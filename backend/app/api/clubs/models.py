@@ -42,6 +42,20 @@ class ClubFollowersLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     id = Column(Integer, primary_key=True, autoincrement=True)
     club_id = Column(Integer, ForeignKey("clubs.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    is_following = Column(Boolean, default=False, nullable=False)
+
+    club = relationship("Clubs")
+    user = relationship("Users")
+
+
+class Notes(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
+    __tablename__ = "notes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    club_id = Column(Integer, ForeignKey("clubs.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    title = Column(String, nullable=False)
+    note = Column(String, nullable=False)
 
     club = relationship("Clubs")
     user = relationship("Users")

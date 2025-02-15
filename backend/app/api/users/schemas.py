@@ -16,7 +16,7 @@ class UserPublic(BaseModel):
 
 
 class User(UserPublic):
-    email: EmailStr | None = Field(default=None)
+    email: EmailStr = Field(...)
     phone: str | None = Field(default=None)
     whatsapp: str | None = Field(default=None)
     org_id: int | None = Field(default=None)
@@ -24,7 +24,7 @@ class User(UserPublic):
 
 class UserCreate(BaseModel):
     full_name: str = Field(..., max_length=100, min_length=3)
-    email: EmailStr | None = Field(default=None)
+    email: EmailStr = Field(...)
     phone: str | None = Field(default=None)
     whatsapp: str | None = Field(default=None)
     org_id: int | None = Field(default=None)

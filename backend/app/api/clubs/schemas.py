@@ -1,3 +1,4 @@
+from datetime import datetime
 from pydantic import BaseModel, Field
 from app.api.users.schemas import UserPublic
 
@@ -55,3 +56,26 @@ class ClubPublicMin(ClubBaseMin):
 
     class Config:
         from_attributes = True
+
+
+class NotesBase(BaseModel):
+    title: str = Field(...)
+    note: str = Field(...)
+
+
+class NoteCreate(NotesBase):
+    pass
+
+
+class NotePublic(NotesBase):
+    id: int = Field(...)
+
+
+class ClubFollow(BaseModel):
+    club_id: int
+    user_id: int
+    is_following: bool
+
+
+class ClubFollowPublic(ClubFollow):
+    created_at: datetime

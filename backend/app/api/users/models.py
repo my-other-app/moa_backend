@@ -25,7 +25,7 @@ class Users(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     id = Column(Integer, primary_key=True, autoincrement=True)
     username = Column(String(100), nullable=False, unique=True)
     full_name = Column(String(100), nullable=False)
-    email = Column(String(100), nullable=True, unique=True)
+    email = Column(String(100), nullable=False, unique=True)
     phone = Column(String(20), nullable=True, unique=True)
     whatsapp = Column(String(20), nullable=True, unique=True)
     org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)

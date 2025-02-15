@@ -1,6 +1,13 @@
 from typing import Annotated
 from fastapi import APIRouter, Depends
-from app.api.clubs.schemas import CreateClub, ClubPublic, EditClub
+from app.api.clubs.schemas import (
+    ClubFollowPublic,
+    CreateClub,
+    ClubPublic,
+    EditClub,
+    NoteCreate,
+    NotePublic,
+)
 from app.db.core import SessionDep
 from app.api.clubs import service
 from app.core.auth.dependencies import DependsAuth
@@ -44,3 +51,35 @@ async def get_all_clubs(
 ):
     clubs = await service.get_all_clubs(session, org_id)
     return await paginate(clubs, ClubPublic, params, session)
+
+
+@router.post("/follow/{club_id}", summary="follow club")
+async def follow_club(
+    club_id: int, session: SessionDep, user: DependsAuth
+) -> ClubFollowPublic:
+    follow = await service.follow_club(session, club_id, user.id)
+    return follow
+
+
+@router.post("/unfollow/{club_id}", summary="un follow club")
+async def unfollow_club(
+    club_id: int, session: SessionDep, user: DependsAuth
+) -> ClubFollowPublic:
+    follow = await service.unfollow_club(session, club_id, user.id)
+    print(follow.is_following)
+    return follow
+
+
+@router.post("/notes/{club_id}/create", summary="Create note")
+async def create_note(
+    club_id: int, session: SessionDep, user: DependsAuth, note: NoteCreate
+) -> NotePublic:
+    return await service.create_note(
+        session, club_id=club_id, user_id=user.id, title=note.title, note=note.note
+    )
+
+
+@router.get("/notes/{club_id}/list", summary="list notes")
+async def list_notes(club_id: int, session: SessionDep, pagination: PaginationParams):
+    query = await service.list_notes(session, club_id=club_id)
+    return await paginate(query, NotePublic, pagination=pagination, db_session=session)
