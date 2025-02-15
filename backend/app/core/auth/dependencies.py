@@ -1,7 +1,7 @@
 from typing import Annotated
 import jwt
 from fastapi import Depends, status
-from jwt.exceptions import InvalidTokenError
+from jwt.exceptions import InvalidTokenError, ExpiredSignatureError
 
 from app.core.auth.authentication import get_user, oauth2_scheme, ALGORITHM
 from app.api.users.models import Users
@@ -25,6 +25,13 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
         user_id: str = token_data.user_id
         if not user_id:
             raise credentials_exception
+    except ExpiredSignatureError:
+        raise CustomHTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            message="Token has expired",
+            error_code="TOKEN_EXPIRED",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     except InvalidTokenError:
         raise credentials_exception
     user = await get_user(user_id)

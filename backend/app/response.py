@@ -6,9 +6,9 @@ class ErrorResponse:
     def __init__(
         self,
         message: str,
-        error_code: int = 0,
-        track_id: str = None,
-        errors: dict = None,
+        error_code: str | None = None,
+        track_id: str | None = None,
+        errors: dict | None = None,
     ):
         self.message = message
         self.error_code = error_code
@@ -42,7 +42,7 @@ class CustomHTTPException(HTTPException, ErrorResponse):
         self,
         status_code,
         message,
-        error_code=0,
+        error_code=None,
         track_id=None,
         errors=None,
         *args,
