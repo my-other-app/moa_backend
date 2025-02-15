@@ -6,6 +6,7 @@ from app.response import CustomHTTPException
 from app.api.users.models import Users
 from app.api.users.schemas import UserCreate
 from app.core.auth.authentication import get_password_hash
+from app.api.clubs.models import ClubFollowersLink, Clubs
 
 
 async def generate_username(user: Users, session: AsyncSession):
@@ -61,3 +62,15 @@ async def create_user(user: UserCreate, session: AsyncSession):
     await session.commit()
     query = await session.execute(select(Users).where(Users.username == username))
     return query.scalar()
+
+
+async def following_clubs(session: AsyncSession, user_id: int):
+    user_exists = await session.scalar(select(exists().where(Users.id == user_id)))
+    if not user_exists:
+        raise CustomHTTPException(status_code=401, message="Unauthorized")
+    query = (
+        select(Clubs)
+        .join(ClubFollowersLink, ClubFollowersLink.club_id == Clubs.id)
+        .where(ClubFollowersLink.user_id == user_id)
+    )
+    return query
