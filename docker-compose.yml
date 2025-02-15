@@ -1,0 +1,64 @@
+version: "1.1"
+
+networks:
+  doth_network:
+    ipam:
+      config:
+        - subnet: 192.168.1.0/24
+
+services:
+  postgres:
+    image: postgres:17.2
+    container_name: doth-postgres
+    restart: on-failure
+    env_file:
+      - .env
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U myuser -d mydatabase"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+    networks:
+      doth_network:
+        ipv4_address: 192.168.1.101
+
+  backend:
+    build: backend/
+    container_name: doth-backend
+    volumes:
+      - ./backend:/backend
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+    command: >
+      python main.py
+    restart: on-failure
+    ports:
+      - "8000:8000"
+    networks:
+      doth_network:
+        ipv4_address: 192.168.1.100
+
+  # nginx:
+  #   container_name: bcards-nginx
+  #   build: nginx
+  #   ports:
+  #     - 80:80
+  #   depends_on:
+  #     - backend
+  #   volumes:
+  #     - media:/var/www/html/media
+  #     - /var/logs/nginx/:/var/log/nginx
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost/api/"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 3
+
+volumes:
+  postgres_data:
