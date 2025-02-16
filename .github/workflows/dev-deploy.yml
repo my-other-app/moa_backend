@@ -84,7 +84,7 @@ jobs:
 
           if [ "$SYNC_ENV" = "true" ]; then
             echo "Syncing environment variables..."
-            sudo printf "%s" "$ENV_VARS" > .env
+            printf "%s" "$ENV_VARS" | sudo tee .env > /dev/null
           fi
 
           if [ "$RESTART_ALL" = "true" ]; then
