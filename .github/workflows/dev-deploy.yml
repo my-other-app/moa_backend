@@ -67,40 +67,40 @@ jobs:
               --exclude='.git/' \
               --exclude='__pycache__/' \
               --exclude='.env' \
-              -e "ssh -o StrictHostKeyChecking=no" ./ $USER@$REMOTE_IP:$PROJECT_PATH
+              -e "ssh -o StrictHostKeyChecking=no" ./ $USER@$REMOTE_IP:$PROJECT_PATH --rsync-path="sudo rsync"
           fi
 
           ssh -o StrictHostKeyChecking=no $USER@$REMOTE_IP <<EOF
           cd $PROJECT_PATH
 
           if [ "$SYNC_CODE" = "true" ]; then
-            docker compose restart backend
+            sudo docker compose restart backend
           fi
 
           if [ "$RESTART_BACKEND" = "true" ]; then
             echo "Restarting backend service..."
-            docker-compose restart backend
+            sudo docker-compose restart backend
           fi
 
           if [ "$SYNC_ENV" = "true" ]; then
             echo "Syncing environment variables..."
-            printf "%s" "$ENV_VARS" > .env
+            sudo printf "%s" "$ENV_VARS" > .env
           fi
 
           if [ "$RESTART_ALL" = "true" ]; then
             echo "Restarting all services..."
-            docker-compose up --build -d
+            sudo docker-compose up --build -d
           fi
 
           if [ "$INSTALL_REQUIREMENTS" = "true" ]; then
             echo "Installing backend requirements..."
-            docker-compose exec backend pip install --no-cache-dir -r requirements.txt
+           sudo  docker-compose exec backend pip install --no-cache-dir -r requirements.txt
           fi
 
           if [ "$RESTART_DATABASE" = "true" ]; then
             echo "Restarting and rebuilding database service..."
-            docker-compose build postgres
-            docker-compose up -d postgres
+            sudo docker-compose build postgres
+            sudo docker-compose up -d postgres
           fi
 
           EOF
