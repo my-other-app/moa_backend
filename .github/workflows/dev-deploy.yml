@@ -6,12 +6,12 @@ on:
       sync_code:
         description: "Sync code to server"
         required: true
-        default: true
+        default: false
         type: boolean
       restart_backend:
         description: "Restart backend service"
         required: false
-        default: true
+        default: false
         type: boolean
       sync_env:
         description: "Sync enviornment variables"
