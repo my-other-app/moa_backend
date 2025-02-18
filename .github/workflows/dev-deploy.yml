@@ -33,6 +33,11 @@ on:
         required: false
         default: false
         type: boolean
+      migrate:
+        description: "Migrate database"
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   deploy:
@@ -56,6 +61,7 @@ jobs:
           RESTART_BACKEND: ${{ github.event.inputs.restart_backend }}
           RESTART_DATABASE: ${{ github.event.inputs.restart_database }}
           RESTART_ALL: ${{ github.event.inputs.restart_all }}
+          MIGRATE: ${{ github.event.inputs.migrate }}
           SYNC_CODE: ${{ github.event.inputs.sync_code }}
           SYNC_ENV: ${{ github.event.inputs.sync_env }}
           ENV_VARS: ${{ secrets.DEV_ENV_VARIABLES }}
@@ -101,6 +107,11 @@ jobs:
             echo "Restarting and rebuilding database service..."
             sudo docker-compose build postgres
             sudo docker-compose up -d postgres
+          fi
+
+          if [ "$MIGRATE" = "true" ]; then
+            echo "Migrating database..."
+            sudo docker-compose exec backend alembic upgrade head
           fi
 
           EOF
