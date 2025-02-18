@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
-from geoalchemy2 import Geometry
+
+# from geoalchemy2 import Geometry
+from pydantic import ConfigDict
 from sqlalchemy import (
     ARRAY,
     Boolean,
@@ -11,6 +13,7 @@ from sqlalchemy import (
     String,
     JSON,
     Float,
+    UniqueConstraint,
 )
 from app.api.users.models import UserAvatarTypes
 from app.db.base import AbstractSQLModel
@@ -45,7 +48,6 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     about = Column(String, nullable=True)
     # location = Column(Geometry("POINT"), nullable=True)
     location_name = Column(String, nullable=True)
-    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)
     has_prize = Column(Boolean, nullable=False, default=False)
     prize_amount = Column(Float, nullable=True)
     contact_phone = Column(String, nullable=True)
@@ -60,17 +62,18 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     reg_enddate = Column(DateTime(timezone=True), nullable=True)
     category_id = Column(Integer, ForeignKey("event_categories.id"), nullable=False)
     club_id = Column(Integer, ForeignKey("clubs.id"), nullable=True)
-    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    additional_details = Column(ARRAY(JSON), nullable=True)
 
-    created_by = relationship("Users")
     category = relationship("EventCategories")
-    org = relationship("Organizations")
     club = relationship("Clubs")
+    registrations = relationship("EventRegistrationsLink")
 
     # socials = Column(JSON, nullable=False, default=[])
 
     # def set_location(self, longitude, latitude):
     #     self.location = f"POINT({longitude} {latitude})"
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class EventInterestsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
@@ -84,12 +87,15 @@ class EventInterestsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     interest = relationship("Interests")
 
 
-class EventParticipantsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
-    __tablename__ = "event_participants_link"
+class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
+    __tablename__ = "event_registrations_link"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    additional_details = Column(JSON, nullable=True)
 
     event = relationship("Events")
     user = relationship("Users")
+
+    __table_args__ = (UniqueConstraint("event_id", "user_id", "is_deleted"),)

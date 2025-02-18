@@ -1,8 +1,10 @@
 from sqlalchemy import Boolean, Column, Enum, Integer, String
 from sqlmodel import Field, SQLModel
+from sqlalchemy.orm import relationship
+import enum
+
 from app.db.base import AbstractSQLModel
 from app.db.mixins import SoftDeleteMixin, TimestampsMixin
-import enum
 
 
 class OrgTypes(enum.Enum):
@@ -25,3 +27,5 @@ class Organizations(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     website = Column(String(100), nullable=True)
     logo = Column(String(100), nullable=True)
     is_verified = Column(Boolean, default=False, nullable=False)
+
+    clubs = relationship("Clubs", back_populates="org")

@@ -5,23 +5,40 @@ from sqlalchemy.orm import selectinload
 from app.response import CustomHTTPException
 from app.api.clubs.models import ClubFollowersLink, Clubs, Notes
 from app.api.clubs.schemas import CreateClub, EditClub
-from app.api.users.models import Users
+from app.api.users.models import UserTypes, Users
+from app.api.users.service import create_user
 
 
-async def create_club(club: CreateClub, user_id: int, session: AsyncSession):
-    db_club = Clubs(**club.model_dump(), created_by_id=user_id)
+async def create_club(
+    session: AsyncSession,
+    name: str,
+    email: str,
+    password: str,
+    phone: str | None = None,
+    logo: str | None = None,
+    about: str | None = None,
+    org_id: int | None = None,
+    location_name: str | None = None,
+):
+    user = await create_user(session, name, email, phone, password, UserTypes.club)
+    if not user:
+        raise CustomHTTPException(
+            500,
+            "An unexpected error occured while creating club. (ERR: Unable to create user)",
+        )
+
+    db_club = Clubs(
+        name=name,
+        logo=logo,
+        about=about,
+        org_id=org_id,
+        location_name=location_name,
+        user_id=user.id,
+    )
     session.add(db_club)
     await session.commit()
     await session.refresh(db_club)
-
-    result = await session.execute(
-        select(Clubs)
-        .options(selectinload(Clubs.created_by))
-        .filter(Clubs.id == db_club.id)
-    )
-    db_club_with_relations = result.scalar_one()
-
-    return db_club_with_relations
+    return db_club
 
 
 async def update_club(club: EditClub, session: AsyncSession, user_id: int):
@@ -44,7 +61,7 @@ async def get_club(club_id: int, session: AsyncSession):
 
 
 async def get_all_clubs(session: AsyncSession, org_id: int = None):
-    query = select(Clubs).options(selectinload(Clubs.created_by))
+    query = select(Clubs)
     if org_id:
         query = query.where(org_id=org_id)
     return query

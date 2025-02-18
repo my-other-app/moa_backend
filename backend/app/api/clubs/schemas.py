@@ -1,5 +1,5 @@
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 from app.api.users.schemas import UserPublic
 
 
@@ -13,7 +13,10 @@ class ClubBase(ClubBaseMin):
     about: str | None = Field(None)
 
 
-class CreateClub(ClubBase):
+class CreateClub(BaseModel):
+    email: EmailStr = Field(..., max_length=100)
+    phone: str | None = Field(None, max_length=15)
+    password: str = Field(..., min_length=6, max_length=100)
     name: str = Field(..., min_length=3, max_length=20)
     logo: str | None = Field(None)
     about: str | None = Field(None)
@@ -43,7 +46,6 @@ class ClubPublic(ClubBase):
     id: int = Field(...)
     rating: int = Field(...)
     total_ratings: int = Field(...)
-    created_by: UserPublic = Field(...)
 
     class Config:
         from_attributes = True

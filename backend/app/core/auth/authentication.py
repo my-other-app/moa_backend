@@ -28,7 +28,10 @@ async def get_user(username_or_id: str):
         if isinstance(username_or_id, int):  # If searching by ID
             query = query.where(Users.id == username_or_id)
         else:
-            query = query.where(Users.username == username_or_id)
+            if "@" in username_or_id:  # If searching by emai
+                query = query.where(Users.email == username_or_id)
+            else:  # If searching by username
+                query = query.where(Users.username == username_or_id)
         result = await session.execute(query)
         result = result.scalars().first()
         return result

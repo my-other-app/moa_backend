@@ -1,4 +1,4 @@
-from geoalchemy2 import Geometry
+# from geoalchemy2 import Geometry
 from sqlalchemy import Boolean, Column, Enum, ForeignKey, Integer, String, JSON, Float
 from sqlmodel import Field, SQLModel
 from app.db.base import AbstractSQLModel
@@ -18,11 +18,13 @@ class Clubs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     location_name = Column(String, nullable=True)
     rating = Column(Float, nullable=False, default=0)
     total_ratings = Column(Integer, nullable=False, default=0)
-    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id"),
+    )
 
-    # socials = Column(JSON, nullable=False, default=[])
-
-    created_by = relationship("Users")
+    user = relationship("Users", back_populates="club")
+    org = relationship("Organizations", back_populates="clubs")
 
 
 class ClubInterestsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):

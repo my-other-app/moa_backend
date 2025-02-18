@@ -1,9 +1,34 @@
+import enum
 from pydantic import AwareDatetime, BaseModel, Field
 from datetime import datetime, timezone
 
 from app.api.clubs.schemas import ClubPublic, ClubPublicMin
-from app.api.orgs.schema import OrganizationPublicMin
 from app.api.users.schemas import UserPublic
+
+
+class FieldTypes(enum.Enum):
+    text = "text"
+    number = "number"
+    email = "email"
+    url = "url"
+    tel = "tel"
+    date = "date"
+    time = "time"
+    datetime = "datetime"
+    checkbox = "checkbox"
+    radio = "radio"
+    select = "select"
+    textarea = "textarea"
+    file = "file"
+    image = "image"
+
+
+class EventAdditionalDetail(BaseModel):
+    key: str
+    label: str
+    field_type: FieldTypes
+    required: bool = True
+    options: list[str] | None = None
 
 
 class EventCategoryBase(BaseModel):
@@ -47,23 +72,34 @@ class EventPublicMin(EventBaseMin):
     id: int = Field(...)
     category: EventCategoryPublic = Field(...)
     club: ClubPublicMin = Field(...)
-    org: OrganizationPublicMin | None = Field(None)
 
 
 class EventPublic(EventBase):
     id: int = Field(...)
     category: EventCategoryPublic = Field(...)
     club: ClubPublic = Field(...)
-    created_by: UserPublic = Field(...)
-    org: OrganizationPublicMin | None = Field(None)
+    additional_details: list[EventAdditionalDetail] | None = Field(None)
+
+
+class Event(EventBase):
+    id: int = Field(...)
+    category_id: int = Field(...)
+    club_id: int | None = Field(...)
+    additional_details: list[EventAdditionalDetail] | None = Field(None)
 
 
 class EventCreate(EventBase):
-    org_id: int | None = Field(None)
     category_id: int = Field(...)
     club_id: int | None = Field(...)
+    additional_details: list[EventAdditionalDetail] | None = Field(None)
 
 
 class EventEdit(EventCreate):
     id: int = Field(...)
     pass
+
+
+class EventRegistration(BaseModel):
+    user: UserPublic
+    event: EventPublic
+    additional_details: dict | None = Field(None)

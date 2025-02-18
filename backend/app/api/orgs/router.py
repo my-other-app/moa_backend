@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.db.core import SessionDep
 from app.api.orgs.schema import OrganizationCreate, OrganizationPublic
 from app.api.orgs import service
+from app.core.auth.dependencies import AdminAuth
 
 router = APIRouter(prefix="/orgs")
 
@@ -10,7 +11,9 @@ router = APIRouter(prefix="/orgs")
 @router.post(
     "/create", response_model=OrganizationPublic, summary="Create a new organization"
 )
-async def create_organization(hero: OrganizationCreate, session: SessionDep):
+async def create_organization(
+    hero: OrganizationCreate, session: SessionDep, user: AdminAuth
+):
     return await service.create_organization(hero, session)
 
 
@@ -21,6 +24,6 @@ async def create_organization(session: SessionDep):
     return await service.list_organizations(session)
 
 
-@router.delete("/info/{id}", summary="Delete organization")
-async def create_organization(id: int, session: SessionDep):
+@router.delete("/delete/{id}", summary="Delete organization")
+async def create_organization(id: int, session: SessionDep, user: AdminAuth):
     return await service.delete_organization(id, session)

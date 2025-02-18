@@ -14,7 +14,7 @@ from app.core.auth.authentication import (
 )
 from app.core.auth.dependencies import DependsAuth
 from app.response import CustomHTTPException
-from app.api.users.schemas import User, UserPublic
+from app.api.users.schemas import UserPublic
 from app.api.users.models import Users
 from app.api.auth.schemas import AuthTokenData, Token
 
@@ -89,7 +89,7 @@ async def refresh_access_token(
         )
 
 
-@router.get("/me", response_model=User, summary="get current user info")
+@router.get("/me", response_model=UserPublic, summary="get current user info")
 async def read_users_me(
     current_user: DependsAuth,
 ):

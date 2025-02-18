@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field, EmailStr, HttpUrl
 from app.api.users.models import UserAvatarTypes
+from app.api.orgs.schema import OrganizationPublicMin
 
 
 class AvatarPublic(BaseModel):
@@ -8,27 +9,39 @@ class AvatarPublic(BaseModel):
     content: str
 
 
-class UserPublic(BaseModel):
-    username: str | None = Field(None, max_length=100, min_length=3)
-    full_name: str = Field(..., max_length=100, min_length=3)
-    profile_pic: HttpUrl | None = Field(None)
-    avatar: AvatarPublic | None = Field(None)
+class UserProfileBase(BaseModel):
+    whatsapp: str | None = Field(None)
 
 
-class User(UserPublic):
+class UserProfileCreate(BaseModel):
+    whatsapp: str | None = Field(None)
+    org_id: int | None = Field(None)
+    avatar_id: int | None = Field(None)
+
+
+class UserProfilePublic(BaseModel):
+    org: OrganizationPublicMin
+    avatar: AvatarPublic
+
+
+class UserBase(BaseModel):
+    full_name: str = Field(...)
     email: EmailStr = Field(...)
-    phone: str | None = Field(default=None)
-    whatsapp: str | None = Field(default=None)
-    org_id: int | None = Field(default=None)
+    phone: str | None = Field(None)
+    username: str = Field(...)
 
 
 class UserCreate(BaseModel):
-    full_name: str = Field(..., max_length=100, min_length=3)
+    full_name: str = Field(...)
     email: EmailStr = Field(...)
-    phone: str | None = Field(default=None)
-    whatsapp: str | None = Field(default=None)
-    org_id: int | None = Field(default=None)
-    password: str = Field(..., min_length=8)
+    phone: str = Field(None)
+    password: str = Field(...)
+
+
+class UserPublic(UserBase):
+    id: int = Field(...)
+    user_type: str = Field(...)
+    profile: UserProfilePublic | None = Field(None)
 
 
 class UserInDB(UserCreate):
