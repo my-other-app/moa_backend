@@ -10,7 +10,7 @@ from app.api.events.schemas import (
     EventPublic,
     EventPublicMin,
 )
-from app.core.auth.dependencies import AdminAuth, DependsAuth
+from app.core.auth.dependencies import AdminAuth, DependsAuth, UserAuth
 from app.core.response.pagination import PaginationParams, paginate
 from app.response import CustomHTTPException
 
@@ -79,7 +79,7 @@ async def create_event_category(
 
 @router.post("/register/{event_id}", summary="Register for an event")
 async def register_event(
-    user: DependsAuth,
+    user: UserAuth,
     event_id: int,
     session: SessionDep = SessionDep,
     additional_details: dict[str, str] = Body(None),
