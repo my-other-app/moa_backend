@@ -26,7 +26,7 @@ class EventCategories(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     __tablename__ = "event_categories"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(20), nullable=False)
+    name = Column(String(50), nullable=False)
     icon = Column(String, nullable=True)
     icon_type = Column(Enum(UserAvatarTypes))
     created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
