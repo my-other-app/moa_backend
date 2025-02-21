@@ -100,6 +100,14 @@ class EventEdit(EventCreate):
 
 
 class EventRegistration(BaseModel):
+    id: int
     user: UserPublic
     event: EventPublic
     additional_details: dict | None = Field(None)
+
+    model_config = {"from_attributes": True}
+
+
+class EventRegistrationPublicMin(BaseModel):
+    id: int
+    user: UserPublic

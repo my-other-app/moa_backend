@@ -72,7 +72,9 @@ async def create_user(
     return query.scalar()
 
 
-async def following_clubs(session: AsyncSession, user_id: int):
+async def following_clubs(
+    session: AsyncSession, user_id: int, limit: int = 10, offset: int = 0
+):
     user_exists = await session.scalar(select(exists().where(Users.id == user_id)))
     if not user_exists:
         raise CustomHTTPException(status_code=401, message="Unauthorized")
@@ -80,8 +82,10 @@ async def following_clubs(session: AsyncSession, user_id: int):
         select(Clubs)
         .join(ClubFollowersLink, ClubFollowersLink.club_id == Clubs.id)
         .where(ClubFollowersLink.user_id == user_id)
+        .limit(limit)
+        .offset(offset)
     )
-    return query
+    return list(await session.scalars(query))
 
 
 async def create_or_update_profile(

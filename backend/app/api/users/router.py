@@ -1,8 +1,12 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from app.api.users.schemas import UserCreate, UserProfileCreate, UserPublic
 from app.db.core import SessionDep
 from app.api.users import service
-from app.core.response.pagination import PaginatedResponse, PaginationParams, paginate
+from app.core.response.pagination import (
+    PaginatedResponse,
+    PaginationParams,
+    paginated_response,
+)
 from app.api.clubs.schemas import ClubPublicMin
 from app.core.auth.dependencies import DependsAuth
 from app.core.response import pagination
@@ -27,10 +31,15 @@ async def register_user(
 
 @router.get("/following", summary="Get all clubs user is following")
 async def get_following_clubs(
-    session: SessionDep, pagination: PaginationParams, user: DependsAuth
+    request: Request,
+    session: SessionDep,
+    pagination: PaginationParams,
+    user: DependsAuth,
 ) -> PaginatedResponse[ClubPublicMin]:
-    following_clubs = await service.following_clubs(session, user.id)
-    return await paginate(following_clubs, ClubPublicMin, pagination, session)
+    following_clubs = await service.following_clubs(
+        session, user.id, limit=pagination.limit, offset=pagination.offset
+    )
+    return paginated_response(following_clubs, request=request, schema=ClubPublicMin)
 
 
 @router.post("/profile/create", summary="Create a user profile.")

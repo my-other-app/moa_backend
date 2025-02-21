@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Body, Form
+from fastapi import APIRouter, Body, Request
+from fastapi.encoders import jsonable_encoder
 
 from app.db.core import SessionDep
 from app.api.events import service
@@ -9,10 +10,11 @@ from app.api.events.schemas import (
     EventEdit,
     EventPublic,
     EventPublicMin,
+    EventRegistration,
+    EventRegistrationPublicMin,
 )
-from app.core.auth.dependencies import AdminAuth, DependsAuth, UserAuth
-from app.core.response.pagination import PaginationParams, paginate
-from app.response import CustomHTTPException
+from app.core.auth.dependencies import AdminAuth, ClubAuth, DependsAuth, UserAuth
+from app.core.response.pagination import PaginationParams, paginated_response
 
 router = APIRouter(prefix="/events")
 
@@ -60,10 +62,15 @@ async def get_event(user: DependsAuth, event_id: int, session: SessionDep = Sess
 
 @router.get("/list", summary="List all events")
 async def list_events(
-    user: DependsAuth, params: PaginationParams, session: SessionDep = SessionDep
+    request: Request,
+    user: DependsAuth,
+    params: PaginationParams,
+    session: SessionDep = SessionDep,
 ):
-    query = await service.list_events(session)
-    return await paginate(query, EventPublicMin, params, session)
+    result = await service.list_events(
+        session, limit=params.limit, offset=params.offset
+    )
+    return paginated_response(result, request, EventPublicMin)
 
 
 @router.post(
@@ -77,7 +84,7 @@ async def create_event_category(
     return await service.create_event_category(session, category, user.id)
 
 
-@router.post("/register/{event_id}", summary="Register for an event")
+@router.post("/registration/{event_id}/register", summary="Register for an event")
 async def register_event(
     user: UserAuth,
     event_id: int,
@@ -85,3 +92,38 @@ async def register_event(
     additional_details: dict[str, str] = Body(None),
 ):
     return await service.register_event(session, event_id, user.id, additional_details)
+
+
+@router.get("/registration/{event_id}/list", summary="Get event registration details")
+async def list_event_registration(
+    request: Request,
+    user: ClubAuth,
+    pagination: PaginationParams,
+    event_id: int,
+    session: SessionDep = SessionDep,
+):
+    result = await service.list_event_registrations(
+        session,
+        user_id=user.id,
+        event_id=event_id,
+        limit=pagination.limit,
+        offset=pagination.offset,
+    )
+    return paginated_response(result, request, EventRegistrationPublicMin)
+
+
+@router.get(
+    "/registration/{event_id}/info/{registration_id}",
+    summary="Get event registration details",
+)
+async def get_event_registration(
+    request: Request,
+    user: ClubAuth,
+    event_id: int,
+    registration_id: int,
+    session: SessionDep = SessionDep,
+) -> EventRegistration:
+    result = await service.get_registration(
+        session, user_id=user.id, event_id=event_id, registration_id=registration_id
+    )
+    return jsonable_encoder(result)

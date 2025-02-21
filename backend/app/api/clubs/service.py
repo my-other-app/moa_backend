@@ -60,11 +60,13 @@ async def get_club(club_id: int, session: AsyncSession):
     return db_club
 
 
-async def get_all_clubs(session: AsyncSession, org_id: int = None):
-    query = select(Clubs)
+async def get_all_clubs(
+    session: AsyncSession, org_id: int = None, limit: int = 10, offset: int = 0
+):
+    query = select(Clubs).limit(limit).offset(offset)
     if org_id:
         query = query.where(org_id=org_id)
-    return query
+    return list(await session.scalars(query))
 
 
 async def follow_club(session: AsyncSession, club_id: int, user_id: int):
@@ -137,12 +139,18 @@ async def create_note(
     return note
 
 
-async def list_notes(session: AsyncSession, club_id: int):
+async def list_notes(
+    session: AsyncSession, club_id: int, limit: int = 10, offset: int = 0
+):
     club_exists = await session.scalar(select(exists().where(Clubs.id == club_id)))
     if not club_exists:
         raise CustomHTTPException(status_code=400, message="Invalid club")
 
     query = (
-        select(Notes).where(Notes.club_id == club_id).order_by(Notes.created_at.desc())
+        select(Notes)
+        .where(Notes.club_id == club_id)
+        .order_by(Notes.created_at.desc())
+        .limit(limit)
+        .offset(offset)
     )
-    return query
+    return list(await session.scalars(query))

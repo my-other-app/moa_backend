@@ -1,16 +1,14 @@
 from datetime import datetime, timezone
 from typing import Optional
-from pydantic import AwareDatetime
 from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, joinedload
 
 from app.response import CustomHTTPException
 from app.api.events.schemas import (
     Event,
     EventAdditionalDetail,
     EventCategoryCreate,
-    EventCreate,
     EventEdit,
 )
 from app.api.events.models import EventCategories, EventRegistrationsLink, Events
@@ -55,7 +53,7 @@ async def create_event(
         select(Users).filter(Users.id == user_id).options(selectinload(Users.club))
     )
     user = user.scalar()
-    print(user.club)
+
     if not user.club:
         raise CustomHTTPException(401, message="Not authorized to create event")
     for field in additional_details:
@@ -132,16 +130,19 @@ async def get_event(session: AsyncSession, event_id: int):
     return db_event
 
 
-async def list_events(session: AsyncSession):
+async def list_events(session: AsyncSession, limit: int = 10, offset: int = 0):
     select_stmt = (
         select(Events)
         .options(
-            selectinload(Events.category),
-            selectinload(Events.club),
+            joinedload(Events.category),
+            joinedload(Events.club),
         )
         .order_by(Events.created_at.desc())
+        .limit(limit)
+        .offset(offset)
     )
-    return select_stmt
+    result = await session.scalars(select_stmt)
+    return list(result)
 
 
 async def create_event_category(
@@ -214,3 +215,65 @@ async def register_event(
             selectinload(EventRegistrationsLink.user),
         )
     )
+
+
+async def list_event_registrations(
+    session: AsyncSession, user_id: int, event_id: int, limit: int = 10, offset: int = 0
+):
+    event = await session.execute(
+        select(Events).filter(Events.id == event_id).options(joinedload(Events.club))
+    )
+    event = event.scalar()
+
+    if event is None:
+        raise CustomHTTPException(404, message="Event not found")
+
+    if event.club.user_id != user_id:
+        raise CustomHTTPException(403, message="Not authorized to view this event")
+
+    scalar_result = await session.scalars(
+        select(EventRegistrationsLink)
+        .where(
+            EventRegistrationsLink.event_id == event_id,
+            EventRegistrationsLink.is_deleted == False,
+        )
+        .options(
+            joinedload(EventRegistrationsLink.user),
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+    return list(scalar_result)
+
+
+async def get_registration(
+    session: AsyncSession, user_id: int, event_id: int, registration_id: int
+):
+    event = await session.execute(
+        select(Events).filter(Events.id == event_id).options(joinedload(Events.club))
+    )
+    event = event.scalar()
+
+    if event is None:
+        raise CustomHTTPException(404, message="Event not found")
+
+    if event.club.user_id != user_id:
+        raise CustomHTTPException(403, message="Not authorized to view this event")
+
+    scalar_result = await session.scalar(
+        select(EventRegistrationsLink)
+        .where(
+            EventRegistrationsLink.event_id == event_id,
+            EventRegistrationsLink.is_deleted == False,
+            EventRegistrationsLink.id == registration_id,
+        )
+        .options(
+            joinedload(EventRegistrationsLink.event).options(
+                joinedload(Events.club), joinedload(Events.category)
+            ),
+            joinedload(EventRegistrationsLink.user),
+        )
+    )
+    if not scalar_result:
+        raise CustomHTTPException(404, "Registration not found")
+    return scalar_result

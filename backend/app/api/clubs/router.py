@@ -1,5 +1,4 @@
-from typing import Annotated
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Request
 from app.api.clubs.schemas import (
     ClubFollowPublic,
     CreateClub,
@@ -13,8 +12,7 @@ from app.api.clubs import service
 from app.core.auth.dependencies import ClubAuth, DependsAuth, UserAuth
 from app.core.response.pagination import (
     PaginationParams,
-    get_pagination_params,
-    paginate,
+    paginated_response,
 )
 
 router = APIRouter(prefix="/clubs")
@@ -52,13 +50,14 @@ async def get_club(club_id: int, session: SessionDep, user: DependsAuth) -> Club
 
 @router.get("/list", summary="get all clubs")
 async def get_all_clubs(
+    request: Request,
     session: SessionDep,
     user: DependsAuth,
     params: PaginationParams,
     org_id: int | None = None,
 ):
     clubs = await service.get_all_clubs(session, org_id)
-    return await paginate(clubs, ClubPublic, params, session)
+    return paginated_response(clubs, request=request, schema=ClubPublic)
 
 
 @router.post("/follow/{club_id}", summary="follow club")
@@ -88,6 +87,8 @@ async def create_note(
 
 
 @router.get("/notes/{club_id}/list", summary="list notes")
-async def list_notes(club_id: int, session: SessionDep, pagination: PaginationParams):
+async def list_notes(
+    request: Request, club_id: int, session: SessionDep, pagination: PaginationParams
+):
     query = await service.list_notes(session, club_id=club_id)
-    return await paginate(query, NotePublic, pagination=pagination, db_session=session)
+    return paginated_response(query, request=request, schema=NotePublic)
