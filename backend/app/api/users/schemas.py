@@ -1,3 +1,4 @@
+from fastapi import Body
 from pydantic import BaseModel, Field, EmailStr, HttpUrl
 from app.api.users.models import UserAvatarTypes
 from app.api.orgs.schema import OrganizationPublicMin
@@ -20,8 +21,14 @@ class UserProfileCreate(BaseModel):
 
 
 class UserProfilePublic(BaseModel):
-    org: OrganizationPublicMin
-    avatar: AvatarPublic
+    org: OrganizationPublicMin | None
+    avatar: AvatarPublic | None
+
+
+class UserProfilePrivate(BaseModel):
+    whatsapp: str | None
+    org: OrganizationPublicMin | None
+    avatar: AvatarPublic | None
 
 
 class UserBase(BaseModel):
@@ -44,6 +51,20 @@ class UserPublic(UserBase):
     profile: UserProfilePublic | None = Field(None)
 
 
+class UserPrivate(UserBase):
+    id: int = Field(...)
+    user_type: str = Field(...)
+    profile: UserProfilePrivate | None = Field(None)
+
+
 class UserInDB(UserCreate):
     id: int = Field(...)
     password: str = Field(..., min_length=8)
+
+
+class UserAvatarSelect(BaseModel):
+    avatar_id: int | None = Body(None)
+
+
+class UserInterestSelect(BaseModel):
+    interest_ids: list[int] = Body(...)

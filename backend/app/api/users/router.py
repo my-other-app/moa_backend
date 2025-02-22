@@ -1,6 +1,14 @@
 from typing import List
 from fastapi import APIRouter, Body, Request
-from app.api.users.schemas import UserCreate, UserProfileCreate, UserPublic
+from app.api.users.schemas import (
+    UserAvatarSelect,
+    UserCreate,
+    UserInterestSelect,
+    UserPrivate,
+    UserProfileCreate,
+    UserProfilePublic,
+    UserPublic,
+)
 from app.db.core import SessionDep
 from app.api.users import service
 from app.core.response.pagination import (
@@ -46,7 +54,7 @@ async def get_following_clubs(
 
 @router.post("/profile/create", summary="Create a user profile.")
 async def create_user_profile(
-    session: SessionDep, profile: UserProfileCreate, user: DependsAuth
+    session: SessionDep, profile: UserProfileCreate, user: UserAuth
 ):
     return await service.create_or_update_profile(
         session,
@@ -57,12 +65,17 @@ async def create_user_profile(
     )
 
 
+@router.get("/profile/me", summary="view self user profile")
+async def get_profile(session: SessionDep, user: UserAuth) -> UserPrivate:
+    return await service.get_user_profile(session=session, user_id=user.id)
+
+
 @router.post("/interests/select", summary="select interests")
 async def select_interests(
-    session: SessionDep, user: UserAuth, interest_ids: list[int] = Body(...)
+    session: SessionDep, user: UserAuth, body: UserInterestSelect
 ) -> List[InterestPublic]:
     await service.select_interests(
-        session=session, user_id=user.id, interest_ids=interest_ids
+        session=session, user_id=user.id, interest_ids=body.interest_ids
     )
     return await service.list_interests(session=session, user_id=user.id)
 
@@ -70,3 +83,12 @@ async def select_interests(
 @router.get("/interests/list", summary="list user interests")
 async def list_interests(session: SessionDep, user: UserAuth) -> List[InterestPublic]:
     return await service.list_interests(session=session, user_id=user.id)
+
+
+@router.post("/avatar/select", summary="select user avatar")
+async def select_avatar(
+    session: SessionDep, user: UserAuth, avatar: UserAvatarSelect
+) -> UserProfilePublic:
+    return await service.select_avatar(
+        session, user_id=user.id, avatar_id=avatar.avatar_id
+    )

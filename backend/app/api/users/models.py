@@ -44,7 +44,7 @@ class Users(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     password = Column(String(100), nullable=False)
     user_type = Column(Enum(UserTypes), nullable=False, default=UserTypes.app_user)
 
-    user_profiles = relationship("UserProfiles", uselist=False)
+    profile = relationship("UserProfiles", uselist=False)
     club = relationship("Clubs", uselist=False)
 
     __table_args__ = (
@@ -66,7 +66,7 @@ class UserProfiles(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     avatar_id = Column(Integer, ForeignKey("user_avatars.id"), nullable=True)
     profile_pic = Column(String, nullable=True)
 
-    user = relationship("Users", back_populates="user_profiles")
+    user = relationship("Users", back_populates="profile")
     org = relationship("Organizations")
     avatar = relationship("UserAvatars")
 

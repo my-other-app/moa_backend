@@ -74,7 +74,7 @@ async def create_user(
     query = await session.execute(
         select(Users)
         .where(Users.username == username)
-        .options(selectinload(Users.user_profiles))
+        .options(selectinload(Users.profile))
     )
     return query.scalar()
 
@@ -150,3 +150,37 @@ async def select_interests(
             session.add(link)
     await session.commit()
     return None
+
+
+async def select_avatar(session: AsyncSession, user_id: int, avatar_id: int | None):
+    await validate_relations(
+        session, {"user_id": (Users, user_id), "avatar_id": (UserAvatars, avatar_id)}
+    )
+    user_profile = await session.scalar(
+        select(UserProfiles).where(
+            UserProfiles.user_id == user_id, UserProfiles.is_deleted == False
+        )
+    )
+    if not user_profile:
+        raise CustomHTTPException(400, "user profile does not exists")
+
+    user_profile.avatar_id = avatar_id
+    await session.commit()
+    await session.refresh(user_profile)
+    return user_profile
+
+
+async def get_user_profile(session: AsyncSession, user_id: int):
+    await validate_relations(session, {"user_id": (Users, user_id)})
+
+    query = (
+        select(Users)
+        .where(Users.id == user_id)
+        .options(
+            joinedload(Users.profile).options(
+                joinedload(UserProfiles.avatar), joinedload(UserProfiles.org)
+            )
+        )
+    )
+
+    return await session.scalar(query)
