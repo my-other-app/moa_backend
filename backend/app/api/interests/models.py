@@ -31,3 +31,6 @@ class Interests(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     category_id = Column(Integer, ForeignKey("interest_categories.id"), nullable=False)
 
     category = relationship("InterestCategory")
+    events = relationship(
+        "Events", secondary="event_interests_link", back_populates="interests"
+    )

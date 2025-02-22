@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
+import io
 from typing import Optional
+from fastapi import UploadFile
 from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
@@ -11,10 +13,16 @@ from app.api.events.schemas import (
     EventCategoryCreate,
     EventEdit,
 )
-from app.api.events.models import EventCategories, EventRegistrationsLink, Events
+from app.api.events.models import (
+    EventCategories,
+    EventInterestsLink,
+    EventRegistrationsLink,
+    Events,
+)
 from app.api.clubs.models import Clubs
 from app.api.users.models import Users
 from app.core.validations.schema import validate_relations
+from app.api.interests.models import Interests
 
 
 async def create_event(
@@ -24,7 +32,7 @@ async def create_event(
     event_datetime: datetime,
     duration: float,
     category_id: int,
-    poster: Optional[str] = None,
+    poster: UploadFile | None = None,
     has_fee: bool = False,
     reg_fee: Optional[float] = None,
     location_name: Optional[str] = None,
@@ -39,6 +47,7 @@ async def create_event(
     contact_email: Optional[str] = None,
     url: Optional[str] = None,
     additional_details: Optional[list[EventAdditionalDetail]] = None,
+    interest_ids: Optional[list[int]] = None,
     *args,
     **kwards
 ):
@@ -71,7 +80,6 @@ async def create_event(
         event_datetime=event_datetime,
         duration=duration,
         category_id=category_id,
-        poster=poster,
         has_fee=has_fee,
         reg_fee=reg_fee,
         location_name=location_name,
@@ -88,15 +96,34 @@ async def create_event(
         club_id=user.club.id,
         additional_details=[x.model_dump(mode="json") for x in additional_details],
     )
+    if poster:
+        content = io.BytesIO(await poster.read())
+        db_event.poster = {
+            "bytes": content,
+            "filename": poster.filename,
+        }
     session.add(db_event)
     await session.commit()
     await session.refresh(db_event)
+    event_id = db_event.id
+
+    if interest_ids:
+        for interest_id in interest_ids:
+            interest_exists = await session.scalar(
+                select(exists().where(Interests.id == interest_id))
+            )
+            if interest_exists:
+                link = EventInterestsLink(event_id=event_id, interest_id=interest_id)
+                session.add(link)
+
+        await session.commit()
     db_event = await session.execute(
         select(Events)
-        .filter(Events.id == db_event.id)
+        .filter(Events.id == event_id)
         .options(
-            selectinload(Events.category),
-            selectinload(Events.club),
+            joinedload(Events.category),
+            joinedload(Events.club),
+            selectinload(Events.interests).options(joinedload(Interests.category)),
         )
         .limit(1)
     )
@@ -122,6 +149,7 @@ async def get_event(session: AsyncSession, event_id: int):
         .options(
             selectinload(Events.category),
             selectinload(Events.club),
+            selectinload(Events.interests).options(joinedload(Interests.category)),
         )
     )
     db_event = db_event.scalar()
@@ -136,12 +164,14 @@ async def list_events(session: AsyncSession, limit: int = 10, offset: int = 0):
         .options(
             joinedload(Events.category),
             joinedload(Events.club),
+            selectinload(Events.interests),
         )
         .order_by(Events.created_at.desc())
         .limit(limit)
         .offset(offset)
     )
     result = await session.scalars(select_stmt)
+    print(result)
     return list(result)
 
 

@@ -1,5 +1,8 @@
+from datetime import datetime, timezone
+import io
 import re
-from sqlalchemy import delete, exists, select
+from fastapi import File, UploadFile
+from sqlalchemy import delete, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
 
@@ -17,6 +20,7 @@ from app.api.clubs.models import ClubFollowersLink, Clubs
 from app.api.orgs.models import Organizations
 from app.core.validations.schema import validate_relations, validate_unique
 from app.api.interests.models import Interests
+from app.api.events.models import EventInterestsLink, Events
 
 
 async def generate_username(user: Users, session: AsyncSession):
@@ -101,6 +105,7 @@ async def create_or_update_profile(
     whatsapp: str | None = None,
     org_id: str | None = None,
     avatar_id: str | None = None,
+    profile_pic: UploadFile | None = None,
 ):
     await validate_relations(
         session,
@@ -117,10 +122,25 @@ async def create_or_update_profile(
         profile.whatsapp = whatsapp
         profile.org_id = org_id
         profile.avatar_id = avatar_id
+        if profile_pic:
+            if profile.profile_pic:
+                profile.profile_pic.delete()
+
+            content = io.BytesIO(await profile_pic.read())
+            profile.profile_pic = {
+                "bytes": content,
+                "filename": profile_pic.filename,
+            }
     else:
         profile = UserProfiles(
             user_id=user_id, org_id=org_id, whatsapp=whatsapp, avatar_id=avatar_id
         )
+        if profile_pic:
+            content = io.BytesIO(await profile_pic.read())
+            profile.profile_pic = {
+                "bytes": content,
+                "filename": profile_pic.filename,
+            }
         session.add(profile)
     await session.commit()
     await session.refresh(profile)

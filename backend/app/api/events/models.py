@@ -1,6 +1,4 @@
 from datetime import datetime, timezone
-
-# from geoalchemy2 import Geometry
 from pydantic import ConfigDict
 from sqlalchemy import (
     ARRAY,
@@ -18,8 +16,9 @@ from sqlalchemy import (
 from app.api.users.models import UserAvatarTypes
 from app.db.base import AbstractSQLModel
 from app.db.mixins import SoftDeleteMixin, TimestampsMixin
-import enum
 from sqlalchemy.orm import relationship
+
+from app.core.storage.fields import S3ImageField
 
 
 class EventCategories(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
@@ -39,7 +38,17 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(100), nullable=False)
-    poster = Column(String, nullable=True)
+    poster = Column(
+        S3ImageField(
+            upload_to="clubs/logos/",
+            variations={
+                "thumbnail": {"width": 150, "height": 150},
+                "medium": {"width": 500, "height": 500},
+                "large": {"width": 800, "height": 800},
+            },
+        ),
+        nullable=True,
+    )
     images = Column(ARRAY(String), nullable=False, default=[])
     event_datetime = Column(DateTime(timezone=True), nullable=False)
     has_fee = Column(Boolean, nullable=False, default=False)
@@ -60,18 +69,21 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         default=lambda: datetime.now(timezone.utc),
     )
     reg_enddate = Column(DateTime(timezone=True), nullable=True)
+    additional_details = Column(ARRAY(JSON), nullable=True)
+    # files = Column(ARRAY(String), nullable=False, default=[])
+
     category_id = Column(Integer, ForeignKey("event_categories.id"), nullable=False)
     club_id = Column(Integer, ForeignKey("clubs.id"), nullable=True)
-    additional_details = Column(ARRAY(JSON), nullable=True)
 
     category = relationship("EventCategories")
     club = relationship("Clubs")
     registrations = relationship("EventRegistrationsLink")
-
-    # socials = Column(JSON, nullable=False, default=[])
-
-    # def set_location(self, longitude, latitude):
-    #     self.location = f"POINT({longitude} {latitude})"
+    interests = relationship(
+        "Interests",
+        secondary="event_interests_link",
+        back_populates="events",
+        uselist=True,
+    )
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -83,8 +95,8 @@ class EventInterestsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
     interest_id = Column(Integer, ForeignKey("interests.id"), nullable=False)
 
-    event = relationship("Events")
-    interest = relationship("Interests")
+    # event = relationship("Events")
+    # interest = relationship("Interests")
 
 
 class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
@@ -93,6 +105,9 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
     id = Column(Integer, primary_key=True, autoincrement=True)
     event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    is_attended = Column(Boolean, nullable=False, default=False)
+    is_won = Column(Boolean, nullable=False, default=False)
+    position = Column(Integer, nullable=True)
     additional_details = Column(JSON, nullable=True)
 
     event = relationship("Events")

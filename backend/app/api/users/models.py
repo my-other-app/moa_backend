@@ -11,6 +11,7 @@ from sqlalchemy import (
 from app.db.mixins import SoftDeleteMixin, TimestampsMixin
 from sqlalchemy.orm import relationship
 from app.db.base import AbstractSQLModel
+from app.core.storage.fields import S3ImageField
 
 
 class UserAvatarTypes(enum.Enum):
@@ -64,7 +65,17 @@ class UserProfiles(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     whatsapp = Column(String(20), nullable=True, unique=True)
     org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)
     avatar_id = Column(Integer, ForeignKey("user_avatars.id"), nullable=True)
-    profile_pic = Column(String, nullable=True)
+    profile_pic = Column(
+        S3ImageField(
+            upload_to="users/profile_pic/",
+            variations={
+                "thumbnail": {"width": 150, "height": 150},
+                "medium": {"width": 500, "height": 500},
+                "large": {"width": 800, "height": 800},
+            },
+        ),
+        nullable=True,
+    )
 
     user = relationship("Users", back_populates="profile")
     org = relationship("Organizations")

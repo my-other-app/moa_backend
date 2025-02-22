@@ -1,11 +1,12 @@
 from typing import List
-from fastapi import APIRouter, Body, Request
+from fastapi import APIRouter, Body, File, Form, Request, UploadFile
+from fastapi.encoders import jsonable_encoder
 from app.api.users.schemas import (
     UserAvatarSelect,
     UserCreate,
     UserInterestSelect,
     UserPrivate,
-    UserProfileCreate,
+    # UserProfileCreate,
     UserProfilePublic,
     UserPublic,
 )
@@ -54,20 +55,27 @@ async def get_following_clubs(
 
 @router.post("/profile/create", summary="Create a user profile.")
 async def create_user_profile(
-    session: SessionDep, profile: UserProfileCreate, user: UserAuth
-):
+    session: SessionDep,
+    user: UserAuth,
+    whatsapp: str | None = Form(None),
+    org_id: int | None = Form(None),
+    avatar_id: int | None = Form(None),
+    profile_pic: UploadFile | None = File(None),
+) -> UserProfilePublic:
     return await service.create_or_update_profile(
         session,
         user_id=user.id,
-        whatsapp=profile.whatsapp,
-        org_id=profile.org_id,
-        avatar_id=profile.avatar_id,
+        whatsapp=whatsapp,
+        org_id=org_id,
+        avatar_id=avatar_id,
+        profile_pic=profile_pic,
     )
 
 
 @router.get("/profile/me", summary="view self user profile")
 async def get_profile(session: SessionDep, user: UserAuth) -> UserPrivate:
-    return await service.get_user_profile(session=session, user_id=user.id)
+    profile = await service.get_user_profile(session=session, user_id=user.id)
+    return profile
 
 
 @router.post("/interests/select", summary="select interests")

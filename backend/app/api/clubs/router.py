@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request, UploadFile
 from app.api.clubs.schemas import (
     ClubFollowPublic,
     CreateClub,
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/clubs")
 
 
 @router.post("/create", summary="create club")
-async def create_club(club: CreateClub, session: SessionDep) -> ClubPublic:
+async def create_club(session: SessionDep, club: CreateClub = Depends()) -> ClubPublic:
     club = await service.create_club(
         session,
         name=club.name,
@@ -36,7 +36,7 @@ async def create_club(club: CreateClub, session: SessionDep) -> ClubPublic:
 
 @router.put("/update", summary="update club")
 async def update_club(
-    club: EditClub, session: SessionDep, user: ClubAuth
+    session: SessionDep, user: ClubAuth, club: EditClub = Depends()
 ) -> ClubPublic:
     club = await service.update_club(club, session, user.id)
     return club
@@ -56,7 +56,9 @@ async def get_all_clubs(
     params: PaginationParams,
     org_id: int | None = None,
 ):
-    clubs = await service.get_all_clubs(session, org_id)
+    clubs = await service.get_all_clubs(
+        session, org_id, limit=params.limit, offset=params.offset
+    )
     return paginated_response(clubs, request=request, schema=ClubPublic)
 
 

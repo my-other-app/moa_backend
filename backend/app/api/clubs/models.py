@@ -5,13 +5,25 @@ from app.db.base import AbstractSQLModel
 from app.db.mixins import SoftDeleteMixin, TimestampsMixin
 from sqlalchemy.orm import relationship
 
+from app.core.storage.fields import S3ImageField
+
 
 class Clubs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     __tablename__ = "clubs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(100), nullable=False)
-    logo = Column(String, nullable=True)
+    logo = Column(
+        S3ImageField(
+            upload_to="clubs/logos/",
+            variations={
+                "thumbnail": {"width": 150, "height": 150},
+                "medium": {"width": 500, "height": 500},
+                "large": {"width": 800, "height": 800},
+            },
+        ),
+        nullable=True,
+    )
     about = Column(String, nullable=True)
     org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)
     # location = Column(Geometry("POINT"), nullable=True)

@@ -1,9 +1,13 @@
 import enum
+import json
+from typing import Optional
+from fastapi import File, Form, UploadFile
 from pydantic import AwareDatetime, BaseModel, Field
 from datetime import datetime, timezone
 
 from app.api.clubs.schemas import ClubPublic, ClubPublicMin
 from app.api.users.schemas import UserPublic
+from app.api.interests.schemas import InterestPublic
 
 
 class FieldTypes(enum.Enum):
@@ -47,7 +51,7 @@ class EventCategoryCreate(EventCategoryBase):
 
 class EventBaseMin(BaseModel):
     name: str = Field(min_length=3, max_length=100)
-    poster: str | None = Field(None)
+    poster: dict | None = Field(None)
     event_datetime: AwareDatetime = Field(...)
     has_fee: bool = Field(False)
     reg_fee: float | None = Field(None)
@@ -79,6 +83,7 @@ class EventPublic(EventBase):
     category: EventCategoryPublic = Field(...)
     club: ClubPublic = Field(...)
     additional_details: list[EventAdditionalDetail] | None = Field(None)
+    interests: list[InterestPublic] | None = Field(None)
 
 
 class Event(EventBase):
@@ -88,15 +93,112 @@ class Event(EventBase):
     additional_details: list[EventAdditionalDetail] | None = Field(None)
 
 
-class EventCreate(EventBase):
-    category_id: int = Field(...)
-    club_id: int | None = Field(...)
-    additional_details: list[EventAdditionalDetail] | None = Field(None)
+class EventCreate:
+    def __init__(
+        self,
+        name: str = Form(..., min_length=3, max_length=100),
+        poster: Optional[UploadFile] = File(None),
+        event_datetime: datetime = Form(...),  # ISO format string
+        has_fee: bool = Form(False),
+        reg_fee: Optional[float] = Form(None),
+        duration: float = Form(...),
+        location_name: Optional[str] = Form(None),
+        has_prize: bool = Form(False),
+        prize_amount: Optional[float] = Form(None),
+        is_online: bool = Form(False),
+        reg_startdate: str = Form(
+            default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        ),  # ISO string
+        reg_enddate: Optional[str] = Form(None),  # ISO format string
+        images: Optional[str] = Form("[]"),  # JSON string
+        about: Optional[str] = Form(None),
+        contact_phone: Optional[str] = Form(None),
+        contact_email: Optional[str] = Form(None),
+        url: Optional[str] = Form(None),
+        category_id: int = Form(...),
+        club_id: Optional[int] = Form(None),
+        interest_ids: Optional[str] = Form("[]"),  # JSON string
+        additional_details: Optional[str] = Form("[]"),  # JSON string
+    ):
+        self.name = name
+        self.poster = poster
+        self.event_datetime = event_datetime
+        self.has_fee = has_fee
+        self.reg_fee = reg_fee
+        self.duration = duration
+        self.location_name = location_name
+        self.has_prize = has_prize
+        self.prize_amount = prize_amount
+        self.is_online = is_online
+        self.reg_startdate = datetime.fromisoformat(reg_startdate)
+        self.reg_enddate = datetime.fromisoformat(reg_enddate) if reg_enddate else None
+        self.images = json.loads(images)  # Convert JSON string to list
+        self.about = about
+        self.contact_phone = contact_phone
+        self.contact_email = contact_email
+        self.url = url
+        self.category_id = category_id
+        self.club_id = club_id
+        self.interest_ids = json.loads(interest_ids)  # Convert JSON string to list
+        self.additional_details = [
+            EventAdditionalDetail(**detail) for detail in json.loads(additional_details)
+        ]
 
 
 class EventEdit(EventCreate):
-    id: int = Field(...)
-    pass
+    id: int = Form(...)
+
+    def __init__(
+        self,
+        name=Form(..., min_length=3, max_length=100),
+        poster=File(None),
+        event_datetime=Form(...),
+        has_fee=Form(False),
+        reg_fee=Form(None),
+        duration=Form(...),
+        location_name=Form(None),
+        has_prize=Form(False),
+        prize_amount=Form(None),
+        is_online=Form(False),
+        reg_startdate=Form(
+            default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        ),
+        reg_enddate=Form(None),
+        images=Form("[]"),
+        about=Form(None),
+        contact_phone=Form(None),
+        contact_email=Form(None),
+        url=Form(None),
+        category_id=Form(...),
+        club_id=Form(None),
+        interest_ids=Form("[]"),
+        additional_details=Form("[]"),
+        id=Form(...),
+    ):
+        super().__init__(
+            name,
+            poster,
+            event_datetime,
+            has_fee,
+            reg_fee,
+            duration,
+            location_name,
+            has_prize,
+            prize_amount,
+            is_online,
+            reg_startdate,
+            reg_enddate,
+            images,
+            about,
+            contact_phone,
+            contact_email,
+            url,
+            category_id,
+            club_id,
+            interest_ids,
+            additional_details,
+        )
+        self.id = id
 
 
 class EventRegistration(BaseModel):

@@ -1,4 +1,4 @@
-from fastapi import Body
+from fastapi import Body, File, Form, UploadFile
 from pydantic import BaseModel, Field, EmailStr, HttpUrl
 from app.api.users.models import UserAvatarTypes
 from app.api.orgs.schema import OrganizationPublicMin
@@ -14,21 +14,24 @@ class UserProfileBase(BaseModel):
     whatsapp: str | None = Field(None)
 
 
-class UserProfileCreate(BaseModel):
-    whatsapp: str | None = Field(None)
-    org_id: int | None = Field(None)
-    avatar_id: int | None = Field(None)
+# class UserProfileCreate(BaseModel):
+#     whatsapp: str | None = Form(None)
+#     org_id: int | None = Form(None)
+#     avatar_id: int | None = Form(None)
+#     profile_pic: UploadFile | None = File(None)
 
 
 class UserProfilePublic(BaseModel):
     org: OrganizationPublicMin | None
     avatar: AvatarPublic | None
+    profile_pic: dict | None
 
 
 class UserProfilePrivate(BaseModel):
     whatsapp: str | None
     org: OrganizationPublicMin | None
     avatar: AvatarPublic | None
+    profile_pic: dict | None = Field(None)
 
 
 class UserBase(BaseModel):

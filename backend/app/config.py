@@ -16,6 +16,11 @@ class AppConfig(BaseSettings):
     DATABASE_URL: str
     DATABASE_URL_SYNC: str
 
+    S3_BUCKET: str
+    S3_ACCESS_KEY: str
+    S3_SECRET_KEY: str
+    S3_BASE_PATH: str
+
     CORS_ORIGINS: list[str] | str
 
     APP_VERSION: str = "1.0"

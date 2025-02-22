@@ -1,3 +1,5 @@
+import io
+from fastapi import UploadFile
 from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -15,10 +17,10 @@ async def create_club(
     email: str,
     password: str,
     phone: str | None = None,
-    logo: str | None = None,
     about: str | None = None,
     org_id: int | None = None,
     location_name: str | None = None,
+    logo: UploadFile | None = None,
 ):
     user = await create_user(session, name, email, phone, password, UserTypes.club)
     if not user:
@@ -29,12 +31,17 @@ async def create_club(
 
     db_club = Clubs(
         name=name,
-        logo=logo,
         about=about,
         org_id=org_id,
         location_name=location_name,
         user_id=user.id,
     )
+    if logo:
+        content = io.BytesIO(await logo.read())
+        db_club.logo = {
+            "bytes": content,
+            "filename": logo.filename,
+        }
     session.add(db_club)
     await session.commit()
     await session.refresh(db_club)
@@ -47,6 +54,14 @@ async def update_club(club: EditClub, session: AsyncSession, user_id: int):
         raise CustomHTTPException(404, "Club not found")
     if db_club.created_by_id != user_id:
         raise CustomHTTPException(403, "Not authorized to update this club")
+    if club.logo:
+        content = io.BytesIO(await club.logo.read())
+        if db_club.logo:
+            db_club.logo.delete()
+        db_club.logo = {
+            "bytes": content,
+            "filename": club.logo.filename,
+        }
     db_club.update(club.model_dump())
     await session.commit()
     await session.refresh(db_club)

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Body, Request
+from fastapi import APIRouter, Body, Depends, Request
 from fastapi.encoders import jsonable_encoder
 
 from app.db.core import SessionDep
@@ -21,7 +21,7 @@ router = APIRouter(prefix="/events")
 
 @router.post("/create", response_model=EventPublic, summary="Create a new event")
 async def create_event(
-    user: DependsAuth, event: EventCreate, session: SessionDep = SessionDep
+    user: DependsAuth, session: SessionDep = SessionDep, event: EventCreate = Depends()
 ):
     return await service.create_event(
         session,
@@ -45,19 +45,20 @@ async def create_event(
         contact_email=event.contact_email,
         url=event.url,
         additional_details=event.additional_details,
+        interest_ids=event.interest_ids,
     )
 
 
 @router.put("/update", response_model=EventPublic, summary="Update an event")
 async def update_event(
-    user: DependsAuth, event: EventEdit, session: SessionDep = SessionDep
+    user: DependsAuth, session: SessionDep = SessionDep, event: EventEdit = Depends()
 ):
     return await service.update_event(session, event, user.id)
 
 
 @router.get("/info/{event_id}", response_model=EventPublic, summary="Get event info")
 async def get_event(user: DependsAuth, event_id: int, session: SessionDep = SessionDep):
-    return await service.get_event(session, event_id)
+    return jsonable_encoder(await service.get_event(session, event_id))
 
 
 @router.get("/list", summary="List all events")

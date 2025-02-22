@@ -35,13 +35,19 @@ async def validate_unique(session: AsyncSession, **kwargs):
     unique_together = kwargs.get("unique_together", [])
     for entry in unique_together:
         query = exists()
+        skip = False
+
         if not isinstance(entry, dict):
             continue
         for key, (schema, value) in entry.items():
+            if not value:
+                skip = True
+                continue
+
             query = query.where(getattr(schema, key) == value)
             if check_deleted and issubclass(schema, SoftDeleteMixin):
                 query = query.where(schema.is_deleted == False)
-        if await session.scalar(select(query)):
+        if not skip and await session.scalar(select(query)):
             key = list(entry.keys())[0]
             errors[key] = f"{key} already exists"
     if errors:
