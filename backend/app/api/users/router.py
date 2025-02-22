@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Request
+from typing import List
+from fastapi import APIRouter, Body, Request
 from app.api.users.schemas import UserCreate, UserProfileCreate, UserPublic
 from app.db.core import SessionDep
 from app.api.users import service
@@ -8,8 +9,9 @@ from app.core.response.pagination import (
     paginated_response,
 )
 from app.api.clubs.schemas import ClubPublicMin
-from app.core.auth.dependencies import DependsAuth
+from app.core.auth.dependencies import DependsAuth, UserAuth
 from app.core.response import pagination
+from app.api.interests.schemas import InterestPublic
 
 router = APIRouter(prefix="/user")
 
@@ -53,3 +55,18 @@ async def create_user_profile(
         org_id=profile.org_id,
         avatar_id=profile.avatar_id,
     )
+
+
+@router.post("/interests/select", summary="select interests")
+async def select_interests(
+    session: SessionDep, user: UserAuth, interest_ids: list[int] = Body(...)
+) -> List[InterestPublic]:
+    await service.select_interests(
+        session=session, user_id=user.id, interest_ids=interest_ids
+    )
+    return await service.list_interests(session=session, user_id=user.id)
+
+
+@router.get("/interests/list", summary="list user interests")
+async def list_interests(session: SessionDep, user: UserAuth) -> List[InterestPublic]:
+    return await service.list_interests(session=session, user_id=user.id)

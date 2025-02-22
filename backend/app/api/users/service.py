@@ -1,15 +1,22 @@
 import re
-from sqlalchemy import exists, select
+from sqlalchemy import delete, exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, joinedload
 
 from app.response import CustomHTTPException
-from app.api.users.models import UserAvatars, UserProfiles, UserTypes, Users
+from app.api.users.models import (
+    UserAvatars,
+    UserInterests,
+    UserProfiles,
+    UserTypes,
+    Users,
+)
 from app.api.users.schemas import UserCreate
 from app.core.auth.authentication import get_password_hash
 from app.api.clubs.models import ClubFollowersLink, Clubs
 from app.api.orgs.models import Organizations
 from app.core.validations.schema import validate_relations, validate_unique
+from app.api.interests.models import Interests
 
 
 async def generate_username(user: Users, session: AsyncSession):
@@ -118,3 +125,28 @@ async def create_or_update_profile(
     await session.commit()
     await session.refresh(profile)
     return profile
+
+
+async def list_interests(session: AsyncSession, user_id: int):
+    query = (
+        select(Interests)
+        .join(UserInterests, UserInterests.interest_id == Interests.id)
+        .where(UserInterests.user_id == user_id)
+        .options(joinedload(Interests.category))
+    )
+    return await session.scalars(query)
+
+
+async def select_interests(
+    session: AsyncSession, user_id: int, interest_ids: list[int]
+):
+    delete_exisisting = delete(UserInterests).where(
+        UserInterests.user_id == user_id, UserInterests.interest_id.in_(interest_ids)
+    )
+    await session.execute(delete_exisisting)
+    for id in interest_ids:
+        if await session.scalar(select(exists().where(Interests.id == id))):
+            link = UserInterests(user_id=user_id, interest_id=id)
+            session.add(link)
+    await session.commit()
+    return None
