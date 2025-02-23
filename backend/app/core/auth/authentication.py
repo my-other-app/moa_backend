@@ -1,8 +1,10 @@
 from passlib.context import CryptContext
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
-from app.api.users.models import Users
+from app.api.users.models import UserTypes, Users
 from app.db.core import get_session
+from app.api.clubs.models import Clubs
+from sqlalchemy.orm import joinedload
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
@@ -24,7 +26,7 @@ def get_password_hash(password):
 
 async def get_user(username_or_id: str):
     async for session in get_session():
-        query = select(Users)
+        query = select(Users).options(joinedload(Users.club), joinedload(Users.profile))
         if isinstance(username_or_id, int):  # If searching by ID
             query = query.where(Users.id == username_or_id)
         else:
@@ -34,6 +36,10 @@ async def get_user(username_or_id: str):
                 query = query.where(Users.username == username_or_id)
         result = await session.execute(query)
         result = result.scalars().first()
+
+        if result and result.user_type == UserTypes.club:
+            if not result.club or not result.club.is_verified:
+                return None
         return result
 
 

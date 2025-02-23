@@ -22,7 +22,7 @@ from app.core.response.pagination import PaginationParams, paginated_response
 router = APIRouter(prefix="/events")
 
 
-@router.post("/create", response_model=EventPublic, summary="Create a new event")
+@router.post("/create", response_model=EventPublicMin, summary="Create a new event")
 async def create_event(
     user: DependsAuth, session: SessionDep = SessionDep, event: EventCreate = Depends()
 ):

@@ -32,3 +32,39 @@ class InterestPublic(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# RESPONSE MODELS
+
+
+class InterestCategoryCreateUpdateResponse(BaseModel):
+    id: int = Field(...)
+    name: str = Field(..., min_length=2)
+    icon: str | None = Field(None)
+    icon_type: str | None = Field(None)
+
+
+class InterestCreateUpdateResponse(BaseModel):
+    id: int = Field(...)
+    name: str = Field(..., min_length=2)
+    icon: str | None = Field(None)
+    icon_type: str | None = Field(None)
+    category_id: int
+
+
+class InterestListResponse(BaseModel):
+    id: int = Field(...)
+    name: str = Field(..., min_length=2)
+    icon: str | None = Field(None)
+    icon_type: str | None = Field(None)
+
+    class Config:
+        from_attributes = True
+
+
+class InterestCategoryWiseListResponse(BaseModel):
+    id: int = Field(...)
+    name: str = Field(..., min_length=2)
+    icon: str | None = Field(None)
+    icon_type: str | None = Field(None)
+    interests: list[InterestListResponse] = Field(...)

@@ -48,7 +48,8 @@ async def create_user(
     full_name: str,
     email: str,
     phone: str,
-    password: str,
+    password: str | None = None,
+    provider: str = "email",
     user_type: UserTypes = UserTypes.app_user,
 ):
     await validate_unique(
@@ -64,10 +65,13 @@ async def create_user(
         phone=phone,
         password=password,
         user_type=user_type,
+        provider=provider,
     )
-
-    hashed_password = get_password_hash(user_obj.password)
-    user_obj.password = hashed_password
+    if provider == "email":
+        if not password:
+            raise CustomHTTPException(400, "Password is required")
+        hashed_password = get_password_hash(user_obj.password)
+        user_obj.password = hashed_password
 
     username = await generate_username(user_obj, session)
     user_obj.username = username
@@ -202,3 +206,28 @@ async def get_user_profile(session: AsyncSession, user_id: int):
     )
 
     return await session.scalar(query)
+
+
+async def update_profile_picture(
+    session: AsyncSession,
+    user_id: int,
+    profile_picture: UploadFile,
+) -> dict:
+    """Update user's profile picture."""
+    profile = await session.scalar(
+        select(UserProfiles).where(UserProfiles.user_id == user_id)
+    )
+    if not profile:
+        profile = UserProfiles(user_id=user_id)
+        session.add(profile)
+
+    if profile.profile_pic:
+        profile.profile_pic.delete()
+
+    content = io.BytesIO(await profile_picture.read())
+    profile.profile_pic = {
+        "bytes": content,
+        "filename": profile_picture.filename,
+    }
+    await session.commit()
+    return {"message": "Profile picture updated successfully"}

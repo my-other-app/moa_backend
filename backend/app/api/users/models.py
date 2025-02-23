@@ -25,6 +25,11 @@ class UserTypes(enum.Enum):
     admin = "admin"
 
 
+class SigninProviders(enum.Enum):
+    google = "google"
+    email = "email"
+
+
 class UserAvatars(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     __tablename__ = "user_avatars"
 
@@ -42,7 +47,8 @@ class Users(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     username = Column(String(100), nullable=False, unique=True)
     email = Column(String(100), nullable=False)
     phone = Column(String(20), nullable=True)
-    password = Column(String(100), nullable=False)
+    password = Column(String(100), nullable=True)
+    provider = Column(Enum(SigninProviders), nullable=True)
     user_type = Column(Enum(UserTypes), nullable=False, default=UserTypes.app_user)
 
     profile = relationship("UserProfiles", uselist=False)

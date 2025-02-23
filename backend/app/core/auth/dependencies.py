@@ -69,6 +69,14 @@ def check_user_type(required_roles: Union[str, List[str]]):
                 message="Not Authorized",
                 error_code="INSUFFICIENT_PERMISSIONS",
             )
+        if user_type == "club":
+            if not current_user.club.is_verified:
+                raise CustomHTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    message="Club is not verified",
+                    error_code="CLUB_NOT_VERIFIED",
+                )
+
         return current_user
 
     return role_checker

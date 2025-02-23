@@ -25,6 +25,7 @@ from app.api.clubs.models import ClubUsersLink, Clubs
 from app.api.users.models import Users
 from app.core.validations.schema import validate_relations
 from app.api.interests.models import Interests
+from app.core.utils.keys import generate_ticket_id, generate_slug
 
 
 async def create_event(
@@ -77,8 +78,10 @@ async def create_event(
                 raise CustomHTTPException(
                     400, message="Options required for select, radio, checkbox fields"
                 )
+    slug = generate_slug(name)
     db_event = Events(
         name=name,
+        slug=slug,
         event_datetime=event_datetime,
         duration=duration,
         category_id=category_id,
@@ -295,18 +298,23 @@ async def register_event(
         if errors:
             raise CustomHTTPException(400, message=errors)
 
-    registration = await session.scalar(
-        select(
-            exists()
-            .where(EventRegistrationsLink.event_id == event_id)
-            .where(EventRegistrationsLink.user_id == user_id)
-            .where(EventRegistrationsLink.is_deleted == False)
+    existing_registration = await session.scalar(
+        select(EventRegistrationsLink).where(
+            EventRegistrationsLink.event_id == event_id,
+            EventRegistrationsLink.user_id == user_id,
+            EventRegistrationsLink.is_deleted == False,
         )
     )
-    if registration:
+    if existing_registration:
         raise CustomHTTPException(400, message="Already registered for this event")
+
+    ticket_id = generate_ticket_id()
+
     registration = EventRegistrationsLink(
-        event_id=event_id, user_id=user_id, additional_details=additional_details
+        event_id=event_id,
+        user_id=user_id,
+        ticket_id=ticket_id,
+        additional_details=additional_details,
     )
     session.add(registration)
     await session.commit()

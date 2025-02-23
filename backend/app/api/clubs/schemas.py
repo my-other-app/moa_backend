@@ -1,8 +1,10 @@
 from datetime import datetime
+from typing import List
 from fastapi import File, Form, UploadFile
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, HttpUrl
 from app.api.users.schemas import UserPublic
 from app.core.storage.fields import S3Image
+from app.api.interests.schemas import InterestPublic
 
 
 class ClubBaseMin(BaseModel):
@@ -13,6 +15,20 @@ class ClubBaseMin(BaseModel):
 
 class ClubBase(ClubBaseMin):
     about: str | None = Field(None)
+
+
+class ClubSocials(BaseModel):
+    instagram: HttpUrl | None = None
+    linkedin: HttpUrl | None = None
+    youtube: HttpUrl | None = None
+    website: HttpUrl | None = None
+
+
+class ClubSocialsCreate(BaseModel):
+    instagram: str | None = None
+    linkedin: str | None = None
+    youtube: str | None = None
+    website: str | None = None
 
 
 class CreateClub:
@@ -27,7 +43,13 @@ class CreateClub:
         org_id: int | None = Form(None),
         location_name: str | None = Form(None),
         location_link: str | None = Form(None),
+        contact_phone: str | None = Form(None),
+        contact_email: str | None = Form(None),
         interest_ids: str | None = Form(None),
+        instagram: str | None = Form(None),
+        linkedin: str | None = Form(None),
+        youtube: str | None = Form(None),
+        website: str | None = Form(None),
     ):
         self.email = email
         self.phone = phone
@@ -37,44 +59,47 @@ class CreateClub:
         self.about = about
         self.org_id = org_id
         self.location_name = location_name
+        self.location_link = location_link
         self.interest_ids = (
             [int(i) for i in interest_ids.split(",")] if interest_ids else []
         )
-        self.location_link = location_link
-
-    # @field_validator("org_id", mode="before")
-    # @classmethod
-    # async def validate_org_id(cls, value: int | None, info: ValidationInfo):
-    #     if not value:
-    #         return value
-    #     session: AsyncSession = info.context.get("session")
-    #     result = await session.execute(
-    #         select(Organizations.id).where(Organizations.id == value)
-    #     )
-    #     if not result.scalar():
-    #         raise ValueError(f"Organization with id {value} does not exist")
-    # return value
+        self.instagram = instagram
+        self.linkedin = linkedin
+        self.youtube = youtube
+        self.website = website
+        self.contact_phone = contact_phone
+        self.contact_email = contact_email
 
 
-class EditClub(CreateClub):
-    id: int = Form(...)
-
+class UpdateClub:
     def __init__(
         self,
-        id: int = Form(...),
-        email=Form(..., max_length=100),
-        phone=Form(None, max_length=15),
-        password=Form(..., min_length=6, max_length=100),
-        name=Form(..., min_length=3, max_length=20),
-        logo=Form(None),
-        about=Form(None),
-        org_id=Form(None),
-        location_name=Form(None),
+        name: str = Form(..., min_length=3, max_length=20),
+        logo: UploadFile | None = File(None),
+        about: str | None = Form(None),
+        org_id: int | None = Form(None),
+        location_name: str | None = Form(None),
+        location_link: str | None = Form(None),
+        contact_phone: str | None = Form(None),
+        contact_email: str | None = Form(None),
+        interest_ids: str | None = Form(None),
     ):
-        super().__init__(
-            email, phone, password, name, logo, about, org_id, location_name
+        self.name = name
+        self.logo = logo
+        self.about = about
+        self.org_id = org_id
+        self.location_name = location_name
+        self.location_link = location_link
+        self.interest_ids = (
+            [int(i) for i in interest_ids.split(",")] if interest_ids else []
         )
-        self.id = id
+        self.contact_phone = contact_phone
+        self.contact_email = contact_email
+
+
+class CreateClubAdmin(BaseModel):
+    email: EmailStr = Field(...)
+    name: str = Field(...)
 
 
 class ClubPublic(ClubBase):
@@ -84,6 +109,14 @@ class ClubPublic(ClubBase):
 
     class Config:
         from_attributes = True
+
+
+class ClubPublicDetail(ClubPublic):
+    socials: ClubSocials = Field(...)
+    location_link: str | None = Field(None)
+    interests: list[str] = Field(...)
+    followers_count: int = Field(...)
+    user_data: dict | None = Field(None)
 
 
 class ClubPublicMin(ClubBaseMin):
@@ -123,3 +156,66 @@ class ClubFollowPublic(BaseModel):
     user: UserPublic
     is_following: bool
     created_at: datetime
+
+
+# RESPONSE MODELS
+
+
+class ClubCreateUpdateResponse(BaseModel):
+    id: int = Field(...)
+    name: str = Field(...)
+    slug: str = Field(...)
+    logo: dict | None = Field(None)
+    about: str | None = Field(None)
+    org_id: int | None = Field(None)
+    location_name: str | None = Field(None)
+    location_link: str | None = Field(None)
+    created_at: datetime = Field(...)
+    updated_at: datetime = Field(...)
+
+
+class ClubListResponse(BaseModel):
+    id: int = Field(...)
+    name: str = Field(...)
+    slug: str = Field(...)
+    logo: dict | None = Field(None)
+    location_name: str | None = Field(None)
+    user_data: dict | None = Field(None)
+    org_id: int | None = Field(None)
+
+
+class ClubInterestDetailMin(BaseModel):
+    id: int = Field(...)
+    name: str = Field(..., min_length=2)
+    icon: str | None = Field(None)
+    icon_type: str | None = Field(None)
+
+
+class ClubPublicDetailResponse(BaseModel):
+    id: int = Field(...)
+    name: str = Field(..., min_length=3, max_length=20)
+    slug: str = Field(...)
+    logo: dict | None = Field(None)
+    location_name: str | None = Field(None)
+    location_link: str | None = Field(None)
+    about: str | None = Field(None)
+    rating: int = Field(...)
+    total_ratings: int = Field(...)
+    socials: ClubSocials | None = Field(None)
+    interests: List[ClubInterestDetailMin] | None = Field(None)
+    followers_count: int = Field(...)
+    user_data: dict | None = Field(None)
+
+
+class NoteCreateUpdateResponse(BaseModel):
+    id: int = Field(...)
+    title: str = Field(...)
+    note: str = Field(...)
+
+
+class NoteListResponse(BaseModel):
+    id: int = Field(...)
+    title: str = Field(...)
+    note: str = Field(...)
+    created_at: datetime = Field(...)
+    updated_at: datetime = Field(...)

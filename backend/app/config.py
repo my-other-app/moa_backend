@@ -21,6 +21,10 @@ class AppConfig(BaseSettings):
     S3_SECRET_KEY: str
     S3_BASE_PATH: str
 
+    GOOGLE_WEB_CLIENT_ID: str
+    GOOGLE_ANDROID_CLIENT_ID: str
+    GOOGLE_IOS_CLIENT_ID: str
+
     CORS_ORIGINS: list[str] | str
 
     APP_VERSION: str = "1.0"

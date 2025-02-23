@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class Token(BaseModel):
@@ -19,3 +19,15 @@ class AuthUser(BaseModel):
     phone: str | None = None
     username: str
     user_type: str
+
+
+class GoogleSignInRequest(BaseModel):
+    id_token: str
+    platform: str = Field(
+        default="web", description="Platform type: 'web', 'android', or 'ios'"
+    )
+
+
+class GoogleSignInResponse(BaseModel):
+    access_token: str
+    refresh_token: str

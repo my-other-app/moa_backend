@@ -77,4 +77,4 @@ async def list_interests(session: AsyncSession):
                     "icon_type": interest.icon_type,
                 }
             )
-    return data
+    return list(data.values())

@@ -100,3 +100,18 @@ async def select_avatar(
     return await service.select_avatar(
         session, user_id=user.id, avatar_id=avatar.avatar_id
     )
+
+
+@router.put("/profile/update-picture")
+async def update_profile_picture(
+    session: SessionDep,
+    user: UserAuth,
+    profile_picture: UploadFile = File(...),
+):
+    """Update user's profile picture."""
+    if not profile_picture.content_type.startswith("image/"):
+        raise Exception("File must be an image")
+
+    return await service.update_profile_picture(
+        session, user_id=user.id, profile_picture=profile_picture
+    )

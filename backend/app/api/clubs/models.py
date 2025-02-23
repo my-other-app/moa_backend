@@ -1,5 +1,13 @@
 # from geoalchemy2 import Geometry
-from sqlalchemy import Boolean, Column, Enum, ForeignKey, Integer, String, JSON, Float, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    Column,
+    ForeignKey,
+    Integer,
+    String,
+    Float,
+    UniqueConstraint,
+)
 from sqlmodel import Field, SQLModel
 from app.db.base import AbstractSQLModel
 from app.db.mixins import SoftDeleteMixin, TimestampsMixin
@@ -12,6 +20,7 @@ class Clubs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     __tablename__ = "clubs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    slug = Column(String(120), nullable=False, unique=True, index=True)
     name = Column(String(100), nullable=False)
     logo = Column(
         S3ImageField(
@@ -35,13 +44,22 @@ class Clubs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         Integer,
         ForeignKey("users.id"),
     )
+    contact_phone = Column(String, nullable=True)
+    contact_email = Column(String, nullable=True)
+    initial_password = Column(String, nullable=True)
+    is_verified = Column(Boolean, nullable=False, default=False)
 
     user = relationship("Users", back_populates="club")
     org = relationship("Organizations", back_populates="clubs")
     followers = relationship("ClubUsersLink", back_populates="club")
-    interests = relationship("ClubInterestsLink", back_populates="club")
+    interests = relationship(
+        "Interests",
+        secondary="clubs_interests_link",
+        back_populates="clubs",
+    )
     events = relationship("Events", back_populates="club")
     notes = relationship("Notes", back_populates="club")
+    socials = relationship("ClubSocials", back_populates="club", uselist=False)
 
 
 class ClubInterestsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
@@ -82,3 +100,18 @@ class Notes(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
 
     club = relationship("Clubs")
     user = relationship("Users")
+
+
+class ClubSocials(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
+    __tablename__ = "club_socials"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    club_id = Column(Integer, ForeignKey("clubs.id"), nullable=False)
+    instagram = Column(String(255), nullable=True)
+    linkedin = Column(String(255), nullable=True)
+    youtube = Column(String(255), nullable=True)
+    website = Column(String(255), nullable=True)
+
+    club = relationship("Clubs", back_populates="socials")
+
+    __table_args__ = (UniqueConstraint("club_id", "is_deleted"),)

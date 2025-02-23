@@ -1,79 +1,121 @@
 import io
 from fastapi import UploadFile
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy import and_, exists, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, aliased, joinedload
+import secrets
 
+
+from app.core.utils.keys import generate_slug
 from app.response import CustomHTTPException
-from app.api.clubs.models import ClubInterestsLink, ClubUsersLink, Clubs, Notes
-from app.api.clubs.schemas import EditClub
+from app.api.clubs.models import (
+    ClubInterestsLink,
+    ClubUsersLink,
+    Clubs,
+    Notes,
+    ClubSocials,
+)
+from app.api.clubs.schemas import ClubSocialsCreate, CreateClub
 from app.api.users.models import UserTypes, Users
 from app.api.users.service import create_user
 from app.api.interests.models import Interests
+from app.core.validations.schema import validate_relations
+from app.api.orgs.models import Organizations
 
 
 async def create_club(
     session: AsyncSession,
     name: str,
     email: str,
-    password: str,
+    password: str | None = None,
     phone: str | None = None,
     about: str | None = None,
     org_id: int | None = None,
     location_name: str | None = None,
     logo: UploadFile | None = None,
     interest_ids: list[int] | None = None,
-):
-    user = await create_user(session, name, email, phone, password, UserTypes.club)
-    if not user:
-        raise CustomHTTPException(
-            500,
-            "An unexpected error occured while creating club. (ERR: Unable to create user)",
-        )
+    is_admin_created: bool = False,
+) -> Clubs:
+    """Create a new club."""
+    if not is_admin_created and not password:
+        raise CustomHTTPException(400, "Password is required")
 
-    db_club = Clubs(
+    existing_club = await session.scalar(
+        select(Clubs).where(
+            func.lower(func.replace(Clubs.name, " ", ""))
+            == func.lower(func.replace(name, " ", "")),
+            Clubs.is_deleted == False,
+        )
+    )
+    if existing_club:
+        raise CustomHTTPException(400, "Club with this name already exists")
+
+    slug = generate_slug(name)
+
+    if is_admin_created:
+        password = secrets.token_urlsafe(12)  # Generate a secure random password
+
+    club_user = await create_user(
+        session,
+        full_name=name,
+        email=email,
+        password=password,
+        phone=phone,
+        user_type=UserTypes.club,
+    )
+
+    club = Clubs(
         name=name,
+        slug=slug,
         about=about,
         org_id=org_id,
         location_name=location_name,
-        user_id=user.id,
+        user_id=club_user.id,
+        is_verified=is_admin_created,
+        initial_password=password if is_admin_created else None,
     )
+
     if logo:
         content = io.BytesIO(await logo.read())
-        db_club.logo = {
+        club.logo = {
             "bytes": content,
             "filename": logo.filename,
         }
-    session.add(db_club)
+
+    session.add(club)
     await session.commit()
-    await session.refresh(db_club)
+    await session.refresh(club)
 
     if interest_ids:
-        for interest_id in interest_ids:
-            print(interest_id)
-            if not await session.scalar(
-                select(
-                    exists().where(
-                        Interests.id == interest_id,
-                        Interests.is_deleted == False,
-                    )
-                )
-            ):
-                continue
-            print("here")
-            link = ClubInterestsLink(club_id=db_club.id, interest_id=interest_id)
+        interests = await session.scalars(
+            select(Interests).where(Interests.id.in_(interest_ids))
+        )
+        for interest in interests:
+            link = ClubInterestsLink(club_id=club.id, interest_id=interest.id)
             session.add(link)
+
     await session.commit()
-    await session.refresh(db_club)
-    return db_club
+    await session.refresh(club)
+    return club
 
 
-async def update_club(club: EditClub, session: AsyncSession, user_id: int):
-    db_club = await session.get(Clubs, club.id)
+async def update_club(session: AsyncSession, club_id: int, club: CreateClub):
+    print(club.org_id)
+    await validate_relations(
+        session,
+        {
+            "org_id": (Organizations, club.org_id),
+        },
+    )
+    db_club = (
+        select(Clubs).where(Clubs.id == club_id).options(selectinload(Clubs.interests))
+    )
+    db_club = await session.scalar(db_club)
+
     if not db_club:
         raise CustomHTTPException(404, "Club not found")
-    if db_club.created_by_id != user_id:
-        raise CustomHTTPException(403, "Not authorized to update this club")
+
     if club.logo:
         content = io.BytesIO(await club.logo.read())
         if db_club.logo:
@@ -82,7 +124,25 @@ async def update_club(club: EditClub, session: AsyncSession, user_id: int):
             "bytes": content,
             "filename": club.logo.filename,
         }
-    db_club.update(club.model_dump())
+
+    db_club.name = club.name
+    db_club.about = club.about
+    db_club.location_name = club.location_name
+    db_club.location_link = club.location_link
+    db_club.org_id = club.org_id
+    db_club.contact_phone = club.contact_phone
+    db_club.contact_email = club.contact_email
+
+    for interest in db_club.interests:
+        session.delete(interest)
+
+    if club.interest_ids:
+        interests = await session.scalars(
+            select(Interests).where(Interests.id.in_(club.interest_ids))
+        )
+        for interest in interests:
+            link = ClubInterestsLink(club_id=db_club.id, interest_id=interest.id)
+            session.add(link)
     await session.commit()
     await session.refresh(db_club)
     return db_club
@@ -102,6 +162,8 @@ async def get_all_clubs(
     limit: int = 10,
     offset: int = 0,
     is_following: bool | None = None,
+    is_pinned: bool | None = None,
+    is_hidden: bool | None = None,
     interest_ids: list[int] | None = None,
 ):
     """Get all clubs with optional filters."""
@@ -132,6 +194,22 @@ async def get_all_clubs(
                     ClubUsersLink.is_deleted == False,
                 ),
             ).filter(ClubUsersLink.id == None)
+    ClubUsersLinkPinned = aliased(ClubUsersLink)
+    ClubUsersLinkHidden = aliased(ClubUsersLink)
+
+    if is_pinned is not None and user_id:
+        query = query.join(ClubUsersLinkPinned).filter(
+            ClubUsersLinkPinned.user_id == user_id,
+            ClubUsersLinkPinned.is_pinned == is_pinned,
+            ClubUsersLinkPinned.is_deleted == False,
+        )
+
+    if is_hidden is not None and user_id:
+        query = query.join(ClubUsersLinkHidden).filter(
+            ClubUsersLinkHidden.user_id == user_id,
+            ClubUsersLinkHidden.is_hidden == is_hidden,
+            ClubUsersLinkHidden.is_deleted == False,
+        )
 
     query = query.order_by(Clubs.created_at.desc()).limit(limit).offset(offset)
     return list(await session.scalars(query))
@@ -295,6 +373,7 @@ async def get_club_details(
         .where(Clubs.id == club_id)
         .options(
             selectinload(Clubs.interests),
+            joinedload(Clubs.socials),
         )
     )
     club = await session.scalar(query)
@@ -328,9 +407,65 @@ async def get_club_details(
             }
 
     # Convert to dict for adding additional fields
-    club_dict = club.__dict__
+    club_dict = jsonable_encoder(club)
     club_dict["followers_count"] = followers_count
     club_dict["user_data"] = user_data
     club_dict["interests"] = [interest.__dict__ for interest in club.interests]
-
     return club_dict
+
+
+async def update_club_logo(
+    session: AsyncSession,
+    club_id: int,
+    logo: UploadFile,
+) -> dict:
+    """Update club logo."""
+    club = await session.get(Clubs, club_id)
+    if not club:
+        raise CustomHTTPException(404, "Club not found")
+
+    if club.logo:
+        club.logo.delete()
+
+    content = io.BytesIO(await logo.read())
+    club.logo = {
+        "bytes": content,
+        "filename": logo.filename,
+    }
+    await session.commit()
+    return {"message": "Club logo updated successfully"}
+
+
+async def create_or_update_club_socials(
+    session: AsyncSession,
+    club_id: int,
+    socials: ClubSocialsCreate,
+) -> ClubSocials:
+    """Create club social links."""
+    club = await session.get(Clubs, club_id)
+    if not club:
+        raise CustomHTTPException(404, "Club not found")
+
+    db_socials = await session.scalar(
+        select(ClubSocials).where(
+            ClubSocials.club_id == club_id,
+            ClubSocials.is_deleted == False,
+        )
+    )
+    if db_socials:
+        db_socials.instagram = socials.instagram
+        db_socials.linkedin = socials.linkedin
+        db_socials.youtube = socials.youtube
+        db_socials.website = socials.website
+    else:
+        db_socials = ClubSocials(
+            club_id=club_id,
+            instagram=socials.instagram,
+            linkedin=socials.linkedin,
+            youtube=socials.youtube,
+            website=socials.website,
+        )
+        session.add(db_socials)
+    await session.commit()
+    await session.refresh(db_socials)
+    return db_socials

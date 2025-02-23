@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Form
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi import status
 import jwt
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth.jwt import create_access_token, decode_jwt_token
 from app.core.auth.authentication import (
@@ -14,9 +15,34 @@ from app.core.auth.authentication import (
 )
 from app.core.auth.dependencies import DependsAuth
 from app.response import CustomHTTPException
-from app.api.auth.schemas import AuthTokenData, AuthUser, Token
+from app.api.auth.schemas import (
+    AuthTokenData,
+    AuthUser,
+    Token,
+    GoogleSignInRequest,
+    GoogleSignInResponse,
+)
+from app.api.auth.service import google_signin
+from app.db.core import SessionDep
 
 router = APIRouter(prefix="/auth")
+
+
+@router.post(
+    "/google", response_model=GoogleSignInResponse, summary="Sign in with Google"
+)
+async def google_sign_in(
+    request: GoogleSignInRequest,
+    session: SessionDep = SessionDep,
+) -> GoogleSignInResponse:
+    access_token, refresh_token = await google_signin(
+        session, request.id_token, request.platform
+    )
+
+    return GoogleSignInResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+    )
 
 
 @router.post("/token", summary="get access token")

@@ -37,6 +37,7 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     __tablename__ = "events"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    slug = Column(String(120), nullable=False, unique=True, index=True)
     name = Column(String(100), nullable=False)
     poster = Column(
         S3ImageField(
@@ -138,7 +139,7 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
     id = Column(Integer, primary_key=True, autoincrement=True)
     event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    verification_code = Column(String, nullable=True)
+    ticket_id = Column(String(60), nullable=False, unique=True, index=True)
     is_attended = Column(Boolean, nullable=False, default=False)
     attended_on = Column(DateTime(timezone=True), nullable=True)
     is_won = Column(Boolean, nullable=False, default=False)

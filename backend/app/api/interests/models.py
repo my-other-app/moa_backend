@@ -34,3 +34,6 @@ class Interests(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     events = relationship(
         "Events", secondary="event_interests_link", back_populates="interests"
     )
+    clubs = relationship(
+        "Clubs", secondary="clubs_interests_link", back_populates="interests"
+    )
