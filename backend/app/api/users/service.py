@@ -254,3 +254,8 @@ async def create_user_avatar(session: AsyncSession, name: str, file: UploadFile)
     await session.commit()
     await session.refresh(avatar)
     return avatar
+
+
+async def list_avatars(session: AsyncSession):
+    query = select(UserAvatars)
+    return await session.scalars(query)

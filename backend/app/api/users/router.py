@@ -117,6 +117,11 @@ async def list_interests(session: SessionDep, user: UserAuth) -> List[InterestPu
     return await service.list_interests(session=session, user_id=user.id)
 
 
+@router.get("/avatar/list", summary="list all avatars")
+async def list_avatars(session: SessionDep) -> List[UserAvatarDetail]:
+    return await service.list_avatars(session)
+
+
 @router.post("/avatar/select", summary="select user avatar")
 async def select_avatar(
     session: SessionDep, user: UserAuth, avatar: UserAvatarSelect
