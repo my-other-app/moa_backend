@@ -1,3 +1,4 @@
+import io
 from sqlalchemy import select
 from app.response import CustomHTTPException
 from app.api.orgs.models import Organizations
@@ -6,12 +7,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def create_organization(org: OrganizationCreate, session: AsyncSession):
-    print(org.model_dump())
-    org = Organizations(**org.model_dump())
-    session.add(org)
+    db_org = Organizations(
+        name=org.name,
+        type=org.type,
+        address=org.address,
+        phone=org.phone,
+        email=org.email,
+        website=org.website,
+    )
+    if org.logo:
+        db_org.logo = {
+            "bytes": io.BytesIO(await org.logo.read()),
+            "filename": org.logo.filename,
+        }
+    session.add(db_org)
     await session.commit()
-    await session.refresh(org)
-    return org
+    await session.refresh(db_org)
+    return db_org
 
 
 async def delete_organization(id: int, session: AsyncSession):

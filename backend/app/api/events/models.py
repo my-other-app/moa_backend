@@ -56,7 +56,6 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     reg_fee = Column(Float, nullable=True)
     duration = Column(Float, nullable=False)
     about = Column(String, nullable=True)
-    # location = Column(Geometry("POINT"), nullable=True)
     location_name = Column(String, nullable=True)
     location_link = Column(String, nullable=True)
     has_prize = Column(Boolean, nullable=False, default=False)

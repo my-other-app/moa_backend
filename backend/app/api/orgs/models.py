@@ -5,6 +5,7 @@ import enum
 
 from app.db.base import AbstractSQLModel
 from app.db.mixins import SoftDeleteMixin, TimestampsMixin
+from app.core.storage.fields import S3ImageField
 
 
 class OrgTypes(enum.Enum):
@@ -25,7 +26,17 @@ class Organizations(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     phone = Column(String(20), nullable=True)
     email = Column(String(100), nullable=True)
     website = Column(String(100), nullable=True)
-    logo = Column(String(100), nullable=True)
+    logo = Column(
+        S3ImageField(
+            upload_to="/organizations/logos/",
+            variations={
+                "thumbnail": {"width": 150, "height": 150},
+                "medium": {"width": 500, "height": 500},
+                "large": {"width": 800, "height": 800},
+            },
+        ),
+        nullable=True,
+    )
     is_verified = Column(Boolean, default=False, nullable=False)
 
     clubs = relationship("Clubs", back_populates="org")

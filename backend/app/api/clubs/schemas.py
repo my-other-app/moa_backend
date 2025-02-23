@@ -170,6 +170,8 @@ class ClubCreateUpdateResponse(BaseModel):
     org_id: int | None = Field(None)
     location_name: str | None = Field(None)
     location_link: str | None = Field(None)
+    contact_phone: str | None = Field(None)
+    contact_email: str | None = Field(None)
     created_at: datetime = Field(...)
     updated_at: datetime = Field(...)
 
@@ -191,6 +193,15 @@ class ClubInterestDetailMin(BaseModel):
     icon_type: str | None = Field(None)
 
 
+class ClubOrgDetail(BaseModel):
+    id: int = Field(...)
+    name: str = Field(..., min_length=2)
+    type: str = Field(..., min_length=2)
+    address: str | None = Field(None)
+    phone: str | None = Field(None)
+    email: str | None = Field(None)
+
+
 class ClubPublicDetailResponse(BaseModel):
     id: int = Field(...)
     name: str = Field(..., min_length=3, max_length=20)
@@ -204,7 +215,10 @@ class ClubPublicDetailResponse(BaseModel):
     socials: ClubSocials | None = Field(None)
     interests: List[ClubInterestDetailMin] | None = Field(None)
     followers_count: int = Field(...)
+    contact_phone: str | None = Field(None)
+    contact_email: str | None = Field(None)
     user_data: dict | None = Field(None)
+    org: ClubOrgDetail | None = Field(None)
 
 
 class NoteCreateUpdateResponse(BaseModel):
@@ -225,4 +239,29 @@ class UserClubLinkDetailResponse(BaseModel):
     is_following: bool
     is_pinned: bool
     is_hidden: bool
+    created_at: datetime
+
+
+class ClubUserAvatarDetail(BaseModel):
+    id: int = Field(...)
+    name: str = Field(...)
+    image: dict | None = Field(None)
+
+
+class ClubUserProfileDetail(BaseModel):
+    id: int = Field(...)
+    avatar: ClubUserAvatarDetail | None = Field(None)
+    profile_pic: dict | None = Field(None)
+
+
+class ClubFollowerDetailResponse(BaseModel):
+    id: int = Field(...)
+    full_name: str = Field(...)
+    username: str = Field(...)
+    profile: ClubUserProfileDetail | None = Field(None)
+
+
+class ClubFollowersListResponse(BaseModel):
+    user: ClubFollowerDetailResponse
+    is_following: bool
     created_at: datetime

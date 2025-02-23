@@ -7,8 +7,12 @@ from app.api.events import service
 from app.api.events.schemas import (
     EventCategoryCreate,
     EventCategoryPublic,
+    EventCategoryResponse,
     EventCreate,
+    EventCreateUpdateResponse,
+    EventDetailResponse,
     EventEdit,
+    EventListResponse,
     EventPublic,
     EventPublicMin,
     EventRegistration,
@@ -17,15 +21,33 @@ from app.api.events.schemas import (
     EventRatingCreate,
 )
 from app.core.auth.dependencies import AdminAuth, ClubAuth, DependsAuth, UserAuth
-from app.core.response.pagination import PaginationParams, paginated_response
+from app.core.response.pagination import (
+    PaginatedResponse,
+    PaginationParams,
+    paginated_response,
+)
 
 router = APIRouter(prefix="/events")
 
 
-@router.post("/create", response_model=EventPublicMin, summary="Create a new event")
+@router.post("/categories/create", summary="Create a new event category")
+async def create_event_category(
+    user: AdminAuth, category: EventCategoryCreate, session: SessionDep = SessionDep
+) -> EventCategoryResponse:
+    return await service.create_event_category(session, category, user.id)
+
+
+@router.get("/categories/list", summary="List all event categories")
+async def list_event_categories(
+    session: SessionDep, user: DependsAuth
+) -> List[EventCategoryResponse]:
+    return await service.list_event_categories(session)
+
+
+@router.post("/create", summary="Create a new event")
 async def create_event(
-    user: DependsAuth, session: SessionDep = SessionDep, event: EventCreate = Depends()
-):
+    user: ClubAuth, session: SessionDep = SessionDep, event: EventCreate = Depends()
+) -> EventCreateUpdateResponse:
     return await service.create_event(
         session,
         user_id=user.id,
@@ -52,15 +74,20 @@ async def create_event(
     )
 
 
-@router.put("/update", response_model=EventPublic, summary="Update an event")
+@router.put("/update/{event_id}", summary="Update an event")
 async def update_event(
-    user: DependsAuth, session: SessionDep = SessionDep, event: EventEdit = Depends()
-):
-    return await service.update_event(session, event, user.id)
+    event_id: int,
+    user: ClubAuth,
+    session: SessionDep = SessionDep,
+    event: EventEdit = Depends(),
+) -> EventCreateUpdateResponse:
+    return await service.update_event(session, event, user.id, event_id=event_id)
 
 
-@router.get("/info/{event_id}", response_model=EventPublic, summary="Get event info")
-async def get_event(user: DependsAuth, event_id: int, session: SessionDep = SessionDep):
+@router.get("/info/{event_id}", summary="Get event info")
+async def get_event(
+    user: DependsAuth, event_id: int, session: SessionDep = SessionDep
+) -> EventDetailResponse:
     result = await service.get_event(session, event_id)
     data = jsonable_encoder(result)
     return data
@@ -76,7 +103,7 @@ async def list_events(
     is_registered: Optional[bool] = Query(None),
     is_ended: Optional[bool] = Query(None),
     interest_ids: Optional[str] = Query(None),
-):
+) -> PaginatedResponse[EventListResponse]:
     """List events with optional filters."""
     interest_ids = [int(i) for i in interest_ids.split(",")] if interest_ids else []
     events = await service.list_events(
@@ -89,18 +116,24 @@ async def list_events(
         is_ended=is_ended,
         interest_ids=interest_ids,
     )
-    return paginated_response(events, request, schema=EventPublicMin)
+    return paginated_response(events, request, schema=EventListResponse)
 
 
-@router.post(
-    "/categories/create",
-    response_model=EventCategoryPublic,
-    summary="Create a new event category",
-)
-async def create_event_category(
-    user: AdminAuth, category: EventCategoryCreate, session: SessionDep = SessionDep
+@router.post("/rate/{event_id}", response_model=EventRating)
+async def rate_event_endpoint(
+    event_id: int,
+    rating_data: EventRatingCreate,
+    session: SessionDep,
+    user: UserAuth,
 ):
-    return await service.create_event_category(session, category, user.id)
+    """Rate an event. Rating must be between 0 and 5."""
+    return await service.rate_event(
+        session=session,
+        event_id=event_id,
+        user_id=user.id,
+        rating=rating_data.rating,
+        review=rating_data.review,
+    )
 
 
 @router.post("/registration/{event_id}/register", summary="Register for an event")
@@ -146,20 +179,3 @@ async def get_event_registration(
         session, user_id=user.id, event_id=event_id, registration_id=registration_id
     )
     return jsonable_encoder(result)
-
-
-@router.post("/rate/{event_id}", response_model=EventRating)
-async def rate_event_endpoint(
-    event_id: int,
-    rating_data: EventRatingCreate,
-    session: SessionDep,
-    user: UserAuth,
-):
-    """Rate an event. Rating must be between 0 and 5."""
-    return await service.rate_event(
-        session=session,
-        event_id=event_id,
-        user_id=user.id,
-        rating=rating_data.rating,
-        review=rating_data.review,
-    )

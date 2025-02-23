@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Request, UploadFile, Query, File
 from app.api.clubs.schemas import (
     ClubCreateUpdateResponse,
     ClubFollowPublic,
+    ClubFollowersListResponse,
     ClubListResponse,
     ClubPublicDetailResponse,
     ClubSocials,
@@ -149,7 +150,9 @@ async def list_notes(
     pagination: PaginationParams,
     user: DependsAuth,
 ) -> PaginatedResponse[NoteListResponse]:
-    query = await service.list_notes(session, club_id=club_id)
+    query = await service.list_notes(
+        session, club_id=club_id, limit=pagination.limit, offset=pagination.offset
+    )
     return paginated_response(query, request=request, schema=NoteListResponse)
 
 
@@ -212,7 +215,7 @@ async def list_club_followers_endpoint(
     pagination: PaginationParams,
     session: SessionDep,
     user: DependsAuth,
-):
+) -> PaginatedResponse[ClubFollowersListResponse]:
     """List followers of a club."""
     followers = await service.list_club_followers(
         session=session,
@@ -220,7 +223,7 @@ async def list_club_followers_endpoint(
         limit=pagination.limit,
         offset=pagination.offset,
     )
-    return paginated_response(followers, request, schema=ClubFollowPublic)
+    return paginated_response(followers, request, schema=ClubFollowersListResponse)
 
 
 @router.put("/logo")

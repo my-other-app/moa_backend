@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
-from sqlalchemy import func, select, or_, and_
+from sqlalchemy import exists, func, select, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, aliased
 from sqlalchemy.dialects.postgresql import INTERVAL
 
 from app.api.events.models import Events, EventRegistrationsLink, EventInterestsLink
@@ -52,15 +52,16 @@ async def suggest_events(
         )
     )
 
+    ClubAlias = aliased(Clubs)
+
     if is_following:
-        query = (
-            query.join(Clubs)
-            .join(ClubUsersLink)
-            .filter(
-                ClubUsersLink.user_id == user_id,
-                ClubUsersLink.is_following == True,
-                ClubUsersLink.is_deleted == False,
-            )
+        query = query.filter(
+            exists()
+            .select_from(ClubUsersLink)
+            .where(ClubUsersLink.club_id == ClubAlias.id)
+            .where(ClubUsersLink.user_id == user_id)
+            .where(ClubUsersLink.is_following == True)
+            .where(ClubUsersLink.is_deleted == False)
         )
 
     if is_registered is not None:

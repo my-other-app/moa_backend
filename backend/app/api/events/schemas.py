@@ -113,7 +113,7 @@ class EventCreate:
             default_factory=lambda: datetime.now(timezone.utc).isoformat()
         ),  # ISO string
         reg_enddate: Optional[str] = Form(None),  # ISO format string
-        images: Optional[str] = Form("[]"),  # JSON string
+        # images: Optional[str] = Form("[]"),  # JSON string
         about: Optional[str] = Form(None),
         contact_phone: Optional[str] = Form(None),
         contact_email: Optional[str] = Form(None),
@@ -135,14 +135,16 @@ class EventCreate:
         self.is_online = is_online
         self.reg_startdate = datetime.fromisoformat(reg_startdate)
         self.reg_enddate = datetime.fromisoformat(reg_enddate) if reg_enddate else None
-        self.images = json.loads(images)  # Convert JSON string to list
+        # self.images = json.loads(images)  # Convert JSON string to list
         self.about = about
         self.contact_phone = contact_phone
         self.contact_email = contact_email
         self.url = url
         self.category_id = category_id
         self.club_id = club_id
-        self.interest_ids = json.loads(interest_ids)
+        self.interest_ids = (
+            [int(x) for x in interest_ids.split(",")] if interest_ids else None
+        )
         try:
             self.additional_details = [
                 EventAdditionalDetail(**detail)
@@ -156,34 +158,32 @@ class EventCreate:
 
 
 class EventEdit(EventCreate):
-    id: int = Form(...)
 
     def __init__(
         self,
-        name=Form(..., min_length=3, max_length=100),
-        poster=File(None),
-        event_datetime=Form(...),
-        has_fee=Form(False),
-        reg_fee=Form(None),
-        duration=Form(...),
-        location_name=Form(None),
-        has_prize=Form(False),
-        prize_amount=Form(None),
-        is_online=Form(False),
-        reg_startdate=Form(
+        name: str = Form(..., min_length=3, max_length=100),
+        poster: Optional[UploadFile] = File(None),
+        event_datetime: datetime = Form(...),  # ISO format string
+        has_fee: bool = Form(False),
+        reg_fee: Optional[float] = Form(None),
+        duration: float = Form(...),
+        location_name: Optional[str] = Form(None),
+        has_prize: bool = Form(False),
+        prize_amount: Optional[float] = Form(None),
+        is_online: bool = Form(False),
+        reg_startdate: str = Form(
             default_factory=lambda: datetime.now(timezone.utc).isoformat()
-        ),
-        reg_enddate=Form(None),
-        images=Form("[]"),
-        about=Form(None),
-        contact_phone=Form(None),
-        contact_email=Form(None),
-        url=Form(None),
-        category_id=Form(...),
-        club_id=Form(None),
-        interest_ids=Form("[]"),
-        additional_details=Form("[]"),
-        id=Form(...),
+        ),  # ISO string
+        reg_enddate: Optional[str] = Form(None),  # ISO format string
+        # images: Optional[str] = Form("[]"),  # JSON string
+        about: Optional[str] = Form(None),
+        contact_phone: Optional[str] = Form(None),
+        contact_email: Optional[str] = Form(None),
+        url: Optional[str] = Form(None),
+        category_id: int = Form(...),
+        club_id: Optional[int] = Form(None),
+        interest_ids: Optional[str] = Form("[]"),  # JSON string
+        additional_details: Optional[str] = Form("[]"),  # JSON string
     ):
         super().__init__(
             name,
@@ -198,7 +198,7 @@ class EventEdit(EventCreate):
             is_online,
             reg_startdate,
             reg_enddate,
-            images,
+            # images,
             about,
             contact_phone,
             contact_email,
@@ -208,7 +208,6 @@ class EventEdit(EventCreate):
             interest_ids,
             additional_details,
         )
-        self.id = id
 
 
 class EventRegistration(BaseModel):
@@ -235,3 +234,103 @@ class EventRating(EventRatingCreate):
     event_id: int
     user_id: int
     created_at: datetime
+
+
+# RESPONSE MODELs
+
+
+class EventCategoryResponse(BaseModel):
+    id: int
+    name: str
+    icon: str | None = None
+    icon_type: str | None = None
+
+
+class EventClubDetail(BaseModel):
+    id: int = Field(...)
+    name: str = Field(...)
+    slug: str = Field(...)
+    logo: dict | None = Field(None)
+
+
+class EventInterestDetail(BaseModel):
+    id: int = Field(...)
+    name: str = Field(...)
+    icon: str | None = Field(None)
+    icon_type: str | None = Field(None)
+
+
+class EventCategoryDetail(BaseModel):
+    id: int = Field(...)
+    name: str = Field(...)
+    icon: str | None = Field(None)
+    icon_type: str | None = Field(None)
+
+
+class EventCreateUpdateResponse(BaseModel):
+    id: int = Field(...)
+    name: str = Field(...)
+    slug: str = Field(...)
+    poster: dict | None = Field(None)
+    event_datetime: datetime = Field(...)
+    duration: float = Field(...)
+    location_name: str | None = Field(None)
+    has_fee: bool = Field(...)
+    reg_fee: float | None = Field(None)
+    has_prize: bool = Field(True)
+    prize_amount: float | None = Field(None)
+    is_online: bool = Field(False)
+    reg_startdate: datetime = Field(...)
+    reg_enddate: datetime | None = Field(None)
+    created_at: datetime = Field(...)
+    updated_at: datetime = Field(...)
+    club: EventClubDetail = Field(...)
+    category: EventCategoryDetail = Field(...)
+    interests: list[EventInterestDetail] | None = Field(None)
+    additional_details: list[EventAdditionalDetail] | None = Field(None)
+
+
+class EventListResponse(BaseModel):
+    id: int = Field(...)
+    name: str = Field(...)
+    slug: str = Field(...)
+    poster: dict | None = Field(None)
+    event_datetime: datetime = Field(...)
+    duration: float = Field(...)
+    location_name: str | None = Field(None)
+    has_fee: bool = Field(...)
+    has_prize: bool = Field(True)
+    prize_amount: float | None = Field(None)
+    is_online: bool = Field(False)
+    reg_startdate: datetime = Field(...)
+    reg_enddate: datetime | None = Field(None)
+    club: EventClubDetail = Field(...)
+    category: EventCategoryDetail = Field(...)
+
+
+class EventDetailResponse(BaseModel):
+    id: int = Field(...)
+    name: str = Field(...)
+    slug: str = Field(...)
+    poster: dict | None = Field(None)
+    event_datetime: datetime = Field(...)
+    duration: float = Field(...)
+    location_name: str | None = Field(None)
+    location_link: str | None = Field(None)
+    has_fee: bool = Field(...)
+    reg_fee: float | None = Field(None)
+    has_prize: bool = Field(True)
+    prize_amount: float | None = Field(None)
+    is_online: bool = Field(False)
+    reg_startdate: datetime = Field(...)
+    reg_enddate: datetime | None = Field(None)
+    club: EventClubDetail = Field(...)
+    category: EventCategoryDetail = Field(...)
+    interests: list[EventInterestDetail] | None = Field(None)
+    additional_details: list[EventAdditionalDetail] | None = Field(None)
+    rating: float = Field(...)
+    total_rating: int = Field(...)
+    about: str | None = Field(None)
+    contact_phone: str | None = Field(None)
+    contact_email: str | None = Field(None)
+    url: str | None = Field(None)

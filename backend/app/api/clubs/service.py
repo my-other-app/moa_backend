@@ -17,7 +17,7 @@ from app.api.clubs.models import (
     ClubSocials,
 )
 from app.api.clubs.schemas import ClubSocialsCreate, CreateClub
-from app.api.users.models import UserTypes, Users
+from app.api.users.models import UserProfiles, UserTypes, Users
 from app.api.users.service import create_user
 from app.api.interests.models import Interests
 from app.core.validations.schema import validate_relations
@@ -101,7 +101,6 @@ async def create_club(
 
 
 async def update_club(session: AsyncSession, club_id: int, club: CreateClub):
-    print(club.org_id)
     await validate_relations(
         session,
         {
@@ -355,7 +354,11 @@ async def list_club_followers(
             ClubUsersLink.is_following == True,
             ClubUsersLink.is_deleted == False,
         )
-        .options(selectinload(ClubUsersLink.user))
+        .options(
+            joinedload(ClubUsersLink.user).options(
+                joinedload(Users.profile).options(joinedload(UserProfiles.avatar))
+            )
+        )
         .order_by(ClubUsersLink.created_at.desc())
         .limit(limit)
         .offset(offset)
@@ -374,6 +377,7 @@ async def get_club_details(
         .options(
             selectinload(Clubs.interests),
             joinedload(Clubs.socials),
+            joinedload(Clubs.org),
         )
     )
     club = await session.scalar(query)

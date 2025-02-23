@@ -1,26 +1,27 @@
-from fastapi import APIRouter
+from typing import List
+from fastapi import APIRouter, Depends
 
 from app.db.core import SessionDep
-from app.api.orgs.schema import OrganizationCreate, OrganizationPublic
+from app.api.orgs.schema import (
+    OrganizationCreate,
+    OrganizationDetailResponse,
+    OrganizationPublic,
+)
 from app.api.orgs import service
 from app.core.auth.dependencies import AdminAuth
 
 router = APIRouter(prefix="/orgs")
 
 
-@router.post(
-    "/create", response_model=OrganizationPublic, summary="Create a new organization"
-)
+@router.post("/create", summary="Create a new organization")
 async def create_organization(
-    hero: OrganizationCreate, session: SessionDep, user: AdminAuth
-):
-    return await service.create_organization(hero, session)
+    session: SessionDep, user: AdminAuth, org: OrganizationCreate = Depends()
+) -> OrganizationDetailResponse:
+    return await service.create_organization(org, session)
 
 
-@router.get(
-    "/list", response_model=list[OrganizationPublic], summary="List all organizations"
-)
-async def create_organization(session: SessionDep):
+@router.get("/list", summary="List all organizations")
+async def create_organization(session: SessionDep) -> List[OrganizationDetailResponse]:
     return await service.list_organizations(session)
 
 

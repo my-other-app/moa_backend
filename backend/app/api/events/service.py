@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 import io
 from typing import Optional
 from fastapi import UploadFile
-from sqlalchemy import and_, exists, select, func
+from sqlalchemy import and_, delete, exists, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
 from sqlalchemy.dialects.postgresql import INTERVAL
@@ -128,23 +128,72 @@ async def create_event(
         .options(
             joinedload(Events.category),
             joinedload(Events.club),
-            selectinload(Events.interests).options(joinedload(Interests.category)),
+            selectinload(Events.interests),
         )
         .limit(1)
     )
     return db_event.scalar_one()
 
 
-async def update_event(session: AsyncSession, event: EventEdit, user_id: int):
-    db_event = await session.execute(select(Events).filter(Events.id == event.id))
+async def update_event(
+    session: AsyncSession, event: EventEdit, user_id: int, event_id: int
+):
+    db_event = await session.execute(
+        select(Events).options(joinedload(Events.club)).filter(Events.id == event_id)
+    )
     db_event = db_event.scalar()
     if db_event is None:
         raise CustomHTTPException(404, message="Event not found")
-    if db_event.created_by_id != user_id:
+    if db_event.club.user_id != user_id:
         raise CustomHTTPException(403, message="Not authorized to update this event")
-    db_event.update(event.model_dump())
+
+    if event.poster:
+        content = io.BytesIO(await event.poster.read())
+        db_event.poster = {
+            "bytes": content,
+            "filename": event.poster.filename,
+        }
+
+    await session.execute(
+        delete(EventInterestsLink).where(EventInterestsLink.event_id == event_id)
+    )
+    for interest_id in event.interest_ids:
+        interest_exists = await session.scalar(
+            select(exists().where(Interests.id == interest_id))
+        )
+        if interest_exists:
+            link = EventInterestsLink(event_id=event_id, interest_id=interest_id)
+            session.add(link)
+    db_event.name = event.name
+    db_event.event_datetime = event.event_datetime
+    db_event.duration = event.duration
+    db_event.category_id = event.category_id
+    db_event.has_fee = event.has_fee
+    db_event.reg_fee = event.reg_fee
+    db_event.location_name = event.location_name
+    db_event.has_prize = event.has_prize
+    db_event.prize_amount = event.prize_amount
+    db_event.is_online = event.is_online
+    db_event.reg_startdate = event.reg_startdate
+    db_event.reg_enddate = event.reg_enddate
+    db_event.about = event.about
+    db_event.contact_phone = event.contact_phone
+    db_event.contact_email = event.contact_email
+    db_event.additional_details = [
+        x.model_dump(mode="json") for x in event.additional_details
+    ]
     await session.commit()
-    return db_event
+    db_event = await session.execute(
+        select(Events)
+        .filter(Events.id == event_id)
+        .options(
+            joinedload(Events.category),
+            joinedload(Events.club),
+            selectinload(Events.interests),
+        )
+        .limit(1)
+    )
+    return db_event.scalar_one()
 
 
 async def get_event(session: AsyncSession, event_id: int):
@@ -263,6 +312,11 @@ async def create_event_category(
     await session.commit()
     await session.refresh(db_category)
     return db_category
+
+
+async def list_event_categories(session: AsyncSession):
+    result = await session.execute(select(EventCategories))
+    return result.scalars().all()
 
 
 async def register_event(

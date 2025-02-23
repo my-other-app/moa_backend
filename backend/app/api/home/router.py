@@ -3,9 +3,13 @@ from typing import List, Optional
 
 from fastapi.encoders import jsonable_encoder
 from app.core.auth.dependencies import UserAuth
-from app.core.response.pagination import PaginationParams, paginated_response
+from app.core.response.pagination import (
+    PaginatedResponse,
+    PaginationParams,
+    paginated_response,
+)
 from app.db.core import SessionDep
-from app.api.events.schemas import EventPublic, EventPublicMin
+from app.api.events.schemas import EventListResponse, EventPublic, EventPublicMin
 from app.api.clubs.schemas import ClubPublic, NotesPrivate, NotesPublic
 from app.api.clubs.models import Notes
 from app.api.home.schemas import SearchResults
@@ -23,7 +27,7 @@ async def get_suggested_events(
     is_following: Optional[bool] = Query(None),
     is_registered: Optional[bool] = Query(None),
     is_ended: Optional[bool] = Query(None),
-):
+) -> PaginatedResponse[EventListResponse]:
     """Get suggested events based on user interests and filters."""
     events = await service.suggest_events(
         session=session,
@@ -34,7 +38,9 @@ async def get_suggested_events(
         is_registered=is_registered,
         is_ended=is_ended,
     )
-    return paginated_response(jsonable_encoder(events), request, schema=EventPublicMin)
+    return paginated_response(
+        jsonable_encoder(events), request, schema=EventListResponse
+    )
 
 
 @router.get("/feed/clubs", summary="Get suggested clubs")
