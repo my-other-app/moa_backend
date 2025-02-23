@@ -1,14 +1,17 @@
 from typing import List
-from fastapi import APIRouter, Body, File, Form, Request, UploadFile
-from fastapi.encoders import jsonable_encoder
+from fastapi import APIRouter, File, Form, Request, UploadFile
+
 from app.api.users.schemas import (
+    UserAvatarDetail,
     UserAvatarSelect,
     UserCreate,
+    UserCreateResponse,
+    UserDetailResponse,
     UserInterestSelect,
     UserPrivate,
-    # UserProfileCreate,
+    UserProfileDetailResponse,
     UserProfilePublic,
-    UserPublic,
+    UserRegisterResponse,
 )
 from app.db.core import SessionDep
 from app.api.users import service
@@ -17,19 +20,19 @@ from app.core.response.pagination import (
     PaginationParams,
     paginated_response,
 )
-from app.api.clubs.schemas import ClubPublicMin
-from app.core.auth.dependencies import DependsAuth, UserAuth
-from app.core.response import pagination
+from app.api.clubs.schemas import ClubListResponse, ClubPublicMin
+from app.core.auth.dependencies import AdminAuth, DependsAuth, UserAuth
 from app.api.interests.schemas import InterestPublic
+from app.api.auth import service as auth_service
 
 router = APIRouter(prefix="/user")
 
 
-@router.post("/register", response_model=UserPublic, summary="Register a new user")
+@router.post("/register", summary="Register a new user")
 async def register_user(
     user: UserCreate,
     session: SessionDep,
-):
+) -> UserRegisterResponse:
     user = await service.create_user(
         session,
         full_name=user.full_name,
@@ -37,7 +40,13 @@ async def register_user(
         phone=user.phone,
         password=user.password,
     )
-    return user
+    token = await auth_service.create_access_refresh_tokens(user)
+    return {
+        "username": user.username,
+        "access_token": token.access_token,
+        "refresh_token": token.refresh_token,
+        "token_type": token.token_type,
+    }
 
 
 @router.get("/following", summary="Get all clubs user is following")
@@ -46,11 +55,11 @@ async def get_following_clubs(
     session: SessionDep,
     pagination: PaginationParams,
     user: DependsAuth,
-) -> PaginatedResponse[ClubPublicMin]:
+) -> PaginatedResponse[ClubListResponse]:
     following_clubs = await service.following_clubs(
         session, user.id, limit=pagination.limit, offset=pagination.offset
     )
-    return paginated_response(following_clubs, request=request, schema=ClubPublicMin)
+    return paginated_response(following_clubs, request=request, schema=ClubListResponse)
 
 
 @router.post("/profile/create", summary="Create a user profile.")
@@ -61,7 +70,7 @@ async def create_user_profile(
     org_id: int | None = Form(None),
     avatar_id: int | None = Form(None),
     profile_pic: UploadFile | None = File(None),
-) -> UserProfilePublic:
+) -> UserCreateResponse:
     return await service.create_or_update_profile(
         session,
         user_id=user.id,
@@ -72,8 +81,23 @@ async def create_user_profile(
     )
 
 
+@router.put("/profile/update-picture")
+async def update_profile_picture(
+    session: SessionDep,
+    user: UserAuth,
+    profile_picture: UploadFile = File(...),
+) -> dict:
+    """Update user's profile picture."""
+    if not profile_picture.content_type.startswith("image/"):
+        raise Exception("File must be an image")
+
+    return await service.update_profile_picture(
+        session, user_id=user.id, profile_picture=profile_picture
+    )
+
+
 @router.get("/profile/me", summary="view self user profile")
-async def get_profile(session: SessionDep, user: UserAuth) -> UserPrivate:
+async def get_profile(session: SessionDep, user: UserAuth) -> UserDetailResponse:
     profile = await service.get_user_profile(session=session, user_id=user.id)
     return profile
 
@@ -96,22 +120,17 @@ async def list_interests(session: SessionDep, user: UserAuth) -> List[InterestPu
 @router.post("/avatar/select", summary="select user avatar")
 async def select_avatar(
     session: SessionDep, user: UserAuth, avatar: UserAvatarSelect
-) -> UserProfilePublic:
+) -> UserAvatarDetail:
     return await service.select_avatar(
         session, user_id=user.id, avatar_id=avatar.avatar_id
     )
 
 
-@router.put("/profile/update-picture")
-async def update_profile_picture(
+@router.post("/avatar/create", summary="create user avatar")
+async def create_avatar(
     session: SessionDep,
-    user: UserAuth,
-    profile_picture: UploadFile = File(...),
-):
-    """Update user's profile picture."""
-    if not profile_picture.content_type.startswith("image/"):
-        raise Exception("File must be an image")
-
-    return await service.update_profile_picture(
-        session, user_id=user.id, profile_picture=profile_picture
-    )
+    user: AdminAuth,
+    avatar: UploadFile = File(...),
+    name: str = Form(...),
+) -> UserAvatarDetail:
+    return await service.create_user_avatar(session, name=name, file=avatar)

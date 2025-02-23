@@ -219,3 +219,10 @@ class NoteListResponse(BaseModel):
     note: str = Field(...)
     created_at: datetime = Field(...)
     updated_at: datetime = Field(...)
+
+
+class UserClubLinkDetailResponse(BaseModel):
+    is_following: bool
+    is_pinned: bool
+    is_hidden: bool
+    created_at: datetime

@@ -35,8 +35,17 @@ class UserAvatars(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(20), nullable=False)
-    icon_type = Column(Enum(UserAvatarTypes), nullable=False)
-    content = Column(String(200), nullable=False)
+    image = Column(
+        S3ImageField(
+            upload_to="avatars/",
+            variations={
+                "thumbnail": {"width": 150, "height": 150},
+                "medium": {"width": 500, "height": 500},
+                "large": {"width": 800, "height": 800},
+            },
+        ),
+        nullable=False,
+    )
 
 
 class Users(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
@@ -56,6 +65,7 @@ class Users(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     notifications = relationship(
         "Notifications", back_populates="user", foreign_keys="Notifications.user_id"
     )
+    interests = relationship("Interests", secondary="user_interests", uselist=True)
 
     __table_args__ = (
         UniqueConstraint(

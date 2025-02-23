@@ -256,7 +256,7 @@ async def unfollow_club(session: AsyncSession, club_id: int, user_id: int):
         )
     )
 
-    if not follow:
+    if not follow or not follow.is_following:
         raise CustomHTTPException(409, "not following the club")
 
     follow.is_following = False

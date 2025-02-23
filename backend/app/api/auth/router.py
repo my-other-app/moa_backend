@@ -4,12 +4,10 @@ from fastapi import APIRouter, Depends, Form
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi import status
 import jwt
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth.jwt import create_access_token, decode_jwt_token
 from app.core.auth.authentication import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
-    REFRESH_TOKEN_EXPIRE_DAYS,
     authenticate_user,
     get_user,
 )
@@ -20,29 +18,20 @@ from app.api.auth.schemas import (
     AuthUser,
     Token,
     GoogleSignInRequest,
-    GoogleSignInResponse,
 )
-from app.api.auth.service import google_signin
+from app.api.auth import service
 from app.db.core import SessionDep
 
 router = APIRouter(prefix="/auth")
 
 
-@router.post(
-    "/google", response_model=GoogleSignInResponse, summary="Sign in with Google"
-)
+@router.post("/google", summary="Sign in with Google")
 async def google_sign_in(
     request: GoogleSignInRequest,
     session: SessionDep = SessionDep,
-) -> GoogleSignInResponse:
-    access_token, refresh_token = await google_signin(
-        session, request.id_token, request.platform
-    )
-
-    return GoogleSignInResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
-    )
+) -> Token:
+    user = await service.google_signin(session, request.id_token, request.platform)
+    return await service.create_access_refresh_tokens(user)
 
 
 @router.post("/token", summary="get access token")
@@ -56,19 +45,7 @@ async def login_for_access_token(
             message="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    refresh_token_expires = timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
-    access_token_data = AuthTokenData(user_id=user.id, token_type="access_token")
-    refresh_token_data = AuthTokenData(user_id=user.id, token_type="refresh_token")
-    access_token = create_access_token(
-        data=access_token_data.model_dump(), expires_delta=access_token_expires
-    )
-    refresh_token = create_access_token(
-        data=refresh_token_data.model_dump(), expires_delta=refresh_token_expires
-    )
-    return Token(
-        access_token=access_token, refresh_token=refresh_token, token_type="Bearer"
-    )
+    return await service.create_access_refresh_tokens(user)
 
 
 @router.post("/refresh", summary="refresh access token")

@@ -26,8 +26,3 @@ class GoogleSignInRequest(BaseModel):
     platform: str = Field(
         default="web", description="Platform type: 'web', 'android', or 'ios'"
     )
-
-
-class GoogleSignInResponse(BaseModel):
-    access_token: str
-    refresh_token: str

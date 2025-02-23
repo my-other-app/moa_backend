@@ -12,6 +12,7 @@ from app.api.clubs.schemas import (
     NoteListResponse,
     ClubSocialsCreate,
     UpdateClub,
+    UserClubLinkDetailResponse,
 )
 from app.db.core import SessionDep
 from app.api.clubs import service
@@ -163,7 +164,7 @@ async def list_notes_self(
 @router.post("/follow/{club_id}", summary="follow club")
 async def follow_club(
     club_id: int, session: SessionDep, user: UserAuth
-) -> ClubFollowPublic:
+) -> UserClubLinkDetailResponse:
     follow = await service.follow_club(session, club_id, user.id)
     return follow
 
@@ -171,9 +172,8 @@ async def follow_club(
 @router.post("/unfollow/{club_id}", summary="un follow club")
 async def unfollow_club(
     club_id: int, session: SessionDep, user: UserAuth
-) -> ClubFollowPublic:
+) -> UserClubLinkDetailResponse:
     follow = await service.unfollow_club(session, club_id, user.id)
-    print(follow.is_following)
     return follow
 
 

@@ -119,10 +119,16 @@ async def create_or_update_profile(
             "avatar_id": (UserAvatars, avatar_id),
         },
     )
+
     profile = await session.scalar(
         select(UserProfiles).where(UserProfiles.user_id == user_id)
     )
     if profile:
+        if profile.whatsapp != whatsapp:
+            await validate_unique(
+                session,
+                unique_together=[{"whatsapp": (UserProfiles, whatsapp)}],
+            )
         profile.whatsapp = whatsapp
         profile.org_id = org_id
         profile.avatar_id = avatar_id
@@ -136,6 +142,10 @@ async def create_or_update_profile(
                 "filename": profile_pic.filename,
             }
     else:
+        await validate_unique(
+            session,
+            unique_together=[{"whatsapp": (UserProfiles, whatsapp)}],
+        )
         profile = UserProfiles(
             user_id=user_id, org_id=org_id, whatsapp=whatsapp, avatar_id=avatar_id
         )
@@ -179,8 +189,10 @@ async def select_avatar(session: AsyncSession, user_id: int, avatar_id: int | No
         session, {"user_id": (Users, user_id), "avatar_id": (UserAvatars, avatar_id)}
     )
     user_profile = await session.scalar(
-        select(UserProfiles).where(
-            UserProfiles.user_id == user_id, UserProfiles.is_deleted == False
+        select(UserProfiles)
+        .where(UserProfiles.user_id == user_id, UserProfiles.is_deleted == False)
+        .options(
+            joinedload(UserProfiles.avatar),
         )
     )
     if not user_profile:
@@ -189,7 +201,7 @@ async def select_avatar(session: AsyncSession, user_id: int, avatar_id: int | No
     user_profile.avatar_id = avatar_id
     await session.commit()
     await session.refresh(user_profile)
-    return user_profile
+    return user_profile.avatar
 
 
 async def get_user_profile(session: AsyncSession, user_id: int):
@@ -201,7 +213,8 @@ async def get_user_profile(session: AsyncSession, user_id: int):
         .options(
             joinedload(Users.profile).options(
                 joinedload(UserProfiles.avatar), joinedload(UserProfiles.org)
-            )
+            ),
+            selectinload(Users.interests),
         )
     )
 
@@ -230,4 +243,14 @@ async def update_profile_picture(
         "filename": profile_picture.filename,
     }
     await session.commit()
-    return {"message": "Profile picture updated successfully"}
+    await session.refresh(profile)
+    return profile.profile_pic
+
+
+async def create_user_avatar(session: AsyncSession, name: str, file: UploadFile):
+    avatar = UserAvatars(name=name)
+    avatar.image = {"bytes": io.BytesIO(await file.read()), "filename": file.filename}
+    session.add(avatar)
+    await session.commit()
+    await session.refresh(avatar)
+    return avatar

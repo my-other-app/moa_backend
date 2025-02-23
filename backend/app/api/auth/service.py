@@ -9,7 +9,7 @@ from app.api.users.models import Users, UserTypes
 from app.api.users.service import create_user
 from sqlalchemy import select
 
-from app.api.auth.schemas import AuthTokenData
+from app.api.auth.schemas import AuthTokenData, Token
 from app.core.auth.authentication import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
     REFRESH_TOKEN_EXPIRE_DAYS,
@@ -19,7 +19,7 @@ from app.response import CustomHTTPException
 
 async def google_signin(
     session: AsyncSession, id_token_str: str, platform: str = "web"
-) -> dict:
+):
     try:
         client_id = {
             "web": settings.GOOGLE_WEB_CLIENT_ID,
@@ -30,16 +30,13 @@ async def google_signin(
         if not client_id:
             raise HTTPException(status_code=400, detail=f"Invalid platform: {platform}")
 
-        # Verify the ID token
         idinfo = id_token.verify_oauth2_token(
             id_token_str, requests.Request(), client_id
         )
 
-        # Get user info from token
         email = idinfo["email"]
         name = idinfo.get("name", "")
 
-        # Check if user exists
         query = await session.execute(
             select(Users).where(
                 Users.email == email, Users.user_type == UserTypes.app_user
@@ -58,20 +55,7 @@ async def google_signin(
                 provider="google",
             )
 
-        access_token_data = AuthTokenData(user_id=user.id, token_type="access_token")
-        refresh_token_data = AuthTokenData(user_id=user.id, token_type="refresh_token")
-
-        access_token = create_access_token(
-            data=access_token_data.model_dump(),
-            expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
-        )
-
-        refresh_token = create_access_token(
-            data=refresh_token_data.model_dump(),
-            expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
-        )
-
-        return access_token, refresh_token
+        return user
 
     except ValueError as e:
         raise CustomHTTPException(
@@ -79,3 +63,19 @@ async def google_signin(
         )
     except Exception as e:
         raise CustomHTTPException(status_code=500, detail="Internal Server Error")
+
+
+async def create_access_refresh_tokens(user: Users) -> Token:
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    refresh_token_expires = timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    access_token_data = AuthTokenData(user_id=user.id, token_type="access_token")
+    refresh_token_data = AuthTokenData(user_id=user.id, token_type="refresh_token")
+    access_token = create_access_token(
+        data=access_token_data.model_dump(), expires_delta=access_token_expires
+    )
+    refresh_token = create_access_token(
+        data=refresh_token_data.model_dump(), expires_delta=refresh_token_expires
+    )
+    return Token(
+        access_token=access_token, refresh_token=refresh_token, token_type="Bearer"
+    )

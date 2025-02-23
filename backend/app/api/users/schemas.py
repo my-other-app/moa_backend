@@ -2,6 +2,7 @@ from fastapi import Body, File, Form, UploadFile
 from pydantic import BaseModel, Field, EmailStr, HttpUrl
 from app.api.users.models import UserAvatarTypes
 from app.api.orgs.schema import OrganizationPublicMin
+from app.api.auth.schemas import Token
 
 
 class AvatarPublic(BaseModel):
@@ -71,3 +72,56 @@ class UserAvatarSelect(BaseModel):
 
 class UserInterestSelect(BaseModel):
     interest_ids: list[int] = Body(...)
+
+
+# RESPONSE MODELS
+
+
+class UserOrganizationDetail(BaseModel):
+    id: int = Field(...)
+    name: str = Field(...)
+    type: str = Field(...)
+    is_verified: bool = Field(...)
+    logo: dict | None = Field(None)
+
+
+class UserAvatarDetail(BaseModel):
+    id: int = Field(...)
+    name: str = Field(...)
+    image: dict | None = Field(None)
+
+
+class UserInterestDetail(BaseModel):
+    id: int = Field(...)
+    name: str = Field(...)
+    icon: str | None = Field(None)
+    icon_type: str | None = Field(None)
+
+
+class UserRegisterResponse(Token):
+    username: str
+
+
+class UserCreateResponse(BaseModel):
+    whatsapp: str | None = Field(None)
+    org_id: int | None = Field(None)
+    avatar_id: int | None = Field(None)
+    profile_pic: dict | None = Field(None)
+
+
+class UserProfileDetailResponse(BaseModel):
+    whatsapp: str | None = Field(None)
+    org: UserOrganizationDetail | None = Field(None)
+    avatar: UserAvatarDetail | None = Field(None)
+    profile_pic: dict | None = Field(None)
+
+
+class UserDetailResponse(BaseModel):
+    id: int = Field(...)
+    full_name: str = Field(...)
+    email: str = Field(...)
+    phone: str | None = Field(None)
+    username: str = Field(...)
+    user_type: str = Field(...)
+    profile: UserProfileDetailResponse | None = Field(None)
+    interests: list[UserInterestDetail] | None = Field(None)
