@@ -64,7 +64,6 @@ async def create_event(
         is_online=event.is_online,
         reg_startdate=event.reg_startdate,
         reg_enddate=event.reg_enddate,
-        images=event.images,
         about=event.about,
         contact_phone=event.contact_phone,
         contact_email=event.contact_email,
