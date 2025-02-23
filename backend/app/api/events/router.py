@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Body, Depends, Request
+from fastapi import APIRouter, Body, Depends, Request, Query
 from fastapi.encoders import jsonable_encoder
+from typing import Optional, List
 
 from app.db.core import SessionDep
 from app.api.events import service
@@ -12,6 +13,8 @@ from app.api.events.schemas import (
     EventPublicMin,
     EventRegistration,
     EventRegistrationPublicMin,
+    EventRating,
+    EventRatingCreate,
 )
 from app.core.auth.dependencies import AdminAuth, ClubAuth, DependsAuth, UserAuth
 from app.core.response.pagination import PaginationParams, paginated_response
@@ -58,20 +61,35 @@ async def update_event(
 
 @router.get("/info/{event_id}", response_model=EventPublic, summary="Get event info")
 async def get_event(user: DependsAuth, event_id: int, session: SessionDep = SessionDep):
-    return jsonable_encoder(await service.get_event(session, event_id))
+    result = await service.get_event(session, event_id)
+    data = jsonable_encoder(result)
+    return data
 
 
 @router.get("/list", summary="List all events")
 async def list_events(
     request: Request,
+    pagination: PaginationParams,
+    session: SessionDep,
     user: DependsAuth,
-    params: PaginationParams,
-    session: SessionDep = SessionDep,
+    is_following: Optional[bool] = Query(None),
+    is_registered: Optional[bool] = Query(None),
+    is_ended: Optional[bool] = Query(None),
+    interest_ids: Optional[str] = Query(None),
 ):
-    result = await service.list_events(
-        session, limit=params.limit, offset=params.offset
+    """List events with optional filters."""
+    interest_ids = [int(i) for i in interest_ids.split(",")] if interest_ids else []
+    events = await service.list_events(
+        session=session,
+        user_id=user.id if user else None,
+        limit=pagination.limit,
+        offset=pagination.offset,
+        is_following=is_following,
+        is_registered=is_registered,
+        is_ended=is_ended,
+        interest_ids=interest_ids,
     )
-    return paginated_response(result, request, EventPublicMin)
+    return paginated_response(events, request, schema=EventPublicMin)
 
 
 @router.post(
@@ -128,3 +146,20 @@ async def get_event_registration(
         session, user_id=user.id, event_id=event_id, registration_id=registration_id
     )
     return jsonable_encoder(result)
+
+
+@router.post("/rate/{event_id}", response_model=EventRating)
+async def rate_event_endpoint(
+    event_id: int,
+    rating_data: EventRatingCreate,
+    session: SessionDep,
+    user: UserAuth,
+):
+    """Rate an event. Rating must be between 0 and 5."""
+    return await service.rate_event(
+        session=session,
+        event_id=event_id,
+        user_id=user.id,
+        rating=rating_data.rating,
+        review=rating_data.review,
+    )

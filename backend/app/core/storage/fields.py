@@ -30,6 +30,34 @@ class S3Image(dict):
                 print(f"Error deleting object: {str(e)}")
 
 
+class S3File(str):
+    def __new__(cls, file_path):
+        s3_client = boto3.client(
+            "s3",
+            aws_access_key_id=settings.S3_ACCESS_KEY,
+            aws_secret_access_key=settings.S3_SECRET_KEY,
+        )
+        url = s3_client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": settings.S3_BUCKET, "Key": file_path},
+            ExpiresIn=3600,
+        )
+        obj = super().__new__(cls, url)
+        obj.file_path = file_path
+        return obj
+
+    def delete(self):
+        s3_client = boto3.client(
+            "s3",
+            aws_access_key_id=settings.S3_ACCESS_KEY,
+            aws_secret_access_key=settings.S3_SECRET_KEY,
+        )
+        try:
+            s3_client.delete_object(Bucket=settings.S3_BUCKET, Key=self.file_path)
+        except Exception as e:
+            print(f"Error deleting object: {str(e)}")
+
+
 class S3ImageField(TypeDecorator):
     """
     A custom SQLAlchemy field for handling images with S3 storage.
@@ -223,3 +251,108 @@ class S3ImageField(TypeDecorator):
         )
         variation_paths["original"] = value
         return S3Image(variations=variation_paths, **variations)
+
+
+class S3FileField(TypeDecorator):
+    """
+    A custom SQLAlchemy field for handling file uploads with S3 storage.
+    Stores the file path and handles direct file uploads without variants.
+    """
+
+    impl = String
+    cache_ok = True
+
+    def __init__(
+        self,
+        upload_to: str = "uploads",
+        max_size: int = 50 * 1024 * 1024,  # 50MB default
+        allowed_extensions: Optional[list[str]] = None,
+    ):
+        super().__init__()
+        self.max_size = max_size
+        self.allowed_extensions = allowed_extensions
+        self.bucket_name = settings.S3_BUCKET
+        self.base_path = os.path.join(settings.S3_BASE_PATH, upload_to)
+        self.s3_client = boto3.client(
+            "s3",
+            aws_access_key_id=settings.S3_ACCESS_KEY,
+            aws_secret_access_key=settings.S3_SECRET_KEY,
+        )
+
+    def process_bind_param(
+        self, value: Union[Dict, bytes, io.BytesIO], dialect
+    ) -> Optional[str]:
+        """Process the value before saving to database."""
+        if not value:
+            return None
+
+        if isinstance(value, str):
+            return value
+
+        try:
+            # Handle different input types
+            if isinstance(value, dict):
+                if "file" in value:
+                    # Handle file-like object (e.g., from Flask/FastAPI)
+                    file_data = value["file"].read()
+                    filename = value["file"].filename
+                elif "bytes" in value:
+                    # Handle raw bytes with optional filename
+                    file_data = value["bytes"]
+                    filename = value.get("filename")
+                else:
+                    raise ValueError("Invalid input format")
+            elif isinstance(value, (bytes, io.BytesIO)):
+                # Handle direct bytes or BytesIO input
+                file_data = value
+                filename = None
+            else:
+                raise ValueError("Unsupported input type")
+
+            if not filename:
+                raise ValueError("Filename is required")
+
+            # Check file extension
+            ext = filename.split(".")[-1].lower()
+            if self.allowed_extensions and ext not in self.allowed_extensions:
+                raise ValueError(
+                    f"Unsupported file extension. Allowed extensions: {self.allowed_extensions}"
+                )
+
+            # Generate unique filename
+            file_uid = str(uuid.uuid4())
+            new_filename = f"{file_uid}.{ext}"
+            full_path = os.path.join(self.base_path, new_filename)
+
+            # Check file size
+            if isinstance(file_data, bytes):
+                file_size = len(file_data)
+                buffer = io.BytesIO(file_data)
+            else:
+                file_data.seek(0, os.SEEK_END)
+                file_size = file_data.tell()
+                file_data.seek(0)
+                buffer = file_data
+
+            if self.max_size and file_size > self.max_size:
+                raise ValueError(
+                    f"File size exceeds maximum allowed size of {self.max_size} bytes"
+                )
+
+            # Upload to S3
+            self.s3_client.upload_fileobj(
+                buffer,
+                self.bucket_name,
+                full_path,
+            )
+
+            return full_path
+
+        except Exception as e:
+            raise ValueError(f"Error processing file: {str(e)}")
+
+    def process_result_value(self, value: str, dialect) -> Optional[S3File]:
+        """Process the value when retrieving from database."""
+        if not value:
+            return None
+        return S3File(value)

@@ -18,7 +18,7 @@ from app.db.base import AbstractSQLModel
 from app.db.mixins import SoftDeleteMixin, TimestampsMixin
 from sqlalchemy.orm import relationship
 
-from app.core.storage.fields import S3ImageField
+from app.core.storage.fields import S3FileField, S3ImageField
 
 
 class EventCategories(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
@@ -57,6 +57,7 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     about = Column(String, nullable=True)
     # location = Column(Geometry("POINT"), nullable=True)
     location_name = Column(String, nullable=True)
+    location_link = Column(String, nullable=True)
     has_prize = Column(Boolean, nullable=False, default=False)
     prize_amount = Column(Float, nullable=True)
     contact_phone = Column(String, nullable=True)
@@ -70,22 +71,54 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     )
     reg_enddate = Column(DateTime(timezone=True), nullable=True)
     additional_details = Column(ARRAY(JSON), nullable=True)
-    # files = Column(ARRAY(String), nullable=False, default=[])
 
     category_id = Column(Integer, ForeignKey("event_categories.id"), nullable=False)
     club_id = Column(Integer, ForeignKey("clubs.id"), nullable=True)
 
     category = relationship("EventCategories")
     club = relationship("Clubs")
-    registrations = relationship("EventRegistrationsLink")
+    registrations = relationship("EventRegistrationsLink", back_populates="event")
     interests = relationship(
         "Interests",
         secondary="event_interests_link",
         back_populates="events",
         uselist=True,
     )
+    files = relationship("EventFiles", back_populates="event")
+    ratings = relationship("EventRatingsLink", back_populates="event")
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class EventFiles(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
+    __tablename__ = "event_files"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
+    file = Column(
+        S3FileField(
+            upload_to="events/files/",
+            allowed_extensions=[
+                "pdf",
+                "doc",
+                "docx",
+                "ppt",
+                "pptx",
+                "xls",
+                "xlsx",
+                "txt",
+                "png",
+                "jpg",
+                "jpeg",
+                "gif",
+            ],
+        ),
+        nullable=False,
+    )
+    name = Column(String, nullable=False)
+    description = Column(String, nullable=True)
+
+    event = relationship("Events", back_populates="files")
 
 
 class EventInterestsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
@@ -105,12 +138,29 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
     id = Column(Integer, primary_key=True, autoincrement=True)
     event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    verification_code = Column(String, nullable=True)
     is_attended = Column(Boolean, nullable=False, default=False)
+    attended_on = Column(DateTime(timezone=True), nullable=True)
     is_won = Column(Boolean, nullable=False, default=False)
     position = Column(Integer, nullable=True)
     additional_details = Column(JSON, nullable=True)
 
-    event = relationship("Events")
+    event = relationship("Events", back_populates="registrations")
+    user = relationship("Users")
+
+    __table_args__ = (UniqueConstraint("event_id", "user_id", "is_deleted"),)
+
+
+class EventRatingsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
+    __tablename__ = "event_ratings_link"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    rating = Column(Float, nullable=False)
+    review = Column(String, nullable=True)
+
+    event = relationship("Events", back_populates="ratings")
     user = relationship("Users")
 
     __table_args__ = (UniqueConstraint("event_id", "user_id", "is_deleted"),)

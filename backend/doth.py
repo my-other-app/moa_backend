@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from pydantic_core import ValidationError
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import HTMLResponse
 from starlette import status
@@ -22,6 +23,28 @@ application.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# @application.exception_handler(ValidationError)
+# async def validation_exception_handler2(request, exc):
+#     errors = {}
+
+#     for error in exc.errors():
+#         current = errors
+
+#         if len(error["loc"]) <= 1:
+#             current[error["loc"][0]] = error["msg"]
+#             break
+
+#         keys = error["loc"][1:]
+#         for loc in keys[:-1]:
+#             current = current.setdefault(loc, {})
+#         current[keys[-1]] = error["msg"]
+
+#     return ErrorResponse(
+#         message="Invalid request",
+#         errors=errors,
+#     ).get_response(status.HTTP_422_UNPROCESSABLE_ENTITY)
 
 
 @application.exception_handler(RequestValidationError)

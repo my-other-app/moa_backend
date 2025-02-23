@@ -26,6 +26,8 @@ class CreateClub:
         about: str | None = Form(None),
         org_id: int | None = Form(None),
         location_name: str | None = Form(None),
+        location_link: str | None = Form(None),
+        interest_ids: str | None = Form(None),
     ):
         self.email = email
         self.phone = phone
@@ -35,6 +37,10 @@ class CreateClub:
         self.about = about
         self.org_id = org_id
         self.location_name = location_name
+        self.interest_ids = (
+            [int(i) for i in interest_ids.split(",")] if interest_ids else []
+        )
+        self.location_link = location_link
 
     # @field_validator("org_id", mode="before")
     # @classmethod
@@ -98,8 +104,13 @@ class NoteCreate(NotesBase):
     pass
 
 
-class NotePublic(NotesBase):
+class NotesPrivate(NotesBase):
     id: int = Field(...)
+
+
+class NotesPublic(NotesBase):
+    id: int = Field(...)
+    club: ClubPublicMin
 
 
 class ClubFollow(BaseModel):
@@ -108,5 +119,7 @@ class ClubFollow(BaseModel):
     is_following: bool
 
 
-class ClubFollowPublic(ClubFollow):
+class ClubFollowPublic(BaseModel):
+    user: UserPublic
+    is_following: bool
     created_at: datetime

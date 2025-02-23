@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from app.api.clubs.schemas import ClubPublic, ClubPublicMin
 from app.api.users.schemas import UserPublic
 from app.api.interests.schemas import InterestPublic
+from app.response import CustomHTTPException
 
 
 class FieldTypes(enum.Enum):
@@ -82,6 +83,8 @@ class EventPublic(EventBase):
     id: int = Field(...)
     category: EventCategoryPublic = Field(...)
     club: ClubPublic = Field(...)
+    rating: float = Field(...)
+    total_rating: int = Field(...)
     additional_details: list[EventAdditionalDetail] | None = Field(None)
     interests: list[InterestPublic] | None = Field(None)
 
@@ -139,10 +142,17 @@ class EventCreate:
         self.url = url
         self.category_id = category_id
         self.club_id = club_id
-        self.interest_ids = json.loads(interest_ids)  # Convert JSON string to list
-        self.additional_details = [
-            EventAdditionalDetail(**detail) for detail in json.loads(additional_details)
-        ]
+        self.interest_ids = json.loads(interest_ids)
+        try:
+            self.additional_details = [
+                EventAdditionalDetail(**detail)
+                for detail in json.loads(additional_details)
+            ]
+        except json.JSONDecodeError:
+            raise CustomHTTPException(
+                status_code=400,
+                message="Invalid JSON format for additional_details",
+            )
 
 
 class EventEdit(EventCreate):
@@ -213,3 +223,15 @@ class EventRegistration(BaseModel):
 class EventRegistrationPublicMin(BaseModel):
     id: int
     user: UserPublic
+
+
+class EventRatingCreate(BaseModel):
+    rating: float = Field(..., ge=0, le=5)
+    review: str | None = Field(None)
+
+
+class EventRating(EventRatingCreate):
+    id: int
+    event_id: int
+    user_id: int
+    created_at: datetime

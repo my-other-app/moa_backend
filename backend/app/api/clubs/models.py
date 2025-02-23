@@ -1,5 +1,5 @@
 # from geoalchemy2 import Geometry
-from sqlalchemy import Boolean, Column, Enum, ForeignKey, Integer, String, JSON, Float
+from sqlalchemy import Boolean, Column, Enum, ForeignKey, Integer, String, JSON, Float, UniqueConstraint
 from sqlmodel import Field, SQLModel
 from app.db.base import AbstractSQLModel
 from app.db.mixins import SoftDeleteMixin, TimestampsMixin
@@ -28,6 +28,7 @@ class Clubs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)
     # location = Column(Geometry("POINT"), nullable=True)
     location_name = Column(String, nullable=True)
+    location_link = Column(String, nullable=True)
     rating = Column(Float, nullable=False, default=0)
     total_ratings = Column(Integer, nullable=False, default=0)
     user_id = Column(
@@ -37,6 +38,10 @@ class Clubs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
 
     user = relationship("Users", back_populates="club")
     org = relationship("Organizations", back_populates="clubs")
+    followers = relationship("ClubUsersLink", back_populates="club")
+    interests = relationship("ClubInterestsLink", back_populates="club")
+    events = relationship("Events", back_populates="club")
+    notes = relationship("Notes", back_populates="club")
 
 
 class ClubInterestsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
@@ -50,16 +55,20 @@ class ClubInterestsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     interest = relationship("Interests")
 
 
-class ClubFollowersLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
-    __tablename__ = "clubs_followers_link"
+class ClubUsersLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
+    __tablename__ = "club_users_link"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     club_id = Column(Integer, ForeignKey("clubs.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    is_following = Column(Boolean, default=False, nullable=False)
+    is_following = Column(Boolean, nullable=False, default=False)
+    is_pinned = Column(Boolean, nullable=False, default=False)
+    is_hidden = Column(Boolean, nullable=False, default=False)
 
-    club = relationship("Clubs")
+    club = relationship("Clubs", back_populates="followers")
     user = relationship("Users")
+
+    __table_args__ = (UniqueConstraint("club_id", "user_id", "is_deleted"),)
 
 
 class Notes(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):

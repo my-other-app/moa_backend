@@ -47,6 +47,9 @@ class Users(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
 
     profile = relationship("UserProfiles", uselist=False)
     club = relationship("Clubs", uselist=False)
+    notifications = relationship(
+        "Notifications", back_populates="user", foreign_keys="Notifications.user_id"
+    )
 
     __table_args__ = (
         UniqueConstraint(
