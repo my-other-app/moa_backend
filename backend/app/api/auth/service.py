@@ -59,10 +59,10 @@ async def google_signin(
 
     except ValueError as e:
         raise CustomHTTPException(
-            status_code=401, detail="Invalid authentication credentials"
+            status_code=401, message="Invalid authentication credentials"
         )
     except Exception as e:
-        raise CustomHTTPException(status_code=500, detail="Internal Server Error")
+        raise CustomHTTPException(status_code=500, message="Internal Server Error")
 
 
 async def create_access_refresh_tokens(user: Users) -> Token:
