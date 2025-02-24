@@ -58,10 +58,12 @@ async def google_signin(
         return user
 
     except ValueError as e:
+        raise e
         raise CustomHTTPException(
             status_code=401, message="Invalid authentication credentials"
         )
     except Exception as e:
+        raise e
         raise CustomHTTPException(status_code=500, message="Internal Server Error")
 
 
