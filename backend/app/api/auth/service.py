@@ -27,6 +27,8 @@ async def google_signin(
             "ios": settings.GOOGLE_IOS_CLIENT_ID,
         }.get(platform)
 
+        print(client_id)
+
         if not client_id:
             raise HTTPException(status_code=400, detail=f"Invalid platform: {platform}")
 
