@@ -81,6 +81,7 @@ class UserProfiles(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    full_name = Column(String(100), nullable=False)
     whatsapp = Column(String(20), nullable=True, unique=True)
     org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)
     avatar_id = Column(Integer, ForeignKey("user_avatars.id"), nullable=True)

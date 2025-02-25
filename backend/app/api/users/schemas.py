@@ -110,6 +110,7 @@ class UserCreateResponse(BaseModel):
 
 
 class UserProfileDetailResponse(BaseModel):
+    full_name: str = Field(...)
     whatsapp: str | None = Field(None)
     org: UserOrganizationDetail | None = Field(None)
     avatar: UserAvatarDetail | None = Field(None)

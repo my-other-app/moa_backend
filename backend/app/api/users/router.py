@@ -66,18 +66,33 @@ async def get_following_clubs(
 async def create_user_profile(
     session: SessionDep,
     user: UserAuth,
+    full_name: str = Form(...),
     whatsapp: str | None = Form(None),
     org_id: int | None = Form(None),
-    avatar_id: int | None = Form(None),
-    profile_pic: UploadFile | None = File(None),
 ) -> UserCreateResponse:
-    return await service.create_or_update_profile(
+    return await service.create_user_profile(
         session,
+        full_name=full_name,
         user_id=user.id,
         whatsapp=whatsapp,
         org_id=org_id,
-        avatar_id=avatar_id,
-        profile_pic=profile_pic,
+    )
+
+
+@router.post("/profile/update", summary="Update a user profile.")
+async def create_user_profile(
+    session: SessionDep,
+    user: UserAuth,
+    full_name: str = Form(...),
+    whatsapp: str | None = Form(None),
+    org_id: int | None = Form(None),
+) -> UserCreateResponse:
+    return await service.update_user_profile(
+        session,
+        full_name=full_name,
+        user_id=user.id,
+        whatsapp=whatsapp,
+        org_id=org_id,
     )
 
 
