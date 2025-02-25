@@ -15,7 +15,7 @@ from app.api.clubs.models import Notes
 from app.api.home.schemas import SearchResults
 from . import service
 
-router = APIRouter(prefix="/home", tags=["feed"])
+router = APIRouter(prefix="/home")
 
 
 @router.get("/feed/events", summary="Get suggested events")
