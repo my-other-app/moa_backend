@@ -103,20 +103,18 @@ async def following_clubs(
     return list(await session.scalars(query))
 
 
-async def create_or_update_profile(
+async def create_user_profile(
     session: AsyncSession,
     user_id: int,
+    full_name: str,
     whatsapp: str | None = None,
     org_id: str | None = None,
-    avatar_id: str | None = None,
-    profile_pic: UploadFile | None = None,
 ):
     await validate_relations(
         session,
         {
             "user_id": (Users, user_id),
             "org_id": (Organizations, org_id),
-            "avatar_id": (UserAvatars, avatar_id),
         },
     )
 
@@ -124,38 +122,51 @@ async def create_or_update_profile(
         select(UserProfiles).where(UserProfiles.user_id == user_id)
     )
     if profile:
-        if profile.whatsapp != whatsapp:
-            await validate_unique(
-                session,
-                unique_together=[{"whatsapp": (UserProfiles, whatsapp)}],
-            )
-        profile.whatsapp = whatsapp
-        profile.org_id = org_id
-        profile.avatar_id = avatar_id
-        if profile_pic:
-            if profile.profile_pic:
-                profile.profile_pic.delete()
-
-            content = io.BytesIO(await profile_pic.read())
-            profile.profile_pic = {
-                "bytes": content,
-                "filename": profile_pic.filename,
-            }
+        raise CustomHTTPException(400, "Profile already exists")
     else:
         await validate_unique(
             session,
             unique_together=[{"whatsapp": (UserProfiles, whatsapp)}],
         )
         profile = UserProfiles(
-            user_id=user_id, org_id=org_id, whatsapp=whatsapp, avatar_id=avatar_id
+            user_id=user_id, org_id=org_id, whatsapp=whatsapp, full_name=full_name
         )
-        if profile_pic:
-            content = io.BytesIO(await profile_pic.read())
-            profile.profile_pic = {
-                "bytes": content,
-                "filename": profile_pic.filename,
-            }
         session.add(profile)
+    await session.commit()
+    await session.refresh(profile)
+    return profile
+
+
+async def update_user_profile(
+    session: AsyncSession,
+    user_id: int,
+    full_name: str,
+    whatsapp: str | None = None,
+    org_id: str | None = None,
+):
+    profile = await session.scalar(
+        select(UserProfiles).where(UserProfiles.user_id == user_id)
+    )
+    if not profile:
+        raise CustomHTTPException(400, "Profile not found.")
+
+    await validate_relations(
+        session,
+        {
+            "user_id": (Users, user_id),
+            "org_id": (Organizations, org_id),
+        },
+    )
+
+    if profile.whatsapp != whatsapp:
+        await validate_unique(
+            session,
+            unique_together=[{"whatsapp": (UserProfiles, whatsapp)}],
+        )
+    profile.whatsapp = whatsapp
+    profile.org_id = org_id
+    profile.full_name = full_name
+
     await session.commit()
     await session.refresh(profile)
     return profile
