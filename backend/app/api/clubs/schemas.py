@@ -176,16 +176,6 @@ class ClubCreateUpdateResponse(BaseModel):
     updated_at: datetime = Field(...)
 
 
-class ClubListResponse(BaseModel):
-    id: int = Field(...)
-    name: str = Field(...)
-    slug: str = Field(...)
-    logo: dict | None = Field(None)
-    location_name: str | None = Field(None)
-    user_data: dict | None = Field(None)
-    org_id: int | None = Field(None)
-
-
 class ClubInterestDetailMin(BaseModel):
     id: int = Field(...)
     name: str = Field(..., min_length=2)
@@ -265,3 +255,15 @@ class ClubFollowersListResponse(BaseModel):
     user: ClubFollowerDetailResponse
     is_following: bool
     created_at: datetime
+
+
+class ClubListResponse(BaseModel):
+    id: int = Field(...)
+    name: str = Field(...)
+    slug: str = Field(...)
+    logo: dict | None = Field(None)
+    location_name: str | None = Field(None)
+    user_data: dict | None = Field(None)
+    followers_count: int = Field(...)
+    interests: List[ClubInterestDetailMin] | None = Field(None)
+    # org_id: int | None = Field(None)

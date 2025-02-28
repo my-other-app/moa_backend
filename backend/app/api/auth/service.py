@@ -10,11 +10,11 @@ from app.api.users.service import create_user
 from sqlalchemy import select
 
 from app.api.auth.schemas import AuthTokenData, Token
-from app.core.auth.authentication import (
-    ACCESS_TOKEN_EXPIRE_MINUTES,
-    REFRESH_TOKEN_EXPIRE_DAYS,
-)
+from app.config import settings
 from app.response import CustomHTTPException
+
+ACCESS_TOKEN_EXPIRE_MINUTES = settings.ACCESS_TOKEN_EXPIRE_MINUTES
+REFRESH_TOKEN_EXPIRE_DAYS = settings.REFRESH_TOKEN_EXPIRE_DAYS
 
 
 async def google_signin(

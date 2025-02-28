@@ -7,7 +7,6 @@ import jwt
 
 from app.core.auth.jwt import create_access_token, decode_jwt_token
 from app.core.auth.authentication import (
-    ACCESS_TOKEN_EXPIRE_MINUTES,
     authenticate_user,
     get_user,
 )
@@ -21,8 +20,11 @@ from app.api.auth.schemas import (
 )
 from app.api.auth import service
 from app.db.core import SessionDep
+from app.config import settings
 
 router = APIRouter(prefix="/auth")
+
+ACCESS_TOKEN_EXPIRE_MINUTES = settings.ACCESS_TOKEN_EXPIRE_MINUTES
 
 
 @router.post("/google", summary="Sign in with Google")

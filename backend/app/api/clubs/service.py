@@ -165,8 +165,28 @@ async def get_all_clubs(
     is_hidden: bool | None = None,
     interest_ids: list[int] | None = None,
 ):
-    """Get all clubs with optional filters."""
-    query = select(Clubs).distinct()
+    """Get all clubs with optional filters and followers count."""
+    ClubUsersLinkPinned = aliased(ClubUsersLink)
+    ClubUsersLinkHidden = aliased(ClubUsersLink)
+    ClubUsersLinkFollowers = aliased(ClubUsersLink)
+
+    query = (
+        select(
+            Clubs,
+            func.count(func.distinct(ClubUsersLinkFollowers.id)).label(
+                "followers_count"
+            ),
+        )
+        .outerjoin(
+            ClubUsersLinkFollowers,
+            and_(
+                ClubUsersLinkFollowers.club_id == Clubs.id,
+                ClubUsersLinkFollowers.is_following == True,
+                ClubUsersLinkFollowers.is_deleted == False,
+            ),
+        )
+        .options(selectinload(Clubs.interests))
+    )
 
     if org_id:
         query = query.filter(Clubs.org_id == org_id)
@@ -193,8 +213,6 @@ async def get_all_clubs(
                     ClubUsersLink.is_deleted == False,
                 ),
             ).filter(ClubUsersLink.id == None)
-    ClubUsersLinkPinned = aliased(ClubUsersLink)
-    ClubUsersLinkHidden = aliased(ClubUsersLink)
 
     if is_pinned is not None and user_id:
         query = query.join(ClubUsersLinkPinned).filter(
@@ -210,8 +228,20 @@ async def get_all_clubs(
             ClubUsersLinkHidden.is_deleted == False,
         )
 
-    query = query.order_by(Clubs.created_at.desc()).limit(limit).offset(offset)
-    return list(await session.scalars(query))
+    query = (
+        query.group_by(Clubs.id)
+        .order_by(Clubs.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+
+    results = await session.execute(query)
+
+    # Convert results to a list of dictionaries
+    return [
+        jsonable_encoder(club) | {"followers_count": followers_count}
+        for club, followers_count in results
+    ]
 
 
 async def follow_club(session: AsyncSession, club_id: int, user_id: int):

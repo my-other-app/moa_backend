@@ -7,8 +7,6 @@ from app.api.clubs.models import Clubs
 from sqlalchemy.orm import joinedload
 
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
-REFRESH_TOKEN_EXPIRE_DAYS = 365
 
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")

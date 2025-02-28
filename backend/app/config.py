@@ -25,6 +25,9 @@ class AppConfig(BaseSettings):
     GOOGLE_ANDROID_CLIENT_ID: str
     GOOGLE_IOS_CLIENT_ID: str
 
+    ACCESS_TOKEN_EXPIRE_MINUTES: int
+    REFRESH_TOKEN_EXPIRE_DAYS: int
+
     CORS_ORIGINS: list[str] | str
 
     APP_VERSION: str = "1.0"
