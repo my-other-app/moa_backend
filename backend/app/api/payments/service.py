@@ -14,7 +14,7 @@ from app.api.payments.models import (
     RazorpayWebhookLogs,
 )
 from app.core.validations.exceptions import RequestValidationError
-from config import settings
+from app.config import settings
 
 razorpay_client = razorpay.Client(
     auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
