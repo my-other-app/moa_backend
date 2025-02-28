@@ -31,6 +31,13 @@ class AppConfig(BaseSettings):
     RAZORPAY_KEY_SECRET: str
     RAZORPAY_WEBHOOK_SECRET: str
 
+    ACCESS_TOKEN_EXPIRE_MINUTES: int
+    REFRESH_TOKEN_EXPIRE_DAYS: int
+
+    CORS_ORIGINS: list[str] | str
+
+    APP_VERSION: str = "1.0"
+
     @property
     def cors_origins(self) -> list[str]:
         if isinstance(self.CORS_ORIGINS, str):
