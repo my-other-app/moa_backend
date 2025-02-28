@@ -1,11 +1,12 @@
 import hashlib
 import hmac
+import time
 import razorpay
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from app.api.payments.handlers import validate_payload
+from app.api.payments.handlers import handle_post_payment, validate_payload
 from app.api.payments.models import (
     OrderStatus,
     PaymentLogs,
@@ -24,12 +25,16 @@ razorpay_client = razorpay.Client(
 async def create_razorpay_order(
     session: AsyncSession, source: str, payload: dict, user_id: int
 ):
-    amount_in_rupee, receipt = await validate_payload(
+    amount_in_rupee, db_receipt = await validate_payload(
         session=session, source=source, payload=payload
     )
 
+    current_timestamp = int(time.time())
+    receipt = f"{db_receipt}#{current_timestamp}"
+    print(receipt)
+
     existing_order = await session.scalar(
-        select(PaymentOrders).where(PaymentOrders.receipt == receipt)
+        select(PaymentOrders).where(PaymentOrders.receipt == db_receipt)
     )
 
     if existing_order:
@@ -47,7 +52,8 @@ async def create_razorpay_order(
     razorpay_order = razorpay_client.order.create(data=order_data)
 
     db_order = PaymentOrders(
-        receipt=receipt,
+        receipt=db_receipt,
+        razorpay_receipt=receipt,
         source=source,
         payload=payload,
         razorpay_order_id=razorpay_order["id"],
@@ -107,9 +113,10 @@ async def verify_razorpay_payment(
     payment_method_details = {}
 
     if expand_payment_details:
-        payment_details = razorpay_client.payment.fetch(
-            razorpay_payment_id, {"expand[]": payment_method}
-        )
+        if payment_method in ("card"):
+            payment_details = razorpay_client.payment.fetch(
+                razorpay_payment_id, {"expand[]": payment_method}
+            )
 
     if payment_method == "upi":
 
@@ -141,14 +148,16 @@ async def verify_razorpay_payment(
         db_payment.payment_method = payment_method
         db_payment.payment_details = payment_method_details
         order.status = OrderStatus.paid
+        await session.commit()
+        await session.refresh(order)
+        await handle_post_payment(session, order)
     else:
         db_payment.status = payment_status
         db_payment.amount = payment_details.get("amount", 0)
         db_payment.payment_method = payment_method
         db_payment.payment_details = payment_method_details
         order.status = OrderStatus.attempted
-
-    await session.commit()
+        await session.commit()
 
     db_payment = await session.scalar(
         select(PaymentLogs)

@@ -28,7 +28,8 @@ class PaymentOrders(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     __tablename__ = "payment_orders"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    receipt = Column(String, nullable=False, unique=True, index=True)
+    receipt = Column(String, nullable=False, index=True)
+    razorpay_receipt = Column(String, nullable=True)
     razorpay_order_id = Column(String, nullable=False, unique=True)
     amount = Column(Float, nullable=False)
     currency = Column(String, nullable=False, default="INR")

@@ -51,6 +51,7 @@ async def create_event(
     url: Optional[str] = None,
     additional_details: Optional[list[EventAdditionalDetail]] = None,
     interest_ids: Optional[list[int]] = None,
+    max_participants: Optional[int] = None,
     *args,
     **kwards
 ):
@@ -99,6 +100,7 @@ async def create_event(
         contact_email=contact_email,
         url=url,
         club_id=user.club.id,
+        max_participants=max_participants,
         additional_details=[x.model_dump(mode="json") for x in additional_details],
     )
     if poster:
@@ -332,9 +334,22 @@ async def register_event(
             "user": (Users, user_id),
         },
     )
-    db_event = await session.execute(select(Events).filter(Events.id == event_id))
+    db_event = await session.execute(
+        select(Events).filter(Events.id == event_id).with_for_update()
+    )
     db_event = db_event.scalar()
     db_event = Event.model_validate(db_event, from_attributes=True)
+    if db_event.max_participants:
+        registered_count = await session.scalar(
+            select(func.count()).where(
+                EventRegistrationsLink.event_id == event_id,
+                EventRegistrationsLink.is_deleted == False,
+                EventRegistrationsLink.is_paid == db_event.has_fee,
+            )
+        )
+        print(registered_count, db_event.max_participants)
+        if registered_count >= db_event.max_participants:
+            raise CustomHTTPException(400, message="Event is full")
 
     if db_event.additional_details:
         if not additional_details:
@@ -360,17 +375,20 @@ async def register_event(
         )
     )
     if existing_registration:
-        raise CustomHTTPException(400, message="Already registered for this event")
+        if db_event.has_fee and existing_registration.is_paid:
+            raise CustomHTTPException(400, message="Already registered for this event")
+    else:
+        ticket_id = generate_ticket_id()
 
-    ticket_id = generate_ticket_id()
-
-    registration = EventRegistrationsLink(
-        event_id=event_id,
-        user_id=user_id,
-        ticket_id=ticket_id,
-        additional_details=additional_details,
-    )
-    session.add(registration)
+        registration = EventRegistrationsLink(
+            event_id=event_id,
+            user_id=user_id,
+            ticket_id=ticket_id,
+            actual_amount=db_event.reg_fee,
+            paid_amount=0,
+            additional_details=additional_details,
+        )
+        session.add(registration)
     await session.commit()
     return await session.scalar(
         select(EventRegistrationsLink)

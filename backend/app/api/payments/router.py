@@ -10,6 +10,7 @@ from app.api.payments.schemas import (
 from app.core.auth.dependencies import DependsAuth
 from app.db.core import SessionDep
 from app.api.payments import service
+from app.response import CustomHTTPException
 
 
 router = APIRouter(prefix="/payments", tags=["payments"])
@@ -31,7 +32,9 @@ async def create_order(
 
     except Exception as e:
         await session.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to create order: {str(e)}")
+        raise CustomHTTPException(
+            status_code=500, message=f"Failed to create order: {str(e)}"
+        )
 
 
 @router.post("/verify", summary="Verify a payment")
@@ -50,8 +53,8 @@ async def verify_payment(
 
     return {
         "payment_status": payment.status.value,
-        "payment_amount": payment.amount,
-        "remining_amount": payment.order.amount - payment.amount,
+        "payment_amount": payment.amount / 100,
+        "remining_amount": payment.order.amount - (payment.amount / 100),
         "payment_method": payment.payment_method,
     }
 

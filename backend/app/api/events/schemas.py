@@ -69,6 +69,7 @@ class EventBase(EventBaseMin):
     images: list[str] = Field([])
     about: str | None = Field(None)
     contact_phone: str | None = Field(None)
+    max_participants: int | None = Field(None)
     contact_email: str | None = Field(None)
     url: str | None = Field(None)
 
@@ -120,7 +121,8 @@ class EventCreate:
         url: Optional[str] = Form(None),
         category_id: int = Form(...),
         club_id: Optional[int] = Form(None),
-        interest_ids: Optional[str] = Form("[]"),  # JSON string
+        interest_ids: Optional[str] = Form(""),  # JSON string
+        max_participants: Optional[int] = Form(None),
         additional_details: Optional[str] = Form("[]"),  # JSON string
     ):
         self.name = name
@@ -145,6 +147,7 @@ class EventCreate:
         self.interest_ids = (
             [int(x) for x in interest_ids.split(",")] if interest_ids else None
         )
+        self.max_participants = max_participants
         try:
             self.additional_details = [
                 EventAdditionalDetail(**detail)
@@ -210,18 +213,24 @@ class EventEdit(EventCreate):
         )
 
 
-class EventRegistration(BaseModel):
-    id: int
-    user: UserPublic
-    event: EventPublic
-    additional_details: dict | None = Field(None)
-
-    model_config = {"from_attributes": True}
-
-
 class EventRegistrationPublicMin(BaseModel):
     id: int
     user: UserPublic
+
+
+class EventRegistrationDetailResponse(BaseModel):
+    id: int
+    user: UserPublic
+    ticket_id: str
+    is_paid: bool
+    actual_amount: float
+    paid_amount: float
+    payment_receipt: str | None
+    created_at: datetime
+    updated_at: datetime
+    is_won: bool
+    position: int | None
+    additional_details: dict | None
 
 
 class EventRatingCreate(BaseModel):

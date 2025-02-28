@@ -34,7 +34,9 @@ async def validate_event_registration_payload(session: AsyncSession, payload: di
         )
 
         if not event_registration:
-            raise RequestValidationError("event_registration_id is invalid")
+            raise RequestValidationError(
+                event_registration_id="event_registration_id is invalid"
+            )
 
         if event_registration.is_paid:
             raise RequestValidationError(event_registration_id="already paid")
@@ -49,7 +51,7 @@ async def validate_event_registration_payload(session: AsyncSession, payload: di
         if not isinstance(amount_to_pay, float) and not isinstance(amount_to_pay, int):
             raise RequestValidationError(event_registration_id="invalid amount to pay")
 
-        receipt = f"moa_event_registration#{event_registration.ticket_id}"
+        receipt = f"er_{event_registration.ticket_id}"
         event_registration.payment_receipt = receipt
         await session.commit()
 
@@ -73,13 +75,27 @@ async def handle_event_registration_payment(
 
         if not event_registration:
             raise RequestValidationError(receipt="receipt is invalid")
-
-        total_paid = await session.scalar(
-            select(func.sum(PaymentLogs.amount)).where(
-                PaymentLogs.order_id == order.id,
-                PaymentLogs.status == PaymentStatus.captured,
+        print(order.id, event_registration.id)
+        print(
+            await session.scalar(
+                select(PaymentLogs).where(
+                    PaymentLogs.order_id == order.id,
+                    PaymentLogs.status == PaymentStatus.captured,
+                )
             )
         )
+        total_paid = (
+            await session.scalar(
+                select(func.sum(PaymentLogs.amount)).where(
+                    PaymentLogs.order_id == order.id,
+                    PaymentLogs.status == PaymentStatus.captured,
+                )
+            )
+            or 0
+        )
+        total_paid /= 100
+
+        print("TOTAL:ACTUAL", total_paid, event_registration.actual_amount)
 
         event_registration.is_paid = total_paid >= event_registration.actual_amount
         event_registration.paid_amount = total_paid
@@ -101,7 +117,7 @@ async def validate_payload(session: AsyncSession, source: str, payload: dict):
     validates payment payload based on the source
     """
     if source == "event_registration":
-        return validate_event_registration_payload(session, payload)
+        return await validate_event_registration_payload(session, payload)
     raise RequestValidationError(source="source is invalid")
 
 

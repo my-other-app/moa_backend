@@ -70,6 +70,7 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         default=lambda: datetime.now(timezone.utc),
     )
     reg_enddate = Column(DateTime(timezone=True), nullable=True)
+    max_participants = Column(Integer, nullable=True)
     additional_details = Column(ARRAY(JSON), nullable=True)
 
     category_id = Column(Integer, ForeignKey("event_categories.id"), nullable=False)

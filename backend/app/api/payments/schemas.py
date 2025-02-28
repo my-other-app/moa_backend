@@ -10,7 +10,9 @@ class PaymentSources(str, PyEnum):
 
 class OrderCreateRequest(BaseModel):
     source: PaymentSources = Field(..., description="Source of the payment order")
-    payload: Dict[str, str] = Field(..., description="Metadata for the payment order")
+    payload: Dict[str, str | int] = Field(
+        ..., description="Metadata for the payment order"
+    )
 
 
 class PaymentVerifyRequest(BaseModel):
