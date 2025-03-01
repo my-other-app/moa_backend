@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, Request, UploadFile, Query, File
 from app.api.clubs.schemas import (
+    ClubAdminDetailResponse,
     ClubCreateUpdateResponse,
     ClubFollowPublic,
     ClubFollowersListResponse,
@@ -51,7 +52,7 @@ async def create_club(
 @router.post("/admin/create", summary="create club as admin")
 async def admin_create_club(
     session: SessionDep, user: AdminAuth, club: CreateClubAdmin
-) -> ClubCreateUpdateResponse:
+) -> ClubAdminDetailResponse:
     """Create a club as an admin. A random password will be generated."""
     return await service.create_club(
         session,
@@ -59,6 +60,20 @@ async def admin_create_club(
         email=club.email,
         is_admin_created=True,
     )
+
+
+@router.get("/admin/list", summary="list all clubs (admin)")
+async def list_all_clubs_admin(
+    request: Request,
+    session: SessionDep,
+    user: AdminAuth,
+    pagination: PaginationParams,
+) -> PaginatedResponse[ClubAdminDetailResponse]:
+    """List all clubs for an admin."""
+    clubs = await service.get_all_clubs(
+        session, limit=pagination.limit, offset=pagination.offset
+    )
+    return paginated_response(clubs, request, schema=ClubAdminDetailResponse)
 
 
 @router.put("/update", summary="update club")

@@ -211,6 +211,19 @@ class ClubPublicDetailResponse(BaseModel):
     org: ClubOrgDetail | None = Field(None)
 
 
+class ClubAdminDetailResponse(BaseModel):
+    id: int = Field(...)
+    name: str = Field(..., min_length=3, max_length=20)
+    slug: str = Field(...)
+    logo: dict | None = Field(None)
+    location_name: str | None = Field(None)
+    location_link: str | None = Field(None)
+    about: str | None = Field(None)
+    contact_phone: str | None = Field(None)
+    contact_email: str | None = Field(None)
+    initial_password: str | None = Field(None)
+
+
 class NoteCreateUpdateResponse(BaseModel):
     id: int = Field(...)
     title: str = Field(...)
@@ -267,3 +280,15 @@ class ClubListResponse(BaseModel):
     followers_count: int = Field(...)
     interests: List[ClubInterestDetailMin] | None = Field(None)
     # org_id: int | None = Field(None)
+
+
+class ClubAdminListResponse(BaseModel):
+    id: int = Field(...)
+    name: str = Field(...)
+    slug: str = Field(...)
+    logo: dict | None = Field(None)
+    location_name: str | None = Field(None)
+    user_data: dict | None = Field(None)
+    followers_count: int = Field(...)
+    initialPassword: str | None = Field(None)
+    interests: List[ClubInterestDetailMin] | None = Field(None)
