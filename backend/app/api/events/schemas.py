@@ -322,6 +322,23 @@ class EventListResponse(BaseModel):
     category: EventCategoryDetail = Field(...)
 
 
+class EventListResponseSelf(BaseModel):
+    id: int = Field(...)
+    name: str = Field(...)
+    slug: str = Field(...)
+    poster: dict | None = Field(None)
+    event_datetime: datetime = Field(...)
+    duration: float = Field(...)
+    location_name: str | None = Field(None)
+    has_fee: bool = Field(...)
+    has_prize: bool = Field(True)
+    prize_amount: float | None = Field(None)
+    is_online: bool = Field(False)
+    reg_startdate: datetime = Field(...)
+    reg_enddate: datetime | None = Field(None)
+    category: EventCategoryDetail = Field(...)
+
+
 class EventDetailResponse(BaseModel):
     id: int = Field(...)
     name: str = Field(...)

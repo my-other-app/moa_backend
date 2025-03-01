@@ -26,6 +26,8 @@ from app.core.response.pagination import (
 )
 from typing import Optional, List
 
+from app.api.events.schemas import EventListResponseSelf
+
 router = APIRouter(prefix="/clubs")
 
 
@@ -252,3 +254,20 @@ async def update_club_logo(
         raise Exception("File must be an image")
 
     return await service.update_club_logo(session, club_id=user.club.id, logo=logo)
+
+
+@router.get("/events/list", summary="Get all events of a club")
+async def get_club_events(
+    request: Request,
+    pagination: PaginationParams,
+    session: SessionDep,
+    user: ClubAuth,
+) -> PaginatedResponse[EventListResponseSelf]:
+    """List events with optional filters."""
+    events = await service.get_club_events(
+        session=session,
+        club_id=user.club.id,
+        limit=pagination.limit,
+        offset=pagination.offset,
+    )
+    return paginated_response(events, request, schema=EventListResponseSelf)

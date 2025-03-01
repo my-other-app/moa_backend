@@ -1,7 +1,7 @@
 import io
 from fastapi import UploadFile
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import and_, exists, select, func
+from sqlalchemy import and_, delete, exists, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, aliased, joinedload
 import secrets
@@ -22,6 +22,7 @@ from app.api.users.service import create_user
 from app.api.interests.models import Interests
 from app.core.validations.schema import validate_relations
 from app.api.orgs.models import Organizations
+from app.api.events.models import Events
 
 
 async def create_club(
@@ -132,8 +133,9 @@ async def update_club(session: AsyncSession, club_id: int, club: CreateClub):
     db_club.contact_phone = club.contact_phone
     db_club.contact_email = club.contact_email
 
-    for interest in db_club.interests:
-        session.delete(interest)
+    await session.execute(
+        delete(ClubInterestsLink).where(ClubInterestsLink.club_id == db_club.id)
+    )
 
     if club.interest_ids:
         interests = await session.scalars(
@@ -503,3 +505,20 @@ async def create_or_update_club_socials(
     await session.commit()
     await session.refresh(db_socials)
     return db_socials
+
+
+async def get_club_events(
+    session: AsyncSession, club_id: int, limit: int = 10, offset: int = 0
+):
+    """Get events of a club."""
+    query = (
+        select(Events)
+        .where(Events.club_id == club_id)
+        .options(
+            joinedload(Events.category),
+        )
+        .order_by(Events.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    return list(await session.scalars(query))
