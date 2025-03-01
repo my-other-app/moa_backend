@@ -11,7 +11,7 @@ def generate_ticket_id():
     timestamp = str(int(time.time() * 1000))  # Milliseconds for uniqueness
     random_str = "".join(random.choices(string.ascii_uppercase + string.digits, k=50))
     unique_hash = hashlib.sha1((timestamp + random_str).encode()).hexdigest()
-    return unique_hash[:50]
+    return unique_hash[:20]
 
 
 def generate_slug(name):

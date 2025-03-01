@@ -70,6 +70,7 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         default=lambda: datetime.now(timezone.utc),
     )
     reg_enddate = Column(DateTime(timezone=True), nullable=True)
+    max_participants = Column(Integer, nullable=True)
     additional_details = Column(ARRAY(JSON), nullable=True)
 
     category_id = Column(Integer, ForeignKey("event_categories.id"), nullable=False)
@@ -138,11 +139,20 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
     id = Column(Integer, primary_key=True, autoincrement=True)
     event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+
     ticket_id = Column(String(60), nullable=False, unique=True, index=True)
+
     is_attended = Column(Boolean, nullable=False, default=False)
     attended_on = Column(DateTime(timezone=True), nullable=True)
+
     is_won = Column(Boolean, nullable=False, default=False)
     position = Column(Integer, nullable=True)
+
+    is_paid = Column(Boolean, nullable=False, default=False)
+    paid_amount = Column(Float, nullable=False, default=0)
+    actual_amount = Column(Float, nullable=False, default=0)
+    payment_receipt = Column(String, nullable=True)
+
     additional_details = Column(JSON, nullable=True)
 
     event = relationship("Events", back_populates="registrations")

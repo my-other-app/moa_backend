@@ -6,16 +6,13 @@ from app.db.core import SessionDep
 from app.api.events import service
 from app.api.events.schemas import (
     EventCategoryCreate,
-    EventCategoryPublic,
     EventCategoryResponse,
     EventCreate,
     EventCreateUpdateResponse,
     EventDetailResponse,
     EventEdit,
     EventListResponse,
-    EventPublic,
-    EventPublicMin,
-    EventRegistration,
+    EventRegistrationDetailResponse,
     EventRegistrationPublicMin,
     EventRating,
     EventRatingCreate,
@@ -70,6 +67,7 @@ async def create_event(
         url=event.url,
         additional_details=event.additional_details,
         interest_ids=event.interest_ids,
+        max_participants=event.max_participants,
     )
 
 
@@ -152,7 +150,7 @@ async def list_event_registration(
     pagination: PaginationParams,
     event_id: int,
     session: SessionDep = SessionDep,
-):
+) -> PaginatedResponse[EventRegistrationPublicMin]:
     result = await service.list_event_registrations(
         session,
         user_id=user.id,
@@ -173,7 +171,7 @@ async def get_event_registration(
     event_id: int,
     registration_id: int,
     session: SessionDep = SessionDep,
-) -> EventRegistration:
+) -> EventRegistrationDetailResponse:
     result = await service.get_registration(
         session, user_id=user.id, event_id=event_id, registration_id=registration_id
     )
