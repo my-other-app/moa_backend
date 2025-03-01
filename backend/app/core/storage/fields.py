@@ -8,6 +8,7 @@ from typing import Dict, Optional, Union
 
 
 from app.config import settings
+from app.response import CustomHTTPException
 
 
 class S3Image(dict):
@@ -71,7 +72,7 @@ class S3ImageField(TypeDecorator):
         self,
         upload_to: str = "uploads",
         max_size: int = 10 * 1024 * 1024,
-        allowed_extensions: list[str] = ["jpg", "jpeg", "png", "gif"],
+        allowed_extensions: list[str] = ["jpg", "jpeg", "png", "gif", "webp"],
         variations: dict = {},
     ):
         super().__init__()
@@ -101,8 +102,9 @@ class S3ImageField(TypeDecorator):
         fmt = img.format.lower()
 
         if self.allowed_extensions and fmt not in self.allowed_extensions:
-            raise ValueError(
-                f"Unsupported image format. Allowed formats: {self.allowed_extensions}"
+            raise CustomHTTPException(
+                status_code=422,
+                message=f"Unsupported image format. Allowed formats: {self.allowed_extensions}",
             )
 
         return img, fmt
@@ -210,6 +212,8 @@ class S3ImageField(TypeDecorator):
                     )
 
             return full_path
+        except CustomHTTPException as e:
+            raise e
         except Exception as e:
             raise ValueError(f"Error processing image: {str(e)}")
 

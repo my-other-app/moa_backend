@@ -1,17 +1,22 @@
 from typing import Annotated, List, Union
 import jwt
-from fastapi import Depends, status
+from fastapi import Depends, Request, status
 from jwt.exceptions import InvalidTokenError, ExpiredSignatureError
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth.authentication import get_user, oauth2_scheme, ALGORITHM
 from app.api.users.models import Users
 from app.response import CustomHTTPException
-from app.config import settings
 from app.api.auth.schemas import AuthTokenData
 from app.core.auth.jwt import decode_jwt_token
+from app.db.core import SessionDep
+from app.api.events.volunteer.models import Volunteer
 
 
-async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
+async def get_current_user(
+    token: Annotated[str, Depends(oauth2_scheme)], session: SessionDep = SessionDep()
+):
     credentials_exception = CustomHTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         message="Could not validate credentials",
@@ -34,7 +39,7 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
         )
     except InvalidTokenError:
         raise credentials_exception
-    user = await get_user(user_id)
+    user = await get_user(session, user_id)
     if user is None:
         raise credentials_exception
     return user
@@ -54,14 +59,19 @@ def check_user_type(required_roles: Union[str, List[str]]):
         required_roles = [required_roles]
 
     async def role_checker(
-        current_user: Annotated[Users, Depends(get_current_user)]
+        request: Request,
+        current_user: Annotated[Users, Depends(get_current_user)],
+        session: SessionDep,
     ) -> Users:
         if not hasattr(current_user, "user_type"):
             raise CustomHTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 message="User model has no type attribute",
             )
-
+        # if "volunteer" in required_roles:
+        #     volunteering = select(Volunteer).where(Volunteer.user_id == current_user.id)
+        #     volunteer = await session.execute(volunteering)
+        #     request.state.volunteer = volunteer.scalars()
         user_type = current_user.user_type.value
         if not any(role == user_type for role in required_roles):
             raise CustomHTTPException(
@@ -86,3 +96,6 @@ DependsAuth = Annotated[Users, Depends(check_user_type(["app_user", "club", "adm
 UserAuth = Annotated[Users, Depends(check_user_type(["app_user", "admin"]))]
 ClubAuth = Annotated[Users, Depends(check_user_type(["club", "admin"]))]
 AdminAuth = Annotated[Users, Depends(check_user_type(["admin"]))]
+VolunteerAuth = Annotated[
+    Users, Depends(check_user_type(["volunteer", "club", "admin"]))
+]

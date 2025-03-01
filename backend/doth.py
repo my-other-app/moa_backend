@@ -10,6 +10,7 @@ from app.config import settings
 from app.db.listeners import *
 from app.response import ErrorResponse, CustomHTTPException
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from sqlalchemy.exc import StatementError
 
 application = FastAPI()
 
@@ -45,6 +46,16 @@ application.add_middleware(
 #         message="Invalid request",
 #         errors=errors,
 #     ).get_response(status.HTTP_422_UNPROCESSABLE_ENTITY)
+
+
+@application.exception_handler(StatementError)
+async def statement_error_handler(request: Request, exc: StatementError):
+    if isinstance(exc.orig, CustomHTTPException):
+        raise exc.orig
+    return ErrorResponse(
+        message="Database error",
+        errors={"error": "An error occurred while processing the request"},
+    ).get_response(status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @application.exception_handler(RequestValidationError)

@@ -52,6 +52,7 @@ async def create_event(
     additional_details: Optional[list[EventAdditionalDetail]] = None,
     interest_ids: Optional[list[int]] = None,
     max_participants: Optional[int] = None,
+    event_guidelines: Optional[str] = None,
     *args,
     **kwards
 ):
@@ -102,6 +103,7 @@ async def create_event(
         club_id=user.club.id,
         max_participants=max_participants,
         additional_details=[x.model_dump(mode="json") for x in additional_details],
+        event_guidelines=event_guidelines,
     )
     if poster:
         content = io.BytesIO(await poster.read())
@@ -184,6 +186,9 @@ async def update_event(
     db_event.additional_details = [
         x.model_dump(mode="json") for x in event.additional_details
     ]
+    db_event.event_guidelines = event.event_guidelines
+    db_event.url = event.url
+    db_event.max_participants = event.max_participants
     await session.commit()
     db_event = await session.execute(
         select(Events)

@@ -72,6 +72,7 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     reg_enddate = Column(DateTime(timezone=True), nullable=True)
     max_participants = Column(Integer, nullable=True)
     additional_details = Column(ARRAY(JSON), nullable=True)
+    event_guidelines = Column(String, nullable=True)
 
     category_id = Column(Integer, ForeignKey("event_categories.id"), nullable=False)
     club_id = Column(Integer, ForeignKey("clubs.id"), nullable=True)

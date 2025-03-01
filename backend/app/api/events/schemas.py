@@ -124,6 +124,7 @@ class EventCreate:
         interest_ids: Optional[str] = Form(""),  # JSON string
         max_participants: Optional[int] = Form(None),
         additional_details: Optional[str] = Form("[]"),  # JSON string
+        event_guidelines: Optional[str] = Form(None),
     ):
         self.name = name
         self.poster = poster
@@ -144,10 +145,17 @@ class EventCreate:
         self.url = url
         self.category_id = category_id
         self.club_id = club_id
-        self.interest_ids = (
-            [int(x) for x in interest_ids.split(",")] if interest_ids else None
-        )
+        try:
+            self.interest_ids = (
+                [int(x) for x in interest_ids.split(",")] if interest_ids else None
+            )
+        except Exception:
+            raise CustomHTTPException(
+                status_code=400,
+                message="Invalid interest_ids format, expected comma seperated integers",
+            )
         self.max_participants = max_participants
+        self.event_guidelines = event_guidelines
         try:
             self.additional_details = [
                 EventAdditionalDetail(**detail)
@@ -187,29 +195,33 @@ class EventEdit(EventCreate):
         club_id: Optional[int] = Form(None),
         interest_ids: Optional[str] = Form("[]"),  # JSON string
         additional_details: Optional[str] = Form("[]"),  # JSON string
+        event_guidelines: Optional[str] = Form(None),
+        max_participants: Optional[int] = Form(None),
     ):
         super().__init__(
-            name,
-            poster,
-            event_datetime,
-            has_fee,
-            reg_fee,
-            duration,
-            location_name,
-            has_prize,
-            prize_amount,
-            is_online,
-            reg_startdate,
-            reg_enddate,
+            name=name,
+            poster=poster,
+            event_datetime=event_datetime,
+            has_fee=has_fee,
+            reg_fee=reg_fee,
+            duration=duration,
+            location_name=location_name,
+            has_prize=has_prize,
+            prize_amount=prize_amount,
+            is_online=is_online,
+            reg_startdate=reg_startdate,
+            reg_enddate=reg_enddate,
             # images,
-            about,
-            contact_phone,
-            contact_email,
-            url,
-            category_id,
-            club_id,
-            interest_ids,
-            additional_details,
+            about=about,
+            contact_phone=contact_phone,
+            contact_email=contact_email,
+            url=url,
+            category_id=category_id,
+            club_id=club_id,
+            interest_ids=interest_ids,
+            additional_details=additional_details,
+            max_participants=max_participants,
+            event_guidelines=event_guidelines,
         )
 
 
@@ -302,6 +314,8 @@ class EventCreateUpdateResponse(BaseModel):
     category: EventCategoryDetail = Field(...)
     interests: list[EventInterestDetail] | None = Field(None)
     additional_details: list[EventAdditionalDetail] | None = Field(None)
+    event_guidelines: str | None = Field(None)
+    max_participants: int | None = Field(None)
 
 
 class EventListResponse(BaseModel):
@@ -365,3 +379,5 @@ class EventDetailResponse(BaseModel):
     contact_phone: str | None = Field(None)
     contact_email: str | None = Field(None)
     url: str | None = Field(None)
+    event_guidelines: str | None = Field(None)
+    max_participants: int | None = Field(None)

@@ -38,9 +38,10 @@ async def google_sign_in(
 
 @router.post("/token", summary="get access token")
 async def login_for_access_token(
+    session: SessionDep,
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
 ) -> Token:
-    user = await authenticate_user(form_data.username, form_data.password)
+    user = await authenticate_user(session, form_data.username, form_data.password)
     if not user:
         raise CustomHTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -51,9 +52,7 @@ async def login_for_access_token(
 
 
 @router.post("/refresh", summary="refresh access token")
-async def refresh_access_token(
-    token: str = Form(...),
-) -> Token:
+async def refresh_access_token(session: SessionDep, token: str = Form(...)) -> Token:
     try:
         payload = decode_jwt_token(token)
         payload = AuthTokenData(**payload)
@@ -63,7 +62,7 @@ async def refresh_access_token(
                 message="Invalid token type",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        user = await get_user(payload.user_id)
+        user = await get_user(session, payload.user_id)
         if not user:
             raise CustomHTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
