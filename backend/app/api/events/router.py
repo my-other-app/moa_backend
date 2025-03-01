@@ -23,8 +23,11 @@ from app.core.response.pagination import (
     PaginationParams,
     paginated_response,
 )
+from app.api.events.volunteer.router import router as volunteer_router
 
 router = APIRouter(prefix="/events")
+
+router.include_router(volunteer_router, tags=["Volunteer"])
 
 
 @router.post("/categories/create", summary="Create a new event category")
