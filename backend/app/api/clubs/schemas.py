@@ -278,6 +278,7 @@ class ClubListResponse(BaseModel):
     location_name: str | None = Field(None)
     user_data: dict | None = Field(None)
     followers_count: int = Field(...)
+    is_following: bool = Field(...)
     interests: List[ClubInterestDetailMin] | None = Field(None)
     # org_id: int | None = Field(None)
 

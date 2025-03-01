@@ -167,10 +167,11 @@ async def get_all_clubs(
     is_hidden: bool | None = None,
     interest_ids: list[int] | None = None,
 ):
-    """Get all clubs with optional filters and followers count."""
+    """Get all clubs with optional filters and followers count, including is_following status."""
     ClubUsersLinkPinned = aliased(ClubUsersLink)
     ClubUsersLinkHidden = aliased(ClubUsersLink)
     ClubUsersLinkFollowers = aliased(ClubUsersLink)
+    ClubUsersLinkFollowing = aliased(ClubUsersLink)
 
     query = (
         select(
@@ -178,6 +179,7 @@ async def get_all_clubs(
             func.count(func.distinct(ClubUsersLinkFollowers.id)).label(
                 "followers_count"
             ),
+            func.bool_or(ClubUsersLinkFollowing.id.isnot(None)).label("is_following"),
         )
         .outerjoin(
             ClubUsersLinkFollowers,
@@ -185,6 +187,15 @@ async def get_all_clubs(
                 ClubUsersLinkFollowers.club_id == Clubs.id,
                 ClubUsersLinkFollowers.is_following == True,
                 ClubUsersLinkFollowers.is_deleted == False,
+            ),
+        )
+        .outerjoin(
+            ClubUsersLinkFollowing,
+            and_(
+                ClubUsersLinkFollowing.club_id == Clubs.id,
+                ClubUsersLinkFollowing.user_id == user_id,
+                ClubUsersLinkFollowing.is_following == True,
+                ClubUsersLinkFollowing.is_deleted == False,
             ),
         )
         .options(selectinload(Clubs.interests))
@@ -241,8 +252,9 @@ async def get_all_clubs(
 
     # Convert results to a list of dictionaries
     return [
-        jsonable_encoder(club) | {"followers_count": followers_count}
-        for club, followers_count in results
+        jsonable_encoder(club)
+        | {"followers_count": followers_count, "is_following": is_following}
+        for club, followers_count, is_following in results
     ]
 
 
