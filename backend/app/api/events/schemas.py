@@ -215,7 +215,12 @@ class EventEdit(EventCreate):
 
 class EventRegistrationPublicMin(BaseModel):
     id: int
+    ticket_id: str
+    is_paid: bool
+    actual_amount: float
+    paid_amount: float
     user: UserPublic
+    created_at: datetime
 
 
 class EventRegistrationDetailResponse(BaseModel):
