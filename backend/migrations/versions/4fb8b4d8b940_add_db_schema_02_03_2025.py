@@ -1,8 +1,8 @@
-"""add db schema
+"""add db schema 02-03-2025
 
-Revision ID: 9df3e8f08220
+Revision ID: 4fb8b4d8b940
 Revises: 
-Create Date: 2025-02-23 12:14:03.988269
+Create Date: 2025-03-02 16:21:27.204427
 
 """
 
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 import app
 
 # revision identifiers, used by Alembic.
-revision: str = "9df3e8f08220"
+revision: str = "4fb8b4d8b940"
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -57,7 +57,7 @@ def upgrade() -> None:
         sa.Column("phone", sa.String(length=20), nullable=True),
         sa.Column("email", sa.String(length=100), nullable=True),
         sa.Column("website", sa.String(length=100), nullable=True),
-        sa.Column("logo", sa.String(length=100), nullable=True),
+        sa.Column("logo", app.core.storage.fields.S3ImageField(), nullable=True),
         sa.Column("is_verified", sa.Boolean(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
@@ -72,13 +72,36 @@ def upgrade() -> None:
         unique=False,
     )
     op.create_table(
+        "razorpay_webhook_logs",
+        sa.Column("id", sa.UUID(), nullable=False),
+        sa.Column("event_id", sa.String(), nullable=False),
+        sa.Column("entity", sa.String(), nullable=False),
+        sa.Column("event", sa.String(), nullable=False),
+        sa.Column("signature", sa.String(), nullable=False),
+        sa.Column("payload", sa.JSON(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("is_deleted", sa.Boolean(), nullable=False),
+        sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_index(
+        op.f("ix_razorpay_webhook_logs_event_id"),
+        "razorpay_webhook_logs",
+        ["event_id"],
+        unique=True,
+    )
+    op.create_index(
+        op.f("ix_razorpay_webhook_logs_is_deleted"),
+        "razorpay_webhook_logs",
+        ["is_deleted"],
+        unique=False,
+    )
+    op.create_table(
         "user_avatars",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
         sa.Column("name", sa.String(length=20), nullable=False),
-        sa.Column(
-            "icon_type", sa.Enum("emoji", "url", name="useravatartypes"), nullable=False
-        ),
-        sa.Column("content", sa.String(length=200), nullable=False),
+        sa.Column("image", app.core.storage.fields.S3ImageField(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("is_deleted", sa.Boolean(), nullable=False),
@@ -95,10 +118,15 @@ def upgrade() -> None:
         sa.Column("username", sa.String(length=100), nullable=False),
         sa.Column("email", sa.String(length=100), nullable=False),
         sa.Column("phone", sa.String(length=20), nullable=True),
-        sa.Column("password", sa.String(length=100), nullable=False),
+        sa.Column("password", sa.String(length=100), nullable=True),
+        sa.Column(
+            "provider",
+            sa.Enum("google", "email", name="signinproviders"),
+            nullable=True,
+        ),
         sa.Column(
             "user_type",
-            sa.Enum("app_user", "club", "admin", name="usertypes"),
+            sa.Enum("app_user", "guest", "club", "admin", name="usertypes"),
             nullable=False,
         ),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
@@ -124,6 +152,8 @@ def upgrade() -> None:
         sa.Column("rating", sa.Float(), nullable=False),
         sa.Column("total_ratings", sa.Integer(), nullable=False),
         sa.Column("user_id", sa.Integer(), nullable=True),
+        sa.Column("contact_phone", sa.String(), nullable=True),
+        sa.Column("contact_email", sa.String(), nullable=True),
         sa.Column("initial_password", sa.String(), nullable=True),
         sa.Column("is_verified", sa.Boolean(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
@@ -191,9 +221,47 @@ def upgrade() -> None:
         op.f("ix_interests_is_deleted"), "interests", ["is_deleted"], unique=False
     )
     op.create_table(
+        "payment_orders",
+        sa.Column("id", sa.UUID(), nullable=False),
+        sa.Column("receipt", sa.String(), nullable=False),
+        sa.Column("razorpay_receipt", sa.String(), nullable=True),
+        sa.Column("razorpay_order_id", sa.String(), nullable=False),
+        sa.Column("amount", sa.Float(), nullable=False),
+        sa.Column("currency", sa.String(), nullable=False),
+        sa.Column(
+            "status",
+            sa.Enum("created", "attempted", "paid", name="orderstatus"),
+            nullable=False,
+        ),
+        sa.Column("user_id", sa.Integer(), nullable=True),
+        sa.Column("notes", sa.String(), nullable=True),
+        sa.Column("source", sa.String(), nullable=False),
+        sa.Column("payload", sa.JSON(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("is_deleted", sa.Boolean(), nullable=False),
+        sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
+        sa.ForeignKeyConstraint(
+            ["user_id"],
+            ["users.id"],
+        ),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("razorpay_order_id"),
+    )
+    op.create_index(
+        op.f("ix_payment_orders_is_deleted"),
+        "payment_orders",
+        ["is_deleted"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_payment_orders_receipt"), "payment_orders", ["receipt"], unique=False
+    )
+    op.create_table(
         "user_profiles",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
         sa.Column("user_id", sa.Integer(), nullable=False),
+        sa.Column("full_name", sa.String(length=100), nullable=False),
         sa.Column("whatsapp", sa.String(length=20), nullable=True),
         sa.Column("org_id", sa.Integer(), nullable=True),
         sa.Column("avatar_id", sa.Integer(), nullable=True),
@@ -321,7 +389,9 @@ def upgrade() -> None:
         sa.Column("is_online", sa.Boolean(), nullable=True),
         sa.Column("reg_startdate", sa.DateTime(timezone=True), nullable=False),
         sa.Column("reg_enddate", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("max_participants", sa.Integer(), nullable=True),
         sa.Column("additional_details", sa.ARRAY(sa.JSON()), nullable=True),
+        sa.Column("event_guidelines", sa.String(), nullable=True),
         sa.Column("category_id", sa.Integer(), nullable=False),
         sa.Column("club_id", sa.Integer(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
@@ -402,6 +472,47 @@ def upgrade() -> None:
         "notifications",
         ["is_deleted"],
         unique=False,
+    )
+    op.create_table(
+        "payment_logs",
+        sa.Column("id", sa.UUID(), nullable=False),
+        sa.Column("order_id", sa.UUID(), nullable=False),
+        sa.Column("razorpay_payment_id", sa.String(), nullable=False),
+        sa.Column(
+            "status",
+            sa.Enum(
+                "created",
+                "authorized",
+                "captured",
+                "refunded",
+                "disputed",
+                "pending",
+                "failed",
+                name="paymentstatus",
+            ),
+            nullable=False,
+        ),
+        sa.Column("amount", sa.Float(), nullable=False),
+        sa.Column("payment_method", sa.String(), nullable=True),
+        sa.Column("payment_details", sa.JSON(), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("is_deleted", sa.Boolean(), nullable=False),
+        sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
+        sa.ForeignKeyConstraint(
+            ["order_id"],
+            ["payment_orders.id"],
+        ),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_index(
+        op.f("ix_payment_logs_is_deleted"), "payment_logs", ["is_deleted"], unique=False
+    )
+    op.create_index(
+        op.f("ix_payment_logs_razorpay_payment_id"),
+        "payment_logs",
+        ["razorpay_payment_id"],
+        unique=True,
     )
     op.create_table(
         "user_interests",
@@ -506,11 +617,18 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
         sa.Column("event_id", sa.Integer(), nullable=False),
         sa.Column("user_id", sa.Integer(), nullable=False),
+        sa.Column("full_name", sa.String(length=100), nullable=False),
+        sa.Column("email", sa.String(length=100), nullable=False),
+        sa.Column("phone", sa.String(length=15), nullable=True),
         sa.Column("ticket_id", sa.String(length=60), nullable=False),
         sa.Column("is_attended", sa.Boolean(), nullable=False),
         sa.Column("attended_on", sa.DateTime(timezone=True), nullable=True),
         sa.Column("is_won", sa.Boolean(), nullable=False),
         sa.Column("position", sa.Integer(), nullable=True),
+        sa.Column("is_paid", sa.Boolean(), nullable=False),
+        sa.Column("paid_amount", sa.Float(), nullable=False),
+        sa.Column("actual_amount", sa.Float(), nullable=False),
+        sa.Column("payment_receipt", sa.String(), nullable=True),
         sa.Column("additional_details", sa.JSON(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
@@ -539,11 +657,42 @@ def upgrade() -> None:
         ["ticket_id"],
         unique=True,
     )
+    op.create_table(
+        "volunteers",
+        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
+        sa.Column("email", sa.String(length=100), nullable=False),
+        sa.Column("event_id", sa.Integer(), nullable=False),
+        sa.Column("user_id", sa.Integer(), nullable=True),
+        sa.Column("club_id", sa.Integer(), nullable=False),
+        sa.Column("is_approved", sa.Boolean(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("is_deleted", sa.Boolean(), nullable=False),
+        sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
+        sa.ForeignKeyConstraint(
+            ["club_id"],
+            ["clubs.id"],
+        ),
+        sa.ForeignKeyConstraint(
+            ["event_id"],
+            ["events.id"],
+        ),
+        sa.ForeignKeyConstraint(
+            ["user_id"],
+            ["users.id"],
+        ),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_index(
+        op.f("ix_volunteers_is_deleted"), "volunteers", ["is_deleted"], unique=False
+    )
     # ### end Alembic commands ###
 
 
 def downgrade() -> None:
     # ### commands auto generated by Alembic - please adjust! ###
+    op.drop_index(op.f("ix_volunteers_is_deleted"), table_name="volunteers")
+    op.drop_table("volunteers")
     op.drop_index(
         op.f("ix_event_registrations_link_ticket_id"),
         table_name="event_registrations_link",
@@ -565,6 +714,11 @@ def downgrade() -> None:
     op.drop_table("event_files")
     op.drop_index(op.f("ix_user_interests_is_deleted"), table_name="user_interests")
     op.drop_table("user_interests")
+    op.drop_index(
+        op.f("ix_payment_logs_razorpay_payment_id"), table_name="payment_logs"
+    )
+    op.drop_index(op.f("ix_payment_logs_is_deleted"), table_name="payment_logs")
+    op.drop_table("payment_logs")
     op.drop_index(op.f("ix_notifications_is_deleted"), table_name="notifications")
     op.drop_table("notifications")
     op.drop_index(op.f("ix_notes_is_deleted"), table_name="notes")
@@ -582,6 +736,9 @@ def downgrade() -> None:
     op.drop_table("club_socials")
     op.drop_index(op.f("ix_user_profiles_is_deleted"), table_name="user_profiles")
     op.drop_table("user_profiles")
+    op.drop_index(op.f("ix_payment_orders_receipt"), table_name="payment_orders")
+    op.drop_index(op.f("ix_payment_orders_is_deleted"), table_name="payment_orders")
+    op.drop_table("payment_orders")
     op.drop_index(op.f("ix_interests_is_deleted"), table_name="interests")
     op.drop_table("interests")
     op.drop_index(op.f("ix_event_categories_is_deleted"), table_name="event_categories")
@@ -593,6 +750,13 @@ def downgrade() -> None:
     op.drop_table("users")
     op.drop_index(op.f("ix_user_avatars_is_deleted"), table_name="user_avatars")
     op.drop_table("user_avatars")
+    op.drop_index(
+        op.f("ix_razorpay_webhook_logs_is_deleted"), table_name="razorpay_webhook_logs"
+    )
+    op.drop_index(
+        op.f("ix_razorpay_webhook_logs_event_id"), table_name="razorpay_webhook_logs"
+    )
+    op.drop_table("razorpay_webhook_logs")
     op.drop_index(op.f("ix_organizations_is_deleted"), table_name="organizations")
     op.drop_table("organizations")
     op.drop_index(
