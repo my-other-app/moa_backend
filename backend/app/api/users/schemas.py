@@ -103,6 +103,7 @@ class UserRegisterResponse(Token):
 
 
 class UserCreateResponse(BaseModel):
+    full_name: str = Field(...)
     whatsapp: str | None = Field(None)
     org_id: int | None = Field(None)
     avatar_id: int | None = Field(None)
