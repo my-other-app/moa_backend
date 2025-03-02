@@ -2,8 +2,9 @@ import enum
 import json
 from typing import Optional
 from fastapi import File, Form, UploadFile
-from pydantic import AwareDatetime, BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field, ValidationError
 from datetime import datetime, timezone
+from fastapi.exceptions import RequestValidationError
 
 from app.api.clubs.schemas import ClubPublic, ClubPublicMin
 from app.api.users.schemas import UserPublic
@@ -166,6 +167,8 @@ class EventCreate:
                 status_code=400,
                 message="Invalid JSON format for additional_details",
             )
+        except ValidationError as e:
+            raise RequestValidationError(e.errors())
 
 
 class EventEdit(EventCreate):
