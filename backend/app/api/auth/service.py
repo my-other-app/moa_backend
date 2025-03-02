@@ -1,4 +1,5 @@
 from datetime import timedelta
+import traceback
 from sqlalchemy.ext.asyncio import AsyncSession
 from google.oauth2 import id_token
 from google.auth.transport import requests
@@ -62,6 +63,7 @@ async def google_signin(
             status_code=401, message="Invalid authentication credentials"
         )
     except Exception as e:
+        traceback.print_exc()
         raise CustomHTTPException(status_code=500, message="Internal Server Error")
 
 

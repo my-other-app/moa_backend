@@ -1,3 +1,4 @@
+import traceback
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -16,7 +17,6 @@ application = FastAPI()
 
 application.include_router(router=api_router)
 
-print(settings.cors_origins)
 application.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -52,6 +52,8 @@ application.add_middleware(
 async def statement_error_handler(request: Request, exc: StatementError):
     if isinstance(exc.orig, CustomHTTPException):
         raise exc.orig
+    print(exc)
+    print(traceback.format_exc())
     return ErrorResponse(
         message="Database error",
         errors={"error": "An error occurred while processing the request"},

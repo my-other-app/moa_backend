@@ -141,6 +141,10 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
     event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
 
+    full_name = Column(String(100), nullable=False)
+    email = Column(String(100), nullable=False)
+    phone = Column(String(15), nullable=True)
+
     ticket_id = Column(String(60), nullable=False, unique=True, index=True)
 
     is_attended = Column(Boolean, nullable=False, default=False)

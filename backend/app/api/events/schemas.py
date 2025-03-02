@@ -2,7 +2,7 @@ import enum
 import json
 from typing import Optional
 from fastapi import File, Form, UploadFile
-from pydantic import AwareDatetime, BaseModel, Field, ValidationError
+from pydantic import AwareDatetime, BaseModel, EmailStr, Field, ValidationError
 from datetime import datetime, timezone
 from fastapi.exceptions import RequestValidationError
 
@@ -232,6 +232,9 @@ class EventRegistrationPublicMin(BaseModel):
     id: int
     ticket_id: str
     is_paid: bool
+    full_name: str
+    email: str
+    phone: str | None = None
     actual_amount: float
     paid_amount: float
     user: UserPublic
@@ -384,3 +387,11 @@ class EventDetailResponse(BaseModel):
     url: str | None = Field(None)
     event_guidelines: str | None = Field(None)
     max_participants: int | None = Field(None)
+
+
+# REQUEST MODELS
+class EventRegistrationRequest(BaseModel):
+    full_name: str = Field(..., max_length=100, min_length=3)
+    email: EmailStr = Field(...)
+    phone: str | None = Field(None)
+    additional_details: dict[str, str] | None = Field(None)

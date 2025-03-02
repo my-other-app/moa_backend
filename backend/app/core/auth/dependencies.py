@@ -1,4 +1,4 @@
-from typing import Annotated, List, Union
+from typing import Annotated, List, Optional, Union
 import jwt
 from fastapi import Depends, Request, status
 from jwt.exceptions import InvalidTokenError, ExpiredSignatureError
@@ -17,6 +17,8 @@ from app.api.events.volunteer.models import Volunteer
 async def get_current_user(
     token: Annotated[str, Depends(oauth2_scheme)], session: SessionDep = SessionDep()
 ):
+    if not token:
+        return None
     credentials_exception = CustomHTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         message="Could not validate credentials",
@@ -45,7 +47,7 @@ async def get_current_user(
     return user
 
 
-def check_user_type(required_roles: Union[str, List[str]]):
+def check_user_type(required_roles: Union[str, List[str]], optional=False):
     """
     Creates a dependency that checks if the current user has the required role(s).
 
@@ -60,9 +62,19 @@ def check_user_type(required_roles: Union[str, List[str]]):
 
     async def role_checker(
         request: Request,
-        current_user: Annotated[Users, Depends(get_current_user)],
+        current_user: Annotated[Optional[Users], Depends(get_current_user)],
         session: SessionDep,
     ) -> Users:
+        if optional:
+            if not current_user:
+                return None
+        else:
+            if not current_user:
+                raise CustomHTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    message="Could not validate credentials",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
         if not hasattr(current_user, "user_type"):
             raise CustomHTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -96,6 +108,12 @@ DependsAuth = Annotated[Users, Depends(check_user_type(["app_user", "club", "adm
 UserAuth = Annotated[Users, Depends(check_user_type(["app_user", "admin"]))]
 ClubAuth = Annotated[Users, Depends(check_user_type(["club", "admin"]))]
 AdminAuth = Annotated[Users, Depends(check_user_type(["admin"]))]
+
 VolunteerAuth = Annotated[
     Users, Depends(check_user_type(["volunteer", "club", "admin"]))
+]  # TODO: modify
+
+
+OptionalUserAuth = Annotated[
+    Optional[Users], Depends(check_user_type(["app_user", "admin"], optional=True))
 ]

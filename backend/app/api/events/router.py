@@ -16,14 +16,24 @@ from app.api.events.schemas import (
     EventRegistrationPublicMin,
     EventRating,
     EventRatingCreate,
+    EventRegistrationRequest,
 )
-from app.core.auth.dependencies import AdminAuth, ClubAuth, DependsAuth, UserAuth
+from app.core.auth.dependencies import (
+    AdminAuth,
+    ClubAuth,
+    DependsAuth,
+    OptionalUserAuth,
+    UserAuth,
+)
 from app.core.response.pagination import (
     PaginatedResponse,
     PaginationParams,
     paginated_response,
 )
 from app.api.events.volunteer.router import router as volunteer_router
+from app.api.users import service as user_service
+from app.api.users.models import UserTypes
+from app.response import CustomHTTPException
 
 router = APIRouter(prefix="/events")
 
@@ -87,7 +97,7 @@ async def update_event(
 
 @router.get("/info/{event_id}", summary="Get event info")
 async def get_event(
-    user: DependsAuth, event_id: int, session: SessionDep = SessionDep
+    event_id: str, session: SessionDep = SessionDep
 ) -> EventDetailResponse:
     result = await service.get_event(session, event_id)
     data = jsonable_encoder(result)
@@ -139,12 +149,37 @@ async def rate_event_endpoint(
 
 @router.post("/registration/{event_id}/register", summary="Register for an event")
 async def register_event(
-    user: UserAuth,
-    event_id: int,
+    registration: EventRegistrationRequest,
+    event_id: int | str,
+    user: OptionalUserAuth,
     session: SessionDep = SessionDep,
-    additional_details: dict[str, str] = Body(None),
 ):
-    return await service.register_event(session, event_id, user.id, additional_details)
+    if not user:
+        if not (
+            user := await user_service.get_non_club_user_by_email(
+                session, registration.email
+            )
+        ):
+            print("no user")
+            user = await user_service.create_user(
+                session=session,
+                full_name=registration.full_name,
+                email=registration.email,
+                phone=registration.phone,
+                provider="email",
+                user_type=UserTypes.guest,
+            )
+    if not user:
+        raise CustomHTTPException(400, "User not found")
+    return await service.register_event(
+        session=session,
+        full_name=registration.full_name,
+        email=registration.email,
+        phone=registration.phone,
+        user_id=user.id,
+        event_id=event_id,
+        additional_details=registration.additional_details,
+    )
 
 
 @router.get("/registration/{event_id}/list", summary="Get event registration details")

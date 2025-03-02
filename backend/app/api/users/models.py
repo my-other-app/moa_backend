@@ -21,6 +21,7 @@ class UserAvatarTypes(enum.Enum):
 
 class UserTypes(enum.Enum):
     app_user = "app_user"
+    guest = "guest"
     club = "club"
     admin = "admin"
 

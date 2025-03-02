@@ -23,10 +23,12 @@ from app.api.interests.models import Interests
 from app.api.events.models import EventInterestsLink, Events
 
 
-async def generate_username(user: Users, session: AsyncSession):
+async def generate_username(user: Users, session: AsyncSession, is_guest: bool = False):
     base_username = re.sub(
         r"[^a-zA-Z0-9_-]", "", user.full_name.lower().replace(" ", "_")
     )
+    if is_guest:
+        base_username = f"guest_{base_username}"
 
     if not base_username:
         base_username = "user"
@@ -43,11 +45,21 @@ async def generate_username(user: Users, session: AsyncSession):
     return username
 
 
+async def get_non_club_user_by_email(session: AsyncSession, email: str):
+    query = (
+        select(Users)
+        .where(Users.email == email, Users.user_type != UserTypes.club)
+        .order_by(Users.id.desc())
+        .limit(1)
+    )
+    return await session.scalar(query)
+
+
 async def create_user(
     session: AsyncSession,
     full_name: str,
     email: str,
-    phone: str,
+    phone: str | None = None,
     password: str | None = None,
     provider: str = "email",
     user_type: UserTypes = UserTypes.app_user,
@@ -67,13 +79,15 @@ async def create_user(
         user_type=user_type,
         provider=provider,
     )
-    if provider == "email":
+    if user_type != UserTypes.guest and provider == "email":
         if not password:
             raise CustomHTTPException(400, "Password is required")
         hashed_password = get_password_hash(user_obj.password)
         user_obj.password = hashed_password
 
-    username = await generate_username(user_obj, session)
+    username = await generate_username(
+        user_obj, session, is_guest=user_type == UserTypes.guest
+    )
     user_obj.username = username
 
     session.add(user_obj)

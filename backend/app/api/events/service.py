@@ -203,7 +203,12 @@ async def update_event(
     return db_event.scalar_one()
 
 
-async def get_event(session: AsyncSession, event_id: int):
+async def get_event(session: AsyncSession, event_id: str | int):
+    is_event_id = (isinstance(event_id, str) and event_id.isdigit()) or isinstance(
+        event_id, int
+    )
+    if is_event_id:
+        event_id = int(event_id)
     ratings_subquery = (
         select(
             func.coalesce(func.avg(EventRatingsLink.rating), 0.0).label("rating"),
@@ -218,7 +223,7 @@ async def get_event(session: AsyncSession, event_id: int):
             ratings_subquery.c.rating.label("rating"),
             ratings_subquery.c.total_rating.label("total_rating"),
         )
-        .filter(Events.id == event_id)
+        .filter(Events.id == event_id if is_event_id else Events.slug == event_id)
         .options(
             selectinload(Events.category),
             selectinload(Events.club),
@@ -328,31 +333,51 @@ async def list_event_categories(session: AsyncSession):
 
 async def register_event(
     session: AsyncSession,
-    event_id: int,
+    full_name: str,
+    email: str,
+    event_id: int | str,
     user_id: int,
+    phone: str | None = None,
     additional_details: dict | None = None,
 ):
+    is_event_id = (isinstance(event_id, str) and event_id.isdigit()) or isinstance(
+        event_id, int
+    )
+
     await validate_relations(
         session,
-        {
-            "event": (Events, event_id),
-            "user": (Users, user_id),
-        },
+        (
+            {
+                "event": (Events, int(event_id)),
+                "user": (Users, user_id),
+            }
+            if is_event_id
+            else {
+                "slug": (Events, event_id, "slug"),
+                "user": (Users, user_id),
+            }
+        ),
     )
-    db_event = await session.execute(
-        select(Events).filter(Events.id == event_id).with_for_update()
-    )
+    if is_event_id:
+        event_id = int(event_id)
+        db_event = await session.execute(
+            select(Events).filter(Events.id == event_id).with_for_update()
+        )
+    else:
+        db_event = await session.execute(
+            select(Events).filter(Events.slug == event_id).with_for_update()
+        )
+
     db_event = db_event.scalar()
     db_event = Event.model_validate(db_event, from_attributes=True)
     if db_event.max_participants:
         registered_count = await session.scalar(
             select(func.count()).where(
-                EventRegistrationsLink.event_id == event_id,
+                EventRegistrationsLink.event_id == db_event.id,
                 EventRegistrationsLink.is_deleted == False,
                 EventRegistrationsLink.is_paid == db_event.has_fee,
             )
         )
-        print(registered_count, db_event.max_participants)
         if registered_count >= db_event.max_participants:
             raise CustomHTTPException(400, message="Event is full")
 
@@ -374,32 +399,37 @@ async def register_event(
 
     existing_registration = await session.scalar(
         select(EventRegistrationsLink).where(
-            EventRegistrationsLink.event_id == event_id,
-            EventRegistrationsLink.user_id == user_id,
+            EventRegistrationsLink.event_id == db_event.id,
+            EventRegistrationsLink.email == email,
             EventRegistrationsLink.is_deleted == False,
         )
     )
     if existing_registration:
+        raise CustomHTTPException(400, message="Already registered for this event")
+        # TODO: add service and api for updating registration info
         if db_event.has_fee and existing_registration.is_paid:
             raise CustomHTTPException(400, message="Already registered for this event")
     else:
         ticket_id = generate_ticket_id()
 
         registration = EventRegistrationsLink(
-            event_id=event_id,
+            event_id=db_event.id,
             user_id=user_id,
             ticket_id=ticket_id,
             actual_amount=db_event.reg_fee,
             paid_amount=0,
             additional_details=additional_details,
+            full_name=full_name,
+            email=email,
+            phone=phone,
         )
         session.add(registration)
     await session.commit()
     return await session.scalar(
         select(EventRegistrationsLink)
         .where(
-            EventRegistrationsLink.event_id == event_id,
-            EventRegistrationsLink.user_id == user_id,
+            EventRegistrationsLink.event_id == db_event.id,
+            EventRegistrationsLink.email == email,
             EventRegistrationsLink.is_deleted == False,
         )
         .options(

@@ -7,10 +7,19 @@ from app.db.mixins import SoftDeleteMixin
 
 async def validate_relations(session: AsyncSession, validation: dict[str, tuple]):
     errors = {}
-    for key, (schema, value) in validation.items():
+    for key, value_tuple in validation.items():
+        if len(value_tuple) == 2:
+            schema, value = value_tuple
+            field = "id"
+        elif len(value_tuple) == 3:
+            schema, value, field = value_tuple
+        else:
+            raise ValueError("Invalid value tuple")
         if value == None:
             continue
-        if not await session.scalar(select(exists().where(schema.id == value))):
+        if not await session.scalar(
+            select(exists().where(getattr(schema, field) == value))
+        ):
             errors[key] = f"invalid {key}"
     if errors:
         raise CustomHTTPException(
