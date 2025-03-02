@@ -8,7 +8,7 @@ networks:
 
 services:
   postgres:
-    image: postgis/postgis:13-3.5
+    image: postgres:17.4
     container_name: doth-postgres
     restart: on-failure
     env_file:
