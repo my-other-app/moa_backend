@@ -1,10 +1,10 @@
 from typing import List
 
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 
 
-class VolunteerCreate(BaseModel):
-    email_ids: List[str]
+class VolunteerCreateRemove(BaseModel):
+    email_id: EmailStr
     event_id: int
 
 
