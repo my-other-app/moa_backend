@@ -1,7 +1,7 @@
 import traceback
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, ORJSONResponse
 from pydantic_core import ValidationError
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import HTMLResponse
@@ -13,7 +13,7 @@ from app.response import ErrorResponse, CustomHTTPException
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from sqlalchemy.exc import StatementError
 
-application = FastAPI()
+application = FastAPI(default_response_class=ORJSONResponse)
 
 application.include_router(router=api_router)
 
