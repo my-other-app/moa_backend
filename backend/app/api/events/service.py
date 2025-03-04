@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 import io
 from typing import Optional
-from fastapi import UploadFile
+from fastapi import BackgroundTasks, UploadFile
 from sqlalchemy import and_, delete, exists, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
@@ -26,6 +26,7 @@ from app.api.users.models import Users
 from app.core.validations.schema import validate_relations
 from app.api.interests.models import Interests
 from app.core.utils.keys import generate_ticket_id, generate_slug
+from app.core.email.email import _send_email, send_email_background
 
 
 async def create_event(
@@ -54,7 +55,7 @@ async def create_event(
     max_participants: Optional[int] = None,
     event_guidelines: Optional[str] = None,
     *args,
-    **kwards
+    **kwards,
 ):
     await validate_relations(
         session,
@@ -333,6 +334,7 @@ async def list_event_categories(session: AsyncSession):
 
 async def register_event(
     session: AsyncSession,
+    background_tasks: BackgroundTasks,
     full_name: str,
     email: str,
     event_id: int | str,
@@ -369,6 +371,7 @@ async def register_event(
         )
 
     db_event = db_event.scalar()
+
     db_event = Event.model_validate(db_event, from_attributes=True)
     if db_event.max_participants:
         registered_count = await session.scalar(
@@ -425,6 +428,24 @@ async def register_event(
         )
         session.add(registration)
     await session.commit()
+    print(
+        _send_email(
+            # background_tasks,
+            [email],
+            f"{db_event.name} - MyOtherAPP",
+            "events/registration_confirmation.email",
+            {
+                "event_name": db_event.name,
+                "ticket_holder": full_name,
+                "ticket_id": ticket_id,
+                "event_date": db_event.event_datetime.date(),
+                "event_time": db_event.event_datetime.time(),
+                "location": db_event.location_name,
+                "payment_info": None,
+                "event_guidelines": db_event.event_guidelines,
+            },
+        )
+    )
     return await session.scalar(
         select(EventRegistrationsLink)
         .where(

@@ -96,6 +96,7 @@ class Event(EventBase):
     category_id: int = Field(...)
     club_id: int | None = Field(...)
     additional_details: list[EventAdditionalDetail] | None = Field(None)
+    event_guidelines: str | None = Field(None)
 
 
 class EventCreate:

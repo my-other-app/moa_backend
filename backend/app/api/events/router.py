@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Body, Depends, Request, Query
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, Request, Query
 from fastapi.encoders import jsonable_encoder
 from typing import Optional, List
 
@@ -149,6 +149,7 @@ async def rate_event_endpoint(
 
 @router.post("/registration/{event_id}/register", summary="Register for an event")
 async def register_event(
+    background_tasks: BackgroundTasks,
     registration: EventRegistrationRequest,
     event_id: int | str,
     user: OptionalUserAuth,
@@ -173,6 +174,7 @@ async def register_event(
         raise CustomHTTPException(400, "User not found")
     return await service.register_event(
         session=session,
+        background_tasks=background_tasks,
         full_name=registration.full_name,
         email=registration.email,
         phone=registration.phone,

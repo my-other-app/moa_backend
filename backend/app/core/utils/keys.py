@@ -4,14 +4,15 @@ import re
 import string
 import time
 import unicodedata
+import uuid
 
 
 def generate_ticket_id():
-    """Generate a unique alphanumeric ticket ID."""
-    timestamp = str(int(time.time() * 1000))  # Milliseconds for uniqueness
-    random_str = "".join(random.choices(string.ascii_uppercase + string.digits, k=50))
-    unique_hash = hashlib.sha1((timestamp + random_str).encode()).hexdigest()
-    return unique_hash[:20]
+    """Generate a short, user-friendly, and unique ticket ID."""
+    timestamp = format(int(time.time() * 1000) % (36**5), "X")
+    characters = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+    random_part = "".join(random.choices(characters, k=5))
+    return f"MOA-{timestamp}-{random_part}"
 
 
 def generate_slug(name):

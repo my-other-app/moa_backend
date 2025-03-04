@@ -113,5 +113,5 @@ class UserInterests(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     interest_id = Column(Integer, ForeignKey("interests.id"), nullable=False)
 
-    user = relationship("Users")
+    # user = relationship("Users")
     interest = relationship("Interests")

@@ -23,6 +23,10 @@ class AppConfig(BaseSettings):
     S3_SECRET_KEY: str
     S3_BASE_PATH: str
 
+    SES_ACCESS_KEY: str
+    SES_SECRET_KEY: str
+    SES_DEFAULT_SENDER: str
+
     GOOGLE_WEB_CLIENT_ID: str
     GOOGLE_ANDROID_CLIENT_ID: str
     GOOGLE_IOS_CLIENT_ID: str
