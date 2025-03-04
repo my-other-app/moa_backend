@@ -1,10 +1,13 @@
+from datetime import datetime, timezone
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import delete, exists, select
+from sqlalchemy import and_, delete, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.events.volunteer.models import Volunteer
 from app.api.users.models import UserProfiles, Users
 from app.response import CustomHTTPException
+from app.api.events.models import EventRegistrationsLink, Events
+from app.api.clubs.models import Clubs
 
 
 async def add_volunteer(
@@ -41,7 +44,9 @@ async def add_volunteer(
     return None
 
 
-async def remove_volunteer(session: AsyncSession, email_id: str, event_id: int) -> None:
+async def remove_event_volunteer(
+    session: AsyncSession, email_id: str, event_id: int
+) -> None:
     """Remove volunteers from an event."""
     volunteer = select(Volunteer).where(
         Volunteer.email == email_id, Volunteer.event_id == event_id
@@ -57,13 +62,48 @@ async def remove_volunteer(session: AsyncSession, email_id: str, event_id: int) 
     return None
 
 
-async def list_volunteers(session: AsyncSession, event_id: int) -> list[dict]:
-    """List all volunteers for an event."""
-    result = (
-        select(Volunteer, UserProfiles)
-        .where(Volunteer.event_id == event_id)
-        .outerjoin(UserProfiles, Volunteer.user_id == UserProfiles.user_id)
+async def remove_club_volunteer(
+    session: AsyncSession, email_id: str, club_id: int
+) -> None:
+    """Remove volunteers from a club."""
+    volunteer = select(Volunteer).where(
+        Volunteer.email == email_id, Volunteer.club_id == club_id
     )
+    volunteer = await session.execute(volunteer)
+    volunteer = volunteer.scalars().first()
+    if not volunteer:
+        raise CustomHTTPException(
+            status_code=404, message="Volunteer does not exist for this club."
+        )
+    volunteer.soft_delete()
+    await session.commit()
+    return None
+
+
+async def list_volunteers(
+    session: AsyncSession, event_id: int, include_club_volunteers=True
+) -> list[dict]:
+    """List all volunteers for an event."""
+    if include_club_volunteers:
+        result = (
+            select(Volunteer, UserProfiles)
+            .outerjoin(Clubs, Clubs.id == Volunteer.club_id)
+            .outerjoin(Events, Events.club_id == Clubs.id)
+            .where(
+                or_(
+                    Volunteer.event_id == event_id,
+                    and_(Events.club_id == Volunteer.club_id, Events.id == event_id),
+                )
+            )
+            .outerjoin(UserProfiles, Volunteer.user_id == UserProfiles.user_id)
+            .distinct()
+        )
+    else:
+        result = (
+            select(Volunteer, UserProfiles)
+            .where(Volunteer.event_id == event_id)
+            .outerjoin(UserProfiles, Volunteer.user_id == UserProfiles.user_id)
+        )
     result = await session.execute(result)
     return [
         jsonable_encoder(volunteer)
@@ -74,3 +114,40 @@ async def list_volunteers(session: AsyncSession, event_id: int) -> list[dict]:
         )
         for volunteer, profile in result
     ]
+
+
+async def checkin_user(
+    session: AsyncSession, event_id: int, ticker_id: str, volunteer_id: int
+) -> None:
+    """Check-in a participant for an event."""
+
+    registration = await session.scalar(
+        select(EventRegistrationsLink).where(
+            EventRegistrationsLink.event_id == event_id,
+            EventRegistrationsLink.ticker_id == ticker_id,
+        )
+    )
+    if not registration:
+        raise CustomHTTPException(400, "Registration not found")
+    if registration.is_attended:
+        raise CustomHTTPException(400, "User already checked-in")
+    registration.is_attended = True
+    registration.attended_on = datetime.now(timezone.utc)
+    registration.volunteer_id = volunteer_id
+    return True
+
+
+async def is_volunteer(session: AsyncSession, user_id: int, event_id: int):
+    """Check if a user is a volunteer for an event."""
+
+    return await session.scalar(
+        select(Volunteer)
+        .outerjoin(Clubs, Clubs.id == Volunteer.club_id)
+        .outerjoin(Events, Events.club_id == Clubs.id)
+        .where(
+            or_(
+                and_(Volunteer.user_id == user_id, Volunteer.event_id == event_id),
+                and_(Events.club_id == Volunteer.club_id, Events.id == event_id),
+            )
+        )
+    )

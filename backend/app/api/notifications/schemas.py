@@ -7,7 +7,7 @@ from app.api.notifications.models import NotificationStatus
 
 
 class NotificationSchema(BaseModel):
-    id: int
+    id: str
     user_id: int
     title: str
     description: str

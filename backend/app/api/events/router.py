@@ -210,7 +210,7 @@ async def get_event_registration(
     request: Request,
     user: ClubAuth,
     event_id: int,
-    registration_id: int,
+    registration_id: str,
     session: SessionDep = SessionDep,
 ) -> EventRegistrationDetailResponse:
     result = await service.get_registration(

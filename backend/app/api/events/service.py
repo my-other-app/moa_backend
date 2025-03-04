@@ -490,7 +490,7 @@ async def list_event_registrations(
 
 
 async def get_registration(
-    session: AsyncSession, user_id: int, event_id: int, registration_id: int
+    session: AsyncSession, user_id: int, event_id: int, registration_id: str
 ):
     event = await session.execute(
         select(Events).filter(Events.id == event_id).options(joinedload(Events.club))

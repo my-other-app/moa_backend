@@ -1,8 +1,8 @@
-import uuid
 from sqlalchemy import JSON, Column, Enum, Float, ForeignKey, String, Integer, Numeric
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from enum import Enum as PyEnum
+import sqlalchemy as sa
 
 from app.db.base import AbstractSQLModel
 from app.db.mixins import SoftDeleteMixin, TimestampsMixin
@@ -27,7 +27,11 @@ class PaymentStatus(PyEnum):
 class PaymentOrders(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     __tablename__ = "payment_orders"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=sa.text("gen_random_uuid()"),
+    )
     receipt = Column(String, nullable=False, index=True)
     razorpay_receipt = Column(String, nullable=True)
     razorpay_order_id = Column(String, nullable=False, unique=True)
@@ -45,7 +49,11 @@ class PaymentOrders(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
 class PaymentLogs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     __tablename__ = "payment_logs"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=sa.text("gen_random_uuid()"),
+    )
     order_id = Column(
         UUID(as_uuid=True), ForeignKey("payment_orders.id"), nullable=False
     )
@@ -61,7 +69,11 @@ class PaymentLogs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
 class RazorpayWebhookLogs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     __tablename__ = "razorpay_webhook_logs"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=sa.text("gen_random_uuid()"),
+    )
     event_id = Column(String, nullable=False, index=True, unique=True)
     entity = Column(String, nullable=False)
     event = Column(String, nullable=False)

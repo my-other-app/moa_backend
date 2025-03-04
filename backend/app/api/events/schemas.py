@@ -230,7 +230,7 @@ class EventEdit(EventCreate):
 
 
 class EventRegistrationPublicMin(BaseModel):
-    id: int
+    id: str
     ticket_id: str
     is_paid: bool
     full_name: str
@@ -243,7 +243,7 @@ class EventRegistrationPublicMin(BaseModel):
 
 
 class EventRegistrationDetailResponse(BaseModel):
-    id: int
+    id: str
     user: UserPublic
     ticket_id: str
     is_paid: bool
@@ -263,7 +263,7 @@ class EventRatingCreate(BaseModel):
 
 
 class EventRating(EventRatingCreate):
-    id: int
+    id: str
     event_id: int
     user_id: int
     created_at: datetime

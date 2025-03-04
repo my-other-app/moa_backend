@@ -1,8 +1,9 @@
-from sqlalchemy import JSON, Column, Enum, ForeignKey, Integer, String
+from sqlalchemy import JSON, UUID, Column, Enum, ForeignKey, Integer, String
 from app.db.base import AbstractSQLModel
 from app.db.mixins import SoftDeleteMixin, TimestampsMixin
 
 from sqlalchemy.orm import relationship
+import sqlalchemy as sa
 from enum import Enum as PyEnum
 
 
@@ -22,7 +23,11 @@ class NotificationStatus(PyEnum):
 class Notifications(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     __tablename__ = "notifications"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=sa.text("gen_random_uuid()"),
+    )
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     title = Column(String, nullable=False)
     description = Column(String, nullable=False)

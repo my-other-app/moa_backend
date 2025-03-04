@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from pydantic import ConfigDict
 from sqlalchemy import (
     ARRAY,
+    UUID,
     Boolean,
     Column,
     DateTime,
@@ -13,11 +14,12 @@ from sqlalchemy import (
     Float,
     UniqueConstraint,
 )
+from sqlalchemy.orm import relationship
+import sqlalchemy as sa
+
 from app.api.users.models import UserAvatarTypes
 from app.db.base import AbstractSQLModel
 from app.db.mixins import SoftDeleteMixin, TimestampsMixin
-from sqlalchemy.orm import relationship
-
 from app.core.storage.fields import S3FileField, S3ImageField
 
 
@@ -95,7 +97,11 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
 class EventFiles(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     __tablename__ = "event_files"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=sa.text("gen_random_uuid()"),
+    )
     event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
     file = Column(
         S3FileField(
@@ -137,7 +143,11 @@ class EventInterestsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
 class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     __tablename__ = "event_registrations_link"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=sa.text("gen_random_uuid()"),
+    )
     event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
 
@@ -149,6 +159,7 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
 
     is_attended = Column(Boolean, nullable=False, default=False)
     attended_on = Column(DateTime(timezone=True), nullable=True)
+    volunteer_id = Column(Integer, ForeignKey("volunteers.id"), nullable=True)
 
     is_won = Column(Boolean, nullable=False, default=False)
     position = Column(Integer, nullable=True)
@@ -169,7 +180,11 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
 class EventRatingsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     __tablename__ = "event_ratings_link"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=sa.text("gen_random_uuid()"),
+    )
     event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     rating = Column(Float, nullable=False)
