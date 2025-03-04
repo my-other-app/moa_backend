@@ -663,9 +663,7 @@ async def delete_event(session: AsyncSession, event_id: int, user_id: int):
     if db_event.club.user_id != user_id:
         raise CustomHTTPException(403, message="Not authorized to delete this event")
     registration_count = await session.scalar(
-        select(func.count(EventRegistrationsLink.id)).filter(
-            EventRegistrationsLink.event_id == event_id
-        )
+        select(func.count()).filter(EventRegistrationsLink.event_id == event_id)
     )
     if registration_count > 0:
         raise CustomHTTPException(400, message="Cannot delete event with registrations")

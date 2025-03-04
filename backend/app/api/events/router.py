@@ -233,7 +233,6 @@ async def get_event_registration(
 @router.get("/tickets/{ticket_id}", summary="Get ticket details")
 async def get_ticket(
     request: Request,
-    user: ClubAuth,
     ticket_id: int | str,
     session: SessionDep = SessionDep,
 ) -> TicketDetailsResponse:
