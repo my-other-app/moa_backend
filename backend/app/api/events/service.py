@@ -574,3 +574,29 @@ async def rate_event(
     await session.commit()
     await session.refresh(event_rating)
     return event_rating
+
+
+async def get_ticket_details(session: AsyncSession, ticket_id: str | int):
+    is_ticket_id = (isinstance(ticket_id, str) and ticket_id.isdigit()) or isinstance(
+        ticket_id, int
+    )
+    if is_ticket_id:
+        ticket_id = int(ticket_id)
+    registration = await session.execute(
+        select(EventRegistrationsLink)
+        .filter(
+            EventRegistrationsLink.id == ticket_id
+            if is_ticket_id
+            else EventRegistrationsLink.ticket_id == ticket_id
+        )
+        .options(
+            joinedload(EventRegistrationsLink.event).options(
+                joinedload(Events.club), joinedload(Events.category)
+            ),
+            joinedload(EventRegistrationsLink.user),
+        )
+    )
+    registration = registration.scalar()
+    if registration is None:
+        raise CustomHTTPException(404, "Ticket not found")
+    return registration

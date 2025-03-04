@@ -17,6 +17,7 @@ from app.api.events.schemas import (
     EventRating,
     EventRatingCreate,
     EventRegistrationRequest,
+    TicketDetailsResponse,
 )
 from app.core.auth.dependencies import (
     AdminAuth,
@@ -214,4 +215,15 @@ async def get_event_registration(
     result = await service.get_registration(
         session, user_id=user.id, event_id=event_id, registration_id=registration_id
     )
+    return jsonable_encoder(result)
+
+
+@router.get("/tickets/{ticket_id}", summary="Get ticket details")
+async def get_ticket(
+    request: Request,
+    user: ClubAuth,
+    ticket_id: int | str,
+    session: SessionDep = SessionDep,
+) -> TicketDetailsResponse:
+    result = await service.get_ticket_details(session, ticket_id=ticket_id)
     return jsonable_encoder(result)
