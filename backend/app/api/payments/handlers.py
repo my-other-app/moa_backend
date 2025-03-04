@@ -1,10 +1,12 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy import exists, func, select
 from app.core.validations.exceptions import RequestValidationError
 from app.api.events.models import Events, EventRegistrationsLink
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 
 from app.api.payments.models import PaymentLogs, PaymentOrders, PaymentStatus
+from app.api.events.background_tasks import send_registration_confirmation_email
 
 
 async def validate_event_registration_payload(session: AsyncSession, payload: dict):
@@ -100,6 +102,42 @@ async def handle_event_registration_payment(
         event_registration.is_paid = total_paid >= event_registration.actual_amount
         event_registration.paid_amount = total_paid
         await session.commit()
+        try:
+            await session.refresh(event_registration)
+            db_event = await session.scalar(
+                select(Events)
+                .filter(Events.id == event_registration.event_id)
+                .options(joinedload(Events.club))
+            )
+            event_endtime = (
+                db_event.event_datetime + timedelta(hours=db_event.duration)
+                if db_event.duration
+                else None
+            )
+            email_payload = {
+                "ticket_id": event_registration.ticket_id,
+                "participant_name": event_registration.full_name,
+                "event_name": db_event.name,
+                "event_date": db_event.event_datetime.strftime("%d %b %Y"),
+                "event_time": (
+                    db_event.event_datetime.strftime("%I:%M %p")
+                    + (" - " + event_endtime.strftime("%I:%M %p"))
+                    if event_endtime
+                    else ""
+                ),
+                "event_location": db_event.location_name,
+                "event_prizes": f"Prizes worth ₹{db_event.prize_amount}",
+                "organizer_name": db_event.club.name,
+                "contact_email": db_event.contact_email,
+                "contact_phone": db_event.contact_phone,
+            }
+            send_registration_confirmation_email(
+                recipients=[event_registration.email],
+                subject=f"Ticket: {db_event.name} - MyOtherAPP",
+                payload=email_payload,
+            )
+        except Exception as e:
+            print("Error sending email", e)
         return True
     except Exception as e:
         raise e
