@@ -1,0 +1,203 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- Gmail Calendar Event Detection -->
+    <meta itemprop="name" content="{{ event_name }}" />
+    <meta itemprop="startDate" content="{{ ics_start_date }}" />
+    <meta itemprop="endDate" content="{{ ics_end_date }}" />
+    <meta itemprop="location" content="{{ event_location }}" />
+
+    <title>Your Ticket is Cooked!</title>
+    <style type="text/css">
+      body,
+      table,
+      td,
+      a {
+        -webkit-text-size-adjust: 100%;
+        -ms-text-size-adjust: 100%;
+      }
+      table,
+      td {
+        mso-table-lspace: 0pt;
+        mso-table-rspace: 0pt;
+      }
+      img {
+        -ms-interpolation-mode: bicubic;
+        border: 0;
+        height: auto;
+        line-height: 100%;
+        outline: none;
+        text-decoration: none;
+      }
+      img {
+        max-width: 100%;
+      }
+      body {
+        height: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        width: 100% !important;
+      }
+      a {
+        color: #1a73e8;
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      .cta-button {
+        display: inline-block;
+        padding: 8px 16px;
+        background-color: #4CAF50;
+        color: white !important;
+        text-decoration: none;
+        border-radius: 4px;
+        font-weight: bold;
+        font-size: 14px;
+        margin: 10px 0;
+        transition: background-color 0.3s ease;
+      }
+      .cta-button:hover {
+        background-color: #45a049;
+        text-decoration: none;
+      }
+    </style>
+  </head>
+  <body style="margin: 0; padding: 0">
+    <table
+      border="0"
+      cellpadding="0"
+      cellspacing="0"
+      width="100%"
+      style="font-family: Arial, sans-serif; max-width: 700px; margin: 0 auto"
+    >
+      <tr>
+        <td bgcolor="#1a1a1a" style="padding: 20px; color: white">
+          <table border="0" cellpadding="0" cellspacing="0" width="100%">
+            <tr>
+              <td
+                width="70%"
+                style="vertical-align: middle; padding-right: 20px"
+              >
+                <div
+                  style="
+                    font-size: 1.8em;
+                    text-transform: uppercase;
+                    margin-left: 10px;
+                  "
+                >
+                  YOUR TICKET IS COOKED!!!
+                </div>
+              </td>
+              <td
+                width="30%"
+                align="right"
+                style="vertical-align: middle; padding-right: 10px"
+              >
+                <img
+                  src="https://raw.githubusercontent.com/SrutavTarun/MyOtherApp_Template/refs/heads/main/barbecue.png"
+                  alt="Grilling Illustration"
+                  width="150"
+                  style="max-width: 150px; height: auto; display: inline-block"
+                />
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+
+      <tr>
+        <td bgcolor="#ffffff" style="padding: 40px 30px">
+          <table border="0" cellpadding="0" cellspacing="0" width="100%">
+            <tr>
+              <td style="color: #333333; font-size: 16px; line-height: 1.6">
+                <p style="margin-top: 0">Dear {{ participant_name }},</p>
+
+                <p>
+                  Thank you for registering for
+                  <strong>{{ event_name }}</strong> through MyOtherApp! We're
+                  excited to have you join us. Here are the event details:
+                </p>
+
+                <table
+                  border="0"
+                  cellpadding="0"
+                  cellspacing="0"
+                  width="100%"
+                  style="margin-bottom: 20px"
+                >
+                  <tr>
+                    <td style="padding: 5px 0">
+                      🎫 Ticket ID: <b>{{ ticket_id }}</b>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 5px 0">🗓️ Date: {{ event_date }}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 5px 0">⏰ Time: {{ event_time }}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 5px 0">
+                      📍 Location: {{ event_location }}
+                    </td>
+                  </tr>
+                  {% if event_prizes %}
+                  <tr>
+                    <td style="padding: 5px 0">
+                      🏆 Prizes: {{ event_prizes }}
+                    </td>
+                  </tr>
+                  {% endif %}
+                  <tr>
+                    <td style="padding: 5px 0">
+                      📢 Organized by: {{ organizer_name }}
+                    </td>
+                  </tr>
+                </table>
+
+                <p>
+                  Please keep this email as confirmation of your registration.
+                  We recommend saving this ticket for entry to the event.
+                </p>
+
+                <p>
+                  We look forward to seeing you at the event!
+                  <span style="font-size: 16px">🚀</span>
+                </p>
+
+                <p style="margin: 20px 0 10px 0;">
+                  <a href="http://events.myotherapp.com/tickets/{{ ticket_id }}" class="cta-button">
+                    View Ticket
+                  </a>
+                </p>
+
+                <p style="margin-bottom: 0">
+                  Best regards,<br />
+                  MyOtherApp Team<br />
+                  <a href="https://myotherapp.com" style="color: #1a73e8"
+                    >myotherapp.com</a
+                  >
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+
+      <tr>
+        <td align="left" style="padding: 20px 30px">
+          <img
+            src="https://raw.githubusercontent.com/SrutavTarun/MyOtherApp_Template/refs/heads/main/logo.png"
+            alt="logo"
+            width="150"
+            style="max-width: 150px; height: auto"
+          />
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

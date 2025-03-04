@@ -1,9 +1,13 @@
 import os
+import io
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
-from typing import List, Dict, Optional
+from typing import Any, List, Dict, Optional, Union
 from jinja2 import Template
 from fastapi import BackgroundTasks
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.application import MIMEApplication
 
 from app.config import settings
 
@@ -16,78 +20,160 @@ ses = boto3.client(
 )
 
 
-def render_template_from_file(template_path: str, context: Dict[str, str]) -> str:
+def render_template(
+    template_path: Optional[str] = None,
+    template_str: Optional[str] = None,
+    context: Optional[Dict[str, Any]] = None,
+) -> str:
     """
-    Reads an HTML template file synchronously and renders it using Jinja2.
-    """
-    template_path = os.path.join("mail_templates/", template_path)
-    if not os.path.exists(template_path):
-        raise FileNotFoundError(f"Template file not found: {template_path}")
+    Render a Jinja2 template from either a file path or a template string.
 
-    with open(template_path, "r", encoding="utf-8") as file:
-        template_str = file.read()
+    :param template_path: Path to the template file
+    :param template_str: Direct template string
+    :param context: Context dictionary for template rendering
+    :return: Rendered template string
+    """
+    if template_path:
+        template_path = os.path.join("templates/email/", template_path)
+        if not os.path.exists(template_path):
+            raise FileNotFoundError(f"Template file not found: {template_path}")
+
+        with open(template_path, "r", encoding="utf-8") as file:
+            template_str = file.read()
+
+    if not template_str:
+        raise ValueError("Either template_path or template_str must be provided")
 
     template = Template(template_str)
-    return template.render(context)
+    return template.render(context or {})
 
 
-def _send_email(
-    recipients: List[str],
+def send_email_with_attachment(
+    recipients: Union[str, List[str]],
     subject: str,
-    template_path: Optional[str] = None,
-    context: Optional[Dict[str, str]] = None,
     body_text: Optional[str] = None,
+    body_html: Optional[str] = None,
+    attachment_bytes: Optional[Union[bytes, io.BytesIO]] = None,
+    attachment_filename: Optional[str] = None,
+    html_template_path: Optional[str] = None,
+    html_template_str: Optional[str] = None,
+    template_context: Optional[Dict[str, Any]] = None,
     sender: Optional[str] = None,
+    aws_region: str = "ap-south-1",
 ) -> Dict:
-    print("Sending email to", recipients)
-    try:
-        sender = sender or settings.SES_DEFAULT_SENDER
-        body_html = (
-            render_template_from_file(template_path, context)
-            if template_path and context
-            else None
-        )
+    """
+    Send an email with optional attachment and HTML template.
 
-        # Ensure at least one body part is present
-        message_body = {}
-        if body_text:
-            message_body["Text"] = {"Data": body_text}
-        if body_html:
-            message_body["Html"] = {"Data": body_html}
+    :param recipients: Single email or list of email addresses
+    :param subject: Email subject
+    :param body_text: Plain text body of the email
+    :param body_html: HTML body of the email
+    :param attachment_bytes: Bytes or BytesIO object for attachment
+    :param attachment_filename: Filename for the attachment
+    :param html_template_path: Path to HTML template file
+    :param html_template_str: Direct HTML template string
+    :param template_context: Context for rendering HTML template
+    :param sender: Sender email (defaults to settings)
+    :param aws_region: AWS region for SES
+    :return: SES send_raw_email response
+    """
+    # Normalize recipients to a list
+    if isinstance(recipients, str):
+        recipients = [recipients]
 
-        if not message_body:  # If neither Text nor Html is provided, raise an error
-            raise ValueError(
-                "Either body_text or a valid template (template_path + context) is required."
+    # Prepare the message
+    msg = MIMEMultipart()
+    msg["Subject"] = subject
+    msg["From"] = sender or settings.SES_DEFAULT_SENDER
+    msg["To"] = ", ".join(recipients)
+
+    # Render HTML template if provided
+    if (html_template_path or html_template_str) and template_context:
+        try:
+            body_html = render_template(
+                template_path=html_template_path,
+                template_str=html_template_str,
+                context=template_context,
             )
-        print("FROM", sender)
-        print("TO", recipients)
-        response = ses.send_email(
-            Source=sender,
-            Destination={"ToAddresses": recipients},
-            Message={
-                "Subject": {"Data": subject},
-                "Body": message_body,
-            },
+        except Exception as e:
+            print(f"Template rendering error: {e}")
+
+    # Attach plain text body
+    if body_text:
+        msg.attach(MIMEText(body_text, "plain"))
+
+    # Attach HTML body
+    if body_html:
+        msg.attach(MIMEText(body_html, "html"))
+
+    # Attach file if provided
+    if attachment_bytes:
+        # Convert to bytes if it's a BytesIO object
+        if isinstance(attachment_bytes, io.BytesIO):
+            attachment_bytes = attachment_bytes.getvalue()
+
+        # Use a default filename if not provided
+        attachment_filename = attachment_filename or "attachment.pdf"
+
+        attachment_part = MIMEApplication(
+            attachment_bytes, _subtype=attachment_filename.split(".")[-1]
         )
+        attachment_part.add_header(
+            "Content-Disposition", "attachment", filename=attachment_filename
+        )
+        msg.attach(attachment_part)
+
+    # Create SES client
+    ses_client = boto3.client(
+        "ses",
+        region_name=aws_region,
+        aws_access_key_id=settings.SES_ACCESS_KEY,
+        aws_secret_access_key=settings.SES_SECRET_KEY,
+    )
+
+    # Send the email
+    try:
+        response = ses_client.send_raw_email(
+            Source=msg["From"],
+            Destinations=recipients,
+            RawMessage={"Data": msg.as_string()},
+        )
+        print(f"Email sent successfully! Message ID: {response['MessageId']}")
         return response
-    except (BotoCoreError, ClientError, ValueError) as e:
-        print("SES Error:", e)  # Debugging
-        return {"error": str(e)}
+    except Exception as e:
+        print(f"Error sending email: {e}")
+        raise
 
 
 def send_email_background(
     background_tasks: BackgroundTasks,
-    recipients: List[str],
+    recipients: Union[str, List[str]],
     subject: str,
-    template_path: Optional[str] = None,
-    context: Optional[Dict[str, str]] = None,
     body_text: Optional[str] = None,
+    body_html: Optional[str] = None,
+    attachment_bytes: Optional[Union[bytes, io.BytesIO]] = None,
+    attachment_filename: Optional[str] = None,
+    html_template_path: Optional[str] = None,
+    html_template_str: Optional[str] = None,
+    template_context: Optional[Dict[str, Any]] = None,
     sender: Optional[str] = None,
 ):
     """
-    Adds the email sending task to FastAPI's background tasks.
+    Add email sending task to FastAPI's background tasks.
+
+    :param background_tasks: FastAPI BackgroundTasks instance
+    :param ... (same parameters as send_email_with_attachment)
     """
-    print("send email background")
     background_tasks.add_task(
-        _send_email, recipients, subject, template_path, context, body_text, sender
+        send_email_with_attachment,
+        recipients=recipients,
+        subject=subject,
+        body_text=body_text,
+        body_html=body_html,
+        attachment_bytes=attachment_bytes,
+        attachment_filename=attachment_filename,
+        html_template_path=html_template_path,
+        html_template_str=html_template_str,
+        template_context=template_context,
+        sender=sender,
     )

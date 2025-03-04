@@ -1,5 +1,6 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import io
+import traceback
 from typing import Optional
 from fastapi import BackgroundTasks, UploadFile
 from sqlalchemy import and_, delete, exists, select, func
@@ -26,7 +27,8 @@ from app.api.users.models import Users
 from app.core.validations.schema import validate_relations
 from app.api.interests.models import Interests
 from app.core.utils.keys import generate_ticket_id, generate_slug
-from app.core.email.email import _send_email, send_email_background
+from app.core.email.email import send_email_background
+from app.api.events.background_tasks import send_registration_confirmation_email
 
 
 async def create_event(
@@ -371,8 +373,9 @@ async def register_event(
         )
 
     db_event = db_event.scalar()
+    # event = db_event
 
-    db_event = Event.model_validate(db_event, from_attributes=True)
+    # db_event = Event.model_validate(db_event, from_attributes=True)
     if db_event.max_participants:
         registered_count = await session.scalar(
             select(func.count()).where(
@@ -390,7 +393,11 @@ async def register_event(
                 400, message="Additional details required for this event"
             )
         errors = {}
-        for field in db_event.additional_details:
+        db_additional_details = [
+            EventAdditionalDetail.model_validate(additional)
+            for additional in db_event.additional_details
+        ]
+        for field in db_additional_details:
             if field.key not in additional_details.keys():
                 errors[field.key] = "This field is required"
                 continue
@@ -400,17 +407,17 @@ async def register_event(
         if errors:
             raise CustomHTTPException(400, message=errors)
 
-    existing_registration = await session.scalar(
+    registration = await session.scalar(
         select(EventRegistrationsLink).where(
             EventRegistrationsLink.event_id == db_event.id,
             EventRegistrationsLink.email == email,
             EventRegistrationsLink.is_deleted == False,
         )
     )
-    if existing_registration:
+    if registration:
         raise CustomHTTPException(400, message="Already registered for this event")
         # TODO: add service and api for updating registration info
-        if db_event.has_fee and existing_registration.is_paid:
+        if db_event.has_fee and registration.is_paid:
             raise CustomHTTPException(400, message="Already registered for this event")
     else:
         ticket_id = generate_ticket_id()
@@ -427,25 +434,48 @@ async def register_event(
             phone=phone,
         )
         session.add(registration)
-    await session.commit()
-    print(
-        _send_email(
-            # background_tasks,
-            [email],
-            f"{db_event.name} - MyOtherAPP",
-            "events/registration_confirmation.email",
-            {
-                "event_name": db_event.name,
-                "ticket_holder": full_name,
-                "ticket_id": ticket_id,
-                "event_date": db_event.event_datetime.date(),
-                "event_time": db_event.event_datetime.time(),
-                "location": db_event.location_name,
-                "payment_info": None,
-                "event_guidelines": db_event.event_guidelines,
-            },
-        )
+
+    event_endtime = (
+        db_event.event_datetime + timedelta(hours=db_event.duration)
+        if db_event.duration
+        else None
     )
+    await session.commit()
+    await session.refresh(registration)
+    db_event = await session.scalar(
+        select(Events)
+        .filter(Events.id == registration.event_id)
+        .options(joinedload(Events.club))
+    )
+    email_payload = {
+        "ticket_id": registration.ticket_id,
+        "participant_name": registration.full_name,
+        "event_name": db_event.name,
+        "event_date": db_event.event_datetime.strftime("%d %b %Y"),
+        "event_time": (
+            db_event.event_datetime.strftime("%I:%M %p")
+            + (" - " + event_endtime.strftime("%I:%M %p"))
+            if event_endtime
+            else ""
+        ),
+        "event_location": db_event.location_name,
+        "event_prizes": f"Prizes worth ₹{db_event.prize_amount}",
+        "organizer_name": db_event.club.name,
+        "contact_email": db_event.contact_email,
+        "contact_phone": db_event.contact_phone,
+    }
+    if not db_event.has_fee:
+        try:
+            background_tasks.add_task(
+                send_registration_confirmation_email,
+                recipients=[email],
+                subject=f"Ticket: {db_event.name} - MyOtherAPP",
+                payload=email_payload,
+            )
+        except Exception as e:
+            print(e)
+            traceback.print_exc()
+
     return await session.scalar(
         select(EventRegistrationsLink)
         .where(

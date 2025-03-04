@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Event Ticket - {{ email_payload.event_name }}</title>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+        font-family: "Inter", sans-serif;
+      }
+
+      body {
+        background-color: #fff;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 100vh;
+      }
+
+      .ticket-container {
+        width: 375px;
+        background-color: #1db9a0;
+        border-radius: 30px;
+        padding: 20px;
+        position: relative;
+        overflow: hidden;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+      }
+
+      .ticket {
+        background-color: #121212;
+        border-radius: 20px;
+        overflow: hidden;
+        color: white;
+        position: relative;
+      }
+
+      .ticket-header {
+        padding: 20px;
+        text-align: center;
+        position: relative;
+      }
+
+      .ticket-header h1 {
+        font-size: 24px;
+        font-weight: 700;
+        margin-bottom: 10px;
+        text-transform: uppercase;
+      }
+
+      .background-text {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-wrap: wrap;
+        opacity: 0.1;
+        overflow: hidden;
+        z-index: 0;
+      }
+
+      .background-text span {
+        font-size: 10px;
+        padding: 2px 5px;
+        white-space: nowrap;
+      }
+
+      .ticket-info {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        padding: 0 20px;
+      }
+
+      .info-box {
+        margin-bottom: 20px;
+      }
+
+      .info-box .label {
+        font-size: 12px;
+        opacity: 0.7;
+        margin-bottom: 5px;
+      }
+
+      .info-box .value {
+        font-size: 16px;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
+      .guidelines {
+        text-align: center;
+        margin: 15px 0;
+      }
+
+      .guidelines a {
+        color: #e6a64c;
+        text-decoration: none;
+        font-size: 14px;
+      }
+
+      .ticket-divider {
+        height: 2px;
+        background: repeating-linear-gradient(
+          to right,
+          transparent,
+          transparent 5px,
+          white 5px,
+          white 10px
+        );
+        margin: 15px 0;
+        position: relative;
+      }
+
+      .ticket-divider::before,
+      .ticket-divider::after {
+        content: "";
+        position: absolute;
+        width: 20px;
+        height: 20px;
+        background-color: #1db9a0;
+        border-radius: 50%;
+        top: -9px;
+      }
+
+      .ticket-divider::before {
+        left: -10px;
+      }
+
+      .ticket-divider::after {
+        right: -10px;
+      }
+
+      .qr-section {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 20px;
+      }
+
+      .qr-code {
+        width: 200px;
+        height: 200px;
+        background-color: white;
+        margin-bottom: 15px;
+      }
+
+      .qr-text {
+        text-align: center;
+        font-size: 12px;
+        max-width: 250px;
+        line-height: 1.5;
+        opacity: 0.8;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="ticket-container">
+      <div class="ticket">
+        <div class="ticket-header">
+          <div class="background-text">
+            {% for _ in range(50) %}
+            <span>Design</span>
+            <span>Passion</span>
+            <span>Developer</span>
+            <span>Networking</span>
+            <span>Time</span>
+            <span>Communication</span>
+            <span>Hackathon</span>
+            {% endfor %}
+          </div>
+          <h1>{{ email_payload.event_name }}</h1>
+
+          <div class="ticket-info">
+            <div class="info-box">
+              <div class="label">Date</div>
+              <div class="value">{{ email_payload.event_date }}</div>
+            </div>
+            <div class="info-box">
+              <div class="label">Time</div>
+              <div class="value">
+                {{ email_payload.event_time.split(' - ')[0] }}
+              </div>
+            </div>
+
+            <div class="info-box">
+              <div class="label">Location</div>
+              <div class="value">{{ email_payload.event_location }}</div>
+            </div>
+            <div class="info-box">
+              <div class="label">Ticket ID</div>
+              <div class="value">{{ email_payload.ticket_id }}</div>
+            </div>
+
+            <div class="info-box">
+              <div class="label">Ticket Holder Name</div>
+              <div class="value">{{ email_payload.participant_name }}</div>
+            </div>
+            <div class="info-box">
+              <div class="label">Ticket Type</div>
+              <div class="value">EARLY BIRD</div>
+            </div>
+          </div>
+
+          <div class="guidelines">
+            <a href="#">Check Out Guidelines</a>
+          </div>
+        </div>
+
+        <div class="ticket-divider"></div>
+
+        <div class="qr-section">
+          <div class="qr-code">
+            <!-- QR code will be generated dynamically -->
+          </div>
+          <div class="qr-text">
+            Generate this ticket at the venue to mark attendance and get other
+            complimentaries
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
