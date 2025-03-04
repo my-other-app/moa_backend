@@ -396,3 +396,16 @@ class EventRegistrationRequest(BaseModel):
     email: EmailStr = Field(...)
     phone: str | None = Field(None)
     additional_details: dict[str, str] | None = Field(None)
+
+
+class TicketDetailsResponse(BaseModel):
+    ticket_id: str
+    event: EventListResponse
+    is_paid: bool
+    actual_amount: float | None
+    paid_amount: float | None
+    payment_receipt: str | None
+    is_attended: bool
+    attended_on: datetime | None
+    user: UserPublic
+    created_at: datetime

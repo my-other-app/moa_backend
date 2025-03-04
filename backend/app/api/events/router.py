@@ -17,6 +17,7 @@ from app.api.events.schemas import (
     EventRating,
     EventRatingCreate,
     EventRegistrationRequest,
+    TicketDetailsResponse,
 )
 from app.core.auth.dependencies import (
     AdminAuth,
@@ -130,6 +131,16 @@ async def list_events(
     return paginated_response(events, request, schema=EventListResponse)
 
 
+@router.delete("/delete/{event_id}", summary="Delete an event")
+async def delete_event(
+    event_id: int,
+    user: ClubAuth,
+    session: SessionDep = SessionDep,
+):
+    await service.delete_event(session, event_id, user.id)
+    return {"message": "Event deleted successfully"}
+
+
 @router.post("/rate/{event_id}", response_model=EventRating)
 async def rate_event_endpoint(
     event_id: int,
@@ -216,4 +227,15 @@ async def get_event_registration(
     result = await service.get_registration(
         session, user_id=user.id, event_id=event_id, registration_id=registration_id
     )
+    return jsonable_encoder(result)
+
+
+@router.get("/tickets/{ticket_id}", summary="Get ticket details")
+async def get_ticket(
+    request: Request,
+    user: ClubAuth,
+    ticket_id: int | str,
+    session: SessionDep = SessionDep,
+) -> TicketDetailsResponse:
+    result = await service.get_ticket_details(session, ticket_id=ticket_id)
     return jsonable_encoder(result)

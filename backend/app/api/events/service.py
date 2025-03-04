@@ -625,3 +625,50 @@ async def rate_event(
     await session.commit()
     await session.refresh(event_rating)
     return event_rating
+
+
+async def get_ticket_details(session: AsyncSession, ticket_id: str | int):
+    is_ticket_id = (isinstance(ticket_id, str) and ticket_id.isdigit()) or isinstance(
+        ticket_id, int
+    )
+    if is_ticket_id:
+        ticket_id = int(ticket_id)
+    registration = await session.execute(
+        select(EventRegistrationsLink)
+        .filter(
+            EventRegistrationsLink.id == ticket_id
+            if is_ticket_id
+            else EventRegistrationsLink.ticket_id == ticket_id
+        )
+        .options(
+            joinedload(EventRegistrationsLink.event).options(
+                joinedload(Events.club), joinedload(Events.category)
+            ),
+            joinedload(EventRegistrationsLink.user),
+        )
+    )
+    registration = registration.scalar()
+    if registration is None:
+        raise CustomHTTPException(404, "Ticket not found")
+    return registration
+
+
+async def delete_event(session: AsyncSession, event_id: int, user_id: int):
+    db_event = await session.execute(
+        select(Events).filter(Events.id == event_id).options(joinedload(Events.club))
+    )
+    db_event = db_event.scalar()
+    if db_event is None:
+        raise CustomHTTPException(404, message="Event not found")
+    if db_event.club.user_id != user_id:
+        raise CustomHTTPException(403, message="Not authorized to delete this event")
+    registration_count = await session.scalar(
+        select(func.count(EventRegistrationsLink.id)).filter(
+            EventRegistrationsLink.event_id == event_id
+        )
+    )
+    if registration_count > 0:
+        raise CustomHTTPException(400, message="Cannot delete event with registrations")
+    db_event.soft_delete()
+    await session.commit()
+    return None

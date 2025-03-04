@@ -154,3 +154,12 @@ async def create_avatar(
     name: str = Form(...),
 ) -> UserAvatarDetail:
     return await service.create_user_avatar(session, name=name, file=avatar)
+
+
+@router.delete("/delete", summary="delete user")
+async def delete_user(
+    session: SessionDep,
+    user: UserAuth,
+) -> dict:
+    await service.delete_user(session, user.id)
+    return {"message": "User deleted successfully."}
