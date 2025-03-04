@@ -131,6 +131,16 @@ async def list_events(
     return paginated_response(events, request, schema=EventListResponse)
 
 
+@router.delete("/delete/{event_id}", summary="Delete an event")
+async def delete_event(
+    event_id: int,
+    user: ClubAuth,
+    session: SessionDep = SessionDep,
+):
+    await service.delete_event(session, event_id, user.id)
+    return {"message": "Event deleted successfully"}
+
+
 @router.post("/rate/{event_id}", response_model=EventRating)
 async def rate_event_endpoint(
     event_id: int,

@@ -20,7 +20,7 @@ from app.api.clubs.models import ClubUsersLink, Clubs
 from app.api.orgs.models import Organizations
 from app.core.validations.schema import validate_relations, validate_unique
 from app.api.interests.models import Interests
-from app.api.events.models import EventInterestsLink, Events
+from app.api.events.models import EventInterestsLink, EventRegistrationsLink, Events
 
 
 async def generate_username(user: Users, session: AsyncSession, is_guest: bool = False):
@@ -284,3 +284,28 @@ async def create_user_avatar(session: AsyncSession, name: str, file: UploadFile)
 async def list_avatars(session: AsyncSession):
     query = select(UserAvatars)
     return await session.scalars(query)
+
+
+async def delete_user(session: AsyncSession, user_id: int):
+    await validate_relations(session, {"user_id": (Users, user_id)})
+    user = await session.scalar(select(Users).where(Users.id == user_id))
+    user.soft_delete()
+    # delete user registrations
+    follows = select(ClubUsersLink).where(ClubUsersLink.user_id == user_id)
+    for follow in await session.scalars(follows):
+        follow.soft_delete()
+    registrations = select(EventRegistrationsLink).where(
+        EventRegistrationsLink.user_id == user_id
+    )
+    for registration in await session.scalars(registrations):
+        registration.soft_delete()
+    interests = select(UserInterests).where(UserInterests.user_id == user_id)
+    for interest in await session.scalars(interests):
+        interest.soft_delete()
+    profile = await session.scalar(
+        select(UserProfiles).where(UserProfiles.user_id == user_id)
+    )
+    if profile:
+        profile.soft_delete()
+    await session.commit()
+    return None
