@@ -60,6 +60,9 @@
         margin: 10px 0;
         transition: background-color 0.3s ease;
       }
+      .cta-button span {
+        color: white !important;
+      }
       .cta-button:hover {
         background-color: #45a049;
         text-decoration: none;
@@ -171,7 +174,7 @@
 
                 <p style="margin: 20px 0 10px 0;">
                   <a href="http://events.myotherapp.com/tickets/{{ ticket_id }}" class="cta-button">
-                    View Ticket
+                    <span>View Ticket</span>
                   </a>
                 </p>
 
