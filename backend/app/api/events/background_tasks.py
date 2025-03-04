@@ -10,6 +10,7 @@ def send_registration_confirmation_email(
     payload: dict,
     recipients: List[str],
 ):
+    print("sending email", subject, payload, recipients)
     # pdf_bytes = generate_pdf_bytes(
     #     template_path="events/ticket.html",
     #     context=payload,
