@@ -58,8 +58,8 @@ async def list_volunteers(
 @router.post("/checkin/{event_id}", summary="Check-in a participant for an event")
 async def checkin_participant(
     session: SessionDep, event_id: int, request: CheckinRequest, user: DependsAuth
-) -> List[ListVolunteersResponse]:
-    if volunteer := service.is_volunteer(session, user.id, event_id):
+) -> dict:
+    if volunteer := await service.is_volunteer(session, user.id, event_id):
         await service.checkin_user(
             session, event_id, ticker_id=request.ticket_id, volunteer_id=volunteer.id
         )

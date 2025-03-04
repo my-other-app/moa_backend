@@ -124,7 +124,7 @@ async def checkin_user(
     registration = await session.scalar(
         select(EventRegistrationsLink).where(
             EventRegistrationsLink.event_id == event_id,
-            EventRegistrationsLink.ticker_id == ticker_id,
+            EventRegistrationsLink.ticket_id == ticker_id,
         )
     )
     if not registration:
@@ -134,6 +134,7 @@ async def checkin_user(
     registration.is_attended = True
     registration.attended_on = datetime.now(timezone.utc)
     registration.volunteer_id = volunteer_id
+    await session.commit()
     return True
 
 

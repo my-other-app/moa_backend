@@ -18,5 +18,4 @@ class ListVolunteersResponse(BaseModel):
 
 
 class CheckinRequest(BaseModel):
-    email: str
     ticket_id: str
