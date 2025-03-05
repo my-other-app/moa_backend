@@ -43,6 +43,11 @@ on:
         required: false
         default: false
         type: boolean
+      build_backend:
+        description: "Build backend service"
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   deploy:
@@ -70,6 +75,7 @@ jobs:
           SYNC_CODE: ${{ github.event.inputs.sync_code }}
           SYNC_ENV: ${{ github.event.inputs.sync_env }}
           UP_BACKEND: ${{ github.event.inputs.up_backend }}
+          BUILD_BACKEND: ${{ github.event.inputs.build_backend }}
           ENV_VARS: ${{ secrets.PROD_ENV_VARIABLES }}
         run: |
           if [ "$SYNC_CODE" = "true" ]; then
@@ -115,9 +121,14 @@ jobs:
             sudo docker-compose -f docker-compose.prod.yml up -d postgres
           fi
 
+          if [ "$BUILD_BACKEND" = "true" ]; then
+            echo "Building backend service..."
+            sudo docker-compose -f docker-compose.prod.yml build backend
+          fi
+
           if [ "$UP_BACKEND" = "true" ]; then
             echo "Starting backend service..."
-            sudo docker-compose -f docker-compose.prod.yml up -d
+            sudo docker-compose -f docker-compose.prod.yml up backend -d
           fi
 
           if [ "$MIGRATE" = "true" ]; then
