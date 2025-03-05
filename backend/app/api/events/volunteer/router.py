@@ -3,6 +3,7 @@ from fastapi import APIRouter
 
 from app.api.events.volunteer.schemas import (
     CheckinRequest,
+    MyEventEventDetails,
     VolunteerCreateRemove,
     ListVolunteersResponse,
 )
@@ -65,3 +66,10 @@ async def checkin_participant(
         )
         return {"message": "User checked-in"}
     raise CustomHTTPException(401, "User is not a volunteer for this event")
+
+
+@router.get("/my-events", summary="List all events a user is volunteering for")
+async def my_events(
+    session: SessionDep, user: DependsAuth
+) -> List[MyEventEventDetails]:
+    return await service.get_volunteer_events(session, user.id)

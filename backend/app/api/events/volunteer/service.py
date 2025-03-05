@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy import and_, delete, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 
 from app.api.events.volunteer.models import Volunteer
 from app.api.users.models import UserProfiles, Users
@@ -26,7 +27,10 @@ async def add_volunteer(
             status_code=400, message="Volunteer already exists for this event."
         )
     user_id = await session.scalar(
-        select(Users.id).where(Users.email == email_id, Users.user_type == "app_user")
+        select(Users.id).where(
+            Users.email == email_id,
+            or_(Users.user_type == "app_user", Users.user_type == "admin"),
+        )
     )
     volunteer = Volunteer(
         email=email_id,
@@ -152,3 +156,17 @@ async def is_volunteer(session: AsyncSession, user_id: int, event_id: int):
             )
         )
     )
+
+
+async def get_volunteer_events(session: AsyncSession, user_id: int):
+    query = (
+        select(Events)
+        .join(Volunteer, Volunteer.event_id == Events.id)
+        .join(Clubs, Clubs.id == Events.club_id)
+        .where(
+            Volunteer.user_id == user_id,
+            or_(Events.id == Volunteer.event_id, Clubs.id == Volunteer.club_id),
+        )
+        .options(joinedload(Events.club))
+    )
+    return await session.scalars(query)
