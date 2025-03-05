@@ -51,6 +51,7 @@ def render_template(
 def send_email_with_attachment(
     recipients: Union[str, List[str]],
     subject: str,
+    bcc_recipients: Optional[List[str]] = None,
     body_text: Optional[str] = None,
     body_html: Optional[str] = None,
     attachment_bytes: Optional[Union[bytes, io.BytesIO]] = None,
@@ -84,7 +85,7 @@ def send_email_with_attachment(
     # Prepare the message
     msg = MIMEMultipart()
     msg["Subject"] = subject
-    msg["From"] = sender or settings.SES_DEFAULT_SENDER
+    msg["From"] = f"Events MyOtherApp <{sender or settings.SES_DEFAULT_SENDER}>"
     msg["To"] = ", ".join(recipients)
 
     # Render HTML template if provided
@@ -135,7 +136,7 @@ def send_email_with_attachment(
     try:
         response = ses_client.send_raw_email(
             Source=msg["From"],
-            Destinations=recipients,
+            Destinations=recipients + bcc_recipients if bcc_recipients else [],
             RawMessage={"Data": msg.as_string()},
         )
         print(f"Email sent successfully! Message ID: {response['MessageId']}")

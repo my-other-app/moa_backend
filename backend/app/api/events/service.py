@@ -3,6 +3,7 @@ import io
 import traceback
 from typing import Optional
 from fastapi import BackgroundTasks, UploadFile
+from pandas import DataFrame
 from sqlalchemy import and_, delete, exists, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
@@ -23,12 +24,17 @@ from app.api.events.models import (
     EventRatingsLink,
 )
 from app.api.clubs.models import ClubUsersLink, Clubs
-from app.api.users.models import Users
+from app.api.users.models import UserTypes, Users
 from app.core.validations.schema import validate_relations
 from app.api.interests.models import Interests
 from app.core.utils.keys import generate_ticket_id, generate_slug
 from app.core.email.email import send_email_background
 from app.api.events.background_tasks import send_registration_confirmation_email
+from app.api.users import service as user_service
+from app.api.models import BackgroundTaskLogs
+from app.api.service import (
+    update_background_task_log,
+)
 
 
 async def create_event(
@@ -336,13 +342,14 @@ async def list_event_categories(session: AsyncSession):
 
 async def register_event(
     session: AsyncSession,
-    background_tasks: BackgroundTasks,
     full_name: str,
     email: str,
     event_id: int | str,
     user_id: int,
     phone: str | None = None,
+    background_tasks: BackgroundTasks | None = None,
     additional_details: dict | None = None,
+    background_task_log_id: str | None = None,
 ):
     is_event_id = (isinstance(event_id, str) and event_id.isdigit()) or isinstance(
         event_id, int
@@ -466,15 +473,34 @@ async def register_event(
     }
     if not db_event.has_fee:
         try:
-            background_tasks.add_task(
-                send_registration_confirmation_email,
-                recipients=[email],
-                subject=f"Ticket: {db_event.name} - MyOtherAPP",
-                payload=email_payload,
-            )
+            if background_tasks:
+                background_tasks.add_task(
+                    send_registration_confirmation_email,
+                    recipients=[email],
+                    subject=f"Ticket: {db_event.name} - MyOtherAPP",
+                    payload=email_payload,
+                )
+            else:
+                send_registration_confirmation_email(
+                    recipients=[email],
+                    subject=f"Ticket: {db_event.name} - MyOtherAPP",
+                    payload=email_payload,
+                )
         except Exception as e:
             print(e)
             traceback.print_exc()
+            if background_task_log_id:
+                await update_background_task_log(
+                    session,
+                    background_task_log_id,
+                    new_logs=[
+                        {
+                            "level": "ERROR",
+                            "message": f"Failed to send email to {email}",
+                            "metadata": {"error": str(e)},
+                        }
+                    ],
+                )
 
     return await session.scalar(
         select(EventRegistrationsLink)
@@ -670,3 +696,145 @@ async def delete_event(session: AsyncSession, event_id: int, user_id: int):
     db_event.soft_delete()
     await session.commit()
     return None
+
+
+async def bulk_import_event_registrations(
+    session: AsyncSession,
+    event_id: Events,
+    df: DataFrame,
+    background_log: BackgroundTaskLogs,
+):
+    try:
+        # Use select to properly load the event with joined club
+        event_query = (
+            select(Events)
+            .filter(Events.id == event_id)
+            .options(joinedload(Events.club))
+        )
+        event = await session.scalar(event_query)
+
+        if not event:
+            await update_background_task_log(
+                session,
+                background_log.id,
+                new_logs=[
+                    {
+                        "level": "ERROR",
+                        "message": f"Event with ID {event.id} not found",
+                    }
+                ],
+                new_status="FAILED",
+            )
+            return
+
+        # Prepare registration logs
+        registration_logs = []
+
+        for _, row in df.iterrows():
+            try:
+                full_name = row["full_name"]
+                email = row["email"]
+                phone = str(row.get("phone", "")) if row.get("phone") else None
+
+                # Process additional details
+                additional_details = {}
+                additional_details_fields = row.get("additional_details_fields", "")
+                if additional_details_fields:
+                    for key in str(additional_details_fields).split(","):
+                        if key in row:
+                            additional_details[key] = row[key]
+
+                # Find or create user
+                user_query = (
+                    select(Users)
+                    .filter(
+                        Users.email == email,
+                        Users.is_deleted == False,
+                        Users.user_type != UserTypes.club,
+                    )
+                    .order_by(Users.created_at.desc())
+                    .limit(1)
+                )
+                user = await session.scalar(user_query)
+
+                if not user:
+                    # Create new user if not exists
+                    user = await user_service.create_user(
+                        session=session,
+                        full_name=full_name,
+                        email=email,
+                        phone=phone,
+                        provider="email",
+                        user_type=UserTypes.guest,
+                    )
+
+                if not user:
+                    registration_logs.append(
+                        {
+                            "level": "ERROR",
+                            "message": f"Failed to create or find user for '{full_name}' <{email}>",
+                        }
+                    )
+                    continue
+
+                # Register for event
+                await register_event(
+                    session=session,
+                    full_name=full_name,
+                    email=email,
+                    phone=phone,
+                    user_id=user.id,
+                    event_id=event.id,
+                    additional_details=additional_details,
+                    background_task_log_id=background_log.id,
+                )
+
+                registration_logs.append(
+                    {
+                        "level": "INFO",
+                        "message": f"Registered '{full_name}' <{email}> for '{event.name}'",
+                    }
+                )
+
+            except Exception as row_error:
+                registration_logs.append(
+                    {
+                        "level": "ERROR",
+                        "message": f"Failed to process row for '{full_name}' <{email}>",
+                        "metadata": {"error": str(row_error)},
+                    }
+                )
+
+        # Update background log with all collected logs
+        if registration_logs:
+            await update_background_task_log(
+                session,
+                background_log.id,
+                new_logs=registration_logs,
+                new_status=(
+                    "COMPLETED"
+                    if all(log["level"] == "INFO" for log in registration_logs)
+                    else "PARTIAL"
+                ),
+            )
+
+        # Commit the session
+        await session.commit()
+
+    except Exception as global_error:
+        # Handle any global unexpected errors
+        await update_background_task_log(
+            session,
+            background_log.id,
+            new_logs=[
+                {
+                    "level": "CRITICAL",
+                    "message": "Bulk import failed",
+                    "metadata": {"error": str(global_error)},
+                }
+            ],
+            new_status="FAILED",
+        )
+
+        # Re-raise the error for upper-level handling
+        # raise

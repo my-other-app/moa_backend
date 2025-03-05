@@ -1,3 +1,4 @@
+from uuid import UUID
 from fastapi import APIRouter
 from app.api.auth.router import router as auth_router
 from app.api.orgs.router import router as org_router
@@ -8,6 +9,10 @@ from app.api.interests.router import router as interests_router
 from app.api.home.router import router as home_router
 from app.api.notifications.router import router as notifications_router
 from app.api.payments.router import router as payments_router
+from app.api import service
+from app.api.schemas import BackgroundTaskLogResponseSchema
+from app.db.core import SessionDep
+from app.core.auth.dependencies import AdminAuth
 
 api_router = APIRouter(
     prefix="/api/v1",
@@ -23,3 +28,13 @@ api_router.include_router(router=interests_router, tags=["interests"])
 api_router.include_router(router=home_router, tags=["home"])
 api_router.include_router(router=notifications_router, tags=["notifications"])
 api_router.include_router(router=payments_router, tags=["payments"])
+
+
+@api_router.get("/background-task-log/{task_id}", tags=["root"])
+async def get_background_task_log(
+    task_id: UUID, session: SessionDep, user: AdminAuth
+) -> BackgroundTaskLogResponseSchema:
+    """
+    Retrieve a background task log by ID
+    """
+    return await service.get_background_task_log(session, task_id)

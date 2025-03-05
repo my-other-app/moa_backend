@@ -1,6 +1,17 @@
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, Request, Query
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Body,
+    Depends,
+    Form,
+    Request,
+    Query,
+    UploadFile,
+)
 from fastapi.encoders import jsonable_encoder
 from typing import Optional, List
+
+from sqlalchemy import select
 
 from app.db.core import SessionDep
 from app.api.events import service
@@ -35,6 +46,10 @@ from app.api.events.volunteer.router import router as volunteer_router
 from app.api.users import service as user_service
 from app.api.users.models import UserTypes
 from app.response import CustomHTTPException
+from app.core.utils.excel import read_excel
+from app.api.events.models import Events
+from app.api.schemas import BackgroundTaskLogResponseSchema
+from app.api.service import create_background_task_log
 
 router = APIRouter(prefix="/events")
 
@@ -228,6 +243,31 @@ async def get_event_registration(
         session, user_id=user.id, event_id=event_id, registration_id=registration_id
     )
     return jsonable_encoder(result)
+
+
+@router.post(
+    "/registration/{event_id}/bulk-import", summary="Bulk import user registrations"
+)
+async def bulk_import_event_registrations(
+    user: AdminAuth,
+    event_id: int,
+    background_tasks: BackgroundTasks,
+    session: SessionDep = SessionDep,
+    file: UploadFile = Form(...),
+) -> BackgroundTaskLogResponseSchema:
+    df = await read_excel(file)
+    event = await session.scalar(select(Events).filter(Events.id == event_id))
+    if not event:
+        raise CustomHTTPException(404, "Event not found")
+    background_log = await create_background_task_log(
+        session,
+        f"Bulk Import Event Registrations for '{event.name}'",
+        "event_registrations_bulk_import",
+    )
+    background_tasks.add_task(
+        service.bulk_import_event_registrations, session, event_id, df, background_log
+    )
+    return jsonable_encoder(background_log)
 
 
 @router.get("/tickets/{ticket_id}", summary="Get ticket details")

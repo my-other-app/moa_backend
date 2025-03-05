@@ -6,3 +6,4 @@ from app.api.interests.models import *
 from app.api.notifications.models import *
 from app.api.payments.models import *
 from app.api.events.volunteer.models import *
+from app.api.models import *
