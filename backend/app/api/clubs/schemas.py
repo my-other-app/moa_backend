@@ -5,9 +5,10 @@ from pydantic import BaseModel, EmailStr, Field, HttpUrl
 from app.api.users.schemas import UserPublic
 from app.core.storage.fields import S3Image
 from app.api.interests.schemas import InterestPublic
+from app.core.response.base_model import CustomBaseModel
 
 
-class ClubBaseMin(BaseModel):
+class ClubBaseMin(CustomBaseModel):
     name: str = Field(..., min_length=3, max_length=20)
     logo: dict | None = Field(None)
     location_name: str | None = Field(None)
@@ -17,14 +18,14 @@ class ClubBase(ClubBaseMin):
     about: str | None = Field(None)
 
 
-class ClubSocials(BaseModel):
+class ClubSocials(CustomBaseModel):
     instagram: HttpUrl | None = None
     linkedin: HttpUrl | None = None
     youtube: HttpUrl | None = None
     website: HttpUrl | None = None
 
 
-class ClubSocialsCreate(BaseModel):
+class ClubSocialsCreate(CustomBaseModel):
     instagram: str | None = None
     linkedin: str | None = None
     youtube: str | None = None
@@ -97,7 +98,7 @@ class UpdateClub:
         self.contact_email = contact_email
 
 
-class CreateClubAdmin(BaseModel):
+class CreateClubAdmin(CustomBaseModel):
     email: EmailStr = Field(...)
     name: str = Field(...)
 
@@ -128,7 +129,7 @@ class ClubPublicMin(ClubBaseMin):
         from_attributes = True
 
 
-class NotesBase(BaseModel):
+class NotesBase(CustomBaseModel):
     title: str = Field(...)
     note: str = Field(...)
 
@@ -146,13 +147,13 @@ class NotesPublic(NotesBase):
     club: ClubPublicMin
 
 
-class ClubFollow(BaseModel):
+class ClubFollow(CustomBaseModel):
     club_id: int
     user_id: int
     is_following: bool
 
 
-class ClubFollowPublic(BaseModel):
+class ClubFollowPublic(CustomBaseModel):
     user: UserPublic
     is_following: bool
     created_at: datetime
@@ -161,7 +162,7 @@ class ClubFollowPublic(BaseModel):
 # RESPONSE MODELS
 
 
-class ClubCreateUpdateResponse(BaseModel):
+class ClubCreateUpdateResponse(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(...)
     slug: str = Field(...)
@@ -176,14 +177,14 @@ class ClubCreateUpdateResponse(BaseModel):
     updated_at: datetime = Field(...)
 
 
-class ClubInterestDetailMin(BaseModel):
+class ClubInterestDetailMin(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(..., min_length=2)
     icon: str | None = Field(None)
     icon_type: str | None = Field(None)
 
 
-class ClubOrgDetail(BaseModel):
+class ClubOrgDetail(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(..., min_length=2)
     type: str = Field(..., min_length=2)
@@ -192,7 +193,7 @@ class ClubOrgDetail(BaseModel):
     email: str | None = Field(None)
 
 
-class ClubPublicDetailResponse(BaseModel):
+class ClubPublicDetailResponse(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(..., min_length=3, max_length=20)
     slug: str = Field(...)
@@ -211,7 +212,7 @@ class ClubPublicDetailResponse(BaseModel):
     org: ClubOrgDetail | None = Field(None)
 
 
-class ClubAdminDetailResponse(BaseModel):
+class ClubAdminDetailResponse(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(..., min_length=3, max_length=20)
     slug: str = Field(...)
@@ -224,13 +225,13 @@ class ClubAdminDetailResponse(BaseModel):
     initial_password: str | None = Field(None)
 
 
-class NoteCreateUpdateResponse(BaseModel):
+class NoteCreateUpdateResponse(CustomBaseModel):
     id: int = Field(...)
     title: str = Field(...)
     note: str = Field(...)
 
 
-class NoteListResponse(BaseModel):
+class NoteListResponse(CustomBaseModel):
     id: int = Field(...)
     title: str = Field(...)
     note: str = Field(...)
@@ -238,39 +239,39 @@ class NoteListResponse(BaseModel):
     updated_at: datetime = Field(...)
 
 
-class UserClubLinkDetailResponse(BaseModel):
+class UserClubLinkDetailResponse(CustomBaseModel):
     is_following: bool
     is_pinned: bool
     is_hidden: bool
     created_at: datetime
 
 
-class ClubUserAvatarDetail(BaseModel):
+class ClubUserAvatarDetail(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(...)
     image: dict | None = Field(None)
 
 
-class ClubUserProfileDetail(BaseModel):
+class ClubUserProfileDetail(CustomBaseModel):
     id: int = Field(...)
     avatar: ClubUserAvatarDetail | None = Field(None)
     profile_pic: dict | None = Field(None)
 
 
-class ClubFollowerDetailResponse(BaseModel):
+class ClubFollowerDetailResponse(CustomBaseModel):
     id: int = Field(...)
     full_name: str = Field(...)
     username: str = Field(...)
     profile: ClubUserProfileDetail | None = Field(None)
 
 
-class ClubFollowersListResponse(BaseModel):
+class ClubFollowersListResponse(CustomBaseModel):
     user: ClubFollowerDetailResponse
     is_following: bool
     created_at: datetime
 
 
-class ClubListResponse(BaseModel):
+class ClubListResponse(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(...)
     slug: str = Field(...)
@@ -283,7 +284,7 @@ class ClubListResponse(BaseModel):
     # org_id: int | None = Field(None)
 
 
-class ClubAdminListResponse(BaseModel):
+class ClubAdminListResponse(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(...)
     slug: str = Field(...)

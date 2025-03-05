@@ -1,29 +1,30 @@
 from pydantic import BaseModel, Field
 
 from app.api.interests.models import InterestIconType
+from app.core.response.base_model import CustomBaseModel
 
 
-class InterestCategoryCreate(BaseModel):
+class InterestCategoryCreate(CustomBaseModel):
     name: str
     icon: str | None = None
     icon_type: InterestIconType | None = None
 
 
-class InterestCreate(BaseModel):
+class InterestCreate(CustomBaseModel):
     name: str
     icon: str | None = None
     icon_type: InterestIconType | None = None
     category_id: int
 
 
-class InterestCategoryPublic(BaseModel):
+class InterestCategoryPublic(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(..., min_length=2)
     icon: str | None = Field(None)
     icon_type: str | None = Field(None)
 
 
-class InterestPublic(BaseModel):
+class InterestPublic(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(..., min_length=2)
     icon: str | None = Field(None)
@@ -37,14 +38,14 @@ class InterestPublic(BaseModel):
 # RESPONSE MODELS
 
 
-class InterestCategoryCreateUpdateResponse(BaseModel):
+class InterestCategoryCreateUpdateResponse(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(..., min_length=2)
     icon: str | None = Field(None)
     icon_type: str | None = Field(None)
 
 
-class InterestCreateUpdateResponse(BaseModel):
+class InterestCreateUpdateResponse(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(..., min_length=2)
     icon: str | None = Field(None)
@@ -52,7 +53,7 @@ class InterestCreateUpdateResponse(BaseModel):
     category_id: int
 
 
-class InterestListResponse(BaseModel):
+class InterestListResponse(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(..., min_length=2)
     icon: str | None = Field(None)
@@ -62,7 +63,7 @@ class InterestListResponse(BaseModel):
         from_attributes = True
 
 
-class InterestCategoryWiseListResponse(BaseModel):
+class InterestCategoryWiseListResponse(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(..., min_length=2)
     icon: str | None = Field(None)

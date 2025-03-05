@@ -5,7 +5,6 @@ from sqlalchemy import (
     UUID,
     Boolean,
     Column,
-    DateTime,
     Enum,
     ForeignKey,
     Integer,
@@ -21,6 +20,7 @@ from app.api.users.models import UserAvatarTypes
 from app.db.base import AbstractSQLModel
 from app.db.mixins import SoftDeleteMixin, TimestampsMixin
 from app.core.storage.fields import S3FileField, S3ImageField
+from app.core.utils.db_fields import TZAwareDateTime
 
 
 class EventCategories(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
@@ -53,7 +53,7 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         nullable=True,
     )
     images = Column(ARRAY(String), nullable=False, default=[])
-    event_datetime = Column(DateTime(timezone=True), nullable=False)
+    event_datetime = Column(TZAwareDateTime(timezone=True), nullable=False)
     has_fee = Column(Boolean, nullable=False, default=False)
     reg_fee = Column(Float, nullable=True)
     duration = Column(Float, nullable=False)
@@ -67,11 +67,11 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     url = Column(String, nullable=True)
     is_online = Column(Boolean, nullable=True)
     reg_startdate = Column(
-        DateTime(timezone=True),
+        TZAwareDateTime(timezone=True),
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
     )
-    reg_enddate = Column(DateTime(timezone=True), nullable=True)
+    reg_enddate = Column(TZAwareDateTime(timezone=True), nullable=True)
     max_participants = Column(Integer, nullable=True)
     additional_details = Column(ARRAY(JSON), nullable=True)
     event_guidelines = Column(String, nullable=True)
@@ -158,7 +158,7 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
     ticket_id = Column(String(60), nullable=False, unique=True, index=True)
 
     is_attended = Column(Boolean, nullable=False, default=False)
-    attended_on = Column(DateTime(timezone=True), nullable=True)
+    attended_on = Column(TZAwareDateTime(timezone=True), nullable=True)
     volunteer_id = Column(Integer, ForeignKey("volunteers.id"), nullable=True)
 
     is_won = Column(Boolean, nullable=False, default=False)

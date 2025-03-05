@@ -3,37 +3,38 @@ from pydantic import BaseModel, Field
 
 from app.api.clubs.schemas import ClubPublicMin, NotesPublic
 from app.api.events.schemas import EventAdditionalDetail, EventPublicMin
+from app.core.response.base_model import CustomBaseModel
 
 
-class SearchResults(BaseModel):
+class SearchResults(CustomBaseModel):
     events: list[EventPublicMin]
     clubs: list[ClubPublicMin]
     notes: list[NotesPublic]
 
 
 # RESPONSE MODEL
-class EventClubDetail(BaseModel):
+class EventClubDetail(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(...)
     slug: str = Field(...)
     logo: dict | None = Field(None)
 
 
-class EventInterestDetail(BaseModel):
+class EventInterestDetail(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(...)
     icon: str | None = Field(None)
     icon_type: str | None = Field(None)
 
 
-class EventCategoryDetail(BaseModel):
+class EventCategoryDetail(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(...)
     icon: str | None = Field(None)
     icon_type: str | None = Field(None)
 
 
-class EventListResponse(BaseModel):
+class EventListResponse(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(...)
     slug: str = Field(...)
@@ -51,7 +52,7 @@ class EventListResponse(BaseModel):
     category: EventCategoryDetail = Field(...)
 
 
-class EventDetailResponse(BaseModel):
+class EventDetailResponse(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(...)
     slug: str = Field(...)

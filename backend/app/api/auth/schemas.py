@@ -1,18 +1,19 @@
 from pydantic import BaseModel, Field
+from app.core.response.base_model import CustomBaseModel
 
 
-class Token(BaseModel):
+class Token(CustomBaseModel):
     token_type: str
     access_token: str
     refresh_token: str
 
 
-class AuthTokenData(BaseModel):
+class AuthTokenData(CustomBaseModel):
     user_id: int
     token_type: str
 
 
-class AuthUser(BaseModel):
+class AuthUser(CustomBaseModel):
     id: int
     full_name: str
     email: str
@@ -21,7 +22,7 @@ class AuthUser(BaseModel):
     user_type: str
 
 
-class GoogleSignInRequest(BaseModel):
+class GoogleSignInRequest(CustomBaseModel):
     id_token: str
     platform: str = Field(
         default="web", description="Platform type: 'web', 'android', or 'ios'"

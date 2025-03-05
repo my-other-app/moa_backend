@@ -2,15 +2,16 @@ from datetime import datetime
 from typing import List
 
 from pydantic import BaseModel, EmailStr
+from app.core.response.base_model import CustomBaseModel
 
 
-class VolunteerCreateRemove(BaseModel):
+class VolunteerCreateRemove(CustomBaseModel):
     email_id: EmailStr
     event_id: int | None = None
     club_id: int | None = None
 
 
-class ListVolunteersResponse(BaseModel):
+class ListVolunteersResponse(CustomBaseModel):
     email: str
     is_approved: bool
     user_id: int | None = None
@@ -18,18 +19,18 @@ class ListVolunteersResponse(BaseModel):
     full_name: str | None = None
 
 
-class CheckinRequest(BaseModel):
+class CheckinRequest(CustomBaseModel):
     ticket_id: str
 
 
-class MyEventsClubDetails(BaseModel):
+class MyEventsClubDetails(CustomBaseModel):
     id: int
     name: str
     slug: str
     logo: dict | None = None
 
 
-class MyEventEventDetails(BaseModel):
+class MyEventEventDetails(CustomBaseModel):
     id: int
     slug: str
     name: str
@@ -41,7 +42,7 @@ class MyEventEventDetails(BaseModel):
     club: MyEventsClubDetails
 
 
-class MyEventsResponse(BaseModel):
+class MyEventsResponse(CustomBaseModel):
     email: str
     is_approved: bool
     event: MyEventEventDetails | None = None

@@ -10,6 +10,7 @@ from app.api.clubs.schemas import ClubPublic, ClubPublicMin
 from app.api.users.schemas import UserPublic
 from app.api.interests.schemas import InterestPublic
 from app.response import CustomHTTPException
+from app.core.response.base_model import CustomBaseModel
 
 
 class FieldTypes(enum.Enum):
@@ -29,7 +30,7 @@ class FieldTypes(enum.Enum):
     image = "image"
 
 
-class EventAdditionalDetail(BaseModel):
+class EventAdditionalDetail(CustomBaseModel):
     key: str
     label: str
     field_type: FieldTypes
@@ -37,7 +38,7 @@ class EventAdditionalDetail(BaseModel):
     options: list[str] | None = None
 
 
-class EventCategoryBase(BaseModel):
+class EventCategoryBase(CustomBaseModel):
     name: str = Field(...)
     icon: str | None = Field(None)
     icon_type: str | None = Field(None)
@@ -51,7 +52,7 @@ class EventCategoryCreate(EventCategoryBase):
     pass
 
 
-class EventBaseMin(BaseModel):
+class EventBaseMin(CustomBaseModel):
     name: str = Field(min_length=3, max_length=100)
     poster: dict | None = Field(None)
     event_datetime: AwareDatetime = Field(...)
@@ -229,7 +230,7 @@ class EventEdit(EventCreate):
         )
 
 
-class EventRegistrationPublicMin(BaseModel):
+class EventRegistrationPublicMin(CustomBaseModel):
     id: str
     ticket_id: str
     is_paid: bool
@@ -242,7 +243,7 @@ class EventRegistrationPublicMin(BaseModel):
     created_at: datetime
 
 
-class EventRegistrationDetailResponse(BaseModel):
+class EventRegistrationDetailResponse(CustomBaseModel):
     id: str
     user: UserPublic
     ticket_id: str
@@ -257,7 +258,7 @@ class EventRegistrationDetailResponse(BaseModel):
     additional_details: dict | None
 
 
-class EventRatingCreate(BaseModel):
+class EventRatingCreate(CustomBaseModel):
     rating: float = Field(..., ge=0, le=5)
     review: str | None = Field(None)
 
@@ -272,35 +273,35 @@ class EventRating(EventRatingCreate):
 # RESPONSE MODELs
 
 
-class EventCategoryResponse(BaseModel):
+class EventCategoryResponse(CustomBaseModel):
     id: int
     name: str
     icon: str | None = None
     icon_type: str | None = None
 
 
-class EventClubDetail(BaseModel):
+class EventClubDetail(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(...)
     slug: str = Field(...)
     logo: dict | None = Field(None)
 
 
-class EventInterestDetail(BaseModel):
+class EventInterestDetail(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(...)
     icon: str | None = Field(None)
     icon_type: str | None = Field(None)
 
 
-class EventCategoryDetail(BaseModel):
+class EventCategoryDetail(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(...)
     icon: str | None = Field(None)
     icon_type: str | None = Field(None)
 
 
-class EventCreateUpdateResponse(BaseModel):
+class EventCreateUpdateResponse(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(...)
     slug: str = Field(...)
@@ -325,7 +326,7 @@ class EventCreateUpdateResponse(BaseModel):
     max_participants: int | None = Field(None)
 
 
-class EventListResponse(BaseModel):
+class EventListResponse(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(...)
     slug: str = Field(...)
@@ -343,7 +344,7 @@ class EventListResponse(BaseModel):
     category: EventCategoryDetail = Field(...)
 
 
-class EventListResponseSelf(BaseModel):
+class EventListResponseSelf(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(...)
     slug: str = Field(...)
@@ -360,7 +361,7 @@ class EventListResponseSelf(BaseModel):
     category: EventCategoryDetail = Field(...)
 
 
-class EventDetailResponse(BaseModel):
+class EventDetailResponse(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(...)
     slug: str = Field(...)
@@ -391,14 +392,14 @@ class EventDetailResponse(BaseModel):
 
 
 # REQUEST MODELS
-class EventRegistrationRequest(BaseModel):
+class EventRegistrationRequest(CustomBaseModel):
     full_name: str = Field(..., max_length=100, min_length=3)
     email: EmailStr = Field(...)
     phone: str | None = Field(None)
     additional_details: dict[str, str] | None = Field(None)
 
 
-class TicketDetailsResponse(BaseModel):
+class TicketDetailsResponse(CustomBaseModel):
     ticket_id: str
     event: EventListResponse
     is_paid: bool

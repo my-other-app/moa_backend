@@ -1,48 +1,50 @@
 from fastapi import Body, File, Form, UploadFile
 from pydantic import BaseModel, Field, EmailStr, HttpUrl
+
 from app.api.users.models import UserAvatarTypes
 from app.api.orgs.schema import OrganizationPublicMin
 from app.api.auth.schemas import Token
+from app.core.response.base_model import CustomBaseModel
 
 
-class AvatarPublic(BaseModel):
+class AvatarPublic(CustomBaseModel):
     id: int
     icon_type: UserAvatarTypes
     content: str
 
 
-class UserProfileBase(BaseModel):
+class UserProfileBase(CustomBaseModel):
     whatsapp: str | None = Field(None)
 
 
-# class UserProfileCreate(BaseModel):
+# class UserProfileCreate(CustomBaseModel):
 #     whatsapp: str | None = Form(None)
 #     org_id: int | None = Form(None)
 #     avatar_id: int | None = Form(None)
 #     profile_pic: UploadFile | None = File(None)
 
 
-class UserProfilePublic(BaseModel):
+class UserProfilePublic(CustomBaseModel):
     org: OrganizationPublicMin | None
     avatar: AvatarPublic | None
     profile_pic: dict | None
 
 
-class UserProfilePrivate(BaseModel):
+class UserProfilePrivate(CustomBaseModel):
     whatsapp: str | None
     org: OrganizationPublicMin | None
     avatar: AvatarPublic | None
     profile_pic: dict | None = Field(None)
 
 
-class UserBase(BaseModel):
+class UserBase(CustomBaseModel):
     full_name: str = Field(...)
     email: EmailStr = Field(...)
     phone: str | None = Field(None)
     username: str = Field(...)
 
 
-class UserCreate(BaseModel):
+class UserCreate(CustomBaseModel):
     full_name: str = Field(...)
     email: EmailStr = Field(...)
     phone: str = Field(None)
@@ -66,18 +68,18 @@ class UserInDB(UserCreate):
     password: str = Field(..., min_length=8)
 
 
-class UserAvatarSelect(BaseModel):
+class UserAvatarSelect(CustomBaseModel):
     avatar_id: int | None = Body(None)
 
 
-class UserInterestSelect(BaseModel):
+class UserInterestSelect(CustomBaseModel):
     interest_ids: list[int] = Body(...)
 
 
 # RESPONSE MODELS
 
 
-class UserOrganizationDetail(BaseModel):
+class UserOrganizationDetail(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(...)
     type: str = Field(...)
@@ -85,13 +87,13 @@ class UserOrganizationDetail(BaseModel):
     logo: dict | None = Field(None)
 
 
-class UserAvatarDetail(BaseModel):
+class UserAvatarDetail(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(...)
     image: dict | None = Field(None)
 
 
-class UserInterestDetail(BaseModel):
+class UserInterestDetail(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(...)
     icon: str | None = Field(None)
@@ -102,7 +104,7 @@ class UserRegisterResponse(Token):
     username: str
 
 
-class UserCreateResponse(BaseModel):
+class UserCreateResponse(CustomBaseModel):
     full_name: str = Field(...)
     whatsapp: str | None = Field(None)
     org_id: int | None = Field(None)
@@ -110,7 +112,7 @@ class UserCreateResponse(BaseModel):
     profile_pic: dict | None = Field(None)
 
 
-class UserProfileDetailResponse(BaseModel):
+class UserProfileDetailResponse(CustomBaseModel):
     full_name: str = Field(...)
     whatsapp: str | None = Field(None)
     org: UserOrganizationDetail | None = Field(None)
@@ -118,7 +120,7 @@ class UserProfileDetailResponse(BaseModel):
     profile_pic: dict | None = Field(None)
 
 
-class UserDetailResponse(BaseModel):
+class UserDetailResponse(CustomBaseModel):
     id: int = Field(...)
     full_name: str = Field(...)
     email: str = Field(...)
