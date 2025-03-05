@@ -52,4 +52,8 @@ class TZAwareDateTime(TypeDecorator):
         if value is None:
             return None
 
-        return value if value.tzinfo is not None else value.replace(tzinfo=IST)
+        return (
+            value.astimezone(IST)
+            if value.tzinfo is not None
+            else value.replace(tzinfo=IST)
+        )
