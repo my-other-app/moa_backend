@@ -38,6 +38,8 @@ class AppConfig(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int
     REFRESH_TOKEN_EXPIRE_DAYS: int
 
+    DISCORD_ERROR_WEBHOOK: str | None = None
+
     CORS_ORIGINS: list[str] | str
 
     APP_VERSION: str = "1.0"

@@ -1,17 +1,18 @@
 import traceback
+import uuid
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, ORJSONResponse
-from pydantic_core import ValidationError
+from fastapi.responses import ORJSONResponse
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import HTMLResponse
 from starlette import status
+from sqlalchemy.exc import StatementError
+
 from app.api.router import api_router
 from app.config import settings
 from app.db.listeners import *
 from app.response import ErrorResponse, CustomHTTPException
-from starlette.exceptions import HTTPException as StarletteHTTPException
-from sqlalchemy.exc import StatementError
+from app.core.utils.discord import notify_error
 
 application = FastAPI(default_response_class=ORJSONResponse)
 
@@ -48,16 +49,27 @@ application.add_middleware(
 #     ).get_response(status.HTTP_422_UNPROCESSABLE_ENTITY)
 
 
+@application.exception_handler(Exception)
+async def http_exception_handler(request: Request, exc: Exception):
+    track_id = str(uuid.uuid4())
+    try:
+        await notify_error(request, exc, track_id)
+    except Exception as e:
+        print("Error while sending error notification")
+        traceback.print_exc()
+    return ErrorResponse(
+        message="Internal Server Error",
+        errors={"error": "An error occurred while processing the request"},
+        track_id=track_id,
+    ).get_response(status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 @application.exception_handler(StatementError)
 async def statement_error_handler(request: Request, exc: StatementError):
     if isinstance(exc.orig, CustomHTTPException):
         raise exc.orig
-    print(exc)
-    print(traceback.format_exc())
-    return ErrorResponse(
-        message="Database error",
-        errors={"error": "An error occurred while processing the request"},
-    ).get_response(status.HTTP_500_INTERNAL_SERVER_ERROR)
+    else:
+        raise exc
 
 
 @application.exception_handler(RequestValidationError)
