@@ -28,6 +28,7 @@ from app.api.events.schemas import (
     EventRating,
     EventRatingCreate,
     EventRegistrationRequest,
+    EventRegistrationResponse,
     TicketDetailsResponse,
 )
 from app.core.auth.dependencies import (
@@ -180,7 +181,7 @@ async def register_event(
     event_id: int | str,
     user: OptionalUserAuth,
     session: SessionDep = SessionDep,
-):
+) -> EventRegistrationResponse:
     if not user:
         if not (
             user := await user_service.get_non_club_user_by_email(

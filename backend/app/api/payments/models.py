@@ -31,6 +31,7 @@ class PaymentOrders(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         UUID(as_uuid=True),
         primary_key=True,
         server_default=sa.text("gen_random_uuid()"),
+        default=sa.text("gen_random_uuid()"),
     )
     receipt = Column(String, nullable=False, index=True)
     razorpay_receipt = Column(String, nullable=True)

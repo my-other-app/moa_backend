@@ -1,6 +1,7 @@
 import enum
 import json
-from typing import Optional
+from typing import Any, Optional
+from uuid import UUID
 from fastapi import File, Form, UploadFile
 from pydantic import AwareDatetime, BaseModel, EmailStr, Field, ValidationError
 from datetime import datetime, timezone
@@ -389,6 +390,19 @@ class EventDetailResponse(CustomBaseModel):
     url: str | None = Field(None)
     event_guidelines: str | None = Field(None)
     max_participants: int | None = Field(None)
+
+
+class EventRegistrationResponse(CustomBaseModel):
+    event_name: str = Field(...)
+    event_id: int = Field(...)
+    event_registration_id: UUID = Field(...)
+    pay_amount: float = Field(...)
+    event_datetime: datetime = Field(...)
+    ticket_id: str | None = Field(None)
+    full_name: str = Field(...)
+    email: str = Field(...)
+    phone: str | None = Field(None)
+    additional_details: dict[str, Any] | None = Field(None)
 
 
 # REQUEST MODELS

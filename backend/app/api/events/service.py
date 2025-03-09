@@ -502,7 +502,7 @@ async def register_event(
                     ],
                 )
 
-    return await session.scalar(
+    data = await session.scalar(
         select(EventRegistrationsLink)
         .where(
             EventRegistrationsLink.event_id == db_event.id,
@@ -514,6 +514,19 @@ async def register_event(
             selectinload(EventRegistrationsLink.user),
         )
     )
+    payment_remining = data.actual_amount - data.paid_amount
+    return {
+        "event_name": db_event.name,
+        "event_id": db_event.id,
+        "event_registration_id": data.id,
+        "pay_amount": payment_remining,
+        "event_datetime": db_event.event_datetime,
+        "ticket_id": data.ticket_id,
+        "full_name": data.full_name,
+        "email": data.email,
+        "phone": data.phone,
+        "additional_details": data.additional_details,
+    }
 
 
 async def list_event_registrations(
