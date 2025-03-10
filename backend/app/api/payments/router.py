@@ -65,6 +65,7 @@ async def razorpay_webhook(request: Request, session: SessionDep):
     event_id = request.headers.get("X-Razorpay-Event-Id", "")
 
     request_body = await request.body()
+    request_body = request_body.decode("utf-8")
     payload = await request.json()
 
     print("Webhook Signature:", webhook_signature)
