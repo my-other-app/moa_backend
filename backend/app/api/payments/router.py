@@ -84,7 +84,7 @@ async def razorpay_webhook(request: Request, session: SessionDep):
         )
 
     return await service.handle_razorpay_webhook(
-        session, event_id=event_id, data=payload
+        session, event_id=event_id, data=payload, signature=webhook_signature
     )
 
 

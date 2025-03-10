@@ -167,12 +167,14 @@ async def verify_razorpay_payment(
     return db_payment
 
 
-async def handle_razorpay_webhook(session: AsyncSession, data: dict, event_id: str):
+async def handle_razorpay_webhook(
+    session: AsyncSession, data: dict, event_id: str, signature: str
+):
     webhook_log = RazorpayWebhookLogs(
         event_id=event_id,
         entity=data.get("entity"),
         event=data.get("event"),
-        signature=data.get("signature"),
+        signature=signature,
         payload=data.get("payload"),
     )
     session.add(webhook_log)
