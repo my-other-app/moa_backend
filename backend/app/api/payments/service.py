@@ -168,6 +168,15 @@ async def verify_razorpay_payment(
 
 
 async def handle_razorpay_webhook(session: AsyncSession, data: dict, event_id: str):
+    webhook_log = RazorpayWebhookLogs(
+        event_id=event_id,
+        entity=data.get("entity"),
+        event=data.get("event"),
+        signature=data.get("signature"),
+        payload=data.get("payload"),
+    )
+    session.add(webhook_log)
+
     webhook_event = await session.scalar(
         select(RazorpayWebhookLogs).where(RazorpayWebhookLogs.event_id == event_id)
     )
@@ -181,22 +190,13 @@ async def handle_razorpay_webhook(session: AsyncSession, data: dict, event_id: s
     payment_id = payload.get("id")
     order_id = payload.get("order_id")
 
-    db_payment = await verify_razorpay_payment(
+    await verify_razorpay_payment(
         session=session,
         razorpay_order_id=order_id,
         razorpay_payment_id=payment_id,
         payment_details=payload,
         expand_payment_details=False,
     )
-
-    RazorpayWebhookLogs(
-        event_id=event_id,
-        entity=data.get("entity"),
-        event=data.get("event"),
-        signature=data.get("signature"),
-        payload=data.get("payload"),
-    )
-    session.add(db_payment)
 
     await session.commit()
 
