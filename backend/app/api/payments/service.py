@@ -80,7 +80,7 @@ async def verify_razorpay_payment(
     payment_details: dict | None = None,
     expand_payment_details: bool = True,
     background_tasks: BackgroundTasks | None = None,
-    send_receipt: bool = False,
+    send_receipt: bool = True,
 ):
     order = await session.scalar(
         select(PaymentOrders).where(
