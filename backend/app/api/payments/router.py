@@ -67,12 +67,18 @@ async def razorpay_webhook(request: Request, session: SessionDep):
     request_body = await request.body()
     payload = await request.json()
 
+    print("Webhook Signature:", webhook_signature)
+    print("Event ID:", event_id)
+    print("Request Body:", request_body)
+    print("Payload:", payload)
+
     try:
         if not service.razorpay_client.utility.verify_webhook_signature(
             request_body, webhook_signature, settings.RAZORPAY_WEBHOOK_SECRET
         ):
             raise Exception("Invalid webhook signature")
     except Exception as e:
+        raise e
         raise HTTPException(
             status_code=400, detail=f"Invalid webhook signature: {str(e)}"
         )
