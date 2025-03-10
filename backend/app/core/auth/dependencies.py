@@ -108,8 +108,11 @@ def check_user_type(required_roles: Union[str, List[str]], optional=False):
     return role_checker
 
 
-DependsAuth = Annotated[Users, Depends(check_user_type(["app_user", "club", "admin"]))]
+DependsAuth = Annotated[
+    Users, Depends(check_user_type(["guest", "app_user", "club", "admin"]))
+]
 UserAuth = Annotated[Users, Depends(check_user_type(["app_user", "admin"]))]
+GuestAuth = Annotated[Users, Depends(check_user_type(["guest", "app_user", "admin"]))]
 ClubAuth = Annotated[Users, Depends(check_user_type(["club", "admin"]))]
 AdminAuth = Annotated[Users, Depends(check_user_type(["admin"]))]
 
