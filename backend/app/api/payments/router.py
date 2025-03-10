@@ -79,12 +79,13 @@ async def razorpay_webhook(request: Request, session: SessionDep):
         ):
             raise Exception("Invalid webhook signature")
     except Exception as e:
-        raise e
         raise HTTPException(
             status_code=400, detail=f"Invalid webhook signature: {str(e)}"
         )
 
-    return await service.handle_razorpay_webhook(session, event_id, payload)
+    return await service.handle_razorpay_webhook(
+        session, event_id=event_id, data=payload
+    )
 
 
 # @router.get("/orders/{order_id}", response_model=OrderResponse)
