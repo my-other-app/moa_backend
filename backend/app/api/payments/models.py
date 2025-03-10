@@ -54,6 +54,7 @@ class PaymentLogs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         UUID(as_uuid=True),
         primary_key=True,
         server_default=sa.text("gen_random_uuid()"),
+        default=sa.text("gen_random_uuid()"),
     )
     order_id = Column(
         UUID(as_uuid=True), ForeignKey("payment_orders.id"), nullable=False
@@ -74,6 +75,7 @@ class RazorpayWebhookLogs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         UUID(as_uuid=True),
         primary_key=True,
         server_default=sa.text("gen_random_uuid()"),
+        default=sa.text("gen_random_uuid()"),
     )
     event_id = Column(String, nullable=False, index=True, unique=True)
     entity = Column(String, nullable=False)

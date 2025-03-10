@@ -27,6 +27,7 @@ class Notifications(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         UUID(as_uuid=True),
         primary_key=True,
         server_default=sa.text("gen_random_uuid()"),
+        default=sa.text("gen_random_uuid()"),
     )
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     title = Column(String, nullable=False)

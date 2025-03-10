@@ -1,3 +1,4 @@
+from datetime import timedelta
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -51,6 +52,7 @@ from app.core.utils.excel import read_excel
 from app.api.events.models import Events
 from app.api.schemas import BackgroundTaskLogResponseSchema
 from app.api.service import create_background_task_log
+from app.api.auth import service as auth_service
 
 router = APIRouter(prefix="/events")
 
@@ -182,13 +184,14 @@ async def register_event(
     user: OptionalUserAuth,
     session: SessionDep = SessionDep,
 ) -> EventRegistrationResponse:
+    response = {}
+
     if not user:
         if not (
             user := await user_service.get_non_club_user_by_email(
                 session, registration.email
             )
         ):
-            print("no user")
             user = await user_service.create_user(
                 session=session,
                 full_name=registration.full_name,
@@ -197,9 +200,17 @@ async def register_event(
                 provider="email",
                 user_type=UserTypes.guest,
             )
-    if not user:
-        raise CustomHTTPException(400, "User not found")
-    return await service.register_event(
+
+        if not user:
+            raise CustomHTTPException(400, "User not found")
+        if user.user_type != UserTypes.guest:
+            raise CustomHTTPException(
+                400, "This email is already registered, please login to continue"
+            )
+
+        token = await auth_service.create_access_refresh_tokens(user)
+        response["auth_token"] = token
+    register_data = await service.register_event(
         session=session,
         background_tasks=background_tasks,
         full_name=registration.full_name,
@@ -209,6 +220,8 @@ async def register_event(
         event_id=event_id,
         additional_details=registration.additional_details,
     )
+    response = {**response, **register_data}
+    return response
 
 
 @router.get("/registration/{event_id}/list", summary="Get event registration details")

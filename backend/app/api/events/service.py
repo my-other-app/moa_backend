@@ -380,6 +380,8 @@ async def register_event(
         )
 
     db_event = db_event.scalar()
+    if not db_event:
+        raise CustomHTTPException(404, message="Event not found")
     # event = db_event
 
     # db_event = Event.model_validate(db_event, from_attributes=True)

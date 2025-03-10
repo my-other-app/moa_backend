@@ -12,6 +12,7 @@ from app.api.users.schemas import UserPublic
 from app.api.interests.schemas import InterestPublic
 from app.response import CustomHTTPException
 from app.core.response.base_model import CustomBaseModel
+from app.api.auth.schemas import Token
 
 
 class FieldTypes(enum.Enum):
@@ -403,6 +404,7 @@ class EventRegistrationResponse(CustomBaseModel):
     email: str = Field(...)
     phone: str | None = Field(None)
     additional_details: dict[str, Any] | None = Field(None)
+    auth_token: Token | None = Field(None)
 
 
 # REQUEST MODELS

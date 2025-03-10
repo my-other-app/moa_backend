@@ -13,6 +13,7 @@ class BackgroundTaskLogs(AbstractSQLModel, TimestampsMixin):
         UUID(as_uuid=True),
         primary_key=True,
         server_default=sa.text("gen_random_uuid()"),
+        default=sa.text("gen_random_uuid()"),
     )
     task_name = Column(sa.String, nullable=False)
     task_type = Column(sa.String(100), nullable=False)

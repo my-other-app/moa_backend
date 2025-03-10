@@ -17,7 +17,8 @@ from app.core.utils.discord import notify_error
 application = FastAPI(default_response_class=ORJSONResponse)
 
 application.include_router(router=api_router)
-
+# print(settings.cors_origins)
+# if settings.DEBUG:
 application.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,

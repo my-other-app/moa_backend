@@ -101,6 +101,7 @@ class EventFiles(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         UUID(as_uuid=True),
         primary_key=True,
         server_default=sa.text("gen_random_uuid()"),
+        default=sa.text("gen_random_uuid()"),
     )
     event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
     file = Column(
@@ -147,6 +148,7 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
         UUID(as_uuid=True),
         primary_key=True,
         server_default=sa.text("gen_random_uuid()"),
+        default=sa.text("gen_random_uuid()"),
     )
     event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
@@ -184,6 +186,7 @@ class EventRatingsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         UUID(as_uuid=True),
         primary_key=True,
         server_default=sa.text("gen_random_uuid()"),
+        default=sa.text("gen_random_uuid()"),
     )
     event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
