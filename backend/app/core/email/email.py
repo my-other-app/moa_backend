@@ -61,6 +61,7 @@ def send_email_with_attachment(
     template_context: Optional[Dict[str, Any]] = None,
     sender: Optional[str] = None,
     aws_region: str = "ap-south-1",
+    sender_name: Optional[str] = None,
 ) -> Dict:
     """
     Send an email with optional attachment and HTML template.
@@ -85,7 +86,9 @@ def send_email_with_attachment(
     # Prepare the message
     msg = MIMEMultipart()
     msg["Subject"] = subject
-    msg["From"] = f"Events MyOtherApp <{sender or settings.SES_DEFAULT_SENDER}>"
+    msg["From"] = (
+        f"{sender_name or 'MyOtherApp'} <{sender or settings.SES_DEFAULT_SENDER}>"
+    )
     msg["To"] = ", ".join(recipients)
 
     # Render HTML template if provided

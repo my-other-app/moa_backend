@@ -1,5 +1,5 @@
 from fastapi.encoders import jsonable_encoder
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from app.config import settings
 from app.api.payments.schemas import (
     OrderCreateRequest,
@@ -39,13 +39,16 @@ async def create_order(
 
 @router.post("/verify", summary="Verify a payment")
 async def verify_payment(
-    request: PaymentVerifyRequest, session: SessionDep
+    request: PaymentVerifyRequest,
+    session: SessionDep,
+    background_tasks: BackgroundTasks,
 ) -> PaymentVerifyResponse:
 
     payment = await service.verify_razorpay_payment(
         session=session,
         razorpay_order_id=request.razorpay_order_id,
         razorpay_payment_id=request.razorpay_payment_id,
+        background_tasks=background_tasks,
     )
 
     if not payment:

@@ -1,0 +1,172 @@
+{% set logo_url =
+"https://raw.githubusercontent.com/SrutavTarun/MyOtherApp_Template/refs/heads/main/logo.png"
+%}
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Payment Receipt</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        line-height: 1.6;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+        color: #333;
+      }
+      .container {
+        width: 90%;
+        max-width: 800px;
+        margin: 20px auto;
+        padding: 30px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+      }
+      .header {
+        text-align: center;
+        margin-bottom: 30px;
+        padding-bottom: 20px;
+        border-bottom: 2px solid #f0f0f0;
+      }
+      .logo {
+        margin-bottom: 15px;
+      }
+      .receipt-title {
+        font-size: 24px;
+        color: #444;
+        margin: 10px 0;
+      }
+      .receipt-number {
+        color: #777;
+        font-size: 14px;
+      }
+      .receipt-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 20px 0;
+      }
+      .receipt-table th,
+      .receipt-table td {
+        border: 1px solid #ddd;
+        padding: 12px;
+        text-align: left;
+      }
+      .receipt-table th {
+        background-color: #f8f8f8;
+        font-weight: bold;
+      }
+      .amount-row {
+        font-weight: bold;
+        background-color: #f5f5f5;
+      }
+      .footer {
+        margin-top: 30px;
+        padding-top: 20px;
+        border-top: 2px solid #f0f0f0;
+        text-align: center;
+        font-size: 14px;
+        color: #777;
+      }
+      .company-info {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 20px;
+      }
+      .company-details {
+        font-size: 14px;
+        text-align: right;
+      }
+      .payment-status {
+        display: inline-block;
+        padding: 5px 10px;
+        background-color: #4caf50;
+        color: white;
+        border-radius: 4px;
+        font-weight: bold;
+        margin-top: 10px;
+      }
+      @media print {
+        body {
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="company-info">
+        <div class="logo">
+          <img src="{{ logo_url }}" alt="MyOtherApp Logo" width="150" />
+        </div>
+        <div class="company-details">
+          <p>
+            MyOtherApp.<br />
+            Kazhakootam, Trivandrum, Kerala, India<br />
+            support@myotherapp.com
+          </p>
+        </div>
+      </div>
+
+      <div class="header">
+        <h1 class="receipt-title">Payment Receipt</h1>
+        <div class="receipt-number">Receipt ID: {{ receipt_id }}</div>
+        <div class="payment-status">PAID</div>
+      </div>
+
+      <table class="receipt-table">
+        <tr>
+          <th colspan="2">Customer Information</th>
+        </tr>
+        <tr>
+          <th>Name</th>
+          <td>{{ payer_name }}</td>
+        </tr>
+        <tr>
+          <th>Email</th>
+          <td>{{ payer_email }}</td>
+        </tr>
+        <tr>
+          <th>Phone</th>
+          <td>{{ payer_phone }}</td>
+        </tr>
+
+        <tr>
+          <th colspan="2">Payment Details</th>
+        </tr>
+        <tr>
+          <th>Date & Time</th>
+          <td>{{ timestamp }}</td>
+        </tr>
+        <tr>
+          <th>Payment Method</th>
+          <td>{{ payment_method }}</td>
+        </tr>
+        <tr>
+          <th>Purpose</th>
+          <td>{{ purpose }}</td>
+        </tr>
+        <tr class="amount-row">
+          <th>Amount Paid</th>
+          <td>{{ amount }}</td>
+        </tr>
+
+        <tr>
+          <th>Notes</th>
+          <td>{{ notes }}</td>
+        </tr>
+      </table>
+
+      <div class="footer">
+        <p>Thank you for your payment!</p>
+        <p>
+          This is an automatically generated receipt. For questions or support,
+          please contact us at support@myotherapp.com
+        </p>
+        <p>© {{ current_year }} MyOtherApp. All rights reserved.</p>
+      </div>
+    </div>
+  </body>
+</html>

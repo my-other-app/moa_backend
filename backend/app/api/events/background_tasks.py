@@ -21,6 +21,8 @@ def send_registration_confirmation_email(
         subject=subject,
         html_template_path="events/registration_confirmation.email",
         template_context=payload,
+        sender_name="Myotherapp Events",
+        sender="events@myotherapp.com",
         # attachment_bytes=pdf_bytes,
         # attachment_filename=f"{payload.get('ticket_id')}-ticket.pdf",
     )

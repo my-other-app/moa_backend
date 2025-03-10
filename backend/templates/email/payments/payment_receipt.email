@@ -1,0 +1,87 @@
+{% set logo_url =
+    "https://raw.githubusercontent.com/SrutavTarun/MyOtherApp_Template/refs/heads/main/logo.png"
+%}
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Payment Receipt</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            width: 90%;
+            max-width: 600px;
+            margin: auto;
+            padding: 20px;
+        }
+        .logo {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .content {
+            margin-bottom: 25px;
+        }
+        .highlight {
+            font-weight: bold;
+            color: #2c5282;
+        }
+        .summary-box {
+            background-color: #f8f9fa;
+            border-left: 4px solid #4299e1;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        .footer {
+            margin-top: 30px;
+            padding-top: 15px;
+            border-top: 1px solid #eee;
+            font-size: 13px;
+            color: #666;
+        }
+        .signature {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">
+            <img src="{{ logo_url }}" alt="MyOtherApp Logo" width="150">
+        </div>
+        
+        <div class="content">
+            <p>Hi {{ payer_name }},</p>
+            
+            <p>Thank you for your payment. Your transaction has been successfully processed.</p>
+            
+            <div class="summary-box">
+                <p><strong>Payment Summary:</strong></p>
+                <p>Amount: <span class="highlight">{{ amount }}</span><br>
+                Purpose: {{ purpose }}<br>
+                Receipt ID: <span class="highlight">{{ receipt_id }}</span><br>
+                Date: {{ timestamp }}</p>
+            </div>
+            
+            <p>The complete receipt is attached to this email as a PDF file for your records.</p>
+            
+            <p>If you have any questions about this payment, please reply to this email or contact our support team.</p>
+        </div>
+        
+        <div class="signature">
+            <p>Thanks,<br>
+            <strong>MyOtherApp Team</strong></p>
+        </div>
+        
+        <div class="footer">
+            <p>This is an automated message. Please do not reply directly to this email.</p>
+            <p>© MyOtherApp Inc. All rights reserved.</p>
+        </div>
+    </div>
+</body>
+</html>

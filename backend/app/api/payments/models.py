@@ -45,6 +45,7 @@ class PaymentOrders(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     payload = Column(JSON, nullable=False)
 
     payment_logs = relationship("PaymentLogs", back_populates="order")
+    user = relationship("Users")
 
 
 class PaymentLogs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):

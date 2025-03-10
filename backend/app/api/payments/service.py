@@ -1,6 +1,9 @@
+from datetime import datetime
 import hashlib
 import hmac
 import time
+import traceback
+from fastapi import BackgroundTasks
 import razorpay
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +19,7 @@ from app.api.payments.models import (
 )
 from app.core.validations.exceptions import RequestValidationError
 from app.config import settings
+from app.api.payments.background_tasks import send_payment_confirmation_email
 
 razorpay_client = razorpay.Client(
     auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
@@ -75,15 +79,14 @@ async def verify_razorpay_payment(
     razorpay_payment_id: str,
     payment_details: dict | None = None,
     expand_payment_details: bool = True,
+    background_tasks: BackgroundTasks | None = None,
+    send_receipt: bool = False,
 ):
     order = await session.scalar(
         select(PaymentOrders).where(
             PaymentOrders.razorpay_order_id == razorpay_order_id
         )
     )
-
-    if order.status == OrderStatus.paid:
-        raise RequestValidationError(razorpay_order_id="Order already paid")
 
     db_payment = await session.scalar(
         select(PaymentLogs)
@@ -93,6 +96,9 @@ async def verify_razorpay_payment(
 
     if db_payment and db_payment.status == PaymentStatus.captured:
         return db_payment
+
+    if order.status == OrderStatus.paid:
+        raise RequestValidationError(razorpay_order_id="Order already paid")
 
     if not db_payment:
         db_payment = PaymentLogs(
@@ -151,6 +157,36 @@ async def verify_razorpay_payment(
         await session.commit()
         await session.refresh(order)
         await handle_post_payment(session, order)
+        if send_receipt:
+            await session.refresh(db_payment)
+            await session.refresh(order)
+            order = await session.scalar(
+                select(PaymentOrders)
+                .where(PaymentOrders.id == order.id)
+                .options(joinedload(PaymentOrders.user))
+            )
+            try:
+                if order.user:
+                    send_payment_confirmation_email(
+                        subject="Payment Receipt",
+                        payload={
+                            "payer_name": order.user.full_name,
+                            "payer_email": order.user.email,
+                            "payer_phone": order.user.phone or "N/A",
+                            "amount": f"₹{order.amount}",
+                            "receipt_id": order.receipt,
+                            "payment_method": db_payment.payment_method,
+                            "timestamp": db_payment.created_at,
+                            "purpose": "Event Registration",
+                            "notes": "N/A",
+                            "current_year": datetime.now().year,
+                        },
+                        recipients=[order.user.email],
+                        background_tasks=background_tasks,
+                    )
+            except Exception as e:
+                traceback.print_exc()
+                print("Error sending email:", str(e))
     else:
         db_payment.status = payment_status
         db_payment.amount = payment_details.get("amount", 0)
