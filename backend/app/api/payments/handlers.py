@@ -102,10 +102,10 @@ async def handle_event_registration_payment(
         event_registration.is_paid = total_paid >= event_registration.actual_amount
         event_registration.paid_amount = total_paid
         await session.commit()
+        await session.refresh(event_registration)
         if not event_registration.is_paid:
             return True
         try:
-            await session.refresh(event_registration)
             db_event = await session.scalar(
                 select(Events)
                 .filter(Events.id == event_registration.event_id)
