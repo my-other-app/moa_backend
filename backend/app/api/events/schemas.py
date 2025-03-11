@@ -232,34 +232,6 @@ class EventEdit(EventCreate):
         )
 
 
-class EventRegistrationPublicMin(CustomBaseModel):
-    id: str
-    ticket_id: str
-    is_paid: bool
-    full_name: str
-    email: str
-    phone: str | None = None
-    actual_amount: float
-    paid_amount: float
-    user: UserPublic
-    created_at: datetime
-
-
-class EventRegistrationDetailResponse(CustomBaseModel):
-    id: str
-    user: UserPublic
-    ticket_id: str
-    is_paid: bool
-    actual_amount: float
-    paid_amount: float
-    payment_receipt: str | None
-    created_at: datetime
-    updated_at: datetime
-    is_won: bool
-    position: int | None
-    additional_details: dict | None
-
-
 class EventRatingCreate(CustomBaseModel):
     rating: float = Field(..., ge=0, le=5)
     review: str | None = Field(None)
@@ -393,26 +365,7 @@ class EventDetailResponse(CustomBaseModel):
     max_participants: int | None = Field(None)
 
 
-class EventRegistrationResponse(CustomBaseModel):
-    event_name: str = Field(...)
-    event_id: int = Field(...)
-    event_registration_id: UUID = Field(...)
-    pay_amount: float = Field(...)
-    event_datetime: datetime = Field(...)
-    ticket_id: str | None = Field(None)
-    full_name: str = Field(...)
-    email: str = Field(...)
-    phone: str | None = Field(None)
-    additional_details: dict[str, Any] | None = Field(None)
-    auth_token: Token | None = Field(None)
-
-
 # REQUEST MODELS
-class EventRegistrationRequest(CustomBaseModel):
-    full_name: str = Field(..., max_length=100, min_length=3)
-    email: EmailStr = Field(...)
-    phone: str | None = Field(None)
-    additional_details: dict[str, str] | None = Field(None)
 
 
 class TicketDetailsResponse(CustomBaseModel):

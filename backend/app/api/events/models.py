@@ -175,6 +175,7 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
 
     event = relationship("Events", back_populates="registrations")
     user = relationship("Users")
+    volunteer = relationship("Volunteer")
 
     __table_args__ = (UniqueConstraint("event_id", "user_id", "is_deleted"),)
 

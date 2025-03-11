@@ -1,18 +1,11 @@
-from datetime import timedelta
 from fastapi import (
     APIRouter,
-    BackgroundTasks,
-    Body,
     Depends,
-    Form,
     Request,
     Query,
-    UploadFile,
 )
 from fastapi.encoders import jsonable_encoder
 from typing import Optional, List
-
-from sqlalchemy import select
 
 from app.db.core import SessionDep
 from app.api.events import service
@@ -24,19 +17,14 @@ from app.api.events.schemas import (
     EventDetailResponse,
     EventEdit,
     EventListResponse,
-    EventRegistrationDetailResponse,
-    EventRegistrationPublicMin,
     EventRating,
     EventRatingCreate,
-    EventRegistrationRequest,
-    EventRegistrationResponse,
     TicketDetailsResponse,
 )
 from app.core.auth.dependencies import (
     AdminAuth,
     ClubAuth,
     DependsAuth,
-    OptionalUserAuth,
     UserAuth,
 )
 from app.core.response.pagination import (
@@ -45,18 +33,12 @@ from app.core.response.pagination import (
     paginated_response,
 )
 from app.api.events.volunteer.router import router as volunteer_router
-from app.api.users import service as user_service
-from app.api.users.models import UserTypes
-from app.response import CustomHTTPException
-from app.core.utils.excel import read_excel
-from app.api.events.models import Events
-from app.api.schemas import BackgroundTaskLogResponseSchema
-from app.api.service import create_background_task_log
-from app.api.auth import service as auth_service
+from app.api.events.registration.router import router as registration_router
 
 router = APIRouter(prefix="/events")
 
 router.include_router(volunteer_router, tags=["Volunteer"])
+router.include_router(registration_router, tags=["Registration"])
 
 
 @router.post("/categories/create", summary="Create a new event category")
@@ -174,114 +156,6 @@ async def rate_event_endpoint(
         rating=rating_data.rating,
         review=rating_data.review,
     )
-
-
-@router.post("/registration/{event_id}/register", summary="Register for an event")
-async def register_event(
-    background_tasks: BackgroundTasks,
-    registration: EventRegistrationRequest,
-    event_id: int | str,
-    user: OptionalUserAuth,
-    session: SessionDep = SessionDep,
-) -> EventRegistrationResponse:
-    response = {}
-
-    if not user:
-        if not (
-            user := await user_service.get_non_club_user_by_email(
-                session, registration.email
-            )
-        ):
-            user = await user_service.create_user(
-                session=session,
-                full_name=registration.full_name,
-                email=registration.email,
-                phone=registration.phone,
-                provider="email",
-                user_type=UserTypes.guest,
-            )
-
-        if not user:
-            raise CustomHTTPException(400, "User not found")
-        if user.user_type != UserTypes.guest:
-            raise CustomHTTPException(
-                400, "This email is already registered, please login to continue"
-            )
-
-        token = await auth_service.create_access_refresh_tokens(user)
-        response["auth_token"] = token
-    register_data = await service.register_event(
-        session=session,
-        background_tasks=background_tasks,
-        full_name=registration.full_name,
-        email=registration.email,
-        phone=registration.phone,
-        user_id=user.id,
-        event_id=event_id,
-        additional_details=registration.additional_details,
-    )
-    response = {**response, **register_data}
-    return response
-
-
-@router.get("/registration/{event_id}/list", summary="Get event registration details")
-async def list_event_registration(
-    request: Request,
-    user: ClubAuth,
-    pagination: PaginationParams,
-    event_id: int,
-    session: SessionDep = SessionDep,
-) -> PaginatedResponse[EventRegistrationPublicMin]:
-    result = await service.list_event_registrations(
-        session,
-        user_id=user.id,
-        event_id=event_id,
-        limit=pagination.limit,
-        offset=pagination.offset,
-    )
-    return paginated_response(result, request, EventRegistrationPublicMin)
-
-
-@router.get(
-    "/registration/{event_id}/info/{registration_id}",
-    summary="Get event registration details",
-)
-async def get_event_registration(
-    request: Request,
-    user: ClubAuth,
-    event_id: int,
-    registration_id: str,
-    session: SessionDep = SessionDep,
-) -> EventRegistrationDetailResponse:
-    result = await service.get_registration(
-        session, user_id=user.id, event_id=event_id, registration_id=registration_id
-    )
-    return jsonable_encoder(result)
-
-
-@router.post(
-    "/registration/{event_id}/bulk-import", summary="Bulk import user registrations"
-)
-async def bulk_import_event_registrations(
-    user: AdminAuth,
-    event_id: int,
-    background_tasks: BackgroundTasks,
-    session: SessionDep = SessionDep,
-    file: UploadFile = Form(...),
-) -> BackgroundTaskLogResponseSchema:
-    df = await read_excel(file)
-    event = await session.scalar(select(Events).filter(Events.id == event_id))
-    if not event:
-        raise CustomHTTPException(404, "Event not found")
-    background_log = await create_background_task_log(
-        session,
-        f"Bulk Import Event Registrations for '{event.name}'",
-        "event_registrations_bulk_import",
-    )
-    background_tasks.add_task(
-        service.bulk_import_event_registrations, session, event_id, df, background_log
-    )
-    return jsonable_encoder(background_log)
 
 
 @router.get("/tickets/{ticket_id}", summary="Get ticket details")

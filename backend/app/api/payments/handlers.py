@@ -6,7 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.api.payments.models import PaymentLogs, PaymentOrders, PaymentStatus
-from app.api.events.background_tasks import send_registration_confirmation_email
+from app.api.events.registration.background_tasks import (
+    send_registration_confirmation_email,
+)
 
 
 async def validate_event_registration_payload(session: AsyncSession, payload: dict):
