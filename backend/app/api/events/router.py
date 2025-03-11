@@ -25,6 +25,7 @@ from app.core.auth.dependencies import (
     AdminAuth,
     ClubAuth,
     DependsAuth,
+    OptionalAuth,
     UserAuth,
 )
 from app.core.response.pagination import (
@@ -166,3 +167,19 @@ async def get_ticket(
 ) -> TicketDetailsResponse:
     result = await service.get_ticket_details(session, ticket_id=ticket_id)
     return jsonable_encoder(result)
+
+
+@router.get("/count-view/{event_id}", summary="Increment event view count")
+async def increment_view_count(
+    request: Request,
+    event_id: str,
+    session: SessionDep = SessionDep,
+    user: OptionalAuth = None,
+) -> dict:
+    if event_id.isdigit():
+        event_id = int(event_id)
+
+    await service.increment_event_page_view(
+        session, event_id=event_id, user_id=user.id if user else None, request=request
+    )
+    return {"message": "Done"}

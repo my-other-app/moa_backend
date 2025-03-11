@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 import io
 from typing import Optional
-from fastapi import UploadFile
+from fastapi import Request, UploadFile
 from sqlalchemy import and_, delete, exists, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
@@ -16,6 +16,7 @@ from app.api.events.schemas import (
 from app.api.events.models import (
     EventCategories,
     EventInterestsLink,
+    EventPageViews,
     EventRegistrationsLink,
     Events,
     EventRatingsLink,
@@ -447,4 +448,45 @@ async def delete_event(session: AsyncSession, event_id: int, user_id: int):
         raise CustomHTTPException(400, message="Cannot delete event with registrations")
     db_event.soft_delete()
     await session.commit()
+    return None
+
+
+async def increment_event_page_view(
+    session: AsyncSession,
+    request: Request,
+    event_id: int | str,
+    user_id: int | None = None,
+):
+    db_event = await session.execute(
+        select(Events)
+        .filter(
+            Events.id == event_id
+            if isinstance(event_id, int)
+            else Events.slug == event_id
+        )
+        .options(joinedload(Events.club))
+    )
+    db_event = db_event.scalar()
+    if db_event is None:
+        raise CustomHTTPException(404, message="Event not found")
+    if not user_id or (user_id and user_id != db_event.club.user_id):
+        db_event.page_views += 1
+        # await session.commit()
+
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        client_ip = forwarded_for.split(",")[0].strip()
+    else:
+        client_ip = request.client.host
+
+    event_view = EventPageViews(
+        event_id=event_id,
+        user_agent=request.headers.get("User-Agent"),
+        ip_address=client_ip,
+        user_id=user_id,
+    )
+    session.add(event_view)
+
+    await session.commit()
+
     return None

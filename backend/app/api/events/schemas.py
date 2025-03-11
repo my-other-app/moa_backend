@@ -67,6 +67,7 @@ class EventBaseMin(CustomBaseModel):
     is_online: bool = Field(False)
     reg_startdate: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     reg_enddate: datetime | None = Field(None)
+    page_views: int = Field(0)
 
 
 class EventBase(EventBaseMin):
@@ -316,6 +317,7 @@ class EventListResponse(CustomBaseModel):
     reg_enddate: datetime | None = Field(None)
     club: EventClubDetail = Field(...)
     category: EventCategoryDetail = Field(...)
+    page_views: int = Field(0)
 
 
 class EventListResponseSelf(CustomBaseModel):
@@ -333,6 +335,7 @@ class EventListResponseSelf(CustomBaseModel):
     reg_startdate: datetime = Field(...)
     reg_enddate: datetime | None = Field(None)
     category: EventCategoryDetail = Field(...)
+    page_views: int = Field(0)
 
 
 class EventDetailResponse(CustomBaseModel):
@@ -363,6 +366,7 @@ class EventDetailResponse(CustomBaseModel):
     url: str | None = Field(None)
     event_guidelines: str | None = Field(None)
     max_participants: int | None = Field(None)
+    page_views: int = Field(0)
 
 
 # REQUEST MODELS

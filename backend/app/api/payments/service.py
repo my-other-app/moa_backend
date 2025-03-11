@@ -214,6 +214,7 @@ async def handle_razorpay_webhook(
         payload=data.get("payload"),
     )
     session.add(webhook_log)
+    await session.commit()
 
     webhook_event = await session.scalar(
         select(RazorpayWebhookLogs).where(RazorpayWebhookLogs.event_id == event_id)

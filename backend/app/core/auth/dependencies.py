@@ -124,3 +124,8 @@ VolunteerAuth = Annotated[
 OptionalUserAuth = Annotated[
     Optional[Users], Depends(check_user_type(["app_user", "admin"], optional=True))
 ]
+
+OptionalAuth = Annotated[
+    Optional[Users],
+    Depends(check_user_type(["guest", "app_user", "club", "admin"], optional=True)),
+]

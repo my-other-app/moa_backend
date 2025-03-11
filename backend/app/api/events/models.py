@@ -75,6 +75,7 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     max_participants = Column(Integer, nullable=True)
     additional_details = Column(ARRAY(JSON), nullable=True)
     event_guidelines = Column(String, nullable=True)
+    page_views = Column(Integer, nullable=False, default=0)
 
     category_id = Column(Integer, ForeignKey("event_categories.id"), nullable=False)
     club_id = Column(Integer, ForeignKey("clubs.id"), nullable=True)
@@ -128,6 +129,24 @@ class EventFiles(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     description = Column(String, nullable=True)
 
     event = relationship("Events", back_populates="files")
+
+
+class EventPageViews(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
+    __tablename__ = "event_page_views"
+
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=sa.text("gen_random_uuid()"),
+        default=sa.text("gen_random_uuid()"),
+    )
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
+    user_agent = Column(String, nullable=True)
+    ip_address = Column(String, nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    event = relationship("Events")
+    user = relationship("Users")
 
 
 class EventInterestsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
