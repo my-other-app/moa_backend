@@ -46,6 +46,7 @@ async def create_event(
     reg_enddate: Optional[datetime] = None,
     images: list[str] = [],
     about: Optional[str] = None,
+    contact_name: Optional[str] = None,
     contact_phone: Optional[str] = None,
     contact_email: Optional[str] = None,
     url: Optional[str] = None,
@@ -97,6 +98,7 @@ async def create_event(
         reg_enddate=reg_enddate,
         images=images,
         about=about,
+        contact_name=contact_name,
         contact_phone=contact_phone,
         contact_email=contact_email,
         url=url,
@@ -181,6 +183,7 @@ async def update_event(
     db_event.reg_startdate = event.reg_startdate
     db_event.reg_enddate = event.reg_enddate
     db_event.about = event.about
+    db_event.contact_name = event.contact_name
     db_event.contact_phone = event.contact_phone
     db_event.contact_email = event.contact_email
     db_event.additional_details = [

@@ -77,6 +77,7 @@ async def create_event(
         reg_startdate=event.reg_startdate,
         reg_enddate=event.reg_enddate,
         about=event.about,
+        contact_name=event.contact_name,
         contact_phone=event.contact_phone,
         contact_email=event.contact_email,
         url=event.url,

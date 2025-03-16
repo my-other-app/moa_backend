@@ -62,6 +62,7 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     location_link = Column(String, nullable=True)
     has_prize = Column(Boolean, nullable=False, default=False)
     prize_amount = Column(Float, nullable=True)
+    contact_name = Column(String, nullable=True)
     contact_phone = Column(String, nullable=True)
     contact_email = Column(String, nullable=True)
     url = Column(String, nullable=True)

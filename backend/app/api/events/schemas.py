@@ -122,6 +122,7 @@ class EventCreate:
         reg_enddate: Optional[str] = Form(None),  # ISO format string
         # images: Optional[str] = Form("[]"),  # JSON string
         about: Optional[str] = Form(None),
+        contact_name: Optional[str] = Form(None),
         contact_phone: Optional[str] = Form(None),
         contact_email: Optional[str] = Form(None),
         url: Optional[str] = Form(None),
@@ -146,6 +147,7 @@ class EventCreate:
         self.reg_enddate = datetime.fromisoformat(reg_enddate) if reg_enddate else None
         # self.images = json.loads(images)  # Convert JSON string to list
         self.about = about
+        self.contact_name = contact_name
         self.contact_phone = contact_phone
         self.contact_email = contact_email
         self.url = url
@@ -196,6 +198,7 @@ class EventEdit(EventCreate):
         reg_enddate: Optional[str] = Form(None),  # ISO format string
         # images: Optional[str] = Form("[]"),  # JSON string
         about: Optional[str] = Form(None),
+        contact_name: Optional[str] = Form(None),
         contact_phone: Optional[str] = Form(None),
         contact_email: Optional[str] = Form(None),
         url: Optional[str] = Form(None),
@@ -221,6 +224,7 @@ class EventEdit(EventCreate):
             reg_enddate=reg_enddate,
             # images,
             about=about,
+            contact_name=contact_name,
             contact_phone=contact_phone,
             contact_email=contact_email,
             url=url,
@@ -361,6 +365,7 @@ class EventDetailResponse(CustomBaseModel):
     rating: float = Field(...)
     total_rating: int = Field(...)
     about: str | None = Field(None)
+    contact_name: str | None = Field(None)
     contact_phone: str | None = Field(None)
     contact_email: str | None = Field(None)
     url: str | None = Field(None)
