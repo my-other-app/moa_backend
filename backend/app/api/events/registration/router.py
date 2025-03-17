@@ -65,6 +65,12 @@ async def register_event(
 
         token = await auth_service.create_access_refresh_tokens(user)
         response["auth_token"] = token
+    if user.user_type != UserTypes.guest:
+        if registration.email != user.email:
+            raise CustomHTTPException(
+                400, "Email does not match with the logged in user email"
+            )
+        registration.email = user.email
     register_data = await service.register_event(
         session=session,
         background_tasks=background_tasks,
@@ -197,16 +203,16 @@ async def bulk_import_event_registrations(
     return jsonable_encoder(background_log)
 
 
-@router.get("/{event_id}/attendance", summary="Get event attendance details")
-async def get_event_attendance(
-    request: Request,
-    user: ClubAuth,
-    event_id: int,
-    session: SessionDep = SessionDep,
-) -> PaginatedResponse[EventRegistrationPublicMin]:
-    result = await service.get_event_attendance(
-        session,
-        user_id=user.id,
-        event_id=event_id,
-    )
-    return paginated_response(result, request, EventRegistrationPublicMin)
+# @router.get("/{event_id}/attendance", summary="Get event attendance details")
+# async def get_event_attendance(
+#     request: Request,
+#     user: ClubAuth,
+#     event_id: int,
+#     session: SessionDep = SessionDep,
+# ) -> PaginatedResponse[EventRegistrationPublicMin]:
+#     result = await service.get_event_attendance(
+#         session,
+#         user_id=user.id,
+#         event_id=event_id,
+#     )
+#     return paginated_response(result, request, EventRegistrationPublicMin)

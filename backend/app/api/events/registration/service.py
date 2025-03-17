@@ -86,6 +86,7 @@ async def register_event(
             EventAdditionalDetail.model_validate(additional)
             for additional in db_event.additional_details
         ]
+        validated_additional_details = {}
         for field in db_additional_details:
             if field.key not in additional_details.keys():
                 errors[field.key] = "This field is required"
@@ -93,8 +94,10 @@ async def register_event(
             if field.field_type.value in ("select", "radio", "checkbox"):
                 if additional_details[field.key] not in field.options:
                     errors[field.key] = "Invalid option selected"
+            validated_additional_details[field.key] = additional_details[field.key]
         if errors:
             raise CustomHTTPException(400, message=errors)
+        additional_details = validated_additional_details
 
     registration = await session.scalar(
         select(EventRegistrationsLink).where(
@@ -276,7 +279,11 @@ async def get_registration(
         .where(
             EventRegistrationsLink.event_id == event_id,
             EventRegistrationsLink.is_deleted == False,
-            EventRegistrationsLink.id == registration_id,
+            (
+                EventRegistrationsLink.ticket_id == registration_id
+                if registration_id.startswith("MOA")
+                else EventRegistrationsLink.id == registration_id
+            ),
         )
         .options(
             joinedload(EventRegistrationsLink.event).options(
