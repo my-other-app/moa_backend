@@ -13,6 +13,7 @@ from app.config import settings
 from app.db.listeners import *
 from app.response import ErrorResponse, CustomHTTPException
 from app.core.utils.discord import notify_error
+from app.core.middlewares.process_time_middleware import ProcessingTimeMiddleware
 
 application = FastAPI(default_response_class=ORJSONResponse)
 
@@ -26,7 +27,7 @@ application.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
+application.add_middleware(ProcessingTimeMiddleware)
 
 # @application.exception_handler(ValidationError)
 # async def validation_exception_handler2(request, exc):
