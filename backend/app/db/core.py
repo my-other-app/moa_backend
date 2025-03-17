@@ -1,3 +1,5 @@
+import logging
+import os
 from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
@@ -18,3 +20,19 @@ async def get_session():
 
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+# setup logging for sqlalchamey
+
+logging.basicConfig()
+logger = logging.getLogger("sqlalchemy.engine")
+logger.setLevel(logging.INFO)
+
+os.makedirs("logs", exist_ok=True)
+
+file_handler = logging.FileHandler("logs/sql.log")
+file_handler.setLevel(logging.INFO)
+
+formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+file_handler.setFormatter(formatter)
+
+logger.addHandler(file_handler)
