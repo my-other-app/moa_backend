@@ -126,15 +126,21 @@ async def checkin_user(
     """Check-in a participant for an event."""
 
     registration = await session.scalar(
-        select(EventRegistrationsLink).where(
+        select(EventRegistrationsLink)
+        .where(
             EventRegistrationsLink.event_id == event_id,
             EventRegistrationsLink.ticket_id == ticker_id,
         )
+        .options(joinedload(EventRegistrationsLink.event))
     )
     if not registration:
         raise CustomHTTPException(400, "Registration not found")
     if registration.is_attended:
         raise CustomHTTPException(400, "User already checked-in")
+    if registration.event.has_fee and not registration.is_paid:
+        raise CustomHTTPException(
+            400, "User has not paid the fee, Please verify the payment details."
+        )
     registration.is_attended = True
     registration.attended_on = datetime.now(timezone.utc)
     registration.volunteer_id = volunteer_id
