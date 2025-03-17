@@ -1,3 +1,4 @@
+from datetime import datetime
 from fastapi import Body, File, Form, UploadFile
 from pydantic import BaseModel, Field, EmailStr, HttpUrl
 
@@ -129,3 +130,49 @@ class UserDetailResponse(CustomBaseModel):
     user_type: str = Field(...)
     profile: UserProfileDetailResponse | None = Field(None)
     interests: list[UserInterestDetail] | None = Field(None)
+
+
+# Response Model
+
+
+class UserEventCategoryDetail(CustomBaseModel):
+    id: int = Field(...)
+    name: str = Field(...)
+    icon: str | None = Field(None)
+    icon_type: str | None = Field(None)
+
+
+class UserEventClubDetail(CustomBaseModel):
+    id: int = Field(...)
+    name: str = Field(...)
+    slug: str = Field(...)
+    logo: dict | None = Field(None)
+
+
+class UserEventList(CustomBaseModel):
+    id: int = Field(...)
+    name: str = Field(...)
+    slug: str = Field(...)
+    poster: dict | None = Field(None)
+    event_datetime: datetime = Field(...)
+    duration: float = Field(...)
+    location_name: str | None = Field(None)
+    has_fee: bool = Field(...)
+    has_prize: bool = Field(True)
+    prize_amount: float | None = Field(None)
+    is_online: bool = Field(False)
+    reg_startdate: datetime = Field(...)
+    reg_enddate: datetime | None = Field(None)
+    club: UserEventClubDetail = Field(...)
+    category: UserEventCategoryDetail = Field(...)
+
+
+class UserRegisteredEvents(CustomBaseModel):
+    full_name: str = Field(...)
+    email: str = Field(...)
+    phone: str | None = Field(None)
+    ticket_id: str = Field(...)
+    is_paid: bool = Field(...)
+    actual_amount: float | None = Field(None)
+    paid_amount: float | None = Field(None)
+    event: UserEventList = Field(...)

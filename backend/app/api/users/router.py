@@ -1,5 +1,5 @@
 from typing import List
-from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi import APIRouter, File, Form, Query, Request, UploadFile
 
 from app.api.users.schemas import (
     UserAvatarDetail,
@@ -8,10 +8,8 @@ from app.api.users.schemas import (
     UserCreateResponse,
     UserDetailResponse,
     UserInterestSelect,
-    UserPrivate,
-    UserProfileDetailResponse,
-    UserProfilePublic,
     UserRegisterResponse,
+    UserRegisteredEvents,
 )
 from app.db.core import SessionDep
 from app.api.users import service
@@ -163,3 +161,25 @@ async def delete_user(
 ) -> dict:
     await service.delete_user(session, user.id)
     return {"message": "User deleted successfully."}
+
+
+@router.get("/my-events", summary="Get all events user is attending")
+async def get_my_events(
+    request: Request,
+    session: SessionDep,
+    pagination: PaginationParams,
+    user: UserAuth,
+    is_attended: bool = Query(False),
+    is_paid: bool = Query(False),
+    is_won: bool = Query(False),
+) -> PaginatedResponse[UserRegisteredEvents]:
+    events = await service.list_registered_events(
+        session,
+        user.id,
+        is_attended=is_attended,
+        is_paid=is_paid,
+        is_won=is_won,
+        limit=pagination.limit,
+        offset=pagination.offset,
+    )
+    return paginated_response(events, request=request, schema=UserRegisteredEvents)

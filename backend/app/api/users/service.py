@@ -309,3 +309,32 @@ async def delete_user(session: AsyncSession, user_id: int):
         profile.soft_delete()
     await session.commit()
     return None
+
+
+async def list_registered_events(
+    session: AsyncSession,
+    user_id: int,
+    is_attended: bool | None = None,
+    is_paid: bool | None = None,
+    is_won: bool | None = None,
+    limit: int = 10,
+    offset: int = 0,
+):
+    query = (
+        select(EventRegistrationsLink)
+        .where(EventRegistrationsLink.user_id == user_id)
+        .options(
+            joinedload(EventRegistrationsLink.event).options(
+                joinedload(Events.club), joinedload(Events.category)
+            )
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+    if is_paid is not None:
+        query = query.where(EventRegistrationsLink.is_paid == is_paid)
+    if is_attended is not None:
+        query = query.where(EventRegistrationsLink.is_attended == is_attended)
+    if is_won is not None:
+        query = query.where(EventRegistrationsLink.is_won == is_won)
+    return (await session.scalars(query)).all()
