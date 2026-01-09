@@ -342,6 +342,12 @@ class EventListResponseSelf(CustomBaseModel):
     page_views: int = Field(0)
 
 
+class EventFileResponse(CustomBaseModel):
+    """Response model for event files/downloads."""
+    name: str
+    url: str
+
+
 class EventDetailResponse(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(...)
@@ -372,6 +378,16 @@ class EventDetailResponse(CustomBaseModel):
     event_guidelines: str | None = Field(None)
     max_participants: int | None = Field(None)
     page_views: int = Field(0)
+    # User-specific fields (only populated when authenticated)
+    is_registered: bool = Field(False)
+    is_attended: bool = Field(False)
+    ticket_id: str | None = Field(None)
+    ticket_url: str | None = Field(None)
+    certificate_url: str | None = Field(None)
+    user_rating: float | None = Field(None)
+    user_position: int | None = Field(None)
+    position_label: str | None = Field(None)
+    downloads: list[EventFileResponse] | None = Field(None)
 
 
 # REQUEST MODELS

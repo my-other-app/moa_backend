@@ -100,9 +100,13 @@ async def update_event(
 
 @router.get("/info/{event_id}", summary="Get event info")
 async def get_event(
-    event_id: str, session: SessionDep = SessionDep
+    event_id: str,
+    session: SessionDep = SessionDep,
+    user: OptionalAuth = None,
 ) -> EventDetailResponse:
-    result = await service.get_event(session, event_id)
+    result = await service.get_event(
+        session, event_id, user_id=user.id if user else None
+    )
     data = jsonable_encoder(result)
     return data
 

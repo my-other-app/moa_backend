@@ -15,6 +15,7 @@ from app.api.events.schemas import (
 )
 from app.api.events.models import (
     EventCategories,
+    EventFiles,
     EventInterestsLink,
     EventPageViews,
     EventRegistrationsLink,
@@ -206,7 +207,7 @@ async def update_event(
     return db_event.scalar_one()
 
 
-async def get_event(session: AsyncSession, event_id: str | int):
+async def get_event(session: AsyncSession, event_id: str | int, user_id: int | None = None):
     is_event_id = (isinstance(event_id, str) and event_id.isdigit()) or isinstance(
         event_id, int
     )
@@ -231,6 +232,7 @@ async def get_event(session: AsyncSession, event_id: str | int):
             selectinload(Events.category),
             selectinload(Events.club),
             selectinload(Events.interests).options(joinedload(Interests.category)),
+            selectinload(Events.files),  # Load event files for downloads
         )
     )
     db_event = db_event.first()
@@ -239,9 +241,57 @@ async def get_event(session: AsyncSession, event_id: str | int):
         raise CustomHTTPException(404, message="Event not found")
 
     print(db_event)
-    data = db_event[0].__dict__
+    event = db_event[0]
+    data = event.__dict__
     data["rating"] = db_event[1]
     data["total_rating"] = db_event[2]
+    
+    # Get event files (downloads) - available to all users
+    data["downloads"] = [
+        {"name": f.name, "url": f.file} 
+        for f in event.files if not f.is_deleted
+    ] if event.files else []
+
+    # User-specific data (only if user is authenticated)
+    if user_id:
+        # Check registration status
+        registration = await session.scalar(
+            select(EventRegistrationsLink).where(
+                EventRegistrationsLink.event_id == event.id,
+                EventRegistrationsLink.user_id == user_id,
+                EventRegistrationsLink.is_deleted == False,
+            )
+        )
+        if registration:
+            data["is_registered"] = True
+            data["is_attended"] = registration.is_attended
+            data["ticket_id"] = registration.ticket_id
+            data["user_position"] = registration.position
+            # Build URLs from ticket_id
+            data["ticket_url"] = f"/api/v1/events/tickets/{registration.ticket_id}"
+            if registration.is_attended:
+                data["certificate_url"] = f"/api/v1/events/certificates/{registration.ticket_id}"
+            # Position label based on position
+            if registration.position:
+                if registration.position == 1:
+                    data["position_label"] = "Winner"
+                elif registration.position == 2:
+                    data["position_label"] = "First Runner Up"
+                elif registration.position == 3:
+                    data["position_label"] = "Second Runner Up"
+                else:
+                    data["position_label"] = f"{registration.position}th Place"
+        
+        # Check user's rating for this event
+        user_rating = await session.scalar(
+            select(EventRatingsLink).where(
+                EventRatingsLink.event_id == event.id,
+                EventRatingsLink.user_id == user_id,
+                EventRatingsLink.is_deleted == False,
+            )
+        )
+        if user_rating:
+            data["user_rating"] = user_rating.rating
 
     return data
 
