@@ -1,5 +1,5 @@
 from datetime import timedelta
-import traceback
+import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from google.oauth2 import id_token
 from google.auth.transport import requests
@@ -11,8 +11,9 @@ from app.api.users.service import create_user
 from sqlalchemy import select
 
 from app.api.auth.schemas import AuthTokenData, Token
-from app.config import settings
 from app.response import CustomHTTPException
+
+logger = logging.getLogger(__name__)
 
 ACCESS_TOKEN_EXPIRE_MINUTES = settings.ACCESS_TOKEN_EXPIRE_MINUTES
 REFRESH_TOKEN_EXPIRE_DAYS = settings.REFRESH_TOKEN_EXPIRE_DAYS
@@ -40,7 +41,9 @@ async def google_signin(
 
         query = await session.execute(
             select(Users).where(
-                Users.email == email, Users.user_type == UserTypes.app_user
+                Users.email == email, 
+                Users.user_type == UserTypes.app_user,
+                Users.is_deleted == False,
             )
         )
         user = query.scalar_one_or_none()
@@ -63,7 +66,7 @@ async def google_signin(
             status_code=401, message="Invalid authentication credentials"
         )
     except Exception as e:
-        traceback.print_exc()
+        logger.exception("Google signin error")
         raise CustomHTTPException(status_code=500, message="Internal Server Error")
 
 

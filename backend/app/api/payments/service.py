@@ -21,9 +21,13 @@ from app.core.validations.exceptions import RequestValidationError
 from app.config import settings
 from app.api.payments.background_tasks import send_payment_confirmation_email
 
+import logging
+
 razorpay_client = razorpay.Client(
     auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
 )
+
+logger = logging.getLogger(__name__)
 
 
 async def create_razorpay_order(
@@ -35,7 +39,6 @@ async def create_razorpay_order(
 
     current_timestamp = int(time.time())
     receipt = f"{db_receipt}#{current_timestamp}"
-    print(receipt)
 
     existing_order = await session.scalar(
         select(PaymentOrders).where(PaymentOrders.receipt == db_receipt)
@@ -185,8 +188,7 @@ async def verify_razorpay_payment(
                         background_tasks=background_tasks,
                     )
             except Exception as e:
-                traceback.print_exc()
-                print("Error sending email:", str(e))
+                logger.exception("Error sending payment confirmation email")
     else:
         db_payment.status = payment_status
         db_payment.amount = payment_details.get("amount", 0)

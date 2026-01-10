@@ -146,7 +146,9 @@ async def update_event(
     session: AsyncSession, event: EventEdit, user_id: int, event_id: int
 ):
     db_event = await session.execute(
-        select(Events).options(joinedload(Events.club)).filter(Events.id == event_id)
+        select(Events)
+        .options(joinedload(Events.club))
+        .filter(Events.id == event_id, Events.is_deleted == False)
     )
     db_event = db_event.scalar()
     if db_event is None:
@@ -218,7 +220,10 @@ async def get_event(session: AsyncSession, event_id: str | int, user_id: int | N
             func.coalesce(func.avg(EventRatingsLink.rating), 0.0).label("rating"),
             func.coalesce(func.count(EventRatingsLink.id), 0).label("total_rating"),
         )
-        .where(EventRatingsLink.event_id == Events.id)
+        .where(
+            EventRatingsLink.event_id == Events.id,
+            EventRatingsLink.is_deleted == False,
+        )
         .subquery()
     )
     db_event = await session.execute(
@@ -227,7 +232,10 @@ async def get_event(session: AsyncSession, event_id: str | int, user_id: int | N
             ratings_subquery.c.rating.label("rating"),
             ratings_subquery.c.total_rating.label("total_rating"),
         )
-        .filter(Events.id == event_id if is_event_id else Events.slug == event_id)
+        .filter(
+            Events.is_deleted == False,
+            Events.id == event_id if is_event_id else Events.slug == event_id
+        )
         .options(
             selectinload(Events.category),
             selectinload(Events.club),

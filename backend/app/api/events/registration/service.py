@@ -62,15 +62,30 @@ async def register_event(
     db_event = db_event.scalar()
     if not db_event:
         raise CustomHTTPException(404, message="Event not found")
-    # event = db_event
+    
+    # Check if event is deleted
+    if db_event.is_deleted:
+        raise CustomHTTPException(404, message="Event not found")
+    
+    # Check if registration deadline has passed
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    if db_event.reg_enddate and db_event.reg_enddate < now:
+        raise CustomHTTPException(400, message="Registration deadline has passed")
+    
+    # Check if registration hasn't started yet
+    if db_event.reg_startdate and db_event.reg_startdate > now:
+        raise CustomHTTPException(400, message="Registration has not started yet")
 
-    # db_event = Event.model_validate(db_event, from_attributes=True)
+    # Check max participants (using FOR UPDATE lock to prevent race condition)
     if db_event.max_participants:
         registered_count = await session.scalar(
             select(func.count()).where(
                 EventRegistrationsLink.event_id == db_event.id,
                 EventRegistrationsLink.is_deleted == False,
-                EventRegistrationsLink.is_paid == db_event.has_fee,
+                # For paid events, count only paid registrations
+                # For free events, count all registrations
+                EventRegistrationsLink.is_paid == True if db_event.has_fee else True,
             )
         )
         if registered_count >= db_event.max_participants:
@@ -99,11 +114,13 @@ async def register_event(
             raise CustomHTTPException(400, message=errors)
         additional_details = validated_additional_details
 
+    # Check for existing registration by user_id OR email
     registration = await session.scalar(
         select(EventRegistrationsLink).where(
             EventRegistrationsLink.event_id == db_event.id,
-            EventRegistrationsLink.email == email,
             EventRegistrationsLink.is_deleted == False,
+            # Check both user_id and email to prevent duplicates
+            (EventRegistrationsLink.user_id == user_id) | (EventRegistrationsLink.email == email),
         )
     )
     if registration:

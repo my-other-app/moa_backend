@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import logging
 from sqlalchemy import exists, func, select
 from app.core.validations.exceptions import RequestValidationError
 from app.api.events.models import Events, EventRegistrationsLink
@@ -9,6 +10,8 @@ from app.api.payments.models import PaymentLogs, PaymentOrders, PaymentStatus
 from app.api.events.registration.background_tasks import (
     send_registration_confirmation_email,
 )
+
+logger = logging.getLogger(__name__)
 
 
 async def validate_event_registration_payload(session: AsyncSession, payload: dict):
@@ -77,17 +80,10 @@ async def handle_event_registration_payment(
             )
         )
 
+
         if not event_registration:
             raise RequestValidationError(receipt="receipt is invalid")
-        print(order.id, event_registration.id)
-        print(
-            await session.scalar(
-                select(PaymentLogs).where(
-                    PaymentLogs.order_id == order.id,
-                    PaymentLogs.status == PaymentStatus.captured,
-                )
-            )
-        )
+        
         total_paid = (
             await session.scalar(
                 select(func.sum(PaymentLogs.amount)).where(
@@ -98,8 +94,6 @@ async def handle_event_registration_payment(
             or 0
         )
         total_paid /= 100
-
-        print("TOTAL:ACTUAL", total_paid, event_registration.actual_amount)
 
         event_registration.is_paid = total_paid >= event_registration.actual_amount
         event_registration.paid_amount = total_paid
@@ -141,7 +135,7 @@ async def handle_event_registration_payment(
                 payload=email_payload,
             )
         except Exception as e:
-            print("Error sending email", e)
+            logger.exception("Error sending registration confirmation email")
         return True
     except Exception as e:
         raise e

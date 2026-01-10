@@ -48,7 +48,11 @@ async def generate_username(user: Users, session: AsyncSession, is_guest: bool =
 async def get_non_club_user_by_email(session: AsyncSession, email: str):
     query = (
         select(Users)
-        .where(Users.email == email, Users.user_type != UserTypes.club)
+        .where(
+            Users.email == email, 
+            Users.user_type != UserTypes.club,
+            Users.is_deleted == False,
+        )
         .order_by(Users.id.desc())
         .limit(1)
     )
@@ -104,9 +108,9 @@ async def create_user(
 async def following_clubs(
     session: AsyncSession, user_id: int, limit: int = 10, offset: int = 0
 ):
-    user_exists = await session.scalar(select(exists().where(Users.id == user_id)))
+    user_exists = await session.scalar(select(exists().where(Users.id == user_id, Users.is_deleted == False)))
     if not user_exists:
-        raise CustomHTTPException(status_code=401, message="Unauthorized")
+        raise CustomHTTPException(status_code=404, message="User not found")
     query = (
         select(Clubs)
         .join(ClubUsersLink, ClubUsersLink.club_id == Clubs.id)
@@ -322,7 +326,10 @@ async def list_registered_events(
 ):
     query = (
         select(EventRegistrationsLink)
-        .where(EventRegistrationsLink.user_id == user_id)
+        .where(
+            EventRegistrationsLink.user_id == user_id,
+            EventRegistrationsLink.is_deleted == False,
+        )
         .options(
             joinedload(EventRegistrationsLink.event).options(
                 joinedload(Events.club), joinedload(Events.category)

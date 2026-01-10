@@ -74,7 +74,7 @@ async def create_club(
         location_name=location_name,
         user_id=club_user.id,
         is_verified=is_admin_created,
-        initial_password=password if is_admin_created else None,
+        # Note: initial_password removed for security - use password reset flow instead
     )
 
     if logo:
@@ -150,7 +150,9 @@ async def update_club(session: AsyncSession, club_id: int, club: CreateClub):
 
 
 async def get_club(club_id: int, session: AsyncSession):
-    db_club = await session.get(Clubs, club_id)
+    db_club = await session.scalar(
+        select(Clubs).where(Clubs.id == club_id, Clubs.is_deleted == False)
+    )
     if not db_club:
         raise CustomHTTPException(404, "Club not found")
     return db_club
@@ -331,13 +333,13 @@ async def create_note(
 async def list_notes(
     session: AsyncSession, club_id: int, limit: int = 10, offset: int = 0
 ):
-    club_exists = await session.scalar(select(exists().where(Clubs.id == club_id)))
+    club_exists = await session.scalar(select(exists().where(Clubs.id == club_id, Clubs.is_deleted == False)))
     if not club_exists:
-        raise CustomHTTPException(status_code=400, message="Invalid club")
+        raise CustomHTTPException(status_code=404, message=\"Club not found\")
 
     query = (
         select(Notes)
-        .where(Notes.club_id == club_id)
+        .where(Notes.club_id == club_id, Notes.is_deleted == False)
         .order_by(Notes.created_at.desc())
         .limit(limit)
         .offset(offset)
@@ -522,14 +524,14 @@ async def create_or_update_club_socials(
 async def get_club_events(
     session: AsyncSession, club_id: int, limit: int = 10, offset: int = 0
 ):
-    """Get events of a club."""
+    \"\"\"Get events of a club.\"\"\"
     query = (
         select(Events)
-        .where(Events.club_id == club_id)
+        .where(Events.club_id == club_id, Events.is_deleted == False)
         .options(
             joinedload(Events.category),
         )
-        .order_by(Events.created_at.desc())
+        .order_by(Events.event_datetime.desc())
         .limit(limit)
         .offset(offset)
     )
