@@ -243,7 +243,7 @@ class EventRatingCreate(CustomBaseModel):
 
 
 class EventRating(EventRatingCreate):
-    id: str
+    id: UUID
     event_id: int
     user_id: int
     created_at: datetime
