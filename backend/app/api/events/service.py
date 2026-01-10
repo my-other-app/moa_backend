@@ -419,6 +419,39 @@ async def rate_event(
         },
     )
 
+    # Get event and club
+    event = await session.scalar(
+        select(Events)
+        .where(Events.id == event_id, Events.is_deleted == False)
+        .options(joinedload(Events.club))
+    )
+    if not event:
+        raise CustomHTTPException(404, "Event not found")
+
+    if not event.club:
+        raise CustomHTTPException(400, "Event not associated with a club")
+    
+    # Check if event has ended
+    from datetime import datetime, timezone, timedelta
+    event_end_time = event.event_datetime + timedelta(hours=event.duration) if event.duration else event.event_datetime
+    if datetime.now(timezone.utc) < event_end_time:
+        raise CustomHTTPException(400, message="You can only rate events after they have ended")
+    
+    # Check if user was registered for the event
+    user_registration = await session.scalar(
+        select(EventRegistrationsLink).where(
+            EventRegistrationsLink.event_id == event_id,
+            EventRegistrationsLink.user_id == user_id,
+            EventRegistrationsLink.is_deleted == False,
+        )
+    )
+    if not user_registration:
+        raise CustomHTTPException(400, message="You must be registered for this event to rate it")
+    
+    # For paid events, check if user has paid
+    if event.has_fee and not user_registration.is_paid:
+        raise CustomHTTPException(400, message="You must complete payment to rate this event")
+
     # Check if user has already rated
     existing_rating = await session.scalar(
         select(EventRatingsLink).where(
@@ -428,15 +461,6 @@ async def rate_event(
         )
     )
 
-    # Get event and club
-    event = await session.scalar(
-        select(Events).where(Events.id == event_id).options(joinedload(Events.club))
-    )
-    if not event:
-        raise CustomHTTPException(404, "Event not found")
-
-    if not event.club:
-        raise CustomHTTPException(400, "Event not associated with a club")
     if existing_rating:
         event_rating = existing_rating
         event_rating.rating = rating
