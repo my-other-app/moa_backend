@@ -171,6 +171,7 @@ async def get_ticket(
     request: Request,
     ticket_id: int | str,
     session: SessionDep = SessionDep,
+    user: DependsAuth = None,  # Require authentication
 ) -> TicketDetailsResponse:
     result = await service.get_ticket_details(session, ticket_id=ticket_id)
     return jsonable_encoder(result)
@@ -196,6 +197,7 @@ async def increment_view_count(
 async def get_wallet_pass(
     ticket_id: str,
     session: SessionDep = SessionDep,
+    user: DependsAuth = None,  # Require authentication
 ) -> Response:
     """
     Generate and download an Apple Wallet pass (.pkpass) for the ticket.

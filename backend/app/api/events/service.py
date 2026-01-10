@@ -45,7 +45,7 @@ async def create_event(
     is_online: bool = False,
     reg_startdate: datetime = datetime.now(timezone.utc),
     reg_enddate: Optional[datetime] = None,
-    images: list[str] = [],
+    images: Optional[list[str]] = None,
     about: Optional[str] = None,
     contact_name: Optional[str] = None,
     contact_phone: Optional[str] = None,
@@ -56,7 +56,7 @@ async def create_event(
     max_participants: Optional[int] = None,
     event_guidelines: Optional[str] = None,
     *args,
-    **kwards,
+    **kwargs,
 ):
     await validate_relations(
         session,
@@ -71,7 +71,7 @@ async def create_event(
     user = user.scalar()
 
     if not user.club:
-        raise CustomHTTPException(401, message="Not authorized to create event")
+        raise CustomHTTPException(403, message="Not authorized to create event")
     for field in additional_details:
         if (
             field.field_type.value == "select"
@@ -97,7 +97,7 @@ async def create_event(
         is_online=is_online,
         reg_startdate=reg_startdate,
         reg_enddate=reg_enddate,
-        images=images,
+        images=images or [],
         about=about,
         contact_name=contact_name,
         contact_phone=contact_phone,
@@ -240,7 +240,7 @@ async def get_event(session: AsyncSession, event_id: str | int, user_id: int | N
     if db_event is None:
         raise CustomHTTPException(404, message="Event not found")
 
-    print(db_event)
+
     event = db_event[0]
     data = event.__dict__
     data["rating"] = db_event[1]
@@ -399,6 +399,10 @@ async def rate_event(
     review: str | None = None,
 ) -> EventRatingsLink:
     """Rate an event and update the corresponding club's rating."""
+    # Validate rating is between 0 and 5
+    if rating < 0 or rating > 5:
+        raise CustomHTTPException(400, message="Rating must be between 0 and 5")
+    
     await validate_relations(
         session,
         {
@@ -458,7 +462,7 @@ async def rate_event(
         )
     )
 
-    club.total_ratings = total_ratings + 1 if total_ratings else 0
+    club.total_ratings = total_ratings if total_ratings else 0
     club.rating = avg_rating if avg_rating else 0
 
     await session.commit()
@@ -475,6 +479,7 @@ async def get_ticket_details(session: AsyncSession, ticket_id: str | int):
     registration = await session.execute(
         select(EventRegistrationsLink)
         .filter(
+            EventRegistrationsLink.is_deleted == False,
             EventRegistrationsLink.id == ticket_id
             if is_ticket_id
             else EventRegistrationsLink.ticket_id == ticket_id
