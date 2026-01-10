@@ -1,10 +1,12 @@
 from datetime import timedelta
+import logging
 from fastapi import BackgroundTasks
 from pandas import DataFrame
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
-import traceback
+
+logger = logging.getLogger(__name__)
 
 from app.api.events.registration.background_tasks import (
     send_registration_confirmation_email,
@@ -191,8 +193,7 @@ async def register_event(
                         payload=email_payload,
                     )
             except Exception as e:
-                print(e)
-                traceback.print_exc()
+                logger.exception("Error sending registration confirmation email")
                 if background_task_log_id:
                     await update_background_task_log(
                         session,

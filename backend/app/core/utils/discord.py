@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
+import logging
 import traceback
 import uuid
 import multiprocessing
@@ -11,6 +12,8 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 async def notify_error(request: Request, exc: Exception, track_id: str):
@@ -103,8 +106,8 @@ Method: {error_details.get("method", "N/A")}
                 response.raise_for_status()
                 return
             except Exception as e:
-                print(f"Discord notification attempt {attempt + 1} failed: {e}")
+                logger.warning(f"Discord notification attempt {attempt + 1} failed: {e}")
                 if attempt < max_retries - 1:
                     await asyncio.sleep(retry_delay * (2**attempt))
 
-        print("Failed to send Discord error notification after all retries")
+        logger.warning("Failed to send Discord error notification after all retries")

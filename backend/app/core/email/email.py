@@ -1,5 +1,6 @@
 import os
 import io
+import logging
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 from typing import Any, List, Dict, Optional, Union
@@ -10,6 +11,8 @@ from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 # Initialize the SES client
 ses = boto3.client(
@@ -100,7 +103,7 @@ def send_email_with_attachment(
                 context=template_context,
             )
         except Exception as e:
-            print(f"Template rendering error: {e}")
+            logger.exception("Template rendering error")
 
     # Attach plain text body
     if body_text:
@@ -142,10 +145,10 @@ def send_email_with_attachment(
             Destinations=recipients + bcc_recipients if bcc_recipients else [],
             RawMessage={"Data": msg.as_string()},
         )
-        print(f"Email sent successfully! Message ID: {response['MessageId']}")
+        logger.info(f"Email sent successfully! Message ID: {response['MessageId']}")
         return response
     except Exception as e:
-        print(f"Error sending email: {e}")
+        logger.exception("Error sending email")
         raise
 
 

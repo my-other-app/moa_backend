@@ -20,6 +20,7 @@ import os
 import io
 import hashlib
 import json
+import logging
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -31,6 +32,8 @@ from sqlalchemy.orm import selectinload
 
 from app.response import CustomHTTPException
 from app.api.events.models import Events, EventRegistrationsLink
+
+logger = logging.getLogger(__name__)
 
 
 # Configuration from environment
@@ -209,7 +212,7 @@ def sign_manifest(manifest_bytes: bytes) -> bytes:
         result = subprocess.run(cmd, capture_output=True)
         
         if result.returncode != 0:
-            print(f"OpenSSL signing failed: {result.stderr.decode()}")
+            logger.warning(f"OpenSSL signing failed: {result.stderr.decode()}")
             return b""
         
         with open(sig_path, 'rb') as f:
@@ -222,7 +225,7 @@ def sign_manifest(manifest_bytes: bytes) -> bytes:
         return signature
         
     except Exception as e:
-        print(f"Error signing manifest: {e}")
+        logger.exception("Error signing manifest")
         return b""
 
 

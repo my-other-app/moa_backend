@@ -1,8 +1,11 @@
+import logging
 from typing import List, Optional, Union
 from fastapi import BackgroundTasks
 
 from app.core.email.email import send_email_with_attachment
 from app.core.utils.pdf import generate_pdf_bytes
+
+logger = logging.getLogger(__name__)
 
 
 def send_registration_confirmation_email(
@@ -10,7 +13,7 @@ def send_registration_confirmation_email(
     payload: dict,
     recipients: List[str],
 ):
-    print("sending email", subject, payload, recipients)
+    logger.info(f"Sending registration confirmation email to {recipients}")
     # pdf_bytes = generate_pdf_bytes(
     #     template_path="events/ticket.html",
     #     context=payload,

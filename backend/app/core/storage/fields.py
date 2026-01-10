@@ -1,4 +1,5 @@
 import boto3
+import logging
 from sqlalchemy.types import TypeDecorator, String
 from PIL import Image
 import io
@@ -9,6 +10,8 @@ from typing import Dict, Optional, Union
 
 from app.config import settings
 from app.response import CustomHTTPException
+
+logger = logging.getLogger(__name__)
 
 
 class S3Image(dict):
@@ -22,13 +25,12 @@ class S3Image(dict):
             aws_access_key_id=settings.S3_ACCESS_KEY,
             aws_secret_access_key=settings.S3_SECRET_KEY,
         )
-        print(self.variations)
 
         for key, value in self.variations.items():
             try:
                 s3_client.delete_object(Bucket=settings.S3_BUCKET, Key=value)
             except Exception as e:
-                print(f"Error deleting object: {str(e)}")
+                logger.warning(f"Error deleting S3 object: {str(e)}")
 
 
 class S3File(str):
@@ -56,7 +58,7 @@ class S3File(str):
         try:
             s3_client.delete_object(Bucket=settings.S3_BUCKET, Key=self.file_path)
         except Exception as e:
-            print(f"Error deleting object: {str(e)}")
+            logger.warning(f"Error deleting S3 object: {str(e)}")
 
 
 class S3ImageField(TypeDecorator):
@@ -139,7 +141,6 @@ class S3ImageField(TypeDecorator):
     ) -> Optional[str]:
         """Process the value before saving to database."""
 
-        print(value)
         if not value:
             return None
 

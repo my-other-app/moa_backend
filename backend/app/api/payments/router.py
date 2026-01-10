@@ -71,11 +71,6 @@ async def razorpay_webhook(request: Request, session: SessionDep):
     request_body = request_body.decode("utf-8")
     payload = await request.json()
 
-    print("Webhook Signature:", webhook_signature)
-    print("Event ID:", event_id)
-    print("Request Body:", request_body)
-    print("Payload:", payload)
-
     try:
         if not service.razorpay_client.utility.verify_webhook_signature(
             request_body, webhook_signature, settings.RAZORPAY_WEBHOOK_SECRET
