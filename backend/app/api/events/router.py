@@ -3,12 +3,14 @@ from fastapi import (
     Depends,
     Request,
     Query,
+    Response,
 )
 from fastapi.encoders import jsonable_encoder
 from typing import Optional, List
 
 from app.db.core import SessionDep
 from app.api.events import service
+from app.api.events import wallet_service
 from app.api.events.schemas import (
     EventCategoryCreate,
     EventCategoryResponse,
@@ -188,3 +190,24 @@ async def increment_view_count(
         session, event_id=event_id, user_id=user.id if user else None, request=request
     )
     return {"message": "Done"}
+
+
+@router.get("/tickets/{ticket_id}/wallet.pkpass", summary="Get Apple Wallet pass")
+async def get_wallet_pass(
+    ticket_id: str,
+    session: SessionDep = SessionDep,
+) -> Response:
+    """
+    Generate and download an Apple Wallet pass (.pkpass) for the ticket.
+    
+    The pass can be added to Apple Wallet on iOS devices.
+    """
+    pkpass_bytes = await wallet_service.generate_wallet_pass(session, ticket_id)
+    
+    return Response(
+        content=pkpass_bytes,
+        media_type="application/vnd.apple.pkpass",
+        headers={
+            "Content-Disposition": f'attachment; filename="ticket-{ticket_id}.pkpass"'
+        }
+    )
