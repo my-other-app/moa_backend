@@ -308,17 +308,20 @@ async def list_events(
 ):
     """List events with filters."""
 
-    # Base query
-    query = select(Events).options(
+    # Base query - filter out soft-deleted events
+    query = select(Events).where(Events.is_deleted == False).options(
         joinedload(Events.category),
         joinedload(Events.club),
     )
 
+    # Filter by interests (add distinct to avoid duplicates)
     if interest_ids:
         query = query.join(EventInterestsLink).filter(
-            EventInterestsLink.interest_id.in_(interest_ids)
-        )
+            EventInterestsLink.interest_id.in_(interest_ids),
+            EventInterestsLink.is_deleted == False,
+        ).distinct()
 
+    # Filter by following clubs
     if is_following and user_id:
         query = (
             query.join(Clubs)
@@ -330,6 +333,7 @@ async def list_events(
             )
         )
 
+    # Filter by registration status
     if is_registered is not None and user_id:
         if is_registered:
             query = query.join(EventRegistrationsLink).filter(
@@ -346,27 +350,30 @@ async def list_events(
                 ),
             ).filter(EventRegistrationsLink.id == None)
 
+    # Filter by ended status (FIXED: corrected logic)
+    # event_end_time = event_datetime + duration hours
     if is_ended is not None:
+        event_end_time = Events.event_datetime + func.cast(
+            func.concat(Events.duration, " HOURS"), INTERVAL
+        )
         if is_ended:
-            query = query.filter(
-                Events.event_datetime
-                > (
-                    func.now()
-                    + func.cast(func.concat(Events.duration, " HOURS"), INTERVAL)
-                )
-            )
+            # Past events: event has ended (end_time < now)
+            query = query.filter(event_end_time < func.now())
         else:
-            query = query.filter(
-                Events.event_datetime
-                <= (
-                    func.now()
-                    + func.cast(func.concat(Events.duration, " HOURS"), INTERVAL)
-                )
-            )
+            # Upcoming/ongoing events: event hasn't ended yet (end_time >= now)
+            query = query.filter(event_end_time >= func.now())
 
-    query = query.order_by(Events.created_at.desc()).limit(limit).offset(offset)
+    # Order by event_datetime instead of created_at
+    # Past events: most recently ended first
+    # Upcoming events: soonest first
+    if is_ended:
+        query = query.order_by(Events.event_datetime.desc())
+    else:
+        query = query.order_by(Events.event_datetime.asc())
+
+    query = query.limit(limit).offset(offset)
     result = await session.execute(query)
-    return result.scalars().all()
+    return result.scalars().unique().all()
 
 
 async def create_event_category(
