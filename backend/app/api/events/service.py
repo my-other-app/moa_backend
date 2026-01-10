@@ -432,9 +432,14 @@ async def rate_event(
         raise CustomHTTPException(400, "Event not associated with a club")
     
     # Check if event has ended
-    from datetime import datetime, timezone, timedelta
+    from datetime import timedelta
     event_end_time = event.event_datetime + timedelta(hours=event.duration) if event.duration else event.event_datetime
-    if datetime.now(timezone.utc) < event_end_time:
+    # Handle both timezone-aware and timezone-naive datetimes
+    now = datetime.now(timezone.utc)
+    if event_end_time.tzinfo is None:
+        # Event datetime is naive, assume UTC
+        event_end_time = event_end_time.replace(tzinfo=timezone.utc)
+    if now < event_end_time:
         raise CustomHTTPException(400, message="You can only rate events after they have ended")
     
     # Check if user was registered for the event
