@@ -335,7 +335,7 @@ async def list_notes(
 ):
     club_exists = await session.scalar(select(exists().where(Clubs.id == club_id, Clubs.is_deleted == False)))
     if not club_exists:
-        raise CustomHTTPException(status_code=404, message=\"Club not found\")
+        raise CustomHTTPException(status_code=404, message="Club not found")
 
     query = (
         select(Notes)
@@ -524,7 +524,7 @@ async def create_or_update_club_socials(
 async def get_club_events(
     session: AsyncSession, club_id: int, limit: int = 10, offset: int = 0
 ):
-    \"\"\"Get events of a club.\"\"\"
+    """Get events of a club."""
     query = (
         select(Events)
         .where(Events.club_id == club_id, Events.is_deleted == False)
