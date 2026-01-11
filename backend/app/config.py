@@ -32,7 +32,7 @@ class AppConfig(BaseSettings):
     GOOGLE_IOS_CLIENT_ID: str
 
     # Apple Sign In
-    APPLE_CLIENT_ID: str = ""  # Your app's bundle ID (e.g., com.myotherapp.app)
+    APPLE_CLIENT_ID: str = "app.myotherapp.com"  # Your app's bundle ID
     APPLE_TEAM_ID: str = ""  # Your Apple Developer Team ID
     APPLE_KEY_ID: str = ""  # Key ID from Apple Developer Console
     APPLE_PRIVATE_KEY: str = ""  # Contents of .p8 file (base64 encoded)
