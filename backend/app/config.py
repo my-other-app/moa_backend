@@ -33,9 +33,9 @@ class AppConfig(BaseSettings):
 
     # Apple Sign In
     APPLE_CLIENT_ID: str = "app.myotherapp.com"  # Your app's bundle ID
-    APPLE_TEAM_ID: str = ""  # Your Apple Developer Team ID
-    APPLE_KEY_ID: str = ""  # Key ID from Apple Developer Console
-    APPLE_PRIVATE_KEY: str = ""  # Contents of .p8 file (base64 encoded)
+    APPLE_TEAM_ID: str = "PX6QV826X4"  # Apple Developer Team ID
+    APPLE_KEY_ID: str = "S875RD7TDG"  # Key ID from Apple Developer Console
+    APPLE_PRIVATE_KEY: str = ""  # Contents of .p8 file (set via environment variable)
 
     RAZORPAY_KEY_ID: str
     RAZORPAY_KEY_SECRET: str
