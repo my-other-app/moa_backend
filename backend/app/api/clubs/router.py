@@ -264,6 +264,7 @@ async def get_club_events(
     pagination: PaginationParams,
     session: SessionDep,
     user: ClubAuth,
+    is_ended: Optional[bool] = Query(None, description="Filter by past (true) or upcoming (false) events"),
 ) -> PaginatedResponse[EventListResponseSelf]:
     """List events with optional filters."""
     events = await service.get_club_events(
@@ -271,6 +272,7 @@ async def get_club_events(
         club_id=user.club.id,
         limit=pagination.limit,
         offset=pagination.offset,
+        is_ended=is_ended,
     )
     return paginated_response(events, request, schema=EventListResponseSelf)
 
