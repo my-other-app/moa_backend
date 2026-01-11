@@ -148,8 +148,17 @@ async def apple_signin(
         raise CustomHTTPException(
             status_code=401, message="Invalid Apple authentication token"
         )
+    except CustomHTTPException:
+        raise
     except Exception as e:
         logger.exception(f"Apple signin error: {e}")
+        # Check if it's a database constraint error (duplicate email)
+        error_msg = str(e).lower()
+        if "unique" in error_msg or "duplicate" in error_msg:
+            raise CustomHTTPException(
+                status_code=409, 
+                message="An account with this email already exists. Please sign in with your original method."
+            )
         raise CustomHTTPException(status_code=500, message="Internal Server Error")
 
 
