@@ -88,16 +88,22 @@ async def apple_signin(
     import jwt
     from jwt import PyJWKClient
     
+    logger.info(f"Apple signin attempt - user_email: {user_email}, user_name: {user_name}")
+    logger.info(f"APPLE_CLIENT_ID configured: {settings.APPLE_CLIENT_ID}")
+    
     try:
         # Apple's public keys endpoint
+        logger.info("Fetching Apple JWKS keys...")
         jwks_client = PyJWKClient("https://appleid.apple.com/auth/keys")
         
         # Decode without verification first to get header
+        logger.info("Getting signing key from JWT...")
         unverified_header = jwt.get_unverified_header(identity_token)
         signing_key = jwks_client.get_signing_key_from_jwt(identity_token)
         
         # Verify the token
         # audience can be your app's bundle ID or service ID
+        logger.info(f"Verifying token with audience: {settings.APPLE_CLIENT_ID}")
         decoded = jwt.decode(
             identity_token,
             signing_key.key,
@@ -106,6 +112,7 @@ async def apple_signin(
             issuer="https://appleid.apple.com",
             options={"verify_aud": bool(settings.APPLE_CLIENT_ID)}
         )
+        logger.info(f"Token verified successfully. sub: {decoded.get('sub')}, email: {decoded.get('email')}")
         
         # Extract user info from token
         apple_user_id = decoded.get("sub")  # Apple's unique user ID
