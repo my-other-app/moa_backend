@@ -110,24 +110,57 @@ async def admin_reset_password(
     """
     Reset a user's password. Admin only.
     
-    Can search by email or username.
+    Can search by:
+    - User email (contains @)
+    - Username
+    - Club name
+    - Club slug
+    - Club ID (numeric)
     """
     from sqlalchemy import select
+    from sqlalchemy.orm import joinedload
     from app.api.users.models import Users
+    from app.api.clubs.models import Clubs
     
-    # Find user by email or username
-    if "@" in request.email_or_username:
-        query = select(Users).where(Users.email == request.email_or_username)
-    else:
-        query = select(Users).where(Users.username == request.email_or_username)
+    user = None
+    search_term = request.email_or_username.strip()
     
-    result = await session.execute(query)
-    user = result.scalar_one_or_none()
+    # Try different search strategies
+    if "@" in search_term:
+        # Search by user email
+        query = select(Users).where(Users.email == search_term)
+        result = await session.execute(query)
+        user = result.scalar_one_or_none()
+    
+    if not user and search_term.isdigit():
+        # Search by club ID
+        club_id = int(search_term)
+        query = select(Users).join(Clubs, Users.id == Clubs.user_id).where(Clubs.id == club_id)
+        result = await session.execute(query)
+        user = result.scalar_one_or_none()
+    
+    if not user:
+        # Search by username
+        query = select(Users).where(Users.username == search_term)
+        result = await session.execute(query)
+        user = result.scalar_one_or_none()
+    
+    if not user:
+        # Search by club slug
+        query = select(Users).join(Clubs, Users.id == Clubs.user_id).where(Clubs.slug == search_term)
+        result = await session.execute(query)
+        user = result.scalar_one_or_none()
+    
+    if not user:
+        # Search by club name (case-insensitive)
+        query = select(Users).join(Clubs, Users.id == Clubs.user_id).where(Clubs.name.ilike(search_term))
+        result = await session.execute(query)
+        user = result.scalar_one_or_none()
     
     if not user:
         raise CustomHTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            message=f"User '{request.email_or_username}' not found",
+            message=f"User or club '{search_term}' not found",
         )
     
     # Hash and set new password
@@ -140,3 +173,4 @@ async def admin_reset_password(
         email=user.email,
         username=user.username,
     )
+
