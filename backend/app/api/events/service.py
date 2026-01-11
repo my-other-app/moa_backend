@@ -215,22 +215,33 @@ async def get_event(session: AsyncSession, event_id: str | int, user_id: int | N
     )
     if is_event_id:
         event_id = int(event_id)
-    ratings_subquery = (
-        select(
-            func.coalesce(func.avg(EventRatingsLink.rating), 0.0).label("rating"),
-            func.coalesce(func.count(EventRatingsLink.id), 0).label("total_rating"),
-        )
+    
+    # Create correlated subqueries for event-specific ratings
+    rating_avg_subquery = (
+        select(func.coalesce(func.avg(EventRatingsLink.rating), 0.0))
         .where(
             EventRatingsLink.event_id == Events.id,
             EventRatingsLink.is_deleted == False,
         )
-        .subquery()
+        .correlate(Events)
+        .scalar_subquery()
     )
+    
+    rating_count_subquery = (
+        select(func.coalesce(func.count(EventRatingsLink.id), 0))
+        .where(
+            EventRatingsLink.event_id == Events.id,
+            EventRatingsLink.is_deleted == False,
+        )
+        .correlate(Events)
+        .scalar_subquery()
+    )
+    
     db_event = await session.execute(
         select(
             Events,
-            ratings_subquery.c.rating.label("rating"),
-            ratings_subquery.c.total_rating.label("total_rating"),
+            rating_avg_subquery.label("rating"),
+            rating_count_subquery.label("total_rating"),
         )
         .filter(
             Events.is_deleted == False,
