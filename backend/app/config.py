@@ -37,6 +37,12 @@ class AppConfig(BaseSettings):
     APPLE_KEY_ID: str = "S875RD7TDG"  # Key ID from Apple Developer Console
     APPLE_PRIVATE_KEY: str = ""  # Contents of .p8 file (set via environment variable)
 
+    # Firebase Push Notifications
+    # Option 1: Path to service account JSON file
+    FIREBASE_SERVICE_ACCOUNT_PATH: str = ""
+    # Option 2: Base64 encoded service account JSON (for environment variable)
+    FIREBASE_SERVICE_ACCOUNT_BASE64: str = ""
+
     RAZORPAY_KEY_ID: str
     RAZORPAY_KEY_SECRET: str
     RAZORPAY_WEBHOOK_SECRET: str

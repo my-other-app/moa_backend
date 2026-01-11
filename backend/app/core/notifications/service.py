@@ -29,15 +29,32 @@ def initialize_firebase():
         return _firebase_app
     
     try:
-        # Try to get credentials from environment or default service account
-        if hasattr(settings, 'FIREBASE_SERVICE_ACCOUNT_PATH') and settings.FIREBASE_SERVICE_ACCOUNT_PATH:
-            cred = credentials.Certificate(settings.FIREBASE_SERVICE_ACCOUNT_PATH)
-            _firebase_app = firebase_admin.initialize_app(cred)
-        else:
-            # Use default credentials (for Cloud Run, App Engine, etc.)
-            _firebase_app = firebase_admin.initialize_app()
+        cred = None
         
-        logger.info("Firebase Admin SDK initialized successfully")
+        # Option 1: Path to service account JSON file
+        if settings.FIREBASE_SERVICE_ACCOUNT_PATH:
+            logger.info(f"Using Firebase credentials from file: {settings.FIREBASE_SERVICE_ACCOUNT_PATH}")
+            cred = credentials.Certificate(settings.FIREBASE_SERVICE_ACCOUNT_PATH)
+        
+        # Option 2: Base64 encoded service account JSON
+        elif settings.FIREBASE_SERVICE_ACCOUNT_BASE64:
+            import base64
+            import json
+            logger.info("Using Firebase credentials from base64 encoded environment variable")
+            decoded = base64.b64decode(settings.FIREBASE_SERVICE_ACCOUNT_BASE64)
+            service_account_info = json.loads(decoded)
+            cred = credentials.Certificate(service_account_info)
+        
+        if cred:
+            _firebase_app = firebase_admin.initialize_app(cred)
+            logger.info("Firebase Admin SDK initialized successfully")
+        else:
+            logger.warning(
+                "No Firebase credentials configured. "
+                "Set APP_FIREBASE_SERVICE_ACCOUNT_PATH or APP_FIREBASE_SERVICE_ACCOUNT_BASE64"
+            )
+            return None
+        
         return _firebase_app
     except Exception as e:
         logger.error(f"Failed to initialize Firebase Admin SDK: {e}")
