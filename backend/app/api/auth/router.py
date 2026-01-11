@@ -9,14 +9,17 @@ from app.core.auth.jwt import create_access_token, decode_jwt_token
 from app.core.auth.authentication import (
     authenticate_user,
     get_user,
+    get_password_hash,
 )
-from app.core.auth.dependencies import DependsAuth
+from app.core.auth.dependencies import DependsAuth, AdminAuth
 from app.response import CustomHTTPException
 from app.api.auth.schemas import (
     AuthTokenData,
     AuthUser,
     Token,
     GoogleSignInRequest,
+    PasswordResetRequest,
+    PasswordResetResponse,
 )
 from app.api.auth import service
 from app.db.core import SessionDep
@@ -96,3 +99,44 @@ async def read_users_me(
     current_user: DependsAuth,
 ):
     return current_user
+
+
+@router.post("/admin/reset-password", summary="Admin reset user password")
+async def admin_reset_password(
+    request: PasswordResetRequest,
+    session: SessionDep,
+    admin: AdminAuth,
+) -> PasswordResetResponse:
+    """
+    Reset a user's password. Admin only.
+    
+    Can search by email or username.
+    """
+    from sqlalchemy import select
+    from app.api.users.models import Users
+    
+    # Find user by email or username
+    if "@" in request.email_or_username:
+        query = select(Users).where(Users.email == request.email_or_username)
+    else:
+        query = select(Users).where(Users.username == request.email_or_username)
+    
+    result = await session.execute(query)
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise CustomHTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            message=f"User '{request.email_or_username}' not found",
+        )
+    
+    # Hash and set new password
+    user.password = get_password_hash(request.new_password)
+    await session.commit()
+    
+    return PasswordResetResponse(
+        success=True,
+        message="Password reset successfully",
+        email=user.email,
+        username=user.username,
+    )

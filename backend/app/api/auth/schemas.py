@@ -27,3 +27,18 @@ class GoogleSignInRequest(CustomBaseModel):
     platform: str = Field(
         default="web", description="Platform type: 'web', 'android', or 'ios'"
     )
+
+
+class PasswordResetRequest(CustomBaseModel):
+    """Request schema for admin password reset"""
+    email_or_username: str = Field(..., description="Email or username of the user")
+    new_password: str = Field(..., min_length=6, description="New password (min 6 characters)")
+
+
+class PasswordResetResponse(CustomBaseModel):
+    """Response schema for password reset"""
+    success: bool
+    message: str
+    email: str | None = None
+    username: str | None = None
+
