@@ -491,12 +491,18 @@ async def rate_event(
         )
         session.add(event_rating)
 
+    # Flush to ensure the rating is in the transaction before counting
+    await session.flush()
+
     # Update club rating
     club = event.club
     total_ratings = await session.scalar(
         select(func.count()).where(
             EventRatingsLink.event_id.in_(
-                select(Events.id).where(Events.club_id == club.id)
+                select(Events.id).where(
+                    Events.club_id == club.id,
+                    Events.is_deleted == False
+                )
             ),
             EventRatingsLink.is_deleted == False,
         )
@@ -504,7 +510,10 @@ async def rate_event(
     avg_rating = await session.scalar(
         select(func.avg(EventRatingsLink.rating)).where(
             EventRatingsLink.event_id.in_(
-                select(Events.id).where(Events.club_id == club.id)
+                select(Events.id).where(
+                    Events.club_id == club.id,
+                    Events.is_deleted == False
+                )
             ),
             EventRatingsLink.is_deleted == False,
         )
