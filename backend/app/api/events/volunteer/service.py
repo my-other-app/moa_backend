@@ -9,7 +9,7 @@ from app.api.users.models import UserProfiles, Users
 from app.response import CustomHTTPException
 from app.api.events.models import EventRegistrationsLink, Events
 from app.api.clubs.models import Clubs
-from app.core.notifications.triggers import notify_user_check_in
+from app.core.notifications.triggers import notify_user_check_in, notify_user_added_as_volunteer
 
 
 async def add_volunteer(
@@ -42,10 +42,27 @@ async def add_volunteer(
     )
 
     session.add(volunteer)
-    # TODO: Send email to user
-    # Two scenarios in that is user is already registered and user is not registered
-    # If user is not registered send the app link to the user
     await session.commit()
+    
+    # Trigger 5: Send notification to user about being added as volunteer
+    if user_id:
+        try:
+            # Get event and club details for notification
+            event = await session.scalar(
+                select(Events).where(Events.id == event_id).options(joinedload(Events.club))
+            )
+            if event and event.club:
+                await notify_user_added_as_volunteer(
+                    session=session,
+                    user_id=user_id,
+                    event_id=event_id,
+                    event_name=event.name,
+                    club_name=event.club.name,
+                )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Failed to send volunteer notification: {e}")
+    
     return None
 
 

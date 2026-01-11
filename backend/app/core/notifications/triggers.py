@@ -239,3 +239,39 @@ async def notify_event_participants(
             "event_id": str(event_id),
         },
     )
+
+
+async def notify_user_added_as_volunteer(
+    session: AsyncSession,
+    user_id: int,
+    event_id: int,
+    event_name: str,
+    club_name: str,
+) -> bool:
+    """
+    Notify a user when they are added as a volunteer to an event.
+    
+    Trigger 5: When a user is added as a volunteer, notify them.
+    
+    Args:
+        session: Database session
+        user_id: User ID who was added as volunteer
+        event_id: Event ID
+        event_name: Event name
+        club_name: Club name that added them
+        
+    Returns:
+        True if notification sent successfully
+    """
+    logger.info(f"Sending volunteer assignment notification to user {user_id} for event {event_id}")
+    
+    return await send_notification_to_user(
+        session=session,
+        user_id=user_id,
+        title=f"🎖️ You're now a volunteer!",
+        body=f"{club_name} added you as a volunteer for {event_name}",
+        data={
+            "type": "volunteer_assigned",
+            "event_id": str(event_id),
+        },
+    )
