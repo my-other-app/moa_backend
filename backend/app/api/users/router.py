@@ -183,3 +183,21 @@ async def get_my_events(
         offset=pagination.offset,
     )
     return paginated_response(events, request=request, schema=UserRegisteredEvents)
+
+
+@router.post("/fcm-token", summary="Register FCM token for push notifications")
+async def register_fcm_token(
+    session: SessionDep,
+    user: UserAuth,
+    body: "FCMTokenRequest",
+) -> "FCMTokenResponse":
+    """Register or update the user's FCM token for push notifications."""
+    from app.api.users.schemas import FCMTokenRequest, FCMTokenResponse
+    await service.update_fcm_token(
+        session=session,
+        user_id=user.id,
+        fcm_token=body.fcm_token,
+        platform=body.platform,
+    )
+    return FCMTokenResponse(success=True, message="FCM token registered successfully")
+

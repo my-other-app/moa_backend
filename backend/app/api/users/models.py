@@ -28,6 +28,7 @@ class UserTypes(enum.Enum):
 
 class SigninProviders(enum.Enum):
     google = "google"
+    apple = "apple"
     email = "email"
 
 
@@ -115,3 +116,20 @@ class UserInterests(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
 
     # user = relationship("Users")
     interest = relationship("Interests")
+
+
+class UserDeviceTokens(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
+    """Store FCM tokens for push notifications per user/device."""
+    __tablename__ = "user_device_tokens"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    fcm_token = Column(String(512), nullable=False)
+    platform = Column(String(20), nullable=False)  # ios / android
+
+    user = relationship("Users")
+    
+    __table_args__ = (
+        UniqueConstraint("user_id", "platform", name="uq_user_platform"),
+    )
+

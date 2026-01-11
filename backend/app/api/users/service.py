@@ -345,3 +345,34 @@ async def list_registered_events(
     if is_won is not None:
         query = query.where(EventRegistrationsLink.is_won == is_won)
     return (await session.scalars(query)).all()
+
+
+async def update_fcm_token(
+    session: AsyncSession,
+    user_id: int,
+    fcm_token: str,
+    platform: str,
+):
+    """Store or update the user's FCM token for push notifications."""
+    from app.api.users.models import UserDeviceTokens
+    
+    # Check if token already exists for this user/platform
+    existing = await session.scalar(
+        select(UserDeviceTokens).where(
+            UserDeviceTokens.user_id == user_id,
+            UserDeviceTokens.platform == platform,
+        )
+    )
+    
+    if existing:
+        existing.fcm_token = fcm_token
+    else:
+        device_token = UserDeviceTokens(
+            user_id=user_id,
+            fcm_token=fcm_token,
+            platform=platform,
+        )
+        session.add(device_token)
+    
+    await session.commit()
+

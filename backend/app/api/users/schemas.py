@@ -176,3 +176,16 @@ class UserRegisteredEvents(CustomBaseModel):
     actual_amount: float | None = Field(None)
     paid_amount: float | None = Field(None)
     event: UserEventList = Field(...)
+
+
+class FCMTokenRequest(CustomBaseModel):
+    """Request schema for registering FCM token"""
+    fcm_token: str = Field(..., description="Firebase Cloud Messaging token")
+    platform: str = Field(..., description="Device platform (ios/android)")
+
+
+class FCMTokenResponse(CustomBaseModel):
+    """Response schema for FCM token registration"""
+    success: bool = Field(...)
+    message: str = Field(...)
+
