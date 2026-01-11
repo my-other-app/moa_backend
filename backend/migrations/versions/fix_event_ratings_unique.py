@@ -1,7 +1,7 @@
 """Fix event_ratings_link unique constraint
 
 Revision ID: fix_event_ratings_unique
-Revises: ef592d8c28eb
+Revises: b675dd56f20e
 Create Date: 2025-01-11
 
 The original constraint only included (user_id, is_deleted) which prevented
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = 'fix_event_ratings_unique'
-down_revision = 'ef592d8c28eb'
+down_revision = 'b675dd56f20e'
 branch_labels = None
 depends_on = None
 
