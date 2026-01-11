@@ -9,6 +9,7 @@ from app.api.users.models import UserProfiles, Users
 from app.response import CustomHTTPException
 from app.api.events.models import EventRegistrationsLink, Events
 from app.api.clubs.models import Clubs
+from app.core.notifications.triggers import notify_user_check_in
 
 
 async def add_volunteer(
@@ -145,6 +146,19 @@ async def checkin_user(
     registration.attended_on = datetime.now(timezone.utc)
     registration.volunteer_id = volunteer_id
     await session.commit()
+    
+    # Trigger 3: Send check-in confirmation notification
+    try:
+        await notify_user_check_in(
+            session=session,
+            user_id=registration.user_id,
+            event_id=event_id,
+            event_name=registration.event.name,
+        )
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Failed to send check-in notification: {e}")
+    
     return True
 
 

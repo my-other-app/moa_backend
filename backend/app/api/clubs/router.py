@@ -27,8 +27,10 @@ from app.core.response.pagination import (
 from typing import Optional, List
 
 from app.api.events.schemas import EventListResponseSelf
+from app.api.clubs.notifications_router import router as notifications_router
 
 router = APIRouter(prefix="/clubs")
+router.include_router(notifications_router, tags=["Club Notifications"])
 
 
 @router.post("/create", summary="create club")

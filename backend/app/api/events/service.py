@@ -27,6 +27,10 @@ from app.api.users.models import Users
 from app.core.validations.schema import validate_relations
 from app.api.interests.models import Interests
 from app.core.utils.keys import generate_slug
+from app.core.notifications.triggers import (
+    notify_followers_of_new_event,
+    notify_users_by_interest,
+)
 
 
 async def create_event(
@@ -139,7 +143,35 @@ async def create_event(
         )
         .limit(1)
     )
-    return db_event.scalar_one()
+    created_event = db_event.scalar_one()
+    
+    # Send push notifications for new event
+    try:
+        # Trigger 1: Notify followers of the club
+        await notify_followers_of_new_event(
+            session=session,
+            club_id=created_event.club.id,
+            club_name=created_event.club.name,
+            event_id=created_event.id,
+            event_name=created_event.name,
+        )
+        
+        # Trigger 2: Notify users with matching interests (excludes followers)
+        if created_event.category:
+            await notify_users_by_interest(
+                session=session,
+                category_id=created_event.category.id,
+                category_name=created_event.category.name,
+                club_id=created_event.club.id,
+                event_id=created_event.id,
+                event_name=created_event.name,
+            )
+    except Exception as e:
+        # Don't fail event creation if notification fails
+        import logging
+        logging.getLogger(__name__).error(f"Failed to send new event notifications: {e}")
+    
+    return created_event
 
 
 async def update_event(
