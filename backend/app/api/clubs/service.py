@@ -522,17 +522,39 @@ async def create_or_update_club_socials(
 
 
 async def get_club_events(
-    session: AsyncSession, club_id: int, limit: int = 10, offset: int = 0
+    session: AsyncSession, 
+    club_id: int, 
+    limit: int = 10, 
+    offset: int = 0,
+    is_ended: bool | None = None,
 ):
-    """Get events of a club."""
+    """Get events of a club with optional past/upcoming filter."""
+    from sqlalchemy.dialects.postgresql import INTERVAL
+    
     query = (
         select(Events)
         .where(Events.club_id == club_id, Events.is_deleted == False)
         .options(
             joinedload(Events.category),
+            joinedload(Events.club),
         )
-        .order_by(Events.event_datetime.desc())
-        .limit(limit)
-        .offset(offset)
     )
+    
+    # Filter by ended status
+    if is_ended is not None:
+        event_end_time = Events.event_datetime + func.cast(
+            func.concat(Events.duration, " HOURS"), INTERVAL
+        )
+        if is_ended:
+            # Past events: event has ended
+            query = query.filter(event_end_time < func.now())
+            query = query.order_by(Events.event_datetime.desc())
+        else:
+            # Upcoming events: event hasn't ended yet
+            query = query.filter(event_end_time >= func.now())
+            query = query.order_by(Events.event_datetime.asc())
+    else:
+        query = query.order_by(Events.event_datetime.desc())
+    
+    query = query.limit(limit).offset(offset)
     return list(await session.scalars(query))

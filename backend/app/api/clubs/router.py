@@ -271,3 +271,23 @@ async def get_club_events(
         offset=pagination.offset,
     )
     return paginated_response(events, request, schema=EventListResponseSelf)
+
+
+@router.get("/{club_id}/events", summary="Get public events of a club")
+async def get_club_events_public(
+    club_id: int,
+    request: Request,
+    pagination: PaginationParams,
+    session: SessionDep,
+    user: DependsAuth,
+    is_ended: Optional[bool] = Query(None, description="Filter by past (true) or upcoming (false) events"),
+) -> PaginatedResponse[EventListResponseSelf]:
+    """List public events of a club with optional filters."""
+    events = await service.get_club_events(
+        session=session,
+        club_id=club_id,
+        limit=pagination.limit,
+        offset=pagination.offset,
+        is_ended=is_ended,
+    )
+    return paginated_response(events, request, schema=EventListResponseSelf)
