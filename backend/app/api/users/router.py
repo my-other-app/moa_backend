@@ -2,6 +2,8 @@ from typing import List
 from fastapi import APIRouter, File, Form, Query, Request, UploadFile
 
 from app.api.users.schemas import (
+    FCMTokenRequest,
+    FCMTokenResponse,
     UserAvatarDetail,
     UserAvatarSelect,
     UserCreate,
@@ -189,10 +191,9 @@ async def get_my_events(
 async def register_fcm_token(
     session: SessionDep,
     user: UserAuth,
-    body: "FCMTokenRequest",
-) -> "FCMTokenResponse":
+    body: FCMTokenRequest,
+) -> FCMTokenResponse:
     """Register or update the user's FCM token for push notifications."""
-    from app.api.users.schemas import FCMTokenRequest, FCMTokenResponse
     await service.update_fcm_token(
         session=session,
         user_id=user.id,
@@ -200,4 +201,3 @@ async def register_fcm_token(
         platform=body.platform,
     )
     return FCMTokenResponse(success=True, message="FCM token registered successfully")
-
