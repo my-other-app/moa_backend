@@ -18,6 +18,7 @@ from app.api.auth.schemas import (
     AuthUser,
     Token,
     GoogleSignInRequest,
+    AppleSignInRequest,
     PasswordResetRequest,
     PasswordResetResponse,
 )
@@ -36,6 +37,27 @@ async def google_sign_in(
     session: SessionDep = SessionDep,
 ) -> Token:
     user = await service.google_signin(session, request.id_token, request.platform)
+    return await service.create_access_refresh_tokens(user)
+
+
+@router.post("/apple", summary="Sign in with Apple")
+async def apple_sign_in(
+    request: AppleSignInRequest,
+    session: SessionDep = SessionDep,
+) -> Token:
+    """
+    Sign in with Apple.
+    
+    Receives the identity_token and authorization_code from the Apple Sign In flow.
+    On first sign in, user_name and user_email may be provided by Apple.
+    """
+    user = await service.apple_signin(
+        session=session,
+        identity_token=request.identity_token,
+        authorization_code=request.authorization_code,
+        user_name=request.user_name,
+        user_email=request.user_email,
+    )
     return await service.create_access_refresh_tokens(user)
 
 

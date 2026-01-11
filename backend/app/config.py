@@ -31,6 +31,12 @@ class AppConfig(BaseSettings):
     GOOGLE_ANDROID_CLIENT_ID: str
     GOOGLE_IOS_CLIENT_ID: str
 
+    # Apple Sign In
+    APPLE_CLIENT_ID: str = ""  # Your app's bundle ID (e.g., com.myotherapp.app)
+    APPLE_TEAM_ID: str = ""  # Your Apple Developer Team ID
+    APPLE_KEY_ID: str = ""  # Key ID from Apple Developer Console
+    APPLE_PRIVATE_KEY: str = ""  # Contents of .p8 file (base64 encoded)
+
     RAZORPAY_KEY_ID: str
     RAZORPAY_KEY_SECRET: str
     RAZORPAY_WEBHOOK_SECRET: str

@@ -42,3 +42,12 @@ class PasswordResetResponse(CustomBaseModel):
     email: str | None = None
     username: str | None = None
 
+
+class AppleSignInRequest(CustomBaseModel):
+    """Request schema for Apple Sign In"""
+    identity_token: str = Field(..., description="JWT identity token from Apple")
+    authorization_code: str = Field(..., description="Authorization code from Apple")
+    user_name: str | None = Field(None, description="User's name (only on first sign in)")
+    user_email: str | None = Field(None, description="User's email (only if shared)")
+
+
