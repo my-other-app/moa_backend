@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 import io
 from typing import Optional
 from fastapi import Request, UploadFile
-from sqlalchemy import and_, delete, exists, select, func
+from sqlalchemy import and_, delete, exists, select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
 from sqlalchemy.dialects.postgresql import INTERVAL
@@ -324,14 +324,26 @@ async def list_events(
     is_registered: bool | None = None,
     is_ended: bool | None = None,
     interest_ids: list[int] | None = None,
+    search: str | None = None,
 ):
-    """List events with filters."""
+    """List events with filters and search."""
 
     # Base query - filter out soft-deleted events
     query = select(Events).where(Events.is_deleted == False).options(
         joinedload(Events.category),
         joinedload(Events.club),
     )
+
+    # Search filter - use ILIKE for case-insensitive pattern matching
+    # Searches in event name and category name
+    if search and search.strip():
+        search_pattern = f"%{search.strip()}%"
+        query = query.outerjoin(EventCategories, Events.category_id == EventCategories.id).filter(
+            or_(
+                Events.name.ilike(search_pattern),
+                EventCategories.name.ilike(search_pattern),
+            )
+        )
 
     # Filter by interests (add distinct to avoid duplicates)
     if interest_ids:

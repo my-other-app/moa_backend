@@ -123,8 +123,9 @@ async def list_events(
     is_registered: Optional[bool] = Query(None),
     is_ended: Optional[bool] = Query(None),
     interest_ids: Optional[str] = Query(None),
+    search: Optional[str] = Query(None, description="Search by event name or category"),
 ) -> PaginatedResponse[EventListResponse]:
-    """List events with optional filters."""
+    """List events with optional filters and search."""
     interest_ids = [int(i) for i in interest_ids.split(",")] if interest_ids else []
     events = await service.list_events(
         session=session,
@@ -135,6 +136,7 @@ async def list_events(
         is_registered=is_registered,
         is_ended=is_ended,
         interest_ids=interest_ids,
+        search=search,
     )
     return paginated_response(events, request, schema=EventListResponse)
 

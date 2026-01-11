@@ -97,8 +97,9 @@ async def get_all_clubs(
     is_pinned: Optional[bool] = Query(None),
     is_hidden: Optional[bool] = Query(None),
     interest_ids: Optional[str] = Query(None),
+    search: Optional[str] = Query(None, description="Search by club name"),
 ) -> PaginatedResponse[ClubListResponse]:
-    """List clubs with optional filters."""
+    """List clubs with optional filters and search."""
     interest_ids = [int(i) for i in (interest_ids.split(",") if interest_ids else [])]
     clubs = await service.get_all_clubs(
         session=session,
@@ -110,6 +111,7 @@ async def get_all_clubs(
         interest_ids=interest_ids,
         is_pinned=is_pinned,
         is_hidden=is_hidden,
+        search=search,
     )
     return paginated_response(clubs, request, schema=ClubListResponse)
 

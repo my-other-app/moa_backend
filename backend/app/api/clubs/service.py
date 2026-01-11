@@ -168,8 +168,9 @@ async def get_all_clubs(
     is_pinned: bool | None = None,
     is_hidden: bool | None = None,
     interest_ids: list[int] | None = None,
+    search: str | None = None,
 ):
-    """Get all clubs with optional filters and followers count, including is_following status."""
+    """Get all clubs with optional filters, search, and followers count."""
     ClubUsersLinkPinned = aliased(ClubUsersLink)
     ClubUsersLinkHidden = aliased(ClubUsersLink)
     ClubUsersLinkFollowers = aliased(ClubUsersLink)
@@ -202,6 +203,11 @@ async def get_all_clubs(
         )
         .options(selectinload(Clubs.interests))
     )
+
+    # Search filter - use ILIKE for case-insensitive pattern matching on club name
+    if search and search.strip():
+        search_pattern = f"%{search.strip()}%"
+        query = query.filter(Clubs.name.ilike(search_pattern))
 
     if org_id:
         query = query.filter(Clubs.org_id == org_id)
