@@ -144,6 +144,7 @@ async def send_notification_to_users(
     title: str,
     body: str,
     data: Optional[dict] = None,
+    image_url: Optional[str] = None,
 ) -> int:
     """
     Send push notification to multiple users.
@@ -154,6 +155,7 @@ async def send_notification_to_users(
         title: Notification title
         body: Notification body
         data: Optional data payload
+        image_url: Optional image URL to display in notification
         
     Returns:
         Number of successfully sent notifications
@@ -166,7 +168,7 @@ async def send_notification_to_users(
         logger.debug(f"No FCM tokens found for users {user_ids}")
         return 0
     
-    return await _send_to_tokens(tokens, title, body, data)
+    return await _send_to_tokens(tokens, title, body, data, image_url)
 
 
 async def _send_to_token(
@@ -222,6 +224,7 @@ async def _send_to_tokens(
     title: str,
     body: str,
     data: Optional[dict] = None,
+    image_url: Optional[str] = None,
 ) -> int:
     """Send notification to multiple FCM tokens using batch send."""
     if not tokens:
@@ -232,19 +235,27 @@ async def _send_to_tokens(
         return 0
     
     try:
+        # Build notification with optional image
+        notification = messaging.Notification(
+            title=title,
+            body=body,
+            image=image_url,  # FCM supports image in notification
+        )
+        
+        # Build Android config with optional image
+        android_notification = messaging.AndroidNotification(
+            sound="default",
+            click_action="FLUTTER_NOTIFICATION_CLICK",
+            image=image_url,
+        )
+        
         message = messaging.MulticastMessage(
-            notification=messaging.Notification(
-                title=title,
-                body=body,
-            ),
+            notification=notification,
             data=data or {},
             tokens=tokens,
             android=messaging.AndroidConfig(
                 priority="high",
-                notification=messaging.AndroidNotification(
-                    sound="default",
-                    click_action="FLUTTER_NOTIFICATION_CLICK",
-                ),
+                notification=android_notification,
             ),
             apns=messaging.APNSConfig(
                 payload=messaging.APNSPayload(
@@ -253,6 +264,9 @@ async def _send_to_tokens(
                         badge=1,
                     ),
                 ),
+                fcm_options=messaging.APNSFCMOptions(
+                    image=image_url,
+                ) if image_url else None,
             ),
         )
         

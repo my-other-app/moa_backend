@@ -200,6 +200,8 @@ async def notify_event_participants(
     title: str,
     body: str,
     user_ids: Optional[list[int]] = None,
+    audience: str = "all",
+    image_url: Optional[str] = None,
 ) -> int:
     """
     Send notification to event participants from club dashboard.
@@ -211,25 +213,35 @@ async def notify_event_participants(
         event_id: Event ID
         title: Custom notification title
         body: Custom notification body
-        user_ids: Optional list of specific user IDs. If None, notifies all participants.
+        user_ids: Optional list of specific user IDs. If provided, overrides audience filter.
+        audience: Target audience - 'all', 'attendees', or 'non_attendees'
+        image_url: Optional image URL to include in notification
         
     Returns:
         Number of notifications sent
     """
     if user_ids is None:
-        # Get all registered participants for this event
+        # Build query based on audience targeting
         query = select(EventRegistrationsLink.user_id).where(
             EventRegistrationsLink.event_id == event_id,
             EventRegistrationsLink.is_deleted == False,
         )
+        
+        # Apply audience filter
+        if audience == "attendees":
+            query = query.where(EventRegistrationsLink.is_attended == True)
+        elif audience == "non_attendees":
+            query = query.where(EventRegistrationsLink.is_attended == False)
+        # else "all" - no additional filter
+        
         result = await session.execute(query)
         user_ids = [row[0] for row in result.fetchall()]
     
     if not user_ids:
-        logger.debug(f"No participants to notify for event {event_id}")
+        logger.debug(f"No participants to notify for event {event_id} (audience: {audience})")
         return 0
     
-    logger.info(f"Sending club notification to {len(user_ids)} participants of event {event_id}")
+    logger.info(f"Sending club notification to {len(user_ids)} {audience} of event {event_id}")
     
     return await send_notification_to_users(
         session=session,
@@ -237,9 +249,10 @@ async def notify_event_participants(
         title=title,
         body=body,
         data={
-            "type": "club_message",
+            "type": "club_announcement",
             "event_id": str(event_id),
         },
+        image_url=image_url,
     )
 
 

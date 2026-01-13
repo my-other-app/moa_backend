@@ -2,9 +2,10 @@
 Club notifications router for sending push notifications to event participants.
 """
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, Literal
+from enum import Enum
 
 from app.db.core import SessionDep
 from app.core.auth.dependencies import ClubAuth
@@ -15,13 +16,25 @@ from sqlalchemy import select
 router = APIRouter(prefix="/notifications", tags=["Club Notifications"])
 
 
+class AudienceType(str, Enum):
+    """Audience types for notifications."""
+    ALL = "all"
+    ATTENDEES = "attendees"
+    NON_ATTENDEES = "non_attendees"
+
+
 class SendNotificationRequest(BaseModel):
     """Request schema for sending notification to event participants."""
     title: str = Field(..., max_length=255, description="Notification title")
     body: str = Field(..., max_length=1000, description="Notification body")
-    user_ids: Optional[List[int]] = Field(
-        None, 
-        description="Specific user IDs to notify. If empty, notifies all participants."
+    image_url: Optional[str] = Field(
+        None,
+        max_length=500,
+        description="Optional image URL to include in notification"
+    )
+    audience: AudienceType = Field(
+        AudienceType.ALL,
+        description="Target audience: 'all' (registrants), 'attendees', or 'non_attendees'"
     )
 
 
@@ -34,7 +47,7 @@ class SendNotificationResponse(BaseModel):
 
 @router.post(
     "/events/{event_id}/send",
-    summary="Send notification to event participants",
+    summary="Send announcement to event participants",
     response_model=SendNotificationResponse,
 )
 async def send_notification_to_participants(
@@ -46,11 +59,12 @@ async def send_notification_to_participants(
     """
     Send a push notification to participants of an event.
     
-    This endpoint allows clubs to send custom notifications to:
-    - All registered participants of an event (if user_ids is empty)
-    - Specific participants (if user_ids is provided)
+    This endpoint allows clubs to send announcements to:
+    - **all**: All registered participants
+    - **attendees**: Only users who have checked in
+    - **non_attendees**: Only users who registered but haven't checked in
     
-    Only the club that owns the event can send notifications.
+    Optionally include an image URL to display in the notification.
     """
     # Verify the event belongs to this club
     query = select(Events).where(
@@ -75,17 +89,24 @@ async def send_notification_to_participants(
             notifications_sent=0,
         )
     
-    # Send notifications
+    # Send notifications with audience targeting
     sent_count = await notify_event_participants(
         session=session,
         event_id=event_id,
         title=request_body.title,
         body=request_body.body,
-        user_ids=request_body.user_ids,
+        image_url=request_body.image_url,
+        audience=request_body.audience.value,
     )
+    
+    audience_label = {
+        "all": "all registrants",
+        "attendees": "attendees",
+        "non_attendees": "non-attendees",
+    }.get(request_body.audience.value, "participants")
     
     return SendNotificationResponse(
         success=sent_count > 0,
-        message=f"Notification sent to {sent_count} participants",
+        message=f"Notification sent to {sent_count} {audience_label}",
         notifications_sent=sent_count,
     )
