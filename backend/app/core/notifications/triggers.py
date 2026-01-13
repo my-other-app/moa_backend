@@ -46,6 +46,7 @@ async def notify_followers_of_new_event(
     # Get all followers of this club
     query = select(ClubUsersLink.user_id).where(
         ClubUsersLink.club_id == club_id,
+        ClubUsersLink.is_following == True,
         ClubUsersLink.is_deleted == False,
     )
     result = await session.execute(query)
@@ -128,6 +129,7 @@ async def notify_users_by_interest(
     # Get followers of this club to exclude them (they already got notification)
     followers_query = select(ClubUsersLink.user_id).where(
         ClubUsersLink.club_id == club_id,
+        ClubUsersLink.is_following == True,
         ClubUsersLink.is_deleted == False,
     )
     followers_result = await session.execute(followers_query)
