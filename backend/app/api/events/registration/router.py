@@ -92,7 +92,7 @@ async def list_event_registration(
     pagination: PaginationParams,
     event_id: int,
     is_attended: bool | None = Query(None),
-    is_paid: bool = Query(True),
+    is_paid: bool | None = Query(None),  # Changed to None to show all by default
     session: SessionDep = SessionDep,
 ) -> PaginatedResponse[EventRegistrationPublicMin]:
     result = await service.list_event_registrations(

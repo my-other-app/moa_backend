@@ -239,7 +239,7 @@ async def list_event_registrations(
     user_id: int,
     event_id: int,
     is_attended: bool | None = None,
-    is_paid: bool = True,
+    is_paid: bool | None = None,  # Changed to None to show all by default
     limit: int = 10,
     offset: int = 0,
 ):
@@ -268,7 +268,8 @@ async def list_event_registrations(
     if limit is not None and offset is not None:
         query = query.limit(limit).offset(offset)
 
-    if event.has_fee and event.reg_fee > 0:
+    # Only apply is_paid filter if explicitly set
+    if is_paid is not None:
         query = query.where(EventRegistrationsLink.is_paid == is_paid)
 
     if is_attended is not None:
