@@ -199,11 +199,11 @@ async def increment_view_count(
 async def get_wallet_pass(
     ticket_id: str,
     session: SessionDep = SessionDep,
-    user: DependsAuth = None,  # Require authentication
 ) -> Response:
     """
     Generate and download an Apple Wallet pass (.pkpass) for the ticket.
     
+    This endpoint is public - the unique ticket ID serves as the access token.
     The pass can be added to Apple Wallet on iOS devices.
     """
     pkpass_bytes = await wallet_service.generate_wallet_pass(session, ticket_id)
