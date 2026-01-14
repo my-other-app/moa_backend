@@ -183,10 +183,16 @@ def sign_manifest(manifest_bytes: bytes) -> bytes:
     import subprocess
     import tempfile
     
+    # Debug logging for certificate paths
+    logger.info(f"Checking certificates in: {CERTS_DIR}")
+    logger.info(f"CERT_PATH exists: {CERT_PATH.exists()} - {CERT_PATH}")
+    logger.info(f"KEY_PATH exists: {KEY_PATH.exists()} - {KEY_PATH}")
+    logger.info(f"WWDR_PATH exists: {WWDR_PATH.exists()} - {WWDR_PATH}")
+    
     # Check if certificates exist
     if not all(p.exists() for p in [CERT_PATH, KEY_PATH, WWDR_PATH]):
         # Return empty signature if certs don't exist
-        # Pass will be created but won't be valid on devices
+        logger.error("One or more certificate files are missing!")
         return b""
     
     try:
@@ -209,14 +215,19 @@ def sign_manifest(manifest_bytes: bytes) -> bytes:
             "-binary"
         ]
         
+        logger.info(f"Running OpenSSL command: {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True)
         
         if result.returncode != 0:
-            logger.warning(f"OpenSSL signing failed: {result.stderr.decode()}")
+            logger.error(f"OpenSSL signing failed with code {result.returncode}")
+            logger.error(f"OpenSSL stderr: {result.stderr.decode()}")
+            logger.error(f"OpenSSL stdout: {result.stdout.decode()}")
             return b""
         
         with open(sig_path, 'rb') as f:
             signature = f.read()
+        
+        logger.info(f"Signature generated successfully, size: {len(signature)} bytes")
         
         # Cleanup
         os.unlink(manifest_path)
@@ -225,7 +236,7 @@ def sign_manifest(manifest_bytes: bytes) -> bytes:
         return signature
         
     except Exception as e:
-        logger.exception("Error signing manifest")
+        logger.exception(f"Error signing manifest: {e}")
         return b""
 
 
