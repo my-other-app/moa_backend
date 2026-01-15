@@ -2,16 +2,20 @@
 Club notifications router for sending push notifications to event participants.
 """
 
+import logging
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 from typing import Optional, Literal
 from enum import Enum
 
+from sqlalchemy.orm import joinedload
 from app.db.core import SessionDep
 from app.core.auth.dependencies import ClubAuth
 from app.core.notifications.triggers import notify_event_participants
 from app.api.events.models import Events
 from sqlalchemy import select
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/notifications", tags=["Club Notifications"])
 
@@ -66,23 +70,31 @@ async def send_notification_to_participants(
     
     Optionally include an image URL to display in the notification.
     """
-    # Verify the event belongs to this club
+    logger.info(f"Sending announcement for event {event_id} by user {user.id}")
+    logger.info(f"Request: title='{request_body.title}', audience={request_body.audience.value}")
+    
+    # Verify the event belongs to this club - use joinedload for club relationship
     query = select(Events).where(
         Events.id == event_id,
         Events.is_deleted == False,
-    )
+    ).options(joinedload(Events.club))
+    
     result = await session.execute(query)
     event = result.scalar_one_or_none()
     
     if not event:
+        logger.warning(f"Event {event_id} not found")
         return SendNotificationResponse(
             success=False,
             message="Event not found",
             notifications_sent=0,
         )
     
+    logger.info(f"Event found: {event.name}, club_id={event.club_id}, club_user_id={event.club.user_id}")
+    
     # Check if the club user owns this event through their club
     if event.club.user_id != user.id:
+        logger.warning(f"User {user.id} doesn't own event {event_id} (club_user_id={event.club.user_id})")
         return SendNotificationResponse(
             success=False,
             message="You don't have permission to send notifications for this event",
@@ -90,6 +102,7 @@ async def send_notification_to_participants(
         )
     
     # Send notifications with audience targeting
+    logger.info(f"Calling notify_event_participants for event {event_id}")
     sent_count = await notify_event_participants(
         session=session,
         event_id=event_id,
@@ -104,6 +117,8 @@ async def send_notification_to_participants(
         "attendees": "attendees",
         "non_attendees": "non-attendees",
     }.get(request_body.audience.value, "participants")
+    
+    logger.info(f"Announcement sent to {sent_count} {audience_label}")
     
     return SendNotificationResponse(
         success=sent_count > 0,
