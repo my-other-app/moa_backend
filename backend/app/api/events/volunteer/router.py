@@ -68,6 +68,20 @@ async def checkin_participant(
     raise CustomHTTPException(401, "User is not a volunteer for this event")
 
 
+@router.post("/validate/{event_id}", summary="Validate a ticket without checking in")
+async def validate_ticket(
+    session: SessionDep, event_id: int, request: CheckinRequest, user: DependsAuth
+) -> dict:
+    """
+    Validate a ticket to check if it's valid for entry.
+    Does NOT mark the user as attended - use checkin endpoint for that.
+    """
+    if not await service.is_volunteer(session, user.id, event_id):
+        raise CustomHTTPException(401, "User is not a volunteer for this event")
+    
+    return await service.validate_ticket(session, event_id, ticket_id=request.ticket_id)
+
+
 @router.get("/my-events", summary="List all events a user is volunteering for")
 async def my_events(
     session: SessionDep, user: DependsAuth

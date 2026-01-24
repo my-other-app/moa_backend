@@ -143,6 +143,7 @@ async def checkin_user(
 ) -> None:
     """Check-in a participant for an event."""
 
+    # First, check if the ticket exists for this specific event
     registration = await session.scalar(
         select(EventRegistrationsLink)
         .where(
@@ -151,8 +152,26 @@ async def checkin_user(
         )
         .options(joinedload(EventRegistrationsLink.event))
     )
+    
     if not registration:
-        raise CustomHTTPException(400, "Registration not found")
+        # Check if the ticket exists for ANY event (wrong event case)
+        any_registration = await session.scalar(
+            select(EventRegistrationsLink)
+            .where(EventRegistrationsLink.ticket_id == ticker_id)
+            .options(joinedload(EventRegistrationsLink.event))
+        )
+        
+        if any_registration:
+            # Ticket exists but for a different event
+            event_name = any_registration.event.name if any_registration.event else "another event"
+            raise CustomHTTPException(
+                400, 
+                f"Incorrect event: This ticket belongs to '{event_name}'"
+            )
+        else:
+            # Ticket doesn't exist at all
+            raise CustomHTTPException(400, "Registration not found")
+    
     if registration.is_attended:
         raise CustomHTTPException(400, "User already checked-in")
     if registration.event.has_fee and not registration.is_paid:
@@ -177,6 +196,70 @@ async def checkin_user(
         logging.getLogger(__name__).error(f"Failed to send check-in notification: {e}")
     
     return True
+
+
+async def validate_ticket(
+    session: AsyncSession, event_id: int, ticket_id: str
+) -> dict:
+    """
+    Validate a ticket without marking attendance.
+    Returns ticket details if valid, raises exception if invalid.
+    """
+    from app.api.users.models import UserProfiles
+    
+    # First, check if the ticket exists for this specific event
+    registration = await session.scalar(
+        select(EventRegistrationsLink)
+        .where(
+            EventRegistrationsLink.event_id == event_id,
+            EventRegistrationsLink.ticket_id == ticket_id,
+        )
+        .options(joinedload(EventRegistrationsLink.event))
+    )
+    
+    if not registration:
+        # Check if the ticket exists for ANY event (wrong event case)
+        any_registration = await session.scalar(
+            select(EventRegistrationsLink)
+            .where(EventRegistrationsLink.ticket_id == ticket_id)
+            .options(joinedload(EventRegistrationsLink.event))
+        )
+        
+        if any_registration:
+            # Ticket exists but for a different event
+            event_name = any_registration.event.name if any_registration.event else "another event"
+            raise CustomHTTPException(
+                400, 
+                f"Incorrect event: This ticket belongs to '{event_name}'"
+            )
+        else:
+            # Ticket doesn't exist at all
+            raise CustomHTTPException(400, "Registration not found")
+    
+    if registration.is_attended:
+        raise CustomHTTPException(400, "User already checked-in")
+    
+    if registration.event.has_fee and not registration.is_paid:
+        raise CustomHTTPException(
+            400, "User has not paid the fee, Please verify the payment details."
+        )
+    
+    # Get user profile for ticket holder name
+    profile = await session.scalar(
+        select(UserProfiles).where(UserProfiles.user_id == registration.user_id)
+    )
+    
+    # Return ticket details without marking as attended
+    return {
+        "valid": True,
+        "ticket_id": ticket_id,
+        "ticket_holder_name": profile.full_name if profile else "Unknown",
+        "event_name": registration.event.name,
+        "event_datetime": registration.event.event_datetime.isoformat() if registration.event.event_datetime else None,
+        "location": registration.event.location,
+        "is_paid": registration.is_paid,
+        "has_fee": registration.event.has_fee,
+    }
 
 
 async def is_volunteer(session: AsyncSession, user_id: int, event_id: int):
