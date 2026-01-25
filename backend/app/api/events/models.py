@@ -77,6 +77,7 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     additional_details = Column(ARRAY(JSON), nullable=True)
     event_guidelines = Column(String, nullable=True)
     page_views = Column(Integer, nullable=False, default=0)
+    event_tag = Column(String(50), nullable=True)  # Tag like "Free", "Paid", "Featured", etc.
 
     category_id = Column(Integer, ForeignKey("event_categories.id"), nullable=False)
     club_id = Column(Integer, ForeignKey("clubs.id"), nullable=True)
@@ -92,8 +93,32 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     )
     files = relationship("EventFiles", back_populates="event")
     ratings = relationship("EventRatingsLink", back_populates="event")
+    speakers = relationship("EventSpeakers", back_populates="event", order_by="EventSpeakers.display_order")
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class EventSpeakers(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
+    """Speakers and guests for events."""
+    __tablename__ = "event_speakers"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
+    name = Column(String(100), nullable=False)
+    designation = Column(String(200), nullable=True)
+    photo = Column(
+        S3ImageField(
+            upload_to="events/speakers/",
+            variations={
+                "thumbnail": {"width": 100, "height": 100},
+                "medium": {"width": 200, "height": 200},
+            },
+        ),
+        nullable=True,
+    )
+    display_order = Column(Integer, nullable=False, default=0)
+
+    event = relationship("Events", back_populates="speakers")
 
 
 class EventFiles(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):

@@ -40,6 +40,22 @@ class EventAdditionalDetail(CustomBaseModel):
     options: list[str] | None = None
 
 
+class EventSpeakerCreate(CustomBaseModel):
+    """Schema for creating/updating event speakers."""
+    name: str = Field(..., min_length=1, max_length=100)
+    designation: str | None = Field(None, max_length=200)
+    photo_url: str | None = Field(None)  # URL or base64 image data
+
+
+class EventSpeakerPublic(CustomBaseModel):
+    """Schema for event speaker response."""
+    id: int
+    name: str
+    designation: str | None = None
+    photo: dict | None = None
+    display_order: int = 0
+
+
 class EventCategoryBase(CustomBaseModel):
     name: str = Field(...)
     icon: str | None = Field(None)
@@ -132,6 +148,8 @@ class EventCreate:
         max_participants: Optional[int] = Form(None),
         additional_details: Optional[str] = Form("[]"),  # JSON string
         event_guidelines: Optional[str] = Form(None),
+        event_tag: Optional[str] = Form(None),  # Event tag like "Free", "Paid", etc.
+        speakers: Optional[str] = Form("[]"),  # JSON array of speakers
     ):
         self.name = name
         self.poster = poster
@@ -164,6 +182,7 @@ class EventCreate:
             )
         self.max_participants = max_participants
         self.event_guidelines = event_guidelines
+        self.event_tag = event_tag
         try:
             self.additional_details = [
                 EventAdditionalDetail(**detail)
@@ -173,6 +192,21 @@ class EventCreate:
             raise CustomHTTPException(
                 status_code=400,
                 message="Invalid JSON format for additional_details",
+            )
+        except ValidationError as e:
+            raise RequestValidationError(e.errors())
+        
+        # Parse speakers JSON
+        try:
+            speakers_data = json.loads(speakers) if speakers else []
+            self.speakers = [
+                EventSpeakerCreate(**speaker) if isinstance(speaker, dict) else speaker
+                for speaker in speakers_data
+            ]
+        except json.JSONDecodeError:
+            raise CustomHTTPException(
+                status_code=400,
+                message="Invalid JSON format for speakers",
             )
         except ValidationError as e:
             raise RequestValidationError(e.errors())
@@ -208,6 +242,8 @@ class EventEdit(EventCreate):
         additional_details: Optional[str] = Form("[]"),  # JSON string
         event_guidelines: Optional[str] = Form(None),
         max_participants: Optional[int] = Form(None),
+        event_tag: Optional[str] = Form(None),
+        speakers: Optional[str] = Form("[]"),
     ):
         super().__init__(
             name=name,
@@ -234,6 +270,8 @@ class EventEdit(EventCreate):
             additional_details=additional_details,
             max_participants=max_participants,
             event_guidelines=event_guidelines,
+            event_tag=event_tag,
+            speakers=speakers,
         )
 
 

@@ -12,6 +12,7 @@ from app.api.events.schemas import (
     EventAdditionalDetail,
     EventCategoryCreate,
     EventEdit,
+    EventSpeakerCreate,
 )
 from app.api.events.models import (
     EventCategories,
@@ -21,6 +22,7 @@ from app.api.events.models import (
     EventRegistrationsLink,
     Events,
     EventRatingsLink,
+    EventSpeakers,
 )
 from app.api.clubs.models import ClubUsersLink, Clubs
 from app.api.users.models import Users
@@ -59,6 +61,8 @@ async def create_event(
     interest_ids: Optional[list[int]] = None,
     max_participants: Optional[int] = None,
     event_guidelines: Optional[str] = None,
+    event_tag: Optional[str] = None,
+    speakers: Optional[list[EventSpeakerCreate]] = None,
     *args,
     **kwargs,
 ):
@@ -111,6 +115,7 @@ async def create_event(
         max_participants=max_participants,
         additional_details=[x.model_dump(mode="json") for x in additional_details],
         event_guidelines=event_guidelines,
+        event_tag=event_tag,
     )
     if poster:
         content = io.BytesIO(await poster.read())
@@ -133,6 +138,19 @@ async def create_event(
                 session.add(link)
 
         await session.commit()
+    
+    # Add speakers/guests if provided
+    if speakers:
+        for idx, speaker in enumerate(speakers):
+            db_speaker = EventSpeakers(
+                event_id=event_id,
+                name=speaker.name,
+                designation=speaker.designation,
+                display_order=idx,
+            )
+            session.add(db_speaker)
+        await session.commit()
+    
     db_event = await session.execute(
         select(Events)
         .filter(Events.id == event_id)
@@ -140,6 +158,7 @@ async def create_event(
             joinedload(Events.category),
             joinedload(Events.club),
             selectinload(Events.interests),
+            selectinload(Events.speakers),
         )
         .limit(1)
     )

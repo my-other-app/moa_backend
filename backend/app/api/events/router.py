@@ -87,6 +87,8 @@ async def create_event(
         interest_ids=event.interest_ids,
         max_participants=event.max_participants,
         event_guidelines=event.event_guidelines,
+        event_tag=event.event_tag,
+        speakers=event.speakers,
     )
 
 
