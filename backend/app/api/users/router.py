@@ -190,7 +190,7 @@ async def get_my_events(
 @router.post("/fcm-token", summary="Register FCM token for push notifications")
 async def register_fcm_token(
     session: SessionDep,
-    user: UserAuth,
+    user: DependsAuth,
     body: FCMTokenRequest,
 ) -> FCMTokenResponse:
     """Register or update the user's FCM token for push notifications."""
@@ -201,3 +201,4 @@ async def register_fcm_token(
         platform=body.platform,
     )
     return FCMTokenResponse(success=True, message="FCM token registered successfully")
+
