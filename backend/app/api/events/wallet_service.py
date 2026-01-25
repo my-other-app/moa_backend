@@ -193,7 +193,7 @@ def sign_manifest(manifest_bytes: bytes) -> bytes:
     if not all(p.exists() for p in [CERT_PATH, KEY_PATH, WWDR_PATH]):
         # Return empty signature if certs don't exist
         logger.error("One or more certificate files are missing!")
-        return b""
+        raise CustomHTTPException(500, "Wallet certificates are not configured on the server.")
     
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix='.json') as manifest_file:
@@ -222,7 +222,9 @@ def sign_manifest(manifest_bytes: bytes) -> bytes:
             logger.error(f"OpenSSL signing failed with code {result.returncode}")
             logger.error(f"OpenSSL stderr: {result.stderr.decode()}")
             logger.error(f"OpenSSL stdout: {result.stdout.decode()}")
-            return b""
+            logger.error(f"OpenSSL stderr: {result.stderr.decode()}")
+            logger.error(f"OpenSSL stdout: {result.stdout.decode()}")
+            raise CustomHTTPException(500, "Failed to sign wallet pass.")
         
         with open(sig_path, 'rb') as f:
             signature = f.read()
@@ -237,7 +239,9 @@ def sign_manifest(manifest_bytes: bytes) -> bytes:
         
     except Exception as e:
         logger.exception(f"Error signing manifest: {e}")
-        return b""
+    except Exception as e:
+        logger.exception(f"Error signing manifest: {e}")
+        raise CustomHTTPException(500, f"Error signing wallet pass: {str(e)}")
 
 
 def get_default_icon() -> bytes:

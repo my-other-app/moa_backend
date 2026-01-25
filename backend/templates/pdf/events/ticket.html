@@ -23,13 +23,15 @@
       }
 
       .ticket-container {
-        width: 375px;
+        width: 100%;
+        max-width: 600px;
         background-color: #1db9a0;
         border-radius: 30px;
         padding: 20px;
         position: relative;
         overflow: hidden;
         box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        margin: 0 auto;
       }
 
       .ticket {
@@ -218,7 +220,7 @@
 
         <div class="qr-section">
           <div class="qr-code">
-            <!-- QR code will be generated dynamically -->
+            <img src="data:image/png;base64,{{ email_payload.qr_code }}" alt="Ticket QR Code" style="width: 100%; height: 100%; object-fit: contain;">
           </div>
           <div class="qr-text">
             Generate this ticket at the venue to mark attendance and get other

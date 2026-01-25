@@ -8,6 +8,9 @@ from fastapi import (
     Response,
 )
 from datetime import timedelta
+import base64
+import io
+import qrcode
 from app.core.utils.pdf import generate_pdf_bytes
 from fastapi.encoders import jsonable_encoder
 from typing import Optional, List
@@ -238,6 +241,25 @@ async def get_ticket_pdf(
         "contact_email": event.contact_email,
         "contact_phone": event.contact_phone,
     }
+
+    # Generate QR Code
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=10,
+        border=4,
+    )
+    qr.add_data(registration.ticket_id)
+    qr.make(fit=True)
+    
+    img = qr.make_image(fill_color="black", back_color="white")
+    
+    # Convert QR code to base64
+    buffered = io.BytesIO()
+    img.save(buffered, format="PNG")
+    qr_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
+    
+    email_payload["qr_code"] = qr_base64
 
     pdf_bytes = generate_pdf_bytes(
         template_path="events/ticket.html",
