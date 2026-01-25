@@ -184,3 +184,80 @@ async def list_all_tokens(
             for t in tokens
         ]
     )
+
+
+@router.get("/test/firebase-status", summary="Check Firebase Admin SDK status")
+async def check_firebase_status(
+    user: AdminAuth,  # Admin only
+):
+    """
+    Check if Firebase Admin SDK is properly initialized.
+    
+    This helps debug push notification issues.
+    """
+    from app.config import settings
+    
+    status = {
+        "has_path_config": bool(settings.FIREBASE_SERVICE_ACCOUNT_PATH),
+        "has_base64_config": bool(settings.FIREBASE_SERVICE_ACCOUNT_BASE64),
+        "base64_length": len(settings.FIREBASE_SERVICE_ACCOUNT_BASE64) if settings.FIREBASE_SERVICE_ACCOUNT_BASE64 else 0,
+        "firebase_initialized": False,
+        "error": None,
+    }
+    
+    try:
+        # Try to initialize Firebase
+        app = push_service.initialize_firebase()
+        if app:
+            status["firebase_initialized"] = True
+            status["project_id"] = app.project_id if hasattr(app, 'project_id') else "unknown"
+        else:
+            status["error"] = "Firebase initialization returned None - check credentials"
+    except Exception as e:
+        status["error"] = str(e)
+    
+    return status
+
+
+@router.post("/test/send-single", summary="Send push to a single token directly")
+async def send_push_to_single_token(
+    token: str,
+    title: str,
+    body: str,
+    user: AdminAuth,
+):
+    """
+    Send push notification directly to a single token for debugging.
+    """
+    import firebase_admin
+    from firebase_admin import messaging
+    
+    try:
+        # Initialize Firebase
+        app = push_service.initialize_firebase()
+        if not app:
+            return {"success": False, "error": "Firebase not initialized"}
+        
+        # Create message
+        message = messaging.Message(
+            notification=messaging.Notification(
+                title=title,
+                body=body,
+            ),
+            token=token,
+            apns=messaging.APNSConfig(
+                payload=messaging.APNSPayload(
+                    aps=messaging.Aps(
+                        sound="default",
+                        badge=1,
+                    ),
+                ),
+            ),
+        )
+        
+        # Send
+        response = messaging.send(message)
+        return {"success": True, "message_id": response}
+        
+    except Exception as e:
+        return {"success": False, "error": str(e), "error_type": type(e).__name__}
