@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 import io
 from typing import Optional
 from fastapi import Request, UploadFile
-from sqlalchemy import and_, delete, exists, select, func, or_
+from sqlalchemy import and_, delete, exists, select, func, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
 from sqlalchemy.dialects.postgresql import INTERVAL
@@ -435,9 +435,8 @@ async def list_events(
     # Filter by ended status (FIXED: corrected logic)
     # event_end_time = event_datetime + duration hours
     if is_ended is not None:
-        event_end_time = Events.event_datetime + func.cast(
-            func.concat(Events.duration, " HOURS"), INTERVAL
-        )
+        # event_end_time = event_datetime + duration * 1 hour
+        event_end_time = Events.event_datetime + (Events.duration * text("INTERVAL '1 hour'"))
         if is_ended:
             # Past events: event has ended (end_time < now)
             query = query.filter(event_end_time < func.now())
