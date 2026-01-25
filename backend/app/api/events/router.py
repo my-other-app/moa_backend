@@ -3,8 +3,12 @@ from fastapi import (
     Depends,
     Request,
     Query,
+    Request,
+    Query,
     Response,
 )
+from datetime import timedelta
+from app.core.utils.pdf import generate_pdf_bytes
 from fastapi.encoders import jsonable_encoder
 from typing import Optional, List
 
@@ -195,6 +199,58 @@ async def increment_view_count(
         session, event_id=event_id, user_id=user.id if user else None, request=request
     )
     return {"message": "Done"}
+
+
+
+@router.get("/tickets/{ticket_id}/pdf", summary="Get ticket PDF")
+async def get_ticket_pdf(
+    ticket_id: str,
+    session: SessionDep = SessionDep,
+    user: DependsAuth = None,
+) -> Response:
+    """
+    Generate and download a PDF for the ticket.
+    """
+    registration = await service.get_ticket_details(session, ticket_id=ticket_id)
+    
+    # Construct payload for template
+    event = registration.event
+    event_endtime = (
+        event.event_datetime + timedelta(hours=event.duration)
+        if event.duration
+        else None
+    )
+    
+    email_payload = {
+        "ticket_id": registration.ticket_id,
+        "participant_name": registration.full_name,
+        "event_name": event.name,
+        "event_date": event.event_datetime.strftime("%d %b %Y"),
+        "event_time": (
+            event.event_datetime.strftime("%I:%M %p")
+            + (" - " + event_endtime.strftime("%I:%M %p"))
+            if event_endtime
+            else ""
+        ),
+        "event_location": event.location_name,
+        "event_prizes": f"Prizes worth ₹{event.prize_amount}",
+        "organizer_name": event.club.name,
+        "contact_email": event.contact_email,
+        "contact_phone": event.contact_phone,
+    }
+
+    pdf_bytes = generate_pdf_bytes(
+        template_path="events/ticket.html",
+        context={"email_payload": email_payload},
+    )
+
+    return Response(
+        content=pdf_bytes.getvalue(),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="ticket-{ticket_id}.pdf"'
+        }
+    )
 
 
 @router.get("/tickets/{ticket_id}/wallet.pkpass", summary="Get Apple Wallet pass")

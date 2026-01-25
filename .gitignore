@@ -5,3 +5,4 @@ volume
 venv
 .env.production
 *.log
+backend/service-account.json
