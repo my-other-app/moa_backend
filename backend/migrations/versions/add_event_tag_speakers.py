@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = 'add_event_tag_speakers'
-down_revision = None
+down_revision = 'add_event_id_notifications'
 branch_labels = None
 depends_on = None
 
