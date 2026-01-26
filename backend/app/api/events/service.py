@@ -62,7 +62,7 @@ async def create_event(
     max_participants: Optional[int] = None,
     event_guidelines: Optional[str] = None,
     event_tag: Optional[str] = None,
-    event_tag: Optional[str] = None,
+
     speakers: Optional[list[EventSpeakerCreate]] = None,
     speaker_photos: Optional[list[UploadFile]] = None,
     *args,
