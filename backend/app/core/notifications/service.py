@@ -33,6 +33,11 @@ def initialize_firebase():
         
         # Option 1: Path to service account JSON file
         if settings.FIREBASE_SERVICE_ACCOUNT_PATH:
+            import os
+            if not os.path.exists(settings.FIREBASE_SERVICE_ACCOUNT_PATH):
+                logger.error(f"Firebase service account file not found at: {settings.FIREBASE_SERVICE_ACCOUNT_PATH}")
+                return None
+                
             logger.info(f"Using Firebase credentials from file: {settings.FIREBASE_SERVICE_ACCOUNT_PATH}")
             cred = credentials.Certificate(settings.FIREBASE_SERVICE_ACCOUNT_PATH)
         
@@ -84,6 +89,7 @@ async def get_fcm_tokens_for_users(
     )
     result = await session.execute(query)
     tokens = [row[0] for row in result.fetchall()]
+    logger.info(f"Found {len(tokens)} FCM tokens for {len(user_ids)} users. User IDs: {user_ids}")
     return tokens
 
 

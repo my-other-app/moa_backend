@@ -366,6 +366,7 @@ async def update_fcm_token(
     
     if existing:
         existing.fcm_token = fcm_token
+        existing.is_deleted = False
     else:
         device_token = UserDeviceTokens(
             user_id=user_id,
