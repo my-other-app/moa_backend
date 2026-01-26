@@ -102,9 +102,8 @@ async def send_notification_to_participants(
         )
     
     # Send notifications with audience targeting
-    # Send notifications with audience targeting
     logger.info(f"Calling notify_event_participants for event {event_id}")
-    sent_count, participant_count = await notify_event_participants(
+    sent_count, participant_ids = await notify_event_participants(
         session=session,
         event_id=event_id,
         title=request_body.title,
@@ -112,6 +111,8 @@ async def send_notification_to_participants(
         image_url=request_body.image_url,
         audience=request_body.audience.value,
     )
+    
+    participant_count = len(participant_ids)
     
     audience_label = {
         "all": "registrants",
@@ -131,7 +132,7 @@ async def send_notification_to_participants(
     if sent_count == 0:
         return SendNotificationResponse(
             success=False, # Treat as warning/failure to alert user
-            message=f"Found {participant_count} {audience_label}, but none have active push notifications (mobile app login required).",
+            message=f"Found {participant_count} {audience_label} (IDs: {participant_ids}), but none have active push notifications (mobile app login required).",
             notifications_sent=0,
         )
         

@@ -250,7 +250,7 @@ async def notify_event_participants(
     
     if not user_ids:
         logger.debug(f"No participants to notify for event {event_id} (audience: {audience})")
-        return 0, 0
+        return 0, []
     
     logger.info(f"Sending club notification to {len(user_ids)} {audience} of event {event_id}")
     
@@ -280,7 +280,7 @@ async def notify_event_participants(
         image_url=image_url,
     )
     
-    return sent_count, len(user_ids)
+    return sent_count, user_ids
 
 
 async def notify_user_added_as_volunteer(
