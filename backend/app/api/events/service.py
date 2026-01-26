@@ -62,7 +62,9 @@ async def create_event(
     max_participants: Optional[int] = None,
     event_guidelines: Optional[str] = None,
     event_tag: Optional[str] = None,
+    event_tag: Optional[str] = None,
     speakers: Optional[list[EventSpeakerCreate]] = None,
+    speaker_photos: Optional[list[UploadFile]] = None,
     *args,
     **kwargs,
 ):
@@ -148,6 +150,28 @@ async def create_event(
                 designation=speaker.designation,
                 display_order=idx,
             )
+            
+            # Handle photo upload
+            # Handle photo upload
+            if speaker.photo_index is not None and speaker_photos:
+                try:
+                    p_index = int(speaker.photo_index)
+                    if len(speaker_photos) > p_index:
+                        photo_file = speaker_photos[p_index]
+                        await photo_file.seek(0)
+                        content = io.BytesIO(await photo_file.read())
+                        db_speaker.photo = {
+                            "bytes": content,
+                            "filename": photo_file.filename,
+                        }
+                except (ValueError, TypeError):
+                    pass
+            elif speaker.photo_url:
+                # If photo_url is provided (e.g. from existing speaker), we might want to handle it.
+                # But S3ImageField expects upload. If it's a string, it might be ignored or cause issues depending on implementation.
+                # Assuming for now we only handle new uploads or leave as None if not provided.
+                pass
+
             session.add(db_speaker)
         await session.commit()
     
@@ -194,7 +218,11 @@ async def create_event(
 
 
 async def update_event(
-    session: AsyncSession, event: EventEdit, user_id: int, event_id: int
+    session: AsyncSession, 
+    event: EventEdit, 
+    user_id: int, 
+    event_id: int,
+    speaker_photos: Optional[list[UploadFile]] = None,
 ):
     db_event = await session.execute(
         select(Events)
@@ -246,6 +274,77 @@ async def update_event(
     db_event.event_guidelines = event.event_guidelines
     db_event.url = event.url
     db_event.max_participants = event.max_participants
+    
+    # Update speakers
+    if event.speakers is not None:
+        # Get existing speakers
+        existing_speakers = await session.execute(
+            select(EventSpeakers).where(EventSpeakers.event_id == event_id)
+        )
+        existing_speakers_map = {s.id: s for s in existing_speakers.scalars().all()}
+        
+        speakers_data = [
+            EventSpeakerCreate(**s) if isinstance(s, dict) else s 
+            for s in event.speakers
+        ]
+        
+        # Track IDs to keep
+        keep_ids = set()
+        
+        for idx, speaker in enumerate(speakers_data):
+            if speaker.id and speaker.id in existing_speakers_map:
+                # Update existing speaker
+                db_speaker = existing_speakers_map[speaker.id]
+                db_speaker.name = speaker.name
+                db_speaker.designation = speaker.designation
+                db_speaker.display_order = idx
+                keep_ids.add(speaker.id)
+                
+                # Update photo if provided
+                if speaker.photo_index is not None and speaker_photos:
+                    try:
+                        p_index = int(speaker.photo_index)
+                        if len(speaker_photos) > p_index:
+                            photo_file = speaker_photos[p_index]
+                            await photo_file.seek(0)
+                            content = io.BytesIO(await photo_file.read())
+                            db_speaker.photo = {
+                                "bytes": content,
+                                "filename": photo_file.filename,
+                            }
+                    except (ValueError, TypeError):
+                        pass
+            else:
+                # Create new speaker
+                db_speaker = EventSpeakers(
+                    event_id=event_id,
+                    name=speaker.name,
+                    designation=speaker.designation,
+                    display_order=idx,
+                )
+                
+                # Handle photo upload for new speaker
+                if speaker.photo_index is not None and speaker_photos:
+                    try:
+                        p_index = int(speaker.photo_index)
+                        if len(speaker_photos) > p_index:
+                            photo_file = speaker_photos[p_index]
+                            await photo_file.seek(0)
+                            content = io.BytesIO(await photo_file.read())
+                            db_speaker.photo = {
+                                "bytes": content,
+                                "filename": photo_file.filename,
+                            }
+                    except (ValueError, TypeError):
+                        pass
+                
+                session.add(db_speaker)
+        
+        # Delete removed speakers
+        for speaker_id, db_speaker in existing_speakers_map.items():
+            if speaker_id not in keep_ids:
+                await session.delete(db_speaker)
+
     await session.commit()
     db_event = await session.execute(
         select(Events)
@@ -303,6 +402,7 @@ async def get_event(session: AsyncSession, event_id: str | int, user_id: int | N
             selectinload(Events.club),
             selectinload(Events.interests).options(joinedload(Interests.category)),
             selectinload(Events.files),  # Load event files for downloads
+            selectinload(Events.speakers),
         )
     )
     db_event = db_event.first()
@@ -321,6 +421,18 @@ async def get_event(session: AsyncSession, event_id: str | int, user_id: int | N
         {"name": f.name, "url": f.file} 
         for f in event.files if not f.is_deleted
     ] if event.files else []
+
+    # Get speakers
+    data["speakers"] = [
+        {
+            "id": s.id,
+            "name": s.name,
+            "designation": s.designation,
+            "photo": s.photo,
+            "display_order": s.display_order
+        }
+        for s in event.speakers if not s.is_deleted
+    ] if event.speakers else []
 
     # User-specific data (only if user is authenticated)
     if user_id:

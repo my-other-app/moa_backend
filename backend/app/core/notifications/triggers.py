@@ -275,6 +275,7 @@ async def notify_event_participants(
         data={
             "type": "club_announcement",
             "event_id": str(event_id),
+            "image_url": image_url or "",
         },
         image_url=image_url,
     )

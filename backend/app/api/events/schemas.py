@@ -45,6 +45,8 @@ class EventSpeakerCreate(CustomBaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     designation: str | None = Field(None, max_length=200)
     photo_url: str | None = Field(None)  # URL or base64 image data
+    photo_index: int | None = Field(None) # Index in the uploaded files list
+    id: int | None = Field(None) # ID for updating existing speakers
 
 
 class EventSpeakerPublic(CustomBaseModel):
@@ -378,6 +380,7 @@ class EventListResponseSelf(CustomBaseModel):
     reg_enddate: datetime | None = Field(None)
     category: EventCategoryDetail = Field(...)
     page_views: int = Field(0)
+    registration_count: int = Field(0)
 
 
 class EventFileResponse(CustomBaseModel):
@@ -426,6 +429,7 @@ class EventDetailResponse(CustomBaseModel):
     user_position: int | None = Field(None)
     position_label: str | None = Field(None)
     downloads: list[EventFileResponse] | None = Field(None)
+    speakers: list[EventSpeakerPublic] | None = Field(None)
 
 
 # REQUEST MODELS

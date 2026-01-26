@@ -536,9 +536,23 @@ async def get_club_events(
 ):
     """Get events of a club with optional past/upcoming filter."""
     from sqlalchemy.dialects.postgresql import INTERVAL
+    from app.api.events.models import EventRegistrationsLink
+    
+    # Subquery to count registrations for each event
+    reg_count_subquery = (
+        select(func.count(EventRegistrationsLink.id))
+        .where(
+            EventRegistrationsLink.event_id == Events.id,
+            EventRegistrationsLink.is_deleted == False,
+        )
+        .scalar_subquery()
+    )
     
     query = (
-        select(Events)
+        select(
+            Events,
+            reg_count_subquery.label("registration_count")
+        )
         .where(Events.club_id == club_id, Events.is_deleted == False)
         .options(
             joinedload(Events.category),
@@ -563,4 +577,11 @@ async def get_club_events(
         query = query.order_by(Events.event_datetime.desc())
     
     query = query.limit(limit).offset(offset)
-    return list(await session.scalars(query))
+    
+    results = await session.execute(query)
+    
+    # Convert results to list of dicts with registration_count
+    return [
+        jsonable_encoder(event) | {"registration_count": count}
+        for event, count in results
+    ]

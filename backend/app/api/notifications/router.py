@@ -22,7 +22,7 @@ class MarkAllReadResponse(BaseModel):
     message: str
 
 
-@router.get("/list")
+@router.get("/fetch-list")
 async def list_notifications(
     request: Request,
     pagination: PaginationParams,
@@ -33,13 +33,31 @@ async def list_notifications(
     
     Returns paginated list of notifications with related club/user/event data.
     """
-    notifications = await service.list_notifications(
-        session=session,
-        user_id=user.id,
-        limit=pagination.limit,
-        offset=pagination.offset,
-    )
-    return paginated_response(notifications, request, schema=NotificationSchema)
+
+    print(f"DEBUG: List notifications request for user {user.id} limit={pagination.limit} offset={pagination.offset}")
+    
+    try:
+        notifications = await service.list_notifications(
+            session=session,
+            user_id=user.id,
+            limit=pagination.limit,
+            offset=pagination.offset,
+        )
+        print(f"DEBUG: Service returned {len(notifications)} notifications")
+        
+        # Debug: Print first notification to check data
+        if notifications:
+            n = notifications[0]
+            print(f"DEBUG: First notification: ID={n.id}, Type={n.type}, Club={n.from_club_id}")
+            
+        response = paginated_response(notifications, request, schema=NotificationSchema)
+        print("DEBUG: Successfully serialized response")
+        return response
+    except Exception as e:
+        print(f"DEBUG: Error listing notifications: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise e
 
 
 @router.get("/unread-count", response_model=UnreadCountResponse)

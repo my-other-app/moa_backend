@@ -25,6 +25,7 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+import requests
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,7 +43,9 @@ TEAM_ID = os.getenv("WALLET_TEAM_ID", "")
 ORG_NAME = os.getenv("WALLET_ORGANIZATION_NAME", "My Other App")
 
 # Certificate paths
-CERTS_DIR = Path(__file__).parent.parent.parent.parent / "wallet_certs"
+# Certificate paths
+# In Docker, we mount the certs to /wallet_certs
+CERTS_DIR = Path("/wallet_certs")
 CERT_PATH = CERTS_DIR / "pass_certificate.pem"
 KEY_PATH = CERTS_DIR / "pass_key.pem"
 WWDR_PATH = CERTS_DIR / "wwdr.pem"
@@ -274,7 +277,18 @@ def get_default_icon() -> bytes:
     return png_header + ihdr + idat + iend
 
 
-def create_pkpass(pass_json: dict) -> bytes:
+def download_image(url: str) -> Optional[bytes]:
+    """Download image from URL."""
+    try:
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            return response.content
+    except Exception as e:
+        logger.error(f"Failed to download image from {url}: {e}")
+    return None
+
+
+def create_pkpass(pass_json: dict, poster_bytes: Optional[bytes] = None) -> bytes:
     """
     Create a .pkpass file (signed ZIP archive).
     
@@ -295,6 +309,11 @@ def create_pkpass(pass_json: dict) -> bytes:
     files['icon@3x.png'] = icon_bytes
     files['logo.png'] = icon_bytes
     files['logo@2x.png'] = icon_bytes
+
+    # Add strip image if available (aesthetic improvement)
+    if poster_bytes:
+        files['strip.png'] = poster_bytes
+        files['strip@2x.png'] = poster_bytes
     
     # Create and sign manifest
     manifest_bytes = create_manifest(files)
@@ -339,7 +358,16 @@ async def generate_wallet_pass(
         holder_name=registration.full_name,
     )
     
+    # Fetch poster image if available
+    poster_bytes = None
+    if event.poster:
+        # event.poster is an S3Image (dict-like) with variations
+        # Try to get medium, then large, then original
+        poster_url = event.poster.get("medium") or event.poster.get("large") or event.poster.get("original")
+        if poster_url:
+            poster_bytes = download_image(poster_url)
+
     # Create the .pkpass file
-    pkpass_bytes = create_pkpass(pass_json)
+    pkpass_bytes = create_pkpass(pass_json, poster_bytes=poster_bytes)
     
     return pkpass_bytes

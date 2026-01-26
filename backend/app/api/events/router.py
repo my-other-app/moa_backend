@@ -67,7 +67,10 @@ async def list_event_categories(
 
 @router.post("/create", summary="Create a new event")
 async def create_event(
-    user: ClubAuth, session: SessionDep = SessionDep, event: EventCreate = Depends()
+    user: ClubAuth,
+    session: SessionDep = SessionDep,
+    event: EventCreate = Depends(),
+    speaker_photos: List[UploadFile] = File([]),
 ) -> EventCreateUpdateResponse:
     return await service.create_event(
         session,
@@ -96,6 +99,7 @@ async def create_event(
         event_guidelines=event.event_guidelines,
         event_tag=event.event_tag,
         speakers=event.speakers,
+        speaker_photos=speaker_photos,
     )
 
 
@@ -105,8 +109,11 @@ async def update_event(
     user: ClubAuth,
     session: SessionDep = SessionDep,
     event: EventEdit = Depends(),
+    speaker_photos: List[UploadFile] = File([]),
 ) -> EventCreateUpdateResponse:
-    return await service.update_event(session, event, user.id, event_id=event_id)
+    return await service.update_event(
+        session, event, user.id, event_id=event_id, speaker_photos=speaker_photos
+    )
 
 
 @router.get("/info/{event_id}", summary="Get event info")

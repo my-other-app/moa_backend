@@ -105,7 +105,7 @@ class CreateClubAdmin(CustomBaseModel):
 
 class ClubPublic(ClubBase):
     id: int = Field(...)
-    rating: int = Field(...)
+    rating: float = Field(...)
     total_ratings: int = Field(...)
 
     class Config:
@@ -122,7 +122,7 @@ class ClubPublicDetail(ClubPublic):
 
 class ClubPublicMin(ClubBaseMin):
     id: int = Field(...)
-    rating: int = Field(...)
+    rating: float = Field(...)
     total_ratings: int = Field(...)
 
     class Config:
