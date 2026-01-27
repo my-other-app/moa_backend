@@ -498,6 +498,29 @@ async def get_club_details(
             Events.event_datetime < now,
         )
     )
+    # Get user specific data
+    user_data = None
+    if user_id:
+        link = await session.scalar(
+            select(ClubUsersLink).where(
+                ClubUsersLink.club_id == club_id,
+                ClubUsersLink.user_id == user_id,
+                ClubUsersLink.is_deleted == False,
+            )
+        )
+        if link:
+            user_data = {
+                "is_following": link.is_following,
+                "is_pinned": link.is_pinned,
+                "is_hidden": link.is_hidden,
+            }
+        else:
+            user_data = {
+                "is_following": False,
+                "is_pinned": False,
+                "is_hidden": False,
+            }
+
     # Calculate average rating
     # Assuming rating is stored in ClubRatingsLink or similar, but schema has rating/total_ratings in Club model?
     # The Club model doesn't seem to have rating fields directly in the provided snippet, 
