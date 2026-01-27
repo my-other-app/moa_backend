@@ -269,7 +269,15 @@ async def list_event_registrations(
         query = query.where(EventRegistrationsLink.is_attended == is_attended)
 
     # Get total count before pagination
-    count_query = select(func.count()).select_from(query.subquery())
+    # Use a separate count query to avoid issues with joinedload in subqueries
+    count_query = select(func.count()).select_from(EventRegistrationsLink).where(
+        EventRegistrationsLink.event_id == event_id,
+        EventRegistrationsLink.is_deleted == False,
+    )
+    
+    if is_attended is not None:
+        count_query = count_query.where(EventRegistrationsLink.is_attended == is_attended)
+        
     total = await session.scalar(count_query) or 0
 
     if limit is not None and offset is not None:

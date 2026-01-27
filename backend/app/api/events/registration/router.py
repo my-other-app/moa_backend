@@ -105,7 +105,7 @@ async def list_event_registration(
         limit=pagination.limit,
         offset=pagination.offset,
     )
-    return paginated_response(result, total, request, EventRegistrationPublicMin)
+    return paginated_response(result, request, EventRegistrationPublicMin, total=total)
 
 
 @router.get("/{event_id}/analytics", summary="Get event analytics")
