@@ -10,6 +10,7 @@ from app.api.events.registration.schemas import (
     EventRegistrationPublicMin,
     EventRegistrationRequest,
     EventRegistrationResponse,
+    EventAnalyticsResponse,
 )
 from app.core.auth.dependencies import AdminAuth, ClubAuth, OptionalUserAuth
 from app.db.core import SessionDep
@@ -95,7 +96,7 @@ async def list_event_registration(
     is_paid: bool | None = Query(None),  # Changed to None to show all by default
     session: SessionDep = SessionDep,
 ) -> PaginatedResponse[EventRegistrationPublicMin]:
-    result = await service.list_event_registrations(
+    result, total = await service.list_event_registrations(
         session,
         user_id=user.id,
         event_id=event_id,
@@ -104,7 +105,20 @@ async def list_event_registration(
         limit=pagination.limit,
         offset=pagination.offset,
     )
-    return paginated_response(result, request, EventRegistrationPublicMin)
+    return paginated_response(result, total, request, EventRegistrationPublicMin)
+
+
+@router.get("/{event_id}/analytics", summary="Get event analytics")
+async def get_event_analytics(
+    user: ClubAuth,
+    event_id: int,
+    session: SessionDep = SessionDep,
+) -> EventAnalyticsResponse:
+    return await service.get_event_analytics(
+        session,
+        user_id=user.id,
+        event_id=event_id,
+    )
 
 
 @router.get("/{event_id}/export", summary="Export event registrations")
@@ -115,7 +129,7 @@ async def export_event_registrations(
     is_paid: bool = Query(True),
     session: SessionDep = SessionDep,
 ) -> list[dict]:
-    result = await service.list_event_registrations(
+    result, _ = await service.list_event_registrations(
         session,
         user_id=user.id,
         event_id=event_id,

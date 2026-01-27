@@ -265,18 +265,18 @@ async def list_event_registrations(
         )
     )
 
-    if limit is not None and offset is not None:
-        query = query.limit(limit).offset(offset)
-
-    # Only apply is_paid filter if explicitly set
-    if is_paid is not None:
-        query = query.where(EventRegistrationsLink.is_paid == is_paid)
-
     if is_attended is not None:
         query = query.where(EventRegistrationsLink.is_attended == is_attended)
 
+    # Get total count before pagination
+    count_query = select(func.count()).select_from(query.subquery())
+    total = await session.scalar(count_query) or 0
+
+    if limit is not None and offset is not None:
+        query = query.limit(limit).offset(offset)
+
     scalar_result = await session.scalars(query)
-    return list(scalar_result)
+    return list(scalar_result), total
 
 
 async def get_registration(
@@ -456,3 +456,142 @@ async def bulk_import_event_registrations(
 
         # Re-raise the error for upper-level handling
         # raise
+
+
+async def get_event_analytics(
+    session: AsyncSession,
+    user_id: int,
+    event_id: int,
+):
+    # 1. Verify Event Access
+    event = await session.execute(
+        select(Events).filter(Events.id == event_id).options(joinedload(Events.club))
+    )
+    event = event.scalar()
+
+    if event is None:
+        raise CustomHTTPException(404, message="Event not found")
+
+    if event.club.user_id != user_id:
+        raise CustomHTTPException(403, message="Not authorized to view this event")
+
+    # 2. Fetch all active registrations
+    query = select(EventRegistrationsLink).where(
+        EventRegistrationsLink.event_id == event_id,
+        EventRegistrationsLink.is_deleted == False,
+    )
+    result = await session.scalars(query)
+    registrations = result.all()
+
+    total_registrations = len(registrations)
+    
+    # 3. Calculate Stats
+    paid_count = sum(1 for r in registrations if r.is_paid)
+    unpaid_count = total_registrations - paid_count
+    
+    attended_count = sum(1 for r in registrations if r.is_attended)
+    absent_count = total_registrations - attended_count
+    
+    total_revenue = sum(r.actual_amount for r in registrations if r.is_paid) # Or use paid_amount?
+    # Usually revenue is based on actual fee if paid, or paid_amount. Let's use paid_amount for accuracy.
+    total_revenue = sum(r.paid_amount for r in registrations)
+
+    page_views = event.page_views or 0
+    conversion_rate = (total_registrations / page_views * 100) if page_views > 0 else 0.0
+    attendance_rate = (attended_count / total_registrations * 100) if total_registrations > 0 else 0.0
+
+    # 4. Institution Distribution
+    institutions = {}
+    for r in registrations:
+        # Assuming institution is stored in additional_details or we need to fetch user profile?
+        # The frontend uses `reg.institution || reg.profile`.
+        # In `EventRegistrationsLink`, we don't have institution directly.
+        # It might be in `additional_details` OR we need to join User profile.
+        # For now, let's check `additional_details` for "College Name" or "Institution".
+        inst = "Unknown"
+        if r.additional_details and isinstance(r.additional_details, dict):
+             inst = r.additional_details.get("College Name") or r.additional_details.get("Institution") or r.additional_details.get("college") or "Unknown"
+        
+        institutions[inst] = institutions.get(inst, 0) + 1
+
+    top_institutions = [
+        {"name": k, "value": v}
+        for k, v in sorted(institutions.items(), key=lambda item: item[1], reverse=True)[:5]
+    ]
+
+    # 5. Registration Time Distribution
+    # Morning: 6-12, Afternoon: 12-17, Evening: 17-21, Night: 21-6
+    morning = 0
+    afternoon = 0
+    evening = 0
+    night = 0
+
+    from datetime import time
+
+    for r in registrations:
+        # created_at is UTC. We should probably convert to local time (IST) or just use UTC?
+        # User is likely in IST (GMT+5:30).
+        # Let's assume server time is UTC and convert to IST for analytics.
+        created_at = r.created_at
+        if not created_at:
+            continue
+            
+        # Add 5 hours 30 minutes for IST
+        local_time = created_at + timedelta(hours=5, minutes=30)
+        t = local_time.time()
+
+        if time(6, 0) <= t < time(12, 0):
+            morning += 1
+        elif time(12, 0) <= t < time(17, 0):
+            afternoon += 1
+        elif time(17, 0) <= t < time(21, 0):
+            evening += 1
+        else:
+            night += 1
+
+    # 6. Attendance Over Time (Recent Check-ins)
+    # Group by hour? Or just list recent check-ins?
+    # User asked for "how many when recent attended".
+    # Let's group by hour for the last 24 hours or just all time if event is short.
+    # Assuming event is 1-2 days.
+    attendance_trend = {}
+    for r in registrations:
+        if r.is_attended and r.attended_on:
+            # Convert to local time (IST)
+            local_time = r.attended_on + timedelta(hours=5, minutes=30)
+            # Group by hour: "10:00 AM", "11:00 AM"
+            hour_key = local_time.strftime("%I:00 %p")
+            # We need to sort by time, so maybe store as tuple (datetime, label) first?
+            # Or just use a dict and sort keys later?
+            # Better: Group by hour and sort by hour.
+            
+            # Use a sortable key like "YYYY-MM-DD HH"
+            sort_key = local_time.strftime("%Y-%m-%d %H")
+            label = local_time.strftime("%I %p") # "10 AM"
+            
+            if sort_key not in attendance_trend:
+                attendance_trend[sort_key] = {"label": label, "count": 0, "sort": sort_key}
+            attendance_trend[sort_key]["count"] += 1
+            
+    # Sort by time
+    attendance_over_time = [
+        {"time": v["label"], "count": v["count"]}
+        for k, v in sorted(attendance_trend.items())
+    ]
+
+    return {
+        "total_registrations": total_registrations,
+        "total_revenue": total_revenue,
+        "attendance_rate": round(attendance_rate, 1),
+        "conversion_rate": round(conversion_rate, 1),
+        "payment_status": {"paid": paid_count, "unpaid": unpaid_count},
+        "attendance_status": {"attended": attended_count, "absent": absent_count},
+        "top_institutions": top_institutions,
+        "registration_time": {
+            "morning": morning,
+            "afternoon": afternoon,
+            "evening": evening,
+            "night": night,
+        },
+        "attendance_over_time": attendance_over_time,
+    }

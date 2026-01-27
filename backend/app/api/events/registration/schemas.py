@@ -60,3 +60,24 @@ class EventRegistrationPublicMin(CustomBaseModel):
     user: UserPublic = Field(...)
     volunteer: ListVolunteersResponse | None = Field(None)
     created_at: datetime = Field(...)
+
+
+class RegistrationTimeDistribution(CustomBaseModel):
+    morning: int = 0  # 6 AM - 12 PM
+    afternoon: int = 0  # 12 PM - 5 PM
+    evening: int = 0  # 5 PM - 9 PM
+    night: int = 0  # 9 PM - 6 AM
+
+
+class EventAnalyticsResponse(CustomBaseModel):
+    total_registrations: int
+    total_revenue: float
+    attendance_rate: float
+    conversion_rate: float
+    
+    # Breakdowns
+    payment_status: dict[str, int]  # {"paid": 10, "unpaid": 5}
+    attendance_status: dict[str, int]  # {"attended": 8, "absent": 7}
+    top_institutions: list[dict[str, Any]]  # [{"name": "IIT", "value": 10}, ...]
+    registration_time: RegistrationTimeDistribution
+    attendance_over_time: list[dict[str, Any]]  # [{"time": "10:00 AM", "count": 5}, ...]
