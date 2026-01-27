@@ -512,23 +512,63 @@ async def get_club_details(
     # Wait, I can't check models.py in the middle of replace_file_content.
     # I will assume 0 for now and fix if needed.
     
-    # Exclude 'org' to prevent circular reference (org -> clubs -> org)
-    club_dict = jsonable_encoder(club, exclude={"org"})
-    
-    # Manually add org without back-population
+    # Manual serialization to avoid circular references and 500 errors
+    club_dict = {
+        "id": club.id,
+        "name": club.name,
+        "slug": club.slug,
+        "logo": club.logo,
+        "about": club.about,
+        "location_name": club.location_name,
+        "location_link": club.location_link,
+        "contact_phone": club.contact_phone,
+        "contact_email": club.contact_email,
+        "rating": club.rating if club.rating is not None else 0.0,
+        "total_ratings": club.total_ratings if club.total_ratings is not None else 0,
+        "followers_count": followers_count,
+        "total_events": total_events or 0,
+        "live_events": live_events or 0,
+        "past_events": past_events or 0,
+        "user_data": user_data,
+    }
+
+    # Manually serialize relationships
     if club.org:
-        club_dict["org"] = jsonable_encoder(club.org, exclude={"clubs"})
-        
-    club_dict["followers_count"] = followers_count
-    club_dict["total_events"] = total_events or 0
-    club_dict["live_events"] = live_events or 0
-    club_dict["past_events"] = past_events or 0
-    
-    # Ensure rating is present and valid
-    if "rating" not in club_dict or club_dict["rating"] is None:
-        club_dict["rating"] = 0.0
-    if "total_ratings" not in club_dict or club_dict["total_ratings"] is None:
-        club_dict["total_ratings"] = 0
+        club_dict["org"] = {
+            "id": club.org.id,
+            "name": club.org.name,
+            "type": club.org.type.value if hasattr(club.org.type, "value") else str(club.org.type),
+            "address": club.org.address,
+            "phone": club.org.phone,
+            "email": club.org.email,
+        }
+    else:
+        club_dict["org"] = None
+
+    if club.socials:
+        club_dict["socials"] = {
+            "instagram": club.socials.instagram,
+            "linkedin": club.socials.linkedin,
+            "youtube": club.socials.youtube,
+            "website": club.socials.website,
+        }
+    else:
+        club_dict["socials"] = None
+
+    if club.interests:
+        club_dict["interests"] = [
+            {
+                "id": i.id,
+                "name": i.name,
+                "icon": i.icon,
+                "icon_type": i.icon_type.value if hasattr(i.icon_type, "value") else str(i.icon_type) if i.icon_type else None,
+            }
+            for i in club.interests
+        ]
+    else:
+        club_dict["interests"] = []
+
+    return club_dict
 
 
 async def update_club_logo(
