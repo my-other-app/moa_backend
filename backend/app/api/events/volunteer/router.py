@@ -30,6 +30,8 @@ async def add_volunteers(
         email_id=volunteer.email_id,
         event_id=volunteer.event_id,
         club_id=volunteer.club_id,
+        full_name=volunteer.full_name,
+        phone=volunteer.phone,
     )
     return await service.list_volunteers(session, volunteer.event_id)
 

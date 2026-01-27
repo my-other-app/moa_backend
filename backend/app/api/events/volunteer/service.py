@@ -13,7 +13,12 @@ from app.core.notifications.triggers import notify_user_check_in, notify_user_ad
 
 
 async def add_volunteer(
-    session: AsyncSession, email_id: str, event_id: int, club_id: int
+    session: AsyncSession,
+    email_id: str,
+    event_id: int,
+    club_id: int,
+    full_name: str | None = None,
+    phone: str | None = None,
 ) -> None:
     """Add volunteers to an event."""
     volunteer_exists = await session.scalar(
@@ -27,16 +32,38 @@ async def add_volunteer(
         raise CustomHTTPException(
             status_code=400, message="Volunteer already exists for this event."
         )
-    user_id = await session.scalar(
-        select(Users.id).where(
+    
+    # Check if user exists
+    user = await session.scalar(
+        select(Users).where(
             Users.email == email_id,
-            or_(Users.user_type == "app_user", Users.user_type == "admin"),
+            Users.is_deleted == False,
         )
     )
+    
+    if not user:
+        if not full_name:
+            raise CustomHTTPException(
+                status_code=400, message="User not found. Please provide full name to add as guest."
+            )
+        
+        # Create guest user
+        from app.api.users import service as user_service
+        from app.api.users.models import UserTypes
+        
+        user = await user_service.create_user(
+            session=session,
+            full_name=full_name,
+            email=email_id,
+            phone=phone,
+            provider="email",
+            user_type=UserTypes.guest,
+        )
+
     volunteer = Volunteer(
         email=email_id,
         event_id=event_id,
-        user_id=user_id,
+        user_id=user.id,
         club_id=club_id,
         is_approved=True,  # TODO: Change this to manual approval by the requested user.
     )

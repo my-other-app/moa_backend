@@ -7,6 +7,8 @@ from app.core.response.base_model import CustomBaseModel
 
 class VolunteerCreateRemove(CustomBaseModel):
     email_id: EmailStr
+    full_name: str | None = None
+    phone: str | None = None
     event_id: int | None = None
     club_id: int | None = None
 
