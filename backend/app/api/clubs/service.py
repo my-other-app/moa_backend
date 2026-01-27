@@ -22,7 +22,7 @@ from app.api.users.service import create_user
 from app.api.interests.models import Interests
 from app.core.validations.schema import validate_relations
 from app.api.orgs.models import Organizations
-from app.api.events.models import Events
+from app.api.events.models import Events, EventRegistrationsLink
 
 
 async def create_club(
@@ -536,7 +536,6 @@ async def get_club_events(
 ):
     """Get events of a club with optional past/upcoming filter."""
     from sqlalchemy.dialects.postgresql import INTERVAL
-    from app.api.events.models import EventRegistrationsLink
     
     # Subquery to count registrations for each event
     reg_count_subquery = (
@@ -553,8 +552,8 @@ async def get_club_events(
         select(func.count(EventRegistrationsLink.id))
         .where(
             EventRegistrationsLink.event_id == Events.id,
-            EventRegistrationsLink.is_attended == True,
-            EventRegistrationsLink.is_deleted == False,
+            EventRegistrationsLink.is_attended.is_(True),
+            EventRegistrationsLink.is_deleted.is_(False),
         )
         .scalar_subquery()
     )
