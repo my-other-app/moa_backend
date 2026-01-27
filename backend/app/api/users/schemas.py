@@ -10,8 +10,8 @@ from app.core.response.base_model import CustomBaseModel
 
 class AvatarPublic(CustomBaseModel):
     id: int
-    icon_type: UserAvatarTypes
-    content: str
+    name: str
+    image: dict | None = None
 
 
 class UserProfileBase(CustomBaseModel):
@@ -26,9 +26,9 @@ class UserProfileBase(CustomBaseModel):
 
 
 class UserProfilePublic(CustomBaseModel):
-    org: OrganizationPublicMin | None
-    avatar: AvatarPublic | None
-    profile_pic: dict | None
+    org: OrganizationPublicMin | None = None
+    avatar: AvatarPublic | None = None
+    profile_pic: dict | None = None
 
 
 class UserProfilePrivate(CustomBaseModel):
