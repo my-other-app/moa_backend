@@ -470,7 +470,8 @@ async def get_club_details(
     )
 
     # Get events statistics
-    from datetime import datetime
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
     
     # Total events
     total_events = await session.scalar(
@@ -485,7 +486,7 @@ async def get_club_details(
         select(func.count()).where(
             Events.club_id == club_id,
             Events.is_deleted == False,
-            Events.event_datetime >= func.now(),
+            Events.event_datetime >= now,
         )
     )
 
@@ -494,33 +495,20 @@ async def get_club_details(
         select(func.count()).where(
             Events.club_id == club_id,
             Events.is_deleted == False,
-            Events.event_datetime < func.now(),
+            Events.event_datetime < now,
         )
     )
-    
-    # Calculate average rating
-    # Assuming rating is stored in ClubRatingsLink or similar, but schema has rating/total_ratings in Club model?
-    # The Club model doesn't seem to have rating fields directly in the provided snippet, 
-    # but the schema expects them. Let's check if they are calculated or stored.
-    # Looking at schema `ClubPublicDetailResponse`, it has `rating` and `total_ratings`.
-    # Let's assume for now we return 0 or calculate if table exists.
-    # The `Clubs` model in `models.py` didn't show rating fields, but `EventRatingsLink` exists.
-    # Maybe club rating is aggregate of event ratings? Or there is a `ClubRatingsLink`?
-    # Let's check `models.py` again if needed, but for now let's return 0.0 for rating if not found.
-    # Actually, the schema has `rating: int` which I changed to `float`.
-    # Let's just pass 0 for now if we don't have the logic, or check `models.py` quickly.
-    # Wait, I can't check models.py in the middle of replace_file_content.
-    # I will assume 0 for now and fix if needed.
     
     club_dict = jsonable_encoder(club)
     club_dict["followers_count"] = followers_count
     club_dict["total_events"] = total_events or 0
     club_dict["live_events"] = live_events or 0
     club_dict["past_events"] = past_events or 0
-    # Ensure rating is present
-    if "rating" not in club_dict:
+    
+    # Ensure rating is present and valid
+    if "rating" not in club_dict or club_dict["rating"] is None:
         club_dict["rating"] = 0.0
-    if "total_ratings" not in club_dict:
+    if "total_ratings" not in club_dict or club_dict["total_ratings"] is None:
         club_dict["total_ratings"] = 0
 
 
