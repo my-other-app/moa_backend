@@ -538,23 +538,25 @@ async def get_club_events(
     from sqlalchemy.dialects.postgresql import INTERVAL
     
     # Subquery to count registrations for each event
+    reg_link = aliased(EventRegistrationsLink)
     reg_count_subquery = (
-        select(func.count(EventRegistrationsLink.id))
+        select(func.count(reg_link.id))
         .where(
-            EventRegistrationsLink.event_id == Events.id,
-            EventRegistrationsLink.is_deleted == False,
+            reg_link.event_id == Events.id,
+            reg_link.is_deleted == False,
         )
         .correlate(Events)
         .scalar_subquery()
     )
 
     # Subquery to count attended registrations for each event
+    attended_link = aliased(EventRegistrationsLink)
     attended_count_subquery = (
-        select(func.count(EventRegistrationsLink.id))
+        select(func.count(attended_link.id))
         .where(
-            EventRegistrationsLink.event_id == Events.id,
-            EventRegistrationsLink.is_attended.is_(True),
-            EventRegistrationsLink.is_deleted.is_(False),
+            attended_link.event_id == Events.id,
+            attended_link.is_attended == True,
+            attended_link.is_deleted == False,
         )
         .correlate(Events)
         .scalar_subquery()
