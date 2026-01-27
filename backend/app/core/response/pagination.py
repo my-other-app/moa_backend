@@ -25,6 +25,7 @@ def get_pagination_params(
 class PaginatedResponse(BaseModel, Generic[M]):
     limit: int
     offset: int
+    total: int
     next: Optional[str] = None
     items: List[M]
 
