@@ -779,7 +779,7 @@ async def increment_event_page_view(
         client_ip = request.client.host
 
     event_view = EventPageViews(
-        event_id=event_id,
+        event_id=db_event.id, # Use the integer ID from the fetched event
         user_agent=request.headers.get("User-Agent"),
         ip_address=client_ip,
         user_id=user_id,
