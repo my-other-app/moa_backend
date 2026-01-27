@@ -262,7 +262,12 @@ async def list_event_registrations(
             EventRegistrationsLink.is_deleted == False,
         )
         .options(
-            joinedload(EventRegistrationsLink.user),
+            joinedload(EventRegistrationsLink.user).options(
+                joinedload(Users.profile).options(
+                    joinedload(UserProfiles.org),
+                    joinedload(UserProfiles.avatar)
+                )
+            ),
             joinedload(EventRegistrationsLink.volunteer),
         )
     )

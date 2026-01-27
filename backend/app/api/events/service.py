@@ -729,7 +729,10 @@ async def list_event_ratings(
         )
         .options(
             joinedload(EventRatingsLink.user).options(
-                joinedload(Users.profile).options(joinedload(UserProfiles.avatar))
+                joinedload(Users.profile).options(
+                    joinedload(UserProfiles.avatar),
+                    joinedload(UserProfiles.org)
+                )
             )
         )
         .order_by(EventRatingsLink.created_at.desc())

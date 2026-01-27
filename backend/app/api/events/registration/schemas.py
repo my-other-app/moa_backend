@@ -35,7 +35,7 @@ class EventAttendanceUpdate(CustomBaseModel):
 
 
 class EventRegistrationDetailResponse(CustomBaseModel):
-    id: str
+    id: UUID
     user: UserPublic
     ticket_id: str
     is_paid: bool
@@ -50,7 +50,7 @@ class EventRegistrationDetailResponse(CustomBaseModel):
 
 
 class EventRegistrationPublicMin(CustomBaseModel):
-    id: str = Field(...)
+    id: UUID = Field(...)
     ticket_id: str = Field(...)
     event_id: int = Field(...)
     is_paid: bool = Field(...)
