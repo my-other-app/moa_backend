@@ -547,11 +547,23 @@ async def get_club_events(
         )
         .scalar_subquery()
     )
+
+    # Subquery to count attended registrations for each event
+    attended_count_subquery = (
+        select(func.count(EventRegistrationsLink.id))
+        .where(
+            EventRegistrationsLink.event_id == Events.id,
+            EventRegistrationsLink.is_attended == True,
+            EventRegistrationsLink.is_deleted == False,
+        )
+        .scalar_subquery()
+    )
     
     query = (
         select(
             Events,
-            reg_count_subquery.label("registration_count")
+            reg_count_subquery.label("registration_count"),
+            attended_count_subquery.label("attended_count"),
         )
         .where(Events.club_id == club_id, Events.is_deleted == False)
         .options(
@@ -580,8 +592,11 @@ async def get_club_events(
     
     results = await session.execute(query)
     
-    # Convert results to list of dicts with registration_count
+    # Convert results to list of dicts with counts
     return [
-        jsonable_encoder(event) | {"registration_count": count}
-        for event, count in results
+        jsonable_encoder(event) | {
+            "registration_count": reg_count,
+            "attended_count": attended_count
+        }
+        for event, reg_count, attended_count in results
     ]
