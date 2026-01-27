@@ -84,6 +84,10 @@ class UpdateClub:
         contact_phone: str | None = Form(None),
         contact_email: str | None = Form(None),
         interest_ids: str | None = Form(None),
+        instagram: str | None = Form(None),
+        linkedin: str | None = Form(None),
+        youtube: str | None = Form(None),
+        website: str | None = Form(None),
     ):
         self.name = name
         self.logo = logo
@@ -96,6 +100,10 @@ class UpdateClub:
         )
         self.contact_phone = contact_phone
         self.contact_email = contact_email
+        self.instagram = instagram
+        self.linkedin = linkedin
+        self.youtube = youtube
+        self.website = website
 
 
 class CreateClubAdmin(CustomBaseModel):

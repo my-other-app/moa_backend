@@ -144,6 +144,30 @@ async def update_club(session: AsyncSession, club_id: int, club: CreateClub):
         for interest in interests:
             link = ClubInterestsLink(club_id=db_club.id, interest_id=interest.id)
             session.add(link)
+    
+    # Update socials
+    db_socials = await session.scalar(
+        select(ClubSocials).where(
+            ClubSocials.club_id == club_id,
+            ClubSocials.is_deleted == False,
+        )
+    )
+    if db_socials:
+        db_socials.instagram = club.instagram
+        db_socials.linkedin = club.linkedin
+        db_socials.youtube = club.youtube
+        db_socials.website = club.website
+    else:
+        if any([club.instagram, club.linkedin, club.youtube, club.website]):
+            db_socials = ClubSocials(
+                club_id=club_id,
+                instagram=club.instagram,
+                linkedin=club.linkedin,
+                youtube=club.youtube,
+                website=club.website,
+            )
+            session.add(db_socials)
+
     await session.commit()
     await session.refresh(db_club)
     return db_club
