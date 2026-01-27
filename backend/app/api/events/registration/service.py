@@ -658,11 +658,10 @@ async def mark_attendance(
     if registration_id.startswith("MOA"):
         query = query.where(EventRegistrationsLink.ticket_id == registration_id)
     else:
-        try:
-            uuid_obj = uuid.UUID(registration_id)
-            query = query.where(EventRegistrationsLink.id == uuid_obj)
         except ValueError:
             raise CustomHTTPException(404, "Registration not found")
+    
+    query = query.options(joinedload(EventRegistrationsLink.user))
     registration = await session.scalar(query)
 
     if not registration:
