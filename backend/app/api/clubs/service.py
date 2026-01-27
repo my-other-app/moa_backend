@@ -544,6 +544,7 @@ async def get_club_events(
             EventRegistrationsLink.event_id == Events.id,
             EventRegistrationsLink.is_deleted == False,
         )
+        .correlate(Events)
         .scalar_subquery()
     )
 
@@ -555,6 +556,7 @@ async def get_club_events(
             EventRegistrationsLink.is_attended.is_(True),
             EventRegistrationsLink.is_deleted.is_(False),
         )
+        .correlate(Events)
         .scalar_subquery()
     )
     
