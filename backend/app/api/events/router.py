@@ -118,10 +118,20 @@ async def update_event(
 
 @router.get("/info/{event_id}", summary="Get event info")
 async def get_event(
+    request: Request,
     event_id: str,
     session: SessionDep = SessionDep,
     user: OptionalAuth = None,
 ) -> EventDetailResponse:
+    # Increment view count
+    try:
+        await service.increment_event_page_view(
+            session, request, event_id, user_id=user.id if user else None
+        )
+    except Exception:
+        # Don't fail the request if view count increment fails
+        pass
+
     result = await service.get_event(
         session, event_id, user_id=user.id if user else None
     )
