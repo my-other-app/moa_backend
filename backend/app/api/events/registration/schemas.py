@@ -30,6 +30,10 @@ class EventRegistrationRequest(CustomBaseModel):
     additional_details: dict[str, str] | None = Field(None)
 
 
+class EventAttendanceUpdate(CustomBaseModel):
+    is_attended: bool
+
+
 class EventRegistrationDetailResponse(CustomBaseModel):
     id: str
     user: UserPublic

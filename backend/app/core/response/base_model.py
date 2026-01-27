@@ -8,7 +8,7 @@ IST = timezone(timedelta(hours=5, minutes=30))
 
 
 class CustomBaseModel(BaseModel):
-    model_config = ConfigDict(json_encoders={datetime: lambda v: v.isoformat()})
+    model_config = ConfigDict(json_encoders={datetime: lambda v: v.isoformat()}, from_attributes=True)
 
     @field_validator("*", mode="before")
     @classmethod

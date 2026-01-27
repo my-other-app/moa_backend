@@ -1,5 +1,6 @@
 from datetime import timedelta
 import logging
+import uuid
 from fastapi import BackgroundTasks
 from pandas import DataFrame
 from sqlalchemy import func, select
@@ -317,17 +318,22 @@ async def get_registration(
     if event.club.user_id != user_id:
         raise CustomHTTPException(403, message="Not authorized to view this event")
 
+    query = select(EventRegistrationsLink).where(
+        EventRegistrationsLink.event_id == event_id,
+        EventRegistrationsLink.is_deleted == False,
+    )
+
+    if registration_id.startswith("MOA"):
+        query = query.where(EventRegistrationsLink.ticket_id == registration_id)
+    else:
+        try:
+            uuid_obj = uuid.UUID(registration_id)
+            query = query.where(EventRegistrationsLink.id == uuid_obj)
+        except ValueError:
+            raise CustomHTTPException(404, "Registration not found")
+
     scalar_result = await session.scalar(
-        select(EventRegistrationsLink)
-        .where(
-            EventRegistrationsLink.event_id == event_id,
-            EventRegistrationsLink.is_deleted == False,
-            (
-                EventRegistrationsLink.ticket_id == registration_id
-                if registration_id.startswith("MOA")
-                else EventRegistrationsLink.id == registration_id
-            ),
-        )
+        query
         .options(
             joinedload(EventRegistrationsLink.event).options(
                 joinedload(Events.club), joinedload(Events.category)
@@ -335,6 +341,9 @@ async def get_registration(
             joinedload(EventRegistrationsLink.user),
         )
     )
+    if not scalar_result:
+        raise CustomHTTPException(404, "Registration not found")
+    return scalar_result
     if not scalar_result:
         raise CustomHTTPException(404, "Registration not found")
     return scalar_result
@@ -619,3 +628,58 @@ async def get_event_analytics(
         },
         "attendance_over_time": attendance_over_time,
     }
+
+
+async def mark_attendance(
+    session: AsyncSession,
+    user_id: int,
+    event_id: int,
+    registration_id: str,
+    is_attended: bool,
+):
+    # 1. Verify Event Access
+    event = await session.execute(
+        select(Events).filter(Events.id == event_id).options(joinedload(Events.club))
+    )
+    event = event.scalar()
+
+    if event is None:
+        raise CustomHTTPException(404, message="Event not found")
+
+    if event.club.user_id != user_id:
+        raise CustomHTTPException(403, message="Not authorized to manage this event")
+
+    # 2. Fetch Registration
+    query = select(EventRegistrationsLink).where(
+        EventRegistrationsLink.event_id == event_id,
+        EventRegistrationsLink.is_deleted == False,
+    )
+
+    if registration_id.startswith("MOA"):
+        query = query.where(EventRegistrationsLink.ticket_id == registration_id)
+    else:
+        try:
+            uuid_obj = uuid.UUID(registration_id)
+            query = query.where(EventRegistrationsLink.id == uuid_obj)
+        except ValueError:
+            raise CustomHTTPException(404, "Registration not found")
+    registration = await session.scalar(query)
+
+    if not registration:
+        raise CustomHTTPException(404, message="Registration not found")
+
+    # 3. Update Attendance
+    from datetime import datetime, timezone
+    
+    if is_attended:
+        if not registration.is_attended:
+            registration.is_attended = True
+            registration.attended_on = datetime.now(timezone.utc)
+    else:
+        registration.is_attended = False
+        registration.attended_on = None
+
+    await session.commit()
+    await session.refresh(registration)
+    
+    return registration

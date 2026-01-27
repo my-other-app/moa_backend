@@ -232,3 +232,23 @@ async def bulk_import_event_registrations(
 #         event_id=event_id,
 #     )
 #     return paginated_response(result, request, EventRegistrationPublicMin)
+
+
+from app.api.events.registration.schemas import EventAttendanceUpdate
+
+@router.post("/{event_id}/attendance/{registration_id}", summary="Mark attendance")
+async def mark_attendance(
+    user: ClubAuth,
+    event_id: int,
+    registration_id: str,
+    attendance: EventAttendanceUpdate,
+    session: SessionDep = SessionDep,
+) -> EventRegistrationDetailResponse:
+    result = await service.mark_attendance(
+        session,
+        user_id=user.id,
+        event_id=event_id,
+        registration_id=registration_id,
+        is_attended=attendance.is_attended,
+    )
+    return jsonable_encoder(result)
