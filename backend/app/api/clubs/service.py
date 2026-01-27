@@ -22,7 +22,7 @@ from app.api.users.service import create_user
 from app.api.interests.models import Interests
 from app.core.validations.schema import validate_relations
 from app.api.orgs.models import Organizations
-from app.api.events.models import Events, EventRegistrationsLink
+from app.api.events.models import Events, EventRegistrationsLink, EventRatingsLink
 
 
 async def create_club(
@@ -522,18 +522,32 @@ async def get_club_details(
             }
 
     # Calculate average rating
-    # Assuming rating is stored in ClubRatingsLink or similar, but schema has rating/total_ratings in Club model?
-    # The Club model doesn't seem to have rating fields directly in the provided snippet, 
-    # but the schema expects them. Let's check if they are calculated or stored.
-    # Looking at schema `ClubPublicDetailResponse`, it has `rating` and `total_ratings`.
-    # Let's assume for now we return 0 or calculate if table exists.
-    # The `Clubs` model in `models.py` didn't show rating fields, but `EventRatingsLink` exists.
-    # Maybe club rating is aggregate of event ratings? Or there is a `ClubRatingsLink`?
-    # Let's check `models.py` again if needed, but for now let's return 0.0 for rating if not found.
-    # Actually, the schema has `rating: int` which I changed to `float`.
-    # Let's just pass 0 for now if we don't have the logic, or check `models.py` quickly.
-    # Wait, I can't check models.py in the middle of replace_file_content.
-    # I will assume 0 for now and fix if needed.
+    # Calculate rating dynamically from EventRatingsLink
+    total_ratings = await session.scalar(
+        select(func.count()).where(
+            EventRatingsLink.event_id.in_(
+                select(Events.id).where(
+                    Events.club_id == club_id,
+                    Events.is_deleted == False
+                )
+            ),
+            EventRatingsLink.is_deleted == False,
+        )
+    )
+    avg_rating = await session.scalar(
+        select(func.avg(EventRatingsLink.rating)).where(
+            EventRatingsLink.event_id.in_(
+                select(Events.id).where(
+                    Events.club_id == club_id,
+                    Events.is_deleted == False
+                )
+            ),
+            EventRatingsLink.is_deleted == False,
+        )
+    )
+
+    rating = avg_rating if avg_rating else 0.0
+    total_ratings_count = total_ratings if total_ratings else 0
     
     # Manual serialization to avoid circular references and 500 errors
     club_dict = {
@@ -546,8 +560,8 @@ async def get_club_details(
         "location_link": club.location_link,
         "contact_phone": club.contact_phone,
         "contact_email": club.contact_email,
-        "rating": club.rating if club.rating is not None else 0.0,
-        "total_ratings": club.total_ratings if club.total_ratings is not None else 0,
+        "rating": rating,
+        "total_ratings": total_ratings_count,
         "followers_count": followers_count,
         "total_events": total_events or 0,
         "live_events": live_events or 0,
