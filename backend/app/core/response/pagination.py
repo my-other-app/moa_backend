@@ -25,13 +25,13 @@ def get_pagination_params(
 class PaginatedResponse(BaseModel, Generic[M]):
     limit: int
     offset: int
-    total: int
+    total: Optional[int] = None
     next: Optional[str] = None
     items: List[M]
 
 
 def paginated_response(
-    result: List[Any], request: Request, schema: Type[M]
+    result: List[Any], request: Request, schema: Type[M], total: int | None = None
 ) -> PaginatedResponse[M]:
     """
     Create a paginated response from a list of SQLAlchemy models
@@ -40,6 +40,7 @@ def paginated_response(
         result: List of SQLAlchemy model instances
         request: FastAPI Request object
         schema: Pydantic model class to convert results into
+        total: Total number of items matching the query (before pagination). Optional.
 
     Returns:
         PaginatedResponse object with properly formatted items
@@ -48,8 +49,23 @@ def paginated_response(
     offset = int(request.query_params.get("offset", 0))
 
     # Check if we have more items than requested limit
-    has_next = len(result) > limit
-    paginated_result = result[:limit] if has_next else result
+    # has_next = len(result) > limit
+    # paginated_result = result[:limit] if has_next else result
+    
+    # If total is provided, use it to determine has_next
+    if total is not None:
+        has_next = offset + len(result) < total
+    else:
+        # Fallback to old behavior (assuming result contains all items or limit+1)
+        # But wait, if result is already paginated (limit), we can't know has_next unless we fetched limit+1
+        # The old implementation fetched limit+1?
+        # Let's check the old implementation.
+        # "paginated_result = result[:limit] if has_next else result"
+        # This implies result had limit+1 items.
+        has_next = len(result) > limit
+        if has_next:
+            result = result[:limit]
+        # total = 0 # Default if not provided
 
     # Prepare next URL if we have more results
     if has_next:
@@ -58,30 +74,15 @@ def paginated_response(
         next_url = f"{request.url.path}?{urlencode(query_params)}"
     else:
         next_url = None
-    model_dicts = jsonable_encoder(paginated_result)
-    # Convert SQLAlchemy models to dicts safely
-    # model_dicts = []
-    # for item in paginated_result:
-    #     # Convert SQLAlchemy model to dict, handling relationships
-    #     item_dict = {}
-    #     for key, value in item.__dict__.items():
-    #         if key.startswith("_"):
-    #             continue
-    #         if hasattr(value, "__dict__"):  # This is a relationship
-    #             if hasattr(value, "__table__"):  # This is a SQLAlchemy model
-    #                 item_dict[key] = value.__dict__
-    #         else:
-    #             item_dict[key] = value
-
-    #     # Create Pydantic model
-    #     model_dicts.append(schema.model_validate(item_dict))
-    # print(model_dicts)
+    model_dicts = jsonable_encoder(result)
+    
     # Use Pydantic model_validate_json for more reliable serialization
     validated_items = [schema.model_validate(item_dict) for item_dict in model_dicts]
 
     return PaginatedResponse[M](
         limit=limit,
         offset=offset,
+        total=total,
         next=next_url,
         items=validated_items,
     )
