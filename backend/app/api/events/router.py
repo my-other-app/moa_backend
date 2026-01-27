@@ -28,6 +28,7 @@ from app.api.events.schemas import (
     EventListResponse,
     EventRating,
     EventRatingCreate,
+    EventRatingDetailResponse,
     TicketDetailsResponse,
 )
 from app.core.auth.dependencies import (
@@ -192,6 +193,25 @@ async def rate_event_endpoint(
         rating=rating_data.rating,
         review=rating_data.review,
     )
+    
+    
+@router.get("/ratings/{event_id}", summary="List event ratings")
+async def list_event_ratings(
+    request: Request,
+    event_id: int,
+    pagination: PaginationParams,
+    session: SessionDep,
+    user: ClubAuth,
+) -> PaginatedResponse[EventRatingDetailResponse]:
+    """List detailed ratings for an event (Club Admin only)."""
+    ratings = await service.list_event_ratings(
+        session=session,
+        event_id=event_id,
+        user_id=user.id,
+        limit=pagination.limit,
+        offset=pagination.offset,
+    )
+    return paginated_response(ratings, request, schema=EventRatingDetailResponse)
 
 
 @router.get("/tickets/{ticket_id}", summary="Get ticket details")

@@ -25,7 +25,7 @@ from app.api.events.models import (
     EventSpeakers,
 )
 from app.api.clubs.models import ClubUsersLink, Clubs
-from app.api.users.models import Users
+from app.api.users.models import Users, UserProfiles
 from app.core.validations.schema import validate_relations
 from app.api.interests.models import Interests
 from app.core.utils.keys import generate_slug
@@ -699,6 +699,46 @@ async def rate_event(
     await session.commit()
     await session.refresh(event_rating)
     return event_rating
+    
+    
+async def list_event_ratings(
+    session: AsyncSession,
+    event_id: int,
+    user_id: int,
+    limit: int = 10,
+    offset: int = 0,
+):
+    """List detailed ratings for an event (Club Admin only)."""
+    # Verify event ownership
+    event = await session.scalar(
+        select(Events)
+        .where(Events.id == event_id, Events.is_deleted == False)
+        .options(joinedload(Events.club))
+    )
+    if not event:
+        raise CustomHTTPException(404, "Event not found")
+    
+    if event.club.user_id != user_id:
+        raise CustomHTTPException(403, "Not authorized to view ratings for this event")
+        
+    query = (
+        select(EventRatingsLink)
+        .where(
+            EventRatingsLink.event_id == event_id,
+            EventRatingsLink.is_deleted == False,
+        )
+        .options(
+            joinedload(EventRatingsLink.user).options(
+                joinedload(Users.profile).options(joinedload(UserProfiles.avatar))
+            )
+        )
+        .order_by(EventRatingsLink.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    
+    result = await session.execute(query)
+    return result.scalars().all()
 
 
 async def get_ticket_details(session: AsyncSession, ticket_id: str | int):

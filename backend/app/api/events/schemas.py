@@ -287,6 +287,14 @@ class EventRating(EventRatingCreate):
     event_id: int
     user_id: int
     created_at: datetime
+    
+    
+class EventRatingDetailResponse(CustomBaseModel):
+    id: UUID
+    rating: float
+    review: str | None
+    user: UserPublic
+    created_at: datetime
 
 
 # RESPONSE MODELs
