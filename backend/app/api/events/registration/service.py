@@ -242,6 +242,7 @@ async def list_event_registrations(
     is_paid: bool | None = None,  # Changed to None to show all by default
     limit: int = 10,
     offset: int = 0,
+    search: str | None = None,
 ):
     event = await session.execute(
         select(Events).filter(Events.id == event_id).options(joinedload(Events.club))
@@ -268,6 +269,14 @@ async def list_event_registrations(
     if is_attended is not None:
         query = query.where(EventRegistrationsLink.is_attended == is_attended)
 
+    if search:
+        search_pattern = f"%{search}%"
+        query = query.filter(
+            (EventRegistrationsLink.full_name.ilike(search_pattern)) |
+            (EventRegistrationsLink.email.ilike(search_pattern)) |
+            (EventRegistrationsLink.ticket_id.ilike(search_pattern))
+        )
+
     # Get total count before pagination
     # Use a separate count query to avoid issues with joinedload in subqueries
     count_query = select(func.count()).select_from(EventRegistrationsLink).where(
@@ -277,6 +286,13 @@ async def list_event_registrations(
     
     if is_attended is not None:
         count_query = count_query.where(EventRegistrationsLink.is_attended == is_attended)
+
+    if search:
+        count_query = count_query.filter(
+            (EventRegistrationsLink.full_name.ilike(search_pattern)) |
+            (EventRegistrationsLink.email.ilike(search_pattern)) |
+            (EventRegistrationsLink.ticket_id.ilike(search_pattern))
+        )
         
     total = await session.scalar(count_query) or 0
 

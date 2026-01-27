@@ -94,6 +94,7 @@ async def list_event_registration(
     event_id: int,
     is_attended: bool | None = Query(None),
     is_paid: bool | None = Query(None),  # Changed to None to show all by default
+    search: str | None = Query(None, description="Search by name, email or ticket ID"),
     session: SessionDep = SessionDep,
 ) -> PaginatedResponse[EventRegistrationPublicMin]:
     result, total = await service.list_event_registrations(
@@ -104,6 +105,7 @@ async def list_event_registration(
         is_paid=is_paid,
         limit=pagination.limit,
         offset=pagination.offset,
+        search=search,
     )
     return paginated_response(result, request, EventRegistrationPublicMin, total=total)
 
