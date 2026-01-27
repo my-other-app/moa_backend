@@ -768,8 +768,11 @@ async def increment_event_page_view(
     db_event = db_event.scalar()
     if db_event is None:
         raise CustomHTTPException(404, message="Event not found")
-    if not user_id or (user_id and user_id != db_event.club.user_id):
-        db_event.page_views += 1
+    
+    # Always increment page views
+    db_event.page_views += 1
+    # if not user_id or (user_id and user_id != db_event.club.user_id):
+    #     db_event.page_views += 1
         # await session.commit()
 
     forwarded_for = request.headers.get("X-Forwarded-For")
