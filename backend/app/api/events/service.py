@@ -756,11 +756,17 @@ async def increment_event_page_view(
     event_id: int | str,
     user_id: int | None = None,
 ):
+    is_event_id = (isinstance(event_id, str) and event_id.isdigit()) or isinstance(
+        event_id, int
+    )
+    if is_event_id:
+        event_id = int(event_id)
+
     db_event = await session.execute(
         select(Events)
         .filter(
             Events.id == event_id
-            if isinstance(event_id, int)
+            if is_event_id
             else Events.slug == event_id
         )
         .options(joinedload(Events.club))
