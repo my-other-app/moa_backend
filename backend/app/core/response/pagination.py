@@ -74,10 +74,9 @@ def paginated_response(
         next_url = f"{request.url.path}?{urlencode(query_params)}"
     else:
         next_url = None
-    model_dicts = jsonable_encoder(result)
-    
-    # Use Pydantic model_validate_json for more reliable serialization
-    validated_items = [schema.model_validate(item_dict) for item_dict in model_dicts]
+    # Use Pydantic model_validate for direct ORM to Pydantic conversion
+    # This ensures from_attributes=True works correctly and relationships are accessed
+    validated_items = [schema.model_validate(item) for item in result]
 
     return PaginatedResponse[M](
         limit=limit,
