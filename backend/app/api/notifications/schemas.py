@@ -17,9 +17,11 @@ class EventBrief(BaseModel):
         from_attributes = True
 
 
+from uuid import UUID
+
 class NotificationSchema(CustomBaseModel):
     """Notification response schema with related entities."""
-    id: str
+    id: UUID
     user_id: int
     title: str
     description: str

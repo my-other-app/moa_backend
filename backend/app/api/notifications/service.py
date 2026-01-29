@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from app.api.notifications.models import Notifications, NotificationStatus
 from app.response import CustomHTTPException
+from app.api.users.models import Users, UserProfiles
 
 
 async def create_notification(
@@ -123,7 +124,12 @@ async def list_notifications(
         )
         .options(
             selectinload(Notifications.from_club),
-            selectinload(Notifications.from_user),
+            selectinload(Notifications.from_user).options(
+                selectinload(Users.profile).options(
+                    selectinload(UserProfiles.avatar),
+                    selectinload(UserProfiles.org)
+                )
+            ),
             selectinload(Notifications.event),
         )
         .order_by(Notifications.created_at.desc())
