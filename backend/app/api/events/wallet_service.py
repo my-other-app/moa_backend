@@ -43,11 +43,24 @@ TEAM_ID = os.getenv("WALLET_TEAM_ID", "")
 ORG_NAME = os.getenv("WALLET_ORGANIZATION_NAME", "My Other App")
 
 # Certificate paths
-# Certificate paths
 # In Docker, we mount the certs to /wallet_certs
-CERTS_DIR = Path("/wallet_certs")
-CERT_PATH = CERTS_DIR / "pass_certificate.pem"
-KEY_PATH = CERTS_DIR / "pass_key.pem"
+# For local dev, we check local directory
+# Try multiple possible locations for walletethings
+possible_paths = [
+    Path(os.getenv("WALLET_CERTS_DIR", "walletethings")),
+    Path("../walletethings"),
+    Path("walletethings"),
+    Path("/wallet_certs"),
+]
+
+CERTS_DIR = Path("/wallet_certs") # Default fallback
+for path in possible_paths:
+    if path.exists() and path.is_dir():
+        CERTS_DIR = path.resolve()
+        break
+
+CERT_PATH = CERTS_DIR / "pass_certificate_new.pem"
+KEY_PATH = CERTS_DIR / "pass_key_new.pem"
 WWDR_PATH = CERTS_DIR / "wwdr.pem"
 
 
