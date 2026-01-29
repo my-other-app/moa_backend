@@ -311,75 +311,80 @@ async def list_event_registrations(
     # Manually serialize to avoid Pydantic validation errors with nested SQLAlchemy models
     serialized_results = []
     for reg in registrations:
-        # Serialize user profile
-        user_data = None
-        if reg.user:
-            profile_data = None
-            if reg.user.profile:
-                org_data = None
-                if reg.user.profile.org:
-                    org_data = {
-                        "id": reg.user.profile.org.id,
-                        "name": reg.user.profile.org.name,
-                        "type": reg.user.profile.org.type.value if hasattr(reg.user.profile.org.type, 'value') else str(reg.user.profile.org.type),
-                        "logo": reg.user.profile.org.logo,
+        try:
+            # Serialize user profile
+            user_data = None
+            if reg.user:
+                profile_data = None
+                if reg.user.profile:
+                    org_data = None
+                    if reg.user.profile.org:
+                        org_data = {
+                            "id": reg.user.profile.org.id,
+                            "name": reg.user.profile.org.name,
+                            "type": reg.user.profile.org.type.value if hasattr(reg.user.profile.org.type, 'value') else str(reg.user.profile.org.type),
+                            "logo": reg.user.profile.org.logo,
+                        }
+                    avatar_data = None
+                    if reg.user.profile.avatar:
+                        avatar_data = {
+                            "id": reg.user.profile.avatar.id,
+                            "name": reg.user.profile.avatar.name,
+                            "image": reg.user.profile.avatar.image,
+                        }
+                    profile_data = {
+                        "org": org_data,
+                        "avatar": avatar_data,
+                        "profile_pic": reg.user.profile.profile_pic,
                     }
-                avatar_data = None
-                if reg.user.profile.avatar:
-                    avatar_data = {
-                        "id": reg.user.profile.avatar.id,
-                        "name": reg.user.profile.avatar.name,
-                        "image": reg.user.profile.avatar.image,
-                    }
-                profile_data = {
-                    "org": org_data,
-                    "avatar": avatar_data,
-                    "profile_pic": reg.user.profile.profile_pic,
+                user_data = {
+                    "id": reg.user.id,
+                    "full_name": reg.user.full_name or "",
+                    "email": reg.user.email or "",
+                    "phone": reg.user.phone,
+                    "username": reg.user.username or reg.user.email or "",  # Fallback to email if no username
+                    "user_type": reg.user.user_type.value if hasattr(reg.user.user_type, 'value') else str(reg.user.user_type),
+                    "profile": profile_data,
                 }
-            user_data = {
-                "id": reg.user.id,
-                "full_name": reg.user.full_name or "",
-                "email": reg.user.email,
-                "phone": reg.user.phone,
-                "username": reg.user.username or reg.user.email,  # Fallback to email if no username
-                "user_type": reg.user.user_type.value if hasattr(reg.user.user_type, 'value') else str(reg.user.user_type),
-                "profile": profile_data,
-            }
-        
-        # Serialize volunteer
-        volunteer_data = None
-        if reg.volunteer:
-            volunteer_data = {
-                "email": reg.volunteer.email,
-                "is_approved": reg.volunteer.is_approved,
-                "user_id": reg.volunteer.user_id,
-                "profile_pic": None,
-                "full_name": None,
-            }
-        
-        # Get institution from profile.org
-        institution = None
-        if reg.user and reg.user.profile and reg.user.profile.org:
-            institution = reg.user.profile.org.name
-        
-        serialized_results.append({
-            "id": reg.id,
-            "ticket_id": reg.ticket_id,
-            "event_id": reg.event_id,
-            "is_paid": reg.is_paid,
-            "full_name": reg.full_name,
-            "email": reg.email,
-            "phone": reg.phone,
-            "actual_amount": reg.actual_amount,
-            "paid_amount": reg.paid_amount,
-            "is_attended": reg.is_attended,
-            "is_won": reg.is_won,
-            "user": user_data,
-            "volunteer": volunteer_data,
-            "institution": institution,
-            "name": reg.full_name,
-            "created_at": reg.created_at,
-        })
+            
+            # Serialize volunteer - skip if soft-deleted
+            volunteer_data = None
+            if reg.volunteer and not getattr(reg.volunteer, 'is_deleted', False):
+                volunteer_data = {
+                    "email": reg.volunteer.email or "",
+                    "is_approved": reg.volunteer.is_approved,
+                    "user_id": reg.volunteer.user_id,
+                    "profile_pic": None,
+                    "full_name": None,
+                }
+            
+            # Get institution from profile.org
+            institution = None
+            if reg.user and reg.user.profile and reg.user.profile.org:
+                institution = reg.user.profile.org.name
+            
+            serialized_results.append({
+                "id": reg.id,
+                "ticket_id": reg.ticket_id or "",
+                "event_id": reg.event_id,
+                "is_paid": reg.is_paid,
+                "full_name": reg.full_name or "",
+                "email": reg.email or "",
+                "phone": reg.phone,
+                "actual_amount": float(reg.actual_amount or 0),
+                "paid_amount": float(reg.paid_amount or 0),
+                "is_attended": reg.is_attended,
+                "is_won": reg.is_won,
+                "user": user_data,
+                "volunteer": volunteer_data,
+                "institution": institution,
+                "name": reg.full_name or "",
+                "created_at": reg.created_at,
+            })
+        except Exception as e:
+            logger.error(f"Error serializing registration {reg.id}: {e}")
+            # Continue with other registrations instead of failing entirely
+            continue
     
     return serialized_results, total
 
