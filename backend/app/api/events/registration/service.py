@@ -338,10 +338,10 @@ async def list_event_registrations(
                 }
             user_data = {
                 "id": reg.user.id,
-                "full_name": reg.user.full_name,
+                "full_name": reg.user.full_name or "",
                 "email": reg.user.email,
                 "phone": reg.user.phone,
-                "username": reg.user.username,
+                "username": reg.user.username or reg.user.email,  # Fallback to email if no username
                 "user_type": reg.user.user_type.value if hasattr(reg.user.user_type, 'value') else str(reg.user.user_type),
                 "profile": profile_data,
             }
