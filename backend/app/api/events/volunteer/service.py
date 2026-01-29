@@ -1,5 +1,4 @@
 from datetime import datetime, timezone
-from fastapi.encoders import jsonable_encoder
 from sqlalchemy import and_, delete, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
@@ -142,7 +141,8 @@ async def list_volunteers(
                 or_(
                     Volunteer.event_id == event_id,
                     and_(Events.club_id == Volunteer.club_id, Events.id == event_id),
-                )
+                ),
+                Volunteer.is_deleted == False,  # Filter deleted volunteers
             )
             .outerjoin(UserProfiles, Volunteer.user_id == UserProfiles.user_id)
             .distinct()
@@ -150,17 +150,23 @@ async def list_volunteers(
     else:
         result = (
             select(Volunteer, UserProfiles)
-            .where(Volunteer.event_id == event_id)
+            .where(
+                Volunteer.event_id == event_id,
+                Volunteer.is_deleted == False,  # Filter deleted volunteers
+            )
             .outerjoin(UserProfiles, Volunteer.user_id == UserProfiles.user_id)
         )
     result = await session.execute(result)
+    
+    # Return only the fields expected by ListVolunteersResponse schema
     return [
-        jsonable_encoder(volunteer)
-        | (
-            {"full_name": profile.full_name, "profile_pic": profile.profile_pic}
-            if profile
-            else {}
-        )
+        {
+            "email": volunteer.email,
+            "is_approved": volunteer.is_approved,
+            "user_id": volunteer.user_id,
+            "full_name": profile.full_name if profile else None,
+            "profile_pic": profile.profile_pic if profile else None,
+        }
         for volunteer, profile in result
     ]
 

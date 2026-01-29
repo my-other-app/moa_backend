@@ -28,6 +28,7 @@ class EventRegistrationRequest(CustomBaseModel):
     email: EmailStr = Field(...)
     phone: str | None = Field(None)
     additional_details: dict[str, str] | None = Field(None)
+    organization: str | None = Field(None, max_length=200)
 
 
 class EventAttendanceUpdate(CustomBaseModel):

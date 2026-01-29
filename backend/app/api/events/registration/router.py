@@ -72,6 +72,11 @@ async def register_event(
                 400, "Email does not match with the logged in user email"
             )
         registration.email = user.email
+    # Merge organization into additional_details if provided
+    additional_details = registration.additional_details or {}
+    if registration.organization:
+        additional_details["organization"] = registration.organization
+
     register_data = await service.register_event(
         session=session,
         background_tasks=background_tasks,
@@ -80,7 +85,7 @@ async def register_event(
         phone=registration.phone,
         user_id=user.id,
         event_id=event_id,
-        additional_details=registration.additional_details,
+        additional_details=additional_details if additional_details else None,
     )
     response = {**response, **register_data}
     return response
