@@ -110,6 +110,29 @@ async def list_event_registration(
     return paginated_response(result, request, EventRegistrationPublicMin, total=total)
 
 
+@router.get("/{event_id}/attendees", summary="Get event attendees list (checked-in only)")
+async def list_event_attendees(
+    request: Request,
+    user: ClubAuth,
+    pagination: PaginationParams,
+    event_id: int,
+    search: str | None = Query(None, description="Search by name, email or ticket ID"),
+    session: SessionDep = SessionDep,
+) -> PaginatedResponse[EventRegistrationPublicMin]:
+    """List only attendees who have checked in (is_attended=True)."""
+    result, total = await service.list_event_registrations(
+        session,
+        user_id=user.id,
+        event_id=event_id,
+        is_attended=True,  # Always filter for attended only
+        is_paid=None,
+        limit=pagination.limit,
+        offset=pagination.offset,
+        search=search,
+    )
+    return paginated_response(result, request, EventRegistrationPublicMin, total=total)
+
+
 @router.get("/{event_id}/analytics", summary="Get event analytics")
 async def get_event_analytics(
     user: ClubAuth,

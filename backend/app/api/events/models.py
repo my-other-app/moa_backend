@@ -224,6 +224,20 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
 
     __table_args__ = (UniqueConstraint("event_id", "user_id", "is_deleted"),)
 
+    @property
+    def institution(self) -> str | None:
+        if self.additional_details and isinstance(self.additional_details, dict):
+            return (
+                self.additional_details.get("College Name")
+                or self.additional_details.get("Institution")
+                or self.additional_details.get("college")
+            )
+        return None
+
+    @property
+    def name(self) -> str:
+        return self.full_name
+
 
 class EventRatingsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     __tablename__ = "event_ratings_link"

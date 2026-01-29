@@ -72,7 +72,7 @@ async def add_volunteer(
     await session.commit()
     
     # Trigger 5: Send notification to user about being added as volunteer
-    if user_id:
+    if user.id:
         try:
             # Get event and club details for notification
             event = await session.scalar(
@@ -81,7 +81,7 @@ async def add_volunteer(
             if event and event.club:
                 await notify_user_added_as_volunteer(
                     session=session,
-                    user_id=user_id,
+                    user_id=user.id,
                     event_id=event_id,
                     event_name=event.name,
                     club_name=event.club.name,

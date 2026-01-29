@@ -61,8 +61,10 @@ class EventRegistrationPublicMin(CustomBaseModel):
     paid_amount: float = Field(...)
     is_attended: bool = Field(...)
     is_won: bool = Field(...)
-    user: UserPublic = Field(...)
+    user: UserPublic | None = Field(None)
     volunteer: ListVolunteersResponse | None = Field(None)
+    institution: str | None = Field(None)
+    name: str | None = Field(None)
     created_at: datetime = Field(...)
 
 

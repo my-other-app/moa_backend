@@ -15,7 +15,7 @@ from app.api.events.registration.background_tasks import (
 from app.api.events.models import EventRegistrationsLink, Events
 from app.api.events.schemas import EventAdditionalDetail
 from app.api.service import update_background_task_log
-from app.api.users.models import UserTypes, Users
+from app.api.users.models import UserProfiles, UserTypes, Users
 from app.core.utils.keys import generate_ticket_id
 from app.core.validations.schema import validate_relations
 from app.response import CustomHTTPException
@@ -306,7 +306,82 @@ async def list_event_registrations(
         query = query.limit(limit).offset(offset)
 
     scalar_result = await session.scalars(query)
-    return list(scalar_result), total
+    registrations = list(scalar_result)
+    
+    # Manually serialize to avoid Pydantic validation errors with nested SQLAlchemy models
+    serialized_results = []
+    for reg in registrations:
+        # Serialize user profile
+        user_data = None
+        if reg.user:
+            profile_data = None
+            if reg.user.profile:
+                org_data = None
+                if reg.user.profile.org:
+                    org_data = {
+                        "id": reg.user.profile.org.id,
+                        "name": reg.user.profile.org.name,
+                        "type": reg.user.profile.org.type.value if hasattr(reg.user.profile.org.type, 'value') else str(reg.user.profile.org.type),
+                        "logo": reg.user.profile.org.logo,
+                    }
+                avatar_data = None
+                if reg.user.profile.avatar:
+                    avatar_data = {
+                        "id": reg.user.profile.avatar.id,
+                        "name": reg.user.profile.avatar.name,
+                        "image": reg.user.profile.avatar.image,
+                    }
+                profile_data = {
+                    "org": org_data,
+                    "avatar": avatar_data,
+                    "profile_pic": reg.user.profile.profile_pic,
+                }
+            user_data = {
+                "id": reg.user.id,
+                "full_name": reg.user.full_name,
+                "email": reg.user.email,
+                "phone": reg.user.phone,
+                "username": reg.user.username,
+                "user_type": reg.user.user_type.value if hasattr(reg.user.user_type, 'value') else str(reg.user.user_type),
+                "profile": profile_data,
+            }
+        
+        # Serialize volunteer
+        volunteer_data = None
+        if reg.volunteer:
+            volunteer_data = {
+                "email": reg.volunteer.email,
+                "is_approved": reg.volunteer.is_approved,
+                "user_id": reg.volunteer.user_id,
+                "profile_pic": None,
+                "full_name": None,
+            }
+        
+        # Get institution from profile.org
+        institution = None
+        if reg.user and reg.user.profile and reg.user.profile.org:
+            institution = reg.user.profile.org.name
+        
+        serialized_results.append({
+            "id": reg.id,
+            "ticket_id": reg.ticket_id,
+            "event_id": reg.event_id,
+            "is_paid": reg.is_paid,
+            "full_name": reg.full_name,
+            "email": reg.email,
+            "phone": reg.phone,
+            "actual_amount": reg.actual_amount,
+            "paid_amount": reg.paid_amount,
+            "is_attended": reg.is_attended,
+            "is_won": reg.is_won,
+            "user": user_data,
+            "volunteer": volunteer_data,
+            "institution": institution,
+            "name": reg.full_name,
+            "created_at": reg.created_at,
+        })
+    
+    return serialized_results, total
 
 
 async def get_registration(

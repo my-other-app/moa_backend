@@ -389,6 +389,7 @@ class EventListResponseSelf(CustomBaseModel):
     category: EventCategoryDetail = Field(...)
     page_views: int = Field(0)
     registration_count: int = Field(0)
+    attended_count: int = Field(0)
 
 
 class EventFileResponse(CustomBaseModel):
