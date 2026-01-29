@@ -7,7 +7,7 @@ from app.api.orgs.models import OrgTypes
 class OrganizationBaseMin(BaseModel):
     name: str = Field(..., min_length=3, max_length=100)
     type: OrgTypes = Field(...)
-    logo: Optional[str] = Field(None, max_length=100)
+    logo: Optional[dict] = Field(None)
 
 
 class OrganizationBase(OrganizationBaseMin):
