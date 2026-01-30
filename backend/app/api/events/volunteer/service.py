@@ -394,7 +394,7 @@ async def validate_ticket(
         "ticket_holder_name": profile.full_name if profile else "Unknown",
         "event_name": registration.event.name,
         "event_datetime": registration.event.event_datetime.isoformat() if registration.event.event_datetime else None,
-        "location": registration.event.location,
+        "location": registration.event.location_name,
         "is_paid": registration.is_paid,
         "has_fee": registration.event.has_fee,
     }
