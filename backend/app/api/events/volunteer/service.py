@@ -175,13 +175,19 @@ async def checkin_user(
     session: AsyncSession, event_id: int, ticker_id: str, volunteer_id: int
 ) -> None:
     """Check-in a participant for an event."""
-
-    # First, check if the ticket exists for this specific event
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Normalize ticket_id
+    ticker_id = ticker_id.strip()
+    
+    # First, check if the ticket exists for this specific event (active registrations only)
     registration = await session.scalar(
         select(EventRegistrationsLink)
         .where(
             EventRegistrationsLink.event_id == event_id,
             EventRegistrationsLink.ticket_id == ticker_id,
+            EventRegistrationsLink.is_deleted == False,
         )
         .options(joinedload(EventRegistrationsLink.event))
     )
@@ -190,7 +196,10 @@ async def checkin_user(
         # Check if the ticket exists for ANY event (wrong event case)
         any_registration = await session.scalar(
             select(EventRegistrationsLink)
-            .where(EventRegistrationsLink.ticket_id == ticker_id)
+            .where(
+                EventRegistrationsLink.ticket_id == ticker_id,
+                EventRegistrationsLink.is_deleted == False,
+            )
             .options(joinedload(EventRegistrationsLink.event))
         )
         
@@ -203,6 +212,7 @@ async def checkin_user(
             )
         else:
             # Ticket doesn't exist at all
+            logger.error(f"Ticket not found during checkin: '{ticker_id}'")
             raise CustomHTTPException(400, "Registration not found")
     
     if registration.is_attended:
@@ -238,35 +248,59 @@ async def validate_ticket(
     Validate a ticket without marking attendance.
     Returns ticket details if valid, raises exception if invalid.
     """
+    import logging
     from app.api.users.models import UserProfiles
     
-    # First, check if the ticket exists for this specific event
+    logger = logging.getLogger(__name__)
+    
+    # Normalize ticket_id - strip whitespace and handle URL encoding
+    ticket_id = ticket_id.strip()
+    
+    logger.info(f"Validating ticket: event_id={event_id}, ticket_id='{ticket_id}'")
+    
+    # First, check if the ticket exists for this specific event (active registrations only)
     registration = await session.scalar(
         select(EventRegistrationsLink)
         .where(
             EventRegistrationsLink.event_id == event_id,
             EventRegistrationsLink.ticket_id == ticket_id,
+            EventRegistrationsLink.is_deleted == False,
         )
         .options(joinedload(EventRegistrationsLink.event))
     )
     
     if not registration:
+        logger.warning(f"Registration not found for event_id={event_id}, ticket_id='{ticket_id}'")
+        
         # Check if the ticket exists for ANY event (wrong event case)
         any_registration = await session.scalar(
             select(EventRegistrationsLink)
-            .where(EventRegistrationsLink.ticket_id == ticket_id)
+            .where(
+                EventRegistrationsLink.ticket_id == ticket_id,
+                EventRegistrationsLink.is_deleted == False,
+            )
             .options(joinedload(EventRegistrationsLink.event))
         )
         
         if any_registration:
             # Ticket exists but for a different event
             event_name = any_registration.event.name if any_registration.event else "another event"
+            logger.warning(f"Ticket belongs to different event: '{event_name}'")
             raise CustomHTTPException(
                 400, 
                 f"Incorrect event: This ticket belongs to '{event_name}'"
             )
         else:
+            # Check if there's a deleted registration with this ticket
+            deleted_reg = await session.scalar(
+                select(EventRegistrationsLink)
+                .where(EventRegistrationsLink.ticket_id == ticket_id)
+            )
+            if deleted_reg:
+                logger.warning(f"Found deleted registration for ticket_id='{ticket_id}'")
+            
             # Ticket doesn't exist at all
+            logger.error(f"Ticket not found: '{ticket_id}'")
             raise CustomHTTPException(400, "Registration not found")
     
     if registration.is_attended:
