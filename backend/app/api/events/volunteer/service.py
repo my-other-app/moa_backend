@@ -321,6 +321,25 @@ async def validate_ticket(
     if not registration:
         logger.warning(f"Registration not found for event_id={event_id}, ticket_id='{ticket_id}'")
         
+        # Debug: List all ticket_ids for this event to help troubleshoot
+        all_regs = await session.execute(
+            select(EventRegistrationsLink.ticket_id, EventRegistrationsLink.is_deleted)
+            .where(EventRegistrationsLink.event_id == event_id)
+        )
+        all_ticket_ids = [(r.ticket_id, r.is_deleted) for r in all_regs.fetchall()]
+        logger.warning(f"All registrations for event {event_id}: {all_ticket_ids[:10]}...")  # Show first 10
+        
+        # Check if ticket exists but is deleted
+        deleted_check = await session.scalar(
+            select(EventRegistrationsLink)
+            .where(
+                EventRegistrationsLink.event_id == event_id,
+                EventRegistrationsLink.ticket_id == ticket_id,
+            )
+        )
+        if deleted_check:
+            logger.error(f"Ticket found but is_deleted={deleted_check.is_deleted}!")
+        
         # Check if the ticket exists for ANY event (wrong event case)
         any_query = (
             select(EventRegistrationsLink)
