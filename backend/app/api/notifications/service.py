@@ -213,3 +213,43 @@ async def mark_all_as_read(session: AsyncSession, user_id: int) -> int:
     await session.commit()
     return result.rowcount
 
+
+async def get_event_notification_stats(
+    session: AsyncSession, event_id: int
+) -> dict:
+    """Get notification statistics for an event.
+    
+    Args:
+        session: Database session
+        event_id: Event ID to get stats for
+        
+    Returns:
+        Dictionary with total_sent, total_read, and read_percentage
+    """
+    # Get total notifications sent for this event
+    total_query = select(func.count(Notifications.id)).where(
+        Notifications.event_id == event_id,
+        Notifications.is_deleted == False,
+    )
+    total_result = await session.execute(total_query)
+    total_sent = total_result.scalar() or 0
+    
+    # Get total notifications read for this event
+    read_query = select(func.count(Notifications.id)).where(
+        Notifications.event_id == event_id,
+        Notifications.status == NotificationStatus.read,
+        Notifications.is_deleted == False,
+    )
+    read_result = await session.execute(read_query)
+    total_read = read_result.scalar() or 0
+    
+    # Calculate read percentage
+    read_percentage = round((total_read / total_sent * 100), 1) if total_sent > 0 else 0
+    
+    return {
+        "total_sent": total_sent,
+        "total_read": total_read,
+        "read_percentage": read_percentage,
+    }
+
+

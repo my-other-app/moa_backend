@@ -141,3 +141,56 @@ async def send_notification_to_participants(
         message=f"Notification sent to {sent_count} of {participant_count} {audience_label}",
         notifications_sent=sent_count,
     )
+
+
+class NotificationStatsResponse(BaseModel):
+    """Response schema for notification statistics."""
+    total_sent: int
+    total_read: int
+    read_percentage: float
+
+
+@router.get(
+    "/events/{event_id}/stats",
+    summary="Get notification statistics for an event",
+    response_model=NotificationStatsResponse,
+)
+async def get_notification_stats(
+    event_id: int,
+    session: SessionDep,
+    user: ClubAuth,
+) -> NotificationStatsResponse:
+    """
+    Get notification statistics for an event.
+    
+    Returns:
+    - **total_sent**: Total notifications sent for this event
+    - **total_read**: Total notifications read by users
+    - **read_percentage**: Percentage of notifications read
+    """
+    from app.api.notifications.service import get_event_notification_stats
+    
+    # Verify the event belongs to this club
+    query = select(Events).where(
+        Events.id == event_id,
+        Events.is_deleted == False,
+    ).options(joinedload(Events.club))
+    
+    result = await session.execute(query)
+    event = result.scalar_one_or_none()
+    
+    if not event:
+        return NotificationStatsResponse(total_sent=0, total_read=0, read_percentage=0)
+    
+    # Check ownership
+    if event.club.user_id != user.id:
+        return NotificationStatsResponse(total_sent=0, total_read=0, read_percentage=0)
+    
+    stats = await get_event_notification_stats(session, event_id)
+    
+    return NotificationStatsResponse(
+        total_sent=stats["total_sent"],
+        total_read=stats["total_read"],
+        read_percentage=stats["read_percentage"],
+    )
+
