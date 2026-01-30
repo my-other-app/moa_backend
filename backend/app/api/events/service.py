@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import io
+import logging
 from typing import Optional
 from fastapi import Request, UploadFile
 from sqlalchemy import and_, delete, exists, select, func, or_, text
