@@ -289,7 +289,8 @@ async def validate_ticket(
     # Normalize ticket_id - strip whitespace and handle URL encoding
     ticket_id = ticket_id.strip()
     
-    logger.info(f"Validating ticket: event_id={event_id}, ticket_id='{ticket_id}'")
+    # Log in hex to catch invisible characters
+    logger.info(f"Validating ticket: event_id={event_id}, ticket_id='{ticket_id}', bytes={ticket_id.encode().hex()}")
     
     # Build query based on ticket_id format (matches mark_attendance logic)
     query = (
@@ -302,9 +303,11 @@ async def validate_ticket(
     )
     
     # Check if it's a MOA ticket_id or a UUID
-    if ticket_id.startswith("MOA"):
-        query = query.where(EventRegistrationsLink.ticket_id == ticket_id)
-        logger.info(f"Searching by ticket_id format: {ticket_id}")
+    if ticket_id.upper().startswith("MOA"):
+        # Use case-insensitive matching for ticket_id
+        from sqlalchemy import func
+        query = query.where(func.upper(EventRegistrationsLink.ticket_id) == ticket_id.upper())
+        logger.info(f"Searching by ticket_id format (case-insensitive): {ticket_id}")
     else:
         # Try to parse as UUID
         try:
