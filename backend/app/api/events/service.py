@@ -741,7 +741,60 @@ async def list_event_ratings(
     )
     
     result = await session.execute(query)
-    return result.scalars().all()
+    ratings = result.scalars().all()
+    
+    # Manually serialize to avoid Pydantic validation errors with nested SQLAlchemy models
+    serialized_ratings = []
+    for rating in ratings:
+        try:
+            # Serialize user profile
+            user_data = None
+            if rating.user:
+                profile_data = None
+                if rating.user.profile:
+                    org_data = None
+                    if rating.user.profile.org:
+                        org_data = {
+                            "id": rating.user.profile.org.id,
+                            "name": rating.user.profile.org.name,
+                            "type": rating.user.profile.org.type.value if hasattr(rating.user.profile.org.type, 'value') else str(rating.user.profile.org.type),
+                        }
+                    
+                    avatar_data = None
+                    if rating.user.profile.avatar:
+                        avatar_data = {
+                            "id": rating.user.profile.avatar.id,
+                            "thumbnail": rating.user.profile.avatar.thumbnail,
+                            "medium": rating.user.profile.avatar.medium,
+                            "original": rating.user.profile.avatar.original,
+                        }
+                    
+                    profile_data = {
+                        "full_name": rating.user.profile.full_name or "",
+                        "avatar": avatar_data,
+                        "org": org_data,
+                    }
+                
+                user_data = {
+                    "id": rating.user.id,
+                    "username": rating.user.username or rating.user.email or "",
+                    "email": rating.user.email or "",
+                    "full_name": rating.user.profile.full_name if rating.user.profile else "",
+                    "profile": profile_data,
+                }
+            
+            serialized_ratings.append({
+                "id": str(rating.id),
+                "rating": float(rating.rating),
+                "review": rating.review,
+                "user": user_data,
+                "created_at": rating.created_at.isoformat() if rating.created_at else None,
+            })
+        except Exception as e:
+            logging.error(f"Error serializing rating {rating.id}: {e}")
+            continue
+    
+    return serialized_ratings
 
 
 async def get_ticket_details(session: AsyncSession, ticket_id: str | int):

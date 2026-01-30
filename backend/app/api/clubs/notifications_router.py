@@ -3,17 +3,21 @@ Club notifications router for sending push notifications to event participants.
 """
 
 import logging
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
-from typing import Optional, Literal
+from typing import Optional, Literal, List
 from enum import Enum
+from datetime import datetime
 
 from sqlalchemy.orm import joinedload
 from app.db.core import SessionDep
 from app.core.auth.dependencies import ClubAuth
 from app.core.notifications.triggers import notify_event_participants
 from app.api.events.models import Events
-from sqlalchemy import select
+from app.api.notifications.models import Notifications, NotificationStatus
+from app.api.clubs.models import Clubs
+from sqlalchemy import select, func, distinct, String
+
 
 logger = logging.getLogger(__name__)
 
@@ -194,3 +198,149 @@ async def get_notification_stats(
         read_percentage=stats["read_percentage"],
     )
 
+
+class NotificationHistoryItem(BaseModel):
+    """Single notification history entry."""
+    id: str
+    title: str
+    description: str
+    event_id: int
+    event_name: str
+    event_poster: Optional[dict]
+    sent_count: int
+    read_count: int
+    read_percentage: float
+    created_at: datetime
+
+
+class NotificationHistoryResponse(BaseModel):
+    """Response for notification history list."""
+    items: List[NotificationHistoryItem]
+    total: int
+
+
+@router.get(
+    "/history",
+    summary="Get notification history for club events",
+    response_model=NotificationHistoryResponse,
+)
+async def get_notification_history(
+    session: SessionDep,
+    user: ClubAuth,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+) -> NotificationHistoryResponse:
+    """
+    Get history of all notifications sent for events owned by this club.
+    
+    Returns grouped notifications with:
+    - Title and description
+    - Event name and poster
+    - Sent count and read count
+    - Read percentage
+    """
+    # Get the club for this user
+    club_query = select(Clubs).where(
+        Clubs.user_id == user.id,
+        Clubs.is_deleted == False,
+    )
+    club_result = await session.execute(club_query)
+    club = club_result.scalar_one_or_none()
+    
+    if not club:
+        return NotificationHistoryResponse(items=[], total=0)
+    
+    # Get all events for this club
+    events_query = select(Events.id).where(
+        Events.club_id == club.id,
+        Events.is_deleted == False,
+    )
+    events_result = await session.execute(events_query)
+    event_ids = [row[0] for row in events_result.fetchall()]
+    
+    if not event_ids:
+        return NotificationHistoryResponse(items=[], total=0)
+    
+    # Get distinct notification groups (grouped by title + event_id + hour)
+    # This gives us unique notification "sends"
+    subquery = (
+        select(
+            Notifications.title,
+            Notifications.description,
+            Notifications.event_id,
+            func.date_trunc('hour', Notifications.created_at).label('send_hour'),
+            func.count(Notifications.id).label('sent_count'),
+            func.count(Notifications.id).filter(
+                Notifications.status == NotificationStatus.read
+            ).label('read_count'),
+            func.min(Notifications.created_at).label('created_at'),
+            func.min(Notifications.id).label('first_id'),
+        )
+        .where(
+            Notifications.event_id.in_(event_ids),
+            Notifications.type == "club_announcement",
+            Notifications.is_deleted == False,
+        )
+        .group_by(
+            Notifications.title,
+            Notifications.description,
+            Notifications.event_id,
+            func.date_trunc('hour', Notifications.created_at),
+        )
+        .order_by(func.min(Notifications.created_at).desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    
+    result = await session.execute(subquery)
+    rows = result.fetchall()
+    
+    # Get total count
+    count_query = (
+        select(func.count(distinct(
+            func.concat(
+                Notifications.title, '||',
+                Notifications.event_id.cast(String), '||',
+                func.date_trunc('hour', Notifications.created_at)
+            )
+        )))
+        .where(
+            Notifications.event_id.in_(event_ids),
+            Notifications.type == "club_announcement",
+            Notifications.is_deleted == False,
+        )
+    )
+    count_result = await session.execute(count_query)
+    total = count_result.scalar() or 0
+    
+    # Get event details
+    event_details = {}
+    if rows:
+        event_ids_in_rows = list(set(row.event_id for row in rows))
+        events_detail_query = select(Events).where(Events.id.in_(event_ids_in_rows))
+        events_detail_result = await session.execute(events_detail_query)
+        for event in events_detail_result.scalars():
+            event_details[event.id] = event
+    
+    # Build response
+    items = []
+    for row in rows:
+        event = event_details.get(row.event_id)
+        sent = row.sent_count or 0
+        read = row.read_count or 0
+        read_pct = round((read / sent * 100), 1) if sent > 0 else 0
+        
+        items.append(NotificationHistoryItem(
+            id=str(row.first_id),
+            title=row.title,
+            description=row.description,
+            event_id=row.event_id,
+            event_name=event.name if event else "Unknown Event",
+            event_poster=event.poster if event else None,
+            sent_count=sent,
+            read_count=read,
+            read_percentage=read_pct,
+            created_at=row.created_at,
+        ))
+    
+    return NotificationHistoryResponse(items=items, total=total)
