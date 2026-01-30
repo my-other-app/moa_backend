@@ -174,34 +174,63 @@ async def list_volunteers(
 async def checkin_user(
     session: AsyncSession, event_id: int, ticker_id: str, volunteer_id: int
 ) -> None:
-    """Check-in a participant for an event."""
+    """
+    Check-in a participant for an event.
+    Accepts either:
+    - ticket_id format: MOA-XXXXX-XXXXX
+    - registration UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+    """
     import logging
+    import uuid as uuid_module
     logger = logging.getLogger(__name__)
     
     # Normalize ticket_id
     ticker_id = ticker_id.strip()
     
-    # First, check if the ticket exists for this specific event (active registrations only)
-    registration = await session.scalar(
+    logger.info(f"Checking in: event_id={event_id}, ticket_id='{ticker_id}'")
+    
+    # Build query based on ticket_id format (matches mark_attendance logic)
+    query = (
         select(EventRegistrationsLink)
         .where(
             EventRegistrationsLink.event_id == event_id,
-            EventRegistrationsLink.ticket_id == ticker_id,
             EventRegistrationsLink.is_deleted == False,
         )
         .options(joinedload(EventRegistrationsLink.event))
     )
     
+    # Check if it's a MOA ticket_id or a UUID
+    if ticker_id.startswith("MOA"):
+        query = query.where(EventRegistrationsLink.ticket_id == ticker_id)
+    else:
+        # Try to parse as UUID
+        try:
+            uuid_obj = uuid_module.UUID(ticker_id)
+            query = query.where(EventRegistrationsLink.id == uuid_obj)
+        except ValueError:
+            # Not a valid UUID, try as ticket_id anyway
+            query = query.where(EventRegistrationsLink.ticket_id == ticker_id)
+    
+    registration = await session.scalar(query)
+    
     if not registration:
         # Check if the ticket exists for ANY event (wrong event case)
-        any_registration = await session.scalar(
+        any_query = (
             select(EventRegistrationsLink)
-            .where(
-                EventRegistrationsLink.ticket_id == ticker_id,
-                EventRegistrationsLink.is_deleted == False,
-            )
+            .where(EventRegistrationsLink.is_deleted == False)
             .options(joinedload(EventRegistrationsLink.event))
         )
+        
+        if ticker_id.startswith("MOA"):
+            any_query = any_query.where(EventRegistrationsLink.ticket_id == ticker_id)
+        else:
+            try:
+                uuid_obj = uuid_module.UUID(ticker_id)
+                any_query = any_query.where(EventRegistrationsLink.id == uuid_obj)
+            except ValueError:
+                any_query = any_query.where(EventRegistrationsLink.ticket_id == ticker_id)
+        
+        any_registration = await session.scalar(any_query)
         
         if any_registration:
             # Ticket exists but for a different event
@@ -247,8 +276,12 @@ async def validate_ticket(
     """
     Validate a ticket without marking attendance.
     Returns ticket details if valid, raises exception if invalid.
+    Accepts either:
+    - ticket_id format: MOA-XXXXX-XXXXX
+    - registration UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
     """
     import logging
+    import uuid
     from app.api.users.models import UserProfiles
     
     logger = logging.getLogger(__name__)
@@ -258,29 +291,53 @@ async def validate_ticket(
     
     logger.info(f"Validating ticket: event_id={event_id}, ticket_id='{ticket_id}'")
     
-    # First, check if the ticket exists for this specific event (active registrations only)
-    registration = await session.scalar(
+    # Build query based on ticket_id format (matches mark_attendance logic)
+    query = (
         select(EventRegistrationsLink)
         .where(
             EventRegistrationsLink.event_id == event_id,
-            EventRegistrationsLink.ticket_id == ticket_id,
             EventRegistrationsLink.is_deleted == False,
         )
         .options(joinedload(EventRegistrationsLink.event))
     )
     
+    # Check if it's a MOA ticket_id or a UUID
+    if ticket_id.startswith("MOA"):
+        query = query.where(EventRegistrationsLink.ticket_id == ticket_id)
+        logger.info(f"Searching by ticket_id format: {ticket_id}")
+    else:
+        # Try to parse as UUID
+        try:
+            uuid_obj = uuid.UUID(ticket_id)
+            query = query.where(EventRegistrationsLink.id == uuid_obj)
+            logger.info(f"Searching by UUID format: {ticket_id}")
+        except ValueError:
+            # Not a valid UUID, try as ticket_id anyway
+            query = query.where(EventRegistrationsLink.ticket_id == ticket_id)
+            logger.info(f"Unknown format, trying as ticket_id: {ticket_id}")
+    
+    registration = await session.scalar(query)
+    
     if not registration:
         logger.warning(f"Registration not found for event_id={event_id}, ticket_id='{ticket_id}'")
         
         # Check if the ticket exists for ANY event (wrong event case)
-        any_registration = await session.scalar(
+        any_query = (
             select(EventRegistrationsLink)
-            .where(
-                EventRegistrationsLink.ticket_id == ticket_id,
-                EventRegistrationsLink.is_deleted == False,
-            )
+            .where(EventRegistrationsLink.is_deleted == False)
             .options(joinedload(EventRegistrationsLink.event))
         )
+        
+        if ticket_id.startswith("MOA"):
+            any_query = any_query.where(EventRegistrationsLink.ticket_id == ticket_id)
+        else:
+            try:
+                uuid_obj = uuid.UUID(ticket_id)
+                any_query = any_query.where(EventRegistrationsLink.id == uuid_obj)
+            except ValueError:
+                any_query = any_query.where(EventRegistrationsLink.ticket_id == ticket_id)
+        
+        any_registration = await session.scalar(any_query)
         
         if any_registration:
             # Ticket exists but for a different event
@@ -291,14 +348,6 @@ async def validate_ticket(
                 f"Incorrect event: This ticket belongs to '{event_name}'"
             )
         else:
-            # Check if there's a deleted registration with this ticket
-            deleted_reg = await session.scalar(
-                select(EventRegistrationsLink)
-                .where(EventRegistrationsLink.ticket_id == ticket_id)
-            )
-            if deleted_reg:
-                logger.warning(f"Found deleted registration for ticket_id='{ticket_id}'")
-            
             # Ticket doesn't exist at all
             logger.error(f"Ticket not found: '{ticket_id}'")
             raise CustomHTTPException(400, "Registration not found")
