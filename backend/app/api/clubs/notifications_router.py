@@ -263,6 +263,7 @@ async def get_notification_history(
     
     # Get distinct notification groups (grouped by title + event_id + hour)
     # This gives us unique notification "sends"
+    # Note: Use min(created_at) instead of min(id) since id is UUID
     subquery = (
         select(
             Notifications.title,
@@ -274,7 +275,6 @@ async def get_notification_history(
                 Notifications.status == NotificationStatus.read
             ).label('read_count'),
             func.min(Notifications.created_at).label('created_at'),
-            func.min(Notifications.id).label('first_id'),
         )
         .where(
             Notifications.event_id.in_(event_ids),
@@ -324,14 +324,17 @@ async def get_notification_history(
     
     # Build response
     items = []
-    for row in rows:
+    for idx, row in enumerate(rows):
         event = event_details.get(row.event_id)
         sent = row.sent_count or 0
         read = row.read_count or 0
         read_pct = round((read / sent * 100), 1) if sent > 0 else 0
         
+        # Generate unique ID from row data
+        unique_id = f"{row.event_id}-{row.title[:20]}-{idx}"
+        
         items.append(NotificationHistoryItem(
-            id=str(row.first_id),
+            id=unique_id,
             title=row.title,
             description=row.description,
             event_id=row.event_id,
