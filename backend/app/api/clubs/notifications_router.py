@@ -250,100 +250,84 @@ async def get_notification_history(
     if not club:
         return NotificationHistoryResponse(items=[], total=0)
     
-    # Get all events for this club
-    events_query = select(Events.id).where(
+    # Get all events for this club with their notifications
+    events_query = select(Events).where(
         Events.club_id == club.id,
         Events.is_deleted == False,
     )
     events_result = await session.execute(events_query)
-    event_ids = [row[0] for row in events_result.fetchall()]
+    events = {e.id: e for e in events_result.scalars().all()}
     
-    if not event_ids:
+    if not events:
         return NotificationHistoryResponse(items=[], total=0)
     
-    # Get distinct notification groups (grouped by title + event_id + hour)
-    # This gives us unique notification "sends"
-    # Note: Use min(created_at) instead of min(id) since id is UUID
-    subquery = (
-        select(
-            Notifications.title,
-            Notifications.description,
-            Notifications.event_id,
-            func.date_trunc('hour', Notifications.created_at).label('send_hour'),
-            func.count(Notifications.id).label('sent_count'),
-            func.count(Notifications.id).filter(
-                Notifications.status == NotificationStatus.read
-            ).label('read_count'),
-            func.min(Notifications.created_at).label('created_at'),
-        )
+    event_ids = list(events.keys())
+    
+    # Get all club_announcement notifications for these events
+    # Simple query - get all notifications and process in Python
+    notifications_query = (
+        select(Notifications)
         .where(
             Notifications.event_id.in_(event_ids),
             Notifications.type == "club_announcement",
             Notifications.is_deleted == False,
         )
-        .group_by(
-            Notifications.title,
-            Notifications.description,
-            Notifications.event_id,
-            func.date_trunc('hour', Notifications.created_at),
-        )
-        .order_by(func.min(Notifications.created_at).desc())
-        .limit(limit)
-        .offset(offset)
+        .order_by(Notifications.created_at.desc())
     )
     
-    result = await session.execute(subquery)
-    rows = result.fetchall()
+    result = await session.execute(notifications_query)
+    all_notifications = result.scalars().all()
     
-    # Get total count
-    count_query = (
-        select(func.count(distinct(
-            func.concat(
-                Notifications.title, '||',
-                Notifications.event_id.cast(String), '||',
-                func.date_trunc('hour', Notifications.created_at)
-            )
-        )))
-        .where(
-            Notifications.event_id.in_(event_ids),
-            Notifications.type == "club_announcement",
-            Notifications.is_deleted == False,
-        )
-    )
-    count_result = await session.execute(count_query)
-    total = count_result.scalar() or 0
+    # Group notifications by (title, event_id, hour)
+    groups = {}
+    for n in all_notifications:
+        # Group key: title + event_id + hour (rounded)
+        hour_key = n.created_at.replace(minute=0, second=0, microsecond=0)
+        key = (n.title, n.event_id, hour_key)
+        
+        if key not in groups:
+            groups[key] = {
+                "title": n.title,
+                "description": n.description,
+                "event_id": n.event_id,
+                "created_at": n.created_at,
+                "sent_count": 0,
+                "read_count": 0,
+            }
+        
+        groups[key]["sent_count"] += 1
+        if n.status == NotificationStatus.read:
+            groups[key]["read_count"] += 1
     
-    # Get event details
-    event_details = {}
-    if rows:
-        event_ids_in_rows = list(set(row.event_id for row in rows))
-        events_detail_query = select(Events).where(Events.id.in_(event_ids_in_rows))
-        events_detail_result = await session.execute(events_detail_query)
-        for event in events_detail_result.scalars():
-            event_details[event.id] = event
+    # Convert to list and sort
+    grouped_list = sorted(groups.values(), key=lambda x: x["created_at"], reverse=True)
+    total = len(grouped_list)
+    
+    # Apply pagination
+    paginated = grouped_list[offset:offset + limit]
     
     # Build response
     items = []
-    for idx, row in enumerate(rows):
-        event = event_details.get(row.event_id)
-        sent = row.sent_count or 0
-        read = row.read_count or 0
+    for idx, g in enumerate(paginated):
+        event = events.get(g["event_id"])
+        sent = g["sent_count"]
+        read = g["read_count"]
         read_pct = round((read / sent * 100), 1) if sent > 0 else 0
         
-        # Generate unique ID from row data
-        unique_id = f"{row.event_id}-{row.title[:20]}-{idx}"
+        unique_id = f"{g['event_id']}-{idx}"
         
         items.append(NotificationHistoryItem(
             id=unique_id,
-            title=row.title,
-            description=row.description,
-            event_id=row.event_id,
+            title=g["title"],
+            description=g["description"],
+            event_id=g["event_id"],
             event_name=event.name if event else "Unknown Event",
             event_poster=event.poster if event else None,
             sent_count=sent,
             read_count=read,
             read_percentage=read_pct,
-            created_at=row.created_at,
+            created_at=g["created_at"],
         ))
     
     return NotificationHistoryResponse(items=items, total=total)
+
