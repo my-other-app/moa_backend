@@ -763,12 +763,12 @@ async def list_event_ratings(
                     
                     avatar_data = None
                     if rating.user.profile.avatar:
-                        avatar_data = {
-                            "id": rating.user.profile.avatar.id,
-                            "thumbnail": rating.user.profile.avatar.thumbnail,
-                            "medium": rating.user.profile.avatar.medium,
-                            "original": rating.user.profile.avatar.original,
-                        }
+                        # UserAvatars has 'image' S3ImageField which is a dict with variations
+                        avatar_image = rating.user.profile.avatar.image
+                        if avatar_image and isinstance(avatar_image, dict):
+                            avatar_data = avatar_image
+                        else:
+                            avatar_data = {"id": rating.user.profile.avatar.id}
                     
                     profile_data = {
                         "full_name": rating.user.profile.full_name or "",

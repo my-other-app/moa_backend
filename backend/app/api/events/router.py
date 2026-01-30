@@ -202,7 +202,7 @@ async def list_event_ratings(
     pagination: PaginationParams,
     session: SessionDep,
     user: ClubAuth,
-) -> PaginatedResponse[EventRatingDetailResponse]:
+):
     """List detailed ratings for an event (Club Admin only)."""
     ratings = await service.list_event_ratings(
         session=session,
@@ -211,7 +211,14 @@ async def list_event_ratings(
         limit=pagination.limit,
         offset=pagination.offset,
     )
-    return paginated_response(ratings, request, schema=EventRatingDetailResponse)
+    # Return raw dict to avoid Pydantic schema mismatch
+    return {
+        "limit": pagination.limit,
+        "offset": pagination.offset,
+        "total": None,
+        "next": None,
+        "items": ratings,
+    }
 
 
 @router.get("/tickets/{ticket_id}", summary="Get ticket details")
