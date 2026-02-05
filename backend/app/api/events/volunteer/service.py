@@ -392,12 +392,14 @@ async def validate_ticket(
         "valid": True,
         "ticket_id": ticket_id,
         "ticket_holder_name": profile.full_name if profile else "Unknown",
+        "ticket_holder_email": registration.email,
         "event_name": registration.event.name,
         "event_datetime": registration.event.event_datetime.isoformat() if registration.event.event_datetime else None,
         "location": registration.event.location_name,
         "is_paid": registration.is_paid,
         "has_fee": registration.event.has_fee,
     }
+
 
 
 async def is_volunteer(session: AsyncSession, user_id: int, event_id: int):
