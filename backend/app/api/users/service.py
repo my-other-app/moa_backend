@@ -162,12 +162,6 @@ async def update_user_profile(
     whatsapp: str | None = None,
     org_id: str | None = None,
 ):
-    profile = await session.scalar(
-        select(UserProfiles).where(UserProfiles.user_id == user_id)
-    )
-    if not profile:
-        raise CustomHTTPException(400, "Profile not found.")
-
     await validate_relations(
         session,
         {
@@ -176,18 +170,35 @@ async def update_user_profile(
         },
     )
 
-    if profile.whatsapp != whatsapp:
+    profile = await session.scalar(
+        select(UserProfiles).where(UserProfiles.user_id == user_id)
+    )
+    
+    if not profile:
+        # Create profile if it doesn't exist (e.g., for email login users)
         await validate_unique(
             session,
             unique_together=[{"whatsapp": (UserProfiles, whatsapp)}],
         )
-    profile.whatsapp = whatsapp
-    profile.org_id = org_id
-    profile.full_name = full_name
+        profile = UserProfiles(
+            user_id=user_id, org_id=org_id, whatsapp=whatsapp, full_name=full_name
+        )
+        session.add(profile)
+    else:
+        # Update existing profile
+        if profile.whatsapp != whatsapp:
+            await validate_unique(
+                session,
+                unique_together=[{"whatsapp": (UserProfiles, whatsapp)}],
+            )
+        profile.whatsapp = whatsapp
+        profile.org_id = org_id
+        profile.full_name = full_name
 
     await session.commit()
     await session.refresh(profile)
     return profile
+
 
 
 async def list_interests(session: AsyncSession, user_id: int):
