@@ -370,6 +370,12 @@ class EventListResponse(CustomBaseModel):
     club: EventClubDetail = Field(...)
     category: EventCategoryDetail = Field(...)
     page_views: int = Field(0)
+    # User-specific fields (only populated when authenticated and registered)
+    is_attended: bool | None = Field(None)
+    ticket_id: str | None = Field(None)
+    ticket_url: str | None = Field(None)
+    certificate_url: str | None = Field(None)
+
 
 
 class EventListResponseSelf(CustomBaseModel):

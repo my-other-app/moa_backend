@@ -165,7 +165,38 @@ async def list_events(
         interest_ids=interest_ids,
         search=search,
     )
-    return paginated_response(events, request, schema=EventListResponse)
+    
+    # Enhance events with user-specific registration data
+    enhanced_events = []
+    if user and events:
+        from app.api.events.models import EventRegistrationsLink
+        from sqlalchemy import select
+        
+        # Get all registrations for this user for these events
+        event_ids = [e.id for e in events]
+        registrations_query = select(EventRegistrationsLink).where(
+            EventRegistrationsLink.event_id.in_(event_ids),
+            EventRegistrationsLink.user_id == user.id,
+            EventRegistrationsLink.is_deleted == False,
+        )
+        result = await session.execute(registrations_query)
+        registrations = {r.event_id: r for r in result.scalars().all()}
+        
+        for event in events:
+            event_dict = jsonable_encoder(event)
+            reg = registrations.get(event.id)
+            if reg:
+                event_dict["is_attended"] = reg.is_attended
+                event_dict["ticket_id"] = reg.ticket_id
+                event_dict["ticket_url"] = f"https://events.myotherapp.com/tickets/{reg.ticket_id}"
+                if reg.is_attended:
+                    event_dict["certificate_url"] = f"https://events.myotherapp.com/certificates/{reg.ticket_id}"
+            enhanced_events.append(event_dict)
+    else:
+        enhanced_events = [jsonable_encoder(e) for e in events]
+    
+    return paginated_response(enhanced_events, request, schema=EventListResponse)
+
 
 
 @router.delete("/delete/{event_id}", summary="Delete an event")
