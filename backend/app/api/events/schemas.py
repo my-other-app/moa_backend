@@ -101,14 +101,14 @@ class EventBase(EventBaseMin):
 class EventPublicMin(EventBaseMin):
     id: int = Field(...)
     category: EventCategoryPublic = Field(...)
-    club: ClubPublicMin = Field(...)
+    club: ClubPublicMin | None = Field(None)
     interests: list[InterestPublic] | None = Field(None)
 
 
 class EventPublic(EventBase):
     id: int = Field(...)
     category: EventCategoryPublic = Field(...)
-    club: ClubPublic = Field(...)
+    club: ClubPublic | None = Field(None)
     rating: float = Field(...)
     total_rating: int = Field(...)
     additional_details: list[EventAdditionalDetail] | None = Field(None)
