@@ -55,13 +55,10 @@ def paginated_response(
     # If total is provided, use it to determine has_next
     if total is not None:
         has_next = offset + len(result) < total
+        if len(result) > limit:
+            result = result[:limit]
     else:
-        # Fallback to old behavior (assuming result contains all items or limit+1)
-        # But wait, if result is already paginated (limit), we can't know has_next unless we fetched limit+1
-        # The old implementation fetched limit+1?
-        # Let's check the old implementation.
-        # "paginated_result = result[:limit] if has_next else result"
-        # This implies result had limit+1 items.
+        # Fallback to old behavior
         has_next = len(result) > limit
         if has_next:
             result = result[:limit]
