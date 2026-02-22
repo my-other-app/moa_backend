@@ -70,12 +70,19 @@ async def list_all_users_admin(
     user: AdminAuth,
 ) -> PaginatedResponse[UserDetailResponse]:
     """List all users for an admin."""
-    from sqlalchemy import select
+    from sqlalchemy import select, func
     from app.api.users.models import Users
 
-    query = select(Users).order_by(Users.created_at.desc())
+    # Get total count
+    total_result = await session.execute(select(func.count(Users.id)))
+    total = total_result.scalar() or 0
+
+    # Get paginated results
+    query = select(Users).order_by(Users.created_at.desc()).offset(pagination.offset).limit(pagination.limit)
+    result = await session.execute(query)
+    users = result.scalars().all()
     
-    return paginated_response(query, request=request, schema=UserDetailResponse)
+    return paginated_response(users, request=request, schema=UserDetailResponse, total=total)
 
 
 @router.post("/profile/create", summary="Create a user profile.")

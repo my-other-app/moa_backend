@@ -149,12 +149,19 @@ async def list_all_events_admin(
     user: AdminAuth,
 ) -> PaginatedResponse[EventPublicMin]:
     """List all events for an admin without filters."""
-    from sqlalchemy import select
+    from sqlalchemy import select, func
     from app.api.events.models import Events
 
-    query = select(Events).order_by(Events.created_at.desc())
+    # Get total count
+    total_result = await session.execute(select(func.count(Events.id)))
+    total = total_result.scalar() or 0
+
+    # Get paginated results
+    query = select(Events).order_by(Events.created_at.desc()).offset(pagination.offset).limit(pagination.limit)
+    result = await session.execute(query)
+    events = result.scalars().all()
     
-    return paginated_response(query, request=request, schema=EventPublicMin)
+    return paginated_response(events, request=request, schema=EventPublicMin, total=total)
 
 
 @router.get("/list", summary="List all events")
