@@ -71,14 +71,25 @@ async def list_all_users_admin(
 ) -> PaginatedResponse[UserDetailResponse]:
     """List all users for an admin."""
     from sqlalchemy import select, func
-    from app.api.users.models import Users
+    from sqlalchemy.orm import selectinload, subqueryload
+    from app.api.users.models import Users, UserProfiles
 
     # Get total count
     total_result = await session.execute(select(func.count(Users.id)))
     total = total_result.scalar() or 0
 
-    # Get paginated results
-    query = select(Users).order_by(Users.created_at.desc()).offset(pagination.offset).limit(pagination.limit)
+    # Get paginated results with eager-loaded relationships
+    query = (
+        select(Users)
+        .options(
+            selectinload(Users.profile).selectinload(UserProfiles.org),
+            selectinload(Users.profile).selectinload(UserProfiles.avatar),
+            selectinload(Users.interests),
+        )
+        .order_by(Users.created_at.desc())
+        .offset(pagination.offset)
+        .limit(pagination.limit)
+    )
     result = await session.execute(query)
     users = result.scalars().all()
     
