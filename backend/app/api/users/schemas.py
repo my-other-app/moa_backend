@@ -128,6 +128,9 @@ class UserDetailResponse(CustomBaseModel):
     phone: str | None = Field(None)
     username: str = Field(...)
     user_type: str = Field(...)
+    provider: str | None = Field(None)
+    created_at: datetime = Field(...)
+    updated_at: datetime = Field(...)
     profile: UserProfileDetailResponse | None = Field(None)
     interests: list[UserInterestDetail] | None = Field(None)
 
