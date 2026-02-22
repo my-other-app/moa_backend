@@ -86,6 +86,7 @@ class EventBaseMin(CustomBaseModel):
     reg_startdate: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     reg_enddate: datetime | None = Field(None)
     page_views: int = Field(0)
+    status: str = Field(...)
 
 
 class EventBase(EventBaseMin):
