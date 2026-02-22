@@ -234,6 +234,9 @@ class ClubAdminDetailResponse(CustomBaseModel):
     contact_phone: str | None = Field(None)
     contact_email: str | None = Field(None)
     initial_password: str | None = Field(None)
+    created_at: datetime = Field(...)
+    is_verified: bool = Field(...)
+    interests: List[ClubInterestDetailMin] | None = Field(None)
 
 
 class NoteCreateUpdateResponse(CustomBaseModel):
