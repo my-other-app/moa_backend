@@ -172,7 +172,60 @@ async def list_all_events_admin(
     result = await session.execute(query)
     events = result.scalars().all()
     
-    return paginated_response(events, request=request, schema=EventPublicMin, total=total)
+    # Manually serialize to avoid 500 Pydantic relationship mapping crash
+    serialized_events = []
+    for event in events:
+        event_dict = {
+            "id": event.id,
+            "name": event.name,
+            "poster": event.poster,
+            "event_datetime": event.event_datetime,
+            "has_fee": event.has_fee,
+            "reg_fee": event.reg_fee,
+            "duration": event.duration,
+            "location_name": event.location_name,
+            "has_prize": event.has_prize,
+            "prize_amount": event.prize_amount,
+            "is_online": event.is_online,
+            "reg_startdate": event.reg_startdate,
+            "reg_enddate": event.reg_enddate,
+            "page_views": event.page_views,
+            "status": event.status,
+            "category": {
+                "id": event.category.id,
+                "name": event.category.name,
+                "icon": event.category.icon,
+                "icon_type": event.category.icon_type.value if hasattr(event.category.icon_type, "value") else event.category.icon_type,
+            } if event.category else None,
+            "club": {
+                "id": event.club.id,
+                "name": event.club.name,
+                "slug": event.club.slug,
+                "logo": event.club.logo,
+            } if event.club else None,
+        }
+
+        if event.interests:
+            event_dict["interests"] = [
+                {
+                    "id": i.id,
+                    "name": i.name,
+                    "icon": i.icon,
+                    "icon_type": i.icon_type.value if hasattr(i.icon_type, "value") else i.icon_type,
+                }
+                for i in event.interests
+            ]
+        else:
+            event_dict["interests"] = []
+
+        serialized_events.append(event_dict)
+    
+    return {
+        "items": serialized_events,
+        "total": total,
+        "limit": pagination.limit,
+        "offset": pagination.offset
+    }
 
 
 @router.get("/list", summary="List all events")
