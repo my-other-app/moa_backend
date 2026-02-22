@@ -23,6 +23,7 @@ from app.api.events.schemas import (
     EventCategoryResponse,
     EventCreate,
     EventCreateUpdateResponse,
+    EventPublicMin,
     EventDetailResponse,
     EventEdit,
     EventListResponse,
@@ -138,6 +139,22 @@ async def get_event(
     )
     data = jsonable_encoder(result)
     return data
+
+
+@router.get("/admin/list", summary="List all events (admin)")
+async def list_all_events_admin(
+    request: Request,
+    session: SessionDep,
+    pagination: PaginationParams,
+    user: AdminAuth,
+) -> PaginatedResponse[EventPublicMin]:
+    """List all events for an admin without filters."""
+    from sqlalchemy import select
+    from app.api.events.models import Events
+
+    query = select(Events).order_by(Events.created_at.desc())
+    
+    return paginated_response(query, request=request, schema=EventPublicMin)
 
 
 @router.get("/list", summary="List all events")

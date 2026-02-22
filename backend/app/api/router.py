@@ -38,3 +38,32 @@ async def get_background_task_log(
     Retrieve a background task log by ID
     """
     return await service.get_background_task_log(session, task_id)
+
+
+@api_router.get("/admin/analytics", tags=["admin"])
+async def get_admin_dashboard_analytics(
+    session: SessionDep, user: AdminAuth
+) -> dict:
+    """
+    Retrieve system-wide analytics for the admin dashboard.
+    """
+    from sqlalchemy import select, func
+    from app.api.users.models import Users
+    from app.api.clubs.models import Clubs
+    from app.api.events.models import Events
+
+    # Run efficient count queries
+    total_users = await session.execute(select(func.count(Users.id)))
+    verified_clubs = await session.execute(
+        select(func.count(Clubs.id)).where(Clubs.is_verified == True)
+    )
+    events_hosted = await session.execute(select(func.count(Events.id)))
+
+    # For now, platform revenue returns a static or partially static payload
+    # until the Razorpay orders API is fully integrated
+    return {
+        "total_users": total_users.scalar() or 0,
+        "verified_clubs": verified_clubs.scalar() or 0,
+        "events_hosted": events_hosted.scalar() or 0,
+        "platform_revenue": 0, 
+    }

@@ -62,6 +62,22 @@ async def get_following_clubs(
     return paginated_response(following_clubs, request=request, schema=ClubListResponse)
 
 
+@router.get("/admin/list", summary="List all users (admin)")
+async def list_all_users_admin(
+    request: Request,
+    session: SessionDep,
+    pagination: PaginationParams,
+    user: AdminAuth,
+) -> PaginatedResponse[UserDetailResponse]:
+    """List all users for an admin."""
+    from sqlalchemy import select
+    from app.api.users.models import Users
+
+    query = select(Users).order_by(Users.created_at.desc())
+    
+    return paginated_response(query, request=request, schema=UserDetailResponse)
+
+
 @router.post("/profile/create", summary="Create a user profile.")
 async def create_user_profile(
     session: SessionDep,
