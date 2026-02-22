@@ -202,6 +202,8 @@ async def list_all_events_admin(
                 "name": event.club.name,
                 "slug": event.club.slug,
                 "logo": event.club.logo,
+                "rating": 0.0,
+                "total_ratings": 0,
             } if event.club else None,
         }
 
