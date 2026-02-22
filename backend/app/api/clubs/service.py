@@ -282,12 +282,41 @@ async def get_all_clubs(
 
     results = await session.execute(query)
 
-    # Convert results to a list of dictionaries
-    return [
-        jsonable_encoder(club)
-        | {"followers_count": followers_count, "is_following": is_following}
-        for club, followers_count, is_following in results
-    ]
+    clubs_response = []
+    for club, followers_count, is_following in results:
+        club_dict = {
+            "id": club.id,
+            "name": club.name,
+            "slug": club.slug,
+            "logo": club.logo,
+            "about": club.about,
+            "location_name": club.location_name,
+            "location_link": club.location_link,
+            "contact_phone": club.contact_phone,
+            "contact_email": club.contact_email,
+            "created_at": club.created_at,
+            "is_verified": club.is_verified,
+            "followers_count": followers_count,
+            "is_following": is_following,
+        }
+        
+        # Serialize interests
+        if club.interests:
+            club_dict["interests"] = [
+                {
+                    "id": i.id,
+                    "name": i.name,
+                    "icon": i.icon,
+                    "icon_type": i.icon_type.value if hasattr(i.icon_type, "value") else str(i.icon_type) if i.icon_type else None,
+                }
+                for i in club.interests
+            ]
+        else:
+            club_dict["interests"] = []
+            
+        clubs_response.append(club_dict)
+        
+    return clubs_response
 
 
 async def follow_club(session: AsyncSession, club_id: int, user_id: int):
