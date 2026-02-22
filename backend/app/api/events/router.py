@@ -163,6 +163,7 @@ async def list_all_events_admin(
         .options(
             selectinload(Events.category),
             selectinload(Events.club),
+            selectinload(Events.interests),
         )
         .order_by(Events.created_at.desc())
         .offset(pagination.offset)

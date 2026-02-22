@@ -102,6 +102,7 @@ class EventPublicMin(EventBaseMin):
     id: int = Field(...)
     category: EventCategoryPublic = Field(...)
     club: ClubPublicMin = Field(...)
+    interests: list[InterestPublic] | None = Field(None)
 
 
 class EventPublic(EventBase):
