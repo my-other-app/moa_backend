@@ -147,87 +147,116 @@ async def list_all_events_admin(
     session: SessionDep,
     pagination: PaginationParams,
     user: AdminAuth,
-) -> PaginatedResponse[EventPublicMin]:
+):
     """List all events for an admin without filters."""
     from sqlalchemy import select, func
     from sqlalchemy.orm import selectinload
     from app.api.events.models import Events
+    from fastapi.responses import JSONResponse
 
-    # Get total count
-    total_result = await session.execute(select(func.count(Events.id)))
-    total = total_result.scalar() or 0
+    def _iso(dt):
+        """Safely convert a datetime to ISO string."""
+        if dt is None:
+            return None
+        try:
+            return dt.isoformat()
+        except Exception:
+            return str(dt)
 
-    # Get paginated results with eager-loaded relationships
-    query = (
-        select(Events)
-        .options(
-            selectinload(Events.category),
-            selectinload(Events.club),
-            selectinload(Events.interests),
+    try:
+        # Get total count
+        total_result = await session.execute(select(func.count(Events.id)))
+        total = total_result.scalar() or 0
+
+        # Get paginated results with eager-loaded relationships
+        query = (
+            select(Events)
+            .options(
+                selectinload(Events.category),
+                selectinload(Events.club),
+                selectinload(Events.interests),
+            )
+            .order_by(Events.created_at.desc())
+            .offset(pagination.offset)
+            .limit(pagination.limit)
         )
-        .order_by(Events.created_at.desc())
-        .offset(pagination.offset)
-        .limit(pagination.limit)
-    )
-    result = await session.execute(query)
-    events = result.scalars().all()
-    
-    # Manually serialize to avoid 500 Pydantic relationship mapping crash
-    serialized_events = []
-    for event in events:
-        event_dict = {
-            "id": event.id,
-            "name": event.name,
-            "poster": event.poster,
-            "event_datetime": event.event_datetime,
-            "has_fee": event.has_fee,
-            "reg_fee": event.reg_fee,
-            "duration": event.duration,
-            "location_name": event.location_name,
-            "has_prize": event.has_prize,
-            "prize_amount": event.prize_amount,
-            "is_online": event.is_online,
-            "reg_startdate": event.reg_startdate,
-            "reg_enddate": event.reg_enddate,
-            "page_views": event.page_views,
-            "status": event.status,
-            "category": {
-                "id": event.category.id,
-                "name": event.category.name,
-                "icon": event.category.icon,
-                "icon_type": event.category.icon_type.value if hasattr(event.category.icon_type, "value") else event.category.icon_type,
-            } if event.category else None,
-            "club": {
-                "id": event.club.id,
-                "name": event.club.name,
-                "slug": event.club.slug,
-                "logo": event.club.logo,
-                "rating": 0.0,
-                "total_ratings": 0,
-            } if event.club else None,
-        }
+        result = await session.execute(query)
+        events = result.scalars().all()
 
-        if event.interests:
-            event_dict["interests"] = [
-                {
-                    "id": i.id,
-                    "name": i.name,
-                    "icon": i.icon,
-                    "icon_type": i.icon_type.value if hasattr(i.icon_type, "value") else i.icon_type,
+        serialized_events = []
+        for event in events:
+            # Build club dict safely
+            club_dict = None
+            if event.club:
+                club_dict = {
+                    "id": event.club.id,
+                    "name": getattr(event.club, "name", "Unknown"),
+                    "slug": getattr(event.club, "slug", ""),
+                    "logo": getattr(event.club, "logo", None),
                 }
-                for i in event.interests
-            ]
-        else:
-            event_dict["interests"] = []
 
-        serialized_events.append(event_dict)
-    
-    return {
-        "items": serialized_events,
-        "total": total,
-        "limit": pagination.limit,
-        "offset": pagination.offset
-    }
+            # Build category dict safely
+            category_dict = None
+            if event.category:
+                icon_type = getattr(event.category, "icon_type", None)
+                category_dict = {
+                    "id": event.category.id,
+                    "name": getattr(event.category, "name", "Unknown"),
+                    "icon": getattr(event.category, "icon", None),
+                    "icon_type": icon_type.value if hasattr(icon_type, "value") else icon_type,
+                }
+
+            # Build interests list safely
+            interests_list = []
+            if getattr(event, "interests", None):
+                for i in event.interests:
+                    icon_type = getattr(i, "icon_type", None)
+                    interests_list.append({
+                        "id": i.id,
+                        "name": getattr(i, "name", ""),
+                        "icon": getattr(i, "icon", None),
+                        "icon_type": icon_type.value if hasattr(icon_type, "value") else icon_type,
+                    })
+
+            # Determine status safely
+            status = "published"
+            if getattr(event, "is_deleted", False):
+                status = "cancelled"
+
+            serialized_events.append({
+                "id": event.id,
+                "name": event.name,
+                "poster": getattr(event, "poster", None),
+                "event_datetime": _iso(event.event_datetime),
+                "has_fee": getattr(event, "has_fee", False),
+                "reg_fee": getattr(event, "reg_fee", None),
+                "duration": getattr(event, "duration", 0),
+                "location_name": getattr(event, "location_name", None),
+                "has_prize": getattr(event, "has_prize", False),
+                "prize_amount": getattr(event, "prize_amount", None),
+                "is_online": getattr(event, "is_online", False),
+                "reg_startdate": _iso(getattr(event, "reg_startdate", None)),
+                "reg_enddate": _iso(getattr(event, "reg_enddate", None)),
+                "page_views": getattr(event, "page_views", 0),
+                "status": status,
+                "category": category_dict,
+                "club": club_dict,
+                "interests": interests_list,
+            })
+
+        return JSONResponse(content={
+            "items": serialized_events,
+            "total": total,
+            "limit": pagination.limit,
+            "offset": pagination.offset,
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse(
+            status_code=500,
+            content={"detail": f"Events admin list error: {str(e)}"},
+        )
 
 
 @router.get("/list", summary="List all events")
