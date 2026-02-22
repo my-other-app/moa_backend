@@ -68,20 +68,33 @@ async def list_all_users_admin(
     session: SessionDep,
     pagination: PaginationParams,
     user: AdminAuth,
+    search: str | None = Query(None),
 ) -> PaginatedResponse[UserDetailResponse]:
     """List all users for an admin."""
-    from sqlalchemy import select, func
+    from sqlalchemy import select, func, or_
     from sqlalchemy.orm import selectinload, subqueryload
     from app.api.users.models import Users, UserProfiles
 
-    # Get total count
-    total_result = await session.execute(select(func.count(Users.id)))
+    # Build the base query with optional search
+    base_query = select(Users)
+    if search:
+        search_term = f"%{search}%"
+        base_query = base_query.filter(
+            or_(
+                Users.full_name.ilike(search_term),
+                Users.email.ilike(search_term),
+                Users.username.ilike(search_term),
+            )
+        )
+
+    # Get total count of filtered results
+    count_query = select(func.count(Users.id)).select_from(base_query.subquery())
+    total_result = await session.execute(count_query)
     total = total_result.scalar() or 0
 
-    # Get paginated results with eager-loaded relationships
+    # Get paginated, eagerly-loaded results
     query = (
-        select(Users)
-        .options(
+        base_query.options(
             selectinload(Users.profile).selectinload(UserProfiles.org),
             selectinload(Users.profile).selectinload(UserProfiles.avatar),
             selectinload(Users.interests),
