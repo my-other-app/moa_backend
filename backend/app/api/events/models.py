@@ -97,6 +97,12 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
 
     model_config = ConfigDict(from_attributes=True)
 
+    @property
+    def status(self) -> str:
+        if getattr(self, "is_deleted", False):
+            return "cancelled"
+        return "published"
+
 
 class EventSpeakers(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     """Speakers and guests for events."""
