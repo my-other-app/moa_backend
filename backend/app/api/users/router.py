@@ -75,20 +75,21 @@ async def list_all_users_admin(
     from sqlalchemy.orm import selectinload, subqueryload
     from app.api.users.models import Users, UserProfiles
 
-    # Build the base query with optional search
+    # Build the base query and count query with optional search
     base_query = select(Users)
+    count_query = select(func.count(Users.id))
+    
     if search:
         search_term = f"%{search}%"
-        base_query = base_query.filter(
-            or_(
-                Users.full_name.ilike(search_term),
-                Users.email.ilike(search_term),
-                Users.username.ilike(search_term),
-            )
+        search_filter = or_(
+            Users.full_name.ilike(search_term),
+            Users.email.ilike(search_term),
+            Users.username.ilike(search_term),
         )
+        base_query = base_query.filter(search_filter)
+        count_query = count_query.filter(search_filter)
 
     # Get total count of filtered results
-    count_query = select(func.count(Users.id)).select_from(base_query.subquery())
     total_result = await session.execute(count_query)
     total = total_result.scalar() or 0
 
