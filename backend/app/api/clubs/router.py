@@ -268,16 +268,18 @@ async def get_club_events(
     session: SessionDep,
     user: ClubAuth,
     is_ended: Optional[bool] = Query(None, description="Filter by past (true) or upcoming (false) events"),
+    search: Optional[str] = Query(None, description="Search by event name"),
 ) -> PaginatedResponse[EventListResponseSelf]:
     """List events with optional filters."""
-    events = await service.get_club_events(
+    events, total = await service.get_club_events(
         session=session,
         club_id=user.club.id,
         limit=pagination.limit,
         offset=pagination.offset,
         is_ended=is_ended,
+        search=search,
     )
-    return paginated_response(events, request, schema=EventListResponseSelf)
+    return paginated_response(events, request, schema=EventListResponseSelf, total=total)
 
 
 @router.get("/{club_id}/events", summary="Get public events of a club")
@@ -288,13 +290,15 @@ async def get_club_events_public(
     session: SessionDep,
     user: DependsAuth,
     is_ended: Optional[bool] = Query(None, description="Filter by past (true) or upcoming (false) events"),
+    search: Optional[str] = Query(None, description="Search by event name"),
 ) -> PaginatedResponse[EventListResponseSelf]:
     """List public events of a club with optional filters."""
-    events = await service.get_club_events(
+    events, total = await service.get_club_events(
         session=session,
         club_id=club_id,
         limit=pagination.limit,
         offset=pagination.offset,
         is_ended=is_ended,
+        search=search,
     )
-    return paginated_response(events, request, schema=EventListResponseSelf)
+    return paginated_response(events, request, schema=EventListResponseSelf, total=total)

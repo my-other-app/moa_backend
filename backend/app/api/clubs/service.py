@@ -700,8 +700,9 @@ async def get_club_events(
     limit: int = 10, 
     offset: int = 0,
     is_ended: bool | None = None,
+    search: str | None = None,
 ):
-    """Get events of a club with optional past/upcoming filter."""
+    """Get events of a club with optional past/upcoming filter and search."""
     from sqlalchemy.dialects.postgresql import INTERVAL
     
     # Subquery to count registrations for each event
@@ -741,6 +742,13 @@ async def get_club_events(
             joinedload(Events.club),
         )
     )
+
+    count_query = select(func.count(Events.id)).where(Events.club_id == club_id, Events.is_deleted == False)
+
+    if search and search.strip():
+        search_pattern = f"%{search.strip()}%"
+        query = query.filter(Events.name.ilike(search_pattern))
+        count_query = count_query.filter(Events.name.ilike(search_pattern))
     
     # Filter by ended status
     if is_ended is not None:
@@ -750,23 +758,31 @@ async def get_club_events(
         if is_ended:
             # Past events: event has ended
             query = query.filter(event_end_time < func.now())
+            count_query = count_query.filter(event_end_time < func.now())
             query = query.order_by(Events.event_datetime.desc())
         else:
             # Upcoming events: event hasn't ended yet
             query = query.filter(event_end_time >= func.now())
+            count_query = count_query.filter(event_end_time >= func.now())
             query = query.order_by(Events.event_datetime.asc())
     else:
         query = query.order_by(Events.event_datetime.desc())
+
+    # Get total count
+    total_result = await session.execute(count_query)
+    total = total_result.scalar() or 0
     
     query = query.limit(limit).offset(offset)
     
     results = await session.execute(query)
     
     # Convert results to list of dicts with counts
-    return [
+    items = [
         jsonable_encoder(event) | {
             "registration_count": reg_count,
             "attended_count": attended_count
         }
         for event, reg_count, attended_count in results
     ]
+
+    return items, total
