@@ -147,11 +147,12 @@ async def list_all_events_admin(
     session: SessionDep,
     pagination: PaginationParams,
     user: AdminAuth,
+    search: Optional[str] = Query(None, description="Search by event name or category"),
 ):
-    """List all events for an admin without filters."""
-    from sqlalchemy import select, func
+    """List all events for an admin without filters, but supports search."""
+    from sqlalchemy import select, func, or_
     from sqlalchemy.orm import selectinload
-    from app.api.events.models import Events
+    from app.api.events.models import Events, EventCategories
     from fastapi.responses import JSONResponse
 
     def _iso(dt):
@@ -164,11 +165,6 @@ async def list_all_events_admin(
             return str(dt)
 
     try:
-        # Get total count
-        total_result = await session.execute(select(func.count(Events.id)))
-        total = total_result.scalar() or 0
-
-        # Get paginated results with eager-loaded relationships
         query = (
             select(Events)
             .options(
@@ -176,10 +172,32 @@ async def list_all_events_admin(
                 selectinload(Events.club),
                 selectinload(Events.interests),
             )
-            .order_by(Events.created_at.desc())
-            .offset(pagination.offset)
-            .limit(pagination.limit)
         )
+        count_query = select(func.count(Events.id))
+
+        if search and search.strip():
+            search_pattern = f"%{search.strip()}%"
+            
+            # Apply to both queries
+            query = query.outerjoin(EventCategories, Events.category_id == EventCategories.id).filter(
+                or_(
+                    Events.name.ilike(search_pattern),
+                    EventCategories.name.ilike(search_pattern),
+                )
+            )
+            count_query = count_query.outerjoin(EventCategories, Events.category_id == EventCategories.id).filter(
+                or_(
+                    Events.name.ilike(search_pattern),
+                    EventCategories.name.ilike(search_pattern),
+                )
+            )
+
+        # Get total count
+        total_result = await session.execute(count_query)
+        total = total_result.scalar() or 0
+
+        # Get paginated results with eager-loaded relationships
+        query = query.order_by(Events.created_at.desc()).offset(pagination.offset).limit(pagination.limit)
         result = await session.execute(query)
         events = result.scalars().all()
 

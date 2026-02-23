@@ -72,10 +72,11 @@ async def list_all_clubs_admin(
     session: SessionDep,
     user: AdminAuth,
     pagination: PaginationParams,
+    search: Optional[str] = Query(None, description="Search by club name"),
 ) -> PaginatedResponse[ClubAdminDetailResponse]:
     """List all clubs for an admin."""
     clubs = await service.get_all_clubs(
-        session, limit=pagination.limit, offset=pagination.offset
+        session, limit=pagination.limit, offset=pagination.offset, search=search
     )
     return paginated_response(clubs, request, schema=ClubAdminDetailResponse)
 
