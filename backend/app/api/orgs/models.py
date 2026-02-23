@@ -38,5 +38,6 @@ class Organizations(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         nullable=True,
     )
     is_verified = Column(Boolean, default=False, nullable=False)
+    is_blocked = Column(Boolean, default=False, nullable=False)
 
     clubs = relationship("Clubs", back_populates="org")

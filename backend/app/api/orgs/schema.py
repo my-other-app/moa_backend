@@ -45,6 +45,26 @@ class OrganizationCreate:
         self.logo = logo
 
 
+class OrganizationUpdate:
+    def __init__(
+        self,
+        name: Optional[str] = Form(None, min_length=3, max_length=100),
+        type: Optional[OrgTypes] = Form(None),
+        address: Optional[str] = Form(None, max_length=200),
+        phone: Optional[str] = Form(None, max_length=20),
+        email: Optional[str] = Form(None, max_length=100),
+        website: Optional[str] = Form(None, max_length=100),
+        logo: Optional[UploadFile] = File(None),
+    ):
+        self.name = name
+        self.type = type
+        self.address = address
+        self.phone = phone
+        self.email = email
+        self.website = website
+        self.logo = logo
+
+
 class OrganizationDetailResponse(BaseModel):
     id: int = Field(..., gt=0)
     name: str = Field(..., min_length=3, max_length=100)
@@ -53,4 +73,5 @@ class OrganizationDetailResponse(BaseModel):
     phone: Optional[str] = Field(None, max_length=20)
     email: Optional[str] = Field(None, max_length=100)
     website: Optional[str] = Field(None, max_length=100)
-    logo: Optional[dict] = Field(None, max_length=100)
+    logo: Optional[dict] = Field(None)
+    is_blocked: bool = Field(False)

@@ -296,6 +296,34 @@ async def create_user_avatar(session: AsyncSession, name: str, file: UploadFile)
     return avatar
 
 
+async def update_user_avatar(session: AsyncSession, id: int, name: str | None = None, file: UploadFile | None = None):
+    avatar = await session.get(UserAvatars, id)
+    if not avatar or getattr(avatar, 'is_deleted', False):
+        raise CustomHTTPException(404, "Avatar not found")
+        
+    if name is not None:
+        avatar.name = name
+        
+    if file is not None:
+        if avatar.image:
+            avatar.image.delete()
+        avatar.image = {"bytes": io.BytesIO(await file.read()), "filename": file.filename}
+        
+    await session.commit()
+    await session.refresh(avatar)
+    return avatar
+
+
+async def delete_user_avatar(session: AsyncSession, id: int):
+    avatar = await session.get(UserAvatars, id)
+    if not avatar or getattr(avatar, 'is_deleted', False):
+        raise CustomHTTPException(404, "Avatar not found")
+        
+    avatar.soft_delete()
+    await session.commit()
+    return {"message": "Avatar deleted successfully"}
+
+
 async def list_avatars(session: AsyncSession):
     query = select(UserAvatars)
     return await session.scalars(query)

@@ -204,6 +204,26 @@ async def create_avatar(
     return await service.create_user_avatar(session, name=name, file=avatar)
 
 
+@router.put("/avatar/update/{id}", summary="update user avatar")
+async def update_avatar(
+    id: int,
+    session: SessionDep,
+    user: AdminAuth,
+    name: str | None = Form(None),
+    avatar: UploadFile | None = File(None),
+) -> UserAvatarDetail:
+    return await service.update_user_avatar(session, id=id, name=name, file=avatar)
+
+
+@router.delete("/avatar/delete/{id}", summary="delete user avatar")
+async def delete_avatar(
+    id: int,
+    session: SessionDep,
+    user: AdminAuth,
+) -> dict:
+    return await service.delete_user_avatar(session, id=id)
+
+
 @router.delete("/delete", summary="delete user")
 async def delete_user(
     session: SessionDep,
