@@ -21,6 +21,8 @@ from app.api.auth.schemas import (
     AppleSignInRequest,
     PasswordResetRequest,
     PasswordResetResponse,
+    ChangePasswordRequest,
+    ChangePasswordResponse,
 )
 from app.api.auth import service
 from app.db.core import SessionDep
@@ -121,6 +123,31 @@ async def read_users_me(
     current_user: DependsAuth,
 ):
     return current_user
+
+
+@router.post("/change-password", summary="Change user password")
+async def change_password(
+    request: ChangePasswordRequest,
+    session: SessionDep,
+    current_user: DependsAuth,
+) -> ChangePasswordResponse:
+    from app.core.auth.authentication import verify_password
+    
+    # Verify old password
+    if not current_user.password or not verify_password(request.old_password, current_user.password):
+        raise CustomHTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            message="Incorrect old password",
+        )
+        
+    # Hash and set new password
+    current_user.password = get_password_hash(request.new_password)
+    await session.commit()
+    
+    return ChangePasswordResponse(
+        success=True,
+        message="Password changed successfully"
+    )
 
 
 @router.post("/admin/reset-password", summary="Admin reset user password")

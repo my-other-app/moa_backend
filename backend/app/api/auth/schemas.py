@@ -43,6 +43,17 @@ class PasswordResetResponse(CustomBaseModel):
     username: str | None = None
 
 
+class ChangePasswordRequest(CustomBaseModel):
+    """Request schema for user changing their own password"""
+    old_password: str = Field(..., description="Current password")
+    new_password: str = Field(..., min_length=6, description="New password (min 6 characters)")
+
+
+class ChangePasswordResponse(CustomBaseModel):
+    success: bool
+    message: str
+
+
 class AppleSignInRequest(CustomBaseModel):
     """Request schema for Apple Sign In"""
     identity_token: str = Field(..., description="JWT identity token from Apple")
