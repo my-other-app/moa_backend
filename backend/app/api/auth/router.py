@@ -140,8 +140,16 @@ async def change_password(
             message="Incorrect old password",
         )
         
+    from sqlalchemy import select
+    from app.api.users.models import Users
+    
+    # Re-fetch user on the current active session to avoid detached instance issues
+    stmt = select(Users).where(Users.id == current_user.id)
+    result = await session.execute(stmt)
+    db_user = result.scalar_one()
+
     # Hash and set new password
-    current_user.password = get_password_hash(request.new_password)
+    db_user.password = get_password_hash(request.new_password)
     await session.commit()
     
     return ChangePasswordResponse(
