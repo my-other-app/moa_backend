@@ -58,22 +58,23 @@ async def get_admin_dashboard_analytics(
     thirty_days_ago = now - timedelta(days=30)
     sixty_days_ago = now - timedelta(days=60)
 
-    # 1. Users & Delta
+    # 1. Total Users Base Growth
     total_users_result = await session.execute(select(func.count(Users.id)))
     total_users = total_users_result.scalar() or 0
 
     users_last_30_result = await session.execute(select(func.count(Users.id)).where(Users.created_at >= thirty_days_ago))
     users_last_30 = users_last_30_result.scalar() or 0
 
-    users_prev_30_result = await session.execute(select(func.count(Users.id)).where(and_(Users.created_at >= sixty_days_ago, Users.created_at < thirty_days_ago)))
-    users_prev_30 = users_prev_30_result.scalar() or 0
+    users_30_days_ago = total_users - users_last_30
 
-    if users_prev_30 > 0:
-        user_growth_pct = int(((users_last_30 - users_prev_30) / users_prev_30) * 100)
+    if users_30_days_ago > 0:
+        # e.g., if we had 100 users 30 days ago, and 12 joined in the last 30 days, we grew by 12%
+        base_growth_pct = int((users_last_30 / users_30_days_ago) * 100)
     else:
-        user_growth_pct = 100 if users_last_30 > 0 else 0
+        # If we had 0 users before, we grew by 100% implicitly if ANY users joined
+        base_growth_pct = 100 if users_last_30 > 0 else 0
     
-    total_users_delta = f"+{user_growth_pct}% from last month" if user_growth_pct >= 0 else f"{user_growth_pct}% from last month"
+    total_users_delta = f"+{base_growth_pct}% from last month" if base_growth_pct >= 0 else f"{base_growth_pct}% from last month"
 
     # 2. Clubs & Delta
     verified_clubs_result = await session.execute(select(func.count(Clubs.id)).where(Clubs.is_verified == True))
