@@ -1,8 +1,9 @@
-import io
-from sqlalchemy import select
+from sqlalchemy import select, func
 from app.response import CustomHTTPException
 from app.api.orgs.models import Organizations
-from app.api.orgs.schema import OrganizationCreate
+from app.api.clubs.models import Clubs, ClubUsersLink
+from app.api.events.models import Events
+from app.api.orgs.schema import OrganizationCreate, OrganizationAnalyticsResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 import pandas as pd
 from fastapi import UploadFile
@@ -115,3 +116,40 @@ async def import_organizations(file: UploadFile, session: AsyncSession):
         return {"message": f"Successfully imported {imported_count} organizations"}
     except Exception as e:
         raise CustomHTTPException(status_code=400, message=f"Failed to parse file: {str(e)}")
+
+
+async def get_organization_analytics(id: int, session: AsyncSession) -> OrganizationAnalyticsResponse:
+    org = await session.get(Organizations, id)
+    if not org or org.is_deleted:
+        raise CustomHTTPException(status_code=404, message="Organization not found")
+
+    # 1. Total Clubs
+    clubs_query = select(func.count(Clubs.id)).where(Clubs.org_id == id, Clubs.is_deleted == False)
+    total_clubs_result = await session.execute(clubs_query)
+    total_clubs = total_clubs_result.scalar() or 0
+
+    # 2. Total Events under those clubs
+    # Subquery to get active club IDs for this organization
+    active_club_ids_query = select(Clubs.id).where(Clubs.org_id == id, Clubs.is_deleted == False)
+    
+    events_query = select(func.count(Events.id)).where(
+        Events.club_id.in_(active_club_ids_query),
+        Events.is_deleted == False
+    )
+    total_events_result = await session.execute(events_query)
+    total_events = total_events_result.scalar() or 0
+
+    # 3. Total Followers mapping to those clubs
+    followers_query = select(func.count(ClubUsersLink.id)).where(
+        ClubUsersLink.club_id.in_(active_club_ids_query),
+        ClubUsersLink.is_deleted == False,
+        ClubUsersLink.is_following == True
+    )
+    total_followers_result = await session.execute(followers_query)
+    total_followers = total_followers_result.scalar() or 0
+
+    return OrganizationAnalyticsResponse(
+        total_clubs=total_clubs,
+        total_events=total_events,
+        total_followers=total_followers
+    )

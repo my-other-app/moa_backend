@@ -13,6 +13,8 @@ class OrgTypes(enum.Enum):
     university = "university"
     college = "college"
     company = "company"
+    ngo = "ngo"
+    community = "community"
     other = "other"
 
 

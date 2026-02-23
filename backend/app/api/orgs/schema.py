@@ -75,3 +75,9 @@ class OrganizationDetailResponse(BaseModel):
     website: Optional[str] = Field(None, max_length=100)
     logo: Optional[dict] = Field(None)
     is_blocked: bool = Field(False)
+
+
+class OrganizationAnalyticsResponse(BaseModel):
+    total_clubs: int = Field(0, description="Total number of clubs affiliated with this organization")
+    total_events: int = Field(0, description="Total number of events hosted by all affiliated clubs")
+    total_followers: int = Field(0, description="Total number of followers across all affiliated clubs")

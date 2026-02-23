@@ -7,6 +7,7 @@ from app.api.orgs.schema import (
     OrganizationUpdate,
     OrganizationDetailResponse,
     OrganizationPublic,
+    OrganizationAnalyticsResponse
 )
 from fastapi import UploadFile, File
 from app.api.orgs import service
@@ -49,3 +50,8 @@ async def import_organizations(
     session: SessionDep, user: AdminAuth, file: UploadFile = File(...)
 ):
     return await service.import_organizations(file, session)
+
+
+@router.get("/admin/{id}/analytics", summary="Get aggregated Club & Event statistics for an Organization")
+async def get_organization_analytics(id: int, session: SessionDep, user: AdminAuth) -> OrganizationAnalyticsResponse:
+    return await service.get_organization_analytics(id, session)
