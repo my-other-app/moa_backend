@@ -196,12 +196,19 @@ def _default_config() -> dict:
     return TicketTemplateConfig().model_dump()
 
 
+def _extract_url(field_val) -> Optional[str]:
+    if isinstance(field_val, str):
+        return field_val
+    if isinstance(field_val, dict) and "original" in field_val:
+        return field_val["original"]
+    return None
+
 def _sync_urls_to_config(template: TicketTemplates) -> None:
     """Sync S3 uploaded image URLs into the config JSON."""
     config = dict(template.config) if template.config else {}
-    config["logo_url"] = template.logo if isinstance(template.logo, str) else None
-    config["secondary_logo_url"] = template.secondary_logo if isinstance(template.secondary_logo, str) else None
-    config["background_image_url"] = template.background_image if isinstance(template.background_image, str) else None
+    config["logo_url"] = _extract_url(template.logo)
+    config["secondary_logo_url"] = _extract_url(template.secondary_logo)
+    config["background_image_url"] = _extract_url(template.background_image)
     template.config = config
 
 
