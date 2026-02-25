@@ -1,10 +1,14 @@
+import io
+import json
 import logging
+from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.ticket_templates.models import TicketTemplates
-from app.api.ticket_templates.schemas import TicketTemplateCreate, TicketTemplateUpdate
+from app.api.ticket_templates.schemas import TicketTemplateConfig
 from app.response import CustomHTTPException
+from fastapi import UploadFile
 
 logger = logging.getLogger(__name__)
 
@@ -12,23 +16,92 @@ logger = logging.getLogger(__name__)
 async def create_ticket_template(
     session: AsyncSession,
     club_id: int,
-    data: TicketTemplateCreate,
+    name: str,
+    is_default: bool,
+    config_json: str,
+    logo: Optional[UploadFile] = None,
+    secondary_logo: Optional[UploadFile] = None,
+    background_image: Optional[UploadFile] = None,
 ) -> TicketTemplates:
-    """Create a new ticket template for a club."""
-    # If setting as default, unset any existing default
-    if data.is_default:
+    """Create a new ticket template with optional image uploads."""
+    config = TicketTemplateConfig(**json.loads(config_json))
+
+    if is_default:
         await _unset_club_defaults(session, club_id)
 
     template = TicketTemplates(
         club_id=club_id,
-        name=data.name,
-        is_default=data.is_default,
-        config=data.config.model_dump(),
+        name=name,
+        is_default=is_default,
+        config=config.model_dump(),
     )
+
+    # Handle file uploads
+    await _apply_uploads(template, logo, secondary_logo, background_image)
+
     session.add(template)
     await session.commit()
     await session.refresh(template)
+
+    # Sync uploaded URLs back into config
+    _sync_urls_to_config(template)
+    await session.commit()
+    await session.refresh(template)
+
     logger.info(f"Created ticket template {template.id} for club {club_id}")
+    return template
+
+
+async def update_ticket_template(
+    session: AsyncSession,
+    template_id: int,
+    club_id: int,
+    name: Optional[str],
+    is_default: Optional[bool],
+    config_json: Optional[str],
+    logo: Optional[UploadFile] = None,
+    secondary_logo: Optional[UploadFile] = None,
+    background_image: Optional[UploadFile] = None,
+    remove_logo: bool = False,
+    remove_secondary_logo: bool = False,
+    remove_background_image: bool = False,
+) -> TicketTemplates:
+    """Update a ticket template with optional image uploads."""
+    template = await get_ticket_template(session, template_id)
+
+    if template.club_id != club_id:
+        raise CustomHTTPException(403, "You do not own this template")
+
+    if name is not None:
+        template.name = name
+    if config_json is not None:
+        config = TicketTemplateConfig(**json.loads(config_json))
+        template.config = config.model_dump()
+    if is_default is not None:
+        if is_default:
+            await _unset_club_defaults(session, club_id)
+        template.is_default = is_default
+
+    # Handle removals
+    if remove_logo:
+        template.logo = None
+    if remove_secondary_logo:
+        template.secondary_logo = None
+    if remove_background_image:
+        template.background_image = None
+
+    # Handle file uploads (overwrite existing)
+    await _apply_uploads(template, logo, secondary_logo, background_image)
+
+    await session.commit()
+    await session.refresh(template)
+
+    # Sync uploaded URLs back into config
+    _sync_urls_to_config(template)
+    await session.commit()
+    await session.refresh(template)
+
+    logger.info(f"Updated ticket template {template_id}")
     return template
 
 
@@ -64,33 +137,6 @@ async def get_ticket_template(
     return template
 
 
-async def update_ticket_template(
-    session: AsyncSession,
-    template_id: int,
-    club_id: int,
-    data: TicketTemplateUpdate,
-) -> TicketTemplates:
-    """Update a ticket template."""
-    template = await get_ticket_template(session, template_id)
-
-    if template.club_id != club_id:
-        raise CustomHTTPException(403, "You do not own this template")
-
-    if data.name is not None:
-        template.name = data.name
-    if data.config is not None:
-        template.config = data.config.model_dump()
-    if data.is_default is not None:
-        if data.is_default:
-            await _unset_club_defaults(session, club_id)
-        template.is_default = data.is_default
-
-    await session.commit()
-    await session.refresh(template)
-    logger.info(f"Updated ticket template {template_id}")
-    return template
-
-
 async def delete_ticket_template(
     session: AsyncSession,
     template_id: int,
@@ -98,10 +144,8 @@ async def delete_ticket_template(
 ) -> None:
     """Soft-delete a ticket template."""
     template = await get_ticket_template(session, template_id)
-
     if template.club_id != club_id:
         raise CustomHTTPException(403, "You do not own this template")
-
     template.is_deleted = True
     await session.commit()
     logger.info(f"Deleted ticket template {template_id}")
@@ -114,7 +158,6 @@ async def get_template_for_event(
     """
     Get the ticket template config for an event.
     Falls back to club default, then to system defaults.
-    Returns the config dict ready to inject into the HTML template.
     """
     from app.api.events.models import Events
 
@@ -124,7 +167,6 @@ async def get_template_for_event(
     if not event:
         return _default_config()
 
-    # 1. Check if event has a specific template assigned
     if hasattr(event, "ticket_template_id") and event.ticket_template_id:
         template = await session.scalar(
             select(TicketTemplates).where(
@@ -135,7 +177,6 @@ async def get_template_for_event(
         if template:
             return template.config
 
-    # 2. Fall back to club's default template
     if event.club_id:
         default_template = await session.scalar(
             select(TicketTemplates).where(
@@ -147,24 +188,39 @@ async def get_template_for_event(
         if default_template:
             return default_template.config
 
-    # 3. Return system defaults (matches current hardcoded ticket)
     return _default_config()
 
 
 def _default_config() -> dict:
-    """Return the default ticket config matching the current hardcoded theme."""
-    return {
-        "accent_color": "#1db9a0",
-        "bg_color": "#121212",
-        "text_color": "#ffffff",
-        "font": "Inter",
-        "logo_url": None,
-        "background_image_url": None,
-        "show_prizes": True,
-        "show_guidelines_link": True,
-        "ticket_type_label": "GENERAL",
-        "custom_footer_text": None,
-    }
+    """Return the default ticket config."""
+    return TicketTemplateConfig().model_dump()
+
+
+def _sync_urls_to_config(template: TicketTemplates) -> None:
+    """Sync S3 uploaded image URLs into the config JSON."""
+    config = dict(template.config) if template.config else {}
+    config["logo_url"] = template.logo if isinstance(template.logo, str) else None
+    config["secondary_logo_url"] = template.secondary_logo if isinstance(template.secondary_logo, str) else None
+    config["background_image_url"] = template.background_image if isinstance(template.background_image, str) else None
+    template.config = config
+
+
+async def _apply_uploads(
+    template: TicketTemplates,
+    logo: Optional[UploadFile],
+    secondary_logo: Optional[UploadFile],
+    background_image: Optional[UploadFile],
+) -> None:
+    """Apply file uploads to the template model."""
+    if logo and logo.filename:
+        content = io.BytesIO(await logo.read())
+        template.logo = {"bytes": content, "filename": logo.filename}
+    if secondary_logo and secondary_logo.filename:
+        content = io.BytesIO(await secondary_logo.read())
+        template.secondary_logo = {"bytes": content, "filename": secondary_logo.filename}
+    if background_image and background_image.filename:
+        content = io.BytesIO(await background_image.read())
+        template.background_image = {"bytes": content, "filename": background_image.filename}
 
 
 async def _unset_club_defaults(session: AsyncSession, club_id: int) -> None:

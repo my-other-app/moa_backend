@@ -10,6 +10,7 @@ from sqlalchemy.orm import relationship
 
 from app.db.base import AbstractSQLModel
 from app.db.mixins import SoftDeleteMixin, TimestampsMixin
+from app.core.storage.fields import S3ImageField
 
 
 class TicketTemplates(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
@@ -20,20 +21,21 @@ class TicketTemplates(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     name = Column(String(100), nullable=False)
     is_default = Column(Boolean, default=False, nullable=False)
 
-    # Style configuration JSON
-    # Schema:
-    # {
-    #   "accent_color": "#1db9a0",         -- Outer border / decorative color
-    #   "bg_color": "#121212",             -- Inner ticket background
-    #   "text_color": "#ffffff",           -- Primary text color
-    #   "font": "Inter",                   -- Google Font name
-    #   "logo_url": null,                  -- Club logo URL for ticket
-    #   "background_image_url": null,      -- Optional background image
-    #   "show_prizes": true,               -- Show prize info on ticket
-    #   "show_guidelines_link": true,      -- Show guidelines link
-    #   "ticket_type_label": "GENERAL",    -- "EARLY BIRD", "VIP", "GENERAL"
-    #   "custom_footer_text": null         -- Custom text at bottom
-    # }
+    # Uploaded images (S3)
+    logo = Column(
+        S3ImageField(upload_to="templates/tickets/logos/"),
+        nullable=True,
+    )
+    secondary_logo = Column(
+        S3ImageField(upload_to="templates/tickets/logos/"),
+        nullable=True,
+    )
+    background_image = Column(
+        S3ImageField(upload_to="templates/tickets/backgrounds/"),
+        nullable=True,
+    )
+
+    # Style configuration JSON (all non-file options)
     config = Column(JSON, nullable=False, default=dict)
 
     club = relationship("Clubs")
