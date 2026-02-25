@@ -603,3 +603,48 @@ async def debug_wallet_certs() -> dict:
         "team_id": wallet_service.TEAM_ID or "(not set)",
         "org_name": wallet_service.ORG_NAME,
     }
+
+
+# ─── Networking Discovery ─────────────────────────────────────────────
+
+from app.api.events.schemas import (
+    NetworkingAttendeesResponse,
+    NetworkingAttendeeResponse,
+    NetworkingInterestItem,
+)
+from app.api.events import networking as networking_service
+
+
+@router.get("/{event_id}/networking", summary="Discover like-minded attendees")
+async def get_networking_attendees(
+    event_id: int,
+    session: SessionDep,
+    user: DependsAuth,
+) -> NetworkingAttendeesResponse:
+    """
+    Returns checked-in attendees who share interests with the requesting user.
+    Only available during the event + 1 hour buffer.
+    Requires the requesting user to be checked in.
+    """
+    result = await networking_service.get_networking_attendees(
+        session, event_id, user.id
+    )
+    return NetworkingAttendeesResponse(
+        event_id=result["event_id"],
+        event_name=result["event_name"],
+        window_closes_at=result["window_closes_at"],
+        attendees=[
+            NetworkingAttendeeResponse(
+                user_id=a["user_id"],
+                name=a["name"],
+                profile_pic_url=a["profile_pic_url"],
+                organization=a["organization"],
+                shared_interests=[
+                    NetworkingInterestItem(**i) for i in a["shared_interests"]
+                ],
+                match_count=a["match_count"],
+            )
+            for a in result["attendees"]
+        ],
+        total=result["total"],
+    )

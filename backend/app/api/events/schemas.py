@@ -471,3 +471,29 @@ class TicketDetailsResponse(CustomBaseModel):
     attended_on: datetime | None
     user: UserPublic
     created_at: datetime
+
+
+# ─── Networking Discovery ─────────────────────────────────────────────
+
+class NetworkingInterestItem(BaseModel):
+    id: int
+    name: str
+    icon: str | None = None
+    icon_type: str | None = None
+
+
+class NetworkingAttendeeResponse(BaseModel):
+    user_id: int
+    name: str
+    profile_pic_url: str | None = None
+    organization: str | None = None
+    shared_interests: list[NetworkingInterestItem] = Field(default_factory=list)
+    match_count: int = 0
+
+
+class NetworkingAttendeesResponse(BaseModel):
+    event_id: int
+    event_name: str
+    window_closes_at: datetime | None = None
+    attendees: list[NetworkingAttendeeResponse] = Field(default_factory=list)
+    total: int = 0
