@@ -154,6 +154,8 @@ class EventCreate:
         event_guidelines: Optional[str] = Form(None),
         event_tag: Optional[str] = Form(None),  # Event tag like "Free", "Paid", etc.
         speakers: Optional[str] = Form("[]"),  # JSON array of speakers
+        ticket_template_id: Optional[int] = Form(None),
+        certificate_template_id: Optional[int] = Form(None),
     ):
         self.name = name
         self.poster = poster
@@ -187,6 +189,8 @@ class EventCreate:
         self.max_participants = max_participants
         self.event_guidelines = event_guidelines
         self.event_tag = event_tag
+        self.ticket_template_id = ticket_template_id
+        self.certificate_template_id = certificate_template_id
         try:
             self.additional_details = [
                 EventAdditionalDetail(**detail)
@@ -248,6 +252,8 @@ class EventEdit(EventCreate):
         max_participants: Optional[int] = Form(None),
         event_tag: Optional[str] = Form(None),
         speakers: Optional[str] = Form("[]"),
+        ticket_template_id: Optional[int] = Form(None),
+        certificate_template_id: Optional[int] = Form(None),
     ):
         super().__init__(
             name=name,
@@ -276,6 +282,8 @@ class EventEdit(EventCreate):
             event_guidelines=event_guidelines,
             event_tag=event_tag,
             speakers=speakers,
+            ticket_template_id=ticket_template_id,
+            certificate_template_id=certificate_template_id,
         )
 
 

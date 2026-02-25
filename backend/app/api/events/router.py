@@ -527,8 +527,8 @@ async def get_certificate_pdf(
     if not registration.is_attended:
         raise CustomHTTPException(403, message="Certificate is only available for attendees who checked in")
 
-    # Load ticket template config for this event (same branding as ticket)
-    from app.api.ticket_templates.service import get_template_for_event
+    # Load certificate template config for this event
+    from app.api.certificate_templates.service import get_template_for_event
     style = await get_template_for_event(session, registration.event_id)
 
     # Construct payload for template

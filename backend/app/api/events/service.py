@@ -63,6 +63,8 @@ async def create_event(
     max_participants: Optional[int] = None,
     event_guidelines: Optional[str] = None,
     event_tag: Optional[str] = None,
+    ticket_template_id: Optional[int] = None,
+    certificate_template_id: Optional[int] = None,
 
     speakers: Optional[list[EventSpeakerCreate]] = None,
     speaker_photos: Optional[list[UploadFile]] = None,
@@ -119,6 +121,8 @@ async def create_event(
         additional_details=[x.model_dump(mode="json") for x in additional_details],
         event_guidelines=event_guidelines,
         event_tag=event_tag,
+        ticket_template_id=ticket_template_id,
+        certificate_template_id=certificate_template_id,
     )
     if poster:
         content = io.BytesIO(await poster.read())
@@ -275,6 +279,8 @@ async def update_event(
     db_event.event_guidelines = event.event_guidelines
     db_event.url = event.url
     db_event.max_participants = event.max_participants
+    db_event.ticket_template_id = getattr(event, "ticket_template_id", None)
+    db_event.certificate_template_id = getattr(event, "certificate_template_id", None)
     
     # Update speakers
     if event.speakers is not None:

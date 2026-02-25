@@ -12,8 +12,7 @@
       margin: 0;
       padding: 0;
       box-sizing: border-box;
-      font-family: "{{ style.font | default('Inter') }}",
-      sans-serif;
+      font-family: "{{ style.font | default('Inter') }}", sans-serif;
     }
 
     body {
@@ -28,13 +27,9 @@
       width: 100%;
       max-width: 600px;
 
-      background-color: {
-          {
-          style.accent_color | default('#1db9a0')
-        }
-      }
+      background-color: {{ style.accent_color | default('#1db9a0') }};
 
-      ;
+
       border-radius: 30px;
       padding: 20px;
       position: relative;
@@ -44,23 +39,15 @@
     }
 
     .ticket {
-      background-color: {
-          {
-          style.bg_color | default('#121212')
-        }
-      }
+      background-color: {{ style.bg_color | default('#121212') }};
 
-      ;
+
       border-radius: 20px;
       overflow: hidden;
 
-      color: {
-          {
-          style.text_color | default('#ffffff')
-        }
-      }
+      color: {{ style.text_color | default('#ffffff') }};
 
-      ;
+
       position: relative;
     }
 
@@ -70,9 +57,7 @@
       position: relative;
     }
 
-      {
-      % if style.background_image_url %
-    }
+      {% if style.background_image_url %}
 
     .ticket-header {
       background-image: url("{{ style.background_image_url }}");
@@ -96,9 +81,7 @@
       z-index: 1;
     }
 
-      {
-      % endif %
-    }
+      {% endif %}
 
     .ticket-header h1 {
       font-size: 24px;
@@ -163,13 +146,9 @@
     }
 
     .guidelines a {
-      color: {
-          {
-          style.accent_color | default('#e6a64c')
-        }
-      }
+      color: {{ style.accent_color | default('#e6a64c') }};
 
-      ;
+
       text-decoration: none;
       font-size: 14px;
     }
@@ -180,18 +159,10 @@
       background: repeating-linear-gradient(to right,
         transparent,
         transparent 5px,
-        {
-          {
-          style.text_color | default('#ffffff')
-        }
-      }
+        {{ style.text_color | default('#ffffff') }}
 
       5px,
-      {
-        {
-        style.text_color | default('#ffffff')
-      }
-    }
+      {{ style.text_color | default('#ffffff') }}
 
     10px);
     margin: 15px 0;
@@ -205,13 +176,9 @@
       width: 20px;
       height: 20px;
 
-      background-color: {
-          {
-          style.accent_color | default('#1db9a0')
-        }
-      }
+      background-color: {{ style.accent_color | default('#1db9a0') }};
 
-      ;
+
       border-radius: 50%;
       top: -9px;
     }

@@ -82,10 +82,12 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     category_id = Column(Integer, ForeignKey("event_categories.id"), nullable=False)
     club_id = Column(Integer, ForeignKey("clubs.id"), nullable=True)
     ticket_template_id = Column(Integer, ForeignKey("ticket_templates.id"), nullable=True)
+    certificate_template_id = Column(Integer, ForeignKey("certificate_templates.id"), nullable=True)
 
     category = relationship("EventCategories")
     club = relationship("Clubs")
     ticket_template = relationship("TicketTemplates")
+    certificate_template = relationship("CertificateTemplates")
     registrations = relationship("EventRegistrationsLink", back_populates="event")
     interests = relationship(
         "Interests",
