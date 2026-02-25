@@ -352,3 +352,187 @@ async def update_badge_definition(session: AsyncSession, badge_id: int, update_d
     await session.commit()
     await session.refresh(badge)
     return badge
+
+
+# ─── Analytics & Recipients ───────────────────────────────────────────
+
+async def get_badge_recipients(session: AsyncSession, badge_id: int) -> list[dict]:
+    """Get all users/clubs who have earned a specific badge."""
+    from app.response import CustomHTTPException
+    from app.api.users.models import Users
+
+    badge = await session.get(BadgeDefinitions, badge_id)
+    if not badge:
+        raise CustomHTTPException(404, "Badge not found.")
+
+    recipients = []
+    if badge.badge_type == BadgeType.user:
+        result = await session.execute(
+            select(UserBadges, Users)
+            .join(Users, UserBadges.user_id == Users.id)
+            .where(UserBadges.badge_id == badge_id)
+            .order_by(UserBadges.awarded_at.desc())
+        )
+        for ub, user in result.all():
+            recipients.append({
+                "id": ub.id,
+                "entity_id": user.id,
+                "entity_name": user.full_name,
+                "entity_email": user.email,
+                "awarded_at": ub.awarded_at,
+            })
+    else:
+        result = await session.execute(
+            select(ClubBadges, Clubs)
+            .join(Clubs, ClubBadges.club_id == Clubs.id)
+            .where(ClubBadges.badge_id == badge_id)
+            .order_by(ClubBadges.awarded_at.desc())
+        )
+        for cb, club in result.all():
+            recipients.append({
+                "id": cb.id,
+                "entity_id": club.id,
+                "entity_name": club.name,
+                "entity_email": club.contact_email,
+                "awarded_at": cb.awarded_at,
+            })
+
+    return recipients
+
+
+async def get_badge_stats(session: AsyncSession, badge_id: int) -> dict:
+    """Get analytics stats for a specific badge."""
+    from datetime import timedelta
+    from app.response import CustomHTTPException
+
+    badge = await session.get(BadgeDefinitions, badge_id)
+    if not badge:
+        raise CustomHTTPException(404, "Badge not found.")
+
+    now = datetime.now(timezone.utc)
+    seven_days_ago = now - timedelta(days=7)
+    thirty_days_ago = now - timedelta(days=30)
+
+    if badge.badge_type == BadgeType.user:
+        table = UserBadges
+    else:
+        table = ClubBadges
+
+    total = await session.scalar(
+        select(func.count()).where(table.badge_id == badge_id)
+    ) or 0
+
+    last_7 = await session.scalar(
+        select(func.count()).where(
+            table.badge_id == badge_id,
+            table.awarded_at >= seven_days_ago,
+        )
+    ) or 0
+
+    last_30 = await session.scalar(
+        select(func.count()).where(
+            table.badge_id == badge_id,
+            table.awarded_at >= thirty_days_ago,
+        )
+    ) or 0
+
+    return {
+        "total_awarded": total,
+        "awards_last_7_days": last_7,
+        "awards_last_30_days": last_30,
+    }
+
+
+async def manual_award_badge(session: AsyncSession, badge_id: int, entity_id: int) -> dict:
+    """Manually award a badge to a user or club."""
+    from app.response import CustomHTTPException
+    from app.api.users.models import Users
+
+    badge = await session.get(BadgeDefinitions, badge_id)
+    if not badge:
+        raise CustomHTTPException(404, "Badge not found.")
+
+    if badge.badge_type == BadgeType.user:
+        # Check user exists
+        user = await session.get(Users, entity_id)
+        if not user:
+            raise CustomHTTPException(404, "User not found.")
+
+        # Check if already awarded
+        existing = await session.scalar(
+            select(func.count()).where(
+                UserBadges.user_id == entity_id,
+                UserBadges.badge_id == badge_id,
+            )
+        )
+        if existing > 0:
+            raise CustomHTTPException(400, "Badge already awarded to this user.")
+
+        award = UserBadges(user_id=entity_id, badge_id=badge_id)
+        session.add(award)
+        await session.commit()
+        return {
+            "id": award.id,
+            "entity_id": entity_id,
+            "entity_name": user.full_name,
+            "entity_email": user.email,
+            "awarded_at": award.awarded_at,
+        }
+    else:
+        club = await session.get(Clubs, entity_id)
+        if not club:
+            raise CustomHTTPException(404, "Club not found.")
+
+        existing = await session.scalar(
+            select(func.count()).where(
+                ClubBadges.club_id == entity_id,
+                ClubBadges.badge_id == badge_id,
+            )
+        )
+        if existing > 0:
+            raise CustomHTTPException(400, "Badge already awarded to this club.")
+
+        award = ClubBadges(club_id=entity_id, badge_id=badge_id)
+        session.add(award)
+        await session.commit()
+        return {
+            "id": award.id,
+            "entity_id": entity_id,
+            "entity_name": club.name,
+            "entity_email": club.contact_email,
+            "awarded_at": award.awarded_at,
+        }
+
+
+async def revoke_badge(session: AsyncSession, badge_id: int, entity_id: int) -> None:
+    """Revoke a badge from a user or club."""
+    from app.response import CustomHTTPException
+
+    badge = await session.get(BadgeDefinitions, badge_id)
+    if not badge:
+        raise CustomHTTPException(404, "Badge not found.")
+
+    if badge.badge_type == BadgeType.user:
+        result = await session.execute(
+            select(UserBadges).where(
+                UserBadges.user_id == entity_id,
+                UserBadges.badge_id == badge_id,
+            )
+        )
+        award = result.scalar_one_or_none()
+        if not award:
+            raise CustomHTTPException(404, "Badge was not awarded to this user.")
+        await session.delete(award)
+    else:
+        result = await session.execute(
+            select(ClubBadges).where(
+                ClubBadges.club_id == entity_id,
+                ClubBadges.badge_id == badge_id,
+            )
+        )
+        award = result.scalar_one_or_none()
+        if not award:
+            raise CustomHTTPException(404, "Badge was not awarded to this club.")
+        await session.delete(award)
+
+    await session.commit()

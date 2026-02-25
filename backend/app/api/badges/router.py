@@ -135,7 +135,15 @@ async def get_club_badges(
 
 # ─── Admin Management ─────────────────────────────────────────────────
 from app.api.auth.router import AdminAuth
-from app.api.badges.schemas import BadgeAdminResponse, BadgeDefinitionCreate, BadgeDefinitionUpdate
+from app.api.badges.schemas import (
+    BadgeAdminResponse,
+    BadgeDefinitionCreate,
+    BadgeDefinitionUpdate,
+    BadgeRecipientResponse,
+    BadgeRecipientsListResponse,
+    BadgeStatsResponse,
+    ManualAwardRequest,
+)
 
 @router.get("/admin", summary="List all badges (Admin)")
 async def admin_list_badges(
@@ -182,3 +190,64 @@ async def admin_update_badge(
     update_data = badge_data.model_dump(exclude_unset=True)
     badge = await service.update_badge_definition(session, badge_id, update_data)
     return BadgeDefinitionResponse.model_validate(badge)
+
+
+@router.get("/admin/{badge_id}/recipients", summary="Get badge recipients (Admin)")
+async def admin_badge_recipients(
+    badge_id: int,
+    session: SessionDep,
+    admin: AdminAuth,
+) -> BadgeRecipientsListResponse:
+    """Get all users or clubs who have earned a specific badge."""
+    from app.api.badges.models import BadgeDefinitions
+    badge = await session.get(BadgeDefinitions, badge_id)
+    recipients = await service.get_badge_recipients(session, badge_id)
+    return BadgeRecipientsListResponse(
+        badge=BadgeDefinitionResponse.model_validate(badge),
+        recipients=[BadgeRecipientResponse(**r) for r in recipients],
+        total=len(recipients),
+    )
+
+
+@router.get("/admin/{badge_id}/stats", summary="Get badge stats (Admin)")
+async def admin_badge_stats(
+    badge_id: int,
+    session: SessionDep,
+    admin: AdminAuth,
+) -> BadgeStatsResponse:
+    """Get analytics stats for a specific badge."""
+    from app.api.badges.models import BadgeDefinitions
+    badge = await session.get(BadgeDefinitions, badge_id)
+    stats = await service.get_badge_stats(session, badge_id)
+    recent = await service.get_badge_recipients(session, badge_id)
+    return BadgeStatsResponse(
+        badge=BadgeDefinitionResponse.model_validate(badge),
+        total_awarded=stats["total_awarded"],
+        recent_awards=[BadgeRecipientResponse(**r) for r in recent[:10]],
+        awards_last_30_days=stats["awards_last_30_days"],
+        awards_last_7_days=stats["awards_last_7_days"],
+    )
+
+
+@router.post("/admin/{badge_id}/award", summary="Manually award badge (Admin)")
+async def admin_award_badge(
+    badge_id: int,
+    body: ManualAwardRequest,
+    session: SessionDep,
+    admin: AdminAuth,
+) -> BadgeRecipientResponse:
+    """Manually award a badge to a specific user or club."""
+    result = await service.manual_award_badge(session, badge_id, body.entity_id)
+    return BadgeRecipientResponse(**result)
+
+
+@router.delete("/admin/{badge_id}/revoke/{entity_id}", summary="Revoke badge (Admin)")
+async def admin_revoke_badge(
+    badge_id: int,
+    entity_id: int,
+    session: SessionDep,
+    admin: AdminAuth,
+):
+    """Revoke a badge from a user or club."""
+    await service.revoke_badge(session, badge_id, entity_id)
+    return {"message": "Badge revoked successfully"}
