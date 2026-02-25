@@ -513,6 +513,21 @@ async def get_wallet_pass(
     )
 
 
+@router.get("/certificates/{ticket_id}/style", summary="Get certificate template style")
+async def get_certificate_style(
+    ticket_id: str,
+    session: SessionDep = SessionDep,
+) -> dict:
+    """
+    Return the certificate template style config for a ticket's event.
+    Public endpoint so the event website can render a styled preview.
+    """
+    registration = await service.get_ticket_details(session, ticket_id=ticket_id)
+    from app.api.certificate_templates.service import get_template_for_event
+    style = await get_template_for_event(session, registration.event_id)
+    return style
+
+
 @router.get("/certificates/{ticket_id}/pdf", summary="Get certificate PDF")
 async def get_certificate_pdf(
     ticket_id: str,
