@@ -3,7 +3,7 @@ Badge API endpoints.
 """
 import logging
 from fastapi import APIRouter
-from app.db.session import SessionDep
+from app.db.core import SessionDep
 from app.api.auth.router import DependsAuth
 from app.api.badges import service
 from app.api.badges.schemas import (
