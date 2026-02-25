@@ -221,6 +221,14 @@ async def register_event(
         )
     )
     payment_remining = data.actual_amount - data.paid_amount
+
+    # Check for new user badges after registration
+    try:
+        from app.api.badges.service import check_and_award_user_badges
+        await check_and_award_user_badges(session, user_id=data.user_id)
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Badge check failed after registration: {e}")
+
     return {
         "event_name": db_event.name,
         "event_id": db_event.id,
@@ -768,5 +776,15 @@ async def mark_attendance(
 
     await session.commit()
     await session.refresh(registration)
-    
+
+    # Check for new badges after attendance change
+    if is_attended and registration.user_id:
+        try:
+            from app.api.badges.service import check_and_award_user_badges, check_and_award_club_badges
+            await check_and_award_user_badges(session, user_id=registration.user_id)
+            await check_and_award_club_badges(session, club_id=event.club_id)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Badge check failed after attendance: {e}")
+
     return registration

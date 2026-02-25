@@ -60,8 +60,13 @@ async def register_event(
         if not user:
             raise CustomHTTPException(400, "User not found")
         if user.user_type != UserTypes.guest:
+            provider_hint = ""
+            if hasattr(user, 'provider') and user.provider:
+                provider_hint = f" (signed up via {user.provider})"
             raise CustomHTTPException(
-                400, "This email is already registered, please login to continue"
+                400,
+                f"An account with this email already exists{provider_hint}. "
+                "Please login through the app to register for this event."
             )
 
         token = await auth_service.create_access_refresh_tokens(user)

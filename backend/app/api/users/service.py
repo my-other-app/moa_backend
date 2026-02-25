@@ -105,6 +105,147 @@ async def create_user(
     return query.scalar()
 
 
+async def merge_guest_into_user(session: AsyncSession, app_user: Users) -> dict:
+    """
+    Merge any guest user accounts into the real app_user account.
+    
+    Transfers all data (registrations, ratings, payments) from guest users
+    matching the app_user's email to the app_user, then soft-deletes the guest.
+    
+    Returns a summary dict with counts of merged records.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Find guest users with the same email
+    guest_users = await session.scalars(
+        select(Users).where(
+            Users.email == app_user.email,
+            Users.user_type == UserTypes.guest,
+            Users.is_deleted == False,
+            Users.id != app_user.id,
+        )
+    )
+    guest_users = list(guest_users)
+    
+    if not guest_users:
+        return {"merged": False, "guests_merged": 0}
+    
+    total_registrations = 0
+    total_ratings = 0
+    total_payments = 0
+    guests_merged = 0
+    
+    from app.api.events.models import EventRatingsLink
+    from app.api.payments.models import PaymentOrders
+    
+    for guest in guest_users:
+        guest_id = guest.id
+        logger.info(f"Merging guest user {guest_id} into app_user {app_user.id} (email: {app_user.email})")
+        
+        # 1. Transfer EventRegistrationsLink records
+        # First, find events where the app_user is already registered (to avoid unique constraint violations)
+        app_user_event_ids = set(
+            await session.scalars(
+                select(EventRegistrationsLink.event_id).where(
+                    EventRegistrationsLink.user_id == app_user.id,
+                    EventRegistrationsLink.is_deleted == False,
+                )
+            )
+        )
+        
+        guest_registrations = list(
+            await session.scalars(
+                select(EventRegistrationsLink).where(
+                    EventRegistrationsLink.user_id == guest_id,
+                    EventRegistrationsLink.is_deleted == False,
+                )
+            )
+        )
+        
+        for reg in guest_registrations:
+            if reg.event_id in app_user_event_ids:
+                # Conflict: both accounts registered for the same event
+                # Keep the app_user's registration, soft-delete the guest's
+                reg.is_deleted = True
+                logger.info(f"  Soft-deleted duplicate registration {reg.id} for event {reg.event_id}")
+            else:
+                # Transfer the registration to the app_user
+                reg.user_id = app_user.id
+                total_registrations += 1
+                logger.info(f"  Transferred registration {reg.id} for event {reg.event_id}")
+        
+        # 2. Transfer EventRatingsLink records
+        app_user_rated_event_ids = set(
+            await session.scalars(
+                select(EventRatingsLink.event_id).where(
+                    EventRatingsLink.user_id == app_user.id,
+                    EventRatingsLink.is_deleted == False,
+                )
+            )
+        )
+        
+        guest_ratings = list(
+            await session.scalars(
+                select(EventRatingsLink).where(
+                    EventRatingsLink.user_id == guest_id,
+                    EventRatingsLink.is_deleted == False,
+                )
+            )
+        )
+        
+        for rating in guest_ratings:
+            if rating.event_id in app_user_rated_event_ids:
+                rating.is_deleted = True
+                logger.info(f"  Soft-deleted duplicate rating {rating.id} for event {rating.event_id}")
+            else:
+                rating.user_id = app_user.id
+                total_ratings += 1
+                logger.info(f"  Transferred rating {rating.id} for event {rating.event_id}")
+        
+        # 3. Transfer PaymentOrders records (no unique constraint to worry about)
+        guest_payments = list(
+            await session.scalars(
+                select(PaymentOrders).where(
+                    PaymentOrders.user_id == guest_id,
+                    PaymentOrders.is_deleted == False,
+                )
+            )
+        )
+        
+        for payment in guest_payments:
+            payment.user_id = app_user.id
+            total_payments += 1
+            logger.info(f"  Transferred payment order {payment.id}")
+        
+        # 4. Soft-delete the guest user and any associated profile
+        guest.is_deleted = True
+        
+        guest_profile = await session.scalar(
+            select(UserProfiles).where(
+                UserProfiles.user_id == guest_id,
+                UserProfiles.is_deleted == False,
+            )
+        )
+        if guest_profile:
+            guest_profile.is_deleted = True
+        
+        guests_merged += 1
+        logger.info(f"  Soft-deleted guest user {guest_id}")
+    
+    await session.flush()
+    
+    summary = {
+        "merged": True,
+        "guests_merged": guests_merged,
+        "registrations_transferred": total_registrations,
+        "ratings_transferred": total_ratings,
+        "payments_transferred": total_payments,
+    }
+    logger.info(f"Account merge complete for user {app_user.id}: {summary}")
+    return summary
+
+
 async def following_clubs(
     session: AsyncSession, user_id: int, limit: int = 10, offset: int = 0
 ):

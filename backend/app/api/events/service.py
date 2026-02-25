@@ -699,6 +699,15 @@ async def rate_event(
 
     await session.commit()
     await session.refresh(event_rating)
+
+    # Check for new badges after rating
+    try:
+        from app.api.badges.service import check_and_award_user_badges, check_and_award_club_badges
+        await check_and_award_user_badges(session, user_id=user_id)
+        await check_and_award_club_badges(session, club_id=event.club.id)
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Badge check failed after rating: {e}")
+
     return event_rating
     
     

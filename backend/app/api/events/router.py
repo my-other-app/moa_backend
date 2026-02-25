@@ -428,6 +428,10 @@ async def get_ticket_pdf(
     """
     registration = await service.get_ticket_details(session, ticket_id=ticket_id)
     
+    # Load ticket template config for this event
+    from app.api.ticket_templates.service import get_template_for_event
+    style = await get_template_for_event(session, registration.event_id)
+
     # Construct payload for template
     event = registration.event
     event_endtime = (
@@ -448,7 +452,7 @@ async def get_ticket_pdf(
             else ""
         ),
         "event_location": event.location_name,
-        "event_prizes": f"Prizes worth ₹{event.prize_amount}",
+        "event_prizes": f"Prizes worth ₹{event.prize_amount}" if event.prize_amount else None,
         "organizer_name": event.club.name,
         "contact_email": event.contact_email,
         "contact_phone": event.contact_phone,
@@ -475,7 +479,7 @@ async def get_ticket_pdf(
 
     pdf_bytes = generate_pdf_bytes(
         template_path="events/ticket.html",
-        context={"email_payload": email_payload},
+        context={"email_payload": email_payload, "style": style},
     )
 
     return Response(
@@ -505,6 +509,68 @@ async def get_wallet_pass(
         media_type="application/vnd.apple.pkpass",
         headers={
             "Content-Disposition": f'attachment; filename="ticket-{ticket_id}.pkpass"'
+        }
+    )
+
+
+@router.get("/certificates/{ticket_id}/pdf", summary="Get certificate PDF")
+async def get_certificate_pdf(
+    ticket_id: str,
+    session: SessionDep = SessionDep,
+) -> Response:
+    """
+    Generate and download a PDF certificate of participation.
+    Only available for attendees who have checked in (is_attended=True).
+    """
+    registration = await service.get_ticket_details(session, ticket_id=ticket_id)
+
+    if not registration.is_attended:
+        raise CustomHTTPException(403, message="Certificate is only available for attendees who checked in")
+
+    # Load ticket template config for this event (same branding as ticket)
+    from app.api.ticket_templates.service import get_template_for_event
+    style = await get_template_for_event(session, registration.event_id)
+
+    # Construct payload for template
+    event = registration.event
+
+    email_payload = {
+        "ticket_id": registration.ticket_id,
+        "participant_name": registration.full_name,
+        "event_name": event.name,
+        "event_date": event.event_datetime.strftime("%d %b %Y"),
+        "organizer_name": event.club.name,
+    }
+
+    # Generate QR Code for verification
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=10,
+        border=4,
+    )
+    qr.add_data(f"certificate:{registration.ticket_id}")
+    qr.make(fit=True)
+
+    img = qr.make_image(fill_color="black", back_color="white")
+
+    buffered = io.BytesIO()
+    img.save(buffered, format="PNG")
+    qr_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
+
+    email_payload["qr_code"] = qr_base64
+
+    pdf_bytes = generate_pdf_bytes(
+        template_path="events/certificate.html",
+        context={"email_payload": email_payload, "style": style},
+        options={"orientation": "Landscape"},
+    )
+
+    return Response(
+        content=pdf_bytes.getvalue(),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="certificate-{ticket_id}.pdf"'
         }
     )
 

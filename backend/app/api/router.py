@@ -9,6 +9,8 @@ from app.api.interests.router import router as interests_router
 from app.api.home.router import router as home_router
 from app.api.notifications.router import router as notifications_router
 from app.api.payments.router import router as payments_router
+from app.api.ticket_templates.router import router as ticket_templates_router
+from app.api.badges.router import router as badges_router
 from app.api import service
 from app.api.schemas import BackgroundTaskLogResponseSchema
 from app.db.core import SessionDep
@@ -28,6 +30,8 @@ api_router.include_router(router=interests_router, tags=["interests"])
 api_router.include_router(router=home_router, tags=["home"])
 api_router.include_router(router=notifications_router, tags=["notifications"])
 api_router.include_router(router=payments_router, tags=["payments"])
+api_router.include_router(router=ticket_templates_router, tags=["ticket-templates"])
+api_router.include_router(router=badges_router, tags=["badges"])
 
 
 @api_router.get("/background-task-log/{task_id}", tags=["root"])

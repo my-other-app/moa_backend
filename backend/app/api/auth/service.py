@@ -7,7 +7,7 @@ from app.core.auth.jwt import create_access_token
 from app.config import settings
 from fastapi import HTTPException
 from app.api.users.models import Users, UserTypes
-from app.api.users.service import create_user
+from app.api.users.service import create_user, merge_guest_into_user
 from sqlalchemy import select
 
 from app.api.auth.schemas import AuthTokenData, Token
@@ -58,6 +58,10 @@ async def google_signin(
                 user_type=UserTypes.app_user,
                 provider="google",
             )
+
+        # Merge any guest accounts with matching email
+        await merge_guest_into_user(session, app_user=user)
+        await session.commit()
 
         return user
 
@@ -144,6 +148,10 @@ async def apple_signin(
                 provider="apple",
             )
         
+        # Merge any guest accounts with matching email
+        await merge_guest_into_user(session, app_user=user)
+        await session.commit()
+
         return user
         
     except jwt.ExpiredSignatureError:

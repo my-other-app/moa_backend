@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Certificate of Participation</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family={{ style.font | default('Inter') }}:wght@300;400;600;700&display=swap"
+        rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: "{{ style.font | default('Inter') }}",
+            sans-serif;
+
+            background: {
+                    {
+                    style.accent_color | default('#1db9a0')
+                }
+            }
+
+            ;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .certificate-outer {
+            width: 100%;
+            max-width: 1000px;
+            padding: 16px;
+
+            background: {
+                    {
+                    style.accent_color | default('#1db9a0')
+                }
+            }
+
+            ;
+            border-radius: 24px;
+        }
+
+        .certificate-inner {
+            background: {
+                    {
+                    style.bg_color | default('#121212')
+                }
+            }
+
+            ;
+
+            color: {
+                    {
+                    style.text_color | default('#ffffff')
+                }
+            }
+
+            ;
+            border-radius: 20px;
+            padding: 50px 60px;
+            position: relative;
+            overflow: hidden;
+            min-height: 580px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+        }
+
+        /* Decorative corner elements */
+        .corner {
+            position: absolute;
+            width: 80px;
+            height: 80px;
+
+            border: 3px solid {
+                    {
+                    style.accent_color | default('#1db9a0')
+                }
+            }
+
+            ;
+            opacity: 0.5;
+        }
+
+        .corner-tl {
+            top: 20px;
+            left: 20px;
+            border-right: none;
+            border-bottom: none;
+        }
+
+        .corner-tr {
+            top: 20px;
+            right: 20px;
+            border-left: none;
+            border-bottom: none;
+        }
+
+        .corner-bl {
+            bottom: 20px;
+            left: 20px;
+            border-right: none;
+            border-top: none;
+        }
+
+        .corner-br {
+            bottom: 20px;
+            right: 20px;
+            border-left: none;
+            border-top: none;
+        }
+
+            {
+            % if style.logo_url %
+        }
+
+        .logo {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            object-fit: cover;
+            margin-bottom: 16px;
+
+            border: 2px solid {
+                    {
+                    style.accent_color | default('#1db9a0')
+                }
+            }
+
+            ;
+        }
+
+            {
+            % endif %
+        }
+
+        .cert-title {
+            font-size: 14px;
+            letter-spacing: 6px;
+            text-transform: uppercase;
+
+            color: {
+                    {
+                    style.accent_color | default('#1db9a0')
+                }
+            }
+
+            ;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        .cert-heading {
+            font-size: 36px;
+            font-weight: 700;
+            margin-bottom: 24px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+
+        .cert-subtitle {
+            font-size: 14px;
+            opacity: 0.6;
+            margin-bottom: 12px;
+        }
+
+        .participant-name {
+            font-size: 28px;
+            font-weight: 700;
+
+            color: {
+                    {
+                    style.accent_color | default('#1db9a0')
+                }
+            }
+
+            ;
+            margin-bottom: 24px;
+            padding: 8px 0;
+
+            border-bottom: 2px solid {
+                    {
+                    style.accent_color | default('#1db9a0')
+                }
+            }
+
+            ;
+            display: inline-block;
+            min-width: 400px;
+        }
+
+        .event-details {
+            font-size: 14px;
+            line-height: 1.8;
+            opacity: 0.8;
+            margin-bottom: 32px;
+        }
+
+        .event-name {
+            font-weight: 600;
+
+            color: {
+                    {
+                    style.text_color | default('#ffffff')
+                }
+            }
+
+            ;
+            opacity: 1;
+        }
+
+        .cert-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            width: 100%;
+            margin-top: auto;
+            padding-top: 24px;
+        }
+
+        .footer-left {
+            text-align: left;
+        }
+
+        .footer-right {
+            text-align: right;
+        }
+
+        .footer-label {
+            font-size: 10px;
+            opacity: 0.4;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .footer-value {
+            font-size: 13px;
+            font-weight: 600;
+            margin-top: 4px;
+        }
+
+        .qr-section {
+            position: absolute;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+
+        .qr-code {
+            width: 60px;
+            height: 60px;
+            background: white;
+            border-radius: 8px;
+            padding: 4px;
+        }
+
+        .qr-code img {
+            width: 100%;
+            height: 100%;
+        }
+
+            {
+            % if style.custom_footer_text %
+        }
+
+        .custom-footer {
+            position: absolute;
+            bottom: 8px;
+            right: 24px;
+            font-size: 9px;
+            opacity: 0.3;
+        }
+
+            {
+            % endif %
+        }
+    </style>
+</head>
+
+<body>
+    <div class="certificate-outer">
+        <div class="certificate-inner">
+            <!-- Decorative corners -->
+            <div class="corner corner-tl"></div>
+            <div class="corner corner-tr"></div>
+            <div class="corner corner-bl"></div>
+            <div class="corner corner-br"></div>
+
+            {% if style.logo_url %}
+            <img src="{{ style.logo_url }}" alt="Logo" class="logo" />
+            {% endif %}
+
+            <div class="cert-title">{{ email_payload.organizer_name }}</div>
+            <h1 class="cert-heading">Certificate of Participation</h1>
+
+            <p class="cert-subtitle">This is to certify that</p>
+            <div class="participant-name">{{ email_payload.participant_name }}</div>
+
+            <div class="event-details">
+                has successfully participated in<br />
+                <span class="event-name">{{ email_payload.event_name }}</span><br />
+                held on {{ email_payload.event_date }}
+            </div>
+
+            <div class="cert-footer">
+                <div class="footer-left">
+                    <div class="footer-label">Certificate ID</div>
+                    <div class="footer-value">{{ email_payload.ticket_id }}</div>
+                </div>
+                <div class="footer-right">
+                    <div class="footer-label">Organized By</div>
+                    <div class="footer-value">{{ email_payload.organizer_name }}</div>
+                </div>
+            </div>
+
+            <div class="qr-section">
+                <div class="qr-code">
+                    <img src="data:image/png;base64,{{ email_payload.qr_code }}" alt="QR" />
+                </div>
+            </div>
+
+            {% if style.custom_footer_text %}
+            <div class="custom-footer">{{ style.custom_footer_text }}</div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+
+</html>

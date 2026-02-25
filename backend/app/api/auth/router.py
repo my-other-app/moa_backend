@@ -75,6 +75,10 @@ async def login_for_access_token(
             message="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    # Merge any guest accounts with matching email into this user
+    from app.api.users.service import merge_guest_into_user
+    await merge_guest_into_user(session, app_user=user)
+    await session.commit()
     return await service.create_access_refresh_tokens(user)
 
 

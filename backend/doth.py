@@ -1,5 +1,6 @@
 import traceback
 import uuid
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import ORJSONResponse
@@ -15,7 +16,22 @@ from app.response import ErrorResponse, CustomHTTPException
 from app.core.utils.discord import notify_error
 from app.core.middlewares.process_time_middleware import ProcessingTimeMiddleware
 
-application = FastAPI(default_response_class=ORJSONResponse)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: seed badge definitions
+    try:
+        from app.db.core import AsyncSessionLocal
+        from app.api.badges.seed import seed_badges
+        async with AsyncSessionLocal() as session:
+            await seed_badges(session)
+    except Exception as e:
+        print(f"Warning: Badge seeding failed: {e}")
+    yield
+    # Shutdown: nothing needed
+
+
+application = FastAPI(default_response_class=ORJSONResponse, lifespan=lifespan)
 
 application.include_router(router=api_router)
 # print(settings.cors_origins)
