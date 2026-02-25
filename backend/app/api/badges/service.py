@@ -471,6 +471,7 @@ async def manual_award_badge(session: AsyncSession, badge_id: int, entity_id: in
         award = UserBadges(user_id=entity_id, badge_id=badge_id)
         session.add(award)
         await session.commit()
+        await session.refresh(award)
         return {
             "id": award.id,
             "entity_id": entity_id,
@@ -495,6 +496,7 @@ async def manual_award_badge(session: AsyncSession, badge_id: int, entity_id: in
         award = ClubBadges(club_id=entity_id, badge_id=badge_id)
         session.add(award)
         await session.commit()
+        await session.refresh(award)
         return {
             "id": award.id,
             "entity_id": entity_id,
