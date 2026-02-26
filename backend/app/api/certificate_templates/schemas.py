@@ -57,11 +57,11 @@ class CertificateTemplateResponse(BaseModel):
     name: str
     is_default: bool
     config: dict
-    logo: Optional[str] = None
-    secondary_logo: Optional[str] = None
-    background_image: Optional[str] = None
-    signature_1: Optional[str] = None
-    signature_2: Optional[str] = None
+    logo: Optional[dict] = None
+    secondary_logo: Optional[dict] = None
+    background_image: Optional[dict] = None
+    signature_1: Optional[dict] = None
+    signature_2: Optional[dict] = None
 
     class Config:
         from_attributes = True
