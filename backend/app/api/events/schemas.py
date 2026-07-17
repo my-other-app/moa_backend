@@ -3,7 +3,7 @@ import json
 from typing import Any, Optional
 from uuid import UUID
 from fastapi import File, Form, UploadFile
-from pydantic import AwareDatetime, BaseModel, EmailStr, Field, ValidationError
+from pydantic import AwareDatetime, BaseModel, EmailStr, Field, ValidationError, field_validator
 from datetime import datetime, timezone
 from fastapi.exceptions import RequestValidationError
 
@@ -82,7 +82,7 @@ class EventBaseMin(CustomBaseModel):
     location_name: str | None = Field(None)
     has_prize: bool = Field(False)
     prize_amount: float | None = Field(None)
-    is_online: bool = Field(False)
+    is_online: bool | None = Field(False)
     reg_startdate: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     reg_enddate: datetime | None = Field(None)
     page_views: int = Field(0)
@@ -330,12 +330,22 @@ class EventInterestDetail(CustomBaseModel):
     icon: str | None = Field(None)
     icon_type: str | None = Field(None)
 
+    @field_validator("icon_type", mode="before")
+    @classmethod
+    def _extract_icon_type_value(cls, value):
+        return value.value if hasattr(value, "value") else value
+
 
 class EventCategoryDetail(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(...)
     icon: str | None = Field(None)
     icon_type: str | None = Field(None)
+
+    @field_validator("icon_type", mode="before")
+    @classmethod
+    def _extract_icon_type_value(cls, value):
+        return value.value if hasattr(value, "value") else value
 
 
 class EventCreateUpdateResponse(CustomBaseModel):
@@ -350,12 +360,12 @@ class EventCreateUpdateResponse(CustomBaseModel):
     reg_fee: float | None = Field(None)
     has_prize: bool = Field(True)
     prize_amount: float | None = Field(None)
-    is_online: bool = Field(False)
+    is_online: bool | None = Field(False)
     reg_startdate: datetime = Field(...)
     reg_enddate: datetime | None = Field(None)
     created_at: datetime = Field(...)
     updated_at: datetime = Field(...)
-    club: EventClubDetail = Field(...)
+    club: EventClubDetail | None = Field(None)
     category: EventCategoryDetail = Field(...)
     interests: list[EventInterestDetail] | None = Field(None)
     additional_details: list[EventAdditionalDetail] | None = Field(None)
@@ -374,10 +384,10 @@ class EventListResponse(CustomBaseModel):
     has_fee: bool = Field(...)
     has_prize: bool = Field(True)
     prize_amount: float | None = Field(None)
-    is_online: bool = Field(False)
+    is_online: bool | None = Field(False)
     reg_startdate: datetime = Field(...)
     reg_enddate: datetime | None = Field(None)
-    club: EventClubDetail = Field(...)
+    club: EventClubDetail | None = Field(None)
     category: EventCategoryDetail = Field(...)
     page_views: int = Field(0)
     # User-specific fields (only populated when authenticated and registered)
@@ -399,13 +409,36 @@ class EventListResponseSelf(CustomBaseModel):
     has_fee: bool = Field(...)
     has_prize: bool = Field(True)
     prize_amount: float | None = Field(None)
-    is_online: bool = Field(False)
+    is_online: bool | None = Field(False)
     reg_startdate: datetime = Field(...)
     reg_enddate: datetime | None = Field(None)
     category: EventCategoryDetail = Field(...)
     page_views: int = Field(0)
     registration_count: int = Field(0)
     attended_count: int = Field(0)
+
+
+class EventAdminListResponse(CustomBaseModel):
+    """Admin event listing — club is optional since Events.club_id is nullable."""
+
+    id: int = Field(...)
+    name: str = Field(...)
+    poster: dict | None = Field(None)
+    event_datetime: datetime = Field(...)
+    duration: float | None = Field(None)
+    location_name: str | None = Field(None)
+    has_fee: bool = Field(...)
+    reg_fee: float | None = Field(None)
+    has_prize: bool = Field(False)
+    prize_amount: float | None = Field(None)
+    is_online: bool | None = Field(False)
+    reg_startdate: datetime | None = Field(None)
+    reg_enddate: datetime | None = Field(None)
+    page_views: int = Field(0)
+    is_deleted: bool = Field(False)
+    category: EventCategoryDetail | None = Field(None)
+    club: EventClubDetail | None = Field(None)
+    interests: list[EventInterestDetail] | None = Field(None)
 
 
 class EventFileResponse(CustomBaseModel):
@@ -427,10 +460,10 @@ class EventDetailResponse(CustomBaseModel):
     reg_fee: float | None = Field(None)
     has_prize: bool = Field(True)
     prize_amount: float | None = Field(None)
-    is_online: bool = Field(False)
+    is_online: bool | None = Field(False)
     reg_startdate: datetime = Field(...)
     reg_enddate: datetime | None = Field(None)
-    club: EventClubDetail = Field(...)
+    club: EventClubDetail | None = Field(None)
     category: EventCategoryDetail = Field(...)
     interests: list[EventInterestDetail] | None = Field(None)
     additional_details: list[EventAdditionalDetail] | None = Field(None)

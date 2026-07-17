@@ -48,6 +48,8 @@ async def get_current_user(
     user = await get_user(session, user_id)
     if user is None:
         raise credentials_exception
+    if user.token_version != token_data.token_version:
+        raise credentials_exception
     return user
 
 

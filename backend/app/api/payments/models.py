@@ -1,4 +1,4 @@
-from sqlalchemy import JSON, Column, Enum, Float, ForeignKey, String, Integer, Numeric
+from sqlalchemy import JSON, Column, Enum, ForeignKey, String, Integer, Numeric
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from enum import Enum as PyEnum
@@ -12,6 +12,7 @@ class OrderStatus(PyEnum):
     created = "created"
     attempted = "attempted"
     paid = "paid"
+    refunded = "refunded"
 
 
 class PaymentStatus(PyEnum):
@@ -36,7 +37,7 @@ class PaymentOrders(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     receipt = Column(String, nullable=False, index=True)
     razorpay_receipt = Column(String, nullable=True)
     razorpay_order_id = Column(String, nullable=False, unique=True)
-    amount = Column(Float, nullable=False)
+    amount = Column(Numeric(10, 2), nullable=False)
     currency = Column(String, nullable=False, default="INR")
     status = Column(Enum(OrderStatus), nullable=False, default=OrderStatus.created)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
@@ -62,7 +63,7 @@ class PaymentLogs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     )
     razorpay_payment_id = Column(String, nullable=False, unique=True, index=True)
     status = Column(Enum(PaymentStatus), nullable=False)
-    amount = Column(Float, nullable=False)
+    amount = Column(Numeric(10, 2), nullable=False)
     payment_method = Column(String, nullable=True)
     payment_details = Column(JSON, nullable=True)
 

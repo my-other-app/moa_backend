@@ -12,21 +12,27 @@ def send_registration_confirmation_email(
     subject: str,
     payload: dict,
     recipients: List[str],
+    background_tasks: BackgroundTasks | None = None,
 ):
-    logger.info(f"Sending registration confirmation email to {recipients}")
-    # pdf_bytes = generate_pdf_bytes(
-    #     template_path="events/ticket.html",
-    #     context=payload,
-    # )
-    response = send_email_with_attachment(
-        recipients=recipients,
-        bcc_recipients=["muhammedr7025662019@gmail.com"],
-        subject=subject,
-        html_template_path="events/registration_confirmation.email",
-        template_context=payload,
-        sender_name="Myotherapp Events",
-        sender="events@myotherapp.com",
-        # attachment_bytes=pdf_bytes,
-        # attachment_filename=f"{payload.get('ticket_id')}-ticket.pdf",
-    )
-    return response
+    def send_email(subject: str, payload: dict, recipients: List[str]):
+        logger.info(f"Sending registration confirmation email to {recipients}")
+        # pdf_bytes = generate_pdf_bytes(
+        #     template_path="events/ticket.html",
+        #     context=payload,
+        # )
+        response = send_email_with_attachment(
+            recipients=recipients,
+            subject=subject,
+            html_template_path="events/registration_confirmation.email",
+            template_context=payload,
+            sender_name="Finnet Events",
+            sender="events@finnet.app",
+            # attachment_bytes=pdf_bytes,
+            # attachment_filename=f"{payload.get('ticket_id')}-ticket.pdf",
+        )
+        return response
+
+    if background_tasks:
+        background_tasks.add_task(send_email, subject, payload, recipients)
+    else:
+        return send_email(subject, payload, recipients)

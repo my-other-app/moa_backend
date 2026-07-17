@@ -11,9 +11,9 @@ Prerequisites:
    - wwdr.pem (Apple WWDR certificate)
 
 Environment variables:
-   - WALLET_PASS_TYPE_ID: e.g., "pass.com.myotherapp.ticket"
+   - WALLET_PASS_TYPE_ID: e.g., "pass.app.finnet.ticket"
    - WALLET_TEAM_ID: Apple Developer Team ID
-   - WALLET_ORGANIZATION_NAME: e.g., "My Other App"
+   - WALLET_ORGANIZATION_NAME: e.g., "Finnet"
 """
 
 import os
@@ -38,9 +38,9 @@ logger = logging.getLogger(__name__)
 
 
 # Configuration from environment
-PASS_TYPE_ID = os.getenv("WALLET_PASS_TYPE_ID", "pass.com.myotherapp.ticket")
+PASS_TYPE_ID = os.getenv("WALLET_PASS_TYPE_ID", "pass.app.finnet.ticket")
 TEAM_ID = os.getenv("WALLET_TEAM_ID", "")
-ORG_NAME = os.getenv("WALLET_ORGANIZATION_NAME", "My Other App")
+ORG_NAME = os.getenv("WALLET_ORGANIZATION_NAME", "Finnet")
 
 # Certificate paths
 # In Docker, we mount the certs to /wallet_certs
@@ -253,8 +253,6 @@ def sign_manifest(manifest_bytes: bytes) -> bytes:
         
         return signature
         
-    except Exception as e:
-        logger.exception(f"Error signing manifest: {e}")
     except Exception as e:
         logger.exception(f"Error signing manifest: {e}")
         raise CustomHTTPException(500, f"Error signing wallet pass: {str(e)}")

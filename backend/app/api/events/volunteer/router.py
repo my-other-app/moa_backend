@@ -27,13 +27,16 @@ async def add_volunteers(
 
     await service.add_volunteer(
         session,
+        caller_user_id=user.id,
         email_id=volunteer.email_id,
         event_id=volunteer.event_id,
         club_id=volunteer.club_id,
         full_name=volunteer.full_name,
         phone=volunteer.phone,
     )
-    return await service.list_volunteers(session, volunteer.event_id)
+    return await service.list_volunteers(
+        session, volunteer.event_id, caller_user_id=user.id
+    )
 
 
 @router.delete("/remove", summary="Remove volunteers from an event")
@@ -42,20 +45,22 @@ async def remove_volunteers(
 ) -> List[ListVolunteersResponse]:
     if volunteer.event_id:
         await service.remove_event_volunteer(
-            session, volunteer.email_id, volunteer.event_id
+            session, user.id, volunteer.email_id, volunteer.event_id
         )
     elif volunteer.club_id:
         await service.remove_club_volunteer(
-            session, volunteer.email_id, volunteer.club_id
+            session, user.id, volunteer.email_id, volunteer.club_id
         )
-    return await service.list_volunteers(session, volunteer.event_id)
+    return await service.list_volunteers(
+        session, volunteer.event_id, caller_user_id=user.id
+    )
 
 
 @router.get("/list/{event_id}", summary="List all volunteers for an event")
 async def list_volunteers(
     session: SessionDep, user: ClubAuth, event_id: int
 ) -> List[ListVolunteersResponse]:
-    return await service.list_volunteers(session, event_id)
+    return await service.list_volunteers(session, event_id, caller_user_id=user.id)
 
 
 @router.post("/checkin/{event_id}", summary="Check-in a participant for an event")

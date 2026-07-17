@@ -24,13 +24,13 @@ class PaymentVerifyRequest(CustomBaseModel):
 class OrderCreateResponse(CustomBaseModel):
     id: uuid.UUID = Field(...)
     razorpay_order_id: str = Field(...)
-    amount: int = Field(...)
+    amount: float = Field(...)
     currency: str = Field(...)
     status: str = Field(...)
 
 
 class PaymentVerifyResponse(CustomBaseModel):
     payment_status: str = Field(...)
-    payment_amount: int = Field(...)
-    remining_amount: Optional[int] = Field(None)
+    payment_amount: float = Field(...)
+    remining_amount: Optional[float] = Field(None)
     payment_method: Optional[str] = Field(None)

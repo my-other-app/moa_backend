@@ -8,7 +8,16 @@ from app.db.listeners import add_loader_criteria
 from app.config import settings
 from app.db.registry import *
 
-engine = create_async_engine(settings.DATABASE_URL)
+# pool_size/max_overflow give each worker process up to 30 concurrent
+# connections; check pool_size * settings.WORKERS against Postgres's
+# max_connections if WORKERS is ever increased beyond 1.
+engine = create_async_engine(
+    settings.DATABASE_URL,
+    pool_size=10,
+    max_overflow=20,
+    pool_recycle=1800,
+    pool_pre_ping=True,
+)
 
 AsyncSessionLocal = async_sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

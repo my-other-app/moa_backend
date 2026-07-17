@@ -3,6 +3,14 @@
 __pycache__
 volume
 venv
+.venv_test
+.pytest_cache
 .env.production
 *.log
 backend/service-account.json
+backend/walletethings/*.pem
+backend/walletethings/*.cer
+backend/walletethings/*.csr
+backend/wallet_certs/*.pem
+backend/wallet_certs/*.cer
+backend/wallet_certs/*.csr

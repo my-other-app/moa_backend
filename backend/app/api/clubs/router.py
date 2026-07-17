@@ -76,9 +76,27 @@ async def list_all_clubs_admin(
 ) -> PaginatedResponse[ClubAdminDetailResponse]:
     """List all clubs for an admin."""
     clubs = await service.get_all_clubs(
-        session, limit=pagination.limit, offset=pagination.offset, search=search
+        session,
+        limit=pagination.limit,
+        offset=pagination.offset,
+        search=search,
+        include_unverified=True,
     )
     return paginated_response(clubs, request, schema=ClubAdminDetailResponse)
+
+
+@router.post("/{club_id}/approve", summary="Approve a pending club (admin)")
+async def approve_club_endpoint(
+    club_id: int, session: SessionDep, user: AdminAuth
+) -> ClubAdminDetailResponse:
+    return await service.approve_club(session, club_id)
+
+
+@router.post("/{club_id}/reject", summary="Reject a pending club (admin)")
+async def reject_club_endpoint(
+    club_id: int, session: SessionDep, user: AdminAuth
+) -> ClubAdminDetailResponse:
+    return await service.reject_club(session, club_id)
 
 
 @router.put("/update", summary="update club")
@@ -140,6 +158,7 @@ async def get_club_details_self_endpoint(
         session=session,
         club_id=user.club.id,
         user_id=user.id if user else None,
+        enforce_visibility=False,
     )
 
 

@@ -44,6 +44,12 @@ def generate_pdf_bytes(
             "margin-bottom": "0",
             "margin-left": "0",
             "encoding": "UTF-8",
+            # pdfkit/wkhtmltopdf has a known, unpatched vulnerability
+            # (PYSEC-2026-2860) where JavaScript in the rendered HTML can
+            # read and exfiltrate local files. These templates never need
+            # JS, so disable it outright rather than rely solely on Jinja2
+            # autoescape to keep script content out.
+            "disable-javascript": None,
         }
 
         # Merge default options with user-provided options

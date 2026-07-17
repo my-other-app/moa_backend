@@ -61,6 +61,7 @@ class Users(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     password = Column(String(100), nullable=True)
     provider = Column(Enum(SigninProviders), nullable=True)
     user_type = Column(Enum(UserTypes), nullable=False, default=UserTypes.app_user)
+    token_version = Column(Integer, nullable=False, default=0)
 
     profile = relationship("UserProfiles", uselist=False)
     club = relationship("Clubs", uselist=False)

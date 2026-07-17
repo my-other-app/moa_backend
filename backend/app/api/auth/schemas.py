@@ -11,6 +11,7 @@ class Token(CustomBaseModel):
 class AuthTokenData(CustomBaseModel):
     user_id: int
     token_type: str
+    token_version: int = 0
 
 
 class AuthUser(CustomBaseModel):

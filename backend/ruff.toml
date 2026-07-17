@@ -1,0 +1,10 @@
+# Deliberately narrow: this codebase has never been linted, and the full
+# pyflakes rule set (F401 unused imports, F841 unused variables, etc.) fails
+# immediately on pre-existing migration boilerplate and debug scripts
+# unrelated to any given change. E9 (syntax errors) and F821 (undefined
+# names) are kept because they catch the exact bug class found twice in this
+# codebase already — a NameError from an unimported name shipping to
+# production undetected — with zero pre-existing noise (verified: a full
+# `ruff check .` passes clean with just these two selected).
+[lint]
+select = ["E9", "F821"]

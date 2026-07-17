@@ -6,6 +6,7 @@ from sqlalchemy.dialects.postgresql import INTERVAL
 
 from app.api.events.models import Events, EventRegistrationsLink, EventInterestsLink
 from app.api.clubs.models import Clubs, ClubUsersLink, ClubInterestsLink, Notes
+from app.api.orgs.models import Organizations
 from app.api.users.models import UserInterests, Users
 from app.api.interests.models import Interests
 
@@ -122,12 +123,16 @@ async def suggest_clubs(
     query = (
         select(Clubs)
         .distinct()
+        .outerjoin(Organizations, Organizations.id == Clubs.org_id)
         .where(
             Clubs.id.in_(
                 select(ClubInterestsLink.club_id)
                 .where(ClubInterestsLink.interest_id.in_(user_interests_subquery))
                 .scalar_subquery()
-            )
+            ),
+            Clubs.is_verified == True,
+            Clubs.is_deleted == False,
+            or_(Clubs.org_id.is_(None), Organizations.is_blocked == False),
         )
     )
 
@@ -162,7 +167,12 @@ async def suggest_notes(
     is_following: bool | None = None,
 ):
     """Suggest notes based on user interests and filters."""
-    query = select(Notes).distinct().options(joinedload(Notes.club))
+    query = (
+        select(Notes)
+        .distinct()
+        .where(Notes.is_deleted == False)
+        .options(joinedload(Notes.club))
+    )
 
     if is_following:
         query = (
@@ -210,11 +220,15 @@ async def global_search(
     clubs_query = (
         select(Clubs)
         .distinct(Clubs.id)
+        .outerjoin(Organizations, Organizations.id == Clubs.org_id)
         .filter(
             or_(
                 Clubs.name.ilike(f"%{search_query}%"),
                 Clubs.about.ilike(f"%{search_query}%"),
-            )
+            ),
+            Clubs.is_verified == True,
+            Clubs.is_deleted == False,
+            or_(Clubs.org_id.is_(None), Organizations.is_blocked == False),
         )
     )
 
@@ -227,7 +241,8 @@ async def global_search(
             or_(
                 Notes.title.ilike(f"%{search_query}%"),
                 Notes.note.ilike(f"%{search_query}%"),
-            )
+            ),
+            Notes.is_deleted == False,
         )
     )
 

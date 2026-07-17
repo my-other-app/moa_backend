@@ -25,15 +25,14 @@ def send_payment_confirmation_email(
             context=payload,
         )
         response = send_email_with_attachment(
-            sender_name="Myotherapp Payments",
-            sender="payments@myotherapp.com",
+            sender_name="Finnet Payments",
+            sender="payments@finnet.app",
             recipients=recipients,
-            bcc_recipients=["muhammedr7025662019@gmail.com"],
             subject=subject,
             html_template_path="payments/payment_receipt.email",
             template_context=payload,
             attachment_bytes=pdf_bytes,
-            attachment_filename=f"myotherapp-payment-receipt.pdf",
+            attachment_filename=f"finnet-payment-receipt.pdf",
         )
         return response
 

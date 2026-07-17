@@ -1,3 +1,4 @@
+import uuid
 from fastapi.encoders import jsonable_encoder
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from app.config import settings
@@ -7,7 +8,7 @@ from app.api.payments.schemas import (
     PaymentVerifyRequest,
     PaymentVerifyResponse,
 )
-from app.core.auth.dependencies import DependsAuth
+from app.core.auth.dependencies import AdminAuth, DependsAuth
 from app.db.core import SessionDep
 from app.api.payments import service
 from app.response import CustomHTTPException
@@ -56,9 +57,21 @@ async def verify_payment(
 
     return {
         "payment_status": payment.status.value,
-        "payment_amount": payment.amount / 100,
-        "remining_amount": payment.order.amount - (payment.amount / 100),
+        # payment.amount / order.amount are already rupees (Numeric columns).
+        "payment_amount": float(payment.amount),
+        "remining_amount": float(payment.order.amount - payment.amount),
         "payment_method": payment.payment_method,
+    }
+
+
+@router.post("/logs/{payment_log_id}/refund", summary="Refund a captured payment (admin, full refund only)")
+async def refund_payment(
+    payment_log_id: uuid.UUID, session: SessionDep, admin: AdminAuth
+) -> dict:
+    payment = await service.refund_payment(session, payment_log_id)
+    return {
+        "payment_status": payment.status.value,
+        "order_status": payment.order.status.value,
     }
 
 

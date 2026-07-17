@@ -47,7 +47,7 @@ def render_template(
     if not template_str:
         raise ValueError("Either template_path or template_str must be provided")
 
-    template = Template(template_str)
+    template = Template(template_str, autoescape=True)
     return template.render(context or {})
 
 
@@ -90,7 +90,7 @@ def send_email_with_attachment(
     msg = MIMEMultipart()
     msg["Subject"] = subject
     msg["From"] = (
-        f"{sender_name or 'MyOtherApp'} <{sender or settings.SES_DEFAULT_SENDER}>"
+        f"{sender_name or 'Finnet'} <{sender or settings.SES_DEFAULT_SENDER}>"
     )
     msg["To"] = ", ".join(recipients)
 

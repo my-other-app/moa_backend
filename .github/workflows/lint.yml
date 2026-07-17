@@ -1,0 +1,66 @@
+name: Lint & Test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  ruff:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check .
+
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: moa_backend_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      APP_SECRET_KEY: ci-test-secret-key
+      APP_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/moa_backend_test
+      APP_DATABASE_URL_SYNC: postgresql://postgres:postgres@localhost:5432/moa_backend_test
+      APP_CORS_ORIGINS: '["http://testserver"]'
+      APP_S3_BUCKET: test-bucket
+      APP_S3_ACCESS_KEY: test-access-key
+      APP_S3_SECRET_KEY: test-secret-key
+      APP_S3_BASE_PATH: https://test-bucket.s3.amazonaws.com
+      APP_SES_ACCESS_KEY: test-ses-access-key
+      APP_SES_SECRET_KEY: test-ses-secret-key
+      APP_SES_DEFAULT_SENDER: test@finnet.app
+      APP_GOOGLE_WEB_CLIENT_ID: test-google-web-client-id
+      APP_GOOGLE_ANDROID_CLIENT_ID: test-google-android-client-id
+      APP_GOOGLE_IOS_CLIENT_ID: test-google-ios-client-id
+      APP_RAZORPAY_KEY_ID: test-razorpay-key-id
+      APP_RAZORPAY_KEY_SECRET: test-razorpay-key-secret
+      APP_RAZORPAY_WEBHOOK_SECRET: test-razorpay-webhook-secret
+      APP_ACCESS_TOKEN_EXPIRE_MINUTES: "15"
+      APP_REFRESH_TOKEN_EXPIRE_DAYS: "7"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: pytest

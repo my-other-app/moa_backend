@@ -36,6 +36,11 @@ async def google_signin(
             id_token_str, requests.Request(), client_id
         )
 
+        if not idinfo.get("email_verified"):
+            raise CustomHTTPException(
+                status_code=401, message="Google account email is not verified"
+            )
+
         email = idinfo["email"]
         name = idinfo.get("name", "")
 
@@ -180,8 +185,12 @@ async def apple_signin(
 async def create_access_refresh_tokens(user: Users) -> Token:
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     refresh_token_expires = timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
-    access_token_data = AuthTokenData(user_id=user.id, token_type="access_token")
-    refresh_token_data = AuthTokenData(user_id=user.id, token_type="refresh_token")
+    access_token_data = AuthTokenData(
+        user_id=user.id, token_type="access_token", token_version=user.token_version
+    )
+    refresh_token_data = AuthTokenData(
+        user_id=user.id, token_type="refresh_token", token_version=user.token_version
+    )
     access_token = create_access_token(
         data=access_token_data.model_dump(), expires_delta=access_token_expires
     )

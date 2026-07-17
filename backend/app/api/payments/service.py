@@ -5,7 +5,8 @@ import time
 import traceback
 from fastapi import BackgroundTasks
 import razorpay
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -17,7 +18,9 @@ from app.api.payments.models import (
     PaymentStatus,
     RazorpayWebhookLogs,
 )
+from app.api.events.models import EventRegistrationsLink
 from app.core.validations.exceptions import RequestValidationError
+from app.response import CustomHTTPException
 from app.config import settings
 from app.api.payments.background_tasks import send_payment_confirmation_email
 
@@ -36,6 +39,12 @@ async def create_razorpay_order(
     amount_in_rupee, db_receipt = await validate_payload(
         session=session, source=source, payload=payload
     )
+
+    # Serialize concurrent order-creation attempts for the same receipt so two
+    # near-simultaneous requests can't both miss the existing-order check below
+    # and each create a separate Razorpay order (double-charge risk). This lock
+    # is transaction-scoped and releases automatically at commit/rollback.
+    await session.execute(select(func.pg_advisory_xact_lock(func.hashtext(db_receipt))))
 
     current_timestamp = int(time.time())
     receipt = f"{db_receipt}#{current_timestamp}"
@@ -91,6 +100,9 @@ async def verify_razorpay_payment(
         )
     )
 
+    if not order:
+        raise CustomHTTPException(404, "Payment order not found")
+
     db_payment = await session.scalar(
         select(PaymentLogs)
         .where(PaymentLogs.razorpay_payment_id == razorpay_payment_id)
@@ -103,6 +115,17 @@ async def verify_razorpay_payment(
     if order.status == OrderStatus.paid:
         raise RequestValidationError(razorpay_order_id="Order already paid")
 
+    if not payment_details:
+        payment_details = razorpay_client.payment.fetch(razorpay_payment_id)
+
+    # Make sure the payment being verified was actually made against this
+    # order, not a different one — otherwise a real captured payment for
+    # order A could be used to mark an unrelated order B as paid.
+    if payment_details.get("order_id") != razorpay_order_id:
+        raise RequestValidationError(
+            razorpay_order_id="This payment does not belong to the specified order."
+        )
+
     if not db_payment:
         db_payment = PaymentLogs(
             order_id=order.id,
@@ -111,9 +134,6 @@ async def verify_razorpay_payment(
             amount=0,
         )
         session.add(db_payment)
-
-    if not payment_details:
-        payment_details = razorpay_client.payment.fetch(razorpay_payment_id)
 
     payment_status = payment_details.get("status", None)
 
@@ -153,13 +173,15 @@ async def verify_razorpay_payment(
 
     if payment_status == "captured":
         db_payment.status = PaymentStatus.captured
-        db_payment.amount = payment_details.get("amount", 0)
+        # Razorpay reports amounts in paise; normalize to rupees so this
+        # column matches every other money column in the schema.
+        db_payment.amount = payment_details.get("amount", 0) / 100
         db_payment.payment_method = payment_method
         db_payment.payment_details = payment_method_details
         order.status = OrderStatus.paid
         await session.commit()
         await session.refresh(order)
-        await handle_post_payment(session, order)
+        await handle_post_payment(session, order, background_tasks=background_tasks)
         if send_receipt:
             await session.refresh(db_payment)
             await session.refresh(order)
@@ -191,7 +213,7 @@ async def verify_razorpay_payment(
                 logger.exception("Error sending payment confirmation email")
     else:
         db_payment.status = payment_status
-        db_payment.amount = payment_details.get("amount", 0)
+        db_payment.amount = payment_details.get("amount", 0) / 100
         db_payment.payment_method = payment_method
         db_payment.payment_details = payment_method_details
         order.status = OrderStatus.attempted
@@ -205,9 +227,62 @@ async def verify_razorpay_payment(
     return db_payment
 
 
+async def _apply_refund(session: AsyncSession, db_payment: PaymentLogs) -> None:
+    """Shared state-reversal for a captured payment being refunded — used by
+    both the admin-triggered refund endpoint and the refund.processed
+    webhook branch, so a refund initiated directly from the Razorpay
+    dashboard converges on the same state as one triggered from our app.
+    """
+    db_payment.status = PaymentStatus.refunded
+    order = db_payment.order
+    order.status = OrderStatus.refunded
+
+    # Re-blocks check-in via the existing has_fee-and-not-is_paid gate in
+    # checkin_user/mark_attendance — no changes needed there.
+    event_registration = await session.scalar(
+        select(EventRegistrationsLink).where(
+            EventRegistrationsLink.payment_receipt == order.receipt
+        )
+    )
+    if event_registration:
+        event_registration.is_paid = False
+        event_registration.paid_amount = 0
+
+    await session.commit()
+
+
+async def refund_payment(session: AsyncSession, payment_log_id) -> PaymentLogs:
+    """Admin-triggered full refund of a captured payment."""
+    db_payment = await session.scalar(
+        select(PaymentLogs)
+        .where(PaymentLogs.id == payment_log_id)
+        .options(joinedload(PaymentLogs.order))
+    )
+    if not db_payment:
+        raise CustomHTTPException(404, "Payment not found")
+    if db_payment.status != PaymentStatus.captured:
+        raise RequestValidationError(
+            payment_log_id="Only a captured payment can be refunded"
+        )
+
+    # No `amount` param — Razorpay refunds the full captured amount.
+    razorpay_client.payment.refund(db_payment.razorpay_payment_id)
+
+    await _apply_refund(session, db_payment)
+    await session.refresh(db_payment)
+    return db_payment
+
+
 async def handle_razorpay_webhook(
     session: AsyncSession, data: dict, event_id: str, signature: str
 ):
+    existing_webhook_event = await session.scalar(
+        select(RazorpayWebhookLogs).where(RazorpayWebhookLogs.event_id == event_id)
+    )
+    if existing_webhook_event:
+        # Already processed (or a concurrent delivery is processing it) — no-op.
+        return None
+
     webhook_log = RazorpayWebhookLogs(
         event_id=event_id,
         entity=data.get("entity"),
@@ -216,12 +291,28 @@ async def handle_razorpay_webhook(
         payload=data.get("payload"),
     )
     session.add(webhook_log)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        # Two concurrent deliveries of the same event both passed the check
+        # above; whichever loses the unique-constraint race is a no-op too.
+        await session.rollback()
+        return None
 
-    webhook_event = await session.scalar(
-        select(RazorpayWebhookLogs).where(RazorpayWebhookLogs.event_id == event_id)
-    )
-    if webhook_event:
+    if data.get("event") == "refund.processed":
+        # Covers a refund initiated directly from the Razorpay dashboard,
+        # outside our app's own /payments/{id}/refund endpoint.
+        refund_entity = data.get("payload", {}).get("refund", {}).get("entity", None)
+        if not refund_entity:
+            raise RequestValidationError(payload="Invalid refund payload")
+
+        db_payment = await session.scalar(
+            select(PaymentLogs)
+            .where(PaymentLogs.razorpay_payment_id == refund_entity.get("payment_id"))
+            .options(joinedload(PaymentLogs.order))
+        )
+        if db_payment and db_payment.status == PaymentStatus.captured:
+            await _apply_refund(session, db_payment)
         return None
 
     payload = data.get("payload", {}).get("payment", {}).get("entity", None)

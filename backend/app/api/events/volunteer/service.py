@@ -11,8 +11,38 @@ from app.api.clubs.models import Clubs
 from app.core.notifications.triggers import notify_user_check_in, notify_user_added_as_volunteer
 
 
+async def _assert_club_owns_target(
+    session: AsyncSession,
+    caller_user_id: int,
+    event_id: int | None,
+    club_id: int | None,
+) -> None:
+    """Raise 403 unless the caller (matched by Users.id, same convention as
+    registration/service.py's `event.club.user_id != user_id` checks) actually
+    owns the event/club being targeted."""
+    if event_id is not None:
+        event = await session.scalar(
+            select(Events)
+            .where(Events.id == event_id, Events.is_deleted == False)
+            .options(joinedload(Events.club))
+        )
+        if not event or not event.club or event.club.user_id != caller_user_id:
+            raise CustomHTTPException(
+                403, "You do not have permission to manage volunteers for this event."
+            )
+    elif club_id is not None:
+        club = await session.scalar(
+            select(Clubs).where(Clubs.id == club_id, Clubs.is_deleted == False)
+        )
+        if not club or club.user_id != caller_user_id:
+            raise CustomHTTPException(
+                403, "You do not have permission to manage volunteers for this club."
+            )
+
+
 async def add_volunteer(
     session: AsyncSession,
+    caller_user_id: int,
     email_id: str,
     event_id: int,
     club_id: int,
@@ -20,6 +50,8 @@ async def add_volunteer(
     phone: str | None = None,
 ) -> None:
     """Add volunteers to an event."""
+    await _assert_club_owns_target(session, caller_user_id, event_id, club_id)
+
     volunteer_exists = await session.scalar(
         select(
             exists(Volunteer).where(
@@ -93,9 +125,11 @@ async def add_volunteer(
 
 
 async def remove_event_volunteer(
-    session: AsyncSession, email_id: str, event_id: int
+    session: AsyncSession, caller_user_id: int, email_id: str, event_id: int
 ) -> None:
     """Remove volunteers from an event."""
+    await _assert_club_owns_target(session, caller_user_id, event_id, None)
+
     volunteer = select(Volunteer).where(
         Volunteer.email == email_id, Volunteer.event_id == event_id
     )
@@ -111,9 +145,11 @@ async def remove_event_volunteer(
 
 
 async def remove_club_volunteer(
-    session: AsyncSession, email_id: str, club_id: int
+    session: AsyncSession, caller_user_id: int, email_id: str, club_id: int
 ) -> None:
     """Remove volunteers from a club."""
+    await _assert_club_owns_target(session, caller_user_id, None, club_id)
+
     volunteer = select(Volunteer).where(
         Volunteer.email == email_id, Volunteer.club_id == club_id
     )
@@ -129,9 +165,15 @@ async def remove_club_volunteer(
 
 
 async def list_volunteers(
-    session: AsyncSession, event_id: int, include_club_volunteers=True
+    session: AsyncSession,
+    event_id: int,
+    include_club_volunteers=True,
+    caller_user_id: int | None = None,
 ) -> list[dict]:
     """List all volunteers for an event."""
+    if caller_user_id is not None and event_id is not None:
+        await _assert_club_owns_target(session, caller_user_id, event_id, None)
+
     if include_club_volunteers:
         result = (
             select(Volunteer, UserProfiles)

@@ -1,0 +1,242 @@
+"""
+Test configuration. Sets required env vars *before* importing any `app.*`
+module, since `app.config.settings = AppConfig()` is constructed at import
+time and will fail to build without them.
+
+Schema is created via `AbstractSQLModel.metadata.create_all()` rather than
+Alembic migrations, since `app/db/registry.py` already imports every model
+module (so the metadata is complete) and this is much faster for a test
+suite that creates/tears down its schema per session.
+"""
+import os
+
+os.environ.setdefault("APP_SECRET_KEY", "test-secret-key-not-for-production")
+os.environ.setdefault(
+    "APP_DATABASE_URL",
+    "postgresql+asyncpg://localhost:5432/moa_backend_test",
+)
+os.environ.setdefault(
+    "APP_DATABASE_URL_SYNC", "postgresql://localhost:5432/moa_backend_test"
+)
+os.environ.setdefault("APP_CORS_ORIGINS", '["http://testserver"]')
+os.environ.setdefault("APP_S3_BUCKET", "test-bucket")
+os.environ.setdefault("APP_S3_ACCESS_KEY", "test-access-key")
+os.environ.setdefault("APP_S3_SECRET_KEY", "test-secret-key")
+os.environ.setdefault("APP_S3_BASE_PATH", "https://test-bucket.s3.amazonaws.com")
+os.environ.setdefault("APP_SES_ACCESS_KEY", "test-ses-access-key")
+os.environ.setdefault("APP_SES_SECRET_KEY", "test-ses-secret-key")
+os.environ.setdefault("APP_SES_DEFAULT_SENDER", "test@finnet.app")
+os.environ.setdefault("APP_GOOGLE_WEB_CLIENT_ID", "test-google-web-client-id")
+os.environ.setdefault("APP_GOOGLE_ANDROID_CLIENT_ID", "test-google-android-client-id")
+os.environ.setdefault("APP_GOOGLE_IOS_CLIENT_ID", "test-google-ios-client-id")
+os.environ.setdefault("APP_RAZORPAY_KEY_ID", "test-razorpay-key-id")
+os.environ.setdefault("APP_RAZORPAY_KEY_SECRET", "test-razorpay-key-secret")
+os.environ.setdefault("APP_RAZORPAY_WEBHOOK_SECRET", "test-razorpay-webhook-secret")
+os.environ.setdefault("APP_ACCESS_TOKEN_EXPIRE_MINUTES", "15")
+os.environ.setdefault("APP_REFRESH_TOKEN_EXPIRE_DAYS", "7")
+
+import asyncio
+from datetime import datetime, timezone
+
+import pytest
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+# Imported only after the env vars above are set.
+from app.db.base import AbstractSQLModel
+from app.db import registry  # noqa: F401 (registers every model on AbstractSQLModel.metadata)
+from app.config import settings
+from app.core.auth.jwt import create_access_token
+from app.api.auth.schemas import AuthTokenData
+from app.api.users.models import UserTypes, Users
+from app.api.clubs.models import Clubs
+from app.core.auth.authentication import get_password_hash
+
+
+@pytest.fixture(scope="session")
+def event_loop():
+    # pytest-asyncio's newer loop_scope mechanism doesn't (yet) correctly
+    # share a loop between session-scoped async fixtures and function-scoped
+    # tests in this version — this explicit override does, despite the
+    # deprecation warning it prints.
+    loop = asyncio.new_event_loop()
+    yield loop
+    loop.close()
+
+
+@pytest_asyncio.fixture(scope="session")
+async def _engine(event_loop):
+    engine = create_async_engine(settings.DATABASE_URL)
+    async with engine.begin() as conn:
+        await conn.run_sync(AbstractSQLModel.metadata.create_all)
+    yield engine
+    async with engine.begin() as conn:
+        await conn.run_sync(AbstractSQLModel.metadata.drop_all)
+    await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def session(_engine) -> AsyncSession:
+    """A DB session wrapped in a transaction that's rolled back after each test."""
+    connection = await _engine.connect()
+    transaction = await connection.begin()
+    session_factory = async_sessionmaker(
+        bind=connection, autocommit=False, autoflush=False, expire_on_commit=False
+    )
+    session = session_factory()
+    try:
+        yield session
+    finally:
+        await session.close()
+        await transaction.rollback()
+        await connection.close()
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter():
+    """The rate limiter's in-memory storage is process-global, so without this,
+    login attempts from one test would count against another test's budget."""
+    from app.core.rate_limit import limiter
+
+    limiter.reset()
+    yield
+    limiter.reset()
+
+
+@pytest_asyncio.fixture
+async def client(session):
+    """An httpx client wired to the real FastAPI app, with get_session overridden
+    to hand out the per-test rolled-back session so requests and test setup
+    share the same transaction."""
+    from doth import application
+    from app.db.core import get_session
+
+    async def _get_test_session():
+        yield session
+
+    application.dependency_overrides[get_session] = _get_test_session
+    transport = ASGITransport(app=application)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
+        yield ac
+    application.dependency_overrides.clear()
+
+
+async def _make_user(session, *, email, user_type=UserTypes.app_user, username=None, password="Password123!"):
+    user = Users(
+        full_name="Test User",
+        username=username or email.split("@")[0],
+        email=email,
+        password=get_password_hash(password),
+        user_type=user_type,
+    )
+    session.add(user)
+    await session.flush()
+    return user
+
+
+@pytest_asyncio.fixture
+async def make_user(session):
+    async def _factory(**kwargs):
+        return await _make_user(session, **kwargs)
+
+    return _factory
+
+
+@pytest_asyncio.fixture
+async def make_club(session):
+    async def _factory(*, name, email, is_verified=True):
+        from app.core.utils.keys import generate_slug
+
+        user = await _make_user(session, email=email, user_type=UserTypes.club)
+        club = Clubs(
+            slug=generate_slug(name),
+            name=name,
+            user_id=user.id,
+            is_verified=is_verified,
+        )
+        session.add(club)
+        await session.flush()
+        user.club = club
+        await session.flush()
+        return user, club
+
+    return _factory
+
+
+@pytest_asyncio.fixture
+async def make_admin(session):
+    async def _factory(*, email="admin@example.com"):
+        return await _make_user(session, email=email, user_type=UserTypes.admin)
+
+    return _factory
+
+
+@pytest_asyncio.fixture
+async def make_event(session):
+    async def _factory(*, club, name="Test Event", created_by, **overrides):
+        from app.api.events.models import Events, EventCategories
+        from app.core.utils.keys import generate_slug
+
+        category = EventCategories(name="General", created_by_id=created_by.id)
+        session.add(category)
+        await session.flush()
+
+        defaults = dict(
+            slug=generate_slug(name),
+            name=name,
+            images=[],
+            event_datetime=datetime.now(timezone.utc),
+            duration=2.0,
+            club_id=club.id if club else None,
+            category_id=category.id,
+        )
+        defaults.update(overrides)
+        event = Events(**defaults)
+        session.add(event)
+        await session.flush()
+        return event
+
+    return _factory
+
+
+@pytest_asyncio.fixture
+async def make_registration(session):
+    async def _factory(*, event, user, **overrides):
+        from app.api.events.models import EventRegistrationsLink
+        from app.core.utils.keys import generate_ticket_id
+
+        defaults = dict(
+            event_id=event.id,
+            user_id=user.id,
+            full_name=user.full_name,
+            email=user.email,
+            ticket_id=generate_ticket_id(),
+        )
+        defaults.update(overrides)
+        registration = EventRegistrationsLink(**defaults)
+        session.add(registration)
+        await session.flush()
+        return registration
+
+    return _factory
+
+
+@pytest_asyncio.fixture
+async def mint_token(session):
+    async def _factory(user):
+        await session.refresh(user)
+        access = create_access_token(
+            data=AuthTokenData(
+                user_id=user.id,
+                token_type="access_token",
+                token_version=user.token_version,
+            ).model_dump(),
+        )
+        return access
+
+    return _factory
+
+
+def auth_header(token: str) -> dict:
+    return {"Authorization": f"Bearer {token}"}

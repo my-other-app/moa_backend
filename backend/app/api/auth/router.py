@@ -1,10 +1,11 @@
 from datetime import timedelta
 from typing import Annotated
-from fastapi import APIRouter, Depends, Form
+from fastapi import APIRouter, Depends, Form, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi import status
 import jwt
 
+from app.core.rate_limit import limiter
 from app.core.auth.jwt import create_access_token, decode_jwt_token
 from app.core.auth.authentication import (
     authenticate_user,
@@ -64,7 +65,9 @@ async def apple_sign_in(
 
 
 @router.post("/token", summary="get access token")
+@limiter.limit("5/minute")
 async def login_for_access_token(
+    request: Request,
     session: SessionDep,
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
 ) -> Token:
@@ -83,7 +86,10 @@ async def login_for_access_token(
 
 
 @router.post("/refresh", summary="refresh access token")
-async def refresh_access_token(session: SessionDep, token: str = Form(...)) -> Token:
+@limiter.limit("20/minute")
+async def refresh_access_token(
+    request: Request, session: SessionDep, token: str = Form(...)
+) -> Token:
     try:
         payload = decode_jwt_token(token)
         payload = AuthTokenData(**payload)
@@ -100,8 +106,18 @@ async def refresh_access_token(session: SessionDep, token: str = Form(...)) -> T
                 message="User not found",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+        if payload.token_version != user.token_version:
+            raise CustomHTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                message="Token has been revoked, please log in again",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-        access_token_data = AuthTokenData(user_id=user.id, token_type="access_token")
+        access_token_data = AuthTokenData(
+            user_id=user.id,
+            token_type="access_token",
+            token_version=user.token_version,
+        )
         access_token = create_access_token(
             data=access_token_data.model_dump(), expires_delta=access_token_expires
         )
@@ -152,10 +168,12 @@ async def change_password(
     result = await session.execute(stmt)
     db_user = result.scalar_one()
 
-    # Hash and set new password
+    # Hash and set new password, and bump token_version to invalidate any
+    # access/refresh tokens issued before this change.
     db_user.password = get_password_hash(request.new_password)
+    db_user.token_version += 1
     await session.commit()
-    
+
     return ChangePasswordResponse(
         success=True,
         message="Password changed successfully"
@@ -163,14 +181,16 @@ async def change_password(
 
 
 @router.post("/admin/reset-password", summary="Admin reset user password")
+@limiter.limit("5/minute")
 async def admin_reset_password(
-    request: PasswordResetRequest,
+    request: Request,
+    payload: PasswordResetRequest,
     session: SessionDep,
     admin: AdminAuth,
 ) -> PasswordResetResponse:
     """
     Reset a user's password. Admin only.
-    
+
     Can search by:
     - User email (contains @)
     - Username
@@ -182,9 +202,9 @@ async def admin_reset_password(
     from sqlalchemy.orm import joinedload
     from app.api.users.models import Users
     from app.api.clubs.models import Clubs
-    
+
     user = None
-    search_term = request.email_or_username.strip()
+    search_term = payload.email_or_username.strip()
     
     # Try different search strategies
     if "@" in search_term:
@@ -224,10 +244,12 @@ async def admin_reset_password(
             message=f"User or club '{search_term}' not found",
         )
     
-    # Hash and set new password
-    user.password = get_password_hash(request.new_password)
+    # Hash and set new password, and bump token_version to invalidate any
+    # access/refresh tokens issued before this reset.
+    user.password = get_password_hash(payload.new_password)
+    user.token_version += 1
     await session.commit()
-    
+
     return PasswordResetResponse(
         success=True,
         message="Password reset successfully",

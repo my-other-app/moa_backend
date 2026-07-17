@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 import logging
+from fastapi import BackgroundTasks
 from sqlalchemy import exists, func, select
 from app.core.validations.exceptions import RequestValidationError
 from app.api.events.models import Events, EventRegistrationsLink
@@ -68,7 +69,9 @@ async def validate_event_registration_payload(session: AsyncSession, payload: di
 
 
 async def handle_event_registration_payment(
-    session: AsyncSession, order: PaymentOrders
+    session: AsyncSession,
+    order: PaymentOrders,
+    background_tasks: BackgroundTasks | None = None,
 ):
     """
     handles payment for event registration
@@ -84,6 +87,8 @@ async def handle_event_registration_payment(
         if not event_registration:
             raise RequestValidationError(receipt="receipt is invalid")
         
+        # PaymentLogs.amount is already in rupees (Numeric column), matching
+        # every other money column — no paise conversion needed here anymore.
         total_paid = (
             await session.scalar(
                 select(func.sum(PaymentLogs.amount)).where(
@@ -93,7 +98,6 @@ async def handle_event_registration_payment(
             )
             or 0
         )
-        total_paid /= 100
 
         event_registration.is_paid = total_paid >= event_registration.actual_amount
         event_registration.paid_amount = total_paid
@@ -131,8 +135,9 @@ async def handle_event_registration_payment(
             }
             send_registration_confirmation_email(
                 recipients=[event_registration.email],
-                subject=f"Ticket: {db_event.name} - MyOtherAPP",
+                subject=f"Ticket: {db_event.name} - Finnet",
                 payload=email_payload,
+                background_tasks=background_tasks,
             )
         except Exception as e:
             logger.exception("Error sending registration confirmation email")
@@ -157,10 +162,16 @@ async def validate_payload(session: AsyncSession, source: str, payload: dict):
     raise RequestValidationError(source="source is invalid")
 
 
-async def handle_post_payment(session: AsyncSession, order: PaymentOrders):
+async def handle_post_payment(
+    session: AsyncSession,
+    order: PaymentOrders,
+    background_tasks: BackgroundTasks | None = None,
+):
     """
     handles post payment operations
     """
     if order.source == "event_registration":
-        return await handle_event_registration_payment(session, order)
+        return await handle_event_registration_payment(
+            session, order, background_tasks=background_tasks
+        )
     raise RequestValidationError(source="source is invalid")

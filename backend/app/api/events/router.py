@@ -18,7 +18,10 @@ from typing import Optional, List
 from app.db.core import SessionDep
 from app.api.events import service
 from app.api.events import wallet_service
+from app.api.users.models import UserTypes
+from app.response import CustomHTTPException
 from app.api.events.schemas import (
+    EventAdminListResponse,
     EventCategoryCreate,
     EventCategoryResponse,
     EventCreate,
@@ -51,6 +54,17 @@ router = APIRouter(prefix="/events")
 
 router.include_router(volunteer_router, tags=["Volunteer"])
 router.include_router(registration_router, tags=["Registration"])
+
+
+def _assert_can_access_ticket(user, registration) -> None:
+    """Allow the ticket's own user, the event's owning club, or an admin."""
+    if user.user_type == UserTypes.admin:
+        return
+    if registration.user_id == user.id:
+        return
+    if user.club and registration.event and registration.event.club_id == user.club.id:
+        return
+    raise CustomHTTPException(403, "You do not have permission to access this ticket.")
 
 
 @router.post("/categories/create", summary="Create a new event category")
@@ -148,133 +162,46 @@ async def list_all_events_admin(
     pagination: PaginationParams,
     user: AdminAuth,
     search: Optional[str] = Query(None, description="Search by event name or category"),
-):
+) -> PaginatedResponse[EventAdminListResponse]:
     """List all events for an admin without filters, but supports search."""
     from sqlalchemy import select, func, or_
     from sqlalchemy.orm import selectinload
     from app.api.events.models import Events, EventCategories
-    from fastapi.responses import JSONResponse
 
-    def _iso(dt):
-        """Safely convert a datetime to ISO string."""
-        if dt is None:
-            return None
-        try:
-            return dt.isoformat()
-        except Exception:
-            return str(dt)
+    query = (
+        select(Events)
+        .options(
+            selectinload(Events.category),
+            selectinload(Events.club),
+            selectinload(Events.interests),
+        )
+    )
+    count_query = select(func.count(Events.id))
 
-    try:
-        query = (
-            select(Events)
-            .options(
-                selectinload(Events.category),
-                selectinload(Events.club),
-                selectinload(Events.interests),
+    if search and search.strip():
+        search_pattern = f"%{search.strip()}%"
+
+        query = query.outerjoin(EventCategories, Events.category_id == EventCategories.id).filter(
+            or_(
+                Events.name.ilike(search_pattern),
+                EventCategories.name.ilike(search_pattern),
             )
         )
-        count_query = select(func.count(Events.id))
-
-        if search and search.strip():
-            search_pattern = f"%{search.strip()}%"
-            
-            # Apply to both queries
-            query = query.outerjoin(EventCategories, Events.category_id == EventCategories.id).filter(
-                or_(
-                    Events.name.ilike(search_pattern),
-                    EventCategories.name.ilike(search_pattern),
-                )
+        count_query = count_query.outerjoin(EventCategories, Events.category_id == EventCategories.id).filter(
+            or_(
+                Events.name.ilike(search_pattern),
+                EventCategories.name.ilike(search_pattern),
             )
-            count_query = count_query.outerjoin(EventCategories, Events.category_id == EventCategories.id).filter(
-                or_(
-                    Events.name.ilike(search_pattern),
-                    EventCategories.name.ilike(search_pattern),
-                )
-            )
-
-        # Get total count
-        total_result = await session.execute(count_query)
-        total = total_result.scalar() or 0
-
-        # Get paginated results with eager-loaded relationships
-        query = query.order_by(Events.created_at.desc()).offset(pagination.offset).limit(pagination.limit)
-        result = await session.execute(query)
-        events = result.scalars().all()
-
-        serialized_events = []
-        for event in events:
-            # Build club dict safely
-            club_dict = None
-            if event.club:
-                club_dict = {
-                    "id": event.club.id,
-                    "name": getattr(event.club, "name", "Unknown"),
-                    "slug": getattr(event.club, "slug", ""),
-                    "logo": getattr(event.club, "logo", None),
-                }
-
-            # Build category dict safely
-            category_dict = None
-            if event.category:
-                icon_type = getattr(event.category, "icon_type", None)
-                category_dict = {
-                    "id": event.category.id,
-                    "name": getattr(event.category, "name", "Unknown"),
-                    "icon": getattr(event.category, "icon", None),
-                    "icon_type": icon_type.value if hasattr(icon_type, "value") else icon_type,
-                }
-
-            # Build interests list safely
-            interests_list = []
-            if getattr(event, "interests", None):
-                for i in event.interests:
-                    icon_type = getattr(i, "icon_type", None)
-                    interests_list.append({
-                        "id": i.id,
-                        "name": getattr(i, "name", ""),
-                        "icon": getattr(i, "icon", None),
-                        "icon_type": icon_type.value if hasattr(icon_type, "value") else icon_type,
-                    })
-
-            # Determine status safely
-            status = "published"
-            if getattr(event, "is_deleted", False):
-                status = "cancelled"
-
-            serialized_events.append({
-                "id": event.id,
-                "name": event.name,
-                "poster": getattr(event, "poster", None),
-                "event_datetime": _iso(event.event_datetime),
-                "has_fee": getattr(event, "has_fee", False),
-                "reg_fee": getattr(event, "reg_fee", None),
-                "duration": getattr(event, "duration", 0),
-                "location_name": getattr(event, "location_name", None),
-                "has_prize": getattr(event, "has_prize", False),
-                "prize_amount": getattr(event, "prize_amount", None),
-                "is_online": getattr(event, "is_online", False),
-                "reg_startdate": _iso(getattr(event, "reg_startdate", None)),
-                "reg_enddate": _iso(getattr(event, "reg_enddate", None)),
-                "page_views": getattr(event, "page_views", 0),
-                "status": status,
-                "category": category_dict,
-                "club": club_dict,
-                "interests": interests_list,
-            })
-
-        return JSONResponse(content={
-            "items": serialized_events,
-            "total": total,
-            "limit": pagination.limit,
-            "offset": pagination.offset,
-        })
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return JSONResponse(
-            status_code=500,
-            content={"detail": f"Events admin list error: {str(e)}"},
         )
+
+    total_result = await session.execute(count_query)
+    total = total_result.scalar() or 0
+
+    query = query.order_by(Events.created_at.desc()).offset(pagination.offset).limit(pagination.limit)
+    result = await session.execute(query)
+    events = result.scalars().all()
+
+    return paginated_response(events, request, schema=EventAdminListResponse, total=total)
 
 
 @router.get("/list", summary="List all events")
@@ -325,9 +252,9 @@ async def list_events(
             if reg:
                 event_dict["is_attended"] = reg.is_attended
                 event_dict["ticket_id"] = reg.ticket_id
-                event_dict["ticket_url"] = f"https://events.myotherapp.com/tickets/{reg.ticket_id}"
+                event_dict["ticket_url"] = f"https://events.finnet.app/tickets/{reg.ticket_id}"
                 if reg.is_attended:
-                    event_dict["certificate_url"] = f"https://events.myotherapp.com/certificates/{reg.ticket_id}"
+                    event_dict["certificate_url"] = f"https://events.finnet.app/certificates/{reg.ticket_id}"
             enhanced_events.append(event_dict)
     else:
         enhanced_events = [jsonable_encoder(e) for e in events]
@@ -397,6 +324,7 @@ async def get_ticket(
     user: DependsAuth = None,  # Require authentication
 ) -> TicketDetailsResponse:
     result = await service.get_ticket_details(session, ticket_id=ticket_id)
+    _assert_can_access_ticket(user, result)
     return jsonable_encoder(result)
 
 
@@ -427,7 +355,8 @@ async def get_ticket_pdf(
     Generate and download a PDF for the ticket.
     """
     registration = await service.get_ticket_details(session, ticket_id=ticket_id)
-    
+    _assert_can_access_ticket(user, registration)
+
     # Load ticket template config for this event
     from app.api.ticket_templates.service import get_template_for_event
     style = await get_template_for_event(session, registration.event_id)
@@ -502,6 +431,9 @@ async def get_wallet_pass(
     
     Requires authentication. The pass can be added to Apple Wallet on iOS devices.
     """
+    registration = await service.get_ticket_details(session, ticket_id=ticket_id)
+    _assert_can_access_ticket(user, registration)
+
     pkpass_bytes = await wallet_service.generate_wallet_pass(session, ticket_id)
     
     return Response(

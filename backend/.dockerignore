@@ -1,0 +1,11 @@
+.env
+.env.production
+service-account.json
+__pycache__
+*.pyc
+venv
+*/venv
+.git
+.DS_Store
+*.log
+logs

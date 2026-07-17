@@ -8,6 +8,9 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import HTMLResponse
 from starlette import status
 from sqlalchemy.exc import StatementError
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from app.api.router import api_router
 from app.config import settings
@@ -15,6 +18,8 @@ from app.db.listeners import *
 from app.response import ErrorResponse, CustomHTTPException
 from app.core.utils.discord import notify_error
 from app.core.middlewares.process_time_middleware import ProcessingTimeMiddleware
+from app.core.middlewares.security_headers_middleware import SecurityHeadersMiddleware
+from app.core.rate_limit import limiter
 
 
 @asynccontextmanager
@@ -33,6 +38,9 @@ async def lifespan(app: FastAPI):
 
 application = FastAPI(default_response_class=ORJSONResponse, lifespan=lifespan)
 
+application.state.limiter = limiter
+application.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 application.include_router(router=api_router)
 # print(settings.cors_origins)
 # if settings.DEBUG:
@@ -44,6 +52,8 @@ application.add_middleware(
     allow_headers=["*"],
 )
 application.add_middleware(ProcessingTimeMiddleware)
+application.add_middleware(SecurityHeadersMiddleware)
+application.add_middleware(SlowAPIMiddleware)
 
 # @application.exception_handler(ValidationError)
 # async def validation_exception_handler2(request, exc):

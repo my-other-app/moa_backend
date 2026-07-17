@@ -1,7 +1,7 @@
 import io
 from fastapi import UploadFile
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import and_, delete, exists, select, func
+from sqlalchemy import and_, delete, exists, or_, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, aliased, joinedload
 import secrets
@@ -182,6 +182,36 @@ async def get_club(club_id: int, session: AsyncSession):
     return db_club
 
 
+async def approve_club(session: AsyncSession, club_id: int) -> Clubs:
+    """Verify a pending club, allowing it to log in and appear publicly."""
+    club = await get_club(club_id, session)
+    club.is_verified = True
+    await session.commit()
+    # Explicitly reload relationships used by the response schema — commit()
+    # expires attributes by default, and a later *lazy* load during response
+    # serialization (outside the session's async context) would raise
+    # MissingGreenlet, since Pydantic can't await it.
+    await session.refresh(club, attribute_names=["interests"])
+    return club
+
+
+async def reject_club(session: AsyncSession, club_id: int) -> Clubs:
+    """Reject a club's (self-)registration.
+
+    There is no separate "rejected" status column today — only
+    `is_verified`. Soft-deleting reuses the existing SoftDeleteMixin
+    machinery already relied on elsewhere in this codebase, and correctly
+    removes the club from public listing/search and blocks its login,
+    consistent with how every other visibility/auth check in this domain
+    is gated on `is_deleted`/`is_verified`.
+    """
+    club = await get_club(club_id, session)
+    club.soft_delete()
+    await session.commit()
+    await session.refresh(club, attribute_names=["interests"])
+    return club
+
+
 async def get_all_clubs(
     session: AsyncSession,
     user_id: int | None = None,
@@ -193,8 +223,13 @@ async def get_all_clubs(
     is_hidden: bool | None = None,
     interest_ids: list[int] | None = None,
     search: str | None = None,
+    include_unverified: bool = False,
 ):
-    """Get all clubs with optional filters, search, and followers count."""
+    """Get all clubs with optional filters, search, and followers count.
+
+    `include_unverified` should only be set by admin-facing callers — the
+    public listing must never surface clubs pending approval.
+    """
     ClubUsersLinkPinned = aliased(ClubUsersLink)
     ClubUsersLinkHidden = aliased(ClubUsersLink)
     ClubUsersLinkFollowers = aliased(ClubUsersLink)
@@ -225,8 +260,15 @@ async def get_all_clubs(
                 ClubUsersLinkFollowing.is_deleted == False,
             ),
         )
+        .where(Clubs.is_deleted == False)
         .options(selectinload(Clubs.interests))
     )
+
+    if not include_unverified:
+        query = query.where(Clubs.is_verified == True)
+        query = query.outerjoin(
+            Organizations, Organizations.id == Clubs.org_id
+        ).where(or_(Clubs.org_id.is_(None), Organizations.is_blocked == False))
 
     # Search filter - use ILIKE for case-insensitive pattern matching on club name
     if search and search.strip():
@@ -473,9 +515,16 @@ async def list_club_followers(
 
 
 async def get_club_details(
-    session: AsyncSession, club_id: int, user_id: int | None = None
+    session: AsyncSession,
+    club_id: int,
+    user_id: int | None = None,
+    enforce_visibility: bool = True,
 ):
-    """Get detailed information about a club."""
+    """Get detailed information about a club.
+
+    `enforce_visibility=False` is only for a club viewing its own profile —
+    every other caller must not be able to see a club that isn't verified yet.
+    """
     query = (
         select(Clubs)
         .where(Clubs.id == club_id)
@@ -485,6 +534,8 @@ async def get_club_details(
             joinedload(Clubs.org),
         )
     )
+    if enforce_visibility:
+        query = query.where(Clubs.is_verified == True, Clubs.is_deleted == False)
     club = await session.scalar(query)
     if not club:
         raise CustomHTTPException(404, "Club not found")
