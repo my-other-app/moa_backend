@@ -1,6 +1,6 @@
 from datetime import timedelta
-from typing import Annotated
-from fastapi import APIRouter, Depends, Form, Request
+from typing import Annotated, Optional
+from fastapi import APIRouter, Depends, Form, Request, Response
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi import status
 import jwt
@@ -32,6 +32,44 @@ from app.config import settings
 router = APIRouter(prefix="/auth")
 
 ACCESS_TOKEN_EXPIRE_MINUTES = settings.ACCESS_TOKEN_EXPIRE_MINUTES
+
+ACCESS_TOKEN_COOKIE_NAME = "access_token"
+REFRESH_TOKEN_COOKIE_NAME = "refresh_token"
+
+
+def _set_auth_cookies(
+    request: Request, response: Response, access_token: str, refresh_token: str
+):
+    """Set the tokens as httpOnly cookies, in addition to the JSON response
+    body. This is additive: the mobile app and other web frontends keep
+    reading the JSON body and simply ignore these cookies. Host-only (no
+    explicit Domain) since every frontend already calls this same API host.
+
+    The `secure` flag is derived from the actual request scheme rather than
+    settings.DEBUG: a Secure cookie is silently dropped by browsers/HTTP
+    clients over plain HTTP, and DEBUG isn't a reliable proxy for "is this
+    request over HTTPS" (e.g. a non-debug local/staging setup still running
+    over http://localhost)."""
+    cookie_kwargs = dict(
+        httponly=True, secure=request.url.scheme == "https", samesite="lax"
+    )
+    response.set_cookie(
+        ACCESS_TOKEN_COOKIE_NAME,
+        access_token,
+        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        **cookie_kwargs,
+    )
+    response.set_cookie(
+        REFRESH_TOKEN_COOKIE_NAME,
+        refresh_token,
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400,
+        **cookie_kwargs,
+    )
+
+
+def _clear_auth_cookies(response: Response):
+    response.delete_cookie(ACCESS_TOKEN_COOKIE_NAME)
+    response.delete_cookie(REFRESH_TOKEN_COOKIE_NAME)
 
 
 @router.post("/google", summary="Sign in with Google")
@@ -68,6 +106,7 @@ async def apple_sign_in(
 @limiter.limit("5/minute")
 async def login_for_access_token(
     request: Request,
+    response: Response,
     session: SessionDep,
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
 ) -> Token:
@@ -82,14 +121,28 @@ async def login_for_access_token(
     from app.api.users.service import merge_guest_into_user
     await merge_guest_into_user(session, app_user=user)
     await session.commit()
-    return await service.create_access_refresh_tokens(user)
+    token = await service.create_access_refresh_tokens(user)
+    _set_auth_cookies(request, response, token.access_token, token.refresh_token)
+    return token
 
 
 @router.post("/refresh", summary="refresh access token")
 @limiter.limit("20/minute")
 async def refresh_access_token(
-    request: Request, session: SessionDep, token: str = Form(...)
+    request: Request,
+    response: Response,
+    session: SessionDep,
+    token: Optional[str] = Form(None),
 ) -> Token:
+    # Fall back to the refresh-token cookie when no form field is sent (the
+    # cookie-auth path — see _set_auth_cookies).
+    token = token or request.cookies.get(REFRESH_TOKEN_COOKIE_NAME)
+    if not token:
+        raise CustomHTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            message="No refresh token provided",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     try:
         payload = decode_jwt_token(token)
         payload = AuthTokenData(**payload)
@@ -121,6 +174,7 @@ async def refresh_access_token(
         access_token = create_access_token(
             data=access_token_data.model_dump(), expires_delta=access_token_expires
         )
+        _set_auth_cookies(request, response, access_token, token)
         return Token(
             access_token=access_token, refresh_token=token, token_type="Bearer"
         )
@@ -136,6 +190,16 @@ async def refresh_access_token(
             message="Invalid token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+
+@router.post("/logout", summary="clear auth cookies")
+async def logout(response: Response):
+    """Clears the httpOnly auth cookies set by /auth/token and /auth/refresh.
+    Needed since client-side JS can't clear httpOnly cookies itself (used by
+    the cookie-auth web frontends; a no-op for clients that never received
+    these cookies in the first place)."""
+    _clear_auth_cookies(response)
+    return {"success": True}
 
 
 @router.get("/me", response_model=AuthUser, summary="get current user info")

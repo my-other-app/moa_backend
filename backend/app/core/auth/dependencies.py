@@ -15,8 +15,13 @@ from app.api.events.volunteer.models import Volunteer
 
 
 async def get_current_user(
-    token: Annotated[str, Depends(oauth2_scheme)], session: SessionDep = SessionDep()
+    request: Request,
+    token: Annotated[str, Depends(oauth2_scheme)],
+    session: SessionDep = SessionDep(),
 ):
+    # Fall back to the access-token cookie when no Authorization header is
+    # present (the cookie-auth web frontends never send one).
+    token = token or request.cookies.get("access_token")
     if not token:
         return None
     credentials_exception = CustomHTTPException(
@@ -124,7 +129,8 @@ VolunteerAuth = Annotated[
 
 
 OptionalUserAuth = Annotated[
-    Optional[Users], Depends(check_user_type(["app_user", "admin"], optional=True))
+    Optional[Users],
+    Depends(check_user_type(["guest", "app_user", "admin"], optional=True)),
 ]
 
 OptionalAuth = Annotated[

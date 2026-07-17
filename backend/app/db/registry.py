@@ -9,3 +9,4 @@ from app.api.events.volunteer.models import *
 from app.api.models import *
 from app.api.ticket_templates.models import *
 from app.api.certificate_templates.models import *
+from app.api.badges.models import *
