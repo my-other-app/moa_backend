@@ -121,6 +121,11 @@ async def login_for_access_token(
     from app.api.users.service import merge_guest_into_user
     await merge_guest_into_user(session, app_user=user)
     await session.commit()
+    # commit() expires user's attributes; refresh explicitly here (a proper
+    # awaited ORM op) rather than letting create_access_refresh_tokens's bare
+    # attribute access trigger an implicit lazy-load, which can hit a
+    # pool_pre_ping/greenlet interaction bug on an async engine (MissingGreenlet).
+    await session.refresh(user)
     token = await service.create_access_refresh_tokens(user)
     _set_auth_cookies(request, response, token.access_token, token.refresh_token)
     return token

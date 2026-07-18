@@ -67,6 +67,12 @@ async def google_signin(
         # Merge any guest accounts with matching email
         await merge_guest_into_user(session, app_user=user)
         await session.commit()
+        # commit() expires user's attributes; refresh explicitly (a proper
+        # awaited ORM op) so the caller's bare attribute access
+        # (create_access_refresh_tokens reading user.id/token_version)
+        # doesn't trigger an implicit lazy-load, which can hit a
+        # pool_pre_ping/greenlet interaction bug on an async engine.
+        await session.refresh(user)
 
         return user
 
@@ -156,9 +162,13 @@ async def apple_signin(
         # Merge any guest accounts with matching email
         await merge_guest_into_user(session, app_user=user)
         await session.commit()
+        # See the matching comment in google_signin: refresh explicitly
+        # after commit to avoid a lazy-load hitting the async
+        # pool_pre_ping/greenlet MissingGreenlet bug.
+        await session.refresh(user)
 
         return user
-        
+
     except jwt.ExpiredSignatureError:
         raise CustomHTTPException(
             status_code=401, message="Apple token has expired"
