@@ -184,13 +184,13 @@ async def register_event(
                     background_tasks.add_task(
                         send_registration_confirmation_email,
                         recipients=[email],
-                        subject=f"Ticket: {db_event.name} - MyOtherAPP",
+                        subject=f"Ticket: {db_event.name} - Finnet",
                         payload=email_payload,
                     )
                 else:
                     send_registration_confirmation_email(
                         recipients=[email],
-                        subject=f"Ticket: {db_event.name} - MyOtherAPP",
+                        subject=f"Ticket: {db_event.name} - Finnet",
                         payload=email_payload,
                     )
             except Exception as e:
