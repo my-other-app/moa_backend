@@ -252,9 +252,9 @@ async def list_events(
             if reg:
                 event_dict["is_attended"] = reg.is_attended
                 event_dict["ticket_id"] = reg.ticket_id
-                event_dict["ticket_url"] = f"https://events.finnet.app/tickets/{reg.ticket_id}"
+                event_dict["ticket_url"] = f"https://events.myotherapp.in/tickets/{reg.ticket_id}"
                 if reg.is_attended:
-                    event_dict["certificate_url"] = f"https://events.finnet.app/certificates/{reg.ticket_id}"
+                    event_dict["certificate_url"] = f"https://events.myotherapp.in/certificates/{reg.ticket_id}"
             enhanced_events.append(event_dict)
     else:
         enhanced_events = [jsonable_encoder(e) for e in events]

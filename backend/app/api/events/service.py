@@ -457,9 +457,9 @@ async def get_event(session: AsyncSession, event_id: str | int, user_id: int | N
             data["ticket_id"] = registration.ticket_id
             data["user_position"] = registration.position
             # Build URLs from ticket_id - use the events subdomain for public ticket pages
-            data["ticket_url"] = f"https://events.myotherapp.com/tickets/{registration.ticket_id}"
+            data["ticket_url"] = f"https://events.myotherapp.in/tickets/{registration.ticket_id}"
             if registration.is_attended:
-                data["certificate_url"] = f"https://events.myotherapp.com/certificates/{registration.ticket_id}"
+                data["certificate_url"] = f"https://events.myotherapp.in/certificates/{registration.ticket_id}"
             # Position label based on position
             if registration.position:
                 if registration.position == 1:
