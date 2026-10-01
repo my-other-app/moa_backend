@@ -19,7 +19,19 @@ engine = create_async_engine(
     pool_pre_ping=True,
 )
 
-AsyncSessionLocal = async_sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# Shared so tests can build their own session against the same semantics.
+# expire_on_commit=False is required, not a preference: with the default True,
+# commit() expires every instance in the identity map, and the next attribute
+# read on one of them issues a *synchronous* refresh. On an async engine that
+# raises MissingGreenlet.
+#
+# This caused a production outage on GET /events/info/{id}: the router calls
+# increment_event_page_view (which commits), then evaluates `user.id` to pass
+# into the service -- by then the auth dependency's Users instance was expired,
+# so every signed-in request 500'd while anonymous ones succeeded.
+SESSION_KWARGS = dict(autocommit=False, autoflush=False, expire_on_commit=False)
+
+AsyncSessionLocal = async_sessionmaker(bind=engine, **SESSION_KWARGS)
 
 
 async def get_session():

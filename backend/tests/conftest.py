@@ -81,9 +81,13 @@ async def session(_engine) -> AsyncSession:
     """A DB session wrapped in a transaction that's rolled back after each test."""
     connection = await _engine.connect()
     transaction = await connection.begin()
-    session_factory = async_sessionmaker(
-        bind=connection, autocommit=False, autoflush=False, expire_on_commit=False
-    )
+    # Mirrors production's session semantics via the shared kwargs. Hardcoding
+    # them here is what let the MissingGreenlet outage ship: the suite ran with
+    # expire_on_commit=False while production ran with the default True, so no
+    # test could reproduce it.
+    from app.db.core import SESSION_KWARGS
+
+    session_factory = async_sessionmaker(bind=connection, **SESSION_KWARGS)
     session = session_factory()
     try:
         yield session

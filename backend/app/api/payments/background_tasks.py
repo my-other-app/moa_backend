@@ -26,7 +26,11 @@ def send_payment_confirmation_email(
         )
         response = send_email_with_attachment(
             sender_name="Finnet Payments",
-            sender="payments@finnet.app",
+            # No explicit sender: send_email_with_attachment falls back to
+            # settings.SES_DEFAULT_SENDER. This used to hardcode
+            # payments@finnet.app, which stopped matching the verified SES
+            # identity after the move to myotherapp.in — and because this runs
+            # in a background task, a rejected sender fails silently.
             recipients=recipients,
             subject=subject,
             html_template_path="payments/payment_receipt.email",
