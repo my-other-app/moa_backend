@@ -174,23 +174,33 @@ async def export_event_registrations(
         offset=None,
     )
 
+    # list_event_registrations returns plain dicts, not ORM rows, so every
+    # field here is looked up by key. Attribute access raised
+    # AttributeError: 'dict' object has no attribute 'ticket_id' and made this
+    # endpoint return 500 for every export.
     data = [
         {
-            "Ticket ID": row.ticket_id,
-            "Full Name": row.full_name,
-            "Email": row.email,
-            "Phone": row.phone,
+            "Ticket ID": row.get("ticket_id"),
+            "Full Name": row.get("full_name"),
+            "Email": row.get("email"),
+            "Phone": row.get("phone"),
+            # Answers to the event's custom registration questions, spread into
+            # their own columns.
             **(
-                row.additional_details
-                if isinstance(row.additional_details, dict)
+                row["additional_details"]
+                if isinstance(row.get("additional_details"), dict)
                 else {}
             ),
-            "Is Paid": row.is_paid,
-            "Actual Amount": row.actual_amount,
-            "Paid Amount": row.paid_amount,
-            "Is Attended": row.is_attended,
-            "Checked In By": row.volunteer.email if row.volunteer else None,
-            "Registered At": row.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            "Is Paid": row.get("is_paid"),
+            "Actual Amount": row.get("actual_amount"),
+            "Paid Amount": row.get("paid_amount"),
+            "Is Attended": row.get("is_attended"),
+            "Checked In By": (row.get("volunteer") or {}).get("email"),
+            "Registered At": (
+                row["created_at"].strftime("%Y-%m-%d %H:%M:%S")
+                if row.get("created_at")
+                else None
+            ),
         }
         for row in result
     ]

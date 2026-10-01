@@ -387,6 +387,11 @@ async def list_event_registrations(
                 "volunteer": volunteer_data,
                 "institution": institution,
                 "name": reg.full_name or "",
+                # Answers to the event's custom questions. Previously omitted,
+                # which silently dropped them from the registrations export --
+                # the export code spreads this key and had been producing
+                # nothing for it.
+                "additional_details": reg.additional_details,
                 "created_at": reg.created_at,
             })
         except Exception as e:
