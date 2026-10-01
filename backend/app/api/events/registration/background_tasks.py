@@ -26,7 +26,11 @@ def send_registration_confirmation_email(
             html_template_path="events/registration_confirmation.email",
             template_context=payload,
             sender_name="Finnet Events",
-            sender="events@finnet.app",
+            # No explicit sender: send_email_with_attachment falls back to
+            # settings.SES_DEFAULT_SENDER. This used to hardcode
+            # events@finnet.app, which stopped matching the verified SES
+            # identity after the move to myotherapp.in — and because this runs
+            # in a background task, a rejected sender fails silently.
             # attachment_bytes=pdf_bytes,
             # attachment_filename=f"{payload.get('ticket_id')}-ticket.pdf",
         )
