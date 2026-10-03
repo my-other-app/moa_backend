@@ -1,6 +1,7 @@
+from typing import Any
 from datetime import datetime
 from fastapi import Body, File, Form, UploadFile
-from pydantic import BaseModel, Field, EmailStr, HttpUrl
+from pydantic import BaseModel, Field, EmailStr, HttpUrl, field_validator
 
 from app.api.users.models import UserAvatarTypes
 from app.api.orgs.schema import OrganizationPublicMin
@@ -164,6 +165,19 @@ class UserEventList(CustomBaseModel):
     has_prize: bool = Field(True)
     prize_amount: float | None = Field(None)
     is_online: bool = Field(False)
+
+    @field_validator("is_online", mode="before")
+    @classmethod
+    def _default_is_online(cls, value: Any) -> Any:
+        """
+        `events.is_online` is nullable and most rows predate the column, so it
+        comes back as None. `Field(False)` does not cover that -- a default
+        only applies when the key is absent, not when it is explicitly None --
+        so serialising any such event raised a ValidationError and returned
+        500 from /user/my-events. An event with no value set is not online.
+        """
+        return False if value is None else value
+
     reg_startdate: datetime = Field(...)
     reg_enddate: datetime | None = Field(None)
     club: UserEventClubDetail = Field(...)
@@ -179,6 +193,29 @@ class UserRegisteredEvents(CustomBaseModel):
     actual_amount: float | None = Field(None)
     paid_amount: float | None = Field(None)
     event: UserEventList = Field(...)
+
+
+class AdminUserStats(CustomBaseModel):
+    """Aggregates for one user. Counted in SQL, not by loading the rows."""
+
+    clubs_following: int = Field(0)
+    events_registered: int = Field(0)
+    events_attended: int = Field(0)
+    events_won: int = Field(0)
+    badges_earned: int = Field(0)
+    total_paid: float = Field(0)
+
+
+class AdminUserDetailResponse(UserDetailResponse):
+    """
+    UserDetailResponse plus the activity an admin is actually looking for.
+
+    The lists behind these counts (followed clubs, registered events) have
+    their own paginated endpoints rather than being embedded, so this stays
+    one cheap query however active the account is.
+    """
+
+    stats: AdminUserStats = Field(...)
 
 
 class FCMTokenRequest(CustomBaseModel):

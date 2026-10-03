@@ -2,6 +2,8 @@ from typing import List
 from fastapi import APIRouter, File, Form, Query, Request, UploadFile
 
 from app.api.users.schemas import (
+    AdminUserDetailResponse,
+    AdminUserStats,
     FCMTokenRequest,
     FCMTokenResponse,
     UserAvatarDetail,
@@ -270,3 +272,77 @@ async def register_fcm_token(
     )
     return FCMTokenResponse(success=True, message="FCM token registered successfully")
 
+
+# ---------------------------------------------------------------------------
+# Admin: one user in full.
+#
+# Declared after /admin/list so the literal path keeps priority over
+# /admin/{user_id}. Every route here is AdminAuth: the self-service
+# equivalents (/following, /my-events) read the caller's own id and cannot
+# answer "what has this other user done", which is the whole point of the
+# admin screen.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/admin/{user_id}", summary="Get one user in full (admin)")
+async def get_user_admin_detail(
+    user_id: int,
+    session: SessionDep,
+    user: AdminAuth,
+) -> AdminUserDetailResponse:
+    db_user, stats = await service.get_user_admin_detail(session, user_id)
+    return AdminUserDetailResponse(
+        **UserDetailResponse.model_validate(db_user).model_dump(),
+        stats=AdminUserStats(**stats),
+    )
+
+
+@router.get("/admin/{user_id}/clubs", summary="Clubs a user follows (admin)")
+async def list_user_clubs_admin(
+    user_id: int,
+    request: Request,
+    session: SessionDep,
+    pagination: PaginationParams,
+    user: AdminAuth,
+) -> PaginatedResponse[ClubListResponse]:
+    clubs = await service.following_clubs(
+        session, user_id, limit=pagination.limit, offset=pagination.offset
+    )
+    total = await service.count_following_clubs(session, user_id)
+    return paginated_response(
+        clubs, request=request, schema=ClubListResponse, total=total
+    )
+
+
+@router.get("/admin/{user_id}/events", summary="Events a user registered for (admin)")
+async def list_user_events_admin(
+    user_id: int,
+    request: Request,
+    session: SessionDep,
+    pagination: PaginationParams,
+    user: AdminAuth,
+    is_attended: bool | None = Query(None),
+    is_paid: bool | None = Query(None),
+    is_won: bool | None = Query(None),
+) -> PaginatedResponse[UserRegisteredEvents]:
+    """
+    Unfiltered by default. The filters are None rather than False so that
+    omitting one means "do not filter" -- passing False would narrow the list
+    to registrations where the flag is off, which is not what "all events"
+    means.
+    """
+    events = await service.list_registered_events(
+        session,
+        user_id,
+        is_attended=is_attended,
+        is_paid=is_paid,
+        is_won=is_won,
+        limit=pagination.limit,
+        offset=pagination.offset,
+    )
+    total = await service.count_registered_events(
+        session, user_id, is_attended=is_attended, is_paid=is_paid, is_won=is_won
+    )
+    return paginated_response(
+        events, request=request, schema=UserRegisteredEvents, total=total
+    )

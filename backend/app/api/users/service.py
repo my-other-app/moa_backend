@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 import io
 import re
 from fastapi import File, UploadFile
-from sqlalchemy import delete, exists, or_, select
+from sqlalchemy import delete, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
 
@@ -21,6 +21,7 @@ from app.api.orgs.models import Organizations
 from app.core.validations.schema import validate_relations, validate_unique
 from app.api.interests.models import Interests
 from app.api.events.models import EventInterestsLink, EventRegistrationsLink, Events
+from app.api.badges.models import UserBadges
 
 
 async def generate_username(user: Users, session: AsyncSession, is_guest: bool = False):
@@ -249,17 +250,33 @@ async def merge_guest_into_user(session: AsyncSession, app_user: Users) -> dict:
 async def following_clubs(
     session: AsyncSession, user_id: int, limit: int = 10, offset: int = 0
 ):
-    user_exists = await session.scalar(select(exists().where(Users.id == user_id, Users.is_deleted == False)))
+    """
+    Clubs this user follows, in the shape ClubListResponse expects.
+
+    This used to return bare Clubs rows, but ClubListResponse requires
+    `followers_count`, `is_following` and `interests`, which a plain row does
+    not carry -- so the endpoint raised a ValidationError and returned 500
+    every single time it was called. The clubs service already assembles
+    exactly that shape and takes `is_following` as a filter, so this delegates
+    to it rather than keeping a second, broken projection of the same data.
+    """
+    user_exists = await session.scalar(
+        select(exists().where(Users.id == user_id, Users.is_deleted == False))
+    )
     if not user_exists:
         raise CustomHTTPException(status_code=404, message="User not found")
-    query = (
-        select(Clubs)
-        .join(ClubUsersLink, ClubUsersLink.club_id == Clubs.id)
-        .where(ClubUsersLink.user_id == user_id, ClubUsersLink.is_following == True)
-        .limit(limit)
-        .offset(offset)
+
+    # Imported here, not at module scope: clubs.service imports from this
+    # module, and a top-level import would close the cycle.
+    from app.api.clubs import service as clubs_service
+
+    return await clubs_service.get_all_clubs(
+        session,
+        user_id=user_id,
+        is_following=True,
+        limit=limit,
+        offset=offset,
     )
-    return list(await session.scalars(query))
 
 
 async def create_user_profile(
@@ -400,6 +417,95 @@ async def get_user_profile(session: AsyncSession, user_id: int):
     )
 
     return await session.scalar(query)
+
+
+async def get_user_admin_detail(session: AsyncSession, user_id: int):
+    """
+    One user with everything an admin needs to judge the account.
+
+    The counts are aggregates rather than lengths of loaded collections: a
+    user with two thousand registrations should not be pulled into memory to
+    show the number 2000. Each list has its own paginated endpoint.
+    """
+    user = await session.scalar(
+        select(Users)
+        .where(Users.id == user_id, Users.is_deleted == False)
+        .options(
+            joinedload(Users.profile).options(
+                joinedload(UserProfiles.avatar), joinedload(UserProfiles.org)
+            ),
+            selectinload(Users.interests),
+        )
+    )
+    if not user:
+        raise CustomHTTPException(404, "User not found")
+
+    registrations = EventRegistrationsLink
+    base = [registrations.user_id == user_id, registrations.is_deleted == False]
+
+    async def count_registrations(*extra):
+        return await session.scalar(
+            select(func.count(registrations.id)).where(*base, *extra)
+        )
+
+    clubs_following = await session.scalar(
+        select(func.count(ClubUsersLink.id)).where(
+            ClubUsersLink.user_id == user_id,
+            ClubUsersLink.is_following == True,
+        )
+    )
+    events_registered = await count_registrations()
+    events_attended = await count_registrations(registrations.is_attended == True)
+    events_won = await count_registrations(registrations.is_won == True)
+    total_paid = await session.scalar(
+        select(func.coalesce(func.sum(registrations.paid_amount), 0)).where(
+            *base, registrations.is_paid == True
+        )
+    )
+    badges_earned = await session.scalar(
+        select(func.count(UserBadges.id)).where(UserBadges.user_id == user_id)
+    )
+
+    return user, {
+        "clubs_following": clubs_following or 0,
+        "events_registered": events_registered or 0,
+        "events_attended": events_attended or 0,
+        "events_won": events_won or 0,
+        "badges_earned": badges_earned or 0,
+        "total_paid": float(total_paid or 0),
+    }
+
+
+async def count_following_clubs(session: AsyncSession, user_id: int) -> int:
+    return (
+        await session.scalar(
+            select(func.count(ClubUsersLink.id)).where(
+                ClubUsersLink.user_id == user_id,
+                ClubUsersLink.is_following == True,
+            )
+        )
+    ) or 0
+
+
+async def count_registered_events(
+    session: AsyncSession,
+    user_id: int,
+    is_attended: bool | None = None,
+    is_paid: bool | None = None,
+    is_won: bool | None = None,
+) -> int:
+    """Companion to list_registered_events, so pages report a real total."""
+    query = select(func.count(EventRegistrationsLink.id)).where(
+        EventRegistrationsLink.user_id == user_id,
+        EventRegistrationsLink.is_deleted == False,
+    )
+    if is_paid is not None:
+        query = query.where(EventRegistrationsLink.is_paid == is_paid)
+    if is_attended is not None:
+        query = query.where(EventRegistrationsLink.is_attended == is_attended)
+    if is_won is not None:
+        query = query.where(EventRegistrationsLink.is_won == is_won)
+    return (await session.scalar(query)) or 0
 
 
 async def update_profile_picture(
