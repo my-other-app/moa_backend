@@ -223,6 +223,34 @@ class ClubPublicDetailResponse(CustomBaseModel):
     org: ClubOrgDetail | None = Field(None)
 
 
+class ClubOwnerDetail(CustomBaseModel):
+    id: int = Field(...)
+    full_name: str | None = Field(None)
+    username: str | None = Field(None)
+    email: str | None = Field(None)
+
+
+class ClubAdminStats(CustomBaseModel):
+    """Totals across every event the club has run."""
+
+    total_registrations: int = Field(0)
+    total_attended: int = Field(0)
+    total_revenue: float = Field(0)
+
+
+class ClubAdminFullResponse(ClubPublicDetailResponse):
+    """
+    The public detail plus what only an admin should see: whether the club is
+    verified at all, who owns the login, and the money across its events.
+    """
+
+    is_verified: bool = Field(False)
+    is_deleted: bool = Field(False)
+    created_at: datetime | None = Field(None)
+    owner: ClubOwnerDetail | None = Field(None)
+    admin_stats: ClubAdminStats = Field(...)
+
+
 class ClubAdminDetailResponse(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(..., min_length=3, max_length=20)

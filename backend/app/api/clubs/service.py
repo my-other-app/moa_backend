@@ -212,6 +212,82 @@ async def reject_club(session: AsyncSession, club_id: int) -> Clubs:
     return club
 
 
+async def get_club_admin_detail(session: AsyncSession, club_id: int):
+    """
+    One club as an admin needs to see it.
+
+    Builds on get_club_details with visibility off: the public view hides
+    anything not yet verified, which is precisely the club an admin is about
+    to approve or reject. On top of the public figures this adds the money and
+    reach across the club's events, and who actually owns the account.
+    """
+    detail = await get_club_details(
+        session, club_id=club_id, user_id=None, enforce_visibility=False
+    )
+
+    club = await session.scalar(
+        select(Clubs).where(Clubs.id == club_id).options(joinedload(Clubs.user))
+    )
+
+    event_ids = select(Events.id).where(
+        Events.club_id == club_id, Events.is_deleted == False
+    )
+    registration_filter = [
+        EventRegistrationsLink.event_id.in_(event_ids),
+        EventRegistrationsLink.is_deleted == False,
+    ]
+
+    total_registrations = await session.scalar(
+        select(func.count(EventRegistrationsLink.id)).where(*registration_filter)
+    )
+    total_attended = await session.scalar(
+        select(func.count(EventRegistrationsLink.id)).where(
+            *registration_filter, EventRegistrationsLink.is_attended == True
+        )
+    )
+    total_revenue = await session.scalar(
+        select(func.coalesce(func.sum(EventRegistrationsLink.paid_amount), 0)).where(
+            *registration_filter, EventRegistrationsLink.is_paid == True
+        )
+    )
+
+    detail["is_verified"] = club.is_verified if club else False
+    detail["is_deleted"] = club.is_deleted if club else False
+    detail["created_at"] = club.created_at if club else None
+    detail["owner"] = (
+        {
+            "id": club.user.id,
+            "full_name": club.user.full_name,
+            "username": club.user.username,
+            "email": club.user.email,
+        }
+        if club and club.user
+        else None
+    )
+    detail["admin_stats"] = {
+        "total_registrations": total_registrations or 0,
+        "total_attended": total_attended or 0,
+        "total_revenue": float(total_revenue or 0),
+    }
+    return detail
+
+
+async def delete_club(session: AsyncSession, club_id: int) -> Clubs:
+    """
+    Soft-delete a club as an admin.
+
+    Same mechanism as reject_club -- there is still only `is_verified` and
+    `is_deleted` -- but a separate entry point, because rejecting a pending
+    registration and removing an established club are different decisions and
+    the UI needs to say different things about them.
+    """
+    club = await get_club(club_id, session)
+    club.soft_delete()
+    await session.commit()
+    await session.refresh(club, attribute_names=["interests"])
+    return club
+
+
 async def get_all_clubs(
     session: AsyncSession,
     user_id: int | None = None,

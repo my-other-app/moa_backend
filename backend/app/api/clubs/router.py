@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Request, UploadFile, Query, File
 from app.api.clubs.schemas import (
     ClubAdminDetailResponse,
+    ClubAdminFullResponse,
     ClubCreateUpdateResponse,
     ClubFollowPublic,
     ClubFollowersListResponse,
@@ -321,3 +322,46 @@ async def get_club_events_public(
         search=search,
     )
     return paginated_response(events, request, schema=EventListResponseSelf, total=total)
+
+
+# ---------------------------------------------------------------------------
+# Admin: one club in full, and editing it.
+#
+# Declared after /admin/list and /admin/create so those literal paths keep
+# priority over /admin/{club_id}.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/admin/{club_id}", summary="Get one club in full (admin)")
+async def get_club_admin_detail_endpoint(
+    club_id: int, session: SessionDep, user: AdminAuth
+) -> ClubAdminFullResponse:
+    """
+    Unlike /clubs/info/{id}, this does not require the club to be verified.
+    A pending club is exactly the one an admin needs to look at before
+    deciding whether to approve it, and the public endpoint 404s on it.
+    """
+    return await service.get_club_admin_detail(session, club_id)
+
+
+@router.put("/admin/{club_id}", summary="Update any club (admin)")
+async def update_club_admin(
+    club_id: int, session: SessionDep, user: AdminAuth, club: UpdateClub = Depends()
+) -> ClubCreateUpdateResponse:
+    """
+    PUT /clubs/update only ever edits the caller's own club, so an admin had
+    no way to correct a club's details. Same handler underneath, with the id
+    taken from the path.
+
+    Note it assigns every column from the request and clears the interest
+    links before re-adding what it was sent, so callers must send the full
+    record rather than a patch.
+    """
+    return await service.update_club(session=session, club_id=club_id, club=club)
+
+
+@router.delete("/admin/{club_id}", summary="Delete a club (admin)")
+async def delete_club_admin(
+    club_id: int, session: SessionDep, user: AdminAuth
+) -> ClubAdminDetailResponse:
+    return await service.delete_club(session, club_id)
