@@ -86,5 +86,6 @@ class EventAnalyticsResponse(CustomBaseModel):
     payment_status: dict[str, int]  # {"paid": 10, "unpaid": 5}
     attendance_status: dict[str, int]  # {"attended": 8, "absent": 7}
     top_institutions: list[dict[str, Any]]  # [{"name": "IIT", "value": 10}, ...]
+    total_institutions: int = 0  # distinct institutions, not capped at the top 5
     registration_time: RegistrationTimeDistribution
     attendance_over_time: list[dict[str, Any]]  # [{"time": "10:00 AM", "count": 5}, ...]

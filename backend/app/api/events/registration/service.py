@@ -650,6 +650,13 @@ async def get_event_analytics(
         for k, v in sorted(institutions.items(), key=lambda item: item[1], reverse=True)[:5]
     ]
 
+    # How many distinct institutions actually turned up, as opposed to the five
+    # largest. The dashboard shows this as a headline count, and deriving it
+    # from len(top_institutions) would silently cap at 5. "Unknown" is the
+    # bucket for registrations that answered no college question, so it is not
+    # an institution and is not counted.
+    total_institutions = len([k for k in institutions if k != "Unknown"])
+
     # 5. Registration Time Distribution
     # Morning: 6-12, Afternoon: 12-17, Evening: 17-21, Night: 21-6
     morning = 0
@@ -718,6 +725,7 @@ async def get_event_analytics(
         "payment_status": {"paid": paid_count, "unpaid": unpaid_count},
         "attendance_status": {"attended": attended_count, "absent": absent_count},
         "top_institutions": top_institutions,
+        "total_institutions": total_institutions,
         "registration_time": {
             "morning": morning,
             "afternoon": afternoon,
