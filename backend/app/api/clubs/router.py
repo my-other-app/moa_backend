@@ -97,7 +97,10 @@ async def list_all_clubs_admin(
         sort=sort,
         order=order,
     )
-    return paginated_response(clubs, request, schema=ClubAdminDetailResponse)
+    clubs, total = clubs
+    return paginated_response(
+        clubs, request, schema=ClubAdminDetailResponse, total=total
+    )
 
 
 @router.post("/{club_id}/approve", summary="Approve a pending club (admin)")
@@ -149,7 +152,8 @@ async def get_all_clubs(
         is_hidden=is_hidden,
         search=search,
     )
-    return paginated_response(clubs, request, schema=ClubListResponse)
+    clubs, total = clubs
+    return paginated_response(clubs, request, schema=ClubListResponse, total=total)
 
 
 @router.get("/info/{club_id}", summary="get club info")

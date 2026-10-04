@@ -400,6 +400,16 @@ async def get_all_clubs(
             ClubUsersLinkHidden.is_deleted == False,
         )
 
+    # The total matching the same filters, taken from this very query rather
+    # than a hand-written copy of its WHERE clause -- the two cannot drift.
+    # with_only_columns keeps the FROM and joins and swaps the selected
+    # columns; DISTINCT collapses the fan-out from the follower joins.
+    total = await session.scalar(
+        select(func.count()).select_from(
+            query.with_only_columns(Clubs.id).order_by(None).distinct().subquery()
+        )
+    )
+
     query = query.group_by(Clubs.id).limit(limit).offset(offset)
     query = apply_sort(
         query,
@@ -451,7 +461,11 @@ async def get_all_clubs(
             
         clubs_response.append(club_dict)
         
-    return clubs_response
+    # Returned with the total so callers can paginate. Without it
+    # paginated_response falls back to "is there an extra row", which reports
+    # no page count at all -- every club list was therefore stuck on its first
+    # page, including the club list on an organisation's page.
+    return clubs_response, total or 0
 
 
 async def follow_club(session: AsyncSession, club_id: int, user_id: int):

@@ -170,6 +170,9 @@ async def list_all_events_admin(
     user: AdminAuth,
     search: Optional[str] = Query(None, description="Search by event name or category"),
     club_id: Optional[int] = Query(None, description="Filter by club"),
+    org_id: Optional[int] = Query(
+        None, description="Filter by the organisation the hosting club belongs to"
+    ),
     category_id: Optional[int] = Query(None, description="Filter by category"),
     is_ended: Optional[bool] = Query(None, description="Past (true) or upcoming (false)"),
     has_fee: Optional[bool] = Query(None, description="Paid events only"),
@@ -213,6 +216,18 @@ async def list_all_events_admin(
     filters = []
     if club_id is not None:
         filters.append(Events.club_id == club_id)
+    if org_id is not None:
+        # Events belong to clubs, and clubs to organisations; an organisation's
+        # page needs its events without first fetching all of its clubs.
+        from app.api.clubs.models import Clubs
+
+        filters.append(
+            Events.club_id.in_(
+                select(Clubs.id).where(
+                    Clubs.org_id == org_id, Clubs.is_deleted == False
+                )
+            )
+        )
     if category_id is not None:
         filters.append(Events.category_id == category_id)
     if has_fee is not None:

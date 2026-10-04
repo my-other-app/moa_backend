@@ -270,13 +270,16 @@ async def following_clubs(
     # module, and a top-level import would close the cycle.
     from app.api.clubs import service as clubs_service
 
-    return await clubs_service.get_all_clubs(
+    clubs, _total = await clubs_service.get_all_clubs(
         session,
         user_id=user_id,
         is_following=True,
         limit=limit,
         offset=offset,
     )
+    # The caller counts separately via count_following_clubs, which the admin
+    # route already uses for its own total.
+    return clubs
 
 
 async def create_user_profile(
