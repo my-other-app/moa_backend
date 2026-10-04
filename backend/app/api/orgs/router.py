@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from typing import List
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from app.db.core import SessionDep
 from app.api.orgs.schema import (
@@ -12,6 +12,7 @@ from app.api.orgs.schema import (
 )
 from fastapi import UploadFile, File
 from app.api.orgs import service
+from app.api.audit import service as audit
 from app.core.auth.dependencies import AdminAuth
 
 router = APIRouter(prefix="/orgs")
@@ -19,9 +20,19 @@ router = APIRouter(prefix="/orgs")
 
 @router.post("/create", summary="Create a new organization")
 async def create_organization(
-    session: SessionDep, user: AdminAuth, org: OrganizationCreate = Depends()
+    session: SessionDep,
+    user: AdminAuth,
+    org: OrganizationCreate = Depends(),
+    request: Request = None,
 ) -> OrganizationDetailResponse:
-    return await service.create_organization(org, session)
+    created = await service.create_organization(org, session)
+    await audit.record(
+        session, actor=user, action="org.create", entity_type="org",
+        entity_id=created.id, summary=f"Created organisation “{created.name}”",
+        request=request,
+    )
+    await session.commit()
+    return created
 
 
 @router.get("/list", summary="List all organizations")
@@ -30,15 +41,34 @@ async def create_organization(session: SessionDep) -> List[OrganizationDetailRes
 
 
 @router.delete("/delete/{id}", summary="Delete organization")
-async def delete_organization(id: int, session: SessionDep, user: AdminAuth):
-    return await service.delete_organization(id, session)
+async def delete_organization(
+    id: int, session: SessionDep, user: AdminAuth, request: Request = None
+):
+    result = await service.delete_organization(id, session)
+    await audit.record(
+        session, actor=user, action="org.delete", entity_type="org",
+        entity_id=id, summary="Deleted organisation", request=request,
+    )
+    await session.commit()
+    return result
 
 
 @router.put("/update/{id}", summary="Update organization details")
 async def update_organization(
-    id: int, session: SessionDep, user: AdminAuth, org: OrganizationUpdate = Depends()
+    id: int,
+    session: SessionDep,
+    user: AdminAuth,
+    org: OrganizationUpdate = Depends(),
+    request: Request = None,
 ) -> OrganizationDetailResponse:
-    return await service.update_organization(id, org, session)
+    updated = await service.update_organization(id, org, session)
+    await audit.record(
+        session, actor=user, action="org.update", entity_type="org",
+        entity_id=id, summary=f"Edited organisation “{updated.name}”",
+        request=request,
+    )
+    await session.commit()
+    return updated
 
 
 class OrganizationBlockRequest(BaseModel):
@@ -53,10 +83,19 @@ async def block_organization(
     session: SessionDep,
     user: AdminAuth,
     body: OrganizationBlockRequest | None = None,
+    request: Request = None,
 ):
-    return await service.block_organization(
+    result = await service.block_organization(
         id, session, is_blocked=body.is_blocked if body else None
     )
+    await audit.record(
+        session, actor=user, action="org.block", entity_type="org",
+        entity_id=id,
+        summary=f"{'Blocked' if result['is_blocked'] else 'Unblocked'} organisation",
+        details={"is_blocked": result["is_blocked"]}, request=request,
+    )
+    await session.commit()
+    return result
 
 
 @router.post("/import", summary="Bulk import organizations from CSV/Excel")

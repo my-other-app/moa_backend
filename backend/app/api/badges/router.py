@@ -2,10 +2,11 @@
 Badge API endpoints.
 """
 import logging
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from app.db.core import SessionDep
 from app.api.auth.router import DependsAuth
 from app.api.badges import service
+from app.api.audit import service as audit
 from app.api.badges.schemas import (
     BadgeDefinitionResponse,
     UserBadgesResponse,
@@ -197,6 +198,7 @@ async def admin_delete_badge(
     badge_id: int,
     session: SessionDep,
     admin: AdminAuth,
+    request: Request = None,
 ):
     """
     Delete a badge definition and every award of it.
@@ -205,7 +207,15 @@ async def admin_delete_badge(
     definition has no soft-delete, so this removes the award rows first; the
     response says how many people lost the badge.
     """
-    return await service.delete_badge_definition(session, badge_id)
+    result = await service.delete_badge_definition(session, badge_id)
+    await audit.record(
+        session, actor=admin, action="badge.delete", entity_type="badge",
+        entity_id=badge_id,
+        summary=f"Deleted badge, revoked from {result['revoked_from']}",
+        details=result, request=request,
+    )
+    await session.commit()
+    return result
 
 
 @router.get("/admin/{badge_id}/recipients", summary="Get badge recipients (Admin)")
@@ -249,9 +259,17 @@ async def admin_award_badge(
     body: ManualAwardRequest,
     session: SessionDep,
     admin: AdminAuth,
+    request: Request = None,
 ) -> BadgeRecipientResponse:
     """Manually award a badge to a specific user or club."""
     result = await service.manual_award_badge(session, badge_id, body.entity_id)
+    await audit.record(
+        session, actor=admin, action="badge.award", entity_type="badge",
+        entity_id=badge_id,
+        summary=f"Awarded badge to {result.get('entity_name') or body.entity_id}",
+        details={"entity_id": body.entity_id}, request=request,
+    )
+    await session.commit()
     return BadgeRecipientResponse(**result)
 
 
@@ -261,7 +279,14 @@ async def admin_revoke_badge(
     entity_id: int,
     session: SessionDep,
     admin: AdminAuth,
+    request: Request = None,
 ):
     """Revoke a badge from a user or club."""
     await service.revoke_badge(session, badge_id, entity_id)
+    await audit.record(
+        session, actor=admin, action="badge.revoke", entity_type="badge",
+        entity_id=badge_id, summary=f"Revoked badge from #{entity_id}",
+        details={"entity_id": entity_id}, request=request,
+    )
+    await session.commit()
     return {"message": "Badge revoked successfully"}

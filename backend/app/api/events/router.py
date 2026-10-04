@@ -17,6 +17,7 @@ from typing import Optional, List
 
 from app.db.core import SessionDep
 from app.api.events import service
+from app.api.audit import service as audit
 from app.core.response.sorting import apply_sort
 from app.api.events.access import is_admin_user
 from app.api.events import wallet_service
@@ -326,8 +327,15 @@ async def delete_event(
     event_id: int,
     user: ClubAuth,
     session: SessionDep = SessionDep,
+    request: Request = None,
 ):
     await service.delete_event(session, event_id, user.id, as_admin=is_admin_user(user))
+    if is_admin_user(user):
+        await audit.record(
+            session, actor=user, action="event.delete", entity_type="event",
+            entity_id=event_id, summary="Deleted event", request=request,
+        )
+        await session.commit()
     return {"message": "Event deleted successfully"}
 
 

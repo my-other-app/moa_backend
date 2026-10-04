@@ -12,6 +12,25 @@ class AuthTokenData(CustomBaseModel):
     user_id: int
     token_type: str
     token_version: int = 0
+    # Set only on a session an admin started on someone else's behalf. It
+    # travels with the token so the session is identifiable for its whole
+    # life, not just at the moment it was created.
+    impersonated_by: int | None = None
+
+
+class ImpersonationRequest(CustomBaseModel):
+    """Why the admin needs the session. Recorded in the audit log."""
+
+    reason: str | None = None
+
+
+class ImpersonationResponse(CustomBaseModel):
+    token: str
+    expires_in: int
+    user_id: int
+    full_name: str | None = None
+    email: str | None = None
+    user_type: str
 
 
 class AuthUser(CustomBaseModel):

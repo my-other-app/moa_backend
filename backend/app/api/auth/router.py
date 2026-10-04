@@ -24,7 +24,10 @@ from app.api.auth.schemas import (
     PasswordResetResponse,
     ChangePasswordRequest,
     ChangePasswordResponse,
+    ImpersonationRequest,
+    ImpersonationResponse,
 )
+from app.api.audit import service as audit
 from app.api.auth import service
 from app.db.core import SessionDep
 from app.config import settings
@@ -326,3 +329,125 @@ async def admin_reset_password(
         username=user.username,
     )
 
+
+# How long an impersonation hand-off token is good for. Short on purpose: it
+# is exchanged for a session immediately after it is issued, so minutes is
+# generous, and a leaked link stops working almost at once.
+IMPERSONATION_TTL_SECONDS = 120
+
+
+@router.post("/admin/impersonate/{user_id}", summary="Start a session as another user")
+async def impersonate_user(
+    user_id: int,
+    session: SessionDep,
+    admin: AdminAuth,
+    request: Request,
+    body: ImpersonationRequest | None = None,
+) -> ImpersonationResponse:
+    """
+    Mint a short-lived hand-off token for another account.
+
+    This is the most dangerous capability in the product, so it is fenced:
+
+    - admins only, and never targeting another admin -- an admin who could
+      impersonate a peer could act as them and leave the log pointing at the
+      wrong person
+    - the token lives for two minutes and is exchanged for a session
+      immediately
+    - the resulting session carries `impersonated_by`, so it stays
+      identifiable for its whole life rather than only at creation
+    - the attempt is recorded before the token is returned, so a token that
+      is minted and never used is still in the log
+
+    It was deliberately not built until the audit log existed, because an
+    admin acting as a user with no record of it is precisely the thing worth
+    refusing.
+    """
+    target = await get_user(session, user_id)
+    if not target:
+        raise CustomHTTPException(404, message="User not found")
+
+    target_type = getattr(target.user_type, "value", target.user_type)
+    if target_type == "admin":
+        raise CustomHTTPException(
+            403, message="Admins cannot impersonate other admins"
+        )
+
+    token = create_access_token(
+        data=AuthTokenData(
+            user_id=target.id,
+            token_type="impersonation",
+            token_version=target.token_version,
+            impersonated_by=admin.id,
+        ).model_dump(),
+        expires_delta=timedelta(seconds=IMPERSONATION_TTL_SECONDS),
+    )
+
+    await audit.record(
+        session,
+        actor=admin,
+        action="user.impersonate",
+        entity_type="user",
+        entity_id=target.id,
+        summary=f"Started a session as {target.email or target.username}",
+        details={
+            "target_user_type": target_type,
+            "reason": (body.reason if body else None),
+        },
+        request=request,
+    )
+    await session.commit()
+
+    return ImpersonationResponse(
+        token=token,
+        expires_in=IMPERSONATION_TTL_SECONDS,
+        user_id=target.id,
+        full_name=target.full_name,
+        email=target.email,
+        user_type=target_type,
+    )
+
+
+@router.post("/impersonate/exchange", summary="Exchange a hand-off token for a session")
+async def exchange_impersonation_token(
+    response: Response,
+    request: Request,
+    session: SessionDep,
+    token: str = Form(...),
+) -> Token:
+    """
+    Turn the hand-off token into normal session cookies.
+
+    Unauthenticated by design -- the token is the credential. It is accepted
+    only if it is of type `impersonation` and still carries the admin that
+    minted it, so an ordinary access token cannot be replayed here to launder
+    itself into a session that looks real.
+    """
+    try:
+        payload = decode_jwt_token(token)
+        data = AuthTokenData(**payload)
+    except Exception:
+        raise CustomHTTPException(401, message="Invalid or expired token")
+
+    if data.token_type != "impersonation" or not data.impersonated_by:
+        raise CustomHTTPException(401, message="Not an impersonation token")
+
+    target = await get_user(session, data.user_id)
+    if not target or target.token_version != data.token_version:
+        raise CustomHTTPException(401, message="Invalid or expired token")
+
+    claims = AuthTokenData(
+        user_id=target.id,
+        token_type="access_token",
+        token_version=target.token_version,
+        impersonated_by=data.impersonated_by,
+    ).model_dump()
+    access_token = create_access_token(
+        data=claims, expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
+    refresh_token = create_access_token(
+        data={**claims, "token_type": "refresh_token"},
+        expires_delta=timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
+    )
+    _set_auth_cookies(request, response, access_token, refresh_token)
+    return Token(access_token=access_token, refresh_token=refresh_token, token_type="bearer")

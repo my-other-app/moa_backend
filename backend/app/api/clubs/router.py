@@ -19,6 +19,7 @@ from app.api.clubs.schemas import (
 )
 from app.db.core import SessionDep
 from app.api.clubs import service
+from app.api.audit import service as audit
 from app.core.auth.dependencies import ClubAuth, DependsAuth, UserAuth, AdminAuth
 from app.core.response.pagination import (
     PaginatedResponse,
@@ -105,16 +106,38 @@ async def list_all_clubs_admin(
 
 @router.post("/{club_id}/approve", summary="Approve a pending club (admin)")
 async def approve_club_endpoint(
-    club_id: int, session: SessionDep, user: AdminAuth
+    club_id: int, session: SessionDep, user: AdminAuth, request: Request = None
 ) -> ClubAdminDetailResponse:
-    return await service.approve_club(session, club_id)
+    club = await service.approve_club(session, club_id)
+    await audit.record(
+        session,
+        actor=user,
+        action="club.approve",
+        entity_type="club",
+        entity_id=club_id,
+        summary=f"Approved club “{club.name}”",
+        request=request,
+    )
+    await session.commit()
+    return club
 
 
 @router.post("/{club_id}/reject", summary="Reject a pending club (admin)")
 async def reject_club_endpoint(
-    club_id: int, session: SessionDep, user: AdminAuth
+    club_id: int, session: SessionDep, user: AdminAuth, request: Request = None
 ) -> ClubAdminDetailResponse:
-    return await service.reject_club(session, club_id)
+    club = await service.reject_club(session, club_id)
+    await audit.record(
+        session,
+        actor=user,
+        action="club.reject",
+        entity_type="club",
+        entity_id=club_id,
+        summary=f"Rejected club “{club.name}” (soft-deleted)",
+        request=request,
+    )
+    await session.commit()
+    return club
 
 
 @router.put("/update", summary="update club")
@@ -364,7 +387,11 @@ async def get_club_admin_detail_endpoint(
 
 @router.put("/admin/{club_id}", summary="Update any club (admin)")
 async def update_club_admin(
-    club_id: int, session: SessionDep, user: AdminAuth, club: UpdateClub = Depends()
+    club_id: int,
+    session: SessionDep,
+    user: AdminAuth,
+    club: UpdateClub = Depends(),
+    request: Request = None,
 ) -> ClubCreateUpdateResponse:
     """
     PUT /clubs/update only ever edits the caller's own club, so an admin had
@@ -375,11 +402,33 @@ async def update_club_admin(
     links before re-adding what it was sent, so callers must send the full
     record rather than a patch.
     """
-    return await service.update_club(session=session, club_id=club_id, club=club)
+    updated = await service.update_club(session=session, club_id=club_id, club=club)
+    await audit.record(
+        session,
+        actor=user,
+        action="club.update",
+        entity_type="club",
+        entity_id=club_id,
+        summary=f"Edited club “{updated.name}”",
+        request=request,
+    )
+    await session.commit()
+    return updated
 
 
 @router.delete("/admin/{club_id}", summary="Delete a club (admin)")
 async def delete_club_admin(
-    club_id: int, session: SessionDep, user: AdminAuth
+    club_id: int, session: SessionDep, user: AdminAuth, request: Request = None
 ) -> ClubAdminDetailResponse:
-    return await service.delete_club(session, club_id)
+    club = await service.delete_club(session, club_id)
+    await audit.record(
+        session,
+        actor=user,
+        action="club.delete",
+        entity_type="club",
+        entity_id=club_id,
+        summary=f"Deleted club “{club.name}”",
+        request=request,
+    )
+    await session.commit()
+    return club
