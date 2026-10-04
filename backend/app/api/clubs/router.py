@@ -21,6 +21,7 @@ from app.db.core import SessionDep
 from app.api.clubs import service
 from app.api.audit import service as audit
 from app.core.auth.dependencies import ClubAuth, DependsAuth, UserAuth, AdminAuth
+from app.core.auth.permissions import DestroyAuth
 from app.core.response.pagination import (
     PaginatedResponse,
     PaginationParams,
@@ -124,7 +125,7 @@ async def approve_club_endpoint(
 
 @router.post("/{club_id}/reject", summary="Reject a pending club (admin)")
 async def reject_club_endpoint(
-    club_id: int, session: SessionDep, user: AdminAuth, request: Request = None
+    club_id: int, session: SessionDep, user: DestroyAuth, request: Request = None
 ) -> ClubAdminDetailResponse:
     club = await service.reject_club(session, club_id)
     await audit.record(
@@ -418,7 +419,7 @@ async def update_club_admin(
 
 @router.delete("/admin/{club_id}", summary="Delete a club (admin)")
 async def delete_club_admin(
-    club_id: int, session: SessionDep, user: AdminAuth, request: Request = None
+    club_id: int, session: SessionDep, user: DestroyAuth, request: Request = None
 ) -> ClubAdminDetailResponse:
     club = await service.delete_club(session, club_id)
     await audit.record(
@@ -428,6 +429,40 @@ async def delete_club_admin(
         entity_type="club",
         entity_id=club_id,
         summary=f"Deleted club “{club.name}”",
+        request=request,
+    )
+    await session.commit()
+    return club
+
+
+@router.get("/admin/deleted/list", summary="Deleted clubs (admin)")
+async def list_deleted_clubs_admin(
+    request: Request,
+    session: SessionDep,
+    pagination: PaginationParams,
+    user: AdminAuth,
+) -> PaginatedResponse[ClubAdminDetailResponse]:
+    """Declared under /admin/deleted so it cannot collide with /admin/{club_id}."""
+    clubs, total = await service.list_deleted_clubs(
+        session, limit=pagination.limit, offset=pagination.offset
+    )
+    return paginated_response(
+        clubs, request, schema=ClubAdminDetailResponse, total=total
+    )
+
+
+@router.post("/admin/{club_id}/restore", summary="Restore a deleted club (admin)")
+async def restore_club_admin(
+    club_id: int, session: SessionDep, user: AdminAuth, request: Request = None
+) -> ClubAdminDetailResponse:
+    club = await service.restore_club(session, club_id)
+    await audit.record(
+        session,
+        actor=user,
+        action="club.restore",
+        entity_type="club",
+        entity_id=club_id,
+        summary=f"Restored club “{club.name}”",
         request=request,
     )
     await session.commit()

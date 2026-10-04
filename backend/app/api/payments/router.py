@@ -1,6 +1,8 @@
 import uuid
+from datetime import datetime
 from fastapi.encoders import jsonable_encoder
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
+from pydantic import Field
 from app.config import settings
 from app.api.payments.schemas import (
     OrderCreateRequest,
@@ -9,8 +11,17 @@ from app.api.payments.schemas import (
     PaymentVerifyResponse,
 )
 from app.core.auth.dependencies import AdminAuth, DependsAuth
+from app.core.auth.permissions import MoneyAuth
 from app.db.core import SessionDep
+from app.api.payments.models import PaymentStatus
+from app.core.response.base_model import CustomBaseModel
+from app.core.response.pagination import (
+    PaginatedResponse,
+    PaginationParams,
+    paginated_response,
+)
 from app.api.payments import service
+from app.api.audit import service as audit
 from app.response import CustomHTTPException
 
 
@@ -66,9 +77,29 @@ async def verify_payment(
 
 @router.post("/logs/{payment_log_id}/refund", summary="Refund a captured payment (admin, full refund only)")
 async def refund_payment(
-    payment_log_id: uuid.UUID, session: SessionDep, admin: AdminAuth
+    payment_log_id: uuid.UUID,
+    session: SessionDep,
+    # Money leaving the platform needs the money capability, not just admin.
+    admin: MoneyAuth,
+    request: Request = None,
 ) -> dict:
     payment = await service.refund_payment(session, payment_log_id)
+    # Money leaving the platform is the action most worth being able to
+    # attribute later.
+    await audit.record(
+        session,
+        actor=admin,
+        action="payment.refund",
+        entity_type="payment",
+        entity_id=payment_log_id,
+        summary=f"Refunded {payment.amount}",
+        details={
+            "amount": float(payment.amount or 0),
+            "razorpay_payment_id": payment.razorpay_payment_id,
+        },
+        request=request,
+    )
+    await session.commit()
     return {
         "payment_status": payment.status.value,
         "order_status": payment.order.status.value,
@@ -181,3 +212,87 @@ async def razorpay_webhook(request: Request, session: SessionDep):
 #                 for log in payment_logs
 #             ],
 #         }
+
+
+class AdminPaymentUser(CustomBaseModel):
+    id: int | None = Field(None)
+    full_name: str | None = Field(None)
+    email: str | None = Field(None)
+
+
+class AdminPaymentResponse(CustomBaseModel):
+    id: uuid.UUID = Field(...)
+    razorpay_payment_id: str | None = Field(None)
+    status: str = Field(...)
+    amount: float = Field(0)
+    payment_method: str | None = Field(None)
+    created_at: datetime = Field(...)
+    order_id: uuid.UUID | None = Field(None)
+    razorpay_order_id: str | None = Field(None)
+    receipt: str | None = Field(None)
+    order_status: str | None = Field(None)
+    user: AdminPaymentUser | None = Field(None)
+    # Only a captured payment can be refunded; surfacing it here saves the UI
+    # re-deriving the rule and getting it wrong.
+    is_refundable: bool = Field(False)
+
+
+@router.get("/admin/list", summary="List payments (admin)")
+async def list_payments_admin(
+    request: Request,
+    session: SessionDep,
+    pagination: PaginationParams,
+    admin: AdminAuth,
+    status: str | None = Query(None, description="captured, refunded, failed, ..."),
+    search: str | None = Query(None, description="Payment, order or receipt id"),
+    user_id: int | None = Query(None),
+) -> PaginatedResponse[AdminPaymentResponse]:
+    """
+    Every payment. There was no list endpoint at all, so the refund route
+    required an id an admin had no way to find.
+    """
+    rows, total = await service.list_payments(
+        session,
+        status=status,
+        search=search,
+        user_id=user_id,
+        limit=pagination.limit,
+        offset=pagination.offset,
+    )
+    items = [
+        AdminPaymentResponse(
+            id=row.id,
+            razorpay_payment_id=row.razorpay_payment_id,
+            status=row.status.value if hasattr(row.status, "value") else str(row.status),
+            amount=float(row.amount or 0),
+            payment_method=row.payment_method,
+            created_at=row.created_at,
+            order_id=row.order_id,
+            razorpay_order_id=row.order.razorpay_order_id if row.order else None,
+            receipt=row.order.receipt if row.order else None,
+            order_status=(
+                row.order.status.value
+                if row.order and hasattr(row.order.status, "value")
+                else None
+            ),
+            user=(
+                AdminPaymentUser(
+                    id=row.order.user.id,
+                    full_name=row.order.user.full_name,
+                    email=row.order.user.email,
+                )
+                if row.order and row.order.user
+                else None
+            ),
+            is_refundable=row.status == PaymentStatus.captured,
+        )
+        for row in rows
+    ]
+    return paginated_response(
+        items, request, schema=AdminPaymentResponse, total=total
+    )
+
+
+@router.get("/admin/totals", summary="Payment totals (admin)")
+async def payment_totals_admin(session: SessionDep, admin: AdminAuth) -> dict:
+    return await service.get_payment_totals(session)

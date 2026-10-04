@@ -1,4 +1,5 @@
 import enum
+import sqlalchemy as sa
 from sqlalchemy import (
     Boolean,
     Column,
@@ -24,6 +25,25 @@ class UserTypes(enum.Enum):
     guest = "guest"
     club = "club"
     admin = "admin"
+
+
+class AdminRoles(enum.Enum):
+    """
+    What an admin may do.
+
+    There was one `admin` user_type and nothing else, so anyone who needed to
+    look at the dashboard could delete clubs, refund payments and impersonate
+    users. These narrow that without a second auth system: `user_type` still
+    gates who is an admin at all, this gates what kind.
+    """
+
+    # Read anything, change nothing. For analysts and new joiners.
+    viewer = "viewer"
+    # Day-to-day moderation: approve, suspend, award, announce. No money, no
+    # deletion of established records, no impersonation.
+    support = "support"
+    # Everything, including refunds, deletion and impersonation.
+    owner = "owner"
 
 
 class SigninProviders(enum.Enum):
@@ -62,6 +82,19 @@ class Users(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     provider = Column(Enum(SigninProviders), nullable=True)
     user_type = Column(Enum(UserTypes), nullable=False, default=UserTypes.app_user)
     token_version = Column(Integer, nullable=False, default=0)
+    # Suspension, as distinct from deletion. The only lever an admin had was
+    # soft-delete, which is permanent in practice and removes the account
+    # rather than restricting it. A suspended user keeps their data and can be
+    # reinstated; the auth dependency refuses them while the flag is set.
+    is_active = Column(Boolean, nullable=False, default=True, server_default=sa.text("true"))
+    suspended_reason = Column(String(255), nullable=True)
+    # Only meaningful when user_type is admin. Defaults to owner so existing
+    # admins keep the access they have today -- a migration that silently
+    # demoted everyone would lock the platform out of itself.
+    admin_role = Column(
+        Enum(AdminRoles), nullable=False, default=AdminRoles.owner,
+        server_default="owner",
+    )
 
     profile = relationship("UserProfiles", uselist=False)
     club = relationship("Clubs", uselist=False)

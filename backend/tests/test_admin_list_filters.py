@@ -222,3 +222,72 @@ async def test_events_sort_by_date(
 
     assert response.status_code == 200, response.text
     assert names(response, "name") == ["Sooner", "Later"]
+
+
+@pytest.fixture
+async def interest(session):
+    from app.api.interests.models import InterestCategory, Interests
+
+    category = InterestCategory(name="Academic")
+    session.add(category)
+    await session.flush()
+    row = Interests(name="Codng", category_id=category.id)
+    session.add(row)
+    await session.flush()
+    return row
+
+
+@pytest.mark.asyncio
+async def test_an_interest_can_be_renamed(client, make_admin, mint_token, interest):
+    """
+    Interests were create-only, so a typo was permanent -- and they appear on
+    every club and user profile.
+    """
+    admin = await make_admin()
+    token = await mint_token(admin)
+
+    response = await client.put(
+        f"/api/v1/interests/{interest.id}",
+        headers=auth_header(token),
+        json={"name": "Coding", "category_id": interest.category_id},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["name"] == "Coding"
+
+
+@pytest.mark.asyncio
+async def test_deleting_an_interest_detaches_it_from_clubs(
+    client, session, make_admin, make_club, mint_token, interest
+):
+    """The link rows reference it, so they have to go with it."""
+    from app.api.clubs.models import ClubInterestsLink
+
+    admin = await make_admin()
+    _, club = await make_club(name="Interested", email="interested@example.com")
+    session.add(ClubInterestsLink(club_id=club.id, interest_id=interest.id))
+    await session.flush()
+    token = await mint_token(admin)
+
+    response = await client.delete(
+        f"/api/v1/interests/{interest.id}", headers=auth_header(token)
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["detached_from"] == 1
+
+    remaining = await client.get("/api/v1/interests/list", headers=auth_header(token))
+    names = [i["name"] for c in remaining.json() for i in c["interests"]]
+    assert "Codng" not in names
+
+
+@pytest.mark.asyncio
+async def test_interest_management_is_admin_only(client, make_user, mint_token, interest):
+    nosy = await make_user(email="nosyinterest@example.com")
+    token = await mint_token(nosy)
+
+    response = await client.delete(
+        f"/api/v1/interests/{interest.id}", headers=auth_header(token)
+    )
+
+    assert response.status_code in (401, 403), response.text

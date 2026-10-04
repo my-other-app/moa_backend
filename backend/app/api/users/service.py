@@ -422,6 +422,36 @@ async def get_user_profile(session: AsyncSession, user_id: int):
     return await session.scalar(query)
 
 
+async def set_user_active(
+    session: AsyncSession, user_id: int, is_active: bool, reason: str | None = None
+):
+    """
+    Suspend or reinstate an account.
+
+    Distinct from deletion on purpose: the only lever an admin had was
+    soft-delete, which removes the account rather than restricting it and has
+    no undo in the product. A suspended user keeps everything and can be let
+    back in.
+
+    Suspending also bumps `token_version`, which invalidates every token
+    already issued -- without it the user would keep working until their
+    current session expired, which is not what "suspended" means.
+    """
+    user = await session.scalar(
+        select(Users).where(Users.id == user_id, Users.is_deleted == False)
+    )
+    if not user:
+        raise CustomHTTPException(404, "User not found")
+
+    user.is_active = is_active
+    user.suspended_reason = reason if not is_active else None
+    if not is_active:
+        user.token_version += 1
+
+    await session.commit()
+    return user
+
+
 async def get_user_admin_detail(session: AsyncSession, user_id: int):
     """
     One user with everything an admin needs to judge the account.

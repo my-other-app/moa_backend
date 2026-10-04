@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -78,3 +78,54 @@ async def list_interests(session: AsyncSession):
                 }
             )
     return list(data.values())
+
+
+async def update_interest(
+    session: AsyncSession,
+    interest_id: int,
+    name: str,
+    category_id: int,
+    icon: str | None = None,
+    icon_type=None,
+):
+    interest = await session.get(Interests, interest_id)
+    if not interest:
+        raise CustomHTTPException(404, "Interest not found")
+
+    interest.name = name
+    interest.category_id = category_id
+    interest.icon = icon
+    interest.icon_type = icon_type
+    await session.commit()
+    await session.refresh(interest)
+    return interest
+
+
+async def delete_interest(session: AsyncSession, interest_id: int) -> dict:
+    """
+    Remove an interest and detach it from everything that selected it.
+
+    The link rows reference it by foreign key, so they go first. Clubs and
+    users keep their other interests; only this one is dropped.
+    """
+    from app.api.clubs.models import ClubInterestsLink
+    from app.api.events.models import EventInterestsLink
+    from app.api.users.models import UserInterests
+
+    interest = await session.get(Interests, interest_id)
+    if not interest:
+        raise CustomHTTPException(404, "Interest not found")
+
+    detached = 0
+    for model in (ClubInterestsLink, EventInterestsLink, UserInterests):
+        count = await session.scalar(
+            select(func.count()).select_from(model).where(
+                model.interest_id == interest_id
+            )
+        )
+        detached += count or 0
+        await session.execute(delete(model).where(model.interest_id == interest_id))
+
+    await session.delete(interest)
+    await session.commit()
+    return {"message": "Interest deleted", "detached_from": detached}

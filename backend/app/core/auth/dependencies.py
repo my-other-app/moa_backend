@@ -102,6 +102,16 @@ def check_user_type(required_roles: Union[str, List[str]], optional=False):
                 message="Not Authorized",
                 error_code="INSUFFICIENT_PERMISSIONS",
             )
+        # A suspension has to bite on every request, not only at sign-in:
+        # an already-issued token would otherwise keep working for its full
+        # lifetime and the suspension would do nothing until it expired.
+        if getattr(current_user, "is_active", True) is False:
+            raise CustomHTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                message="This account has been suspended",
+                error_code="ACCOUNT_SUSPENDED",
+            )
+
         if user_type == "club":
             if not current_user.club.is_verified:
                 raise CustomHTTPException(

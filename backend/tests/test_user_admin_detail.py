@@ -168,3 +168,112 @@ async def test_missing_user_is_a_404(client, make_admin, mint_token):
     response = await client.get("/api/v1/user/admin/999999", headers=auth_header(token))
 
     assert response.status_code == 404, response.text
+
+
+@pytest.mark.asyncio
+async def test_a_user_can_be_suspended_and_reinstated(
+    client, make_admin, make_user, mint_token
+):
+    """
+    Suspension did not exist: the only lever for an abusive account was
+    delete, which is permanent in practice and takes their data with it.
+    """
+    admin = await make_admin()
+    target = await make_user(email="suspendme@example.com")
+    token = await mint_token(admin)
+
+    suspended = await client.put(
+        f"/api/v1/user/admin/{target.id}/active",
+        headers=auth_header(token),
+        json={"is_active": False, "reason": "spam"},
+    )
+    assert suspended.status_code == 200, suspended.text
+    assert suspended.json()["is_active"] is False
+    assert suspended.json()["suspended_reason"] == "spam"
+
+    reinstated = await client.put(
+        f"/api/v1/user/admin/{target.id}/active",
+        headers=auth_header(token),
+        json={"is_active": True},
+    )
+    assert reinstated.json()["is_active"] is True
+    # The reason is cleared, or a reinstated account still reads as guilty.
+    assert reinstated.json()["suspended_reason"] is None
+
+
+@pytest.mark.asyncio
+async def test_suspension_takes_effect_on_the_next_request(
+    client, make_admin, make_user, mint_token
+):
+    """
+    An already-issued token must stop working immediately. If suspension only
+    applied at sign-in, the user would carry on until their session expired.
+    """
+    admin = await make_admin()
+    target = await make_user(email="stillin@example.com")
+    victim_token = await mint_token(target)
+    admin_token = await mint_token(admin)
+
+    before = await client.get("/api/v1/auth/me", headers=auth_header(victim_token))
+    assert before.status_code == 200
+
+    await client.put(
+        f"/api/v1/user/admin/{target.id}/active",
+        headers=auth_header(admin_token),
+        json={"is_active": False, "reason": "abuse"},
+    )
+
+    after = await client.get("/api/v1/auth/me", headers=auth_header(victim_token))
+    assert after.status_code in (401, 403), after.text
+
+
+@pytest.mark.asyncio
+async def test_an_admin_cannot_suspend_themselves(client, make_admin, mint_token):
+    """Reinstating needs an admin, so this is a one-way lockout."""
+    admin = await make_admin()
+    token = await mint_token(admin)
+
+    response = await client.put(
+        f"/api/v1/user/admin/{admin.id}/active",
+        headers=auth_header(token),
+        json={"is_active": False},
+    )
+
+    assert response.status_code == 400, response.text
+
+
+@pytest.mark.asyncio
+async def test_suspension_is_recorded_in_the_audit_log(
+    client, make_admin, make_user, mint_token
+):
+    admin = await make_admin()
+    target = await make_user(email="logged@example.com")
+    token = await mint_token(admin)
+
+    await client.put(
+        f"/api/v1/user/admin/{target.id}/active",
+        headers=auth_header(token),
+        json={"is_active": False, "reason": "repeated reports"},
+    )
+
+    log = await client.get(
+        "/api/v1/admin/audit-log?action=user.suspend", headers=auth_header(token)
+    )
+    rows = log.json()["items"]
+    assert len(rows) == 1
+    assert rows[0]["details"]["reason"] == "repeated reports"
+
+
+@pytest.mark.asyncio
+async def test_only_an_admin_can_suspend(client, make_user, mint_token):
+    nosy = await make_user(email="nosysuspend@example.com")
+    victim = await make_user(email="victimsuspend@example.com")
+    token = await mint_token(nosy)
+
+    response = await client.put(
+        f"/api/v1/user/admin/{victim.id}/active",
+        headers=auth_header(token),
+        json={"is_active": False},
+    )
+
+    assert response.status_code in (401, 403), response.text

@@ -157,3 +157,108 @@ async def test_missing_club_is_a_404(client, make_admin, mint_token):
     response = await client.get("/api/v1/clubs/admin/999999", headers=auth_header(token))
 
     assert response.status_code == 404, response.text
+
+
+@pytest.mark.asyncio
+async def test_a_deleted_club_can_be_found_and_restored(
+    client, make_admin, make_club, mint_token
+):
+    """
+    Everything soft-deletes and nothing restored, so reject and delete were
+    permanent in practice -- the confirm dialogs said a developer could undo
+    it, which was true and also an admission the product could not.
+    """
+    admin = await make_admin()
+    _, club = await make_club(name="Oops", email="oops@example.com")
+    token = await mint_token(admin)
+
+    await client.delete(f"/api/v1/clubs/admin/{club.id}", headers=auth_header(token))
+
+    deleted = await client.get(
+        "/api/v1/clubs/admin/deleted/list", headers=auth_header(token)
+    )
+    assert deleted.status_code == 200, deleted.text
+    assert [c["name"] for c in deleted.json()["items"]] == ["Oops"]
+
+    restored = await client.post(
+        f"/api/v1/clubs/admin/{club.id}/restore", headers=auth_header(token)
+    )
+    assert restored.status_code == 200, restored.text
+
+    # Back in the normal listing, and out of the deleted one.
+    live = await client.get(
+        f"/api/v1/clubs/admin/{club.id}", headers=auth_header(token)
+    )
+    assert live.status_code == 200
+    assert live.json()["is_deleted"] is False
+
+    still_deleted = await client.get(
+        "/api/v1/clubs/admin/deleted/list", headers=auth_header(token)
+    )
+    assert still_deleted.json()["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_restoring_does_not_re_verify_a_pending_club(
+    client, make_admin, make_club, mint_token
+):
+    """An undo must not silently make the approval decision for the admin."""
+    admin = await make_admin()
+    _, club = await make_club(
+        name="Pending Undo", email="pendingundo@example.com", is_verified=False
+    )
+    token = await mint_token(admin)
+
+    await client.post(f"/api/v1/clubs/{club.id}/reject", headers=auth_header(token))
+    await client.post(
+        f"/api/v1/clubs/admin/{club.id}/restore", headers=auth_header(token)
+    )
+
+    detail = await client.get(
+        f"/api/v1/clubs/admin/{club.id}", headers=auth_header(token)
+    )
+    assert detail.json()["is_verified"] is False
+
+
+@pytest.mark.asyncio
+async def test_restoring_a_live_club_is_a_404(
+    client, make_admin, make_club, mint_token
+):
+    admin = await make_admin()
+    _, club = await make_club(name="Alive", email="alive@example.com")
+    token = await mint_token(admin)
+
+    response = await client.post(
+        f"/api/v1/clubs/admin/{club.id}/restore", headers=auth_header(token)
+    )
+
+    assert response.status_code == 404, response.text
+
+
+@pytest.mark.asyncio
+async def test_restore_is_recorded(client, make_admin, make_club, mint_token):
+    admin = await make_admin()
+    _, club = await make_club(name="Logged Undo", email="loggedundo@example.com")
+    token = await mint_token(admin)
+
+    await client.delete(f"/api/v1/clubs/admin/{club.id}", headers=auth_header(token))
+    await client.post(
+        f"/api/v1/clubs/admin/{club.id}/restore", headers=auth_header(token)
+    )
+
+    log = await client.get(
+        "/api/v1/admin/audit-log?action=club.restore", headers=auth_header(token)
+    )
+    assert log.json()["total"] == 1
+
+
+@pytest.mark.asyncio
+async def test_the_deleted_list_is_admin_only(client, make_user, mint_token):
+    nosy = await make_user(email="nosydeleted@example.com")
+    token = await mint_token(nosy)
+
+    response = await client.get(
+        "/api/v1/clubs/admin/deleted/list", headers=auth_header(token)
+    )
+
+    assert response.status_code in (401, 403), response.text

@@ -13,6 +13,7 @@ from app.core.auth.authentication import (
     get_password_hash,
 )
 from app.core.auth.dependencies import DependsAuth, AdminAuth
+from app.core.auth.permissions import ImpersonateAuth
 from app.response import CustomHTTPException
 from app.api.auth.schemas import (
     AuthTokenData,
@@ -340,7 +341,7 @@ IMPERSONATION_TTL_SECONDS = 120
 async def impersonate_user(
     user_id: int,
     session: SessionDep,
-    admin: AdminAuth,
+    admin: ImpersonateAuth,
     request: Request,
     body: ImpersonationRequest | None = None,
 ) -> ImpersonationResponse:

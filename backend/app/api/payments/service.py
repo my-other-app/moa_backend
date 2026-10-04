@@ -5,7 +5,7 @@ import time
 import traceback
 from fastapi import BackgroundTasks
 import razorpay
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
@@ -249,6 +249,99 @@ async def _apply_refund(session: AsyncSession, db_payment: PaymentLogs) -> None:
         event_registration.paid_amount = 0
 
     await session.commit()
+
+
+async def list_payments(
+    session: AsyncSession,
+    status: str | None = None,
+    search: str | None = None,
+    user_id: int | None = None,
+    limit: int = 20,
+    offset: int = 0,
+):
+    """
+    Every payment, for an admin.
+
+    There was no way to list these at all: the only payment route an admin had
+    was the refund, which needs a payment id they had no way to look up. A
+    platform that takes money could not show a transaction, investigate a
+    failed one, or find the payment behind "I paid and got nothing".
+    """
+    query = (
+        select(PaymentLogs)
+        .options(
+            joinedload(PaymentLogs.order).joinedload(PaymentOrders.user)
+        )
+        .where(PaymentLogs.is_deleted == False)
+    )
+    count_query = select(func.count(PaymentLogs.id)).where(
+        PaymentLogs.is_deleted == False
+    )
+
+    filters = []
+    if status:
+        filters.append(PaymentLogs.status == status)
+    if user_id is not None:
+        # Through the order, which is what carries the payer.
+        filters.append(
+            PaymentLogs.order_id.in_(
+                select(PaymentOrders.id).where(PaymentOrders.user_id == user_id)
+            )
+        )
+    if search and search.strip():
+        term = f"%{search.strip()}%"
+        filters.append(
+            or_(
+                PaymentLogs.razorpay_payment_id.ilike(term),
+                PaymentLogs.order_id.in_(
+                    select(PaymentOrders.id).where(
+                        or_(
+                            PaymentOrders.razorpay_order_id.ilike(term),
+                            PaymentOrders.receipt.ilike(term),
+                        )
+                    )
+                ),
+            )
+        )
+
+    for condition in filters:
+        query = query.where(condition)
+        count_query = count_query.where(condition)
+
+    total = await session.scalar(count_query)
+    rows = await session.scalars(
+        query.order_by(PaymentLogs.created_at.desc()).limit(limit).offset(offset)
+    )
+    return list(rows), (total or 0)
+
+
+async def get_payment_totals(session: AsyncSession) -> dict:
+    """Headline figures for the payments page."""
+    captured = await session.scalar(
+        select(func.coalesce(func.sum(PaymentLogs.amount), 0)).where(
+            PaymentLogs.status == PaymentStatus.captured,
+            PaymentLogs.is_deleted == False,
+        )
+    )
+    refunded = await session.scalar(
+        select(func.coalesce(func.sum(PaymentLogs.amount), 0)).where(
+            PaymentLogs.status == PaymentStatus.refunded,
+            PaymentLogs.is_deleted == False,
+        )
+    )
+    failed = await session.scalar(
+        select(func.count(PaymentLogs.id)).where(
+            PaymentLogs.status == PaymentStatus.failed,
+            PaymentLogs.is_deleted == False,
+        )
+    )
+    return {
+        "captured_total": float(captured or 0),
+        "refunded_total": float(refunded or 0),
+        # Net of refunds: the gross figure alone overstates what was kept.
+        "net_total": float((captured or 0) - (refunded or 0)),
+        "failed_count": int(failed or 0),
+    }
 
 
 async def refund_payment(session: AsyncSession, payment_log_id) -> PaymentLogs:

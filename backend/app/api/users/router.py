@@ -16,7 +16,10 @@ from app.api.users.schemas import (
     UserRegisteredEvents,
 )
 from app.db.core import SessionDep
+from app.core.response.base_model import CustomBaseModel
+from app.response import CustomHTTPException
 from app.api.users import service
+from app.api.audit import service as audit
 from app.core.response.sorting import apply_sort
 from app.core.response.pagination import (
     PaginatedResponse,
@@ -25,6 +28,7 @@ from app.core.response.pagination import (
 )
 from app.api.clubs.schemas import ClubListResponse, ClubPublicMin
 from app.core.auth.dependencies import AdminAuth, DependsAuth, UserAuth
+from app.core.auth.permissions import ModerateAuth
 from app.api.interests.schemas import InterestPublic
 from app.api.auth import service as auth_service
 
@@ -318,6 +322,11 @@ async def get_user_admin_detail(
     return AdminUserDetailResponse(
         **UserDetailResponse.model_validate(db_user).model_dump(),
         stats=AdminUserStats(**stats),
+        # Not on UserDetailResponse, so it has to be carried explicitly --
+        # otherwise the field silently defaults to True and a suspended
+        # account reads as active.
+        is_active=db_user.is_active,
+        suspended_reason=db_user.suspended_reason,
     )
 
 
@@ -369,4 +378,59 @@ async def list_user_events_admin(
     )
     return paginated_response(
         events, request=request, schema=UserRegisteredEvents, total=total
+    )
+
+
+class SetUserActiveRequest(CustomBaseModel):
+    is_active: bool
+    reason: str | None = None
+
+
+@router.put("/admin/{user_id}/active", summary="Suspend or reinstate a user (admin)")
+async def set_user_active_admin(
+    user_id: int,
+    body: SetUserActiveRequest,
+    session: SessionDep,
+    user: ModerateAuth,
+    request: Request = None,
+) -> AdminUserDetailResponse:
+    """
+    Suspension, as opposed to deletion.
+
+    An admin dealing with an abusive account previously had one option --
+    delete it -- which is permanent in practice and takes their data with it.
+    """
+    if user_id == user.id:
+        # Nothing stops an admin locking themselves out otherwise, and
+        # reinstating requires an admin.
+        raise CustomHTTPException(400, message="You cannot suspend your own account")
+
+    target = await service.set_user_active(
+        session, user_id, is_active=body.is_active, reason=body.reason
+    )
+    await audit.record(
+        session,
+        actor=user,
+        action="user.suspend" if not body.is_active else "user.reinstate",
+        entity_type="user",
+        entity_id=user_id,
+        summary=(
+            f"Suspended {target.email or target.username}"
+            if not body.is_active
+            else f"Reinstated {target.email or target.username}"
+        ),
+        details={"reason": body.reason},
+        request=request,
+    )
+    await session.commit()
+
+    db_user, stats = await service.get_user_admin_detail(session, user_id)
+    return AdminUserDetailResponse(
+        **UserDetailResponse.model_validate(db_user).model_dump(),
+        stats=AdminUserStats(**stats),
+        # Not on UserDetailResponse, so it has to be carried explicitly --
+        # otherwise the field silently defaults to True and a suspended
+        # account reads as active.
+        is_active=db_user.is_active,
+        suspended_reason=db_user.suspended_reason,
     )

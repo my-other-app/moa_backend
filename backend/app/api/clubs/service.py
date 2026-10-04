@@ -289,6 +289,49 @@ async def delete_club(session: AsyncSession, club_id: int) -> Clubs:
     return club
 
 
+async def list_deleted_clubs(session: AsyncSession, limit: int = 20, offset: int = 0):
+    """
+    Soft-deleted clubs, so a mistake can be found and undone.
+
+    Everything in this product soft-deletes and nothing restored, so "reject"
+    and "delete" were effectively permanent -- the dialogs said a developer
+    could undo it, which was true and also an admission the product could not.
+    """
+    total = await session.scalar(
+        select(func.count(Clubs.id)).where(Clubs.is_deleted == True)
+    )
+    rows = await session.scalars(
+        select(Clubs)
+        .where(Clubs.is_deleted == True)
+        .options(selectinload(Clubs.interests))
+        .order_by(Clubs.deleted_at.desc().nulls_last(), Clubs.id.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    return list(rows), (total or 0)
+
+
+async def restore_club(session: AsyncSession, club_id: int) -> Clubs:
+    """
+    Undo a soft delete.
+
+    Restoring does not re-verify: a club deleted while pending comes back
+    pending, so an admin still makes the approval decision deliberately
+    rather than inheriting it from an undo.
+    """
+    club = await session.scalar(
+        select(Clubs).where(Clubs.id == club_id, Clubs.is_deleted == True)
+    )
+    if not club:
+        raise CustomHTTPException(404, "No deleted club with that id")
+
+    club.is_deleted = False
+    club.deleted_at = None
+    await session.commit()
+    await session.refresh(club, attribute_names=["interests"])
+    return club
+
+
 async def get_all_clubs(
     session: AsyncSession,
     user_id: int | None = None,

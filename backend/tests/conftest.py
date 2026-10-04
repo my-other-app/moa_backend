@@ -170,8 +170,12 @@ async def make_club(session):
 
 @pytest_asyncio.fixture
 async def make_admin(session):
-    async def _factory(*, email="admin@example.com"):
-        return await _make_user(session, email=email, user_type=UserTypes.admin)
+    async def _factory(*, email="admin@example.com", role=None):
+        user = await _make_user(session, email=email, user_type=UserTypes.admin)
+        if role is not None:
+            user.admin_role = role
+            await session.flush()
+        return user
 
     return _factory
 

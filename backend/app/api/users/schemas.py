@@ -216,6 +216,8 @@ class AdminUserDetailResponse(UserDetailResponse):
     """
 
     stats: AdminUserStats = Field(...)
+    is_active: bool = Field(True)
+    suspended_reason: str | None = Field(None)
 
 
 class FCMTokenRequest(CustomBaseModel):
