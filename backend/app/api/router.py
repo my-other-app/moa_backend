@@ -1,5 +1,5 @@
 from uuid import UUID
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from app.api.auth.router import router as auth_router
 from app.api.orgs.router import router as org_router
 from app.api.users.router import router as user_router
@@ -146,3 +146,31 @@ async def get_admin_dashboard_analytics(
         "platform_revenue_delta": "+0% from last month",
         "user_growth_data": user_growth_data,
     }
+
+
+@api_router.get("/admin/analytics/trends", tags=["admin"])
+async def get_admin_trends(
+    session: SessionDep,
+    user: AdminAuth,
+    days: int = Query(30, ge=1, le=365, description="Window length in days"),
+) -> dict:
+    """
+    Daily users, events, registrations and revenue, with the preceding window
+    for comparison. The dashboard's other figures are counters; these are the
+    ones that say whether anything is moving.
+    """
+    from app.api import admin_insights
+
+    return await admin_insights.get_trends(session, days=days)
+
+
+@api_router.get("/admin/moderation-queue", tags=["admin"])
+async def get_admin_moderation_queue(
+    session: SessionDep,
+    user: AdminAuth,
+    limit: int = Query(20, ge=1, le=100),
+) -> dict:
+    """Everything waiting on an admin decision, in one response."""
+    from app.api import admin_insights
+
+    return await admin_insights.get_moderation_queue(session, limit=limit)
