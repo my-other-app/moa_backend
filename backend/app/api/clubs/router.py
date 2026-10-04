@@ -75,6 +75,9 @@ async def list_all_clubs_admin(
     pagination: PaginationParams,
     search: Optional[str] = Query(None, description="Search by club name"),
     org_id: Optional[int] = Query(None, description="Filter by organization"),
+    is_verified: Optional[bool] = Query(None, description="Approved clubs only"),
+    sort: Optional[str] = Query(None, description="created, name or followers"),
+    order: Optional[str] = Query(None, description="asc or desc"),
 ) -> PaginatedResponse[ClubAdminDetailResponse]:
     """
     List all clubs for an admin.
@@ -90,6 +93,9 @@ async def list_all_clubs_admin(
         offset=pagination.offset,
         search=search,
         include_unverified=True,
+        is_verified=is_verified,
+        sort=sort,
+        order=order,
     )
     return paginated_response(clubs, request, schema=ClubAdminDetailResponse)
 

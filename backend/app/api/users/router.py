@@ -17,6 +17,7 @@ from app.api.users.schemas import (
 )
 from app.db.core import SessionDep
 from app.api.users import service
+from app.core.response.sorting import apply_sort
 from app.core.response.pagination import (
     PaginatedResponse,
     PaginationParams,
@@ -71,6 +72,10 @@ async def list_all_users_admin(
     pagination: PaginationParams,
     user: AdminAuth,
     search: str | None = Query(None),
+    user_type: str | None = Query(None, description="app_user, club, admin or guest"),
+    provider: str | None = Query(None, description="google, apple or email"),
+    sort: str | None = Query(None, description="joined, name, email or username"),
+    order: str | None = Query(None, description="asc or desc"),
 ) -> PaginatedResponse[UserDetailResponse]:
     """List all users for an admin."""
     from sqlalchemy import select, func, or_
@@ -91,6 +96,14 @@ async def list_all_users_admin(
         base_query = base_query.filter(search_filter)
         count_query = count_query.filter(search_filter)
 
+    # Filters are applied to both queries or the total disagrees with the rows.
+    if user_type:
+        base_query = base_query.filter(Users.user_type == user_type)
+        count_query = count_query.filter(Users.user_type == user_type)
+    if provider:
+        base_query = base_query.filter(Users.provider == provider)
+        count_query = count_query.filter(Users.provider == provider)
+
     # Get total count of filtered results
     total_result = await session.execute(count_query)
     total = total_result.scalar() or 0
@@ -102,9 +115,20 @@ async def list_all_users_admin(
             selectinload(Users.profile).selectinload(UserProfiles.avatar),
             selectinload(Users.interests),
         )
-        .order_by(Users.created_at.desc())
         .offset(pagination.offset)
         .limit(pagination.limit)
+    )
+    query = apply_sort(
+        query,
+        columns={
+            "joined": Users.created_at,
+            "name": Users.full_name,
+            "email": Users.email,
+            "username": Users.username,
+        },
+        default=Users.created_at,
+        sort=sort,
+        order=order,
     )
     result = await session.execute(query)
     users = result.scalars().all()

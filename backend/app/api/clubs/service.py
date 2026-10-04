@@ -9,6 +9,7 @@ import secrets
 
 from app.core.utils.keys import generate_slug
 from app.response import CustomHTTPException
+from app.core.response.sorting import apply_sort
 from app.api.clubs.models import (
     ClubInterestsLink,
     ClubUsersLink,
@@ -300,6 +301,9 @@ async def get_all_clubs(
     interest_ids: list[int] | None = None,
     search: str | None = None,
     include_unverified: bool = False,
+    is_verified: bool | None = None,
+    sort: str | None = None,
+    order: str | None = None,
 ):
     """Get all clubs with optional filters, search, and followers count.
 
@@ -339,6 +343,11 @@ async def get_all_clubs(
         .where(Clubs.is_deleted == False)
         .options(selectinload(Clubs.interests))
     )
+
+    # `include_unverified` is the admin gate; `is_verified` is the caller's
+    # own filter on top of it, so an admin can ask for pending clubs only.
+    if is_verified is not None:
+        query = query.where(Clubs.is_verified == is_verified)
 
     if not include_unverified:
         query = query.where(Clubs.is_verified == True)
@@ -391,11 +400,19 @@ async def get_all_clubs(
             ClubUsersLinkHidden.is_deleted == False,
         )
 
-    query = (
-        query.group_by(Clubs.id)
-        .order_by(Clubs.created_at.desc())
-        .limit(limit)
-        .offset(offset)
+    query = query.group_by(Clubs.id).limit(limit).offset(offset)
+    query = apply_sort(
+        query,
+        columns={
+            "created": Clubs.created_at,
+            "name": Clubs.name,
+            # The aggregate is already selected and labelled, so sorting on it
+            # costs nothing extra.
+            "followers": func.count(func.distinct(ClubUsersLinkFollowers.id)),
+        },
+        default=Clubs.created_at,
+        sort=sort,
+        order=order,
     )
 
     results = await session.execute(query)

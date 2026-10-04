@@ -17,6 +17,7 @@ from typing import Optional, List
 
 from app.db.core import SessionDep
 from app.api.events import service
+from app.core.response.sorting import apply_sort
 from app.api.events.access import is_admin_user
 from app.api.events import wallet_service
 from app.api.users.models import UserTypes
@@ -168,8 +169,14 @@ async def list_all_events_admin(
     pagination: PaginationParams,
     user: AdminAuth,
     search: Optional[str] = Query(None, description="Search by event name or category"),
+    club_id: Optional[int] = Query(None, description="Filter by club"),
+    category_id: Optional[int] = Query(None, description="Filter by category"),
+    is_ended: Optional[bool] = Query(None, description="Past (true) or upcoming (false)"),
+    has_fee: Optional[bool] = Query(None, description="Paid events only"),
+    sort: Optional[str] = Query(None, description="created, date, name or views"),
+    order: Optional[str] = Query(None, description="asc or desc"),
 ) -> PaginatedResponse[EventAdminListResponse]:
-    """List all events for an admin without filters, but supports search."""
+    """List all events for an admin, with search, filters and ordering."""
     from sqlalchemy import select, func, or_
     from sqlalchemy.orm import selectinload
     from app.api.events.models import Events, EventCategories
@@ -200,10 +207,40 @@ async def list_all_events_admin(
             )
         )
 
+    # Applied to both queries, or the reported total disagrees with the rows.
+    from datetime import datetime, timezone
+
+    filters = []
+    if club_id is not None:
+        filters.append(Events.club_id == club_id)
+    if category_id is not None:
+        filters.append(Events.category_id == category_id)
+    if has_fee is not None:
+        filters.append(Events.has_fee == has_fee)
+    if is_ended is not None:
+        now = datetime.now(timezone.utc)
+        filters.append(
+            Events.event_datetime < now if is_ended else Events.event_datetime >= now
+        )
+    for condition in filters:
+        query = query.filter(condition)
+        count_query = count_query.filter(condition)
+
     total_result = await session.execute(count_query)
     total = total_result.scalar() or 0
 
-    query = query.order_by(Events.created_at.desc()).offset(pagination.offset).limit(pagination.limit)
+    query = apply_sort(
+        query,
+        columns={
+            "created": Events.created_at,
+            "date": Events.event_datetime,
+            "name": Events.name,
+            "views": Events.page_views,
+        },
+        default=Events.created_at,
+        sort=sort,
+        order=order,
+    ).offset(pagination.offset).limit(pagination.limit)
     result = await session.execute(query)
     events = result.scalars().all()
 
