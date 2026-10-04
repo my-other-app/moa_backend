@@ -74,10 +74,18 @@ async def list_all_clubs_admin(
     user: AdminAuth,
     pagination: PaginationParams,
     search: Optional[str] = Query(None, description="Search by club name"),
+    org_id: Optional[int] = Query(None, description="Filter by organization"),
 ) -> PaginatedResponse[ClubAdminDetailResponse]:
-    """List all clubs for an admin."""
+    """
+    List all clubs for an admin.
+
+    `org_id` is here so an organisation's page can show its clubs including
+    the unverified ones -- the public /clubs/list filter hides those, which
+    are exactly the ones an admin needs to see.
+    """
     clubs = await service.get_all_clubs(
         session,
+        org_id=org_id,
         limit=pagination.limit,
         offset=pagination.offset,
         search=search,

@@ -74,14 +74,37 @@ async def update_organization(id: int, org_data, session: AsyncSession):
     return org
 
 
-async def block_organization(id: int, session: AsyncSession):
+async def block_organization(
+    id: int, session: AsyncSession, is_blocked: bool | None = None
+):
+    """
+    Block or unblock an organisation.
+
+    Pass `is_blocked` to set it outright. The endpoint used to toggle and
+    ignore its request body, which is only safe when the caller's view of the
+    current state is correct -- and the admin dashboard caches this list for
+    ten minutes, so clicking "Block" on a stale row would have unblocked it.
+    Setting an explicit value is idempotent and cannot invert.
+
+    Omitting it still toggles, so any caller that relied on the old behaviour
+    keeps working.
+    """
     org = await session.get(Organizations, id)
     if not org or org.is_deleted:
         raise CustomHTTPException(status_code=404, message="Organization not found")
-        
-    org.is_blocked = not org.is_blocked
+
+    org.is_blocked = (not org.is_blocked) if is_blocked is None else is_blocked
     await session.commit()
     return {"message": f"Organization {'blocked' if org.is_blocked else 'unblocked'} successfully", "is_blocked": org.is_blocked}
+
+
+async def get_organization(id: int, session: AsyncSession):
+    """One organisation. The list endpoint returns every row with no filter,
+    so a detail page had to fetch all of them and pick one out."""
+    org = await session.get(Organizations, id)
+    if not org or org.is_deleted:
+        raise CustomHTTPException(status_code=404, message="Organization not found")
+    return org
 
 
 async def import_organizations(file: UploadFile, session: AsyncSession):
