@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload, joinedload
 from sqlalchemy.dialects.postgresql import INTERVAL
 
 from app.response import CustomHTTPException
+from app.api.events.access import ensure_event_access
 from app.api.events.schemas import (
     EventAdditionalDetail,
     EventCategoryCreate,
@@ -228,6 +229,7 @@ async def update_event(
     user_id: int, 
     event_id: int,
     speaker_photos: Optional[list[UploadFile]] = None,
+    as_admin: bool = False,
 ):
     db_event = await session.execute(
         select(Events)
@@ -237,8 +239,9 @@ async def update_event(
     db_event = db_event.scalar()
     if db_event is None:
         raise CustomHTTPException(404, message="Event not found")
-    if db_event.club.user_id != user_id:
-        raise CustomHTTPException(403, message="Not authorized to update this event")
+    ensure_event_access(
+        db_event, user_id, as_admin, message="Not authorized to update this event"
+    )
 
     if event.poster:
         content = io.BytesIO(await event.poster.read())
@@ -723,6 +726,7 @@ async def list_event_ratings(
     user_id: int,
     limit: int = 10,
     offset: int = 0,
+    as_admin: bool = False,
 ):
     """List detailed ratings for an event (Club Admin only)."""
     # Verify event ownership
@@ -734,8 +738,9 @@ async def list_event_ratings(
     if not event:
         raise CustomHTTPException(404, "Event not found")
     
-    if event.club.user_id != user_id:
-        raise CustomHTTPException(403, "Not authorized to view ratings for this event")
+    ensure_event_access(
+        event, user_id, as_admin, message="Not authorized to view ratings for this event"
+    )
         
     query = (
         select(EventRatingsLink)
@@ -840,15 +845,18 @@ async def get_ticket_details(session: AsyncSession, ticket_id: str | int):
     return registration
 
 
-async def delete_event(session: AsyncSession, event_id: int, user_id: int):
+async def delete_event(
+    session: AsyncSession, event_id: int, user_id: int, as_admin: bool = False
+):
     db_event = await session.execute(
         select(Events).filter(Events.id == event_id).options(joinedload(Events.club))
     )
     db_event = db_event.scalar()
     if db_event is None:
         raise CustomHTTPException(404, message="Event not found")
-    if db_event.club.user_id != user_id:
-        raise CustomHTTPException(403, message="Not authorized to delete this event")
+    ensure_event_access(
+        db_event, user_id, as_admin, message="Not authorized to delete this event"
+    )
     registration_count = await session.scalar(
         select(func.count()).filter(
             EventRegistrationsLink.event_id == event_id,

@@ -17,6 +17,7 @@ from typing import Optional, List
 
 from app.db.core import SessionDep
 from app.api.events import service
+from app.api.events.access import is_admin_user
 from app.api.events import wallet_service
 from app.api.users.models import UserTypes
 from app.response import CustomHTTPException
@@ -128,7 +129,12 @@ async def update_event(
     speaker_photos: List[UploadFile] = File([]),
 ) -> EventCreateUpdateResponse:
     return await service.update_event(
-        session, event, user.id, event_id=event_id, speaker_photos=speaker_photos
+        session,
+        event,
+        user.id,
+        event_id=event_id,
+        speaker_photos=speaker_photos,
+        as_admin=is_admin_user(user),
     )
 
 
@@ -269,7 +275,7 @@ async def delete_event(
     user: ClubAuth,
     session: SessionDep = SessionDep,
 ):
-    await service.delete_event(session, event_id, user.id)
+    await service.delete_event(session, event_id, user.id, as_admin=is_admin_user(user))
     return {"message": "Event deleted successfully"}
 
 
@@ -305,6 +311,7 @@ async def list_event_ratings(
         user_id=user.id,
         limit=pagination.limit,
         offset=pagination.offset,
+        as_admin=is_admin_user(user),
     )
     # Return raw dict to avoid Pydantic schema mismatch
     return {

@@ -19,6 +19,7 @@ from app.api.users import service as user_service
 from app.response import CustomHTTPException
 from app.api.auth import service as auth_service
 from app.api.events.registration import service
+from app.api.events.access import is_admin_user
 from app.api.events.models import Events
 from app.api.schemas import BackgroundTaskLogResponseSchema
 from app.api.service import create_background_task_log
@@ -116,6 +117,7 @@ async def list_event_registration(
         limit=pagination.limit,
         offset=pagination.offset,
         search=search,
+        as_admin=is_admin_user(user),
     )
     return paginated_response(result, request, EventRegistrationPublicMin, total=total)
 
@@ -139,6 +141,7 @@ async def list_event_attendees(
         limit=pagination.limit,
         offset=pagination.offset,
         search=search,
+        as_admin=is_admin_user(user),
     )
     return paginated_response(result, request, EventRegistrationPublicMin, total=total)
 
@@ -153,6 +156,7 @@ async def get_event_analytics(
         session,
         user_id=user.id,
         event_id=event_id,
+        as_admin=is_admin_user(user),
     )
 
 
@@ -172,6 +176,7 @@ async def export_event_registrations(
         is_paid=is_paid,
         limit=None,
         offset=None,
+        as_admin=is_admin_user(user),
     )
 
     # list_event_registrations returns plain dicts, not ORM rows, so every
@@ -234,7 +239,11 @@ async def get_event_registration(
     session: SessionDep = SessionDep,
 ) -> EventRegistrationDetailResponse:
     result = await service.get_registration(
-        session, user_id=user.id, event_id=event_id, registration_id=registration_id
+        session,
+        user_id=user.id,
+        event_id=event_id,
+        registration_id=registration_id,
+        as_admin=is_admin_user(user),
     )
     return jsonable_encoder(result)
 
@@ -293,5 +302,6 @@ async def mark_attendance(
         event_id=event_id,
         registration_id=registration_id,
         is_attended=attendance.is_attended,
+        as_admin=is_admin_user(user),
     )
     return jsonable_encoder(result)

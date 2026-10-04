@@ -19,6 +19,7 @@ from app.api.users.models import UserProfiles, UserTypes, Users
 from app.core.utils.keys import generate_ticket_id
 from app.core.validations.schema import validate_relations
 from app.response import CustomHTTPException
+from app.api.events.access import ensure_event_access
 from app.api.users import service as user_service
 from app.api.models import BackgroundTaskLogs
 
@@ -252,6 +253,7 @@ async def list_event_registrations(
     limit: int = 10,
     offset: int = 0,
     search: str | None = None,
+    as_admin: bool = False,
 ):
     event = await session.execute(
         select(Events).filter(Events.id == event_id).options(joinedload(Events.club))
@@ -261,8 +263,7 @@ async def list_event_registrations(
     if event is None:
         raise CustomHTTPException(404, message="Event not found")
 
-    if event.club.user_id != user_id:
-        raise CustomHTTPException(403, message="Not authorized to view this event")
+    ensure_event_access(event, user_id, as_admin)
     query = (
         select(EventRegistrationsLink)
         .where(
@@ -403,7 +404,11 @@ async def list_event_registrations(
 
 
 async def get_registration(
-    session: AsyncSession, user_id: int, event_id: int, registration_id: str
+    session: AsyncSession,
+    user_id: int,
+    event_id: int,
+    registration_id: str,
+    as_admin: bool = False,
 ):
     event = await session.execute(
         select(Events).filter(Events.id == event_id).options(joinedload(Events.club))
@@ -413,8 +418,7 @@ async def get_registration(
     if event is None:
         raise CustomHTTPException(404, message="Event not found")
 
-    if event.club.user_id != user_id:
-        raise CustomHTTPException(403, message="Not authorized to view this event")
+    ensure_event_access(event, user_id, as_admin)
 
     query = select(EventRegistrationsLink).where(
         EventRegistrationsLink.event_id == event_id,
@@ -593,6 +597,7 @@ async def get_event_analytics(
     session: AsyncSession,
     user_id: int,
     event_id: int,
+    as_admin: bool = False,
 ):
     # 1. Verify Event Access
     event = await session.execute(
@@ -603,8 +608,7 @@ async def get_event_analytics(
     if event is None:
         raise CustomHTTPException(404, message="Event not found")
 
-    if event.club.user_id != user_id:
-        raise CustomHTTPException(403, message="Not authorized to view this event")
+    ensure_event_access(event, user_id, as_admin)
 
     # 2. Fetch all active registrations
     query = select(EventRegistrationsLink).where(
@@ -742,6 +746,7 @@ async def mark_attendance(
     event_id: int,
     registration_id: str,
     is_attended: bool,
+    as_admin: bool = False,
 ):
     # 1. Verify Event Access
     event = await session.execute(
@@ -752,8 +757,9 @@ async def mark_attendance(
     if event is None:
         raise CustomHTTPException(404, message="Event not found")
 
-    if event.club.user_id != user_id:
-        raise CustomHTTPException(403, message="Not authorized to manage this event")
+    ensure_event_access(
+        event, user_id, as_admin, message="Not authorized to manage this event"
+    )
 
     # 2. Fetch Registration
     query = select(EventRegistrationsLink).where(
