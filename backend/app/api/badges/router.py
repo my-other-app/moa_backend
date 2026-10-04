@@ -192,6 +192,22 @@ async def admin_update_badge(
     return BadgeDefinitionResponse.model_validate(badge)
 
 
+@router.delete("/admin/{badge_id}", summary="Delete badge (Admin)")
+async def admin_delete_badge(
+    badge_id: int,
+    session: SessionDep,
+    admin: AdminAuth,
+):
+    """
+    Delete a badge definition and every award of it.
+
+    There was no way to remove a badge once created -- only to edit it. The
+    definition has no soft-delete, so this removes the award rows first; the
+    response says how many people lost the badge.
+    """
+    return await service.delete_badge_definition(session, badge_id)
+
+
 @router.get("/admin/{badge_id}/recipients", summary="Get badge recipients (Admin)")
 async def admin_badge_recipients(
     badge_id: int,
@@ -199,8 +215,7 @@ async def admin_badge_recipients(
     admin: AdminAuth,
 ) -> BadgeRecipientsListResponse:
     """Get all users or clubs who have earned a specific badge."""
-    from app.api.badges.models import BadgeDefinitions
-    badge = await session.get(BadgeDefinitions, badge_id)
+    badge = await service.get_badge_definition(session, badge_id)
     recipients = await service.get_badge_recipients(session, badge_id)
     return BadgeRecipientsListResponse(
         badge=BadgeDefinitionResponse.model_validate(badge),
@@ -216,8 +231,7 @@ async def admin_badge_stats(
     admin: AdminAuth,
 ) -> BadgeStatsResponse:
     """Get analytics stats for a specific badge."""
-    from app.api.badges.models import BadgeDefinitions
-    badge = await session.get(BadgeDefinitions, badge_id)
+    badge = await service.get_badge_definition(session, badge_id)
     stats = await service.get_badge_stats(session, badge_id)
     recent = await service.get_badge_recipients(session, badge_id)
     return BadgeStatsResponse(

@@ -3,11 +3,12 @@ Badge awarding and retrieval logic.
 """
 import logging
 from datetime import datetime, timezone
-from sqlalchemy import select, func, exists
+from sqlalchemy import select, func, exists, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.api.badges.models import BadgeDefinitions, BadgeType, UserBadges, ClubBadges
+from app.response import CustomHTTPException
 from app.api.events.models import (
     EventRegistrationsLink,
     EventRatingsLink,
@@ -355,6 +356,50 @@ async def update_badge_definition(session: AsyncSession, badge_id: int, update_d
 
 
 # ─── Analytics & Recipients ───────────────────────────────────────────
+
+async def get_badge_definition(session: AsyncSession, badge_id: int) -> BadgeDefinitions:
+    """
+    Load a badge definition or 404.
+
+    The recipients and stats endpoints used to `session.get(...)` and feed the
+    result straight into `BadgeDefinitionResponse.model_validate`, which turns
+    a missing badge into a ValidationError and a 500 instead of a 404.
+    """
+    badge = await session.get(BadgeDefinitions, badge_id)
+    if not badge:
+        raise CustomHTTPException(404, message="Badge not found")
+    return badge
+
+
+async def delete_badge_definition(session: AsyncSession, badge_id: int) -> dict:
+    """
+    Delete a badge definition and every award of it.
+
+    BadgeDefinitions has no soft-delete mixin, so this is a real delete, and
+    the award rows reference it by foreign key -- they have to go first or the
+    delete violates the constraint. Both award tables are cleared, because a
+    badge may be a user badge or a club badge and the counts are reported
+    together.
+    """
+    badge = await get_badge_definition(session, badge_id)
+
+    user_awards = await session.scalar(
+        select(func.count(UserBadges.id)).where(UserBadges.badge_id == badge_id)
+    )
+    club_awards = await session.scalar(
+        select(func.count(ClubBadges.id)).where(ClubBadges.badge_id == badge_id)
+    )
+
+    await session.execute(delete(UserBadges).where(UserBadges.badge_id == badge_id))
+    await session.execute(delete(ClubBadges).where(ClubBadges.badge_id == badge_id))
+    await session.delete(badge)
+    await session.commit()
+
+    return {
+        "message": "Badge deleted successfully",
+        "revoked_from": (user_awards or 0) + (club_awards or 0),
+    }
+
 
 async def get_badge_recipients(session: AsyncSession, badge_id: int) -> list[dict]:
     """Get all users/clubs who have earned a specific badge."""
