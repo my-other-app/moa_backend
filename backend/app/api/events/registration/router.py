@@ -11,6 +11,7 @@ from app.api.events.registration.schemas import (
     EventRegistrationRequest,
     EventRegistrationResponse,
     EventAnalyticsResponse,
+    SetWinnerRequest,
 )
 from app.core.auth.dependencies import AdminAuth, ClubAuth, OptionalUserAuth
 from app.db.core import SessionDep
@@ -302,6 +303,78 @@ async def mark_attendance(
         event_id=event_id,
         registration_id=registration_id,
         is_attended=attendance.is_attended,
+        as_admin=is_admin_user(user),
+    )
+    return jsonable_encoder(result)
+
+
+# ---------------------------------------------------------------------------
+# Winners.
+#
+# `is_won` and `position` have been columns on every registration since the
+# table was written, and the badge checker reads `position` for events_won,
+# runner_up_count and podium_count -- but nothing in the API ever wrote
+# either, so those three badges could not be earned by anyone.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{event_id}/winners", summary="List an event's winners")
+async def list_event_winners(
+    event_id: int,
+    user: ClubAuth,
+    session: SessionDep,
+) -> list[EventRegistrationPublicMin]:
+    winners = await service.list_winners(
+        session,
+        user_id=user.id,
+        event_id=event_id,
+        as_admin=is_admin_user(user),
+    )
+    return [
+        EventRegistrationPublicMin(
+            id=w.id,
+            ticket_id=w.ticket_id or "",
+            event_id=w.event_id,
+            is_paid=w.is_paid,
+            full_name=w.full_name or "",
+            email=w.email or "",
+            phone=w.phone,
+            actual_amount=float(w.actual_amount or 0),
+            paid_amount=float(w.paid_amount or 0),
+            is_attended=w.is_attended,
+            is_won=w.is_won,
+            position=w.position,
+            institution=w.institution,
+            name=w.full_name or "",
+            created_at=w.created_at,
+        )
+        for w in winners
+    ]
+
+
+@router.put(
+    "/{event_id}/winners/{registration_id}",
+    summary="Set or clear a registration's placing",
+)
+async def set_event_winner(
+    event_id: int,
+    registration_id: str,
+    body: SetWinnerRequest,
+    user: ClubAuth,
+    session: SessionDep,
+) -> EventRegistrationDetailResponse:
+    """
+    `position: 1` marks first place, `position: null` clears the placing.
+
+    Placings need not be unique within an event -- joint winners are real and
+    rejecting them would be a surprise with no upside.
+    """
+    result = await service.set_winner(
+        session,
+        user_id=user.id,
+        event_id=event_id,
+        registration_id=registration_id,
+        position=body.position,
         as_admin=is_admin_user(user),
     )
     return jsonable_encoder(result)

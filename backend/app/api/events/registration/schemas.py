@@ -62,11 +62,18 @@ class EventRegistrationPublicMin(CustomBaseModel):
     paid_amount: float = Field(...)
     is_attended: bool = Field(...)
     is_won: bool = Field(...)
+    position: int | None = Field(None)
     user: UserPublic | None = Field(None)
     volunteer: ListVolunteersResponse | None = Field(None)
     institution: str | None = Field(None)
     name: str | None = Field(None)
     created_at: datetime = Field(...)
+
+
+class SetWinnerRequest(CustomBaseModel):
+    """`position` of None clears the placing; 1 is first."""
+
+    position: int | None = Field(None, ge=1)
 
 
 class RegistrationTimeDistribution(CustomBaseModel):

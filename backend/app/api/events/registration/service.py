@@ -384,6 +384,9 @@ async def list_event_registrations(
                 "paid_amount": float(reg.paid_amount or 0),
                 "is_attended": reg.is_attended,
                 "is_won": reg.is_won,
+                # The placing itself, not just whether they placed -- the
+                # dashboard shows 1st/2nd/3rd and the badge metrics key on it.
+                "position": reg.position,
                 "user": user_data,
                 "volunteer": volunteer_data,
                 "institution": institution,
@@ -738,6 +741,135 @@ async def get_event_analytics(
         },
         "attendance_over_time": attendance_over_time,
     }
+
+
+async def _load_registration_for_event(
+    session: AsyncSession, event_id: int, registration_id: str
+):
+    """
+    Resolve a registration by uuid or by ticket id.
+
+    mark_attendance accepts either form -- organisers paste a scanned ticket
+    id as readily as a uuid -- so the winner endpoints accept both too rather
+    than being the one place that insists on a uuid.
+    """
+    query = select(EventRegistrationsLink).where(
+        EventRegistrationsLink.event_id == event_id,
+        EventRegistrationsLink.is_deleted == False,
+    )
+    if registration_id.startswith("MOA"):
+        query = query.where(EventRegistrationsLink.ticket_id == registration_id)
+    else:
+        try:
+            query = query.where(
+                EventRegistrationsLink.id == uuid.UUID(registration_id)
+            )
+        except ValueError:
+            raise CustomHTTPException(404, "Registration not found")
+
+    registration = await session.scalar(query.options(
+        joinedload(EventRegistrationsLink.user)
+    ))
+    if not registration:
+        raise CustomHTTPException(404, message="Registration not found")
+    return registration
+
+
+async def set_winner(
+    session: AsyncSession,
+    user_id: int,
+    event_id: int,
+    registration_id: str,
+    position: int | None,
+    as_admin: bool = False,
+):
+    """
+    Record or clear a placing for one registration.
+
+    `is_won` and `position` have been columns on every registration since the
+    table was written, and the badge checker reads `position` for three of its
+    metrics -- events_won (1st), runner_up_count (2nd) and podium_count (3rd).
+    Nothing in the API ever wrote either column, so those three badges could
+    never be earned by anyone. This is what writes them.
+
+    The two columns are kept consistent: `is_won` means "placed at all" and is
+    true exactly when a position is set. Passing None clears both.
+
+    Positions are not required to be unique within an event. Shared places are
+    real -- joint winners, two thirds -- and rejecting them would be a
+    surprise with no upside; the dashboard shows the placings as given.
+    """
+    if position is not None and position < 1:
+        raise CustomHTTPException(400, message="Position must be 1 or higher")
+
+    event = await session.scalar(
+        select(Events).where(Events.id == event_id).options(joinedload(Events.club))
+    )
+    if event is None:
+        raise CustomHTTPException(404, message="Event not found")
+
+    ensure_event_access(
+        event, user_id, as_admin, message="Not authorized to manage this event"
+    )
+
+    registration = await _load_registration_for_event(
+        session, event_id, registration_id
+    )
+
+    registration.position = position
+    registration.is_won = position is not None
+
+    await session.commit()
+    # No refresh: sessions are created with expire_on_commit=False, so the
+    # instance keeps both the values just written and the eagerly-loaded
+    # `user` the response schema requires. Refreshing would reload the columns
+    # and drop the relationship, which the response then rejects.
+
+    # The three placing badges can only be earned once a position exists, so
+    # re-check here. Mirrors mark_attendance: a badge failure must not fail
+    # the write the organiser actually asked for.
+    if registration.user_id:
+        try:
+            from app.api.badges.service import check_and_award_user_badges
+
+            await check_and_award_user_badges(session, user_id=registration.user_id)
+        except Exception as e:
+            import logging
+
+            logging.getLogger(__name__).error(f"Badge check failed after placing: {e}")
+
+    return registration
+
+
+async def list_winners(
+    session: AsyncSession,
+    user_id: int,
+    event_id: int,
+    as_admin: bool = False,
+):
+    """Everyone who placed, best placing first."""
+    event = await session.scalar(
+        select(Events).where(Events.id == event_id).options(joinedload(Events.club))
+    )
+    if event is None:
+        raise CustomHTTPException(404, message="Event not found")
+
+    ensure_event_access(event, user_id, as_admin)
+
+    rows = await session.scalars(
+        select(EventRegistrationsLink)
+        .where(
+            EventRegistrationsLink.event_id == event_id,
+            EventRegistrationsLink.is_deleted == False,
+            EventRegistrationsLink.is_won == True,
+        )
+        .options(joinedload(EventRegistrationsLink.user))
+        .order_by(
+            EventRegistrationsLink.position.asc().nulls_last(),
+            EventRegistrationsLink.full_name.asc(),
+        )
+    )
+    return list(rows)
 
 
 async def mark_attendance(
