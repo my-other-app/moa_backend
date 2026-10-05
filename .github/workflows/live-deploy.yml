@@ -1,5 +1,17 @@
 name: Live Deployment
 
+# The remote half of this deploy used to be a heredoc piped into `ssh`, which
+# made the whole script the remote shell's stdin. Any command that read stdin
+# therefore ate the rest of the script: on 2026-10-05 a `docker-compose exec`
+# (no `-T`) swallowed everything after it, so `alembic upgrade head` never ran
+# while the job still reported success -- the code shipped expecting columns
+# the database did not have and every login 500'd.
+#
+# So the script is now copied to the server and run from a file. Its stdin is
+# /dev/null, every `exec` passes `-T`, `set -e` makes a failure fail the job,
+# and the last line prints a marker that a following step greps for. A
+# truncated script can no longer pass for a successful one.
+
 on:
   workflow_dispatch:
     inputs:
@@ -62,7 +74,38 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
 
+      - name: Sync code
+        if: ${{ github.event.inputs.sync_code == 'true' }}
+        env:
+          REMOTE_IP: ${{ secrets.PROD_REMOTE_IP }}
+          USER: ${{ secrets.PROD_REMOTE_USER }}
+          PROJECT_PATH: ${{ secrets.PROD_PROJECT_PATH }}
+        run: |
+          rsync -avz --delete \
+            --exclude='README.md' \
+            --exclude='.gitignore' \
+            --exclude='.git/' \
+            --exclude='__pycache__/' \
+            --exclude='.env' \
+            -e "ssh -o StrictHostKeyChecking=no" ./ "$USER@$REMOTE_IP:$PROJECT_PATH" \
+            --rsync-path="sudo rsync"
+
+      - name: Sync environment variables
+        if: ${{ github.event.inputs.sync_env == 'true' }}
+        env:
+          REMOTE_IP: ${{ secrets.PROD_REMOTE_IP }}
+          USER: ${{ secrets.PROD_REMOTE_USER }}
+          PROJECT_PATH: ${{ secrets.PROD_PROJECT_PATH }}
+          ENV_VARS: ${{ secrets.PROD_ENV_VARIABLES }}
+        run: |
+          # Its own connection, with the secret as the only thing on stdin, so
+          # it is never written into the deploy script or a temp file.
+          printf '%s' "$ENV_VARS" \
+            | ssh -o StrictHostKeyChecking=no "$USER@$REMOTE_IP" \
+                "sudo tee '$PROJECT_PATH/.env' > /dev/null"
+
       - name: Deploy
+        id: deploy
         env:
           REMOTE_IP: ${{ secrets.PROD_REMOTE_IP }}
           USER: ${{ secrets.PROD_REMOTE_USER }}
@@ -73,67 +116,104 @@ jobs:
           RESTART_ALL: ${{ github.event.inputs.restart_all }}
           MIGRATE: ${{ github.event.inputs.migrate }}
           SYNC_CODE: ${{ github.event.inputs.sync_code }}
-          SYNC_ENV: ${{ github.event.inputs.sync_env }}
           UP_BACKEND: ${{ github.event.inputs.up_backend }}
           BUILD_BACKEND: ${{ github.event.inputs.build_backend }}
-          ENV_VARS: ${{ secrets.PROD_ENV_VARIABLES }}
         run: |
-          if [ "$SYNC_CODE" = "true" ]; then
-            rsync -avz --delete \
-              --exclude='README.md' \
-              --exclude='.gitignore' \
-              --exclude='.git/' \
-              --exclude='__pycache__/' \
-              --exclude='.env' \
-              -e "ssh -o StrictHostKeyChecking=no" ./ $USER@$REMOTE_IP:$PROJECT_PATH --rsync-path="sudo rsync"
-          fi
+          set -eo pipefail
 
-          ssh -o StrictHostKeyChecking=no $USER@$REMOTE_IP <<EOF
-          cd $PROJECT_PATH
+          COMPOSE="sudo docker-compose -f docker-compose.prod.yml"
 
-          if [ "$SYNC_CODE" = "true" ]; then
-            sudo docker compose -f docker-compose.prod.yml restart backend
-          fi
+          # Built locally so the runner expands the flags, then shipped as a
+          # file. Nothing secret goes in here -- the env file has its own step.
+          cat > deploy-remote.sh <<EOF
+          set -eo pipefail
+          cd "$PROJECT_PATH"
 
-          if [ "$RESTART_BACKEND" = "true" ]; then
-            echo "Restarting backend service..."
-            sudo docker-compose -f docker-compose.prod.yml restart backend
-          fi
-
-          if [ "$SYNC_ENV" = "true" ]; then
-            echo "Syncing environment variables..."
-            printf "%s" "$ENV_VARS" | sudo tee .env > /dev/null
-          fi
-
+          # Recreating steps come first: packages installed into a running
+          # container with \`exec pip install\` do not survive a recreate, so
+          # install_requirements has to follow them, not precede them.
           if [ "$RESTART_ALL" = "true" ]; then
-            echo "Restarting all services..."
-            sudo docker-compose -f docker-compose.prod.yml up --build -d
-          fi
-
-          if [ "$INSTALL_REQUIREMENTS" = "true" ]; then
-            echo "Installing backend requirements..."
-            sudo docker-compose -f docker-compose.prod.yml exec backend pip install --no-cache-dir -r requirements.txt
-          fi
-
-          if [ "$RESTART_DATABASE" = "true" ]; then
-            echo "Restarting and rebuilding database service..."
-            sudo docker-compose -f docker-compose.prod.yml build postgres
-            sudo docker-compose -f docker-compose.prod.yml up -d postgres
+            echo "::group::Restarting all services"
+            $COMPOSE up --build -d
+            echo "::endgroup::"
           fi
 
           if [ "$BUILD_BACKEND" = "true" ]; then
-            echo "Building backend service..."
-            sudo docker-compose -f docker-compose.prod.yml build backend
+            echo "::group::Building backend"
+            $COMPOSE build backend
+            echo "::endgroup::"
           fi
 
           if [ "$UP_BACKEND" = "true" ]; then
-            echo "Starting backend service..."
-            sudo docker-compose -f docker-compose.prod.yml up backend -d
+            echo "::group::Starting backend"
+            $COMPOSE up backend -d
+            echo "::endgroup::"
+          fi
+
+          if [ "$RESTART_DATABASE" = "true" ]; then
+            echo "::group::Rebuilding database"
+            $COMPOSE build postgres
+            $COMPOSE up -d postgres
+            echo "::endgroup::"
+          fi
+
+          if [ "$INSTALL_REQUIREMENTS" = "true" ]; then
+            echo "::group::Installing backend requirements"
+            # -T: without it this reads stdin and, when the script came in on
+            # stdin, consumed the rest of the deploy.
+            $COMPOSE exec -T backend pip install --no-cache-dir -r requirements.txt
+            echo "::endgroup::"
+            # A dependency added this way is only visible to code imported
+            # after it lands, so the restart below is not optional.
+            NEEDS_RESTART=1
           fi
 
           if [ "$MIGRATE" = "true" ]; then
-            echo "Migrating database..."
-            sudo docker-compose -f docker-compose.prod.yml exec backend alembic upgrade head
+            echo "::group::Migrating database"
+            $COMPOSE exec -T backend alembic upgrade head
+            echo "Applied revision:"
+            $COMPOSE exec -T backend alembic current
+            echo "::endgroup::"
           fi
 
+          # Last, so the process that comes up sees the new code, the new
+          # dependencies and the new schema together.
+          if [ "$SYNC_CODE" = "true" ] || [ "$RESTART_BACKEND" = "true" ] || [ -n "\$NEEDS_RESTART" ]; then
+            echo "::group::Restarting backend"
+            $COMPOSE restart backend
+            echo "::endgroup::"
+          fi
+
+          echo "MOA_DEPLOY_COMPLETE"
           EOF
+
+          REMOTE_SCRIPT="/tmp/moa-deploy-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.sh"
+
+          ssh -o StrictHostKeyChecking=no "$USER@$REMOTE_IP" \
+            "umask 077 && cat > '$REMOTE_SCRIPT'" < deploy-remote.sh
+
+          # stdin is /dev/null, so no remote command can eat the script.
+          set +e
+          ssh -o StrictHostKeyChecking=no "$USER@$REMOTE_IP" \
+            "bash '$REMOTE_SCRIPT'; status=\$?; rm -f '$REMOTE_SCRIPT'; exit \$status" \
+            < /dev/null | tee deploy-output.log
+          status=${PIPESTATUS[0]}
+          set -e
+
+          if [ "$status" -ne 0 ]; then
+            echo "::error::Remote deploy script exited $status"
+            exit "$status"
+          fi
+
+          # The marker is the point of all this: it is the last line of the
+          # script, so its absence means the script stopped early even though
+          # every command that did run returned 0.
+          if ! grep -q "MOA_DEPLOY_COMPLETE" deploy-output.log; then
+            echo "::error::The deploy script did not run to completion: the marker is missing, so steps after the last one shown above never ran. Do not treat this deploy as applied."
+            exit 1
+          fi
+
+          if [ "$MIGRATE" = "true" ] && ! grep -q "Applied revision:" deploy-output.log; then
+            echo "::error::migrate was requested but the migration step did not run."
+            exit 1
+          fi
