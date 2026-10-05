@@ -3,6 +3,11 @@ from typing import List
 from fastapi import APIRouter, Depends, Request
 
 from app.db.core import SessionDep
+from app.core.response.pagination import (
+    PaginatedResponse,
+    PaginationParams,
+    paginated_response,
+)
 from app.api.orgs.schema import (
     OrganizationCreate,
     OrganizationUpdate,
@@ -108,6 +113,35 @@ async def import_organizations(
 @router.get("/admin/{id}/analytics", summary="Get aggregated Club & Event statistics for an Organization")
 async def get_organization_analytics(id: int, session: SessionDep, user: AdminAuth) -> OrganizationAnalyticsResponse:
     return await service.get_organization_analytics(id, session)
+
+
+@router.get("/deleted/list", summary="Deleted organizations (admin)")
+async def list_deleted_organizations_endpoint(
+    request: Request,
+    session: SessionDep,
+    pagination: PaginationParams,
+    user: AdminAuth,
+) -> PaginatedResponse[OrganizationDetailResponse]:
+    """Declared before /{id} so the literal path wins."""
+    orgs, total = await service.list_deleted_organizations(
+        session, limit=pagination.limit, offset=pagination.offset
+    )
+    return paginated_response(
+        orgs, request, schema=OrganizationDetailResponse, total=total
+    )
+
+
+@router.post("/{id}/restore", summary="Restore a deleted organization (admin)")
+async def restore_organization_endpoint(
+    id: int, session: SessionDep, user: AdminAuth, request: Request = None
+) -> OrganizationDetailResponse:
+    org = await service.restore_organization(session, id)
+    await audit.record(
+        session, actor=user, action="org.restore", entity_type="org",
+        entity_id=id, summary=f"Restored organisation “{org.name}”", request=request,
+    )
+    await session.commit()
+    return org
 
 
 @router.get("/{id}", summary="Get one organization")

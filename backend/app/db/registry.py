@@ -11,3 +11,4 @@ from app.api.ticket_templates.models import *
 from app.api.certificate_templates.models import *
 from app.api.badges.models import *
 from app.api.audit.models import *
+from app.api.auth.sessions import UserSessions  # noqa: F401

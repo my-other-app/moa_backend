@@ -1,5 +1,5 @@
 from fastapi import File, Form, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional
 from app.api.orgs.models import OrgTypes
 
@@ -66,6 +66,10 @@ class OrganizationUpdate:
 
 
 class OrganizationDetailResponse(BaseModel):
+    # Validated straight from an ORM row by paginated_response, which the
+    # other org routes avoided by returning objects for FastAPI to serialise.
+    model_config = ConfigDict(from_attributes=True)
+
     id: int = Field(..., gt=0)
     name: str = Field(..., min_length=3, max_length=100)
     type: OrgTypes = Field(...)

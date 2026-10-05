@@ -20,11 +20,22 @@ MODERATE = "moderate"
 MANAGE_MONEY = "manage_money"
 DESTROY = "destroy"
 IMPERSONATE = "impersonate"
+# Editing accounts and granting admin roles. Owner-only: anyone who can
+# hand out `owner` can grant themselves anything, so this is the capability
+# that gates every other one.
+MANAGE_ADMINS = "manage_admins"
 
 ROLE_CAPABILITIES: dict[AdminRoles, set[str]] = {
     AdminRoles.viewer: {VIEW},
     AdminRoles.support: {VIEW, MODERATE},
-    AdminRoles.owner: {VIEW, MODERATE, MANAGE_MONEY, DESTROY, IMPERSONATE},
+    AdminRoles.owner: {
+        VIEW,
+        MODERATE,
+        MANAGE_MONEY,
+        DESTROY,
+        IMPERSONATE,
+        MANAGE_ADMINS,
+    },
 }
 
 
@@ -69,3 +80,4 @@ DestroyAuth = Annotated[object, Depends(requires(DESTROY))]
 MoneyAuth = Annotated[object, Depends(requires(MANAGE_MONEY))]
 ModerateAuth = Annotated[object, Depends(requires(MODERATE))]
 ImpersonateAuth = Annotated[object, Depends(requires(IMPERSONATE))]
+ManageAdminsAuth = Annotated[object, Depends(requires(MANAGE_ADMINS))]

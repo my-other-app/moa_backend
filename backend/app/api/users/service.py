@@ -422,6 +422,101 @@ async def get_user_profile(session: AsyncSession, user_id: int):
     return await session.scalar(query)
 
 
+async def admin_update_user(
+    session: AsyncSession,
+    user_id: int,
+    full_name: str | None = None,
+    email: str | None = None,
+    phone: str | None = None,
+):
+    """
+    Correct an account's details.
+
+    Admins could suspend a user but not fix a typo'd email, which is the most
+    common support request there is. Only the fields that were sent are
+    applied -- unlike the club and event handlers, an omitted field is left
+    alone rather than cleared.
+
+    `username` is deliberately not editable: it is referenced in URLs and
+    exports, and renaming it silently breaks links that already exist.
+    """
+    user = await session.scalar(
+        select(Users).where(Users.id == user_id, Users.is_deleted == False)
+    )
+    if not user:
+        raise CustomHTTPException(404, "User not found")
+
+    if email and email != user.email:
+        # (email, user_type) is unique, so a clash is a 500 from the database
+        # unless it is caught here.
+        clash = await session.scalar(
+            select(Users).where(
+                Users.email == email,
+                Users.user_type == user.user_type,
+                Users.id != user_id,
+                Users.is_deleted == False,
+            )
+        )
+        if clash:
+            raise CustomHTTPException(400, "Another account already uses that email")
+        user.email = email
+
+    if full_name is not None:
+        user.full_name = full_name
+    if phone is not None:
+        user.phone = phone or None
+
+    await session.commit()
+    return user
+
+
+async def admin_delete_user(session: AsyncSession, user_id: int):
+    """
+    Soft-delete an account.
+
+    Suspension is the reversible option and should be preferred; this exists
+    for the cases where a record genuinely has to go. The token version is
+    bumped so existing sessions stop immediately rather than running until
+    they expire.
+    """
+    user = await session.scalar(
+        select(Users).where(Users.id == user_id, Users.is_deleted == False)
+    )
+    if not user:
+        raise CustomHTTPException(404, "User not found")
+
+    user.soft_delete()
+    user.token_version += 1
+    await session.commit()
+    return user
+
+
+async def set_admin_role(session: AsyncSession, user_id: int, role):
+    """
+    Grant or change an admin role.
+
+    Only meaningful for an admin account; setting it on anyone else would be
+    a no-op the caller would reasonably expect to have worked.
+    """
+    from app.api.users.models import AdminRoles, UserTypes
+
+    user = await session.scalar(
+        select(Users).where(Users.id == user_id, Users.is_deleted == False)
+    )
+    if not user:
+        raise CustomHTTPException(404, "User not found")
+
+    user_type = getattr(user.user_type, "value", user.user_type)
+    if user_type != UserTypes.admin.value:
+        raise CustomHTTPException(
+            400, "Only an admin account can have an admin role"
+        )
+
+    user.admin_role = role if isinstance(role, AdminRoles) else AdminRoles(role)
+    await session.commit()
+    return user
+
+
 async def set_user_active(
     session: AsyncSession, user_id: int, is_active: bool, reason: str | None = None
 ):

@@ -647,3 +647,37 @@ async def get_networking_attendees(
         ],
         total=result["total"],
     )
+
+
+@router.get("/admin/deleted/list", summary="Deleted events (admin)")
+async def list_deleted_events_admin(
+    request: Request,
+    session: SessionDep,
+    pagination: PaginationParams,
+    user: AdminAuth,
+) -> PaginatedResponse[EventAdminListResponse]:
+    """Under /admin/deleted so it cannot collide with another admin path."""
+    events, total = await service.list_deleted_events(
+        session, limit=pagination.limit, offset=pagination.offset
+    )
+    return paginated_response(
+        events, request, schema=EventAdminListResponse, total=total
+    )
+
+
+@router.post("/admin/{event_id}/restore", summary="Restore a deleted event (admin)")
+async def restore_event_admin(
+    event_id: int, session: SessionDep, user: AdminAuth, request: Request = None
+) -> EventAdminListResponse:
+    event = await service.restore_event(session, event_id)
+    await audit.record(
+        session,
+        actor=user,
+        action="event.restore",
+        entity_type="event",
+        entity_id=event_id,
+        summary=f"Restored event “{event.name}”",
+        request=request,
+    )
+    await session.commit()
+    return event

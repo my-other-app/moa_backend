@@ -16,6 +16,10 @@ class AuthTokenData(CustomBaseModel):
     # travels with the token so the session is identifiable for its whole
     # life, not just at the moment it was created.
     impersonated_by: int | None = None
+    # Identifies the session this token belongs to, so one can be ended
+    # without ending all of them. Absent on tokens issued before sessions
+    # existed, which are treated as live rather than signed out on deploy.
+    sid: str | None = None
 
 
 class ImpersonationRequest(CustomBaseModel):

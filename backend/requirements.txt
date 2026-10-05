@@ -64,3 +64,4 @@ urllib3==2.7.0
 uvicorn==0.29.0
 uvloop==0.21.0
 wallet==2.1.525
+pyotp==2.9.0

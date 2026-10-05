@@ -91,6 +91,15 @@ class Users(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     # Only meaningful when user_type is admin. Defaults to owner so existing
     # admins keep the access they have today -- a migration that silently
     # demoted everyone would lock the platform out of itself.
+    # Two-factor, for admins. A stolen admin password is otherwise the whole
+    # chain: impersonation, refunds and deletion all sit behind it.
+    totp_secret = Column(String(64), nullable=True)
+    totp_enabled = Column(
+        Boolean, nullable=False, default=False, server_default=sa.text("false")
+    )
+    # Hashed, never stored in the clear -- they are password equivalents.
+    totp_recovery_codes = Column(sa.JSON, nullable=True)
+
     admin_role = Column(
         Enum(AdminRoles), nullable=False, default=AdminRoles.owner,
         server_default="owner",

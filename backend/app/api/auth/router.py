@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, Form, Request, Response
 from fastapi.security import OAuth2PasswordRequestForm
@@ -31,6 +31,7 @@ from app.api.auth.schemas import (
 from app.api.audit import service as audit
 from app.api.auth import service
 from app.db.core import SessionDep
+from app.core.response.base_model import CustomBaseModel
 from app.config import settings
 
 router = APIRouter(prefix="/auth")
@@ -82,7 +83,12 @@ async def google_sign_in(
     session: SessionDep = SessionDep,
 ) -> Token:
     user = await service.google_signin(session, request.id_token, request.platform)
-    return await service.create_access_refresh_tokens(user)
+    # No HTTP Request here -- `request` is the body model -- so the session is
+    # recorded without a device or address rather than renaming a public
+    # parameter for the sake of two optional fields.
+    token = await service.create_access_refresh_tokens(user, session=session)
+    await session.commit()
+    return token
 
 
 @router.post("/apple", summary="Sign in with Apple")
@@ -103,7 +109,9 @@ async def apple_sign_in(
         user_name=request.user_name,
         user_email=request.user_email,
     )
-    return await service.create_access_refresh_tokens(user)
+    token = await service.create_access_refresh_tokens(user, session=session)
+    await session.commit()
+    return token
 
 
 @router.post("/token", summary="get access token")
@@ -113,6 +121,7 @@ async def login_for_access_token(
     response: Response,
     session: SessionDep,
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
+    totp_code: Optional[str] = Form(None),
 ) -> Token:
     user = await authenticate_user(session, form_data.username, form_data.password)
     if not user:
@@ -121,6 +130,35 @@ async def login_for_access_token(
             message="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    # Second factor, where the account has one. The password is verified
+    # first so an attacker learns nothing new from the order; the distinct
+    # error code is what lets the UI show the code field rather than claiming
+    # the password was wrong.
+    if getattr(user, "totp_enabled", False):
+        from app.api.auth import totp as totp_service
+
+        if not totp_code:
+            raise CustomHTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                message="Enter the code from your authenticator app",
+                error_code="TOTP_REQUIRED",
+            )
+
+        if not totp_service.verify(user.totp_secret, totp_code):
+            remaining = totp_service.consume_recovery_code(
+                totp_code, user.totp_recovery_codes
+            )
+            if remaining is None:
+                raise CustomHTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    message="That code is not valid",
+                    error_code="TOTP_INVALID",
+                )
+            # A recovery code is single use; leaving it active would turn one
+            # leaked code into permanent access.
+            user.totp_recovery_codes = remaining
+            await session.commit()
     # Merge any guest accounts with matching email into this user
     from app.api.users.service import merge_guest_into_user
     await merge_guest_into_user(session, app_user=user)
@@ -130,7 +168,10 @@ async def login_for_access_token(
     # attribute access trigger an implicit lazy-load, which can hit a
     # pool_pre_ping/greenlet interaction bug on an async engine (MissingGreenlet).
     await session.refresh(user)
-    token = await service.create_access_refresh_tokens(user)
+    token = await service.create_access_refresh_tokens(
+        user, session=session, request=request
+    )
+    await session.commit()
     _set_auth_cookies(request, response, token.access_token, token.refresh_token)
     return token
 
@@ -168,6 +209,19 @@ async def refresh_access_token(
                 message="User not found",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+        from app.api.auth import sessions as session_store
+
+        if not await session_store.is_live(session, payload.sid):
+            # Ended from the sessions screen. token_version is the blunt
+            # instrument that ends every session; this ends one.
+            raise CustomHTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                message="This session was signed out",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        await session_store.touch(session, payload.sid)
+        await session.commit()
+
         if payload.token_version != user.token_version:
             raise CustomHTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -452,3 +506,188 @@ async def exchange_impersonation_token(
     )
     _set_auth_cookies(request, response, access_token, refresh_token)
     return Token(access_token=access_token, refresh_token=refresh_token, token_type="bearer")
+
+
+class SessionResponse(CustomBaseModel):
+    id: str
+    user_agent: str | None = None
+    ip_address: str | None = None
+    last_seen_at: datetime | None = None
+    created_at: datetime | None = None
+    current: bool = False
+
+
+@router.get("/sessions", summary="List your active sessions")
+async def list_sessions(
+    session: SessionDep,
+    user: DependsAuth,
+    request: Request,
+) -> list[SessionResponse]:
+    """
+    Your own sessions only.
+
+    token_version could already end every session at once, which is right for
+    a password change and wrong for "sign out my old laptop" -- there was no
+    way to see what existed, let alone end one.
+    """
+    from app.api.auth import sessions as session_store
+
+    current_sid = None
+    token = request.cookies.get(ACCESS_TOKEN_COOKIE_NAME)
+    if token:
+        try:
+            current_sid = AuthTokenData(**decode_jwt_token(token)).sid
+        except Exception:
+            current_sid = None
+
+    rows = await session_store.list_for_user(session, user.id)
+    return [
+        SessionResponse(
+            id=str(row.id),
+            user_agent=row.user_agent,
+            ip_address=row.ip_address,
+            last_seen_at=row.last_seen_at,
+            created_at=row.created_at,
+            # Marked so nobody ends the session they are using by accident.
+            current=str(row.id) == current_sid,
+        )
+        for row in rows
+    ]
+
+
+@router.delete("/sessions/{session_id}", summary="Sign out one session")
+async def revoke_session(
+    session_id: str,
+    session: SessionDep,
+    user: DependsAuth,
+):
+    from app.api.auth import sessions as session_store
+
+    # Scoped to the owner, so one user cannot end another's session.
+    if not await session_store.revoke(session, session_id, user.id):
+        raise CustomHTTPException(404, message="No such session")
+    return {"message": "Session signed out"}
+
+
+@router.delete("/sessions", summary="Sign out every other session")
+async def revoke_all_sessions(
+    session: SessionDep,
+    user: DependsAuth,
+):
+    """
+    Ends every session including this one, and bumps token_version so already
+    issued access tokens stop immediately rather than lasting out their term.
+    """
+    from app.api.auth import sessions as session_store
+    from sqlalchemy import select as sa_select
+    from app.api.users.models import Users as UsersModel
+
+    count = await session_store.revoke_all_for_user(session, user.id)
+    db_user = await session.scalar(sa_select(UsersModel).where(UsersModel.id == user.id))
+    if db_user:
+        db_user.token_version += 1
+        await session.commit()
+    return {"message": f"Signed out {count} session(s)"}
+
+
+class TotpSetupResponse(CustomBaseModel):
+    secret: str
+    provisioning_uri: str
+
+
+class TotpEnableRequest(CustomBaseModel):
+    code: str
+
+
+class TotpEnableResponse(CustomBaseModel):
+    enabled: bool
+    # Shown once and never again -- only hashes are stored.
+    recovery_codes: list[str]
+
+
+class TotpStatusResponse(CustomBaseModel):
+    enabled: bool
+    recovery_codes_remaining: int = 0
+
+
+@router.get("/2fa", summary="Whether two-factor is on for this account")
+async def totp_status(user: DependsAuth) -> TotpStatusResponse:
+    return TotpStatusResponse(
+        enabled=bool(getattr(user, "totp_enabled", False)),
+        recovery_codes_remaining=len(user.totp_recovery_codes or []),
+    )
+
+
+@router.post("/2fa/setup", summary="Start two-factor enrolment")
+async def totp_setup(session: SessionDep, user: DependsAuth) -> TotpSetupResponse:
+    """
+    Generates a secret and returns the otpauth:// URI to scan.
+
+    Two steps on purpose: the secret is stored but not enabled until the user
+    proves they can read a code from it. Enabling here would lock out anyone
+    whose authenticator failed to scan.
+    """
+    from app.api.auth import totp as totp_service
+    from sqlalchemy import select as sa_select
+    from app.api.users.models import Users as UsersModel
+
+    if getattr(user, "totp_enabled", False):
+        raise CustomHTTPException(400, message="Two-factor is already enabled")
+
+    secret = totp_service.new_secret()
+    db_user = await session.scalar(sa_select(UsersModel).where(UsersModel.id == user.id))
+    db_user.totp_secret = secret
+    await session.commit()
+
+    return TotpSetupResponse(
+        secret=secret,
+        provisioning_uri=totp_service.provisioning_uri(secret, user.email or user.username),
+    )
+
+
+@router.post("/2fa/enable", summary="Confirm and enable two-factor")
+async def totp_enable(
+    body: TotpEnableRequest, session: SessionDep, user: DependsAuth
+) -> TotpEnableResponse:
+    from app.api.auth import totp as totp_service
+    from sqlalchemy import select as sa_select
+    from app.api.users.models import Users as UsersModel
+
+    db_user = await session.scalar(sa_select(UsersModel).where(UsersModel.id == user.id))
+    if not db_user.totp_secret:
+        raise CustomHTTPException(400, message="Start setup first")
+    if not totp_service.verify(db_user.totp_secret, body.code):
+        raise CustomHTTPException(400, message="That code is not valid")
+
+    plaintext, hashed = totp_service.generate_recovery_codes()
+    db_user.totp_enabled = True
+    db_user.totp_recovery_codes = hashed
+    await session.commit()
+
+    return TotpEnableResponse(enabled=True, recovery_codes=plaintext)
+
+
+@router.post("/2fa/disable", summary="Turn two-factor off")
+async def totp_disable(
+    body: TotpEnableRequest, session: SessionDep, user: DependsAuth
+):
+    """
+    Requires a current code, not just a session. Otherwise anyone who walked
+    up to an unlocked screen could remove the second factor, which is the one
+    thing it exists to prevent.
+    """
+    from app.api.auth import totp as totp_service
+    from sqlalchemy import select as sa_select
+    from app.api.users.models import Users as UsersModel
+
+    db_user = await session.scalar(sa_select(UsersModel).where(UsersModel.id == user.id))
+    if not db_user.totp_enabled:
+        raise CustomHTTPException(400, message="Two-factor is not enabled")
+    if not totp_service.verify(db_user.totp_secret, body.code):
+        raise CustomHTTPException(400, message="That code is not valid")
+
+    db_user.totp_enabled = False
+    db_user.totp_secret = None
+    db_user.totp_recovery_codes = None
+    await session.commit()
+    return {"message": "Two-factor disabled"}

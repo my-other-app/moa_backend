@@ -28,7 +28,7 @@ from app.core.response.pagination import (
 )
 from app.api.clubs.schemas import ClubListResponse, ClubPublicMin
 from app.core.auth.dependencies import AdminAuth, DependsAuth, UserAuth
-from app.core.auth.permissions import ModerateAuth
+from app.core.auth.permissions import ManageAdminsAuth, ModerateAuth
 from app.api.interests.schemas import InterestPublic
 from app.api.auth import service as auth_service
 
@@ -327,6 +327,7 @@ async def get_user_admin_detail(
         # account reads as active.
         is_active=db_user.is_active,
         suspended_reason=db_user.suspended_reason,
+        admin_role=getattr(db_user.admin_role, "value", db_user.admin_role),
     )
 
 
@@ -433,4 +434,131 @@ async def set_user_active_admin(
         # account reads as active.
         is_active=db_user.is_active,
         suspended_reason=db_user.suspended_reason,
+        admin_role=getattr(db_user.admin_role, "value", db_user.admin_role),
+    )
+
+
+class AdminUpdateUserRequest(CustomBaseModel):
+    """Only the fields sent are applied; omitted ones are left alone."""
+
+    full_name: str | None = None
+    email: str | None = None
+    phone: str | None = None
+
+
+class SetAdminRoleRequest(CustomBaseModel):
+    role: str
+
+
+@router.put("/admin/{user_id}", summary="Edit a user (admin)")
+async def admin_update_user_endpoint(
+    user_id: int,
+    body: AdminUpdateUserRequest,
+    session: SessionDep,
+    user: ManageAdminsAuth,
+    request: Request = None,
+) -> AdminUserDetailResponse:
+    """
+    Admins could suspend an account but not correct it -- a typo'd email had
+    no fix in the product.
+    """
+    await service.admin_update_user(
+        session,
+        user_id,
+        full_name=body.full_name,
+        email=body.email,
+        phone=body.phone,
+    )
+    await audit.record(
+        session,
+        actor=user,
+        action="user.update",
+        entity_type="user",
+        entity_id=user_id,
+        summary="Edited account details",
+        details=body.model_dump(exclude_none=True),
+        request=request,
+    )
+    await session.commit()
+
+    db_user, stats = await service.get_user_admin_detail(session, user_id)
+    return AdminUserDetailResponse(
+        **UserDetailResponse.model_validate(db_user).model_dump(),
+        stats=AdminUserStats(**stats),
+        is_active=db_user.is_active,
+        suspended_reason=db_user.suspended_reason,
+        admin_role=getattr(db_user.admin_role, "value", db_user.admin_role),
+    )
+
+
+@router.delete("/admin/{user_id}", summary="Delete a user (admin)")
+async def admin_delete_user_endpoint(
+    user_id: int,
+    session: SessionDep,
+    user: ManageAdminsAuth,
+    request: Request = None,
+):
+    if user_id == user.id:
+        raise CustomHTTPException(400, message="You cannot delete your own account")
+
+    target = await service.admin_delete_user(session, user_id)
+    await audit.record(
+        session,
+        actor=user,
+        action="user.delete",
+        entity_type="user",
+        entity_id=user_id,
+        summary=f"Deleted {target.email or target.username}",
+        request=request,
+    )
+    await session.commit()
+    return {"message": "User deleted"}
+
+
+@router.put("/admin/{user_id}/role", summary="Set an admin's role")
+async def set_admin_role_endpoint(
+    user_id: int,
+    body: SetAdminRoleRequest,
+    session: SessionDep,
+    user: ManageAdminsAuth,
+    request: Request = None,
+) -> AdminUserDetailResponse:
+    """
+    Roles were enforced from the first day they existed but could only be
+    changed with a direct database update, which left the feature
+    half-delivered.
+    """
+    from app.api.users.models import AdminRoles
+
+    try:
+        role = AdminRoles(body.role)
+    except ValueError:
+        raise CustomHTTPException(400, message=f"Unknown role: {body.role}")
+
+    if user_id == user.id and role is not AdminRoles.owner:
+        # Demoting yourself removes the capability needed to undo it.
+        raise CustomHTTPException(
+            400, message="You cannot remove your own owner role"
+        )
+
+    target = await service.set_admin_role(session, user_id, role)
+    await audit.record(
+        session,
+        actor=user,
+        action="user.set_role",
+        entity_type="user",
+        entity_id=user_id,
+        summary=f"Set admin role to {role.value} for {target.email}",
+        details={"role": role.value},
+        request=request,
+    )
+    await session.commit()
+
+    db_user, stats = await service.get_user_admin_detail(session, user_id)
+    return AdminUserDetailResponse(
+        **UserDetailResponse.model_validate(db_user).model_dump(),
+        stats=AdminUserStats(**stats),
+        is_active=db_user.is_active,
+        suspended_reason=db_user.suspended_reason,
+        admin_role=getattr(db_user.admin_role, "value", db_user.admin_role),
     )

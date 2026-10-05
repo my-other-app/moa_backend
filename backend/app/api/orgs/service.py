@@ -177,3 +177,34 @@ async def get_organization_analytics(id: int, session: AsyncSession) -> Organiza
         total_events=total_events,
         total_followers=total_followers
     )
+
+
+async def list_deleted_organizations(
+    session: AsyncSession, limit: int = 20, offset: int = 0
+):
+    total = await session.scalar(
+        select(func.count(Organizations.id)).where(Organizations.is_deleted == True)
+    )
+    rows = await session.scalars(
+        select(Organizations)
+        .where(Organizations.is_deleted == True)
+        .order_by(Organizations.deleted_at.desc().nulls_last(), Organizations.id.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    return list(rows), (total or 0)
+
+
+async def restore_organization(session: AsyncSession, id: int):
+    org = await session.scalar(
+        select(Organizations).where(
+            Organizations.id == id, Organizations.is_deleted == True
+        )
+    )
+    if not org:
+        raise CustomHTTPException(404, "No deleted organization with that id")
+
+    org.is_deleted = False
+    org.deleted_at = None
+    await session.commit()
+    return org
