@@ -69,9 +69,19 @@ async def test_todays_signup_lands_on_todays_point(
 
 
 @pytest.mark.asyncio
-async def test_revenue_counts_only_paid_registrations(
+async def test_registrations_are_counted_regardless_of_payment(
     client, make_admin, make_club, make_user, make_event, make_registration, mint_token
 ):
+    """
+    Registrations count attendance, so a free place is still a registration.
+
+    Revenue deliberately does not come from these rows any more. A
+    registration records what was charged; a refund never changes it, so after
+    any refund that figure overstates what the platform kept -- and disagreed
+    with the payments page showing the same word on the same screen. Revenue
+    now reads the payment log, which is covered in
+    test_admin_analytics_accuracy.py.
+    """
     admin = await make_admin()
     owner, club = await make_club(name="Revenue", email="revenueclub@example.com")
     event = await make_event(club=club, name="Paid Event", created_by=owner)
@@ -87,8 +97,10 @@ async def test_revenue_counts_only_paid_registrations(
     )
 
     body = response.json()
-    assert body["totals"]["revenue"] == 300
     assert body["totals"]["registrations"] == 2
+    # No payment was captured, so nothing cleared -- even though a registration
+    # claims it was paid.
+    assert body["totals"]["revenue"] == 0
 
 
 @pytest.mark.asyncio

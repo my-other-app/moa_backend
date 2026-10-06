@@ -61,6 +61,7 @@ async def get_admin_dashboard_analytics(
     from app.api.users.models import Users
     from app.api.clubs.models import Clubs
     from app.api.events.models import Events
+    from app.api.payments.models import PaymentLogs, PaymentStatus
     from datetime import datetime, timedelta, timezone
 
     now = datetime.now(timezone.utc)
@@ -87,22 +88,87 @@ async def get_admin_dashboard_analytics(
     total_users_delta = f"+{base_growth_pct}% from last month" if base_growth_pct >= 0 else f"{base_growth_pct}% from last month"
 
     # 2. Clubs & Delta
-    verified_clubs_result = await session.execute(select(func.count(Clubs.id)).where(Clubs.is_verified == True))
+    # `is_deleted` matters here: every list endpoint filters it, so counting
+    # deleted rows made this card disagree with the table it links to.
+    verified_clubs_result = await session.execute(
+        select(func.count(Clubs.id)).where(
+            Clubs.is_verified == True, Clubs.is_deleted == False
+        )
+    )
     verified_clubs = verified_clubs_result.scalar() or 0
 
-    new_clubs_7_result = await session.execute(select(func.count(Clubs.id)).where(and_(Clubs.is_verified == True, Clubs.created_at >= seven_days_ago)))
+    new_clubs_7_result = await session.execute(
+        select(func.count(Clubs.id)).where(
+            and_(
+                Clubs.is_verified == True,
+                Clubs.is_deleted == False,
+                Clubs.created_at >= seven_days_ago,
+            )
+        )
+    )
     new_clubs_7 = new_clubs_7_result.scalar() or 0
     verified_clubs_delta = f"+{new_clubs_7} new this week"
 
     # 3. Events & Delta
-    events_hosted_result = await session.execute(select(func.count(Events.id)))
+    events_hosted_result = await session.execute(
+        select(func.count(Events.id)).where(Events.is_deleted == False)
+    )
     events_hosted = events_hosted_result.scalar() or 0
 
-    new_events_30_result = await session.execute(select(func.count(Events.id)).where(Events.created_at >= thirty_days_ago))
+    new_events_30_result = await session.execute(
+        select(func.count(Events.id)).where(
+            Events.is_deleted == False, Events.created_at >= thirty_days_ago
+        )
+    )
     new_events_30 = new_events_30_result.scalar() or 0
     events_hosted_delta = f"+{new_events_30} this month"
 
-    # 4. Usage Growth Chart Data (Last 7 Days)
+    # 4. Revenue
+    #
+    # This reported a literal 0 with a "+0% from last month" caption, so the
+    # dashboard has always shown no revenue regardless of takings. Read from
+    # the payment log and net of refunds, so it agrees with the payments page
+    # rather than being a second, larger number for the same thing.
+    async def _captured_between(start=None, end=None) -> float:
+        filters = [
+            PaymentLogs.status == PaymentStatus.captured,
+            PaymentLogs.is_deleted == False,
+        ]
+        if start is not None:
+            filters.append(PaymentLogs.created_at >= start)
+        if end is not None:
+            filters.append(PaymentLogs.created_at < end)
+        total = await session.scalar(
+            select(func.coalesce(func.sum(PaymentLogs.amount), 0)).where(*filters)
+        )
+        return float(total or 0)
+
+    refunded_total = await session.scalar(
+        select(func.coalesce(func.sum(PaymentLogs.amount), 0)).where(
+            PaymentLogs.status == PaymentStatus.refunded,
+            PaymentLogs.is_deleted == False,
+        )
+    )
+    platform_revenue = await _captured_between() - float(refunded_total or 0)
+
+    revenue_30 = await _captured_between(start=thirty_days_ago)
+    revenue_previous_30 = await _captured_between(
+        start=sixty_days_ago, end=thirty_days_ago
+    )
+    if revenue_previous_30 > 0:
+        revenue_change = int(
+            ((revenue_30 - revenue_previous_30) / revenue_previous_30) * 100
+        )
+        platform_revenue_delta = (
+            f"{'+' if revenue_change >= 0 else ''}{revenue_change}% from last month"
+        )
+    elif revenue_30 > 0:
+        # No baseline to divide by; "+100%" would be an invention.
+        platform_revenue_delta = "first revenue this month"
+    else:
+        platform_revenue_delta = "no revenue yet"
+
+    # 5. Usage Growth Chart Data (Last 7 Days)
     growth_query = select(
         cast(Users.created_at, Date).label("creation_date"),
         func.count(Users.id)
@@ -146,8 +212,8 @@ async def get_admin_dashboard_analytics(
         "verified_clubs_delta": verified_clubs_delta,
         "events_hosted": events_hosted,
         "events_hosted_delta": events_hosted_delta,
-        "platform_revenue": 0, 
-        "platform_revenue_delta": "+0% from last month",
+        "platform_revenue": platform_revenue,
+        "platform_revenue_delta": platform_revenue_delta,
         "user_growth_data": user_growth_data,
     }
 

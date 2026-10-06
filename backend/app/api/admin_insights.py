@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.clubs.models import Clubs
 from app.api.events.models import EventRegistrationsLink, Events
+from app.api.payments.models import PaymentLogs, PaymentStatus
 from app.api.users.models import Users
 
 # A year of daily points is already more than a chart can show usefully, and
@@ -53,21 +54,30 @@ async def get_trends(session: AsyncSession, days: int = 30) -> dict:
     start_of_day = start.replace(hour=0, minute=0, second=0, microsecond=0)
     previous_start = start_of_day - timedelta(days=days)
 
-    paid = EventRegistrationsLink.is_paid == True
     live = EventRegistrationsLink.is_deleted == False
+    live_events = Events.is_deleted == False
+    # Revenue is money actually taken, read from the payment log -- the same
+    # source as the payments page and the headline figure. It used to sum
+    # `paid_amount` on registrations, which counts what a ticket was priced at
+    # rather than what cleared, so the chart and the payments page disagreed.
+    captured = (
+        PaymentLogs.status == PaymentStatus.captured,
+        PaymentLogs.is_deleted == False,
+    )
 
     users = await _daily_counts(session, Users.created_at, start_of_day)
-    events = await _daily_counts(session, Events.created_at, start_of_day)
+    events = await _daily_counts(
+        session, Events.created_at, start_of_day, live_events
+    )
     registrations = await _daily_counts(
         session, EventRegistrationsLink.created_at, start_of_day, live
     )
     revenue = await _daily_counts(
         session,
-        EventRegistrationsLink.created_at,
+        PaymentLogs.created_at,
         start_of_day,
-        live,
-        paid,
-        value=EventRegistrationsLink.paid_amount,
+        *captured,
+        value=PaymentLogs.amount,
     )
 
     series = []
@@ -96,15 +106,12 @@ async def get_trends(session: AsyncSession, days: int = 30) -> dict:
 
     previous = {
         "users": int(await window_total(Users.created_at)),
-        "events": int(await window_total(Events.created_at)),
+        "events": int(await window_total(Events.created_at, live_events)),
         "registrations": int(
             await window_total(EventRegistrationsLink.created_at, live)
         ),
         "revenue": await window_total(
-            EventRegistrationsLink.created_at,
-            live,
-            paid,
-            value=EventRegistrationsLink.paid_amount,
+            PaymentLogs.created_at, *captured, value=PaymentLogs.amount
         ),
     }
 
