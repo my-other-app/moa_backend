@@ -133,3 +133,138 @@ async def test_a_non_admin_is_still_refused_regardless_of_role(
     response = await client.get("/api/v1/clubs/admin/list", headers=auth_header(token))
 
     assert response.status_code in (401, 403), response.text
+
+
+# ---------------------------------------------------------------------------
+# Coverage for the 27 mutating endpoints that previously accepted any admin.
+#
+# Before this, `admin_role` was enforced on eight endpoints. The UI offered a
+# Viewer role described as "Read everything, change nothing" while that viewer
+# could delete organisations and badges, because every other handler asked only
+# "is this an admin". These assert the boundary per capability rather than per
+# endpoint: one representative route each, for the three roles.
+#
+# A denied call must be exactly 403 -- the guard is a dependency, so it runs
+# before the body is validated and before the row is looked up, which is why a
+# dummy id is enough. An allowed call is asserted as "not 403": it may well 404
+# or 422 on the dummy id, and that still proves the guard let it through.
+# ---------------------------------------------------------------------------
+
+MODERATE_ROUTE = ("put", "/api/v1/orgs/block/1", {"is_blocked": True})
+DESTROY_ROUTE = ("delete", "/api/v1/orgs/delete/1", None)
+CONTENT_ROUTE = ("post", "/api/v1/interests/create", {"name": "X", "category_id": 1})
+CREDENTIALS_ROUTE = (
+    "post",
+    "/api/v1/auth/admin/reset-password",
+    {"identifier": "someone", "new_password": "Irrelevant123!"},
+)
+
+
+async def _call(client, token, route):
+    method, path, body = route
+    kwargs = {"headers": auth_header(token)}
+    if body is not None:
+        kwargs["json"] = body
+    return await getattr(client, method)(path, **kwargs)
+
+
+@pytest.mark.parametrize(
+    "role,route,allowed",
+    [
+        # A viewer changes nothing at all, which is what the UI promises.
+        ("viewer", MODERATE_ROUTE, False),
+        ("viewer", DESTROY_ROUTE, False),
+        ("viewer", CONTENT_ROUTE, False),
+        ("viewer", CREDENTIALS_ROUTE, False),
+        # Support moderates -- approve, suspend, award, announce, block.
+        ("support", MODERATE_ROUTE, True),
+        # ...but does not delete, reshape the catalogue, or take over accounts.
+        ("support", DESTROY_ROUTE, False),
+        ("support", CONTENT_ROUTE, False),
+        ("support", CREDENTIALS_ROUTE, False),
+        ("owner", MODERATE_ROUTE, True),
+        ("owner", DESTROY_ROUTE, True),
+        ("owner", CONTENT_ROUTE, True),
+        ("owner", CREDENTIALS_ROUTE, True),
+    ],
+)
+@pytest.mark.asyncio
+async def test_capability_boundaries(
+    client, make_admin, mint_token, role, route, allowed
+):
+    admin = await make_admin(email=f"{role}-{route[1].count('/')}@example.com", role=role)
+    token = await mint_token(admin)
+
+    response = await _call(client, token, route)
+
+    if allowed:
+        assert response.status_code != 403, response.text
+    else:
+        assert response.status_code == 403, response.text
+        assert response.json().get("error_code") == "INSUFFICIENT_ADMIN_ROLE"
+
+
+@pytest.mark.asyncio
+async def test_the_refusal_names_the_capability_not_the_role(
+    client, make_admin, mint_token
+):
+    """
+    An admin told only "forbidden" cannot tell whether to ask for a different
+    role or stop trying. The message names the missing capability.
+    """
+    admin = await make_admin(email="namedcap@example.com", role="viewer")
+    token = await mint_token(admin)
+
+    response = await _call(client, token, DESTROY_ROUTE)
+
+    assert response.status_code == 403
+    assert "destroy" in response.json()["message"].lower()
+
+
+@pytest.mark.asyncio
+async def test_creating_content_is_not_reported_as_destroying(
+    client, make_admin, mint_token
+):
+    """
+    Catalogue writes were the reason for a capability of their own: routing
+    them through DESTROY would have told a support admin that creating an
+    interest was a deletion.
+    """
+    admin = await make_admin(email="contentmsg@example.com", role="support")
+    token = await mint_token(admin)
+
+    response = await _call(client, token, CONTENT_ROUTE)
+
+    assert response.status_code == 403
+    message = response.json()["message"].lower()
+    assert "content" in message and "destroy" not in message
+
+
+@pytest.mark.asyncio
+async def test_me_reports_the_admin_role_as_a_plain_string(
+    client, make_admin, mint_token
+):
+    """
+    The dashboard hides actions a role cannot perform, which it can only do if
+    the role reaches it. Asserting the exact string matters: a SQLAlchemy Enum
+    serialises as "AdminRoles.support" unless it is unwrapped, and the client
+    compares against "support".
+    """
+    admin = await make_admin(email="meresolve@example.com", role="support")
+    token = await mint_token(admin)
+
+    response = await client.get("/api/v1/auth/me", headers=auth_header(token))
+
+    assert response.status_code == 200, response.text
+    assert response.json()["admin_role"] == "support"
+
+
+@pytest.mark.asyncio
+async def test_me_reports_no_role_for_a_non_admin(client, make_user, mint_token):
+    user = await make_user(email="plainme@example.com")
+    token = await mint_token(user)
+
+    response = await client.get("/api/v1/auth/me", headers=auth_header(token))
+
+    assert response.status_code == 200, response.text
+    assert response.json().get("admin_role") in (None, "owner")

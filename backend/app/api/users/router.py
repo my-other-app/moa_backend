@@ -28,7 +28,7 @@ from app.core.response.pagination import (
 )
 from app.api.clubs.schemas import ClubListResponse, ClubPublicMin
 from app.core.auth.dependencies import AdminAuth, DependsAuth, UserAuth
-from app.core.auth.permissions import ManageAdminsAuth, ModerateAuth
+from app.core.auth.permissions import ContentAuth, DestroyAuth, ManageAdminsAuth, ModerateAuth
 from app.api.interests.schemas import InterestPublic
 from app.api.auth import service as auth_service
 
@@ -227,7 +227,7 @@ async def select_avatar(
 @router.post("/avatar/create", summary="create user avatar")
 async def create_avatar(
     session: SessionDep,
-    user: AdminAuth,
+    user: ContentAuth,
     avatar: UploadFile = File(...),
     name: str = Form(...),
 ) -> UserAvatarDetail:
@@ -238,7 +238,7 @@ async def create_avatar(
 async def update_avatar(
     id: int,
     session: SessionDep,
-    user: AdminAuth,
+    user: ContentAuth,
     name: str | None = Form(None),
     avatar: UploadFile | None = File(None),
 ) -> UserAvatarDetail:
@@ -249,7 +249,7 @@ async def update_avatar(
 async def delete_avatar(
     id: int,
     session: SessionDep,
-    user: AdminAuth,
+    user: DestroyAuth,
 ) -> dict:
     return await service.delete_user_avatar(session, id=id)
 

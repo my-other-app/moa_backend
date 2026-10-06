@@ -53,6 +53,8 @@ from app.core.response.pagination import (
 from app.api.events.volunteer.router import router as volunteer_router
 from app.api.events.registration.router import router as registration_router
 
+from app.core.auth.permissions import ContentAuth, ModerateAuth
+
 router = APIRouter(prefix="/events")
 
 router.include_router(volunteer_router, tags=["Volunteer"])
@@ -72,7 +74,7 @@ def _assert_can_access_ticket(user, registration) -> None:
 
 @router.post("/categories/create", summary="Create a new event category")
 async def create_event_category(
-    user: AdminAuth, category: EventCategoryCreate, session: SessionDep = SessionDep
+    user: ContentAuth, category: EventCategoryCreate, session: SessionDep = SessionDep
 ) -> EventCategoryResponse:
     return await service.create_event_category(session, category, user.id)
 
@@ -667,7 +669,7 @@ async def list_deleted_events_admin(
 
 @router.post("/admin/{event_id}/restore", summary="Restore a deleted event (admin)")
 async def restore_event_admin(
-    event_id: int, session: SessionDep, user: AdminAuth, request: Request = None
+    event_id: int, session: SessionDep, user: ModerateAuth, request: Request = None
 ) -> EventAdminListResponse:
     event = await service.restore_event(session, event_id)
     await audit.record(

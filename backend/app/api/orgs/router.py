@@ -20,13 +20,15 @@ from app.api.orgs import service
 from app.api.audit import service as audit
 from app.core.auth.dependencies import AdminAuth
 
+from app.core.auth.permissions import ContentAuth, DestroyAuth, ModerateAuth
+
 router = APIRouter(prefix="/orgs")
 
 
 @router.post("/create", summary="Create a new organization")
 async def create_organization(
     session: SessionDep,
-    user: AdminAuth,
+    user: ContentAuth,
     org: OrganizationCreate = Depends(),
     request: Request = None,
 ) -> OrganizationDetailResponse:
@@ -47,7 +49,7 @@ async def create_organization(session: SessionDep) -> List[OrganizationDetailRes
 
 @router.delete("/delete/{id}", summary="Delete organization")
 async def delete_organization(
-    id: int, session: SessionDep, user: AdminAuth, request: Request = None
+    id: int, session: SessionDep, user: DestroyAuth, request: Request = None
 ):
     result = await service.delete_organization(id, session)
     await audit.record(
@@ -62,7 +64,7 @@ async def delete_organization(
 async def update_organization(
     id: int,
     session: SessionDep,
-    user: AdminAuth,
+    user: ContentAuth,
     org: OrganizationUpdate = Depends(),
     request: Request = None,
 ) -> OrganizationDetailResponse:
@@ -86,7 +88,7 @@ class OrganizationBlockRequest(BaseModel):
 async def block_organization(
     id: int,
     session: SessionDep,
-    user: AdminAuth,
+    user: ModerateAuth,
     body: OrganizationBlockRequest | None = None,
     request: Request = None,
 ):
@@ -105,7 +107,7 @@ async def block_organization(
 
 @router.post("/import", summary="Bulk import organizations from CSV/Excel")
 async def import_organizations(
-    session: SessionDep, user: AdminAuth, file: UploadFile = File(...)
+    session: SessionDep, user: ContentAuth, file: UploadFile = File(...)
 ):
     return await service.import_organizations(file, session)
 
@@ -133,7 +135,7 @@ async def list_deleted_organizations_endpoint(
 
 @router.post("/{id}/restore", summary="Restore a deleted organization (admin)")
 async def restore_organization_endpoint(
-    id: int, session: SessionDep, user: AdminAuth, request: Request = None
+    id: int, session: SessionDep, user: ModerateAuth, request: Request = None
 ) -> OrganizationDetailResponse:
     org = await service.restore_organization(session, id)
     await audit.record(

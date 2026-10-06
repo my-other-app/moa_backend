@@ -13,6 +13,8 @@ from app.api.interests.schemas import (
     InterestCreateUpdateResponse,
 )
 
+from app.core.auth.permissions import ContentAuth, DestroyAuth
+
 router = APIRouter(prefix="/interests")
 
 
@@ -27,7 +29,7 @@ async def list_interests(
 
 @router.post("/create", summary="Create a interest")
 async def create_interest(
-    user: AdminAuth, session: SessionDep, interest: InterestCreate
+    user: ContentAuth, session: SessionDep, interest: InterestCreate
 ) -> InterestCreateUpdateResponse:
     return await service.create_interest(
         session=session,
@@ -40,7 +42,7 @@ async def create_interest(
 
 @router.post("/category/create", summary="Create an interest category")
 async def create_interest_category(
-    user: AdminAuth, session: SessionDep, category: InterestCategoryCreate
+    user: ContentAuth, session: SessionDep, category: InterestCategoryCreate
 ) -> InterestCategoryCreateUpdateResponse:
     return await service.create_interest_category(
         session=session,
@@ -54,7 +56,7 @@ async def create_interest_category(
 async def update_interest(
     interest_id: int,
     interest: InterestCreate,
-    user: AdminAuth,
+    user: ContentAuth,
     session: SessionDep,
     request: Request = None,
 ) -> InterestCreateUpdateResponse:
@@ -83,7 +85,7 @@ async def update_interest(
 @router.delete("/{interest_id}", summary="Delete an interest")
 async def delete_interest(
     interest_id: int,
-    user: AdminAuth,
+    user: DestroyAuth,
     session: SessionDep,
     request: Request = None,
 ):

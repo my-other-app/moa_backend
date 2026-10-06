@@ -16,6 +16,8 @@ from app.api.badges.schemas import (
 
 logger = logging.getLogger(__name__)
 
+from app.core.auth.permissions import ContentAuth, DestroyAuth, ModerateAuth
+
 router = APIRouter(prefix="/badges", tags=["Badges"])
 
 
@@ -173,7 +175,7 @@ async def admin_list_badges(
 async def admin_create_badge(
     badge_data: BadgeDefinitionCreate,
     session: SessionDep,
-    admin: AdminAuth,
+    admin: ContentAuth,
 ) -> BadgeDefinitionResponse:
     """Admin endpoint to create a new badge definition."""
     badge = await service.create_badge_definition(session, badge_data.model_dump())
@@ -185,7 +187,7 @@ async def admin_update_badge(
     badge_id: int,
     badge_data: BadgeDefinitionUpdate,
     session: SessionDep,
-    admin: AdminAuth,
+    admin: ContentAuth,
 ) -> BadgeDefinitionResponse:
     """Admin endpoint to update an existing badge definition."""
     update_data = badge_data.model_dump(exclude_unset=True)
@@ -197,7 +199,7 @@ async def admin_update_badge(
 async def admin_delete_badge(
     badge_id: int,
     session: SessionDep,
-    admin: AdminAuth,
+    admin: DestroyAuth,
     request: Request = None,
 ):
     """
@@ -258,7 +260,7 @@ async def admin_award_badge(
     badge_id: int,
     body: ManualAwardRequest,
     session: SessionDep,
-    admin: AdminAuth,
+    admin: ModerateAuth,
     request: Request = None,
 ) -> BadgeRecipientResponse:
     """Manually award a badge to a specific user or club."""
@@ -278,7 +280,7 @@ async def admin_revoke_badge(
     badge_id: int,
     entity_id: int,
     session: SessionDep,
-    admin: AdminAuth,
+    admin: ModerateAuth,
     request: Request = None,
 ):
     """Revoke a badge from a user or club."""

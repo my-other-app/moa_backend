@@ -21,7 +21,7 @@ from app.db.core import SessionDep
 from app.api.clubs import service
 from app.api.audit import service as audit
 from app.core.auth.dependencies import ClubAuth, DependsAuth, UserAuth, AdminAuth
-from app.core.auth.permissions import DestroyAuth
+from app.core.auth.permissions import ContentAuth, DestroyAuth, ModerateAuth
 from app.core.response.pagination import (
     PaginatedResponse,
     PaginationParams,
@@ -58,7 +58,7 @@ async def create_club(
 
 @router.post("/admin/create", summary="create club as admin")
 async def admin_create_club(
-    session: SessionDep, user: AdminAuth, club: CreateClubAdmin
+    session: SessionDep, user: ContentAuth, club: CreateClubAdmin
 ) -> ClubAdminDetailResponse:
     """Create a club as an admin. A random password will be generated."""
     return await service.create_club(
@@ -107,7 +107,7 @@ async def list_all_clubs_admin(
 
 @router.post("/{club_id}/approve", summary="Approve a pending club (admin)")
 async def approve_club_endpoint(
-    club_id: int, session: SessionDep, user: AdminAuth, request: Request = None
+    club_id: int, session: SessionDep, user: ModerateAuth, request: Request = None
 ) -> ClubAdminDetailResponse:
     club = await service.approve_club(session, club_id)
     await audit.record(
@@ -390,7 +390,7 @@ async def get_club_admin_detail_endpoint(
 async def update_club_admin(
     club_id: int,
     session: SessionDep,
-    user: AdminAuth,
+    user: ContentAuth,
     club: UpdateClub = Depends(),
     request: Request = None,
 ) -> ClubCreateUpdateResponse:
@@ -453,7 +453,7 @@ async def list_deleted_clubs_admin(
 
 @router.post("/admin/{club_id}/restore", summary="Restore a deleted club (admin)")
 async def restore_club_admin(
-    club_id: int, session: SessionDep, user: AdminAuth, request: Request = None
+    club_id: int, session: SessionDep, user: ModerateAuth, request: Request = None
 ) -> ClubAdminDetailResponse:
     club = await service.restore_club(session, club_id)
     await audit.record(

@@ -13,7 +13,7 @@ from app.core.auth.authentication import (
     get_password_hash,
 )
 from app.core.auth.dependencies import DependsAuth, AdminAuth
-from app.core.auth.permissions import ImpersonateAuth
+from app.core.auth.permissions import ImpersonateAuth, ResetCredentialsAuth
 from app.response import CustomHTTPException
 from app.api.auth.schemas import (
     AuthTokenData,
@@ -313,7 +313,7 @@ async def admin_reset_password(
     request: Request,
     payload: PasswordResetRequest,
     session: SessionDep,
-    admin: AdminAuth,
+    admin: ResetCredentialsAuth,
 ) -> PasswordResetResponse:
     """
     Reset a user's password. Admin only.

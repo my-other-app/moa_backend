@@ -8,6 +8,8 @@ from app.api.notifications.schemas import NotificationSchema
 from app.core.notifications import service as push_service
 from . import service
 
+from app.core.auth.permissions import ModerateAuth
+
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 
 
@@ -131,7 +133,7 @@ class ListTokensResponse(BaseModel):
 async def send_push_to_all_devices(
     request: SendPushRequest,
     session: SessionDep,
-    user: AdminAuth,  # Admin only
+    user: ModerateAuth,  # Admin only
 ):
     """
     Send a test push notification to ALL registered devices.
@@ -242,7 +244,7 @@ async def send_push_to_single_token(
     token: str,
     title: str,
     body: str,
-    user: AdminAuth,
+    user: ModerateAuth,
 ):
     """
     Send push notification directly to a single token for debugging.

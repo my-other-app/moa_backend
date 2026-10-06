@@ -24,6 +24,15 @@ IMPERSONATE = "impersonate"
 # hand out `owner` can grant themselves anything, so this is the capability
 # that gates every other one.
 MANAGE_ADMINS = "manage_admins"
+# The catalogue: interests, categories, avatars, badge definitions, and the
+# club and organisation records themselves. Separate from MODERATE because
+# approving one club is a decision about one club, while renaming an interest
+# changes what every profile in the product displays. Separate from DESTROY so
+# the refusal can say "cannot manage content" rather than claiming a create
+# was a deletion.
+MANAGE_CONTENT = "manage_content"
+# Setting another user's password, which is account takeover by another name.
+RESET_CREDENTIALS = "reset_credentials"
 
 ROLE_CAPABILITIES: dict[AdminRoles, set[str]] = {
     AdminRoles.viewer: {VIEW},
@@ -35,6 +44,8 @@ ROLE_CAPABILITIES: dict[AdminRoles, set[str]] = {
         DESTROY,
         IMPERSONATE,
         MANAGE_ADMINS,
+        MANAGE_CONTENT,
+        RESET_CREDENTIALS,
     },
 }
 
@@ -81,3 +92,5 @@ MoneyAuth = Annotated[object, Depends(requires(MANAGE_MONEY))]
 ModerateAuth = Annotated[object, Depends(requires(MODERATE))]
 ImpersonateAuth = Annotated[object, Depends(requires(IMPERSONATE))]
 ManageAdminsAuth = Annotated[object, Depends(requires(MANAGE_ADMINS))]
+ContentAuth = Annotated[object, Depends(requires(MANAGE_CONTENT))]
+ResetCredentialsAuth = Annotated[object, Depends(requires(RESET_CREDENTIALS))]

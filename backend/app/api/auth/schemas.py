@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import field_validator, BaseModel, Field
 from app.core.response.base_model import CustomBaseModel
 
 
@@ -44,6 +44,18 @@ class AuthUser(CustomBaseModel):
     phone: str | None = None
     username: str
     user_type: str
+    # The dashboard needs this to stop offering actions the role will refuse.
+    # It is a convenience for the UI, not a control: every endpoint still
+    # checks the capability itself, so a client that ignores this gets a 403
+    # rather than its way.
+    admin_role: str | None = None
+
+    @field_validator("admin_role", mode="before")
+    @classmethod
+    def _role_to_value(cls, value):
+        """`admin_role` is a SQLAlchemy Enum, which serialises as
+        `AdminRoles.owner` rather than `owner` unless unwrapped here."""
+        return getattr(value, "value", value)
 
 
 class GoogleSignInRequest(CustomBaseModel):
