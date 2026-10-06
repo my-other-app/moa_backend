@@ -156,7 +156,7 @@ CONTENT_ROUTE = ("post", "/api/v1/interests/create", {"name": "X", "category_id"
 CREDENTIALS_ROUTE = (
     "post",
     "/api/v1/auth/admin/reset-password",
-    {"identifier": "someone", "new_password": "Irrelevant123!"},
+    {"email_or_username": "someone", "new_password": "Irrelevant123!"},
 )
 
 
