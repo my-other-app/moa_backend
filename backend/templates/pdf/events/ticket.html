@@ -343,10 +343,60 @@
       ;
       padding: 10px 20px 20px;
     }
+  
+    /* ---- Layer mode -------------------------------------------------
+       Used only when the template defines layers. The stage is the
+       artwork's own pixel size, so a coordinate chosen in the editor lands
+       in the same place here without either side knowing the display size.
+       Clipping is deliberate: artwork does not reflow, so an overlong name
+       must be cut rather than pushed through the design. */
+    .layer-stage {
+      position: relative;
+      overflow: hidden;
+      margin: 0 auto;
+      background-repeat: no-repeat;
+      background-size: 100% 100%;
+    }
+    .layer {
+      position: absolute;
+      white-space: pre-wrap;
+      overflow: hidden;
+    }
+    .layer-qr {
+      display: block;
+    }
   </style>
 </head>
 
 <body>
+{% if style.layers %}
+  <!-- Layer mode: the club's own artwork with positioned content on top. -->
+  <div class="layer-stage"
+       style="width: {{ style.canvas.width or 1000 }}px;
+              height: {{ style.canvas.height or 1000 }}px;
+              {% if style.background_image_url %}background-image: url('{{ style.background_image_url }}');{% else %}background-color: {{ style.bg_color | default('#121212') }};{% endif %}">
+    {% for layer in style.layers %}
+      {% if layer.type == 'qr' %}
+        <img class="layer layer-qr"
+             src="{{ qr_code_url }}"
+             alt=""
+             style="left: {{ layer.x }}px; top: {{ layer.y }}px;
+                    width: {{ layer.width or 160 }}px; height: {{ layer.width or 160 }}px;" />
+      {% else %}
+        <div class="layer"
+             style="left: {{ layer.x }}px; top: {{ layer.y }}px;
+                    {% if layer.width %}width: {{ layer.width }}px;{% endif %}
+                    font-size: {{ layer.font_size }}px;
+                    line-height: {{ layer.font_size + layer.line_spacing }}px;
+                    color: {{ layer.color }};
+                    text-align: {{ layer.align }};
+                    font-weight: {{ 700 if layer.bold else 400 }};
+                    max-height: {{ (layer.font_size + layer.line_spacing) * layer.max_lines }}px;">{{ layer.rendered_text }}</div>
+      {% endif %}
+    {% endfor %}
+  </div>
+{% else %}
+
   <div class="ticket-container">
     <div class="ticket">
       <div class="ticket-header">
@@ -449,6 +499,7 @@
       {% endif %}
     </div>
   </div>
+{% endif %}
 </body>
 
 </html>

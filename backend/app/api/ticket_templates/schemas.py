@@ -1,6 +1,8 @@
 from pydantic import BaseModel, Field
 from typing import Optional
 
+from app.api.templates_shared import LayerCanvas, TemplateLayer
+
 
 class TicketTemplateConfig(BaseModel):
     # Colors
@@ -23,6 +25,11 @@ class TicketTemplateConfig(BaseModel):
     custom_header_text: Optional[str] = Field(default=None, description="Custom text above event name")
     organizer_subtitle: Optional[str] = Field(default=None, description="e.g. 'Presents' or 'In association with'")
     custom_footer_text: Optional[str] = Field(default=None, description="Custom text at bottom of ticket")
+
+    # Layer mode. Empty means the classic styled layout, which is what every
+    # existing template uses -- the renderer only switches when this is set.
+    layers: list[TemplateLayer] = Field(default_factory=list)
+    canvas: LayerCanvas = Field(default_factory=LayerCanvas)
 
     # Image URLs — auto-populated from S3 uploads, not user-editable
     logo_url: Optional[str] = Field(default=None, description="Auto-populated from logo upload")

@@ -1,6 +1,8 @@
 from pydantic import BaseModel, Field
 from typing import Optional
 
+from app.api.templates_shared import LayerCanvas, TemplateLayer
+
 
 class CertificateTemplateConfig(BaseModel):
     # Colors
@@ -31,6 +33,11 @@ class CertificateTemplateConfig(BaseModel):
     show_qr_code: bool = Field(default=True, description="Show verification QR code")
     show_certificate_id: bool = Field(default=True, description="Show certificate ID")
     date_format: str = Field(default="dd MMM yyyy", description="dd MMM yyyy, MMMM dd yyyy, dd/MM/yyyy")
+
+    # Layer mode. Empty means the classic styled layout, which is what every
+    # existing template uses -- the renderer only switches when this is set.
+    layers: list[TemplateLayer] = Field(default_factory=list)
+    canvas: LayerCanvas = Field(default_factory=LayerCanvas)
 
     # Image URLs — auto-populated from S3 uploads
     logo_url: Optional[str] = Field(default=None, description="Auto-populated from logo upload")

@@ -12,6 +12,7 @@ import base64
 import io
 import qrcode
 from app.core.utils.pdf import generate_pdf_bytes
+from app.api.templates_shared import render_layers
 from fastapi.encoders import jsonable_encoder
 from typing import Optional, List
 
@@ -475,9 +476,35 @@ async def get_ticket_pdf(
     
     email_payload["qr_code"] = qr_base64
 
+    # Layer mode substitutes its tokens here: Jinja will not re-render the
+    # contents of a variable, so `{{name}}` inside a layer would print as
+    # literal braces. No-op when the template defines no layers.
+    if isinstance(style, dict) and style.get("layers"):
+        style = {
+            **style,
+            "layers": render_layers(
+                style["layers"],
+                {
+                    "name": email_payload.get("name"),
+                    "ticket_code": email_payload.get("ticket_id")
+                    or email_payload.get("ticket_code"),
+                    "event_name": email_payload.get("event_name"),
+                    "event_title": email_payload.get("event_name"),
+                    "event_date": email_payload.get("event_date"),
+                    "event_time": email_payload.get("event_time"),
+                    "venue": email_payload.get("venue"),
+                    "club_name": email_payload.get("club_name"),
+                },
+            ),
+        }
+
     pdf_bytes = generate_pdf_bytes(
         template_path="events/ticket.html",
-        context={"email_payload": email_payload, "style": style},
+        context={
+            "email_payload": email_payload,
+            "style": style,
+            "qr_code_url": f"data:image/png;base64,{qr_base64}",
+        },
     )
 
     return Response(
