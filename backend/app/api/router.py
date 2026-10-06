@@ -12,6 +12,7 @@ from app.api.payments.router import router as payments_router
 from app.api.ticket_templates.router import router as ticket_templates_router
 from app.api.badges.router import router as badges_router
 from app.api.audit.router import router as audit_router
+from app.api.backups.router import router as backups_router
 from app.api.certificate_templates.router import router as certificate_templates_router
 from app.api import service
 from app.api.schemas import BackgroundTaskLogResponseSchema
@@ -36,6 +37,7 @@ api_router.include_router(router=ticket_templates_router, tags=["ticket-template
 api_router.include_router(router=certificate_templates_router, tags=["certificate-templates"])
 api_router.include_router(router=badges_router, tags=["badges"])
 api_router.include_router(router=audit_router)
+api_router.include_router(router=backups_router)
 
 
 @api_router.get("/background-task-log/{task_id}", tags=["root"])

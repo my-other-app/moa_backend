@@ -17,6 +17,10 @@ class AppConfig(BaseSettings):
 
     DATABASE_URL: str
     DATABASE_URL_SYNC: str
+    # Mounted from the host, deliberately outside the directory the deploy
+    # rsyncs with --delete -- a backup inside it would be erased by the next
+    # deploy, which is the opposite of the point.
+    BACKUP_DIR: str = "/backups"
 
     S3_BUCKET: str
     S3_ACCESS_KEY: str

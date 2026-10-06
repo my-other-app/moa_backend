@@ -31,6 +31,10 @@ services:
     container_name: doth-backend
     volumes:
       - ./backend:/backend
+      # Absolute host path, deliberately outside the project directory: the
+      # deploy rsyncs the project with --delete, so a backup stored under it
+      # would be erased by the next deploy.
+      - /var/backups/moa:/backups
     env_file:
       - .env
     depends_on:
