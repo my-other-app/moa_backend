@@ -25,6 +25,7 @@ from decimal import Decimal
 from sqlalchemy import Float, and_, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.admin_insights import get_trends
 from app.api.clubs.models import ClubUsersLink, Clubs
 from app.api.events.models import (
     EventCategories,
@@ -486,4 +487,9 @@ async def get_overview(
         "funnel": await _funnel(session, totals, averages),
         "top_clubs": await _top_clubs(session, top_by),
         "money": await _money(session, days),
+        # The daily series and its previous-window comparison, folded in rather
+        # than left as a second call: the KPI cards double as the chart's
+        # series selector, so the figure and the line have to come from one
+        # response or they can describe different windows.
+        "trends": await get_trends(session, days),
     }
