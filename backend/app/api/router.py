@@ -13,6 +13,7 @@ from app.api.ticket_templates.router import router as ticket_templates_router
 from app.api.badges.router import router as badges_router
 from app.api.audit.router import router as audit_router
 from app.api.backups.router import router as backups_router
+from app.api import admin_overview
 from app.api.certificate_templates.router import router as certificate_templates_router
 from app.api import service
 from app.api.schemas import BackgroundTaskLogResponseSchema
@@ -48,6 +49,25 @@ async def get_background_task_log(
     Retrieve a background task log by ID
     """
     return await service.get_background_task_log(session, task_id)
+
+
+@api_router.get("/admin/overview", tags=["admin"])
+async def get_admin_overview(
+    session: SessionDep,
+    user: AdminAuth,
+    days: int = Query(30, ge=1, le=365, description="Comparison window"),
+    top_by: str = Query(
+        "followers", description="followers, registrations or revenue"
+    ),
+) -> dict:
+    """
+    Everything the admin Overview screen shows, in one response.
+
+    The screen needs roughly fifteen aggregates. As separate endpoints that is
+    fifteen round trips for one page load against a single backend instance;
+    here it is one, with every figure computed in the database.
+    """
+    return await admin_overview.get_overview(session, days=days, top_by=top_by)
 
 
 @api_router.get("/admin/analytics", tags=["admin"])
