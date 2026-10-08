@@ -14,6 +14,7 @@ from datetime import date, datetime, timedelta, timezone
 from sqlalchemy import Date, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.utils.time_buckets import utc_date
 from app.api.clubs.models import Clubs
 from app.api.events.models import EventRegistrationsLink, Events
 from app.api.payments.models import PaymentLogs, PaymentStatus
@@ -32,10 +33,11 @@ async def _daily_counts(
     how revenue differs from the rest.
     """
     aggregate = func.sum(value) if value is not None else func.count()
+    day = utc_date(column)
     rows = await session.execute(
-        select(cast(column, Date).label("day"), aggregate)
+        select(day.label("day"), aggregate)
         .where(column >= since, *extra_filters)
-        .group_by(cast(column, Date))
+        .group_by(day)
     )
     return {row[0]: float(row[1] or 0) for row in rows.all()}
 

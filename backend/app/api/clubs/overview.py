@@ -13,10 +13,11 @@ thing people make decisions on.
 """
 
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import Numeric, case, cast, func, select
 
+from app.core.utils.time_buckets import utc_trunc, utc_ts
 from app.api.clubs.models import ClubUsersLink, Clubs
 from app.api.events.models import EventRegistrationsLink, Events
 
@@ -133,7 +134,7 @@ async def get_club_overview(session, club: Clubs, days: int = 30) -> dict:
     series_rows = (
         await session.execute(
             select(
-                func.date_trunc("day", EventRegistrationsLink.created_at).label("day"),
+                utc_trunc("day", EventRegistrationsLink.created_at).label("day"),
                 func.coalesce(
                     func.sum(
                         case(
@@ -163,12 +164,20 @@ async def get_club_overview(session, club: Clubs, days: int = 30) -> dict:
         for row in series_rows
     }
 
-    def series_for(window_start: datetime) -> list[dict]:
+    def series_for(last_day: date) -> list[dict]:
         # Every day present, including the empty ones -- a chart that skips
         # quiet days compresses time and makes a flat week look busy.
+        #
+        # Anchored on the window's last day rather than counted forward from
+        # `start`. `start` is `now - days`, so counting forward from it gave a
+        # series that ended *yesterday* and left today out entirely, while the
+        # headline totals beside it used the rolling window and included
+        # today. The chart and the number above it disagreed, and today's
+        # takings appeared nowhere.
+        first_day = last_day - timedelta(days=days - 1)
         out = []
         for offset in range(days):
-            day = (window_start + timedelta(days=offset)).date()
+            day = first_day + timedelta(days=offset)
             point = by_day.get(day, {"revenue": 0.0, "registrations": 0})
             out.append(
                 {
@@ -183,7 +192,9 @@ async def get_club_overview(session, club: Clubs, days: int = 30) -> dict:
     weekday_rows = (
         await session.execute(
             select(
-                func.extract("dow", EventRegistrationsLink.created_at),
+                func.extract("dow", utc_ts(EventRegistrationsLink.created_at)).label(
+                    "dow"
+                ),
                 func.count(EventRegistrationsLink.id),
             )
             .where(
@@ -191,7 +202,7 @@ async def get_club_overview(session, club: Clubs, days: int = 30) -> dict:
                 EventRegistrationsLink.is_deleted == False,
                 EventRegistrationsLink.created_at >= start,
             )
-            .group_by(func.extract("dow", EventRegistrationsLink.created_at))
+            .group_by("dow")
         )
     ).all()
     # Postgres dow: 0 = Sunday. Presented Monday-first, which is how a week
@@ -308,7 +319,7 @@ async def get_club_overview(session, club: Clubs, days: int = 30) -> dict:
     follower_rows = (
         await session.execute(
             select(
-                func.date_trunc("week", ClubUsersLink.created_at).label("week"),
+                utc_trunc("week", ClubUsersLink.created_at).label("week"),
                 func.count(ClubUsersLink.id),
             )
             .where(
@@ -377,8 +388,8 @@ async def get_club_overview(session, club: Clubs, days: int = 30) -> dict:
             },
         },
         "revenue_series": {
-            "current": series_for(start),
-            "previous": series_for(previous_start),
+            "current": series_for(now.date()),
+            "previous": series_for(now.date() - timedelta(days=days)),
         },
         "busiest_day": busiest,
         "repeat_rate": repeat_rate,
