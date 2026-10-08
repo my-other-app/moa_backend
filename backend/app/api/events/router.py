@@ -263,7 +263,39 @@ async def list_all_events_admin(
     result = await session.execute(query)
     events = result.scalars().all()
 
-    return paginated_response(events, request, schema=EventAdminListResponse, total=total)
+    # Registration and attendance counts, from one grouped query over the
+    # page's ids rather than a correlated subquery per row or a join on the
+    # listing. A join here would fan out against the category join above and
+    # multiply the page_views column it already selects.
+    rows = paginated_response(
+        events, request, schema=EventAdminListResponse, total=total
+    )
+    if events:
+        from app.api.events.models import EventRegistrationsLink
+
+        counts = (
+            await session.execute(
+                select(
+                    EventRegistrationsLink.event_id,
+                    func.count(EventRegistrationsLink.id),
+                    func.count(EventRegistrationsLink.id).filter(
+                        EventRegistrationsLink.is_attended == True
+                    ),
+                )
+                .where(
+                    EventRegistrationsLink.event_id.in_([e.id for e in events]),
+                    EventRegistrationsLink.is_deleted == False,
+                )
+                .group_by(EventRegistrationsLink.event_id)
+            )
+        ).all()
+        by_event = {event_id: (total_, present) for event_id, total_, present in counts}
+        for item in rows.items:
+            registered, present = by_event.get(item.id, (0, 0))
+            item.registration_count = registered
+            item.attended_count = present
+
+    return rows
 
 
 @router.get("/list", summary="List all events")

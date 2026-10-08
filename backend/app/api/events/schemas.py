@@ -440,6 +440,16 @@ class EventAdminListResponse(CustomBaseModel):
     club: EventClubDetail | None = Field(None)
     interests: list[EventInterestDetail] | None = Field(None)
 
+    #: How many people registered, and how many were marked present.
+    #:
+    #: Defaulted rather than required: an event that has finished with
+    #: `attended_count` at zero and registrations above it is the one an admin
+    #: is looking for -- certificates and winners are both blocked until the
+    #: club marks attendance -- and a missing count must not be mistaken for
+    #: a marked zero. The list fills both for every row it returns.
+    registration_count: int = Field(0)
+    attended_count: int = Field(0)
+
 
 class EventFileResponse(CustomBaseModel):
     """Response model for event files/downloads."""
