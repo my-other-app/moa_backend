@@ -35,6 +35,19 @@ services:
     container_name: doth-live-backend
     volumes:
       - ./backend:/backend
+      # Backups, on the host and outside /var/www/myotherapp-production.
+      #
+      # This mount did not exist. BACKUP_DIR has always defaulted to
+      # /backups, so every dump was written into the container's own
+      # writable layer and destroyed the next time the container was
+      # recreated -- which a deploy does routinely. The endpoint reported
+      # success and the listing showed the file, right up until the restart
+      # that threw it away, which is the worst way for a backup to fail.
+      #
+      # Outside the project directory on purpose: the deploy rsyncs that
+      # path with --delete, so a backup inside it would be erased by the
+      # next deploy instead.
+      - /var/backups/myotherapp:/backups
     env_file:
       - .env
     environment:
