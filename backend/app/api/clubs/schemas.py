@@ -251,6 +251,11 @@ class ClubAdminFullResponse(ClubPublicDetailResponse):
     admin_stats: ClubAdminStats = Field(...)
 
 
+class ClubOrgMin(CustomBaseModel):
+    id: int = Field(...)
+    name: str = Field(...)
+
+
 class ClubAdminDetailResponse(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(..., min_length=3, max_length=20)
@@ -265,6 +270,16 @@ class ClubAdminDetailResponse(CustomBaseModel):
     created_at: datetime = Field(...)
     is_verified: bool = Field(...)
     interests: List[ClubInterestDetailMin] | None = Field(None)
+
+    # The four the admin list shows per row. All default, because the same
+    # schema also serialises approve/reject, which return one club built
+    # without them -- a required field there would turn an approval into a
+    # 500 after the write had already committed.
+    followers_count: int = Field(0)
+    events_count: int = Field(0)
+    org: ClubOrgMin | None = Field(None)
+    #: The club's sign-in address, not the contact address on its page.
+    owner_email: str | None = Field(None)
 
 
 class NoteCreateUpdateResponse(CustomBaseModel):

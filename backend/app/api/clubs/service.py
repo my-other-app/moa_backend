@@ -347,11 +347,16 @@ async def get_all_clubs(
     is_verified: bool | None = None,
     sort: str | None = None,
     order: str | None = None,
+    with_admin_fields: bool = False,
 ):
     """Get all clubs with optional filters, search, and followers count.
 
     `include_unverified` should only be set by admin-facing callers — the
     public listing must never surface clubs pending approval.
+
+    `with_admin_fields` adds the organisation, the login email and an event
+    count to each row. It is off by default so the public listing, which is
+    the hot path, does not pay for three things it never shows.
     """
     ClubUsersLinkPinned = aliased(ClubUsersLink)
     ClubUsersLinkHidden = aliased(ClubUsersLink)
@@ -386,6 +391,11 @@ async def get_all_clubs(
         .where(Clubs.is_deleted == False)
         .options(selectinload(Clubs.interests))
     )
+
+    if with_admin_fields:
+        # selectinload, not joinedload: these would fan out against the
+        # follower join above and inflate the aggregate it computes.
+        query = query.options(selectinload(Clubs.org), selectinload(Clubs.user))
 
     # `include_unverified` is the admin gate; `is_verified` is the caller's
     # own filter on top of it, so an admin can ask for pending clubs only.
@@ -471,7 +481,9 @@ async def get_all_clubs(
     results = await session.execute(query)
 
     clubs_response = []
+    results_clubs = []
     for club, followers_count, is_following in results:
+        results_clubs.append(club)
         club_dict = {
             "id": club.id,
             "name": club.name,
@@ -503,12 +515,46 @@ async def get_all_clubs(
             club_dict["interests"] = []
             
         clubs_response.append(club_dict)
-        
+
+    if with_admin_fields:
+        await _attach_admin_fields(session, results_clubs, clubs_response)
+
     # Returned with the total so callers can paginate. Without it
     # paginated_response falls back to "is there an extra row", which reports
     # no page count at all -- every club list was therefore stuck on its first
     # page, including the club list on an organisation's page.
     return clubs_response, total or 0
+
+
+async def _attach_admin_fields(session: AsyncSession, clubs, rows: list[dict]) -> None:
+    """
+    Add organisation, login email and event count to an admin club page.
+
+    The counts come from one grouped query over the page's ids rather than a
+    correlated subquery on the listing itself: that listing already carries an
+    outer join to the follower link table, and a second aggregate over a
+    second join multiplies the rows each one counts.
+    """
+    if not clubs:
+        return
+
+    club_ids = [club.id for club in clubs]
+    counts = dict(
+        (
+            await session.execute(
+                select(Events.club_id, func.count(Events.id))
+                .where(Events.club_id.in_(club_ids), Events.is_deleted == False)
+                .group_by(Events.club_id)
+            )
+        ).all()
+    )
+
+    for club, row in zip(clubs, rows):
+        row["events_count"] = counts.get(club.id, 0)
+        row["org"] = {"id": club.org.id, "name": club.org.name} if club.org else None
+        # The club's sign-in address, which is not contact_email: that one is
+        # published on the club's page and is often a committee alias.
+        row["owner_email"] = club.user.email if club.user else None
 
 
 async def follow_club(session: AsyncSession, club_id: int, user_id: int):

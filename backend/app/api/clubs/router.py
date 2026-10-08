@@ -98,6 +98,7 @@ async def list_all_clubs_admin(
         is_verified=is_verified,
         sort=sort,
         order=order,
+        with_admin_fields=True,
     )
     clubs, total = clubs
     return paginated_response(
