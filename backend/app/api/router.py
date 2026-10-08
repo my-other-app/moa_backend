@@ -13,6 +13,10 @@ from app.api.ticket_templates.router import router as ticket_templates_router
 from app.api.badges.router import router as badges_router
 from app.api.audit.router import router as audit_router
 from app.api.backups.router import router as backups_router
+from app.api.subscriptions.router import (
+    admin_router as subscriptions_admin_router,
+    club_router as subscriptions_club_router,
+)
 from app.api import admin_overview
 from app.api.certificate_templates.router import router as certificate_templates_router
 from app.api import service
@@ -39,6 +43,10 @@ api_router.include_router(router=certificate_templates_router, tags=["certificat
 api_router.include_router(router=badges_router, tags=["badges"])
 api_router.include_router(router=audit_router)
 api_router.include_router(router=backups_router)
+# Before the clubs router: these are literal paths under /clubs, and the
+# clubs router owns the parameterised ones.
+api_router.include_router(router=subscriptions_club_router)
+api_router.include_router(router=subscriptions_admin_router)
 
 
 @api_router.get("/background-task-log/{task_id}", tags=["root"])

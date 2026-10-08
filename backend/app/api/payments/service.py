@@ -8,7 +8,7 @@ import razorpay
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 
 from app.api.payments.handlers import handle_post_payment, validate_payload
 from app.api.payments.models import (
@@ -392,6 +392,16 @@ async def handle_razorpay_webhook(
         await session.rollback()
         return None
 
+    event_name = data.get("event") or ""
+
+    # Subscription lifecycle. Handled here rather than in its own webhook
+    # route because Razorpay posts every event to one URL, and the idempotency
+    # log above has to be the single gate for all of them -- a second route
+    # would have its own log and could process the same delivery twice.
+    if event_name.startswith("subscription."):
+        await _handle_subscription_event(session, event_name, data)
+        return None
+
     if data.get("event") == "refund.processed":
         # Covers a refund initiated directly from the Razorpay dashboard,
         # outside our app's own /payments/{id}/refund endpoint.
@@ -425,4 +435,57 @@ async def handle_razorpay_webhook(
 
     await session.commit()
 
+    return None
+
+
+async def _handle_subscription_event(session: AsyncSession, event: str, data: dict):
+    """
+    Apply a Razorpay subscription event to our mirror of it.
+
+    Matched on Razorpay's own subscription id first, falling back to the
+    club_id we put in the subscription's notes -- the id is authoritative, the
+    note is what makes a subscription created outside this app findable.
+    """
+    from app.api.subscriptions import billing as subscription_billing
+    from app.api.subscriptions.models import ClubSubscriptions
+
+    if event not in subscription_billing.HANDLED_EVENTS:
+        logger.info("Ignoring Razorpay event %s", event)
+        return None
+
+    razorpay_id = subscription_billing.subscription_id_from_payload(data)
+    subscription = None
+    if razorpay_id:
+        subscription = await session.scalar(
+            select(ClubSubscriptions)
+            .where(ClubSubscriptions.razorpay_subscription_id == razorpay_id)
+            .options(selectinload(ClubSubscriptions.plan))
+        )
+
+    if subscription is None:
+        club_id = subscription_billing.club_id_from_payload(data)
+        if club_id is not None:
+            subscription = await session.scalar(
+                select(ClubSubscriptions)
+                .where(
+                    ClubSubscriptions.club_id == club_id,
+                    ClubSubscriptions.is_deleted == False,
+                )
+                .options(selectinload(ClubSubscriptions.plan))
+            )
+            # First event for a subscription the club authorised: adopt the
+            # Razorpay id so later events match on it directly.
+            if subscription is not None and razorpay_id:
+                subscription.razorpay_subscription_id = razorpay_id
+
+    if subscription is None:
+        # Logged, not raised: a 500 makes Razorpay retry forever, and an event
+        # for a club we cannot find will not resolve itself on a retry.
+        logger.warning(
+            "Razorpay %s for unknown subscription (razorpay_id=%s)", event, razorpay_id
+        )
+        return None
+
+    if subscription_billing.apply_event(subscription, event, data):
+        await session.commit()
     return None
