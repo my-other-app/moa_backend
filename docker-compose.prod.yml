@@ -54,8 +54,12 @@ services:
       # empty substitution that becomes a baffling authentication failure.
       # Nothing secret is written here: these are read from the same .env the
       # database itself uses.
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:?POSTGRES_USER must be set in .env}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB must be set in .env}
-      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      # APP_-prefixed: app/config.py sets `env_prefix="APP_"`, so the
+      # settings object reads APP_DATABASE_URL and ignores a bare
+      # DATABASE_URL entirely -- an override without the prefix lands in the
+      # container's environment, changes nothing, and looks applied.
+      APP_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:?POSTGRES_USER must be set in .env}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB must be set in .env}
+      APP_DATABASE_URL_SYNC: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
     depends_on:
       - postgres
     command: >
