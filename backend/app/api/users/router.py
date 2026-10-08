@@ -1,8 +1,14 @@
-from typing import List
+import csv
+import io
+from datetime import datetime
+from typing import AsyncIterator, List
+
 from fastapi import APIRouter, File, Form, Query, Request, UploadFile
+from fastapi.responses import StreamingResponse
 
 from app.api.users.schemas import (
     AdminUserDetailResponse,
+    AdminUserListResponse,
     AdminUserStats,
     FCMTokenRequest,
     FCMTokenResponse,
@@ -28,7 +34,13 @@ from app.core.response.pagination import (
 )
 from app.api.clubs.schemas import ClubListResponse, ClubPublicMin
 from app.core.auth.dependencies import AdminAuth, DependsAuth, UserAuth
-from app.core.auth.permissions import ContentAuth, DestroyAuth, ManageAdminsAuth, ModerateAuth
+from app.core.auth.permissions import (
+    ContentAuth,
+    DestroyAuth,
+    ExportDataAuth,
+    ManageAdminsAuth,
+    ModerateAuth,
+)
 from app.api.interests.schemas import InterestPublic
 from app.api.auth import service as auth_service
 
@@ -69,6 +81,74 @@ async def get_following_clubs(
     return paginated_response(following_clubs, request=request, schema=ClubListResponse)
 
 
+# ---------------------------------------------------------------------------
+# Admin: the user list, and the CSV export of the same list.
+#
+# The filters live in one place because the export has to mean "what I am
+# looking at". A second copy of the predicate would drift, and an export that
+# quietly ignores a filter is worse than no export at all -- the admin cannot
+# tell by looking at the file.
+# ---------------------------------------------------------------------------
+
+#: Sort keys the API accepts, mapped to the columns they order by.
+_USER_SORTS = {
+    "joined": "created_at",
+    "name": "full_name",
+    "email": "email",
+    "username": "username",
+}
+
+
+def _user_list_filters(
+    search: str | None,
+    user_type: str | None,
+    provider: str | None,
+    is_active: bool | None,
+):
+    """The WHERE clauses for the admin user list, as a list of criteria."""
+    from sqlalchemy import or_
+
+    from app.api.users.models import Users
+
+    criteria = []
+    if search:
+        term = f"%{search}%"
+        criteria.append(
+            or_(
+                Users.full_name.ilike(term),
+                Users.email.ilike(term),
+                Users.username.ilike(term),
+            )
+        )
+    if user_type:
+        criteria.append(Users.user_type == user_type)
+    if provider:
+        criteria.append(Users.provider == provider)
+    if is_active is not None:
+        criteria.append(Users.is_active.is_(is_active))
+    return criteria
+
+
+def _sorted_user_query(query, sort: str | None, order: str | None):
+    """
+    Apply the requested sort, then break ties on the primary key.
+
+    Without the final `id` key, rows sharing a sort value can appear on two
+    pages or on neither -- the database is free to return ties in any order,
+    and both the paged list and the chunked export read by offset.
+    """
+    from app.api.users.models import Users
+
+    query = apply_sort(
+        query,
+        columns={name: getattr(Users, col) for name, col in _USER_SORTS.items()},
+        default=Users.created_at,
+        sort=sort,
+        order=order,
+    )
+    return query.order_by(Users.id.desc())
+
+
 @router.get("/admin/list", summary="List all users (admin)")
 async def list_all_users_admin(
     request: Request,
@@ -80,41 +160,28 @@ async def list_all_users_admin(
     provider: str | None = Query(None, description="google, apple or email"),
     sort: str | None = Query(None, description="joined, name, email or username"),
     order: str | None = Query(None, description="asc or desc"),
-) -> PaginatedResponse[UserDetailResponse]:
+    is_active: bool | None = Query(
+        None, description="true for active only, false for suspended only"
+    ),
+) -> PaginatedResponse[AdminUserListResponse]:
     """List all users for an admin."""
-    from sqlalchemy import select, func, or_
-    from sqlalchemy.orm import selectinload, subqueryload
+    from sqlalchemy import func, select
+    from sqlalchemy.orm import selectinload
+
     from app.api.users.models import Users, UserProfiles
 
-    # Build the base query and count query with optional search
-    base_query = select(Users)
-    count_query = select(func.count(Users.id))
-    
-    if search:
-        search_term = f"%{search}%"
-        search_filter = or_(
-            Users.full_name.ilike(search_term),
-            Users.email.ilike(search_term),
-            Users.username.ilike(search_term),
-        )
-        base_query = base_query.filter(search_filter)
-        count_query = count_query.filter(search_filter)
+    criteria = _user_list_filters(search, user_type, provider, is_active)
 
-    # Filters are applied to both queries or the total disagrees with the rows.
-    if user_type:
-        base_query = base_query.filter(Users.user_type == user_type)
-        count_query = count_query.filter(Users.user_type == user_type)
-    if provider:
-        base_query = base_query.filter(Users.provider == provider)
-        count_query = count_query.filter(Users.provider == provider)
+    # The same criteria go on both queries, or the total disagrees with the
+    # rows and the pager offers pages that do not exist.
+    total = (
+        await session.execute(select(func.count(Users.id)).where(*criteria))
+    ).scalar() or 0
 
-    # Get total count of filtered results
-    total_result = await session.execute(count_query)
-    total = total_result.scalar() or 0
-
-    # Get paginated, eagerly-loaded results
     query = (
-        base_query.options(
+        select(Users)
+        .where(*criteria)
+        .options(
             selectinload(Users.profile).selectinload(UserProfiles.org),
             selectinload(Users.profile).selectinload(UserProfiles.avatar),
             selectinload(Users.interests),
@@ -122,22 +189,112 @@ async def list_all_users_admin(
         .offset(pagination.offset)
         .limit(pagination.limit)
     )
-    query = apply_sort(
-        query,
-        columns={
-            "joined": Users.created_at,
-            "name": Users.full_name,
-            "email": Users.email,
-            "username": Users.username,
-        },
-        default=Users.created_at,
-        sort=sort,
-        order=order,
+    result = await session.execute(_sorted_user_query(query, sort, order))
+
+    return paginated_response(
+        result.scalars().all(),
+        request=request,
+        schema=AdminUserListResponse,
+        total=total,
     )
-    result = await session.execute(query)
-    users = result.scalars().all()
-    
-    return paginated_response(users, request=request, schema=UserDetailResponse, total=total)
+
+
+#: Rows per database round trip while streaming the export. Big enough that a
+#: 50k-user export is 50 queries rather than 5,000; small enough that one
+#: chunk is a few hundred kilobytes rather than the whole table in memory.
+_EXPORT_CHUNK = 1000
+
+_EXPORT_COLUMNS = (
+    ("ID", lambda u: u.id),
+    ("Name", lambda u: u.full_name),
+    ("Username", lambda u: u.username),
+    ("Email", lambda u: u.email),
+    ("Phone", lambda u: u.phone),
+    ("Type", lambda u: getattr(u.user_type, "value", u.user_type)),
+    ("Sign-in", lambda u: getattr(u.provider, "value", u.provider)),
+    ("Joined", lambda u: u.created_at.strftime("%Y-%m-%d %H:%M:%S") if u.created_at else ""),
+    ("Status", lambda u: "active" if u.is_active else "suspended"),
+    ("Suspended reason", lambda u: u.suspended_reason or ""),
+)
+
+
+@router.get("/admin/export", summary="Export the filtered user list as CSV (admin)")
+async def export_users_admin(
+    session: SessionDep,
+    admin: ExportDataAuth,
+    search: str | None = Query(None),
+    user_type: str | None = Query(None, description="app_user, club, admin or guest"),
+    provider: str | None = Query(None, description="google, apple or email"),
+    sort: str | None = Query(None, description="joined, name, email or username"),
+    order: str | None = Query(None, description="asc or desc"),
+    is_active: bool | None = Query(
+        None, description="true for active only, false for suspended only"
+    ),
+) -> StreamingResponse:
+    """
+    Stream every row matching the filters, not just the page on screen.
+
+    Behind `export_data` rather than plain AdminAuth: a viewer can already
+    page the list, but handing out the whole user base as one file is a
+    different act from reading a screen of it, and it is the one the audit
+    log and the role split care about.
+
+    Streamed in chunks rather than assembled and returned: the box this runs
+    on has a few hundred megabytes of headroom, and a full export held in
+    memory as Python objects is the kind of thing that takes the API down
+    with it.
+
+    The request's own session is used while streaming, which is safe here:
+    FastAPI closes the dependency exit stack after the response body has
+    been sent, so a `yield` dependency outlives the generator that produced
+    the body. `test_export_pages_past_one_chunk` is what actually holds that
+    down -- it reads several chunks, so a session closed early fails it.
+    """
+    from sqlalchemy import select
+
+    from app.api.users.models import Users
+
+    criteria = _user_list_filters(search, user_type, provider, is_active)
+
+    async def rows() -> AsyncIterator[str]:
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+
+        def drain() -> str:
+            chunk = buffer.getvalue()
+            buffer.seek(0)
+            buffer.truncate(0)
+            return chunk
+
+        # A BOM, so Excel on Windows reads the file as UTF-8 instead of
+        # mangling every non-ASCII name in it.
+        writer.writerow([name for name, _ in _EXPORT_COLUMNS])
+        yield "\ufeff" + drain()
+
+        offset = 0
+        while True:
+            query = select(Users).where(*criteria).offset(offset).limit(_EXPORT_CHUNK)
+            result = await session.execute(_sorted_user_query(query, sort, order))
+            batch = result.scalars().all()
+            if not batch:
+                break
+            for db_user in batch:
+                writer.writerow([value(db_user) for _, value in _EXPORT_COLUMNS])
+            yield drain()
+            if len(batch) < _EXPORT_CHUNK:
+                break
+            offset += _EXPORT_CHUNK
+
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    return StreamingResponse(
+        rows(),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="users-{stamp}.csv"',
+            # Nothing downstream should keep a copy of the user base.
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @router.post("/profile/create", summary="Create a user profile.")

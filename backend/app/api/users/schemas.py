@@ -1,7 +1,7 @@
 from typing import Any
 from datetime import datetime
 from fastapi import Body, File, Form, UploadFile
-from pydantic import BaseModel, Field, EmailStr, HttpUrl, field_validator
+from pydantic import BaseModel, EmailStr, Field, HttpUrl, field_validator, model_validator
 
 from app.api.users.models import UserAvatarTypes
 from app.api.orgs.schema import OrganizationPublicMin
@@ -136,6 +136,32 @@ class UserDetailResponse(CustomBaseModel):
     interests: list[UserInterestDetail] | None = Field(None)
 
 
+class AdminUserListResponse(UserDetailResponse):
+    """
+    One row of the admin user list.
+
+    These two fields are here rather than on UserDetailResponse because that
+    one also answers GET /user/profile: putting an account's admin role on it
+    would publish the platform's privilege map to every signed-in user.
+
+    `admin_role` is reported as None unless the account is actually an admin.
+    The column is NOT NULL and defaults to `owner`, so every app user carries
+    `owner` in the database -- read literally it would badge the entire user
+    base as administrators.
+    """
+
+    is_active: bool = Field(True)
+    admin_role: str | None = Field(None)
+
+    @model_validator(mode="after")
+    def _only_admins_have_a_role(self) -> "AdminUserListResponse":
+        # Done here rather than at the call site so it holds for every route
+        # that returns this schema, including the CSV export.
+        if self.user_type != "admin":
+            self.admin_role = None
+        return self
+
+
 # Response Model
 
 
@@ -218,8 +244,16 @@ class AdminUserDetailResponse(UserDetailResponse):
     stats: AdminUserStats = Field(...)
     is_active: bool = Field(True)
     suspended_reason: str | None = Field(None)
-    # Only meaningful for an admin account.
+    # Only meaningful for an admin account, and only reported for one -- see
+    # AdminUserListResponse for why reporting the raw column would describe
+    # every user on the platform as an owner.
     admin_role: str | None = Field(None)
+
+    @model_validator(mode="after")
+    def _only_admins_have_a_role(self) -> "AdminUserDetailResponse":
+        if self.user_type != "admin":
+            self.admin_role = None
+        return self
 
 
 class FCMTokenRequest(CustomBaseModel):
