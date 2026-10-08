@@ -1,4 +1,8 @@
 from fastapi import APIRouter, Depends, Request, UploadFile, Query, File
+from sqlalchemy import select
+
+from app.api.clubs.models import Clubs
+from app.response import CustomHTTPException
 from app.api.clubs.schemas import (
     ClubAdminDetailResponse,
     ClubAdminFullResponse,
@@ -67,6 +71,29 @@ async def admin_create_club(
         email=club.email,
         is_admin_created=True,
     )
+
+
+@router.get("/overview", summary="Everything the club dashboard shows")
+async def club_overview(
+    session: SessionDep,
+    user: ClubAuth,
+    days: int = Query(30, ge=1, le=365, description="Window length in days"),
+) -> dict:
+    """
+    One response for the whole dashboard, so every figure on the screen
+    describes the same moment. Assembled from eight calls, a registration
+    count from one second can sit beside a revenue total from another and the
+    pair will not add up.
+    """
+    from app.api.clubs import overview as overview_service
+
+    club = (
+        await session.execute(select(Clubs).where(Clubs.user_id == user.id))
+    ).scalar_one_or_none()
+    if not club:
+        raise CustomHTTPException(status_code=404, message="No club for this account")
+
+    return await overview_service.get_club_overview(session, club, days=days)
 
 
 @router.get("/admin/list", summary="list all clubs (admin)")
