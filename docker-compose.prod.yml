@@ -39,7 +39,17 @@ services:
       python main.py
     restart: on-failure
     ports:
+      # Two host ports for one container port, deliberately. nginx on this box
+      # proxies api.myotherapp.com to 8001 and api.myotherapp.in (plus the
+      # stale api.staging.myotherapp.in and `finnet` vhosts) to 8000. On
+      # 2026-10-07 a recreate moved the published port from 8000 to 8001 and
+      # every client -- the Flutter app, all three dashboards -- talks to
+      # api.myotherapp.in, so the whole platform 502'd for ~18h while the
+      # backend itself was healthy. Publishing both keeps either vhost working.
+      # The real fix is one nginx upstream for both names; until then, do not
+      # drop 8000 from this list.
       - "8001:8000"
+      - "8000:8000"
     networks:
       doth_network:
         ipv4_address: 192.168.5.100
