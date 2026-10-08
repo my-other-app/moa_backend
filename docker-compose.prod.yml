@@ -18,7 +18,11 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U myuser -d mydatabase"]
+      # Was `-U myuser -d mydatabase`: placeholder credentials that do not
+      # exist here, so this logged `FATAL: role "myuser" does not exist`
+      # every ten seconds -- forever -- while still reporting healthy, since
+      # pg_isready only asks whether the server answers.
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 10s
       retries: 5
       start_period: 5s
@@ -33,6 +37,25 @@ services:
       - ./backend:/backend
     env_file:
       - .env
+    environment:
+      # Rebuilt from the parts rather than taken from .env, because the .env
+      # copy hardcodes an IP: it said 192.168.1.101 while postgres sits on
+      # 192.168.5.101. A packet to a dead address on an unrouted subnet is
+      # not refused, it is dropped -- so every new connection hung until it
+      # timed out instead of failing fast, while connections already in the
+      # pool kept working. The result looked like intermittent 500s rather
+      # than a database the app could not reach at all.
+      #
+      # `postgres` is the compose service name, resolved by Docker's embedded
+      # DNS to whatever address the container currently has, so changing the
+      # subnet can never break this again.
+      #
+      # `:?` makes a missing variable a loud compose error instead of an
+      # empty substitution that becomes a baffling authentication failure.
+      # Nothing secret is written here: these are read from the same .env the
+      # database itself uses.
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:?POSTGRES_USER must be set in .env}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB must be set in .env}
+      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
     depends_on:
       - postgres
     command: >
