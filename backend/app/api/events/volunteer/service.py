@@ -278,19 +278,26 @@ async def checkin_user(
             # Ticket exists but for a different event
             event_name = any_registration.event.name if any_registration.event else "another event"
             raise CustomHTTPException(
-                400, 
-                f"Incorrect event: This ticket belongs to '{event_name}'"
+                400,
+                f"Incorrect event: This ticket belongs to '{event_name}'",
+                error_code="TICKET_WRONG_EVENT",
             )
         else:
             # Ticket doesn't exist at all
             logger.error(f"Ticket not found during checkin: '{ticker_id}'")
-            raise CustomHTTPException(400, "Registration not found")
+            raise CustomHTTPException(
+                400, "Registration not found", error_code="REGISTRATION_NOT_FOUND"
+            )
     
     if registration.is_attended:
-        raise CustomHTTPException(400, "User already checked-in")
+        raise CustomHTTPException(
+            400, "User already checked-in", error_code="TICKET_ALREADY_USED"
+        )
     if registration.event.has_fee and not registration.is_paid:
         raise CustomHTTPException(
-            400, "User has not paid the fee, Please verify the payment details."
+            400,
+            "User has not paid the fee, Please verify the payment details.",
+            error_code="FEE_UNPAID",
         )
     registration.is_attended = True
     registration.attended_on = datetime.now(timezone.utc)
@@ -408,20 +415,27 @@ async def validate_ticket(
             event_name = any_registration.event.name if any_registration.event else "another event"
             logger.warning(f"Ticket belongs to different event: '{event_name}'")
             raise CustomHTTPException(
-                400, 
-                f"Incorrect event: This ticket belongs to '{event_name}'"
+                400,
+                f"Incorrect event: This ticket belongs to '{event_name}'",
+                error_code="TICKET_WRONG_EVENT",
             )
         else:
             # Ticket doesn't exist at all
             logger.error(f"Ticket not found: '{ticket_id}'")
-            raise CustomHTTPException(400, "Registration not found")
+            raise CustomHTTPException(
+                400, "Registration not found", error_code="REGISTRATION_NOT_FOUND"
+            )
     
     if registration.is_attended:
-        raise CustomHTTPException(400, "User already checked-in")
+        raise CustomHTTPException(
+            400, "User already checked-in", error_code="TICKET_ALREADY_USED"
+        )
     
     if registration.event.has_fee and not registration.is_paid:
         raise CustomHTTPException(
-            400, "User has not paid the fee, Please verify the payment details."
+            400,
+            "User has not paid the fee, Please verify the payment details.",
+            error_code="FEE_UNPAID",
         )
     
     # Get user profile for ticket holder name
