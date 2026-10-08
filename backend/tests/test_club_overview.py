@@ -244,3 +244,77 @@ async def test_a_club_account_is_required(client, make_admin, mint_token):
     response = await client.get("/api/v1/clubs/overview", headers=auth_header(token))
 
     assert response.status_code in (403, 404), response.text
+
+
+@pytest.mark.asyncio
+async def test_the_series_ends_today_and_the_windows_abut(
+    client, session, make_club, make_event, make_user, make_registration, mint_token
+):
+    """
+    The series was counted forward from `now - days`, so it ended yesterday
+    and left today out, while the totals printed beside it used the rolling
+    window and included today. Today's takings showed up in the headline
+    figure and nowhere on the chart.
+    """
+    owner, club = await make_club(name="Press", email="press@example.com")
+    event = await make_event(club=club, name="Open Mic", created_by=owner)
+    user = await make_user(email="today@example.com")
+    await register(make_registration, event, user, paid=30.0)
+    await session.flush()
+    token = await mint_token(owner)
+
+    response = await client.get(
+        "/api/v1/clubs/overview?days=7", headers=auth_header(token)
+    )
+
+    body = response.json()
+    current = body["revenue_series"]["current"]
+    previous = body["revenue_series"]["previous"]
+    today = datetime.now(timezone.utc).date()
+
+    assert current[-1]["date"] == today.isoformat()
+    # A registration made right now lands on the last point, not off the end.
+    assert current[-1]["revenue"] == 30.0
+
+    # The two windows abut rather than overlapping or leaving a gap: a
+    # period-on-period comparison double-counts a day if they overlap.
+    assert previous[-1]["date"] == (today - timedelta(days=7)).isoformat()
+    assert len(previous) == 7
+    assert previous[-1]["date"] < current[0]["date"]
+    assert (
+        datetime.fromisoformat(current[0]["date"]).date()
+        - datetime.fromisoformat(previous[-1]["date"]).date()
+    ) == timedelta(days=1)
+
+
+@pytest.mark.asyncio
+async def test_a_registration_made_late_in_the_utc_day_still_lands_on_it(
+    client, session, make_club, make_event, make_user, make_registration, mint_token
+):
+    """
+    Day buckets are computed in UTC on both sides.
+
+    `date_trunc` on a `timestamptz` resolves using the database session's
+    TimeZone, while the keys it is looked up by come from
+    `datetime.now(timezone.utc)`. On a session set to Asia/Kolkata, anything
+    created after 18:30 UTC bucketed to the next day and vanished from the
+    series. Production runs Postgres in UTC, which is the only reason this
+    was invisible.
+    """
+    owner, club = await make_club(name="Night", email="night@example.com")
+    event = await make_event(club=club, name="Late Set", created_by=owner)
+    user = await make_user(email="late@example.com")
+    # 23:30 UTC is 05:00 the following day in IST.
+    when = datetime.now(timezone.utc).replace(hour=23, minute=30) - timedelta(days=2)
+    await register(make_registration, event, user, paid=40.0, when=when)
+    await session.flush()
+    token = await mint_token(owner)
+
+    response = await client.get(
+        "/api/v1/clubs/overview?days=7", headers=auth_header(token)
+    )
+
+    series = response.json()["revenue_series"]["current"]
+    by_date = {point["date"]: point["revenue"] for point in series}
+
+    assert by_date[when.date().isoformat()] == 40.0
