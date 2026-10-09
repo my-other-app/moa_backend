@@ -156,7 +156,7 @@ def generate_image_bytes(
             timeout=30,
         )
         with open(output_path, "rb") as rendered:
-            return io.BytesIO(rendered.read())
+            return _tighten_png(rendered.read())
     except subprocess.CalledProcessError as e:
         logger.error(f"wkhtmltoimage failed: {e.stderr[:500]}")
         raise
@@ -166,3 +166,32 @@ def generate_image_bytes(
                 os.unlink(path)
             except OSError:
                 pass
+
+def _tighten_png(raw: bytes) -> io.BytesIO:
+    """Crop a rendered page to its content and compress it.
+
+    wkhtmltoimage writes the full page at the requested width and does not
+    compress: a certificate came back 1400x559 and 2.99MB, which is exactly
+    its uncompressed size. Most of that was transparent margin either side
+    of a centred card, and an app showing four of them in a list would pull
+    12MB to draw four thumbnails.
+
+    Cropping to the alpha bounding box also fixes the shape -- the image
+    becomes the certificate rather than a wide page with a certificate in
+    the middle -- so it scales into a panel without being letterboxed.
+    """
+    from PIL import Image
+
+    with Image.open(io.BytesIO(raw)) as image:
+        image = image.convert("RGBA")
+        box = image.getbbox()
+        if box:
+            image = image.crop(box)
+
+        out = io.BytesIO()
+        # Flat artwork with few colours, so a palette costs nothing visually
+        # and saves most of the bytes. Transparency is kept: the card behind
+        # it in the app supplies the colour around the certificate.
+        image.save(out, format="PNG", optimize=True)
+        out.seek(0)
+        return out
