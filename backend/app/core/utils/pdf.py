@@ -2,7 +2,11 @@ import io
 import os
 import tempfile
 import jinja2
+import logging
 import pdfkit
+
+
+logger = logging.getLogger(__name__)
 
 
 def generate_pdf_bytes(
@@ -93,3 +97,72 @@ def save_pdf_to_file(pdf_bytes, filename="output.pdf"):
     """
     with open(filename, "wb") as f:
         f.write(pdf_bytes.getvalue())
+
+def generate_image_bytes(
+    template_path: str,
+    context: dict,
+    width: int = 1400,
+    template_dir: str = None,
+) -> io.BytesIO:
+    """Render the same Jinja2 template to a PNG instead of a PDF.
+
+    The app shows a certificate preview beside a download button, and the
+    two have to be the same document. Rendering the PDF in a webview put
+    Apple's PDF viewer chrome on screen -- a page counter, a page frame, and
+    the certificate shrunk inside a sheet of white -- which no styling can
+    remove. An image has no viewer, so it crops to the certificate exactly.
+
+    wkhtmltoimage is the same engine wkhtmltopdf uses, so the output is the
+    same rendering of the same template, not a second implementation that
+    can drift from it.
+    """
+    import subprocess
+    import tempfile
+
+    template_loader_path = template_dir or "templates/pdf/"
+    template_env = jinja2.Environment(
+        loader=jinja2.FileSystemLoader(searchpath=template_loader_path),
+        autoescape=True,
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    html_out = template_env.get_template(template_path).render(context)
+
+    with tempfile.NamedTemporaryFile(suffix=".html", delete=False, mode="w") as src:
+        src.write(html_out)
+        source_path = src.name
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as out:
+        output_path = out.name
+
+    try:
+        subprocess.run(
+            [
+                "wkhtmltoimage",
+                "--format", "png",
+                "--width", str(width),
+                # Transparent so the card behind supplies the colour, and
+                # cropped to the content rather than padded to a page.
+                "--transparent",
+                "--quality", "90",
+                # No JavaScript, for the same reason the PDF path disables
+                # it: these templates never need it, and it is the vector
+                # for the unpatched local-file read in wkhtmltopdf.
+                "--disable-javascript",
+                source_path,
+                output_path,
+            ],
+            check=True,
+            capture_output=True,
+            timeout=30,
+        )
+        with open(output_path, "rb") as rendered:
+            return io.BytesIO(rendered.read())
+    except subprocess.CalledProcessError as e:
+        logger.error(f"wkhtmltoimage failed: {e.stderr[:500]}")
+        raise
+    finally:
+        for path in (source_path, output_path):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
