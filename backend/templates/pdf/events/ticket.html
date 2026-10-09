@@ -28,13 +28,7 @@
       width: 100%;
       max-width: 600px;
 
-      background-color: {
-          {
-          style.accent_color | default('#1db9a0')
-        }
-      }
-
-      ;
+      background-color: {{ style.accent_color | default('#1db9a0') }};
       border-radius: 30px;
       padding: 20px;
       position: relative;
@@ -46,19 +40,9 @@
         % if style.border_style and style.border_style !='none' %
       }
 
-      border: 3px {
-          {
-          style.border_style
-        }
-      }
+      border: 3px {{ style.border_style }}
 
-        {
-          {
-          style.border_color | default('#1db9a0')
-        }
-      }
-
-      ;
+        {{ style.border_color | default('#1db9a0') }};
 
         {
         % endif %
@@ -66,23 +50,11 @@
     }
 
     .ticket {
-      background-color: {
-          {
-          style.bg_color | default('#121212')
-        }
-      }
-
-      ;
+      background-color: {{ style.bg_color | default('#121212') }};
       border-radius: 20px;
       overflow: hidden;
 
-      color: {
-          {
-          style.text_color | default('#ffffff')
-        }
-      }
-
-      ;
+      color: {{ style.text_color | default('#ffffff') }};
       position: relative;
 
         {
@@ -162,26 +134,14 @@
       text-transform: uppercase;
       letter-spacing: 3px;
 
-      color: {
-          {
-          style.secondary_text_color | default('#aaaaaa')
-        }
-      }
-
-      ;
+      color: {{ style.secondary_text_color | default('#aaaaaa') }};
       margin-bottom: 6px;
     }
 
     .custom-header {
       font-size: 12px;
 
-      color: {
-          {
-          style.secondary_text_color | default('#aaaaaa')
-        }
-      }
-
-      ;
+      color: {{ style.secondary_text_color | default('#aaaaaa') }};
       margin-bottom: 8px;
     }
 
@@ -218,13 +178,7 @@
     .info-box .label {
       font-size: 12px;
 
-      color: {
-          {
-          style.secondary_text_color | default('#aaaaaa')
-        }
-      }
-
-      ;
+      color: {{ style.secondary_text_color | default('#aaaaaa') }};
       margin-bottom: 5px;
     }
 
@@ -240,13 +194,7 @@
     }
 
     .guidelines a {
-      color: {
-          {
-          style.accent_color | default('#1db9a0')
-        }
-      }
-
-      ;
+      color: {{ style.accent_color | default('#1db9a0') }};
       text-decoration: none;
       font-size: 14px;
     }
@@ -257,18 +205,10 @@
       background: repeating-linear-gradient(to right,
         transparent,
         transparent 5px,
-        {
-          {
-          style.text_color | default('#ffffff')
-        }
-      }
+        {{ style.text_color | default('#ffffff') }}
 
       5px,
-      {
-        {
-        style.text_color | default('#ffffff')
-      }
-    }
+      {{ style.text_color | default('#ffffff') }}
 
     10px);
     margin: 15px 0;
@@ -282,13 +222,7 @@
       width: 20px;
       height: 20px;
 
-      background-color: {
-          {
-          style.accent_color | default('#1db9a0')
-        }
-      }
-
-      ;
+      background-color: {{ style.accent_color | default('#1db9a0') }};
       border-radius: 50%;
       top: -9px;
     }
@@ -321,26 +255,14 @@
       max-width: 250px;
       line-height: 1.5;
 
-      color: {
-          {
-          style.secondary_text_color | default('#aaaaaa')
-        }
-      }
-
-      ;
+      color: {{ style.secondary_text_color | default('#aaaaaa') }};
     }
 
     .custom-footer {
       text-align: center;
       font-size: 11px;
 
-      color: {
-          {
-          style.secondary_text_color | default('#aaaaaa')
-        }
-      }
-
-      ;
+      color: {{ style.secondary_text_color | default('#aaaaaa') }};
       padding: 10px 20px 20px;
     }
   

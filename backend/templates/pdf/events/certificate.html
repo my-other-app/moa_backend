@@ -23,13 +23,7 @@
             font-family: "{{ style.font | default('Inter') }}",
             sans-serif;
 
-            background: {
-                    {
-                    style.accent_color | default('#1db9a0')
-                }
-            }
-
-            ;
+            background: {{ style.accent_color | default('#1db9a0') }};
             display: flex;
             justify-content: center;
             align-items: center;
@@ -41,13 +35,7 @@
             width: 100%;
             max-width: 800px;
 
-            background: {
-                    {
-                    style.accent_color | default('#1db9a0')
-                }
-            }
-
-            ;
+            background: {{ style.accent_color | default('#1db9a0') }};
             border-radius: 20px;
             padding: 14px;
 
@@ -55,19 +43,9 @@
                 % if style.border_style and style.border_style !='none' %
             }
 
-            border: 3px {
-                    {
-                    style.border_style
-                }
-            }
+            border: 3px {{ style.border_style }}
 
-                {
-                    {
-                    style.border_color | default('#1db9a0')
-                }
-            }
-
-            ;
+                {{ style.border_color | default('#1db9a0') }};
 
                 {
                 % endif %
@@ -75,21 +53,9 @@
         }
 
         .certificate-inner {
-            background: {
-                    {
-                    style.bg_color | default('#121212')
-                }
-            }
+            background: {{ style.bg_color | default('#121212') }};
 
-            ;
-
-            color: {
-                    {
-                    style.text_color | default('#ffffff')
-                }
-            }
-
-            ;
+            color: {{ style.text_color | default('#ffffff') }};
             border-radius: 16px;
             padding: 48px 40px;
             text-align: center;
@@ -158,13 +124,7 @@
             letter-spacing: 5px;
             text-transform: uppercase;
 
-            color: {
-                    {
-                    style.accent_color | default('#1db9a0')
-                }
-            }
-
-            ;
+            color: {{ style.accent_color | default('#1db9a0') }};
             margin-bottom: 8px;
             font-weight: 600;
         }
@@ -183,13 +143,7 @@
         .cert-subtitle {
             font-size: 13px;
 
-            color: {
-                    {
-                    style.secondary_text_color | default('#aaaaaa')
-                }
-            }
-
-            ;
+            color: {{ style.secondary_text_color | default('#aaaaaa') }};
             margin-bottom: 10px;
         }
 
@@ -197,22 +151,10 @@
             font-size: 28px;
             font-weight: 700;
 
-            color: {
-                    {
-                    style.accent_color | default('#1db9a0')
-                }
-            }
-
-            ;
+            color: {{ style.accent_color | default('#1db9a0') }};
             padding: 8px 0;
 
-            border-bottom: 2px solid {
-                    {
-                    style.accent_color | default('#1db9a0')
-                }
-            }
-
-            ;
+            border-bottom: 2px solid {{ style.accent_color | default('#1db9a0') }};
             display: inline-block;
             min-width: 300px;
             margin-bottom: 20px;
@@ -222,38 +164,20 @@
             font-size: 13px;
             line-height: 1.8;
 
-            color: {
-                    {
-                    style.secondary_text_color | default('#aaaaaa')
-                }
-            }
-
-            ;
+            color: {{ style.secondary_text_color | default('#aaaaaa') }};
             margin-bottom: 24px;
         }
 
         .cert-event-name {
             font-weight: 600;
 
-            color: {
-                    {
-                    style.text_color | default('#ffffff')
-                }
-            }
-
-            ;
+            color: {{ style.text_color | default('#ffffff') }};
         }
 
         .cert-custom-text {
             font-size: 13px;
 
-            color: {
-                    {
-                    style.secondary_text_color | default('#aaaaaa')
-                }
-            }
-
-            ;
+            color: {{ style.secondary_text_color | default('#aaaaaa') }};
             margin-bottom: 16px;
             font-style: italic;
         }
@@ -280,13 +204,7 @@
             width: 120px;
             height: 1px;
 
-            background: {
-                    {
-                    style.secondary_text_color | default('#aaaaaa')
-                }
-            }
-
-            ;
+            background: {{ style.secondary_text_color | default('#aaaaaa') }};
             margin: 0 auto 6px;
         }
 
@@ -298,13 +216,7 @@
         .cert-signatory-title {
             font-size: 10px;
 
-            color: {
-                    {
-                    style.secondary_text_color | default('#aaaaaa')
-                }
-            }
-
-            ;
+            color: {{ style.secondary_text_color | default('#aaaaaa') }};
         }
 
         /* QR */
@@ -330,13 +242,7 @@
         .cert-footer-label {
             font-size: 9px;
 
-            color: {
-                    {
-                    style.secondary_text_color | default('#aaaaaa')
-                }
-            }
-
-            ;
+            color: {{ style.secondary_text_color | default('#aaaaaa') }};
             text-transform: uppercase;
             letter-spacing: 1px;
         }
@@ -351,13 +257,7 @@
             text-align: center;
             font-size: 11px;
 
-            color: {
-                    {
-                    style.secondary_text_color | default('#aaaaaa')
-                }
-            }
-
-            ;
+            color: {{ style.secondary_text_color | default('#aaaaaa') }};
             margin-top: 16px;
         }
     
