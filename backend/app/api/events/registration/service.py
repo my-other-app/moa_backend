@@ -24,6 +24,20 @@ from app.api.users import service as user_service
 from app.api.models import BackgroundTaskLogs
 
 
+def _field_type(field) -> str:
+    """The field's type as a plain string.
+
+    CustomBaseModel sets use_enum_values=True, so a FieldTypes annotation
+    validates to the string rather than the enum member. Reading
+    `.field_type.value` therefore raised AttributeError on every registration
+    for an event with custom fields -- a 500, with the app only able to report
+    that something went wrong. Accepting either form keeps this working if
+    that config is ever changed back.
+    """
+    field_type = field.field_type
+    return getattr(field_type, "value", field_type)
+
+
 async def register_event(
     session: AsyncSession,
     full_name: str,
@@ -107,13 +121,23 @@ async def register_event(
         ]
         validated_additional_details = {}
         for field in db_additional_details:
-            if field.key not in additional_details.keys():
-                errors[field.key] = "This field is required"
+            value = additional_details.get(field.key)
+            missing = value is None or (isinstance(value, str) and not value.strip())
+
+            if missing:
+                # Only a required field is an error when absent. This used to
+                # reject any missing key without consulting field.required, so
+                # `required: False` meant nothing and every custom field was
+                # mandatory -- a client that correctly omits a blank optional
+                # field had its registration refused.
+                if field.required:
+                    errors[field.key] = "This field is required"
                 continue
-            if field.field_type.value in ("select", "radio", "checkbox"):
-                if additional_details[field.key] not in field.options:
+
+            if _field_type(field) in ("select", "radio", "checkbox"):
+                if value not in (field.options or []):
                     errors[field.key] = "Invalid option selected"
-            validated_additional_details[field.key] = additional_details[field.key]
+            validated_additional_details[field.key] = value
         if errors:
             raise CustomHTTPException(400, message=errors)
         additional_details = validated_additional_details

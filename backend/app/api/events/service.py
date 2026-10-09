@@ -87,11 +87,10 @@ async def create_event(
     if not user.club:
         raise CustomHTTPException(403, message="Not authorized to create event")
     for field in additional_details:
-        if (
-            field.field_type.value == "select"
-            or field.field_type.value == "radio"
-            or field.field_type.value == "checkbox"
-        ):
+        # Same enum-or-string question as at registration time; see
+        # _field_type in app/api/events/registration/service.py.
+        field_type = getattr(field.field_type, "value", field.field_type)
+        if field_type in ("select", "radio", "checkbox"):
             if not field.options:
                 raise CustomHTTPException(
                     400, message="Options required for select, radio, checkbox fields"
