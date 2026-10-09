@@ -51,6 +51,7 @@ from app.core.response.pagination import (
     PaginationParams,
     paginated_response,
 )
+from app.api.events import recommendations
 from app.api.events.volunteer.router import router as volunteer_router
 from app.api.events.registration.router import router as registration_router
 
@@ -355,6 +356,36 @@ async def list_events(
     
     return paginated_response(enhanced_events, request, schema=EventListResponse)
 
+
+
+@router.get("/for-you", summary="Personalised event feed")
+async def for_you(
+    request: Request,
+    pagination: PaginationParams,
+    session: SessionDep,
+    user: DependsAuth,
+    debug_scores: bool = Query(False, description="Include each event's score"),
+) -> PaginatedResponse[EventListResponse]:
+    """Upcoming events ranked for this user.
+
+    Replaces calling /events/list with no filters, which returned every event
+    ever created oldest-first -- so the feed opened on an event from years ago.
+    """
+    events, scores = await recommendations.for_you_events(
+        session,
+        user_id=user.id,
+        limit=pagination.limit,
+        offset=pagination.offset,
+    )
+
+    payload = []
+    for event, score in zip(events, scores):
+        item = jsonable_encoder(event)
+        if debug_scores:
+            item["_score"] = round(score, 3)
+        payload.append(item)
+
+    return paginated_response(payload, request, schema=EventListResponse)
 
 
 @router.delete("/delete/{event_id}", summary="Delete an event")
