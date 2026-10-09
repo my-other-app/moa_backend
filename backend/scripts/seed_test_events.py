@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 sys.path.insert(0, ".")
 
+from app.api.badges.models import BadgeDefinitions, UserBadges  # noqa: E402
 from app.api.clubs.models import Clubs, Notes  # noqa: E402
 from app.api.events.models import (  # noqa: E402
     EventInterestsLink,
@@ -76,6 +77,51 @@ PLAN = [
      ["Coding"],                       0,     0, False, -8,
      "already ended, must not appear"),
 ]
+
+# Custom registration fields, stored on Events.additional_details and
+# validated in app/api/events/registration/service.py at registration time.
+#
+# NOTE on `required`: that validator rejects any field whose key is absent
+# from the submission without ever consulting field.required, so an optional
+# field is optional in name only. "Dietary requirements" below is marked
+# required=False precisely so the gap is visible when testing.
+CUSTOM_FIELDS = {
+    "Secure Coding Sprint": [
+        {"key": "tshirt_size", "label": "T-shirt size", "field_type": "select",
+         "required": True, "options": ["S", "M", "L", "XL", "XXL"]},
+        {"key": "experience", "label": "Experience level", "field_type": "radio",
+         "required": True, "options": ["Beginner", "Intermediate", "Advanced"]},
+        {"key": "dietary", "label": "Dietary requirements",
+         "field_type": "textarea", "required": False, "options": None},
+        {"key": "emergency_contact", "label": "Emergency contact",
+         "field_type": "tel", "required": True, "options": None},
+    ],
+    "Founders Coding Jam": [
+        {"key": "tshirt_size", "label": "T-shirt size", "field_type": "select",
+         "required": True, "options": ["S", "M", "L", "XL"]},
+        {"key": "team_name", "label": "Team name", "field_type": "text",
+         "required": True, "options": None},
+        {"key": "github", "label": "GitHub profile", "field_type": "url",
+         "required": False, "options": None},
+    ],
+    "Annual Entrepreneur Summit": [
+        {"key": "company", "label": "Company or idea", "field_type": "text",
+         "required": True, "options": None},
+        {"key": "stage", "label": "Stage", "field_type": "select",
+         "required": True, "options": ["Idea", "Prototype", "Revenue", "Scaling"]},
+        {"key": "pitch_slot", "label": "Preferred pitch slot",
+         "field_type": "time", "required": True, "options": None},
+        {"key": "consent", "label": "Agree to be recorded",
+         "field_type": "checkbox", "required": True, "options": ["Yes", "No"]},
+    ],
+    # The rest are left plain on purpose, so a registration with no custom
+    # fields is testable alongside one that has them.
+}
+
+# Badges to award to --user-id, so both the earned and the unearned state
+# have something to show. Production holds 18 definitions and had awarded
+# none of them to anybody.
+AWARD_BADGES = ["first_event", "event_explorer", "critic", "runner_up"]
 
 NOTES = [
     ("Doors open early", "Doors open 30 minutes before each session. Bring a laptop."),
@@ -145,6 +191,10 @@ async def seed(session: AsyncSession):
             # A spread so the popularity term is not uniformly zero.
             page_views=random.randint(0, 60),
         )
+        custom = CUSTOM_FIELDS.get(title)
+        if custom:
+            event.additional_details = custom
+
         session.add(event)
         await session.flush()
 
@@ -157,7 +207,8 @@ async def seed(session: AsyncSession):
             )
 
         made += 1
-        print(f"  + {name}  ({club.name}, {why})")
+        extra = f"  [+{len(custom)} custom fields]" if custom else ""
+        print(f"  + {name}  ({club.name}, {why}){extra}")
 
     notes_made = 0
     for slug, club in clubs.items():
@@ -176,6 +227,50 @@ async def seed(session: AsyncSession):
 
     await session.commit()
     print(f"\nSeeded {made} events and {notes_made} notes.")
+
+
+async def award_badges(session: AsyncSession, user_id: int):
+    """Give the user a few badges so the earned state has something in it.
+
+    Deliberately partial: four of the eighteen definitions, so the profile
+    shows earned and unearned side by side. Awarded directly rather than by
+    driving the real triggers, which would mean registering for and attending
+    events that have not happened.
+    """
+    definitions = {
+        d.slug: d
+        for d in (
+            await session.scalars(
+                select(BadgeDefinitions).where(
+                    BadgeDefinitions.slug.in_(AWARD_BADGES)
+                )
+            )
+        ).all()
+    }
+    existing = {
+        b.badge_id
+        for b in (
+            await session.scalars(
+                select(UserBadges).where(UserBadges.user_id == user_id)
+            )
+        ).all()
+    }
+
+    added = 0
+    for slug in AWARD_BADGES:
+        definition = definitions.get(slug)
+        if definition is None:
+            print(f"  ? no badge definition {slug!r}, skipping")
+            continue
+        if definition.id in existing:
+            print(f"  = {definition.emoji} {definition.name} already awarded")
+            continue
+        session.add(UserBadges(user_id=user_id, badge_id=definition.id))
+        added += 1
+        print(f"  + {definition.emoji} {definition.name}")
+
+    await session.commit()
+    print(f"\nAwarded {added} badges to user {user_id}.")
 
 
 async def remove(session: AsyncSession):
@@ -212,6 +307,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--remove", action="store_true", help="undo a previous seed")
     parser.add_argument(
+        "--award-badges",
+        type=int,
+        metavar="USER_ID",
+        help="also award a few badges to this user, so the profile has some",
+    )
+    parser.add_argument(
         "--confirm",
         action="store_true",
         help="required: this writes to whichever database the app is configured for",
@@ -226,7 +327,13 @@ def main():
 
     async def _run():
         async with AsyncSessionLocal() as session:
-            await (remove(session) if args.remove else seed(session))
+            if args.remove:
+                await remove(session)
+                return
+            await seed(session)
+            if args.award_badges:
+                print()
+                await award_badges(session, args.award_badges)
 
     asyncio.run(_run())
 
