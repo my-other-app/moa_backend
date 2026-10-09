@@ -11,7 +11,7 @@ from datetime import timedelta
 import base64
 import io
 import qrcode
-from app.core.utils.pdf import generate_pdf_bytes
+from app.core.utils.pdf import generate_image_bytes, generate_pdf_bytes
 from app.api.templates_shared import render_layers
 from fastapi.encoders import jsonable_encoder
 from typing import Optional, List
@@ -619,6 +619,81 @@ async def get_certificate_style(
     return style
 
 
+async def _certificate_render_context(session, ticket_id: str) -> dict:
+    """The template context for a certificate, shared by the PDF and the PNG.
+
+    Both renders go through this so the preview the app shows and the file
+    the download produces cannot drift apart -- they are the same template
+    with the same payload, rendered by the same engine.
+    """
+    registration = await service.get_ticket_details(session, ticket_id=ticket_id)
+
+    if not registration.is_attended:
+        raise CustomHTTPException(
+            403, message="Certificate is only available for attendees who checked in"
+        )
+
+    from app.api.certificate_templates.service import get_template_for_event
+
+    style = await get_template_for_event(session, registration.event_id)
+    event = registration.event
+
+    email_payload = {
+        "ticket_id": registration.ticket_id,
+        "participant_name": registration.full_name,
+        "event_name": event.name,
+        "event_date": event.event_datetime.strftime("%d %b %Y"),
+        "organizer_name": event.club.name if event.club else "",
+    }
+
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=10,
+        border=4,
+    )
+    qr.add_data(f"certificate:{registration.ticket_id}")
+    qr.make(fit=True)
+    buffered = io.BytesIO()
+    qr.make_image(fill_color="black", back_color="white").save(buffered, format="PNG")
+    email_payload["qr_code"] = base64.b64encode(buffered.getvalue()).decode("utf-8")
+
+    return {"email_payload": email_payload, "style": style}
+
+
+@router.get("/certificates/{ticket_id}/image", summary="Get certificate as an image")
+async def get_certificate_image(
+    ticket_id: str,
+    session: SessionDep = SessionDep,
+) -> Response:
+    """The certificate as a PNG, for previewing it in the app.
+
+    The app used to render the PDF in a webview, which put Apple's PDF
+    viewer chrome on screen -- a page counter, a page frame, and the
+    certificate shrunk inside a sheet of white. An image has no viewer, so
+    it crops to the certificate itself.
+
+    Same template, same payload and the same rendering engine as the PDF,
+    so what is previewed is what is downloaded.
+    """
+    context = await _certificate_render_context(session, ticket_id)
+
+    image_bytes = generate_image_bytes(
+        template_path="events/certificate.html",
+        context=context,
+    )
+
+    return Response(
+        content=image_bytes.getvalue(),
+        media_type="image/png",
+        headers={
+            # Certificates do not change once issued, so this is worth
+            # caching hard: the app shows it in a list and a detail view.
+            "Cache-Control": "public, max-age=86400",
+        },
+    )
+
+
 @router.get("/certificates/{ticket_id}/pdf", summary="Get certificate PDF")
 async def get_certificate_pdf(
     ticket_id: str,
@@ -628,47 +703,11 @@ async def get_certificate_pdf(
     Generate and download a PDF certificate of participation.
     Only available for attendees who have checked in (is_attended=True).
     """
-    registration = await service.get_ticket_details(session, ticket_id=ticket_id)
-
-    if not registration.is_attended:
-        raise CustomHTTPException(403, message="Certificate is only available for attendees who checked in")
-
-    # Load certificate template config for this event
-    from app.api.certificate_templates.service import get_template_for_event
-    style = await get_template_for_event(session, registration.event_id)
-
-    # Construct payload for template
-    event = registration.event
-
-    email_payload = {
-        "ticket_id": registration.ticket_id,
-        "participant_name": registration.full_name,
-        "event_name": event.name,
-        "event_date": event.event_datetime.strftime("%d %b %Y"),
-        "organizer_name": event.club.name,
-    }
-
-    # Generate QR Code for verification
-    qr = qrcode.QRCode(
-        version=1,
-        error_correction=qrcode.constants.ERROR_CORRECT_L,
-        box_size=10,
-        border=4,
-    )
-    qr.add_data(f"certificate:{registration.ticket_id}")
-    qr.make(fit=True)
-
-    img = qr.make_image(fill_color="black", back_color="white")
-
-    buffered = io.BytesIO()
-    img.save(buffered, format="PNG")
-    qr_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
-
-    email_payload["qr_code"] = qr_base64
+    context = await _certificate_render_context(session, ticket_id)
 
     pdf_bytes = generate_pdf_bytes(
         template_path="events/certificate.html",
-        context={"email_payload": email_payload, "style": style},
+        context=context,
         options={"orientation": "Landscape"},
     )
 
