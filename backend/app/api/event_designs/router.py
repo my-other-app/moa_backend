@@ -14,20 +14,32 @@ import enum
 import io
 from typing import Optional
 
-from fastapi import APIRouter, File, Form, Query, UploadFile
+from fastapi import APIRouter, File, Form, Query, Response, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
 from app.api.certificate_templates.models import CertificateTemplates
+from app.api.certificate_templates.schemas import CertificateTemplateConfig
 from app.api.certificate_templates.service import (
     _default_config as certificate_default_config,
 )
+from app.api.events.documents import (
+    apply_layers,
+    document_values,
+    image_width,
+    qr_data_url,
+    qr_png_base64,
+    sample_values,
+)
+from app.api.events.models import EventRegistrationsLink
 from app.api.events.access import ensure_event_access, is_admin_user
 from app.api.events.models import Events
 from app.api.templates_audience import RegistrationRole, TemplateAudience
 from app.api.templates_resolve import fork_for_event, resolve_template
 from app.api.ticket_templates.models import TicketTemplates
+from app.api.ticket_templates.schemas import TicketTemplateConfig
+from app.core.utils.pdf import generate_image_bytes
 from app.api.ticket_templates.service import _default_config as ticket_default_config
 from app.core.auth.dependencies import ClubAuth
 from app.db.core import SessionDep
@@ -344,3 +356,176 @@ async def save_artwork(
     await session.refresh(template)
 
     return _describe(template, event_id, audience)
+
+
+# --- previewing with a real attendee ------------------------------------------
+#
+# The designer's "Sample preview" showed Lorem Ipsum, and the only way to see
+# the document an actual attendee would receive was to issue one. These two
+# endpoints give the designer the real thing: the values for a chosen
+# registration to substitute live, and the document itself rendered by the
+# same engine as the PDF.
+
+
+class SampleResponse(BaseModel):
+    """What to fill the tokens with, and the QR that goes with it."""
+
+    values: dict
+    qr_data_url: str
+    registration: Optional[dict] = None
+
+
+async def _registration_for_preview(session, event_id: int, ticket_id: Optional[str]):
+    """The chosen registration, which must belong to this event.
+
+    Checked against the event rather than only looked up, so a club cannot
+    preview its design against another event's attendee by guessing a code.
+    """
+    if not ticket_id:
+        return None
+    registration = await session.scalar(
+        select(EventRegistrationsLink)
+        .options(joinedload(EventRegistrationsLink.event).joinedload(Events.club))
+        .where(
+            EventRegistrationsLink.event_id == event_id,
+            EventRegistrationsLink.ticket_id == ticket_id,
+            EventRegistrationsLink.is_deleted == False,
+        )
+    )
+    if registration is None:
+        raise CustomHTTPException(404, message="No such registration on this event")
+    return registration
+
+
+def _values_and_qr(event, kind: DesignKind, registration):
+    """The token values and QR text for a real or fictional attendee."""
+    if registration is not None:
+        values = document_values(registration, event)
+        code = registration.ticket_id
+    else:
+        values = sample_values(event, kind.value)
+        code = values["ticket_code"]
+    qr_text = f"certificate:{code}" if kind is DesignKind.certificate else code
+    return values, qr_text
+
+
+@router.get("/{kind}/sample", summary="Values to preview this design with")
+async def sample_for_design(
+    session: SessionDep,
+    user: ClubAuth,
+    event_id: int,
+    kind: DesignKind,
+    ticket_id: Optional[str] = Query(None),
+) -> SampleResponse:
+    """Token values for one registration, or a sample attendee without one.
+
+    The designer substitutes these as the organiser drags, so a long real
+    name is seen to fit -- or not -- before anyone is issued a document.
+    """
+    event = await _event_for_editing(session, user, event_id)
+    registration = await _registration_for_preview(session, event_id, ticket_id)
+    values, qr_text = _values_and_qr(event, kind, registration)
+    return SampleResponse(
+        values=values,
+        qr_data_url=qr_data_url(qr_text),
+        registration=(
+            {
+                "ticket_id": registration.ticket_id,
+                "full_name": registration.full_name,
+                "email": registration.email,
+                "role": getattr(registration.role, "value", registration.role),
+            }
+            if registration is not None
+            else None
+        ),
+    )
+
+
+class PreviewRequest(BaseModel):
+    config: dict = Field(..., description="The design as the editor holds it, saved or not")
+    ticket_id: Optional[str] = Field(default=None)
+
+
+@router.post("/{kind}/preview", summary="Render this design exactly, as a PNG")
+async def preview_design(
+    session: SessionDep,
+    user: ClubAuth,
+    event_id: int,
+    kind: DesignKind,
+    payload: PreviewRequest,
+    audience: TemplateAudience = Query(TemplateAudience.event_default),
+) -> Response:
+    """The document as the attendee would get it, from an unsaved design.
+
+    The canvas is an approximation -- a browser is not wkhtmltopdf. This is
+    not: same template, same engine, same values, so "does the name fit"
+    is answered by the thing that will print it.
+    """
+    event = await _event_for_editing(session, user, event_id)
+    registration = await _registration_for_preview(session, event_id, payload.ticket_id)
+
+    # Validated through the same schema the save path uses, so a preview
+    # cannot render a config the API would refuse to store.
+    schema = TicketTemplateConfig if kind is DesignKind.ticket else CertificateTemplateConfig
+    try:
+        style = schema(**payload.config).model_dump()
+    except Exception as exc:
+        raise CustomHTTPException(422, message=f"Invalid design: {exc}")
+
+    # Artwork URLs live on the stored row, not in what the editor sends.
+    current = await resolve_template(
+        session, _MODELS[kind], event_id=event_id, club_id=event.club_id,
+        role=_role_for(audience),
+    )
+    if current is not None and current.config:
+        for key in ("logo_url", "secondary_logo_url", "background_image_url",
+                    "signature_1_url", "signature_2_url"):
+            if not style.get(key) and current.config.get(key):
+                style[key] = current.config[key]
+
+    values, qr_text = _values_and_qr(event, kind, registration)
+    style = apply_layers(style, values)
+
+    name = values["name"]
+    if kind is DesignKind.ticket:
+        template = "events/ticket.html"
+        default_width = 600
+        email_payload = {
+            "ticket_id": values["ticket_code"],
+            "participant_name": name,
+            "event_name": values["event_name"],
+            "event_date": values["event_date"],
+            "event_time": values["event_time"],
+            "event_location": values["venue"],
+            "event_prizes": f"Prizes worth ₹{event.prize_amount}" if event.prize_amount else None,
+            "organizer_name": values["club_name"],
+            "contact_email": event.contact_email,
+            "contact_phone": event.contact_phone,
+            "qr_code": qr_png_base64(qr_text),
+        }
+    else:
+        template = "events/certificate.html"
+        default_width = 1400
+        email_payload = {
+            "ticket_id": values["certificate_id"],
+            "participant_name": name,
+            "event_name": values["event_name"],
+            "event_date": values["event_date"],
+            "organizer_name": values["club_name"],
+            "qr_code": qr_png_base64(qr_text),
+        }
+
+    image_bytes = generate_image_bytes(
+        template_path=template,
+        context={
+            "email_payload": email_payload,
+            "style": style,
+            "qr_code_url": qr_data_url(qr_text),
+        },
+        width=image_width(style, default=default_width),
+    )
+    return Response(
+        content=image_bytes.getvalue(),
+        media_type="image/png",
+        headers={"Cache-Control": "no-store"},
+    )

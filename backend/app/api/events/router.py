@@ -12,7 +12,14 @@ import base64
 import io
 import qrcode
 from app.core.utils.pdf import generate_image_bytes, generate_pdf_bytes
-from app.api.templates_shared import render_layers
+from app.api.events.documents import (
+    apply_layers,
+    document_values,
+    image_width,
+    pdf_page_options,
+    qr_data_url,
+    qr_png_base64,
+)
 from fastapi.encoders import jsonable_encoder
 import logging
 from typing import Optional, List
@@ -485,6 +492,74 @@ async def get_ticket(
     return jsonable_encoder(result)
 
 
+@router.get("/tickets/{ticket_id}/image", summary="Get ticket as an image")
+async def get_ticket_image(
+    ticket_id: str,
+    session: SessionDep = SessionDep,
+    user: DependsAuth = None,
+) -> Response:
+    """The ticket as a PNG, for showing on screen.
+
+    The app drew its own ticket -- a hardcoded card with its own colours and
+    its own QR -- and the event website drew a third one. Only the PDF
+    download carried the club's design. This is the same template, the same
+    payload and the same engine as the PDF, so what the attendee sees in the
+    app is the ticket the club designed.
+
+    Same access rule as the PDF: the ticket's owner, the owning club, or an
+    admin. A QR is an entry pass, not a public image.
+    """
+    registration = await service.get_ticket_details(session, ticket_id=ticket_id)
+    _assert_can_access_ticket(user, registration)
+
+    from app.api.ticket_templates.service import get_template_for_event
+
+    style = await get_template_for_event(
+        session, registration.event_id, role=_role_of(registration)
+    )
+    event = registration.event
+    event_endtime = (
+        event.event_datetime + timedelta(hours=event.duration)
+        if event.duration
+        else None
+    )
+    email_payload = {
+        "ticket_id": registration.ticket_id,
+        "participant_name": registration.full_name,
+        "event_name": event.name,
+        "event_date": event.event_datetime.strftime("%d %b %Y"),
+        "event_time": (
+            event.event_datetime.strftime("%I:%M %p")
+            + (" - " + event_endtime.strftime("%I:%M %p"))
+            if event_endtime
+            else ""
+        ),
+        "event_location": event.location_name,
+        "event_prizes": f"Prizes worth ₹{event.prize_amount}" if event.prize_amount else None,
+        "organizer_name": event.club.name,
+        "contact_email": event.contact_email,
+        "contact_phone": event.contact_phone,
+        "qr_code": qr_png_base64(registration.ticket_id),
+    }
+    style = apply_layers(style, document_values(registration, event))
+
+    image_bytes = generate_image_bytes(
+        template_path="events/ticket.html",
+        context={
+            "email_payload": email_payload,
+            "style": style,
+            "qr_code_url": qr_data_url(registration.ticket_id),
+        },
+        # The built-in card is 600px wide; a layered design is its artwork.
+        width=image_width(style, default=600),
+    )
+    return Response(
+        content=image_bytes.getvalue(),
+        media_type="image/png",
+        headers={"Cache-Control": "private, max-age=300"},
+    )
+
+
 @router.get("/count-view/{event_id}", summary="Increment event view count")
 async def increment_view_count(
     request: Request,
@@ -546,46 +621,14 @@ async def get_ticket_pdf(
         "contact_phone": event.contact_phone,
     }
 
-    # Generate QR Code
-    qr = qrcode.QRCode(
-        version=1,
-        error_correction=qrcode.constants.ERROR_CORRECT_L,
-        box_size=10,
-        border=4,
-    )
-    qr.add_data(registration.ticket_id)
-    qr.make(fit=True)
-    
-    img = qr.make_image(fill_color="black", back_color="white")
-    
-    # Convert QR code to base64
-    buffered = io.BytesIO()
-    img.save(buffered, format="PNG")
-    qr_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
-    
+    qr_base64 = qr_png_base64(registration.ticket_id)
     email_payload["qr_code"] = qr_base64
 
-    # Layer mode substitutes its tokens here: Jinja will not re-render the
-    # contents of a variable, so `{{name}}` inside a layer would print as
-    # literal braces. No-op when the template defines no layers.
-    if isinstance(style, dict) and style.get("layers"):
-        style = {
-            **style,
-            "layers": render_layers(
-                style["layers"],
-                {
-                    "name": email_payload.get("name"),
-                    "ticket_code": email_payload.get("ticket_id")
-                    or email_payload.get("ticket_code"),
-                    "event_name": email_payload.get("event_name"),
-                    "event_title": email_payload.get("event_name"),
-                    "event_date": email_payload.get("event_date"),
-                    "event_time": email_payload.get("event_time"),
-                    "venue": email_payload.get("venue"),
-                    "club_name": email_payload.get("club_name"),
-                },
-            ),
-        }
+    # Layer tokens are filled from the one shared answer. This used to read
+    # them off email_payload under keys it did not have -- `name` where the
+    # payload said `participant_name` -- so the attendee's name was blank on
+    # every layer-mode ticket, and three tokens were never filled at all.
+    style = apply_layers(style, document_values(registration, event))
 
     pdf_bytes = generate_pdf_bytes(
         template_path="events/ticket.html",
@@ -594,6 +637,9 @@ async def get_ticket_pdf(
             "style": style,
             "qr_code_url": f"data:image/png;base64,{qr_base64}",
         },
+        # In layer mode the page is the artwork's own size, so the design
+        # fills the PDF instead of sitting shrunk on an A4 sheet.
+        options=pdf_page_options(style),
     )
 
     return Response(
@@ -676,19 +722,20 @@ async def _certificate_render_context(session, ticket_id: str) -> dict:
         "organizer_name": event.club.name if event.club else "",
     }
 
-    qr = qrcode.QRCode(
-        version=1,
-        error_correction=qrcode.constants.ERROR_CORRECT_L,
-        box_size=10,
-        border=4,
-    )
-    qr.add_data(f"certificate:{registration.ticket_id}")
-    qr.make(fit=True)
-    buffered = io.BytesIO()
-    qr.make_image(fill_color="black", back_color="white").save(buffered, format="PNG")
-    email_payload["qr_code"] = base64.b64encode(buffered.getvalue()).decode("utf-8")
+    qr_text = f"certificate:{registration.ticket_id}"
+    email_payload["qr_code"] = qr_png_base64(qr_text)
 
-    return {"email_payload": email_payload, "style": style}
+    # Tokens were never substituted on certificates: this context had no
+    # render_layers call, so a layered certificate printed every text layer
+    # empty. And the template's QR layer reads `qr_code_url`, which nothing
+    # here set -- that is the QR "never previewing".
+    style = apply_layers(style, document_values(registration, event))
+
+    return {
+        "email_payload": email_payload,
+        "style": style,
+        "qr_code_url": qr_data_url(qr_text),
+    }
 
 
 @router.get("/certificates/{ticket_id}/image", summary="Get certificate as an image")
@@ -711,6 +758,7 @@ async def get_certificate_image(
     image_bytes = generate_image_bytes(
         template_path="events/certificate.html",
         context=context,
+        width=image_width(context["style"], default=1400),
     )
 
     return Response(
@@ -738,7 +786,9 @@ async def get_certificate_pdf(
     pdf_bytes = generate_pdf_bytes(
         template_path="events/certificate.html",
         context=context,
-        options={"orientation": "Landscape"},
+        options=pdf_page_options(
+            context["style"], default={"orientation": "Landscape"}
+        ),
     )
 
     return Response(
