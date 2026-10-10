@@ -54,6 +54,16 @@ def generate_pdf_bytes(
             # JS, so disable it outright rather than rely solely on Jinja2
             # autoescape to keep script content out.
             "disable-javascript": None,
+            # CVE-2025-26240, also unpatched: path traversal through
+            # `from_string`. That one does not need JavaScript -- a
+            # `file://` in an img src or a CSS url() is enough -- so
+            # disabling JS above does not cover it.
+            #
+            # Club-supplied text reaches these templates, which is exactly
+            # the input the advisory is about. Nothing here loads a local
+            # resource: artwork, logos and QR codes are all remote URLs and
+            # the styles are inline, so this costs nothing.
+            "disable-local-file-access": None,
         }
 
         # Merge default options with user-provided options
@@ -128,9 +138,6 @@ def generate_image_bytes(
     )
     html_out = template_env.get_template(template_path).render(context)
 
-    with tempfile.NamedTemporaryFile(suffix=".html", delete=False, mode="w") as src:
-        src.write(html_out)
-        source_path = src.name
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as out:
         output_path = out.name
 
@@ -148,9 +155,16 @@ def generate_image_bytes(
                 # it: these templates never need it, and it is the vector
                 # for the unpatched local-file read in wkhtmltopdf.
                 "--disable-javascript",
-                source_path,
+                # And no local files at all, for CVE-2025-26240 -- which
+                # needs no JavaScript, only a file:// in a src or a url().
+                "--disable-local-file-access",
+                # "-" reads the document from stdin. With local file access
+                # off, a local input path is the one thing wkhtmltoimage
+                # might still have had to open; this way it opens nothing.
+                "-",
                 output_path,
             ],
+            input=html_out.encode("utf-8"),
             check=True,
             capture_output=True,
             timeout=30,
@@ -161,11 +175,10 @@ def generate_image_bytes(
         logger.error(f"wkhtmltoimage failed: {e.stderr[:500]}")
         raise
     finally:
-        for path in (source_path, output_path):
-            try:
-                os.unlink(path)
-            except OSError:
-                pass
+        try:
+            os.unlink(output_path)
+        except OSError:
+            pass
 
 def _tighten_png(raw: bytes) -> io.BytesIO:
     """Crop a rendered page to its content and compress it.
