@@ -293,7 +293,26 @@
               height: {{ style.canvas.height or 1000 }}px;
               {% if style.background_image_url %}background-image: url('{{ style.background_image_url }}');{% else %}background-color: {{ style.bg_color | default('#121212') }};{% endif %}">
     {% for layer in style.layers %}
-      {% if layer.type == 'qr' %}
+      {% if layer.hidden %}
+        {# Parked by the designer: kept in the file, left off the artwork. #}
+      {% elif layer.type == 'image' and layer.image_url %}
+        <img class="layer"
+             src="{{ layer.image_url }}"
+             alt=""
+             style="left: {{ layer.x }}px; top: {{ layer.y }}px;
+                    width: {{ layer.width or 200 }}px;
+                    {% if layer.height %}height: {{ layer.height }}px;{% endif %}
+                    opacity: {{ (layer.opacity | default(100)) / 100 }};
+                    object-fit: contain;" />
+      {% elif layer.type == 'shape' %}
+        <div class="layer"
+             style="left: {{ layer.x }}px; top: {{ layer.y }}px;
+                    width: {{ layer.width or 100 }}px;
+                    height: {{ layer.height or 100 }}px;
+                    background: {{ layer.fill | default('#ffffff') }};
+                    border-radius: {{ layer.radius | default(0) }}px;
+                    opacity: {{ (layer.opacity | default(100)) / 100 }};"></div>
+      {% elif layer.type == 'qr' %}
         <img class="layer layer-qr"
              src="{{ qr_code_url }}"
              alt=""
@@ -303,12 +322,16 @@
         <div class="layer"
              style="left: {{ layer.x }}px; top: {{ layer.y }}px;
                     {% if layer.width %}width: {{ layer.width }}px;{% endif %}
-                    font-size: {{ layer.font_size }}px;
-                    line-height: {{ layer.font_size + layer.line_spacing }}px;
+                    {% if layer.font %}font-family: '{{ layer.font }}', sans-serif;{% endif %}
+                    font-size: {{ layer.rendered_font_size | default(layer.font_size) }}px;
+                    line-height: {{ (layer.rendered_font_size | default(layer.font_size)) + layer.line_spacing }}px;
+                    letter-spacing: {{ layer.letter_spacing | default(0) }}px;
+                    opacity: {{ (layer.opacity | default(100)) / 100 }};
                     color: {{ layer.color }};
                     text-align: {{ layer.align }};
-                    font-weight: {{ 700 if layer.bold else 400 }};
-                    max-height: {{ (layer.font_size + layer.line_spacing) * layer.max_lines }}px;">{{ layer.rendered_text }}</div>
+                    font-weight: {{ layer.weight if layer.weight else (700 if layer.bold else 400) }};
+                    overflow: hidden;
+                    max-height: {{ ((layer.rendered_font_size | default(layer.font_size)) + layer.line_spacing) * layer.max_lines }}px;">{{ layer.rendered_text }}</div>
       {% endif %}
     {% endfor %}
   </div>
