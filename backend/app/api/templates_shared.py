@@ -18,12 +18,14 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from app.api.templates_fit import fit_font_size
+
 
 class TemplateLayer(BaseModel):
     """One positioned element on the artwork."""
 
     id: str = Field(..., description="Stable id, so the editor can track a layer across edits")
-    type: Literal["text", "qr"] = Field(default="text")
+    type: Literal["text", "qr", "image", "shape"] = Field(default="text")
     name: Optional[str] = Field(default=None, description="What the editor calls it")
 
     # Content. For a text layer this may contain {{tokens}}; for a QR layer it
@@ -45,6 +47,43 @@ class TemplateLayer(BaseModel):
     # artwork has no reflow, so an overlong name must not run into the design.
     max_lines: int = Field(default=1, ge=1, le=20)
     line_spacing: float = Field(default=0, ge=-20, le=200)
+
+    # --- Added for the layer editor -----------------------------------------
+    # Every one defaults to what the renderer already did, so a template
+    # saved before these existed renders exactly as it did.
+
+    # Falls back to the template's own font when unset, so changing the
+    # template font still moves every layer that never overrode it.
+    font: Optional[str] = Field(default=None)
+    # 400 or 700 in practice; `bold` above is kept so older configs still
+    # render, and weight wins when both are set.
+    weight: Optional[int] = Field(default=None, ge=100, le=900)
+    letter_spacing: float = Field(default=0, ge=-20, le=100)
+    opacity: int = Field(default=100, ge=0, le=100)
+    height: Optional[int] = Field(default=None, ge=1)
+
+    # What to do when the text does not fit its box. Artwork has no reflow,
+    # so something has to give: shrink the type until it does, or cut it.
+    overflow: Literal["shrink", "clip"] = Field(default="shrink")
+
+    # Hidden layers stay in the file and are skipped when rendering, so a
+    # club can park an element without losing its position. Locked ones
+    # render normally and cannot be dragged.
+    hidden: bool = Field(default=False)
+    locked: bool = Field(default=False)
+
+    # Image layers.
+    image_url: Optional[str] = Field(default=None)
+    # Shape layers: a filled rectangle, optionally rounded.
+    fill: Optional[str] = Field(default=None)
+    radius: int = Field(default=0, ge=0, le=400)
+
+    @property
+    def effective_weight(self) -> int:
+        """The weight to render at, reconciling `weight` and the older `bold`."""
+        if self.weight is not None:
+            return self.weight
+        return 700 if self.bold else 400
 
 
 class LayerCanvas(BaseModel):
@@ -99,6 +138,11 @@ def render_layers(layers, values: dict) -> list[dict]:
     Substitution is a plain replace, not a Jinja render, on purpose -- layer
     text is club-supplied, and handing it to a template engine would let a
     club execute template syntax on the server.
+
+    The fitted size is worked out here too, for the same reason: it depends
+    on the substituted text, which only exists at this point. A layer set to
+    shrink gets `rendered_font_size` reduced until the text fits its box;
+    every other layer gets its own size back unchanged.
     """
     out = []
     for layer in layers:
@@ -107,5 +151,24 @@ def render_layers(layers, values: dict) -> list[dict]:
         for key, value in values.items():
             text = text.replace("{{" + key + "}}", "" if value is None else str(value))
         data["rendered_text"] = text
+
+        font_size = data.get("font_size") or 24
+        # Missing keys mean a config saved before these existed. Defaulting
+        # overflow to "shrink" here matches the schema default, so an old
+        # template gets the fit as well -- it can only make text that used
+        # to be cut off visible, never the reverse.
+        if data.get("type", "text") == "text" and data.get("overflow", "shrink") == "shrink":
+            weight = data.get("weight")
+            data["rendered_font_size"] = fit_font_size(
+                text,
+                font_size=font_size,
+                box_width=data.get("width"),
+                max_lines=data.get("max_lines") or 1,
+                bold=(weight >= 600) if weight else bool(data.get("bold")),
+                letter_spacing=data.get("letter_spacing") or 0,
+            )
+        else:
+            data["rendered_font_size"] = font_size
+
         out.append(data)
     return out

@@ -11,6 +11,7 @@ from app.api.events.registration.schemas import (
     EventRegistrationRequest,
     EventRegistrationResponse,
     EventAnalyticsResponse,
+    SetRoleRequest,
     SetWinnerRequest,
 )
 from app.core.auth.dependencies import AdminAuth, ClubAuth, OptionalUserAuth
@@ -21,6 +22,7 @@ from app.response import CustomHTTPException
 from app.api.auth import service as auth_service
 from app.api.events.registration import service
 from app.api.events.access import is_admin_user
+from app.api.templates_audience import RegistrationRole
 from app.api.events.models import Events
 from app.api.schemas import BackgroundTaskLogResponseSchema
 from app.api.service import create_background_task_log
@@ -375,6 +377,49 @@ async def set_event_winner(
         event_id=event_id,
         registration_id=registration_id,
         position=body.position,
+        as_admin=is_admin_user(user),
+    )
+    return jsonable_encoder(result)
+
+
+# ---------------------------------------------------------------------------
+# Roles.
+#
+# An event can hold a separate ticket or certificate design for speakers and
+# staff, but the renderer chooses one by the registration's role -- so until
+# something could write it, every variant an organiser designed would sit
+# unused while everyone received the event default.
+# ---------------------------------------------------------------------------
+
+
+@router.put(
+    "/{event_id}/role/{registration_id}",
+    summary="Set or clear which role a registration is attending as",
+)
+async def set_registration_role(
+    event_id: int,
+    registration_id: str,
+    body: SetRoleRequest,
+    user: ClubAuth,
+    session: SessionDep,
+) -> EventRegistrationDetailResponse:
+    """
+    `role: "speaker"` marks a speaker, `role: null` resets them to attendee.
+
+    Every registration is an attendee until an organiser says otherwise, so
+    there is no "no role" to return to. An attendee receives the event's
+    default design anyway unless the club has drawn an attendee variant.
+    """
+    # CustomBaseModel sets use_enum_values, so an enum-annotated field
+    # arrives as a plain string -- the service wants the member.
+    role = RegistrationRole(body.role) if body.role else None
+
+    result = await service.set_role(
+        session,
+        user_id=user.id,
+        event_id=event_id,
+        registration_id=registration_id,
+        role=role,
         as_admin=is_admin_user(user),
     )
     return jsonable_encoder(result)

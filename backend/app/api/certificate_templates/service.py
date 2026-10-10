@@ -5,6 +5,8 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.templates_audience import RegistrationRole
+from app.api.templates_resolve import resolve_template
 from app.api.certificate_templates.models import CertificateTemplates
 from app.api.certificate_templates.schemas import CertificateTemplateConfig
 from app.response import CustomHTTPException
@@ -160,10 +162,16 @@ async def delete_certificate_template(
 async def get_template_for_event(
     session: AsyncSession,
     event_id: int,
+    role: RegistrationRole | None = None,
 ) -> dict:
-    """
-    Get the certificate template config for an event.
-    Falls back to club default, then to system defaults.
+    """The config this event's document should be rendered from.
+
+    Resolution lives in app/api/templates_resolve so tickets and
+    certificates cannot drift apart: event+role, then the event's default,
+    then the club's, then the system's.
+
+    `role` picks the variant. Left out -- as the designer does when showing
+    an event's default -- it skips straight to the event default.
     """
     from app.api.events.models import Events
 
@@ -173,28 +181,32 @@ async def get_template_for_event(
     if not event:
         return _default_config()
 
-    if hasattr(event, "certificate_template_id") and event.certificate_template_id:
-        template = await session.scalar(
-            select(CertificateTemplates).where(
-                CertificateTemplates.id == event.certificate_template_id,
-                CertificateTemplates.is_deleted == False,
-            )
-        )
-        if template:
-            return template.config
+    template = await resolve_template(
+        session,
+        CertificateTemplates,
+        event_id=event_id,
+        club_id=event.club_id,
+        role=role,
+    )
+    if template is not None:
+        return template.config
 
-    if event.club_id:
-        default_template = await session.scalar(
+    # An explicitly assigned club template, from before events could own
+    # their own design. Still honoured so existing events keep rendering
+    # the way they did.
+    assigned_id = getattr(event, "certificate_template_id", None)
+    if assigned_id:
+        assigned = await session.scalar(
             select(CertificateTemplates).where(
-                CertificateTemplates.club_id == event.club_id,
-                CertificateTemplates.is_default == True,
+                CertificateTemplates.id == assigned_id,
                 CertificateTemplates.is_deleted == False,
             )
         )
-        if default_template:
-            return default_template.config
+        if assigned is not None:
+            return assigned.config
 
     return _default_config()
+
 
 
 def _default_config() -> dict:

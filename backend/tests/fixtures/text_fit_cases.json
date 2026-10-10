@@ -1,0 +1,13 @@
+[
+  {"text": "Ann Lee", "fontSize": 40, "boxWidth": 600, "maxLines": 1, "bold": false, "letterSpacing": 0, "expected": 40, "expectedLines": 1},
+  {"text": "Lakshminarayanan Venkataraman", "fontSize": 40, "boxWidth": 300, "maxLines": 1, "bold": false, "letterSpacing": 0, "expected": 19, "expectedLines": 2},
+  {"text": "Lakshminarayanan Venkataraman", "fontSize": 40, "boxWidth": 300, "maxLines": 2, "bold": false, "letterSpacing": 0, "expected": 40, "expectedLines": 2},
+  {"text": "Lakshminarayanan Venkataraman", "fontSize": 40, "boxWidth": 20, "maxLines": 1, "bold": false, "letterSpacing": 0, "expected": 18, "expectedLines": 2},
+  {"text": "Lakshminarayanan Venkataraman", "fontSize": 40, "boxWidth": 300, "maxLines": 1, "bold": true, "letterSpacing": 0, "expected": 18, "expectedLines": 2},
+  {"text": "Lakshminarayanan Venkataraman", "fontSize": 40, "boxWidth": 300, "maxLines": 1, "bold": false, "letterSpacing": 6, "expected": 18, "expectedLines": 2},
+  {"text": "WWWWWWWWWW", "fontSize": 32, "boxWidth": 200, "maxLines": 1, "bold": false, "letterSpacing": 0, "expected": 32, "expectedLines": 1},
+  {"text": "iiiiiiiiii", "fontSize": 32, "boxWidth": 200, "maxLines": 1, "bold": false, "letterSpacing": 0, "expected": 32, "expectedLines": 1},
+  {"text": "Certificate of Participation", "fontSize": 28, "boxWidth": 420, "maxLines": 2, "bold": false, "letterSpacing": 2, "expected": 28, "expectedLines": 1},
+  {"text": "MOA-2048", "fontSize": 24, "boxWidth": 100, "maxLines": 1, "bold": true, "letterSpacing": 1, "expected": 24, "expectedLines": 1},
+  {"text": "Innovation Hall, Building 4, Technopark", "fontSize": 20, "boxWidth": 260, "maxLines": 2, "bold": false, "letterSpacing": 0, "expected": 20, "expectedLines": 2}
+]
