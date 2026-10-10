@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 from uuid import UUID
 from pydantic import EmailStr, Field
 
@@ -7,6 +7,7 @@ from app.core.response.base_model import CustomBaseModel
 from app.api.auth.schemas import Token
 from app.api.users.schemas import UserPublic
 from app.api.events.volunteer.schemas import ListVolunteersResponse
+from app.api.templates_audience import RegistrationRole
 
 
 class EventRegistrationResponse(CustomBaseModel):
@@ -48,6 +49,8 @@ class EventRegistrationDetailResponse(CustomBaseModel):
     is_won: bool
     position: int | None
     additional_details: dict | None
+    # Picks which ticket and certificate variant this person is issued.
+    role: RegistrationRole = Field(RegistrationRole.attendee)
 
 
 class EventRegistrationPublicMin(CustomBaseModel):
@@ -63,6 +66,7 @@ class EventRegistrationPublicMin(CustomBaseModel):
     is_attended: bool = Field(...)
     is_won: bool = Field(...)
     position: int | None = Field(None)
+    role: RegistrationRole = Field(RegistrationRole.attendee)
     user: UserPublic | None = Field(None)
     volunteer: ListVolunteersResponse | None = Field(None)
     institution: str | None = Field(None)
@@ -96,3 +100,12 @@ class EventAnalyticsResponse(CustomBaseModel):
     total_institutions: int = 0  # distinct institutions, not capped at the top 5
     registration_time: RegistrationTimeDistribution
     attendance_over_time: list[dict[str, Any]]  # [{"time": "10:00 AM", "count": 5}, ...]
+
+
+class SetRoleRequest(CustomBaseModel):
+    """Which role a registration is attending as."""
+
+    role: Optional[RegistrationRole] = Field(
+        default=None,
+        description="attendee, speaker or staff. Null resets them to attendee.",
+    )

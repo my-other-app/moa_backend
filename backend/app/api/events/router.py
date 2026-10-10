@@ -14,6 +14,7 @@ import qrcode
 from app.core.utils.pdf import generate_image_bytes, generate_pdf_bytes
 from app.api.templates_shared import render_layers
 from fastapi.encoders import jsonable_encoder
+import logging
 from typing import Optional, List
 
 from app.db.core import SessionDep
@@ -23,6 +24,7 @@ from app.core.response.sorting import apply_sort
 from app.api.events.access import is_admin_user
 from app.api.events import wallet_service
 from app.api.users.models import UserTypes
+from app.api.templates_audience import RegistrationRole
 from app.response import CustomHTTPException
 from app.api.events.schemas import (
     EventAdminListResponse,
@@ -57,10 +59,32 @@ from app.api.events.registration.router import router as registration_router
 
 from app.core.auth.permissions import ContentAuth, ModerateAuth
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/events")
 
 router.include_router(volunteer_router, tags=["Volunteer"])
 router.include_router(registration_router, tags=["Registration"])
+
+
+def _role_of(registration) -> Optional[RegistrationRole]:
+    """The role this registration's document should be rendered for.
+
+    Every registration carries one -- the column is not nullable and defaults
+    to attendee -- so None here is a fallback, not a normal state. It covers
+    the rows that predate the column and any value this build does not
+    recognise, and it resolves to the event's default design.
+    """
+    raw = getattr(registration, "role", None)
+    if raw is None:
+        return None
+    value = getattr(raw, "value", raw)
+    try:
+        return RegistrationRole(value)
+    except ValueError:
+        # An unknown role in the database must not stop a ticket rendering.
+        logger.warning("Unknown registration role %r, using the event default", value)
+        return None
 
 
 def _assert_can_access_ticket(user, registration) -> None:
@@ -492,7 +516,9 @@ async def get_ticket_pdf(
 
     # Load ticket template config for this event
     from app.api.ticket_templates.service import get_template_for_event
-    style = await get_template_for_event(session, registration.event_id)
+    style = await get_template_for_event(
+        session, registration.event_id, role=_role_of(registration)
+    )
 
     # Construct payload for template
     event = registration.event
@@ -615,7 +641,9 @@ async def get_certificate_style(
     """
     registration = await service.get_ticket_details(session, ticket_id=ticket_id)
     from app.api.certificate_templates.service import get_template_for_event
-    style = await get_template_for_event(session, registration.event_id)
+    style = await get_template_for_event(
+        session, registration.event_id, role=_role_of(registration)
+    )
     return style
 
 
@@ -635,7 +663,9 @@ async def _certificate_render_context(session, ticket_id: str) -> dict:
 
     from app.api.certificate_templates.service import get_template_for_event
 
-    style = await get_template_for_event(session, registration.event_id)
+    style = await get_template_for_event(
+        session, registration.event_id, role=_role_of(registration)
+    )
     event = registration.event
 
     email_payload = {
