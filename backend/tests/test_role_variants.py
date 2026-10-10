@@ -293,3 +293,117 @@ async def test_the_registration_list_reports_each_role(
     roles = {row["email"]: row["role"] for row in response.json()["items"]}
     assert roles["listed-speaker@example.com"] == "speaker"
     assert roles["listed-attendee@example.com"] == "attendee"
+
+
+# --- bulk import --------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "cell,expected",
+    [
+        ("speaker", RegistrationRole.speaker),
+        ("Speaker", RegistrationRole.speaker),
+        ("  STAFF  ", RegistrationRole.staff),
+        ("attendee", RegistrationRole.attendee),
+    ],
+)
+def test_a_role_cell_is_read_forgivingly(cell, expected):
+    """A human filled this spreadsheet in, so "Speaker " has to work.
+
+    Failing somebody's whole row over capitalisation would be a poor trade
+    for strictness nobody asked for.
+    """
+    from app.api.events.registration.service import _role_from_sheet
+
+    assert _role_from_sheet(cell) is expected
+
+
+@pytest.mark.parametrize("cell", [None, "", "   ", "nan", "none"])
+def test_a_sheet_with_no_role_column_imports_as_before(cell):
+    """The column is optional: an older sheet must import unchanged."""
+    from app.api.events.registration.service import _role_from_sheet
+
+    assert _role_from_sheet(cell) is None
+
+
+def test_an_unreadable_role_still_imports_the_person():
+    """Getting people registered matters more than the variant they get.
+
+    Rejecting the row would lose a registration over a typo in a column
+    that only picks which artwork they receive.
+    """
+    from app.api.events.registration.service import _role_from_sheet
+
+    assert _role_from_sheet("keynote speaker") is None
+
+
+async def test_bulk_import_registers_a_speaker_as_a_speaker(
+    session, event_with_variants, make_user
+):
+    """End to end: the sheet says speaker, the row comes out a speaker."""
+    from app.api.events.registration.service import register_event
+
+    _, _, event = event_with_variants
+    user = await make_user(email="imported@example.com")
+    await session.commit()
+
+    await register_event(
+        session=session,
+        full_name="Imported Speaker",
+        email=user.email,
+        user_id=user.id,
+        event_id=event.id,
+        role=RegistrationRole.speaker,
+    )
+
+    from sqlalchemy import select
+
+    from app.api.events.models import EventRegistrationsLink
+
+    registration = await session.scalar(
+        select(EventRegistrationsLink).where(
+            EventRegistrationsLink.event_id == event.id,
+            EventRegistrationsLink.user_id == user.id,
+        )
+    )
+    assert _role_of(registration) is RegistrationRole.speaker
+
+    config = await get_template_for_event(
+        session, event.id, role=_role_of(registration)
+    )
+    assert config["bg_color"] == "#speaker0"
+
+
+async def test_registering_without_a_role_still_works(
+    session, event_with_variants, make_user
+):
+    """Every other caller of register_event passes no role at all.
+
+    The column is not nullable, so this has to fall to the default rather
+    than writing None.
+    """
+    from app.api.events.registration.service import register_event
+
+    _, _, event = event_with_variants
+    user = await make_user(email="ordinary@example.com")
+    await session.commit()
+
+    await register_event(
+        session=session,
+        full_name="Ordinary Attendee",
+        email=user.email,
+        user_id=user.id,
+        event_id=event.id,
+    )
+
+    from sqlalchemy import select
+
+    from app.api.events.models import EventRegistrationsLink
+
+    registration = await session.scalar(
+        select(EventRegistrationsLink).where(
+            EventRegistrationsLink.event_id == event.id,
+            EventRegistrationsLink.user_id == user.id,
+        )
+    )
+    assert _role_of(registration) is RegistrationRole.attendee

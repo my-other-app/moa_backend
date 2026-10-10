@@ -11,6 +11,7 @@ including events whose tickets were already in people's hands.
 """
 
 import enum
+import io
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, Query, UploadFile
@@ -295,8 +296,6 @@ async def save_artwork(
     "clear this image", which would wipe a logo on a save that never touched
     it -- the same trap the club endpoints document.
     """
-    import io
-
     event = await _event_for_editing(session, user, event_id)
     model = _MODELS[kind]
     allowed = _IMAGE_FIELDS[kind]

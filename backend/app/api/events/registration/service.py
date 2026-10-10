@@ -49,6 +49,7 @@ async def register_event(
     background_tasks: BackgroundTasks | None = None,
     additional_details: dict | None = None,
     background_task_log_id: str | None = None,
+    role: RegistrationRole | None = None,
 ):
     is_event_id = (isinstance(event_id, str) and event_id.isdigit()) or isinstance(
         event_id, int
@@ -172,6 +173,9 @@ async def register_event(
             full_name=full_name,
             email=email,
             phone=phone,
+            # Omitted means attendee, which is the column default -- passing
+            # None explicitly would violate the not-null constraint.
+            **({"role": role} if role is not None else {}),
         )
         session.add(registration)
 
@@ -521,6 +525,7 @@ async def bulk_import_event_registrations(
                 full_name = row["full_name"]
                 email = row["email"]
                 phone = str(row.get("phone", "")) if row.get("phone") else None
+                role = _role_from_sheet(row.get("role"))
 
                 # Process additional details
                 additional_details = {}
@@ -573,6 +578,7 @@ async def bulk_import_event_registrations(
                     event_id=event.id,
                     additional_details=additional_details,
                     background_task_log_id=background_log.id,
+                    role=role,
                 )
 
                 registration_logs.append(
@@ -1015,3 +1021,24 @@ async def set_role(
     # so the instance keeps the eagerly-loaded `user` the response needs.
 
     return registration
+
+
+def _role_from_sheet(value) -> RegistrationRole | None:
+    """Read a `role` cell from a bulk-import sheet.
+
+    Optional, so a sheet written before this column existed imports exactly
+    as it did. Deliberately forgiving about case and stray spaces, because
+    the alternative is failing somebody's whole row over "Speaker " -- and
+    an unreadable value falls back to attendee rather than rejecting the
+    registration, since the point of the import is to get people in.
+    """
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if not text or text in {"nan", "none"}:
+        return None
+    try:
+        return RegistrationRole(text)
+    except ValueError:
+        logger.warning("Unknown role %r in bulk import, importing as attendee", value)
+        return None
