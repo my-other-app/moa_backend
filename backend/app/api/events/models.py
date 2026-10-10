@@ -17,6 +17,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 import sqlalchemy as sa
 
+from app.api.templates_audience import RegistrationRole
 from app.api.users.models import UserAvatarTypes
 from app.db.base import AbstractSQLModel
 from app.db.mixins import SoftDeleteMixin, TimestampsMixin
@@ -87,8 +88,16 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
 
     category = relationship("EventCategories")
     club = relationship("Clubs")
-    ticket_template = relationship("TicketTemplates")
-    certificate_template = relationship("CertificateTemplates")
+    # foreign_keys is required now that the relationship runs both ways:
+    # an event points at a club template it was assigned, and an event's
+    # own forked design points back at the event. Without naming the column,
+    # SQLAlchemy cannot tell which of the two joins is meant.
+    ticket_template = relationship(
+        "TicketTemplates", foreign_keys=[ticket_template_id]
+    )
+    certificate_template = relationship(
+        "CertificateTemplates", foreign_keys=[certificate_template_id]
+    )
     registrations = relationship("EventRegistrationsLink", back_populates="event")
     interests = relationship(
         "Interests",
@@ -215,6 +224,15 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
 
     ticket_id = Column(String(60), nullable=False, unique=True, index=True)
 
+    # What this person is at the event, which picks the ticket and
+    # certificate variant they are issued. Everyone is an attendee unless
+    # the organiser says otherwise.
+    role = Column(
+        Enum(RegistrationRole),
+        nullable=False,
+        default=RegistrationRole.attendee,
+        server_default=RegistrationRole.attendee.value,
+    )
     is_attended = Column(Boolean, nullable=False, default=False)
     attended_on = Column(TZAwareDateTime(timezone=True), nullable=True)
     volunteer_id = Column(Integer, ForeignKey("volunteers.id"), nullable=True)
