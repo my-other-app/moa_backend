@@ -28,10 +28,25 @@ from app.api.events.documents import (
     apply_layers,
     document_values,
     image_width,
+    in_layout_mode,
+    layout_colors,
+    layout_png,
+    layout_sample_values,
+    layout_values,
     qr_data_url,
     qr_png_base64,
+    render_layout_document,
     sample_values,
 )
+from app.core.layout.engine import layout_problems, problems_as_fields
+from app.core.layout.model import TicketLayoutFields, dump
+from app.core.layout.starters import (
+    CERTIFICATE_STARTERS,
+    TICKET_STARTERS,
+    certificate_starter,
+    ticket_starter,
+)
+from app.core.layout.tokens import TICKET_TOKENS, field_token
 from app.api.events.models import EventRegistrationsLink
 from app.api.events.access import ensure_event_access, is_admin_user
 from app.api.events.models import Events
@@ -529,3 +544,162 @@ async def preview_design(
         media_type="image/png",
         headers={"Cache-Control": "no-store"},
     )
+
+
+# --- the layered design ---------------------------------------------------------
+#
+# The layer editor's own endpoints. The design is a canvas, layers and a page
+# in the editor's wire form, stored under config["layout"]; the renderer draws
+# it with the fonts the editor measured with. Saving validates it the way the
+# editor does, so the API refuses exactly what the editor would.
+
+
+def _starter(kind: DesignKind) -> dict:
+    s = ticket_starter("classic") if kind is DesignKind.ticket else certificate_starter("classic")
+    return dump(TicketLayoutFields(canvas=s["canvas"], layers=s["layers"], page=s["page"]))
+
+
+def _layout_dto(event, kind: DesignKind, audience: TemplateAudience, template, style: dict) -> dict:
+    """The design and everything the editor needs around it."""
+    layout = style.get("layout") if in_layout_mode(style) else None
+    data = layout or {**_starter(kind), "version": 0}
+    colors = layout_colors(style)
+    club = getattr(event, "club", None)
+    fields = [f.get("label") for f in (event.additional_details or []) if isinstance(f, dict) and f.get("label")]
+    tokens = [{"key": t["key"], "group": t["group"], "label": t["label"], "sample": t["sample"], "note": t.get("note")} for t in TICKET_TOKENS]
+    tokens += [{"key": field_token(f), "group": "Guest fields", "label": f, "sample": f"‹{f}›", "note": None} for f in fields]
+    return {
+        "eventId": event.id,
+        "kind": kind.value,
+        "audience": audience.value,
+        "canvas": data["canvas"],
+        "layers": data["layers"],
+        "page": data["page"],
+        "version": data.get("version", 0),
+        "isOwn": template is not None and template.event_id == event.id and template.audience is audience,
+        "fromStarter": layout is None,
+        "templateUrl": style.get("background_image_url"),
+        "imageUrls": {},
+        "brand": {
+            "orgName": club.name if club else "",
+            "primary": colors["primary"],
+            "secondary": colors["secondary"],
+            "logoUrl": style.get("logo_url"),
+        },
+        "eventIconUrl": None,
+        "starters": TICKET_STARTERS if kind is DesignKind.ticket else CERTIFICATE_STARTERS,
+        "tokens": tokens,
+        "qrRequired": kind is DesignKind.ticket,
+    }
+
+
+async def _current(session, event, kind: DesignKind, audience: TemplateAudience):
+    template = await resolve_template(
+        session, _MODELS[kind], event_id=event.id, club_id=event.club_id, role=_role_for(audience),
+    )
+    style = dict(template.config or {}) if template is not None else _DEFAULTS[kind]()
+    return template, style
+
+
+@router.get("/{kind}/layout", summary="The layered design the editor works on")
+async def get_layout(
+    session: SessionDep,
+    user: ClubAuth,
+    event_id: int,
+    kind: DesignKind,
+    audience: TemplateAudience = Query(TemplateAudience.event_default),
+) -> dict:
+    event = await _event_for_editing(session, user, event_id)
+    template, style = await _current(session, event, kind, audience)
+    return _layout_dto(event, kind, audience, template, style)
+
+
+@router.get("/{kind}/layout/starters/{name}", summary="A complete design to start from")
+async def get_starter(
+    session: SessionDep,
+    user: ClubAuth,
+    event_id: int,
+    kind: DesignKind,
+    name: str,
+) -> dict:
+    await _event_for_editing(session, user, event_id)
+    catalogue = TICKET_STARTERS if kind is DesignKind.ticket else CERTIFICATE_STARTERS
+    if name not in catalogue:
+        raise CustomHTTPException(404, message="No such starter")
+    s = ticket_starter(name) if kind is DesignKind.ticket else certificate_starter(name)
+    return dump(TicketLayoutFields(canvas=s["canvas"], layers=s["layers"], page=s["page"]))
+
+
+def _validate_layout(kind: DesignKind, body: dict) -> TicketLayoutFields:
+    """Shape first, then meaning -- each refused with the field to fix."""
+    try:
+        layout = TicketLayoutFields.model_validate(body)
+    except Exception as exc:
+        raise CustomHTTPException(422, message="This design has a problem.", errors={"detail": str(exc)[:2000]})
+    problems = layout_problems(layout.canvas, layout.layers, layout.page, qr_required=kind is DesignKind.ticket)
+    if problems:
+        raise CustomHTTPException(
+            422,
+            message="Some parts of this design need attention before it can be used.",
+            errors={"fields": problems_as_fields(problems)},
+        )
+    return layout
+
+
+@router.put("/{kind}/layout", summary="Save the layered design")
+async def save_layout(
+    session: SessionDep,
+    user: ClubAuth,
+    event_id: int,
+    kind: DesignKind,
+    body: dict,
+    audience: TemplateAudience = Query(TemplateAudience.event_default),
+) -> dict:
+    """Forks the design onto the event on first save, like the config does,
+    and bumps the version so a document can say which design it was made from."""
+    event = await _event_for_editing(session, user, event_id)
+    layout = _validate_layout(kind, body)
+
+    template = await fork_for_event(
+        session, _MODELS[kind], event_id=event_id, club_id=event.club_id,
+        audience=audience, name=f"{event.name} {kind.value}",
+    )
+    config = dict(template.config or {})
+    previous = (config.get("layout") or {}).get("version", 0)
+    config["layout"] = {**dump(layout), "version": previous + 1}
+    template.config = config
+    await session.commit()
+    await session.refresh(template)
+    return _layout_dto(event, kind, audience, template, dict(template.config))
+
+
+@router.post("/{kind}/layout/preview", summary="The layered design rendered exactly, as a PNG")
+async def preview_layout(
+    session: SessionDep,
+    user: ClubAuth,
+    event_id: int,
+    kind: DesignKind,
+    body: dict,
+    audience: TemplateAudience = Query(TemplateAudience.event_default),
+) -> Response:
+    """The unsaved design through the real renderer, for a real attendee
+    (`ticket_id`) or the sample one. A design that would be refused on save
+    is refused here too, so the preview never shows something the attendee
+    could not receive."""
+    event = await _event_for_editing(session, user, event_id)
+    ticket_id = body.pop("ticket_id", None)
+    layout = _validate_layout(kind, body)
+    template, style = await _current(session, event, kind, audience)
+    style = {**style, "layout": dump(layout)}
+
+    registration = await _registration_for_preview(session, event_id, ticket_id)
+    if registration is not None:
+        values = layout_values(registration, event, kind.value)
+        code = registration.ticket_id
+    else:
+        values = layout_sample_values(event, kind.value)
+        code = values["admission_no"]
+    qr_text = f"certificate:{code}" if kind is DesignKind.certificate else code
+
+    pdf = render_layout_document(style, values, qr_text, title=f"{kind.value} preview")
+    return Response(content=layout_png(style, pdf), media_type="image/png", headers={"Cache-Control": "no-store"})

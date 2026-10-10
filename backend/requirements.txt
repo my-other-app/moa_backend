@@ -65,3 +65,10 @@ uvicorn==0.29.0
 uvloop==0.21.0
 wallet==2.1.525
 pyotp==2.9.0
+
+# Layered ticket and certificate designs: the PDF is drawn with reportlab
+# from the same font files the editor measures with, and previewed as a PNG
+# through pdfium. Neither needs a browser or a system package.
+reportlab==5.0.1
+fonttools==4.66.1
+pypdfium2==5.14.0

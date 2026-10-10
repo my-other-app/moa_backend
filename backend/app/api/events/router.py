@@ -16,9 +16,13 @@ from app.api.events.documents import (
     apply_layers,
     document_values,
     image_width,
+    in_layout_mode,
+    layout_png,
+    layout_values,
     pdf_page_options,
     qr_data_url,
     qr_png_base64,
+    render_layout_document,
 )
 from fastapi.encoders import jsonable_encoder
 import logging
@@ -541,6 +545,17 @@ async def get_ticket_image(
         "contact_phone": event.contact_phone,
         "qr_code": qr_png_base64(registration.ticket_id),
     }
+    if in_layout_mode(style):
+        pdf = render_layout_document(
+            style, layout_values(registration, event, "ticket"), registration.ticket_id,
+            title=f"Ticket {registration.ticket_id}", event_icon_url=_poster_url(event),
+        )
+        return Response(
+            content=layout_png(style, pdf),
+            media_type="image/png",
+            headers={"Cache-Control": "private, max-age=300"},
+        )
+
     style = apply_layers(style, document_values(registration, event))
 
     image_bytes = generate_image_bytes(
@@ -628,6 +643,19 @@ async def get_ticket_pdf(
     # them off email_payload under keys it did not have -- `name` where the
     # payload said `participant_name` -- so the attendee's name was blank on
     # every layer-mode ticket, and three tokens were never filled at all.
+    if in_layout_mode(style):
+        # Drawn by the layout renderer with the editor's own fonts and layout
+        # code, so the ticket is what the canvas showed. No HTML, no browser.
+        pdf = render_layout_document(
+            style, layout_values(registration, event, "ticket"), registration.ticket_id,
+            title=f"Ticket {registration.ticket_id}", event_icon_url=_poster_url(event),
+        )
+        return Response(
+            content=pdf,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="ticket-{registration.ticket_id}.pdf"'},
+        )
+
     style = apply_layers(style, document_values(registration, event))
 
     pdf_bytes = generate_pdf_bytes(
@@ -735,7 +763,31 @@ async def _certificate_render_context(session, ticket_id: str) -> dict:
         "email_payload": email_payload,
         "style": style,
         "qr_code_url": qr_data_url(qr_text),
+        "registration": registration,
+        "qr_text": qr_text,
     }
+
+
+def _poster_url(event) -> Optional[str]:
+    """The event poster, for an `event_icon` image layer."""
+    poster = getattr(event, "poster", None)
+    if isinstance(poster, dict):
+        return poster.get("original") or poster.get("medium")
+    return poster if isinstance(poster, str) else None
+
+
+def _layout_certificate(context: dict, as_png: bool) -> Response:
+    registration = context["registration"]
+    style = context["style"]
+    pdf = render_layout_document(
+        style, layout_values(registration, registration.event, "certificate"), context["qr_text"],
+        title=f"Certificate {registration.ticket_id}", event_icon_url=_poster_url(registration.event),
+    )
+    if as_png:
+        return Response(content=layout_png(style, pdf), media_type="image/png",
+                        headers={"Cache-Control": "public, max-age=86400"})
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="certificate-{registration.ticket_id}.pdf"'})
 
 
 @router.get("/certificates/{ticket_id}/image", summary="Get certificate as an image")
@@ -754,6 +806,8 @@ async def get_certificate_image(
     so what is previewed is what is downloaded.
     """
     context = await _certificate_render_context(session, ticket_id)
+    if in_layout_mode(context["style"]):
+        return _layout_certificate(context, as_png=True)
 
     image_bytes = generate_image_bytes(
         template_path="events/certificate.html",
@@ -782,6 +836,8 @@ async def get_certificate_pdf(
     Only available for attendees who have checked in (is_attended=True).
     """
     context = await _certificate_render_context(session, ticket_id)
+    if in_layout_mode(context["style"]):
+        return _layout_certificate(context, as_png=False)
 
     pdf_bytes = generate_pdf_bytes(
         template_path="events/certificate.html",
