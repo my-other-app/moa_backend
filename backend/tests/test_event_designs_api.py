@@ -8,9 +8,13 @@ tickets are already out.
 """
 from datetime import datetime, timedelta, timezone
 
+from typing import Optional
+
 import pytest
+from sqlalchemy import select
 
 from app.api.certificate_templates.models import CertificateTemplates
+from app.api.event_designs.router import _extract_url
 from app.api.templates_audience import TemplateAudience
 from app.api.ticket_templates.models import TicketTemplates
 from tests.conftest import auth_header
@@ -317,3 +321,135 @@ async def test_the_fork_is_not_offered_in_the_club_library(
 
     assert library.status_code == 200
     assert [t["name"] for t in library.json()] == ["Club default"]
+
+
+def _png_bytes(color: str = "#1db9a0") -> bytes:
+    """A real 4x4 PNG.
+
+    The image columns run every upload through Pillow, so a handful of
+    plausible-looking header bytes is rejected -- the upload has to be an
+    image the library can actually open.
+    """
+    import io
+
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (4, 4), color).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+
+def _object_key(value) -> Optional[str]:
+    """The stored key behind an image field, with the signature stripped.
+
+    Reading one of these columns mints a presigned URL, and the signature
+    carries an expiry -- so two reads of an unchanged image are two different
+    strings. Comparing them directly passes or fails on which side of a
+    second the reads landed, which is a test that fails on a slow afternoon.
+    """
+    url = _extract_url(value)
+    return url.split("?", 1)[0] if url else None
+
+
+
+# --- artwork ------------------------------------------------------------------
+
+
+async def test_uploading_artwork_forks_before_writing(
+    fake_s3, client, session, designing
+):
+    """Replacing an event's background must not replace the club's.
+
+    Without the fork, an organiser changing the artwork on one event would
+    change it on the club template, and so on every other event still
+    following it.
+    """
+    _, club, event, headers = designing
+    club_template = await _club_default(session, club.id)
+    club_template.background_image = "https://cdn.example.com/club-artwork.png"
+    await session.commit()
+
+    response = await client.put(
+        f"/api/v1/events/{event.id}/designs/ticket/artwork",
+        headers=headers,
+        files={"background_image": ("event.png", _png_bytes(), "image/png")},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["is_own"] is True
+
+    await session.refresh(club_template)
+    # Reading an image column back mints a presigned URL and wraps it in a
+    # dict, so compare what it still points at rather than the shape.
+    still_pointing_at = _extract_url(club_template.background_image) or ""
+    assert "club-artwork.png" in still_pointing_at
+
+
+async def test_the_uploaded_url_reaches_the_config_the_renderer_reads(
+    fake_s3,
+    client, session, designing
+):
+    """The templates read `background_image_url` from the config, not the column.
+
+    An upload that stores the file without syncing the URL changes nothing on
+    the document, which looks exactly like the upload failing silently.
+    """
+    _, club, event, headers = designing
+    await _club_default(session, club.id)
+
+    response = await client.put(
+        f"/api/v1/events/{event.id}/designs/ticket/artwork",
+        headers=headers,
+        files={"background_image": ("event.png", _png_bytes(), "image/png")},
+    )
+
+    assert "background_image_url" in response.json()["config"]
+
+
+async def test_artwork_left_out_of_the_request_is_left_alone(
+    fake_s3,
+    client, session, designing
+):
+    """A save that never touched the logo must not clear it."""
+    _, club, event, headers = designing
+    await _club_default(session, club.id)
+    await client.put(
+        f"/api/v1/events/{event.id}/designs/ticket/artwork",
+        headers=headers,
+        files={"logo": ("logo.png", _png_bytes(), "image/png")},
+    )
+
+    design = await session.scalar(
+        select(TicketTemplates).where(TicketTemplates.event_id == event.id)
+    )
+    stored_logo = _object_key(design.logo)
+
+    await client.put(
+        f"/api/v1/events/{event.id}/designs/ticket/artwork",
+        headers=headers,
+        files={"background_image": ("bg.png", _png_bytes(), "image/png")},
+    )
+
+    await session.refresh(design)
+    assert _object_key(design.logo) == stored_logo
+    assert stored_logo is not None
+
+
+async def test_another_club_cannot_upload_artwork_to_this_event(
+    fake_s3,
+    client, session, designing, make_club, mint_token
+):
+    _, club, event, _ = designing
+    await _club_default(session, club.id)
+    other_owner, _ = await make_club(name="Other", email="other3@example.com")
+    other_token = await mint_token(other_owner)
+    await session.commit()
+
+    response = await client.put(
+        f"/api/v1/events/{event.id}/designs/ticket/artwork",
+        headers=auth_header(other_token),
+        files={"background_image": ("x.png", _png_bytes(), "image/png")},
+    )
+
+    assert response.status_code == 403

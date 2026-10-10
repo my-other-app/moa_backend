@@ -13,7 +13,7 @@ including events whose tickets were already in people's hands.
 import enum
 from typing import Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, File, Form, Query, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
@@ -223,3 +223,125 @@ async def reset_design(
         kind=kind,
         audience=audience,
     )
+
+
+# --- artwork -------------------------------------------------------------------
+#
+# Kept separate from the config save above. The config is saved often -- every
+# nudge of a layer -- and sending the artwork with it would re-upload a
+# multi-megabyte PNG on each one. Artwork changes rarely, so it gets its own
+# request.
+
+
+def _extract_url(value) -> Optional[str]:
+    """The stored URL for an image field, whatever shape it is in."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict) and "original" in value:
+        return value["original"]
+    return None
+
+
+_IMAGE_FIELDS = {
+    DesignKind.ticket: ("logo", "secondary_logo", "background_image"),
+    DesignKind.certificate: (
+        "logo",
+        "secondary_logo",
+        "background_image",
+        "signature_1",
+        "signature_2",
+    ),
+}
+
+
+def _sync_urls(template, kind: DesignKind) -> None:
+    """Copy the stored image URLs into the config the renderer reads.
+
+    The templates read `background_image_url` out of the config rather than
+    the column, so an upload that skips this step stores the file and
+    changes nothing on the document.
+    """
+    config = dict(template.config) if template.config else {}
+    for field in _IMAGE_FIELDS[kind]:
+        config[f"{field}_url"] = _extract_url(getattr(template, field, None))
+    template.config = config
+
+
+@router.put("/{kind}/artwork", summary="Replace this event's artwork")
+async def save_artwork(
+    session: SessionDep,
+    user: ClubAuth,
+    event_id: int,
+    kind: DesignKind,
+    audience: TemplateAudience = Query(TemplateAudience.event_default),
+    logo: Optional[UploadFile] = File(None),
+    secondary_logo: Optional[UploadFile] = File(None),
+    background_image: Optional[UploadFile] = File(None),
+    signature_1: Optional[UploadFile] = File(None),
+    signature_2: Optional[UploadFile] = File(None),
+    remove_logo: bool = Form(False),
+    remove_secondary_logo: bool = Form(False),
+    remove_background_image: bool = Form(False),
+    remove_signature_1: bool = Form(False),
+    remove_signature_2: bool = Form(False),
+) -> DesignResponse:
+    """Upload artwork for this event's design, forking it first.
+
+    Forking before writing is the point: without it, an organiser replacing
+    the background on one event would replace it on the club template and so
+    on every other event still following it.
+
+    A field left out is left alone. Sending an empty one would read as
+    "clear this image", which would wipe a logo on a save that never touched
+    it -- the same trap the club endpoints document.
+    """
+    import io
+
+    event = await _event_for_editing(session, user, event_id)
+    model = _MODELS[kind]
+    allowed = _IMAGE_FIELDS[kind]
+
+    template = await fork_for_event(
+        session,
+        model,
+        event_id=event_id,
+        club_id=event.club_id,
+        audience=audience,
+        name=f"{event.name} {kind.value}",
+    )
+
+    uploads = {
+        "logo": logo,
+        "secondary_logo": secondary_logo,
+        "background_image": background_image,
+        "signature_1": signature_1,
+        "signature_2": signature_2,
+    }
+    removals = {
+        "logo": remove_logo,
+        "secondary_logo": remove_secondary_logo,
+        "background_image": remove_background_image,
+        "signature_1": remove_signature_1,
+        "signature_2": remove_signature_2,
+    }
+
+    for field in allowed:
+        if removals[field]:
+            setattr(template, field, None)
+        upload = uploads[field]
+        if upload is not None and upload.filename:
+            setattr(
+                template,
+                field,
+                {"bytes": io.BytesIO(await upload.read()), "filename": upload.filename},
+            )
+
+    await session.commit()
+    await session.refresh(template)
+
+    # After the commit, so the stored URLs exist to copy.
+    _sync_urls(template, kind)
+    await session.commit()
+    await session.refresh(template)
+
+    return _describe(template, event_id, audience)

@@ -168,6 +168,60 @@ async def make_club(session):
     return _factory
 
 
+
+@pytest.fixture
+def fake_s3(monkeypatch):
+    """Let a test save a row with an image without reaching S3.
+
+    The image columns are a custom SQLAlchemy TypeDecorator that uploads
+    inside `process_bind_param`, so saving a row carrying an image is a
+    network call. Nothing else in the suite uploads one, so there was no
+    pattern for this.
+
+    The patch goes on the boto3 client *object*, not on the column type and
+    not on `boto3.client`. Two earlier attempts explain why:
+
+      - Replacing the type instance's `s3_client` misses, because SQLAlchemy
+        adapts a type per dialect by copying it, and the copy that the flush
+        actually calls kept the original client.
+      - Replacing the class's `process_bind_param` misses too, because the
+        bind processor is built once per type and cached, so a processor
+        created earlier in the session still calls the original.
+
+    Every one of those copies holds a reference to the same client object,
+    so patching that object's methods reaches all of them.
+    """
+    uploaded: list[str] = []
+
+    from app.api.certificate_templates.models import CertificateTemplates
+    from app.api.ticket_templates.models import TicketTemplates
+
+    def upload_fileobj(fileobj, bucket, key, **kwargs):
+        uploaded.append(key)
+
+    def generate_presigned_url(operation, Params=None, **kwargs):
+        key = (Params or {}).get("Key", "unknown")
+        return f"https://test-bucket.s3.amazonaws.com/{key}"
+
+    clients = set()
+    for model in (TicketTemplates, CertificateTemplates):
+        for column in model.__table__.columns:
+            client = getattr(column.type, "s3_client", None)
+            if client is not None:
+                clients.add(id(client))
+                monkeypatch.setattr(client, "upload_fileobj", upload_fileobj)
+                monkeypatch.setattr(
+                    client, "generate_presigned_url", generate_presigned_url
+                )
+                monkeypatch.setattr(client, "delete_object", lambda **kw: {})
+                monkeypatch.setattr(client, "head_object", lambda **kw: {})
+
+    # A miss here means the field stopped holding its own client, and every
+    # test using this fixture would quietly start calling S3 for real.
+    assert clients, "no S3 client found on the template image columns"
+
+    return uploaded
+
 @pytest_asyncio.fixture
 async def make_admin(session):
     async def _factory(*, email="admin@example.com", role=None):
