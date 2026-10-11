@@ -12,9 +12,12 @@ including events whose tickets were already in people's hands.
 
 import enum
 import io
+import os
+from uuid import uuid4
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, Query, Response, UploadFile
+from PIL import Image
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
@@ -56,7 +59,9 @@ from app.api.ticket_templates.models import TicketTemplates
 from app.api.ticket_templates.schemas import TicketTemplateConfig
 from app.core.utils.pdf import generate_image_bytes
 from app.api.ticket_templates.service import _default_config as ticket_default_config
+from app.config import settings
 from app.core.auth.dependencies import ClubAuth
+from app.core.storage import objects
 from app.db.core import SessionDep
 from app.response import CustomHTTPException
 
@@ -559,11 +564,30 @@ def _starter(kind: DesignKind) -> dict:
     return dump(TicketLayoutFields(canvas=s["canvas"], layers=s["layers"], page=s["page"]))
 
 
+def _layout_prefix(event_id: int) -> str:
+    """Where this event's designer uploads live. A layout may only point inside it."""
+    return os.path.join(settings.S3_BASE_PATH, "events", str(event_id), "layout") + "/"
+
+
+def _layout_keys(data: dict) -> dict:
+    """Every object key a layout points at, by the field that holds it."""
+    keys = {}
+    template_key = (data.get("canvas") or {}).get("templateKey")
+    if template_key:
+        keys["canvas.templateKey"] = template_key
+    for i, layer in enumerate(data.get("layers") or []):
+        if layer.get("kind") == "image" and layer.get("imageKey"):
+            keys[f"layers.{i}.imageKey"] = layer["imageKey"]
+    return keys
+
+
 def _layout_dto(event, kind: DesignKind, audience: TemplateAudience, template, style: dict) -> dict:
     """The design and everything the editor needs around it."""
     layout = style.get("layout") if in_layout_mode(style) else None
     data = layout or {**_starter(kind), "version": 0}
     colors = layout_colors(style)
+    image_urls = {key: objects.presigned_url(key) for key in set(_layout_keys(data).values())}
+    template_key = (data.get("canvas") or {}).get("templateKey")
     club = getattr(event, "club", None)
     fields = [f.get("label") for f in (event.additional_details or []) if isinstance(f, dict) and f.get("label")]
     tokens = [{"key": t["key"], "group": t["group"], "label": t["label"], "sample": t["sample"], "note": t.get("note")} for t in TICKET_TOKENS]
@@ -578,8 +602,8 @@ def _layout_dto(event, kind: DesignKind, audience: TemplateAudience, template, s
         "version": data.get("version", 0),
         "isOwn": template is not None and template.event_id == event.id and template.audience is audience,
         "fromStarter": layout is None,
-        "templateUrl": style.get("background_image_url"),
-        "imageUrls": {},
+        "templateUrl": image_urls.get(template_key) if template_key else style.get("background_image_url"),
+        "imageUrls": image_urls,
         "brand": {
             "orgName": club.name if club else "",
             "primary": colors["primary"],
@@ -590,6 +614,7 @@ def _layout_dto(event, kind: DesignKind, audience: TemplateAudience, template, s
         "starters": TICKET_STARTERS if kind is DesignKind.ticket else CERTIFICATE_STARTERS,
         "tokens": tokens,
         "qrRequired": kind is DesignKind.ticket,
+        "sampleValues": layout_sample_values(event, kind.value),
     }
 
 
@@ -630,12 +655,18 @@ async def get_starter(
     return dump(TicketLayoutFields(canvas=s["canvas"], layers=s["layers"], page=s["page"]))
 
 
-def _validate_layout(kind: DesignKind, body: dict) -> TicketLayoutFields:
+def _validate_layout(kind: DesignKind, body: dict, *, event_id: int) -> TicketLayoutFields:
     """Shape first, then meaning -- each refused with the field to fix."""
     try:
         layout = TicketLayoutFields.model_validate(body)
     except Exception as exc:
         raise CustomHTTPException(422, message="This design has a problem.", errors={"detail": str(exc)[:2000]})
+    # Keys are plain strings in the JSON; one pointing outside this event's
+    # folder would let a design print another club's upload.
+    prefix = _layout_prefix(event_id)
+    foreign = {field: "Upload the image through this event's designer." for field, key in _layout_keys(body).items() if not key.startswith(prefix)}
+    if foreign:
+        raise CustomHTTPException(422, message="Some images in this design were not uploaded here.", errors={"fields": foreign})
     problems = layout_problems(layout.canvas, layout.layers, layout.page, qr_required=kind is DesignKind.ticket)
     if problems:
         raise CustomHTTPException(
@@ -658,7 +689,7 @@ async def save_layout(
     """Forks the design onto the event on first save, like the config does,
     and bumps the version so a document can say which design it was made from."""
     event = await _event_for_editing(session, user, event_id)
-    layout = _validate_layout(kind, body)
+    layout = _validate_layout(kind, body, event_id=event_id)
 
     template = await fork_for_event(
         session, _MODELS[kind], event_id=event_id, club_id=event.club_id,
@@ -688,7 +719,7 @@ async def preview_layout(
     could not receive."""
     event = await _event_for_editing(session, user, event_id)
     ticket_id = body.pop("ticket_id", None)
-    layout = _validate_layout(kind, body)
+    layout = _validate_layout(kind, body, event_id=event_id)
     template, style = await _current(session, event, kind, audience)
     style = {**style, "layout": dump(layout)}
 
@@ -703,3 +734,48 @@ async def preview_layout(
 
     pdf = render_layout_document(style, values, qr_text, title=f"{kind.value} preview")
     return Response(content=layout_png(style, pdf), media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+MAX_IMAGE_BYTES = 5 * 1024 * 1024
+# Templates are stored at this width so files stay light; the editor's X and Y read in the stored size.
+STORED_MAX_WIDTH = 2400
+_EXT = {"PNG": "png", "JPEG": "jpg", "WEBP": "webp"}
+
+
+@router.post("/{kind}/layout/images", summary="A template or a picture for the layered design")
+async def upload_layout_image(
+    session: SessionDep,
+    user: ClubAuth,
+    event_id: int,
+    kind: DesignKind,
+    file: UploadFile = File(...),
+    purpose: str = Query("image", pattern="^(template|image)$"),
+) -> dict:
+    """Stored under the event and answered with the key the layout saves and
+    a URL to show it now. Nothing is written to the design: the editor holds
+    the key until the person saves."""
+    await _event_for_editing(session, user, event_id)
+    raw = await file.read()
+    if len(raw) > MAX_IMAGE_BYTES:
+        raise CustomHTTPException(413, message="That image is over 5 MB. Export it smaller and try again.")
+    try:
+        image = Image.open(io.BytesIO(raw))
+        image.load()
+    except Exception:
+        raise CustomHTTPException(422, message="That file is not an image we can read. Use PNG, JPEG or WebP.")
+    fmt = (image.format or "").upper()
+    if fmt not in _EXT:
+        raise CustomHTTPException(422, message="Use PNG, JPEG or WebP.")
+    if image.width > STORED_MAX_WIDTH:
+        image = image.resize((STORED_MAX_WIDTH, round(image.height * STORED_MAX_WIDTH / image.width)), Image.Resampling.LANCZOS)
+        out = io.BytesIO()
+        if fmt == "JPEG":
+            image.convert("RGB").save(out, "JPEG", quality=90)
+        else:
+            image.save(out, "PNG")
+            fmt = "PNG"
+        raw = out.getvalue()
+    ext = _EXT[fmt]
+    key = f"{_layout_prefix(event_id)}{purpose}-{uuid4().hex}.{ext}"
+    objects.put_bytes(key, raw, "image/jpeg" if ext == "jpg" else f"image/{ext}")
+    return {"key": key, "url": objects.presigned_url(key), "width": image.width, "height": image.height}

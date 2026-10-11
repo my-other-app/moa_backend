@@ -175,6 +175,7 @@ from functools import lru_cache
 from sqlalchemy import inspect as sa_inspect
 
 from app.core.layout.model import TicketLayoutFields, ticket_area
+from app.core.storage import objects
 from app.core.layout.renderer import RenderInput, pdf_to_png, render_pdf
 from app.core.layout.tokens import (
     TokenAttendee,
@@ -309,6 +310,15 @@ def render_layout_document(style: dict, values: dict, qr_value: str, *, title: s
                            event_icon_url: Optional[str] = None) -> bytes:
     """The PDF of a layered design, for one set of values."""
     layout = layout_of(style)
+    # A template uploaded in the designer is an object key; one set on the
+    # template's artwork field is a URL. Either way the renderer gets bytes.
+    template_key = layout.canvas.template_key
+    template = objects.get_bytes(template_key) if template_key else fetch_bytes(style.get("background_image_url") or "")
+    images = {
+        l.image_key: objects.get_bytes(l.image_key)
+        for l in layout.layers
+        if l.kind == "image" and l.image_key
+    }
     return render_pdf(RenderInput(
         title=title,
         canvas=layout.canvas,
@@ -317,7 +327,8 @@ def render_layout_document(style: dict, values: dict, qr_value: str, *, title: s
         values=values,
         qr_value=qr_value,
         colors=layout_colors(style),
-        template=fetch_bytes(style.get("background_image_url") or ""),
+        template=template,
+        images={k: v for k, v in images.items() if v},
         org_logo=fetch_bytes(style.get("logo_url") or ""),
         event_icon=fetch_bytes(event_icon_url or ""),
     ))
