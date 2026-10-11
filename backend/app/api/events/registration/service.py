@@ -435,6 +435,8 @@ async def list_event_registrations(
                 "created_at": reg.created_at,
                 "ticket_revoked_at": reg.ticket_revoked_at,
                 "ticket_deliveries": sent.get(reg.id, []),
+                "email_bounced_at": reg.email_bounced_at,
+                "email_bounce_reason": reg.email_bounce_reason,
             })
         except Exception as e:
             logger.error(f"Error serializing registration {reg.id}: {e}")
@@ -1095,6 +1097,9 @@ async def update_registration(
         )
         if taken is not None:
             raise CustomHTTPException(409, message="Another registration on this event already uses that email.")
+        if (registration.email or "").strip().lower() != email.strip().lower():
+            registration.email_bounced_at = None
+            registration.email_bounce_reason = None
         registration.email = email
     if phone is not None:
         registration.phone = phone.strip() or None

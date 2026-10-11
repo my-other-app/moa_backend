@@ -279,6 +279,12 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
     certificate_design_version = Column(Integer, nullable=False, default=0, server_default="0")
     # When this guest's ID card last printed; the reprint rule turns on it.
     badge_printed_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    # Set by the provider's bounce or complaint notice: later sends skip the
+    # address until it is corrected, which clears it.
+    email_bounced_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    email_bounce_reason = Column(String(300), nullable=True)
+    wa_bounced_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    wa_bounce_reason = Column(String(300), nullable=True)
     volunteer_id = Column(Integer, ForeignKey("volunteers.id"), nullable=True)
 
     is_won = Column(Boolean, nullable=False, default=False)

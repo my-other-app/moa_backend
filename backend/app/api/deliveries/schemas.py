@@ -57,6 +57,8 @@ class DeliverySummary(BaseModel):
     registrations: int
     revoked: int
     channels: list[ChannelSummary]
+    # Which channels have a provider behind them; one without sends nothing and says so.
+    providers: list[dict] = []
 
 
 class DeliveryLogRow(BaseModel):
