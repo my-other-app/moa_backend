@@ -214,6 +214,8 @@ class GateContext(BaseModel):
     expected_door_id: Optional[UUID]
     guest_fields: list[dict]
     me: dict
+    # Whether there is anything to hand out; the console shows the merch tab only then.
+    has_merch: bool = False
 
 
 class GateSearchRow(AttendeeSummary):

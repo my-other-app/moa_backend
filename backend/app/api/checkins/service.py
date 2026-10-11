@@ -389,7 +389,15 @@ async def context(session, event: Events, actor: GateActor) -> dict:
         "expected_door_id": expected,
         "guest_fields": [f for f in (event.additional_details or []) if isinstance(f, dict)],
         "me": {"name": actor.name, "kind": actor.kind},
+        # Whether there is anything to hand out: the console shows the merch tab only then.
+        "has_merch": await _has_merch(session, event.id),
     }
+
+
+async def _has_merch(session, event_id: int) -> bool:
+    from app.api.merch.models import MerchItems
+
+    return bool(await session.scalar(select(func.count()).select_from(MerchItems).where(MerchItems.event_id == event_id)))
 
 
 # --- the team ----------------------------------------------------------------------
