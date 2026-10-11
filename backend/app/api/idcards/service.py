@@ -76,7 +76,7 @@ def render_card(event: Events, reg: EventRegistrationsLink, style: dict, *, for_
     values = layout_values(reg, event, "badge")
     return render_layout_document(
         style, values, reg.ticket_id, title=f"ID card {reg.ticket_id}", event_icon_url=poster_url(event),
-        skip_preprinted=for_print and skip_preprinted_for(event, style),
+        skip_preprinted=for_print and skip_preprinted_for(event, style), club=getattr(event, "club", None),
     )
 
 
@@ -226,5 +226,5 @@ def badge_for_scan(event: Events, reg: EventRegistrationsLink, actor: GateActor,
     }
 
 
-def brand_of(style: dict) -> dict:
-    return layout_colors(style)
+def brand_of(style: dict, club=None) -> dict:
+    return layout_colors(style, club)

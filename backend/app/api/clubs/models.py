@@ -46,6 +46,9 @@ class Clubs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     )
     contact_phone = Column(String, nullable=True)
     contact_email = Column(String, nullable=True)
+    # Brand colours designs and emails fall back to when a template sets none; hex, like a design tool.
+    brand_primary = Column(String(7), nullable=True)
+    brand_secondary = Column(String(7), nullable=True)
     initial_password = Column(String, nullable=True)
     is_verified = Column(Boolean, nullable=False, default=False)
 

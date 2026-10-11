@@ -608,7 +608,7 @@ def _layout_dto(event, kind: DesignKind, audience: TemplateAudience, template, s
     """The design and everything the editor needs around it."""
     layout = style.get("layout") if in_layout_mode(style) else None
     data = layout or {**_starter(kind), "version": 0}
-    colors = layout_colors(style)
+    colors = layout_colors(style, getattr(event, "club", None))
     image_urls = {key: objects.presigned_url(key) for key in set(_layout_keys(data).values())}
     template_key = (data.get("canvas") or {}).get("templateKey")
     club = getattr(event, "club", None)
@@ -772,7 +772,7 @@ async def preview_layout(
     qr_text = f"certificate:{code}" if kind is DesignKind.certificate else code
 
     entries = await agenda_service.entries_for(session, event) if kind is DesignKind.agenda else None
-    pdf = render_layout_document(style, values, qr_text, title=f"{kind.value} preview", agenda=entries)
+    pdf = render_layout_document(style, values, qr_text, title=f"{kind.value} preview", agenda=entries, club=getattr(event, "club", None))
     return Response(content=layout_png(style, pdf), media_type="image/png", headers={"Cache-Control": "no-store"})
 
 

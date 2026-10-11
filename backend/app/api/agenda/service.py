@@ -161,7 +161,7 @@ async def programme_pdf(session, event: Events, page_key: Optional[str] = None) 
     same = page.width_mm == layout.page.width_mm and page.height_mm == layout.page.height_mm
     values = layout_sample_values(event, "ticket")
     entries = await entries_for(session, event)
-    return render_layout_document(style, values, "", title=f"{event.name} · programme", agenda=entries, fit="stretch" if same else "contain", page=page)
+    return render_layout_document(style, values, "", title=f"{event.name} · programme", agenda=entries, fit="stretch" if same else "contain", page=page, club=getattr(event, "club", None))
 
 
 __all__ = ["AgendaEntry"]
