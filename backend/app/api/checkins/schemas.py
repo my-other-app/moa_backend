@@ -139,6 +139,7 @@ class AttendeeSummary(BaseModel):
     is_paid: bool = True
     checked_in_at: Optional[datetime] = None
     badge_printed_at: Optional[datetime] = None
+    admission_no: Optional[str] = None
 
 
 class ScanBody(BaseModel):
@@ -220,6 +221,8 @@ class GateContext(BaseModel):
 
 class GateSearchRow(AttendeeSummary):
     pass
+    admission_no: Optional[str] = None
+
 
 
 # --- the log ----------------------------------------------------------------------

@@ -14,6 +14,7 @@ from app.api.events.models import EventRegistrationsLink, Events
 from app.api.events.schemas import EventAdditionalDetail
 from app.api.service import update_background_task_log
 from app.api.users.models import UserProfiles, UserTypes, Users
+from app.api.admission import service as admission
 from app.core.utils.keys import generate_ticket_id
 from app.core.validations.schema import validate_relations
 from app.response import CustomHTTPException
@@ -186,6 +187,8 @@ async def register_event(
             **({"role": role} if role is not None else {}),
         )
         session.add(registration)
+        # Its admission number, from the event's own counter, before the row is kept.
+        await admission.assign(session, db_event, registration)
 
         await session.commit()
         await session.refresh(registration)
@@ -437,6 +440,7 @@ async def list_event_registrations(
                 "ticket_deliveries": sent.get(reg.id, []),
                 "email_bounced_at": reg.email_bounced_at,
                 "email_bounce_reason": reg.email_bounce_reason,
+                "admission_no": reg.admission_no,
             })
         except Exception as e:
             logger.error(f"Error serializing registration {reg.id}: {e}")

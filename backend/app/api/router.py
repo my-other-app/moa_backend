@@ -17,6 +17,7 @@ from app.api.closeout.router import router as closeout_router
 from app.api.hooks.router import router as hooks_router
 from app.api.contacts.router import router as contacts_router
 from app.api.events.duplicate_router import router as duplicate_router
+from app.api.admission.router import router as admission_router
 from app.api.emails.router import (
     library_router as email_library_router,
     messages_router,
@@ -70,6 +71,7 @@ api_router.include_router(router=closeout_router, tags=["closeout"])
 api_router.include_router(router=hooks_router, tags=["hooks"])
 api_router.include_router(router=contacts_router, tags=["contacts"])
 api_router.include_router(router=duplicate_router, tags=["events"])
+api_router.include_router(router=admission_router, tags=["admission"])
 api_router.include_router(router=messages_router, tags=["emails"])
 api_router.include_router(router=files_router, tags=["emails"])
 api_router.include_router(router=events_router, tags=["events"])
