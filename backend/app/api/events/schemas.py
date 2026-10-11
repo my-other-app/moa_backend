@@ -416,6 +416,8 @@ class EventListResponseSelf(CustomBaseModel):
     page_views: int = Field(0)
     registration_count: int = Field(0)
     attended_count: int = Field(0)
+    #: Where the event is on its status clock: draft, published, live, closed, archived.
+    status: str = Field("published")
 
 
 class EventAdminListResponse(CustomBaseModel):
@@ -487,6 +489,10 @@ class EventDetailResponse(CustomBaseModel):
     event_guidelines: str | None = Field(None)
     max_participants: int | None = Field(None)
     page_views: int = Field(0)
+    #: The status clock, so the console can say "draft" or "closed" without a second call.
+    status: str = Field("published")
+    status_clock: bool = Field(True)
+    retention_mode: str = Field("keep")
     # User-specific fields (only populated when authenticated)
     is_registered: bool = Field(False)
     is_attended: bool = Field(False)
