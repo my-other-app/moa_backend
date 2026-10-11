@@ -19,4 +19,5 @@ from app.api.idcards.models import *
 from app.api.kiosk.models import *
 from app.api.agenda.models import *
 from app.api.merch.models import *
+from app.api.closeout.models import *
 from app.api.auth.sessions import UserSessions  # noqa: F401

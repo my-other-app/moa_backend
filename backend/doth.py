@@ -37,8 +37,12 @@ async def lifespan(app: FastAPI):
     from app.api.emails.service import sweep_loop
 
     sweeper = asyncio.create_task(sweep_loop())
+    from app.api.closeout.service import sweep_loop as closeout_sweep_loop
+
+    closer = asyncio.create_task(closeout_sweep_loop())
     yield
     sweeper.cancel()
+    closer.cancel()
 
 
 application = FastAPI(default_response_class=ORJSONResponse, lifespan=lifespan)

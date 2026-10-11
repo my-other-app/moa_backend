@@ -17,6 +17,7 @@ from sqlalchemy.orm import joinedload
 from app.api.checkins import doors as doors_mod
 from app.api.checkins.gate_auth import GateActor
 from app.api.checkins.models import CheckIns, CheckInVia, DoorKind, DoorMode, Doors
+from app.api.closeout.models import DOOR_OPEN_STATUSES, EventStatus
 from app.api.events.models import EventRegistrationsLink, Events
 from app.api.events.volunteer.models import Volunteer
 from app.api.templates_audience import RegistrationRole
@@ -32,6 +33,9 @@ WALKUP_DOMAIN = "walkup.myotherapp.in"
 
 
 def door_open(event: Events, now: Optional[datetime] = None) -> bool:
+    # A draft refuses check-ins; so does an event that is closed or archived.
+    if (getattr(event, "lifecycle", None) or EventStatus.published) not in DOOR_OPEN_STATUSES:
+        return False
     mode = event.door_mode or DoorMode.open
     if mode is DoorMode.open:
         return True
