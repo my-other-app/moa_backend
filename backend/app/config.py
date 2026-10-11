@@ -58,6 +58,8 @@ class AppConfig(BaseSettings):
 
     # Where a link in an email points: the API as the public reaches it.
     PUBLIC_API_URL: str = "https://api.myotherapp.in"
+    # The clubs dashboard, for links a volunteer opens on a phone.
+    PUBLIC_WEB_URL: str = "https://clubs-next.myotherapp.in"
 
     CORS_ORIGINS: list[str] | str
 

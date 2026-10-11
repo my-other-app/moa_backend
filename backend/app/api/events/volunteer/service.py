@@ -216,107 +216,40 @@ async def list_volunteers(
 async def checkin_user(
     session: AsyncSession, event_id: int, ticker_id: str, volunteer_id: int
 ) -> None:
+    """Check-in a participant for an event, from the volunteer app.
+
+    Accepts a ticket id (MOA-XXXXX-XXXXX) or a registration UUID. Goes
+    through the same admission as every door, so the check-in is recorded
+    with who did it; the app's error codes are kept.
     """
-    Check-in a participant for an event.
-    Accepts either:
-    - ticket_id format: MOA-XXXXX-XXXXX
-    - registration UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-    """
-    import logging
-    import uuid as uuid_module
-    logger = logging.getLogger(__name__)
-    
-    # Normalize ticket_id
-    ticker_id = ticker_id.strip()
-    
-    logger.info(f"Checking in: event_id={event_id}, ticket_id='{ticker_id}'")
-    
-    # Build query based on ticket_id format (matches mark_attendance logic)
-    query = (
-        select(EventRegistrationsLink)
-        .where(
-            EventRegistrationsLink.event_id == event_id,
-            EventRegistrationsLink.is_deleted == False,
-        )
-        .options(joinedload(EventRegistrationsLink.event))
+    from app.api.checkins import service as checkins
+    from app.api.checkins.gate_auth import GateActor
+    from app.api.checkins.models import CheckInVia
+
+    event = await session.scalar(select(Events).where(Events.id == event_id).options(joinedload(Events.club)))
+    if event is None:
+        raise CustomHTTPException(404, "Event not found", error_code="EVENT_NOT_FOUND")
+    volunteer = await session.scalar(select(Volunteer).where(Volunteer.id == volunteer_id))
+    user = await session.scalar(select(Users).where(Users.id == volunteer.user_id)) if volunteer and volunteer.user_id else None
+    actor = GateActor(kind="user", name=(user.full_name if user else None) or "Volunteer", user=user, volunteer=volunteer, can_check_in=True)
+    result = await checkins.scan(
+        session, event, code=ticker_id.strip(), door_label=None, client_ref=None, scanned_at=None, actor=actor, via=CheckInVia.app
     )
-    
-    # Check if it's a MOA ticket_id or a UUID
-    if ticker_id.startswith("MOA"):
-        query = query.where(EventRegistrationsLink.ticket_id == ticker_id)
-    else:
-        # Try to parse as UUID
-        try:
-            uuid_obj = uuid_module.UUID(ticker_id)
-            query = query.where(EventRegistrationsLink.id == uuid_obj)
-        except ValueError:
-            # Not a valid UUID, try as ticket_id anyway
-            query = query.where(EventRegistrationsLink.ticket_id == ticker_id)
-    
-    registration = await session.scalar(query)
-    
-    if not registration:
-        # Check if the ticket exists for ANY event (wrong event case)
-        any_query = (
-            select(EventRegistrationsLink)
-            .where(EventRegistrationsLink.is_deleted == False)
-            .options(joinedload(EventRegistrationsLink.event))
-        )
-        
-        if ticker_id.startswith("MOA"):
-            any_query = any_query.where(EventRegistrationsLink.ticket_id == ticker_id)
-        else:
-            try:
-                uuid_obj = uuid_module.UUID(ticker_id)
-                any_query = any_query.where(EventRegistrationsLink.id == uuid_obj)
-            except ValueError:
-                any_query = any_query.where(EventRegistrationsLink.ticket_id == ticker_id)
-        
-        any_registration = await session.scalar(any_query)
-        
-        if any_registration:
-            # Ticket exists but for a different event
-            event_name = any_registration.event.name if any_registration.event else "another event"
-            raise CustomHTTPException(
-                400,
-                f"Incorrect event: This ticket belongs to '{event_name}'",
-                error_code="TICKET_WRONG_EVENT",
-            )
-        else:
-            # Ticket doesn't exist at all
-            logger.error(f"Ticket not found during checkin: '{ticker_id}'")
-            raise CustomHTTPException(
-                400, "Registration not found", error_code="REGISTRATION_NOT_FOUND"
-            )
-    
-    if registration.is_attended:
-        raise CustomHTTPException(
-            400, "User already checked-in", error_code="TICKET_ALREADY_USED"
-        )
-    if registration.event.has_fee and not registration.is_paid:
-        raise CustomHTTPException(
-            400,
-            "User has not paid the fee, Please verify the payment details.",
-            error_code="FEE_UNPAID",
-        )
-    registration.is_attended = True
-    registration.attended_on = datetime.now(timezone.utc)
-    registration.volunteer_id = volunteer_id
-    await session.commit()
-    
-    # Trigger 3: Send check-in confirmation notification
-    try:
-        await notify_user_check_in(
-            session=session,
-            user_id=registration.user_id,
-            event_id=event_id,
-            event_name=registration.event.name,
-        )
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).error(f"Failed to send check-in notification: {e}")
-    
-    return True
+    outcome = result["outcome"]
+    if outcome == "CHECKED_IN":
+        return True
+    if outcome == "WRONG_EVENT":
+        name = (result.get("other_event") or {}).get("name") or "another event"
+        raise CustomHTTPException(400, f"Incorrect event: This ticket belongs to '{name}'", error_code="TICKET_WRONG_EVENT")
+    if outcome == "ALREADY_CHECKED_IN":
+        raise CustomHTTPException(400, "User already checked-in", error_code="TICKET_ALREADY_USED")
+    if outcome == "UNPAID":
+        raise CustomHTTPException(400, "User has not paid the fee, Please verify the payment details.", error_code="FEE_UNPAID")
+    if outcome == "REVOKED":
+        raise CustomHTTPException(400, "This ticket was revoked.", error_code="TICKET_REVOKED")
+    if outcome == "EVENT_NOT_OPEN":
+        raise CustomHTTPException(400, "The door is closed for this event.", error_code="EVENT_NOT_OPEN")
+    raise CustomHTTPException(400, "Registration not found", error_code="REGISTRATION_NOT_FOUND")
 
 
 async def validate_ticket(

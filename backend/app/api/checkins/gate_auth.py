@@ -1,0 +1,92 @@
+"""Who is at the door.
+
+Three ways in: the club that runs the event (everything), an approved
+volunteer signed into their account (their switches), or a phone opened on
+a door's gate link (that door's switches, with the door as the name on
+every admission).
+"""
+from dataclasses import dataclass
+from typing import Annotated, Optional
+
+from fastapi import Depends, Request
+from sqlalchemy import or_, select
+from sqlalchemy.orm import joinedload
+
+from app.api.checkins import doors as doors_mod
+from app.api.checkins.models import Doors
+from app.api.events.access import is_admin_user
+from app.api.events.models import Events
+from app.api.events.volunteer.models import Volunteer
+from app.api.users.models import Users, UserTypes
+from app.core.auth.dependencies import check_user_type
+from app.db.core import SessionDep
+from app.response import CustomHTTPException
+
+GATE_KEY_HEADER = "X-Gate-Key"
+
+AnyUser = Annotated[Optional[Users], Depends(check_user_type([t.value for t in UserTypes], optional=True))]
+
+
+@dataclass
+class GateActor:
+    kind: str  # "user" | "door"
+    name: str
+    user: Optional[Users] = None
+    volunteer: Optional[Volunteer] = None
+    door: Optional[Doors] = None
+    can_check_in: bool = False
+    can_walkup: bool = False
+    can_merch: bool = False
+    # Access from above volunteer: the club or an admin. Overrides the switches.
+    full: bool = False
+
+    @property
+    def user_id(self) -> Optional[int]:
+        return self.user.id if self.user is not None else None
+
+    @property
+    def permissions(self) -> dict:
+        return {"check_in": self.can_check_in or self.full, "walkup": self.can_walkup or self.full, "merch": self.can_merch or self.full, "full": self.full}
+
+
+async def load_event(session, event_id: int) -> Events:
+    event = await session.scalar(select(Events).options(joinedload(Events.club)).where(Events.id == event_id, Events.is_deleted == False))
+    if event is None:
+        raise CustomHTTPException(404, message="Event not found")
+    return event
+
+
+async def actor_for(session, event: Events, user: Optional[Users], gate_key: Optional[str]) -> GateActor:
+    if gate_key:
+        door = await doors_mod.door_by_key(session, gate_key)
+        if door is None or door.event_id != event.id:
+            raise CustomHTTPException(403, message="This gate link is no longer valid. Ask the organiser for a new one.", error_code="GATE_LINK_INVALID")
+        return GateActor(kind="door", name=door.name, door=door, can_check_in=True, can_walkup=door.link_can_walkup)
+    if user is None:
+        raise CustomHTTPException(401, message="Sign in, or open the gate link the organiser sent you.")
+    if is_admin_user(user) or (event.club is not None and event.club.user_id == user.id):
+        return GateActor(kind="user", name=user.full_name or user.email, user=user, full=True)
+    volunteer = await session.scalar(
+        select(Volunteer).where(
+            Volunteer.user_id == user.id,
+            Volunteer.is_deleted == False,
+            Volunteer.is_approved == True,
+            or_(Volunteer.event_id == event.id, Volunteer.club_id == event.club_id),
+        ).order_by(Volunteer.event_id.desc().nulls_last())
+    )
+    if volunteer is None:
+        raise CustomHTTPException(403, message="You are not on this event's team.", error_code="NOT_A_VOLUNTEER")
+    return GateActor(
+        kind="user", name=user.full_name or user.email, user=user, volunteer=volunteer,
+        can_check_in=volunteer.can_check_in, can_walkup=volunteer.can_walkup, can_merch=volunteer.can_merch,
+    )
+
+
+async def gate_actor(request: Request, session: SessionDep, event_id: int, user: AnyUser) -> GateActor:
+    event = await load_event(session, event_id)
+    actor = await actor_for(session, event, user, request.headers.get(GATE_KEY_HEADER))
+    request.state.gate_event = event
+    return actor
+
+
+GateAuth = Annotated[GateActor, Depends(gate_actor)]
