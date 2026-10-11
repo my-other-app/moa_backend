@@ -723,6 +723,20 @@ async def list_club_followers(
     return result.scalars().all()
 
 
+async def count_club_followers(session: AsyncSession, club_id: int) -> int:
+    """How many follow the club, so a page of them can say where it stands."""
+    return int(
+        await session.scalar(
+            select(func.count()).select_from(ClubUsersLink).where(
+                ClubUsersLink.club_id == club_id,
+                ClubUsersLink.is_following == True,
+                ClubUsersLink.is_deleted == False,
+            )
+        )
+        or 0
+    )
+
+
 async def get_club_details(
     session: AsyncSession,
     club_id: int,
