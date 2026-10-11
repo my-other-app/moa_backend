@@ -46,6 +46,7 @@ async def register_event(
     event_id: int | str,
     user: OptionalUserAuth,
     session: SessionDep = SessionDep,
+    ref: str | None = Query(None, max_length=16, description="A tracking link's code, so the sign-up is credited to it"),
 ) -> EventRegistrationResponse:
     response = {}
 
@@ -98,6 +99,7 @@ async def register_event(
         user_id=user.id,
         event_id=event_id,
         additional_details=additional_details if additional_details else None,
+        tracking_ref=registration.ref or ref,
     )
     response = {**response, **register_data}
     return response

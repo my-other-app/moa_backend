@@ -31,6 +31,8 @@ class EventRegistrationRequest(CustomBaseModel):
     phone: str | None = Field(None)
     additional_details: dict[str, str] | None = Field(None)
     organization: str | None = Field(None, max_length=200)
+    #: The tracking link's code the page carried, so the sign-up is credited to it.
+    ref: str | None = Field(None, max_length=16)
 
 
 class EventAttendanceUpdate(CustomBaseModel):

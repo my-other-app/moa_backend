@@ -294,6 +294,8 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
     wa_bounce_reason = Column(String(300), nullable=True)
     # The admission number the ticket prints beside the scan code.
     admission_no = Column(String(40), nullable=True)
+    # The tracking link whose code this sign-up carried, when it came through one.
+    tracking_link_id = Column(UUID(as_uuid=True), ForeignKey("tracking_links.id", ondelete="SET NULL"), nullable=True, index=True)
     volunteer_id = Column(Integer, ForeignKey("volunteers.id"), nullable=True)
 
     is_won = Column(Boolean, nullable=False, default=False)

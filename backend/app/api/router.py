@@ -20,6 +20,7 @@ from app.api.events.duplicate_router import router as duplicate_router
 from app.api.admission.router import router as admission_router
 from app.api.analytics.router import router as analytics_router
 from app.api.club_designs.router import router as club_designs_router
+from app.api.links.router import router as links_router
 from app.api.emails.router import (
     library_router as email_library_router,
     messages_router,
@@ -55,6 +56,7 @@ api_router.include_router(router=org_router, tags=["organization"])
 api_router.include_router(router=user_router, tags=["user"])
 api_router.include_router(router=analytics_router, tags=["analytics"])
 api_router.include_router(router=club_designs_router, tags=["club-designs"])
+api_router.include_router(router=links_router, tags=["tracking-links"])
 api_router.include_router(router=club_router, tags=["clubs"])
 # Before the events router: these sit under /events/{event_id} and the
 # events router owns the rest of that space.

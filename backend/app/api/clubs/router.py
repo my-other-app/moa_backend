@@ -278,9 +278,10 @@ async def list_notes_self(
 
 @router.post("/follow/{club_id}", summary="follow club")
 async def follow_club(
-    club_id: int, session: SessionDep, user: UserAuth
+    club_id: int, session: SessionDep, user: UserAuth,
+    ref: str | None = Query(None, max_length=16, description="A tracking link's code, so the follow is credited to it"),
 ) -> UserClubLinkDetailResponse:
-    follow = await service.follow_club(session, club_id, user.id)
+    follow = await service.follow_club(session, club_id, user.id, tracking_ref=ref)
     return follow
 
 

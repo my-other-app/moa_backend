@@ -67,6 +67,9 @@ class AppConfig(BaseSettings):
     PUBLIC_API_URL: str = "https://api.myotherapp.in"
     # The clubs dashboard, for links a volunteer opens on a phone.
     PUBLIC_WEB_URL: str = "https://clubs-next.myotherapp.in"
+    # The public event site a tracking link lands on; {slug} for a club's page.
+    PUBLIC_SITE_URL: str = "https://events.myotherapp.in"
+    PUBLIC_CLUB_URL: str = "https://events.myotherapp.in/clubs/{slug}"
 
     CORS_ORIGINS: list[str] | str
 
