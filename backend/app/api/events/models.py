@@ -22,6 +22,7 @@ from app.api.users.models import UserAvatarTypes
 from app.api.checkins.models import DoorMode
 from app.api.idcards.models import ReprintPolicy
 from app.api.kiosk.models import SelfCheckInVerify
+from app.api.closeout.models import EventStatus, RetentionMode
 from app.db.base import AbstractSQLModel
 from app.db.mixins import SoftDeleteMixin, TimestampsMixin
 from app.core.storage.fields import S3FileField, S3ImageField
@@ -108,6 +109,16 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     # Staff mode on a kiosk; checked on the server, never shipped to the tablet.
     kiosk_pin = Column(String(12), nullable=True)
 
+    # The status clock: published → live at the start, → closed after the
+    # end, → archived once retention has run. Stored as "status"; read
+    # through the `status` property below, which the app has always used.
+    lifecycle = Column("status", Enum(EventStatus), nullable=False, default=EventStatus.published, server_default="published")
+    status_clock = Column(Boolean, nullable=False, default=True, server_default=sa.true())
+    retention_mode = Column(Enum(RetentionMode), nullable=False, default=RetentionMode.keep, server_default="keep")
+    retention_hours = Column(Integer, nullable=False, default=72, server_default="72")
+    report_recipients = Column(ARRAY(String), nullable=False, default=list, server_default="{}")
+    keep_contacts = Column(Boolean, nullable=False, default=True, server_default=sa.true())
+
     category = relationship("EventCategories")
     club = relationship("Clubs")
     # foreign_keys is required now that the relationship runs both ways:
@@ -137,7 +148,7 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     def status(self) -> str:
         if getattr(self, "is_deleted", False):
             return "cancelled"
-        return "published"
+        return (self.lifecycle or EventStatus.published).value
 
 
 class EventSpeakers(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):

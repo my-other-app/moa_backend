@@ -26,6 +26,7 @@ from app.api.events.models import (
     EventRatingsLink,
     EventSpeakers,
 )
+from app.api.closeout.models import LOCKED_STATUSES, EventStatus
 from app.api.clubs.models import ClubUsersLink, Clubs
 from app.api.users.models import Users, UserProfiles
 from app.core.validations.schema import validate_relations
@@ -241,6 +242,8 @@ async def update_event(
     ensure_event_access(
         db_event, user_id, as_admin, message="Not authorized to update this event"
     )
+    if (db_event.lifecycle or EventStatus.published) in LOCKED_STATUSES:
+        raise CustomHTTPException(409, message="This event is closed, so its settings are read-only. Move its status back to Live on the closeout page to change them.", error_code="EVENT_LOCKED")
 
     if event.poster:
         content = io.BytesIO(await event.poster.read())
@@ -554,6 +557,10 @@ async def list_events(
             ).filter(EventRegistrationsLink.id == None)
 
     # Filter by ended status (FIXED: corrected logic)
+    # Archived events leave the public lists; a guest's own registrations still show them.
+    if not is_registered:
+        query = query.filter(Events.lifecycle != EventStatus.archived)
+
     # event_end_time = event_datetime + duration hours
     if is_ended is not None:
         # event_end_time = event_datetime + duration * 1 hour
