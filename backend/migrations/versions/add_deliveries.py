@@ -16,7 +16,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "add_deliveries"
-down_revision = "add_event_template_variants"
+down_revision = "add_missing_primary_keys"
 branch_labels = None
 depends_on = None
 
