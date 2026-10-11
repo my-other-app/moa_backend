@@ -56,6 +56,8 @@ class KioskContext(BaseModel):
     event: dict
     self_check_in: KioskSettings
     counters: dict
+    agenda: list = []
+    has_programme: bool = False
 
 
 class RedeemBody(BaseModel):

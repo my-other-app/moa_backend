@@ -19,7 +19,7 @@ import qrcode
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas as rl_canvas
 
-from app.core.layout.engine import layout_text, line_x
+from app.core.layout.engine import agenda_weights, layout_agenda, layout_text, line_x
 from app.core.layout.fonts import font_file_of, measure_for, pick, register
 from app.core.layout.model import (
     SHAPE_PATH_BOX,
@@ -34,6 +34,9 @@ from app.core.layout.model import (
 from app.core.layout.tokens import carries_per_guest_token, render_ticket_template
 
 MM = 72 / 25.4
+
+# Everything an agenda's time column and day headings can draw: digits, the dash, the meridiem, and en-GB day and month names.
+AGENDA_TIME_CHARS = "0123456789:– AMPJFSONDabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 
 @dataclass
@@ -53,6 +56,10 @@ class RenderInput:
     guest_photo: Optional[bytes] = None
     skip_preprinted: bool = False
     monochrome: bool = False
+    # The run of show an agenda layer draws, and the zone its times read in.
+    agenda: list = field(default_factory=list)
+    timezone: str = "UTC"
+    hour12: bool = False
 
 
 def _rgb(hex_color: str) -> tuple:
@@ -280,6 +287,33 @@ def _draw(inp: RenderInput, safe_fonts: bool) -> bytes:
                     t.setCharSpace(laid.letter_spacing * k)
                 t.setTextOrigin(X(line_x(l, line["width"])), Y(l.y + baseline))
                 t.textOut(line["text"])
+                c.drawText(t)
+            c.restoreState()
+
+        elif l.kind == "agenda":
+            # Three roles in two families: titles and details in the layer's face, times in mono.
+            entries = inp.agenda or []
+            w = agenda_weights(l.font)
+            sample = " ".join(f"{e.title} {e.speaker or ''} {e.location or ''}" for e in entries) + " · + 0123456789 more sessions"
+            title_file = pick(font_file_of(l.font, w["title"]), sample, safe_fonts)
+            detail_file = pick(font_file_of(l.font, w["detail"]), sample, safe_fonts)
+            time_file = pick(font_file_of("mono", 700), AGENDA_TIME_CHARS, safe_fonts)
+            fonts = {"title": register(title_file), "detail": register(detail_file), "time": register(time_file)}
+            laid = layout_agenda(
+                l, entries, inp.timezone,
+                {"title": measure_for(title_file), "detail": measure_for(detail_file), "time": measure_for(time_file)},
+                hour12=inp.hour12,
+            )
+            c.saveState()
+            c.setFillAlpha(l.opacity)
+            for piece in laid.pieces:
+                role = "time" if piece.role in ("day", "time") else "title" if piece.role == "title" else "detail"
+                fill = color(l.accent) if piece.role in ("time", "day") else color(l.color) if piece.role == "title" else color(l.muted)
+                c.setFillColorRGB(*fill)
+                t = c.beginText()
+                t.setFont(fonts[role], piece.size * k)
+                t.setTextOrigin(X(l.x + piece.x), Y(l.y + piece.y))
+                t.textOut(piece.text)
                 c.drawText(t)
             c.restoreState()
 

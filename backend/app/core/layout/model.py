@@ -183,8 +183,41 @@ class ShapeLayer(LayerBase):
         return v
 
 
+class AgendaLayer(LayerBase):
+    """The run of show, laid into a box: time, title and detail per session.
+
+    Rows that will not fit shrink first, then drop with a "+N more" line.
+    One per design; the sessions come from the event, never from the layer.
+    """
+
+    kind: Literal["agenda"] = "agenda"
+    width: float = Field(ge=40, le=10_000)
+    height: float = Field(ge=20, le=10_000)
+    font: TicketFont = "inter"
+    # Title size; times and details are scaled from it.
+    size: float = Field(default=28, ge=6, le=400)
+    color: str = "#141614"
+    # Times and day headings.
+    accent: str = "brand.primary"
+    # Speaker and location.
+    muted: str = "#5A5F5B"
+    align: Literal["left", "center", "right"] = "left"
+    # Extra pixels between sessions.
+    row_gap: float = Field(default=16, ge=0, le=1_000)
+    columns: int = Field(default=1, ge=1, le=3)
+    show_speaker: bool = True
+    show_location: bool = True
+    show_day_headings: bool = True
+    opacity: float = Field(default=1, ge=0, le=1)
+
+    @field_validator("color", "accent", "muted")
+    @classmethod
+    def _refs(cls, v: str, info) -> str:
+        return _color_ref(v, info.field_name)
+
+
 TicketLayer = Annotated[
-    Union[TextLayer, QrLayer, ImageLayer, ShapeLayer], Field(discriminator="kind")
+    Union[TextLayer, QrLayer, ImageLayer, ShapeLayer, AgendaLayer], Field(discriminator="kind")
 ]
 
 
@@ -271,6 +304,8 @@ PAGE_PRESETS: dict[str, dict] = {
     "label_50x90": {"label": "Brother label · 50 × 90 mm", "page": PageSpec(width_mm=50, height_mm=90)},
     "label_54x90": {"label": "Brother label · 54 × 90 mm", "page": PageSpec(width_mm=54, height_mm=90)},
     "label_62x90": {"label": "Brother label · 62 × 90 mm", "page": PageSpec(width_mm=62, height_mm=90)},
+    "screen_landscape": {"label": "Kiosk screen · landscape 16:9", "page": PageSpec(width_mm=332, height_mm=186.75)},
+    "screen_portrait": {"label": "Kiosk screen · portrait 9:16", "page": PageSpec(width_mm=186.75, height_mm=332)},
     "a4_landscape": {"label": "A4 landscape · 297 × 210 mm", "page": PageSpec(width_mm=297, height_mm=210)},
     "a4_portrait": {"label": "A4 portrait · 210 × 297 mm", "page": PageSpec(width_mm=210, height_mm=297)},
     "letter_landscape": {"label": "Letter landscape · 11 × 8.5 in", "page": PageSpec(width_mm=279.4, height_mm=215.9)},
@@ -328,6 +363,7 @@ def dump(model: BaseModel) -> dict:
 
 
 __all__ = [
+    "AgendaLayer",
     "COLOR_REFS", "COLOR_REF_LABEL", "IMAGE_SOURCE_LABEL", "MAX_LAYERS", "PAGE_PRESETS",
     "SHAPE_PATH_BOX", "TICKET_FONTS", "TICKET_PAGE", "ImageLayer", "PageSpec", "QrLayer",
     "ShapeLayer", "TextLayer", "TicketArea", "TicketCanvas", "TicketLayer", "TicketLayoutFields",

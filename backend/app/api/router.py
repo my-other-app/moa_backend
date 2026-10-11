@@ -11,6 +11,7 @@ from app.api.certificates.router import public_router as verify_router, router a
 from app.api.checkins.router import router as checkins_router
 from app.api.idcards.router import router as idcards_router
 from app.api.kiosk.router import admin_router as kiosks_admin_router, kiosk_router, self_router
+from app.api.agenda.router import router as agenda_router
 from app.api.emails.router import (
     library_router as email_library_router,
     messages_router,
@@ -57,6 +58,7 @@ api_router.include_router(router=idcards_router, tags=["id-cards"])
 api_router.include_router(router=kiosks_admin_router, tags=["kiosks"])
 api_router.include_router(router=kiosk_router, tags=["kiosks"])
 api_router.include_router(router=self_router, tags=["kiosks"])
+api_router.include_router(router=agenda_router, tags=["agenda"])
 api_router.include_router(router=messages_router, tags=["emails"])
 api_router.include_router(router=files_router, tags=["emails"])
 api_router.include_router(router=events_router, tags=["events"])

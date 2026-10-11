@@ -309,8 +309,13 @@ def fetch_bytes(url: str) -> Optional[bytes]:
 
 
 def render_layout_document(style: dict, values: dict, qr_value: str, *, title: str,
-                           event_icon_url: Optional[str] = None, skip_preprinted: bool = False) -> bytes:
-    """The PDF of a layered design, for one set of values."""
+                           event_icon_url: Optional[str] = None, skip_preprinted: bool = False,
+                           agenda: Optional[list] = None, fit: str = "stretch", page=None) -> bytes:
+    """The PDF of a layered design, for one set of values.
+
+    `agenda` is the run of show an agenda layer draws; `page` and `fit`
+    put the design on another page than it was drawn for (a screen-shaped
+    programme fitted onto A4)."""
     layout = layout_of(style)
     # A template uploaded in the designer is an object key; one set on the
     # template's artwork field is a URL. Either way the renderer gets bytes.
@@ -325,15 +330,18 @@ def render_layout_document(style: dict, values: dict, qr_value: str, *, title: s
         title=title,
         canvas=layout.canvas,
         layers=layout.layers,
-        page=layout.page,
+        page=page or layout.page,
         values=values,
         qr_value=qr_value,
         colors=layout_colors(style),
+        fit=fit,
         template=template,
         images={k: v for k, v in images.items() if v},
         org_logo=fetch_bytes(style.get("logo_url") or ""),
         event_icon=fetch_bytes(event_icon_url or ""),
         skip_preprinted=skip_preprinted,
+        agenda=agenda or [],
+        timezone=EVENT_TIMEZONE,
     ))
 
 

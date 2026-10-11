@@ -74,3 +74,16 @@ def test_badge_starters_follow_the_page_the_designer_is_on():
     assert badge_starter_page("label_brother", PAGE_PRESETS["label_29x90"]["page"]) == PAGE_PRESETS["label_29x90"]["page"]
     assert badge_starter_page("label_brother", None) == PAGE_PRESETS["label_62x90"]["page"]
     assert badge_starter_page("label_4x6") == PAGE_PRESETS["lanyard_4x6"]["page"]
+
+
+from app.core.layout.starters import AGENDA_STARTERS, agenda_starter  # noqa: E402
+
+
+@pytest.mark.parametrize("kind", list(AGENDA_STARTERS))
+def test_every_agenda_starter_is_valid_and_lists_the_run_of_show_once(kind):
+    s = agenda_starter(kind)
+    fields = TicketLayoutFields(canvas=s["canvas"], layers=s["layers"], page=s["page"])
+    assert layout_problems(fields.canvas, fields.layers, fields.page, qr_required=False) == []
+    assert sum(1 for l in fields.layers if l.kind == "agenda") == 1
+    assert any(l.kind == "text" and "event_name" in l.text for l in fields.layers)
+    assert s["page"] == PAGE_PRESETS["a4_portrait"]["page"] if kind == "programme" else s["page"].height_mm is not None

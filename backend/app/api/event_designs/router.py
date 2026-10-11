@@ -23,6 +23,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
 from app.api.certificate_templates.models import CertificateTemplates
+from app.api.agenda import service as agenda_service
+from app.api.agenda.models import AgendaTemplates
+from app.api.agenda.service import agenda_default_config
 from app.api.idcards.models import BadgeTemplates
 from app.api.idcards.service import badge_default_config
 from app.api.certificate_templates.schemas import CertificateTemplateConfig
@@ -30,6 +33,7 @@ from app.api.certificate_templates.service import (
     _default_config as certificate_default_config,
 )
 from app.api.events.documents import (
+    EVENT_TIMEZONE,
     apply_layers,
     document_values,
     image_width,
@@ -45,7 +49,7 @@ from app.api.events.documents import (
 )
 from app.core.layout.engine import layout_problems, problems_as_fields
 from app.core.layout.model import PageSpec, TicketLayoutFields, dump
-from app.core.layout.starters import BADGE_STARTERS, CERTIFICATE_STARTERS, TICKET_STARTERS, badge_starter, certificate_starter, ticket_starter
+from app.core.layout.starters import agenda_starter, badge_starter, certificate_starter, ticket_starter, AGENDA_STARTERS, BADGE_STARTERS, CERTIFICATE_STARTERS, TICKET_STARTERS
 from app.core.layout.tokens import TICKET_TOKENS, field_token
 from app.api.events.models import EventRegistrationsLink
 from app.api.events.access import ensure_event_access, is_admin_user
@@ -69,17 +73,21 @@ class DesignKind(str, enum.Enum):
     ticket = "ticket"
     badge = "badge"
     certificate = "certificate"
+    # The programme: the run of show as a designed screen or page. One per event, no QR.
+    agenda = "agenda"
 
 
 _MODELS = {
     DesignKind.ticket: TicketTemplates,
     DesignKind.badge: BadgeTemplates,
     DesignKind.certificate: CertificateTemplates,
+    DesignKind.agenda: AgendaTemplates,
 }
 _DEFAULTS = {
     DesignKind.ticket: ticket_default_config,
     DesignKind.badge: badge_default_config,
     DesignKind.certificate: certificate_default_config,
+    DesignKind.agenda: agenda_default_config,
 }
 
 
@@ -278,6 +286,7 @@ def _extract_url(value) -> Optional[str]:
 _IMAGE_FIELDS = {
     DesignKind.ticket: ("logo", "secondary_logo", "background_image"),
     DesignKind.badge: (),
+    DesignKind.agenda: (),
     DesignKind.certificate: (
         "logo",
         "secondary_logo",
@@ -560,7 +569,7 @@ async def preview_design(
 # editor does, so the API refuses exactly what the editor would.
 
 
-_CATALOGUES = {DesignKind.ticket: TICKET_STARTERS, DesignKind.badge: BADGE_STARTERS, DesignKind.certificate: CERTIFICATE_STARTERS}
+_CATALOGUES = {DesignKind.ticket: TICKET_STARTERS, DesignKind.badge: BADGE_STARTERS, DesignKind.certificate: CERTIFICATE_STARTERS, DesignKind.agenda: AGENDA_STARTERS}
 
 
 def _starter_of(kind: DesignKind, name: str, page=None) -> dict:
@@ -568,11 +577,13 @@ def _starter_of(kind: DesignKind, name: str, page=None) -> dict:
         return ticket_starter(name)
     if kind is DesignKind.badge:
         return badge_starter(name, page=page)
+    if kind is DesignKind.agenda:
+        return agenda_starter(name)
     return certificate_starter(name)
 
 
 def _starter(kind: DesignKind) -> dict:
-    s = _starter_of(kind, "classic")
+    s = _starter_of(kind, "screen" if kind is DesignKind.agenda else "classic")
     return dump(TicketLayoutFields(canvas=s["canvas"], layers=s["layers"], page=s["page"]))
 
 
@@ -593,7 +604,7 @@ def _layout_keys(data: dict) -> dict:
     return keys
 
 
-def _layout_dto(event, kind: DesignKind, audience: TemplateAudience, template, style: dict) -> dict:
+def _layout_dto(event, kind: DesignKind, audience: TemplateAudience, template, style: dict, agenda: Optional[list] = None) -> dict:
     """The design and everything the editor needs around it."""
     layout = style.get("layout") if in_layout_mode(style) else None
     data = layout or {**_starter(kind), "version": 0}
@@ -627,7 +638,16 @@ def _layout_dto(event, kind: DesignKind, audience: TemplateAudience, template, s
         "tokens": tokens,
         "qrRequired": kind in (DesignKind.ticket, DesignKind.badge),
         "sampleValues": layout_sample_values(event, kind.value),
+        # The run of show an agenda layer draws on the stage: the event's own sessions, or samples while it has none.
+        "agenda": agenda or [],
+        "timezone": EVENT_TIMEZONE,
     }
+
+
+async def _agenda_for(session, event, kind: DesignKind) -> Optional[list]:
+    if kind is not DesignKind.agenda:
+        return None
+    return agenda_service.entries_json(await agenda_service.entries_for(session, event))
 
 
 async def _current(session, event, kind: DesignKind, audience: TemplateAudience):
@@ -648,7 +668,7 @@ async def get_layout(
 ) -> dict:
     event = await _event_for_editing(session, user, event_id)
     template, style = await _current(session, event, kind, audience)
-    return _layout_dto(event, kind, audience, template, style)
+    return _layout_dto(event, kind, audience, template, style, await _agenda_for(session, event, kind))
 
 
 @router.get("/{kind}/layout/starters/{name}", summary="A complete design to start from")
@@ -720,7 +740,7 @@ async def save_layout(
     template.config = config
     await session.commit()
     await session.refresh(template)
-    return _layout_dto(event, kind, audience, template, dict(template.config))
+    return _layout_dto(event, kind, audience, template, dict(template.config), await _agenda_for(session, event, kind))
 
 
 @router.post("/{kind}/layout/preview", summary="The layered design rendered exactly, as a PNG")
@@ -751,7 +771,8 @@ async def preview_layout(
         code = values["admission_no"]
     qr_text = f"certificate:{code}" if kind is DesignKind.certificate else code
 
-    pdf = render_layout_document(style, values, qr_text, title=f"{kind.value} preview")
+    entries = await agenda_service.entries_for(session, event) if kind is DesignKind.agenda else None
+    pdf = render_layout_document(style, values, qr_text, title=f"{kind.value} preview", agenda=entries)
     return Response(content=layout_png(style, pdf), media_type="image/png", headers={"Cache-Control": "no-store"})
 
 

@@ -17,4 +17,5 @@ from app.api.emails.models import *
 from app.api.checkins.models import *
 from app.api.idcards.models import *
 from app.api.kiosk.models import *
+from app.api.agenda.models import *
 from app.api.auth.sessions import UserSessions  # noqa: F401

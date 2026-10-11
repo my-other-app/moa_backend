@@ -8,6 +8,7 @@ from typing import Optional
 from sqlalchemy import func, select
 
 from app.api.checkins import doors as doors_mod
+from app.api.agenda import service as agenda_service
 from app.api.checkins import service as checkins
 from app.api.checkins.models import CheckIns, CheckInVia, DoorKind
 from app.api.events.documents import layout_colors
@@ -134,6 +135,9 @@ async def context(session, device: KioskDevices) -> dict:
         },
         "self_check_in": kiosk_settings(event),
         "counters": {**counters, "checked_in_here": here},
+        # The run of show plays while a card prints; the programme replaces the plain banner once one is saved.
+        "agenda": await agenda_service.upcoming(session, event),
+        "has_programme": await agenda_service.saved(session, event),
     }
 
 
