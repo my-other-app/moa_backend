@@ -33,6 +33,7 @@ from app.api.events.tickets import ticket_document
 from app.core.email import email as email_mod
 from app.db.core import AsyncSessionLocal
 from app.db.listeners import add_loader_criteria
+from app.core import providers as providers_mod
 from app.response import CustomHTTPException
 
 logger = logging.getLogger(__name__)
@@ -237,9 +238,12 @@ async def deliver(session, delivery_id: uuid.UUID) -> Optional[Deliveries]:
     elif d.kind is DeliveryKind.certificate and (reg.certificate_issued_at is None or reg.certificate_revoked_at is not None):
         error = "no valid certificate — issue or reinstate it to send"
     elif d.channel is DeliveryChannel.whatsapp:
-        error = "no WhatsApp provider is configured — nothing was sent"
+        error = providers_mod.NO_WHATSAPP
     elif not reg.email:
         error = "no email address"
+    elif reg.email_bounced_at is not None:
+        # A dead mailbox is not worth another try, and trying costs the sending domain's name.
+        error = providers_mod.BOUNCED
     else:
         try:
             # A ticket goes out in the event's designed invite when there is
@@ -387,7 +391,7 @@ async def summary(session, event: Events, kind: DeliveryKind) -> dict:
             "pending": n(DeliveryStatus.pending),
             "unsent": max(0, registrations - with_row),
         })
-    return {"kind": kind.value, "registrations": registrations, "revoked": revoked, "channels": channels}
+    return {"kind": kind.value, "registrations": registrations, "revoked": revoked, "channels": channels, "providers": providers_mod.providers()}
 
 
 def _sends(event_id: int):

@@ -30,6 +30,13 @@ class AppConfig(BaseSettings):
     SES_ACCESS_KEY: str
     SES_SECRET_KEY: str
     SES_DEFAULT_SENDER: str
+    # Shared secret in the SES → SNS hook URL (?token=), on top of Amazon's signature.
+    SES_WEBHOOK_TOKEN: str = ""
+    # WhatsApp Cloud API: the hook's verify token and app secret, and the sending credentials. Empty = no provider.
+    WHATSAPP_VERIFY_TOKEN: str = ""
+    WHATSAPP_APP_SECRET: str = ""
+    WHATSAPP_ACCESS_TOKEN: str = ""
+    WHATSAPP_PHONE_NUMBER_ID: str = ""
 
     GOOGLE_WEB_CLIENT_ID: str
     GOOGLE_ANDROID_CLIENT_ID: str

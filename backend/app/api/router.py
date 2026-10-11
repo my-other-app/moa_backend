@@ -14,6 +14,7 @@ from app.api.kiosk.router import admin_router as kiosks_admin_router, kiosk_rout
 from app.api.agenda.router import router as agenda_router
 from app.api.merch.router import router as merch_router, gate_router as merch_gate_router
 from app.api.closeout.router import router as closeout_router
+from app.api.hooks.router import router as hooks_router
 from app.api.emails.router import (
     library_router as email_library_router,
     messages_router,
@@ -64,6 +65,7 @@ api_router.include_router(router=agenda_router, tags=["agenda"])
 api_router.include_router(router=merch_router, tags=["merch"])
 api_router.include_router(router=merch_gate_router, tags=["merch"])
 api_router.include_router(router=closeout_router, tags=["closeout"])
+api_router.include_router(router=hooks_router, tags=["hooks"])
 api_router.include_router(router=messages_router, tags=["emails"])
 api_router.include_router(router=files_router, tags=["emails"])
 api_router.include_router(router=events_router, tags=["events"])

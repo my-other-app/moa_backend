@@ -509,7 +509,8 @@ async def send_test(session, event: Events, *, to: str, subject: str, design: Em
 
 
 def audience_query(event_id: int, audience: EmailAudience):
-    q = deliveries._active(event_id)
+    # An address that bounced is left alone until it is corrected.
+    q = deliveries._active(event_id).where(EventRegistrationsLink.email_bounced_at.is_(None))
     if audience.who == "CHECKED_IN":
         q = q.where(EventRegistrationsLink.is_attended == True)
     elif audience.who == "NOT_CHECKED_IN":
@@ -620,6 +621,9 @@ async def deliver_message(session, msg: Messages, d: MessageDeliveries, design: 
     if not reg.email:
         d.status = DeliveryStatus.skipped
         d.error = "no email address"
+    elif reg.email_bounced_at is not None:
+        d.status = DeliveryStatus.skipped
+        d.error = "that address bounced — correct it to send again"
     else:
         try:
             out = await compose(session, event, reg, msg.subject or "", design, attachments, brand=brand, logo_url=logo_url)
