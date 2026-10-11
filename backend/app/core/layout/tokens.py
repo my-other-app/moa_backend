@@ -250,6 +250,25 @@ def format_date(d: datetime, tz: str) -> str:
     return f"{d.day} {_MONTHS[d.month - 1]} {d.year}"
 
 
+_MONTHS_LONG = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+
+
+def format_agenda_day(d: datetime, tz: str) -> str:
+    """A day heading as en-GB writes it: Saturday 11 October."""
+    d = _in(d, tz)
+    return f"{_DAYS[d.weekday()]} {d.day} {_MONTHS_LONG[d.month - 1]}"
+
+
+def day_key(d: datetime, tz: str) -> str:
+    """The calendar day, in the event's zone, that two sessions are compared on."""
+    return _in(d, tz).strftime("%Y-%m-%d")
+
+
+def at_wall_clock(base: datetime, tz: str, hour: int, minute: int = 0) -> datetime:
+    """The instant that reads as the given wall-clock time in a zone, on the day of `base`."""
+    return _in(base, tz).replace(hour=hour, minute=minute, second=0, microsecond=0)
+
+
 def format_event_time(d: datetime, tz: str, hour12: bool = False) -> str:
     """A time as the event prints it: 09:00, or 9:00 AM when the event asks for it."""
     d = _in(d, tz)
