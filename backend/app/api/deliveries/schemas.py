@@ -66,6 +66,8 @@ class DeliveryLogRow(BaseModel):
     name: str
     address: Optional[str]
     kind: str
+    # A message's subject; nothing for a ticket or certificate.
+    what: Optional[str] = None
     channel: str
     status: str
     outcome: Optional[str]

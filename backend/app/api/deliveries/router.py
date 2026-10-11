@@ -102,7 +102,7 @@ async def deliveries_log(
     session: SessionDep,
     user: ClubAuth,
     event_id: int,
-    kind: Optional[DeliveryKind] = Query(None),
+    kind: Optional[str] = Query(None, pattern="^(ticket|certificate|message)$"),
     channel: Optional[DeliveryChannel] = Query(None),
     problem: bool = Query(False, description="Only sends that failed or came back"),
     search: Optional[str] = Query(None, max_length=100),

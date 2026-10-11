@@ -8,9 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.api.payments.models import PaymentLogs, PaymentOrders, PaymentStatus
-from app.api.events.registration.background_tasks import (
-    send_registration_confirmation_email,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -111,36 +108,13 @@ async def handle_event_registration_payment(
                 .filter(Events.id == event_registration.event_id)
                 .options(joinedload(Events.club))
             )
-            event_endtime = (
-                db_event.event_datetime + timedelta(hours=db_event.duration)
-                if db_event.duration
-                else None
-            )
-            email_payload = {
-                "ticket_id": event_registration.ticket_id,
-                "participant_name": event_registration.full_name,
-                "event_name": db_event.name,
-                "event_date": db_event.event_datetime.strftime("%d %b %Y"),
-                "event_time": (
-                    db_event.event_datetime.strftime("%I:%M %p")
-                    + (" - " + event_endtime.strftime("%I:%M %p"))
-                    if event_endtime
-                    else ""
-                ),
-                "event_location": db_event.location_name,
-                "event_prizes": f"Prizes worth ₹{db_event.prize_amount}",
-                "organizer_name": db_event.club.name,
-                "contact_email": db_event.contact_email,
-                "contact_phone": db_event.contact_phone,
-            }
-            send_registration_confirmation_email(
-                recipients=[event_registration.email],
-                subject=f"Ticket: {db_event.name} - Finnet",
-                payload=email_payload,
-                background_tasks=background_tasks,
-            )
-        except Exception as e:
-            logger.exception("Error sending registration confirmation email")
+            # The paid-for ticket goes out as the event's invite email,
+            # through the same queue as Send tickets.
+            from app.api.deliveries import service as deliveries
+
+            await deliveries.send_ticket(session, db_event, event_registration, background_tasks)
+        except Exception:
+            logger.exception("Error sending the ticket email after payment")
         return True
     except Exception as e:
         raise e

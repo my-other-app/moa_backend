@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
+from sqlalchemy import String, cast, func, literal, select, union_all
 from sqlalchemy.orm import joinedload
 
 from app.api.deliveries.models import (
@@ -301,6 +301,21 @@ async def run(delivery_ids: list) -> None:
                 await session.rollback()
 
 
+async def send_ticket(session, event: Events, registration: EventRegistrationsLink, background_tasks=None) -> None:
+    """The ticket email at registration or payment: queued like any other
+    send, so the attendee list shows it landing, and sent after the response
+    when there is a response to wait for. Nothing is re-sent if the guest
+    already has one."""
+    result = await queue(session, event, DeliveryKind.ticket, registration_ids=[registration.id], only="unsent")
+    if not result["ids"]:
+        return
+    if background_tasks is not None:
+        background_tasks.add_task(run, result["ids"])
+        return
+    for did in result["ids"]:
+        await deliver(session, did)
+
+
 # --- the ticket itself --------------------------------------------------------
 
 
@@ -375,33 +390,74 @@ async def summary(session, event: Events, kind: DeliveryKind) -> dict:
     return {"kind": kind.value, "registrations": registrations, "revoked": revoked, "channels": channels}
 
 
+def _sends(event_id: int):
+    """Ticket and certificate sends and message deliveries, as one list.
+
+    They live in two tables because they are made differently, but nobody
+    asking "who never got their ticket" cares which table it is in. Enums are
+    cast to text so the two halves line up."""
+    from app.api.emails.models import MessageDeliveries, MessageKind, Messages
+
+    documents = select(
+        Deliveries.id.label("id"),
+        Deliveries.registration_id.label("registration_id"),
+        cast(Deliveries.kind, String).label("kind"),
+        literal(None, type_=String).label("what"),
+        cast(Deliveries.channel, String).label("channel"),
+        cast(Deliveries.status, String).label("status"),
+        cast(Deliveries.outcome, String).label("outcome"),
+        Deliveries.reason.label("reason"),
+        Deliveries.error.label("error"),
+        Deliveries.attempts.label("attempts"),
+        Deliveries.sent_at.label("sent_at"),
+        Deliveries.outcome_at.label("outcome_at"),
+        Deliveries.created_at.label("created_at"),
+    ).where(Deliveries.event_id == event_id)
+    messages = (
+        select(
+            MessageDeliveries.id.label("id"),
+            MessageDeliveries.registration_id.label("registration_id"),
+            literal("message", type_=String).label("kind"),
+            Messages.subject.label("what"),
+            cast(MessageDeliveries.channel, String).label("channel"),
+            cast(MessageDeliveries.status, String).label("status"),
+            cast(MessageDeliveries.outcome, String).label("outcome"),
+            MessageDeliveries.reason.label("reason"),
+            MessageDeliveries.error.label("error"),
+            literal(1).label("attempts"),
+            MessageDeliveries.sent_at.label("sent_at"),
+            MessageDeliveries.outcome_at.label("outcome_at"),
+            MessageDeliveries.created_at.label("created_at"),
+        )
+        .join(Messages, Messages.id == MessageDeliveries.message_id)
+        .where(Messages.event_id == event_id, Messages.kind != MessageKind.TEST)
+    )
+    return union_all(documents, messages).subquery("sends")
+
+
 async def log(
     session,
     event: Events,
     *,
-    kind: Optional[DeliveryKind] = None,
+    kind: Optional[str] = None,
     channel: Optional[DeliveryChannel] = None,
     problem: bool = False,
     search: Optional[str] = None,
     page: int = 1,
     page_size: int = 50,
 ) -> dict:
-    """Every send to every guest, newest first. The tally is always the whole
-    event's, so narrowing to the failures never makes the number look smaller
-    than it is."""
-    base = (
-        select(Deliveries, EventRegistrationsLink)
-        .join(EventRegistrationsLink, EventRegistrationsLink.id == Deliveries.registration_id)
-        .where(Deliveries.event_id == event.id)
-    )
+    """Every send to every guest, newest first: tickets, certificates and
+    messages together. The tally is always the whole event's, so narrowing
+    to the failures never makes the number look smaller than it is."""
+    s = _sends(event.id)
+    problems = [o.value for o in PROBLEM_OUTCOMES]
+    base = select(s, EventRegistrationsLink).join(EventRegistrationsLink, EventRegistrationsLink.id == s.c.registration_id)
     if kind is not None:
-        base = base.where(Deliveries.kind == kind)
+        base = base.where(s.c.kind == kind)
     if channel is not None:
-        base = base.where(Deliveries.channel == channel)
+        base = base.where(s.c.channel == channel.value)
     if problem:
-        base = base.where(
-            (Deliveries.status == DeliveryStatus.failed) | (Deliveries.outcome.in_(PROBLEM_OUTCOMES))
-        )
+        base = base.where((s.c.status == DeliveryStatus.failed.value) | (s.c.outcome.in_(problems)))
     if search:
         pat = f"%{search}%"
         base = base.where(
@@ -414,44 +470,47 @@ async def log(
     page_size = max(1, min(page_size, 200))
     rows = (
         await session.execute(
-            base.order_by(Deliveries.sent_at.desc().nulls_last(), Deliveries.created_at.desc())
+            base.order_by(s.c.sent_at.desc().nulls_last(), s.c.created_at.desc())
             .limit(page_size)
             .offset((page - 1) * page_size)
         )
     ).all()
     items = []
-    for d, reg in rows:
+    for row in rows:
+        reg = row.EventRegistrationsLink
         items.append({
-            "id": d.id,
+            "id": row.id,
             "registration_id": reg.id,
             "ticket_id": reg.ticket_id,
             "name": reg.full_name or "",
-            "address": reg.email if d.channel is DeliveryChannel.email else reg.phone,
-            "kind": d.kind.value,
-            "channel": d.channel.value,
-            "status": d.status.value,
-            "outcome": d.outcome.value if d.outcome else None,
-            "reason": d.reason or d.error,
-            "attempts": d.attempts or 0,
-            "sent_at": d.sent_at,
-            "outcome_at": d.outcome_at,
+            "address": reg.email if row.channel == DeliveryChannel.email.value else reg.phone,
+            "kind": row.kind,
+            "what": row.what,
+            "channel": row.channel,
+            "status": row.status,
+            "outcome": row.outcome,
+            "reason": row.reason or row.error,
+            "attempts": row.attempts or 0,
+            "sent_at": row.sent_at,
+            "outcome_at": row.outcome_at,
         })
 
-    tally_q = select(Deliveries.status, Deliveries.outcome, func.count()).where(Deliveries.event_id == event.id)
+    tally_q = select(s.c.status, s.c.outcome, func.count())
     if kind is not None:
-        tally_q = tally_q.where(Deliveries.kind == kind)
-    counts = (await session.execute(tally_q.group_by(Deliveries.status, Deliveries.outcome))).all()
-    n = lambda f: sum(c for s, o, c in counts if f(s, o))  # noqa: E731
+        tally_q = tally_q.where(s.c.kind == kind)
+    counts = (await session.execute(tally_q.group_by(s.c.status, s.c.outcome))).all()
+    n = lambda f: sum(c for st, o, c in counts if f(st, o))  # noqa: E731
+    sent, failed, skipped, pending = (x.value for x in (DeliveryStatus.sent, DeliveryStatus.failed, DeliveryStatus.skipped, DeliveryStatus.pending))
     tally = {
-        "sent": n(lambda s, o: s is DeliveryStatus.sent),
-        "delivered": n(lambda s, o: o in (DeliveryOutcome.delivered, DeliveryOutcome.read)),
+        "sent": n(lambda st, o: st == sent),
+        "delivered": n(lambda st, o: o in (DeliveryOutcome.delivered.value, DeliveryOutcome.read.value)),
         # Handed over and nothing heard back -- not the same as delivered.
-        "awaiting": n(lambda s, o: s is DeliveryStatus.sent and o is None),
-        "bounced": n(lambda s, o: o is DeliveryOutcome.bounced),
-        "complained": n(lambda s, o: o is DeliveryOutcome.complained),
-        "failed": n(lambda s, o: s is DeliveryStatus.failed),
-        "skipped": n(lambda s, o: s is DeliveryStatus.skipped),
-        "pending": n(lambda s, o: s is DeliveryStatus.pending),
+        "awaiting": n(lambda st, o: st == sent and o is None),
+        "bounced": n(lambda st, o: o == DeliveryOutcome.bounced.value),
+        "complained": n(lambda st, o: o == DeliveryOutcome.complained.value),
+        "failed": n(lambda st, o: st == failed),
+        "skipped": n(lambda st, o: st == skipped),
+        "pending": n(lambda st, o: st == pending),
     }
     return {"items": items, "total": total, "page": page, "page_size": page_size, "tally": tally}
 

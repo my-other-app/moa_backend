@@ -9,9 +9,6 @@ from sqlalchemy.orm import joinedload, selectinload
 
 logger = logging.getLogger(__name__)
 
-from app.api.events.registration.background_tasks import (
-    send_registration_confirmation_email,
-)
 from app.api.events.models import EventRegistrationsLink, Events
 from app.api.events.schemas import EventAdditionalDetail
 from app.api.service import update_background_task_log
@@ -183,11 +180,6 @@ async def register_event(
         )
         session.add(registration)
 
-        event_endtime = (
-            db_event.event_datetime + timedelta(hours=db_event.duration)
-            if db_event.duration
-            else None
-        )
         await session.commit()
         await session.refresh(registration)
         db_event = await session.scalar(
@@ -195,40 +187,15 @@ async def register_event(
             .filter(Events.id == registration.event_id)
             .options(joinedload(Events.club))
         )
-        email_payload = {
-            "ticket_id": registration.ticket_id,
-            "participant_name": registration.full_name,
-            "event_name": db_event.name,
-            "event_date": db_event.event_datetime.strftime("%d %b %Y"),
-            "event_time": (
-                db_event.event_datetime.strftime("%I:%M %p")
-                + (" - " + event_endtime.strftime("%I:%M %p"))
-                if event_endtime
-                else ""
-            ),
-            "event_location": db_event.location_name,
-            "event_prizes": f"Prizes worth ₹{db_event.prize_amount}",
-            "organizer_name": db_event.club.name,
-            "contact_email": db_event.contact_email,
-            "contact_phone": db_event.contact_phone,
-        }
         if not db_event.has_fee and notify:
+            # The ticket goes out as the event's invite email, through the
+            # same queue as Send tickets, so the attendee list shows it land.
             try:
-                if background_tasks:
-                    background_tasks.add_task(
-                        send_registration_confirmation_email,
-                        recipients=[email],
-                        subject=f"Ticket: {db_event.name} - Finnet",
-                        payload=email_payload,
-                    )
-                else:
-                    send_registration_confirmation_email(
-                        recipients=[email],
-                        subject=f"Ticket: {db_event.name} - Finnet",
-                        payload=email_payload,
-                    )
+                from app.api.deliveries import service as deliveries
+
+                await deliveries.send_ticket(session, db_event, registration, background_tasks)
             except Exception as e:
-                logger.exception("Error sending registration confirmation email")
+                logger.exception("Error sending the ticket email")
                 if background_task_log_id:
                     await update_background_task_log(
                         session,

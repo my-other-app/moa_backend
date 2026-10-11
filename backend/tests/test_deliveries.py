@@ -30,7 +30,11 @@ def outbox(monkeypatch):
         sent.append(kwargs)
         return {"MessageId": f"ses-{len(sent)}"}
 
+    # Tickets go out in the event's designed invite (`send_email`), or in the
+    # plain words (`send_email_with_attachment`) when the club switches the
+    # invite off. Both land here, with their own argument shapes.
     monkeypatch.setattr(email_mod, "send_email_with_attachment", send)
+    monkeypatch.setattr(email_mod, "send_email", send)
     return {"sent": sent, "state": state}
 
 
@@ -90,9 +94,11 @@ async def test_send_emails_everyone_with_an_address_and_records_each_one(client,
     assert [m["recipients"] for m in outbox["sent"]] == [["ananya@example.com"], ["bala@example.com"]]
     mail = outbox["sent"][0]
     assert mail["subject"] == "Your ticket for Build Night"
-    assert mail["attachment_filename"] == f"ticket-{world['a'].ticket_id}.pdf"
-    assert mail["attachment_bytes"][:4] == b"%PDF"
-    assert "Innovation Hall" in mail["body_text"]
+    # The designed invite carries the ticket PDF and the guest's QR inline.
+    ticket = next(a for a in mail["attachments"] if a["filename"] == f"ticket-{world['a'].ticket_id}.pdf")
+    assert ticket["content"][:4] == b"%PDF"
+    assert any(a.get("content_id") == "ticket-qr" for a in mail["attachments"])
+    assert "Innovation Hall" in mail["text"]
 
     summary = (await client.get(f"/api/v1/events/{world['event'].id}/deliveries/summary", headers=world["club"])).json()
     assert summary["registrations"] == 3

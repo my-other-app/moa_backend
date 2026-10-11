@@ -158,7 +158,7 @@ def design_problems(subject: str, design: EmailDesign) -> list[str]:
     return out
 
 
-def validate_fields(fields: EmailTemplateFields, *, event_id: Optional[int], club_id: int) -> None:
+def validate_fields(fields: EmailTemplateFields, *, event_id: Optional[int], club_id: int, stage: EmailStage = EmailStage.CUSTOM) -> None:
     problems = design_problems(fields.subject, fields.design)
     if problems:
         raise CustomHTTPException(422, message=problems[0], errors={"fields": {"design": problems}})
@@ -167,6 +167,12 @@ def validate_fields(fields: EmailTemplateFields, *, event_id: Optional[int], clu
             raise CustomHTTPException(422, message="That image belongs to another event.", errors={"fields": {"design": ["image: not this event's upload"]}})
     if fields.trigger.mode in ("BEFORE_START", "AFTER_END") and not fields.trigger.minutes:
         raise CustomHTTPException(422, message="Say how long before or after.", errors={"fields": {"trigger": "minutes"}})
+    if stage is EmailStage.INVITE and fields.trigger.mode != "ON_TICKETS":
+        raise CustomHTTPException(
+            422,
+            message="The invite goes out with the tickets. Use the pre-event email for a timed send.",
+            errors={"fields": {"trigger": "The invite goes out with the tickets."}},
+        )
 
 
 def _sorted(templates: list[EmailTemplates]) -> list[EmailTemplates]:
@@ -192,6 +198,8 @@ async def ensure_library(session, club_id: int) -> list[EmailTemplates]:
 async def ensure_event_templates(session, event: Events) -> list[EmailTemplates]:
     """The event's emails, with every journey stage present: copied from the
     club's library the first time, so a club's design carries over."""
+    if event.club_id is None:
+        raise CustomHTTPException(422, message="This event has no club, so it has no emails to send from.")
     rows = list(await session.scalars(select(EmailTemplates).where(EmailTemplates.event_id == event.id)))
     have = {t.stage for t in rows if t.stage is not EmailStage.CUSTOM}
     missing = [EmailStage(s) for s in JOURNEY_STAGES if EmailStage(s) not in have]
@@ -218,7 +226,7 @@ async def template_of(session, template_id, *, event: Optional[Events] = None, c
 
 
 async def create_template(session, *, club_id: int, event_id: Optional[int], fields: EmailTemplateFields, stage: EmailStage = EmailStage.CUSTOM, created_by=None) -> EmailTemplates:
-    validate_fields(fields, event_id=event_id, club_id=club_id)
+    validate_fields(fields, event_id=event_id, club_id=club_id, stage=stage)
     if stage is not EmailStage.CUSTOM:
         dup = await session.scalar(select(EmailTemplates).where(EmailTemplates.club_id == club_id, EmailTemplates.event_id == event_id if event_id is not None else EmailTemplates.event_id.is_(None), EmailTemplates.stage == stage))
         if dup is not None:
@@ -230,7 +238,7 @@ async def create_template(session, *, club_id: int, event_id: Optional[int], fie
 
 
 async def update_template(session, tpl: EmailTemplates, fields: EmailTemplateFields) -> EmailTemplates:
-    validate_fields(fields, event_id=tpl.event_id, club_id=tpl.club_id)
+    validate_fields(fields, event_id=tpl.event_id, club_id=tpl.club_id, stage=tpl.stage)
     before = (tpl.subject, tpl.design)
     _apply(tpl, fields)
     if (tpl.subject, tpl.design) != before:
@@ -564,6 +572,10 @@ async def start_message(
 
 
 async def send_template(session, event: Events, tpl: EmailTemplates, *, scheduled: bool = False, created_by=None) -> Messages:
+    if tpl.stage is EmailStage.INVITE:
+        raise CustomHTTPException(
+            422, message="The invite goes out with the tickets. Use Send tickets on the attendees page."
+        )
     fields = fields_of(tpl)
     return await start_message(
         session, event, kind=MessageKind.TEMPLATE, subject=fields.subject, design=fields.design, attachments=fields.attachments,
@@ -730,10 +742,17 @@ def template_out(tpl: EmailTemplates) -> dict:
 
 
 async def invite_email(session, reg: EventRegistrationsLink, event: Events) -> Optional[Outgoing]:
-    """The designed ticket email, when the event has one switched on. The
-    ticket itself is always attached: that is what the email is for."""
-    tpl = await session.scalar(select(EmailTemplates).where(EmailTemplates.event_id == event.id, EmailTemplates.stage == EmailStage.INVITE, EmailTemplates.enabled == True))
+    """The designed ticket email. Every event has one -- copied from the
+    club's library the first time it is needed -- unless the club switched it
+    off, in which case the plain ticket email goes. The ticket itself is
+    always attached: that is what the email is for."""
+    if event.club_id is None:
+        return None
+    tpl = await session.scalar(select(EmailTemplates).where(EmailTemplates.event_id == event.id, EmailTemplates.stage == EmailStage.INVITE))
     if tpl is None:
+        templates = await ensure_event_templates(session, event)
+        tpl = next((t for t in templates if t.stage is EmailStage.INVITE), None)
+    if tpl is None or not tpl.enabled:
         return None
     fields = fields_of(tpl)
     return await compose(

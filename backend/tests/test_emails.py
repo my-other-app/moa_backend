@@ -343,3 +343,75 @@ async def test_save_to_library_then_a_new_event_starts_from_it(client, session, 
     assert len((await _journey(client, world))["custom"]) == 2
     assert (await client.delete(_url(world, f"/{copy.json()['id']}"), headers=world["club"])).status_code == 200
     assert len((await _journey(client, world))["custom"]) == 1
+
+
+async def test_a_guest_who_registers_gets_the_designed_invite_with_the_ticket(client, world, outbox, background):
+    """The invite is the ticket email: registering sends it, through the same
+    queue as Send tickets, without the club ever opening the emails page."""
+    r = await client.post(
+        f"/api/v1/events/registration/{world['event'].id}/register",
+        json={"full_name": "Devika Menon", "email": "devika-e@example.com", "phone": "9999999999"},
+    )
+    assert r.status_code == 200, r.text
+    assert outbox["plain"] == []
+    (mail,) = outbox["sent"]
+    assert mail["recipients"] == ["devika-e@example.com"]
+    assert mail["subject"] == "Your ticket for Build Night"
+    assert "Devika" in mail["html"]
+    assert any(a["filename"].startswith("ticket-") for a in mail["attachments"])
+    assert any(a.get("content_id") == "ticket-qr" for a in mail["attachments"])
+
+    log = await client.get(f"/api/v1/events/{world['event'].id}/deliveries", params={"kind": "ticket"}, headers=world["club"])
+    rows = {x["name"]: x for x in log.json()["items"]}
+    assert rows["Devika Menon"]["status"] == "sent"
+    # Registering forked the journey from the club's library on the way.
+    journey = await _journey(client, world)
+    assert _stage(journey, "INVITE")["template"]["sourceId"] is not None
+
+    # Switched off, a guest who registers gets the plain ticket email instead.
+    invite = _stage(journey, "INVITE")["template"]
+    body = {k: v for k, v in invite.items() if k in ("name", "subject", "design", "attachments", "audience", "trigger", "channels", "enabled")}
+    body["enabled"] = False
+    assert (await client.put(_url(world, f"/{invite['id']}"), json=body, headers=world["club"])).status_code == 200
+    r = await client.post(
+        f"/api/v1/events/registration/{world['event'].id}/register",
+        json={"full_name": "Eshan Pillai", "email": "eshan-e@example.com", "phone": "9999999998"},
+    )
+    assert r.status_code == 200, r.text
+    assert len(outbox["sent"]) == 1 and len(outbox["plain"]) == 1
+    assert outbox["plain"][0]["recipients"] == ["eshan-e@example.com"]
+    assert outbox["plain"][0]["attachment_filename"].startswith("ticket-")
+
+
+async def test_the_invite_goes_out_with_the_tickets_and_nothing_else(client, world):
+    invite = _stage(await _journey(client, world), "INVITE")["template"]
+    body = {k: v for k, v in invite.items() if k in ("name", "subject", "design", "attachments", "audience", "trigger", "channels", "enabled")}
+    body["trigger"] = {"mode": "BEFORE_START", "minutes": 60}
+    timed = await client.put(_url(world, f"/{invite['id']}"), json=body, headers=world["club"])
+    assert timed.status_code == 422
+    assert "goes out with the tickets" in timed.json()["message"]
+    sent = await client.post(_url(world, f"/{invite['id']}/send"), headers=world["club"])
+    assert sent.status_code == 422
+    assert "Send tickets" in sent.json()["message"]
+
+
+async def test_the_delivery_log_lists_messages_beside_tickets(client, world, outbox, background):
+    assert (await client.post(f"/api/v1/events/{world['event'].id}/tickets/send", json={"only": "unsent"}, headers=world["club"])).status_code == 200
+    body = {"subject": "Parking at {{venue}}", "body": "Behind the hall, {{first_name}}.", "audience": {"who": "ALL", "roles": []}}
+    assert (await client.post(f"/api/v1/events/{world['event'].id}/messages", json=body, headers=world["club"])).status_code == 200
+
+    everything = await client.get(f"/api/v1/events/{world['event'].id}/deliveries", headers=world["club"])
+    assert everything.status_code == 200, everything.text
+    kinds = {(x["name"], x["kind"]) for x in everything.json()["items"]}
+    assert ("Ananya Iyer", "ticket") in kinds and ("Ananya Iyer", "message") in kinds
+    # Four guests, two sends each: three reached and one skipped per send.
+    assert everything.json()["total"] == 8
+    assert everything.json()["tally"]["sent"] == 6 and everything.json()["tally"]["skipped"] == 2
+
+    messages = await client.get(f"/api/v1/events/{world['event'].id}/deliveries", params={"kind": "message"}, headers=world["club"])
+    rows = messages.json()["items"]
+    # The subject as the club typed it: the same words the messages page shows.
+    assert len(rows) == 4 and all(r["what"] == "Parking at {{venue}}" for r in rows)
+    assert messages.json()["tally"]["sent"] == 3
+    problems = await client.get(f"/api/v1/events/{world['event'].id}/deliveries", params={"problem": "true"}, headers=world["club"])
+    assert problems.json()["items"] == [] and problems.json()["tally"]["skipped"] == 2

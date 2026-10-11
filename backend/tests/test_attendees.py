@@ -9,14 +9,14 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.api.events.registration import background_tasks as reg_background
+from app.core.email import email as email_mod
 from tests.conftest import auth_header
 
 
 @pytest.fixture
 def no_email(monkeypatch):
     sent = []
-    monkeypatch.setattr(reg_background, "send_email_with_attachment", lambda **kw: sent.append(kw))
+    monkeypatch.setattr(email_mod, "send_email_with_attachment", lambda **kw: sent.append(kw))
     return sent
 
 
