@@ -9,6 +9,7 @@ from fastapi import BackgroundTasks
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
+from email.mime.image import MIMEImage
 
 from app.config import settings
 
@@ -184,3 +185,54 @@ def send_email_background(
         template_context=template_context,
         sender=sender,
     )
+
+
+def send_email(
+    recipients: List[str],
+    subject: str,
+    text: str,
+    html: str,
+    attachments: Optional[List[Dict[str, Any]]] = None,
+    sender: Optional[str] = None,
+    sender_name: Optional[str] = None,
+    aws_region: str = "ap-south-1",
+) -> Dict:
+    """A designed email: a text and an HTML body, files attached, and pictures
+    inline by Content-ID (`{"filename", "content", "content_id"}`) so the
+    guest's QR shows in the message rather than hanging off it.
+
+    Shaped as a provider would shape it (multipart/mixed > related >
+    alternative), which is what mail clients agree on."""
+    related = MIMEMultipart("related")
+    alternative = MIMEMultipart("alternative")
+    alternative.attach(MIMEText(text or "", "plain", "utf-8"))
+    alternative.attach(MIMEText(html or "", "html", "utf-8"))
+    related.attach(alternative)
+    msg = MIMEMultipart("mixed")
+    msg["Subject"] = subject
+    msg["From"] = f"{sender_name or 'Finnet'} <{sender or settings.SES_DEFAULT_SENDER}>"
+    msg["To"] = ", ".join(recipients)
+    msg.attach(related)
+    for a in attachments or []:
+        content = a["content"]
+        if isinstance(content, io.BytesIO):
+            content = content.getvalue()
+        filename = a.get("filename") or "attachment"
+        if a.get("content_id"):
+            part = MIMEImage(content, _subtype=filename.rsplit(".", 1)[-1] if "." in filename else "png")
+            part.add_header("Content-ID", f"<{a['content_id']}>")
+            part.add_header("Content-Disposition", "inline", filename=filename)
+            related.attach(part)
+        else:
+            part = MIMEApplication(content, _subtype=filename.rsplit(".", 1)[-1] if "." in filename else "octet-stream")
+            part.add_header("Content-Disposition", "attachment", filename=filename)
+            msg.attach(part)
+    ses_client = boto3.client(
+        "ses",
+        region_name=aws_region,
+        aws_access_key_id=settings.SES_ACCESS_KEY,
+        aws_secret_access_key=settings.SES_SECRET_KEY,
+    )
+    response = ses_client.send_raw_email(Source=msg["From"], Destinations=recipients, RawMessage={"Data": msg.as_string()})
+    logger.info("Email sent: %s", response.get("MessageId"))
+    return response

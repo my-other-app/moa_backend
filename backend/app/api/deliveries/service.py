@@ -205,6 +205,14 @@ async def _document(session, kind: DeliveryKind, reg: EventRegistrationsLink):
     return await certificate_document(session, reg)
 
 
+async def _designed(session, kind: DeliveryKind, reg: EventRegistrationsLink, event: Events):
+    if kind is not DeliveryKind.ticket:
+        return None
+    from app.api.emails import service as emails
+
+    return await emails.invite_email(session, reg, event)
+
+
 async def deliver(session, delivery_id: uuid.UUID) -> Optional[Deliveries]:
     """Worker: one guest, one channel. Records whatever happened."""
     d = await session.scalar(
@@ -234,20 +242,35 @@ async def deliver(session, delivery_id: uuid.UUID) -> Optional[Deliveries]:
         error = "no email address"
     else:
         try:
-            doc = await _document(session, d.kind, reg)
-            version = doc.design_version
-            copy = copy_for(d.kind, reg, event, org_name)
-            # boto3 is synchronous; the send must not hold the event loop.
-            response = await asyncio.to_thread(
-                email_mod.send_email_with_attachment,
-                recipients=[reg.email],
-                subject=copy["subject"],
-                body_text=copy["text"],
-                body_html=copy["html"],
-                attachment_bytes=doc.content,
-                attachment_filename=doc.filename,
-                sender_name=org_name or None,
-            )
+            # A ticket goes out in the event's designed invite when there is
+            # one switched on; otherwise in the plain words below.
+            designed = await _designed(session, d.kind, reg, event)
+            if designed is not None:
+                version = designed.design_version
+                response = await asyncio.to_thread(
+                    email_mod.send_email,
+                    recipients=[reg.email],
+                    subject=designed.subject,
+                    text=designed.text,
+                    html=designed.html,
+                    attachments=designed.attachments,
+                    sender_name=org_name or None,
+                )
+            else:
+                doc = await _document(session, d.kind, reg)
+                version = doc.design_version
+                copy = copy_for(d.kind, reg, event, org_name)
+                # boto3 is synchronous; the send must not hold the event loop.
+                response = await asyncio.to_thread(
+                    email_mod.send_email_with_attachment,
+                    recipients=[reg.email],
+                    subject=copy["subject"],
+                    body_text=copy["text"],
+                    body_html=copy["html"],
+                    attachment_bytes=doc.content,
+                    attachment_filename=doc.filename,
+                    sender_name=org_name or None,
+                )
             status = DeliveryStatus.sent
             provider_id = (response or {}).get("MessageId")
         except Exception as exc:  # the row is the record; the reason goes in it

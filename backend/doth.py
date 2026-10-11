@@ -1,3 +1,4 @@
+import asyncio
 import traceback
 import uuid
 from contextlib import asynccontextmanager
@@ -32,8 +33,12 @@ async def lifespan(app: FastAPI):
             await seed_badges(session)
     except Exception as e:
         print(f"Warning: Badge seeding failed: {e}")
+    # Timed journey emails: one sweep a minute, one worker at a time.
+    from app.api.emails.service import sweep_loop
+
+    sweeper = asyncio.create_task(sweep_loop())
     yield
-    # Shutdown: nothing needed
+    sweeper.cancel()
 
 
 application = FastAPI(default_response_class=ORJSONResponse, lifespan=lifespan)
