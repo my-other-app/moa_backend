@@ -211,6 +211,9 @@ def token_event(event) -> TokenEvent:
         starts_at=start,
         ends_at=end,
         timezone=EVENT_TIMEZONE,
+        admission_prefix=getattr(event, "admission_prefix", None),
+        admission_digits=getattr(event, "admission_digits", None) or 4,
+        admission_include_code=bool(getattr(event, "admission_include_code", True)) if getattr(event, "admission_include_code", None) is not None else True,
     )
 
 
@@ -272,7 +275,7 @@ def layout_values(registration, event, kind: str) -> dict:
         token_event(event),
         (club.name if club else "") or "",
         token_attendee(registration),
-        registration.ticket_id or "",
+        getattr(registration, "admission_no", None) or registration.ticket_id or "",
         ROLE_LABELS.get(str(role), str(role).title()),
         certificate=certificate,
         field_labels=field_labels_of(event),

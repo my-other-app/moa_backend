@@ -65,6 +65,7 @@ class EventRegistrationDetailResponse(CustomBaseModel):
     ticket_deliveries: list[DeliveryBrief] = Field(default_factory=list)
     email_bounced_at: datetime | None = Field(None)
     email_bounce_reason: str | None = Field(None)
+    admission_no: str | None = Field(None)
     certificate_deliveries: list[DeliveryBrief] = Field(default_factory=list)
 
 
@@ -122,6 +123,7 @@ class EventRegistrationPublicMin(CustomBaseModel):
     ticket_deliveries: list[DeliveryBrief] = Field(default_factory=list)
     email_bounced_at: datetime | None = Field(None)
     email_bounce_reason: str | None = Field(None)
+    admission_no: str | None = Field(None)
 
 
 class SetWinnerRequest(CustomBaseModel):

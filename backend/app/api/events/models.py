@@ -119,6 +119,13 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     report_recipients = Column(ARRAY(String), nullable=False, default=list, server_default="{}")
     keep_contacts = Column(Boolean, nullable=False, default=True, server_default=sa.true())
 
+    # How this event numbers its tickets: a prefix, a padded sequence, the
+    # event code at the end. Numbers already given out are never rewritten.
+    admission_prefix = Column(String(12), nullable=True)
+    admission_digits = Column(Integer, nullable=False, default=4, server_default="4")
+    admission_include_code = Column(Boolean, nullable=False, default=True, server_default=sa.true())
+    admission_seq = Column(Integer, nullable=False, default=0, server_default="0")
+
     category = relationship("EventCategories")
     club = relationship("Clubs")
     # foreign_keys is required now that the relationship runs both ways:
@@ -285,6 +292,8 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
     email_bounce_reason = Column(String(300), nullable=True)
     wa_bounced_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     wa_bounce_reason = Column(String(300), nullable=True)
+    # The admission number the ticket prints beside the scan code.
+    admission_no = Column(String(40), nullable=True)
     volunteer_id = Column(Integer, ForeignKey("volunteers.id"), nullable=True)
 
     is_won = Column(Boolean, nullable=False, default=False)

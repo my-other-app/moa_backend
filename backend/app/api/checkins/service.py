@@ -52,7 +52,8 @@ def _code_filter(code: str):
     try:
         return EventRegistrationsLink.id == uuid.UUID(code)
     except ValueError:
-        return func.upper(EventRegistrationsLink.ticket_id) == code.upper()
+        # The scan code, or the admission number printed beside it.
+        return or_(func.upper(EventRegistrationsLink.ticket_id) == code.upper(), func.upper(EventRegistrationsLink.admission_no) == code.upper())
 
 
 def _loaded():
@@ -84,7 +85,7 @@ def summary(reg: EventRegistrationsLink, checked_in_at=None) -> dict:
     return {
         "id": reg.id, "name": reg.full_name or "", "ticket_id": reg.ticket_id, "role": str(role), "email": reg.email or None,
         "phone": reg.phone or None, "has_contact": bool(reg.email or reg.phone), "is_paid": bool(reg.is_paid) if reg.event.has_fee else True,
-        "checked_in_at": checked_in_at, "badge_printed_at": getattr(reg, "badge_printed_at", None),
+        "checked_in_at": checked_in_at, "badge_printed_at": getattr(reg, "badge_printed_at", None), "admission_no": getattr(reg, "admission_no", None),
     }
 
 
@@ -331,7 +332,7 @@ async def search(session, event: Events, q: str) -> list[dict]:
     regs = list(
         await session.scalars(
             select(EventRegistrationsLink).options(*_loaded())
-            .where(EventRegistrationsLink.event_id == event.id, EventRegistrationsLink.is_deleted == False, or_(EventRegistrationsLink.full_name.ilike(pat), EventRegistrationsLink.email.ilike(pat), EventRegistrationsLink.ticket_id.ilike(pat)))
+            .where(EventRegistrationsLink.event_id == event.id, EventRegistrationsLink.is_deleted == False, or_(EventRegistrationsLink.full_name.ilike(pat), EventRegistrationsLink.email.ilike(pat), EventRegistrationsLink.ticket_id.ilike(pat), EventRegistrationsLink.admission_no.ilike(pat)))
             .order_by(EventRegistrationsLink.full_name).limit(8)
         )
     )
