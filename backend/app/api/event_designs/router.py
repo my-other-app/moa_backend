@@ -592,6 +592,17 @@ def _layout_prefix(event_id: int) -> str:
     return os.path.join(settings.S3_BASE_PATH, "events", str(event_id), "layout") + "/"
 
 
+def _club_layout_prefix(club_id: int) -> str:
+    """Where the club's own designer uploads live: an event forked from the
+    club's design keeps pointing at these, so they are allowed on the event too."""
+    return os.path.join(settings.S3_BASE_PATH, "clubs", str(club_id), "layout") + "/"
+
+
+def _prefixes_for(event) -> tuple:
+    own = (_layout_prefix(event.id),)
+    return own + ((_club_layout_prefix(event.club_id),) if getattr(event, "club_id", None) else ())
+
+
 def _layout_keys(data: dict) -> dict:
     """Every object key a layout points at, by the field that holds it."""
     keys = {}
@@ -694,16 +705,15 @@ async def get_starter(
     return dump(TicketLayoutFields(canvas=s["canvas"], layers=s["layers"], page=s["page"]))
 
 
-def _validate_layout(kind: DesignKind, body: dict, *, event_id: int) -> TicketLayoutFields:
+def _validate_layout(kind: DesignKind, body: dict, *, prefixes: tuple) -> TicketLayoutFields:
     """Shape first, then meaning -- each refused with the field to fix."""
     try:
         layout = TicketLayoutFields.model_validate(body)
     except Exception as exc:
         raise CustomHTTPException(422, message="This design has a problem.", errors={"detail": str(exc)[:2000]})
-    # Keys are plain strings in the JSON; one pointing outside this event's
-    # folder would let a design print another club's upload.
-    prefix = _layout_prefix(event_id)
-    foreign = {field: "Upload the image through this event's designer." for field, key in _layout_keys(body).items() if not key.startswith(prefix)}
+    # Keys are plain strings in the JSON; one pointing outside the folders this
+    # design may use would let it print another club's upload.
+    foreign = {field: "Upload the image through this designer." for field, key in _layout_keys(body).items() if not any(key.startswith(prefix) for prefix in prefixes)}
     if foreign:
         raise CustomHTTPException(422, message="Some images in this design were not uploaded here.", errors={"fields": foreign})
     problems = layout_problems(layout.canvas, layout.layers, layout.page, qr_required=kind in (DesignKind.ticket, DesignKind.badge))
@@ -728,7 +738,7 @@ async def save_layout(
     """Forks the design onto the event on first save, like the config does,
     and bumps the version so a document can say which design it was made from."""
     event = await _event_for_editing(session, user, event_id)
-    layout = _validate_layout(kind, body, event_id=event_id)
+    layout = _validate_layout(kind, body, prefixes=_prefixes_for(event))
 
     template = await fork_for_event(
         session, _MODELS[kind], event_id=event_id, club_id=event.club_id,
@@ -758,7 +768,7 @@ async def preview_layout(
     could not receive."""
     event = await _event_for_editing(session, user, event_id)
     ticket_id = body.pop("ticket_id", None)
-    layout = _validate_layout(kind, body, event_id=event_id)
+    layout = _validate_layout(kind, body, prefixes=_prefixes_for(event))
     template, style = await _current(session, event, kind, audience)
     style = {**style, "layout": dump(layout)}
 
@@ -795,7 +805,11 @@ async def upload_layout_image(
     a URL to show it now. Nothing is written to the design: the editor holds
     the key until the person saves."""
     await _event_for_editing(session, user, event_id)
-    raw = await file.read()
+    return _store_layout_image(await file.read(), _layout_prefix(event_id), purpose)
+
+
+def _store_layout_image(raw: bytes, prefix: str, purpose: str) -> dict:
+    """Check, shrink and store one upload under a designer's folder."""
     if len(raw) > MAX_IMAGE_BYTES:
         raise CustomHTTPException(413, message="That image is over 5 MB. Export it smaller and try again.")
     try:
@@ -816,6 +830,6 @@ async def upload_layout_image(
             fmt = "PNG"
         raw = out.getvalue()
     ext = _EXT[fmt]
-    key = f"{_layout_prefix(event_id)}{purpose}-{uuid4().hex}.{ext}"
+    key = f"{prefix}{purpose}-{uuid4().hex}.{ext}"
     objects.put_bytes(key, raw, "image/jpeg" if ext == "jpg" else f"image/{ext}")
     return {"key": key, "url": objects.presigned_url(key), "width": image.width, "height": image.height}

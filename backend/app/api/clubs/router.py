@@ -328,14 +328,15 @@ async def list_club_followers_endpoint(
     session: SessionDep,
     user: DependsAuth,
 ) -> PaginatedResponse[ClubFollowersListResponse]:
-    """List followers of a club."""
+    """List followers of a club, with how many there are in all."""
     followers = await service.list_club_followers(
         session=session,
         club_id=club_id,
         limit=pagination.limit,
         offset=pagination.offset,
     )
-    return paginated_response(followers, request, schema=ClubFollowersListResponse)
+    total = await service.count_club_followers(session=session, club_id=club_id)
+    return paginated_response(followers, request, schema=ClubFollowersListResponse, total=total)
 
 
 @router.put("/logo")
