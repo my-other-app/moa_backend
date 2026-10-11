@@ -9,6 +9,8 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlmodel import Field, SQLModel
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+
 from app.db.base import AbstractSQLModel
 from app.db.mixins import SoftDeleteMixin, TimestampsMixin
 from sqlalchemy.orm import relationship
@@ -85,6 +87,8 @@ class ClubUsersLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     is_following = Column(Boolean, nullable=False, default=False)
     is_pinned = Column(Boolean, nullable=False, default=False)
     is_hidden = Column(Boolean, nullable=False, default=False)
+    # The tracking link whose code the follow carried, when it came through one.
+    tracking_link_id = Column(PG_UUID(as_uuid=True), ForeignKey("tracking_links.id", ondelete="SET NULL"), nullable=True, index=True)
 
     club = relationship("Clubs", back_populates="followers")
     user = relationship("Users")

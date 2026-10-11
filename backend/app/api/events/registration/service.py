@@ -51,6 +51,7 @@ async def register_event(
     role: RegistrationRole | None = None,
     notify: bool = True,
     relaxed_fields: bool = False,
+    tracking_ref: str | None = None,
 ):
     """`relaxed_fields` is for a guest registered at the door: nothing is
     required there, and what they answer goes on the record.
@@ -189,6 +190,10 @@ async def register_event(
         session.add(registration)
         # Its admission number, from the event's own counter, before the row is kept.
         await admission.assign(session, db_event, registration)
+        # Credited to the tracking link the page carried, if it carried one of this club's.
+        from app.api.links import service as links
+
+        await links.attribute_registration(session, registration, db_event, tracking_ref)
 
         await session.commit()
         await session.refresh(registration)

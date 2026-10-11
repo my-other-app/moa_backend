@@ -51,6 +51,10 @@ application.state.limiter = limiter
 application.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 application.include_router(router=api_router)
+# The short tracking link lives at the root: api.myotherapp.in/l/<code> fits on a poster.
+from app.api.links.router import public_router as public_links_router  # noqa: E402
+
+application.include_router(router=public_links_router, tags=["tracking-links"])
 # print(settings.cors_origins)
 # if settings.DEBUG:
 application.add_middleware(

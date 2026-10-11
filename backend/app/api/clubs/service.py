@@ -570,7 +570,7 @@ async def _attach_admin_fields(session: AsyncSession, clubs, rows: list[dict]) -
         row["owner_email"] = club.user.email if club.user else None
 
 
-async def follow_club(session: AsyncSession, club_id: int, user_id: int):
+async def follow_club(session: AsyncSession, club_id: int, user_id: int, tracking_ref: str | None = None):
     user_exists = await session.scalar(select(exists().where(Users.id == user_id)))
     club_exists = await session.scalar(select(exists().where(Clubs.id == club_id)))
 
@@ -591,6 +591,10 @@ async def follow_club(session: AsyncSession, club_id: int, user_id: int):
     else:
         follow = ClubUsersLink(user_id=user_id, club_id=club_id, is_following=True)
         session.add(follow)
+    # Credited to the tracking link the page carried, if it carried one of this club's.
+    from app.api.links import service as links
+
+    await links.attribute_follow(session, follow, club_id, tracking_ref)
     await session.commit()
     await session.refresh(follow)
     return follow
