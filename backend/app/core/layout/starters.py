@@ -1,3 +1,5 @@
+import math
+from typing import Optional
 """Complete designs to start from -- no template needed.
 
 Ported from Muster's starters, with their fixed colours kept so a starter
@@ -7,14 +9,15 @@ colours instead. Layer ids are stable names, so the editor can speak of
 """
 
 from app.core.layout.model import (
-    PAGE_PRESETS,
     ImageLayer,
+    PAGE_PRESETS,
     PageSpec,
     QrLayer,
     ShapeLayer,
     TextLayer,
     TicketCanvas,
     canvas_for_page,
+    min_qr_size,
 )
 
 TICKET_STARTERS = {
@@ -183,3 +186,283 @@ def certificate_starter(kind: str = "classic") -> dict:
             _qr(W - 120 - 170, H - 120 - 170 - 40, 170),
         ],
     }
+
+
+def _jsround(x: float) -> int:
+    """JavaScript's Math.round: half rounds up, where Python's rounds to even."""
+    return int(math.floor(x + 0.5))
+
+
+# ─── ID cards ───────────────────────────────────────────────────────────────
+
+BADGE_STARTERS = {
+    "classic": {"label": "Conference", "note": "Brand head, photo in a ring, first name large, type band with the QR"},
+    "lanyard": {"label": "Bold", "note": "Full colour, a first name you read across the room"},
+    "minimal": {"label": "Editorial", "note": "White, serif name, hairline rules, type colour at the top edge"},
+    "simple": {"label": "Simple", "note": "A name, a QR and the event — nothing else. The one to reach for when the card has to be read across a room."},
+    "insert": {"label": "Badge insert", "note": "Full colour on paper or card: brand head, the name large, a QR, type band in the role's colour. Drawn for the size above, upright or across."},
+    "label_4x3": {"label": "Label · 4 × 3 in", "note": "Black only, for a thermal label printer: name across the badge, QR, type band. Colour comes from the roll."},
+    "label_4x6": {"label": "Label · 4 × 6 in", "note": "Black only, for a lanyard label: name, a QR you can read from a scanner at arm's length, type band."},
+    "label_brother": {"label": "Label · Brother roll", "note": "Black only, for a Brother QL: name stacked, a QR, type band. Drawn for the roll the size above is set to."},
+}
+
+# What a paper printer cannot reach at the head and foot of a page, in mm.
+PAPER_UNPRINTABLE_MM = 5
+
+_BROTHER_PAGES = {w: PAGE_PRESETS[f"label_{w}x90"]["page"] for w in (29, 38, 50, 54, 62)}
+_INSERT_PAGES = [PAGE_PRESETS[k]["page"] for k in ("badge_87x130", "badge_89x137", "badge_130x87", "cr80_portrait", "cr80_landscape", "a6_portrait")]
+
+
+def _same_page(a: PageSpec, b: Optional[PageSpec]) -> bool:
+    return b is not None and abs(a.width_mm - b.width_mm) < 0.05 and (a.height_mm or -1) == (b.height_mm or -1)
+
+
+def badge_starter_page(kind: str, current: Optional[PageSpec] = None) -> PageSpec:
+    """The page a starter is drawn for: the card starters sit on a CR80, the
+    label starters on their label, the insert and simple ones on whatever
+    badge page the designer is already set to."""
+    if kind in ("insert", "simple"):
+        return next((p for p in _INSERT_PAGES if _same_page(p, current)), PAGE_PRESETS["badge_87x130"]["page"])
+    if kind == "label_4x3":
+        return PAGE_PRESETS["label_4x3"]["page"]
+    if kind == "label_4x6":
+        return PAGE_PRESETS["lanyard_4x6"]["page"]
+    if kind == "label_brother":
+        width = int(current.width_mm) if current is not None and current.height_mm == 90 else 0
+        return _BROTHER_PAGES.get(width, PAGE_PRESETS["label_62x90"]["page"])
+    return PAGE_PRESETS["cr80_portrait"]["page"]
+
+
+def badge_starter(kind: str, *, seats: bool = False, page: Optional[PageSpec] = None) -> dict:
+    """A complete ID card to start from. The card starters sit on a CR80
+    portrait card at 300 dpi (638 × 1011 px); the label starters are drawn
+    black on white for a thermal head. Pixel for pixel the TypeScript port."""
+    page = badge_starter_page(kind, page)
+    W, H = canvas_for_page(page)
+    canvas = TicketCanvas(width=W, height=H, background="#FFFFFF")
+    M = 44
+    first = "{{seat}}" if seats else "{{first_name}}"
+    last = "{{last_name}}"
+    org = "{% if organization %}{{organization}}{% endif %}"
+    INK = "#141614"
+
+    if kind == "label_4x3":
+        L = 60
+        qr_size = 280
+        qr_x = W - L - qr_size
+        name_w = qr_x - 40 - L
+        band_y = 740
+        return {"page": page, "canvas": canvas, "layers": [
+            _image("logo", "Club logo", "org_logo", L, L, 240, 84, align="left"),
+            _text("event", "Event name", "{{event_name | upper}}", L + 280, L + 6, W - 2 * L - 280, 24, font="mono", weight=700, color=INK, align="right", letter_spacing=2, max_lines=2),
+            _text("when", "Date", "{{event_date | upper}}{% if venue %} · {{venue | upper}}{% endif %}", L + 280, L + 74, W - 2 * L - 280, 18, font="mono", color=INK, align="right", letter_spacing=1),
+            _shape("rule", "Rule", L, 168, W - 2 * L, 4, fill=INK),
+            _text("first", "Seat", first, L, 200, name_w, 200, font="bebas", color=INK) if seats else _text("first", "First name", "{{first_name | upper}}", L, 200, name_w, 190, font="bebas", color=INK),
+            _text("last", "Last name", "{{last_name | upper}}", L, 410, name_w, 72, weight=700, color=INK, hidden=seats),
+            _text("org", "Organization", org, L, 506, name_w, 36, color=INK),
+            _qr(qr_x, 200, qr_size),
+            _text("code-label", "Admission label", "ADMISSION", qr_x, 500, qr_size, 16, font="mono", weight=700, color=INK, align="center", letter_spacing=3),
+            _text("code", "Admission number", "{{admission_no}}", qr_x, 528, qr_size, 28, font="mono", weight=700, color=INK, align="center"),
+            _shape("band", "Type band", 0, band_y, W, H - band_y, fill=INK),
+            _text("type", "Ticket type", "{{ticket_type | upper}}", L, band_y + 30, 720, 96, font="bebas", color="#FFFFFF", letter_spacing=2),
+            _text("client", "Club", "{{org_name | upper}}", W - L - 400, band_y + 66, 400, 24, font="mono", color="#FFFFFF", align="right", letter_spacing=2),
+        ]}
+
+    if kind == "label_4x6":
+        L = 60
+        qr_size = 420
+        band_y = 1480
+        return {"page": page, "canvas": canvas, "layers": [
+            _image("logo", "Club logo", "org_logo", L, L, 260, 90, align="left"),
+            _text("event", "Event name", "{{event_name | upper}}", L + 300, L + 8, W - 2 * L - 300, 26, font="mono", weight=700, color=INK, align="right", letter_spacing=2, max_lines=2),
+            _text("when", "Date", "{{event_date | upper}}{% if venue %} · {{venue | upper}}{% endif %}", L + 300, L + 80, W - 2 * L - 300, 18, font="mono", color=INK, align="right", letter_spacing=1),
+            _shape("rule", "Rule", L, 180, W - 2 * L, 4, fill=INK),
+            _text("first", "Seat", first, L, 230, W - 2 * L, 240, font="bebas", color=INK, align="center") if seats else _text("first", "First name", "{{first_name | upper}}", L, 230, W - 2 * L, 230, font="bebas", color=INK, align="center"),
+            _text("last", "Last name", "{{last_name | upper}}", L, 490, W - 2 * L, 84, weight=700, color=INK, align="center", hidden=seats),
+            _text("org", "Organization", org, L, 610, W - 2 * L, 40, color=INK, align="center"),
+            _qr((W - qr_size) / 2, 740, qr_size),
+            _text("code-label", "Admission label", "ADMISSION", L, 1200, W - 2 * L, 18, font="mono", weight=700, color=INK, align="center", letter_spacing=4),
+            _text("code", "Admission number", "{{admission_no}}", L, 1232, W - 2 * L, 40, font="mono", weight=700, color=INK, align="center"),
+            _shape("band", "Type band", 0, band_y, W, H - band_y, fill=INK),
+            _text("type", "Ticket type", "{{ticket_type | upper}}", L, band_y + 44, W - 2 * L, 150, font="bebas", color="#FFFFFF", align="center", letter_spacing=3),
+            _text("client", "Club", "{{org_name | upper}}", L, band_y + 236, W - 2 * L, 26, font="mono", color="#FFFFFF", align="center", letter_spacing=3),
+        ]}
+
+    if kind in ("insert", "simple"):
+        across = W > H
+        px = lambda share, mn=1: max(mn, _jsround(W * share))  # noqa: E731
+        py = lambda share, mn=1: max(mn, _jsround(H * share))  # noqa: E731
+        foot_safe = max(1, math.ceil((PAPER_UNPRINTABLE_MM / page.height_mm) * H)) if page.height_mm else py(0.02)
+
+        def foot_stack(type_size, client_size, wanted):
+            client = H - foot_safe - math.ceil(client_size * 1.2)
+            typ = client - math.ceil(type_size * 1.2)
+            return typ, client, min(wanted, typ - py(0.02))
+
+        L = max(26, px(0.05 if across else 0.07))
+        if kind == "simple":
+            cw = W - 2 * L
+            qr_size = max(min_qr_size(canvas, page), _jsround(min(cw, H * 0.34)))
+            type_size = px(0.072, 20)
+            f_type, _f_client, band_y = foot_stack(type_size, 1, py(0.86))
+            return {"page": page, "canvas": canvas, "layers": [
+                _text("event", "Event name", "{{event_name | upper}}", L, py(0.06), cw, px(0.03, 13), font="mono", weight=700, color="#5A5F5B", letter_spacing=3, align="center", max_lines=2),
+                _text("first", "Seat" if seats else "First name", "{{seat}}" if seats else "{{first_name | upper}}", L, py(0.16), cw, px(0.155, 40), font="bebas", color=INK, align="center", max_lines=2),
+                _text("last", "Last name", "{{last_name | upper}}", L, py(0.34), cw, px(0.062, 18), weight=700, color=INK, align="center", hidden=seats, max_lines=2),
+                _text("org", "Organization", org, L, py(0.42), cw, px(0.04, 14), color="#5A5F5B", align="center", max_lines=2),
+                _qr(_jsround((W - qr_size) / 2), py(0.5), qr_size),
+                _shape("band", "Type band", 0, band_y, W, H - band_y, fill="ticket_type"),
+                _text("type", "Ticket type", "{{ticket_type | upper}}", L, f_type, cw, type_size, font="bebas", color="#FFFFFF", align="center", letter_spacing=2),
+            ]}
+        if not across:
+            cw = W - 2 * L
+            qr_size = px(0.292, min_qr_size(canvas, page))
+            col = L + qr_size + px(0.035, 14)
+            col_w = W - L - col
+            type_size = px(0.107, 26)
+            client_size = px(0.021, 10)
+            f_type, f_client, band_y = foot_stack(type_size, client_size, py(0.84))
+            return {"page": page, "canvas": canvas, "layers": [
+                _shape("head", "Brand head", 0, 0, W, py(0.011, 3), fill="brand.primary"),
+                _image("logo", "Club logo", "org_logo", L, py(0.055), px(0.292), py(0.062, 26), align="left"),
+                _text("event", "Event name", "{{event_name | upper}}", L, py(0.133), cw, px(0.027, 13), font="mono", weight=700, color=INK, letter_spacing=2, max_lines=2),
+                _text("when", "Date", "{{event_date | upper}}{% if venue %} · {{venue | upper}}{% endif %}", L, py(0.162), cw, px(0.0195, 11), font="mono", color=INK, letter_spacing=1, max_lines=2),
+                _shape("rule", "Rule", L, py(0.215), cw, max(2, py(0.0026)), fill="brand.primary"),
+                _text("first", "Seat", first, L, py(0.248), cw, px(0.195, 40), font="bebas", color=INK) if seats else _text("first", "First name", "{{first_name | upper}}", L, py(0.248), cw, px(0.195, 40), font="bebas", color=INK, max_lines=2),
+                _text("last", "Last name", "{{last_name | upper}}", L, py(0.395), cw, px(0.076, 20), weight=700, color=INK, hidden=seats, max_lines=2),
+                _text("org", "Organization", org, L, py(0.46), cw, px(0.039, 14), color=INK, max_lines=2),
+                _qr(L, py(0.541), qr_size),
+                _text("code-label", "Admission label", "ADMISSION", col, py(0.559), col_w, px(0.0175, 10), font="mono", weight=700, color=INK, letter_spacing=2),
+                _text("code", "Admission number", "{{admission_no}}", col, py(0.581), col_w, px(0.029, 13), font="mono", weight=700, color=INK, max_lines=2),
+                _shape("band", "Type band", 0, band_y, W, H - band_y, fill="ticket_type"),
+                _text("type", "Ticket type", "{{ticket_type | upper}}", L, f_type, cw, type_size, font="bebas", color="#FFFFFF", letter_spacing=2),
+                _text("client", "Club", "{{org_name | upper}}", L, f_client, cw, client_size, font="mono", color="#FFFFFF", letter_spacing=2),
+            ]}
+        type_size = px(0.06, 20)
+        client_size = px(0.014, 9)
+        f_type, f_client, band_y = foot_stack(type_size, client_size, py(0.83))
+        qr_size = max(min_qr_size(canvas, page), py(0.4))
+        qr_x = W - L - qr_size
+        name_w = qr_x - L - px(0.03, 12)
+        return {"page": page, "canvas": canvas, "layers": [
+            _shape("head", "Brand head", 0, 0, W, py(0.017, 3), fill="brand.primary"),
+            _image("logo", "Club logo", "org_logo", L, py(0.075), px(0.19), py(0.1, 26), align="left"),
+            _text("event", "Event name", "{{event_name | upper}}", L + px(0.22), py(0.085), W - L - px(0.22) - L, px(0.021, 12), font="mono", weight=700, color=INK, letter_spacing=2, max_lines=2),
+            _text("when", "Date", "{{event_date | upper}}{% if venue %} · {{venue | upper}}{% endif %}", L + px(0.22), py(0.145), W - L - px(0.22) - L, px(0.0155, 10), font="mono", color=INK, letter_spacing=1, max_lines=2),
+            _shape("rule", "Rule", L, py(0.3), W - 2 * L, max(2, py(0.004)), fill="brand.primary"),
+            _text("first", "Seat", first, L, py(0.35), name_w, px(0.1, 34), font="bebas", color=INK) if seats else _text("first", "First name", "{{first_name | upper}}", L, py(0.35), name_w, px(0.1, 34), font="bebas", color=INK, max_lines=2),
+            _text("last", "Last name", "{{last_name | upper}}", L, py(0.55), name_w, px(0.042, 16), weight=700, color=INK, hidden=seats, max_lines=2),
+            _text("org", "Organization", org, L, py(0.65), name_w, px(0.024, 12), color=INK, max_lines=2),
+            _qr(qr_x, py(0.32), qr_size),
+            _text("code-label", "Admission label", "ADMISSION", qr_x, py(0.32) + qr_size + py(0.02), qr_size, px(0.013, 9), font="mono", weight=700, color=INK, letter_spacing=2, align="center"),
+            _text("code", "Admission number", "{{admission_no}}", qr_x, py(0.32) + qr_size + py(0.055), qr_size, px(0.02, 11), font="mono", weight=700, color=INK, align="center", max_lines=2),
+            _shape("band", "Type band", 0, band_y, W, H - band_y, fill="ticket_type"),
+            _text("type", "Ticket type", "{{ticket_type | upper}}", L, f_type, name_w, type_size, font="bebas", color="#FFFFFF", letter_spacing=2),
+            _text("client", "Club", "{{org_name | upper}}", L, f_client, name_w, client_size, font="mono", color="#FFFFFF", letter_spacing=2),
+        ]}
+
+    if kind == "label_brother":
+        k = W / 732
+        px = lambda n, mn=1: max(mn, _jsround(n * k))  # noqa: E731
+        L = max(26, px(60))
+        cw = W - 2 * L
+        qr_size = min(260, max(min_qr_size(canvas, page), _jsround(cw * 0.62)))
+        beside = cw - qr_size - px(24) >= 190
+        band_y = 900
+        head = [
+            _image("logo", "Club logo", "org_logo", L, L, min(cw, px(220)), px(70, 30), align="left"),
+            _text("event", "Event name", "{{event_name | upper}}", L, L + px(90, 44), cw, px(20, 13), font="mono", weight=700, color=INK, letter_spacing=2, max_lines=2),
+            _shape("rule", "Rule", L, 210, cw, 4, fill=INK),
+        ]
+        foot = [
+            _shape("band", "Type band", 0, band_y, W, H - band_y, fill=INK),
+            _text("type", "Ticket type", "{{ticket_type | upper}}", L, band_y + 30, cw, px(80, 40), font="bebas", color="#FFFFFF", letter_spacing=2),
+            _text("client", "Club", "{{org_name | upper}}", L, band_y + 120, cw, px(18, 12), font="mono", color="#FFFFFF", letter_spacing=2),
+        ]
+
+        def name(y, size, last_size, org_size):
+            return [
+                _text("first", "Seat", first, L, y, cw, size, font="bebas", color=INK) if seats else _text("first", "First name", "{{first_name | upper}}", L, y, cw, size, font="bebas", color=INK, max_lines=2),
+                _text("last", "Last name", "{{last_name | upper}}", L, y + _jsround(size * 1.14), cw, last_size, weight=700, color=INK, hidden=seats, max_lines=2),
+                _text("org", "Organization", org, L, y + _jsround(size * 1.64), cw, org_size, color=INK, max_lines=2),
+            ]
+
+        if beside:
+            col = L + qr_size + px(24, 14)
+            col_w = W - L - col
+            return {"page": page, "canvas": canvas, "layers": [
+                *head,
+                *name(240, px(140, 54), px(54, 26), px(30, 16)),
+                _qr(L, 560, qr_size),
+                _text("code-label", "Admission label", "ADMISSION", col, 580, col_w, px(14, 11), font="mono", weight=700, color=INK, letter_spacing=2),
+                _text("code", "Admission number", "{{admission_no}}", col, 606, col_w, px(22, 14), font="mono", weight=700, color=INK, max_lines=2),
+                _text("when", "Date", "{{event_date | upper}}", col, 700, col_w, px(16, 12), font="mono", color=INK, letter_spacing=1, max_lines=2),
+                *foot,
+            ]}
+        qr_x = _jsround((W - qr_size) / 2)
+        qr_y = 560 - _jsround(qr_size * 0.12)
+        return {"page": page, "canvas": canvas, "layers": [
+            *head,
+            *name(238, px(150, 46), px(60, 22), px(34, 15)),
+            _qr(qr_x, qr_y, qr_size),
+            _text("code-label", "Admission label", "ADMISSION", L, qr_y + qr_size + 16, cw, px(14, 10), font="mono", weight=700, color=INK, letter_spacing=2, align="center"),
+            _text("code", "Admission number", "{{admission_no}}", L, qr_y + qr_size + 40, cw, px(22, 14), font="mono", weight=700, color=INK, align="center", max_lines=2),
+            *foot,
+        ]}
+
+    if kind == "lanyard":
+        panel_y, panel_h, qr_size = 640, 335, 190
+        qr_y = panel_y + (panel_h - qr_size) / 2
+        return {"page": page, "canvas": canvas, "layers": [
+            _shape("background", "Card colour", 0, 0, W, H, fill="brand.primary"),
+            _image("logo", "Club logo", "org_logo", M, 40, 170, 70, align="left"),
+            _text("event", "Event name", "{{event_name | upper}}", M, 128, W - 2 * M, 24, font="mono", weight=700, color="brand.secondary", letter_spacing=3, max_lines=2),
+            _text("first", "First name", first if seats else "{{first_name | upper}}", M, 222, W - 2 * M, 190, font="bebas", color="#FFFFFF"),
+            _text("last", "Last name", "{{last_name | upper}}", M, 440, W - 2 * M, 84, font="bebas", color="brand.secondary", hidden=seats),
+            _text("org", "Organization", org, M, 548, W - 2 * M, 28, color="#FFFFFF", opacity=0.82),
+            _shape("panel", "White panel", 24, panel_y, W - 48, panel_h, fill="#FFFFFF", radius=28),
+            _shape("pill", "Type pill", 56, qr_y + 6, 260, 60, fill="ticket_type", radius=30),
+            _text("type", "Ticket type", "{{ticket_type | upper}}", 64, qr_y + 20, 244, 26, font="mono", weight=700, color="#FFFFFF", align="center", letter_spacing=2),
+            _text("code-label", "Admission label", "ADMISSION", 56, qr_y + 100, 260, 16, font="mono", weight=700, color="#8C918C", letter_spacing=3),
+            _text("code", "Admission number", "{{admission_no}}", 56, qr_y + 124, 260, 26, font="mono", weight=700, color="#141614"),
+            _text("when", "Date", "{{event_date | upper}}", 56, qr_y + 166, 260, 20, font="mono", color="#5A5F5B", letter_spacing=1),
+            _qr(W - 24 - 32 - qr_size, qr_y, qr_size),
+            _shape("strip", "Type strip", 0, H - 22, W, 22, fill="ticket_type"),
+        ]}
+
+    if kind == "minimal":
+        return {"page": page, "canvas": canvas, "layers": [
+            _shape("bar", "Type bar", 0, 0, W, 26, fill="ticket_type"),
+            _text("event", "Event name", "{{event_name | upper}}", M, 104, W - 2 * M, 22, font="mono", weight=700, letter_spacing=3, max_lines=2),
+            _text("when", "Date", "{{event_date | upper}}{% if venue %} · {{venue | upper}}{% endif %}", M, 146, W - 2 * M, 18, font="mono", color="#8C918C", letter_spacing=1),
+            _shape("rule-top", "Top rule", M, 204, W - 2 * M, 2, fill="#141614"),
+            _text("first", "First name", first, M, 286, W - 2 * M, 104, font="dm_serif"),
+            _text("last", "Last name", last, M, 402, W - 2 * M, 104, font="dm_serif", color="#5A5F5B", hidden=seats),
+            _text("org", "Organization", org, M, 556, W - 2 * M, 28, color="#5A5F5B"),
+            _text("type", "Ticket type", "{{ticket_type | upper}}", M, 606, W - 2 * M, 26, font="mono", weight=700, color="ticket_type", letter_spacing=3),
+            _shape("rule-bottom", "Bottom rule", M, 700, W - 2 * M, 2, fill="#E1E1DC"),
+            _qr(M, 748, 190),
+            _text("code-label", "Admission label", "ADMISSION", M + 218, 760, W - M - (M + 218), 16, font="mono", weight=700, color="#8C918C", letter_spacing=3),
+            _text("code", "Admission number", "{{admission_no}}", M + 218, 786, W - M - (M + 218), 24, font="mono", weight=700),
+            _image("logo", "Club logo", "org_logo", W - M - 160, 868, 160, 70, align="right"),
+        ]}
+
+    # classic
+    head_h, ring, photo, band_y, tile = 400, 300, 270, 800, 176
+    return {"page": page, "canvas": canvas, "layers": [
+        _shape("head", "Brand head", 0, 0, W, head_h, fill="brand.primary"),
+        _image("logo", "Club logo", "org_logo", M, 40, 170, 70, align="left"),
+        _text("event", "Event name", "{{event_name | upper}}", M, 120, W - 2 * M, 28, font="mono", weight=700, color="#FFFFFF", letter_spacing=2, max_lines=2),
+        _text("when", "Date", "{{event_date | upper}}", M, 192, 300, 22, font="mono", color="brand.secondary", letter_spacing=2),
+        _shape("accent", "Accent rule", M, 236, 64, 6, fill="brand.secondary"),
+        _shape("photo-ring", "Photo ring", (W - ring) / 2, head_h - ring / 2, ring, ring, fill="#FFFFFF", radius=ring / 2, hidden=seats),
+        _image("photo", "Guest photo", "guest_photo", (W - photo) / 2, head_h - photo / 2, photo, photo, fit="cover", radius=photo / 2, hidden=seats),
+        _text("first", "Seat", first, M, 470, W - 2 * M, 140, font="bebas", align="center") if seats else _text("first", "First name", first, M, 574, W - 2 * M, 84, weight=700, align="center"),
+        _text("last", "Last name", last, M, 676, W - 2 * M, 40, align="center", color="#3C413D", hidden=seats),
+        _text("org", "Organization", org, M, 736, W - 2 * M, 26, align="center", color="#6B716C"),
+        _shape("foot", "Role band", 0, band_y, W, H - band_y, fill="ticket_type"),
+        _text("type", "Ticket type", "{{ticket_type | upper}}", M, band_y + 36, 330, 64, font="bebas", color="#FFFFFF", letter_spacing=2),
+        _text("code", "Admission number", "{{admission_no}}", M, band_y + 130, 330, 22, font="mono", color="#FFFFFF", opacity=0.85),
+        _shape("qr-tile", "QR tile", W - M - tile, band_y + 18, tile, tile, fill="#FFFFFF", radius=20),
+        _qr(W - M - tile + (tile - 150) / 2, band_y + 18 + (tile - 150) / 2, 150),
+    ]}

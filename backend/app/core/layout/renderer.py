@@ -336,3 +336,16 @@ def pdf_text(pdf: bytes) -> str:
 
     doc = pdfium.PdfDocument(pdf)
     return doc[0].get_textpage().get_text_range()
+
+
+def blank_page_pdf(message: str) -> bytes:
+    """A one-line PDF, for a download that would otherwise be empty."""
+    from reportlab.pdfgen import canvas as rl_canvas
+
+    buf = io.BytesIO()
+    c = rl_canvas.Canvas(buf, pagesize=(320, 200))
+    c.setFont("Helvetica", 12)
+    c.drawString(24, 100, message)
+    c.showPage()
+    c.save()
+    return buf.getvalue()

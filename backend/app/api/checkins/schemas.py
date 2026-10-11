@@ -138,6 +138,7 @@ class AttendeeSummary(BaseModel):
     has_contact: bool = False
     is_paid: bool = True
     checked_in_at: Optional[datetime] = None
+    badge_printed_at: Optional[datetime] = None
 
 
 class ScanBody(BaseModel):
@@ -157,6 +158,8 @@ class ScanResult(BaseModel):
     revoked_at: Optional[datetime]
     capture: dict
     replayed: bool = False
+    # What the console should do about the ID card.
+    badge: dict = Field(default_factory=dict)
 
 
 class ScanBatchBody(BaseModel):

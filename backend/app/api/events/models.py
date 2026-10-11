@@ -20,6 +20,7 @@ import sqlalchemy as sa
 from app.api.templates_audience import RegistrationRole
 from app.api.users.models import UserAvatarTypes
 from app.api.checkins.models import DoorMode
+from app.api.idcards.models import ReprintPolicy
 from app.db.base import AbstractSQLModel
 from app.db.mixins import SoftDeleteMixin, TimestampsMixin
 from app.core.storage.fields import S3FileField, S3ImageField
@@ -94,6 +95,11 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     spot_registration_checks_in = Column(Boolean, nullable=False, default=True)
     capture_contact_at_gate = Column(Boolean, nullable=False, default=False)
     require_contact_at_gate = Column(Boolean, nullable=False, default=False)
+    # ID cards: who may print a second one, whether a check-in prints, and
+    # what the blank stock already carries.
+    reprint_policy = Column(Enum(ReprintPolicy), nullable=False, default=ReprintPolicy.anyone)
+    auto_print_badges = Column(Boolean, nullable=False, default=False)
+    preprinted_carries = Column(JSON, nullable=False, default=list)
 
     category = relationship("EventCategories")
     club = relationship("Clubs")
@@ -253,6 +259,8 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
     certificate_issued_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     certificate_revoked_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     certificate_design_version = Column(Integer, nullable=False, default=0, server_default="0")
+    # When this guest's ID card last printed; the reprint rule turns on it.
+    badge_printed_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     volunteer_id = Column(Integer, ForeignKey("volunteers.id"), nullable=True)
 
     is_won = Column(Boolean, nullable=False, default=False)

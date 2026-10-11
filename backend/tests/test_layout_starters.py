@@ -49,3 +49,28 @@ def test_a_certificate_starter_prints_the_number_and_the_name():
     text = pdf_text(pdf)
     assert "Ananya Iyer" in text
     assert "CERT-0041-KF26" in text
+
+
+# ─── ID cards ───────────────────────────────────────────────────────────────
+
+from app.core.layout.model import PAGE_PRESETS, TicketLayoutFields  # noqa: E402, F811
+from app.core.layout.starters import BADGE_STARTERS, badge_starter, badge_starter_page  # noqa: E402
+
+
+@pytest.mark.parametrize("kind", list(BADGE_STARTERS))
+def test_every_badge_starter_is_valid_as_it_comes(kind):
+    for page in (None, PAGE_PRESETS["cr80_landscape"]["page"], PAGE_PRESETS["label_38x90"]["page"]):
+        s = badge_starter(kind, page=page)
+        fields = TicketLayoutFields(canvas=s["canvas"], layers=s["layers"], page=s["page"])
+        assert layout_problems(fields.canvas, fields.layers, fields.page, qr_required=True) == []
+        assert any(l.kind == "qr" for l in fields.layers)
+        assert any(l.kind == "text" and "first_name" in l.text for l in fields.layers)
+
+
+def test_badge_starters_follow_the_page_the_designer_is_on():
+    assert badge_starter_page("classic") == PAGE_PRESETS["cr80_portrait"]["page"]
+    assert badge_starter_page("insert", PAGE_PRESETS["cr80_landscape"]["page"]) == PAGE_PRESETS["cr80_landscape"]["page"]
+    assert badge_starter_page("insert", PAGE_PRESETS["ticket"]["page"]) == PAGE_PRESETS["badge_87x130"]["page"]
+    assert badge_starter_page("label_brother", PAGE_PRESETS["label_29x90"]["page"]) == PAGE_PRESETS["label_29x90"]["page"]
+    assert badge_starter_page("label_brother", None) == PAGE_PRESETS["label_62x90"]["page"]
+    assert badge_starter_page("label_4x6") == PAGE_PRESETS["lanyard_4x6"]["page"]

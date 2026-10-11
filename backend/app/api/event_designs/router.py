@@ -23,6 +23,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
 from app.api.certificate_templates.models import CertificateTemplates
+from app.api.idcards.models import BadgeTemplates
+from app.api.idcards.service import badge_default_config
 from app.api.certificate_templates.schemas import CertificateTemplateConfig
 from app.api.certificate_templates.service import (
     _default_config as certificate_default_config,
@@ -42,13 +44,8 @@ from app.api.events.documents import (
     sample_values,
 )
 from app.core.layout.engine import layout_problems, problems_as_fields
-from app.core.layout.model import TicketLayoutFields, dump
-from app.core.layout.starters import (
-    CERTIFICATE_STARTERS,
-    TICKET_STARTERS,
-    certificate_starter,
-    ticket_starter,
-)
+from app.core.layout.model import PageSpec, TicketLayoutFields, dump
+from app.core.layout.starters import BADGE_STARTERS, CERTIFICATE_STARTERS, TICKET_STARTERS, badge_starter, certificate_starter, ticket_starter
 from app.core.layout.tokens import TICKET_TOKENS, field_token
 from app.api.events.models import EventRegistrationsLink
 from app.api.events.access import ensure_event_access, is_admin_user
@@ -70,15 +67,18 @@ router = APIRouter(prefix="/events/{event_id}/designs")
 
 class DesignKind(str, enum.Enum):
     ticket = "ticket"
+    badge = "badge"
     certificate = "certificate"
 
 
 _MODELS = {
     DesignKind.ticket: TicketTemplates,
+    DesignKind.badge: BadgeTemplates,
     DesignKind.certificate: CertificateTemplates,
 }
 _DEFAULTS = {
     DesignKind.ticket: ticket_default_config,
+    DesignKind.badge: badge_default_config,
     DesignKind.certificate: certificate_default_config,
 }
 
@@ -277,6 +277,7 @@ def _extract_url(value) -> Optional[str]:
 
 _IMAGE_FIELDS = {
     DesignKind.ticket: ("logo", "secondary_logo", "background_image"),
+    DesignKind.badge: (),
     DesignKind.certificate: (
         "logo",
         "secondary_logo",
@@ -559,8 +560,19 @@ async def preview_design(
 # editor does, so the API refuses exactly what the editor would.
 
 
+_CATALOGUES = {DesignKind.ticket: TICKET_STARTERS, DesignKind.badge: BADGE_STARTERS, DesignKind.certificate: CERTIFICATE_STARTERS}
+
+
+def _starter_of(kind: DesignKind, name: str, page=None) -> dict:
+    if kind is DesignKind.ticket:
+        return ticket_starter(name)
+    if kind is DesignKind.badge:
+        return badge_starter(name, page=page)
+    return certificate_starter(name)
+
+
 def _starter(kind: DesignKind) -> dict:
-    s = ticket_starter("classic") if kind is DesignKind.ticket else certificate_starter("classic")
+    s = _starter_of(kind, "classic")
     return dump(TicketLayoutFields(canvas=s["canvas"], layers=s["layers"], page=s["page"]))
 
 
@@ -611,9 +623,9 @@ def _layout_dto(event, kind: DesignKind, audience: TemplateAudience, template, s
             "logoUrl": style.get("logo_url"),
         },
         "eventIconUrl": None,
-        "starters": TICKET_STARTERS if kind is DesignKind.ticket else CERTIFICATE_STARTERS,
+        "starters": _CATALOGUES[kind],
         "tokens": tokens,
-        "qrRequired": kind is DesignKind.ticket,
+        "qrRequired": kind in (DesignKind.ticket, DesignKind.badge),
         "sampleValues": layout_sample_values(event, kind.value),
     }
 
@@ -647,11 +659,18 @@ async def get_starter(
     kind: DesignKind,
     name: str,
 ) -> dict:
-    await _event_for_editing(session, user, event_id)
-    catalogue = TICKET_STARTERS if kind is DesignKind.ticket else CERTIFICATE_STARTERS
-    if name not in catalogue:
+    event = await _event_for_editing(session, user, event_id)
+    if name not in _CATALOGUES[kind]:
         raise CustomHTTPException(404, message="No such starter")
-    s = ticket_starter(name) if kind is DesignKind.ticket else certificate_starter(name)
+    # A badge starter is drawn for the page the designer is on, so the
+    # insert and label starters fit the stock already chosen.
+    page = None
+    if kind is DesignKind.badge:
+        _, style = await _current(session, event, kind, TemplateAudience.event_default)
+        layout = style.get("layout") if in_layout_mode(style) else None
+        if layout and layout.get("page"):
+            page = PageSpec.model_validate(layout["page"])
+    s = _starter_of(kind, name, page)
     return dump(TicketLayoutFields(canvas=s["canvas"], layers=s["layers"], page=s["page"]))
 
 
@@ -667,7 +686,7 @@ def _validate_layout(kind: DesignKind, body: dict, *, event_id: int) -> TicketLa
     foreign = {field: "Upload the image through this event's designer." for field, key in _layout_keys(body).items() if not key.startswith(prefix)}
     if foreign:
         raise CustomHTTPException(422, message="Some images in this design were not uploaded here.", errors={"fields": foreign})
-    problems = layout_problems(layout.canvas, layout.layers, layout.page, qr_required=kind is DesignKind.ticket)
+    problems = layout_problems(layout.canvas, layout.layers, layout.page, qr_required=kind in (DesignKind.ticket, DesignKind.badge))
     if problems:
         raise CustomHTTPException(
             422,
