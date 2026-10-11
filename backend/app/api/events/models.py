@@ -19,6 +19,7 @@ import sqlalchemy as sa
 
 from app.api.templates_audience import RegistrationRole
 from app.api.users.models import UserAvatarTypes
+from app.api.checkins.models import DoorMode
 from app.db.base import AbstractSQLModel
 from app.db.mixins import SoftDeleteMixin, TimestampsMixin
 from app.core.storage.fields import S3FileField, S3ImageField
@@ -85,6 +86,14 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     club_id = Column(Integer, ForeignKey("clubs.id"), nullable=True)
     ticket_template_id = Column(Integer, ForeignKey("ticket_templates.id"), nullable=True)
     certificate_template_id = Column(Integer, ForeignKey("certificate_templates.id"), nullable=True)
+    # The door. `open` admits anyone with a ticket at any time; `auto` opens a
+    # day before the start and closes `close_after_minutes` past the end.
+    door_mode = Column(Enum(DoorMode), nullable=False, default=DoorMode.open)
+    close_after_minutes = Column(Integer, nullable=False, default=240)
+    # Whether a guest registered at the desk is admitted by the same stroke.
+    spot_registration_checks_in = Column(Boolean, nullable=False, default=True)
+    capture_contact_at_gate = Column(Boolean, nullable=False, default=False)
+    require_contact_at_gate = Column(Boolean, nullable=False, default=False)
 
     category = relationship("EventCategories")
     club = relationship("Clubs")

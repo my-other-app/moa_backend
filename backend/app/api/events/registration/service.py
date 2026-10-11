@@ -9,6 +9,7 @@ from sqlalchemy.orm import joinedload, selectinload
 
 logger = logging.getLogger(__name__)
 
+from app.api.users.models import Users
 from app.api.events.models import EventRegistrationsLink, Events
 from app.api.events.schemas import EventAdditionalDetail
 from app.api.service import update_background_task_log
@@ -48,8 +49,12 @@ async def register_event(
     background_task_log_id: str | None = None,
     role: RegistrationRole | None = None,
     notify: bool = True,
+    relaxed_fields: bool = False,
 ):
-    """`notify=False` is for a guest the organiser adds or imports: the
+    """`relaxed_fields` is for a guest registered at the door: nothing is
+    required there, and what they answer goes on the record.
+
+    `notify=False` is for a guest the organiser adds or imports: the
     confirmation goes out later through Send tickets, where it is recorded,
     rather than from here where it is not."""
     is_event_id = (isinstance(event_id, str) and event_id.isdigit()) or isinstance(
@@ -112,7 +117,9 @@ async def register_event(
         if registered_count >= db_event.max_participants:
             raise CustomHTTPException(400, message="Event is full")
 
-    if db_event.additional_details:
+    if relaxed_fields:
+        additional_details = {k: v for k, v in (additional_details or {}).items() if v not in (None, "")}
+    elif db_event.additional_details:
         if not additional_details:
             raise CustomHTTPException(
                 400, message="Additional details required for this event"
@@ -930,25 +937,24 @@ async def mark_attendance(
     is_attended: bool,
     as_admin: bool = False,
 ):
-    # 1. Verify Event Access
-    event = await session.execute(
+    """Check a guest in by hand from the attendees page, or take it back.
+    Recorded as an admission at the desk, like every other way in."""
+    from app.api.checkins import service as checkins
+    from app.api.checkins.gate_auth import GateActor
+
+    event = await session.scalar(
         select(Events).filter(Events.id == event_id).options(joinedload(Events.club))
     )
-    event = event.scalar()
-
     if event is None:
         raise CustomHTTPException(404, message="Event not found")
-
     ensure_event_access(
         event, user_id, as_admin, message="Not authorized to manage this event"
     )
 
-    # 2. Fetch Registration
     query = select(EventRegistrationsLink).where(
         EventRegistrationsLink.event_id == event_id,
         EventRegistrationsLink.is_deleted == False,
     )
-
     if registration_id.startswith("MOA"):
         query = query.where(EventRegistrationsLink.ticket_id == registration_id)
     else:
@@ -957,45 +963,32 @@ async def mark_attendance(
             query = query.where(EventRegistrationsLink.id == uuid_obj)
         except ValueError:
             raise CustomHTTPException(404, "Registration not found")
-    
     query = query.options(joinedload(EventRegistrationsLink.user))
     registration = await session.scalar(query)
-
     if not registration:
         raise CustomHTTPException(404, message="Registration not found")
 
-    # 3. Update Attendance
-    from datetime import datetime, timezone
-
-    if is_attended and registration.ticket_revoked_at is not None:
-        raise CustomHTTPException(
-            409, message="This ticket was revoked. Reinstate it before checking them in."
-        )
+    actor_user = await session.get(Users, user_id)
+    actor = GateActor(kind="user", name=(actor_user.full_name if actor_user else None) or "Organiser", user=actor_user, full=True)
     if is_attended:
+        if registration.ticket_revoked_at is not None:
+            raise CustomHTTPException(
+                409, message="This ticket was revoked. Reinstate it before checking them in."
+            )
         if not registration.is_attended:
-            registration.is_attended = True
-            registration.attended_on = datetime.now(timezone.utc)
-    else:
-        registration.is_attended = False
-        registration.attended_on = None
+            result = await checkins.check_in_by_hand(session, event, registration.id, "Desk", actor)
+            if result["outcome"] == "UNPAID":
+                raise CustomHTTPException(409, message="This guest has not paid. Record the payment first.")
+            if result["outcome"] == "EVENT_NOT_OPEN":
+                raise CustomHTTPException(409, message="The door is closed. Open it under Team & doors to check guests in.")
+    elif registration.is_attended:
+        await checkins.undo(session, event, registration.id, actor)
 
-    await session.commit()
     # Named attributes, not a bare refresh: a bare refresh expires the joined
     # `user` too and does not load it back, and the response schema requires
     # it -- so a check-in on a registration already in the session answered
     # 500 after the write had been made.
     await session.refresh(registration, attribute_names=["is_attended", "attended_on", "updated_at", "user"])
-
-    # Check for new badges after attendance change
-    if is_attended and registration.user_id:
-        try:
-            from app.api.badges.service import check_and_award_user_badges, check_and_award_club_badges
-            await check_and_award_user_badges(session, user_id=registration.user_id)
-            await check_and_award_club_badges(session, club_id=event.club_id)
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).error(f"Badge check failed after attendance: {e}")
-
     return registration
 
 
