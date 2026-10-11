@@ -1042,7 +1042,9 @@ async def get_club_events(
     items = [
         jsonable_encoder(event) | {
             "registration_count": reg_count,
-            "attended_count": attended_count
+            "attended_count": attended_count,
+            # A property, so the encoder does not see it on its own.
+            "status": event.status,
         }
         for event, reg_count, attended_count in results
     ]

@@ -86,7 +86,12 @@ async def figures(session, event: Events) -> dict:
     club = getattr(event, "club", None)
     registered = len(regs)
     checked_in = len(attended)
+    # The door as a shape, frozen here so the overview can read it back once
+    # retention has deleted the rows it was computed from.
+    from app.api.analytics import service as analytics
+
     return {
+        "analytics": await analytics.figures(session, event),
         "event_name": event.name, "org_name": club.name if club else "", "venue": event.location_name,
         "starts_at": event.event_datetime.isoformat(), "ends_at": ends_at(event).isoformat(),
         "registered": registered, "checked_in": checked_in,

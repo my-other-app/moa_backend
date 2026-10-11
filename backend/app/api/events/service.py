@@ -427,6 +427,10 @@ async def get_event(session: AsyncSession, event_id: str | int, user_id: int | N
     data = event.__dict__
     data["rating"] = db_event[1]
     data["total_rating"] = db_event[2]
+    # The status clock as plain strings: `status` is a property the dict
+    # cannot see, and the retention column is an enum the response reads as text.
+    data["status"] = event.status
+    data["retention_mode"] = getattr(event.retention_mode, "value", event.retention_mode) or "keep"
     
     # Get event files (downloads) - available to all users
     data["downloads"] = [
