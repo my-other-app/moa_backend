@@ -21,6 +21,7 @@ from app.api.templates_audience import RegistrationRole
 from app.api.users.models import UserAvatarTypes
 from app.api.checkins.models import DoorMode
 from app.api.idcards.models import ReprintPolicy
+from app.api.kiosk.models import SelfCheckInVerify
 from app.db.base import AbstractSQLModel
 from app.db.mixins import SoftDeleteMixin, TimestampsMixin
 from app.core.storage.fields import S3FileField, S3ImageField
@@ -100,6 +101,12 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     reprint_policy = Column(Enum(ReprintPolicy), nullable=False, default=ReprintPolicy.anyone)
     auto_print_badges = Column(Boolean, nullable=False, default=False)
     preprinted_carries = Column(JSON, nullable=False, default=list)
+    # Self check-in from a guest's phone, via a kiosk's QR.
+    self_check_in_enabled = Column(Boolean, nullable=False, default=False)
+    self_check_in_verify = Column(Enum(SelfCheckInVerify), nullable=False, default=SelfCheckInVerify.email)
+    self_check_in_print = Column(Boolean, nullable=False, default=True)
+    # Staff mode on a kiosk; checked on the server, never shipped to the tablet.
+    kiosk_pin = Column(String(12), nullable=True)
 
     category = relationship("EventCategories")
     club = relationship("Clubs")

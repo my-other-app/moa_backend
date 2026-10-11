@@ -10,6 +10,7 @@ from app.api.deliveries.router import router as deliveries_router
 from app.api.certificates.router import public_router as verify_router, router as certificates_router
 from app.api.checkins.router import router as checkins_router
 from app.api.idcards.router import router as idcards_router
+from app.api.kiosk.router import admin_router as kiosks_admin_router, kiosk_router, self_router
 from app.api.emails.router import (
     library_router as email_library_router,
     messages_router,
@@ -53,6 +54,9 @@ api_router.include_router(router=verify_router, tags=["certificates"])
 api_router.include_router(router=emails_router, tags=["emails"])
 api_router.include_router(router=checkins_router, tags=["check-ins"])
 api_router.include_router(router=idcards_router, tags=["id-cards"])
+api_router.include_router(router=kiosks_admin_router, tags=["kiosks"])
+api_router.include_router(router=kiosk_router, tags=["kiosks"])
+api_router.include_router(router=self_router, tags=["kiosks"])
 api_router.include_router(router=messages_router, tags=["emails"])
 api_router.include_router(router=files_router, tags=["emails"])
 api_router.include_router(router=events_router, tags=["events"])

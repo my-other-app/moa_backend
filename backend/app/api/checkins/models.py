@@ -79,6 +79,8 @@ class CheckIns(AbstractSQLModel, TimestampsMixin):
     scanned_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     # From the device, so a retried scan admits once.
     client_ref = Column(String(64), nullable=True, unique=True)
+    # The kiosk that made it, when one did: "this isn't me" may undo only its own.
+    kiosk_device_id = Column(UUID(as_uuid=True), ForeignKey("kiosk_devices.id", ondelete="SET NULL"), nullable=True)
 
     registration = relationship("EventRegistrationsLink")
     door = relationship("Doors")
