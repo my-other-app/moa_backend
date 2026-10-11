@@ -159,3 +159,184 @@ def image_width(style, *, default: int) -> int:
     if not in_layer_mode(style):
         return default
     return canvas_size(style)[0]
+
+
+# --- layered designs ------------------------------------------------------------
+#
+# A design made in the layer editor is drawn by app.core.layout, not by the
+# HTML templates: the same font files and the same layout code the editor
+# ran, so what the canvas showed is what prints. What follows is the bridge
+# from our rows to that renderer's inputs.
+
+import urllib.request
+from datetime import datetime, timezone as _tz
+from functools import lru_cache
+
+from sqlalchemy import inspect as sa_inspect
+
+from app.core.layout.model import TicketLayoutFields, ticket_area
+from app.core.storage import objects
+from app.core.layout.renderer import RenderInput, pdf_to_png, render_pdf
+from app.core.layout.tokens import (
+    TokenAttendee,
+    TokenCertificate,
+    TokenEvent,
+    sample_token_values,
+    ticket_token_values,
+)
+
+EVENT_TIMEZONE = "Asia/Kolkata"
+
+ROLE_LABELS = {"attendee": "Attendee", "speaker": "Speaker", "staff": "Staff"}
+
+
+def in_layout_mode(style) -> bool:
+    """A design made in the layer editor, as opposed to the HTML templates."""
+    return isinstance(style, dict) and bool((style.get("layout") or {}).get("layers"))
+
+
+def layout_of(style) -> TicketLayoutFields:
+    return TicketLayoutFields.model_validate(style["layout"])
+
+
+def token_event(event) -> TokenEvent:
+    start = event.event_datetime
+    end = start + timedelta(hours=event.duration) if event.duration else start
+    club = getattr(event, "club", None)
+    return TokenEvent(
+        name=event.name or "",
+        code=f"E{event.id}",
+        venue=event.location_name,
+        organiser=club.name if club else None,
+        starts_at=start,
+        ends_at=end,
+        timezone=EVENT_TIMEZONE,
+    )
+
+
+def field_labels_of(event) -> dict:
+    """Custom field key → label, so an answer is reachable by either."""
+    out = {}
+    for f in event.additional_details or []:
+        if isinstance(f, dict) and f.get("key") and f.get("label"):
+            out[f["key"]] = f["label"]
+    return out
+
+
+def _loaded(obj, attr: str) -> bool:
+    """Whether a relationship is already in memory.
+
+    Reading one that is not would lazy-load it, and inside the async session
+    that is a MissingGreenlet, not a query. The loaders fetch what each
+    endpoint needs; anything else is simply not on the document.
+    """
+    try:
+        return attr not in sa_inspect(obj).unloaded
+    except Exception:
+        return False
+
+
+def token_attendee(registration) -> TokenAttendee:
+    details = registration.additional_details if isinstance(registration.additional_details, dict) else {}
+    org = None
+    user = registration.user if _loaded(registration, "user") else None
+    profile = user.profile if user is not None and _loaded(user, "profile") else None
+    if profile is not None and _loaded(profile, "org") and profile.org is not None:
+        org = profile.org.name
+    return TokenAttendee(
+        name=registration.full_name or "",
+        organization=org,
+        email=registration.email,
+        seat_label=None,
+        custom_fields=details,
+        team=str(details.get("team_name") or details.get("team") or "") or None,
+    )
+
+
+def layout_values(registration, event, kind: str) -> dict:
+    """Every token's value for this registration's ticket or certificate."""
+    raw_role = getattr(registration, "role", None)
+    role = getattr(raw_role, "value", raw_role) if raw_role else "attendee"
+    certificate = None
+    if kind == "certificate":
+        from app.api.events.certificates import certificate_number
+
+        certificate = TokenCertificate(
+            number=certificate_number(registration.ticket_id or ""),
+            issued_at=getattr(registration, "certificate_issued_at", None) or datetime.now(_tz.utc),
+            checked_in_at=getattr(registration, "attended_on", None),
+            placing=PLACINGS.get(registration.position or 0, ""),
+        )
+    club = getattr(event, "club", None)
+    return ticket_token_values(
+        token_event(event),
+        (club.name if club else "") or "",
+        token_attendee(registration),
+        registration.ticket_id or "",
+        ROLE_LABELS.get(str(role), str(role).title()),
+        certificate=certificate,
+        field_labels=field_labels_of(event),
+    )
+
+
+def layout_sample_values(event, kind: str) -> dict:
+    labels = list(field_labels_of(event).values())
+    club = getattr(event, "club", None)
+    return sample_token_values(token_event(event), (club.name if club else "") or "", kind, fields=labels)
+
+
+def layout_colors(style: dict) -> dict:
+    """The brand colours a design may refer to, from the template's own palette."""
+    primary = style.get("accent_color") or "#1db9a0"
+    return {
+        "primary": primary,
+        "secondary": style.get("secondary_text_color") or "#aaaaaa",
+        "ticketType": primary,
+    }
+
+
+@lru_cache(maxsize=64)
+def fetch_bytes(url: str) -> Optional[bytes]:
+    """An image the design points at. Cached per process: a club's logo is
+    the same bytes on every ticket of the batch."""
+    if not url:
+        return None
+    try:
+        with urllib.request.urlopen(url, timeout=10) as r:  # noqa: S310 - our own storage URLs
+            return r.read()
+    except Exception:
+        return None
+
+
+def render_layout_document(style: dict, values: dict, qr_value: str, *, title: str,
+                           event_icon_url: Optional[str] = None) -> bytes:
+    """The PDF of a layered design, for one set of values."""
+    layout = layout_of(style)
+    # A template uploaded in the designer is an object key; one set on the
+    # template's artwork field is a URL. Either way the renderer gets bytes.
+    template_key = layout.canvas.template_key
+    template = objects.get_bytes(template_key) if template_key else fetch_bytes(style.get("background_image_url") or "")
+    images = {
+        l.image_key: objects.get_bytes(l.image_key)
+        for l in layout.layers
+        if l.kind == "image" and l.image_key
+    }
+    return render_pdf(RenderInput(
+        title=title,
+        canvas=layout.canvas,
+        layers=layout.layers,
+        page=layout.page,
+        values=values,
+        qr_value=qr_value,
+        colors=layout_colors(style),
+        template=template,
+        images={k: v for k, v in images.items() if v},
+        org_logo=fetch_bytes(style.get("logo_url") or ""),
+        event_icon=fetch_bytes(event_icon_url or ""),
+    ))
+
+
+def layout_png(style: dict, pdf: bytes) -> bytes:
+    """The PNG of that PDF, at the artwork's own width."""
+    area = ticket_area(layout_of(style).canvas)
+    return pdf_to_png(pdf, width_px=int(area.width))

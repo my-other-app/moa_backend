@@ -19,3 +19,6 @@ class BackgroundTaskLogs(AbstractSQLModel, TimestampsMixin):
     task_type = Column(sa.String(100), nullable=False)
     status = Column(sa.String, nullable=False)
     logs = Column(JSONB, nullable=False, default=[])
+    # The event a run belongs to, when it belongs to one -- so an organiser can
+    # see the history of their own imports.
+    event_id = Column(sa.Integer, sa.ForeignKey("events.id"), nullable=True, index=True)

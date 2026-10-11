@@ -39,6 +39,14 @@ class CertificateTemplateConfig(BaseModel):
     layers: list[TemplateLayer] = Field(default_factory=list)
     canvas: LayerCanvas = Field(default_factory=LayerCanvas)
 
+    # The layered design, in the editor's wire form: {canvas, layers, page,
+    # version}. Validated on its own endpoint through the layout schema and
+    # layout_problems, not here -- this field only has to survive a config
+    # save that touched a colour. When present it is what the renderer draws;
+    # `layers` above is the older, flat layer format, kept so designs saved
+    # with it still print.
+    layout: Optional[dict] = Field(default=None)
+
     # Image URLs — auto-populated from S3 uploads
     logo_url: Optional[str] = Field(default=None, description="Auto-populated from logo upload")
     secondary_logo_url: Optional[str] = Field(default=None, description="Auto-populated from secondary_logo upload")

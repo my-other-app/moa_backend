@@ -235,6 +235,15 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
     )
     is_attended = Column(Boolean, nullable=False, default=False)
     attended_on = Column(TZAwareDateTime(timezone=True), nullable=True)
+    # Set when the organiser revokes the ticket: the door refuses it by name
+    # from the next scan, and nothing is sent for it until it is reinstated.
+    ticket_revoked_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    # A certificate is issued by the organiser and can be taken back. Null
+    # issued_at with is_attended keeps the certificate attended guests
+    # always had, so turning issuing on removes nothing.
+    certificate_issued_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    certificate_revoked_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    certificate_design_version = Column(Integer, nullable=False, default=0, server_default="0")
     volunteer_id = Column(Integer, ForeignKey("volunteers.id"), nullable=True)
 
     is_won = Column(Boolean, nullable=False, default=False)

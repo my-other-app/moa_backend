@@ -53,8 +53,14 @@ def captured(monkeypatch):
         return io.BytesIO(b"\x89PNG stub")
 
     import app.api.events.router as events_router
+    import app.api.events.tickets as tickets
+    import app.api.events.certificates as certificates
     import app.api.event_designs.router as designs_router
 
+    # The PDFs render in the document modules the router delegates to; the
+    # image endpoints still call the renderer from the router.
+    monkeypatch.setattr(tickets, "generate_pdf_bytes", fake_pdf)
+    monkeypatch.setattr(certificates, "generate_pdf_bytes", fake_pdf)
     monkeypatch.setattr(events_router, "generate_pdf_bytes", fake_pdf)
     monkeypatch.setattr(events_router, "generate_image_bytes", fake_image)
     monkeypatch.setattr(designs_router, "generate_image_bytes", fake_image)
