@@ -1,4 +1,5 @@
 import io
+import re
 from fastapi import UploadFile
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy import and_, delete, exists, or_, select, func
@@ -102,6 +103,9 @@ async def create_club(
     return club
 
 
+HEX_COLOUR = re.compile(r"^#[0-9a-f]{6}$")
+
+
 async def update_club(session: AsyncSession, club_id: int, club: CreateClub):
     await validate_relations(
         session,
@@ -128,6 +132,13 @@ async def update_club(session: AsyncSession, club_id: int, club: CreateClub):
 
     db_club.name = club.name
     db_club.about = club.about
+    # Like every other field here, whatever came is what is kept: an empty
+    # (or omitted) colour clears it. The profile form always sends both.
+    for key in ("brand_primary", "brand_secondary"):
+        value = (getattr(club, key, None) or "").strip().lower()
+        if value and not HEX_COLOUR.match(value):
+            raise CustomHTTPException(422, message=f"{key.replace('_', ' ')}: use a 6-digit hex colour, like #1db9a0.")
+        setattr(db_club, key, value or None)
     db_club.location_name = club.location_name
     db_club.location_link = club.location_link
     db_club.org_id = club.org_id
@@ -494,6 +505,8 @@ async def get_all_clubs(
             "location_link": club.location_link,
             "contact_phone": club.contact_phone,
             "contact_email": club.contact_email,
+            "brand_primary": club.brand_primary,
+            "brand_secondary": club.brand_secondary,
             "created_at": club.created_at,
             "is_verified": club.is_verified,
             "followers_count": followers_count,
@@ -836,6 +849,8 @@ async def get_club_details(
         "location_link": club.location_link,
         "contact_phone": club.contact_phone,
         "contact_email": club.contact_email,
+        "brand_primary": club.brand_primary,
+        "brand_secondary": club.brand_secondary,
         "rating": rating,
         "total_ratings": total_ratings_count,
         "followers_count": followers_count,

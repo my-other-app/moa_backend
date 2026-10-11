@@ -285,14 +285,23 @@ def layout_sample_values(event, kind: str) -> dict:
     return sample_token_values(token_event(event), (club.name if club else "") or "", kind, fields=labels)
 
 
-def layout_colors(style: dict) -> dict:
-    """The brand colours a design may refer to, from the template's own palette."""
-    primary = style.get("accent_color") or "#1db9a0"
-    return {
-        "primary": primary,
-        "secondary": style.get("secondary_text_color") or "#aaaaaa",
-        "ticketType": primary,
-    }
+DEFAULT_PRIMARY = "#1db9a0"
+DEFAULT_SECONDARY = "#aaaaaa"
+
+
+def layout_colors(style: dict, club=None) -> dict:
+    """The brand colours a design may refer to: the template's own palette,
+    else the club's brand, else the defaults. A template still on the stock
+    colours has not chosen them, so the club's brand wins there too."""
+
+    def pick(key: str, default: str, brand: str) -> str:
+        own = (style.get(key) or "").strip().lower()
+        if own and own != default:
+            return own
+        return (getattr(club, brand, None) if club is not None else None) or default
+
+    primary = pick("accent_color", DEFAULT_PRIMARY, "brand_primary")
+    return {"primary": primary, "secondary": pick("secondary_text_color", DEFAULT_SECONDARY, "brand_secondary"), "ticketType": primary}
 
 
 @lru_cache(maxsize=64)
@@ -310,7 +319,7 @@ def fetch_bytes(url: str) -> Optional[bytes]:
 
 def render_layout_document(style: dict, values: dict, qr_value: str, *, title: str,
                            event_icon_url: Optional[str] = None, skip_preprinted: bool = False,
-                           agenda: Optional[list] = None, fit: str = "stretch", page=None) -> bytes:
+                           agenda: Optional[list] = None, fit: str = "stretch", page=None, club=None) -> bytes:
     """The PDF of a layered design, for one set of values.
 
     `agenda` is the run of show an agenda layer draws; `page` and `fit`
@@ -333,7 +342,7 @@ def render_layout_document(style: dict, values: dict, qr_value: str, *, title: s
         page=page or layout.page,
         values=values,
         qr_value=qr_value,
-        colors=layout_colors(style),
+        colors=layout_colors(style, club),
         fit=fit,
         template=template,
         images={k: v for k, v in images.items() if v},

@@ -1,0 +1,110 @@
+"""An event's setup, copied onto a new date.
+
+Everything that is a setting comes across: the fields guests answer, the
+door and card rules, self check-in, retention, the designs (ticket, card,
+certificate, programme), the email journey, the merchandise. What is a
+judgement call is asked for: the doors, the team, the agenda. What is never
+the same is left out: the venue, the registrations, every handover, every
+report. The copy starts as a draft on the clock.
+"""
+from datetime import datetime, timezone
+from typing import Optional
+
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
+
+from app.api.agenda.models import AgendaItems, AgendaTemplates
+from app.api.certificate_templates.models import CertificateTemplates
+from app.api.checkins.models import Doors
+from app.api.closeout.models import EventStatus
+from app.api.emails.models import EmailTemplates
+from app.api.events.models import EventInterestsLink, Events
+from app.api.events.volunteer.models import Volunteer
+from app.api.idcards.models import BadgeTemplates
+from app.api.merch.models import MerchItems, MerchVariants
+from app.api.ticket_templates.models import TicketTemplates
+from app.core.utils.keys import generate_slug
+
+SETTINGS = (
+    "category_id", "has_fee", "reg_fee", "has_prize", "prize_amount", "is_online", "about", "contact_name", "contact_phone", "contact_email", "url",
+    "additional_details", "event_guidelines", "event_tag", "ticket_template_id", "certificate_template_id", "max_participants",
+    "door_mode", "close_after_minutes", "spot_registration_checks_in", "capture_contact_at_gate", "require_contact_at_gate",
+    "reprint_policy", "auto_print_badges", "preprinted_carries", "self_check_in_enabled", "self_check_in_verify", "self_check_in_print",
+    "retention_mode", "retention_hours", "report_recipients", "keep_contacts",
+)
+DESIGN_MODELS = (TicketTemplates, BadgeTemplates, CertificateTemplates, AgendaTemplates)
+
+
+async def _event_rows(session, model, event_id: int) -> list:
+    q = select(model).where(model.event_id == event_id)
+    if hasattr(model, "is_deleted"):
+        q = q.where(model.is_deleted == False)  # noqa: E712
+    return list((await session.scalars(q)).all())
+
+
+async def duplicate_event(
+    session, source: Events, user, *, name: str, event_datetime: datetime, duration: Optional[float] = None,
+    copy_doors: bool = False, copy_team: bool = False, copy_agenda: bool = False, copy_merch: bool = True,
+) -> dict:
+    new = Events(name=name.strip(), slug=generate_slug(name), event_datetime=event_datetime, duration=duration or source.duration, club_id=source.club_id, images=[], reg_startdate=datetime.now(timezone.utc))
+    for key in SETTINGS:
+        setattr(new, key, getattr(source, key))
+    new.lifecycle = EventStatus.draft
+    new.status_clock = True
+    session.add(new)
+    await session.flush()
+    copied = {"interests": 0, "designs": 0, "emails": 0, "merch": 0, "doors": 0, "team": 0, "agenda": 0}
+
+    for link in await _event_rows(session, EventInterestsLink, source.id):
+        session.add(EventInterestsLink(event_id=new.id, interest_id=link.interest_id))
+        copied["interests"] += 1
+
+    # The event's own designs; a club default needs no copying, the new event resolves to it anyway.
+    for model in DESIGN_MODELS:
+        for row in await _event_rows(session, model, source.id):
+            session.add(model(club_id=row.club_id, event_id=new.id, audience=row.audience, name=row.name, is_default=row.is_default, config=dict(row.config or {})))
+            copied["designs"] += 1
+
+    for t in await _event_rows(session, EmailTemplates, source.id):
+        session.add(EmailTemplates(
+            club_id=t.club_id, event_id=new.id, stage=t.stage, name=t.name, subject=t.subject, design=t.design, attachments=t.attachments,
+            audience=t.audience, trigger=t.trigger, channels=t.channels, enabled=t.enabled, version=t.version, source_id=t.id, created_by=getattr(user, "id", None),
+        ))
+        copied["emails"] += 1
+
+    if copy_merch:
+        items = list((await session.scalars(select(MerchItems).options(selectinload(MerchItems.variants)).where(MerchItems.event_id == source.id))).all())
+        for m in items:
+            item = MerchItems(event_id=new.id, name=m.name, photo_key=m.photo_key, stock=m.stock, eligibility_field=m.eligibility_field, eligibility_value=m.eligibility_value, variant_field=m.variant_field)
+            item.variants = [MerchVariants(label=v.label, stock=v.stock) for v in m.variants]
+            session.add(item)
+            copied["merch"] += 1
+
+    door_ids: dict = {}
+    if copy_doors:
+        for d in await _event_rows(session, Doors, source.id):
+            nd = Doors(event_id=new.id, name=d.name, kind=d.kind, sort_order=d.sort_order, active=d.active)
+            session.add(nd)
+            await session.flush()
+            door_ids[d.id] = nd.id
+            copied["doors"] += 1
+
+    if copy_team:
+        for v in await _event_rows(session, Volunteer, source.id):
+            session.add(Volunteer(
+                email=v.email, event_id=new.id, user_id=v.user_id, club_id=v.club_id, is_approved=v.is_approved,
+                can_check_in=v.can_check_in, can_walkup=v.can_walkup, can_merch=v.can_merch, door_id=door_ids.get(v.door_id),
+            ))
+            copied["team"] += 1
+
+    if copy_agenda:
+        delta = event_datetime - source.event_datetime
+        for a in await _event_rows(session, AgendaItems, source.id):
+            session.add(AgendaItems(
+                event_id=new.id, starts_at=a.starts_at + delta, ends_at=(a.ends_at + delta) if a.ends_at else None, title=a.title, description=a.description,
+                speaker=a.speaker, speaker_photo_key=a.speaker_photo_key, location=a.location, sort_order=a.sort_order,
+            ))
+            copied["agenda"] += 1
+
+    await session.commit()
+    return {"id": new.id, "slug": new.slug, "name": new.name, "copied": copied}

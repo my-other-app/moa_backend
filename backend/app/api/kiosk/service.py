@@ -130,7 +130,7 @@ async def context(session, device: KioskDevices) -> dict:
         "device": {"id": device.id, "name": device.name, "door": device.door_label, "expires_at": device.expires_at},
         "event": {
             "id": event.id, "name": event.name, "org_name": club.name if club else "", "venue": event.location_name, "starts_at": event.event_datetime,
-            "brand_primary": layout_colors(style)["primary"], "poster_url": poster_url(event), "door_open": checkins.door_open(event),
+            "brand_primary": layout_colors(style, club)["primary"], "poster_url": poster_url(event), "door_open": checkins.door_open(event),
             "reprint_policy": (event.reprint_policy or ReprintPolicy.anyone).value, "auto_print_badges": bool(event.auto_print_badges), "has_fee": bool(event.has_fee),
         },
         "self_check_in": kiosk_settings(event),

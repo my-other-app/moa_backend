@@ -365,7 +365,7 @@ async def brand_primary(session, event: Events) -> str:
         style = await get_template_for_event(session, event.id, role=None)
     except Exception:
         style = None
-    return layout_colors(style or {})["primary"]
+    return layout_colors(style or {}, getattr(event, "club", None))["primary"]
 
 
 def doors_in(start: datetime, now: Optional[datetime] = None) -> str:

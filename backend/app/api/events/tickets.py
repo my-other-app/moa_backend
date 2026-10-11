@@ -107,7 +107,7 @@ def render_ticket_pdf(registration, style: dict) -> bytes:
             layout_values(registration, event, "ticket"),
             registration.ticket_id,
             title=f"Ticket {registration.ticket_id}",
-            event_icon_url=poster_url(event),
+            event_icon_url=poster_url(event), club=getattr(event, "club", None),
         )
 
     payload = ticket_payload(registration)

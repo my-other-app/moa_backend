@@ -88,9 +88,13 @@ class UpdateClub:
         linkedin: str | None = Form(None),
         youtube: str | None = Form(None),
         website: str | None = Form(None),
+        brand_primary: str | None = Form(None),
+        brand_secondary: str | None = Form(None),
     ):
         self.name = name
         self.logo = logo
+        self.brand_primary = brand_primary
+        self.brand_secondary = brand_secondary
         self.about = about
         self.org_id = org_id
         self.location_name = location_name
@@ -219,6 +223,8 @@ class ClubPublicDetailResponse(CustomBaseModel):
     followers_count: int = Field(...)
     contact_phone: str | None = Field(None)
     contact_email: str | None = Field(None)
+    brand_primary: str | None = Field(None)
+    brand_secondary: str | None = Field(None)
     user_data: dict | None = Field(None)
     org: ClubOrgDetail | None = Field(None)
 
