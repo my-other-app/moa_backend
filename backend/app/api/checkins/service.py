@@ -80,12 +80,15 @@ def summary(reg: EventRegistrationsLink, checked_in_at=None) -> dict:
     return {
         "id": reg.id, "name": reg.full_name or "", "ticket_id": reg.ticket_id, "role": str(role), "email": reg.email or None,
         "phone": reg.phone or None, "has_contact": bool(reg.email or reg.phone), "is_paid": bool(reg.is_paid) if reg.event.has_fee else True,
-        "checked_in_at": checked_in_at,
+        "checked_in_at": checked_in_at, "badge_printed_at": getattr(reg, "badge_printed_at", None),
     }
 
 
+NO_BADGE = {"auto": False, "may_print": False, "printed_at": None, "policy": "anyone"}
+
+
 def _not_admitted(outcome: str, **more) -> dict:
-    return {"outcome": outcome, "attendee": None, "checked_in_at": None, "checked_in_by": None, "other_event": None, "revoked_at": None, "capture": {"ask": False, "required": False, "reason": "NOT_ADMITTED"}, "replayed": False, **more}
+    return {"outcome": outcome, "attendee": None, "checked_in_at": None, "checked_in_by": None, "other_event": None, "revoked_at": None, "capture": {"ask": False, "required": False, "reason": "NOT_ADMITTED"}, "replayed": False, "badge": NO_BADGE, **more}
 
 
 def _capture(event: Events, reg: EventRegistrationsLink) -> dict:
@@ -167,9 +170,13 @@ async def scan(session, event: Events, *, code: str, door_label: Optional[str], 
         existing = await check_in_of(session, reg.id)
     if existing is not None:
         replay = bool(client_ref) and existing.client_ref == client_ref
+        from app.api.idcards.service import badge_for_scan
+
         return {
             "outcome": "CHECKED_IN" if replay else "ALREADY_CHECKED_IN", "attendee": summary(reg, existing.checked_in_at), "checked_in_at": existing.checked_in_at,
             "checked_in_by": {"name": _by_name(existing), "door": existing.door_label or "—"}, "other_event": None, "revoked_at": None, "capture": _capture(event, reg), "replayed": replay,
+            # A second scan is a resweep: the card prints only on a first admission.
+            "badge": {**badge_for_scan(event, reg, actor, admitted=False), "auto": False},
         }
     if not door_open(event):
         return _not_admitted("EVENT_NOT_OPEN", attendee=summary(reg))
@@ -187,9 +194,11 @@ async def scan(session, event: Events, *, code: str, door_label: Optional[str], 
         if not _retry:
             raise
         return await scan(session, event, code=code, door_label=door_label, client_ref=client_ref, scanned_at=scanned_at, actor=actor, via=via, _retry=False)
+    from app.api.idcards.service import badge_for_scan
+
     return {
         "outcome": "CHECKED_IN", "attendee": summary(reg, row.checked_in_at), "checked_in_at": row.checked_in_at, "checked_in_by": None, "other_event": None,
-        "revoked_at": None, "capture": _capture(event, reg), "replayed": False,
+        "revoked_at": None, "capture": _capture(event, reg), "replayed": False, "badge": badge_for_scan(event, reg, actor, admitted=True),
     }
 
 
@@ -371,6 +380,7 @@ async def context(session, event: Events, actor: GateActor) -> dict:
         "event": {
             "id": event.id, "name": event.name, "code": f"E{event.id}", "org_name": club.name if club else "", "door_open": door_open(event), **gate_settings(event),
             "has_fee": bool(event.has_fee), "starts_at": event.event_datetime, "ticket_example": "MOA-XXXXX-XXXXX",
+            "auto_print_badges": bool(event.auto_print_badges), "reprint_policy": (event.reprint_policy.value if event.reprint_policy else "anyone"),
         },
         "permissions": actor.permissions,
         "counters": await counters(session, event.id),

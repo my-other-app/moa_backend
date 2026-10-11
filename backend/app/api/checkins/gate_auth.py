@@ -84,7 +84,7 @@ async def actor_for(session, event: Events, user: Optional[Users], gate_key: Opt
 
 async def gate_actor(request: Request, session: SessionDep, event_id: int, user: AnyUser) -> GateActor:
     event = await load_event(session, event_id)
-    actor = await actor_for(session, event, user, request.headers.get(GATE_KEY_HEADER))
+    actor = await actor_for(session, event, user, request.headers.get(GATE_KEY_HEADER) or request.query_params.get("key"))
     request.state.gate_event = event
     return actor
 

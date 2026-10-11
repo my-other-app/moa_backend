@@ -309,7 +309,7 @@ def fetch_bytes(url: str) -> Optional[bytes]:
 
 
 def render_layout_document(style: dict, values: dict, qr_value: str, *, title: str,
-                           event_icon_url: Optional[str] = None) -> bytes:
+                           event_icon_url: Optional[str] = None, skip_preprinted: bool = False) -> bytes:
     """The PDF of a layered design, for one set of values."""
     layout = layout_of(style)
     # A template uploaded in the designer is an object key; one set on the
@@ -333,6 +333,7 @@ def render_layout_document(style: dict, values: dict, qr_value: str, *, title: s
         images={k: v for k, v in images.items() if v},
         org_logo=fetch_bytes(style.get("logo_url") or ""),
         event_icon=fetch_bytes(event_icon_url or ""),
+        skip_preprinted=skip_preprinted,
     ))
 
 
