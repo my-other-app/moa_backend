@@ -6,6 +6,9 @@ import pandas as pd
 from sqlalchemy import select
 
 from app.api.events.registration.schemas import (
+    AddAttendeeRequest,
+    ImportLogSummary,
+    RegistrationUpdateRequest,
     EventRegistrationDetailResponse,
     EventRegistrationPublicMin,
     EventRegistrationRequest,
@@ -108,7 +111,9 @@ async def list_event_registration(
     event_id: int,
     is_attended: bool | None = Query(None),
     is_paid: bool | None = Query(None),  # Changed to None to show all by default
-    search: str | None = Query(None, description="Search by name, email or ticket ID"),
+    search: str | None = Query(None, description="Search by name, email, phone or ticket ID"),
+    role: RegistrationRole | None = Query(None),
+    delivery: str | None = Query(None, pattern="^(not_delivered)$", description="Only guests not reached on any channel"),
     session: SessionDep = SessionDep,
 ) -> PaginatedResponse[EventRegistrationPublicMin]:
     result, total = await service.list_event_registrations(
@@ -121,6 +126,8 @@ async def list_event_registration(
         offset=pagination.offset,
         search=search,
         as_admin=is_admin_user(user),
+        role=role,
+        delivery=delivery,
     )
     return paginated_response(result, request, EventRegistrationPublicMin, total=total)
 
@@ -248,7 +255,116 @@ async def get_event_registration(
         registration_id=registration_id,
         as_admin=is_admin_user(user),
     )
-    return jsonable_encoder(result)
+    return jsonable_encoder(await _with_deliveries(session, result))
+
+
+async def _with_deliveries(session, registration) -> dict:
+    """The guest in full: the record, and what was sent to them."""
+    from app.api.deliveries import service as deliveries
+    from app.api.deliveries.models import DeliveryKind
+
+    out = dict(jsonable_encoder(registration))
+    for kind, key in ((DeliveryKind.ticket, "ticket_deliveries"), (DeliveryKind.certificate, "certificate_deliveries")):
+        sent = await deliveries.by_registration(session, registration.event_id, kind, [registration.id])
+        out[key] = jsonable_encoder(sent.get(registration.id, []))
+    return out
+
+
+@router.patch("/{event_id}/info/{registration_id}", summary="Correct a registration")
+async def update_event_registration(
+    user: ClubAuth,
+    event_id: int,
+    registration_id: str,
+    body: RegistrationUpdateRequest,
+    session: SessionDep = SessionDep,
+) -> EventRegistrationDetailResponse:
+    result = await service.update_registration(
+        session,
+        user_id=user.id,
+        event_id=event_id,
+        registration_id=registration_id,
+        full_name=body.full_name,
+        email=body.email,
+        phone=body.phone,
+        role=body.role,
+        additional_details=body.additional_details,
+        as_admin=is_admin_user(user),
+    )
+    return jsonable_encoder(await _with_deliveries(session, result))
+
+
+@router.delete("/{event_id}/info/{registration_id}", summary="Take someone off the list")
+async def remove_event_registration(
+    user: ClubAuth,
+    event_id: int,
+    registration_id: str,
+    confirm_slug: str = Query(..., description="The event's slug, typed to confirm"),
+    session: SessionDep = SessionDep,
+) -> dict:
+    await service.remove_registration(
+        session, user_id=user.id, event_id=event_id, registration_id=registration_id,
+        confirm_slug=confirm_slug, as_admin=is_admin_user(user),
+    )
+    return {"message": "Removed"}
+
+
+@router.post("/{event_id}/attendees", summary="Add a guest by hand")
+async def add_event_attendee(
+    user: ClubAuth,
+    event_id: int,
+    body: AddAttendeeRequest,
+    session: SessionDep = SessionDep,
+) -> EventRegistrationDetailResponse:
+    """Not the public form: nothing is emailed from here. Send tickets
+    delivers theirs, and records it."""
+    result = await service.add_attendee(
+        session, user_id=user.id, event_id=event_id,
+        full_name=body.full_name, email=body.email, phone=body.phone, role=body.role,
+        additional_details=body.additional_details, as_admin=is_admin_user(user),
+    )
+    return jsonable_encoder(await _with_deliveries(session, result))
+
+
+@router.post("/{event_id}/import", summary="Import a guest list (CSV or Excel)")
+async def import_event_registrations(
+    user: ClubAuth,
+    event_id: int,
+    background_tasks: BackgroundTasks,
+    session: SessionDep = SessionDep,
+    file: UploadFile = Form(...),
+) -> ImportLogSummary:
+    """The organiser's import: rows become registrations, nobody is emailed
+    from here, and the run is recorded against the event so the panel can
+    show what happened to every row."""
+    from app.api.events.access import ensure_event_access
+    from sqlalchemy.orm import joinedload
+
+    event = await session.scalar(select(Events).filter(Events.id == event_id).options(joinedload(Events.club)))
+    if not event:
+        raise CustomHTTPException(404, "Event not found")
+    ensure_event_access(event, user.id, is_admin_user(user), message="Not authorized to manage this event")
+    df = await read_excel(file)
+    missing = [c for c in ("full_name", "email") if c not in df.columns]
+    if missing:
+        raise CustomHTTPException(422, message=f"The file needs a column for {', '.join(missing)}.", errors={"fields": {c: "missing column" for c in missing}})
+    background_log = await create_background_task_log(
+        session, f"Import {file.filename or 'guest list'} into '{event.name}'", "event_registrations_bulk_import",
+    )
+    background_log.event_id = event_id
+    await session.commit()
+    background_tasks.add_task(
+        service.bulk_import_event_registrations, session, event_id, df, background_log, False
+    )
+    return service.summarise_import(background_log)
+
+
+@router.get("/{event_id}/imports", summary="Every import into this event, newest first")
+async def list_event_imports(
+    user: ClubAuth,
+    event_id: int,
+    session: SessionDep = SessionDep,
+) -> list[ImportLogSummary]:
+    return await service.list_imports(session, user_id=user.id, event_id=event_id, as_admin=is_admin_user(user))
 
 
 @router.post("/{event_id}/bulk-import", summary="Bulk import user registrations")

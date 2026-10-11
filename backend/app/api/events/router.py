@@ -36,6 +36,8 @@ from app.api.events.access import is_admin_user
 from app.api.events import wallet_service
 from app.api.users.models import UserTypes
 from app.api.templates_audience import RegistrationRole
+from app.api.events.tickets import poster_url, role_of, ticket_document
+from app.api.events.certificates import availability, certificate_context, qr_text as certificate_qr_text
 from app.response import CustomHTTPException
 from app.api.events.schemas import (
     EventAdminListResponse,
@@ -79,23 +81,8 @@ router.include_router(registration_router, tags=["Registration"])
 
 
 def _role_of(registration) -> Optional[RegistrationRole]:
-    """The role this registration's document should be rendered for.
-
-    Every registration carries one -- the column is not nullable and defaults
-    to attendee -- so None here is a fallback, not a normal state. It covers
-    the rows that predate the column and any value this build does not
-    recognise, and it resolves to the event's default design.
-    """
-    raw = getattr(registration, "role", None)
-    if raw is None:
-        return None
-    value = getattr(raw, "value", raw)
-    try:
-        return RegistrationRole(value)
-    except ValueError:
-        # An unknown role in the database must not stop a ticket rendering.
-        logger.warning("Unknown registration role %r, using the event default", value)
-        return None
+    """See app.api.events.tickets.role_of; kept under this name for the callers here."""
+    return role_of(registration)
 
 
 def _assert_can_access_ticket(user, registration) -> None:
@@ -604,78 +591,11 @@ async def get_ticket_pdf(
     registration = await service.get_ticket_details(session, ticket_id=ticket_id)
     _assert_can_access_ticket(user, registration)
 
-    # Load ticket template config for this event
-    from app.api.ticket_templates.service import get_template_for_event
-    style = await get_template_for_event(
-        session, registration.event_id, role=_role_of(registration)
-    )
-
-    # Construct payload for template
-    event = registration.event
-    event_endtime = (
-        event.event_datetime + timedelta(hours=event.duration)
-        if event.duration
-        else None
-    )
-    
-    email_payload = {
-        "ticket_id": registration.ticket_id,
-        "participant_name": registration.full_name,
-        "event_name": event.name,
-        "event_date": event.event_datetime.strftime("%d %b %Y"),
-        "event_time": (
-            event.event_datetime.strftime("%I:%M %p")
-            + (" - " + event_endtime.strftime("%I:%M %p"))
-            if event_endtime
-            else ""
-        ),
-        "event_location": event.location_name,
-        "event_prizes": f"Prizes worth ₹{event.prize_amount}" if event.prize_amount else None,
-        "organizer_name": event.club.name,
-        "contact_email": event.contact_email,
-        "contact_phone": event.contact_phone,
-    }
-
-    qr_base64 = qr_png_base64(registration.ticket_id)
-    email_payload["qr_code"] = qr_base64
-
-    # Layer tokens are filled from the one shared answer. This used to read
-    # them off email_payload under keys it did not have -- `name` where the
-    # payload said `participant_name` -- so the attendee's name was blank on
-    # every layer-mode ticket, and three tokens were never filled at all.
-    if in_layout_mode(style):
-        # Drawn by the layout renderer with the editor's own fonts and layout
-        # code, so the ticket is what the canvas showed. No HTML, no browser.
-        pdf = render_layout_document(
-            style, layout_values(registration, event, "ticket"), registration.ticket_id,
-            title=f"Ticket {registration.ticket_id}", event_icon_url=_poster_url(event),
-        )
-        return Response(
-            content=pdf,
-            media_type="application/pdf",
-            headers={"Content-Disposition": f'attachment; filename="ticket-{registration.ticket_id}.pdf"'},
-        )
-
-    style = apply_layers(style, document_values(registration, event))
-
-    pdf_bytes = generate_pdf_bytes(
-        template_path="events/ticket.html",
-        context={
-            "email_payload": email_payload,
-            "style": style,
-            "qr_code_url": f"data:image/png;base64,{qr_base64}",
-        },
-        # In layer mode the page is the artwork's own size, so the design
-        # fills the PDF instead of sitting shrunk on an A4 sheet.
-        options=pdf_page_options(style),
-    )
-
+    doc = await ticket_document(session, registration)
     return Response(
-        content=pdf_bytes.getvalue(),
+        content=doc.content,
         media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'attachment; filename="ticket-{ticket_id}.pdf"'
-        }
+        headers={"Content-Disposition": f'attachment; filename="{doc.filename}"'},
     )
 
 
@@ -730,9 +650,15 @@ async def _certificate_render_context(session, ticket_id: str) -> dict:
     """
     registration = await service.get_ticket_details(session, ticket_id=ticket_id)
 
-    if not registration.is_attended:
+    held = availability(registration)
+    if not held.available:
         raise CustomHTTPException(
-            403, message="Certificate is only available for attendees who checked in"
+            403,
+            message=(
+                "This certificate was revoked."
+                if held.reason == "revoked"
+                else "Certificate is only available for attendees who checked in"
+            ),
         )
 
     from app.api.certificate_templates.service import get_template_for_event
@@ -740,40 +666,12 @@ async def _certificate_render_context(session, ticket_id: str) -> dict:
     style = await get_template_for_event(
         session, registration.event_id, role=_role_of(registration)
     )
-    event = registration.event
-
-    email_payload = {
-        "ticket_id": registration.ticket_id,
-        "participant_name": registration.full_name,
-        "event_name": event.name,
-        "event_date": event.event_datetime.strftime("%d %b %Y"),
-        "organizer_name": event.club.name if event.club else "",
-    }
-
-    qr_text = f"certificate:{registration.ticket_id}"
-    email_payload["qr_code"] = qr_png_base64(qr_text)
-
-    # Tokens were never substituted on certificates: this context had no
-    # render_layers call, so a layered certificate printed every text layer
-    # empty. And the template's QR layer reads `qr_code_url`, which nothing
-    # here set -- that is the QR "never previewing".
-    style = apply_layers(style, document_values(registration, event))
-
-    return {
-        "email_payload": email_payload,
-        "style": style,
-        "qr_code_url": qr_data_url(qr_text),
-        "registration": registration,
-        "qr_text": qr_text,
-    }
+    context = certificate_context(registration, style)
+    return {**context, "registration": registration, "qr_text": certificate_qr_text(registration)}
 
 
 def _poster_url(event) -> Optional[str]:
-    """The event poster, for an `event_icon` image layer."""
-    poster = getattr(event, "poster", None)
-    if isinstance(poster, dict):
-        return poster.get("original") or poster.get("medium")
-    return poster if isinstance(poster, str) else None
+    return poster_url(event)
 
 
 def _layout_certificate(context: dict, as_png: bool) -> Response:

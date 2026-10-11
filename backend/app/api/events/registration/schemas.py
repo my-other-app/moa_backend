@@ -7,6 +7,7 @@ from app.core.response.base_model import CustomBaseModel
 from app.api.auth.schemas import Token
 from app.api.users.schemas import UserPublic
 from app.api.events.volunteer.schemas import ListVolunteersResponse
+from app.api.deliveries.schemas import DeliveryBrief
 from app.api.templates_audience import RegistrationRole
 
 
@@ -51,6 +52,49 @@ class EventRegistrationDetailResponse(CustomBaseModel):
     additional_details: dict | None
     # Picks which ticket and certificate variant this person is issued.
     role: RegistrationRole = Field(RegistrationRole.attendee)
+    # The guest in full, as the attendee page shows one: what is on their
+    # record and everything that happened to them.
+    full_name: str | None = Field(None)
+    email: str | None = Field(None)
+    phone: str | None = Field(None)
+    is_attended: bool = Field(False)
+    attended_on: datetime | None = Field(None)
+    ticket_revoked_at: datetime | None = Field(None)
+    certificate_issued_at: datetime | None = Field(None)
+    certificate_revoked_at: datetime | None = Field(None)
+    ticket_deliveries: list[DeliveryBrief] = Field(default_factory=list)
+    certificate_deliveries: list[DeliveryBrief] = Field(default_factory=list)
+
+
+class RegistrationUpdateRequest(CustomBaseModel):
+    """A correction by the organiser: name, contact, role, answers."""
+
+    full_name: str | None = Field(None, max_length=100, min_length=1)
+    email: EmailStr | None = Field(None)
+    phone: str | None = Field(None, max_length=15)
+    role: RegistrationRole | None = Field(None)
+    additional_details: dict[str, Any] | None = Field(None)
+
+
+class AddAttendeeRequest(CustomBaseModel):
+    """Added by hand at the desk or from a message -- not through the public form."""
+
+    full_name: str = Field(..., max_length=100, min_length=1)
+    email: EmailStr = Field(...)
+    phone: str | None = Field(None, max_length=15)
+    role: RegistrationRole = Field(RegistrationRole.attendee)
+    additional_details: dict[str, Any] | None = Field(None)
+
+
+class ImportLogSummary(CustomBaseModel):
+    id: UUID
+    task_name: str
+    status: str
+    created_at: datetime
+    imported: int
+    failed: int
+    # The rows that could not be used, with why -- the permanent record.
+    issues: list[str] = Field(default_factory=list)
 
 
 class EventRegistrationPublicMin(CustomBaseModel):
@@ -72,6 +116,8 @@ class EventRegistrationPublicMin(CustomBaseModel):
     institution: str | None = Field(None)
     name: str | None = Field(None)
     created_at: datetime = Field(...)
+    ticket_revoked_at: datetime | None = Field(None)
+    ticket_deliveries: list[DeliveryBrief] = Field(default_factory=list)
 
 
 class SetWinnerRequest(CustomBaseModel):

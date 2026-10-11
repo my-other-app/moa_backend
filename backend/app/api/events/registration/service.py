@@ -50,7 +50,11 @@ async def register_event(
     additional_details: dict | None = None,
     background_task_log_id: str | None = None,
     role: RegistrationRole | None = None,
+    notify: bool = True,
 ):
+    """`notify=False` is for a guest the organiser adds or imports: the
+    confirmation goes out later through Send tickets, where it is recorded,
+    rather than from here where it is not."""
     is_event_id = (isinstance(event_id, str) and event_id.isdigit()) or isinstance(
         event_id, int
     )
@@ -208,7 +212,7 @@ async def register_event(
             "contact_email": db_event.contact_email,
             "contact_phone": db_event.contact_phone,
         }
-        if not db_event.has_fee:
+        if not db_event.has_fee and notify:
             try:
                 if background_tasks:
                     background_tasks.add_task(
@@ -283,6 +287,8 @@ async def list_event_registrations(
     offset: int = 0,
     search: str | None = None,
     as_admin: bool = False,
+    role: RegistrationRole | None = None,
+    delivery: str | None = None,
 ):
     event = await session.execute(
         select(Events).filter(Events.id == event_id).options(joinedload(Events.club))
@@ -293,6 +299,35 @@ async def list_event_registrations(
         raise CustomHTTPException(404, message="Event not found")
 
     ensure_event_access(event, user_id, as_admin)
+
+    # The filters are built once and applied to both the page and the count,
+    # so the two can never disagree.
+    conditions = []
+    if is_attended is not None:
+        conditions.append(EventRegistrationsLink.is_attended == is_attended)
+    if role is not None:
+        conditions.append(EventRegistrationsLink.role == role)
+    if search:
+        search_pattern = f"%{search}%"
+        conditions.append(
+            (EventRegistrationsLink.full_name.ilike(search_pattern))
+            | (EventRegistrationsLink.email.ilike(search_pattern))
+            | (EventRegistrationsLink.phone.ilike(search_pattern))
+            | (EventRegistrationsLink.ticket_id.ilike(search_pattern))
+        )
+    if delivery == "not_delivered":
+        # Nothing sent, nothing that worked, or something that came back. A
+        # guest reached on any channel is not here.
+        from app.api.deliveries.models import Deliveries, DeliveryKind, DeliveryOutcome, DeliveryStatus
+
+        reached = select(Deliveries.registration_id).where(
+            Deliveries.event_id == event_id,
+            Deliveries.kind == DeliveryKind.ticket,
+            Deliveries.status == DeliveryStatus.sent,
+            (Deliveries.outcome.is_(None)) | (Deliveries.outcome.in_((DeliveryOutcome.delivered, DeliveryOutcome.read))),
+        )
+        conditions.append(EventRegistrationsLink.id.not_in(reached))
+
     query = (
         select(EventRegistrationsLink)
         .where(
@@ -310,16 +345,10 @@ async def list_event_registrations(
         )
     )
 
-    if is_attended is not None:
-        query = query.where(EventRegistrationsLink.is_attended == is_attended)
-
-    if search:
-        search_pattern = f"%{search}%"
-        query = query.filter(
-            (EventRegistrationsLink.full_name.ilike(search_pattern)) |
-            (EventRegistrationsLink.email.ilike(search_pattern)) |
-            (EventRegistrationsLink.ticket_id.ilike(search_pattern))
-        )
+    for condition in conditions:
+        query = query.where(condition)
+    # By name, as a list somebody reads from top to bottom.
+    query = query.order_by(EventRegistrationsLink.full_name, EventRegistrationsLink.created_at)
 
     # Get total count before pagination
     # Use a separate count query to avoid issues with joinedload in subqueries
@@ -327,17 +356,9 @@ async def list_event_registrations(
         EventRegistrationsLink.event_id == event_id,
         EventRegistrationsLink.is_deleted == False,
     )
-    
-    if is_attended is not None:
-        count_query = count_query.where(EventRegistrationsLink.is_attended == is_attended)
+    for condition in conditions:
+        count_query = count_query.where(condition)
 
-    if search:
-        count_query = count_query.filter(
-            (EventRegistrationsLink.full_name.ilike(search_pattern)) |
-            (EventRegistrationsLink.email.ilike(search_pattern)) |
-            (EventRegistrationsLink.ticket_id.ilike(search_pattern))
-        )
-        
     total = await session.scalar(count_query) or 0
 
     if limit is not None and offset is not None:
@@ -345,6 +366,13 @@ async def list_event_registrations(
 
     scalar_result = await session.scalars(query)
     registrations = list(scalar_result)
+    # What was sent to each of them, so the list can say who was reached.
+    from app.api.deliveries import service as deliveries
+    from app.api.deliveries.models import DeliveryKind
+
+    sent = await deliveries.by_registration(
+        session, event_id, DeliveryKind.ticket, [r.id for r in registrations]
+    )
     
     # Manually serialize to avoid Pydantic validation errors with nested SQLAlchemy models
     serialized_results = []
@@ -431,6 +459,8 @@ async def list_event_registrations(
                 # nothing for it.
                 "additional_details": reg.additional_details,
                 "created_at": reg.created_at,
+                "ticket_revoked_at": reg.ticket_revoked_at,
+                "ticket_deliveries": sent.get(reg.id, []),
             })
         except Exception as e:
             logger.error(f"Error serializing registration {reg.id}: {e}")
@@ -493,6 +523,7 @@ async def bulk_import_event_registrations(
     event_id: Events,
     df: DataFrame,
     background_log: BackgroundTaskLogs,
+    notify: bool = True,
 ):
     try:
         # Use select to properly load the event with joined club
@@ -520,11 +551,22 @@ async def bulk_import_event_registrations(
         # Prepare registration logs
         registration_logs = []
 
-        for _, row in df.iterrows():
+        for index, row in df.iterrows():
+            full_name = row.get("full_name")
+            email = row.get("email")
+            # A blank cell arrives as NaN, not "". Said plainly, before any
+            # query runs: a bad value reaching the database aborts the
+            # transaction and takes every later row down with it.
+            if not isinstance(email, str) or not email.strip() or not isinstance(full_name, str) or not full_name.strip():
+                registration_logs.append(
+                    {"level": "ERROR", "message": f"Row {int(index) + 2}: a name and an email are both required"}
+                )
+                continue
+            email = email.strip()
+            full_name = full_name.strip()
             try:
-                full_name = row["full_name"]
-                email = row["email"]
-                phone = str(row.get("phone", "")) if row.get("phone") else None
+                phone_cell = row.get("phone")
+                phone = str(phone_cell).strip() if isinstance(phone_cell, str) and phone_cell.strip() else None
                 role = _role_from_sheet(row.get("role"))
 
                 # Process additional details
@@ -579,6 +621,7 @@ async def bulk_import_event_registrations(
                     additional_details=additional_details,
                     background_task_log_id=background_log.id,
                     role=role,
+                    notify=notify,
                 )
 
                 registration_logs.append(
@@ -589,10 +632,14 @@ async def bulk_import_event_registrations(
                 )
 
             except Exception as row_error:
+                # The failed statement left the transaction aborted; roll it
+                # back so the next row, and the log itself, can be written.
+                # Rows already registered were committed and stay.
+                await session.rollback()
                 registration_logs.append(
                     {
                         "level": "ERROR",
-                        "message": f"Failed to process row for '{full_name}' <{email}>",
+                        "message": f"Row {int(index) + 2}: '{full_name}' <{email}> could not be registered — {str(row_error)[:200]}",
                         "metadata": {"error": str(row_error)},
                     }
                 )
@@ -952,7 +999,11 @@ async def mark_attendance(
 
     # 3. Update Attendance
     from datetime import datetime, timezone
-    
+
+    if is_attended and registration.ticket_revoked_at is not None:
+        raise CustomHTTPException(
+            409, message="This ticket was revoked. Reinstate it before checking them in."
+        )
     if is_attended:
         if not registration.is_attended:
             registration.is_attended = True
@@ -962,7 +1013,11 @@ async def mark_attendance(
         registration.attended_on = None
 
     await session.commit()
-    await session.refresh(registration)
+    # Named attributes, not a bare refresh: a bare refresh expires the joined
+    # `user` too and does not load it back, and the response schema requires
+    # it -- so a check-in on a registration already in the session answered
+    # 500 after the write had been made.
+    await session.refresh(registration, attribute_names=["is_attended", "attended_on", "updated_at", "user"])
 
     # Check for new badges after attendance change
     if is_attended and registration.user_id:
@@ -1042,3 +1097,136 @@ def _role_from_sheet(value) -> RegistrationRole | None:
     except ValueError:
         logger.warning("Unknown role %r in bulk import, importing as attendee", value)
         return None
+
+
+# ---------------------------------------------------------------------------
+# The organiser's own changes to the list: a correction, a removal, a guest
+# added by hand, and the record of what was imported. Ported from Muster's
+# attendees module onto registrations.
+# ---------------------------------------------------------------------------
+
+
+async def update_registration(
+    session: AsyncSession,
+    user_id: int,
+    event_id: int,
+    registration_id: str,
+    *,
+    full_name: str | None = None,
+    email: str | None = None,
+    phone: str | None = None,
+    role: RegistrationRole | None = None,
+    additional_details: dict | None = None,
+    as_admin: bool = False,
+):
+    """A correction: the registration's own name, contact and answers. The
+    linked user account is left alone -- it is theirs, not the event's."""
+    registration = await get_registration(session, user_id, event_id, registration_id, as_admin=as_admin)
+    if full_name is not None:
+        registration.full_name = full_name.strip()
+    if email is not None:
+        taken = await session.scalar(
+            select(EventRegistrationsLink).where(
+                EventRegistrationsLink.event_id == event_id,
+                EventRegistrationsLink.is_deleted == False,
+                EventRegistrationsLink.email == email,
+                EventRegistrationsLink.id != registration.id,
+            )
+        )
+        if taken is not None:
+            raise CustomHTTPException(409, message="Another registration on this event already uses that email.")
+        registration.email = email
+    if phone is not None:
+        registration.phone = phone.strip() or None
+    if role is not None:
+        registration.role = role
+    if additional_details is not None:
+        registration.additional_details = {**(registration.additional_details or {}), **additional_details}
+    await session.commit()
+    await session.refresh(registration, attribute_names=["full_name", "email", "phone", "role", "additional_details", "updated_at", "user"])
+    return registration
+
+
+async def remove_registration(
+    session: AsyncSession,
+    user_id: int,
+    event_id: int,
+    registration_id: str,
+    *,
+    confirm_slug: str,
+    as_admin: bool = False,
+):
+    """Takes them off the list: the record, the ticket and the check-in with
+    it. Soft deleted like everything else, but it is the answer to "take me
+    off the list", so it asks for the event's slug to be typed."""
+    registration = await get_registration(session, user_id, event_id, registration_id, as_admin=as_admin)
+    if (confirm_slug or "").strip() != registration.event.slug:
+        raise CustomHTTPException(409, message="Type the event's slug exactly to confirm.", errors={"fields": {"confirm_slug": registration.event.slug}})
+    registration.soft_delete()
+    await session.commit()
+    return registration
+
+
+async def add_attendee(
+    session: AsyncSession,
+    user_id: int,
+    event_id: int,
+    *,
+    full_name: str,
+    email: str,
+    phone: str | None,
+    role: RegistrationRole,
+    additional_details: dict | None,
+    as_admin: bool = False,
+):
+    """A guest the organiser adds by hand. Finds or makes the guest account
+    the way the public form does, registers them, and sends nothing: the
+    ticket goes out through Send tickets, where it is recorded."""
+    from app.api.users import service as user_service
+    from app.api.users.models import UserTypes
+
+    event = await session.scalar(select(Events).where(Events.id == event_id).options(joinedload(Events.club)))
+    if event is None:
+        raise CustomHTTPException(404, message="Event not found")
+    ensure_event_access(event, user_id, as_admin, message="Not authorized to manage this event")
+
+    user = await user_service.get_non_club_user_by_email(session, email)
+    if user is None:
+        user = await user_service.create_user(
+            session=session, full_name=full_name, email=email, phone=phone, provider="email", user_type=UserTypes.guest
+        )
+    if user is None:
+        raise CustomHTTPException(400, message="The guest account could not be created")
+    data = await register_event(
+        session=session, full_name=full_name, email=email, phone=phone, user_id=user.id, event_id=event_id,
+        additional_details=additional_details, role=role, notify=False,
+    )
+    return await get_registration(session, user_id, event_id, str(data["event_registration_id"]), as_admin=as_admin)
+
+
+def summarise_import(log) -> dict:
+    """What an import did, in the words the panel shows."""
+    entries = log.logs or []
+    imported = sum(1 for e in entries if e.get("level") == "INFO")
+    failed = sum(1 for e in entries if e.get("level") in ("ERROR", "CRITICAL"))
+    issues = [e.get("message", "") for e in entries if e.get("level") in ("ERROR", "CRITICAL")][:50]
+    return {
+        "id": log.id, "task_name": log.task_name, "status": log.status, "created_at": log.created_at,
+        "imported": imported, "failed": failed, "issues": issues,
+    }
+
+
+async def list_imports(session: AsyncSession, user_id: int, event_id: int, as_admin: bool = False) -> list[dict]:
+    from app.api.models import BackgroundTaskLogs
+
+    event = await session.scalar(select(Events).where(Events.id == event_id).options(joinedload(Events.club)))
+    if event is None:
+        raise CustomHTTPException(404, message="Event not found")
+    ensure_event_access(event, user_id, as_admin)
+    logs = await session.scalars(
+        select(BackgroundTaskLogs)
+        .where(BackgroundTaskLogs.event_id == event_id, BackgroundTaskLogs.task_type == "event_registrations_bulk_import")
+        .order_by(BackgroundTaskLogs.created_at.desc())
+        .limit(20)
+    )
+    return [summarise_import(log) for log in logs]

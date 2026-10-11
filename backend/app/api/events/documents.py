@@ -259,9 +259,11 @@ def layout_values(registration, event, kind: str) -> dict:
     role = getattr(raw_role, "value", raw_role) if raw_role else "attendee"
     certificate = None
     if kind == "certificate":
+        from app.api.events.certificates import certificate_number
+
         certificate = TokenCertificate(
-            number=registration.ticket_id or "",
-            issued_at=datetime.now(_tz.utc),
+            number=certificate_number(registration.ticket_id or ""),
+            issued_at=getattr(registration, "certificate_issued_at", None) or datetime.now(_tz.utc),
             checked_in_at=getattr(registration, "attended_on", None),
             placing=PLACINGS.get(registration.position or 0, ""),
         )

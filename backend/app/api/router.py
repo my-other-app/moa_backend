@@ -6,6 +6,8 @@ from app.api.users.router import router as user_router
 from app.api.clubs.router import router as club_router
 from app.api.events.router import router as events_router
 from app.api.event_designs.router import router as event_designs_router
+from app.api.deliveries.router import router as deliveries_router
+from app.api.certificates.router import public_router as verify_router, router as certificates_router
 from app.api.interests.router import router as interests_router
 from app.api.home.router import router as home_router
 from app.api.notifications.router import router as notifications_router
@@ -37,6 +39,9 @@ api_router.include_router(router=club_router, tags=["clubs"])
 # Before the events router: these sit under /events/{event_id} and the
 # events router owns the rest of that space.
 api_router.include_router(router=event_designs_router, tags=["event-designs"])
+api_router.include_router(router=deliveries_router, tags=["deliveries"])
+api_router.include_router(router=certificates_router, tags=["certificates"])
+api_router.include_router(router=verify_router, tags=["certificates"])
 api_router.include_router(router=events_router, tags=["events"])
 api_router.include_router(router=interests_router, tags=["interests"])
 api_router.include_router(router=home_router, tags=["home"])
