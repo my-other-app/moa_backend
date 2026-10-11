@@ -17,10 +17,9 @@ from tests.conftest import auth_header
 
 @pytest.fixture(autouse=True)
 def no_email(monkeypatch):
-    import app.api.events.registration.background_tasks as background_tasks
+    from app.core.email import email as email_mod
 
-    monkeypatch.setattr(
-        background_tasks, "send_email_with_attachment", lambda **kwargs: None
+    monkeypatch.setattr(email_mod, "send_email_with_attachment", lambda **kwargs: None
     )
 
 

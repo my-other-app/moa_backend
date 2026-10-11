@@ -12,10 +12,9 @@ from tests.conftest import auth_header
 async def test_guest_can_register_twice_with_the_token_from_the_first_registration(
     client, session, monkeypatch, make_club, make_event
 ):
-    import app.api.events.registration.background_tasks as background_tasks_module
+    from app.core.email import email as email_mod
 
-    monkeypatch.setattr(
-        background_tasks_module, "send_email_with_attachment", lambda **kwargs: None
+    monkeypatch.setattr(email_mod, "send_email_with_attachment", lambda **kwargs: None
     )
 
     club_user, club = await make_club(
