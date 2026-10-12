@@ -80,3 +80,26 @@ async def test_partners_are_listed_in_order_and_kept_to_their_club(client, world
     assert [p["name"] for p in (await client.get("/api/v1/clubs/partners", headers=h)).json()] == ["GDG Pune", "Kinetic Labs"]
     assert (await client.delete(f"/api/v1/clubs/partners/{cm['id']}", headers=h)).status_code == 404
     assert [p["name"] for p in (await client.get("/api/v1/clubs/partners", headers=world["rival_h"])).json()] == ["Their Sponsor"]
+
+
+async def test_a_follower_profile_shows_only_what_they_gave_the_club(client, session, world, make_user, make_event, make_registration, mint_token):
+    from datetime import datetime, timedelta, timezone
+
+    h, club = world["h"], world["club"]
+    fan = await make_user(email="fan-profile@example.com")
+    fan_h = auth_header(await mint_token(fan))
+    assert (await client.post(f"/api/v1/clubs/follow/{club.id}", headers=fan_h)).status_code == 200
+    past = await make_event(club=club, created_by=world["owner"], name="Past Night", event_datetime=datetime.now(timezone.utc) - timedelta(days=3), has_fee=True, reg_fee=200)
+    await make_registration(event=past, user=fan, is_paid=True, paid_amount=200, actual_amount=200, is_attended=True)
+    await session.commit()
+
+    r = await client.get(f"/api/v1/clubs/followers/{club.id}/{fan.id}", headers=h)
+    assert r.status_code == 200, r.text
+    p = r.json()
+    assert p["user"]["id"] == fan.id and p["user"]["full_name"] == fan.full_name and p["followed_at"]
+    assert p["contact"]["email"] == fan.email
+    assert [e["name"] for e in p["events"]] == ["Past Night"] and p["events"][0]["attended"] is True and p["events"][0]["paid_amount"] == 200.0
+    assert p["totals"] == {"registrations": 1, "attended": 1, "paid": 200.0}
+    # A stranger who never followed is nobody here; another club cannot look.
+    assert (await client.get(f"/api/v1/clubs/followers/{club.id}/{world['owner'].id}", headers=h)).status_code == 404
+    assert (await client.get(f"/api/v1/clubs/followers/{club.id}/{fan.id}", headers=world["rival_h"])).status_code == 403

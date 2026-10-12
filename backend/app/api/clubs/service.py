@@ -1147,3 +1147,44 @@ async def delete_partner(session: AsyncSession, p: ClubPartners) -> None:
     p.is_deleted = True
     p.deleted_at = datetime.now(timezone.utc)
     await session.commit()
+
+
+# ─── One follower, as the club may know them ─────────────────────────────
+
+
+async def follower_profile(session: AsyncSession, club_id: int, user_id: int) -> dict:
+    """Who this follower is and what they did with the club: nothing they did not give the club."""
+    from app.api.events.models import EventRegistrationsLink, Events
+    from app.api.users.models import UserProfiles, Users
+
+    link = await session.scalar(
+        select(ClubUsersLink).where(ClubUsersLink.club_id == club_id, ClubUsersLink.user_id == user_id, ClubUsersLink.is_following == True, ClubUsersLink.is_deleted == False)  # noqa: E712
+    )
+    if link is None:
+        raise CustomHTTPException(404, message="Not a follower of this club")
+    user = await session.scalar(select(Users).where(Users.id == user_id).options(joinedload(Users.profile).options(joinedload(UserProfiles.avatar), joinedload(UserProfiles.org)), selectinload(Users.interests)))
+    if user is None:
+        raise CustomHTTPException(404, message="Not a follower of this club")
+    profile = user.profile
+    rows = (await session.execute(
+        select(EventRegistrationsLink, Events)
+        .join(Events, Events.id == EventRegistrationsLink.event_id)
+        .where(EventRegistrationsLink.user_id == user_id, EventRegistrationsLink.is_deleted == False, Events.club_id == club_id, Events.is_deleted == False)  # noqa: E712
+        .order_by(Events.event_datetime.desc())
+    )).all()
+    events = [
+        dict(event_id=e.id, name=e.name, starts_at=e.event_datetime.isoformat() if e.event_datetime else None, status=e.status, attended=bool(r.is_attended), paid=bool(r.is_paid), paid_amount=float(r.paid_amount or 0), registered_at=r.created_at.isoformat() if r.created_at else None)
+        for r, e in rows
+    ]
+    # The club learns a contact only from a registration, where the person gave it.
+    contact = next((r for r, _ in rows if r.email or getattr(r, "phone", None)), None)
+    avatar = None
+    if profile is not None:
+        avatar = profile.profile_pic or (profile.avatar.image if profile.avatar else None)
+    return dict(
+        user=dict(id=user.id, full_name=(profile.full_name if profile and profile.full_name else user.full_name), username=user.username, avatar=avatar, org=(profile.org.name if profile and profile.org else None), interests=[i.name for i in (user.interests or [])]),
+        followed_at=link.created_at.isoformat() if link.created_at else None,
+        contact=dict(email=contact.email if contact else None, phone=(getattr(contact, "phone", None) if contact else None)),
+        events=events,
+        totals=dict(registrations=len(events), attended=sum(1 for x in events if x["attended"]), paid=round(sum(x["paid_amount"] for x in events), 2)),
+    )
