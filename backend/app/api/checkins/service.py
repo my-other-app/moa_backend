@@ -296,12 +296,20 @@ async def walkup(session, event: Events, body, actor: GateActor, background_task
     data = await register_event(
         session=session, full_name=name, email=account_email, phone=phone, user_id=user.id, event_id=event.id,
         additional_details=body.custom_fields or None, role=role, notify=False, relaxed_fields=True,
+        store_picks=body.store or None,
     )
     reg = await registration_of(session, event, data["event_registration_id"])
     if event.has_fee and not reg.is_paid:
         # Paid at the door; the desk takes the money.
         reg.is_paid = True
         reg.paid_amount = reg.actual_amount
+        await session.commit()
+    # Whatever they took from the shelf is paid at the desk too.
+    from app.api.store import service as store
+
+    pending = await store.pending_for(session, reg.id)
+    if pending is not None:
+        await store.mark_paid(session, pending)
         await session.commit()
 
     via = CheckInVia.desk if actor.full and actor.door is None else CheckInVia.walkup
@@ -396,6 +404,7 @@ async def context(session, event: Events, actor: GateActor) -> dict:
         "me": {"name": actor.name, "kind": actor.kind},
         # Whether there is anything to hand out: the console shows the merch tab only then.
         "has_merch": await _has_merch(session, event.id),
+        "has_store": bool(getattr(event, "merch_enabled", False)),
     }
 
 

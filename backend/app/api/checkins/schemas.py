@@ -175,6 +175,9 @@ class ByHandBody(BaseModel):
     door: Optional[str] = Field(default=None, max_length=40)
 
 
+from app.api.store.schemas import StorePick  # noqa: E402
+
+
 class WalkupBody(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     email: Optional[EmailStr] = None
@@ -186,6 +189,8 @@ class WalkupBody(BaseModel):
     confirm_new: bool = False
     door: Optional[str] = Field(default=None, max_length=40)
     client_ref: str = Field(min_length=8, max_length=64)
+    # What they take from the shelf, paid at the desk with the ticket.
+    store: Optional[list[StorePick]] = Field(default=None, max_length=20)
 
 
 class WalkupResult(BaseModel):
@@ -217,6 +222,7 @@ class GateContext(BaseModel):
     me: dict
     # Whether there is anything to hand out; the console shows the merch tab only then.
     has_merch: bool = False
+    has_store: bool = False
 
 
 class GateSearchRow(AttendeeSummary):
