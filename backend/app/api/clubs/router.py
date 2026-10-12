@@ -176,6 +176,7 @@ async def reject_club_endpoint(
 async def update_club(
     session: SessionDep, user: ClubAuth, club: UpdateClub = Depends()
 ) -> ClubCreateUpdateResponse:
+    club.name = user.club.name  # the name is not the club's to change here
     club = await service.update_club(session=session, club_id=user.club.id, club=club)
     return club
 
@@ -380,6 +381,14 @@ async def create_partner(session: SessionDep, user: ClubAuth, body: ClubPartnerC
 async def update_partner(session: SessionDep, user: ClubAuth, partner_id: int, body: ClubPartnerPatch) -> ClubPartnerOut:
     p = await service.partner_for(session, user.club.id, partner_id)
     return ClubPartnerOut(**await service.update_partner(session, p, body.model_dump(exclude_unset=True)))
+
+
+@router.put("/partners/{partner_id}/logo", summary="A partner's logo")
+async def update_partner_logo(session: SessionDep, user: ClubAuth, partner_id: int, logo: UploadFile = File(...)) -> ClubPartnerOut:
+    if not (logo.content_type or "").startswith("image/"):
+        raise CustomHTTPException(422, message="The logo must be an image")
+    p = await service.partner_for(session, user.club.id, partner_id)
+    return ClubPartnerOut(**await service.update_partner_logo(session, p, logo))
 
 
 @router.delete("/partners/{partner_id}", summary="Remove a partner")

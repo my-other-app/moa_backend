@@ -96,3 +96,18 @@ async def test_signing_out_others_ends_them_at_once(client, world):
     assert [x["device"] for x in s["sessions"]] == ["Safari on iPhone"] and s["sessions"][0]["current"] is True
     assert (await client.get("/api/v1/auth/security/overview", headers=auth_header(laptop))).status_code == 401
     assert (await client.get("/api/v1/clubs/info", headers=auth_header(laptop))).status_code == 401
+
+
+async def test_a_session_from_before_the_record_still_shows_as_a_sign_in(client, session, world):
+    from app.api.auth import sessions as session_store
+
+    class Req:
+        headers = {"user-agent": WINDOWS, "x-forwarded-for": "103.21.58.14"}
+        client = None
+
+    await session_store.start(session, world["owner"].id, Req())
+    await session.commit()
+    me = await _login(client, "49.36.112.7", IPHONE)
+    s = (await client.get("/api/v1/auth/security/overview", headers=auth_header(me.json()["access_token"]))).json()
+    assert s["counts"]["sessions_30d"] == 2 and s["counts"]["active_sessions"] == 2
+    assert [h["device"] for h in s["history"]] == ["Safari on iPhone", "Chrome on Windows"] and all(h["result"] == "signed_in" for h in s["history"])

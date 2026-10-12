@@ -205,7 +205,7 @@ def fake_s3(monkeypatch):
     uploaded: list[str] = []
 
     from app.api.certificate_templates.models import CertificateTemplates
-    from app.api.clubs.models import Clubs
+    from app.api.clubs.models import ClubPartners, Clubs
     from app.api.ticket_templates.models import TicketTemplates
 
     def upload_fileobj(fileobj, bucket, key, **kwargs):
@@ -216,7 +216,7 @@ def fake_s3(monkeypatch):
         return f"https://test-bucket.s3.amazonaws.com/{key}"
 
     clients = set()
-    for model in (TicketTemplates, CertificateTemplates, Clubs):
+    for model in (TicketTemplates, CertificateTemplates, Clubs, ClubPartners):
         for column in model.__table__.columns:
             client = getattr(column.type, "s3_client", None)
             if client is not None:

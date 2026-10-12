@@ -75,7 +75,8 @@ class CreateClub:
 class UpdateClub:
     def __init__(
         self,
-        name: str = Form(..., min_length=3, max_length=20),
+        # Ignored on the club's own form: the name, like the handle, changes only through support.
+        name: str | None = Form(None, min_length=3, max_length=20),
         logo: UploadFile | None = File(None),
         about: str | None = Form(None),
         org_id: int | None = Form(None),
@@ -132,6 +133,7 @@ class ClubPartnerOut(CustomBaseModel):
     role: str | None = None
     since: int | None = None
     sort_order: int = 0
+    logo: dict | None = None
 
 
 def _named(v):
