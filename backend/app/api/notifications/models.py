@@ -25,6 +25,7 @@ class NotificationType(PyEnum):
     # Volunteer-related
     volunteer_added = "volunteer_added"              # User added as volunteer
     volunteer_removed = "volunteer_removed"          # User removed as volunteer
+    club_thread = "club_thread"
 
 
 class NotificationStatus(PyEnum):

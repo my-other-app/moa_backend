@@ -24,3 +24,4 @@ from app.api.auth.sessions import UserSessions  # noqa: F401
 from app.api.links import models as _links_models  # noqa: F401
 from app.api.finance import models as _finance_models  # noqa: F401
 from app.api.security import models as _security_models  # noqa: F401
+from app.api.threads import models as _threads_models  # noqa: F401
