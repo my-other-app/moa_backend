@@ -81,18 +81,18 @@ async def test_the_season_adds_up_by_month_by_type_and_by_event(client, world):
     assert (f["expenses"], f["expense_count"], f["net"]) == (600.0, 3, 400.0)
     assert (f["outstanding"], f["outstanding_count"], f["paying"], f["regs"], f["avg_ticket"]) == (500.0, 1, 2, 6, 500.0)
     # The period before held the ₹1,000 workshop and spent nothing.
-    assert s["deltas"] == {"gross": 50.0, "tickets": 0.0, "refunds": None, "expenses": None, "net": -60.0}
+    assert s["deltas"] == {"gross": 50.0, "tickets": 0.0, "merch": None, "refunds": None, "expenses": None, "net": -60.0}
     assert len(s["by_month"]) == 6
     assert [sum(r[k] for r in s["by_month"]) for k in ("tickets", "refunds", "expenses", "net")] == [1000.0, 500.0, 600.0, 400.0]
     assert s["by_type"] == [
-        {"type": "Hackathon", "events": 1, "tickets": 1000.0, "expenses": 500.0, "net": 500.0},
-        {"type": "General", "events": 1, "tickets": 0.0, "expenses": 0.0, "net": 0.0},
-        {"type": "Club", "events": 0, "tickets": 0.0, "expenses": 100.0, "net": -100.0},
+        {"type": "Hackathon", "events": 1, "tickets": 1000.0, "merch": 0.0, "expenses": 500.0, "net": 500.0},
+        {"type": "General", "events": 1, "tickets": 0.0, "merch": 0.0, "expenses": 0.0, "net": 0.0},
+        {"type": "Club", "events": 0, "tickets": 0.0, "merch": 0.0, "expenses": 100.0, "net": -100.0},
     ]
     rows = s["by_event"]
     assert [r["name"] for r in rows] == ["TinyML Circle", "Hack Night 04"]
     assert rows[0]["status"] == "published" and rows[0]["regs"] == 2 and rows[0]["tickets"] == 0.0
-    assert rows[1] | {"starts_at": ""} == {"id": past.id, "name": "Hack Night 04", "starts_at": "", "type": "Hackathon", "status": "closed", "regs": 4, "paying": 2, "tickets": 1000.0, "refunds": 500.0, "expenses": 500.0, "net": 500.0}
+    assert rows[1] | {"starts_at": ""} == {"id": past.id, "name": "Hack Night 04", "starts_at": "", "type": "Hackathon", "status": "closed", "regs": 4, "paying": 2, "tickets": 1000.0, "merch": 0.0, "refunds": 500.0, "expenses": 500.0, "net": 500.0}
     assert [x["title"] for x in s["expenses"]] == ["Domain renewal", "Pizza", "Venue"] and s["expenses"][1]["category"] == "food" and s["expenses"][1]["event_name"] == "Hack Night 04"
     assert s["categories"][0] == "venue"
 
@@ -136,8 +136,8 @@ async def test_statements_carry_the_ledger_and_the_totals(client, world):
     r = await client.get("/api/v1/clubs/finance/statement.csv", headers=h)
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/csv") and r.headers["content-disposition"].startswith('attachment; filename="yukthi') and r.headers["content-disposition"].endswith('.csv"')
     body = r.text.lstrip("﻿")
-    assert "Hack Night 04,Hackathon,closed,4,2,1000.0,500.0,40.0,960.0" in body
-    assert "TinyML Circle,General,published,2,0,0.0,0.0,0.0,0.0" in body
+    assert "Hack Night 04,Hackathon,closed,4,2,1000.0,0.0,500.0,40.0,960.0" in body
+    assert "TinyML Circle,General,published,2,0,0.0,0.0,0.0,0.0,0.0" in body
     assert ",Hack Night 04,'=SUM(A1),printing,40.0," in body  # a title that looks like a formula is defused
     assert "Net surplus,960.0" in body and "Outstanding,500.0" in body and "Rival Gala" not in body
 

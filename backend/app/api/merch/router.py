@@ -81,6 +81,18 @@ async def delete_item(session: SessionDep, user: ClubAuth, event_id: int, item_i
     return {"ok": True}
 
 
+@router.post("/{item_id}/handout", summary="One piece given out by hand, counted")
+async def hand_out_by_hand(session: SessionDep, user: ClubAuth, event_id: int, item_id: UUID) -> MerchItemOut:
+    event = await deliveries.event_for_club(session, user, event_id)
+    return MerchItemOut(**await service.hand_out_by_hand(session, event, item_id, +1))
+
+
+@router.post("/{item_id}/handout/undo", summary="Take one counted piece back")
+async def undo_hand_out(session: SessionDep, user: ClubAuth, event_id: int, item_id: UUID) -> MerchItemOut:
+    event = await deliveries.event_for_club(session, user, event_id)
+    return MerchItemOut(**await service.hand_out_by_hand(session, event, item_id, -1))
+
+
 @router.post("/{item_id}/variants", summary="A new size or colour")
 async def add_variant(session: SessionDep, user: ClubAuth, event_id: int, item_id: UUID, body: VariantIn) -> MerchItemOut:
     event = await deliveries.event_for_club(session, user, event_id)

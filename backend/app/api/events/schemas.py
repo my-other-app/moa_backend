@@ -82,6 +82,8 @@ class EventBaseMin(CustomBaseModel):
     location_name: str | None = Field(None)
     has_prize: bool = Field(False)
     prize_amount: float | None = Field(None)
+    merch_enabled: bool = Field(False)
+    swag_enabled: bool = Field(False)
     is_online: bool | None = Field(False)
     reg_startdate: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     reg_enddate: datetime | None = Field(None)
@@ -136,6 +138,8 @@ class EventCreate:
         has_prize: bool = Form(False),
         prize_amount: Optional[float] = Form(None),
         is_online: bool = Form(False),
+        merch_enabled: Optional[bool] = Form(None),
+        swag_enabled: Optional[bool] = Form(None),
         reg_startdate: str = Form(
             default_factory=lambda: datetime.now(timezone.utc).isoformat()
         ),  # ISO string
@@ -167,6 +171,8 @@ class EventCreate:
         self.has_prize = has_prize
         self.prize_amount = prize_amount
         self.is_online = is_online
+        self.merch_enabled = merch_enabled
+        self.swag_enabled = swag_enabled
         self.reg_startdate = datetime.fromisoformat(reg_startdate)
         self.reg_enddate = datetime.fromisoformat(reg_enddate) if reg_enddate else None
         # self.images = json.loads(images)  # Convert JSON string to list
@@ -234,6 +240,8 @@ class EventEdit(EventCreate):
         has_prize: bool = Form(False),
         prize_amount: Optional[float] = Form(None),
         is_online: bool = Form(False),
+        merch_enabled: Optional[bool] = Form(None),
+        swag_enabled: Optional[bool] = Form(None),
         reg_startdate: str = Form(
             default_factory=lambda: datetime.now(timezone.utc).isoformat()
         ),  # ISO string
@@ -266,6 +274,8 @@ class EventEdit(EventCreate):
             has_prize=has_prize,
             prize_amount=prize_amount,
             is_online=is_online,
+            merch_enabled=merch_enabled,
+            swag_enabled=swag_enabled,
             reg_startdate=reg_startdate,
             reg_enddate=reg_enddate,
             # images,
@@ -471,6 +481,8 @@ class EventDetailResponse(CustomBaseModel):
     has_fee: bool = Field(...)
     reg_fee: float | None = Field(None)
     has_prize: bool = Field(True)
+    merch_enabled: bool = Field(False)
+    swag_enabled: bool = Field(False)
     prize_amount: float | None = Field(None)
     is_online: bool | None = Field(False)
     reg_startdate: datetime = Field(...)

@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.api.payments.models import PaymentLogs, PaymentOrders, PaymentStatus
+from app.api.store.models import EventStoreOrders as StoreOrders
+from decimal import Decimal
 
 logger = logging.getLogger(__name__)
 
@@ -43,23 +45,21 @@ async def validate_event_registration_payload(session: AsyncSession, payload: di
                 event_registration_id="event_registration_id is invalid"
             )
 
-        if event_registration.is_paid:
+        from app.api.store import service as store
+
+        ticket_due = Decimal(event_registration.actual_amount or 0) - Decimal(event_registration.paid_amount or 0)
+        if ticket_due < 0:
+            ticket_due = Decimal(0)
+        # What they picked from the shelf rides on the same payment as the ticket.
+        store_due = await store.pending_total(session, event_registration.id)
+        if event_registration.is_paid and store_due == 0:
             raise RequestValidationError(event_registration_id="already paid")
-
-        amount_to_pay = (
-            event_registration.actual_amount - event_registration.paid_amount
-        )
-
-        if not amount_to_pay:
+        amount_to_pay = ticket_due + store_due
+        if amount_to_pay <= 0:
             raise RequestValidationError(event_registration_id="nothing to pay")
-
-        if not isinstance(amount_to_pay, float) and not isinstance(amount_to_pay, int):
-            raise RequestValidationError(event_registration_id="invalid amount to pay")
-
         receipt = f"er_{event_registration.ticket_id}"
         event_registration.payment_receipt = receipt
         await session.commit()
-
         return (float(amount_to_pay), receipt)
     except Exception as e:
         raise e
@@ -96,11 +96,25 @@ async def handle_event_registration_payment(
             or 0
         )
 
-        event_registration.is_paid = total_paid >= event_registration.actual_amount
-        event_registration.paid_amount = total_paid
+        from app.api.store import service as store
+
+        # The store's share comes off the top; the rest is the ticket's.
+        total_paid = Decimal(total_paid)
+        pending = await store.pending_for(session, event_registration.id)
+        actual = Decimal(event_registration.actual_amount or 0)
+        ticket_due = max(Decimal(0), actual - Decimal(event_registration.paid_amount or 0))
+        if pending is not None and total_paid >= Decimal(pending.total) + ticket_due:
+            await store.mark_paid(session, pending)
+        store_share = await session.scalar(
+            select(func.coalesce(func.sum(StoreOrders.total), 0)).where(StoreOrders.registration_id == event_registration.id, StoreOrders.status == "paid")
+        ) or 0
+        ticket_paid = max(Decimal(0), total_paid - Decimal(store_share))
+        event_registration.paid_amount = min(actual, ticket_paid)
+        event_registration.is_paid = ticket_paid >= actual
         await session.commit()
         await session.refresh(event_registration)
         if not event_registration.is_paid:
+            return True
             return True
         try:
             db_event = await session.scalar(

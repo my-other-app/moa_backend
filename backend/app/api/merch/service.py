@@ -36,6 +36,8 @@ def item_out(m: MerchItems) -> dict:
         "stock": m.stock, "collected": m.collected_count, "total": _total(m),
         "eligibility_field": m.eligibility_field, "eligibility_value": m.eligibility_value, "variant_field": m.variant_field,
         "variants": [{"id": v.id, "label": v.label, "stock": v.stock, "collected": v.collected_count} for v in m.variants],
+        "sponsor": m.sponsor, "handout_rule": m.handout_rule, "manual_handed_out": m.manual_handed_out or 0,
+        "handed_out": m.collected_count + (m.manual_handed_out or 0),
         "created_at": m.created_at,
     }
 
@@ -79,6 +81,7 @@ async def create_item(session, event: Events, body) -> dict:
         event_id=event.id, name=body.name, photo_key=body.photo_key,
         stock=None if body.variant_field else (body.stock or 0),
         eligibility_field=body.eligibility_field, eligibility_value=body.eligibility_value, variant_field=body.variant_field,
+        sponsor=(body.sponsor or None), handout_rule=(body.handout_rule or None),
     )
     if body.variant_field:
         m.variants = [MerchVariants(label=v.label, stock=v.stock) for v in body.variants]
@@ -103,7 +106,7 @@ async def update_item(session, event: Events, item_id: UUID, body) -> dict:
         raise CustomHTTPException(422, message="Set both the field and the value, or neither.", error_code="MERCH_ELIGIBILITY_INCOMPLETE")
     if nxt["stock"] is not None and nxt["stock"] < m.collected_count:
         raise CustomHTTPException(422, message=f"{m.collected_count} have already been handed out, so stock cannot go below that.")
-    for k in ("name", "photo_key"):
+    for k in ("name", "photo_key", "sponsor", "handout_rule"):
         if k in data:
             setattr(m, k, data[k])
     for k, v in nxt.items():
@@ -380,3 +383,18 @@ async def analytics(session, event: Events) -> dict:
         "by_door": [{"id": did, "name": name or label or "Door not recorded", "count": c} for did, label, name, c in by_door],
         "by_hour": [{"hour": h.isoformat(), "count": c} for h, c in hours],
     }
+
+
+async def hand_out_by_hand(session, event: Events, item_id: UUID, delta: int) -> dict:
+    """A piece given out without a scan — counted, and taken back with Undo."""
+    m = await _item(session, event, item_id)
+    total = _total(m)
+    nxt = (m.manual_handed_out or 0) + delta
+    if nxt < 0:
+        nxt = 0
+    if total and m.collected_count + nxt > total:
+        raise CustomHTTPException(422, message="Nothing left to hand out")
+    m.manual_handed_out = nxt
+    await session.commit()
+    await session.refresh(m)
+    return item_out(await _item(session, event, item_id))

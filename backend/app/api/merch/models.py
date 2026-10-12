@@ -30,6 +30,10 @@ class MerchItems(AbstractSQLModel, TimestampsMixin):
     eligibility_field = Column(String(80), nullable=True)
     eligibility_value = Column(String(80), nullable=True)
     variant_field = Column(String(80), nullable=True)
+    # Swag: who sponsored it, how it is given out, and pieces counted out by hand at the door.
+    sponsor = Column(String(120), nullable=True)
+    handout_rule = Column(String(40), nullable=True)
+    manual_handed_out = Column(Integer, nullable=False, default=0)
 
     variants = relationship("MerchVariants", back_populates="item", cascade="all, delete-orphan", order_by="MerchVariants.created_at")
 

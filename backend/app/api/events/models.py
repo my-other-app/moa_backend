@@ -62,6 +62,9 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     event_datetime = Column(TZAwareDateTime(timezone=True), nullable=False)
     has_fee = Column(Boolean, nullable=False, default=False)
     reg_fee = Column(Numeric(10, 2), nullable=True)
+    # Merchandise sold at registration, and free swag counted out at the door.
+    merch_enabled = Column(Boolean, nullable=False, default=False)
+    swag_enabled = Column(Boolean, nullable=False, default=False)
     duration = Column(Float, nullable=False)
     about = Column(String, nullable=True)
     location_name = Column(String, nullable=True)

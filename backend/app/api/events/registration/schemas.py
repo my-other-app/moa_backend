@@ -23,6 +23,11 @@ class EventRegistrationResponse(CustomBaseModel):
     phone: str | None = Field(None)
     additional_details: dict[str, Any] | None = Field(None)
     auth_token: Token | None = Field(None)
+    store_order_id: str | None = Field(None)
+    store_total: float = Field(0)
+
+
+from app.api.store.schemas import StorePick  # noqa: E402
 
 
 class EventRegistrationRequest(CustomBaseModel):
@@ -33,6 +38,8 @@ class EventRegistrationRequest(CustomBaseModel):
     organization: str | None = Field(None, max_length=200)
     #: The tracking link's code the page carried, so the sign-up is credited to it.
     ref: str | None = Field(None, max_length=16)
+    #: What they picked from the event's shelf; paid with the ticket.
+    store: list[StorePick] | None = Field(None, max_length=20)
 
 
 class EventAttendanceUpdate(CustomBaseModel):

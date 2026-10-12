@@ -38,6 +38,8 @@ class MerchItemIn(BaseModel):
     eligibility_value: Optional[str] = Field(default=None, max_length=80)
     variant_field: Optional[str] = Field(default=None, max_length=80)
     variants: list[VariantIn] = Field(default_factory=list, max_length=40)
+    sponsor: Optional[str] = Field(default=None, max_length=120)
+    handout_rule: Optional[str] = Field(default=None, max_length=40)
 
     @field_validator("name")
     @classmethod
@@ -68,6 +70,8 @@ class MerchItemIn(BaseModel):
 
 class MerchItemPatch(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    sponsor: Optional[str] = Field(default=None, max_length=120)
+    handout_rule: Optional[str] = Field(default=None, max_length=40)
     photo_key: Optional[str] = Field(default=None, max_length=300)
     stock: Optional[int] = Field(default=None, ge=0, le=1_000_000)
     eligibility_field: Optional[str] = Field(default=None, max_length=80)
@@ -100,6 +104,10 @@ class MerchItemOut(BaseModel):
     eligibility_value: Optional[str]
     variant_field: Optional[str]
     variants: list[VariantOut]
+    sponsor: Optional[str] = None
+    handout_rule: Optional[str] = None
+    manual_handed_out: int = 0
+    handed_out: int = 0
     created_at: Optional[datetime]
 
 
