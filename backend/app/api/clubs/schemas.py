@@ -401,3 +401,22 @@ class ClubAdminListResponse(CustomBaseModel):
     followers_count: int = Field(...)
     initialPassword: str | None = Field(None)
     interests: List[ClubInterestDetailMin] | None = Field(None)
+
+
+class FollowerEventRow(CustomBaseModel):
+    event_id: int
+    name: str
+    starts_at: str | None = None
+    status: str
+    attended: bool
+    paid: bool
+    paid_amount: float
+    registered_at: str | None = None
+
+
+class FollowerProfileResponse(CustomBaseModel):
+    user: dict
+    followed_at: str | None = None
+    contact: dict
+    events: list[FollowerEventRow]
+    totals: dict

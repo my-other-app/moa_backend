@@ -23,6 +23,7 @@ from app.api.clubs.schemas import (
     ClubPartnerCreate,
     ClubPartnerOut,
     ClubPartnerPatch,
+    FollowerProfileResponse,
 )
 from app.db.core import SessionDep
 from app.api.clubs import service
@@ -342,6 +343,13 @@ async def list_club_followers_endpoint(
     )
     total = await service.count_club_followers(session=session, club_id=club_id)
     return paginated_response(followers, request, schema=ClubFollowersListResponse, total=total)
+
+
+@router.get("/followers/{club_id}/{user_id}", summary="One follower: who they are and what they did with the club")
+async def follower_profile_endpoint(session: SessionDep, user: ClubAuth, club_id: int, user_id: int) -> FollowerProfileResponse:
+    if user.club is None or user.club.id != club_id:
+        raise CustomHTTPException(status_code=403, message="Not your club")
+    return FollowerProfileResponse(**await service.follower_profile(session, club_id, user_id))
 
 
 @router.put("/logo")
