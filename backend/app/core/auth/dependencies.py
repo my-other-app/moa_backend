@@ -66,6 +66,28 @@ async def get_current_user(
     return user
 
 
+async def get_current_user_if_valid(
+    request: Request,
+    token: Annotated[str, Depends(oauth2_scheme)],
+    session: SessionDep = SessionDep(),
+) -> Optional[Users]:
+    """The signed-in user, or nobody when the token presented is dead.
+
+    Public pages take an optional identity: a visitor whose stored token has
+    expired, or was revoked from the Security page, is a visitor still, not a
+    refused request. The event site kept a token after a registration and every
+    public page went blank once it aged out, because the 401 from here was
+    surfacing on endpoints that never needed a sign-in in the first place.
+    Suspension and role checks still run on whoever this returns.
+    """
+    try:
+        return await get_current_user(request, token, session)
+    except CustomHTTPException as exc:
+        if exc.status_code == status.HTTP_401_UNAUTHORIZED:
+            return None
+        raise
+
+
 def check_user_type(required_roles: Union[str, List[str]], optional=False):
     """
     Creates a dependency that checks if the current user has the required role(s).
@@ -79,9 +101,11 @@ def check_user_type(required_roles: Union[str, List[str]], optional=False):
     if isinstance(required_roles, str):
         required_roles = [required_roles]
 
+    identify = get_current_user_if_valid if optional else get_current_user
+
     async def role_checker(
         request: Request,
-        current_user: Annotated[Optional[Users], Depends(get_current_user)],
+        current_user: Annotated[Optional[Users], Depends(identify)],
         session: SessionDep,
     ) -> Users:
         if optional:
