@@ -191,3 +191,23 @@ async def test_swag_is_counted_by_hand_and_names_its_sponsor(client, world):
     await client.post(url, headers=h)
     assert (await client.post(url, headers=h)).status_code == 422  # nothing left
     assert (await client.patch(f"/api/v1/events/{event.id}/merch/{item['id']}", json={"sponsor": "", "handout_rule": "door"}, headers=h)).json()["handout_rule"] == "door"
+
+
+async def test_a_walk_up_takes_from_the_shelf_and_pays_at_the_desk(client, session, world):
+    h, event = world["h"], world["paid"]
+    await client.patch(_store(event.id, "/settings"), json={"merch_enabled": True}, headers=h)
+    tee = (await client.post(_store(event.id), json={"name": "Hack Night tee", "price": 450, "variants": [{"label": "M", "stock": 3}]}, headers=h)).json()
+    m_id = tee["variants"][0]["id"]
+    # The organiser at the desk registers a walk-up with a tee; the desk takes the money for both.
+    r = await client.post(f"/api/v1/events/{event.id}/gate/walkup", json={"name": "Door Guest", "phone": "9876501234", "client_ref": "walkup-ref-0001", "store": [{"item_id": tee["id"], "variant_id": m_id, "qty": 1}]}, headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["outcome"] == "REGISTERED"
+    s = (await client.get(_store(event.id, "/summary"), headers=h)).json()
+    assert s["units_sold"] == 1 and s["revenue"] == 450.0 and s["to_hand_over"] == 1
+    reg_id = r.json()["attendee"]["id"]
+    # The door sees the paid order against the guest and hands it over.
+    owed = await client.get(f"/api/v1/events/{event.id}/gate/store/{reg_id}", headers=h)
+    assert owed.status_code == 200 and owed.json()[0]["summary"] == "Hack Night tee (M)"
+    handed = await client.post(f"/api/v1/events/{event.id}/gate/store/{owed.json()[0]['id']}/handover", headers=h)
+    assert handed.status_code == 200 and handed.json()["handed_over_at"]
+    assert (await client.get(_store(event.id, "/summary"), headers=h)).json()["to_hand_over"] == 0
