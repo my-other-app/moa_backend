@@ -55,6 +55,14 @@ async def get_current_user(
         raise credentials_exception
     if user.token_version != token_data.token_version:
         raise credentials_exception
+    # A session ended from the Security page dies now, not at its next refresh.
+    if token_data.sid:
+        from app.api.auth import sessions as session_store
+
+        row = await session_store.get_live(session, token_data.sid)
+        if row is None:
+            raise credentials_exception
+        await session_store.touch_throttled(session, row)
     return user
 
 

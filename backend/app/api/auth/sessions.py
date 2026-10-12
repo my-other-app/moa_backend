@@ -126,3 +126,28 @@ async def revoke_all_for_user(session: AsyncSession, user_id: int) -> int:
         row.revoked = True
     await session.commit()
     return len(rows)
+
+
+async def get_live(session: AsyncSession, session_id):
+    """The session row, or None when it is gone or revoked."""
+    try:
+        row = await session.get(UserSessions, uuid.UUID(str(session_id)))
+    except (ValueError, AttributeError):
+        return None
+    if row is None or row.revoked:
+        return None
+    return row
+
+
+async def touch_throttled(session: AsyncSession, row, every_seconds: int = 60) -> None:
+    """Move last_seen_at along, but not on every single request."""
+    now = datetime.now(timezone.utc)
+    last = row.last_seen_at
+    if last is not None and last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    if last is None or (now - last).total_seconds() >= every_seconds:
+        row.last_seen_at = now
+        try:
+            await session.commit()
+        except Exception:
+            await session.rollback()

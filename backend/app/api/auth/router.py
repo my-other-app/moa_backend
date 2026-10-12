@@ -1,6 +1,6 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Annotated, Optional
-from fastapi import APIRouter, Depends, Form, Request, Response
+from fastapi import APIRouter, Depends, Form, Request, Response, BackgroundTasks
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi import status
 import jwt
@@ -120,16 +120,23 @@ async def login_for_access_token(
     request: Request,
     response: Response,
     session: SessionDep,
+    background: BackgroundTasks,
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
     totp_code: Optional[str] = Form(None),
 ) -> Token:
+    from app.api.security import service as security
+
+    async def refuse(user, result: str, status_code: int, message: str, **extra):
+        await security.record(session, request=request, identifier=form_data.username, user=user, method="password", result=result)
+        await session.commit()
+        raise CustomHTTPException(status_code=status_code, message=message, **extra)
+
+    wait = await security.lockout_remaining(session, form_data.username, security.client_ip(request))
+    if wait:
+        await refuse(None, "blocked", status.HTTP_429_TOO_MANY_REQUESTS, f"Too many wrong passwords. Try again in {max(1, wait // 60)} min.", error_code="LOGIN_LOCKED")
     user = await authenticate_user(session, form_data.username, form_data.password)
     if not user:
-        raise CustomHTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            message="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        await refuse(None, "wrong_password", status.HTTP_401_UNAUTHORIZED, "Incorrect username or password", headers={"WWW-Authenticate": "Bearer"})
 
     # Second factor, where the account has one. The password is verified
     # first so an attacker learns nothing new from the order; the distinct
@@ -139,22 +146,14 @@ async def login_for_access_token(
         from app.api.auth import totp as totp_service
 
         if not totp_code:
-            raise CustomHTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                message="Enter the code from your authenticator app",
-                error_code="TOTP_REQUIRED",
-            )
+            await refuse(user, "totp_required", status.HTTP_401_UNAUTHORIZED, "Enter the code from your authenticator app", error_code="TOTP_REQUIRED")
 
         if not totp_service.verify(user.totp_secret, totp_code):
             remaining = totp_service.consume_recovery_code(
                 totp_code, user.totp_recovery_codes
             )
             if remaining is None:
-                raise CustomHTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    message="That code is not valid",
-                    error_code="TOTP_INVALID",
-                )
+                await refuse(user, "totp_invalid", status.HTTP_401_UNAUTHORIZED, "That code is not valid", error_code="TOTP_INVALID")
             # A recovery code is single use; leaving it active would turn one
             # leaked code into permanent access.
             user.totp_recovery_codes = remaining
@@ -171,7 +170,16 @@ async def login_for_access_token(
     token = await service.create_access_refresh_tokens(
         user, session=session, request=request
     )
+    first_time_here = await security.is_new_device(session, user.id, request)
+    await security.record(session, request=request, identifier=form_data.username, user=user, method="password", result="signed_in", session_id=security.sid_in(token.access_token))
     await session.commit()
+    if first_time_here and getattr(user, "notify_new_device", True) and user.email:
+        device, _ = security.parse_agent(security.user_agent_of(request))
+        ip = security.client_ip(request)
+        background.add_task(
+            security.send_new_device_email, user.email, account=await security.account_name(session, user), device=device,
+            place=await security.place_for(session, ip, resolve=False), ip=ip, when=datetime.now(timezone.utc),
+        )
     _set_auth_cookies(request, response, token.access_token, token.refresh_token)
     return token
 

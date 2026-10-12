@@ -69,6 +69,8 @@ class AppConfig(BaseSettings):
     PUBLIC_WEB_URL: str = "https://clubs-next.myotherapp.in"
     # The public event site a tracking link lands on; {slug} for a club's page.
     PUBLIC_SITE_URL: str = "https://events.myotherapp.in"
+    # Where an address is turned into a place for the Security page; {ip} is filled in. Empty disables it.
+    GEOIP_URL: str = "https://ipapi.co/{ip}/json/"
     PUBLIC_CLUB_URL: str = "https://events.myotherapp.in/clubs/{slug}"
 
     CORS_ORIGINS: list[str] | str

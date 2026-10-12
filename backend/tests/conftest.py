@@ -108,6 +108,17 @@ def _reset_rate_limiter():
     limiter.reset()
 
 
+@pytest.fixture(autouse=True)
+def _quiet_email(monkeypatch):
+    """Transactional mail never leaves the suite. A sign-in from a device the
+    account has not seen sends one, which is every first login in every test;
+    a test that cares about mail patches `send_email` itself and wins."""
+    from app.core.email import email as email_mod
+
+    monkeypatch.setattr(email_mod, "send_email", lambda **kwargs: None)
+    yield
+
+
 @pytest_asyncio.fixture
 async def client(session):
     """An httpx client wired to the real FastAPI app, with get_session overridden
