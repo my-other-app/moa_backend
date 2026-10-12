@@ -36,6 +36,18 @@ class Clubs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         nullable=True,
     )
     about = Column(String, nullable=True)
+    # One line under the name on the club page and every event; the about is the long form.
+    tagline = Column(String(120), nullable=True)
+    cover = Column(
+        S3ImageField(
+            upload_to="clubs/covers/",
+            variations={
+                "medium": {"width": 1200, "height": 400},
+                "large": {"width": 1800, "height": 600},
+            },
+        ),
+        nullable=True,
+    )
     org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)
     # location = Column(Geometry("POINT"), nullable=True)
     location_name = Column(String, nullable=True)
@@ -122,3 +134,16 @@ class ClubSocials(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     club = relationship("Clubs", back_populates="socials")
 
     __table_args__ = (UniqueConstraint("club_id", "is_deleted"),)
+
+
+class ClubPartners(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
+    """Year-round partners shown on the club page; event sponsors live on the event."""
+
+    __tablename__ = "club_partners"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    club_id = Column(Integer, ForeignKey("clubs.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(100), nullable=False)
+    role = Column(String(80), nullable=True)
+    since = Column(Integer, nullable=True)
+    sort_order = Column(Integer, nullable=False, default=0)

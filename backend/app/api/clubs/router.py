@@ -20,6 +20,9 @@ from app.api.clubs.schemas import (
     ClubSocialsCreate,
     UpdateClub,
     UserClubLinkDetailResponse,
+    ClubPartnerCreate,
+    ClubPartnerOut,
+    ClubPartnerPatch,
 )
 from app.db.core import SessionDep
 from app.api.clubs import service
@@ -351,6 +354,38 @@ async def update_club_logo(
         raise Exception("File must be an image")
 
     return await service.update_club_logo(session, club_id=user.club.id, logo=logo)
+
+
+@router.put("/cover", summary="The banner across the top of the club page")
+async def update_club_cover(session: SessionDep, user: ClubAuth, cover: UploadFile = File(...)):
+    if not (cover.content_type or "").startswith("image/"):
+        raise CustomHTTPException(422, message="The cover must be an image")
+    return await service.update_club_cover(session, club_id=user.club.id, cover=cover)
+
+
+# ─── Partners ─────────────────────────────────────────────────────────────
+
+
+@router.get("/partners", summary="The club's year-round partners")
+async def list_partners(session: SessionDep, user: ClubAuth) -> list[ClubPartnerOut]:
+    return [ClubPartnerOut(**service._partner_out(p)) for p in await service.list_partners(session, user.club.id)]
+
+
+@router.post("/partners", summary="Add a partner", status_code=201)
+async def create_partner(session: SessionDep, user: ClubAuth, body: ClubPartnerCreate) -> ClubPartnerOut:
+    return ClubPartnerOut(**await service.create_partner(session, user.club.id, body.name, body.role, body.since))
+
+
+@router.patch("/partners/{partner_id}", summary="Correct a partner")
+async def update_partner(session: SessionDep, user: ClubAuth, partner_id: int, body: ClubPartnerPatch) -> ClubPartnerOut:
+    p = await service.partner_for(session, user.club.id, partner_id)
+    return ClubPartnerOut(**await service.update_partner(session, p, body.model_dump(exclude_unset=True)))
+
+
+@router.delete("/partners/{partner_id}", summary="Remove a partner")
+async def delete_partner(session: SessionDep, user: ClubAuth, partner_id: int) -> dict:
+    await service.delete_partner(session, await service.partner_for(session, user.club.id, partner_id))
+    return {"deleted": True}
 
 
 @router.get("/events/list", summary="Get all events of a club")

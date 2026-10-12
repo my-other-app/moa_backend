@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 import io
 import re
 from fastapi import UploadFile
@@ -17,6 +18,7 @@ from app.api.clubs.models import (
     Clubs,
     Notes,
     ClubSocials,
+    ClubPartners,
 )
 from app.api.clubs.schemas import ClubSocialsCreate, CreateClub
 from app.api.users.models import UserProfiles, UserTypes, Users
@@ -132,6 +134,8 @@ async def update_club(session: AsyncSession, club_id: int, club: CreateClub):
 
     db_club.name = club.name
     db_club.about = club.about
+    if hasattr(club, "tagline"):
+        db_club.tagline = (club.tagline or "").strip() or None
     # Like every other field here, whatever came is what is kept: an empty
     # (or omitted) colour clears it. The profile form always sends both.
     for key in ("brand_primary", "brand_secondary"):
@@ -862,6 +866,8 @@ async def get_club_details(
         "name": club.name,
         "slug": club.slug,
         "logo": club.logo,
+        "cover": club.cover,
+        "tagline": club.tagline,
         "about": club.about,
         "location_name": club.location_name,
         "location_link": club.location_link,
@@ -878,6 +884,7 @@ async def get_club_details(
         "user_data": user_data,
     }
 
+    club_dict["partners"] = [_partner_out(p) for p in await list_partners(session, club.id)]
     # Manually serialize relationships
     if club.org:
         club_dict["org"] = {
@@ -1068,3 +1075,65 @@ async def get_club_events(
     ]
 
     return items, total
+
+
+# ─── Cover and partners ───────────────────────────────────────────────────
+
+
+async def update_club_cover(session: AsyncSession, club_id: int, cover: UploadFile) -> dict:
+    """The banner across the top of the club page."""
+    club = await session.get(Clubs, club_id)
+    if not club:
+        raise CustomHTTPException(404, "Club not found")
+    if club.cover:
+        club.cover.delete()
+    club.cover = {"bytes": io.BytesIO(await cover.read()), "filename": cover.filename}
+    await session.commit()
+    return {"message": "Club cover updated successfully"}
+
+
+def _partner_out(p: ClubPartners) -> dict:
+    return {"id": p.id, "name": p.name, "role": p.role, "since": p.since, "sort_order": p.sort_order}
+
+
+async def list_partners(session: AsyncSession, club_id: int) -> list[ClubPartners]:
+    rows = await session.scalars(
+        select(ClubPartners).where(ClubPartners.club_id == club_id, ClubPartners.is_deleted == False).order_by(ClubPartners.sort_order, ClubPartners.id)  # noqa: E712
+    )
+    return list(rows.all())
+
+
+async def partner_for(session: AsyncSession, club_id: int, partner_id: int) -> ClubPartners:
+    p = await session.scalar(select(ClubPartners).where(ClubPartners.id == partner_id, ClubPartners.club_id == club_id, ClubPartners.is_deleted == False))  # noqa: E712
+    if p is None:
+        raise CustomHTTPException(404, message="Partner not found")
+    return p
+
+
+async def create_partner(session: AsyncSession, club_id: int, name: str, role: str | None, since: int | None) -> dict:
+    last = await session.scalar(select(func.max(ClubPartners.sort_order)).where(ClubPartners.club_id == club_id, ClubPartners.is_deleted == False))  # noqa: E712
+    p = ClubPartners(club_id=club_id, name=name.strip(), role=(role or "").strip() or None, since=since, sort_order=(last if last is not None else -1) + 1)
+    session.add(p)
+    await session.commit()
+    await session.refresh(p)
+    return _partner_out(p)
+
+
+async def update_partner(session: AsyncSession, p: ClubPartners, data: dict) -> dict:
+    if "name" in data and data["name"] is not None:
+        p.name = data["name"].strip()
+    if "role" in data:
+        p.role = (data["role"] or "").strip() or None
+    if "since" in data:
+        p.since = data["since"]
+    if "sort_order" in data and data["sort_order"] is not None:
+        p.sort_order = data["sort_order"]
+    await session.commit()
+    await session.refresh(p)
+    return _partner_out(p)
+
+
+async def delete_partner(session: AsyncSession, p: ClubPartners) -> None:
+    p.is_deleted = True
+    p.deleted_at = datetime.now(timezone.utc)
+    await session.commit()
