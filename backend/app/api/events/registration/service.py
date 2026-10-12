@@ -52,6 +52,7 @@ async def register_event(
     notify: bool = True,
     relaxed_fields: bool = False,
     tracking_ref: str | None = None,
+    store_picks: list | None = None,
 ):
     """`relaxed_fields` is for a guest registered at the door: nothing is
     required there, and what they answer goes on the record.
@@ -166,6 +167,12 @@ async def register_event(
     if registration:
         if not db_event.has_fee or registration.is_paid:
             raise CustomHTTPException(400, message="Already registered for this event")
+        # Back for the payment: the shelf picks are taken fresh.
+        if store_picks is not None:
+            from app.api.store import service as store
+
+            await store.place_order(session, db_event, registration, store_picks, role=(registration.role.value if getattr(registration, "role", None) else "attendee"))
+            await session.commit()
 
         # TODO: add service and api for updating registration info
         # if db_event.has_fee and registration.is_paid:
@@ -197,6 +204,11 @@ async def register_event(
 
         await session.commit()
         await session.refresh(registration)
+        if store_picks:
+            from app.api.store import service as store
+
+            await store.place_order(session, db_event, registration, store_picks, role=(role.value if role is not None else "attendee"))
+            await session.commit()
         db_event = await session.scalar(
             select(Events)
             .filter(Events.id == registration.event_id)
@@ -236,7 +248,10 @@ async def register_event(
             selectinload(EventRegistrationsLink.user),
         )
     )
-    payment_remining = data.actual_amount - data.paid_amount
+    from app.api.store import service as store
+
+    pending_store = await store.pending_for(session, data.id)
+    payment_remining = max(0, (data.actual_amount or 0) - (data.paid_amount or 0)) + (pending_store.total if pending_store else 0)
 
     # Check for new user badges after registration
     try:
@@ -250,6 +265,8 @@ async def register_event(
         "event_id": db_event.id,
         "event_registration_id": data.id,
         "pay_amount": payment_remining,
+        "store_order_id": str(pending_store.id) if pending_store else None,
+        "store_total": float(pending_store.total) if pending_store else 0.0,
         "event_datetime": db_event.event_datetime,
         "ticket_id": data.ticket_id,
         "full_name": data.full_name,

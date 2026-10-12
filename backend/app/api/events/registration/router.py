@@ -100,6 +100,7 @@ async def register_event(
         event_id=event_id,
         additional_details=additional_details if additional_details else None,
         tracking_ref=registration.ref or ref,
+        store_picks=registration.store,
     )
     response = {**response, **register_data}
     return response

@@ -272,6 +272,10 @@ async def update_event(
     db_event.has_prize = event.has_prize
     db_event.prize_amount = event.prize_amount
     db_event.is_online = event.is_online
+    if getattr(event, "merch_enabled", None) is not None:
+        db_event.merch_enabled = event.merch_enabled
+    if getattr(event, "swag_enabled", None) is not None:
+        db_event.swag_enabled = event.swag_enabled
     db_event.reg_startdate = event.reg_startdate
     db_event.reg_enddate = event.reg_enddate
     db_event.about = event.about

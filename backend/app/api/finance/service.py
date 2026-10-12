@@ -25,12 +25,13 @@ from app.api.events.models import EventCategories, EventRegistrationsLink as Reg
 from app.api.finance.models import ClubExpenses
 from app.api.finance.schemas import EXPENSE_CATEGORIES, ExpenseCreate, ExpensePatch
 from app.api.payments.models import PaymentLogs, PaymentOrders, PaymentStatus
+from app.api.store.models import EventStoreOrders
 from app.core.utils.time_buckets import utc_trunc
 from app.response import CustomHTTPException
 
 CLUB_ROW = "Club"  # overheads logged against no event
 _SHOWN = (EventStatus.published, EventStatus.live, EventStatus.closed, EventStatus.archived)
-_MONEY = ("gross", "tickets", "refunds", "expenses", "net")
+_MONEY = ("gross", "tickets", "merch", "refunds", "expenses", "net")
 
 
 def _now() -> datetime:
@@ -107,7 +108,7 @@ _REFUNDED = exists().where(
 
 
 def _blank() -> dict:
-    return dict(regs=0, paying=0, tickets=Decimal(0), outstanding=Decimal(0), outstanding_count=0, refunds=Decimal(0), refund_count=0, expenses=Decimal(0), expense_count=0)
+    return dict(regs=0, paying=0, tickets=Decimal(0), merch=Decimal(0), outstanding=Decimal(0), outstanding_count=0, refunds=Decimal(0), refund_count=0, expenses=Decimal(0), expense_count=0)
 
 
 async def _per_event(session, event_ids: list[int]) -> dict[int, dict]:
@@ -149,6 +150,10 @@ async def _per_event(session, event_ids: list[int]) -> dict[int, dict]:
     )
     for eid, amount, n in (await session.execute(q)).all():
         out[eid].update(expenses=Decimal(amount), expense_count=n)
+    # Merchandise paid for with the ticket, kept apart from the ticket itself.
+    q = select(EventStoreOrders.event_id, func.coalesce(func.sum(EventStoreOrders.total), 0)).where(EventStoreOrders.event_id.in_(event_ids), EventStoreOrders.status == "paid").group_by(EventStoreOrders.event_id)
+    for eid, amount in (await session.execute(q)).all():
+        out[eid].update(merch=Decimal(amount))
     return out
 
 
@@ -158,15 +163,15 @@ def _totals(rows: list[dict], overhead: Decimal = Decimal(0), overhead_count: in
     for r in rows:
         for k in t:
             t[k] += r[k]
-    t["gross"] = t["tickets"] + t["refunds"]
-    t["net"] = t["tickets"] - t["expenses"]
+    t["gross"] = t["tickets"] + t["merch"] + t["refunds"]
+    t["net"] = t["tickets"] + t["merch"] - t["expenses"]
     return t
 
 
 def _figures(t: dict, events: dict | None = None) -> dict:
     return dict(
         events=events, regs=t["regs"], paying=t["paying"],
-        gross=_f(t["gross"]), tickets=_f(t["tickets"]), refunds=_f(t["refunds"]), refund_count=t["refund_count"],
+        gross=_f(t["gross"]), tickets=_f(t["tickets"]), merch=_f(t["merch"]), refunds=_f(t["refunds"]), refund_count=t["refund_count"],
         expenses=_f(t["expenses"]), expense_count=t["expense_count"], net=_f(t["net"]),
         outstanding=_f(t["outstanding"]), outstanding_count=t["outstanding_count"],
         avg_ticket=_f(t["tickets"] / t["paying"]) if t["paying"] else None,
@@ -178,11 +183,11 @@ def _deltas(cur: dict, prev: dict | None) -> dict:
 
 
 def _month_rows(months: dict[str, dict]) -> list[dict]:
-    return [dict(month=m, tickets=_f(r["tickets"]), refunds=_f(r["refunds"]), expenses=_f(r["expenses"]), net=_f(r["tickets"] - r["expenses"])) for m, r in months.items()]
+    return [dict(month=m, tickets=_f(r["tickets"]), merch=_f(r["merch"]), refunds=_f(r["refunds"]), expenses=_f(r["expenses"]), net=_f(r["tickets"] + r["merch"] - r["expenses"])) for m, r in months.items()]
 
 
 def _new_month(m: str) -> dict:
-    return dict(tickets=Decimal(0), refunds=Decimal(0), expenses=Decimal(0))
+    return dict(tickets=Decimal(0), merch=Decimal(0), refunds=Decimal(0), expenses=Decimal(0))
 
 
 # ─── The club's season ───────────────────────────────────────────────────
@@ -242,30 +247,32 @@ async def club_summary(session, club, frm: date, to: date) -> dict:
         row = months.get(_month_of(e.event_datetime.astimezone(timezone.utc)))
         if row is not None:
             row["tickets"] += m["tickets"]
+            row["merch"] += m["merch"]
             row["refunds"] += m["refunds"]
             row["expenses"] += m["expenses"]
         kind = names.get(e.id, "Uncategorised")
-        t = types.setdefault(kind, dict(type=kind, events=0, tickets=Decimal(0), expenses=Decimal(0)))
+        t = types.setdefault(kind, dict(type=kind, events=0, tickets=Decimal(0), merch=Decimal(0), expenses=Decimal(0)))
         t["events"] += 1
         t["tickets"] += m["tickets"]
+        t["merch"] += m["merch"]
         t["expenses"] += m["expenses"]
         by_event.append(dict(
             id=e.id, name=e.name, starts_at=_iso(e.event_datetime), type=kind, status=e.status, regs=m["regs"], paying=m["paying"],
-            tickets=_f(m["tickets"]), refunds=_f(m["refunds"]), expenses=_f(m["expenses"]), net=_f(m["tickets"] - m["expenses"]),
+            tickets=_f(m["tickets"]), merch=_f(m["merch"]), refunds=_f(m["refunds"]), expenses=_f(m["expenses"]), net=_f(m["tickets"] + m["merch"] - m["expenses"]),
         ))
     for x in overheads:
         row = months.get(_month_of(x.incurred_on))
         if row is not None:
             row["expenses"] += Decimal(x.amount)
     if overheads:
-        types[CLUB_ROW] = dict(type=CLUB_ROW, events=0, tickets=Decimal(0), expenses=sum((Decimal(x.amount) for x in overheads), Decimal(0)))
+        types[CLUB_ROW] = dict(type=CLUB_ROW, events=0, tickets=Decimal(0), merch=Decimal(0), expenses=sum((Decimal(x.amount) for x in overheads), Decimal(0)))
     by_type = sorted(types.values(), key=lambda t: (-t["tickets"], -t["events"], t["type"]))
 
     return dict(
         scope="club", period=dict(start=frm, end=to),
         figures=_figures(cur, dict(conducted=conducted, upcoming=upcoming or 0, delta=_pct(conducted, prev_conducted))),
         deltas=_deltas(cur, prev), by_month=_month_rows(months),
-        by_type=[dict(type=t["type"], events=t["events"], tickets=_f(t["tickets"]), expenses=_f(t["expenses"]), net=_f(t["tickets"] - t["expenses"])) for t in by_type],
+        by_type=[dict(type=t["type"], events=t["events"], tickets=_f(t["tickets"]), merch=_f(t["merch"]), expenses=_f(t["expenses"]), net=_f(t["tickets"] + t["merch"] - t["expenses"])) for t in by_type],
         by_event=by_event, expenses=await _expense_rows(session, club.id, [e.id for e in events], frm, to),
         categories=list(EXPENSE_CATEGORIES), generated_at=_iso(now),
     )
@@ -297,6 +304,10 @@ async def event_summary(session, event) -> dict:
     )
     for when, amount in (await session.execute(q)).all():
         months.setdefault(_month_of(when), _new_month(""))["refunds"] += Decimal(amount or 0)
+    by_merch_month = utc_trunc("month", EventStoreOrders.paid_at)
+    q = select(by_merch_month, func.sum(EventStoreOrders.total)).where(EventStoreOrders.event_id == event.id, EventStoreOrders.status == "paid", EventStoreOrders.paid_at.is_not(None)).group_by(by_merch_month)
+    for when, amount in (await session.execute(q)).all():
+        months.setdefault(_month_of(when), _new_month(""))["merch"] += Decimal(amount or 0)
     expenses = await _expense_rows(session, event.club_id, [event.id], None, None)
     for x in expenses:
         months.setdefault(x["incurred_on"][:7], _new_month(""))["expenses"] += Decimal(str(x["amount"]))
@@ -403,7 +414,7 @@ def _writer():
 def _totals_section(w, f: dict) -> None:
     w.writerow([])
     w.writerow(["Totals"])
-    for key, label in (("gross", "Gross income"), ("refunds", "Refunds"), ("tickets", "Tickets held"), ("expenses", "Expenses"), ("net", "Net surplus"), ("outstanding", "Outstanding")):
+    for key, label in (("gross", "Gross income"), ("refunds", "Refunds"), ("tickets", "Tickets held"), ("merch", "Merchandise"), ("expenses", "Expenses"), ("net", "Net surplus"), ("outstanding", "Outstanding")):
         w.writerow([label, f[key]])
 
 
@@ -421,9 +432,9 @@ async def club_statement(session, club, frm: date, to: date) -> str:
     w.writerow(["Statement", _cell(club.name), f"{frm.isoformat()} to {to.isoformat()}"])
     w.writerow([])
     w.writerow(["Events"])
-    w.writerow(["Date", "Event", "Type", "Status", "Registrations", "Paying", "Tickets", "Refunds", "Expenses", "Net"])
+    w.writerow(["Date", "Event", "Type", "Status", "Registrations", "Paying", "Tickets", "Merchandise", "Refunds", "Expenses", "Net"])
     for r in s["by_event"]:
-        w.writerow([r["starts_at"][:10], _cell(r["name"]), _cell(r["type"]), r["status"], r["regs"], r["paying"], r["tickets"], r["refunds"], r["expenses"], r["net"]])
+        w.writerow([r["starts_at"][:10], _cell(r["name"]), _cell(r["type"]), r["status"], r["regs"], r["paying"], r["tickets"], r["merch"], r["refunds"], r["expenses"], r["net"]])
     _expenses_section(w, s["expenses"])
     _totals_section(w, s["figures"])
     return "﻿" + buf.getvalue()

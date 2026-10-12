@@ -76,6 +76,7 @@ class Figures(BaseModel):
     paying: int
     gross: float
     tickets: float
+    merch: float = 0
     refunds: float
     refund_count: int
     expenses: float
@@ -89,6 +90,7 @@ class Figures(BaseModel):
 class Deltas(BaseModel):
     gross: Optional[float]
     tickets: Optional[float]
+    merch: Optional[float] = None
     refunds: Optional[float]
     expenses: Optional[float]
     net: Optional[float]
@@ -97,6 +99,7 @@ class Deltas(BaseModel):
 class MonthRow(BaseModel):
     month: str
     tickets: float
+    merch: float = 0
     refunds: float
     expenses: float
     net: float
@@ -106,6 +109,7 @@ class TypeRow(BaseModel):
     type: str
     events: int
     tickets: float
+    merch: float = 0
     expenses: float
     net: float
 
@@ -119,6 +123,7 @@ class EventRow(BaseModel):
     regs: int
     paying: int
     tickets: float
+    merch: float = 0
     refunds: float
     expenses: float
     net: float

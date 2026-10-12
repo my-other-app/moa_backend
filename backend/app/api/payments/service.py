@@ -50,10 +50,12 @@ async def create_razorpay_order(
     receipt = f"{db_receipt}#{current_timestamp}"
 
     existing_order = await session.scalar(
-        select(PaymentOrders).where(PaymentOrders.receipt == db_receipt)
+        select(PaymentOrders).where(PaymentOrders.receipt == db_receipt, PaymentOrders.status != OrderStatus.paid, PaymentOrders.status != OrderStatus.refunded).order_by(PaymentOrders.created_at.desc())
     )
-
-    if existing_order:
+    # Reused only while it still asks for the same money: a changed pick
+    # from the shelf means a fresh order, not a stale amount.
+    if existing_order and float(existing_order.amount) == float(amount_in_rupee):
+        return existing_order
         return existing_order
 
     amount_in_paise = int(amount_in_rupee * 100)
@@ -247,6 +249,10 @@ async def _apply_refund(session: AsyncSession, db_payment: PaymentLogs) -> None:
     if event_registration:
         event_registration.is_paid = False
         event_registration.paid_amount = 0
+        # A full refund gives the shelf its pieces back too.
+        from app.api.store import service as store
+
+        await store.mark_refunded(session, event_registration.id)
 
     await session.commit()
 
