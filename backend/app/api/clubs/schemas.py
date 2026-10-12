@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List
 from fastapi import File, Form, UploadFile
-from pydantic import BaseModel, EmailStr, Field, HttpUrl
+from pydantic import BaseModel, EmailStr, Field, HttpUrl, field_validator
 from app.api.users.schemas import UserPublic
 from app.core.storage.fields import S3Image
 from app.api.interests.schemas import InterestPublic
@@ -90,9 +90,11 @@ class UpdateClub:
         website: str | None = Form(None),
         brand_primary: str | None = Form(None),
         brand_secondary: str | None = Form(None),
+        tagline: str | None = Form(None, max_length=120),
     ):
         self.name = name
         self.logo = logo
+        self.tagline = tagline
         self.brand_primary = brand_primary
         self.brand_secondary = brand_secondary
         self.about = about
@@ -124,8 +126,45 @@ class ClubPublic(ClubBase):
         from_attributes = True
 
 
+class ClubPartnerOut(CustomBaseModel):
+    id: int
+    name: str
+    role: str | None = None
+    since: int | None = None
+    sort_order: int = 0
+
+
+def _named(v):
+    if v is None:
+        return None
+    v = v.strip()
+    if not v:
+        raise ValueError("Name the partner")
+    return v
+
+
+class ClubPartnerCreate(CustomBaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    role: str | None = Field(None, max_length=80)
+    since: int | None = Field(None, ge=1900, le=2100)
+
+    _name = field_validator("name")(_named)
+
+
+class ClubPartnerPatch(CustomBaseModel):
+    name: str | None = Field(None, min_length=1, max_length=100)
+    role: str | None = Field(None, max_length=80)
+    since: int | None = Field(None, ge=1900, le=2100)
+    sort_order: int | None = Field(None, ge=0, le=10000)
+
+    _name = field_validator("name")(_named)
+
+
 class ClubPublicDetail(ClubPublic):
     socials: ClubSocials = Field(...)
+    tagline: str | None = Field(None)
+    cover: dict | None = Field(None)
+    partners: list[ClubPartnerOut] = Field(default_factory=list)
     location_link: str | None = Field(None)
     interests: list[str] = Field(...)
     followers_count: int = Field(...)
@@ -210,6 +249,9 @@ class ClubPublicDetailResponse(CustomBaseModel):
     name: str = Field(..., min_length=3, max_length=20)
     slug: str = Field(...)
     logo: dict | None = Field(None)
+    cover: dict | None = Field(None)
+    tagline: str | None = Field(None)
+    partners: list[ClubPartnerOut] = Field(default_factory=list)
     location_name: str | None = Field(None)
     location_link: str | None = Field(None)
     about: str | None = Field(None)
