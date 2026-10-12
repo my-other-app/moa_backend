@@ -93,3 +93,20 @@ async def test_event_detail_works_for_an_authenticated_user(
 # InvalidRequestError -- an artefact of the fixture, not of the endpoint.
 # Verifying repeat reads needs a per-request session fixture, which would be a
 # larger change to the suite than this fix warrants.
+
+
+@pytest.mark.asyncio
+async def test_event_detail_treats_a_dead_token_as_a_visitor(client, make_club, make_event):
+    """The event site keeps the token a registration handed it. Once that token
+    has expired or been revoked, the public event page must still load as it
+    would for anyone else, not fail with a 401 it never needed."""
+    owner, club = await make_club(name="Visitor Club", email="visitor@example.com")
+    event = await make_event(club=club, name="Open Evening", created_by=owner)
+
+    expired = await client.get(f"/api/v1/events/info/{event.id}", headers=auth_header("not-a-real-token"))
+    assert expired.status_code == 200, expired.text
+    assert expired.json()["name"] == "Open Evening"
+
+    # A route that requires a sign-in still refuses the same token.
+    refused = await client.get("/api/v1/clubs/dashboard", headers=auth_header("not-a-real-token"))
+    assert refused.status_code == 401
