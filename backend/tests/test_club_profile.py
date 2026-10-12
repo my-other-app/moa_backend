@@ -25,13 +25,16 @@ async def world(client, session, make_club, mint_token):
 async def test_tagline_and_cover_join_the_profile_and_the_handle_stays(client, world, fake_s3):
     h, club = world["h"], world["club"]
     slug = club.slug
-    saved = await client.put("/api/v1/clubs/update", data={"name": "Yukthi", "tagline": "  Pune's student electronics and robotics club  ", "slug": "something-else"}, headers=h)
+    # Neither the name nor the handle is the form's to change.
+    saved = await client.put("/api/v1/clubs/update", data={"name": "Renamed", "tagline": "  Pune's student electronics and robotics club  ", "slug": "something-else"}, headers=h)
     assert saved.status_code == 200, saved.text
     me = (await client.get("/api/v1/clubs/info", headers=h)).json()
-    assert me["tagline"] == "Pune's student electronics and robotics club" and me["slug"] == slug and me["cover"] is None and me["partners"] == []
+    assert me["name"] == "Yukthi" and me["slug"] == slug
+    assert me["tagline"] == "Pune's student electronics and robotics club" and me["cover"] is None and me["partners"] == []
+    assert (await client.put("/api/v1/clubs/update", data={"tagline": "No name sent at all"}, headers=h)).status_code == 200
     assert (await client.put("/api/v1/clubs/update", data={"name": "Yukthi", "tagline": "x" * 121}, headers=h)).status_code == 422
     # Cleared when sent empty, like every other field on this form.
-    await client.put("/api/v1/clubs/update", data={"name": "Yukthi", "tagline": ""}, headers=h)
+    await client.put("/api/v1/clubs/update", data={"tagline": ""}, headers=h)
     assert (await client.get("/api/v1/clubs/info", headers=h)).json()["tagline"] is None
 
     cover = await client.put("/api/v1/clubs/cover", files={"cover": ("banner.png", _png(), "image/png")}, headers=h)
@@ -40,7 +43,7 @@ async def test_tagline_and_cover_join_the_profile_and_the_handle_stays(client, w
     assert (await client.get("/api/v1/clubs/info", headers=h)).json()["cover"] is not None
 
 
-async def test_partners_are_listed_in_order_and_kept_to_their_club(client, world):
+async def test_partners_are_listed_in_order_and_kept_to_their_club(client, world, fake_s3):
     h = world["h"]
     kl = await client.post("/api/v1/clubs/partners", json={"name": "Kinetic Labs", "role": "Industry partner", "since": 2025}, headers=h)
     assert kl.status_code == 201, kl.text
@@ -66,6 +69,11 @@ async def test_partners_are_listed_in_order_and_kept_to_their_club(client, world
         assert (await client.patch(f"/api/v1/clubs/partners/{gp['id']}", json=bad, headers=h)).status_code == 422, bad
     assert (await client.post("/api/v1/clubs/partners", json={"name": " "}, headers=h)).status_code == 422
 
+    # A logo, as an image only, on our partner only.
+    with_logo = await client.put(f"/api/v1/clubs/partners/{gp['id']}/logo", files={"logo": ("gdg.png", _png(), "image/png")}, headers=h)
+    assert with_logo.status_code == 200 and with_logo.json()["logo"] is not None
+    assert (await client.put(f"/api/v1/clubs/partners/{gp['id']}/logo", files={"logo": ("x.txt", b"no", "text/plain")}, headers=h)).status_code == 422
+    assert (await client.put(f"/api/v1/clubs/partners/{theirs['id']}/logo", files={"logo": ("gdg.png", _png(), "image/png")}, headers=h)).status_code == 404
     assert (await client.patch(f"/api/v1/clubs/partners/{theirs['id']}", json={"name": "Ours now"}, headers=h)).status_code == 404
     assert (await client.delete(f"/api/v1/clubs/partners/{theirs['id']}", headers=h)).status_code == 404
     assert (await client.delete(f"/api/v1/clubs/partners/{cm['id']}", headers=h)).json() == {"deleted": True}

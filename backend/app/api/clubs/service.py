@@ -132,7 +132,8 @@ async def update_club(session: AsyncSession, club_id: int, club: CreateClub):
             "filename": club.logo.filename,
         }
 
-    db_club.name = club.name
+    if club.name:
+        db_club.name = club.name
     db_club.about = club.about
     if hasattr(club, "tagline"):
         db_club.tagline = (club.tagline or "").strip() or None
@@ -1093,7 +1094,16 @@ async def update_club_cover(session: AsyncSession, club_id: int, cover: UploadFi
 
 
 def _partner_out(p: ClubPartners) -> dict:
-    return {"id": p.id, "name": p.name, "role": p.role, "since": p.since, "sort_order": p.sort_order}
+    return {"id": p.id, "name": p.name, "role": p.role, "since": p.since, "sort_order": p.sort_order, "logo": p.logo}
+
+
+async def update_partner_logo(session: AsyncSession, p: ClubPartners, logo: UploadFile) -> dict:
+    if p.logo:
+        p.logo.delete()
+    p.logo = {"bytes": io.BytesIO(await logo.read()), "filename": logo.filename}
+    await session.commit()
+    await session.refresh(p)
+    return _partner_out(p)
 
 
 async def list_partners(session: AsyncSession, club_id: int) -> list[ClubPartners]:

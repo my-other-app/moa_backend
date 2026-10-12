@@ -147,3 +147,7 @@ class ClubPartners(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     role = Column(String(80), nullable=True)
     since = Column(Integer, nullable=True)
     sort_order = Column(Integer, nullable=False, default=0)
+    logo = Column(
+        S3ImageField(upload_to="clubs/partners/", variations={"thumbnail": {"width": 150, "height": 150}, "medium": {"width": 400, "height": 400}}),
+        nullable=True,
+    )

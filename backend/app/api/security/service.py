@@ -251,10 +251,21 @@ async def overview(session, user, current_sid: str | None) -> dict:
     sessions_out.sort(key=lambda s: (not s["current"], s["last_seen_at"] or ""), reverse=False)
     sessions_out = sorted(sessions_out, key=lambda s: (0 if s["current"] else 1, -(datetime.fromisoformat(s["last_seen_at"]).timestamp() if s["last_seen_at"] else 0)))
 
+    # Sessions that began before the door kept a record (or through Google or
+    # Apple, which record nothing yet) still count as sign-ins: one each.
+    recorded = {sid for sid in (await session.scalars(select(SignInAttempts.session_id).where(SignInAttempts.user_id == user.id, SignInAttempts.session_id.is_not(None)))).all()}
+    unrecorded = [s for s in (await session.scalars(select(session_store.UserSessions).where(session_store.UserSessions.user_id == user.id, session_store.UserSessions.created_at >= d60))).all() if s.id not in recorded]
+    extra = []
+    for s in unrecorded:
+        device, _ = parse_agent(s.user_agent)
+        when = s.created_at if s.created_at.tzinfo else s.created_at.replace(tzinfo=timezone.utc)
+        extra.append(dict(id=f"session-{s.id}", at=when, place=await place_for(session, s.ip_address, resolve=False), device=device, ip_address=s.ip_address, method="password", result="signed_in"))
+
     async def window(frm, to):
         rows = list((await session.execute(
             select(SignInAttempts.result, SignInAttempts.place).where(mine, SignInAttempts.created_at >= frm, SignInAttempts.created_at < to)
         )).all())
+        rows += [(x["result"], x["place"]) for x in extra if frm <= x["at"] < to]
         signed = sum(1 for r, _ in rows if r == "signed_in")
         failed = sum(1 for r, _ in rows if r in FAILED_RESULTS or r == "blocked")
         places = {p for _, p in rows if p}
@@ -274,7 +285,11 @@ async def overview(session, user, current_sid: str | None) -> dict:
     history = []
     for a in (await session.scalars(select(SignInAttempts).where(mine).order_by(SignInAttempts.created_at.desc()).limit(60))).all():
         device, _ = parse_agent(a.user_agent)
-        history.append(dict(id=str(a.id), at=_iso(a.created_at), place=a.place, device=device, ip_address=a.ip_address, method=a.method, result=a.result))
+        at = a.created_at if a.created_at.tzinfo else a.created_at.replace(tzinfo=timezone.utc)
+        history.append(dict(id=str(a.id), at=at, place=a.place, device=device, ip_address=a.ip_address, method=a.method, result=a.result))
+    history = sorted(history + extra, key=lambda h: h["at"], reverse=True)[:60]
+    for h in history:
+        h["at"] = _iso(h["at"])
 
     return dict(
         account=await account_name(session, user),
