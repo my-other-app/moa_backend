@@ -22,6 +22,7 @@ from app.api.analytics.router import router as analytics_router
 from app.api.club_designs.router import router as club_designs_router
 from app.api.finance.router import router as finance_router
 from app.api.security.router import router as security_router
+from app.api.threads.router import public_router as threads_public_router, router as threads_router
 from app.api.links.router import router as links_router
 from app.api.emails.router import (
     library_router as email_library_router,
@@ -60,7 +61,9 @@ api_router.include_router(router=analytics_router, tags=["analytics"])
 api_router.include_router(router=club_designs_router, tags=["club-designs"])
 api_router.include_router(router=links_router, tags=["tracking-links"])
 api_router.include_router(router=finance_router, tags=["finance"])
+api_router.include_router(router=threads_router, tags=["threads"])
 api_router.include_router(router=security_router, tags=["security"])
+api_router.include_router(router=threads_public_router, tags=["threads"])
 api_router.include_router(router=club_router, tags=["clubs"])
 # Before the events router: these sit under /events/{event_id} and the
 # events router owns the rest of that space.

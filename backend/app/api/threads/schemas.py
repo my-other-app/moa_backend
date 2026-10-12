@@ -1,0 +1,89 @@
+from typing import Literal, Optional
+
+from pydantic import BaseModel, Field, field_validator
+
+MAX_BODY = 500
+MAX_OPTIONS = 4
+MAX_OPTION = 60
+
+
+class PollOptionOut(BaseModel):
+    id: str
+    label: str
+    votes: int
+    share: int
+
+
+class PollOut(BaseModel):
+    options: list[PollOptionOut]
+    votes: int
+    voted_option_id: Optional[str]
+
+
+class ClubRef(BaseModel):
+    id: int
+    name: str
+    slug: Optional[str] = None
+    logo: Optional[dict] = None
+
+
+class ThreadOut(BaseModel):
+    id: str
+    club: ClubRef
+    body: str
+    image: Optional[dict]
+    kind: Literal["post", "poll"]
+    poll: Optional[PollOut]
+    pinned: bool
+    notify_followers: bool
+    likes: int
+    comments: int
+    views: int
+    liked: bool
+    created_at: str
+
+
+class ThreadPage(BaseModel):
+    items: list[ThreadOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class Author(BaseModel):
+    id: Optional[int]
+    name: str
+    is_club: bool
+
+
+class CommentOut(BaseModel):
+    id: str
+    body: str
+    author: Author
+    created_at: str
+
+
+class ThreadPatch(BaseModel):
+    pinned: Optional[bool] = None
+    body: Optional[str] = Field(None, min_length=1, max_length=MAX_BODY)
+
+
+class CommentCreate(BaseModel):
+    body: str = Field(..., min_length=1, max_length=500)
+
+    @field_validator("body")
+    @classmethod
+    def _trim(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Write something first")
+        return v
+
+
+class VoteIn(BaseModel):
+    option_id: str
+
+
+class LikeOut(BaseModel):
+    liked: bool
+    likes: int
