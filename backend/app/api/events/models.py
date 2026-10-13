@@ -65,6 +65,8 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     # Merchandise sold at registration, and free swag counted out at the door.
     merch_enabled = Column(Boolean, nullable=False, default=False)
     swag_enabled = Column(Boolean, nullable=False, default=False)
+    # Live Q&A: a question waits for the organiser before the room sees it.
+    qa_approve_first = Column(Boolean, nullable=False, default=True, server_default=sa.true())
     duration = Column(Float, nullable=False)
     about = Column(String, nullable=True)
     location_name = Column(String, nullable=True)
