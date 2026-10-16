@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
@@ -87,3 +88,159 @@ class LinksSummary(BaseModel):
     deltas: Deltas
     untracked: Untracked
     generated_at: str
+
+
+# ─── The Tracking links page ──────────────────────────────────────────────
+
+
+class LinkTarget(BaseModel):
+    kind: str
+    id: Optional[int]
+    name: str
+    starts_at: Optional[datetime]
+
+
+class LinkRow(BaseModel):
+    id: UUID
+    name: str
+    code: str
+    url: str
+    destination: str
+    utm_source: str
+    utm_medium: str
+    utm_campaign: Optional[str]
+    utm_content: Optional[str]
+    target: LinkTarget
+    conversion_noun: str
+    second_noun: str
+    clicks: int
+    uniques: int
+    conversions: int
+    rate: float
+    second: int
+    clicks_ever: int
+    last_click_at: Optional[datetime]
+    created_at: datetime
+
+
+class SeriesPoint(BaseModel):
+    date: str
+    clicks: int
+    conversions: int
+
+
+class SourceSummary(BaseModel):
+    source: str
+    links: int
+    clicks: int
+    conversions: int
+    rate: float
+
+
+class BestSource(BaseModel):
+    source: str
+    conversions: int
+    rate: float
+
+
+class BestLink(BaseModel):
+    id: UUID
+    name: str
+    source: str
+    conversions: int
+    rate: float
+
+
+class OverviewTotals(BaseModel):
+    links: int
+    clicks: int
+    uniques: int
+    conversions: int
+    rate: float
+    follows: int
+    registrations: int
+    second: int
+    share_of_all: float
+    best_source: Optional[BestSource]
+    best_link: Optional[BestLink]
+    last_click_at: Optional[datetime]
+
+
+class TrackedOfAll(BaseModel):
+    tracked: int
+    total: int
+
+
+class OverviewUntracked(BaseModel):
+    follows: TrackedOfAll
+    registrations: TrackedOfAll
+    conversions: int
+    total: int
+
+
+class NeverOpened(BaseModel):
+    id: UUID
+    name: str
+    target: LinkTarget
+
+
+class OverviewAttention(BaseModel):
+    never_opened: list[NeverOpened]
+
+
+class AllTime(BaseModel):
+    links: int
+    clicks: int
+
+
+class LinksOverview(BaseModel):
+    scope: str
+    period_days: int
+    grain: str
+    links: list[LinkRow]
+    series: list[SeriesPoint]
+    by_source: list[SourceSummary]
+    totals: OverviewTotals
+    deltas: Deltas
+    untracked: OverviewUntracked
+    attention: OverviewAttention
+    all_time: AllTime
+    generated_at: datetime
+
+
+class DetailPoint(BaseModel):
+    date: str
+    clicks: int
+
+
+class DeviceShare(BaseModel):
+    device: str
+    clicks: int
+
+
+class ReferrerShare(BaseModel):
+    referrer: str
+    clicks: int
+
+
+class HourShare(BaseModel):
+    hour: int
+    clicks: int
+
+
+class LinkDetail(BaseModel):
+    id: UUID
+    name: str
+    code: str
+    url: str
+    destination: str
+    clicks: int
+    uniques: int
+    first_click_at: Optional[datetime]
+    last_click_at: Optional[datetime]
+    series: list[DetailPoint]
+    devices: list[DeviceShare]
+    referrers: list[ReferrerShare]
+    hours: list[HourShare]
+    created_at: datetime
+    generated_at: datetime

@@ -141,3 +141,48 @@ async def test_links_are_edited_retired_and_kept_to_their_club(client, world):
     gone = await client.get(f"/l/{link['code']}")
     assert gone.status_code == 302 and gone.headers["location"] == settings.PUBLIC_SITE_URL
     assert (await client.delete(_event_url(world, f"/{link['id']}"), headers=h)).status_code == 404
+
+
+async def test_the_page_reads_every_link_of_the_club_with_its_days_channels_and_what_came_without_one(client, session, world):
+    h, club, fan, event = world["h"], world["club"], world["fan"], world["event"]
+    bio = (await client.post("/api/v1/clubs/links", json={"name": "Instagram bio", "utm_source": "instagram", "utm_medium": "social"}, headers=h)).json()
+    poster = (await client.post(_event_url(world), json={"name": "Freshers fair QR", "utm_source": "poster_qr", "utm_medium": "print"}, headers=h)).json()
+    unshared = (await client.post(_event_url(world), json={"name": "Notice board", "utm_source": "poster_qr", "utm_medium": "print"}, headers=h)).json()
+    # Opened on two phones and a laptop, from Instagram's in-app browser and from nowhere in particular.
+    await client.get(f"/l/{bio['code']}", headers={"user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Mobile Safari", "x-forwarded-for": "10.0.0.1", "referer": "https://l.instagram.com/?u=x"})
+    await client.get(f"/l/{bio['code']}", headers={"user-agent": "Mozilla/5.0 (Linux; Android 14) Mobile Chrome", "x-forwarded-for": "10.0.0.2"})
+    await client.get(f"/l/{poster['code']}", headers={"user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X) Chrome", "x-forwarded-for": "10.0.0.3"})
+    # One follow through the bio, one sign-up through the poster, one sign-up with no link at all.
+    assert (await client.post(f"/api/v1/clubs/follow/{club.id}?ref={bio['code']}", headers=world["fan_h"])).status_code == 200
+    await _register(client, event.id, ref=poster["code"])
+    await _register(client, event.id)
+
+    o = (await client.get("/api/v1/clubs/links/overview", headers=h)).json()
+    assert o["scope"] == "club" and o["grain"] == "day" and o["totals"]["links"] == 3
+    assert o["totals"] == {**o["totals"], "clicks": 3, "uniques": 3, "conversions": 2, "follows": 1, "registrations": 1, "rate": 66.7, "share_of_all": 66.7}
+    assert o["totals"]["best_source"]["source"] in ("instagram", "poster_qr") and o["totals"]["best_link"]["conversions"] == 1
+    by_name = {l["name"]: l for l in o["links"]}
+    assert by_name["Instagram bio"]["target"] == {"kind": "club", "id": None, "name": "Club page", "starts_at": None}
+    assert by_name["Instagram bio"]["conversion_noun"] == "follow" and by_name["Instagram bio"]["clicks"] == 2 and by_name["Instagram bio"]["conversions"] == 1
+    assert by_name["Freshers fair QR"]["target"]["kind"] == "event" and by_name["Freshers fair QR"]["target"]["name"] == "Hack Night"
+    assert by_name["Freshers fair QR"]["conversion_noun"] == "registration" and by_name["Freshers fair QR"]["rate"] == 100.0
+    assert by_name["Notice board"]["clicks_ever"] == 0 and by_name["Notice board"]["last_click_at"] is None
+    # Too new to call unopened; the day's bar carries all three openings and both sign-ups.
+    assert o["attention"]["never_opened"] == []
+    assert sum(p["clicks"] for p in o["series"]) == 3 and sum(p["conversions"] for p in o["series"]) == 2 and len(o["series"]) == 31
+    assert o["untracked"] == {"follows": {"tracked": 1, "total": 1}, "registrations": {"tracked": 1, "total": 2}, "conversions": 1, "total": 3}
+    sources = {s["source"]: s for s in o["by_source"]}
+    assert sources["poster_qr"]["links"] == 2 and sources["poster_qr"]["clicks"] == 1 and sources["instagram"]["conversions"] == 1
+
+    # The event's own page sees only its links, and never the follow.
+    e = (await client.get(_event_url(world, "/overview"), headers=h)).json()
+    assert [l["name"] for l in e["links"]] == ["Notice board", "Freshers fair QR"] and e["totals"]["follows"] == 0 and e["untracked"]["total"] == 2
+
+    # One link opened further: its days, devices and where the openings came from.
+    d = (await client.get(f"/api/v1/clubs/links/{bio['id']}/detail", headers=h)).json()
+    assert d["clicks"] == 2 and d["uniques"] == 2 and d["devices"] == [{"device": "phone", "clicks": 2}]
+    assert {r["referrer"]: r["clicks"] for r in d["referrers"]} == {"Instagram": 1, "Direct · app or typed": 1}
+    assert sum(p["clicks"] for p in d["series"]) == 2 and len(d["hours"]) == 24 and sum(x["clicks"] for x in d["hours"]) == 2
+    assert (await client.get(f"/api/v1/clubs/links/{poster['id']}/detail", headers=world["rival"])).status_code == 404
+    assert (await client.get(_event_url(world, f"/{bio['id']}/detail"), headers=h)).status_code == 404
+    assert (await client.get(_event_url(world, f"/{unshared['id']}/detail"), headers=h)).json()["clicks"] == 0
