@@ -3,7 +3,7 @@ import io
 import logging
 from typing import Optional
 from fastapi import Request, UploadFile
-from sqlalchemy import and_, delete, exists, select, func, or_, text
+from sqlalchemy import ARRAY, Integer, and_, any_, cast, delete, exists, literal_column, select, func, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
 from sqlalchemy.dialects.postgresql import INTERVAL
@@ -25,6 +25,7 @@ from app.api.events.models import (
     Events,
     EventRatingsLink,
     EventSpeakers,
+    ends_at_sql,
 )
 from app.api.closeout.models import LOCKED_STATUSES, EventStatus
 from app.api.discover import geo
@@ -549,29 +550,42 @@ async def list_events(
 ):
     """List events with filters and search."""
 
-    # Base query - filter out soft-deleted events
-    query = select(Events).where(Events.is_deleted == False).options(
-        joinedload(Events.category),
-        joinedload(Events.club),
-    )
+    # Base query - filter out soft-deleted events. Narrow: the page is chosen
+    # on ids and dates, then only its events are read in full (below), rather
+    # than sorting thousands of whole rows with their club and category.
+    query = select(Events.id).where(Events.is_deleted == False)
 
     # Search filter - use ILIKE for case-insensitive pattern matching
-    # Searches in event name and category name
+    # Searches in event name and category name. The category side is the ids
+    # of the categories whose name matches, compared as one array, so both
+    # sides of the OR can use an index (a trigram index on the name).
     if search and search.strip():
         search_pattern = f"%{search.strip()}%"
-        query = query.outerjoin(EventCategories, Events.category_id == EventCategories.id).filter(
+        matching_categories = select(func.array_agg(EventCategories.id)).where(
+            EventCategories.name.ilike(search_pattern),
+            EventCategories.is_deleted == False,
+        ).scalar_subquery()
+        query = query.filter(
             or_(
                 Events.name.ilike(search_pattern),
-                EventCategories.name.ilike(search_pattern),
+                Events.category_id == any_(func.coalesce(matching_categories, cast(literal_column("'{}'"), ARRAY(Integer)))),
             )
         )
 
-    # Filter by interests (add distinct to avoid duplicates)
+    # Filter by interests: an event with any of them, once. A semi-join
+    # (EXISTS) rather than a join and DISTINCT: DISTINCT over every column of
+    # events cannot compare additional_details (json[]), which made this
+    # filter fail outright, and it would sort every row to de-duplicate.
     if interest_ids:
-        query = query.join(EventInterestsLink).filter(
-            EventInterestsLink.interest_id.in_(interest_ids),
-            EventInterestsLink.is_deleted == False,
-        ).distinct()
+        query = query.filter(
+            exists(
+                select(EventInterestsLink.id).where(
+                    EventInterestsLink.event_id == Events.id,
+                    EventInterestsLink.interest_id.in_(interest_ids),
+                    EventInterestsLink.is_deleted == False,
+                )
+            )
+        )
 
     # Filter by following clubs
     if is_following and user_id:
@@ -609,8 +623,9 @@ async def list_events(
 
     # event_end_time = event_datetime + duration hours
     if is_ended is not None:
-        # event_end_time = event_datetime + duration * 1 hour
-        event_end_time = Events.event_datetime + (Events.duration * text("INTERVAL '1 hour'"))
+        # event_end_time = event_datetime + duration * 1 hour, in the form
+        # ix_events_ends_at indexes (see ends_at_sql).
+        event_end_time = ends_at_sql(Events)
         if is_ended:
             # Past events: event has ended (end_time < now)
             query = query.filter(event_end_time < func.now())
@@ -621,14 +636,25 @@ async def list_events(
     # Order by event_datetime instead of created_at
     # Past events: most recently ended first
     # Upcoming events: soonest first
+    # The id settles ties, so a page boundary cannot fall between two events
+    # at the same instant differently from one request to the next.
     if is_ended:
-        query = query.order_by(Events.event_datetime.desc())
+        query = query.order_by(Events.event_datetime.desc(), Events.id.desc())
     else:
-        query = query.order_by(Events.event_datetime.asc())
+        query = query.order_by(Events.event_datetime.asc(), Events.id.asc())
 
     query = query.limit(limit).offset(offset)
-    result = await session.execute(query)
-    return result.scalars().unique().all()
+    ids = list(dict.fromkeys((await session.scalars(query)).all()))
+    if not ids:
+        return []
+    loaded = await session.scalars(
+        select(Events).where(Events.id.in_(ids)).options(
+            joinedload(Events.category),
+            joinedload(Events.club),
+        )
+    )
+    by_id = {e.id: e for e in loaded.unique().all()}
+    return [by_id[i] for i in ids if i in by_id]
 
 
 async def create_event_category(
