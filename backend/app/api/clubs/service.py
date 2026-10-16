@@ -28,6 +28,7 @@ from app.api.interests.models import Interests
 from app.core.validations.schema import validate_relations
 from app.api.orgs.models import Organizations
 from app.api.events.models import Events, EventRegistrationsLink, EventRatingsLink
+from app.api.discover import geo
 
 
 async def create_club(
@@ -146,7 +147,9 @@ async def update_club(session: AsyncSession, club_id: int, club: CreateClub):
             raise CustomHTTPException(422, message=f"{key.replace('_', ' ')}: use a 6-digit hex colour, like #1db9a0.")
         setattr(db_club, key, value or None)
     db_club.location_name = club.location_name
-    db_club.location_link = club.location_link
+    # A changed map link moves the club's point (read now, or followed after the save); the same link keeps it.
+    if ((club.location_link or "").strip() or None) != db_club.location_link:
+        geo.set_link(db_club, club.location_link)
     db_club.org_id = club.org_id
     db_club.contact_phone = club.contact_phone
     db_club.contact_email = club.contact_email

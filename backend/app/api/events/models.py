@@ -72,6 +72,9 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     about = Column(String, nullable=True)
     location_name = Column(String, nullable=True)
     location_link = Column(String, nullable=True)
+    # Where the venue is, read from location_link (a map link) when it holds one; for "near you".
+    lat = Column(Float, nullable=True)
+    lng = Column(Float, nullable=True)
     has_prize = Column(Boolean, nullable=False, default=False)
     prize_amount = Column(Numeric(10, 2), nullable=True)
     contact_name = Column(String, nullable=True)

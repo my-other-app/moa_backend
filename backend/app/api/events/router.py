@@ -1,5 +1,6 @@
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Depends,
     Request,
     Query,
@@ -30,6 +31,7 @@ from typing import Optional, List
 
 from app.db.core import SessionDep
 from app.api.events import service
+from app.api.discover import geo
 from app.api.audit import service as audit
 from app.core.response.sorting import apply_sort
 from app.api.events.access import is_admin_user
@@ -80,6 +82,12 @@ router.include_router(volunteer_router, tags=["Volunteer"])
 router.include_router(registration_router, tags=["Registration"])
 
 
+def _follow_map_link(background_tasks: BackgroundTasks, event) -> None:
+    """A short map link (maps.app.goo.gl…) is followed after the answer, to find the venue's point."""
+    if geo.needs_resolving(event):
+        background_tasks.add_task(geo.resolve_and_store, "event", event.id)
+
+
 def _role_of(registration) -> Optional[RegistrationRole]:
     """See app.api.events.tickets.role_of; kept under this name for the callers here."""
     return role_of(registration)
@@ -113,11 +121,12 @@ async def list_event_categories(
 @router.post("/create", summary="Create a new event")
 async def create_event(
     user: ClubAuth,
+    background_tasks: BackgroundTasks,
     session: SessionDep = SessionDep,
     event: EventCreate = Depends(),
     speaker_photos: List[UploadFile] = File([]),
 ) -> EventCreateUpdateResponse:
-    return await service.create_event(
+    created = await service.create_event(
         session,
         user_id=user.id,
         name=event.name,
@@ -128,6 +137,7 @@ async def create_event(
         has_fee=event.has_fee,
         reg_fee=event.reg_fee,
         location_name=event.location_name,
+        location_link=event.location_link,
         has_prize=event.has_prize,
         prize_amount=event.prize_amount,
         is_online=event.is_online,
@@ -147,17 +157,20 @@ async def create_event(
         speaker_photos=speaker_photos,
         status=event.status,
     )
+    _follow_map_link(background_tasks, created)
+    return created
 
 
 @router.put("/update/{event_id}", summary="Update an event")
 async def update_event(
     event_id: int,
     user: ClubAuth,
+    background_tasks: BackgroundTasks,
     session: SessionDep = SessionDep,
     event: EventEdit = Depends(),
     speaker_photos: List[UploadFile] = File([]),
 ) -> EventCreateUpdateResponse:
-    return await service.update_event(
+    updated = await service.update_event(
         session,
         event,
         user.id,
@@ -165,6 +178,8 @@ async def update_event(
         speaker_photos=speaker_photos,
         as_admin=is_admin_user(user),
     )
+    _follow_map_link(background_tasks, updated)
+    return updated
 
 
 @router.get("/info/{event_id}", summary="Get event info")
