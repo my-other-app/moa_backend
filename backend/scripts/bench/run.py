@@ -190,6 +190,7 @@ async def main() -> None:
     p.add_argument("--budget", type=float, default=40.0)
     p.add_argument("--warmup", type=int, default=3)
     p.add_argument("--only", help="comma-separated substrings of endpoint names")
+    p.add_argument("--skip", help="comma-separated substrings of endpoint names to leave out")
     p.add_argument("--explain", help="write EXPLAIN (ANALYZE, BUFFERS) of the slowest statements here")
     p.add_argument("--explain-all", action="store_true", help="explain every statement of the request, not the slowest two")
     p.add_argument("--indexes", help="write which indexes each endpoint's plans use here (JSON); implies explaining every statement")
@@ -227,6 +228,8 @@ async def main() -> None:
         for name, path, params, signed in endpoints(targets):
             if args.only and not any(o.strip() in name for o in args.only.split(",")):
                 continue
+            if args.skip and any(o.strip() in name for o in args.skip.split(",")):
+                continue
             headers = {"Authorization": f"Bearer {token}"} if signed else {}
 
             async def call():
@@ -238,7 +241,11 @@ async def main() -> None:
                 cap.take()
                 cap.on = True
                 t0 = time.perf_counter()
-                r = await client.get(API + path, params=params, headers=h)
+                try:
+                    r = await client.get(API + path, params=params, headers=h)
+                except Exception as exc:  # noqa: BLE001 — the app raised: recorded, and the run goes on
+                    cap.on = False
+                    raise Unsupported(f"500 {type(exc).__name__}: {str(exc).splitlines()[0][:160]}")
                 took = time.perf_counter() - t0
                 cap.on = False
                 if r.status_code != 200:
