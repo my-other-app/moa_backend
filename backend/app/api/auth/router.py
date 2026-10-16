@@ -5,19 +5,22 @@ from fastapi.security import OAuth2PasswordRequestForm
 from fastapi import status
 import jwt
 
-from app.core.rate_limit import limiter
+from app.core.rate_limit import account_or_address, limiter
 from app.core.auth.jwt import create_access_token, decode_jwt_token
 from app.core.auth.authentication import (
     authenticate_user,
     get_user,
     get_password_hash,
 )
-from app.core.auth.dependencies import DependsAuth, AdminAuth
+from app.core.auth.dependencies import DependsAuth, AdminAuth, UserAuth
 from app.core.auth.permissions import ImpersonateAuth, ResetCredentialsAuth
 from app.response import CustomHTTPException
 from app.api.auth.schemas import (
     AuthTokenData,
     AuthUser,
+    EmailCodeSent,
+    EmailVerified,
+    EmailVerifyRequest,
     Token,
     GoogleSignInRequest,
     AppleSignInRequest,
@@ -331,6 +334,63 @@ async def read_users_me(
     current_user: DependsAuth,
 ):
     return current_user
+
+
+@router.post("/email/send-code", summary="Send a code that verifies the account's email")
+@limiter.limit("5/minute", key_func=account_or_address)
+async def send_email_code(
+    request: Request,
+    session: SessionDep,
+    user: UserAuth,
+    background: BackgroundTasks,
+) -> EmailCodeSent:
+    """
+    Six digits to the account's own address, good for fifteen minutes; any
+    earlier code stops working. Once a minute and ten times a day per account:
+    sooner is a 429 with `errors.retry_after` in seconds. 409 ALREADY_VERIFIED
+    when there is nothing to verify. The mail goes out after the response.
+    """
+    from app.api.auth import verification
+
+    code = await verification.issue(session, user)
+    email, name = user.email, user.full_name
+    await session.commit()
+    background.add_task(verification.send_code_email, email, code=code, name=name)
+    return EmailCodeSent(
+        email=email,
+        expires_in=int(verification.CODE_TTL.total_seconds()),
+        retry_after=int(verification.RESEND_AFTER.total_seconds()),
+    )
+
+
+@router.post("/email/verify", summary="Verify the account's email with the code sent to it")
+@limiter.limit("10/minute", key_func=account_or_address)
+async def verify_email(
+    request: Request,
+    body: EmailVerifyRequest,
+    session: SessionDep,
+    user: UserAuth,
+) -> EmailVerified:
+    """
+    On a match the address is verified, every code closed, and whatever was
+    booked as a guest under the address is brought into the account. A wrong
+    code is a 400 CODE_INVALID with `errors.attempts_left`; the fifth wrong
+    one kills the code (CODE_LOCKED); an old, replaced or absent one is
+    CODE_EXPIRED.
+    """
+    from app.api.auth import verification
+    from app.api.users.service import merge_guest_into_user
+
+    verified_at = await verification.verify(session, user, body.code)
+    # Never raises: a merge that fails is undone on its own and retried by
+    # the next profile load, and the verification still stands.
+    summary = await merge_guest_into_user(session, user)
+    await session.commit()
+    return EmailVerified(
+        email_verified_at=verified_at,
+        merged=bool(summary.get("merged")),
+        registrations_transferred=int(summary.get("registrations_transferred") or 0),
+    )
 
 
 @router.post("/change-password", summary="Change user password")
