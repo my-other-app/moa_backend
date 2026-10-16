@@ -14,7 +14,6 @@ keeps that one lookup cheap.
 Revision ID: allow_repeat_guests
 Revises: add_event_page
 """
-import sqlalchemy as sa
 from alembic import op
 
 revision = "allow_repeat_guests"
@@ -50,20 +49,28 @@ def upgrade() -> None:
         END $$;
         """
     )
-    op.create_index(
-        "uq_users_email_user_type",
-        "users",
-        ["email", "user_type"],
-        unique=True,
-        postgresql_where=sa.text("user_type <> 'guest'"),
-    )
-    op.create_index(
-        "uq_users_phone_user_type",
-        "users",
-        ["phone", "user_type"],
-        unique=True,
-        postgresql_where=sa.text("user_type <> 'guest'"),
-    )
+    # Production's schema has drifted from the migrations before (it once
+    # lacked primary keys). If it never had these constraints and already
+    # holds duplicates, a unique index would fail the whole deploy; then the
+    # index is created plain, as unenforced as before, and a notice says so.
+    for column in ("email", "phone"):
+        op.execute(
+            f"""
+            DO $$
+            BEGIN
+              IF EXISTS (
+                SELECT 1 FROM users
+                WHERE user_type <> 'guest' AND {column} IS NOT NULL
+                GROUP BY {column}, user_type HAVING count(*) > 1
+              ) THEN
+                RAISE NOTICE 'users has duplicate ({column}, user_type) outside guests; index created without UNIQUE';
+                CREATE INDEX uq_users_{column}_user_type ON users ({column}, user_type) WHERE user_type <> 'guest';
+              ELSE
+                CREATE UNIQUE INDEX uq_users_{column}_user_type ON users ({column}, user_type) WHERE user_type <> 'guest';
+              END IF;
+            END $$;
+            """
+        )
     op.execute("CREATE INDEX ix_users_email_normalised ON users (lower(btrim(email)))")
 
 
