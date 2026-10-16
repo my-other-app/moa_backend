@@ -36,6 +36,9 @@ def main(paths: list[str]) -> None:
             if row is None:
                 cells.append("— | —")
                 continue
+            if "unsupported" in row:
+                cells.append(f"not offered ({row['unsupported'][:3]}) | —")
+                continue
             stmts = str(row["statements_min"]) if row["statements_min"] == row["statements_max"] else f"{row['statements_min']}–{row['statements_max']}"
             cells.append(f"{_ms(row['p50'])} / {_ms(row['p95'])} (n={row['n']}) | {stmts}")
         print(f"| {name} | " + " | ".join(cells) + " |")

@@ -26,6 +26,7 @@ import re
 import statistics
 import sys
 import time
+from datetime import timedelta
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -58,6 +59,15 @@ class Capture:
     def take(self) -> list:
         out, self.statements = self.statements, []
         return out
+
+
+class Unsupported(Exception):
+    pass
+
+
+def _write(path: str, label: str, targets: dict, results: list) -> None:
+    with open(path, "w") as f:
+        json.dump(dict(label=label, targets={k: v for k, v in targets.items() if k != "token_version"}, results=results), f, indent=1, default=str)
 
 
 def pct(values: list[float], p: float) -> float:
@@ -202,7 +212,11 @@ async def main() -> None:
     cap.install(engine.sync_engine)
     async with AsyncSessionLocal() as s:
         targets = await pick_targets(s)
-    token = create_access_token(data=AuthTokenData(user_id=targets["user_id"], token_type="access_token", token_version=targets["token_version"]).model_dump())
+    # Valid for a day: a run against the old code takes hours.
+    token = create_access_token(
+        data=AuthTokenData(user_id=targets["user_id"], token_type="access_token", token_version=targets["token_version"]).model_dump(),
+        expires_delta=timedelta(days=1),
+    )
 
     results = []
     plans: list[str] = []
@@ -228,11 +242,17 @@ async def main() -> None:
                 took = time.perf_counter() - t0
                 cap.on = False
                 if r.status_code != 200:
-                    raise SystemExit(f"{name}: {r.status_code} {r.text[:300]}")
+                    raise Unsupported(f"{r.status_code} {r.text[:200]}")
                 return took, cap.take(), len(r.content)
 
-            for _ in range(args.warmup):
-                await call()
+            try:
+                for _ in range(max(1, args.warmup)):
+                    await call()
+            except Unsupported as exc:
+                # e.g. a sort this version of the API does not know (422)
+                results.append(dict(name=name, path=path, params=params, unsupported=str(exc)))
+                print(f"{name:<36} not answered: {exc}", flush=True)
+                continue
             lat, counts, sql_t = [], [], []
             last = []
             size = 0
@@ -249,6 +269,8 @@ async def main() -> None:
                 statements_min=min(counts), statements_max=max(counts), sql_ms=statistics.mean(sql_t) * 1000, bytes=size,
             )
             results.append(row)
+            if args.out:  # as it goes, so a run that dies late keeps what it measured
+                _write(args.out, args.label, targets, results)
             print(f"{name:<36} n={row['n']:>4}  p50 {row['p50']:8.1f}  p95 {row['p95']:8.1f}  p99 {row['p99']:8.1f} ms  "
                   f"stmts {row['statements_min']}-{row['statements_max']}  sql {row['sql_ms']:7.1f} ms", flush=True)
             if args.explain or args.indexes:
@@ -260,8 +282,7 @@ async def main() -> None:
                     plans.extend(explained)
 
     if args.out:
-        with open(args.out, "w") as f:
-            json.dump(dict(label=args.label, targets={k: v for k, v in targets.items() if k != "token_version"}, results=results), f, indent=1, default=str)
+        _write(args.out, args.label, targets, results)
     if args.explain:
         with open(args.explain, "w") as f:
             f.write("\n".join(plans))
