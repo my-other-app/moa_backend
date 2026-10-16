@@ -6,9 +6,10 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, File, Query, Response, UploadFile
 
 from app.api.deliveries import service as deliveries
-from app.api.emails import service
+from app.api.emails import library_overview, service
 from app.api.emails.models import EmailStage
 from app.api.emails.schemas import (
+    LibraryOverview,
     AudienceCount,
     AudienceRequest,
     EmailContext,
@@ -221,6 +222,12 @@ async def library_context(session: SessionDep, user: ClubAuth) -> EmailContext:
 async def upload_library_image(session: SessionDep, user: ClubAuth, file: UploadFile = File(...)) -> ImageUpload:
     club = await service.club_of(session, user)
     return ImageUpload(**store_image(await file.read(), service.image_prefix(club_id=club.id), max_width=EMAIL_IMAGE_WIDTH, name="email"))
+
+
+@library_router.get("/overview", summary="The library with how each email is used and what it did, the month in figures, and what goes out next")
+async def library_overview_endpoint(session: SessionDep, user: ClubAuth) -> LibraryOverview:
+    club = await service.club_of(session, user)
+    return LibraryOverview(**await library_overview.overview(session, club))
 
 
 @library_router.get("/{template_id}", summary="One library email")
