@@ -391,6 +391,7 @@ async def list_events(
             reg = registrations.get(event.id)
             if reg:
                 event_dict["is_attended"] = reg.is_attended
+                event_dict["is_paid"] = bool(reg.is_paid)
                 event_dict["ticket_id"] = reg.ticket_id
                 event_dict["ticket_url"] = public_urls.ticket_url(reg.ticket_id)
                 if reg.is_attended:

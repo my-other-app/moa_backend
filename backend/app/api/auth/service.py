@@ -76,6 +76,10 @@ async def google_signin(
 
         return user
 
+    except (CustomHTTPException, HTTPException):
+        # Refusals made above on purpose (an unverified Google address, an
+        # unknown platform) are answers, not crashes; they used to come back 500.
+        raise
     except ValueError as e:
         raise CustomHTTPException(
             status_code=401, message="Invalid authentication credentials"

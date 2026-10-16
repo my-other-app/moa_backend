@@ -275,7 +275,8 @@ async def register_event(
         if not claim_existing and registration.user_id != user_id:
             raise CustomHTTPException(409, message=ALREADY_REGISTERED, error_code="ALREADY_REGISTERED")
         if not db_event.has_fee or registration.is_paid:
-            raise CustomHTTPException(400, message="Already registered for this event")
+            # Still a 400, as the app expects; the code lets every client tell it apart.
+            raise CustomHTTPException(400, message="Already registered for this event", error_code="ALREADY_REGISTERED")
         # Back for the payment: the shelf picks are taken fresh.
         if store_picks is not None:
             from app.api.store import service as store
