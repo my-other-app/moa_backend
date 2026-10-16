@@ -1,17 +1,21 @@
 """The club's website: the console's side under ClubAuth, and the page and
 its images for anyone."""
+import json
 from urllib.parse import unquote
 
 import boto3
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 
 from app.api.clubs.models import Clubs
+from app.api.links import service as links
 from app.api.sites import service
+from app.api.sites.analytics import site_analytics
 from app.api.sites.schemas import PreviewOut, SiteOut, SitePatch
 from app.config import settings
 from app.core.auth.dependencies import ClubAuth
+from app.core.rate_limit import limiter
 from app.db.core import SessionDep
 from app.response import CustomHTTPException
 
@@ -60,6 +64,30 @@ async def publish(session: SessionDep, user: ClubAuth) -> SiteOut:
     club = await _club_for(session, user)
     s = await service.publish(session, club, await service.get_or_create(session, club))
     return SiteOut(**await service.out(session, club, s))
+
+
+@router.get("/analytics", summary="What the website brought: visits, who sent them, the sign-ups after")
+async def analytics(session: SessionDep, user: ClubAuth, days: int = Query(30, ge=1, le=365)) -> dict:
+    club = await _club_for(session, user)
+    if await links.site_published(session, club.id) and await links.website_link(session, club.id) is None:
+        await links.ensure_website_link(session, club)
+        await session.commit()
+    return await site_analytics(session, club, days)
+
+
+@public_router.post("/{slug}/visit", status_code=204, summary="A visit to a club's site, counted for its analytics")
+@limiter.limit("60/minute")
+async def visit(request: Request, slug: str, session: SessionDep) -> Response:
+    """Sent by the page around the site (or the site itself, at its own
+    address) as plain text, so a browser sends it without asking first."""
+    try:
+        body = json.loads((await request.body()).decode("utf-8") or "{}")
+    except (ValueError, UnicodeDecodeError):
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    await links.record_site_visit(session, slug, request, ref=body.get("ref"), via=body.get("via"), referrer=body.get("referrer"))
+    return Response(status_code=204, headers={"Cache-Control": "no-store"})
 
 
 @public_router.get("/{slug}", summary="A club's published page", response_class=HTMLResponse)

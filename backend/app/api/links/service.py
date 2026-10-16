@@ -4,13 +4,13 @@ import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from uuid import UUID
 
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import joinedload
 
-from app.api.clubs.models import ClubUsersLink
+from app.api.clubs.models import Clubs, ClubUsersLink
 from app.api.events.models import EventRegistrationsLink, Events
 from app.api.links.models import TrackingClicks, TrackingLinks
 from app.config import settings
@@ -142,8 +142,91 @@ async def update(session, link: TrackingLinks, body) -> TrackingLinks:
 
 
 async def delete(session, link: TrackingLinks) -> None:
+    if link.kind == WEBSITE:
+        raise CustomHTTPException(409, message="This is your website's own link; it stays while the site is up.")
     link.is_deleted = True
     await session.commit()
+
+
+# ─── The club website's own link ──────────────────────────────────────────
+
+WEBSITE = "website"
+# A visitor who reloads or comes back within this counts once.
+VISIT_GAP = timedelta(minutes=30)
+
+
+async def website_link(session, club_id: int) -> Optional[TrackingLinks]:
+    return await session.scalar(
+        select(TrackingLinks).where(TrackingLinks.club_id == club_id, TrackingLinks.kind == WEBSITE, TrackingLinks.is_deleted == False)  # noqa: E712
+    )
+
+
+async def ensure_website_link(session, club) -> TrackingLinks:
+    """The club website's link, made the first time it is needed. Flushed, not
+    committed: the caller's commit keeps it."""
+    link = await website_link(session, club.id)
+    if link is not None:
+        return link
+    for _ in range(5):
+        code = new_code()
+        if await session.scalar(select(func.count()).where(TrackingLinks.code == code)) == 0:
+            link = TrackingLinks(
+                club_id=club.id, event_id=None, kind=WEBSITE, name="Your website", code=code,
+                utm_source="website", utm_medium="club_site",
+            )
+            session.add(link)
+            await session.flush()
+            return link
+    raise CustomHTTPException(500, message="Could not mint a link code; try again.")
+
+
+async def site_published(session, club_id: int) -> bool:
+    from app.api.sites.models import ClubSites
+
+    return bool(await session.scalar(select(ClubSites.published_at).where(ClubSites.club_id == club_id)))
+
+
+def _clean_referrer(value) -> Optional[str]:
+    if not isinstance(value, str) or not value:
+        return None
+    parts = urlsplit(value.strip())
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return None
+    return value.strip()[:300]
+
+
+async def record_site_visit(session, slug: str, request, *, ref=None, via=None, referrer=None) -> Optional[str]:
+    """A visit to a club's published website. It came through one of the
+    club's own links, or it is the website's own: what reached the site some
+    other way (a search, a bio, a link someone pasted). Returns what it was
+    counted as, or None when it was not counted."""
+    club = await session.scalar(select(Clubs).where(Clubs.slug == slug, Clubs.is_deleted == False))  # noqa: E712
+    if club is None or not await site_published(session, club.id):
+        return None
+    link = await by_code(session, ref) if isinstance(ref, str) and ref else None
+    if link is not None and link.club_id == club.id and link.event_id is None:
+        if via == "l":
+            return None  # the short link already counted this opening on its way here
+        target = link  # the full link, opened without the short one
+    else:
+        target = await ensure_website_link(session, club)
+    visitor = visitor_of(request)
+    if visitor:
+        recent = await session.scalar(
+            select(func.count()).where(
+                TrackingClicks.link_id == target.id, TrackingClicks.visitor == visitor,
+                TrackingClicks.created_at >= datetime.now(timezone.utc) - VISIT_GAP,
+            )
+        )
+        if recent:
+            await session.commit()  # keep a just-made website link
+            return None
+    session.add(TrackingClicks(
+        link_id=target.id, visitor=visitor, referrer=_clean_referrer(referrer),
+        user_agent=(request.headers.get("user-agent") or None) and request.headers.get("user-agent")[:200],
+    ))
+    await session.commit()
+    return target.kind
 
 
 # ─── The figures ──────────────────────────────────────────────────────────
