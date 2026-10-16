@@ -166,6 +166,18 @@ async def test_the_page_by_slug(client, session, world):
     assert world["reg"].ticket_id not in r.text
 
 
+async def test_an_online_event_shows_no_venue_link(client, session, world):
+    # A club may leave the meeting link in the map field; the public page must not carry it.
+    soon = world["e"]["soon"]
+    soon.is_online, soon.location_link, soon.lat, soon.lng = True, JOIN, 12.93, 77.62
+    await session.commit()
+    r = await client.get(f"{API}/events/{soon.slug}")
+    assert r.status_code == 200, r.text
+    ev = r.json()["event"]
+    assert (ev["is_online"], ev["location_link"], ev["lat"], ev["lng"]) == (True, None, None, None)
+    assert JOIN not in r.text
+
+
 async def test_the_page_by_id_is_the_same_page(client, world):
     main = world["e"]["main"]
 

@@ -537,12 +537,15 @@ async def event_page(session, ref: str, now: Optional[datetime] = None) -> dict:
     club, cat = e.club, e.category
     going = (await going_counts(session, [e.id])).get(e.id, 0)
     poster = _img(e.poster, "original", "large", "medium", "thumbnail")
+    # An online event has no venue to show; a link left in the map field may well be the meeting itself.
+    venue = (None, None, None) if e.is_online else (e.location_link, e.lat, e.lng)
     event = dict(
         id=e.id, slug=e.slug, name=e.name, about=e.about,
         poster=poster, poster_thumb=_img(e.poster, "medium", "thumbnail") or poster,
         starts_at=_aware(e.event_datetime).isoformat(), ends_at=_ends_at(e).isoformat(),
         duration_hours=float(e.duration) if e.duration is not None else None, timezone=EVENT_TIMEZONE,
-        is_online=bool(e.is_online), location_name=e.location_name, location_link=e.location_link, lat=e.lat, lng=e.lng,
+        is_online=bool(e.is_online), location_name=e.location_name,
+        location_link=venue[0], lat=venue[1], lng=venue[2],
         has_fee=bool(e.has_fee), fee=float(e.reg_fee) if e.has_fee and e.reg_fee is not None else None,
         has_prize=bool(e.has_prize), prize_amount=float(e.prize_amount) if e.has_prize and e.prize_amount is not None else None,
         capacity=e.max_participants, going=going,
