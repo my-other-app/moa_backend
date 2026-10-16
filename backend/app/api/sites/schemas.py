@@ -45,6 +45,8 @@ class SiteOut(BaseModel):
     slug: str
     templates: list[dict]
     fonts: list[dict]
+    #: The site's own tracking link (id, code, short_url) once it is published; None before.
+    tracking: Optional[dict] = None
 
 
 class PreviewOut(BaseModel):

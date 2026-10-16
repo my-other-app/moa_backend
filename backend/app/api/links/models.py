@@ -10,7 +10,7 @@ how many came.
 import uuid
 
 import sqlalchemy as sa
-from sqlalchemy import UUID, Column, ForeignKey, Integer, String
+from sqlalchemy import UUID, Column, ForeignKey, Index, Integer, String, text
 from sqlalchemy.orm import relationship
 
 from app.db.base import AbstractSQLModel
@@ -33,9 +33,18 @@ class TrackingLinks(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     utm_campaign = Column(String(80), nullable=True)
     utm_content = Column(String(80), nullable=True)
     created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    # "custom": made by the club. "website": the one link every club with a
+    # published website gets on its own — its visits are the site's visits
+    # that came through none of the club's other links, and its code rides
+    # on the site's event buttons so the sign-ups they bring are credited.
+    kind = Column(String(16), nullable=False, default="custom", server_default="custom")
 
     club = relationship("Clubs")
     event = relationship("Events")
+
+    __table_args__ = (
+        Index("uq_tracking_links_club_website", "club_id", unique=True, postgresql_where=text("kind = 'website' AND is_deleted = false")),
+    )
 
 
 class TrackingClicks(AbstractSQLModel, TimestampsMixin):

@@ -128,6 +128,8 @@ async def _registered_later(session, club_id: int, follows: list[ClubUsersLink])
 
 
 def _target(link: TrackingLinks, events: dict[int, Events]) -> dict:
+    if link.kind == "website":
+        return dict(kind="website", id=None, name="Website", starts_at=None)
     if link.event_id is None:
         return dict(kind="club", id=None, name="Club page", starts_at=None)
     e = events.get(link.event_id)
@@ -190,7 +192,9 @@ async def overview(session, club: Clubs, event: Optional[Events], days: int, now
         rows.append(dict(
             id=l.id, name=l.name, code=l.code, url=short_url(l), destination=destination(l, getattr(club, "slug", None)),
             utm_source=l.utm_source, utm_medium=l.utm_medium, utm_campaign=l.utm_campaign, utm_content=l.utm_content,
-            target=_target(l, events), conversion_noun="registration" if l.event_id else "follow", second_noun="checked in" if l.event_id else "registered later",
+            target=_target(l, events), kind=l.kind or "custom",
+            conversion_noun="registration" if l.event_id else ("sign-up" if l.kind == "website" else "follow"),
+            second_noun="checked in" if (l.event_id or l.kind == "website") else "registered later",
             clicks=n, uniques=len(uniques[l.id]), conversions=c, rate=_pct(c, n), second=second[l.id],
             clicks_ever=ever.get(l.id, (0, None))[0], last_click_at=ever.get(l.id, (0, None))[1], created_at=l.created_at,
         ))

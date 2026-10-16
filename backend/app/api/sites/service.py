@@ -10,6 +10,7 @@ from app.api.clubs import service as clubs
 from app.api.clubs.models import Clubs, ClubSocials, ClubUsersLink
 from app.api.closeout.models import EventStatus
 from app.api.events.models import Events
+from app.api.links import service as links
 from app.api.sites.models import FONTS, SECTIONS, TEMPLATES, THEMES, ClubSites
 from app.api.sites.render import image_url, render
 from app.config import settings
@@ -83,8 +84,12 @@ def _first_sentence(text: str | None) -> str | None:
     return t[:240]
 
 
-async def site_data(session: AsyncSession, club: Clubs, choices: dict) -> dict:
-    """Everything the page is made from, with every image pointed at the site's own image route."""
+async def site_data(session: AsyncSession, club: Clubs, choices: dict, ref_code: str | None = None) -> dict:
+    """Everything the page is made from, with every image pointed at the site's own image route.
+
+    `ref_code` is the website's own tracking link: it rides on every event
+    button as `sref`, so a sign-up that starts on the site is credited to it
+    (unless the visitor came through another of the club's links first)."""
     base = _site_api_url(club)
     now = _now()
     socials = await session.scalar(select(ClubSocials).where(ClubSocials.club_id == club.id, ClubSocials.is_deleted == False))  # noqa: E712
@@ -95,7 +100,8 @@ async def site_data(session: AsyncSession, club: Clubs, choices: dict) -> dict:
     def ev(e: Events, upcoming: bool) -> dict:
         fee = f"₹{int(e.reg_fee)}" if e.has_fee and e.reg_fee else "Free"
         where = "Online" if e.is_online else (e.location_name or None)
-        return dict(id=e.id, name=e.name, starts_at=e.event_datetime, where=where, fee=fee, poster=image_url(base, e.poster, "medium"), url=f"{settings.PUBLIC_SITE_URL}/{e.id}", upcoming=upcoming)
+        url = f"{settings.PUBLIC_SITE_URL}/{e.id}" + (f"?sref={ref_code}" if ref_code else "")
+        return dict(id=e.id, name=e.name, starts_at=e.event_datetime, where=where, fee=fee, poster=image_url(base, e.poster, "medium"), url=url, upcoming=upcoming)
 
     upcoming = [ev(e, True) for e in sorted((e for e in events if e.event_datetime >= now and e.lifecycle in (EventStatus.published, EventStatus.live)), key=lambda e: e.event_datetime)][:6]
     past = [ev(e, False) for e in events if e.event_datetime < now][:6]
@@ -114,6 +120,7 @@ async def site_data(session: AsyncSession, club: Clubs, choices: dict) -> dict:
         upcoming=upcoming, past=past, team=team, partners=partners, socials=social_links,
         numbers=dict(followers=followers, events=sum(1 for e in events if e.event_datetime < now)),
         follow_url=f"{settings.PUBLIC_SITE_URL}/clubs/{club.slug}?follow=1", events_url=f"{settings.PUBLIC_SITE_URL}/clubs/{club.slug}#events",
+        visit_url=f"{settings.PUBLIC_API_URL}/api/v1/sites/{club.slug}/visit",
     )
 
 
@@ -129,11 +136,14 @@ def available_sections(data: dict) -> dict:
 
 
 async def preview_html(session: AsyncSession, club: Clubs, choices: dict) -> str:
-    return render(await site_data(session, club, choices))
+    existing = await links.website_link(session, club.id)
+    return render(await site_data(session, club, choices, existing.code if existing else None))
 
 
 async def publish(session: AsyncSession, club: Clubs, s: ClubSites) -> ClubSites:
-    s.html = render(await site_data(session, club, _choices(s)))
+    # Publishing is what gives the site its own tracking link, from the first time.
+    link = await links.ensure_website_link(session, club)
+    s.html = render(await site_data(session, club, _choices(s), link.code))
     s.published_at = _now()
     await session.commit()
     await session.refresh(s)
@@ -141,9 +151,15 @@ async def publish(session: AsyncSession, club: Clubs, s: ClubSites) -> ClubSites
 
 
 async def out(session: AsyncSession, club: Clubs, s: ClubSites) -> dict:
-    data = await site_data(session, club, _choices(s))
+    link = await links.website_link(session, club.id)
+    if link is None and s.published_at:
+        # Published before sites had a link: give it one now.
+        link = await links.ensure_website_link(session, club)
+        await session.commit()
+    data = await site_data(session, club, _choices(s), link.code if link else None)
+    tracking = dict(link_id=str(link.id), code=link.code, short_url=links.short_url(link)) if link else None
     stale = s.published_at is not None and s.settings_at is not None and s.settings_at > s.published_at
-    return dict(**_choices(s), default_headline=data["default_headline"], default_subline=data["default_subline"], available=available_sections(data), published_at=s.published_at, stale=stale, url=public_url(club), slug=club.slug, templates=TEMPLATE_META, fonts=FONT_META)
+    return dict(**_choices(s), default_headline=data["default_headline"], default_subline=data["default_subline"], available=available_sections(data), published_at=s.published_at, stale=stale, url=public_url(club), slug=club.slug, templates=TEMPLATE_META, fonts=FONT_META, tracking=tracking)
 
 
 async def published_html(session: AsyncSession, slug: str) -> str | None:

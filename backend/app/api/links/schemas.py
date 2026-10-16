@@ -44,6 +44,8 @@ class LinkOut(BaseModel):
     #: The step after the conversion: guests who came through the door, or followers who later registered.
     second: int
     created_at: str
+    #: "custom", or "website" for the club website's own link.
+    kind: str = "custom"
 
 
 class SourceRow(BaseModel):
@@ -121,6 +123,7 @@ class LinkRow(BaseModel):
     clicks_ever: int
     last_click_at: Optional[datetime]
     created_at: datetime
+    kind: str = "custom"
 
 
 class SeriesPoint(BaseModel):

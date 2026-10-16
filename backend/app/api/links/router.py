@@ -30,7 +30,7 @@ def _out(link, club) -> LinkOut:
     return LinkOut(
         id=link.id, name=link.name, code=link.code, url=service.short_url(link), destination=service.destination(link, getattr(club, "slug", None)),
         utm_source=link.utm_source, utm_medium=link.utm_medium, utm_campaign=link.utm_campaign, utm_content=link.utm_content,
-        clicks=0, uniques=0, conversions=0, rate=0.0, second=0, created_at=link.created_at.isoformat(),
+        clicks=0, uniques=0, conversions=0, rate=0.0, second=0, created_at=link.created_at.isoformat(), kind=link.kind or "custom",
     )
 
 
@@ -87,6 +87,10 @@ async def club_links(session: SessionDep, user: ClubAuth, days: int = Query(30, 
 @router.get("/clubs/links/overview", summary="Every link of the club — its page and its events — as the Tracking links page reads them")
 async def club_links_overview(session: SessionDep, user: ClubAuth, days: int = Query(30, ge=1, le=3650)) -> LinksOverview:
     club = await _club_for(session, user)
+    # A club whose website is up has the site's own link here, from the first look.
+    if await service.site_published(session, club.id) and await service.website_link(session, club.id) is None:
+        await service.ensure_website_link(session, club)
+        await session.commit()
     return LinksOverview(**await overview_mod.overview(session, club, None, days))
 
 
@@ -126,4 +130,6 @@ async def open_link(request: Request, session: SessionDep, code: str) -> Redirec
         # A retired or mistyped code still lands somewhere sensible.
         return RedirectResponse(settings.PUBLIC_SITE_URL, status_code=302)
     await service.record_click(session, link, request)
-    return RedirectResponse(service.destination(link, link.club.slug if link.club else None), status_code=302, headers={"Cache-Control": "no-store"})
+    # `via=l`: this opening is counted already, so the club's site does not count it again.
+    to = service.destination(link, link.club.slug if link.club else None) + "&via=l"
+    return RedirectResponse(to, status_code=302, headers={"Cache-Control": "no-store"})

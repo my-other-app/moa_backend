@@ -154,6 +154,9 @@ _JS = """
 var y=document.getElementById('y');if(y){y.textContent=new Date().getFullYear()}
 document.querySelectorAll('[data-when]').forEach(function(el){var d=new Date(el.getAttribute('data-when'));if(!isNaN(d)){el.textContent=d.toLocaleString(undefined,{weekday:'short',day:'numeric',month:'short',hour:'numeric',minute:'2-digit'})}});
 var c=document.querySelector('[data-countdown]');if(c){var t=new Date(c.getAttribute('data-countdown')).getTime();function tick(){var s=Math.max(0,Math.floor((t-Date.now())/1000));var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),mi=Math.floor(s%3600/60),se=s%60;c.querySelector('[data-d]').textContent=d;c.querySelector('[data-h]').textContent=('0'+h).slice(-2);c.querySelector('[data-m]').textContent=('0'+mi).slice(-2);c.querySelector('[data-s]').textContent=('0'+se).slice(-2)}tick();setInterval(tick,1000)}
+// A visit, counted for the club's analytics -- only where the page is the whole tab (its own address).
+// Framed (the events site, the dashboard's preview), the page around it counts or does not.
+try{var v=document.body.getAttribute('data-visit');if(v&&window.top===window){var q=new URLSearchParams(location.search);fetch(v,{method:'POST',mode:'cors',keepalive:true,headers:{'content-type':'text/plain'},body:JSON.stringify({ref:q.get('ref'),via:q.get('via'),referrer:document.referrer||null})}).catch(function(){})}}catch(e){}
 })();
 """
 
@@ -183,7 +186,7 @@ def _event_card(e: dict, template: str, register: str) -> str:
     return (
         f'<article class="card">{poster}<span class="date"><small>{mon}</small><b>{day}</b></span>'
         f'<h3>{esc(e["name"])}</h3><p><span data-when="{esc(e["starts_at"].isoformat())}">{when}</span>{meta_html}</p>'
-        f'<a class="btn btn-primary btn-sm" href="{esc(register)}">{label}</a></article>'
+        f'<a class="btn btn-primary btn-sm" href="{esc(register)}" target="_top">{label}</a></article>'
     )
 
 
@@ -218,7 +221,7 @@ def render(data: dict) -> str:
         nav_links.append('<a href="#partners">Partners</a>')
     if on.get("contact", True):
         nav_links.append('<a href="#contact">Contact</a>')
-    follow_btn = f'<a class="btn btn-primary btn-sm" href="{esc(follow_url)}">Follow</a>' if follow_url else ""
+    follow_btn = f'<a class="btn btn-primary btn-sm" href="{esc(follow_url)}" target="_top">Follow</a>' if follow_url else ""
     brand_img = _img(logo, name)
     parts = [
         f'<nav class="nav"><div class="wrap"><a class="brand" href="#top">{brand_img}<span>{esc(name)}</span></a>'
@@ -228,7 +231,7 @@ def render(data: dict) -> str:
     if on.get("hero", True):
         pill = f'<span class="pill"><i></i>Next up · {esc(nxt["name"])} · {esc(_when(nxt["starts_at"]))}</span>' if nxt else ""
         see = '<a class="btn btn-primary" href="#events">See upcoming events</a>' if on.get("upcoming", True) else ""
-        join = f'<a class="btn btn-ghost" href="{esc(follow_url)}">Join the club</a>' if follow_url else ""
+        join = f'<a class="btn btn-ghost" href="{esc(follow_url)}" target="_top">Join the club</a>' if follow_url else ""
         cta = f'<div class="cta">{see}{join}</div>'
         text = f'{pill}<h1>{esc(headline)}</h1><p class="sub">{esc(subline)}</p>'
         if template == "campus":
@@ -245,7 +248,7 @@ def render(data: dict) -> str:
 
     if on.get("upcoming", True):
         cards = "".join(_event_card(e, template, e["url"]) for e in upcoming) if upcoming else '<p class="empty">Nothing scheduled yet — follow the club to hear first.</p>'
-        more = f'<a class="more" href="{esc(data["events_url"])}">View all →</a>' if data.get("events_url") else ""
+        more = f'<a class="more" href="{esc(data["events_url"])}" target="_top">View all →</a>' if data.get("events_url") else ""
         parts.append(f'<section id="events"><div class="wrap"><div class="row"><h2>Upcoming events</h2>{more}</div><div class="grid">{cards}</div></div></section>')
 
     if on.get("about", True):
@@ -257,7 +260,7 @@ def render(data: dict) -> str:
         )
 
     if on.get("past", True) and past:
-        pics = "".join(f'<a href="{esc(e["url"])}" title="{esc(e["name"])}"><img src="{esc(e["poster"])}" alt="{esc(e["name"])}" loading="lazy"></a>' for e in past if e.get("poster")) if template == "campus" else ""
+        pics = "".join(f'<a href="{esc(e["url"])}" title="{esc(e["name"])}" target="_top"><img src="{esc(e["poster"])}" alt="{esc(e["name"])}" loading="lazy"></a>' for e in past if e.get("poster")) if template == "campus" else ""
         body = f'<div class="gallery">{pics}</div>' if pics else '<div class="grid">' + "".join(_event_card(e, template, e["url"]) for e in past) + "</div>"
         parts.append(f'<section id="past"><div class="wrap"><h2>Past events</h2>{body}</div></section>')
 
@@ -277,7 +280,7 @@ def render(data: dict) -> str:
         parts.append(f'<section id="partners"><div class="wrap"><h2>Partners</h2><div class="logos">{"".join(logos)}</div></div></section>')
 
     if on.get("follow", True) and follow_url:
-        parts.append(f'<section><div class="wrap"><div class="band"><div><h2>Follow {esc(name)}</h2><p>Hear first about every event, in the app.</p></div><a class="btn" href="{esc(follow_url)}">Follow in the app</a></div></div></section>')
+        parts.append(f'<section><div class="wrap"><div class="band"><div><h2>Follow {esc(name)}</h2><p>Hear first about every event, in the app.</p></div><a class="btn" href="{esc(follow_url)}" target="_top">Follow in the app</a></div></div></section>')
 
     if on.get("contact", True):
         links = "".join(f'<a href="{esc(u)}" target="_blank" rel="noreferrer">{esc(k)}</a>' for k, u in data["socials"])
@@ -295,6 +298,6 @@ def render(data: dict) -> str:
         f'<title>{esc(title)}</title><meta name="description" content="{esc(desc)}"><meta property="og:title" content="{esc(title)}"><meta property="og:description" content="{esc(desc)}">{og}'
         f'<link rel="canonical" href="{esc(site_url)}">{icon}'
         f'<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family={font_query}&display=swap" rel="stylesheet">'
-        f"<style>{css}</style></head><body>{''.join(parts)}<script>{_JS}</script>"
+        f"<style>{css}</style></head><body data-visit=\"{esc(data.get('visit_url') or '')}\">{''.join(parts)}<script>{_JS}</script>"
         f'<script type="application/ld+json">{ld}</script></body></html>'
     )

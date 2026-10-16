@@ -55,7 +55,8 @@ async def test_a_link_is_made_shared_and_opened(client, session, world):
 
     # Opening the short link counts the click and goes on to the page.
     opened = await client.get(f"/l/{link['code']}", headers={"user-agent": "poster-phone", "x-forwarded-for": "10.0.0.7"})
-    assert opened.status_code == 302 and opened.headers["location"] == link["destination"]
+    # The short link marks its landing (`via=l`) so the club site does not count the same opening twice.
+    assert opened.status_code == 302 and opened.headers["location"] == link["destination"] + "&via=l"
     again = await client.get(f"/l/{link['code']}", headers={"user-agent": "poster-phone", "x-forwarded-for": "10.0.0.7"})
     assert again.status_code == 302
     clicks = list((await session.scalars(select(TrackingClicks))).all())
