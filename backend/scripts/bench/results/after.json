@@ -1,0 +1,576 @@
+{
+ "label": "after",
+ "targets": {
+  "club": "club-439-blockchain",
+  "event": "e5594-ux-jam",
+  "interest": 21,
+  "category": 7,
+  "user_id": 1
+ },
+ "results": [
+  {
+   "name": "home",
+   "path": "/discover/home",
+   "params": {},
+   "n": 300,
+   "p50": 1.3880830010748468,
+   "p95": 1.5189774007012602,
+   "p99": 1.5826370818831492,
+   "mean": 1.4041047464464402,
+   "statements_min": 0,
+   "statements_max": 0,
+   "sql_ms": 0,
+   "bytes": 34523
+  },
+  {
+   "name": "home (cold)",
+   "path": "/discover/home",
+   "params": {},
+   "n": 286,
+   "p50": 68.93272899833391,
+   "p95": 81.5770942481322,
+   "p99": 92.52449819978207,
+   "mean": 69.98720575508989,
+   "statements_min": 17,
+   "statements_max": 17,
+   "sql_ms": 52.344727629089036,
+   "bytes": 34523
+  },
+  {
+   "name": "home lat/lng",
+   "path": "/discover/home",
+   "params": {
+    "lat": 12.9716,
+    "lng": 77.5946
+   },
+   "n": 300,
+   "p50": 1.6538125018996652,
+   "p95": 1.8529101034800988,
+   "p99": 1.9588574041699753,
+   "mean": 1.7020436300663278,
+   "statements_min": 0,
+   "statements_max": 0,
+   "sql_ms": 0,
+   "bytes": 44762
+  },
+  {
+   "name": "home lat/lng (cold)",
+   "path": "/discover/home",
+   "params": {
+    "lat": 12.9716,
+    "lng": 77.5946
+   },
+   "n": 225,
+   "p50": 88.27712500351481,
+   "p95": 102.86607459711375,
+   "p99": 108.20883483567741,
+   "mean": 88.84641945746908,
+   "statements_min": 26,
+   "statements_max": 26,
+   "sql_ms": 62.62236404067759,
+   "bytes": 44748
+  },
+  {
+   "name": "events",
+   "path": "/discover/events",
+   "params": {},
+   "n": 300,
+   "p50": 14.710437495523365,
+   "p95": 15.72856605234847,
+   "p99": 17.265330092995963,
+   "mean": 14.57007250020979,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 8.567391389515251,
+   "bytes": 22897
+  },
+  {
+   "name": "events q",
+   "path": "/discover/events",
+   "params": {
+    "q": "robotics"
+   },
+   "n": 300,
+   "p50": 15.246312501403736,
+   "p95": 16.457887201613634,
+   "p99": 22.758990829679487,
+   "mean": 15.510407353164434,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 10.213546946761198,
+   "bytes": 23550
+  },
+  {
+   "name": "events q short",
+   "path": "/discover/events",
+   "params": {
+    "q": "ai"
+   },
+   "n": 300,
+   "p50": 15.747542001918191,
+   "p95": 16.66798160295002,
+   "p99": 17.35778665795806,
+   "mean": 15.875293343536518,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 10.601969366543926,
+   "bytes": 23996
+  },
+  {
+   "name": "events q typo",
+   "path": "/discover/events",
+   "params": {
+    "q": "robtics"
+   },
+   "n": 300,
+   "p50": 34.71658299895353,
+   "p95": 56.454248249428936,
+   "p99": 66.92479999619536,
+   "mean": 36.43611197306503,
+   "statements_min": 5,
+   "statements_max": 5,
+   "sql_ms": 24.201084136463276,
+   "bytes": 23550
+  },
+  {
+   "name": "events q relevance",
+   "path": "/discover/events",
+   "params": {
+    "q": "robotics",
+    "sort": "relevance"
+   },
+   "n": 300,
+   "p50": 24.24589599831961,
+   "p95": 27.71878184648813,
+   "p99": 42.67663957929466,
+   "mean": 25.00685627315155,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 17.64847892317145,
+   "bytes": 23326
+  },
+  {
+   "name": "events this_weekend",
+   "path": "/discover/events",
+   "params": {
+    "when": "this_weekend"
+   },
+   "n": 300,
+   "p50": 13.373687499552034,
+   "p95": 16.018067300683473,
+   "p99": 18.925023013580315,
+   "mean": 13.560352073424536,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 8.067621633575374,
+   "bytes": 22895
+  },
+  {
+   "name": "events category",
+   "path": "/discover/events",
+   "params": {
+    "category": 7
+   },
+   "n": 300,
+   "p50": 15.828957999474369,
+   "p95": 18.78440204782237,
+   "p99": 31.072340591854292,
+   "mean": 16.319336403297104,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 10.322208613166973,
+   "bytes": 23762
+  },
+  {
+   "name": "events online",
+   "path": "/discover/events",
+   "params": {
+    "type": "online"
+   },
+   "n": 300,
+   "p50": 14.791291501751402,
+   "p95": 16.211966946139,
+   "p99": 17.047408329308382,
+   "mean": 14.717565703128155,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 8.757957226674383,
+   "bytes": 22504
+  },
+  {
+   "name": "events free",
+   "path": "/discover/events",
+   "params": {
+    "price": "free"
+   },
+   "n": 300,
+   "p50": 14.835937501629815,
+   "p95": 15.908496502015625,
+   "p99": 16.98304583660501,
+   "mean": 14.47551957979158,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 8.616017620248991,
+   "bytes": 22735
+  },
+  {
+   "name": "events lat/lng (radius 50, date)",
+   "path": "/discover/events",
+   "params": {
+    "lat": 12.9716,
+    "lng": 77.5946
+   },
+   "n": 300,
+   "p50": 15.13243750014226,
+   "p95": 16.186943749562488,
+   "p99": 16.971098331414357,
+   "mean": 15.176608346373541,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 8.97704153341086,
+   "bytes": 22864
+  },
+  {
+   "name": "events distance r=50",
+   "path": "/discover/events",
+   "params": {
+    "lat": 12.9716,
+    "lng": 77.5946,
+    "sort": "distance",
+    "radius_km": 50
+   },
+   "n": 300,
+   "p50": 24.857666499883635,
+   "p95": 27.414399700137437,
+   "p99": 30.44257499735963,
+   "mean": 24.71807957338266,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 15.507522753784238,
+   "bytes": 23032
+  },
+  {
+   "name": "events distance r=300",
+   "path": "/discover/events",
+   "params": {
+    "lat": 9.9312,
+    "lng": 76.2673,
+    "sort": "distance",
+    "radius_km": 300
+   },
+   "n": 300,
+   "p50": 24.529104000976076,
+   "p95": 26.564137795867282,
+   "p99": 33.052474995347374,
+   "mean": 24.453720016608713,
+   "statements_min": 4,
+   "statements_max": 6,
+   "sql_ms": 15.507051794144596,
+   "bytes": 22324
+  },
+  {
+   "name": "events popular",
+   "path": "/discover/events",
+   "params": {
+    "sort": "popular"
+   },
+   "n": 300,
+   "p50": 15.966916496836348,
+   "p95": 18.297168751087156,
+   "p99": 20.58541975951811,
+   "mean": 16.306424716943486,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 10.82330500711881,
+   "bytes": 22756
+  },
+  {
+   "name": "events offset=480",
+   "path": "/discover/events",
+   "params": {
+    "offset": 480
+   },
+   "n": 300,
+   "p50": 15.242833502270514,
+   "p95": 19.953174998954637,
+   "p99": 22.527782327088058,
+   "mean": 15.25430418320563,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 9.39306315073433,
+   "bytes": 23216
+  },
+  {
+   "name": "clubs",
+   "path": "/discover/clubs",
+   "params": {},
+   "n": 300,
+   "p50": 18.50431250204565,
+   "p95": 20.169499999974505,
+   "p99": 21.69157316355266,
+   "mean": 17.69869223688147,
+   "statements_min": 6,
+   "statements_max": 6,
+   "sql_ms": 10.944318567126174,
+   "bytes": 14006
+  },
+  {
+   "name": "clubs q",
+   "path": "/discover/clubs",
+   "params": {
+    "q": "robotics"
+   },
+   "n": 300,
+   "p50": 24.24677049930324,
+   "p95": 26.2115806555812,
+   "p99": 31.6057050936797,
+   "mean": 22.775794310024743,
+   "statements_min": 6,
+   "statements_max": 6,
+   "sql_ms": 14.976831016635211,
+   "bytes": 12536
+  },
+  {
+   "name": "clubs q typo",
+   "path": "/discover/clubs",
+   "params": {
+    "q": "robtics"
+   },
+   "n": 300,
+   "p50": 21.65918749960838,
+   "p95": 25.00143509496411,
+   "p99": 26.39982050794057,
+   "mean": 22.198018703226506,
+   "statements_min": 8,
+   "statements_max": 8,
+   "sql_ms": 16.13512732052186,
+   "bytes": 12536
+  },
+  {
+   "name": "clubs interest",
+   "path": "/discover/clubs",
+   "params": {
+    "interest": 21
+   },
+   "n": 300,
+   "p50": 18.047145997115877,
+   "p95": 22.204456550753093,
+   "p99": 23.417496755428143,
+   "mean": 17.226198443556008,
+   "statements_min": 6,
+   "statements_max": 6,
+   "sql_ms": 10.50188443349422,
+   "bytes": 14038
+  },
+  {
+   "name": "clubs nearby",
+   "path": "/discover/clubs",
+   "params": {
+    "lat": 12.9716,
+    "lng": 77.5946,
+    "sort": "nearby"
+   },
+   "n": 300,
+   "p50": 19.761791503697168,
+   "p95": 22.326476746457047,
+   "p99": 25.426203500901458,
+   "mean": 20.05664177357782,
+   "statements_min": 6,
+   "statements_max": 6,
+   "sql_ms": 13.919479872638476,
+   "bytes": 14428
+  },
+  {
+   "name": "clubs popular",
+   "path": "/discover/clubs",
+   "params": {
+    "sort": "popular"
+   },
+   "n": 300,
+   "p50": 18.47479149728315,
+   "p95": 20.077312501962297,
+   "p99": 20.638735658503716,
+   "mean": 17.253013499939698,
+   "statements_min": 6,
+   "statements_max": 6,
+   "sql_ms": 10.54987792975832,
+   "bytes": 14006
+  },
+  {
+   "name": "club page (big)",
+   "path": "/discover/clubs/club-439-blockchain",
+   "params": {},
+   "n": 300,
+   "p50": 17.792833998100832,
+   "p95": 20.012638147818507,
+   "p99": 21.696234409391757,
+   "mean": 17.78674072023326,
+   "statements_min": 14,
+   "statements_max": 14,
+   "sql_ms": 9.839505780376689,
+   "bytes": 13706
+  },
+  {
+   "name": "event page",
+   "path": "/discover/events/e5594-ux-jam",
+   "params": {},
+   "n": 300,
+   "p50": 24.183396002626978,
+   "p95": 27.074741349861142,
+   "p99": 32.05041416440505,
+   "mean": 23.34708267325671,
+   "statements_min": 11,
+   "statements_max": 11,
+   "sql_ms": 14.332593913034847,
+   "bytes": 7815
+  },
+  {
+   "name": "threads",
+   "path": "/discover/threads",
+   "params": {},
+   "n": 300,
+   "p50": 10.725874497438781,
+   "p95": 12.447553850142869,
+   "p99": 13.456939502648307,
+   "mean": 10.805984733742662,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 6.693755366868572,
+   "bytes": 27719
+  },
+  {
+   "name": "categories",
+   "path": "/discover/categories",
+   "params": {},
+   "n": 300,
+   "p50": 1.093895498343045,
+   "p95": 1.3896377971832408,
+   "p99": 1.4785633402061646,
+   "mean": 1.143806916564548,
+   "statements_min": 0,
+   "statements_max": 0,
+   "sql_ms": 0,
+   "bytes": 2409
+  },
+  {
+   "name": "sitemap",
+   "path": "/discover/sitemap",
+   "params": {},
+   "n": 300,
+   "p50": 1.026083504257258,
+   "p95": 1.3327836539247075,
+   "p99": 1.4153257357247637,
+   "mean": 1.0764426703826757,
+   "statements_min": 0,
+   "statements_max": 0,
+   "sql_ms": 0,
+   "bytes": 516042
+  },
+  {
+   "name": "sitemap (cold)",
+   "path": "/discover/sitemap",
+   "params": {},
+   "n": 300,
+   "p50": 57.33881250489503,
+   "p95": 60.662576445611194,
+   "p99": 62.96578200133808,
+   "mean": 52.00522093662585,
+   "statements_min": 2,
+   "statements_max": 2,
+   "sql_ms": 22.487656536735205,
+   "bytes": 516042
+  },
+  {
+   "name": "categories (cold)",
+   "path": "/discover/categories",
+   "params": {},
+   "n": 300,
+   "p50": 8.05981249868637,
+   "p95": 8.580780951160705,
+   "p99": 8.9332822576398,
+   "mean": 8.143526916658933,
+   "statements_min": 2,
+   "statements_max": 2,
+   "sql_ms": 5.1629804001034545,
+   "bytes": 2409
+  },
+  {
+   "name": "app for-you",
+   "path": "/events/for-you",
+   "params": {},
+   "n": 300,
+   "p50": 36.26345799784758,
+   "p95": 43.13401220206289,
+   "p99": 88.74626374366926,
+   "mean": 40.74013693333351,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 24.738958429879858,
+   "bytes": 19822
+  },
+  {
+   "name": "app list upcoming",
+   "path": "/events/list",
+   "params": {
+    "is_ended": "false"
+   },
+   "n": 300,
+   "p50": 17.197041503095534,
+   "p95": 19.396183349090283,
+   "p99": 21.893277747367392,
+   "mean": 17.178467216678353,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 9.035489260301498,
+   "bytes": 18986
+  },
+  {
+   "name": "app list search",
+   "path": "/events/list",
+   "params": {
+    "search": "robotics"
+   },
+   "n": 300,
+   "p50": 17.084208000596846,
+   "p95": 18.25093160259712,
+   "p99": 18.76143107991083,
+   "mean": 16.754443009922397,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 8.582094786227875,
+   "bytes": 22296
+  },
+  {
+   "name": "app list following",
+   "path": "/events/list",
+   "params": {
+    "is_following": "true"
+   },
+   "n": 300,
+   "p50": 14.04710399947362,
+   "p95": 14.802655948005851,
+   "p99": 15.78654082630237,
+   "mean": 13.946912623214303,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 6.439969676284818,
+   "bytes": 19203
+  },
+  {
+   "name": "app list interests",
+   "path": "/events/list",
+   "params": {
+    "interest_ids": "21"
+   },
+   "n": 300,
+   "p50": 19.89983300154563,
+   "p95": 21.841376747761387,
+   "p99": 24.70626291375082,
+   "mean": 19.905831543413417,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 11.091897133276992,
+   "bytes": 20731
+  }
+ ]
+}

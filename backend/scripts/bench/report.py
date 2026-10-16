@@ -21,7 +21,7 @@ def _ms(v: float) -> str:
 def main(paths: list[str]) -> None:
     runs = [json.load(open(p)) for p in paths]
     names: list[str] = []
-    for run in runs:
+    for run in reversed(runs):  # the last run's order first: it has every row
         for row in run["results"]:
             if row["name"] not in names:
                 names.append(row["name"])
@@ -37,7 +37,8 @@ def main(paths: list[str]) -> None:
                 cells.append("— | —")
                 continue
             if "unsupported" in row:
-                cells.append(f"not offered ({row['unsupported'][:3]}) | —")
+                code = row["unsupported"][:3]
+                cells.append(("fails (500)" if code == "500" else f"not offered ({code})") + " | —")
                 continue
             stmts = str(row["statements_min"]) if row["statements_min"] == row["statements_max"] else f"{row['statements_min']}–{row['statements_max']}"
             cells.append(f"{_ms(row['p50'])} / {_ms(row['p95'])} (n={row['n']}) | {stmts}")

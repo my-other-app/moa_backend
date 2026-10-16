@@ -1,0 +1,487 @@
+{
+ "label": "signing fixed",
+ "targets": {
+  "club": "club-439-blockchain",
+  "event": "e5594-ux-jam",
+  "interest": 21,
+  "category": 7,
+  "user_id": 1
+ },
+ "results": [
+  {
+   "name": "home",
+   "path": "/discover/home",
+   "params": {},
+   "n": 5,
+   "p50": 9037.402459005534,
+   "p95": 9341.137433399854,
+   "p99": 9346.560386679776,
+   "mean": 9043.049366801279,
+   "statements_min": 41,
+   "statements_max": 41,
+   "sql_ms": 679.3574748036917,
+   "bytes": 34547
+  },
+  {
+   "name": "home lat/lng",
+   "path": "/discover/home",
+   "params": {
+    "lat": 12.9716,
+    "lng": 77.5946
+   },
+   "n": 5,
+   "p50": 8712.308875001327,
+   "p95": 8942.033666597854,
+   "p99": 8976.777833316883,
+   "mean": 8729.114050000499,
+   "statements_min": 42,
+   "statements_max": 42,
+   "sql_ms": 403.0610920046456,
+   "bytes": 44960
+  },
+  {
+   "name": "events",
+   "path": "/discover/events",
+   "params": {},
+   "n": 5,
+   "p50": 8330.382624997583,
+   "p95": 9125.91084119631,
+   "p99": 9245.225201036083,
+   "mean": 8556.990874998155,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 268.16631680121645,
+   "bytes": 23067
+  },
+  {
+   "name": "events q",
+   "path": "/discover/events",
+   "params": {
+    "q": "robotics"
+   },
+   "n": 300,
+   "p50": 54.43237500003306,
+   "p95": 65.13551425268815,
+   "p99": 197.46495407671316,
+   "mean": 58.38251406676136,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 40.704872916855194,
+   "bytes": 23564
+  },
+  {
+   "name": "events q short",
+   "path": "/discover/events",
+   "params": {
+    "q": "ai"
+   },
+   "n": 66,
+   "p50": 244.15152100118576,
+   "p95": 437.4367912514572,
+   "p99": 447.3130834510812,
+   "mean": 306.35826187911636,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 115.26363375742221,
+   "bytes": 23940
+  },
+  {
+   "name": "events q typo",
+   "path": "/discover/events",
+   "params": {
+    "q": "robtics"
+   },
+   "n": 300,
+   "p50": 45.318020496779354,
+   "p95": 49.41241280030226,
+   "p99": 58.16234208257801,
+   "mean": 45.19591693327432,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 35.59643678701832,
+   "bytes": 2061
+  },
+  {
+   "name": "events q relevance",
+   "path": "/discover/events",
+   "params": {
+    "q": "robotics",
+    "sort": "relevance"
+   },
+   "unsupported": "422 {\"message\":\"Invalid request\",\"errors\":{\"sort\":\"Input should be 'date', 'distance' or 'popular'\"},\"error_code\":null,\"track_id\":null}"
+  },
+  {
+   "name": "events this_weekend",
+   "path": "/discover/events",
+   "params": {
+    "when": "this_weekend"
+   },
+   "n": 251,
+   "p50": 66.03254200308584,
+   "p95": 211.49241700186394,
+   "p99": 223.34556250280002,
+   "mean": 79.88206607170066,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 37.354409908834086,
+   "bytes": 23079
+  },
+  {
+   "name": "events category",
+   "path": "/discover/events",
+   "params": {
+    "category": 7
+   },
+   "n": 218,
+   "p50": 73.9959584971075,
+   "p95": 227.45196245195984,
+   "p99": 246.3700945559685,
+   "mean": 92.05913859157323,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 41.42943786735135,
+   "bytes": 23913
+  },
+  {
+   "name": "events online",
+   "path": "/discover/events",
+   "params": {
+    "type": "online"
+   },
+   "n": 145,
+   "p50": 104.6777080046013,
+   "p95": 272.40338339906884,
+   "p99": 402.1325214399259,
+   "mean": 138.36737127592266,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 55.715110033784654,
+   "bytes": 22538
+  },
+  {
+   "name": "events free",
+   "path": "/discover/events",
+   "params": {
+    "price": "free"
+   },
+   "n": 5,
+   "p50": 5919.6919159949175,
+   "p95": 5977.345033598249,
+   "p99": 5984.414640317555,
+   "mean": 5906.49356659851,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 212.66423399647465,
+   "bytes": 22904
+  },
+  {
+   "name": "events lat/lng (radius 50, date)",
+   "path": "/discover/events",
+   "params": {
+    "lat": 12.9716,
+    "lng": 77.5946
+   },
+   "n": 5,
+   "p50": 8380.43779200234,
+   "p95": 8719.343641601154,
+   "p99": 8777.902328322525,
+   "mean": 8357.787074998487,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 232.95744220231427,
+   "bytes": 23062
+  },
+  {
+   "name": "events distance r=50",
+   "path": "/discover/events",
+   "params": {
+    "lat": 12.9716,
+    "lng": 77.5946,
+    "sort": "distance",
+    "radius_km": 50
+   },
+   "n": 5,
+   "p50": 8404.224292004074,
+   "p95": 8717.618274997221,
+   "p99": 8760.502854996594,
+   "mean": 8392.84155839996,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 269.658050200087,
+   "bytes": 23022
+  },
+  {
+   "name": "events distance r=300",
+   "path": "/discover/events",
+   "params": {
+    "lat": 9.9312,
+    "lng": 76.2673,
+    "sort": "distance",
+    "radius_km": 300
+   },
+   "n": 5,
+   "p50": 8513.237417006167,
+   "p95": 8662.063199996192,
+   "p99": 8677.699439995631,
+   "mean": 8447.953158400196,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 310.37010879808804,
+   "bytes": 22330
+  },
+  {
+   "name": "events popular",
+   "path": "/discover/events",
+   "params": {
+    "sort": "popular"
+   },
+   "n": 5,
+   "p50": 8494.346915998904,
+   "p95": 8879.420841803949,
+   "p99": 8954.997701964749,
+   "mean": 8572.57114140084,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 418.6781329975929,
+   "bytes": 22748
+  },
+  {
+   "name": "events offset=480",
+   "path": "/discover/events",
+   "params": {
+    "offset": 480
+   },
+   "n": 5,
+   "p50": 8377.09695900412,
+   "p95": 8412.510941196524,
+   "p99": 8417.823121035763,
+   "mean": 8378.546225199534,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 209.3106082000304,
+   "bytes": 23662
+  },
+  {
+   "name": "clubs",
+   "path": "/discover/clubs",
+   "params": {},
+   "n": 202,
+   "p50": 83.02310349972686,
+   "p95": 248.6503130960045,
+   "p99": 267.6382699188981,
+   "mean": 99.41209114855731,
+   "statements_min": 7,
+   "statements_max": 7,
+   "sql_ms": 54.49498208935717,
+   "bytes": 14008
+  },
+  {
+   "name": "clubs q",
+   "path": "/discover/clubs",
+   "params": {
+    "q": "robotics"
+   },
+   "n": 300,
+   "p50": 41.946895500586834,
+   "p95": 47.84393689769787,
+   "p99": 51.79841282712004,
+   "mean": 40.7077479132325,
+   "statements_min": 7,
+   "statements_max": 7,
+   "sql_ms": 28.525652990138042,
+   "bytes": 12546
+  },
+  {
+   "name": "clubs q typo",
+   "path": "/discover/clubs",
+   "params": {
+    "q": "robtics"
+   },
+   "n": 300,
+   "p50": 11.311499998555519,
+   "p95": 13.272550005058294,
+   "p99": 14.021758092712819,
+   "mean": 10.637219740237924,
+   "statements_min": 2,
+   "statements_max": 2,
+   "sql_ms": 6.993538110255031,
+   "bytes": 747
+  },
+  {
+   "name": "clubs interest",
+   "path": "/discover/clubs",
+   "params": {
+    "interest": 21
+   },
+   "n": 300,
+   "p50": 39.40522949778824,
+   "p95": 44.40498960284459,
+   "p99": 51.990807579277316,
+   "mean": 38.92632343663232,
+   "statements_min": 7,
+   "statements_max": 7,
+   "sql_ms": 27.971903633054655,
+   "bytes": 14042
+  },
+  {
+   "name": "clubs nearby",
+   "path": "/discover/clubs",
+   "params": {
+    "lat": 12.9716,
+    "lng": 77.5946,
+    "sort": "nearby"
+   },
+   "n": 267,
+   "p50": 62.415874999715015,
+   "p95": 213.91122509958223,
+   "p99": 236.861299999582,
+   "mean": 75.27834909340983,
+   "statements_min": 7,
+   "statements_max": 7,
+   "sql_ms": 36.57111669700372,
+   "bytes": 14440
+  },
+  {
+   "name": "clubs popular",
+   "path": "/discover/clubs",
+   "params": {
+    "sort": "popular"
+   },
+   "n": 200,
+   "p50": 83.34649949756567,
+   "p95": 250.09307085201726,
+   "p99": 267.3866285749681,
+   "mean": 100.26015187006124,
+   "statements_min": 7,
+   "statements_max": 7,
+   "sql_ms": 60.17039529066096,
+   "bytes": 14008
+  },
+  {
+   "name": "club page (big)",
+   "path": "/discover/clubs/club-439-blockchain",
+   "params": {},
+   "n": 300,
+   "p50": 52.269229494413594,
+   "p95": 60.30286939894722,
+   "p99": 95.87997532798906,
+   "mean": 53.49530872682711,
+   "statements_min": 14,
+   "statements_max": 14,
+   "sql_ms": 42.90693585431048,
+   "bytes": 13688
+  },
+  {
+   "name": "event page",
+   "path": "/discover/events/e5594-ux-jam",
+   "params": {},
+   "n": 300,
+   "p50": 37.54670850321418,
+   "p95": 43.31923779864155,
+   "p99": 53.076449001237016,
+   "mean": 38.2319382137454,
+   "statements_min": 11,
+   "statements_max": 11,
+   "sql_ms": 30.38520890297756,
+   "bytes": 7791
+  },
+  {
+   "name": "threads",
+   "path": "/discover/threads",
+   "params": {},
+   "n": 300,
+   "p50": 14.821270495303907,
+   "p95": 17.556516653712606,
+   "p99": 24.28500941401564,
+   "mean": 15.416945733425866,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 11.26701915934973,
+   "bytes": 27695
+  },
+  {
+   "name": "categories",
+   "path": "/discover/categories",
+   "params": {},
+   "n": 300,
+   "p50": 15.757416502310662,
+   "p95": 17.85130655007379,
+   "p99": 21.57031774331699,
+   "mean": 15.920640373248414,
+   "statements_min": 2,
+   "statements_max": 2,
+   "sql_ms": 12.125209593286854,
+   "bytes": 2409
+  },
+  {
+   "name": "sitemap",
+   "path": "/discover/sitemap",
+   "params": {},
+   "n": 295,
+   "p50": 46.68929099716479,
+   "p95": 185.91576239778078,
+   "p99": 193.07321798041812,
+   "mean": 67.85978830155081,
+   "statements_min": 2,
+   "statements_max": 2,
+   "sql_ms": 28.504270274474255,
+   "bytes": 516042
+  },
+  {
+   "name": "app list upcoming",
+   "path": "/events/list",
+   "params": {
+    "is_ended": "false"
+   },
+   "n": 300,
+   "p50": 41.528770998411346,
+   "p95": 44.3464500061964,
+   "p99": 52.83807717067246,
+   "mean": 41.809628036692935,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 30.99650787366651,
+   "bytes": 18975
+  },
+  {
+   "name": "app list search",
+   "path": "/events/list",
+   "params": {
+    "search": "robotics"
+   },
+   "n": 300,
+   "p50": 29.18897950075916,
+   "p95": 32.746771453457775,
+   "p99": 50.287047999663585,
+   "mean": 30.039624250057386,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 20.890003570142046,
+   "bytes": 22302
+  },
+  {
+   "name": "app list following",
+   "path": "/events/list",
+   "params": {
+    "is_following": "true"
+   },
+   "n": 300,
+   "p50": 26.677749996451894,
+   "p95": 31.064895551025987,
+   "p99": 48.2363505098328,
+   "mean": 28.464044013332266,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 18.58970576317612,
+   "bytes": 19179
+  },
+  {
+   "name": "app list interests",
+   "path": "/events/list",
+   "params": {
+    "interest_ids": "21"
+   },
+   "unsupported": "500 ProgrammingError: (sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.UndefinedFunctionError'>: could not identify an equality operator for type "
+  }
+ ]
+}

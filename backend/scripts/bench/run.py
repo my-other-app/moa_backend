@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import gc
 import json
 import logging
 import re
@@ -146,6 +147,8 @@ def endpoints(t: dict) -> list[tuple[str, str, dict, bool]]:
         ("threads", "/discover/threads", {}, False),
         ("categories", "/discover/categories", {}, False),
         ("sitemap", "/discover/sitemap", {}, False),
+        ("sitemap (cold)", "/discover/sitemap", {}, False),
+        ("categories (cold)", "/discover/categories", {}, False),
         ("app for-you", "/events/for-you", {}, True),
         ("app list upcoming", "/events/list", {"is_ended": "false"}, True),
         ("app list search", "/events/list", {"search": "robotics"}, True),
@@ -195,6 +198,7 @@ async def main() -> None:
     p.add_argument("--explain-all", action="store_true", help="explain every statement of the request, not the slowest two")
     p.add_argument("--indexes", help="write which indexes each endpoint's plans use here (JSON); implies explaining every statement")
     p.add_argument("--quiet-sql-log", action="store_true", help="turn the app's SQL statement log down to WARNING")
+    p.add_argument("--freeze", action="store_true", help="gc.freeze() after import, as the app's startup does (doth.lifespan)")
     args = p.parse_args()
 
     from doth import application
@@ -202,6 +206,10 @@ async def main() -> None:
     from app.core.auth.jwt import create_access_token
     from app.db.core import AsyncSessionLocal, engine
 
+    if args.freeze:
+        # The in-process client runs no lifespan; do what its startup does to the collector.
+        gc.collect()
+        gc.freeze()
     if args.quiet_sql_log:
         logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
     # The app logs every statement; in a benchmark that goes to a file, not the terminal.
