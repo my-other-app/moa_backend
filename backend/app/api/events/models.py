@@ -16,6 +16,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 import sqlalchemy as sa
+from sqlalchemy import DDL, event as sa_event
 
 from app.api.templates_audience import RegistrationRole
 from app.api.users.models import UserAvatarTypes
@@ -92,6 +93,12 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     additional_details = Column(ARRAY(JSON), nullable=True)
     event_guidelines = Column(String, nullable=True)
     page_views = Column(Integer, nullable=False, default=0)
+    # How many are registered and have not cancelled: a trigger on
+    # event_registrations_link keeps it, in the same transaction as every
+    # insert, cancel, delete or move there (see GOING_COUNT_SQL below), so a
+    # list can sort by popularity without counting registrations.
+    # Reconciled from the rows by app.api.discover.counters.reconcile.
+    going_count = Column(Integer, nullable=False, default=0, server_default="0")
     event_tag = Column(String(50), nullable=True)  # Tag like "Free", "Paid", "Featured", etc.
 
     category_id = Column(Integer, ForeignKey("event_categories.id"), nullable=False)
@@ -160,11 +167,45 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
 
     model_config = ConfigDict(from_attributes=True)
 
+    __table_args__ = (
+        # What the public lists walk: what is on or to come, soonest first.
+        # The predicate is written out, not bound, by the queries that use it
+        # (see discover.service._in), so a cached generic plan can use it too.
+        sa.Index("ix_events_shown_start", "event_datetime", "id", postgresql_where=sa.text("NOT is_deleted AND status IN ('published', 'live')")),
+        # When each event ends, for "not over yet" without reading every row.
+        sa.Index(
+            "ix_events_ends_at",
+            sa.func.timezone(sa.literal_column("'UTC'"), sa.func.timezone(sa.literal_column("'UTC'"), event_datetime) + duration * sa.text("INTERVAL '1 hour'")),
+            postgresql_where=sa.text("NOT is_deleted"),
+        ),
+        sa.Index("ix_events_club_start", "club_id", "event_datetime", postgresql_where=sa.text("NOT is_deleted")),
+        sa.Index("ix_events_category_start", "category_id", "event_datetime", postgresql_where=sa.text("NOT is_deleted")),
+        # "Near you": a latitude/longitude box first, the exact distance after.
+        sa.Index("ix_events_shown_point", "lat", "lng", postgresql_where=sa.text("NOT is_deleted AND status IN ('published', 'live') AND lat IS NOT NULL AND lng IS NOT NULL")),
+        # Words anywhere in the name or the place: trigram indexes serve ILIKE '%…%' and similarity.
+        sa.Index("ix_events_name_trgm", "name", postgresql_using="gin", postgresql_ops={"name": "gin_trgm_ops"}, postgresql_where=sa.text("NOT is_deleted")),
+        sa.Index("ix_events_location_trgm", "location_name", postgresql_using="gin", postgresql_ops={"location_name": "gin_trgm_ops"}, postgresql_where=sa.text("NOT is_deleted")),
+    )
+
     @property
     def status(self) -> str:
         if getattr(self, "is_deleted", False):
             return "cancelled"
         return (self.lifecycle or EventStatus.published).value
+
+
+def ends_at_sql(model=None):
+    """When an event ends, start plus `duration` hours, as SQL.
+
+    Written in UTC wall time: `timestamptz + interval` is only STABLE (a day's
+    length depends on the session's zone), so Postgres will not index it;
+    `timestamp + interval` and `AT TIME ZONE 'UTC'` are IMMUTABLE. For an
+    interval of hours, which is all a duration ever is, the two are the same
+    instant in every zone. This exact expression is what ix_events_ends_at
+    indexes, so "not over yet" can be a range scan."""
+    m = model if model is not None else Events
+    utc = sa.literal_column("'UTC'")
+    return sa.func.timezone(utc, sa.func.timezone(utc, m.event_datetime) + m.duration * sa.text("INTERVAL '1 hour'"))
 
 
 class EventSpeakers(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
@@ -257,6 +298,11 @@ class EventInterestsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     # event = relationship("Events")
     # interest = relationship("Interests")
 
+    __table_args__ = (
+        sa.Index("ix_event_interests_event", "event_id", postgresql_where=sa.text("NOT is_deleted")),
+        sa.Index("ix_event_interests_interest", "interest_id", "event_id", postgresql_where=sa.text("NOT is_deleted")),
+    )
+
 
 class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     __tablename__ = "event_registrations_link"
@@ -324,7 +370,11 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
     user = relationship("Users")
     volunteer = relationship("Volunteer")
 
-    __table_args__ = (UniqueConstraint("event_id", "user_id", "is_deleted"),)
+    __table_args__ = (
+        UniqueConstraint("event_id", "user_id", "is_deleted"),
+        # One person's registrations: the app's ticket lists and the For You feed.
+        sa.Index("ix_registrations_user", "user_id", postgresql_where=sa.text("NOT is_deleted")),
+    )
 
     @property
     def institution(self) -> str | None:
@@ -359,3 +409,39 @@ class EventRatingsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     user = relationship("Users")
 
     __table_args__ = (UniqueConstraint("event_id", "user_id", "is_deleted"),)
+
+
+# ─── events.going_count, kept by the database ─────────────────────────────
+#
+# A trigger rather than application code: registrations are written from the
+# public form, the app, the desk, the kiosk, imports, the guest merge, refunds
+# and the retention scrub, and a trigger sees every one of them, raw SQL
+# included, in the writer's own transaction. Registration already holds the
+# event row (SELECT … FOR UPDATE), so the extra update adds no new waiting.
+# The migration discover_perf installs the same function and trigger.
+
+GOING_COUNT_SQL = (
+    """
+    CREATE OR REPLACE FUNCTION moa_going_count() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF TG_OP = 'UPDATE' AND OLD.event_id = NEW.event_id AND OLD.is_deleted = NEW.is_deleted THEN
+        RETURN NULL;
+      END IF;
+      IF TG_OP IN ('UPDATE', 'DELETE') AND NOT OLD.is_deleted THEN
+        UPDATE events SET going_count = going_count - 1 WHERE id = OLD.event_id;
+      END IF;
+      IF TG_OP IN ('UPDATE', 'INSERT') AND NOT NEW.is_deleted THEN
+        UPDATE events SET going_count = going_count + 1 WHERE id = NEW.event_id;
+      END IF;
+      RETURN NULL;
+    END $$
+    """,
+    """
+    CREATE TRIGGER trg_registrations_going_count
+    AFTER INSERT OR DELETE OR UPDATE OF event_id, is_deleted ON event_registrations_link
+    FOR EACH ROW EXECUTE FUNCTION moa_going_count()
+    """,
+)
+
+for _sql in GOING_COUNT_SQL:
+    sa_event.listen(EventRegistrationsLink.__table__, "after_create", DDL(_sql).execute_if(dialect="postgresql"))
