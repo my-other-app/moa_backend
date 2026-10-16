@@ -1,4 +1,4 @@
-"""The club's expense ledger: what an event cost, set against the ticket money it brought."""
+"""The club's ledger: what an event cost, and what came in besides tickets, set against the ticket money."""
 import uuid
 
 from sqlalchemy import UUID, Column, Date, ForeignKey, Integer, Numeric, String
@@ -14,6 +14,8 @@ class ClubExpenses(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     club_id = Column(Integer, ForeignKey("clubs.id", ondelete="CASCADE"), nullable=False, index=True)
     # Null means an overhead of the club itself: a domain, a subscription, a banner reused all year.
     event_id = Column(Integer, ForeignKey("events.id", ondelete="SET NULL"), nullable=True, index=True)
+    # "expense" or "income": the ledger holds what went out and what came in besides tickets — sponsorship, a grant, a donation.
+    kind = Column(String(10), nullable=False, default="expense", server_default="expense")
     title = Column(String(120), nullable=False)
     category = Column(String(40), nullable=False)
     amount = Column(Numeric(10, 2), nullable=False)

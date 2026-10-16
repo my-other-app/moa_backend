@@ -67,41 +67,57 @@ async def test_the_season_adds_up_by_month_by_type_and_by_event(client, world):
     await _expense(client, h, event_id=past.id, title="Venue", category="venue", amount=300)
     await _expense(client, h, event_id=past.id, title="Pizza", category="Food", amount=200, note="two large")
     overhead = await _expense(client, h, title="Domain renewal", category="other", amount=100)
-    assert overhead["event_id"] is None and overhead["event_name"] is None and overhead["incurred_on"] == NOW.date().isoformat()
+    assert overhead["event_id"] is None and overhead["event_name"] is None and overhead["incurred_on"] == NOW.date().isoformat() and overhead["kind"] == "expense"
+    # The ledger takes income too: a sponsor for the hackathon, a grant to the club.
+    sponsor = await _expense(client, h, event_id=past.id, kind="income", title="Acme sponsorship", category="sponsorship", amount=2000)
+    assert sponsor["kind"] == "income" and sponsor["category"] == "sponsorship"
+    await _expense(client, h, kind="income", title="College grant", category="grant", amount=300)
+    # An income's category must be an income category, and the other way round.
+    assert (await client.post("/api/v1/clubs/finance/expenses", json={"kind": "income", "title": "Odd", "category": "venue", "amount": 10}, headers=h)).status_code == 422
+    assert (await client.post("/api/v1/clubs/finance/expenses", json={"title": "Odd", "category": "grant", "amount": 10}, headers=h)).status_code == 422
 
     s = (await client.get("/api/v1/clubs/finance", headers=h)).json()
     # The window runs from four months back through the end of next month.
     end = (datetime(NOW.year + (NOW.month + 1) // 12, (NOW.month + 1) % 12 + 1, 1, tzinfo=timezone.utc) - timedelta(days=1)).date()
     assert s["scope"] == "club" and s["period"]["end"] == end.isoformat() and s["period"]["start"].endswith("-01")
     f = s["figures"]
-    # Two paid guests held ₹1,000; the refund grosses it up; the three expenses come off.
+    # Two paid guests held ₹1,000 and ₹2,300 came in besides; the refund grosses it up; the three expenses come off.
     # One event conducted, as in the window before (the old workshop), so the arrow is flat.
     assert f["events"] == {"conducted": 1, "upcoming": 1, "delta": 0.0}
-    assert (f["gross"], f["tickets"], f["refunds"], f["refund_count"]) == (1500.0, 1000.0, 500.0, 1)
-    assert (f["expenses"], f["expense_count"], f["net"]) == (600.0, 3, 400.0)
+    assert (f["gross"], f["tickets"], f["other_income"], f["other_income_count"], f["refunds"], f["refund_count"]) == (3800.0, 1000.0, 2300.0, 2, 500.0, 1)
+    assert (f["expenses"], f["expense_count"], f["net"]) == (600.0, 3, 2700.0)
     assert (f["outstanding"], f["outstanding_count"], f["paying"], f["regs"], f["avg_ticket"]) == (500.0, 1, 2, 6, 500.0)
     # The period before held the ₹1,000 workshop and spent nothing.
-    assert s["deltas"] == {"gross": 50.0, "tickets": 0.0, "merch": None, "refunds": None, "expenses": None, "net": -60.0}
+    assert s["deltas"] == {"gross": 280.0, "tickets": 0.0, "merch": None, "refunds": None, "expenses": None, "net": 170.0}
     assert len(s["by_month"]) == 6
-    assert [sum(r[k] for r in s["by_month"]) for k in ("tickets", "refunds", "expenses", "net")] == [1000.0, 500.0, 600.0, 400.0]
+    assert [sum(r[k] for r in s["by_month"]) for k in ("tickets", "other", "refunds", "expenses", "net")] == [1000.0, 2300.0, 500.0, 600.0, 2700.0]
     assert s["by_type"] == [
-        {"type": "Hackathon", "events": 1, "tickets": 1000.0, "merch": 0.0, "expenses": 500.0, "net": 500.0},
-        {"type": "General", "events": 1, "tickets": 0.0, "merch": 0.0, "expenses": 0.0, "net": 0.0},
-        {"type": "Club", "events": 0, "tickets": 0.0, "merch": 0.0, "expenses": 100.0, "net": -100.0},
+        {"type": "Hackathon", "events": 1, "tickets": 1000.0, "merch": 0.0, "other": 2000.0, "expenses": 500.0, "net": 2500.0},
+        {"type": "General", "events": 1, "tickets": 0.0, "merch": 0.0, "other": 0.0, "expenses": 0.0, "net": 0.0},
+        {"type": "Club", "events": 0, "tickets": 0.0, "merch": 0.0, "other": 300.0, "expenses": 100.0, "net": 200.0},
     ]
     rows = s["by_event"]
     assert [r["name"] for r in rows] == ["TinyML Circle", "Hack Night 04"]
     assert rows[0]["status"] == "published" and rows[0]["regs"] == 2 and rows[0]["tickets"] == 0.0
-    assert rows[1] == rows[1] | {"id": past.id, "name": "Hack Night 04", "type": "Hackathon", "status": "closed", "held": True, "has_fee": True, "fee": 500.0, "regs": 4, "paying": 2, "tickets": 1000.0, "merch": 0.0, "online": 1000.0, "cash": 0.0, "refunds": 500.0, "expenses": 500.0, "expense_count": 2, "net": 500.0, "margin": 50.0, "outstanding": 500.0, "outstanding_count": 1}
+    assert rows[1] == rows[1] | {"id": past.id, "name": "Hack Night 04", "type": "Hackathon", "status": "closed", "held": True, "has_fee": True, "fee": 500.0, "regs": 4, "paying": 2, "tickets": 1000.0, "merch": 0.0, "other_income": 2000.0, "online": 1000.0, "cash": 0.0, "refunds": 500.0, "expenses": 500.0, "expense_count": 2, "net": 2500.0, "margin": 83.0, "outstanding": 500.0, "outstanding_count": 1}
     assert rows[0]["held"] is False and rows[0]["has_fee"] is False and rows[0]["margin"] is None
     # Both paid guests paid online; nothing was taken at the door; half of what came in stayed.
-    assert (f["online"], f["online_count"], f["cash"], f["cash_count"], f["margin"], f["cost_per_head"]) == (1000.0, 2, 0.0, 0, 40.0, 100.0)
-    assert s["channels"] == [{"key": "online", "label": "Paid online", "amount": 1000.0, "count": 2}, {"key": "cash", "label": "Cash at the door", "amount": 0.0, "count": 0}, {"key": "merch", "label": "Merchandise", "amount": 0.0, "count": 0}]
+    assert (f["online"], f["online_count"], f["cash"], f["cash_count"], f["margin"], f["cost_per_head"]) == (1000.0, 2, 0.0, 0, 82.0, 100.0)
+    assert s["channels"] == [{"key": "online", "label": "Paid online", "amount": 1000.0, "count": 2}, {"key": "cash", "label": "Cash at the door", "amount": 0.0, "count": 0}, {"key": "merch", "label": "Merchandise", "amount": 0.0, "count": 0}, {"key": "other", "label": "Sponsorship & other", "amount": 2300.0, "count": 2}]
     assert s["by_category"] == [{"category": "venue", "amount": 300.0, "count": 1}, {"category": "food", "amount": 200.0, "count": 1}, {"category": "other", "amount": 100.0, "count": 1}]
+    assert s["income_by_category"] == [{"category": "sponsorship", "amount": 2000.0, "count": 1}, {"category": "grant", "amount": 300.0, "count": 1}]
+    assert s["income_categories"][0] == "sponsorship"
     # One guest at the held hackathon still owes; nothing ran at a loss; its ledger has entries.
     assert s["attention"] == {"at_a_loss": [], "owed": [{"id": past.id, "name": "Hack Night 04", "outstanding": 500.0, "outstanding_count": 1}], "unlogged": []}
     assert s["ahead"] == {"events": 1, "paid_events": 0, "regs": 2, "tickets": 0.0, "outstanding": 0.0, "outstanding_count": 0, "expenses": 0.0}
-    assert [x["title"] for x in s["expenses"]] == ["Domain renewal", "Pizza", "Venue"] and s["expenses"][1]["category"] == "food" and s["expenses"][1]["event_name"] == "Hack Night 04"
+    assert [x["title"] for x in s["expenses"]] == ["College grant", "Acme sponsorship", "Domain renewal", "Pizza", "Venue"] and s["expenses"][3]["category"] == "food" and s["expenses"][3]["event_name"] == "Hack Night 04"
+    assert [x["kind"] for x in s["expenses"]] == ["income", "income", "expense", "expense", "expense"]
+    # An entry can change kind, and its category must follow.
+    turned = await client.patch(f"/api/v1/clubs/finance/expenses/{sponsor['id']}", json={"kind": "expense", "category": "venue"}, headers=h)
+    assert turned.status_code == 200 and turned.json()["kind"] == "expense" and turned.json()["category"] == "venue"
+    assert (await client.patch(f"/api/v1/clubs/finance/expenses/{sponsor['id']}", json={"category": "grant"}, headers=h)).status_code == 422
+    assert (await client.patch(f"/api/v1/clubs/finance/expenses/{sponsor['id']}", json={"kind": "income"}, headers=h)).json()["category"] == "other"
+    assert (await client.patch(f"/api/v1/clubs/finance/expenses/{sponsor['id']}", json={"category": "sponsorship"}, headers=h)).json()["category"] == "sponsorship"
     assert s["categories"][0] == "venue"
 
     # A wider window takes the old workshop in; the previous window is then empty.
@@ -140,18 +156,20 @@ async def test_one_event_has_its_own_ledger_and_expense_book(client, world):
 async def test_statements_carry_the_ledger_and_the_totals(client, world):
     h, past = world["h"], world["past"]
     await _expense(client, h, event_id=past.id, title="=SUM(A1)", category="printing", amount=40)
+    await _expense(client, h, event_id=past.id, kind="income", title="Sponsor", category="sponsorship", amount=60)
 
     r = await client.get("/api/v1/clubs/finance/statement.csv", headers=h)
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/csv") and r.headers["content-disposition"].startswith('attachment; filename="yukthi') and r.headers["content-disposition"].endswith('.csv"')
     body = r.text.lstrip("﻿")
-    assert "Hack Night 04,Hackathon,closed,4,2,1000.0,0.0,500.0,40.0,960.0" in body
+    assert "Hack Night 04,Hackathon,closed,4,2,1000.0,0.0,500.0,40.0,1020.0" in body
     assert "TinyML Circle,General,published,2,0,0.0,0.0,0.0,0.0,0.0" in body
     assert ",Hack Night 04,'=SUM(A1),printing,40.0," in body  # a title that looks like a formula is defused
-    assert "Net surplus,960.0" in body and "Outstanding,500.0" in body and "Rival Gala" not in body
+    assert "Other income\n" in body and ",Hack Night 04,Sponsor,sponsorship,60.0," in body
+    assert "Other income,60.0" in body and "Net surplus,1020.0" in body and "Outstanding,500.0" in body and "Rival Gala" not in body
 
     r = await client.get(f"/api/v1/events/{past.id}/finance/statement.csv", headers=h)
     assert r.status_code == 200 and r.headers["content-disposition"].startswith('attachment; filename="hack-night-04') and r.headers["content-disposition"].endswith('-statement.csv"')
     lines = r.text.lstrip("﻿").splitlines()
     guests = [ln for ln in lines if "@example.com" in ln]
     assert len(guests) == 4 and sum(ln.endswith(",refunded") for ln in guests) == 1 and sum(ln.endswith(",paid") for ln in guests) == 2 and sum(ln.endswith(",unpaid") for ln in guests) == 1
-    assert "Gross income,1500.0" in lines and "Net surplus,960.0" in lines
+    assert "Gross income,1560.0" in lines and "Net surplus,1020.0" in lines

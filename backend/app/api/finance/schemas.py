@@ -2,9 +2,12 @@ from datetime import date
 from decimal import Decimal
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 EXPENSE_CATEGORIES = ("venue", "food", "prizes", "printing", "marketing", "equipment", "travel", "speakers", "other")
+INCOME_CATEGORIES = ("sponsorship", "grant", "donation", "sales", "fees", "other")
+KINDS = ("expense", "income")
+CATEGORIES = {"expense": EXPENSE_CATEGORIES, "income": INCOME_CATEGORIES}
 
 
 def _clean_title(v: str) -> str:
@@ -14,15 +17,17 @@ def _clean_title(v: str) -> str:
     return v
 
 
-def _known_category(v: str) -> str:
+def _known_category(v: str, kind: str = "expense") -> str:
     v = v.strip().lower()
-    if v not in EXPENSE_CATEGORIES:
-        raise ValueError(f"category must be one of: {', '.join(EXPENSE_CATEGORIES)}")
+    allowed = CATEGORIES[kind]
+    if v not in allowed:
+        raise ValueError(f"an {kind}'s category must be one of: {', '.join(allowed)}")
     return v
 
 
 class ExpenseCreate(BaseModel):
     event_id: Optional[int] = None
+    kind: Literal["expense", "income"] = "expense"
     title: str = Field(..., min_length=1, max_length=120)
     category: str = Field("other", max_length=40)
     amount: Decimal = Field(..., gt=0, max_digits=10, decimal_places=2)
@@ -30,11 +35,16 @@ class ExpenseCreate(BaseModel):
     note: Optional[str] = Field(None, max_length=500)
 
     _title = field_validator("title")(_clean_title)
-    _category = field_validator("category")(_known_category)
+
+    @model_validator(mode="after")
+    def _category_fits_kind(self):
+        self.category = _known_category(self.category, self.kind)
+        return self
 
 
 class ExpensePatch(BaseModel):
     event_id: Optional[int] = None
+    kind: Optional[Literal["expense", "income"]] = None
     title: Optional[str] = Field(None, min_length=1, max_length=120)
     category: Optional[str] = Field(None, max_length=40)
     amount: Optional[Decimal] = Field(None, gt=0, max_digits=10, decimal_places=2)
@@ -49,13 +59,15 @@ class ExpensePatch(BaseModel):
     @field_validator("category")
     @classmethod
     def _category(cls, v):
-        return None if v is None else _known_category(v)
+        # Checked against the entry's kind in the service, where the kind is known.
+        return None if v is None else v.strip().lower()
 
 
 class ExpenseOut(BaseModel):
     id: str
     event_id: Optional[int]
     event_name: Optional[str]
+    kind: str = "expense"
     title: str
     category: str
     amount: float
@@ -77,6 +89,8 @@ class Figures(BaseModel):
     gross: float
     tickets: float
     merch: float = 0
+    other_income: float = 0
+    other_income_count: int = 0
     refunds: float
     refund_count: int
     online: float = 0
@@ -106,6 +120,7 @@ class MonthRow(BaseModel):
     month: str
     tickets: float
     merch: float = 0
+    other: float = 0
     refunds: float
     expenses: float
     net: float
@@ -116,6 +131,7 @@ class TypeRow(BaseModel):
     events: int
     tickets: float
     merch: float = 0
+    other: float = 0
     expenses: float
     net: float
 
@@ -133,6 +149,7 @@ class EventRow(BaseModel):
     paying: int
     tickets: float
     merch: float = 0
+    other_income: float = 0
     online: float = 0
     cash: float = 0
     refunds: float
@@ -211,8 +228,10 @@ class FinanceSummary(BaseModel):
     by_event: list[EventRow]
     expenses: list[ExpenseOut]
     by_category: list[CategoryRow] = []
+    income_by_category: list[CategoryRow] = []
     channels: list[ChannelRow] = []
     attention: Attention = Attention()
     ahead: Ahead = Ahead()
     categories: list[str]
+    income_categories: list[str] = []
     generated_at: str
