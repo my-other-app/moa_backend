@@ -252,6 +252,16 @@ async def feed(session, user, offset: int, limit: int) -> dict:
     return dict(items=await _shape(session, rows, clubs, user.id), total=total or 0, limit=limit, offset=offset)
 
 
+async def one_public(session, thread_id, user, request) -> dict:
+    """One post as its reader sees it — what a tapped notification opens. Counts the view like the club page does."""
+    t, club = await live_thread(session, thread_id)
+    item = (await _shape(session, [t], {club.id: club}, getattr(user, "id", None)))[0]
+    if getattr(user, "id", None) != club.user_id:
+        await _count_views(session, [t], _visitor(user, request))
+        item["views"] = t.views_count
+    return item
+
+
 async def live_thread(session, thread_id) -> tuple[ClubThreads, Clubs]:
     t = await session.scalar(select(ClubThreads).where(ClubThreads.id == _uuid(thread_id), ClubThreads.is_deleted == False))  # noqa: E712
     if t is None:

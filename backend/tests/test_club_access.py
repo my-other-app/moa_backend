@@ -84,7 +84,7 @@ async def test_an_invite_is_mailed_previewed_accepted_and_opens_the_clubs_dashbo
     assert me["role"] == "editor" and me["club_name"] == "Circuit Society" and me["member"]["full_name"] == "Priya Nair"
     assert me["can"]["money"] is False and me["can"]["edit_events"] is True and me["can"]["manage_access"] is False
     # The session acts as the club: club routes answer for Circuit Society.
-    assert (await client.get("/api/v1/clubs/site", headers=h)).json()["url"].endswith(f"/clubs/{world['club'].slug}")
+    assert (await client.get("/api/v1/clubs/site", headers=h)).json()["url"] == f"https://{world['club'].slug}.myotherapp.in"
 
     owner_view = (await client.get("/api/v1/clubs/access", headers=world["h"])).json()
     assert owner_view["can_manage"] is True and [m["email"] for m in owner_view["members"]] == ["priya@example.com"]

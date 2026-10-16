@@ -110,6 +110,12 @@ async def my_feed(session: SessionDep, user: UserAuth, offset: int = Query(0, ge
     return ThreadPage(**await service.feed(session, user, offset, limit))
 
 
+# After /threads/feed, so "feed" is never read as a post id.
+@public_router.get("/threads/{thread_id}", summary="One post, as a tapped notification opens it")
+async def one_thread(request: Request, session: SessionDep, user: OptionalAuth, thread_id: str) -> ThreadOut:
+    return ThreadOut(**await service.one_public(session, thread_id, user, request))
+
+
 @public_router.post("/threads/{thread_id}/like", summary="Like, or take it back")
 @limiter.limit("120/minute")
 async def like(request: Request, session: SessionDep, user: UserAuth, thread_id: str) -> LikeOut:

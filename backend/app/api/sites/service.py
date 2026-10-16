@@ -1,5 +1,6 @@
 """The club's site: its choices, the data the page is made from, the
 rendering, and the publish that stores the page."""
+import re
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select
@@ -33,7 +34,15 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# One DNS label: what can stand before .myotherapp.in.
+_LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+
+
 def public_url(club: Clubs) -> str:
+    """The site's address: the club's own subdomain, or the events-site page
+    when the slug cannot be a subdomain (longer than 63, odd characters)."""
+    if club.slug and _LABEL.match(club.slug):
+        return settings.PUBLIC_CLUB_SITE_URL.format(slug=club.slug)
     return settings.PUBLIC_CLUB_URL.format(slug=club.slug)
 
 

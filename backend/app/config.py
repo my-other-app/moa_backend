@@ -80,6 +80,9 @@ class AppConfig(BaseSettings):
     # Where an address is turned into a place for the Security page; {ip} is filled in. Empty disables it.
     GEOIP_URL: str = "https://ipapi.co/{ip}/json/"
     PUBLIC_CLUB_URL: str = "https://events.myotherapp.in/clubs/{slug}"
+    # A club's published website at its own address (served by the club-sites Cloudflare Worker).
+    # PUBLIC_CLUB_URL stays the events-site page tracking links land on; it frames the same site.
+    PUBLIC_CLUB_SITE_URL: str = "https://{slug}.myotherapp.in"
 
     CORS_ORIGINS: list[str] | str
 
