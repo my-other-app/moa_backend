@@ -1,5 +1,8 @@
 import boto3
 import logging
+import threading
+import time
+from collections import OrderedDict
 from sqlalchemy.types import TypeDecorator, String
 from PIL import Image
 import io
@@ -12,6 +15,61 @@ from app.config import settings
 from app.response import CustomHTTPException
 
 logger = logging.getLogger(__name__)
+
+
+# One client for signing read URLs, made when this module loads.
+#
+# Signing is local work (no request leaves the process), but making a boto3
+# client loads and validates its service model: about 4 ms, and it used to be
+# done for every image column of every row read, so a page that read a few
+# thousand events spent seconds here. Clients are safe to share across
+# threads. Made at import rather than on first use, so a test that swaps
+# `boto3.client` for a fake while it runs cannot leave the fake behind here.
+_SIGNER = boto3.client(
+    "s3",
+    aws_access_key_id=settings.S3_ACCESS_KEY,
+    aws_secret_access_key=settings.S3_SECRET_KEY,
+)
+
+
+def _signer():
+    return _SIGNER
+
+
+# Signed read URLs, kept and handed out again for half their life.
+#
+# Even with one client, signing is about 70 µs a URL (botocore resolves the
+# endpoint rules every time), and every image column of every row read signs
+# four or five: a page of 24 event cards signed ~200 URLs. A URL valid for an
+# hour is reused for its first half hour, so whoever receives it has at
+# least 30 minutes to load the image, and the same image now has the same
+# address across page views, which lets browsers cache it.
+_SIGN_SECONDS = 3600
+_REUSE_SECONDS = 1800
+_SIGNED_MAX = 20000
+_signed: "OrderedDict[str, tuple[float, str]]" = OrderedDict()
+_signed_lock = threading.Lock()
+
+
+def signed_url(key: str) -> str:
+    """A presigned GET URL for `key`, valid for at least another 30 minutes."""
+    now = time.monotonic()
+    with _signed_lock:
+        hit = _signed.get(key)
+        if hit is not None and hit[0] > now:
+            _signed.move_to_end(key)
+            return hit[1]
+    url = _SIGNER.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": settings.S3_BUCKET, "Key": key},
+        ExpiresIn=_SIGN_SECONDS,
+    )
+    with _signed_lock:
+        _signed[key] = (now + _REUSE_SECONDS, url)
+        _signed.move_to_end(key)
+        while len(_signed) > _SIGNED_MAX:
+            _signed.popitem(last=False)
+    return url
 
 
 class S3Image(dict):
@@ -35,16 +93,7 @@ class S3Image(dict):
 
 class S3File(str):
     def __new__(cls, file_path):
-        s3_client = boto3.client(
-            "s3",
-            aws_access_key_id=settings.S3_ACCESS_KEY,
-            aws_secret_access_key=settings.S3_SECRET_KEY,
-        )
-        url = s3_client.generate_presigned_url(
-            "get_object",
-            Params={"Bucket": settings.S3_BUCKET, "Key": file_path},
-            ExpiresIn=3600,
-        )
+        url = signed_url(file_path)
         obj = super().__new__(cls, url)
         obj.file_path = file_path
         return obj
@@ -223,11 +272,6 @@ class S3ImageField(TypeDecorator):
         if not value:
             return None
 
-        s3_client = boto3.client(
-            "s3",
-            aws_access_key_id=settings.S3_ACCESS_KEY,
-            aws_secret_access_key=settings.S3_SECRET_KEY,
-        )
         ext = value.split(".")[-1]
         file_name = ".".join(value.split(".")[:-1]).split("/")[-1]
 
@@ -240,20 +284,11 @@ class S3ImageField(TypeDecorator):
             variation_paths[variation] = variation_path
             try:
                 # s3_client.head_object(Bucket=self.bucket_name, Key=variation_path)
-                url = s3_client.generate_presigned_url(
-                    "get_object",
-                    Params={"Bucket": settings.S3_BUCKET, "Key": variation_path},
-                    ExpiresIn=3600,
-                )
-                variations[variation] = url
+                variations[variation] = signed_url(variation_path)
             except:
                 pass
 
-        variations["original"] = s3_client.generate_presigned_url(
-            "get_object",
-            Params={"Bucket": settings.S3_BUCKET, "Key": value},
-            ExpiresIn=3600,
-        )
+        variations["original"] = signed_url(value)
         variation_paths["original"] = value
         return S3Image(variations=variation_paths, **variations)
 
