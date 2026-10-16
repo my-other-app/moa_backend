@@ -1,6 +1,7 @@
 import enum
 import json
 from typing import Any, Optional
+from urllib.parse import urlsplit
 from uuid import UUID
 from fastapi import File, Form, UploadFile
 from pydantic import AwareDatetime, BaseModel, EmailStr, Field, ValidationError, field_validator
@@ -40,6 +41,10 @@ class EventAdditionalDetail(CustomBaseModel):
     options: list[str] | None = None
 
 
+SPEAKER_BIO_MAX = 600
+SPEAKER_LINK_MAX = 500
+
+
 class EventSpeakerCreate(CustomBaseModel):
     """Schema for creating/updating event speakers."""
     name: str = Field(..., min_length=1, max_length=100)
@@ -47,6 +52,38 @@ class EventSpeakerCreate(CustomBaseModel):
     photo_url: str | None = Field(None)  # URL or base64 image data
     photo_index: int | None = Field(None) # Index in the uploaded files list
     id: int | None = Field(None) # ID for updating existing speakers
+    # Left out, an existing speaker keeps theirs: older clients do not send these.
+    bio: str | None = Field(None)
+    link: str | None = Field(None)
+
+    @field_validator("bio", mode="before")
+    @classmethod
+    def _bio(cls, v):
+        if v is None:
+            return None
+        if not isinstance(v, str):
+            raise ValueError("A speaker's bio must be text.")
+        v = v.strip()
+        if len(v) > SPEAKER_BIO_MAX:
+            raise ValueError(f"A speaker's bio can be at most {SPEAKER_BIO_MAX} characters.")
+        return v or None
+
+    @field_validator("link", mode="before")
+    @classmethod
+    def _link(cls, v):
+        if v is None:
+            return None
+        if not isinstance(v, str):
+            raise ValueError("A speaker's link must be a web address.")
+        v = v.strip()
+        if not v:
+            return None
+        parts = urlsplit(v)
+        if parts.scheme.lower() not in ("http", "https") or not parts.netloc or any(c.isspace() for c in v):
+            raise ValueError("A speaker's link must be a web address starting with http:// or https://.")
+        if len(v) > SPEAKER_LINK_MAX:
+            raise ValueError(f"A speaker's link can be at most {SPEAKER_LINK_MAX} characters.")
+        return v
 
 
 class EventSpeakerPublic(CustomBaseModel):
@@ -55,6 +92,8 @@ class EventSpeakerPublic(CustomBaseModel):
     name: str
     designation: str | None = None
     photo: dict | None = None
+    bio: str | None = None
+    link: str | None = None
     display_order: int = 0
 
 

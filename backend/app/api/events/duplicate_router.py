@@ -32,9 +32,9 @@ class Duplicated(BaseModel):
 
 @router.post("/duplicate", summary="A new event from this one's setup", status_code=201)
 async def duplicate(session: SessionDep, user: ClubAuth, event_id: int, body: DuplicateBody) -> Duplicated:
-    """Settings, fields, designs, the email journey and the merchandise come
-    across; doors, team and agenda when asked; the venue, the guest list and
-    every record of the day stay behind. The copy starts as a draft."""
+    """Settings, fields, designs, the email journey, the merchandise and the
+    organisers come across; doors, team and agenda when asked; the venue, the
+    guest list and every record of the day stay behind. The copy starts as a draft."""
     source = await deliveries.event_for_club(session, user, event_id)
     return Duplicated(**await duplicate_event(
         session, source, user, name=body.name, event_datetime=body.event_datetime, duration=body.duration,

@@ -171,6 +171,8 @@ async def create_event(
                 event_id=event_id,
                 name=speaker.name,
                 designation=speaker.designation,
+                bio=speaker.bio,
+                link=speaker.link,
                 display_order=idx,
             )
             
@@ -336,6 +338,10 @@ async def update_event(
                 db_speaker = existing_speakers_map[speaker.id]
                 db_speaker.name = speaker.name
                 db_speaker.designation = speaker.designation
+                # Only when sent: a client that predates them would otherwise wipe them.
+                for field in ("bio", "link"):
+                    if field in speaker.model_fields_set:
+                        setattr(db_speaker, field, getattr(speaker, field))
                 db_speaker.display_order = idx
                 keep_ids.add(speaker.id)
                 
@@ -359,6 +365,8 @@ async def update_event(
                     event_id=event_id,
                     name=speaker.name,
                     designation=speaker.designation,
+                    bio=speaker.bio,
+                    link=speaker.link,
                     display_order=idx,
                 )
                 
@@ -452,7 +460,10 @@ async def get_event(session: AsyncSession, event_id: str | int, user_id: int | N
 
 
     event = db_event[0]
-    data = event.__dict__
+    # A copy: writing the response's speakers and downloads into the instance's
+    # own __dict__ swapped its speakers collection for a plain list, and the
+    # next flush of that instance in the same session failed on it.
+    data = dict(event.__dict__)
     data["rating"] = db_event[1]
     data["total_rating"] = db_event[2]
     # The status clock as plain strings: `status` is a property the dict
@@ -473,6 +484,8 @@ async def get_event(session: AsyncSession, event_id: str | int, user_id: int | N
             "name": s.name,
             "designation": s.designation,
             "photo": s.photo,
+            "bio": s.bio,
+            "link": s.link,
             "display_order": s.display_order
         }
         for s in event.speakers if not s.is_deleted

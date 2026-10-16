@@ -53,6 +53,9 @@ _DESTRUCTIVE = _rx(
     r"^/api/v1/events/delete/\d+$",
     r"^/api/v1/events/\d+/closeout/retention/run$",
 )
+# An event's own setup that is not money or profile (its agenda, its organisers)
+# falls to the defaults: door staff may read it, editors and admins change it.
+
 # The only changes door staff make: letting people in and handing things over.
 _DOOR_WRITES = _rx(
     r"^/api/v1/events/\d+/gate/",

@@ -2,10 +2,11 @@
 
 Everything that is a setting comes across: the fields guests answer, the
 door and card rules, self check-in, retention, the designs (ticket, card,
-certificate, programme), the email journey, the merchandise. What is a
-judgement call is asked for: the doors, the team, the agenda. What is never
-the same is left out: the venue, the registrations, every handover, every
-report. The copy starts as a draft on the clock.
+certificate, programme), the email journey, the merchandise, the organisers
+its page names. What is a judgement call is asked for: the doors, the team,
+the agenda. What is never the same is left out: the venue, the
+registrations, every handover, every report. The copy starts as a draft on
+the clock.
 """
 from datetime import datetime, timezone
 from typing import Optional
@@ -22,6 +23,7 @@ from app.api.events.models import EventInterestsLink, Events
 from app.api.events.volunteer.models import Volunteer
 from app.api.idcards.models import BadgeTemplates
 from app.api.merch.models import MerchItems, MerchVariants
+from app.api.organisers.models import EventTeamMembers
 from app.api.ticket_templates.models import TicketTemplates
 from app.core.utils.keys import generate_slug
 
@@ -53,11 +55,15 @@ async def duplicate_event(
     new.status_clock = True
     session.add(new)
     await session.flush()
-    copied = {"interests": 0, "designs": 0, "emails": 0, "merch": 0, "doors": 0, "team": 0, "agenda": 0}
+    copied = {"interests": 0, "designs": 0, "emails": 0, "merch": 0, "doors": 0, "team": 0, "agenda": 0, "organisers": 0}
 
     for link in await _event_rows(session, EventInterestsLink, source.id):
         session.add(EventInterestsLink(event_id=new.id, interest_id=link.interest_id))
         copied["interests"] += 1
+
+    for o in await _event_rows(session, EventTeamMembers, source.id):
+        session.add(EventTeamMembers(event_id=new.id, member_id=o.member_id, role=o.role, sort_order=o.sort_order))
+        copied["organisers"] += 1
 
     # The event's own designs; a club default needs no copying, the new event resolves to it anyway.
     for model in DESIGN_MODELS:
