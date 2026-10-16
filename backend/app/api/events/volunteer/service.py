@@ -396,18 +396,24 @@ async def validate_ticket(
 
 
 async def is_volunteer(session: AsyncSession, user_id: int, event_id: int):
-    """Check if a user is a volunteer for an event."""
+    """This user's volunteer place for the event, or for the club running it.
 
+    The club-wide branch used to match any volunteer row of the event's club
+    without asking whose it was, so any signed-in account at all -- a guest
+    fresh from the public form included -- could check people in at every
+    event of a club with one club-wide volunteer. Same rule as the gate's
+    (checkins.gate_auth.actor_for)."""
+    club_id = select(Events.club_id).where(Events.id == event_id).scalar_subquery()
     return await session.scalar(
         select(Volunteer)
-        .outerjoin(Clubs, Clubs.id == Volunteer.club_id)
-        .outerjoin(Events, Events.club_id == Clubs.id)
         .where(
-            or_(
-                and_(Volunteer.user_id == user_id, Volunteer.event_id == event_id),
-                and_(Events.club_id == Volunteer.club_id, Events.id == event_id),
-            )
+            Volunteer.user_id == user_id,
+            Volunteer.is_deleted == False,
+            Volunteer.is_approved == True,
+            or_(Volunteer.event_id == event_id, Volunteer.club_id == club_id),
         )
+        .order_by(Volunteer.event_id.desc().nulls_last())
+        .limit(1)
     )
 
 
