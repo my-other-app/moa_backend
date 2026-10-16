@@ -19,7 +19,7 @@ import re
 import time
 from contextlib import asynccontextmanager
 from typing import Optional
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, unquote, urljoin, urlparse
 
 import httpx
 from sqlalchemy import select
@@ -134,6 +134,26 @@ def coords_from_link(url: Optional[str], _depth: int = 0) -> Optional[Point]:
     return None
 
 
+# Google's own hosts: the only ones a link is ever followed through. A club
+# writes its own map link, so a look-alike (maps.google.example.com) or a
+# redirect into our own network must never be requested.
+_GOOGLE_HOST = re.compile(
+    r"^(?:[a-z0-9-]+\.)*(?:google\.(?:com|co\.in|in|co\.uk|com\.au|ca|ae|com\.sg|de|fr)|goo\.gl|g\.page|g\.co|share\.google)$"
+)
+MAX_HOPS = 6
+
+
+def _is_google(url: str) -> bool:
+    try:
+        u = urlparse(url)
+        port = u.port
+    except ValueError:
+        return False
+    if u.scheme not in ("https", "http") or port not in (None, 80, 443):
+        return False
+    return bool(_GOOGLE_HOST.match((u.hostname or "").lower()))
+
+
 def is_short_link(url: Optional[str]) -> bool:
     """A link whose point only shows once it is followed."""
     if not url or not isinstance(url, str):
@@ -141,6 +161,8 @@ def is_short_link(url: Optional[str]) -> bool:
     text = url.strip()
     if "://" not in text:
         text = "https://" + text
+    if not _is_google(text):
+        return False
     try:
         u = urlparse(text)
     except ValueError:
@@ -169,7 +191,10 @@ def _http(timeout: float = 5.0) -> httpx.AsyncClient:
 
 
 async def resolve_link(url: Optional[str]) -> Optional[Point]:
-    """The point a link stands for, following a short link to where it lands. Never raises."""
+    """The point a link stands for, following a short link to where it lands. Never raises.
+
+    Redirects are followed one hop at a time, and only through Google's own
+    hosts; the first hop that holds a point ends it."""
     try:
         found = coords_from_link(url)
         if found or not is_short_link(url):
@@ -178,13 +203,18 @@ async def resolve_link(url: Optional[str]) -> Optional[Point]:
         if "://" not in target:
             target = "https://" + target
         async with _http() as http:
-            # Streamed, and closed unread: only where it lands matters, not the page.
-            async with http.stream("GET", target) as r:
-                hops = [str(h.headers.get("location") or "") for h in r.history] + [str(r.url)]
-        for hop in reversed(hops):
-            found = coords_from_link(hop)
-            if found:
-                return found
+            for _ in range(MAX_HOPS):
+                if not _is_google(target):
+                    return None
+                # Streamed, and closed unread: only where it points matters, not the page.
+                async with http.stream("GET", target, follow_redirects=False) as r:
+                    location = r.headers.get("location") if r.is_redirect else None
+                if not location:
+                    return None
+                target = urljoin(target, location)
+                found = coords_from_link(target)
+                if found:
+                    return found
     except Exception:  # noqa: BLE001 — a link that cannot be followed is a place not known
         logger.info("map link could not be followed: %s", url, exc_info=True)
     return None

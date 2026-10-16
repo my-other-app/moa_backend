@@ -96,6 +96,11 @@ def test_junk_holds_no_point(junk):
     ("https://goo.gl/xyz", False),
     ("https://g.co/other", False),
     ("https://example.com/maps", False),
+    # Look-alikes of Google's hosts are never followed.
+    ("https://maps.google.example.com/?cid=1", False),
+    ("https://google.example.com/maps?cid=1", False),
+    ("https://maps.app.goo.gl.example.com/x", False),
+    ("https://maps.app.goo.gl:8080/x", False),
     ("", False),
     (None, False),
 ])
@@ -139,6 +144,23 @@ async def test_following_never_raises(net):
     net["routes"]["https://maps.app.goo.gl/nowhere"] = httpx.Response(302, headers={"location": "https://www.google.com/maps/place/NoPoint"})
     assert await geo.resolve_link("https://maps.app.goo.gl/nowhere") is None
     assert await geo.resolve_link(None) is None
+
+
+async def test_a_redirect_off_google_is_never_requested(net):
+    # A short link that points into our own network, or anywhere else, stops there.
+    net["routes"]["https://maps.app.goo.gl/inside"] = httpx.Response(302, headers={"location": "http://169.254.169.254/latest/meta-data/"})
+    assert await geo.resolve_link("https://maps.app.goo.gl/inside") is None
+    net["routes"]["https://maps.app.goo.gl/away"] = httpx.Response(302, headers={"location": "https://example.com/maps/place/X"})
+    assert await geo.resolve_link("https://maps.app.goo.gl/away") is None
+    net["routes"]["https://maps.app.goo.gl/rel"] = httpx.Response(302, headers={"location": "/maps/place/Here/@12.97,77.59,15z"})
+    assert await geo.resolve_link("https://maps.app.goo.gl/rel") == (12.97, 77.59)
+    assert all("169.254" not in c and "example.com" not in c for c in net["calls"])
+
+
+async def test_redirects_stop_after_a_few_hops(net):
+    net["routes"]["https://maps.app.goo.gl/loop"] = httpx.Response(302, headers={"location": "https://maps.app.goo.gl/loop"})
+    assert await geo.resolve_link("https://maps.app.goo.gl/loop") is None
+    assert len(net["calls"]) == geo.MAX_HOPS
 
 
 async def test_a_link_that_holds_its_point_or_is_not_a_short_link_is_never_followed(net):
