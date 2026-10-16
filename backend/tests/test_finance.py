@@ -92,7 +92,15 @@ async def test_the_season_adds_up_by_month_by_type_and_by_event(client, world):
     rows = s["by_event"]
     assert [r["name"] for r in rows] == ["TinyML Circle", "Hack Night 04"]
     assert rows[0]["status"] == "published" and rows[0]["regs"] == 2 and rows[0]["tickets"] == 0.0
-    assert rows[1] | {"starts_at": ""} == {"id": past.id, "name": "Hack Night 04", "starts_at": "", "type": "Hackathon", "status": "closed", "regs": 4, "paying": 2, "tickets": 1000.0, "merch": 0.0, "refunds": 500.0, "expenses": 500.0, "net": 500.0}
+    assert rows[1] == rows[1] | {"id": past.id, "name": "Hack Night 04", "type": "Hackathon", "status": "closed", "held": True, "has_fee": True, "fee": 500.0, "regs": 4, "paying": 2, "tickets": 1000.0, "merch": 0.0, "online": 1000.0, "cash": 0.0, "refunds": 500.0, "expenses": 500.0, "expense_count": 2, "net": 500.0, "margin": 50.0, "outstanding": 500.0, "outstanding_count": 1}
+    assert rows[0]["held"] is False and rows[0]["has_fee"] is False and rows[0]["margin"] is None
+    # Both paid guests paid online; nothing was taken at the door; half of what came in stayed.
+    assert (f["online"], f["online_count"], f["cash"], f["cash_count"], f["margin"], f["cost_per_head"]) == (1000.0, 2, 0.0, 0, 40.0, 100.0)
+    assert s["channels"] == [{"key": "online", "label": "Paid online", "amount": 1000.0, "count": 2}, {"key": "cash", "label": "Cash at the door", "amount": 0.0, "count": 0}, {"key": "merch", "label": "Merchandise", "amount": 0.0, "count": 0}]
+    assert s["by_category"] == [{"category": "venue", "amount": 300.0, "count": 1}, {"category": "food", "amount": 200.0, "count": 1}, {"category": "other", "amount": 100.0, "count": 1}]
+    # One guest at the held hackathon still owes; nothing ran at a loss; its ledger has entries.
+    assert s["attention"] == {"at_a_loss": [], "owed": [{"id": past.id, "name": "Hack Night 04", "outstanding": 500.0, "outstanding_count": 1}], "unlogged": []}
+    assert s["ahead"] == {"events": 1, "paid_events": 0, "regs": 2, "tickets": 0.0, "outstanding": 0.0, "outstanding_count": 0, "expenses": 0.0}
     assert [x["title"] for x in s["expenses"]] == ["Domain renewal", "Pizza", "Venue"] and s["expenses"][1]["category"] == "food" and s["expenses"][1]["event_name"] == "Hack Night 04"
     assert s["categories"][0] == "venue"
 

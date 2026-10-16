@@ -108,7 +108,10 @@ _REFUNDED = exists().where(
 
 
 def _blank() -> dict:
-    return dict(regs=0, paying=0, tickets=Decimal(0), merch=Decimal(0), outstanding=Decimal(0), outstanding_count=0, refunds=Decimal(0), refund_count=0, expenses=Decimal(0), expense_count=0)
+    return dict(
+        regs=0, paying=0, tickets=Decimal(0), merch=Decimal(0), online=Decimal(0), online_count=0, cash=Decimal(0), cash_count=0,
+        outstanding=Decimal(0), outstanding_count=0, refunds=Decimal(0), refund_count=0, expenses=Decimal(0), expense_count=0,
+    )
 
 
 async def _per_event(session, event_ids: list[int]) -> dict[int, dict]:
@@ -118,6 +121,9 @@ async def _per_event(session, event_ids: list[int]) -> dict[int, dict]:
         return out
     paid = Reg.is_paid == True  # noqa: E712
     owed = and_(Reg.is_paid == False, Events.has_fee == True, ~_REFUNDED)  # noqa: E712
+    # Paid online carries the provider's receipt; paid at the door, the desk took the money and there is none.
+    online = and_(paid, Reg.payment_receipt.isnot(None))
+    cash = and_(paid, Reg.payment_receipt.is_(None))
     q = (
         select(
             Reg.event_id,
@@ -126,13 +132,17 @@ async def _per_event(session, event_ids: list[int]) -> dict[int, dict]:
             func.coalesce(func.sum(Reg.paid_amount).filter(paid), 0),
             func.count().filter(owed),
             func.coalesce(func.sum(Reg.actual_amount).filter(owed), 0),
+            func.coalesce(func.sum(Reg.paid_amount).filter(online), 0),
+            func.count().filter(online),
+            func.coalesce(func.sum(Reg.paid_amount).filter(cash), 0),
+            func.count().filter(cash),
         )
         .join(Events, Events.id == Reg.event_id)
         .where(Reg.event_id.in_(event_ids), Reg.is_deleted == False)  # noqa: E712
         .group_by(Reg.event_id)
     )
-    for eid, regs, paying, tickets, owed_n, owed_sum in (await session.execute(q)).all():
-        out[eid].update(regs=regs, paying=paying, tickets=Decimal(tickets), outstanding_count=owed_n, outstanding=Decimal(owed_sum))
+    for eid, regs, paying, tickets, owed_n, owed_sum, online_sum, online_n, cash_sum, cash_n in (await session.execute(q)).all():
+        out[eid].update(regs=regs, paying=paying, tickets=Decimal(tickets), outstanding_count=owed_n, outstanding=Decimal(owed_sum), online=Decimal(online_sum), online_count=online_n, cash=Decimal(cash_sum), cash_count=cash_n)
     q = (
         select(Reg.event_id, func.coalesce(func.sum(PaymentLogs.amount), 0), func.count())
         .select_from(PaymentLogs)
@@ -168,14 +178,57 @@ def _totals(rows: list[dict], overhead: Decimal = Decimal(0), overhead_count: in
     return t
 
 
+def _margin(t: dict) -> float | None:
+    income = t["tickets"] + t["merch"]
+    return float(round(t["net"] / income * 100)) if income else None
+
+
 def _figures(t: dict, events: dict | None = None) -> dict:
     return dict(
         events=events, regs=t["regs"], paying=t["paying"],
         gross=_f(t["gross"]), tickets=_f(t["tickets"]), merch=_f(t["merch"]), refunds=_f(t["refunds"]), refund_count=t["refund_count"],
-        expenses=_f(t["expenses"]), expense_count=t["expense_count"], net=_f(t["net"]),
+        online=_f(t["online"]), online_count=t["online_count"], cash=_f(t["cash"]), cash_count=t["cash_count"],
+        expenses=_f(t["expenses"]), expense_count=t["expense_count"], net=_f(t["net"]), margin=_margin(t),
         outstanding=_f(t["outstanding"]), outstanding_count=t["outstanding_count"],
         avg_ticket=_f(t["tickets"] / t["paying"]) if t["paying"] else None,
+        cost_per_head=_f(t["expenses"] / t["regs"]) if t["regs"] and t["expenses"] else None,
     )
+
+
+def _event_row(e, m: dict, kind: str, now: datetime) -> dict:
+    net = m["tickets"] + m["merch"] - m["expenses"]
+    return dict(
+        id=e.id, name=e.name, starts_at=_iso(e.event_datetime), type=kind, status=e.status, held=e.event_datetime <= now, has_fee=bool(e.has_fee), fee=_f(e.reg_fee),
+        regs=m["regs"], paying=m["paying"], tickets=_f(m["tickets"]), merch=_f(m["merch"]), online=_f(m["online"]), cash=_f(m["cash"]), refunds=_f(m["refunds"]),
+        expenses=_f(m["expenses"]), expense_count=m["expense_count"], net=_f(net), margin=_margin({**m, "net": net}),
+        outstanding=_f(m["outstanding"]), outstanding_count=m["outstanding_count"],
+    )
+
+
+def _attention(rows: list[dict]) -> dict:
+    held = [r for r in rows if r["held"]]
+    return dict(
+        at_a_loss=[dict(id=r["id"], name=r["name"], net=r["net"], tickets=r["tickets"], expenses=r["expenses"]) for r in held if r["net"] < 0 and r["expenses"] > 0],
+        owed=sorted((dict(id=r["id"], name=r["name"], outstanding=r["outstanding"], outstanding_count=r["outstanding_count"]) for r in held if r["outstanding"] > 0), key=lambda r: -r["outstanding"]),
+        unlogged=[dict(id=r["id"], name=r["name"], tickets=r["tickets"]) for r in held if r["has_fee"] and r["tickets"] > 0 and r["expense_count"] == 0],
+    )
+
+
+def _ahead(rows: list[dict]) -> dict:
+    coming = [r for r in rows if not r["held"]]
+    return dict(
+        events=len(coming), paid_events=sum(1 for r in coming if r["has_fee"]), regs=sum(r["regs"] for r in coming),
+        tickets=_f(sum(Decimal(str(r["tickets"])) + Decimal(str(r["merch"])) for r in coming)), outstanding=_f(sum(Decimal(str(r["outstanding"])) for r in coming)),
+        outstanding_count=sum(r["outstanding_count"] for r in coming), expenses=_f(sum(Decimal(str(r["expenses"])) for r in coming)),
+    )
+
+
+def _channels(t: dict) -> list[dict]:
+    return [
+        dict(key="online", label="Paid online", amount=_f(t["online"]), count=t["online_count"]),
+        dict(key="cash", label="Cash at the door", amount=_f(t["cash"]), count=t["cash_count"]),
+        dict(key="merch", label="Merchandise", amount=_f(t["merch"]), count=0),
+    ]
 
 
 def _deltas(cur: dict, prev: dict | None) -> dict:
@@ -256,10 +309,7 @@ async def club_summary(session, club, frm: date, to: date) -> dict:
         t["tickets"] += m["tickets"]
         t["merch"] += m["merch"]
         t["expenses"] += m["expenses"]
-        by_event.append(dict(
-            id=e.id, name=e.name, starts_at=_iso(e.event_datetime), type=kind, status=e.status, regs=m["regs"], paying=m["paying"],
-            tickets=_f(m["tickets"]), merch=_f(m["merch"]), refunds=_f(m["refunds"]), expenses=_f(m["expenses"]), net=_f(m["tickets"] + m["merch"] - m["expenses"]),
-        ))
+        by_event.append(_event_row(e, m, kind, now))
     for x in overheads:
         row = months.get(_month_of(x.incurred_on))
         if row is not None:
@@ -274,6 +324,8 @@ async def club_summary(session, club, frm: date, to: date) -> dict:
         deltas=_deltas(cur, prev), by_month=_month_rows(months),
         by_type=[dict(type=t["type"], events=t["events"], tickets=_f(t["tickets"]), merch=_f(t["merch"]), expenses=_f(t["expenses"]), net=_f(t["tickets"] + t["merch"] - t["expenses"])) for t in by_type],
         by_event=by_event, expenses=await _expense_rows(session, club.id, [e.id for e in events], frm, to),
+        by_category=await _by_category(session, club.id, [e.id for e in events], frm, to), channels=_channels(cur),
+        attention=_attention(by_event), ahead=_ahead(by_event),
         categories=list(EXPENSE_CATEGORIES), generated_at=_iso(now),
     )
 
@@ -315,10 +367,13 @@ async def event_summary(session, event) -> dict:
     first, last = date.fromisoformat(keys[0] + "-01"), date.fromisoformat(keys[-1] + "-01")
     filled = {m: months.get(m, _new_month(m)) for m in _months(first, last)}
 
+    row = _event_row(event, money, "", now)
     return dict(
         scope="event", period=dict(start=first, end=event.event_datetime.astimezone(timezone.utc).date()),
         figures=_figures(cur), deltas=_deltas(cur, None), by_month=_month_rows(filled), by_type=[], by_event=[],
-        expenses=expenses, categories=list(EXPENSE_CATEGORIES), generated_at=_iso(now),
+        expenses=expenses, by_category=await _by_category(session, event.club_id, [event.id], None, None), channels=_channels(cur),
+        attention=_attention([row]), ahead=_ahead([row]),
+        categories=list(EXPENSE_CATEGORIES), generated_at=_iso(now),
     )
 
 
@@ -332,7 +387,8 @@ def _expense_out(x: ClubExpenses, event_name: str | None) -> dict:
     )
 
 
-async def _expense_rows(session, club_id: int, event_ids: list[int], frm: date | None, to: date | None) -> list[dict]:
+def _expense_conds(club_id: int, event_ids: list[int], frm: date | None, to: date | None) -> list | None:
+    """The period's entries: the events' own, and the club's overheads dated inside it."""
     conds = [ClubExpenses.club_id == club_id, ClubExpenses.is_deleted == False]  # noqa: E712
     own = ClubExpenses.event_id.in_(event_ids) if event_ids else None
     if frm is not None and to is not None:
@@ -341,6 +397,23 @@ async def _expense_rows(session, club_id: int, event_ids: list[int], frm: date |
     elif own is not None:
         conds.append(own)
     else:
+        return None
+    return conds
+
+
+async def _by_category(session, club_id: int, event_ids: list[int], frm: date | None, to: date | None) -> list[dict]:
+    """Where the money went: the period's spend by category, largest first."""
+    conds = _expense_conds(club_id, event_ids, frm, to)
+    if conds is None:
+        return []
+    q = select(ClubExpenses.category, func.coalesce(func.sum(ClubExpenses.amount), 0), func.count()).where(*conds).group_by(ClubExpenses.category)
+    rows = [dict(category=c, amount=_f(a), count=n) for c, a, n in (await session.execute(q)).all()]
+    return sorted(rows, key=lambda r: (-r["amount"], r["category"]))
+
+
+async def _expense_rows(session, club_id: int, event_ids: list[int], frm: date | None, to: date | None) -> list[dict]:
+    conds = _expense_conds(club_id, event_ids, frm, to)
+    if conds is None:
         return []
     rows = list((await session.scalars(select(ClubExpenses).where(*conds).order_by(ClubExpenses.incurred_on.desc(), ClubExpenses.created_at.desc()).limit(400))).all())
     names = {}

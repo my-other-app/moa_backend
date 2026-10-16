@@ -79,12 +79,18 @@ class Figures(BaseModel):
     merch: float = 0
     refunds: float
     refund_count: int
+    online: float = 0
+    online_count: int = 0
+    cash: float = 0
+    cash_count: int = 0
     expenses: float
     expense_count: int
     net: float
+    margin: Optional[float] = None
     outstanding: float
     outstanding_count: int
     avg_ticket: Optional[float]
+    cost_per_head: Optional[float] = None
 
 
 class Deltas(BaseModel):
@@ -120,13 +126,74 @@ class EventRow(BaseModel):
     starts_at: str
     type: str
     status: str
+    held: bool = False
+    has_fee: bool = False
+    fee: float = 0
     regs: int
     paying: int
     tickets: float
     merch: float = 0
+    online: float = 0
+    cash: float = 0
     refunds: float
     expenses: float
+    expense_count: int = 0
     net: float
+    margin: Optional[float] = None
+    outstanding: float = 0
+    outstanding_count: int = 0
+
+
+class CategoryRow(BaseModel):
+    category: str
+    amount: float
+    count: int
+
+
+class ChannelRow(BaseModel):
+    key: str
+    label: str
+    amount: float
+    count: int
+
+
+class LossRow(BaseModel):
+    id: int
+    name: str
+    net: float
+    tickets: float
+    expenses: float
+
+
+class OwedRow(BaseModel):
+    id: int
+    name: str
+    outstanding: float
+    outstanding_count: int
+
+
+class UnloggedRow(BaseModel):
+    id: int
+    name: str
+    tickets: float
+
+
+class Attention(BaseModel):
+    at_a_loss: list[LossRow] = []
+    owed: list[OwedRow] = []
+    unlogged: list[UnloggedRow] = []
+
+
+class Ahead(BaseModel):
+    """What is still to come inside the period: events not yet held, what they have sold so far, what they are owed."""
+
+    events: int = 0
+    paid_events: int = 0
+    regs: int = 0
+    tickets: float = 0
+    outstanding: float = 0
+    outstanding_count: int = 0
+    expenses: float = 0
 
 
 class Period(BaseModel):
@@ -143,5 +210,9 @@ class FinanceSummary(BaseModel):
     by_type: list[TypeRow]
     by_event: list[EventRow]
     expenses: list[ExpenseOut]
+    by_category: list[CategoryRow] = []
+    channels: list[ChannelRow] = []
+    attention: Attention = Attention()
+    ahead: Ahead = Ahead()
     categories: list[str]
     generated_at: str
