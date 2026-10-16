@@ -454,6 +454,8 @@ class EventListResponse(CustomBaseModel):
     page_views: int = Field(0)
     # User-specific fields (only populated when authenticated and registered)
     is_attended: bool | None = Field(None)
+    # A paid event's registration still waiting for its payment is not a ticket yet.
+    is_paid: bool | None = Field(None)
     ticket_id: str | None = Field(None)
     ticket_url: str | None = Field(None)
     certificate_url: str | None = Field(None)

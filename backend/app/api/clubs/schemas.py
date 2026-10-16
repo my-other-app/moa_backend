@@ -297,7 +297,9 @@ class ClubOrgDetail(CustomBaseModel):
 
 class ClubPublicDetailResponse(CustomBaseModel):
     id: int = Field(...)
-    name: str = Field(..., min_length=3, max_length=20)
+    # The form's 3–20 rule is for typing a name, not for reading one back: the
+    # column holds 100, and a longer name (an admin's, an import's) made this a 500.
+    name: str = Field(...)
     slug: str = Field(...)
     logo: dict | None = Field(None)
     cover: dict | None = Field(None)
@@ -358,7 +360,7 @@ class ClubOrgMin(CustomBaseModel):
 
 class ClubAdminDetailResponse(CustomBaseModel):
     id: int = Field(...)
-    name: str = Field(..., min_length=3, max_length=20)
+    name: str = Field(...)  # see ClubPublicDetailResponse.name
     slug: str = Field(...)
     logo: dict | None = Field(None)
     location_name: str | None = Field(None)
