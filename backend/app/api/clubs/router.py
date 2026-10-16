@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request, UploadFile, Query, File
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, UploadFile, Query, File
 from sqlalchemy import select
 
 from app.api.clubs.models import Clubs
@@ -30,6 +30,7 @@ from app.api.clubs.schemas import (
 )
 from app.db.core import SessionDep
 from app.api.clubs import events_list, followers_insights, service
+from app.api.discover import geo
 from app.api.audit import service as audit
 from app.core.auth.dependencies import ClubAuth, DependsAuth, UserAuth, AdminAuth
 from app.core.auth.permissions import ContentAuth, DestroyAuth, ModerateAuth
@@ -177,12 +178,19 @@ async def reject_club_endpoint(
     return club
 
 
+def _follow_map_link(background_tasks: BackgroundTasks, club) -> None:
+    """A short map link (maps.app.goo.gl…) is followed after the answer, to find the club's point."""
+    if geo.needs_resolving(club):
+        background_tasks.add_task(geo.resolve_and_store, "club", club.id)
+
+
 @router.put("/update", summary="update club")
 async def update_club(
-    session: SessionDep, user: ClubAuth, club: UpdateClub = Depends()
+    session: SessionDep, user: ClubAuth, background_tasks: BackgroundTasks, club: UpdateClub = Depends()
 ) -> ClubCreateUpdateResponse:
     club.name = user.club.name  # the name is not the club's to change here
     club = await service.update_club(session=session, club_id=user.club.id, club=club)
+    _follow_map_link(background_tasks, club)
     return club
 
 
@@ -544,6 +552,7 @@ async def update_club_admin(
     club_id: int,
     session: SessionDep,
     user: ContentAuth,
+    background_tasks: BackgroundTasks,
     club: UpdateClub = Depends(),
     request: Request = None,
 ) -> ClubCreateUpdateResponse:
@@ -557,6 +566,7 @@ async def update_club_admin(
     record rather than a patch.
     """
     updated = await service.update_club(session=session, club_id=club_id, club=club)
+    _follow_map_link(background_tasks, updated)
     await audit.record(
         session,
         actor=user,

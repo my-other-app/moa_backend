@@ -52,6 +52,9 @@ class Clubs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     # location = Column(Geometry("POINT"), nullable=True)
     location_name = Column(String, nullable=True)
     location_link = Column(String, nullable=True)
+    # Read from location_link when it is a map link; a club without one is placed by its events.
+    lat = Column(Float, nullable=True)
+    lng = Column(Float, nullable=True)
     rating = Column(Float, nullable=False, default=0)
     total_ratings = Column(Integer, nullable=False, default=0)
     user_id = Column(

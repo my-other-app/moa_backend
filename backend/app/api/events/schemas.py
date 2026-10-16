@@ -135,6 +135,8 @@ class EventCreate:
         reg_fee: Optional[float] = Form(None),
         duration: float = Form(...),
         location_name: Optional[str] = Form(None),
+        # A map link for the venue; a point is read from it for "near you".
+        location_link: Optional[str] = Form(None, max_length=2000),
         has_prize: bool = Form(False),
         prize_amount: Optional[float] = Form(None),
         is_online: bool = Form(False),
@@ -172,6 +174,7 @@ class EventCreate:
         self.reg_fee = reg_fee
         self.duration = duration
         self.location_name = location_name
+        self.location_link = location_link
         self.has_prize = has_prize
         self.prize_amount = prize_amount
         self.is_online = is_online
@@ -241,6 +244,10 @@ class EventEdit(EventCreate):
         reg_fee: Optional[float] = Form(None),
         duration: float = Form(...),
         location_name: Optional[str] = Form(None),
+        # A map link for the venue; a point is read from it for "near you". Omitted keeps the
+        # link (a form posts "" as omitted), so removing it takes clear_location_link.
+        location_link: Optional[str] = Form(None, max_length=2000),
+        clear_location_link: bool = Form(False),
         has_prize: bool = Form(False),
         prize_amount: Optional[float] = Form(None),
         is_online: bool = Form(False),
@@ -275,6 +282,7 @@ class EventEdit(EventCreate):
             reg_fee=reg_fee,
             duration=duration,
             location_name=location_name,
+            location_link=location_link,
             has_prize=has_prize,
             prize_amount=prize_amount,
             is_online=is_online,
@@ -299,6 +307,7 @@ class EventEdit(EventCreate):
             ticket_template_id=ticket_template_id,
             certificate_template_id=certificate_template_id,
         )
+        self.clear_location_link = clear_location_link
 
 
 class EventRatingCreate(CustomBaseModel):

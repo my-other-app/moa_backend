@@ -27,6 +27,7 @@ from app.api.events.models import (
     EventSpeakers,
 )
 from app.api.closeout.models import LOCKED_STATUSES, EventStatus
+from app.api.discover import geo
 from app.api.clubs.models import ClubUsersLink, Clubs
 from app.api.users.models import Users, UserProfiles
 from app.core.validations.schema import validate_relations
@@ -56,6 +57,7 @@ async def create_event(
     has_fee: bool = False,
     reg_fee: Optional[float] = None,
     location_name: Optional[str] = None,
+    location_link: Optional[str] = None,
     has_prize: bool = False,
     prize_amount: Optional[float] = None,
     is_online: bool = False,
@@ -137,6 +139,9 @@ async def create_event(
         from app.api.closeout.models import EventStatus
 
         db_event.lifecycle = EventStatus(status)
+    # The venue's point, read from its map link now when the link holds one;
+    # a short link is followed after the save (see the router).
+    geo.set_link(db_event, location_link)
     if poster:
         content = io.BytesIO(await poster.read())
         db_event.poster = {
@@ -282,6 +287,11 @@ async def update_event(
     db_event.has_fee = event.has_fee
     db_event.reg_fee = event.reg_fee
     db_event.location_name = event.location_name
+    # The map link: a new one moves the point, a removal clears both, nothing sent keeps them.
+    if getattr(event, "clear_location_link", False):
+        geo.set_link(db_event, None)
+    elif getattr(event, "location_link", None) is not None:
+        geo.set_link(db_event, event.location_link)
     db_event.has_prize = event.has_prize
     db_event.prize_amount = event.prize_amount
     db_event.is_online = event.is_online

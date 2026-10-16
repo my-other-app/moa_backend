@@ -29,6 +29,7 @@ from app.api.sites.router import public_router as sites_public_router, router as
 from app.api.club_access.router import router as club_access_router
 from app.api.store.router import public_router as store_public_router, router as store_router
 from app.api.links.router import router as links_router
+from app.api.discover.router import admin_router as discover_admin_router, router as discover_router
 from app.api.emails.router import (
     library_router as email_library_router,
     messages_router,
@@ -65,6 +66,8 @@ api_router.include_router(router=user_router, tags=["user"])
 api_router.include_router(router=analytics_router, tags=["analytics"])
 api_router.include_router(router=club_designs_router, tags=["club-designs"])
 api_router.include_router(router=links_router, tags=["tracking-links"])
+api_router.include_router(router=discover_router, tags=["discover"])
+api_router.include_router(router=discover_admin_router, tags=["discover"])
 api_router.include_router(router=finance_router, tags=["finance"])
 api_router.include_router(router=threads_router, tags=["threads"])
 api_router.include_router(router=security_router, tags=["security"])
