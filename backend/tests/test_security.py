@@ -51,7 +51,7 @@ async def test_the_page_shows_this_device_its_place_and_the_history(client, worl
     s = (await client.get("/api/v1/auth/security/overview", headers=h)).json()
     assert s["account"] == "Circuit Society"
     assert len(s["sessions"]) == 1 and s["sessions"][0]["current"] is True
-    assert s["sessions"][0] | {"id": "", "created_at": "", "last_seen_at": ""} == {"id": "", "device": "Chrome on Windows", "kind": "computer", "place": "Pune, Maharashtra", "ip_address": "103.21.58.14", "created_at": "", "last_seen_at": "", "current": True}
+    assert s["sessions"][0] | {"id": "", "created_at": "", "last_seen_at": ""} == {"id": "", "device": "Chrome on Windows", "kind": "computer", "place": "Pune, Maharashtra", "ip_address": "103.21.58.14", "created_at": "", "last_seen_at": "", "current": True, "who": None}
     assert s["counts"]["active_sessions"] == 1 and s["counts"]["sessions_30d"] == 1 and s["counts"]["places_30d"] == 1 and s["counts"]["failed_30d"] == 0
     assert s["by_place"] == [{"place": "Pune, Maharashtra", "total": 1, "failed": 0}]
     assert s["history"][0]["result"] == "signed_in" and s["history"][0]["method"] == "password" and s["history"][0]["device"] == "Chrome on Windows"

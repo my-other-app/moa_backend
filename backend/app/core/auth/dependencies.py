@@ -63,6 +63,12 @@ async def get_current_user(
         if row is None:
             raise credentials_exception
         await session_store.touch_throttled(session, row)
+    # A club team member's session acts as the club; on every request the
+    # member must still have access and their role must allow this request.
+    if token_data.member_id:
+        from app.api.club_access import service as club_access
+
+        await club_access.check_member(session, request, user, token_data.member_id)
     return user
 
 

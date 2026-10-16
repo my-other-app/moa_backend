@@ -36,10 +36,12 @@ class UserSessions(AbstractSQLModel, TimestampsMixin):
         TimestampsMixin.created_at.type, nullable=True
     )
     revoked = Column(Boolean, nullable=False, default=False)
+    # A club team member's session on the club's account: who it really is.
+    member_id = Column(Integer, ForeignKey("club_members.id", ondelete="SET NULL"), nullable=True, index=True)
 
 
 async def start(
-    session: AsyncSession, user_id: int, request=None
+    session: AsyncSession, user_id: int, request=None, member_id: int | None = None
 ) -> uuid.UUID:
     """Record a new session and return the id to embed in the token."""
     user_agent = None
@@ -58,6 +60,7 @@ async def start(
         user_agent=user_agent,
         ip_address=ip_address,
         last_seen_at=datetime.now(timezone.utc),
+        member_id=member_id,
     )
     session.add(row)
     await session.flush()

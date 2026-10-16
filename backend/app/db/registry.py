@@ -29,3 +29,4 @@ from app.api.store import models as _store_models  # noqa: F401
 from app.api.live import models as _live_models  # noqa: F401
 from app.api.competitions import models as _competition_models  # noqa: F401
 from app.api.sites import models as _site_models  # noqa: F401
+from app.api.club_access import models as _club_access_models  # noqa: F401
