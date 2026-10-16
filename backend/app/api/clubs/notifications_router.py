@@ -18,6 +18,9 @@ from app.api.notifications.models import Notifications, NotificationStatus
 from app.api.clubs.models import Clubs
 from sqlalchemy import select, func, distinct, String
 
+from app.api.clubs import announcements_page
+from app.response import CustomHTTPException
+
 
 logger = logging.getLogger(__name__)
 
@@ -331,3 +334,87 @@ async def get_notification_history(
     
     return NotificationHistoryResponse(items=items, total=total)
 
+
+
+# ─── The Announcements page ──────────────────────────────────────────────
+
+
+class PushSend(BaseModel):
+    id: str
+    kind: str
+    title: str
+    body: str
+    event_id: Optional[int] = None
+    event: Optional[dict] = None
+    audience: Optional[str] = None
+    sent: int
+    read: int
+    read_quickly: int
+    read_pct: int
+    slot: str
+    created_at: datetime
+
+
+class PushHistoryPage(BaseModel):
+    items: List[PushSend]
+    total: int
+    limit: int
+    offset: int
+    counts: dict
+
+
+class PushInsights(BaseModel):
+    sends: int
+    sends_delta: Optional[int] = None
+    reached: int
+    reached_delta: Optional[int] = None
+    open_rate: Optional[int] = None
+    open_rate_prev: Optional[int] = None
+    quick_rate: Optional[int] = None
+    last_sent_at: Optional[datetime] = None
+    best: Optional[dict] = None
+    slots: List[dict]
+    best_slot: Optional[str] = None
+    coming: List[dict]
+    registered_ahead: int
+    reachable_ahead: int
+    all_time: dict
+    generated_at: datetime
+
+
+class PushAudience(BaseModel):
+    event: dict
+    registered: int
+    checked_in: int
+    reachable: int
+    by_audience: dict
+
+
+async def _club_of(session, user) -> Clubs:
+    club = await session.scalar(select(Clubs).where(Clubs.user_id == user.id, Clubs.is_deleted == False))  # noqa: E712
+    if club is None:
+        raise CustomHTTPException(404, message="No club for this account")
+    return club
+
+
+@router.get("/page", summary="Everything pushed to phones — announcements and live updates — scoped and searched")
+async def push_history_page(session: SessionDep, user: ClubAuth, scope: str = Query("all"), search: Optional[str] = Query(None, max_length=80), limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0)) -> PushHistoryPage:
+    if scope not in announcements_page.SCOPES:
+        raise CustomHTTPException(422, message="Unknown scope.")
+    club = await _club_of(session, user)
+    return PushHistoryPage(**await announcements_page.history(session, club.id, scope=scope, search=search, limit=limit, offset=offset))
+
+
+@router.get("/insights", summary="How much the club sends, how far it reaches, how much is opened, when it lands best, who can be reached")
+async def push_insights(session: SessionDep, user: ClubAuth) -> PushInsights:
+    club = await _club_of(session, user)
+    return PushInsights(**await announcements_page.insights(session, club.id))
+
+
+@router.get("/events/{event_id}/audience", summary="What a send to this event would reach, by audience")
+async def push_audience(session: SessionDep, user: ClubAuth, event_id: int) -> PushAudience:
+    club = await _club_of(session, user)
+    event = await session.scalar(select(Events).where(Events.id == event_id, Events.club_id == club.id, Events.is_deleted == False))  # noqa: E712
+    if event is None:
+        raise CustomHTTPException(404, message="Event not found")
+    return PushAudience(**await announcements_page.audience(session, event))
