@@ -6,8 +6,9 @@ from sqlalchemy import select
 
 from app.api.clubs.models import Clubs
 from app.api.deliveries import service as deliveries
+from app.api.links import overview as overview_mod
 from app.api.links import service
-from app.api.links.schemas import LinkCreate, LinkOut, LinkPatch, LinksSummary
+from app.api.links.schemas import LinkCreate, LinkDetail, LinkOut, LinkPatch, LinksOverview, LinksSummary
 from app.config import settings
 from app.core.auth.dependencies import ClubAuth
 from app.db.core import SessionDep
@@ -42,6 +43,18 @@ async def event_links(session: SessionDep, user: ClubAuth, event_id: int, days: 
     return LinksSummary(**await service.summary(session, event.club, event, days))
 
 
+@router.get("/events/{event_id}/links/overview", summary="This event's links as the Tracking links page reads them")
+async def event_links_overview(session: SessionDep, user: ClubAuth, event_id: int, days: int = Query(30, ge=1, le=3650)) -> LinksOverview:
+    event = await deliveries.event_for_club(session, user, event_id)
+    return LinksOverview(**await overview_mod.overview(session, event.club, event, days))
+
+
+@router.get("/events/{event_id}/links/{link_id}/detail", summary="One of this event's links, opened further")
+async def event_link_detail(session: SessionDep, user: ClubAuth, event_id: int, link_id: UUID, days: int = Query(30, ge=1, le=3650)) -> LinkDetail:
+    event = await deliveries.event_for_club(session, user, event_id)
+    return LinkDetail(**await overview_mod.detail(session, event.club, event, link_id, days))
+
+
 @router.post("/events/{event_id}/links", summary="A new tracking link for this event", status_code=201)
 async def create_event_link(session: SessionDep, user: ClubAuth, event_id: int, body: LinkCreate) -> LinkOut:
     event = await deliveries.event_for_club(session, user, event_id)
@@ -69,6 +82,18 @@ async def delete_event_link(session: SessionDep, user: ClubAuth, event_id: int, 
 async def club_links(session: SessionDep, user: ClubAuth, days: int = Query(30, ge=1, le=3650)) -> LinksSummary:
     club = await _club_for(session, user)
     return LinksSummary(**await service.summary(session, club, None, days))
+
+
+@router.get("/clubs/links/overview", summary="Every link of the club — its page and its events — as the Tracking links page reads them")
+async def club_links_overview(session: SessionDep, user: ClubAuth, days: int = Query(30, ge=1, le=3650)) -> LinksOverview:
+    club = await _club_for(session, user)
+    return LinksOverview(**await overview_mod.overview(session, club, None, days))
+
+
+@router.get("/clubs/links/{link_id}/detail", summary="One of the club's links, opened further")
+async def club_link_detail(session: SessionDep, user: ClubAuth, link_id: UUID, days: int = Query(30, ge=1, le=3650)) -> LinkDetail:
+    club = await _club_for(session, user)
+    return LinkDetail(**await overview_mod.detail(session, club, None, link_id, days))
 
 
 @router.post("/clubs/links", summary="A new tracking link to the club page", status_code=201)
