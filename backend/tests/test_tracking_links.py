@@ -51,7 +51,7 @@ async def test_a_link_is_made_shared_and_opened(client, session, world):
     assert len(link["code"]) == 8 and link["url"] == f"{settings.PUBLIC_API_URL}/l/{link['code']}"
     # Tags are normalised the way analytics tools expect them.
     assert link["utm_source"] == "instagram" and link["utm_campaign"] == "hack_night"
-    assert link["destination"].startswith(f"{settings.PUBLIC_SITE_URL}/{event.id}?utm_source=instagram&utm_medium=social&utm_campaign=hack_night&ref=")
+    assert link["destination"].startswith(f"{settings.PUBLIC_SITE_URL}/events/{event.slug}?utm_source=instagram&utm_medium=social&utm_campaign=hack_night&ref=")
 
     # Opening the short link counts the click and goes on to the page.
     opened = await client.get(f"/l/{link['code']}", headers={"user-agent": "poster-phone", "x-forwarded-for": "10.0.0.7"})

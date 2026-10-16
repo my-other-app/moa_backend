@@ -15,6 +15,7 @@ from app.api.links import service as links
 from app.api.sites.models import FONTS, SECTIONS, TEMPLATES, THEMES, ClubSites
 from app.api.sites.render import image_url, render
 from app.config import settings
+from app.core import public_urls
 from app.response import CustomHTTPException
 
 TEMPLATE_META = [
@@ -109,7 +110,7 @@ async def site_data(session: AsyncSession, club: Clubs, choices: dict, ref_code:
     def ev(e: Events, upcoming: bool) -> dict:
         fee = f"₹{int(e.reg_fee)}" if e.has_fee and e.reg_fee else "Free"
         where = "Online" if e.is_online else (e.location_name or None)
-        url = f"{settings.PUBLIC_SITE_URL}/{e.id}" + (f"?sref={ref_code}" if ref_code else "")
+        url = public_urls.event_url(e.slug) + (f"?sref={ref_code}" if ref_code else "")
         return dict(id=e.id, name=e.name, starts_at=e.event_datetime, where=where, fee=fee, poster=image_url(base, e.poster, "medium"), url=url, upcoming=upcoming)
 
     upcoming = [ev(e, True) for e in sorted((e for e in events if e.event_datetime >= now and e.lifecycle in (EventStatus.published, EventStatus.live)), key=lambda e: e.event_datetime)][:6]

@@ -83,7 +83,7 @@ def test_the_site_address_is_the_clubs_subdomain_when_the_slug_can_be_one():
     from app.api.sites.service import public_url
 
     assert public_url(SimpleNamespace(slug="circuit-society-a1b2c3")) == "https://circuit-society-a1b2c3.myotherapp.in"
-    # Longer than a DNS label allows, or not a label at all: the events-site page.
+    # Longer than a DNS label allows, or not a label at all: the public site's club page.
     long = "a" * 70
-    assert public_url(SimpleNamespace(slug=long)) == f"https://events.myotherapp.in/clubs/{long}"
-    assert public_url(SimpleNamespace(slug="-a1b2c3")) == "https://events.myotherapp.in/clubs/-a1b2c3"
+    assert public_url(SimpleNamespace(slug=long)) == f"https://myotherapp.in/clubs/{long}"
+    assert public_url(SimpleNamespace(slug="-a1b2c3")) == "https://myotherapp.in/clubs/-a1b2c3"

@@ -190,7 +190,7 @@ async def overview(session, club: Clubs, event: Optional[Events], days: int, now
     for l in links:
         n, c = c_now[l.id], v_now[l.id]
         rows.append(dict(
-            id=l.id, name=l.name, code=l.code, url=short_url(l), destination=destination(l, getattr(club, "slug", None)),
+            id=l.id, name=l.name, code=l.code, url=short_url(l), destination=destination(l, getattr(club, "slug", None), getattr(events.get(l.event_id), "slug", None)),
             utm_source=l.utm_source, utm_medium=l.utm_medium, utm_campaign=l.utm_campaign, utm_content=l.utm_content,
             target=_target(l, events), kind=l.kind or "custom",
             conversion_noun="registration" if l.event_id else ("sign-up" if l.kind == "website" else "follow"),
@@ -286,8 +286,9 @@ async def detail(session, club: Clubs, event: Optional[Events], link_id: UUID, d
     devices = Counter(device_of(c.user_agent) for c in clicks)
     referrers = Counter(referrer_of(c.referrer) for c in clicks)
     hours = Counter(c.created_at.astimezone(IST).hour for c in clicks)
+    target = event if event is not None else (await _events_of(session, [link])).get(link.event_id)
     return dict(
-        id=link.id, name=link.name, code=link.code, url=short_url(link), destination=destination(link, getattr(club, "slug", None)),
+        id=link.id, name=link.name, code=link.code, url=short_url(link), destination=destination(link, getattr(club, "slug", None), getattr(target, "slug", None)),
         clicks=len(clicks), uniques=len({c.visitor or str(c.id) for c in clicks}),
         first_click_at=clicks[0].created_at if clicks else None, last_click_at=clicks[-1].created_at if clicks else None,
         series=[dict(date=b, clicks=days_[b]) for b in buckets],

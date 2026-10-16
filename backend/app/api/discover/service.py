@@ -3,8 +3,8 @@ the clubs behind it.
 
 What the public sees: an event that is published or live, not deleted, not
 over, by a club that is verified and not deleted; a club that is verified
-and not deleted. A club page's past events are the one place an event that
-has ended still shows.
+and not deleted. Once over, an event the club held still shows on the club
+page's past list, on its own page and in the sitemap, and nowhere else.
 
 The data set is small (college clubs), so the candidate rows are read once
 and distance, sorting and paging happen here, after the filters.
@@ -15,26 +15,34 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import exists, func, or_, select, text
-from sqlalchemy.orm import contains_eager
+from sqlalchemy import and_, exists, func, or_, select, text
+from sqlalchemy.orm import contains_eager, selectinload
 
+from app.api.agenda import service as agenda
 from app.api.closeout.models import EventStatus
 from app.api.clubs import service as clubs_service
-from app.api.clubs.models import ClubInterestsLink, Clubs, ClubSocials, ClubUsersLink
+from app.api.clubs.events_list import registration_open
+from app.api.clubs.models import ClubInterestsLink, Clubs, ClubSocials, ClubTeamMembers, ClubUsersLink
 from app.api.discover import geo
-from app.api.events.models import EventCategories, EventRegistrationsLink, Events
+from app.api.events.documents import EVENT_TIMEZONE
+from app.api.events.models import EventCategories, EventInterestsLink, EventRegistrationsLink, Events
 from app.api.interests.models import Interests
+from app.api.organisers import service as organisers
 from app.api.sites import service as sites
 from app.api.sites.models import ClubSites
 from app.api.threads import service as threads
 from app.api.threads.models import ClubThreads
-from app.config import settings
+from app.core import public_urls
 from app.response import CustomHTTPException
 
 IST = ZoneInfo("Asia/Kolkata")
 SHOWN = (EventStatus.published, EventStatus.live)
 HELD = (EventStatus.published, EventStatus.live, EventStatus.closed, EventStatus.archived)
 NEAR_KM = 50.0
+CLUB_TEAM_ON_EVENT = 8
+ALSO_ON = 4
+SITEMAP_MAX = 5000
+SITEMAP_PAST = timedelta(days=365)
 WHENS = ("any", "today", "tomorrow", "this_week", "this_weekend", "next_week", "this_month")
 
 
@@ -196,6 +204,7 @@ def card(e: Events, now: datetime, going: int, distance: Optional[float] = None)
     return dict(
         id=e.id,
         name=e.name,
+        slug=e.slug,
         poster=_img(e.poster, "medium", "original"),
         starts_at=_aware(e.event_datetime).isoformat(),
         ends_at=_ends_at(e).isoformat(),
@@ -211,7 +220,7 @@ def card(e: Events, now: datetime, going: int, distance: Optional[float] = None)
         going=going,
         capacity=e.max_participants,
         status=status_of(e, now, going),
-        url=f"{settings.PUBLIC_SITE_URL}/{e.id}",
+        url=public_urls.event_url(e.slug),
     )
 
 
@@ -423,6 +432,13 @@ def _social_links(raw: dict) -> dict:
     return {k: (sites._social_href(k, v) if v and v.strip() else None) for k, v in raw.items()}
 
 
+def _team_member(m: ClubTeamMembers, role: Optional[str]) -> dict:
+    return dict(
+        name=m.name, role=role, photo=_img(m.photo, "medium", "original", "thumbnail"),
+        links=_social_links({k: getattr(m, k) for k in ("instagram", "linkedin", "x", "website")}),
+    )
+
+
 async def club_page(session, slug: str, viewer_id: Optional[int], now: Optional[datetime] = None) -> dict:
     now = now or now_utc()
     club = await session.scalar(select(Clubs).where(Clubs.slug == slug, *_club_visible()))
@@ -448,13 +464,7 @@ async def club_page(session, slug: str, viewer_id: Optional[int], now: Optional[
         .order_by(ClubThreads.created_at.desc(), ClubThreads.id).limit(5)
     )).all())
 
-    team = [
-        dict(
-            name=m.name, role=m.role, photo=_img(m.photo, "medium", "original", "thumbnail"),
-            links=_social_links({k: getattr(m, k) for k in ("instagram", "linkedin", "x", "website")}),
-        )
-        for m in await clubs_service.list_team(session, club.id)
-    ]
+    team = [_team_member(m, m.role) for m in await clubs_service.list_team(session, club.id)]
     partners = [dict(name=p.name, role=p.role, logo=_img(p.logo, "medium", "thumbnail", "original")) for p in await clubs_service.list_partners(session, club.id)]
     return dict(
         club=detail,
@@ -462,6 +472,131 @@ async def club_page(session, slug: str, viewer_id: Optional[int], now: Optional[
         past=await cards(session, past, now, going=going),
         threads=await threads._shape(session, posts, {club.id: club}, viewer_id),
         team=team, partners=partners,
+    )
+
+
+# ─── An event's page ─────────────────────────────────────────────────────
+
+
+def _public_where(now: datetime) -> list:
+    """An event anyone may open: on now or still to come, as the search shows
+    it, or held and over, as a club page's past list shows it."""
+    end = _end_expr()
+    return [
+        Events.is_deleted == False,  # noqa: E712
+        *_club_visible(),
+        or_(and_(Events.lifecycle.in_(SHOWN), end >= now), and_(Events.lifecycle.in_(HELD), end < now)),
+    ]
+
+
+def _ref_where(ref: str):
+    """A slug, or the id the old site's addresses carried; None for a number too big to be an id."""
+    if ref.isascii() and ref.isdigit():
+        n = int(ref)
+        return Events.id == n if n < 2**31 else None
+    return Events.slug == ref
+
+
+def _iso(dt: Optional[datetime]) -> Optional[str]:
+    return _aware(dt).isoformat() if dt is not None else None
+
+
+async def _interest_names_of(session, event_id: int) -> list[str]:
+    rows = await session.scalars(
+        select(Interests.name)
+        .join(EventInterestsLink, EventInterestsLink.interest_id == Interests.id)
+        .where(EventInterestsLink.event_id == event_id, EventInterestsLink.is_deleted == False, Interests.is_deleted == False)  # noqa: E712
+        .order_by(EventInterestsLink.id)
+    )
+    out: list[str] = []
+    for name in rows.all():
+        if name not in out:
+            out.append(name)
+    return out
+
+
+async def _event_team(session, e: Events) -> tuple[list[dict], str]:
+    """The organisers the event names; without them, the first of the club's team."""
+    named = await organisers.rows_for(session, e)
+    if named:
+        return [_team_member(m, o.role or m.role) for o, m in named], "event"
+    members = (await clubs_service.list_team(session, e.club_id))[:CLUB_TEAM_ON_EVENT]
+    return [_team_member(m, m.role) for m in members], ("club" if members else "none")
+
+
+async def event_page(session, ref: str, now: Optional[datetime] = None) -> dict:
+    """Everything the public event page shows. Nothing about who registered
+    beyond the count, and never the online joining link."""
+    now = now or now_utc()
+    key = _ref_where(ref)
+    e = None
+    if key is not None:
+        e = await session.scalar(_event_select().options(selectinload(Events.speakers)).where(key, *_public_where(now)))
+    if e is None:
+        raise CustomHTTPException(404, message="Event not found")
+    club, cat = e.club, e.category
+    going = (await going_counts(session, [e.id])).get(e.id, 0)
+    poster = _img(e.poster, "original", "large", "medium", "thumbnail")
+    event = dict(
+        id=e.id, slug=e.slug, name=e.name, about=e.about,
+        poster=poster, poster_thumb=_img(e.poster, "medium", "thumbnail") or poster,
+        starts_at=_aware(e.event_datetime).isoformat(), ends_at=_ends_at(e).isoformat(),
+        duration_hours=float(e.duration) if e.duration is not None else None, timezone=EVENT_TIMEZONE,
+        is_online=bool(e.is_online), location_name=e.location_name, location_link=e.location_link, lat=e.lat, lng=e.lng,
+        has_fee=bool(e.has_fee), fee=float(e.reg_fee) if e.has_fee and e.reg_fee is not None else None,
+        has_prize=bool(e.has_prize), prize_amount=float(e.prize_amount) if e.has_prize and e.prize_amount is not None else None,
+        capacity=e.max_participants, going=going,
+        seats_left=max(e.max_participants - going, 0) if e.max_participants else None,
+        reg_opens_at=_iso(e.reg_startdate), reg_closes_at=_iso(e.reg_enddate),
+        status=status_of(e, now, going), registration_open=registration_open(e, going, now),
+        category=dict(id=cat.id, name=cat.name) if cat is not None else None,
+        interests=await _interest_names_of(session, e.id),
+        guidelines=e.event_guidelines,
+        contact=dict(name=e.contact_name, email=e.contact_email, phone=e.contact_phone),
+        url=public_urls.event_url(e.slug),
+    )
+    speakers = [
+        dict(id=s.id, name=s.name, designation=s.designation, photo=_img(s.photo, "medium", "thumbnail", "original"), bio=s.bio, link=s.link)
+        for s in e.speakers if not s.is_deleted
+    ]
+    team, team_source = await _event_team(session, e)
+    more = await _rows(session, filtered(now, club_id=club.id).where(Events.id != e.id).limit(ALSO_ON))
+    similar = await _rows(session, filtered(now, category=e.category_id).where(Events.club_id != club.id).limit(ALSO_ON))
+    shown_going = await going_counts(session, [x.id for x in more + similar])
+    return dict(
+        event=event,
+        club=dict(
+            id=club.id, name=club.name, slug=club.slug, logo=_img(club.logo, "thumbnail", "medium", "original"),
+            tagline=club.tagline, followers=(await follower_counts(session, [club.id])).get(club.id, 0), location_name=club.location_name,
+        ),
+        speakers=speakers,
+        agenda=dict(timezone=EVENT_TIMEZONE, items=await agenda.list_items(session, e.id)),
+        team=team, team_source=team_source,
+        more_from_club=await cards(session, more, now, going=shown_going),
+        similar=await cards(session, similar, now, going=shown_going),
+    )
+
+
+# ─── Sitemap ─────────────────────────────────────────────────────────────
+
+
+async def sitemap(session, now: Optional[datetime] = None) -> dict:
+    """Every page a search engine should know: events still to come or held in
+    the last year, and every club, each with when it last changed."""
+    now = now or now_utc()
+    events = (await session.execute(
+        select(Events.slug, Events.updated_at)
+        .join(Clubs, Clubs.id == Events.club_id)
+        .where(*_public_where(now), Events.event_datetime >= now - SITEMAP_PAST)
+        .order_by(Events.event_datetime.desc(), Events.id.desc())
+        .limit(SITEMAP_MAX)
+    )).all()
+    clubs = (await session.execute(
+        select(Clubs.slug, Clubs.updated_at).where(*_club_visible()).order_by(Clubs.id).limit(SITEMAP_MAX)
+    )).all()
+    return dict(
+        events=[dict(slug=slug, updated_at=_iso(at)) for slug, at in events],
+        clubs=[dict(slug=slug, updated_at=_iso(at)) for slug, at in clubs],
     )
 
 

@@ -32,6 +32,7 @@ from app.api.clubs.models import ClubUsersLink, Clubs
 from app.api.users.models import Users, UserProfiles
 from app.core.validations.schema import validate_relations
 from app.api.interests.models import Interests
+from app.core import public_urls
 from app.core.utils.keys import generate_slug
 from app.core.notifications.triggers import (
     notify_followers_of_new_event,
@@ -506,10 +507,10 @@ async def get_event(session: AsyncSession, event_id: str | int, user_id: int | N
             data["is_attended"] = registration.is_attended
             data["ticket_id"] = registration.ticket_id
             data["user_position"] = registration.position
-            # Build URLs from ticket_id - use the events subdomain for public ticket pages
-            data["ticket_url"] = f"https://events.myotherapp.in/tickets/{registration.ticket_id}"
+            # The public site's ticket and certificate pages, by ticket id.
+            data["ticket_url"] = public_urls.ticket_url(registration.ticket_id)
             if registration.is_attended:
-                data["certificate_url"] = f"https://events.myotherapp.in/certificates/{registration.ticket_id}"
+                data["certificate_url"] = public_urls.certificate_url(registration.ticket_id)
             # Position label based on position
             if registration.position:
                 if registration.position == 1:

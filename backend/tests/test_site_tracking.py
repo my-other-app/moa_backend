@@ -10,6 +10,7 @@ from sqlalchemy import select
 
 from app.api.events.models import EventRegistrationsLink
 from app.api.links.models import TrackingClicks, TrackingLinks
+from app.config import settings
 from app.core.email import email as email_mod
 from app.core.rate_limit import limiter
 from tests.conftest import auth_header
@@ -60,10 +61,10 @@ async def test_publishing_gives_the_site_its_link_and_its_buttons_carry_the_code
 
     html = (await client.get(f"/api/v1/sites/{world['club'].slug}")).text
     # The event button leaves the frame for the whole tab, carrying the site's code as a weak ref.
-    assert re.search(rf'href="[^"]*/{world["event"].id}\?sref={code}" target="_top">Register</a>', html)
+    assert re.search(rf'href="{re.escape(settings.PUBLIC_SITE_URL)}/events/{world["event"].slug}\?sref={code}" target="_top">Register</a>', html)
     assert f'data-visit="http' in html and f"/api/v1/sites/{world['club'].slug}/visit" in html
     # Every way out of the frame goes to the whole tab.
-    assert 'href="https://events.myotherapp.in/clubs/' in html and html.count('target="_top"') >= 3
+    assert f'href="{settings.PUBLIC_SITE_URL}/clubs/' in html and html.count('target="_top"') >= 3
 
 
 async def test_a_site_published_before_tracking_gets_its_link_on_the_next_look(client, world, session):

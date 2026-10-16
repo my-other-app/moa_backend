@@ -14,6 +14,7 @@ from app.api.clubs.models import Clubs, ClubUsersLink
 from app.api.events.models import EventRegistrationsLink, Events
 from app.api.links.models import TrackingClicks, TrackingLinks
 from app.config import settings
+from app.core import public_urls
 from app.response import CustomHTTPException
 
 # No vowels, no look-alikes: a code read off a poster cannot be misread.
@@ -38,8 +39,10 @@ def short_url(link: TrackingLinks) -> str:
     return f"{settings.PUBLIC_API_URL}/l/{link.code}"
 
 
-def destination(link: TrackingLinks, club_slug: Optional[str] = None) -> str:
-    base = f"{settings.PUBLIC_SITE_URL}/{link.event_id}" if link.event_id else settings.PUBLIC_CLUB_URL.format(slug=club_slug or link.club_id)
+def destination(link: TrackingLinks, club_slug: Optional[str] = None, event_slug: Optional[str] = None) -> str:
+    """Where the link lands, tagged: the event's page or the club's. Every caller
+    passes the event's slug; the page answers to the bare id too, should one not."""
+    base = public_urls.event_url(event_slug or link.event_id) if link.event_id else settings.PUBLIC_CLUB_URL.format(slug=club_slug or link.club_id)
     params = {"utm_source": link.utm_source, "utm_medium": link.utm_medium}
     if link.utm_campaign:
         params["utm_campaign"] = link.utm_campaign
@@ -53,7 +56,7 @@ async def by_code(session, code: str) -> Optional[TrackingLinks]:
     if not code:
         return None
     return await session.scalar(
-        select(TrackingLinks).options(joinedload(TrackingLinks.club)).where(TrackingLinks.code == code.strip().lower(), TrackingLinks.is_deleted == False)  # noqa: E712
+        select(TrackingLinks).options(joinedload(TrackingLinks.club), joinedload(TrackingLinks.event)).where(TrackingLinks.code == code.strip().lower(), TrackingLinks.is_deleted == False)  # noqa: E712
     )
 
 
@@ -344,7 +347,7 @@ async def summary(session, club, event, days: int = 30, now: Optional[datetime] 
         agg[0] += n
         agg[1] += c
         out_links.append({
-            "id": link.id, "name": link.name, "code": link.code, "url": short_url(link), "destination": destination(link, getattr(club, "slug", None)),
+            "id": link.id, "name": link.name, "code": link.code, "url": short_url(link), "destination": destination(link, getattr(club, "slug", None), getattr(event, "slug", None)),
             "utm_source": link.utm_source, "utm_medium": link.utm_medium, "utm_campaign": link.utm_campaign, "utm_content": link.utm_content,
             "clicks": n, "uniques": u, "conversions": c, "rate": _pct(c, n), "second": s, "created_at": link.created_at.isoformat(),
         })
