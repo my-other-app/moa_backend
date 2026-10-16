@@ -1,0 +1,148 @@
+"""The club's posts as the Threads page needs them: which ones wait for a
+reply, the page's scopes and sorts, and the figures above the list — reach,
+engagement, what kind of post works."""
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
+from typing import Optional
+
+from sqlalchemy import func, select
+
+from app.api.clubs.models import Clubs, ClubUsersLink
+from app.api.threads.models import ClubThreads, ThreadComments, ThreadLikes, ThreadVotes
+from app.api.threads.service import _options_for, _out
+
+SCOPES = ("all", "pinned", "polls", "photos", "awaiting")
+SORTS = ("newest", "seen", "engaged")
+WINDOW = timedelta(days=30)
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+async def _reply_state(session, club: Clubs, thread_ids: list) -> dict:
+    """Per post: when the last comment landed, and whether a follower spoke after the club last did."""
+    out = {t: dict(last_comment_at=None, awaiting_reply=False) for t in thread_ids}
+    if not thread_ids:
+        return out
+    rows = (await session.execute(
+        select(ThreadComments.thread_id, ThreadComments.user_id, func.max(ThreadComments.created_at))
+        .where(ThreadComments.thread_id.in_(thread_ids), ThreadComments.is_deleted == False)  # noqa: E712
+        .group_by(ThreadComments.thread_id, ThreadComments.user_id)
+    )).all()
+    last_follower: dict = {}
+    last_club: dict = {}
+    for tid, uid, at in rows:
+        if uid == club.user_id:
+            last_club[tid] = max(last_club.get(tid, at), at)
+        else:
+            last_follower[tid] = max(last_follower.get(tid, at), at)
+    for tid in thread_ids:
+        f, c = last_follower.get(tid), last_club.get(tid)
+        latest = max([x for x in (f, c) if x is not None], default=None)
+        out[tid] = dict(last_comment_at=latest.isoformat() if latest else None, awaiting_reply=bool(f and (c is None or f > c)))
+    return out
+
+
+def _engagement(t: ClubThreads, votes: int) -> int:
+    return (t.likes_count or 0) + (t.comments_count or 0) + votes
+
+
+async def _rows(session, club: Clubs) -> list[ClubThreads]:
+    return list((await session.scalars(select(ClubThreads).where(ClubThreads.club_id == club.id, ClubThreads.is_deleted == False).order_by(ClubThreads.created_at.desc()))).all())  # noqa: E712
+
+
+async def list_for_page(session, club: Clubs, *, scope: str = "all", sort: str = "newest", offset: int = 0, limit: int = 10, viewer_id: Optional[int] = None) -> dict:
+    rows = await _rows(session, club)
+    ids = [t.id for t in rows]
+    options = await _options_for(session, ids)
+    states = await _reply_state(session, club, ids)
+    votes = {t.id: sum(o.votes_count for o in options[t.id]) for t in rows}
+    counts = dict(all=len(rows), pinned=sum(1 for t in rows if t.pinned), polls=sum(1 for t in rows if t.kind == "poll"), photos=sum(1 for t in rows if t.image), awaiting=sum(1 for t in rows if states[t.id]["awaiting_reply"]))
+    if scope == "pinned":
+        rows = [t for t in rows if t.pinned]
+    elif scope == "polls":
+        rows = [t for t in rows if t.kind == "poll"]
+    elif scope == "photos":
+        rows = [t for t in rows if t.image]
+    elif scope == "awaiting":
+        rows = [t for t in rows if states[t.id]["awaiting_reply"]]
+    if sort == "seen":
+        rows.sort(key=lambda t: (-(t.views_count or 0), -t.created_at.timestamp()))
+    elif sort == "engaged":
+        rows.sort(key=lambda t: (-_engagement(t, votes[t.id]), -t.created_at.timestamp()))
+    else:
+        rows.sort(key=lambda t: (not t.pinned, -t.created_at.timestamp()))
+    page = rows[offset : offset + limit]
+    items = []
+    for t in page:
+        d = _out(t, club, options[t.id], False, None)
+        d.update(states[t.id])
+        d["engagement"] = _engagement(t, votes[t.id])
+        items.append(d)
+    return dict(items=items, total=len(rows), limit=limit, offset=offset, counts=counts)
+
+
+async def insights(session, club: Clubs) -> dict:
+    now = _now()
+    rows = await _rows(session, club)
+    ids = [t.id for t in rows]
+    options = await _options_for(session, ids)
+    votes = {t.id: sum(o.votes_count for o in options[t.id]) for t in rows}
+    states = await _reply_state(session, club, ids)
+
+    def window(start: datetime, end: datetime):
+        return [t for t in rows if start < t.created_at <= end]
+
+    cur = window(now - WINDOW, now)
+    prev = window(now - 2 * WINDOW, now - WINDOW)
+    reach = lambda ts: sum(t.views_count or 0 for t in ts)  # noqa: E731
+    engaged = lambda ts: sum(_engagement(t, votes[t.id]) for t in ts)  # noqa: E731
+
+    def rate(ts) -> Optional[float]:
+        v = reach(ts)
+        return round(100 * engaged(ts) / v, 1) if v else None
+
+    # Likes and comments as they landed, per week, for the last twelve weeks.
+    since = now - timedelta(weeks=12)
+    likes_by_week: dict = defaultdict(int)
+    for (at,) in (await session.execute(select(ThreadLikes.created_at).join(ClubThreads, ClubThreads.id == ThreadLikes.thread_id).where(ClubThreads.club_id == club.id, ThreadLikes.created_at > since))).all():
+        likes_by_week[at.isocalendar()[:2]] += 1
+    comments_by_week: dict = defaultdict(int)
+    for (at,) in (await session.execute(select(ThreadComments.created_at).join(ClubThreads, ClubThreads.id == ThreadComments.thread_id).where(ClubThreads.club_id == club.id, ThreadComments.is_deleted == False, ThreadComments.created_at > since))).all():  # noqa: E712
+        comments_by_week[at.isocalendar()[:2]] += 1
+    votes_by_week: dict = defaultdict(int)
+    for (at,) in (await session.execute(select(ThreadVotes.created_at).join(ClubThreads, ClubThreads.id == ThreadVotes.thread_id).where(ClubThreads.club_id == club.id, ThreadVotes.created_at > since))).all():
+        votes_by_week[at.isocalendar()[:2]] += 1
+    weeks = []
+    for k in range(11, -1, -1):
+        day = now - timedelta(weeks=k)
+        key = day.isocalendar()[:2]
+        posted = [t for t in rows if t.created_at.isocalendar()[:2] == key]
+        weeks.append(dict(week=day.strftime("%Y-%m-%d"), posts=len(posted), reach=reach(posted), reactions=likes_by_week[key] + comments_by_week[key] + votes_by_week[key]))
+
+    # What works: average reach by kind of post, and whether telling followers moved it.
+    def avg(ts) -> Optional[int]:
+        return round(reach(ts) / len(ts)) if ts else None
+
+    kinds = [
+        dict(kind="poll", label="Polls", posts=sum(1 for t in rows if t.kind == "poll"), avg_reach=avg([t for t in rows if t.kind == "poll"]), avg_engagement=round(engaged([t for t in rows if t.kind == "poll"]) / max(1, sum(1 for t in rows if t.kind == "poll")), 1) if any(t.kind == "poll" for t in rows) else None),
+        dict(kind="photo", label="With a photo", posts=sum(1 for t in rows if t.kind != "poll" and t.image), avg_reach=avg([t for t in rows if t.kind != "poll" and t.image]), avg_engagement=round(engaged([t for t in rows if t.kind != "poll" and t.image]) / max(1, sum(1 for t in rows if t.kind != "poll" and t.image)), 1) if any(t.kind != "poll" and t.image for t in rows) else None),
+        dict(kind="text", label="Text only", posts=sum(1 for t in rows if t.kind != "poll" and not t.image), avg_reach=avg([t for t in rows if t.kind != "poll" and not t.image]), avg_engagement=round(engaged([t for t in rows if t.kind != "poll" and not t.image]) / max(1, sum(1 for t in rows if t.kind != "poll" and not t.image)), 1) if any(t.kind != "poll" and not t.image for t in rows) else None),
+    ]
+    told = [t for t in rows if t.notify_followers]
+    quiet = [t for t in rows if not t.notify_followers]
+    best = max(cur, key=lambda t: (_engagement(t, votes[t.id]), t.views_count or 0), default=None)
+    followers = await session.scalar(select(func.count()).select_from(ClubUsersLink).where(ClubUsersLink.club_id == club.id, ClubUsersLink.is_following == True, ClubUsersLink.is_deleted == False)) or 0  # noqa: E712
+    return dict(
+        posts=len(cur), posts_delta=(len(cur) - len(prev)) if (cur or prev) else None,
+        reach=reach(cur), reach_delta=(reach(cur) - reach(prev)) if (cur or prev) else None,
+        reach_per_follower=round(reach(cur) / max(1, len(cur)) / followers, 2) if (followers and cur) else None,
+        engagement_rate=rate(cur), engagement_rate_prev=rate(prev),
+        awaiting=sum(1 for t in rows if states[t.id]["awaiting_reply"]),
+        best=dict(id=str(best.id), body=best.body[:120], views=best.views_count or 0, engagement=_engagement(best, votes[best.id]), kind=best.kind) if best else None,
+        weeks=weeks, kinds=kinds,
+        notify=dict(told=dict(posts=len(told), avg_reach=avg(told)), quiet=dict(posts=len(quiet), avg_reach=avg(quiet))),
+        followers=followers, all_time=dict(posts=len(rows), reach=reach(rows), engagement=engaged(rows)),
+        generated_at=now.isoformat(),
+    )

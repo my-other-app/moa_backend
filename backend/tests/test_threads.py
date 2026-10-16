@@ -138,3 +138,41 @@ async def test_readers_like_comment_and_are_counted_once(client, world):
     assert [x["body"] for x in feed["items"]] == ["Results are in!"] and feed["total"] == 1
     assert (await client.get("/api/v1/threads/feed", headers=world["stranger_h"])).json()["items"] == []
     assert (await client.get("/api/v1/threads/feed", headers=h)).status_code == 403
+
+
+async def test_the_threads_page_knows_what_waits_and_what_works(client, world):
+    h = world["h"]
+    first = await client.post("/api/v1/clubs/threads", data={"body": "Hack Night 04 is tonight!", "notify_followers": "true"}, headers=h)
+    poll = await client.post("/api/v1/clubs/threads", data={"body": "Theme for 05?", "notify_followers": "false", "poll_options": '["Robotics","Wearables"]'}, headers=h)
+    assert first.status_code == 201 and poll.status_code == 201
+    t1, t2 = first.json()["id"], poll.json()["id"]
+    # Readers: two likes and a comment on the first; a vote on the poll.
+    assert (await client.post(f"/api/v1/threads/{t1}/like", headers=world["fan_h"])).status_code == 200
+    assert (await client.post(f"/api/v1/threads/{t1}/like", headers=world["fan2_h"])).status_code == 200
+    assert (await client.post(f"/api/v1/threads/{t1}/comments", json={"body": "Can't wait!"}, headers=world["fan_h"])).status_code == 201
+    opt = poll.json()["poll"]["options"][0]["id"]
+    assert (await client.post(f"/api/v1/threads/{t2}/vote", json={"option_id": opt}, headers=world["fan_h"])).status_code == 200
+
+    page = (await client.get("/api/v1/clubs/threads/page", headers=h)).json()
+    assert page["counts"] == {"all": 2, "pinned": 0, "polls": 1, "photos": 0, "awaiting": 1}
+    by = {r["id"]: r for r in page["items"]}
+    assert by[t1]["awaiting_reply"] is True and by[t1]["engagement"] == 3 and by[t1]["last_comment_at"]
+    assert by[t2]["awaiting_reply"] is False and by[t2]["engagement"] == 1
+    waiting = (await client.get("/api/v1/clubs/threads/page?scope=awaiting", headers=h)).json()
+    assert [r["id"] for r in waiting["items"]] == [t1]
+
+    # The club replies: nothing waits any more.
+    assert (await client.post(f"/api/v1/clubs/threads/{t1}/comments", json={"body": "See you there"}, headers=h)).status_code == 201
+    assert (await client.get("/api/v1/clubs/threads/page?scope=awaiting", headers=h)).json()["total"] == 0
+    engaged = (await client.get("/api/v1/clubs/threads/page?sort=engaged", headers=h)).json()["items"]
+    assert [r["id"] for r in engaged] == [t1, t2]
+    assert (await client.get("/api/v1/clubs/threads/page?scope=vip", headers=h)).status_code == 422
+
+    i = (await client.get("/api/v1/clubs/threads/insights", headers=h)).json()
+    assert i["posts"] == 2 and i["posts_delta"] == 2 and i["awaiting"] == 0 and i["followers"] == 2
+    assert i["best"]["id"] == t1 and i["best"]["engagement"] == 4  # two likes, two comments
+    assert len(i["weeks"]) == 12 and i["weeks"][-1]["posts"] == 2 and i["weeks"][-1]["reactions"] == 5
+    kinds = {k["kind"]: k for k in i["kinds"]}
+    assert kinds["poll"]["posts"] == 1 and kinds["text"]["posts"] == 1 and kinds["photo"]["posts"] == 0 and kinds["photo"]["avg_reach"] is None
+    assert i["notify"]["told"]["posts"] == 1 and i["notify"]["quiet"]["posts"] == 1
+    assert i["all_time"]["posts"] == 2 and i["all_time"]["engagement"] == 5
