@@ -51,18 +51,21 @@ async def get_session():
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
-# setup logging for sqlalchamey
+# Every SQL statement with its parameters, to stdout and logs/sql.log -- only
+# when asked for (APP_SQL_LOG=true). It used to be always on, in production
+# too: the parameters carry people's emails, phones and names, and the file
+# grew without bound.
+if settings.SQL_LOG:
+    logging.basicConfig()
+    logger = logging.getLogger("sqlalchemy.engine")
+    logger.setLevel(logging.INFO)
 
-logging.basicConfig()
-logger = logging.getLogger("sqlalchemy.engine")
-logger.setLevel(logging.INFO)
+    os.makedirs("logs", exist_ok=True)
 
-os.makedirs("logs", exist_ok=True)
+    file_handler = logging.FileHandler("logs/sql.log")
+    file_handler.setLevel(logging.INFO)
 
-file_handler = logging.FileHandler("logs/sql.log")
-file_handler.setLevel(logging.INFO)
+    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    file_handler.setFormatter(formatter)
 
-formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-file_handler.setFormatter(formatter)
-
-logger.addHandler(file_handler)
+    logger.addHandler(file_handler)
