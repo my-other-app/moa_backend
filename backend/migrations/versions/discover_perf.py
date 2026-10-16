@@ -20,12 +20,12 @@ The downgrade leaves the pg_trgm extension in place: other things may come
 to use it, and creating it again is a no-op.
 
 Revision ID: discover_perf
-Revises: allow_repeat_guests
+Revises: add_apple_provider
 """
 from alembic import op
 
 revision = "discover_perf"
-down_revision = "allow_repeat_guests"
+down_revision = "add_apple_provider"
 branch_labels = None
 depends_on = None
 

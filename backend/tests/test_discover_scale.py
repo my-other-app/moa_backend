@@ -633,14 +633,21 @@ async def test_going_and_follower_counts_stay_exact_through_every_kind_of_write(
     await _check_counts(session)
 
 
-async def test_the_guest_merge_keeps_the_counts_exact(session, make_club, make_event, make_user):
+@pytest.mark.parametrize("vouched_by", ["google", "verified_code"])
+async def test_the_guest_merge_keeps_the_counts_exact(session, make_club, make_event, make_user, vouched_by):
+    """Into an account Google vouched for, or a password account whose owner
+    typed back the code sent to the address (merges_into)."""
     from app.api.users import service as users_service
     from app.api.users.models import SigninProviders
 
     owner, club = await make_club(name="Merge Count Club", email="merge-count@example.com")
     event = await make_event(club=club, created_by=owner, name="Merge Count", event_datetime=datetime.now(timezone.utc) + timedelta(days=3))
     app_user = await make_user(email="merger@example.com", username=f"merger-{uuid.uuid4().hex[:6]}")
-    app_user.provider = SigninProviders.google
+    if vouched_by == "google":
+        app_user.provider = SigninProviders.google
+    else:
+        app_user.email_verified_at = datetime.now(timezone.utc)
+    assert users_service.merges_into(app_user)
     guest = await make_user(email="MERGER@example.com", user_type=UserTypes.guest, username=f"guest-{uuid.uuid4().hex[:6]}")
     for u in (app_user, guest):
         session.add(EventRegistrationsLink(event_id=event.id, user_id=u.id, full_name="M", email=u.email, ticket_id=f"T-{uuid.uuid4().hex[:10]}"))
