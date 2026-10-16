@@ -19,6 +19,7 @@ from app.api.clubs.models import (
     Notes,
     ClubSocials,
     ClubPartners,
+    ClubTeamMembers,
 )
 from app.api.clubs.schemas import ClubSocialsCreate, CreateClub
 from app.api.users.models import UserProfiles, UserTypes, Users
@@ -886,6 +887,7 @@ async def get_club_details(
     }
 
     club_dict["partners"] = [_partner_out(p) for p in await list_partners(session, club.id)]
+    club_dict["team"] = [_member_out(m) for m in await list_team(session, club.id)]
     # Manually serialize relationships
     if club.org:
         club_dict["org"] = {
@@ -1146,6 +1148,66 @@ async def update_partner(session: AsyncSession, p: ClubPartners, data: dict) -> 
 async def delete_partner(session: AsyncSession, p: ClubPartners) -> None:
     p.is_deleted = True
     p.deleted_at = datetime.now(timezone.utc)
+    await session.commit()
+
+
+# ─── The team ────────────────────────────────────────────────────────────
+
+TEAM_FIELDS = ("role", "instagram", "linkedin", "x", "website")
+
+
+def _member_out(m: ClubTeamMembers) -> dict:
+    return {"id": m.id, "name": m.name, "role": m.role, "instagram": m.instagram, "linkedin": m.linkedin, "x": m.x, "website": m.website, "sort_order": m.sort_order, "photo": m.photo}
+
+
+async def list_team(session: AsyncSession, club_id: int) -> list[ClubTeamMembers]:
+    rows = await session.scalars(
+        select(ClubTeamMembers).where(ClubTeamMembers.club_id == club_id, ClubTeamMembers.is_deleted == False).order_by(ClubTeamMembers.sort_order, ClubTeamMembers.id)  # noqa: E712
+    )
+    return list(rows.all())
+
+
+async def member_for(session: AsyncSession, club_id: int, member_id: int) -> ClubTeamMembers:
+    m = await session.scalar(select(ClubTeamMembers).where(ClubTeamMembers.id == member_id, ClubTeamMembers.club_id == club_id, ClubTeamMembers.is_deleted == False))  # noqa: E712
+    if m is None:
+        raise CustomHTTPException(404, message="Team member not found")
+    return m
+
+
+async def create_member(session: AsyncSession, club_id: int, data: dict) -> dict:
+    last = await session.scalar(select(func.max(ClubTeamMembers.sort_order)).where(ClubTeamMembers.club_id == club_id, ClubTeamMembers.is_deleted == False))  # noqa: E712
+    m = ClubTeamMembers(club_id=club_id, name=data["name"].strip(), sort_order=(last if last is not None else -1) + 1, **{k: (data.get(k) or None) for k in TEAM_FIELDS})
+    session.add(m)
+    await session.commit()
+    await session.refresh(m)
+    return _member_out(m)
+
+
+async def update_member(session: AsyncSession, m: ClubTeamMembers, data: dict) -> dict:
+    if "name" in data and data["name"] is not None:
+        m.name = data["name"].strip()
+    for k in TEAM_FIELDS:
+        if k in data:
+            setattr(m, k, data[k] or None)
+    if "sort_order" in data and data["sort_order"] is not None:
+        m.sort_order = data["sort_order"]
+    await session.commit()
+    await session.refresh(m)
+    return _member_out(m)
+
+
+async def update_member_photo(session: AsyncSession, m: ClubTeamMembers, photo: UploadFile) -> dict:
+    if m.photo:
+        m.photo.delete()
+    m.photo = {"bytes": io.BytesIO(await photo.read()), "filename": photo.filename}
+    await session.commit()
+    await session.refresh(m)
+    return _member_out(m)
+
+
+async def delete_member(session: AsyncSession, m: ClubTeamMembers) -> None:
+    m.is_deleted = True
+    m.deleted_at = datetime.now(timezone.utc)
     await session.commit()
 
 

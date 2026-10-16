@@ -103,3 +103,34 @@ async def test_a_follower_profile_shows_only_what_they_gave_the_club(client, ses
     # A stranger who never followed is nobody here; another club cannot look.
     assert (await client.get(f"/api/v1/clubs/followers/{club.id}/{world['owner'].id}", headers=h)).status_code == 404
     assert (await client.get(f"/api/v1/clubs/followers/{club.id}/{fan.id}", headers=world["rival_h"])).status_code == 403
+
+
+async def test_the_team_is_listed_in_order_with_photos_and_links_and_kept_to_its_club(client, world, fake_s3):
+    h = world["h"]
+    lead = await client.post("/api/v1/clubs/team", json={"name": "Arjun Sharma", "role": "Lead", "instagram": "@arjun ", "linkedin": "https://linkedin.com/in/arjun", "website": ""}, headers=h)
+    assert lead.status_code == 201, lead.text
+    assert lead.json()["instagram"] == "@arjun" and lead.json()["website"] is None and lead.json()["sort_order"] == 0
+    ops = (await client.post("/api/v1/clubs/team", json={"name": "Meera Nair", "role": "Operations"}, headers=h)).json()
+    theirs = (await client.post("/api/v1/clubs/team", json={"name": "Their Person"}, headers=world["rival_h"])).json()
+
+    assert [m["name"] for m in (await client.get("/api/v1/clubs/team", headers=h)).json()] == ["Arjun Sharma", "Meera Nair"]
+    assert [m["name"] for m in (await client.get("/api/v1/clubs/info", headers=h)).json()["team"]] == ["Arjun Sharma", "Meera Nair"]
+    public = await client.get(f"/api/v1/clubs/info/{world['club'].id}", headers=world["rival_h"])
+    assert public.status_code == 200 and [m["role"] for m in public.json()["team"]] == ["Lead", "Operations"]
+
+    fixed = await client.patch(f"/api/v1/clubs/team/{ops['id']}", json={"role": "Head of operations", "x": "meera_n"}, headers=h)
+    assert fixed.status_code == 200 and fixed.json()["role"] == "Head of operations" and fixed.json()["x"] == "meera_n"
+    # Reordering: the lead sent to the back.
+    assert (await client.patch(f"/api/v1/clubs/team/{lead.json()['id']}", json={"sort_order": 5}, headers=h)).status_code == 200
+    assert [m["name"] for m in (await client.get("/api/v1/clubs/team", headers=h)).json()] == ["Meera Nair", "Arjun Sharma"]
+    for bad in ({"name": " "}, {"sort_order": -1}):
+        assert (await client.patch(f"/api/v1/clubs/team/{ops['id']}", json=bad, headers=h)).status_code == 422, bad
+
+    with_photo = await client.put(f"/api/v1/clubs/team/{ops['id']}/photo", files={"photo": ("meera.png", _png(), "image/png")}, headers=h)
+    assert with_photo.status_code == 200 and with_photo.json()["photo"] is not None
+    assert (await client.put(f"/api/v1/clubs/team/{ops['id']}/photo", files={"photo": ("x.txt", b"no", "text/plain")}, headers=h)).status_code == 422
+    assert (await client.put(f"/api/v1/clubs/team/{theirs['id']}/photo", files={"photo": ("p.png", _png(), "image/png")}, headers=h)).status_code == 404
+    assert (await client.patch(f"/api/v1/clubs/team/{theirs['id']}", json={"name": "Ours"}, headers=h)).status_code == 404
+    assert (await client.delete(f"/api/v1/clubs/team/{lead.json()['id']}", headers=h)).json() == {"deleted": True}
+    assert [m["name"] for m in (await client.get("/api/v1/clubs/team", headers=h)).json()] == ["Meera Nair"]
+    assert [m["name"] for m in (await client.get("/api/v1/clubs/team", headers=world["rival_h"])).json()] == ["Their Person"]

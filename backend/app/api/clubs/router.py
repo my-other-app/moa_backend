@@ -4,6 +4,9 @@ from sqlalchemy import select
 from app.api.clubs.models import Clubs
 from app.response import CustomHTTPException
 from app.api.clubs.schemas import (
+    ClubTeamMemberOut,
+    ClubTeamMemberCreate,
+    ClubTeamMemberPatch,
     ClubAdminDetailResponse,
     ClubAdminFullResponse,
     ClubCreateUpdateResponse,
@@ -428,6 +431,39 @@ async def update_partner_logo(session: SessionDep, user: ClubAuth, partner_id: i
         raise CustomHTTPException(422, message="The logo must be an image")
     p = await service.partner_for(session, user.club.id, partner_id)
     return ClubPartnerOut(**await service.update_partner_logo(session, p, logo))
+
+
+# ─── The team ────────────────────────────────────────────────────────────
+
+
+@router.get("/team", summary="The people who run the club")
+async def list_team(session: SessionDep, user: ClubAuth) -> list[ClubTeamMemberOut]:
+    return [ClubTeamMemberOut(**service._member_out(m)) for m in await service.list_team(session, user.club.id)]
+
+
+@router.post("/team", summary="Add a team member", status_code=201)
+async def create_member(session: SessionDep, user: ClubAuth, body: ClubTeamMemberCreate) -> ClubTeamMemberOut:
+    return ClubTeamMemberOut(**await service.create_member(session, user.club.id, body.model_dump()))
+
+
+@router.patch("/team/{member_id}", summary="Correct a team member")
+async def update_member(session: SessionDep, user: ClubAuth, member_id: int, body: ClubTeamMemberPatch) -> ClubTeamMemberOut:
+    m = await service.member_for(session, user.club.id, member_id)
+    return ClubTeamMemberOut(**await service.update_member(session, m, body.model_dump(exclude_unset=True)))
+
+
+@router.put("/team/{member_id}/photo", summary="A team member's photo")
+async def update_member_photo(session: SessionDep, user: ClubAuth, member_id: int, photo: UploadFile = File(...)) -> ClubTeamMemberOut:
+    if not (photo.content_type or "").startswith("image/"):
+        raise CustomHTTPException(422, message="The photo must be an image")
+    m = await service.member_for(session, user.club.id, member_id)
+    return ClubTeamMemberOut(**await service.update_member_photo(session, m, photo))
+
+
+@router.delete("/team/{member_id}", summary="Remove a team member")
+async def delete_member(session: SessionDep, user: ClubAuth, member_id: int) -> dict:
+    await service.delete_member(session, await service.member_for(session, user.club.id, member_id))
+    return {"deleted": True}
 
 
 @router.delete("/partners/{partner_id}", summary="Remove a partner")

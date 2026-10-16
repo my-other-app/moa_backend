@@ -136,6 +136,26 @@ class ClubSocials(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     __table_args__ = (UniqueConstraint("club_id", "is_deleted"),)
 
 
+class ClubTeamMembers(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
+    """The people who run the club, shown on the club page: a name, a role, a photo, and where to find them."""
+
+    __tablename__ = "club_team_members"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    club_id = Column(Integer, ForeignKey("clubs.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(100), nullable=False)
+    role = Column(String(80), nullable=True)
+    instagram = Column(String(255), nullable=True)
+    linkedin = Column(String(255), nullable=True)
+    x = Column(String(255), nullable=True)
+    website = Column(String(255), nullable=True)
+    sort_order = Column(Integer, nullable=False, default=0)
+    photo = Column(
+        S3ImageField(upload_to="clubs/team/", variations={"thumbnail": {"width": 150, "height": 150}, "medium": {"width": 400, "height": 400}}),
+        nullable=True,
+    )
+
+
 class ClubPartners(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     """Year-round partners shown on the club page; event sponsors live on the event."""
 
