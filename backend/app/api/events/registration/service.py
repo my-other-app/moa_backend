@@ -3,7 +3,7 @@ import logging
 import uuid
 from fastapi import BackgroundTasks
 from pandas import DataFrame
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -22,6 +22,51 @@ from app.api.events.access import ensure_event_access
 from app.api.templates_audience import RegistrationRole
 from app.api.users import service as user_service
 from app.api.models import BackgroundTaskLogs
+
+
+ALREADY_REGISTERED = (
+    "This email is already registered for this event. Your ticket was sent to it; "
+    "sign in to the MyOtherApp app with this email to see it."
+)
+AWAITING_PAYMENT = (
+    "This email already has a registration for this event that is waiting for payment. "
+    "Sign in to the MyOtherApp app with this email to finish paying."
+)
+
+
+async def resolve_event(session: AsyncSession, event_id: int | str) -> Events:
+    """The live event an id or a slug names."""
+    if isinstance(event_id, int) or (isinstance(event_id, str) and event_id.isdigit()):
+        where = Events.id == int(event_id)
+    else:
+        where = Events.slug == event_id
+    event = await session.scalar(select(Events).where(where, Events.is_deleted == False))
+    if event is None:
+        raise CustomHTTPException(404, message="Event not found")
+    return event
+
+
+async def live_registration_for_email(
+    session: AsyncSession, event_id: int, email: str
+) -> EventRegistrationsLink | None:
+    """A live registration for this event under this address: made with it,
+    or held by any account that has it. Case and stray spaces are ignored."""
+    holders = select(Users.id).where(
+        user_service.same_email(Users.email, email), Users.is_deleted == False
+    )
+    return await session.scalar(
+        select(EventRegistrationsLink)
+        .where(
+            EventRegistrationsLink.event_id == event_id,
+            EventRegistrationsLink.is_deleted == False,
+            or_(
+                user_service.same_email(EventRegistrationsLink.email, email),
+                EventRegistrationsLink.user_id.in_(holders),
+            ),
+        )
+        .order_by(EventRegistrationsLink.created_at)
+        .limit(1)
+    )
 
 
 def _field_type(field) -> str:
@@ -53,13 +98,18 @@ async def register_event(
     relaxed_fields: bool = False,
     tracking_ref: str | None = None,
     store_picks: list | None = None,
+    claim_existing: bool = True,
 ):
     """`relaxed_fields` is for a guest registered at the door: nothing is
     required there, and what they answer goes on the record.
 
     `notify=False` is for a guest the organiser adds or imports: the
     confirmation goes out later through Send tickets, where it is recorded,
-    rather than from here where it is not."""
+    rather than from here where it is not.
+
+    `claim_existing=False` is for a fresh guest from the public form: a
+    registration already made under the same address by someone else is
+    refused rather than handed back, ticket id and all."""
     is_event_id = (isinstance(event_id, str) and event_id.isdigit()) or isinstance(
         event_id, int
     )
@@ -165,6 +215,8 @@ async def register_event(
         )
     )
     if registration:
+        if not claim_existing and registration.user_id != user_id:
+            raise CustomHTTPException(409, message=ALREADY_REGISTERED, error_code="ALREADY_REGISTERED")
         if not db_event.has_fee or registration.is_paid:
             raise CustomHTTPException(400, message="Already registered for this event")
         # Back for the payment: the shelf picks are taken fresh.
@@ -202,13 +254,17 @@ async def register_event(
 
         await links.attribute_registration(session, registration, db_event, tracking_ref)
 
-        await session.commit()
-        await session.refresh(registration)
         if store_picks:
             from app.api.store import service as store
 
+            # Before the registration is kept, not after: a pick refused here
+            # (sold out, no size) must leave nothing behind, or the guest
+            # could not try again from the public form, which refuses an
+            # address already on the list.
+            await session.flush()
             await store.place_order(session, db_event, registration, store_picks, role=(role.value if role is not None else "attendee"))
-            await session.commit()
+        await session.commit()
+        await session.refresh(registration)
         db_event = await session.scalar(
             select(Events)
             .filter(Events.id == registration.event_id)
@@ -236,13 +292,11 @@ async def register_event(
                         ],
                     )
 
+    # By id, not by address: two accounts can register under one address,
+    # and the answer must be this caller's own registration.
     data = await session.scalar(
         select(EventRegistrationsLink)
-        .where(
-            EventRegistrationsLink.event_id == db_event.id,
-            EventRegistrationsLink.email == email,
-            EventRegistrationsLink.is_deleted == False,
-        )
+        .where(EventRegistrationsLink.id == registration.id)
         .options(
             selectinload(EventRegistrationsLink.event),
             selectinload(EventRegistrationsLink.user),
@@ -580,17 +634,7 @@ async def bulk_import_event_registrations(
                             additional_details[key] = row[key]
 
                 # Find or create user
-                user_query = (
-                    select(Users)
-                    .filter(
-                        Users.email == email,
-                        Users.is_deleted == False,
-                        Users.user_type != UserTypes.club,
-                    )
-                    .order_by(Users.created_at.desc())
-                    .limit(1)
-                )
-                user = await session.scalar(user_query)
+                user = await user_service.get_non_club_user_by_email(session, email)
 
                 if not user:
                     # Create new user if not exists

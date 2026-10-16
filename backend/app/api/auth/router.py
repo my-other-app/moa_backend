@@ -391,8 +391,11 @@ async def admin_reset_password(
     
     # Try different search strategies
     if "@" in search_term:
-        # Search by user email
-        query = select(Users).where(Users.email == search_term)
+        # Search by user email. Guests are left out: they have no password
+        # to reset, and an address the public form has seen can have several.
+        from app.api.users.models import UserTypes
+
+        query = select(Users).where(Users.email == search_term, Users.user_type != UserTypes.guest)
         result = await session.execute(query)
         user = result.scalar_one_or_none()
     

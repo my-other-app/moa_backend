@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import and_, delete, exists, or_, select
+from sqlalchemy import and_, case, delete, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -64,14 +64,21 @@ async def add_volunteer(
             status_code=400, message="Volunteer already exists for this event."
         )
     
-    # Check if user exists
+    # Check if user exists. Any kind of account, a club's own included, as
+    # before; ignoring case, and the app account first when there is one.
+    from app.api.users import service as user_service
+    from app.api.users.models import UserTypes
+
     user = await session.scalar(
-        select(Users).where(
-            Users.email == email_id,
-            Users.is_deleted == False,
+        select(Users)
+        .where(user_service.same_email(Users.email, email_id), Users.is_deleted == False)
+        .order_by(
+            case((Users.user_type == UserTypes.app_user, 0), (Users.user_type == UserTypes.guest, 2), else_=1),
+            Users.id.desc(),
         )
+        .limit(1)
     )
-    
+
     if not user:
         if not full_name:
             raise CustomHTTPException(
@@ -79,9 +86,6 @@ async def add_volunteer(
             )
         
         # Create guest user
-        from app.api.users import service as user_service
-        from app.api.users.models import UserTypes
-        
         user = await user_service.create_user(
             session=session,
             full_name=full_name,

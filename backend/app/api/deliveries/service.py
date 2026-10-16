@@ -12,7 +12,7 @@ import re
 import uuid
 import zipfile
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -318,6 +318,38 @@ async def send_ticket(session, event: Events, registration: EventRegistrationsLi
         return
     for did in result["ids"]:
         await deliver(session, did)
+
+
+#: How soon one ticket can be sent again because someone asked from the public form.
+RESEND_GAP = timedelta(minutes=10)
+
+
+async def resend_ticket(session, event: Events, registration: EventRegistrationsLink, background_tasks=None) -> bool:
+    """The ticket once more, to the address it was sent to, for someone who
+    tried to register again with it.
+
+    Anyone can type an address into the public form, so this goes only to
+    the registration's own address, and at most once every ten minutes."""
+    prior = await session.scalar(
+        select(Deliveries).where(
+            Deliveries.registration_id == registration.id,
+            Deliveries.kind == DeliveryKind.ticket,
+            Deliveries.channel == DeliveryChannel.email,
+        )
+    )
+    if prior is not None:
+        last = prior.sent_at if prior.status is DeliveryStatus.sent else prior.updated_at
+        if last is not None and datetime.now(timezone.utc) - last < RESEND_GAP:
+            return False
+    result = await queue(session, event, DeliveryKind.ticket, registration_ids=[registration.id], force=True)
+    if not result["ids"]:
+        return False
+    if background_tasks is not None:
+        background_tasks.add_task(run, result["ids"])
+    else:
+        for did in result["ids"]:
+            await deliver(session, did)
+    return True
 
 
 # --- the ticket itself --------------------------------------------------------

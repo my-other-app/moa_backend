@@ -1,8 +1,9 @@
 from datetime import datetime, timezone
 import io
 import re
+import secrets
 from fastapi import File, UploadFile
-from sqlalchemy import delete, exists, func, or_, select
+from sqlalchemy import case, delete, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
 
@@ -46,18 +47,86 @@ async def generate_username(user: Users, session: AsyncSession, is_guest: bool =
     return username
 
 
+def same_email(column, email: str):
+    """`column` holds `email`, ignoring case and stray spaces.
+
+    Both sides go through the database's own lower() and btrim(), so the
+    comparison cannot disagree with ix_users_email_normalised about what
+    matches, and the index serves it.
+    """
+    return func.lower(func.btrim(column)) == func.lower(func.btrim(email))
+
+
+def emails_match(a: str | None, b: str | None) -> bool:
+    """The Python side of same_email, for two addresses already in hand."""
+    return (a or "").strip().lower() == (b or "").strip().lower()
+
+
 async def get_non_club_user_by_email(session: AsyncSession, email: str):
+    """The account a staff-entered address belongs to: the door, the
+    organiser's own list, an import, a volunteer invite.
+
+    An app account is preferred, so the ticket shows up in the app; otherwise
+    the newest guest. Never call this from a public form: whoever typed the
+    address has not shown that it is theirs.
+    """
     query = (
         select(Users)
         .where(
-            Users.email == email, 
+            same_email(Users.email, email),
             Users.user_type != UserTypes.club,
             Users.is_deleted == False,
         )
-        .order_by(Users.id.desc())
+        .order_by(
+            case((Users.user_type == UserTypes.app_user, 0), else_=1),
+            Users.id.desc(),
+        )
         .limit(1)
     )
     return await session.scalar(query)
+
+
+async def email_has_club_account(session: AsyncSession, email: str) -> bool:
+    return bool(
+        await session.scalar(
+            select(
+                exists().where(
+                    same_email(Users.email, email),
+                    Users.user_type == UserTypes.club,
+                    Users.is_deleted == False,
+                )
+            )
+        )
+    )
+
+
+async def new_guest(
+    session: AsyncSession, full_name: str, email: str, phone: str | None = None
+) -> Users:
+    """A fresh guest for one sign-up from the public form.
+
+    Flushed, not committed: it is kept only if the registration it was made
+    for is, so a refused sign-up leaves no account behind.
+    """
+    guest = Users(
+        full_name=full_name,
+        email=email,
+        phone=phone,
+        user_type=UserTypes.guest,
+        provider="email",
+    )
+    # A random tail rather than generate_username's counter: every sign-up
+    # without a sign-in makes one of these, and counting up from guest_rahul
+    # past every earlier Rahul is a query per Rahul.
+    base = re.sub(r"[^a-zA-Z0-9_-]", "", full_name.lower().replace(" ", "_"))[:60] or "user"
+    while True:
+        username = f"guest_{base}_{secrets.token_hex(3)}"
+        if not await session.scalar(select(exists().where(Users.username == username))):
+            break
+    guest.username = username
+    session.add(guest)
+    await session.flush()
+    return guest
 
 
 async def create_user(
@@ -69,13 +138,15 @@ async def create_user(
     provider: str = "email",
     user_type: UserTypes = UserTypes.app_user,
 ):
-    await validate_unique(
-        session,
-        unique_together=[
-            {"email": (Users, email), "user_type": (Users, user_type)},
-            {"phone": (Users, phone), "user_type": (Users, user_type)},
-        ],
-    )
+    # Guests may share an address or a phone; every other kind may not.
+    if user_type != UserTypes.guest:
+        await validate_unique(
+            session,
+            unique_together=[
+                {"email": (Users, email), "user_type": (Users, user_type)},
+                {"phone": (Users, phone), "user_type": (Users, user_type)},
+            ],
+        )
     user_obj = Users(
         full_name=full_name,
         email=email,
