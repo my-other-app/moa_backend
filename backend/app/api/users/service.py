@@ -1,14 +1,16 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import io
+import logging
 import re
 import secrets
 from fastapi import File, UploadFile
-from sqlalchemy import case, delete, exists, func, or_, select
+from sqlalchemy import case, delete, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
 
 from app.response import CustomHTTPException
 from app.api.users.models import (
+    SigninProviders,
     UserAvatars,
     UserInterests,
     UserProfiles,
@@ -23,6 +25,8 @@ from app.core.validations.schema import validate_relations, validate_unique
 from app.api.interests.models import Interests
 from app.api.events.models import EventInterestsLink, EventRegistrationsLink, Events
 from app.api.badges.models import UserBadges
+
+logger = logging.getLogger(__name__)
 
 
 async def generate_username(user: Users, session: AsyncSession, is_guest: bool = False):
@@ -177,145 +181,371 @@ async def create_user(
     return query.scalar()
 
 
+# --- Folding guests into the app account ----------------------------------
+#
+# A guest is the account the public form, the door, the organiser's list or a
+# volunteer invite makes for someone who is not signed in. Once the owner of
+# the address signs in to the app, what those guests hold is theirs.
+
+#: Providers that have shown the account owns its address. A password
+#: account's address was typed at sign-up and never checked, so folding the
+#: guests under it into that account would hand their tickets to whoever
+#: typed it -- the hole the public form had, one request further on.
+VERIFIED_PROVIDERS = (SigninProviders.google, SigninProviders.apple)
+
+#: How long an unfinished payment order counts as a payment under way. Within
+#: it, a duplicate registration that is being paid for is not retired: the
+#: payment would land on a retired row and the guest would have paid for
+#: nothing. Razorpay retries its webhooks for a day.
+PAYMENT_UNDER_WAY = timedelta(hours=24)
+
+#: First key of the advisory lock that keeps two merges for one account apart.
+_MERGE_LOCK = 7_316_203
+
+_NOTHING = {"merged": False, "guests_merged": 0}
+
+
+def merges_into(user) -> bool:
+    """Whether guests are ever folded into this account."""
+    if user is None or user.is_deleted or not (user.email or "").strip():
+        return False
+    # By value: an account made in this request still holds the plain string
+    # it was created with, not the enum member a load would give.
+    kind = getattr(user.user_type, "value", user.user_type)
+    provider = getattr(user.provider, "value", user.provider)
+    return kind == UserTypes.app_user.value and provider in {p.value for p in VERIFIED_PROVIDERS}
+
+
+def _guests_of(app_user: Users):
+    return select(Users).where(
+        same_email(Users.email, app_user.email),
+        Users.user_type == UserTypes.guest,
+        Users.is_deleted == False,
+        Users.id != app_user.id,
+    )
+
+
 async def merge_guest_into_user(session: AsyncSession, app_user: Users) -> dict:
+    """Fold every guest under this app account's address into it.
+
+    Registrations, ratings, payment orders, shop orders, volunteer places,
+    badges and notifications move over, and the guests are retired. Rows
+    kept by registration (check-ins, certificates, deliveries, team places,
+    merch) follow their registration. Staff and audit columns -- who checked
+    someone in, who created what -- stay as they are.
+
+    Addresses match ignoring case and stray spaces. Only an app account whose
+    provider vouched for its address (VERIFIED_PROVIDERS) takes part; for any
+    other account this does nothing.
+
+    Safe to call on every request: one indexed query when there is nothing to
+    fold, and running it again changes nothing. It never raises. The work
+    runs in a SAVEPOINT, so a failure is logged and undone on its own and the
+    sign-in or page that called it carries on. The caller commits.
     """
-    Merge any guest user accounts into the real app_user account.
-    
-    Transfers all data (registrations, ratings, payments) from guest users
-    matching the app_user's email to the app_user, then soft-deletes the guest.
-    
-    Returns a summary dict with counts of merged records.
-    """
-    import logging
-    logger = logging.getLogger(__name__)
-    
-    # Find guest users with the same email
-    guest_users = await session.scalars(
-        select(Users).where(
-            Users.email == app_user.email,
-            Users.user_type == UserTypes.guest,
-            Users.is_deleted == False,
-            Users.id != app_user.id,
+    if not merges_into(app_user):
+        return dict(_NOTHING)
+    try:
+        if await session.scalar(_guests_of(app_user).with_only_columns(Users.id).limit(1)) is None:
+            return dict(_NOTHING)
+        async with session.begin_nested():
+            # Two requests from one app launch can both find the same guests;
+            # the second waits here, then finds nothing left to fold.
+            await session.execute(select(func.pg_advisory_xact_lock(_MERGE_LOCK, app_user.id)))
+            guests = list(await session.scalars(_guests_of(app_user).order_by(Users.id)))
+            if not guests:
+                return dict(_NOTHING)
+            summary = await _fold(session, app_user, guests)
+    except Exception:
+        logger.exception("Could not merge guests into user %s", app_user.id)
+        return {**_NOTHING, "failed": True}
+    logger.info("Merged guests into user %s: %s", app_user.id, summary)
+    return summary
+
+
+async def merge_guests_now(session: AsyncSession, user: Users) -> dict:
+    """merge_guest_into_user for a request that otherwise only reads: what
+    was folded is committed, so the read that follows sees it."""
+    summary = await merge_guest_into_user(session, user)
+    if summary.get("merged"):
+        try:
+            await session.commit()
+        except Exception:
+            logger.exception("Could not keep the guests merged into user %s", user.id)
+            await session.rollback()
+            await session.refresh(user)
+    return summary
+
+
+async def merge_all_guests(session: AsyncSession) -> dict:
+    """The merge for every app account that has guests waiting, including
+    guests an older, case-sensitive merge left behind. One account at a
+    time, each kept as it finishes."""
+    from sqlalchemy.orm import aliased
+
+    guest = aliased(Users)
+    accounts = list(
+        await session.scalars(
+            select(Users)
+            .where(
+                Users.user_type == UserTypes.app_user,
+                Users.provider.in_(VERIFIED_PROVIDERS),
+                Users.is_deleted == False,
+                exists().where(
+                    same_email(guest.email, Users.email),
+                    guest.user_type == UserTypes.guest,
+                    guest.is_deleted == False,
+                    guest.id != Users.id,
+                ),
+            )
+            .order_by(Users.id)
         )
     )
-    guest_users = list(guest_users)
-    
-    if not guest_users:
-        return {"merged": False, "guests_merged": 0}
-    
-    total_registrations = 0
-    total_ratings = 0
-    total_payments = 0
-    guests_merged = 0
-    
+    totals: dict = {"app_users_checked": len(accounts), "app_users_merged": 0, "failed": 0}
+    for account in accounts:
+        summary = await merge_guest_into_user(session, account)
+        if summary.get("failed"):
+            totals["failed"] += 1
+            continue
+        if not summary.get("merged"):
+            continue
+        await session.commit()
+        totals["app_users_merged"] += 1
+        for key, value in summary.items():
+            if isinstance(value, int) and not isinstance(value, bool):
+                totals[key] = totals.get(key, 0) + value
+    return totals
+
+
+async def _fold(session: AsyncSession, app_user: Users, guests: list[Users]) -> dict:
     from app.api.events.models import EventRatingsLink
+    from app.api.events.volunteer.models import Volunteer
+    from app.api.notifications.models import Notifications
     from app.api.payments.models import PaymentOrders
-    
-    for guest in guest_users:
-        guest_id = guest.id
-        logger.info(f"Merging guest user {guest_id} into app_user {app_user.id} (email: {app_user.email})")
-        
-        # 1. Transfer EventRegistrationsLink records
-        # First, find events where the app_user is already registered (to avoid unique constraint violations)
-        app_user_event_ids = set(
-            await session.scalars(
-                select(EventRegistrationsLink.event_id).where(
-                    EventRegistrationsLink.user_id == app_user.id,
-                    EventRegistrationsLink.is_deleted == False,
-                )
-            )
-        )
-        
-        guest_registrations = list(
-            await session.scalars(
-                select(EventRegistrationsLink).where(
-                    EventRegistrationsLink.user_id == guest_id,
-                    EventRegistrationsLink.is_deleted == False,
-                )
-            )
-        )
-        
-        for reg in guest_registrations:
-            if reg.event_id in app_user_event_ids:
-                # Conflict: both accounts registered for the same event
-                # Keep the app_user's registration, soft-delete the guest's
-                reg.is_deleted = True
-                logger.info(f"  Soft-deleted duplicate registration {reg.id} for event {reg.event_id}")
-            else:
-                # Transfer the registration to the app_user
-                reg.user_id = app_user.id
-                total_registrations += 1
-                logger.info(f"  Transferred registration {reg.id} for event {reg.event_id}")
-        
-        # 2. Transfer EventRatingsLink records
-        app_user_rated_event_ids = set(
-            await session.scalars(
-                select(EventRatingsLink.event_id).where(
-                    EventRatingsLink.user_id == app_user.id,
-                    EventRatingsLink.is_deleted == False,
-                )
-            )
-        )
-        
-        guest_ratings = list(
-            await session.scalars(
-                select(EventRatingsLink).where(
-                    EventRatingsLink.user_id == guest_id,
-                    EventRatingsLink.is_deleted == False,
-                )
-            )
-        )
-        
-        for rating in guest_ratings:
-            if rating.event_id in app_user_rated_event_ids:
-                rating.is_deleted = True
-                logger.info(f"  Soft-deleted duplicate rating {rating.id} for event {rating.event_id}")
-            else:
-                rating.user_id = app_user.id
-                total_ratings += 1
-                logger.info(f"  Transferred rating {rating.id} for event {rating.event_id}")
-        
-        # 3. Transfer PaymentOrders records (no unique constraint to worry about)
-        guest_payments = list(
-            await session.scalars(
-                select(PaymentOrders).where(
-                    PaymentOrders.user_id == guest_id,
-                    PaymentOrders.is_deleted == False,
-                )
-            )
-        )
-        
-        for payment in guest_payments:
-            payment.user_id = app_user.id
-            total_payments += 1
-            logger.info(f"  Transferred payment order {payment.id}")
-        
-        # 4. Soft-delete the guest user and any associated profile
-        guest.is_deleted = True
-        
-        guest_profile = await session.scalar(
-            select(UserProfiles).where(
-                UserProfiles.user_id == guest_id,
-                UserProfiles.is_deleted == False,
-            )
-        )
-        if guest_profile:
-            guest_profile.is_deleted = True
-        
-        guests_merged += 1
-        logger.info(f"  Soft-deleted guest user {guest_id}")
-    
-    await session.flush()
-    
+    from app.api.store.models import EventStoreOrders
+
+    guest_ids = [g.id for g in guests]
+    archive = _Archive(session, app_user)
+
+    regs_moved, regs_retired, held = await _fold_registrations(session, app_user, guest_ids, archive)
+    ratings_moved, ratings_retired, _ = await _fold_per_event(
+        session,
+        EventRatingsLink,
+        app_user,
+        guest_ids,
+        archive,
+        # The newer opinion stands; on a tie, the one given signed in.
+        best_first=lambda r: (-(r.updated_at or r.created_at).timestamp(), r.user_id != app_user.id, str(r.id)),
+    )
     summary = {
         "merged": True,
-        "guests_merged": guests_merged,
-        "registrations_transferred": total_registrations,
-        "ratings_transferred": total_ratings,
-        "payments_transferred": total_payments,
+        "registrations_transferred": regs_moved,
+        "registrations_retired": regs_retired,
+        "ratings_transferred": ratings_moved,
+        "ratings_retired": ratings_retired,
+        "payments_transferred": await _move(session, PaymentOrders, guest_ids, app_user.id),
+        "store_orders_transferred": await _move(session, EventStoreOrders, guest_ids, app_user.id),
+        "volunteers_transferred": await _move(session, Volunteer, guest_ids, app_user.id),
+        "notifications_transferred": await _move(session, Notifications, guest_ids, app_user.id),
+        "badges_transferred": await _fold_badges(session, app_user, guest_ids),
     }
-    logger.info(f"Account merge complete for user {app_user.id}: {summary}")
+
+    # A guest still holding a registration that is being paid for stays live
+    # until the payment settles; a later run finishes it.
+    retired = [g for g in guests if g.id not in held]
+    for g in retired:
+        g.soft_delete()
+    if retired:
+        await session.execute(
+            update(UserProfiles)
+            .where(UserProfiles.user_id.in_([g.id for g in retired]), UserProfiles.is_deleted == False)
+            .values(is_deleted=True, deleted_at=datetime.now(timezone.utc))
+            .execution_options(synchronize_session=False)
+        )
+    await session.flush()
+    summary["guests_merged"] = len(retired)
+    summary["guests_held"] = len(guests) - len(retired)
     return summary
+
+
+async def _fold_registrations(session: AsyncSession, app_user: Users, guest_ids: list[int], archive) -> tuple[int, int, set]:
+    """Registrations, one per event. Where the account and its guests hold
+    several for one event, the strongest stays and the rest are retired:
+
+    1. checked in;  2. paid;  3. being paid for right now;  4. holding an
+    issued certificate;  5. not revoked;  6. made first.
+
+    A duplicate that is being paid for is never retired: the whole clash
+    waits for a later run (see PAYMENT_UNDER_WAY)."""
+    from app.api.payments.models import OrderStatus, PaymentOrders
+
+    rows = await _live_rows(session, EventRegistrationsLink, [app_user.id, *guest_ids])
+    clashing = [r for rs in _by_event(rows).values() if len(rs) > 1 for r in rs]
+    receipts = {r.payment_receipt: r.id for r in clashing if r.payment_receipt}
+    paying = set()
+    if receipts:
+        open_orders = await session.scalars(
+            select(PaymentOrders.receipt).where(
+                PaymentOrders.receipt.in_(list(receipts)),
+                PaymentOrders.status.in_([OrderStatus.created, OrderStatus.attempted]),
+                PaymentOrders.created_at >= datetime.now(timezone.utc) - PAYMENT_UNDER_WAY,
+                PaymentOrders.is_deleted == False,
+            )
+        )
+        paying = {receipts[receipt] for receipt in open_orders}
+
+    def strongest_first(r):
+        return (
+            not r.is_attended,
+            not (r.is_paid or (r.paid_amount or 0) > 0),
+            r.id not in paying,
+            not (r.certificate_issued_at is not None and r.certificate_revoked_at is None),
+            r.ticket_revoked_at is not None,
+            r.created_at,
+            str(r.id),
+        )
+
+    return await _fold_per_event(
+        session,
+        EventRegistrationsLink,
+        app_user,
+        guest_ids,
+        archive,
+        best_first=strongest_first,
+        rows=rows,
+        hold=lambda r: r.id in paying,
+    )
+
+
+async def _fold_per_event(session, model, app_user, guest_ids, archive, *, best_first, rows=None, hold=None) -> tuple[int, int, set]:
+    """Moves `model`'s live rows from the guests to the account, keeping one
+    per event: the first by `best_first`. The others are retired. A clash
+    with a row `hold` picks out among the losers is left alone.
+
+    (event_id, user_id, is_deleted) is unique, so a retired row needs an
+    account with no retired row for that event yet: its own account if free,
+    else another guest being folded, else the app account, else a retired
+    archive guest made for the purpose. Losers are retired and flushed
+    before winners move, so no statement sees two live rows for one event.
+    Returns (moved, retired, ids of guests whose clash was held)."""
+    owners = [app_user.id, *guest_ids]
+    if rows is None:
+        rows = await _live_rows(session, model, owners)
+    groups = _by_event(rows)
+    taken = await _retired_slots(session, model, [e for e, rs in groups.items() if len(rs) > 1], owners)
+
+    winners, losers, held = [], [], set()
+    for rs in groups.values():
+        rs.sort(key=best_first)
+        best, rest = rs[0], rs[1:]
+        if hold is not None and any(hold(r) for r in rest):
+            held.update(r.user_id for r in rs if r.user_id != app_user.id)
+            continue
+        if best.user_id != app_user.id:
+            winners.append(best)
+        losers.extend(rest)
+
+    for row in losers:
+        candidates = [row.user_id, *(g for g in guest_ids if g != row.user_id)]
+        if row.user_id != app_user.id:
+            candidates.append(app_user.id)
+        holder = next((c for c in candidates if (row.event_id, c) not in taken), None)
+        if holder is None:
+            holder = await archive.free_for(row.event_id, taken)
+        taken.add((row.event_id, holder))
+        row.user_id = holder
+        row.soft_delete()
+    await session.flush()
+    for row in winners:
+        row.user_id = app_user.id
+    await session.flush()
+    return len(winners), len(losers), held
+
+
+class _Archive:
+    """Retired guests made only to hold a retired duplicate when every account
+    in the merge already holds one for that event. Practically never needed;
+    without it the merge would have no legal place to put the row."""
+
+    def __init__(self, session: AsyncSession, app_user: Users):
+        self.session = session
+        self.app_user = app_user
+        self.made: list[int] = []
+
+    async def free_for(self, event_id: int, taken: set) -> int:
+        for user_id in self.made:
+            if (event_id, user_id) not in taken:
+                return user_id
+        archived = Users(
+            full_name=self.app_user.full_name or "Merged guest",
+            username=f"merged_{self.app_user.id}_{secrets.token_hex(4)}",
+            email=self.app_user.email,
+            user_type=UserTypes.guest,
+            is_deleted=True,
+            deleted_at=datetime.now(timezone.utc),
+        )
+        self.session.add(archived)
+        await self.session.flush()
+        self.made.append(archived.id)
+        return archived.id
+
+
+async def _live_rows(session: AsyncSession, model, owners: list[int]) -> list:
+    return list(await session.scalars(select(model).where(model.user_id.in_(owners), model.is_deleted == False)))
+
+
+def _by_event(rows) -> dict:
+    groups: dict = {}
+    for row in rows:
+        groups.setdefault(row.event_id, []).append(row)
+    return groups
+
+
+async def _retired_slots(session: AsyncSession, model, event_ids: list[int], owners: list[int]) -> set:
+    """(event_id, user_id) pairs that already hold a retired row. Read on the
+    connection rather than through the session: the session hides retired
+    rows from every ORM query (app.db.listeners)."""
+    if not event_ids:
+        return set()
+    table = model.__table__
+    connection = await session.connection()
+    result = await connection.execute(
+        select(table.c.event_id, table.c.user_id).where(
+            table.c.event_id.in_(event_ids),
+            table.c.user_id.in_(owners),
+            table.c.is_deleted.is_(True),
+        )
+    )
+    return {(event_id, user_id) for event_id, user_id in result}
+
+
+async def _move(session: AsyncSession, model, guest_ids: list[int], app_user_id: int) -> int:
+    """Every live row of `model` the guests hold, to the account."""
+    query = update(model).where(model.user_id.in_(guest_ids))
+    if hasattr(model, "is_deleted"):
+        query = query.where(model.is_deleted == False)
+    result = await session.execute(
+        query.values(user_id=app_user_id).execution_options(synchronize_session=False)
+    )
+    return result.rowcount or 0
+
+
+async def _fold_badges(session: AsyncSession, app_user: Users, guest_ids: list[int]) -> int:
+    """Badges the account does not have yet. (user_id, badge_id) is unique and
+    badges cannot be retired, so a badge it already has stays with the
+    retired guest."""
+    have = set(await session.scalars(select(UserBadges.badge_id).where(UserBadges.user_id == app_user.id)))
+    moved = 0
+    for badge in await session.scalars(
+        select(UserBadges).where(UserBadges.user_id.in_(guest_ids)).order_by(UserBadges.awarded_at, UserBadges.id)
+    ):
+        if badge.badge_id in have:
+            continue
+        badge.user_id = app_user.id
+        have.add(badge.badge_id)
+        moved += 1
+    await session.flush()
+    return moved
 
 
 async def following_clubs(

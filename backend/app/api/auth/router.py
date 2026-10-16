@@ -277,6 +277,11 @@ async def refresh_access_token(
                     error_code="ACCESS_REMOVED",
                     headers={"WWW-Authenticate": "Bearer"},
                 )
+        # A refresh is the one call every app session makes on its own,
+        # weeks after the sign-in that last merged.
+        from app.api.users.service import merge_guests_now
+
+        await merge_guests_now(session, user)
         access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         # The new access token keeps what the session is: its id (so ending
         # it from Security ends it now), whose behalf it acts on, and the club

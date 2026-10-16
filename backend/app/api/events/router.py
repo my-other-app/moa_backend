@@ -351,6 +351,12 @@ async def list_events(
     search: Optional[str] = Query(None, description="Search by event name or category"),
 ) -> PaginatedResponse[EventListResponse]:
     """List events with optional filters and search."""
+    if is_registered:
+        # The app's upcoming and past tickets: guests waiting under the
+        # address are folded in first, so a website ticket shows up here.
+        from app.api.users import service as user_service
+
+        await user_service.merge_guests_now(session, user)
     interest_ids = [int(i) for i in interest_ids.split(",")] if interest_ids else []
     events = await service.list_events(
         session=session,

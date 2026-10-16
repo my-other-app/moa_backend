@@ -58,8 +58,8 @@ async def register_event(
     and a session for that guest only: it reaches what this request made and
     nothing else. Handing over the guest that already had the address, as
     this did, gave its tickets, payments and profile to whoever typed it.
-    The guests are folded into the app account once someone signs in with
-    the address."""
+    The guests are folded into the app account once the address's owner
+    signs in to the app with Google or Apple (users.service.merge_guest_into_user)."""
     response = {}
     registration.email = registration.email.strip()
 

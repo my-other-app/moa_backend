@@ -2,7 +2,7 @@ from uuid import UUID
 from fastapi import APIRouter, Query
 from app.api.auth.router import router as auth_router
 from app.api.orgs.router import router as org_router
-from app.api.users.router import router as user_router
+from app.api.users.router import admin_router as user_admin_router, router as user_router
 from app.api.clubs.router import router as club_router
 from app.api.events.router import router as events_router
 from app.api.event_designs.router import router as event_designs_router
@@ -64,6 +64,7 @@ api_router = APIRouter(
 api_router.include_router(router=auth_router, tags=["auth"])
 api_router.include_router(router=org_router, tags=["organization"])
 api_router.include_router(router=user_router, tags=["user"])
+api_router.include_router(router=user_admin_router)
 api_router.include_router(router=analytics_router, tags=["analytics"])
 api_router.include_router(router=club_designs_router, tags=["club-designs"])
 api_router.include_router(router=links_router, tags=["tracking-links"])
