@@ -87,3 +87,35 @@ class VoteIn(BaseModel):
 class LikeOut(BaseModel):
     liked: bool
     likes: int
+
+
+class ThreadRowOut(ThreadOut):
+    last_comment_at: Optional[str] = None
+    awaiting_reply: bool = False
+    engagement: int = 0
+
+
+class ThreadsPageOut(BaseModel):
+    items: list[ThreadRowOut]
+    total: int
+    limit: int
+    offset: int
+    counts: dict
+
+
+class ThreadInsights(BaseModel):
+    posts: int
+    posts_delta: Optional[int] = None
+    reach: int
+    reach_delta: Optional[int] = None
+    reach_per_follower: Optional[float] = None
+    engagement_rate: Optional[float] = None
+    engagement_rate_prev: Optional[float] = None
+    awaiting: int
+    best: Optional[dict] = None
+    weeks: list[dict]
+    kinds: list[dict]
+    notify: dict
+    followers: int
+    all_time: dict
+    generated_at: str

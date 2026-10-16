@@ -4,8 +4,8 @@ from fastapi import APIRouter, File, Form, Query, Request, UploadFile
 from sqlalchemy import select
 
 from app.api.clubs.models import Clubs
-from app.api.threads import service
-from app.api.threads.schemas import CommentCreate, CommentOut, LikeOut, PollOut, ThreadOut, ThreadPage, ThreadPatch, VoteIn
+from app.api.threads import insights as threads_insights, service
+from app.api.threads.schemas import CommentCreate, CommentOut, LikeOut, PollOut, ThreadInsights, ThreadOut, ThreadPage, ThreadPatch, ThreadsPageOut, VoteIn
 from app.core.auth.dependencies import ClubAuth, OptionalAuth, UserAuth
 from app.core.rate_limit import limiter
 from app.db.core import SessionDep
@@ -28,6 +28,20 @@ async def _club_for(session, user) -> Clubs:
 async def list_threads(session: SessionDep, user: ClubAuth, offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=50)) -> ThreadPage:
     club = await _club_for(session, user)
     return ThreadPage(**await service.list_for_club(session, club, offset, limit, viewer_id=user.id))
+
+
+@router.get("/page", summary="The club's posts for the Threads page: scoped, sorted, each saying whether it waits for a reply")
+async def list_threads_page(session: SessionDep, user: ClubAuth, scope: str = Query("all"), sort: str = Query("newest"), offset: int = Query(0, ge=0), limit: int = Query(10, ge=1, le=50)) -> ThreadsPageOut:
+    if scope not in threads_insights.SCOPES or sort not in threads_insights.SORTS:
+        raise CustomHTTPException(422, message="Unknown scope or sort.")
+    club = await _club_for(session, user)
+    return ThreadsPageOut(**await threads_insights.list_for_page(session, club, scope=scope, sort=sort, offset=offset, limit=limit, viewer_id=user.id))
+
+
+@router.get("/insights", summary="Reach, engagement and what kind of post works, over the last 30 days and the last 12 weeks")
+async def thread_insights(session: SessionDep, user: ClubAuth) -> ThreadInsights:
+    club = await _club_for(session, user)
+    return ThreadInsights(**await threads_insights.insights(session, club))
 
 
 @router.post("", summary="Post: text, maybe a photo, maybe a poll; followers told if asked", status_code=201)
