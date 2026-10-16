@@ -145,6 +145,7 @@ async def create_event(
         event_tag=event.event_tag,
         speakers=event.speakers,
         speaker_photos=speaker_photos,
+        status=event.status,
     )
 
 

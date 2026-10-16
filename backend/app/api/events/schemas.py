@@ -160,9 +160,13 @@ class EventCreate:
         speakers: Optional[str] = Form("[]"),  # JSON array of speakers
         ticket_template_id: Optional[int] = Form(None),
         certificate_template_id: Optional[int] = Form(None),
+        # Where the event starts on its status clock: a draft stays off the
+        # app and refuses check-ins until it is published.
+        status: Optional[str] = Form(None, pattern="^(draft|published)$"),
     ):
         self.name = name
         self.poster = poster
+        self.status = status
         self.event_datetime = event_datetime
         self.has_fee = has_fee
         self.reg_fee = reg_fee
