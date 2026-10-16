@@ -74,3 +74,16 @@ async def test_the_figures_above_the_list(client, session, world):
     assert f["attention"]["closing_soon"] == []
     row = next(r for r in (await client.get("/api/v1/clubs/events/list?scope=upcoming", headers=world["h"])).json()["items"] if r["name"] == "Hack Night 04")
     assert row["registration_open"] is False
+
+
+async def test_an_event_can_be_created_as_a_draft(client, world):
+    body = {"name": "Not yet", "event_datetime": (NOW + timedelta(days=9)).isoformat(), "duration": "2", "category_id": str(world["soon"].category_id), "status": "draft", "location_name": "Lab 1"}
+    r = await client.post("/api/v1/events/create", data=body, headers=world["h"])
+    assert r.status_code == 200, r.text
+    drafts = (await client.get("/api/v1/clubs/events/list?scope=draft", headers=world["h"])).json()["items"]
+    assert "Not yet" in [d["name"] for d in drafts]
+    assert "Not yet" not in [d["name"] for d in (await client.get("/api/v1/clubs/events/list?scope=upcoming", headers=world["h"])).json()["items"]]
+    assert (await client.post("/api/v1/events/create", data={**body, "status": "closed"}, headers=world["h"])).status_code == 422
+    plain = await client.post("/api/v1/events/create", data={k: v for k, v in body.items() if k != "status"} | {"name": "Straight out"}, headers=world["h"])
+    assert plain.status_code == 200
+    assert "Straight out" in [d["name"] for d in (await client.get("/api/v1/clubs/events/list?scope=upcoming", headers=world["h"])).json()["items"]]

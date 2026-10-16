@@ -70,6 +70,7 @@ async def create_event(
 
     speakers: Optional[list[EventSpeakerCreate]] = None,
     speaker_photos: Optional[list[UploadFile]] = None,
+    status: Optional[str] = None,
     *args,
     **kwargs,
 ):
@@ -125,6 +126,10 @@ async def create_event(
         ticket_template_id=ticket_template_id,
         certificate_template_id=certificate_template_id,
     )
+    if status:
+        from app.api.closeout.models import EventStatus
+
+        db_event.lifecycle = EventStatus(status)
     if poster:
         content = io.BytesIO(await poster.read())
         db_event.poster = {
