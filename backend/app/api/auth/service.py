@@ -8,6 +8,7 @@ from app.config import settings
 from fastapi import HTTPException
 from app.api.users.models import Users, UserTypes
 from app.api.users.service import create_user, merge_guest_into_user
+from app.api.auth.verification import claim_for_provider
 from sqlalchemy import select
 
 from app.api.auth.schemas import AuthTokenData, Token
@@ -63,6 +64,10 @@ async def google_signin(
                 user_type=UserTypes.app_user,
                 provider="google",
             )
+        else:
+            # Google checked the address: an unverified password account
+            # under it is taken back from whoever set the password.
+            await claim_for_provider(session, user, method="google")
 
         # Merge any guest accounts with matching email
         await merge_guest_into_user(session, app_user=user)
@@ -162,7 +167,10 @@ async def apple_signin(
                 user_type=UserTypes.app_user,
                 provider="apple",
             )
-        
+        else:
+            # Apple signed the address: see the matching call in google_signin.
+            await claim_for_provider(session, user, method="apple")
+
         # Merge any guest accounts with matching email
         await merge_guest_into_user(session, app_user=user)
         await session.commit()

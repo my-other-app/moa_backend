@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import field_validator, BaseModel, Field
 from app.core.response.base_model import CustomBaseModel
 
@@ -48,6 +50,9 @@ class AuthUser(CustomBaseModel):
     phone: str | None = None
     username: str
     user_type: str
+    # Google and Apple accounts always; a password account once its owner
+    # typed back the code sent to the address.
+    email_verified: bool = False
     # The dashboard needs this to stop offering actions the role will refuse.
     # It is a convenience for the UI, not a control: every endpoint still
     # checks the capability itself, so a client that ignores this gets a 403
@@ -92,6 +97,30 @@ class ChangePasswordRequest(CustomBaseModel):
 class ChangePasswordResponse(CustomBaseModel):
     success: bool
     message: str
+
+
+class EmailCodeSent(CustomBaseModel):
+    """A verification code is on its way to `email`."""
+
+    sent: bool = True
+    email: str
+    # Seconds the code stays good.
+    expires_in: int
+    # Seconds before another code may be asked for.
+    retry_after: int
+
+
+class EmailVerifyRequest(CustomBaseModel):
+    code: str = Field(..., min_length=1, max_length=20, description="The six-digit code from the email")
+
+
+class EmailVerified(CustomBaseModel):
+    email_verified: bool = True
+    email_verified_at: datetime
+    # Whether tickets and the rest booked as a guest under the address were
+    # brought into the account just now, and how many registrations moved.
+    merged: bool = False
+    registrations_transferred: int = 0
 
 
 class AppleSignInRequest(CustomBaseModel):

@@ -13,6 +13,7 @@ from app.db.mixins import SoftDeleteMixin, TimestampsMixin
 from sqlalchemy.orm import relationship
 from app.db.base import AbstractSQLModel
 from app.core.storage.fields import S3ImageField
+from app.core.utils.db_fields import TZAwareDateTime
 
 
 class UserAvatarTypes(enum.Enum):
@@ -52,6 +53,11 @@ class SigninProviders(enum.Enum):
     email = "email"
 
 
+#: Providers that check the address before they hand it over. An account
+#: made through one owns its address from the start.
+ADDRESS_CHECKING_PROVIDERS = frozenset({SigninProviders.google.value, SigninProviders.apple.value})
+
+
 class UserAvatars(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     __tablename__ = "user_avatars"
 
@@ -80,6 +86,11 @@ class Users(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     phone = Column(String(20), nullable=True)
     password = Column(String(100), nullable=True)
     provider = Column(Enum(SigninProviders), nullable=True)
+    # When the owner of `email` showed it is theirs: a code sent there was
+    # typed back, or Google or Apple vouched for it. A password account's
+    # address is only typed at sign-up, so until this is set nothing that
+    # belongs to the address -- guests' tickets above all -- is given to it.
+    email_verified_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     user_type = Column(Enum(UserTypes), nullable=False, default=UserTypes.app_user)
     token_version = Column(Integer, nullable=False, default=0)
     # Suspension, as distinct from deletion. The only lever an admin had was
@@ -113,6 +124,19 @@ class Users(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         "Notifications", back_populates="user", foreign_keys="Notifications.user_id"
     )
     interests = relationship("Interests", secondary="user_interests", uselist=True)
+
+    @property
+    def email_verified(self) -> bool:
+        """Whether the account has shown it owns its address.
+
+        Google and Apple accounts always have: the provider checked before
+        handing the address over. They carry the stamp too (set when made,
+        and backfilled), but an account a build without the stamp made in
+        the minute around a deploy is still theirs.
+        """
+        if self.email_verified_at is not None:
+            return True
+        return getattr(self.provider, "value", self.provider) in ADDRESS_CHECKING_PROVIDERS
 
     __table_args__ = (
         # One account per address, and per phone, for each kind of account --

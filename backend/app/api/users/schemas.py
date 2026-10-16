@@ -130,6 +130,10 @@ class UserDetailResponse(CustomBaseModel):
     username: str = Field(...)
     user_type: str = Field(...)
     provider: str | None = Field(None)
+    # Google and Apple accounts always; a password account once its owner
+    # typed back the code sent to the address. The app asks the rest to
+    # verify, since tickets booked on the website reach only verified ones.
+    email_verified: bool = Field(False)
     created_at: datetime = Field(...)
     updated_at: datetime = Field(...)
     profile: UserProfileDetailResponse | None = Field(None)

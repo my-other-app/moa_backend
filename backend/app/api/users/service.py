@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload, joinedload
 
 from app.response import CustomHTTPException
 from app.api.users.models import (
+    ADDRESS_CHECKING_PROVIDERS,
     SigninProviders,
     UserAvatars,
     UserInterests,
@@ -159,6 +160,9 @@ async def create_user(
         user_type=user_type,
         provider=provider,
     )
+    if getattr(provider, "value", provider) in ADDRESS_CHECKING_PROVIDERS:
+        # Google and Apple checked the address before handing it over.
+        user_obj.email_verified_at = datetime.now(timezone.utc)
     if user_type != UserTypes.guest and provider == "email":
         if not password:
             raise CustomHTTPException(400, "Password is required")
@@ -188,9 +192,10 @@ async def create_user(
 # the address signs in to the app, what those guests hold is theirs.
 
 #: Providers that have shown the account owns its address. A password
-#: account's address was typed at sign-up and never checked, so folding the
-#: guests under it into that account would hand their tickets to whoever
-#: typed it -- the hole the public form had, one request further on.
+#: account's address was typed at sign-up, so folding the guests under it
+#: into that account would hand their tickets to whoever typed it -- the
+#: hole the public form had, one request further on -- until its owner
+#: types back the code sent there (Users.email_verified_at).
 VERIFIED_PROVIDERS = (SigninProviders.google, SigninProviders.apple)
 
 #: How long an unfinished payment order counts as a payment under way. Within
@@ -206,14 +211,14 @@ _NOTHING = {"merged": False, "guests_merged": 0}
 
 
 def merges_into(user) -> bool:
-    """Whether guests are ever folded into this account."""
+    """Whether guests are ever folded into this account: an app account
+    whose provider vouched for its address, or whose owner verified it."""
     if user is None or user.is_deleted or not (user.email or "").strip():
         return False
     # By value: an account made in this request still holds the plain string
     # it was created with, not the enum member a load would give.
     kind = getattr(user.user_type, "value", user.user_type)
-    provider = getattr(user.provider, "value", user.provider)
-    return kind == UserTypes.app_user.value and provider in {p.value for p in VERIFIED_PROVIDERS}
+    return kind == UserTypes.app_user.value and user.email_verified
 
 
 def _guests_of(app_user: Users):
@@ -234,8 +239,9 @@ async def merge_guest_into_user(session: AsyncSession, app_user: Users) -> dict:
     merch) follow their registration. Staff and audit columns -- who checked
     someone in, who created what -- stay as they are.
 
-    Addresses match ignoring case and stray spaces. Only an app account whose
-    provider vouched for its address (VERIFIED_PROVIDERS) takes part; for any
+    Addresses match ignoring case and stray spaces. Only an app account that
+    has shown it owns its address takes part (merges_into): its provider
+    vouched for it, or its owner typed back the code sent there. For any
     other account this does nothing.
 
     Safe to call on every request: one indexed query when there is nothing to
@@ -289,7 +295,7 @@ async def merge_all_guests(session: AsyncSession) -> dict:
             select(Users)
             .where(
                 Users.user_type == UserTypes.app_user,
-                Users.provider.in_(VERIFIED_PROVIDERS),
+                or_(Users.provider.in_(VERIFIED_PROVIDERS), Users.email_verified_at.is_not(None)),
                 Users.is_deleted == False,
                 exists().where(
                     same_email(guest.email, Users.email),
@@ -761,6 +767,9 @@ async def admin_update_user(
         if clash:
             raise CustomHTTPException(400, "Another account already uses that email")
         user.email = email
+        # What was verified was the old address; the new one has to be shown
+        # to be theirs before anything booked under it comes in.
+        user.email_verified_at = None
 
     if full_name is not None:
         user.full_name = full_name

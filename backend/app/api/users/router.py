@@ -1,9 +1,10 @@
 import csv
 import io
+import logging
 from datetime import datetime
 from typing import AsyncIterator, List
 
-from fastapi import APIRouter, File, Form, Query, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.api.users.schemas import (
@@ -44,6 +45,8 @@ from app.core.auth.permissions import (
 from app.api.interests.schemas import InterestPublic
 from app.api.auth import service as auth_service
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/user")
 admin_router = APIRouter(prefix="/admin/users", tags=["admin"])
 
@@ -72,6 +75,7 @@ async def merge_guests(request: Request, session: SessionDep, admin: ModerateAut
 async def register_user(
     user: UserCreate,
     session: SessionDep,
+    background: BackgroundTasks,
 ) -> UserRegisterResponse:
     user = await service.create_user(
         session,
@@ -80,6 +84,22 @@ async def register_user(
         phone=user.phone,
         password=user.password,
     )
+    # The address was only typed. A code goes to it now, so the app can ask
+    # for it on the next screen; until it comes back the account gets
+    # nothing booked under the address (merges_into).
+    try:
+        from app.api.auth import verification
+
+        code = await verification.issue(session, user)
+        await session.commit()
+        background.add_task(verification.send_code_email, user.email, code=code, name=user.full_name)
+    except Exception:
+        # The account stands either way; the app can ask for another code.
+        logger.warning("Could not issue a verification code for new user %s", user.id, exc_info=True)
+        await session.rollback()
+        # A rollback expires the account; reload it rather than let the token
+        # code lazy-load it (MissingGreenlet on the async engine).
+        await session.refresh(user)
     token = await auth_service.create_access_refresh_tokens(user)
     return {
         "username": user.username,
