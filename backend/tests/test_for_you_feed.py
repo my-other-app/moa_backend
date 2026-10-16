@@ -290,3 +290,21 @@ async def test_paging_does_not_repeat_or_skip_an_event(
 
     assert len(set(first) & set(second)) == 0
     assert len(set(first) | set(second)) == 6
+
+
+async def test_drafts_and_unverified_clubs_never_reach_the_feed(
+    client, session, make_club, make_event, make_user, mint_token,
+):
+    from app.api.closeout.models import EventStatus
+
+    owner, club = await make_club(name="Open Club", email="f-vis@example.com")
+    await make_event(club=club, created_by=owner, name="Shown Night", event_datetime=soon(6))
+    await make_event(club=club, created_by=owner, name="Draft Night", event_datetime=soon(6), lifecycle=EventStatus.draft)
+    shadow_owner, shadow = await make_club(name="Shadow Club", email="f-shadow@example.com", is_verified=False)
+    await make_event(club=shadow, created_by=shadow_owner, name="Shadow Night", event_datetime=soon(6))
+    await session.commit()
+
+    items = names(await feed(client, await mint_token(await make_user(email="f-vis-user@example.com"))))
+
+    assert "Shown Night" in items
+    assert "Draft Night" not in items and "Shadow Night" not in items

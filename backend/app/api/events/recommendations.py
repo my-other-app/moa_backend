@@ -17,10 +17,11 @@ of index probes, and the history counts had no index at all. Popularity reads
 events.going_count, which a trigger keeps equal to the count it replaces.
 """
 
-from sqlalchemy import ARRAY, Float, Integer, and_, any_, case, cast, func, literal, literal_column, select, text
+from sqlalchemy import ARRAY, Float, Integer, and_, any_, bindparam, case, cast, func, literal, literal_column, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
+from app.api.closeout.models import EventStatus
 from app.api.clubs.models import ClubUsersLink, Clubs
 from app.api.events.models import (
     EventInterestsLink,
@@ -240,6 +241,13 @@ async def for_you_events(
         .outerjoin(category_history_rows, category_history_rows.c.key == Events.category_id)
         .where(
             Events.is_deleted == False,
+            # Only what the public can see: published or live, from a club that
+            # is verified and not deleted (the discover pages' rule). Drafts and
+            # unverified clubs' events used to reach the feed. The statuses are
+            # written into the SQL so the partial indexes on them still apply.
+            Events.lifecycle.in_(bindparam(None, [EventStatus.published, EventStatus.live], expanding=True, literal_execute=True)),
+            Clubs.is_verified == True,  # noqa: E712
+            Clubs.is_deleted == False,  # noqa: E712
             # Not finished. `duration` is hours after event_datetime.
             event_end >= now,
             # Registration still open. A null end date means no deadline was

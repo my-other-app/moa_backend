@@ -265,6 +265,9 @@ async def for_you(session, user_id: int, limit: int = 10, offset: int = 0):
         select(Events, score)
         .outerjoin(Clubs, Clubs.id == Events.club_id)
         .where(Events.is_deleted == False, event_end >= now, (Events.reg_enddate.is_(None)) | (Events.reg_enddate >= now), ~already_registered, ~club_hidden)  # noqa: E712
+        # The one deliberate change: only what the public can see (the old
+        # feed also offered drafts and unverified clubs' events).
+        .where(Events.lifecycle.in_(SHOWN), Clubs.is_verified == True, Clubs.is_deleted == False)  # noqa: E712
         .options(joinedload(Events.category), joinedload(Events.club))
         .order_by(score.desc(), Events.event_datetime.asc(), Events.id.asc())
         .limit(limit).offset(offset)
