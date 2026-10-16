@@ -162,11 +162,60 @@ class ClubPartnerPatch(CustomBaseModel):
     _name = field_validator("name")(_named)
 
 
+SOCIALS = ("instagram", "linkedin", "x", "website")
+
+
+def _link(v):
+    """A handle or a link, as typed, trimmed; the pages make the URL."""
+    if v is None:
+        return None
+    v = v.strip()
+    return v or None
+
+
+class ClubTeamMemberOut(CustomBaseModel):
+    id: int
+    name: str
+    role: str | None = None
+    instagram: str | None = None
+    linkedin: str | None = None
+    x: str | None = None
+    website: str | None = None
+    sort_order: int = 0
+    photo: dict | None = None
+
+
+class ClubTeamMemberCreate(CustomBaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    role: str | None = Field(None, max_length=80)
+    instagram: str | None = Field(None, max_length=255)
+    linkedin: str | None = Field(None, max_length=255)
+    x: str | None = Field(None, max_length=255)
+    website: str | None = Field(None, max_length=255)
+
+    _name = field_validator("name")(_named)
+    _links = field_validator(*SOCIALS)(_link)
+
+
+class ClubTeamMemberPatch(CustomBaseModel):
+    name: str | None = Field(None, min_length=1, max_length=100)
+    role: str | None = Field(None, max_length=80)
+    instagram: str | None = Field(None, max_length=255)
+    linkedin: str | None = Field(None, max_length=255)
+    x: str | None = Field(None, max_length=255)
+    website: str | None = Field(None, max_length=255)
+    sort_order: int | None = Field(None, ge=0, le=10000)
+
+    _name = field_validator("name")(_named)
+    _links = field_validator(*SOCIALS)(_link)
+
+
 class ClubPublicDetail(ClubPublic):
     socials: ClubSocials = Field(...)
     tagline: str | None = Field(None)
     cover: dict | None = Field(None)
     partners: list[ClubPartnerOut] = Field(default_factory=list)
+    team: list[ClubTeamMemberOut] = Field(default_factory=list)
     location_link: str | None = Field(None)
     interests: list[str] = Field(...)
     followers_count: int = Field(...)
@@ -254,6 +303,7 @@ class ClubPublicDetailResponse(CustomBaseModel):
     cover: dict | None = Field(None)
     tagline: str | None = Field(None)
     partners: list[ClubPartnerOut] = Field(default_factory=list)
+    team: list[ClubTeamMemberOut] = Field(default_factory=list)
     location_name: str | None = Field(None)
     location_link: str | None = Field(None)
     about: str | None = Field(None)

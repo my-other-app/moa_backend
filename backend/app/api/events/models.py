@@ -36,7 +36,8 @@ class EventCategories(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     name = Column(String(50), nullable=False)
     icon = Column(String, nullable=True)
     icon_type = Column(Enum(UserAvatarTypes))
-    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    # Null for a type the product ships; a user for one a club added.
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 
     created_by = relationship("Users")
 
