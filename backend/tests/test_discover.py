@@ -183,7 +183,7 @@ async def test_events_lists_what_is_on_and_nothing_else(client, world):
     assert far["has_fee"] is True and far["fee"] == 200.0 and far["going"] == 2 and far["capacity"] == 2 and far["status"] == "full"
     assert far["category"] == {"id": world["music"].id, "name": "Music"}
     assert far["club"] == {"id": world["b"].id, "name": "Rhythm Collective", "slug": world["b"].slug, "logo": None}
-    assert far["url"] == f"https://events.myotherapp.in/{e['far'].id}"
+    assert far["slug"] == e["far"].slug and far["url"] == f"https://myotherapp.in/events/{e['far'].slug}"
     assert far["lat"] == MYSURU[0] and far["lng"] == MYSURU[1] and far["distance_km"] is None and far["is_online"] is False
     start = datetime.fromisoformat(far["starts_at"])
     assert start == e["far"].event_datetime and datetime.fromisoformat(far["ends_at"]) == start + timedelta(hours=e["far"].duration)

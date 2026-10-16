@@ -7,6 +7,7 @@ import pytest
 
 from app.api.checkins.models import CheckInVia, CheckIns
 from app.api.live import service
+from app.config import settings
 from tests.conftest import auth_header
 
 START = datetime.now(timezone.utc) + timedelta(hours=1)
@@ -252,7 +253,7 @@ async def test_the_survey_goes_to_whoever_was_there_and_each_link_is_theirs(clie
     assert go.json()["sent"] == 2 and go.json()["invited"] == 2 and go.json()["sent_at"]
     assert {m["recipients"][0] for m in sent} == {"sneha-l@example.com", "rohan-l@example.com"}
     link = next(line for line in sent[0]["text"].splitlines() if line.startswith("http"))
-    assert link.startswith(f"https://events.myotherapp.in/feedback/{world['event'].id}/")
+    assert link.startswith(f"{settings.PUBLIC_SITE_URL}/feedback/{world['event'].id}/")
     path, _, token = link.partition("?k=")
     reg_id = path.rsplit("/", 1)[1]
 

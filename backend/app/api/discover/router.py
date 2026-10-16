@@ -4,10 +4,10 @@ changes whether a post shows as liked."""
 import logging
 from typing import Literal, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Path, Query, Request
 
 from app.api.discover import geo, service
-from app.api.discover.schemas import BackfillResult, CategoryCount, ClubPage, ClubSearch, EventSearch, Home, Where
+from app.api.discover.schemas import BackfillResult, CategoryCount, ClubPage, ClubSearch, EventPage, EventSearch, Home, Sitemap, Where
 from app.api.threads.schemas import ThreadPage
 from app.core.auth.dependencies import AdminAuth, OptionalAuth
 from app.core.rate_limit import limiter
@@ -80,6 +80,13 @@ async def events(
     ))
 
 
+@router.get("/events/{ref}", summary="An event's page: the event, its club, speakers, agenda and team, and what else is on")
+@limiter.limit(LIMIT, key_func=_visitor)
+async def event_page(request: Request, session: SessionDep, user: OptionalAuth, ref: str = Path(..., max_length=160, description="The event's slug, or its id")) -> EventPage:
+    """404 for anything the public cannot see: a draft, a deleted event, an unverified club's."""
+    return EventPage(**await service.event_page(session, ref))
+
+
 @router.get("/clubs", summary="Clubs to find: by words, interest and distance")
 @limiter.limit(LIMIT, key_func=_visitor)
 async def clubs(
@@ -117,6 +124,13 @@ async def thread_feed(request: Request, session: SessionDep, user: OptionalAuth,
 @limiter.limit(LIMIT, key_func=_visitor)
 async def categories(request: Request, session: SessionDep, user: OptionalAuth) -> list[CategoryCount]:
     return [CategoryCount(**c) for c in await service.categories(session, service.now_utc())]
+
+
+@router.get("/sitemap", summary="Every public event and club page, with when each last changed")
+@limiter.limit(LIMIT, key_func=_visitor)
+async def sitemap(request: Request, session: SessionDep, user: OptionalAuth) -> Sitemap:
+    """Events still to come or held in the last year, and every club; at most 5000 of each."""
+    return Sitemap(**await service.sitemap(session))
 
 
 @admin_router.post("/geo-backfill", summary="Read the point out of every event and club map link that has none yet")

@@ -1,5 +1,10 @@
+from urllib.parse import urlsplit
+
 from pydantic import PostgresDsn, RedisDsn, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# The public site's address before it moved to the bare domain; old links still come from it.
+FORMER_SITE_ORIGIN = "https://events.myotherapp.in"
 
 
 class AppConfig(BaseSettings):
@@ -75,13 +80,13 @@ class AppConfig(BaseSettings):
     PUBLIC_API_URL: str = "https://api.myotherapp.in"
     # The clubs dashboard, for links a volunteer opens on a phone.
     PUBLIC_WEB_URL: str = "https://clubs-next.myotherapp.in"
-    # The public event site a tracking link lands on; {slug} for a club's page.
-    PUBLIC_SITE_URL: str = "https://events.myotherapp.in"
+    # The public site: an event's page is /events/{slug}, a club's /clubs/{slug}. Tracking links land here.
+    PUBLIC_SITE_URL: str = "https://myotherapp.in"
     # Where an address is turned into a place for the Security page; {ip} is filled in. Empty disables it.
     GEOIP_URL: str = "https://ipapi.co/{ip}/json/"
-    PUBLIC_CLUB_URL: str = "https://events.myotherapp.in/clubs/{slug}"
+    PUBLIC_CLUB_URL: str = "https://myotherapp.in/clubs/{slug}"
     # A club's published website at its own address (served by the club-sites Cloudflare Worker).
-    # PUBLIC_CLUB_URL stays the events-site page tracking links land on; it frames the same site.
+    # PUBLIC_CLUB_URL stays the public site's page tracking links land on; it frames the same site.
     PUBLIC_CLUB_SITE_URL: str = "https://{slug}.myotherapp.in"
 
     CORS_ORIGINS: list[str] | str
@@ -90,13 +95,25 @@ class AppConfig(BaseSettings):
 
     @property
     def cors_origins(self) -> list[str]:
-        if isinstance(self.CORS_ORIGINS, str):
-            return [
-                origin.strip()
-                for origin in self.CORS_ORIGINS.split(",")
-                if origin.strip()
-            ]
-        return self.CORS_ORIGINS
+        """CORS_ORIGINS, plus the public site (bare and www.) and its former
+        address: the site calls the API from the browser, and the server's
+        env may not list a domain the site has just moved to."""
+        listed = self.CORS_ORIGINS.split(",") if isinstance(self.CORS_ORIGINS, str) else self.CORS_ORIGINS
+        out: list[str] = []
+        for origin in [*listed, *_site_origins(self.PUBLIC_SITE_URL), FORMER_SITE_ORIGIN]:
+            origin = origin.strip()
+            if origin and origin not in out:
+                out.append(origin)
+        return out
+
+
+def _site_origins(url: str) -> list[str]:
+    parts = urlsplit(url.strip())
+    if not parts.scheme or not parts.netloc:
+        return []
+    host = parts.netloc.lower()
+    other = host[len("www."):] if host.startswith("www.") else f"www.{host}"
+    return [f"{parts.scheme}://{host}", f"{parts.scheme}://{other}"]
 
 
 settings = AppConfig()

@@ -186,6 +186,9 @@ class EventSpeakers(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         nullable=True,
     )
     display_order = Column(Integer, nullable=False, default=0)
+    # A few lines about them, and one place to find out more; the event page shows both.
+    bio = Column(String(600), nullable=True)
+    link = Column(String(500), nullable=True)
 
     event = relationship("Events", back_populates="speakers")
 

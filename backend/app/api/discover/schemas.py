@@ -4,6 +4,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel
 
+from app.api.agenda.schemas import AgendaItemOut
 from app.api.threads.schemas import ThreadOut
 
 
@@ -30,6 +31,7 @@ class EventClub(BaseModel):
 class EventCard(BaseModel):
     id: int
     name: str
+    slug: str
     poster: Optional[str] = None
     starts_at: str
     ends_at: str
@@ -159,6 +161,93 @@ class ClubPage(BaseModel):
     threads: list[ThreadOut]
     team: list[TeamMember]
     partners: list[Partner]
+
+
+class EventContact(BaseModel):
+    name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+
+
+class PageEvent(BaseModel):
+    """The event itself. Never the online joining link: that goes to those registered."""
+    id: int
+    slug: str
+    name: str
+    about: Optional[str] = None
+    poster: Optional[str] = None
+    poster_thumb: Optional[str] = None
+    starts_at: str
+    ends_at: str
+    duration_hours: Optional[float] = None
+    timezone: str
+    is_online: bool
+    location_name: Optional[str] = None
+    location_link: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    has_fee: bool
+    fee: Optional[float] = None
+    has_prize: bool
+    prize_amount: Optional[float] = None
+    capacity: Optional[int] = None
+    going: int
+    seats_left: Optional[int] = None
+    reg_opens_at: Optional[str] = None
+    reg_closes_at: Optional[str] = None
+    status: Literal["upcoming", "closing_soon", "full", "live", "ended"]
+    registration_open: bool
+    category: Optional[CategoryRef] = None
+    interests: list[str]
+    guidelines: Optional[str] = None
+    contact: EventContact
+    url: str
+
+
+class PageClub(BaseModel):
+    id: int
+    name: str
+    slug: str
+    logo: Optional[str] = None
+    tagline: Optional[str] = None
+    followers: int
+    location_name: Optional[str] = None
+
+
+class Speaker(BaseModel):
+    id: int
+    name: str
+    designation: Optional[str] = None
+    photo: Optional[str] = None
+    bio: Optional[str] = None
+    link: Optional[str] = None
+
+
+class PageAgenda(BaseModel):
+    timezone: str
+    items: list[AgendaItemOut]
+
+
+class EventPage(BaseModel):
+    event: PageEvent
+    club: PageClub
+    speakers: list[Speaker]
+    agenda: PageAgenda
+    team: list[TeamMember]
+    # The event's own organisers when it names them, else the club's team.
+    team_source: Literal["event", "club", "none"]
+    more_from_club: list[EventCard]
+    similar: list[EventCard]
+
+
+class SitemapEntry(BaseModel):
+    slug: str
+    updated_at: str
+
+
+class Sitemap(BaseModel):
+    events: list[SitemapEntry]
+    clubs: list[SitemapEntry]
 
 
 class BackfillCounts(BaseModel):
