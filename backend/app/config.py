@@ -32,6 +32,14 @@ class AppConfig(BaseSettings):
     SES_DEFAULT_SENDER: str
     # Shared secret in the SES → SNS hook URL (?token=), on top of Amazon's signature.
     SES_WEBHOOK_TOKEN: str = ""
+    # Which provider sends mail: "ses" (default) or "resend", which falls back to SES on any refusal.
+    MAIL_PROVIDER: str = "ses"
+    RESEND_API_KEY: str = ""
+    # The signing secret Resend shows for the webhook (whsec_…); without it the Resend hook refuses everything.
+    RESEND_WEBHOOK_SECRET: str = ""
+    # The sender for platform mail through Resend: an address on its verified domain.
+    MAIL_FROM_ADDRESS: str = "info@myotherapp.in"
+    MAIL_FROM_NAME: str = "MyOtherApp"
     # WhatsApp Cloud API: the hook's verify token and app secret, and the sending credentials. Empty = no provider.
     WHATSAPP_VERIFY_TOKEN: str = ""
     WHATSAPP_APP_SECRET: str = ""

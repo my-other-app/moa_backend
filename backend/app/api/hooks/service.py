@@ -8,7 +8,7 @@ from sqlalchemy import or_, select, update
 from app.api.deliveries.models import Deliveries, DeliveryOutcome
 from app.api.emails.models import MessageDeliveries
 from app.api.events.models import EventRegistrationsLink
-from app.api.hooks.verdicts import Verdict, is_permanent, ses_verdicts, whatsapp_verdict
+from app.api.hooks.verdicts import Verdict, is_permanent, resend_verdict, ses_verdicts, whatsapp_verdict
 
 SETTLED = (DeliveryOutcome.bounced, DeliveryOutcome.complained)
 
@@ -70,6 +70,15 @@ async def ses(session, envelope_message: str) -> dict:
     for message_id, _addr, v in ses_verdicts(message):
         matched += await record(session, message_id, "email", v, at)
     return {"matched": matched}
+
+
+async def resend(session, event: dict) -> dict:
+    """One Resend webhook event, matched by the id Resend gave the mail."""
+    got = resend_verdict(event) if isinstance(event, dict) else None
+    if got is None:
+        return {"matched": 0}
+    email_id, v = got
+    return {"matched": await record(session, email_id, "email", v, _when(event.get("created_at")))}
 
 
 async def whatsapp(session, payload: dict) -> dict:

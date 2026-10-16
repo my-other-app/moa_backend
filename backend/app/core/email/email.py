@@ -1,28 +1,13 @@
 import os
 import io
 import logging
-import boto3
-from botocore.exceptions import BotoCoreError, ClientError
 from typing import Any, List, Dict, Optional, Union
 from jinja2 import Template
 from fastapi import BackgroundTasks
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.application import MIMEApplication
-from email.mime.image import MIMEImage
 
-from app.config import settings
+from app.core.email import transport
 
 logger = logging.getLogger(__name__)
-
-# Initialize the SES client
-ses = boto3.client(
-    "ses",
-    region_name="ap-south-1",
-    aws_access_key_id=settings.SES_ACCESS_KEY,
-    aws_secret_access_key=settings.SES_SECRET_KEY,
-)
-
 
 def render_template(
     template_path: Optional[str] = None,
@@ -66,89 +51,28 @@ def send_email_with_attachment(
     sender: Optional[str] = None,
     aws_region: str = "ap-south-1",
     sender_name: Optional[str] = None,
+    reply_to: Optional[str] = None,
 ) -> Dict:
-    """
-    Send an email with optional attachment and HTML template.
-
-    :param recipients: Single email or list of email addresses
-    :param subject: Email subject
-    :param body_text: Plain text body of the email
-    :param body_html: HTML body of the email
-    :param attachment_bytes: Bytes or BytesIO object for attachment
-    :param attachment_filename: Filename for the attachment
-    :param html_template_path: Path to HTML template file
-    :param html_template_str: Direct HTML template string
-    :param template_context: Context for rendering HTML template
-    :param sender: Sender email (defaults to settings)
-    :param aws_region: AWS region for SES
-    :return: SES send_raw_email response
-    """
-    # Normalize recipients to a list
+    """A mail with an optional file and an optional HTML template, sent
+    through whichever provider is configured (see `transport`). Returns
+    `{"MessageId", "Provider"}`. `aws_region` is kept for old callers."""
     if isinstance(recipients, str):
         recipients = [recipients]
-
-    # Prepare the message
-    msg = MIMEMultipart()
-    msg["Subject"] = subject
-    msg["From"] = (
-        f"{sender_name or 'Finnet'} <{sender or settings.SES_DEFAULT_SENDER}>"
-    )
-    msg["To"] = ", ".join(recipients)
-
-    # Render HTML template if provided
     if (html_template_path or html_template_str) and template_context:
         try:
-            body_html = render_template(
-                template_path=html_template_path,
-                template_str=html_template_str,
-                context=template_context,
-            )
-        except Exception as e:
+            body_html = render_template(template_path=html_template_path, template_str=html_template_str, context=template_context)
+        except Exception:
             logger.exception("Template rendering error")
-
-    # Attach plain text body
-    if body_text:
-        msg.attach(MIMEText(body_text, "plain"))
-
-    # Attach HTML body
-    if body_html:
-        msg.attach(MIMEText(body_html, "html"))
-
-    # Attach file if provided
+    attachments = []
     if attachment_bytes:
-        # Convert to bytes if it's a BytesIO object
-        if isinstance(attachment_bytes, io.BytesIO):
-            attachment_bytes = attachment_bytes.getvalue()
-
-        # Use a default filename if not provided
-        attachment_filename = attachment_filename or "attachment.pdf"
-
-        attachment_part = MIMEApplication(
-            attachment_bytes, _subtype=attachment_filename.split(".")[-1]
-        )
-        attachment_part.add_header(
-            "Content-Disposition", "attachment", filename=attachment_filename
-        )
-        msg.attach(attachment_part)
-
-    # Create SES client
-    ses_client = boto3.client(
-        "ses",
-        region_name=aws_region,
-        aws_access_key_id=settings.SES_ACCESS_KEY,
-        aws_secret_access_key=settings.SES_SECRET_KEY,
+        attachments.append(transport.Attachment(filename=attachment_filename or "attachment.pdf", content=transport.as_bytes(attachment_bytes)))
+    mail = transport.Mail(
+        to=list(recipients), bcc=list(bcc_recipients or []), subject=subject, text=body_text, html=body_html,
+        from_name=sender_name, from_address=sender, reply_to=reply_to, attachments=attachments,
     )
-
-    # Send the email
     try:
-        response = ses_client.send_raw_email(
-            Source=msg["From"],
-            Destinations=recipients + bcc_recipients if bcc_recipients else [],
-            RawMessage={"Data": msg.as_string()},
-        )
-        logger.info(f"Email sent successfully! Message ID: {response['MessageId']}")
-        return response
-    except Exception as e:
+        return transport.deliver(mail)
+    except Exception:
         logger.exception("Error sending email")
         raise
 
@@ -196,43 +120,15 @@ def send_email(
     sender: Optional[str] = None,
     sender_name: Optional[str] = None,
     aws_region: str = "ap-south-1",
+    reply_to: Optional[str] = None,
 ) -> Dict:
     """A designed email: a text and an HTML body, files attached, and pictures
     inline by Content-ID (`{"filename", "content", "content_id"}`) so the
-    guest's QR shows in the message rather than hanging off it.
-
-    Shaped as a provider would shape it (multipart/mixed > related >
-    alternative), which is what mail clients agree on."""
-    related = MIMEMultipart("related")
-    alternative = MIMEMultipart("alternative")
-    alternative.attach(MIMEText(text or "", "plain", "utf-8"))
-    alternative.attach(MIMEText(html or "", "html", "utf-8"))
-    related.attach(alternative)
-    msg = MIMEMultipart("mixed")
-    msg["Subject"] = subject
-    msg["From"] = f"{sender_name or 'Finnet'} <{sender or settings.SES_DEFAULT_SENDER}>"
-    msg["To"] = ", ".join(recipients)
-    msg.attach(related)
-    for a in attachments or []:
-        content = a["content"]
-        if isinstance(content, io.BytesIO):
-            content = content.getvalue()
-        filename = a.get("filename") or "attachment"
-        if a.get("content_id"):
-            part = MIMEImage(content, _subtype=filename.rsplit(".", 1)[-1] if "." in filename else "png")
-            part.add_header("Content-ID", f"<{a['content_id']}>")
-            part.add_header("Content-Disposition", "inline", filename=filename)
-            related.attach(part)
-        else:
-            part = MIMEApplication(content, _subtype=filename.rsplit(".", 1)[-1] if "." in filename else "octet-stream")
-            part.add_header("Content-Disposition", "attachment", filename=filename)
-            msg.attach(part)
-    ses_client = boto3.client(
-        "ses",
-        region_name=aws_region,
-        aws_access_key_id=settings.SES_ACCESS_KEY,
-        aws_secret_access_key=settings.SES_SECRET_KEY,
-    )
-    response = ses_client.send_raw_email(Source=msg["From"], Destinations=recipients, RawMessage={"Data": msg.as_string()})
-    logger.info("Email sent: %s", response.get("MessageId"))
-    return response
+    guest's QR shows in the message rather than hanging off it. Sent through
+    whichever provider is configured (see `transport`)."""
+    files = [
+        transport.Attachment(filename=a.get("filename") or "attachment", content=transport.as_bytes(a["content"]), content_id=a.get("content_id"))
+        for a in attachments or []
+    ]
+    mail = transport.Mail(to=list(recipients), subject=subject, text=text, html=html, from_name=sender_name, from_address=sender, reply_to=reply_to, attachments=files)
+    return transport.deliver(mail)

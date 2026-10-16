@@ -42,6 +42,25 @@ async def ses_hook(request: Request, session: SessionDep, token: Optional[str] =
         return {"ok": True, "matched": 0}
 
 
+@router.post("/resend", summary="What Resend says became of a mail", status_code=202)
+async def resend_hook(request: Request, session: SessionDep) -> dict:
+    """Signed by Resend with the webhook's secret; refused without it."""
+    import json
+
+    from app.api.hooks import svix
+
+    raw = await request.body()
+    h = request.headers
+    if not svix.verify(getattr(settings, "RESEND_WEBHOOK_SECRET", "") or "", h.get("svix-id") or "", h.get("svix-timestamp") or "", h.get("svix-signature") or "", raw):
+        logger.warning("resend hook refused: signature did not verify")
+        return {"ok": False, "reason": "signature"}
+    try:
+        return {"ok": True, **await service.resend(session, json.loads(raw.decode("utf-8") or "{}"))}
+    except Exception:  # noqa: BLE001 - the provider never hears our trouble
+        logger.exception("resend hook failed")
+        return {"ok": True, "matched": 0}
+
+
 @router.get("/whatsapp", summary="Meta subscribes by asking for its own token back")
 async def whatsapp_verify(request: Request) -> Response:
     q = request.query_params
