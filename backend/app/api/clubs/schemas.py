@@ -435,3 +435,52 @@ class ClubEventsFigures(BaseModel):
     past: int
     drafts: int
     generated_at: datetime
+
+
+class FollowerUser(BaseModel):
+    id: int
+    full_name: str
+    username: Optional[str] = None
+    avatar: Optional[dict] = None
+
+
+class FollowerRow(BaseModel):
+    """A follower as the followers page lists them."""
+
+    user: FollowerUser
+    org: Optional[str] = None
+    interests: list[str]
+    followed_at: Optional[datetime] = None
+    source: Optional[str] = None
+    registrations: int
+    attended: int
+    last_registered_at: Optional[datetime] = None
+    upcoming: int
+    segments: list[str]
+
+
+class FollowersPage(BaseModel):
+    items: list[FollowerRow]
+    total: int
+    limit: int
+    offset: int
+    counts: dict
+
+
+class FollowersInsights(BaseModel):
+    """The audience above the list."""
+
+    total: int
+    new: int
+    new_delta: Optional[int] = None
+    came: int
+    regulars: int
+    registered_ahead: int
+    quiet: int
+    next_event: Optional[dict] = None
+    growth: list[dict]
+    by_org: list[dict]
+    interests: list[dict]
+    sources: list[dict]
+    segments: dict
+    generated_at: datetime

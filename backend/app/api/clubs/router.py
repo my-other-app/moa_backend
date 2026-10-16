@@ -26,7 +26,7 @@ from app.api.clubs.schemas import (
     FollowerProfileResponse,
 )
 from app.db.core import SessionDep
-from app.api.clubs import events_list, service
+from app.api.clubs import events_list, followers_insights, service
 from app.api.audit import service as audit
 from app.core.auth.dependencies import ClubAuth, DependsAuth, UserAuth, AdminAuth
 from app.core.auth.permissions import ContentAuth, DestroyAuth, ModerateAuth
@@ -37,7 +37,7 @@ from app.core.response.pagination import (
 )
 from typing import Optional, List
 
-from app.api.clubs.schemas import ClubEventsFigures
+from app.api.clubs.schemas import ClubEventsFigures, FollowersInsights, FollowersPage
 from app.api.events.schemas import EventListResponseSelf
 from app.api.clubs.notifications_router import router as notifications_router
 
@@ -325,6 +325,36 @@ async def toggle_hide_club_endpoint(
         club_id=club_id,
         user_id=user.id,
     )
+
+
+@router.get("/followers/list", summary="The club's followers, with what each did with the club")
+async def list_followers_page(
+    session: SessionDep,
+    user: ClubAuth,
+    pagination: PaginationParams,
+    segment: str = Query("all", description="all · new · regulars · once · never · quiet"),
+    sort: str = Query("newest", description="newest · oldest · active · name"),
+    search: Optional[str] = Query(None, max_length=80),
+) -> FollowersPage:
+    if segment not in followers_insights.SEGMENTS or sort not in followers_insights.SORTS:
+        raise CustomHTTPException(422, message="Unknown segment or sort.")
+    items, total, counts = await followers_insights.list_followers(session, user.club.id, segment=segment, search=search, sort=sort, limit=pagination.limit, offset=pagination.offset)
+    return FollowersPage(items=items, total=total, limit=pagination.limit, offset=pagination.offset, counts=counts)
+
+
+@router.get("/followers/insights", summary="The audience above the list: growth, who turns up, where from, what they care about")
+async def followers_insights_endpoint(session: SessionDep, user: ClubAuth) -> FollowersInsights:
+    return FollowersInsights(**await followers_insights.insights(session, user.club.id))
+
+
+@router.get("/followers/export.csv", summary="The followers in a segment, as a spreadsheet")
+async def followers_export(session: SessionDep, user: ClubAuth, segment: str = Query("all")):
+    from fastapi.responses import Response
+
+    if segment not in followers_insights.SEGMENTS:
+        raise CustomHTTPException(422, message="Unknown segment.")
+    body = await followers_insights.export_csv(session, user.club.id, segment=segment)
+    return Response(content="\ufeff" + body, media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="followers-{segment}.csv"'})
 
 
 @router.get("/followers/{club_id}")
