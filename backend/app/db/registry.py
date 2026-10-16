@@ -28,3 +28,4 @@ from app.api.threads import models as _threads_models  # noqa: F401
 from app.api.store import models as _store_models  # noqa: F401
 from app.api.live import models as _live_models  # noqa: F401
 from app.api.competitions import models as _competition_models  # noqa: F401
+from app.api.sites import models as _site_models  # noqa: F401

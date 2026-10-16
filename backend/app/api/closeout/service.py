@@ -210,6 +210,10 @@ async def update_settings(session, event: Events, body) -> dict:
     if data.get("keep_contacts") is not None:
         event.keep_contacts = data["keep_contacts"]
     await session.commit()
+    if "status" in data:
+        from app.api.sites import service as sites
+
+        await sites.republish_for_event(session, event.id)
     # Editing the hours re-times the job. DELETED stays terminal.
     job = await ensure_job(session, event)
     if job.state is not RetentionState.deleted:
