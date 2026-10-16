@@ -127,6 +127,97 @@ async def test_an_unpaid_registration_on_a_paid_event_is_told_it_waits_for_payme
     assert r.json()["error_code"] == "REGISTRATION_AWAITING_PAYMENT"
 
 
+async def _walked_away(session, make_user, make_registration, event, email, *, user_type=UserTypes.guest):
+    """An unpaid registration made an hour ago, with a receipt and no order since."""
+    holder = await make_user(email=email, user_type=user_type)
+    reg = await make_registration(event=event, user=holder, actual_amount=200)
+    reg.payment_receipt = f"er_{reg.ticket_id}"
+    reg.created_at = NOW - timedelta(hours=1)
+    await session.commit()
+    return reg
+
+
+def _order(reg, *, status, age):
+    from app.api.payments.models import PaymentOrders
+
+    order = PaymentOrders(
+        receipt=reg.payment_receipt, razorpay_order_id=f"order_{reg.ticket_id}", amount=200,
+        status=status, user_id=reg.user_id, source="event_registration", payload={},
+    )
+    order.created_at = NOW - age
+    return order
+
+
+async def test_a_checkout_walked_away_from_lets_the_address_start_again(
+    client, session, make_club, make_event, make_user, make_registration
+):
+    from app.api.payments.models import OrderStatus
+
+    _, _, first, _ = await _world(session, make_club, make_event, has_fee=True, reg_fee=200)
+    old = await _walked_away(session, make_user, make_registration, first, "walked@example.com")
+    session.add(_order(old, status=OrderStatus.created, age=timedelta(minutes=50)))
+    await session.commit()
+
+    r = await _register(client, first.id, "walked@example.com")
+    assert r.status_code == 200, r.text
+    fresh = await _registration(session, r.json()["event_registration_id"])
+    assert fresh.id != old.id and fresh.user_id != old.user_id
+
+    # The abandoned one is retired, out of the organiser's list.
+    retired = (await (await session.connection()).execute(
+        select(EventRegistrationsLink.__table__.c.is_deleted).where(EventRegistrationsLink.__table__.c.id == old.id)
+    )).scalar_one()
+    assert retired is True
+
+
+async def test_a_payment_that_may_still_land_or_has_landed_keeps_the_registration(
+    client, session, make_club, make_event, make_user, make_registration
+):
+    from app.api.payments.models import OrderStatus
+
+    _, _, first, _ = await _world(session, make_club, make_event, has_fee=True, reg_fee=200)
+    recent = await _walked_away(session, make_user, make_registration, first, "recent@example.com")
+    session.add(_order(recent, status=OrderStatus.attempted, age=timedelta(minutes=10)))
+    paid = await _walked_away(session, make_user, make_registration, first, "paid-late@example.com")
+    # Paid at Razorpay, but the registration was never marked: money moved, so it stays.
+    session.add(_order(paid, status=OrderStatus.paid, age=timedelta(hours=1)))
+    await session.commit()
+
+    for email in ("recent@example.com", "paid-late@example.com"):
+        r = await _register(client, first.id, email)
+        assert r.status_code == 409, (email, r.text)
+        assert r.json()["error_code"] == "REGISTRATION_AWAITING_PAYMENT"
+
+
+async def test_an_app_users_unpaid_registration_is_never_retired_from_the_public_form(
+    client, session, make_club, make_event, make_user, make_registration
+):
+    _, _, first, _ = await _world(session, make_club, make_event, has_fee=True, reg_fee=200)
+    reg = await _walked_away(session, make_user, make_registration, first, "app-unpaid@example.com", user_type=UserTypes.app_user)
+
+    r = await _register(client, first.id, "app-unpaid@example.com")
+    assert r.status_code == 409, r.text
+    await session.refresh(reg)
+    assert reg.is_deleted is False
+
+
+async def test_optional_questions_left_blank_do_not_block_and_a_missing_required_one_is_named(
+    client, session, make_club, make_event
+):
+    optional = [{"key": "tshirt", "label": "T-shirt size", "field_type": "text", "required": False}]
+    required = [{"key": "college", "label": "College", "field_type": "text", "required": True}]
+    owner, club = await make_club(name="Questions Club", email="questions@example.com")
+    loose = await make_event(club=club, created_by=owner, name="Loose", event_datetime=NOW + timedelta(days=3), additional_details=optional)
+    strict = await make_event(club=club, created_by=owner, name="Strict", event_datetime=NOW + timedelta(days=3), additional_details=required)
+    await session.commit()
+
+    assert (await _register(client, loose.id, "loose@example.com")).status_code == 200
+
+    r = await _register(client, strict.id, "strict@example.com")
+    assert r.status_code == 400, r.text
+    assert r.json()["message"] == {"college": "This field is required"}
+
+
 async def test_an_app_users_address_registers_under_a_fresh_guest_and_their_password_still_works(
     client, session, make_club, make_event, make_user
 ):

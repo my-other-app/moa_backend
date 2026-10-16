@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 import uuid
 from fastapi import BackgroundTasks
@@ -30,8 +30,65 @@ ALREADY_REGISTERED = (
 )
 AWAITING_PAYMENT = (
     "This email already has a registration for this event that is waiting for payment. "
-    "Sign in to the MyOtherApp app with this email to finish paying."
+    "If you left the payment unfinished, you can start again here in about 30 minutes, "
+    "or sign in to the MyOtherApp app with this email to finish paying."
 )
+
+
+#: How long an unpaid registration from the public form holds its address
+#: before the address may start again. A checkout left open (a UPI request, a
+#: slow bank page) finishes well inside it; one walked away from no longer
+#: locks the person out of the form.
+ABANDONED_AFTER = timedelta(minutes=30)
+
+
+async def retire_if_abandoned(session: AsyncSession, event: Events, reg: EventRegistrationsLink) -> bool:
+    """Retire an unpaid registration a guest walked away from, so the same
+    address can register again from the public form. Only a guest's, only on
+    a paid event, never once money moved and never while a payment may still
+    land on it. True when it was retired."""
+    from app.api.payments.models import OrderStatus, PaymentOrders
+
+    if not event.has_fee or reg.is_paid or (reg.paid_amount or 0) > 0 or reg.is_attended:
+        return False
+    since = datetime.now(timezone.utc) - ABANDONED_AFTER
+    if reg.created_at is not None and reg.created_at > since:
+        return False
+    holder = await session.get(Users, reg.user_id)
+    if holder is None or holder.user_type != UserTypes.guest:
+        return False
+    if reg.payment_receipt:
+        money_or_recent = await session.scalar(
+            select(PaymentOrders.id)
+            .where(
+                PaymentOrders.receipt == reg.payment_receipt,
+                or_(
+                    PaymentOrders.status.in_([OrderStatus.paid, OrderStatus.refunded]),
+                    PaymentOrders.created_at > since,
+                ),
+            )
+            .limit(1)
+        )
+        if money_or_recent is not None:
+            return False
+    # (event, user, is_deleted) is unique, and the session hides retired rows
+    # (app.db.listeners), so look on the connection.
+    table = EventRegistrationsLink.__table__
+    connection = await session.connection()
+    clash = (
+        await connection.execute(
+            select(table.c.id).where(
+                table.c.event_id == reg.event_id,
+                table.c.user_id == reg.user_id,
+                table.c.is_deleted.is_(True),
+            ).limit(1)
+        )
+    ).first()
+    if clash is not None:
+        return False
+    reg.is_deleted = True
+    await session.flush()
+    return True
 
 
 async def resolve_event(session: AsyncSession, event_id: int | str) -> Events:
@@ -173,10 +230,10 @@ async def register_event(
     if relaxed_fields:
         additional_details = {k: v for k, v in (additional_details or {}).items() if v not in (None, "")}
     elif db_event.additional_details:
-        if not additional_details:
-            raise CustomHTTPException(
-                400, message="Additional details required for this event"
-            )
+        # No answers at all is fine when every question is optional; a
+        # required one missing is reported by name below. This used to refuse
+        # any registration that sent no answers, optional questions or not.
+        additional_details = additional_details or {}
         errors = {}
         db_additional_details = [
             EventAdditionalDetail.model_validate(additional)

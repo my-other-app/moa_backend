@@ -82,7 +82,7 @@ async def register_event(
                 error_code="CLUB_EMAIL",
             )
         existing = await service.live_registration_for_email(session, event.id, registration.email)
-        if existing is not None:
+        if existing is not None and not await service.retire_if_abandoned(session, event, existing):
             return await _already_registered(session, background_tasks, event, existing)
         user = await user_service.new_guest(
             session,
