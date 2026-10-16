@@ -30,7 +30,7 @@ async def test_the_site_is_made_from_the_club_previewed_published_and_served(cli
     s = (await client.get("/api/v1/clubs/site", headers=h)).json()
     assert s["template"] == "launchpad" and s["theme"] == "light" and s["published_at"] is None and s["stale"] is False
     assert s["default_headline"] == "Build things that think." and s["default_subline"].startswith("Hack nights, build weekends")
-    assert s["available"]["team"] is False and s["available"]["past"] is True and s["url"].endswith(f"/clubs/{club.slug}")
+    assert s["available"]["team"] is False and s["available"]["past"] is True and s["url"] == f"https://{club.slug}.myotherapp.in"
     assert [t["key"] for t in s["templates"]] == ["launchpad", "chapter", "campus", "arena"] and len(s["fonts"]) == 5
     # Nothing public yet.
     assert (await client.get(f"/api/v1/sites/{club.slug}")).status_code == 404
@@ -75,3 +75,15 @@ async def test_a_published_site_is_remade_when_the_events_change(client, session
     made = await client.post("/api/v1/events/create", data={"name": "Robo Sumo League", "description": "Fight night for robots.", "event_datetime": (NOW + timedelta(days=12)).isoformat(), "duration": "3", "has_fee": "false", "status": "published", "category_id": str(world["soon"].category_id)}, headers=h)
     assert made.status_code in (200, 201), made.text
     assert "Robo Sumo League" in (await client.get(f"/api/v1/sites/{club.slug}")).text
+
+
+def test_the_site_address_is_the_clubs_subdomain_when_the_slug_can_be_one():
+    from types import SimpleNamespace
+
+    from app.api.sites.service import public_url
+
+    assert public_url(SimpleNamespace(slug="circuit-society-a1b2c3")) == "https://circuit-society-a1b2c3.myotherapp.in"
+    # Longer than a DNS label allows, or not a label at all: the events-site page.
+    long = "a" * 70
+    assert public_url(SimpleNamespace(slug=long)) == f"https://events.myotherapp.in/clubs/{long}"
+    assert public_url(SimpleNamespace(slug="-a1b2c3")) == "https://events.myotherapp.in/clubs/-a1b2c3"

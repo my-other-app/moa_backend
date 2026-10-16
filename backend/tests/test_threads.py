@@ -176,3 +176,27 @@ async def test_the_threads_page_knows_what_waits_and_what_works(client, world):
     assert kinds["poll"]["posts"] == 1 and kinds["text"]["posts"] == 1 and kinds["photo"]["posts"] == 0 and kinds["photo"]["avg_reach"] is None
     assert i["notify"]["told"]["posts"] == 1 and i["notify"]["quiet"]["posts"] == 1
     assert i["all_time"]["posts"] == 2 and i["all_time"]["engagement"] == 5
+
+
+async def test_one_post_opens_from_its_notification(client, world):
+    h, club = world["h"], world["club"]
+    t = (await client.post(POST, data={"body": "Hack night moved to Lab 3", "notify_followers": "true"}, headers=h)).json()
+    thread_id = world["pushed"][-1]["data"]["thread_id"]
+    assert thread_id == t["id"] and world["pushed"][-1]["data"]["type"] == "club_thread"
+
+    await client.post(f"/api/v1/threads/{thread_id}/like", headers=world["fan_h"])
+    one = await client.get(f"/api/v1/threads/{thread_id}", headers=world["fan_h"])
+    assert one.status_code == 200
+    body = one.json()
+    assert body["body"] == "Hack night moved to Lab 3" and body["club"]["id"] == club.id and body["liked"] is True and body["likes"] == 1
+    # Read signed out too; a view counts once a person, never the club's own.
+    assert (await client.get(f"/api/v1/threads/{thread_id}")).json()["liked"] is False
+    await client.get(f"/api/v1/threads/{thread_id}", headers=world["fan_h"])
+    await client.get(f"/api/v1/threads/{thread_id}", headers=h)
+    assert (await client.get(POST, headers=h)).json()["items"][0]["views"] == 2
+    # "feed" is still the feed, not a post id.
+    assert (await client.get("/api/v1/threads/feed", headers=world["fan_h"])).status_code == 200
+    # Gone, or never was.
+    assert (await client.delete(f"{POST}/{thread_id}", headers=h)).status_code == 200
+    assert (await client.get(f"/api/v1/threads/{thread_id}")).status_code == 404
+    assert (await client.get("/api/v1/threads/not-a-uuid")).status_code in (404, 422)
