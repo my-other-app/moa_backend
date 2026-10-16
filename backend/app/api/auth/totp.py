@@ -14,7 +14,7 @@ import pyotp
 
 from app.core.auth.authentication import get_password_hash, verify_password
 
-ISSUER = "Finnet Admin"
+ISSUER = "MyOtherApp Admin"
 RECOVERY_CODE_COUNT = 8
 
 

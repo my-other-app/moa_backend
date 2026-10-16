@@ -25,7 +25,7 @@ def send_payment_confirmation_email(
             context=payload,
         )
         response = send_email_with_attachment(
-            sender_name="Finnet Payments",
+            sender_name="MyOtherApp Payments",
             # No explicit sender: send_email_with_attachment falls back to
             # settings.SES_DEFAULT_SENDER. This used to hardcode
             # payments@finnet.app, which stopped matching the verified SES
@@ -36,7 +36,7 @@ def send_payment_confirmation_email(
             html_template_path="payments/payment_receipt.email",
             template_context=payload,
             attachment_bytes=pdf_bytes,
-            attachment_filename=f"finnet-payment-receipt.pdf",
+            attachment_filename="myotherapp-payment-receipt.pdf",
         )
         return response
 

@@ -93,3 +93,32 @@ def whatsapp_verdict(status: str, error: Optional[dict] = None) -> Optional[Verd
         return Verdict(DeliveryOutcome.bounced if (known and known[1]) else DeliveryOutcome.undelivered, reason, code)
     # `sent` tells us nothing we did not already know.
     return None
+
+
+def resend_verdict(event: dict) -> Optional[tuple]:
+    """Resend's webhook event: `{"type": "email.bounced", "created_at", "data": {"email_id", "to", "bounce": {...}}}`.
+    Returns `(email_id, verdict)`, or None for an event a desk does not act on."""
+    kind = (event.get("type") or "").lower()
+    data = event.get("data") or {}
+    email_id = data.get("email_id")
+    if not email_id:
+        return None
+    if kind == "email.delivered":
+        return email_id, Verdict(DeliveryOutcome.delivered, "Delivered to the mailbox", None)
+    if kind == "email.opened":
+        return email_id, Verdict(DeliveryOutcome.read, "Opened", None)
+    if kind == "email.bounced":
+        b = data.get("bounce") or {}
+        permanent = (b.get("type") or "").lower() in ("permanent", "hard", "")
+        msg = (b.get("message") or "").strip()
+        reason = msg[:300] if msg else ("The address does not exist" if permanent else "The mailbox would not take it just now")
+        return email_id, Verdict(DeliveryOutcome.bounced if permanent else DeliveryOutcome.undelivered, reason, b.get("subType") or b.get("type"))
+    if kind == "email.complained":
+        return email_id, Verdict(DeliveryOutcome.complained, "Marked as spam by the recipient", None)
+    if kind == "email.delivery_delayed":
+        return email_id, Verdict(DeliveryOutcome.undelivered, "Held up on the way — the mail server is retrying", "delayed")
+    if kind == "email.failed":
+        reason = ((data.get("failed") or {}).get("reason") or "Resend could not send it").strip()
+        return email_id, Verdict(DeliveryOutcome.undelivered, f"Refused before sending: {reason}"[:300], "failed")
+    # email.sent, email.clicked and email.scheduled tell us nothing a desk acts on.
+    return None
