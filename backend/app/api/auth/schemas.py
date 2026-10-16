@@ -20,6 +20,10 @@ class AuthTokenData(CustomBaseModel):
     # without ending all of them. Absent on tokens issued before sessions
     # existed, which are treated as live rather than signed out on deploy.
     sid: str | None = None
+    # Set when a club team member signed in with their own password: the
+    # session acts as the club, and this says who is behind it. Checked on
+    # every request (still a member; the role allows this) — see club_access.
+    member_id: int | None = None
 
 
 class ImpersonationRequest(CustomBaseModel):

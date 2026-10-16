@@ -193,17 +193,20 @@ async def apple_signin(
 
 
 async def create_access_refresh_tokens(
-    user: Users, session=None, request=None, sid: str | None = None
+    user: Users, session=None, request=None, sid: str | None = None, member_id: int | None = None
 ) -> Token:
     """
     `session` and `request` are optional so every existing caller keeps
     working: without them no session row is recorded and the tokens simply
     carry no sid, which the refresh path treats as live.
+
+    `member_id` makes it a club team member's session: `user` is the club's
+    own account, and the member rides along in both tokens and the session row.
     """
     if sid is None and session is not None:
         from app.api.auth import sessions
 
-        sid = str(await sessions.start(session, user.id, request=request))
+        sid = str(await sessions.start(session, user.id, request=request, member_id=member_id))
 
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     refresh_token_expires = timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
@@ -212,12 +215,14 @@ async def create_access_refresh_tokens(
         token_type="access_token",
         token_version=user.token_version,
         sid=sid,
+        member_id=member_id,
     )
     refresh_token_data = AuthTokenData(
         user_id=user.id,
         token_type="refresh_token",
         token_version=user.token_version,
         sid=sid,
+        member_id=member_id,
     )
     access_token = create_access_token(
         data=access_token_data.model_dump(), expires_delta=access_token_expires

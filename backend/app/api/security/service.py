@@ -242,11 +242,19 @@ async def overview(session, user, current_sid: str | None) -> dict:
     mine = or_(SignInAttempts.user_id == user.id, SignInAttempts.identifier.in_([v for v in ((user.username or "").lower(), (user.email or "").lower()) if v]))
 
     sessions_out = []
-    for s in await session_store.list_for_user(session, user.id):
+    live = await session_store.list_for_user(session, user.id)
+    member_ids = {s.member_id for s in live if s.member_id}
+    names = {}
+    if member_ids:
+        from app.api.club_access.models import ClubMembers
+
+        names = {m.id: (m.full_name or m.email) for m in (await session.scalars(select(ClubMembers).where(ClubMembers.id.in_(member_ids)))).all()}
+    for s in live:
         device, kind = parse_agent(s.user_agent)
         sessions_out.append(dict(
             id=str(s.id), device=device, kind=kind, place=await place_for(session, s.ip_address, resolve=False), ip_address=s.ip_address,
             created_at=_iso(s.created_at), last_seen_at=_iso(s.last_seen_at), current=str(s.id) == str(current_sid),
+            who=names.get(s.member_id) if s.member_id else None,
         ))
     sessions_out.sort(key=lambda s: (not s["current"], s["last_seen_at"] or ""), reverse=False)
     sessions_out = sorted(sessions_out, key=lambda s: (0 if s["current"] else 1, -(datetime.fromisoformat(s["last_seen_at"]).timestamp() if s["last_seen_at"] else 0)))

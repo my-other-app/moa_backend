@@ -12,6 +12,8 @@ class SessionOut(BaseModel):
     created_at: Optional[str]
     last_seen_at: Optional[str]
     current: bool
+    # A club team member's session on the club's account: who it is.
+    who: Optional[str] = None
 
 
 class Counts(BaseModel):

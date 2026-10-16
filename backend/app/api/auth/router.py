@@ -134,6 +134,36 @@ async def login_for_access_token(
     wait = await security.lockout_remaining(session, form_data.username, security.client_ip(request))
     if wait:
         await refuse(None, "blocked", status.HTTP_429_TOO_MANY_REQUESTS, f"Too many wrong passwords. Try again in {max(1, wait // 60)} min.", error_code="LOGIN_LOCKED")
+
+    # The clubs dashboard asks with scope "club": there, a club team member's
+    # own email and password open a session on the club's account. Only
+    # there — the same address may be someone's app account too, and the app
+    # must keep signing them in as themselves.
+    if "club" in (form_data.scopes or []):
+        from app.api.club_access import service as club_access
+        from app.api.clubs.models import Clubs
+
+        member = await club_access.authenticate(session, form_data.username, form_data.password)
+        if member is not None:
+            club = await session.get(Clubs, member.club_id)
+            owner = await get_user(session, club.user_id) if club is not None and not club.is_deleted and club.user_id else None
+            if owner is None or getattr(owner, "is_active", True) is False:
+                await refuse(None, "blocked", status.HTTP_403_FORBIDDEN, "This club's dashboard is closed right now. Ask the club's owner.", error_code="CLUB_UNAVAILABLE")
+            token = await service.create_access_refresh_tokens(owner, session=session, request=request, member_id=member.id)
+            first_time_here = await security.is_new_device(session, owner.id, request)
+            await security.record(session, request=request, identifier=member.email, user=owner, method="password", result="signed_in", session_id=security.sid_in(token.access_token))
+            member.last_seen_at = datetime.now(timezone.utc)
+            await session.commit()
+            if first_time_here and getattr(owner, "notify_new_device", True):
+                device, _ = security.parse_agent(security.user_agent_of(request))
+                ip = security.client_ip(request)
+                background.add_task(
+                    security.send_new_device_email, member.email, account=club.name, device=device,
+                    place=await security.place_for(session, ip, resolve=False), ip=ip, when=datetime.now(timezone.utc),
+                )
+            _set_auth_cookies(request, response, token.access_token, token.refresh_token)
+            return token
+
     user = await authenticate_user(session, form_data.username, form_data.password)
     if not user:
         await refuse(None, "wrong_password", status.HTTP_401_UNAUTHORIZED, "Incorrect username or password", headers={"WWW-Authenticate": "Bearer"})
@@ -236,11 +266,29 @@ async def refresh_access_token(
                 message="Token has been revoked, please log in again",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+        if payload.member_id:
+            from app.api.club_access.models import ClubMembers
+
+            member = await session.get(ClubMembers, payload.member_id)
+            if member is None or member.status != "active" or user.club is None or member.club_id != user.club.id:
+                raise CustomHTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    message="Your access to this club's dashboard was removed",
+                    error_code="ACCESS_REMOVED",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
         access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        # The new access token keeps what the session is: its id (so ending
+        # it from Security ends it now), whose behalf it acts on, and the club
+        # member behind it. Dropping them here quietly turned every session
+        # into a plain one an hour after sign-in.
         access_token_data = AuthTokenData(
             user_id=user.id,
             token_type="access_token",
             token_version=user.token_version,
+            sid=payload.sid,
+            impersonated_by=payload.impersonated_by,
+            member_id=payload.member_id,
         )
         access_token = create_access_token(
             data=access_token_data.model_dump(), expires_delta=access_token_expires
