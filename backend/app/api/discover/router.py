@@ -4,7 +4,7 @@ changes whether a post shows as liked."""
 import logging
 from typing import Literal, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Path, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Path, Query, Request, Response
 
 from app.api.discover import counters, geo, service
 from app.api.discover.schemas import BackfillResult, CategoryCount, ClubPage, ClubSearch, CounterFixes, EventPage, EventSearch, Home, Sitemap, Where
@@ -123,11 +123,12 @@ async def categories(request: Request, session: SessionDep, user: OptionalAuth) 
     return [CategoryCount(**c) for c in await service.categories(session, service.now_utc())]
 
 
-@router.get("/sitemap", summary="Every public event and club page, with when each last changed")
+@router.get("/sitemap", summary="Every public event and club page, with when each last changed", response_model=Sitemap)
 @limiter.limit(LIMIT, key_func=_visitor)
-async def sitemap(request: Request, session: SessionDep, user: OptionalAuth) -> Sitemap:
-    """Events still to come or held in the last year, and every club; at most 5000 of each."""
-    return Sitemap(**await service.sitemap(session))
+async def sitemap(request: Request, session: SessionDep, user: OptionalAuth) -> Response:
+    """Events still to come or held in the last year, and every club; at most 5000 of each.
+    The body is made and checked against Sitemap once a minute (service.sitemap_json)."""
+    return Response(content=await service.sitemap_json(session), media_type="application/json")
 
 
 @admin_router.post("/geo-backfill", summary="Read the point out of every event and club map link that has none yet")

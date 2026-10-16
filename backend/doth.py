@@ -1,4 +1,5 @@
 import asyncio
+import gc
 import traceback
 import uuid
 from contextlib import asynccontextmanager
@@ -43,6 +44,13 @@ async def lifespan(app: FastAPI):
     from app.api.live.service import sweep_loop as feedback_sweep_loop
 
     feedback = asyncio.create_task(feedback_sweep_loop())
+    # What import and startup built (models, routes, schemas, the S3 service
+    # model: some 740,000 objects) lives as long as the process. Frozen out
+    # of the collector's reach, a full collection no longer walks all of it:
+    # on the discover benchmark those walks were the 100+ ms tail of requests
+    # that allocate a lot (scripts/bench/RESULTS.md).
+    gc.collect()
+    gc.freeze()
     yield
     sweeper.cancel()
     closer.cancel()

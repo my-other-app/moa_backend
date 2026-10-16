@@ -33,6 +33,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
+import orjson
+
 from sqlalchemy import and_, bindparam, case, exists, func, or_, select, text, true, union
 from sqlalchemy.orm import aliased, contains_eager, selectinload
 
@@ -855,6 +857,19 @@ async def sitemap(session, now: Optional[datetime] = None) -> dict:
     for every crawler, so kept for the minute."""
     now = now or now_utc()
     return await cache.shared.remember(("sitemap", cache.minute(now)), lambda: _sitemap(session, now))
+
+
+async def sitemap_json(session, now: Optional[datetime] = None) -> bytes:
+    """The sitemap as the response body, made once a minute: building and
+    checking 6,500 entries for every request cost more than reading them."""
+    from app.api.discover.schemas import Sitemap
+
+    now = now or now_utc()
+
+    async def build() -> bytes:
+        return orjson.dumps(Sitemap(**await sitemap(session, now)).model_dump(mode="json"))
+
+    return await cache.shared.remember(("sitemap-json", cache.minute(now)), build)
 
 
 # ─── Threads ─────────────────────────────────────────────────────────────

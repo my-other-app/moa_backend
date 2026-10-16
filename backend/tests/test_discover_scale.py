@@ -820,3 +820,26 @@ async def test_the_app_list_filters_by_interest_once_each_in_date_order(client, 
     r = await client.get("/api/v1/events/list", params={"interest_ids": f"{a.id},{b.id}", "is_ended": "false", "limit": 10}, headers=token)
     assert r.status_code == 200, r.text  # was a 500: DISTINCT cannot compare json[]
     assert [x["id"] for x in r.json()["items"]] == [e.id for e in sorted(made[:3], key=lambda e: (e.event_datetime, e.id))]
+
+
+async def test_the_sitemap_lists_public_pages_and_is_served_from_the_minute_cache(client, session, shared_cache, statements):
+    w = World(session, seed=13)
+    await w.base(n_users=1)
+    [club] = await w.clubs_at([("Mapped Club", BLR, True)])
+    [ghost] = await w.clubs_at([("Hidden Mapped Club", BLR, True)], verified=False)
+    now = w.now
+    shown = Events(slug=f"sm-{uuid.uuid4().hex[:6]}", name="On Soon", images=[], event_datetime=now + timedelta(days=2), duration=2.0, club_id=club.id, category_id=w.categories[0].id, lifecycle=EventStatus.published)
+    held = Events(slug=f"sm-{uuid.uuid4().hex[:6]}", name="Held", images=[], event_datetime=now - timedelta(days=20), duration=2.0, club_id=club.id, category_id=w.categories[0].id, lifecycle=EventStatus.closed)
+    draft = Events(slug=f"sm-{uuid.uuid4().hex[:6]}", name="Draft", images=[], event_datetime=now + timedelta(days=2), duration=2.0, club_id=club.id, category_id=w.categories[0].id, lifecycle=EventStatus.draft)
+    old = Events(slug=f"sm-{uuid.uuid4().hex[:6]}", name="Long Ago", images=[], event_datetime=now - timedelta(days=400), duration=2.0, club_id=club.id, category_id=w.categories[0].id, lifecycle=EventStatus.archived)
+    session.add_all([shown, held, draft, old])
+    await session.commit()
+    first = await client.get(f"{API}/sitemap")
+    assert first.status_code == 200 and first.headers["content-type"].startswith("application/json")
+    body = first.json()
+    assert [e["slug"] for e in body["events"]] == [shown.slug, held.slug]
+    assert [c["slug"] for c in body["clubs"]] == [club.slug] and ghost.slug not in str(body)
+    assert all(set(e) == {"slug", "updated_at"} for e in body["events"] + body["clubs"])
+    statements.clear()
+    assert (await client.get(f"{API}/sitemap")).json() == body
+    assert not [s for s in statements if "FROM events" in s]
