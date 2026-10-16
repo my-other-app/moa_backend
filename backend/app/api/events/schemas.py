@@ -428,6 +428,14 @@ class EventListResponseSelf(CustomBaseModel):
     attended_count: int = Field(0)
     #: Where the event is on its status clock: draft, published, live, closed, archived.
     status: str = Field("published")
+    #: What the organiser checks the row for.
+    checked_in: int = Field(0)
+    max_participants: Optional[int] = Field(None)
+    collected: float = Field(0)
+    outstanding: float = Field(0)
+    door_open: bool = Field(False)
+    registration_open: bool = Field(False)
+    ends_at: Optional[datetime] = Field(None)
 
 
 class EventAdminListResponse(CustomBaseModel):
