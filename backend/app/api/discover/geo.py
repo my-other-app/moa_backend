@@ -290,6 +290,27 @@ async def resolve_and_store(kind: str, obj_id: int) -> bool:
 _tried: dict[tuple[str, int], float] = {}
 RETRY_AFTER = 6 * 3600
 _backfilling = False
+# How often a page view may look for rows still without a point. The look is
+# two queries; once a minute is plenty for a backfill that runs after the
+# page has answered.
+SCAN_EVERY = 60.0
+_last_scan = -SCAN_EVERY
+
+
+def scan_due() -> bool:
+    """Whether this page view should look for rows to backfill (and, if so, the
+    next one within SCAN_EVERY seconds should not)."""
+    global _last_scan
+    now = time.monotonic()
+    if now - _last_scan < SCAN_EVERY:
+        return False
+    _last_scan = now
+    return True
+
+
+def reset_scan() -> None:
+    global _last_scan
+    _last_scan = -SCAN_EVERY
 
 
 async def missing(session, limit: Optional[int] = None, *, skip_recent: bool = True) -> list[tuple[str, int]]:
@@ -337,6 +358,17 @@ async def backfill(items: list[tuple[str, int]]) -> None:
         _backfilling = False
 
 
+async def backfill_missing(limit: int) -> None:
+    """The lazy backfill a page view starts: find a few rows still without a
+    point, then follow their links. After the response; never raises."""
+    try:
+        async with session_scope() as session:
+            pending = await missing(session, limit)
+        await backfill(pending)
+    except Exception:  # noqa: BLE001
+        logger.warning("geo backfill failed", exc_info=True)
+
+
 async def backfill_all(session) -> dict:
     """Every row with a link and no point: read what can be read here, follow the rest."""
     from app.api.clubs.models import Clubs
@@ -366,13 +398,106 @@ async def backfill_all(session) -> dict:
 
 # ─── Distances ────────────────────────────────────────────────────────────
 
+EARTH_KM = 6371.0088
+# A box a hair wider than the circle: rounding in the trigonometry must never
+# leave out a point the exact distance keeps (1e-7 degrees is about a centimetre).
+_BOX_PAD = 1e-7
+
 
 def km(a_lat: float, a_lng: float, b_lat: float, b_lng: float) -> float:
     """Great-circle distance (haversine)."""
     p1, p2 = math.radians(a_lat), math.radians(b_lat)
     dp, dl = p2 - p1, math.radians(b_lng - a_lng)
     h = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
-    return 2 * 6371.0088 * math.asin(min(1.0, math.sqrt(h)))
+    return 2 * EARTH_KM * math.asin(min(1.0, math.sqrt(h)))
+
+
+def km_sql(lat: float, lng: float, lat_col, lng_col):
+    """`km` from a fixed point to a row's point, as SQL: the same formula, step
+    for step, so the database orders and filters by the distance this module
+    reports. The fixed point's half is worked out here."""
+    from sqlalchemy import func
+
+    p1 = math.radians(lat)
+    p2 = func.radians(lat_col)
+    dp, dl = p2 - p1, func.radians(lng_col - lng)
+    # Halved by multiplying: x * 0.5 is exactly x / 2 in floating point, and
+    # SQLAlchemy would turn "/ 2" into a NUMERIC division.
+    h = func.power(func.sin(dp * 0.5), 2.0) + math.cos(p1) * func.cos(p2) * func.power(func.sin(dl * 0.5), 2.0)
+    return (2 * EARTH_KM) * func.asin(func.least(1.0, func.sqrt(h)))
+
+
+Box = tuple[float, float, list[tuple[float, float]]]
+
+
+def bbox(lat: float, lng: float, radius_km: float) -> Optional[Box]:
+    """The latitude/longitude box that holds every point within `radius_km` of
+    (lat, lng) on the sphere `km` measures: (south, north, [(west, east), …]).
+
+    A B-tree on lat/lng can find the rows inside it; the exact distance then
+    decides. Longitude spans the circle's true extent, asin(sin d / cos φ),
+    not d / cos φ, which falls short away from the equator. Two longitude
+    ranges when the box crosses the antimeridian; every longitude when the
+    circle takes in a pole. None when the circle covers the whole sphere and a
+    box would rule nothing out."""
+    if radius_km < 0:
+        return None
+    d = radius_km / EARTH_KM  # the angular radius
+    if d >= math.pi:
+        return None
+    phi = math.radians(lat)
+    south, north = phi - d, phi + d
+    if south <= -math.pi / 2 or north >= math.pi / 2:
+        # A pole is inside: every longitude, from the far edge to the pole.
+        return (max(math.degrees(south), -90.0) - _BOX_PAD, min(math.degrees(north), 90.0) + _BOX_PAD, [(-180.0, 180.0)])
+    dl = math.degrees(math.asin(min(1.0, math.sin(d) / math.cos(phi)))) + _BOX_PAD
+    west, east = lng - dl, lng + dl
+    if east - west >= 360:
+        ranges = [(-180.0, 180.0)]
+    elif west < -180:
+        ranges = [(west + 360, 180.0), (-180.0, east)]
+    elif east > 180:
+        ranges = [(west, 180.0), (-180.0, east - 360)]
+    else:
+        ranges = [(west, east)]
+    return (math.degrees(south) - _BOX_PAD, math.degrees(north) + _BOX_PAD, ranges)
+
+
+def in_box_sql(box: Optional[Box], lat_col, lng_col):
+    """SQL for "inside the box" (True when there is no box)."""
+    from sqlalchemy import and_, or_, true
+
+    if box is None:
+        return true()
+    south, north, ranges = box
+    lngs = [lng_col.between(w, e) for w, e in ranges]
+    return and_(lat_col.between(south, north), lngs[0] if len(lngs) == 1 else or_(*lngs))
+
+
+# ─── Cells: the coarse place a cached answer is kept for ──────────────────
+
+CELL_DEG = 0.25
+
+
+def cell(lat: float, lng: float) -> tuple[int, int]:
+    return (math.floor(lat / CELL_DEG), math.floor(lng / CELL_DEG))
+
+
+def cell_centre(c: tuple[int, int]) -> tuple[float, float]:
+    return ((c[0] + 0.5) * CELL_DEG, (c[1] + 0.5) * CELL_DEG)
+
+
+def cell_reach(c: tuple[int, int]) -> float:
+    """How far (km) any point of the cell can be from its centre: the farthest
+    corner, since distance from a point grows towards a lat/lng box's corners."""
+    clat, clng = cell_centre(c)
+    lat0, lng0 = c[0] * CELL_DEG, c[1] * CELL_DEG
+    return max(km(clat, clng, la, ln) for la in (lat0, lat0 + CELL_DEG) for ln in (lng0, lng0 + CELL_DEG))
+
+
+def cell_is_cacheable(c: tuple[int, int]) -> bool:
+    """Cells are kept away from the poles, where a lat/lng box stops being small."""
+    return -85.0 <= c[0] * CELL_DEG and (c[0] + 1) * CELL_DEG <= 85.0
 
 
 # ─── The visitor ──────────────────────────────────────────────────────────

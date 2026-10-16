@@ -11,12 +11,21 @@ from app.db.registry import *
 # pool_size/max_overflow give each worker process up to 30 concurrent
 # connections; check pool_size * settings.WORKERS against Postgres's
 # max_connections if WORKERS is ever increased beyond 1.
+# plan_cache_mode: asyncpg prepares every statement, and after five runs
+# Postgres may switch a prepared statement to one "generic" plan made without
+# the parameters' values. For a query whose best plan depends on them -- a
+# search for "ai" (no trigram to look up) against one for "robotics", or a
+# date that is now rather than any date -- the generic plan can be ten times
+# slower (scripts/bench/RESULTS.md has one). Planning each run with the real
+# values costs a fraction of a millisecond, which is what every statement
+# paid for its first five runs anyway.
 engine = create_async_engine(
     settings.DATABASE_URL,
     pool_size=10,
     max_overflow=20,
     pool_recycle=1800,
     pool_pre_ping=True,
+    connect_args={"server_settings": {"plan_cache_mode": "force_custom_plan"}},
 )
 
 # Shared so tests can build their own session against the same semantics.

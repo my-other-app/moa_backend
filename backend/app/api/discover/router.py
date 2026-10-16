@@ -6,8 +6,8 @@ from typing import Literal, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Path, Query, Request
 
-from app.api.discover import geo, service
-from app.api.discover.schemas import BackfillResult, CategoryCount, ClubPage, ClubSearch, EventPage, EventSearch, Home, Sitemap, Where
+from app.api.discover import counters, geo, service
+from app.api.discover.schemas import BackfillResult, CategoryCount, ClubPage, ClubSearch, CounterFixes, EventPage, EventSearch, Home, Sitemap, Where
 from app.api.threads.schemas import ThreadPage
 from app.core.auth.dependencies import AdminAuth, OptionalAuth
 from app.core.rate_limit import limiter
@@ -45,13 +45,10 @@ async def locate(request: Request, user: OptionalAuth, lat: Optional[float] = La
 async def home(request: Request, session: SessionDep, user: OptionalAuth, background_tasks: BackgroundTasks, lat: Optional[float] = Lat, lng: Optional[float] = Lng) -> Home:
     where = await geo.where(request, lat, lng)
     data = await service.home(session, where, _viewer(user))
-    # A few rows whose map link has not been read yet, read after this answers.
-    try:
-        pending = await geo.missing(session, LAZY_BACKFILL)
-        if pending:
-            background_tasks.add_task(geo.backfill, pending)
-    except Exception:  # noqa: BLE001 — the page never waits on the backfill
-        logger.warning("could not schedule the geo backfill", exc_info=True)
+    # A few rows whose map link has not been read yet, looked for and read
+    # after this answers, at most once a minute (geo.scan_due).
+    if geo.scan_due():
+        background_tasks.add_task(geo.backfill_missing, LAZY_BACKFILL)
     return Home(**data)
 
 
@@ -69,7 +66,7 @@ async def events(
     lat: Optional[float] = Lat,
     lng: Optional[float] = Lng,
     radius_km: float = Query(50, ge=0, le=20000, description="Only with a known place, for in-person events; 0 for anywhere"),
-    sort: Literal["date", "distance", "popular"] = Query("date"),
+    sort: Literal["date", "distance", "popular", "relevance"] = Query("date", description="relevance: best match for `q` first (date without `q`)"),
     offset: int = Query(0, ge=0),
     limit: int = Query(24, ge=1, le=60),
 ) -> EventSearch:
@@ -136,3 +133,11 @@ async def sitemap(request: Request, session: SessionDep, user: OptionalAuth) -> 
 @admin_router.post("/geo-backfill", summary="Read the point out of every event and club map link that has none yet")
 async def geo_backfill(session: SessionDep, user: AdminAuth) -> BackfillResult:
     return BackfillResult(**await geo.backfill_all(session))
+
+
+@admin_router.post("/reconcile-counters", summary="Recount any event's going count or club's follower count that disagrees with its rows")
+async def reconcile_counters(session: SessionDep, user: AdminAuth) -> CounterFixes:
+    """Triggers keep both counts exact; this finds and puts right any that a
+    write with triggers switched off (a restore, say) left behind. Returns how
+    many were wrong: normally none."""
+    return CounterFixes(**await counters.reconcile(session))

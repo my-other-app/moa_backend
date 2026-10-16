@@ -6,26 +6,44 @@ over, by a club that is verified and not deleted; a club that is verified
 and not deleted. Once over, an event the club held still shows on the club
 page's past list, on its own page and in the sitemap, and nowhere else.
 
-The data set is small (college clubs), so the candidate rows are read once
-and distance, sorting and paging happen here, after the filters.
+Every list is filtered, ordered and paged by the database, so a request
+reads a page of rows plus what the indexes walk, whatever the number of
+events and clubs:
+
+- "Not over yet" and the order by date run on a partial index of what can be
+  shown (ix_events_shown_start).
+- Words are case-blind substrings (ILIKE) of the event's name or place, its
+  club's or its category's name, tested on what is on. A search that finds
+  nothing tries again by trigram word similarity, which forgives a typo,
+  through pg_trgm indexes.
+- Distance is the same haversine as geo.km, in SQL, behind a latitude/
+  longitude box (geo.bbox) that an index can find.
+- "Popular" sorts by events.going_count and clubs.follower_count, which
+  triggers keep exact; what a card shows is counted from the rows for the page.
+- The front page's sections each take a LIMIT, and the parts that are the
+  same for every visitor are kept for a minute (cache.py). "Near you" is
+  kept per quarter-degree cell as a short list that is provably enough for
+  any point in the cell, and finished for the visitor's own point, so it is
+  exactly what a fresh query would give.
 """
 from __future__ import annotations
 
+import heapq
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, exists, func, or_, select, text
-from sqlalchemy.orm import contains_eager, selectinload
+from sqlalchemy import and_, bindparam, case, exists, func, or_, select, text, true, union
+from sqlalchemy.orm import aliased, contains_eager, selectinload
 
 from app.api.agenda import service as agenda
 from app.api.closeout.models import EventStatus
 from app.api.clubs import service as clubs_service
 from app.api.clubs.events_list import registration_open
-from app.api.clubs.models import ClubInterestsLink, Clubs, ClubSocials, ClubTeamMembers, ClubUsersLink
-from app.api.discover import geo
+from app.api.clubs.models import ClubInterestsLink, Clubs, ClubSocials, ClubTeamMembers
+from app.api.discover import cache, geo
 from app.api.events.documents import EVENT_TIMEZONE
-from app.api.events.models import EventCategories, EventInterestsLink, EventRegistrationsLink, Events
+from app.api.events.models import EventCategories, EventInterestsLink, Events, ends_at_sql
 from app.api.interests.models import Interests
 from app.api.organisers import service as organisers
 from app.api.sites import service as sites
@@ -39,11 +57,17 @@ IST = ZoneInfo("Asia/Kolkata")
 SHOWN = (EventStatus.published, EventStatus.live)
 HELD = (EventStatus.published, EventStatus.live, EventStatus.closed, EventStatus.archived)
 NEAR_KM = 50.0
+NEAR_COUNT = 12
+HOME_LIST = 8
+HOME_CLUBS = 8
+HOME_THREADS = 6
 CLUB_TEAM_ON_EVENT = 8
 ALSO_ON = 4
 SITEMAP_MAX = 5000
 SITEMAP_PAST = timedelta(days=365)
 WHENS = ("any", "today", "tomorrow", "this_week", "this_weekend", "next_week", "this_month")
+# Rounding slack when a cached pool is cut by distance: far below a metre.
+_SLACK_KM = 1e-6
 
 
 def now_utc() -> datetime:
@@ -56,8 +80,22 @@ def _aware(dt: Optional[datetime]) -> Optional[datetime]:
     return dt
 
 
+def _in(column, values):
+    """`column IN (…)` with the values written into the SQL rather than bound.
+
+    asyncpg prepares every statement, and after a few runs Postgres may plan
+    it once for any parameters; a partial index whose predicate names these
+    values (status IN ('published', 'live')) is only usable when the query
+    carries them as constants."""
+    return column.in_(bindparam(None, list(values), expanding=True, literal_execute=True))
+
+
+def _not_draft():
+    return Events.lifecycle != bindparam(None, EventStatus.draft, type_=Events.lifecycle.type, literal_execute=True)
+
+
 def _end_expr():
-    return Events.event_datetime + Events.duration * text("INTERVAL '1 hour'")
+    return ends_at_sql(Events)
 
 
 def _ends_at(e: Events) -> datetime:
@@ -119,7 +157,7 @@ def window(when: str, now: datetime) -> tuple[Optional[datetime], Optional[datet
 def _visible_where(now: datetime) -> list:
     return [
         Events.is_deleted == False,  # noqa: E712
-        Events.lifecycle.in_(SHOWN),
+        _in(Events.lifecycle, SHOWN),
         Clubs.is_verified == True,  # noqa: E712
         Clubs.is_deleted == False,  # noqa: E712
         _end_expr() >= now,
@@ -135,32 +173,111 @@ def _event_select():
     )
 
 
-def filtered(now: datetime, *, when: str = "any", category: Optional[int] = None, type_: str = "any", price: str = "any", q: Optional[str] = None, club_id: Optional[int] = None):
-    stmt = _event_select().where(*_visible_where(now))
+def _event_words(q: str):
+    """Words anywhere in the event's name or place, its club's name or its
+    category's name: case-blind substrings, as always.
+
+    Tested on what is on: the club and category sides are hashed lookups of
+    the few ids whose names match. Measured against the alternatives on
+    37,000 events (RESULTS.md): finding matches through trigram indexes over
+    every event, past ones included, costs more than this filter for any
+    word common enough to matter, because the events still to come are
+    already a small, indexed set."""
+    p = _like(q)
+    return or_(
+        Events.name.ilike(p, escape="\\"),
+        Events.location_name.ilike(p, escape="\\"),
+        Events.club_id.in_(select(Clubs.id).where(Clubs.name.ilike(p, escape="\\"), Clubs.is_deleted == False)),  # noqa: E712
+        Events.category_id.in_(select(EventCategories.id).where(EventCategories.name.ilike(p, escape="\\"), EventCategories.is_deleted == False)),  # noqa: E712
+    )
+
+
+def _matching(event_match, club_match, category_match):
+    """`events.id IN (…)`: the events (of any date; the caller filters)
+    whose own name or place, whose club's name, or whose category's name
+    matches. One arm per table, each through that table's trigram index, and
+    a semi-join the planner can drive from the matches."""
+    e1, e2, e3 = (aliased(Events, name=f"words_e{i}") for i in (1, 2, 3))
+    club = aliased(Clubs, name="words_club")
+    cat = aliased(EventCategories, name="words_category")
+    return Events.id.in_(union(
+        select(e1.id).where(event_match(e1), e1.is_deleted == False),  # noqa: E712
+        select(e2.id).join(club, club.id == e2.club_id).where(club_match(club), club.is_deleted == False, e2.is_deleted == False),  # noqa: E712
+        select(e3.id).join(cat, cat.id == e3.category_id).where(category_match(cat), cat.is_deleted == False, e3.is_deleted == False),  # noqa: E712
+    ))
+
+
+# How alike a word must be to count as a typo of it (pg_trgm word similarity;
+# its default, 0.6, misses "robtics" for "robotics" at 0.55, while 0.5 still
+# leaves out "Robots" at 0.38).
+FUZZY_THRESHOLD = 0.5
+
+
+def _event_words_fuzzy(q: str):
+    """The same places, by trigram word similarity (pg_trgm's `%>`): for when
+    a typo found nothing. Here the trigram indexes find the few candidates;
+    as a filter, `%>` costs several microseconds a row."""
+    q = q.strip()
+    return _matching(
+        lambda m: or_(m.name.op("%>")(q), m.location_name.op("%>")(q)),
+        lambda m: m.name.op("%>")(q),
+        lambda m: m.name.op("%>")(q),
+    )
+
+
+def _fuzzy_worthwhile(q: Optional[str]) -> bool:
+    """A trigram needs three characters; fewer would match everything or nothing."""
+    return bool(q and len(q.strip()) >= 3)
+
+
+async def _fuzzy(session) -> None:
+    """Use FUZZY_THRESHOLD for `%>` until this request's transaction ends."""
+    await session.execute(text(f"SET LOCAL pg_trgm.word_similarity_threshold = {FUZZY_THRESHOLD}"))
+
+
+def _relevance(q: str):
+    """How well an event answers the words: the best of its name, its club's,
+    its place's and its category's, in that order of weight."""
+    q = q.strip()
+    return func.greatest(
+        func.word_similarity(q, Events.name),
+        0.8 * func.word_similarity(q, Clubs.name),
+        0.6 * func.word_similarity(q, Events.location_name),
+        0.5 * func.word_similarity(q, EventCategories.name),
+    )
+
+
+def _popularity():
+    return Events.going_count + func.coalesce(Events.page_views, 0)
+
+
+def _conditions(now: datetime, *, when: str = "any", category: Optional[int] = None, type_: str = "any", price: str = "any", club_id: Optional[int] = None) -> list:
+    conds = _visible_where(now)
     start, end = window(when, now)
     if start is not None:
-        stmt = stmt.where(_end_expr() >= start)
+        conds.append(_end_expr() >= start)
     if end is not None:
-        stmt = stmt.where(Events.event_datetime < end)
+        conds.append(Events.event_datetime < end)
     if category:
-        stmt = stmt.where(Events.category_id == category)
+        conds.append(Events.category_id == category)
     if type_ == "online":
-        stmt = stmt.where(Events.is_online == True)  # noqa: E712
+        conds.append(Events.is_online == True)  # noqa: E712
     elif type_ == "in_person":
-        stmt = stmt.where(func.coalesce(Events.is_online, False) == False)  # noqa: E712
+        conds.append(func.coalesce(Events.is_online, False) == False)  # noqa: E712
     if price == "free":
-        stmt = stmt.where(func.coalesce(Events.has_fee, False) == False)  # noqa: E712
+        conds.append(func.coalesce(Events.has_fee, False) == False)  # noqa: E712
     elif price == "paid":
-        stmt = stmt.where(Events.has_fee == True)  # noqa: E712
-    if q and q.strip():
-        p = _like(q)
-        stmt = stmt.where(or_(
-            Events.name.ilike(p, escape="\\"), Clubs.name.ilike(p, escape="\\"),
-            Events.location_name.ilike(p, escape="\\"), EventCategories.name.ilike(p, escape="\\"),
-        ))
+        conds.append(Events.has_fee == True)  # noqa: E712
     if club_id is not None:
-        stmt = stmt.where(Events.club_id == club_id)
-    return stmt.order_by(Events.event_datetime, Events.id)
+        conds.append(Events.club_id == club_id)
+    return conds
+
+
+def filtered(now: datetime, *, when: str = "any", category: Optional[int] = None, type_: str = "any", price: str = "any", q: Optional[str] = None, club_id: Optional[int] = None):
+    conds = _conditions(now, when=when, category=category, type_=type_, price=price, club_id=club_id)
+    if q and q.strip():
+        conds.append(_event_words(q))
+    return _event_select().where(*conds).order_by(Events.event_datetime, Events.id)
 
 
 async def _rows(session, stmt) -> list[Events]:
@@ -168,20 +285,38 @@ async def _rows(session, stmt) -> list[Events]:
 
 
 async def going_counts(session, ids: list[int]) -> dict[int, int]:
+    """How many are going to each of these events: the trigger-kept counter
+    (exactly the registrations not deleted), read as plain columns so a copy of
+    the event already in this session cannot answer with an older number. A
+    primary-key read per event, where counting the rows of a popular event
+    read thousands."""
     if not ids:
         return {}
-    rows = await session.execute(
-        select(EventRegistrationsLink.event_id, func.count())
-        .where(EventRegistrationsLink.event_id.in_(ids), EventRegistrationsLink.is_deleted == False)  # noqa: E712
-        .group_by(EventRegistrationsLink.event_id)
-    )
-    return {k: int(v) for k, v in rows.all()}
+    rows = await session.execute(select(Events.id, Events.going_count).where(Events.id.in_(ids)))
+    return {k: int(v) for k, v in rows.all() if v}
 
 
 def _event_km(e: Events, here) -> Optional[float]:
     if here is None or e.is_online or e.lat is None or e.lng is None:
         return None
     return geo.km(here[0], here[1], e.lat, e.lng)
+
+
+def _in_person_point():
+    return and_(func.coalesce(Events.is_online, False) == False, Events.lat.isnot(None), Events.lng.isnot(None))  # noqa: E712
+
+
+def _within(here, radius_km: float):
+    """Online events are anywhere, and an in-person one without a point cannot
+    be ruled out; the rest must be inside the radius. The box goes first so the
+    exact distance is only worked out for rows inside it."""
+    box = geo.bbox(here[0], here[1], radius_km)
+    return or_(
+        Events.is_online == True,  # noqa: E712
+        Events.lat.is_(None),
+        Events.lng.is_(None),
+        and_(geo.in_box_sql(box, Events.lat, Events.lng), geo.km_sql(here[0], here[1], Events.lat, Events.lng) <= radius_km),
+    )
 
 
 def status_of(e: Events, now: datetime, going: int) -> str:
@@ -224,6 +359,18 @@ def card(e: Events, now: datetime, going: int, distance: Optional[float] = None)
     )
 
 
+def _card_km(c: dict, here) -> Optional[float]:
+    """A card's distance from the visitor, from what the card carries (as _event_km)."""
+    if here is None or c["is_online"] or c["lat"] is None or c["lng"] is None:
+        return None
+    return round(geo.km(here[0], here[1], c["lat"], c["lng"]), 1)
+
+
+def _placed(cards_: list[dict], here) -> list[dict]:
+    """Copies of shared cards with the visitor's distance on them."""
+    return [dict(c, distance_km=_card_km(c, here)) for c in cards_]
+
+
 async def cards(session, rows: list[Events], now: datetime, here=None, going: Optional[dict] = None) -> list[dict]:
     if going is None:
         going = await going_counts(session, [e.id for e in rows])
@@ -240,8 +387,7 @@ async def category_counts(session, now: datetime) -> dict[int, int]:
     return {k: int(v) for k, v in rows.all()}
 
 
-async def categories(session, now: datetime, *, only_upcoming: bool = False) -> list[dict]:
-    """Every category the product ships plus any a club added that has something on; most upcoming first."""
+async def _categories(session, now: datetime, only_upcoming: bool) -> list[dict]:
     counts = await category_counts(session, now)
     rows = (await session.scalars(select(EventCategories).where(EventCategories.is_deleted == False))).all()  # noqa: E712
     out = [
@@ -253,27 +399,91 @@ async def categories(session, now: datetime, *, only_upcoming: bool = False) -> 
     return out
 
 
+async def categories(session, now: datetime, *, only_upcoming: bool = False) -> list[dict]:
+    """Every category the product ships plus any a club added that has something on; most upcoming first.
+    The same for everyone, so kept for the minute."""
+    got = await cache.shared.remember(("categories", only_upcoming, cache.minute(now)), lambda: _categories(session, now, only_upcoming))
+    return [dict(c) for c in got]
+
+
+async def _count(session, stmt) -> int:
+    return int(await session.scalar(stmt) or 0)
+
+
+def _event_count(conds: list):
+    return select(func.count(Events.id)).select_from(Events).join(Clubs, Clubs.id == Events.club_id).where(*conds)
+
+
+async def _page(session, conds: list, keys: list[tuple], offset: int, limit: int, *, with_category: bool = False) -> list[Events]:
+    """One page of events in the order of `keys` ((expression, descending)).
+
+    The sort runs on narrow rows (the id and the keys), and only the page's
+    rows are then read in full with their club and category: sorting ten
+    thousand whole rows to keep twenty-four was most of the work."""
+    if limit <= 0:
+        return []
+    narrow = select(Events.id.label("id"), *[k.label(f"k{i}") for i, (k, _) in enumerate(keys)]).select_from(Events).join(Clubs, Clubs.id == Events.club_id)
+    if with_category:
+        narrow = narrow.outerjoin(EventCategories, EventCategories.id == Events.category_id)
+    page = (
+        narrow.where(*conds)
+        .order_by(*[k.desc() if d else k for k, d in keys])
+        .offset(offset).limit(limit)
+        .subquery("page")
+    )
+    order = [page.c[f"k{i}"].desc() if d else page.c[f"k{i}"] for i, (_, d) in enumerate(keys)]
+    return await _rows(session, _event_select().join(page, page.c.id == Events.id).order_by(*order))
+
+
 async def search_events(
     session, where: dict, *, q: Optional[str], when: str, category: Optional[int], type_: str, price: str,
     radius_km: float, sort: str, offset: int, limit: int, now: Optional[datetime] = None,
 ) -> dict:
     now = now or now_utc()
-    rows = await _rows(session, filtered(now, when=when, category=category, type_=type_, price=price, q=q))
     here = _here(where)
-    dist = {e.id: _event_km(e, here) for e in rows}
-    # Online events are anywhere; an in-person one without a point cannot be ruled out, so it stays.
-    if here is not None and type_ != "online" and radius_km > 0:
-        rows = [e for e in rows if e.is_online or dist[e.id] is None or dist[e.id] <= radius_km]
-    going = await going_counts(session, [e.id for e in rows])
-    if sort == "distance" and here is not None:
-        rows.sort(key=lambda e: (dist[e.id] is None, dist[e.id] or 0.0, _aware(e.event_datetime), e.id))
+    conds = _conditions(now, when=when, category=category, type_=type_, price=price)
+    radius = here is not None and type_ != "online" and radius_km > 0
+    if radius:
+        conds.append(_within(here, radius_km))
+    words = bool(q and q.strip())
+    total = await _count(session, _event_count(conds + ([_event_words(q)] if words else [])))
+    if words:
+        if total == 0 and _fuzzy_worthwhile(q):
+            # Nothing has these letters in this order: forgive a typo.
+            await _fuzzy(session)
+            conds.append(_event_words_fuzzy(q))
+            total = await _count(session, _event_count(conds))
+        else:
+            conds.append(_event_words(q))
+
+    by_date = [(Events.event_datetime, False), (Events.id, False)]
+    page: list[Events] = []
+    if total <= offset:
+        pass
+    elif sort == "distance" and here is not None:
+        # Nearest first, then everything without a distance (online, or no
+        # point) by date. The two parts are paged as one list; the first can
+        # use the point index, inside the radius's box.
+        placed = conds + [_in_person_point()]
+        if radius:
+            placed.append(geo.in_box_sql(geo.bbox(here[0], here[1], radius_km), Events.lat, Events.lng))
+        unplaced = conds + [or_(Events.is_online == True, Events.lat.is_(None), Events.lng.is_(None))]  # noqa: E712
+        n_placed = await _count(session, _event_count(placed))
+        if offset < n_placed:
+            page = await _page(session, placed, [(geo.km_sql(here[0], here[1], Events.lat, Events.lng), False), *by_date], offset, limit)
+        if offset + limit > n_placed:
+            page += await _page(session, unplaced, by_date, max(0, offset - n_placed), limit - len(page))
     elif sort == "popular":
-        rows.sort(key=lambda e: (-(going.get(e.id, 0) + (e.page_views or 0)), _aware(e.event_datetime), e.id))
-    page = rows[offset:offset + limit]
+        page = await _page(session, conds, [(_popularity(), True), *by_date], offset, limit)
+    elif sort == "relevance" and words:
+        page = await _page(session, conds, [(_relevance(q), True), *by_date], offset, limit, with_category=True)
+    else:
+        page = await _page(session, conds, by_date, offset, limit)
+    going = await going_counts(session, [e.id for e in page])
     cats = [dict(id=c["id"], name=c["name"], upcoming=c["upcoming"]) for c in await categories(session, now, only_upcoming=True)]
     return dict(
-        items=[card(e, now, going.get(e.id, 0), dist[e.id]) for e in page],
-        total=len(rows), offset=offset, limit=limit, where=where, categories=cats,
+        items=[card(e, now, going.get(e.id, 0), _event_km(e, here)) for e in page],
+        total=total, offset=offset, limit=limit, where=where, categories=cats,
     )
 
 
@@ -284,34 +494,33 @@ def _club_visible():
     return [Clubs.is_verified == True, Clubs.is_deleted == False]  # noqa: E712
 
 
-async def club_points(session, clubs: list[Clubs]) -> dict[int, tuple[float, float]]:
-    """Where each club is: its own point, else the middle of its in-person events' points."""
-    out = {c.id: (c.lat, c.lng) for c in clubs if c.lat is not None and c.lng is not None}
-    need = [c.id for c in clubs if c.id not in out]
-    if need:
-        rows = await session.execute(
-            select(Events.club_id, func.avg(Events.lat), func.avg(Events.lng))
-            .where(
-                Events.club_id.in_(need), Events.lat.isnot(None), Events.lng.isnot(None),
-                Events.is_deleted == False, Events.lifecycle != EventStatus.draft,  # noqa: E712
-                func.coalesce(Events.is_online, False) == False,  # noqa: E712
-            )
-            .group_by(Events.club_id)
+def _club_point():
+    """Where a club is, as SQL: its own point, else the middle of its
+    in-person events' points. The events are only read for a club without
+    its own point (the lateral's condition on the club is checked first)."""
+    events_point = (
+        select(func.avg(Events.lat).label("lat"), func.avg(Events.lng).label("lng"))
+        .where(
+            Events.club_id == Clubs.id, Events.lat.isnot(None), Events.lng.isnot(None),
+            Events.is_deleted == False, _not_draft(),  # noqa: E712
+            func.coalesce(Events.is_online, False) == False,  # noqa: E712
+            or_(Clubs.lat.is_(None), Clubs.lng.is_(None)),
         )
-        for club_id, lat, lng in rows.all():
-            out[club_id] = (float(lat), float(lng))
-    return out
+        .lateral("club_events_point")
+    )
+    own = and_(Clubs.lat.isnot(None), Clubs.lng.isnot(None))
+    lat = case((own, Clubs.lat), else_=events_point.c.lat)
+    lng = case((own, Clubs.lng), else_=events_point.c.lng)
+    return events_point, lat, lng
 
 
 async def follower_counts(session, ids: list[int]) -> dict[int, int]:
+    """How many follow each of these clubs: the trigger-kept counter (follows
+    that are following and not deleted), read as plain columns (see going_counts)."""
     if not ids:
         return {}
-    rows = await session.execute(
-        select(ClubUsersLink.club_id, func.count())
-        .where(ClubUsersLink.club_id.in_(ids), ClubUsersLink.is_following == True, ClubUsersLink.is_deleted == False)  # noqa: E712
-        .group_by(ClubUsersLink.club_id)
-    )
-    return {k: int(v) for k, v in rows.all()}
+    rows = await session.execute(select(Clubs.id, Clubs.follower_count).where(Clubs.id.in_(ids)))
+    return {k: int(v) for k, v in rows.all() if v}
 
 
 async def _upcoming_counts(session, ids: list[int], now: datetime) -> dict[int, int]:
@@ -370,27 +579,30 @@ async def club_cards(session, clubs: list[Clubs], now: datetime, *, distances: O
     ]
 
 
-async def _club_rows(session, *, q: Optional[str] = None, interest: Optional[int] = None) -> list[Clubs]:
-    stmt = select(Clubs).where(*_club_visible())
-    if q and q.strip():
-        p = _like(q)
-        stmt = stmt.where(or_(Clubs.name.ilike(p, escape="\\"), Clubs.tagline.ilike(p, escape="\\"), Clubs.location_name.ilike(p, escape="\\")))
-    if interest:
-        stmt = stmt.where(exists(
-            select(ClubInterestsLink.id).where(
-                ClubInterestsLink.club_id == Clubs.id, ClubInterestsLink.interest_id == interest, ClubInterestsLink.is_deleted == False,  # noqa: E712
-            )
-        ))
-    return list((await session.scalars(stmt.order_by(Clubs.id))).all())
+def _club_words(q: str):
+    p = _like(q)
+    return or_(Clubs.name.ilike(p, escape="\\"), Clubs.tagline.ilike(p, escape="\\"), Clubs.location_name.ilike(p, escape="\\"))
 
 
-def _club_distances(clubs: list[Clubs], points: dict, here) -> dict[int, Optional[float]]:
-    if here is None:
-        return {c.id: None for c in clubs}
-    return {c.id: (geo.km(here[0], here[1], *points[c.id]) if c.id in points else None) for c in clubs}
+def _club_words_fuzzy(q: str):
+    q = q.strip()
+    return or_(Clubs.name.op("%>")(q), Clubs.tagline.op("%>")(q), Clubs.location_name.op("%>")(q))
 
 
-async def top_interests(session, limit: int = 16) -> list[dict]:
+def _club_interest(interest: int):
+    return exists(
+        select(ClubInterestsLink.id).where(
+            ClubInterestsLink.club_id == Clubs.id, ClubInterestsLink.interest_id == interest, ClubInterestsLink.is_deleted == False,  # noqa: E712
+        )
+    )
+
+
+def _popular_clubs_order():
+    """Most followed first, then by name as Python orders it (code points), then id."""
+    return [Clubs.follower_count.desc(), func.lower(Clubs.name).collate("C"), Clubs.id]
+
+
+async def _top_interests(session, limit: int) -> list[dict]:
     n = func.count(func.distinct(Clubs.id))
     rows = await session.execute(
         select(Interests.id, Interests.name, n)
@@ -404,27 +616,64 @@ async def top_interests(session, limit: int = 16) -> list[dict]:
     return [dict(id=i, name=name, clubs=int(c)) for i, name, c in rows.all()]
 
 
+async def top_interests(session, limit: int = 16, now: Optional[datetime] = None) -> list[dict]:
+    now = now or now_utc()
+    got = await cache.shared.remember(("interests", limit, cache.minute(now)), lambda: _top_interests(session, limit))
+    return [dict(i) for i in got]
+
+
 async def search_clubs(
     session, where: dict, *, q: Optional[str], interest: Optional[int], radius_km: float, sort: str,
     offset: int, limit: int, now: Optional[datetime] = None,
 ) -> dict:
     now = now or now_utc()
-    rows = await _club_rows(session, q=q, interest=interest)
     here = _here(where)
-    dist = _club_distances(rows, await club_points(session, rows), here)
-    if here is not None and radius_km > 0:
-        rows = [c for c in rows if dist[c.id] is None or dist[c.id] <= radius_km]
-    followers = await follower_counts(session, [c.id for c in rows])
+    conds = list(_club_visible())
+    if interest:
+        conds.append(_club_interest(interest))
+    joined = None
+    dist = lat = lng = None
+    if here is not None:
+        joined, lat, lng = _club_point()
+        dist = case((and_(lat.isnot(None), lng.isnot(None)), geo.km_sql(here[0], here[1], lat, lng)), else_=None)
+        if radius_km > 0:
+            conds.append(or_(dist.is_(None), dist <= radius_km))
+
+    def counted(extra: list):
+        stmt = select(func.count(Clubs.id)).select_from(Clubs)
+        if joined is not None:
+            stmt = stmt.outerjoin(joined, true())
+        return stmt.where(*conds, *extra)
+
+    words = bool(q and q.strip())
+    total = await _count(session, counted([_club_words(q)] if words else []))
+    if words:
+        if total == 0 and _fuzzy_worthwhile(q):
+            await _fuzzy(session)
+            conds.append(_club_words_fuzzy(q))
+            total = await _count(session, counted([]))
+        else:
+            conds.append(_club_words(q))
+
     if sort == "nearby" and here is not None:
-        rows.sort(key=lambda c: (dist[c.id] is None, dist[c.id] or 0.0, -followers.get(c.id, 0), c.id))
+        order = [dist.is_(None), dist, Clubs.follower_count.desc(), Clubs.id]
     elif sort == "newest":
-        rows.sort(key=lambda c: (_aware(c.created_at) or datetime.min.replace(tzinfo=timezone.utc), c.id), reverse=True)
+        order = [Clubs.created_at.desc(), Clubs.id.desc()]
     else:
-        rows.sort(key=lambda c: (-followers.get(c.id, 0), (c.name or "").lower(), c.id))
-    page = rows[offset:offset + limit]
+        order = _popular_clubs_order()
+    if here is not None:
+        stmt = select(Clubs, lat, lng).outerjoin(joined, true())
+    else:
+        stmt = select(Clubs)
+    rows = (await session.execute(stmt.where(*conds).order_by(*order).offset(offset).limit(limit))).all() if total > offset else []
+    page = [r[0] for r in rows]
+    distances = {}
+    if here is not None:
+        for c, la, ln in rows:
+            distances[c.id] = geo.km(here[0], here[1], float(la), float(ln)) if la is not None and ln is not None else None
     return dict(
-        items=await club_cards(session, page, now, distances=dist, followers=followers),
-        total=len(rows), offset=offset, limit=limit, where=where, interests=await top_interests(session),
+        items=await club_cards(session, page, now, distances=distances),
+        total=total, offset=offset, limit=limit, where=where, interests=await top_interests(session, now=now),
     )
 
 
@@ -453,7 +702,7 @@ async def club_page(session, slug: str, viewer_id: Optional[int], now: Optional[
 
     upcoming = await _rows(session, filtered(now, club_id=club.id).limit(60))
     past_where = [
-        Events.club_id == club.id, Events.is_deleted == False, Events.lifecycle.in_(HELD), _end_expr() < now,  # noqa: E712
+        Events.club_id == club.id, Events.is_deleted == False, _in(Events.lifecycle, HELD), _end_expr() < now,  # noqa: E712
     ]
     past = await _rows(session, _event_select().where(*past_where).order_by(Events.event_datetime.desc(), Events.id.desc()).limit(6))
     detail["events_held"] = int(await session.scalar(select(func.count(Events.id)).where(*past_where)) or 0)
@@ -485,7 +734,7 @@ def _public_where(now: datetime) -> list:
     return [
         Events.is_deleted == False,  # noqa: E712
         *_club_visible(),
-        or_(and_(Events.lifecycle.in_(SHOWN), end >= now), and_(Events.lifecycle.in_(HELD), end < now)),
+        or_(and_(_in(Events.lifecycle, SHOWN), end >= now), and_(_in(Events.lifecycle, HELD), end < now)),
     ]
 
 
@@ -583,10 +832,7 @@ async def event_page(session, ref: str, now: Optional[datetime] = None) -> dict:
 # ─── Sitemap ─────────────────────────────────────────────────────────────
 
 
-async def sitemap(session, now: Optional[datetime] = None) -> dict:
-    """Every page a search engine should know: events still to come or held in
-    the last year, and every club, each with when it last changed."""
-    now = now or now_utc()
+async def _sitemap(session, now: datetime) -> dict:
     events = (await session.execute(
         select(Events.slug, Events.updated_at)
         .join(Clubs, Clubs.id == Events.club_id)
@@ -601,6 +847,14 @@ async def sitemap(session, now: Optional[datetime] = None) -> dict:
         events=[dict(slug=slug, updated_at=_iso(at)) for slug, at in events],
         clubs=[dict(slug=slug, updated_at=_iso(at)) for slug, at in clubs],
     )
+
+
+async def sitemap(session, now: Optional[datetime] = None) -> dict:
+    """Every page a search engine should know: events still to come or held in
+    the last year, and every club, each with when it last changed. The same
+    for every crawler, so kept for the minute."""
+    now = now or now_utc()
+    return await cache.shared.remember(("sitemap", cache.minute(now)), lambda: _sitemap(session, now))
 
 
 # ─── Threads ─────────────────────────────────────────────────────────────
@@ -623,57 +877,192 @@ async def threads_feed(session, viewer_id: Optional[int], offset: int, limit: in
     return dict(items=await threads._shape(session, rows, by_id, viewer_id), total=total or 0, limit=limit, offset=offset)
 
 
+async def _for_viewer(session, shared_threads: list[dict], viewer_id: Optional[int]) -> list[dict]:
+    """Shared, anonymous post cards, with what this reader liked and voted for."""
+    if viewer_id is None or not shared_threads:
+        return [dict(t) for t in shared_threads]
+    import uuid
+
+    liked, voted = await threads._mine(session, [uuid.UUID(t["id"]) for t in shared_threads], viewer_id)
+    out = []
+    for t in shared_threads:
+        tid = uuid.UUID(t["id"])
+        poll = t["poll"]
+        if poll is not None:
+            option = voted.get(tid)
+            poll = dict(poll, voted_option_id=str(option) if option else None)
+        out.append(dict(t, liked=tid in liked, poll=poll))
+    return out
+
+
 # ─── Home ────────────────────────────────────────────────────────────────
 
 
-async def stats(session, upcoming: int) -> dict:
-    clubs = await session.scalar(select(func.count(Clubs.id)).where(*_club_visible()))
+CITIES_EVERY = 10  # minutes
+
+
+async def _cities(session) -> int:
     place = func.lower(func.trim(Events.location_name))
-    cities = await session.scalar(
+    n = await session.scalar(
         select(func.count(func.distinct(place)))
         .join(Clubs, Clubs.id == Events.club_id)
         .where(
-            Events.is_deleted == False, Events.lifecycle.in_(HELD), *_club_visible(),  # noqa: E712
+            Events.is_deleted == False, _in(Events.lifecycle, HELD), *_club_visible(),  # noqa: E712
             func.coalesce(Events.is_online, False) == False,  # noqa: E712
             place.isnot(None), place != "",
         )
     )
-    return dict(upcoming_events=upcoming, clubs=int(clubs or 0), cities=int(cities or 0))
+    return int(n or 0)
+
+
+async def stats(session, upcoming: int, now: Optional[datetime] = None) -> dict:
+    now = now or now_utc()
+    clubs = await session.scalar(select(func.count(Clubs.id)).where(*_club_visible()))
+    # Every place an event was ever held: a distinct count over all of them,
+    # and a number that moves slowly, so it is worked out every ten minutes.
+    cities = await cache.shared.remember(("cities", cache.minute(now) // CITIES_EVERY), lambda: _cities(session))
+    return dict(upcoming_events=upcoming, clubs=int(clubs or 0), cities=cities)
+
+
+async def _home_shared(session, now: datetime) -> dict:
+    """The front page as anyone sees it: nothing about where they are or who they are."""
+    visible = _visible_where(now)
+    by_date = [(Events.event_datetime, False), (Events.id, False)]
+    this_week = await _page(session, visible + [Events.event_datetime < now + timedelta(days=7)], by_date, 0, HOME_LIST)
+    online = await _page(session, visible + [Events.is_online == True], by_date, 0, HOME_LIST)  # noqa: E712
+    popular = await _page(session, visible, [(_popularity(), True), *by_date], 0, HOME_LIST)
+    going = await going_counts(session, list({e.id for e in this_week + online + popular}))
+    upcoming = await _count(session, _event_count(visible))
+
+    top_clubs = list((await session.scalars(select(Clubs).where(*_club_visible()).order_by(*_popular_clubs_order()).limit(HOME_CLUBS))).all())
+
+    posts = list((await session.scalars(_threads_base().order_by(ClubThreads.created_at.desc(), ClubThreads.id).limit(HOME_THREADS))).all())
+    by_id = await threads._clubs_by_id(session, {t.club_id for t in posts})
+
+    def out(es):
+        return [card(e, now, going.get(e.id, 0), None) for e in es]
+
+    return dict(
+        this_week=out(this_week), online=out(online), popular=out(popular),
+        categories=await categories(session, now, only_upcoming=True),
+        clubs=await club_cards(session, top_clubs, now),
+        threads=await threads._shape(session, posts, by_id, None),
+        stats=await stats(session, upcoming, now),
+    )
+
+
+async def _near_pool(session, now: datetime, centre: tuple[float, float], reach: float) -> dict:
+    """In-person events, soonest first, enough to answer "near you" for any
+    point within `reach` km of `centre`.
+
+    An event more than NEAR_KM + reach from the centre is more than NEAR_KM
+    from every such point, so it is left out. One within NEAR_KM - reach is
+    near every such point, so once NEAR_COUNT of those have been seen, nothing
+    later can make anyone's first NEAR_COUNT: the list stops there. What is
+    kept is (id, lat, lng); the cards are made when a visitor needs them."""
+    far = NEAR_KM + reach + _SLACK_KM
+    sure = NEAR_KM - reach - _SLACK_KM
+    rows = await session.execute(
+        select(Events.id, Events.lat, Events.lng)
+        .join(Clubs, Clubs.id == Events.club_id)
+        .where(*_visible_where(now), _in_person_point(), geo.in_box_sql(geo.bbox(centre[0], centre[1], far), Events.lat, Events.lng))
+        .order_by(Events.event_datetime, Events.id)
+    )
+    pool: list[tuple[int, float, float]] = []
+    certain = 0
+    for event_id, lat, lng in rows.all():
+        d = geo.km(centre[0], centre[1], lat, lng)
+        if d > far:
+            continue
+        pool.append((event_id, lat, lng))
+        if d <= sure:
+            certain += 1
+            if certain >= NEAR_COUNT:
+                break
+    return dict(events=pool, cards={})
+
+
+async def _near(session, now: datetime, pool: dict, here: tuple[float, float]) -> list[dict]:
+    picked = [i for i, lat, lng in pool["events"] if geo.km(here[0], here[1], lat, lng) <= NEAR_KM][:NEAR_COUNT]
+    missing = [i for i in picked if i not in pool["cards"]]
+    if missing:
+        rows = await _rows(session, _event_select().where(Events.id.in_(missing)))
+        going = await going_counts(session, missing)
+        for e in rows:
+            pool["cards"][e.id] = card(e, now, going.get(e.id, 0), None)
+    return _placed([pool["cards"][i] for i in picked if i in pool["cards"]], here)
+
+
+async def _club_places(session) -> list[tuple[int, Optional[float], Optional[float], int]]:
+    """Every listed club's point (its own or its events') and follower count."""
+    joined, lat, lng = _club_point()
+    rows = await session.execute(select(Clubs.id, lat, lng, Clubs.follower_count).outerjoin(joined, true()).where(*_club_visible()))
+    return [(i, float(la) if la is not None else None, float(ln) if ln is not None else None, n) for i, la, ln, n in rows.all()]
+
+
+async def _club_pool(session, now: datetime, centre: tuple[float, float], reach: float) -> dict:
+    """Clubs enough to give the HOME_CLUBS nearest for any point within
+    `reach` km of `centre`: (id, lat, lng, followers), cards made as needed.
+
+    If R is the distance from the centre to its HOME_CLUBS-th nearest club, a
+    point P in reach has that many clubs within R + reach, so its own
+    nearest are all within R + reach of P, and so within R + 2·reach of the
+    centre. Clubs with no point at all come after every club with one."""
+    places = await cache.shared.remember(("club-places", cache.minute(now)), lambda: _club_places(session))
+    placed = [(geo.km(centre[0], centre[1], la, ln), i) for i, la, ln, _ in places if la is not None and ln is not None]
+    if len(placed) >= HOME_CLUBS:
+        bound = heapq.nsmallest(HOME_CLUBS, (d for d, _ in placed))[-1] + 2 * reach + _SLACK_KM
+        keep = {i for d, i in placed if d <= bound}
+    else:
+        keep = {i for _, i in placed}
+        unplaced = sorted(((-n, i) for i, la, ln, n in places if la is None or ln is None))[:HOME_CLUBS]
+        keep |= {i for _, i in unplaced}
+    return dict(clubs=[p for p in places if p[0] in keep], cards={})
+
+
+async def _nearest_clubs(session, now: datetime, pool: dict, here: tuple[float, float]) -> list[dict]:
+    ranked = []
+    for i, la, ln, n in pool["clubs"]:
+        d = geo.km(here[0], here[1], la, ln) if la is not None and ln is not None else None
+        ranked.append(((d is None, d or 0.0, -n, i), i, d))
+    picked = heapq.nsmallest(HOME_CLUBS, ranked)
+    missing = [i for _, i, _ in picked if i not in pool["cards"]]
+    if missing:
+        rows = list((await session.scalars(select(Clubs).where(Clubs.id.in_(missing)))).all())
+        for c in await club_cards(session, rows, now):
+            pool["cards"][c["id"]] = c
+    return [dict(pool["cards"][i], distance_km=round(d, 1) if d is not None else None) for _, i, d in picked if i in pool["cards"]]
 
 
 async def home(session, where: dict, viewer_id: Optional[int], now: Optional[datetime] = None) -> dict:
     now = now or now_utc()
-    rows = await _rows(session, filtered(now))
-    going = await going_counts(session, [e.id for e in rows])
     here = _here(where)
+    minute = cache.minute(now)
+    shared = await cache.shared.remember(("home", minute), lambda: _home_shared(session, now))
 
-    near: list[Events] = []
+    near: list[dict] = []
+    clubs = [dict(c) for c in shared["clubs"]]
     if here is not None:
-        near = [e for e in rows if not e.is_online and e.lat is not None and e.lng is not None and _event_km(e, here) <= NEAR_KM][:12]
-    week_end = now + timedelta(days=7)
-    this_week = [e for e in rows if _aware(e.event_datetime) < week_end][:8]
-    online = [e for e in rows if e.is_online][:8]
-    popular = sorted(rows, key=lambda e: (-(going.get(e.id, 0) + (e.page_views or 0)), _aware(e.event_datetime), e.id))[:8]
-
-    club_rows = await _club_rows(session)
-    followers = await follower_counts(session, [c.id for c in club_rows])
-    dist = _club_distances(club_rows, await club_points(session, club_rows) if here is not None else {}, here)
-    if here is not None:
-        club_rows.sort(key=lambda c: (dist[c.id] is None, dist[c.id] or 0.0, -followers.get(c.id, 0), c.id))
-    else:
-        club_rows.sort(key=lambda c: (-followers.get(c.id, 0), (c.name or "").lower(), c.id))
-
-    posts = list((await session.scalars(_threads_base().order_by(ClubThreads.created_at.desc(), ClubThreads.id).limit(6))).all())
-    by_id = await threads._clubs_by_id(session, {t.club_id for t in posts})
-
-    def out(es):
-        return [card(e, now, going.get(e.id, 0), _event_km(e, here)) for e in es]
+        cell = geo.cell(*here)
+        if geo.cell_is_cacheable(cell):
+            centre, reach = geo.cell_centre(cell), geo.cell_reach(cell)
+            pool = await cache.shared.remember(("near", cell, minute), lambda: _near_pool(session, now, centre, reach))
+            club_pool = await cache.shared.remember(("home-clubs", cell, minute), lambda: _club_pool(session, now, centre, reach))
+        else:  # by a pole: worked out for this point alone
+            pool = await _near_pool(session, now, here, 0.0)
+            club_pool = await _club_pool(session, now, here, 0.0)
+        near = await _near(session, now, pool, here)
+        clubs = await _nearest_clubs(session, now, club_pool, here)
 
     return dict(
         where=where,
-        near=out(near), this_week=out(this_week), online=out(online), popular=out(popular),
-        categories=await categories(session, now, only_upcoming=True),
-        clubs=await club_cards(session, club_rows[:8], now, distances=dist, followers=followers),
-        threads=await threads._shape(session, posts, by_id, viewer_id),
-        stats=await stats(session, len(rows)),
+        near=near,
+        this_week=_placed(shared["this_week"], here),
+        online=_placed(shared["online"], here),
+        popular=_placed(shared["popular"], here),
+        categories=[dict(c) for c in shared["categories"]],
+        clubs=clubs,
+        threads=await _for_viewer(session, shared["threads"], viewer_id),
+        stats=dict(shared["stats"]),
     )
+
