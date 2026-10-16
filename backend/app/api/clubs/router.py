@@ -26,7 +26,7 @@ from app.api.clubs.schemas import (
     FollowerProfileResponse,
 )
 from app.db.core import SessionDep
-from app.api.clubs import service
+from app.api.clubs import events_list, service
 from app.api.audit import service as audit
 from app.core.auth.dependencies import ClubAuth, DependsAuth, UserAuth, AdminAuth
 from app.core.auth.permissions import ContentAuth, DestroyAuth, ModerateAuth
@@ -37,6 +37,7 @@ from app.core.response.pagination import (
 )
 from typing import Optional, List
 
+from app.api.clubs.schemas import ClubEventsFigures
 from app.api.events.schemas import EventListResponseSelf
 from app.api.clubs.notifications_router import router as notifications_router
 
@@ -405,23 +406,27 @@ async def delete_partner(session: SessionDep, user: ClubAuth, partner_id: int) -
     return {"deleted": True}
 
 
+@router.get("/events/figures", summary="The season above the events list: upcoming, registered, collected, what waits")
+async def get_club_events_figures(session: SessionDep, user: ClubAuth) -> ClubEventsFigures:
+    return ClubEventsFigures(**await events_list.figures(session, user.club.id))
+
+
 @router.get("/events/list", summary="Get all events of a club")
 async def get_club_events(
     request: Request,
     pagination: PaginationParams,
     session: SessionDep,
     user: ClubAuth,
-    is_ended: Optional[bool] = Query(None, description="Filter by past (true) or upcoming (false) events"),
+    is_ended: Optional[bool] = Query(None, description="Older switch: past (true) or upcoming (false)"),
+    scope: str = Query("all", description="upcoming · now · draft · past · all"),
+    sort: Optional[str] = Query(None, description="soonest · latest · registered · viewed"),
     search: Optional[str] = Query(None, description="Search by event name"),
 ) -> PaginatedResponse[EventListResponseSelf]:
     """List events with optional filters."""
-    events, total = await service.get_club_events(
-        session=session,
-        club_id=user.club.id,
-        limit=pagination.limit,
-        offset=pagination.offset,
-        is_ended=is_ended,
-        search=search,
+    if scope not in events_list.SCOPES or (sort is not None and sort not in events_list.SORTS):
+        raise CustomHTTPException(422, message="Unknown scope or sort.")
+    events, total = await events_list.list_events(
+        session, user.club.id, scope=scope, sort=sort, search=search, limit=pagination.limit, offset=pagination.offset, is_ended=is_ended,
     )
     return paginated_response(events, request, schema=EventListResponseSelf, total=total)
 

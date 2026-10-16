@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 from fastapi import File, Form, UploadFile
 from pydantic import BaseModel, EmailStr, Field, HttpUrl, field_validator
 from app.api.users.schemas import UserPublic
@@ -420,3 +420,18 @@ class FollowerProfileResponse(CustomBaseModel):
     contact: dict
     events: list[FollowerEventRow]
     totals: dict
+
+
+class ClubEventsFigures(BaseModel):
+    """The season above the events list."""
+
+    upcoming: int
+    next_event: Optional[dict] = None
+    registered: int
+    capacity: Optional[int] = None
+    collected: float
+    outstanding: float
+    attention: dict
+    past: int
+    drafts: int
+    generated_at: datetime
