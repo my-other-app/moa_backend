@@ -236,6 +236,8 @@ class Rounds(BaseModel):
 
 class PublicBoard(BaseModel):
     event_id: int
+    #: Whether the event runs a competition at all — the pages use it to show the way in.
+    enabled: bool
     public: bool
     rows: list[BoardRow]
 

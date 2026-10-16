@@ -544,10 +544,10 @@ async def state(session: AsyncSession, c: Competitions, event: Events) -> dict:
 
 async def public_board(session: AsyncSession, c: Competitions, event: Events) -> dict:
     if not (c.enabled and c.leaderboard_public):
-        return dict(event_id=event.id, public=False, rows=[])
+        return dict(event_id=event.id, enabled=c.enabled, public=False, rows=[])
     teams = await teams_of(session, c)
     board = _board(c, teams, await _scores(session, c), {t.id: t.name for t in c.tracks})
-    return dict(event_id=event.id, public=True, rows=board)
+    return dict(event_id=event.id, enabled=True, public=True, rows=board)
 
 
 async def my_state(session: AsyncSession, c: Competitions, event: Events, reg: Reg) -> dict:

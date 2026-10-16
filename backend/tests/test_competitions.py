@@ -117,7 +117,7 @@ async def test_submissions_judging_rounds_board_and_office_hours(client, world):
     board = s["board"]
     assert [(r["rank"], r["name"], r["score"], r["judges_scored"], r["judges_total"]) for r in board] == [(1, "Null Pointers", 82.0, 1, 2), (2, "Byte Benders", 68.5, 2, 2), (None, "Solder Squad", None, 0, 2)]
     # Private until the organiser says otherwise; then anyone can read it, and a team sees it on their side.
-    assert (await client.get(_u(world, "/leaderboard"))).json() == {"event_id": world["event"].id, "public": False, "rows": []}
+    assert (await client.get(_u(world, "/leaderboard"))).json() == {"event_id": world["event"].id, "enabled": True, "public": False, "rows": []}
     assert (await client.get(_u(world, "/me"), headers=u[0])).json()["board"] is None
     await client.patch(_u(world), json={"leaderboard_public": True}, headers=h)
     pub = (await client.get(_u(world, "/leaderboard"))).json()
