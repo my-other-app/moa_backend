@@ -14,6 +14,7 @@ from sqlalchemy.orm import joinedload
 from app.api.events.models import Events, EventRegistrationsLink
 from app.api.users.models import Users, UserProfiles, UserInterests
 from app.api.interests.models import Interests
+from app.api.orgs.models import Organizations
 from app.response import CustomHTTPException
 
 logger = logging.getLogger(__name__)
@@ -111,13 +112,17 @@ async def get_networking_attendees(
     # 6. Build attendee list with interest matching
     attendee_user_ids = [r.user_id for r in other_regs]
 
-    # Fetch user profiles
+    # Fetch user profiles, with the college in the same query. It used to be
+    # read afterwards as `profile.org`, a lazy load, which an async session
+    # cannot do: the request died the moment any other checked-in guest had a
+    # college on their profile, which is nearly every guest.
     profiles_result = await session.execute(
-        select(Users, UserProfiles)
-        .outerjoin(UserProfiles, Users.id == UserProfiles.user_id)
-        .where(Users.id.in_(attendee_user_ids))
+        select(Users, UserProfiles, Organizations.name)
+        .outerjoin(UserProfiles, (Users.id == UserProfiles.user_id) & (UserProfiles.is_deleted == False))  # noqa: E712
+        .outerjoin(Organizations, Organizations.id == UserProfiles.org_id)
+        .where(Users.id.in_(attendee_user_ids), Users.is_deleted == False)  # noqa: E712
     )
-    user_profiles = {u.id: (u, p) for u, p in profiles_result.all()}
+    user_profiles = {u.id: (u, p, org) for u, p, org in profiles_result.all()}
 
     # Fetch all interests for attendee users
     attendee_interests_result = await session.execute(
@@ -136,7 +141,7 @@ async def get_networking_attendees(
     # 7. Build response with match counts
     attendees = []
     for uid in attendee_user_ids:
-        user_data, profile_data = user_profiles.get(uid, (None, None))
+        user_data, profile_data, org_name = user_profiles.get(uid, (None, None, None))
         if not user_data:
             continue
 
@@ -156,11 +161,6 @@ async def get_networking_attendees(
                     profile_pic_url = pic
             except Exception:
                 pass
-
-        # Organization name
-        org_name = None
-        if profile_data and profile_data.org:
-            org_name = profile_data.org.name if profile_data.org else None
 
         attendees.append({
             "user_id": uid,
