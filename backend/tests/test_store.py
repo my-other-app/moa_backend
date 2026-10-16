@@ -38,11 +38,11 @@ def _store(event_id, path=""):
     return f"/api/v1/events/{event_id}/store{path}"
 
 
-async def _register(client, event_id, email, picks=None):
+async def _register(client, event_id, email, picks=None, headers=None):
     payload = {"full_name": "Guest Buyer", "email": email, "phone": f"9{uuid.uuid4().int % 10**9:09d}"}
     if picks is not None:
         payload["store"] = picks
-    r = await client.post(f"/api/v1/events/registration/{event_id}/register", json=payload)
+    r = await client.post(f"/api/v1/events/registration/{event_id}/register", json=payload, headers=headers or {})
     return r
 
 
@@ -111,7 +111,8 @@ async def test_picks_are_paid_with_the_ticket_and_handed_over_once(client, sessi
     assert order.status_code == 200, order.text
     assert float(order.json()["amount"]) == 1890.0
     # Changing the picks before paying makes a fresh order for the new amount, not the stale one.
-    again = await _register(client, event.id, "aarav@example.com", [{"item_id": tee["id"], "variant_id": m_id, "qty": 1}])
+    # Back with the session the first registration left in the browser, as the site sends it.
+    again = await _register(client, event.id, "aarav@example.com", [{"item_id": tee["id"], "variant_id": m_id, "qty": 1}], headers=auth_header(reg["auth_token"]["access_token"]))
     assert again.status_code == 200 and again.json()["pay_amount"] == 550
     order2 = await client.post("/api/v1/payments/orders", json={"source": "event_registration", "payload": {"event_id": event.id, "event_registration_id": reg["event_registration_id"]}}, headers=auth_header(reg["auth_token"]["access_token"]))
     assert float(order2.json()["amount"]) == 550.0 and order2.json()["razorpay_order_id"] != order.json()["razorpay_order_id"]

@@ -115,11 +115,27 @@ class Users(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     interests = relationship("Interests", secondary="user_interests", uselist=True)
 
     __table_args__ = (
-        UniqueConstraint(
+        # One account per address, and per phone, for each kind of account --
+        # except guests. The public form makes a fresh guest for every sign-up
+        # without a sign-in, so one address can stand behind several guests
+        # until they are merged into the app account it belongs to.
+        sa.Index(
+            "uq_users_email_user_type",
             "email",
             "user_type",
+            unique=True,
+            postgresql_where=sa.text("user_type <> 'guest'"),
         ),
-        UniqueConstraint("phone", "user_type"),
+        sa.Index(
+            "uq_users_phone_user_type",
+            "phone",
+            "user_type",
+            unique=True,
+            postgresql_where=sa.text("user_type <> 'guest'"),
+        ),
+        # Addresses are matched trimmed and case-blind, and the merge looks
+        # for guests this way on every app launch.
+        sa.Index("ix_users_email_normalised", sa.func.lower(sa.func.btrim(email))),
     )
 
 

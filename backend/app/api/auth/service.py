@@ -131,7 +131,11 @@ async def apple_signin(
         
         # Extract user info from token
         apple_user_id = decoded.get("sub")  # Apple's unique user ID
-        email = decoded.get("email") or user_email
+        # Only the address Apple signed. The one the client sends beside the
+        # token is signed by nobody: falling back to it let a token with no
+        # address claim sign in to whichever account had the address typed
+        # next to it, and guests are now folded into Apple accounts.
+        email = decoded.get("email")
         
         if not email:
             # Use Apple user ID to create a placeholder email

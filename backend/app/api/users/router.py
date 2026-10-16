@@ -45,6 +45,27 @@ from app.api.interests.schemas import InterestPublic
 from app.api.auth import service as auth_service
 
 router = APIRouter(prefix="/user")
+admin_router = APIRouter(prefix="/admin/users", tags=["admin"])
+
+
+@admin_router.post("/merge-guests", summary="Fold waiting guests into every app account")
+async def merge_guests(request: Request, session: SessionDep, admin: ModerateAuth) -> dict:
+    """The merge the app runs per account, for every app account with guests
+    under its address -- including guests whose address differs only in
+    case, which the merge used to miss. Safe to run again: a second run finds
+    nothing to do."""
+    totals = await service.merge_all_guests(session)
+    await audit.record(
+        session,
+        actor=admin,
+        action="users.merge_guests",
+        entity_type="user",
+        summary=f"Merged guests into {totals['app_users_merged']} app accounts",
+        details=totals,
+        request=request,
+    )
+    await session.commit()
+    return totals
 
 
 @router.post("/register", summary="Register a new user")
@@ -348,6 +369,10 @@ async def update_profile_picture(
 
 @router.get("/profile/me", summary="view self user profile")
 async def get_profile(session: SessionDep, user: UserAuth) -> UserDetailResponse:
+    # The app reads this whenever it needs the profile, sign-in or not, and
+    # app sessions last weeks: a ticket bought on the website as a guest is
+    # folded in here rather than at the next sign-in.
+    await service.merge_guests_now(session, user)
     profile = await service.get_user_profile(session=session, user_id=user.id)
     return profile
 
@@ -430,6 +455,7 @@ async def get_my_events(
     is_paid: bool = Query(False),
     is_won: bool = Query(False),
 ) -> PaginatedResponse[UserRegisteredEvents]:
+    await service.merge_guests_now(session, user)
     events = await service.list_registered_events(
         session,
         user.id,
@@ -448,7 +474,11 @@ async def register_fcm_token(
     user: DependsAuth,
     body: FCMTokenRequest,
 ) -> FCMTokenResponse:
-    """Register or update the user's FCM token for push notifications."""
+    """Register or update the user's FCM token for push notifications.
+
+    The app sends this on every launch with a stored session, so it is also
+    where guests waiting under the address are folded in."""
+    await service.merge_guests_now(session, user)
     await service.update_fcm_token(
         session=session,
         user_id=user.id,

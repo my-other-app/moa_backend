@@ -1,7 +1,8 @@
 from io import BytesIO
+import logging
 from fastapi import APIRouter, BackgroundTasks, Form, Query, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 import pandas as pd
 from sqlalchemy import select
 
@@ -21,7 +22,7 @@ from app.core.auth.dependencies import AdminAuth, ClubAuth, OptionalUserAuth
 from app.db.core import SessionDep
 from app.api.users.models import UserTypes
 from app.api.users import service as user_service
-from app.response import CustomHTTPException
+from app.response import CustomHTTPException, ErrorResponse
 from app.api.auth import service as auth_service
 from app.api.events.registration import service
 from app.api.events.access import is_admin_user
@@ -36,6 +37,8 @@ from app.core.response.pagination import (
 )
 from app.core.utils.excel import read_excel
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/registration")
 
 
@@ -48,43 +51,54 @@ async def register_event(
     session: SessionDep = SessionDep,
     ref: str | None = Query(None, max_length=16, description="A tracking link's code, so the sign-up is credited to it"),
 ) -> EventRegistrationResponse:
+    """Register the signed-in caller, or anyone at all from the public form.
+
+    Without a sign-in, the caller has shown nothing but that they can type an
+    address. They get a fresh guest of their own for this one registration,
+    and a session for that guest only: it reaches what this request made and
+    nothing else. Handing over the guest that already had the address, as
+    this did, gave its tickets, payments and profile to whoever typed it.
+    The guests are folded into the app account once the address's owner
+    signs in to the app with Google or Apple (users.service.merge_guest_into_user)."""
     response = {}
+    registration.email = registration.email.strip()
 
-    if not user:
-        if not (
-            user := await user_service.get_non_club_user_by_email(
-                session, registration.email
-            )
-        ):
-            user = await user_service.create_user(
-                session=session,
-                full_name=registration.full_name,
-                email=registration.email,
-                phone=registration.phone,
-                provider="email",
-                user_type=UserTypes.guest,
-            )
+    if (
+        user is not None
+        and user.user_type == UserTypes.guest
+        and not user_service.emails_match(user.email, registration.email)
+    ):
+        # A guest's session is only the receipt of an earlier registration in
+        # this browser. With another address it is someone else signing up
+        # here, and their ticket must not land on the first person's account.
+        user = None
 
-        if not user:
-            raise CustomHTTPException(400, "User not found")
-        if user.user_type != UserTypes.guest:
-            provider_hint = ""
-            if hasattr(user, 'provider') and user.provider:
-                provider_hint = f" (signed up via {user.provider})"
+    if user is None:
+        event = await service.resolve_event(session, event_id)
+        if await user_service.email_has_club_account(session, registration.email):
             raise CustomHTTPException(
                 400,
-                f"An account with this email already exists{provider_hint}. "
-                "Please login through the app to register for this event."
+                "This email belongs to a club's account. Register with your own email.",
+                error_code="CLUB_EMAIL",
             )
-
-        token = await auth_service.create_access_refresh_tokens(user)
-        response["auth_token"] = token
-    if user.user_type != UserTypes.guest:
-        if registration.email != user.email:
-            raise CustomHTTPException(
-                400, "Email does not match with the logged in user email"
-            )
-        registration.email = user.email
+        existing = await service.live_registration_for_email(session, event.id, registration.email)
+        if existing is not None and not await service.retire_if_abandoned(session, event, existing):
+            return await _already_registered(session, background_tasks, event, existing)
+        user = await user_service.new_guest(
+            session,
+            full_name=registration.full_name,
+            email=registration.email,
+            phone=registration.phone,
+        )
+        claim_existing = False
+    else:
+        claim_existing = True
+        if user.user_type != UserTypes.guest:
+            if not user_service.emails_match(registration.email, user.email):
+                raise CustomHTTPException(
+                    400, "Email does not match with the logged in user email"
+                )
+            registration.email = user.email
     # Merge organization into additional_details if provided
     additional_details = registration.additional_details or {}
     if registration.organization:
@@ -101,9 +115,29 @@ async def register_event(
         additional_details=additional_details if additional_details else None,
         tracking_ref=registration.ref or ref,
         store_picks=registration.store,
+        claim_existing=claim_existing,
     )
+    if not claim_existing:
+        response["auth_token"] = await auth_service.create_access_refresh_tokens(user)
     response = {**response, **register_data}
     return response
+
+
+async def _already_registered(session, background_tasks, event: Events, existing) -> JSONResponse:
+    """The 409 for an address already on this event's list from the public
+    form. A ticket already issued goes out again to the address it went to,
+    which belongs to whoever owns the address, not necessarily the caller."""
+    if event.has_fee and not existing.is_paid:
+        return ErrorResponse(service.AWAITING_PAYMENT, error_code="REGISTRATION_AWAITING_PAYMENT").get_response(409)
+    try:
+        from app.api.deliveries import service as deliveries
+
+        await deliveries.resend_ticket(session, event, existing, background_tasks)
+    except Exception:
+        logger.exception("The ticket could not be queued again for registration %s", existing.id)
+        await session.rollback()
+    # Returned rather than raised, so the resend queued above still runs.
+    return ErrorResponse(service.ALREADY_REGISTERED, error_code="ALREADY_REGISTERED").get_response(409)
 
 
 @router.get("/{event_id}/list", summary="Get event registration details")
