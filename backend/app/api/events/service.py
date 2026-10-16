@@ -38,6 +38,13 @@ from app.core.notifications.triggers import (
 )
 
 
+async def _republish_site(session, event_id: int) -> None:
+    """A club with a published website gets it remade when an event changes; never in the way of the save."""
+    from app.api.sites import service as sites
+
+    await sites.republish_for_event(session, event_id)
+
+
 async def create_event(
     session: AsyncSession,
     user_id: int,
@@ -224,7 +231,8 @@ async def create_event(
         # Don't fail event creation if notification fails
         import logging
         logging.getLogger(__name__).error(f"Failed to send new event notifications: {e}")
-    
+
+    await _republish_site(session, created_event.id)
     return created_event
 
 
@@ -367,6 +375,7 @@ async def update_event(
                 await session.delete(db_speaker)
 
     await session.commit()
+    await _republish_site(session, event_id)
     db_event = await session.execute(
         select(Events)
         .filter(Events.id == event_id)
