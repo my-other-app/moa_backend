@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field
 
 from app.core.layout.model import Wire
 from app.core.mail.schema import EmailAttachments, EmailAudience, EmailDesign, EmailStage, EmailTemplateFields
@@ -149,3 +149,22 @@ class ImageUpload(Wire):
     url: str
     width: int
     height: int
+
+
+class LibraryTemplateOut(EmailTemplateOut):
+    label: str
+    usage: dict
+
+
+class LibraryOverview(BaseModel):
+    """The Emails page: the library with its use and results, the month, what goes out next."""
+
+    figures: dict
+    previous: dict
+    delta: Optional[dict] = None
+    templates: list[LibraryTemplateOut]
+    queue: list[dict]
+    recent: list[dict]
+    attention: dict
+    all_time: dict
+    generated_at: datetime

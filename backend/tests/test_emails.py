@@ -415,3 +415,28 @@ async def test_the_delivery_log_lists_messages_beside_tickets(client, world, out
     assert messages.json()["tally"]["sent"] == 3
     problems = await client.get(f"/api/v1/events/{world['event'].id}/deliveries", params={"problem": "true"}, headers=world["club"])
     assert problems.json()["items"] == [] and problems.json()["tally"]["skipped"] == 2
+
+
+async def test_the_library_overview_knows_use_results_and_what_goes_out_next(client, session, world):
+    h = world["club"]
+    # The event's copies exist once its emails were looked at; the pre-event one is timed.
+    journey = (await client.get(f"/api/v1/events/{world['event'].id}/emails", headers=h)).json()
+    pre = next(s for s in journey["journey"] if s["stage"] == "PRE_EVENT")
+    # Send the reminder by hand, so there is a message with recipients.
+    inv = next(s for s in journey["journey"] if s["stage"] == "REMINDER")
+    sent = await client.post(f"/api/v1/events/{world['event'].id}/emails/{inv['template']['id']}/send", headers=h)
+    assert sent.status_code == 200, sent.text
+
+    o = (await client.get("/api/v1/clubs/me/emails/overview", headers=h)).json()
+    assert o["figures"]["messages"] == 1 and o["figures"]["recipients"] >= 1  # the reminder goes to guests not yet inside
+    assert o["all_time"]["messages"] == 1
+    by = {t["stage"]: t for t in o["templates"]}
+    assert set(by) >= {"INVITE", "PRE_EVENT", "REMINDER", "POST_EVENT"}
+    assert by["REMINDER"]["usage"]["events"] == 1 and by["REMINDER"]["usage"]["sends"] == 1 and by["REMINDER"]["usage"]["last_sent_at"]
+    assert by["PRE_EVENT"]["usage"]["sends"] == 0 and by["INVITE"]["label"] == "Invite" and by["INVITE"]["usage"]["events"] == 1
+    # The pre-event email is due a day before the start, and has not gone.
+    q = next((x for x in o["queue"] if x["stage"] == "PRE_EVENT"), None)
+    assert q is not None and q["event"]["name"] == "Build Night" and q["template_id"] == pre["template"]["id"]
+    assert o["recent"][0]["stage"] == "REMINDER" and o["recent"][0]["recipients"] >= 1
+    assert o["attention"]["disabled_stages"] == [] and o["delta"]["messages"] == 1
+    assert (await client.get("/api/v1/clubs/me/emails/overview", headers=world["other"])).json()["templates"][0]["usage"]["events"] == 0
