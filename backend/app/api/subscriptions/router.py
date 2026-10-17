@@ -18,7 +18,9 @@ from sqlalchemy.orm import selectinload
 from app.api.admin_alerts import notify
 from app.api.audit import service as audit
 from app.api.clubs.models import Clubs
-from app.api.subscriptions import billing, gates, notices, service
+from app.api.users.models import Users
+from app.api.subscriptions import billing, gates, ledger, notices, service, sweep
+from app.api.subscriptions import revenue as revenue_service
 from app.api.subscriptions.models import (
     BillingCycle,
     ClubSubscriptions,
@@ -30,12 +32,17 @@ from app.api.subscriptions.models import (
 )
 from app.api.subscriptions.schemas import (
     AdminCancelIn,
+    AdminSubscriptionOut,
     AssignPlanIn,
+    BackfillOut,
+    ChargesPageOut,
+    ClubPlanOut,
     EntitlementsOut,
     ExtendGraceIn,
     PlanIn,
     PlanOut,
     PublicPlansOut,
+    RevenueOut,
     StartSubscriptionIn,
     StartSubscriptionOut,
     SubscriptionOut,
@@ -419,6 +426,63 @@ async def subscription_totals(session: SessionDep, user: AdminAuth) -> Subscript
     return await service.mrr_totals(session)
 
 
+# ---------------------------------------------------------------------------
+# Revenue
+# ---------------------------------------------------------------------------
+
+
+@admin_router.get("/revenue", summary="Subscriptions and what they earned (admin)")
+async def revenue_figures(
+    session: SessionDep,
+    user: AdminAuth,
+    months: int = Query(12, ge=1, le=60, description="Months in the series, this one included"),
+) -> RevenueOut:
+    """
+    Run rate (MRR, ARR, counts, by plan and by cycle, renewals due in 30
+    days) from the subscriptions as they stand; money (collected, refunded,
+    the monthly series) from the ledger of what Razorpay took. Months are
+    calendar months in India. Complimentary plans are counted, never valued;
+    ticket money is shown apart and is not platform revenue.
+    """
+    return await revenue_service.revenue(session, months=months)
+
+
+@admin_router.get("/revenue/charges", summary="Every subscription payment (admin)")
+async def revenue_charges(
+    session: SessionDep,
+    user: AdminAuth,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    club_id: Optional[int] = Query(None),
+    month: Optional[str] = Query(None, description="YYYY-MM, a calendar month in India"),
+) -> ChargesPageOut:
+    """Newest first. `sum_paise` is the total of every payment matching the
+    filters, not only this page (gross; `refunded_paise` beside it)."""
+    return await revenue_service.list_charges(session, offset=offset, limit=limit, club_id=club_id, month=month)
+
+
+@admin_router.post("/revenue/backfill", summary="Fill the ledger from Razorpay (admin)")
+async def revenue_backfill(session: SessionDep, user: MoneyAuth, request: Request = None) -> BackfillOut:
+    """
+    Ask Razorpay (read-only) for the invoices of every subscription we know
+    of and add any payment the ledger is missing. Safe to run again: a
+    payment already recorded is only brought up to date with its refunds.
+    `failed` counts subscriptions Razorpay would not answer for.
+    """
+    done = await ledger.backfill(session)
+    await audit.record(
+        session,
+        actor=user,
+        action="revenue.backfill",
+        entity_type="revenue",
+        summary=f"Backfilled the revenue ledger: {done['inserted']} payments added from {done['scanned']} subscriptions",
+        details=done,
+        request=request,
+    )
+    await session.commit()
+    return done
+
+
 @admin_router.get("/subscriptions", summary="List club subscriptions (admin)")
 async def list_subscriptions(
     request: Request,
@@ -428,12 +492,18 @@ async def list_subscriptions(
     status: Optional[SubscriptionStatus] = Query(None),
     plan_id: Optional[int] = Query(None),
     search: Optional[str] = Query(None, description="Club name"),
-) -> PaginatedResponse[SubscriptionOut]:
+    complimentary: Optional[bool] = Query(None, description="Only complimentary plans (true) or none of them (false)"),
+    club_id: Optional[int] = Query(None, description="One club's row"),
+) -> PaginatedResponse[AdminSubscriptionOut]:
     criteria = [ClubSubscriptions.is_deleted == False]
+    if club_id is not None:
+        criteria.append(ClubSubscriptions.club_id == club_id)
     if status is not None:
         criteria.append(ClubSubscriptions.status == status)
     if plan_id is not None:
         criteria.append(ClubSubscriptions.plan_id == plan_id)
+    if complimentary is not None:
+        criteria.append(ClubSubscriptions.complimentary == complimentary)
     if search and search.strip():
         criteria.append(
             ClubSubscriptions.club_id.in_(
@@ -454,6 +524,7 @@ async def list_subscriptions(
                 .where(*criteria)
                 .options(
                     selectinload(ClubSubscriptions.club),
+                    selectinload(ClubSubscriptions.granter),
                     selectinload(ClubSubscriptions.plan).selectinload(Plans.limits),
                     selectinload(ClubSubscriptions.plan).selectinload(Plans.features),
                 )
@@ -469,12 +540,36 @@ async def list_subscriptions(
         .all()
     )
 
-    items = [subscription_dict(row) for row in rows]
-    return paginated_response(items, request, schema=SubscriptionOut, total=total)
+    items = [subscription_dict(row, admin=True, granter=row.granter) for row in rows]
+    return paginated_response(items, request, schema=AdminSubscriptionOut, total=total)
+
+
+@admin_router.get(
+    "/subscriptions/club/{club_id}", summary="One club's plan, subscribed or not (admin)"
+)
+async def club_plan(club_id: int, session: SessionDep, user: AdminAuth) -> ClubPlanOut:
+    """
+    What a club is on, for a club's own page in the admin app: its
+    subscription row when it has one, and the plan it resolves to either way
+    -- every club on Free has no row, which is why such a club never appears
+    under Subscriptions. Give it a plan with PUT .../plan.
+    """
+    club = await session.get(Clubs, club_id)
+    if not club or club.is_deleted:
+        raise CustomHTTPException(status_code=404, message="Club not found")
+    row = await service.get_club_subscription(session, club_id)
+    resolved = await service.resolve_entitlements(session, club_id)
+    granter = await session.get(Users, row.granted_by) if row is not None and row.granted_by else None
+    return {
+        "club": {"id": club.id, "name": club.name},
+        "plan_key": resolved.plan.key if resolved.plan else None,
+        "plan_name": resolved.plan.name if resolved.plan else None,
+        "subscription": subscription_dict(row, club, admin=True, granter=granter) if row is not None else None,
+    }
 
 
 @admin_router.put(
-    "/subscriptions/club/{club_id}/plan", summary="Move a club to a plan (admin)"
+    "/subscriptions/club/{club_id}/plan", summary="Give a club a plan, free or by hand (admin)"
 )
 async def assign_plan(
     club_id: int,
@@ -482,44 +577,130 @@ async def assign_plan(
     session: SessionDep,
     user: MoneyAuth,
     request: Request = None,
-) -> SubscriptionOut:
+) -> AdminSubscriptionOut:
     """
-    Grant a plan directly, without taking payment.
+    Grant a plan directly, without taking payment, to any club -- one with a
+    subscription row or one without (every club on Free).
 
-    For bespoke deals and corrections. It deliberately does not touch
-    Razorpay: if the club has a live Razorpay subscription it keeps billing at
-    the old price until someone cancels it there, and the response says so.
+    `complimentary: true` (the default): given for nothing, until `ends_at`
+    or with no end; worth 0 and never revenue. A club whose Razorpay
+    subscription can still charge it (trial, active, past due or paused) is
+    refused with 409 LIVE_SUBSCRIPTION unless `cancel_razorpay: true`, which
+    cancels it at Razorpay at once first (502 RAZORPAY_ERROR, and nothing
+    granted, when Razorpay will not). An open, unpaid checkout is closed.
+
+    `complimentary: false`: a deal invoiced by hand, at the plan's price in
+    MRR. It does not touch Razorpay: a live Razorpay subscription keeps
+    billing until someone cancels it.
     """
     plan = await service.get_plan(session, payload.plan_id)
     # CustomBaseModel keeps enum *values*, so these arrive as plain strings.
     cycle = BillingCycle(payload.cycle)
-    subscription = await service.assign_plan(
-        session, club_id=club_id, plan=plan, cycle=cycle, status=SubscriptionStatus(payload.status)
-    )
+    club = await session.get(Clubs, club_id)
+    if not club or club.is_deleted:
+        raise CustomHTTPException(status_code=404, message="Club not found")
 
+    if payload.complimentary:
+        subscription = await _grant_complimentary(session, user, club, plan, cycle, payload, request)
+    else:
+        status = SubscriptionStatus(payload.status)
+        subscription = await service.assign_plan(
+            session, club_id=club_id, plan=plan, cycle=cycle, status=status, granted_by=getattr(user, "id", None)
+        )
+        await audit.record(
+            session,
+            actor=user,
+            action="subscription.assign",
+            entity_type="club",
+            entity_id=club_id,
+            summary=f"Moved club {club_id} to plan “{plan.name}” ({cycle.value})",
+            request=request,
+        )
+        await notify(
+            session, "plan_assigned",
+            title=f"{_admin_name(user)} moved {club.name} to {plan.name}",
+            body=f"{plan.name}, {cycle.value}, {status.value}. Nothing was charged.",
+            club=club, subscription=subscription, dedupe=False,
+            data={"plan": plan.key, "plan_name": plan.name, "cycle": cycle.value, "status": status.value,
+                  "by": getattr(user, "email", None), "action": "assign", "complimentary": False},
+        )
+    await session.commit()
+    return await _fresh(session, subscription.id)
+
+
+async def _grant_complimentary(session, user, club, plan, cycle, payload, request) -> ClubSubscriptions:
+    """The comp path of PUT .../plan: make sure Razorpay cannot charge the
+    club, then grant. The row is locked first, so a webhook about the old
+    Razorpay subscription waits for this and then finds it gone."""
+    now = datetime.now(timezone.utc)
+    row = await service.get_club_subscription(session, club.id, for_update=True)
+    service.settle_stale_pending(row, now)
+    closed = stopped = stop_outcome = None
+    was = None
+    if row is not None:
+        was = {
+            "plan_id": row.plan_id,
+            "status": getattr(row.status, "value", row.status),
+            "complimentary": bool(row.complimentary),
+            "razorpay_subscription_id": row.razorpay_subscription_id,
+        }
+    if row is not None and row.status == SubscriptionStatus.pending and row.razorpay_subscription_id:
+        # An open checkout: closed now, so it can never be paid while the
+        # club has a plan for nothing (502 CHECKOUT_NOT_CLOSED if Razorpay
+        # will not confirm it).
+        closed = row.razorpay_subscription_id
+        billing.close_unpaid_checkout(closed)
+        service.revert_checkout(row)
+    if service.live_at_razorpay(row):
+        if not payload.cancel_razorpay:
+            raise CustomHTTPException(
+                status_code=409,
+                message=(
+                    f"{club.name} pays through Razorpay ({row.status.value}). Cancel that subscription "
+                    "first, or send cancel_razorpay: true to cancel it now and grant the plan."
+                ),
+                error_code="LIVE_SUBSCRIPTION",
+                errors={"razorpay_subscription_id": row.razorpay_subscription_id, "status": row.status.value},
+            )
+        stopped = row.razorpay_subscription_id
+        stop_outcome = billing.stop_now(stopped)
+
+    ends_at = payload.ends_at
+    subscription = await service.grant_complimentary(
+        session, club_id=club.id, plan=plan, cycle=cycle, reason=payload.reason, ends_at=ends_at,
+        granted_by=getattr(user, "id", None), now=now,
+    )
+    until = f"until {notices.day(ends_at)}" if ends_at else "with no end date"
     await audit.record(
         session,
         actor=user,
-        action="subscription.assign",
+        action="subscription.comp_grant",
         entity_type="club",
-        entity_id=club_id,
-        summary=f"Moved club {club_id} to plan “{plan.name}” ({cycle.value})",
+        entity_id=club.id,
+        summary=f"Gave {club.name} “{plan.name}” ({cycle.value}) free, {until}",
+        details={
+            "subscription_id": subscription.id, "plan": plan.key, "cycle": cycle.value,
+            "reason": payload.reason, "ends_at": ends_at.isoformat() if ends_at else None,
+            "razorpay_cancelled": stopped, "razorpay_outcome": stop_outcome, "checkout_closed": closed,
+            "previous": was,
+        },
         request=request,
     )
-    club = await session.get(Clubs, club_id)
     await notify(
         session, "plan_assigned",
-        title=f"{_admin_name(user)} moved {club.name} to {plan.name}",
-        body=f"{plan.name}, {cycle.value}, {SubscriptionStatus(payload.status).value}. Nothing was charged.",
+        title=f"{_admin_name(user)} gave {club.name} {plan.name} free",
+        body=(
+            f"Complimentary {plan.name}, {until}. Nothing is charged and it is not counted as revenue."
+            + (f" Razorpay subscription {stopped} was cancelled." if stopped else "")
+        ),
         club=club, subscription=subscription, dedupe=False,
-        data={"plan": plan.key, "cycle": cycle.value, "status": SubscriptionStatus(payload.status).value,
-              "by": getattr(user, "email", None), "action": "assign"},
+        data={
+            "plan": plan.key, "cycle": cycle.value, "status": "active", "by": getattr(user, "email", None),
+            "action": "comp_grant", "complimentary": True, "plan_name": plan.name, "reason": payload.reason,
+            "ends_at": ends_at.isoformat() if ends_at else None, "razorpay_cancelled": stopped,
+        },
     )
-    await session.commit()
-
-    fresh = await service.get_club_subscription(session, club_id)
-    club = await session.get(Clubs, club_id)
-    return subscription_dict(fresh, club)
+    return subscription
 
 
 @admin_router.post(
@@ -583,17 +764,19 @@ async def _admin_subscription(session, subscription_id: int) -> ClubSubscription
 
 
 async def _fresh(session, subscription_id: int) -> dict:
+    """The row as the admin sees it, read afresh after a change."""
     row = await session.scalar(
         select(ClubSubscriptions)
         .where(ClubSubscriptions.id == subscription_id)
         .options(
             selectinload(ClubSubscriptions.club),
+            selectinload(ClubSubscriptions.granter),
             selectinload(ClubSubscriptions.plan).selectinload(Plans.limits),
             selectinload(ClubSubscriptions.plan).selectinload(Plans.features),
         )
         .execution_options(populate_existing=True)
     )
-    return subscription_dict(row)
+    return subscription_dict(row, admin=True, granter=row.granter)
 
 
 @admin_router.post(
@@ -605,7 +788,7 @@ async def extend_grace(
     session: SessionDep,
     user: MoneyAuth,
     request: Request = None,
-) -> SubscriptionOut:
+) -> AdminSubscriptionOut:
     """
     Move a past-due club's grace end `days` later (1 to 30): from its current
     end, or from now if it has already run out. A past-due club with no grace
@@ -674,7 +857,7 @@ async def admin_cancel_subscription(
     session: SessionDep,
     user: MoneyAuth,
     request: Request = None,
-) -> SubscriptionOut:
+) -> AdminSubscriptionOut:
     """
     Cancel for the club, the way the club's own cancel does.
 
@@ -685,6 +868,8 @@ async def admin_cancel_subscription(
       goes to Free, or back to an admin's grant it had before a checkout.
     - A checkout still pending is closed and the club goes back to what it had.
     - A plan an admin granted has nothing at Razorpay; it is cancelled here.
+    - A complimentary plan is revoked now, whatever `at_period_end` says:
+      the club goes to Free.
 
     409 NOTHING_TO_CANCEL when it is cancelled already (and, for `false`, no
     paid-for days are left to end). 502 RAZORPAY_ERROR when Razorpay refuses:
@@ -699,8 +884,12 @@ async def admin_cancel_subscription(
     club_name = row.club.name if row.club else f"club {row.club_id}"
     plan_name = row.plan.name if row.plan else "its plan"
     was = row.status.value
+    comp = bool(row.complimentary)
 
-    if row.status == SubscriptionStatus.cancelled:
+    if comp:
+        # Nothing at Razorpay, and nothing paid for to run out: revoked now.
+        outcome = service.end_comp(row, now, restore=False)
+    elif row.status == SubscriptionStatus.cancelled:
         if at_period_end or not service.is_entitled(row, now):
             await session.commit()
             raise CustomHTTPException(
@@ -743,15 +932,21 @@ async def admin_cancel_subscription(
         action="subscription.admin_cancel",
         entity_type="club",
         entity_id=row.club_id,
-        summary=f"Cancelled {club_name}'s {plan_name} subscription ({'at period end' if at_period_end else 'now'})",
+        summary=(
+            f"Revoked {club_name}'s complimentary {plan_name}" if comp
+            else f"Cancelled {club_name}'s {plan_name} subscription ({'at period end' if at_period_end else 'now'})"
+        ),
         details={"subscription_id": row.id, "at_period_end": at_period_end, "outcome": outcome,
-                 "razorpay_subscription_id": rzp, "previous_status": was},
+                 "razorpay_subscription_id": rzp, "previous_status": was, "complimentary": comp},
         request=request,
     )
     if outcome != "checkout_closed":
         await notify(
             session, "subscription_cancelled",
-            title=f"{_admin_name(user)} cancelled {club_name}'s {plan_name} subscription",
+            title=(
+                f"{_admin_name(user)} revoked {club_name}'s complimentary {plan_name}" if comp
+                else f"{_admin_name(user)} cancelled {club_name}'s {plan_name} subscription"
+            ),
             body=(
                 f"Access runs to the end of the period ({notices.day(row.current_period_end)})."
                 if service.is_entitled(row, now) and row.current_period_end
@@ -759,7 +954,7 @@ async def admin_cancel_subscription(
             ),
             club=row.club, subscription=row, dedupe=False,
             data={"by": "admin", "admin": getattr(user, "email", None), "at_period_end": at_period_end,
-                  "outcome": outcome, "previous_status": was},
+                  "outcome": outcome, "previous_status": was, "complimentary": comp},
         )
     await session.commit()
     return await _fresh(session, row.id)
@@ -781,18 +976,35 @@ async def _own_club(session, user) -> Clubs:
 
 async def _settled_subscription(session, club_id: int):
     """The club's row, with a checkout pending for over a day put back to what
-    the club had first (service.settle_stale_pending)."""
+    the club had first (service.settle_stale_pending), and a complimentary
+    plan whose end has passed put away the way the hourly sweep would
+    (sweep.expire_comp: the club mailed once, the admins alerted)."""
     row = await service.get_club_subscription(session, club_id)
     if service.settle_stale_pending(row):
         await session.commit()
         row = await service.get_club_subscription(session, club_id)
+    if await _settle_ended_comp(session, row):
+        row = await service.get_club_subscription(session, club_id)
     return row
+
+
+async def _settle_ended_comp(session, row, now: datetime | None = None) -> bool:
+    """Put away a complimentary plan the sweep has not reached yet. Returns
+    whether there was one. Commits."""
+    now = now or datetime.now(timezone.utc)
+    if not service.comp_over(row, now):
+        return False
+    await sweep.expire_comp(session, row, now)
+    await session.commit()
+    return True
 
 
 @club_router.get("/subscription", summary="The club's own plan")
 async def my_subscription(session: SessionDep, user: ClubAuth) -> SubscriptionOut | None:
     club = await _own_club(session, user)
     row = await _settled_subscription(session, club.id)
+    # The club's view: `complimentary` and `comp_ends_at`, never why it was
+    # given or by whom (AdminSubscriptionOut).
     return subscription_dict(row, club) if row else None
 
 
@@ -819,6 +1031,10 @@ async def my_entitlements(session: SessionDep, user: ClubAuth) -> EntitlementsOu
             getattr(resolved.row.status, "value", resolved.row.status) if resolved.row else None
         ),
         "usage": await service.usage(session, club.id),
+        "complimentary": service.comp_live(resolved.subscription),
+        "comp_ends_at": (
+            resolved.subscription.comp_ends_at if service.comp_live(resolved.subscription) else None
+        ),
     }
 
 
@@ -838,13 +1054,25 @@ async def start_subscription(
     / `charged` make it active. An unpaid checkout falls back after a day,
     which is also when the Razorpay link stops working.
 
-    Refused: a plan not on the pricing page (404 PLAN_NOT_AVAILABLE), one
+    Refused: a club on a complimentary plan (409 COMPLIMENTARY_PLAN: its plan
+    is changed by talking to us; once the comp has ended, checkout works as
+    usual), a plan not on the pricing page (404 PLAN_NOT_AVAILABLE), one
     priced on request (422 CONTACT_SALES), a free one (422 FREE_PLAN), and a
     second checkout while a Razorpay subscription can still charge the club
     (409 SUBSCRIPTION_EXISTS). A pending checkout the club never authorised is
     the exception: it is cancelled at Razorpay and replaced.
     """
     club = await _own_club(session, user)
+    current = await service.get_club_subscription(session, club.id)
+    if service.comp_live(current):
+        raise CustomHTTPException(
+            status_code=409,
+            message="Your plan is provided by MyOtherApp — talk to us to change it.",
+            error_code="COMPLIMENTARY_PLAN",
+        )
+    # A comp that has ended but the sweep has not put away yet: put away now,
+    # so the checkout starts from what the club really has.
+    await _settle_ended_comp(session, current)
     # CustomBaseModel keeps enum *values*: the cycle arrives as a string.
     cycle = BillingCycle(payload.cycle)
     plan = await service.purchasable_plan(session, plan_id=payload.plan_id, plan_key=payload.plan_key)

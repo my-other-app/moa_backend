@@ -182,12 +182,17 @@ async def get_organization_analytics(id: int, session: AsyncSession) -> Organiza
 async def list_deleted_organizations(
     session: AsyncSession, limit: int = 20, offset: int = 0
 ):
+    # include_deleted on each: the session hides deleted rows from every ORM
+    # query (app.db.listeners), so without it this finds none.
     total = await session.scalar(
-        select(func.count(Organizations.id)).where(Organizations.is_deleted == True)
+        select(func.count(Organizations.id))
+        .where(Organizations.is_deleted == True)
+        .execution_options(include_deleted=True)
     )
     rows = await session.scalars(
         select(Organizations)
         .where(Organizations.is_deleted == True)
+        .execution_options(include_deleted=True)
         .order_by(Organizations.deleted_at.desc().nulls_last(), Organizations.id.desc())
         .limit(limit)
         .offset(offset)
@@ -197,9 +202,9 @@ async def list_deleted_organizations(
 
 async def restore_organization(session: AsyncSession, id: int):
     org = await session.scalar(
-        select(Organizations).where(
-            Organizations.id == id, Organizations.is_deleted == True
-        )
+        select(Organizations)
+        .where(Organizations.id == id, Organizations.is_deleted == True)
+        .execution_options(include_deleted=True)
     )
     if not org:
         raise CustomHTTPException(404, "No deleted organization with that id")

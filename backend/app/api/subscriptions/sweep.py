@@ -1,6 +1,7 @@
-"""The hourly billing sweep: graces running out, and trials about to bill.
+"""The hourly billing sweep: graces running out, trials about to bill, and
+complimentary plans ending.
 
-Three jobs, each row in its own transaction so one bad row cannot stop the
+Five jobs, each row in its own transaction so one bad row cannot stop the
 rest:
 
 - a grace ending within two days, not yet reminded: the club is mailed and
@@ -10,7 +11,14 @@ rest:
   admin's grant it had before, the club mailed and the admins alerted
   (`subscription_downgraded`). Access has already ended by then whatever the
   sweep does: `is_entitled` stops counting a grace the moment it runs out;
-- a trial ending within three days: once, "your trial ends on ...".
+- a trial ending within three days: once, "your trial ends on ...";
+- a complimentary plan whose end has passed: back to the admin's grant the
+  club had before it (previous_state) or to Free, the club mailed "Your
+  complimentary ... has ended" and the admins alerted (`comp_ended`). As with
+  a grace, access has already ended: `is_entitled` stops honouring a comp the
+  moment its end passes;
+- a complimentary plan ending within seven days: once, the club mailed and
+  the admins alerted (`comp_ending`).
 
 One worker at a time, by a Postgres advisory lock held on its own connection
 (a session gives its connection back at every commit, and a session-level
@@ -28,7 +36,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.admin_alerts import notify
 from app.api.subscriptions import billing, notices, service
-from app.api.subscriptions.models import ClubSubscriptions, SubscriptionStatus
+from app.api.subscriptions.models import ClubSubscriptions, Plans, SubscriptionStatus
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +102,23 @@ def _trial_ending(now):
     )
 
 
+def _comp_over(now):
+    return (
+        ClubSubscriptions.complimentary == True,  # noqa: E712
+        ClubSubscriptions.comp_ends_at <= now,
+    )
+
+
+def _comp_ending(now):
+    return (
+        ClubSubscriptions.complimentary == True,  # noqa: E712
+        ClubSubscriptions.status == SubscriptionStatus.active,
+        ClubSubscriptions.comp_ends_at > now,
+        ClubSubscriptions.comp_ends_at <= now + service.COMP_REMINDER,
+        ClubSubscriptions.comp_reminded_at.is_(None),
+    )
+
+
 async def remind_grace(session, sub: ClubSubscriptions, now: datetime) -> None:
     name = sub.club.name if sub.club is not None else f"Club {sub.club_id}"
     plan = sub.plan.name if sub.plan is not None else "its plan"
@@ -153,14 +178,76 @@ async def remind_trial(session, sub: ClubSubscriptions, now: datetime) -> None:
     await notices.email_trial_ending(session, sub, name)
 
 
+async def _after_comp(session, sub: ClubSubscriptions, now: datetime) -> tuple[str, str | None]:
+    """What the club has once its comp is put away: ("the Free plan", None),
+    or the earlier grant's name and its plan key."""
+    if service.restorable(sub, now):
+        earlier = await session.get(Plans, (sub.previous_state or {}).get("plan_id"))
+        if earlier is not None:
+            return earlier.name, earlier.key
+    return "the Free plan", None
+
+
+async def _club(session, sub: ClubSubscriptions):
+    """The club, without a lazy load: the club's own routes come here with a
+    row whose `club` was never loaded."""
+    from app.api.clubs.models import Clubs
+
+    return await session.get(Clubs, sub.club_id)
+
+
+async def remind_comp(session, sub: ClubSubscriptions, now: datetime) -> None:
+    club = await _club(session, sub)
+    name = club.name if club is not None else f"Club {sub.club_id}"
+    plan = sub.plan.name if sub.plan is not None else "its plan"
+    then, _ = await _after_comp(session, sub, now)
+    sub.comp_reminded_at = now
+    await notices.email_comp_ending(session, sub, name, then=then)
+    await notify(
+        session, "comp_ending",
+        title=f"{name}'s complimentary {plan} ends {notices.day(sub.comp_ends_at)}",
+        body=f"Then {name} is on {then}. Extend it by granting it again with a later end, or let it run out.",
+        club=club, subscription=sub,
+        data=notices._data(sub, complimentary=True, comp_ends_at=sub.comp_ends_at, reason=sub.comp_reason),
+    )
+
+
+async def expire_comp(session, sub: ClubSubscriptions, now: datetime) -> str:
+    """A complimentary plan's end has passed: put back the admin's grant the
+    club had before it, or move it to Free; tell the club (once) and the
+    admins. Returns "restored" or "cancelled". Also run by the club's own
+    billing routes on a comp the sweep has not reached yet."""
+    club = await _club(session, sub)
+    name = club.name if club is not None else f"Club {sub.club_id}"
+    plan = sub.plan.name if sub.plan is not None else "its plan"
+    ends = sub.comp_ends_at
+    then, then_key = await _after_comp(session, sub, now)
+    data = notices._data(sub, complimentary=True, comp_ends_at=ends, reason=sub.comp_reason)
+
+    # Recorded against the comp, before the row moves on.
+    await notices.email_comp_ended(session, sub, name, plan_name=plan, then=then)
+    outcome = service.end_comp(sub, now)
+    await session.flush()
+    await notify(
+        session, "comp_ended",
+        title=f"{name}'s complimentary {plan} ended",
+        body=f"It ran to {notices.day(ends)}. {name} is on {then} now.",
+        club=club if club is not None else sub.club_id, subscription=sub.id,
+        data={**data, "outcome": outcome, "now_on": then_key or "free"},
+    )
+    return outcome
+
+
 async def sweep(session, now: datetime | None = None) -> dict:
-    """One run of the three jobs. Returns how many rows each touched."""
+    """One run of the five jobs. Returns how many rows each touched."""
     now = now or _now()
-    done = {"downgraded": 0, "grace_reminded": 0, "trial_reminded": 0}
+    done = {"downgraded": 0, "grace_reminded": 0, "trial_reminded": 0, "comp_ended": 0, "comp_reminded": 0}
     for key, criteria, job in (
         ("downgraded", _grace_over(now), expire_grace),
         ("grace_reminded", _grace_ending(now), remind_grace),
         ("trial_reminded", _trial_ending(now), remind_trial),
+        ("comp_ended", _comp_over(now), expire_comp),
+        ("comp_reminded", _comp_ending(now), remind_comp),
     ):
         for sub_id in await _ids(session, *criteria):
             try:

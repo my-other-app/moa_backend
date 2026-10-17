@@ -196,6 +196,36 @@ def close_unpaid_checkout(subscription_id: str) -> None:
     )
 
 
+def stop_now(subscription_id: str) -> str:
+    """
+    Cancel a Razorpay subscription at once: the club is about to be given a
+    plan for nothing, and must never be billed while it has it.
+
+    Returns "cancelled", or "already_over" when Razorpay refused because it
+    had finished with the subscription anyway (cancelled, completed,
+    expired) -- the outcome wanted. Anything else is a 502 RAZORPAY_ERROR and
+    the caller grants nothing: a comp on top of a subscription that can still
+    charge is exactly what this is here to prevent.
+    """
+    try:
+        cancel_subscription(subscription_id, at_period_end=False)
+        return "cancelled"
+    except Exception as exc:  # noqa: BLE001
+        refused = str(exc)[:200]
+        logger.info("Razorpay refused to cancel %s; checking whether it is over", subscription_id, exc_info=True)
+    try:
+        state = (razorpay_client.subscription.fetch(subscription_id) or {}).get("status")
+    except Exception:  # noqa: BLE001
+        state = None
+    if state in _FINISHED:
+        return "already_over"
+    raise CustomHTTPException(
+        status_code=502,
+        message=f"Razorpay did not cancel the subscription, so no plan was given: {refused}",
+        error_code="RAZORPAY_ERROR",
+    )
+
+
 def retry_charge(subscription_id: str) -> None:
     """
     Ask Razorpay to retry a failed charge now.

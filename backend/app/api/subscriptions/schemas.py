@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from pydantic import Field, model_validator
 
@@ -169,12 +169,48 @@ class SubscriptionOut(CustomBaseModel):
     grace_ends_at: datetime | None = None
     #: Past due with a grace that has not run out.
     in_grace: bool = False
+    #: A plan MyOtherApp gives the club for nothing, until `comp_ends_at`
+    #: (null: no end). Nothing is charged; the club cannot start a checkout
+    #: while it runs (409 COMPLIMENTARY_PLAN).
+    complimentary: bool = False
+    comp_ends_at: datetime | None = None
+
+
+class PlanUserMin(CustomBaseModel):
+    id: int
+    name: str | None = None
+
+
+class AdminSubscriptionOut(SubscriptionOut):
+    """The admin's view: also why a comp was given, and by whom. Neither is
+    ever shown to the club."""
+
+    comp_reason: str | None = None
+    #: The admin who last assigned the plan (a comp or a deal by hand).
+    granted_by: PlanUserMin | None = None
+
+
+class ClubPlanOut(CustomBaseModel):
+    """One club's plan, for its page in the admin app: the row when it has
+    one (null for a club on Free that never subscribed), and the plan it
+    resolves to either way."""
+
+    club: PlanClubMin
+    plan_key: str | None = None
+    plan_name: str | None = None
+    subscription: AdminSubscriptionOut | None = None
 
 
 class SubscriptionTotals(CustomBaseModel):
     mrr_paise: int = 0
     arr_paise: int = 0
+    #: Trial, active and past due, complimentary plans not included.
     active_subscriptions: int = 0
+    #: What MRR is made of: active, or past due within Razorpay's retries or
+    #: the grace; never a trial or a complimentary plan.
+    paying: int = 0
+    #: Complimentary plans still running. Worth nothing in MRR.
+    complimentary: int = 0
     trialing: int = 0
     past_due: int = 0
     cancelled: int = 0
@@ -183,6 +219,136 @@ class SubscriptionTotals(CustomBaseModel):
     paused: int = 0
     #: Past due, Razorpay done retrying, grace still running (also counted in past_due).
     in_grace: int = 0
+
+
+class RevenueCounts(CustomBaseModel):
+    #: Active, or past due within Razorpay's retries or the grace. What MRR is made of.
+    paying: int = 0
+    #: Trials that grant their plan now.
+    trialing: int = 0
+    #: Complimentary plans still running: counted, never valued.
+    complimentary: int = 0
+    past_due: int = 0
+    #: Past due, Razorpay done retrying, grace still running (also in past_due).
+    in_grace: int = 0
+    paused: int = 0
+    #: Checkouts Razorpay has not confirmed.
+    pending: int = 0
+    #: Approved, live clubs on the default plan (no plan of their own that holds now).
+    free_clubs: int = 0
+    #: Approved, live clubs.
+    total_clubs: int = 0
+
+
+class RevenuePlanRow(CustomBaseModel):
+    plan_id: int
+    plan_key: str
+    plan_name: str
+    paying: int = 0
+    trialing: int = 0
+    complimentary: int = 0
+    mrr_paise: int = 0
+
+
+class RevenueCycleRow(CustomBaseModel):
+    paying: int = 0
+    mrr_paise: int = 0
+
+
+class RevenueCollected(CustomBaseModel):
+    """Gross payments Razorpay took, by when it took them (months in India).
+    `refunded_paise` is every refund ever; subtract for net."""
+
+    this_month_paise: int = 0
+    last_month_paise: int = 0
+    year_to_date_paise: int = 0
+    all_time_paise: int = 0
+    refunded_paise: int = 0
+
+
+class RevenueMonth(CustomBaseModel):
+    #: YYYY-MM, a calendar month in India.
+    month: str
+    collected_paise: int = 0
+    #: Refunds of that month's payments.
+    refunded_paise: int = 0
+    #: Razorpay subscriptions whose first payment fell in the month.
+    new_paying: int = 0
+    #: Trials that began in the month.
+    new_trials: int = 0
+    #: Cancellations the admins were alerted to (club, admin, Razorpay, a
+    #: grace running out); complimentary plans revoked are not counted.
+    cancelled: int = 0
+    #: Complimentary plans granted in the month.
+    new_complimentary: int = 0
+
+
+class RevenueRenewals(CustomBaseModel):
+    #: What Razorpay is due to take in the next 30 days from active, renewing
+    #: subscriptions: each at what it last charged (or its price).
+    next_30_days_paise: int = 0
+    count: int = 0
+
+
+class TicketSales(CustomBaseModel):
+    this_month_paise: int = 0
+    all_time_paise: int = 0
+    note: str
+
+
+class RevenueOut(CustomBaseModel):
+    #: Paying subscriptions only; a yearly price counts a twelfth a month.
+    mrr_paise: int = 0
+    arr_paise: int = 0
+    counts: RevenueCounts
+    by_plan: list[RevenuePlanRow]
+    by_cycle: dict[str, RevenueCycleRow]
+    collected: RevenueCollected
+    #: The last `months` months, oldest first, every month present.
+    series: list[RevenueMonth]
+    upcoming_renewals: RevenueRenewals
+    #: For context only: never part of the figures above.
+    ticket_sales: TicketSales
+
+
+class ChargeClub(CustomBaseModel):
+    id: int
+    name: str
+    slug: str | None = None
+
+
+class ChargeOut(CustomBaseModel):
+    id: int
+    club: ChargeClub | None = None
+    plan_name: str | None = None
+    cycle: str | None = None
+    amount_paise: int
+    refunded_paise: int = 0
+    #: captured | refunded | partially_refunded
+    status: str
+    razorpay_payment_id: str
+    charged_at: datetime
+
+
+class ChargesPageOut(CustomBaseModel):
+    items: list[ChargeOut]
+    total: int = 0
+    #: Every matching payment, not just this page; gross.
+    sum_paise: int = 0
+    refunded_paise: int = 0
+    offset: int = 0
+    limit: int = 20
+
+
+class BackfillOut(CustomBaseModel):
+    #: Razorpay subscriptions asked about.
+    scanned: int = 0
+    #: Payments added to the ledger.
+    inserted: int = 0
+    #: Payments already there whose refunds changed.
+    updated: int = 0
+    #: Subscriptions Razorpay would not answer for; safe to run again.
+    failed: int = 0
 
 
 class ExtendGraceIn(CustomBaseModel):
@@ -196,9 +362,28 @@ class AdminCancelIn(CustomBaseModel):
 
 
 class AssignPlanIn(CustomBaseModel):
+    """
+    Put a club on a plan without charging it.
+
+    `complimentary` (the default): the plan is given for nothing -- active,
+    worth 0, never revenue -- with a `reason` (required, up to 200
+    characters, for the admins only) until `ends_at` (in the future; null for
+    no end). `status` is ignored: a comp is always active. A club whose
+    Razorpay subscription can still charge it is refused (409
+    LIVE_SUBSCRIPTION) unless `cancel_razorpay` is true, which stops it at
+    Razorpay first.
+
+    `complimentary: false` is a deal invoiced by hand: the plan at its price
+    in MRR, in the `status` given. `reason` and `ends_at` do not apply.
+    """
+
     plan_id: int
     cycle: BillingCycle = BillingCycle.monthly
     status: SubscriptionStatus = SubscriptionStatus.active
+    complimentary: bool = True
+    reason: str | None = Field(None, max_length=200)
+    ends_at: datetime | None = None
+    cancel_razorpay: bool = False
 
     @model_validator(mode="after")
     def _a_state_an_admin_can_grant(self) -> "AssignPlanIn":
@@ -206,6 +391,16 @@ class AssignPlanIn(CustomBaseModel):
         # has paid, the other a subscription Razorpay stopped charging.
         if SubscriptionStatus(self.status) in (SubscriptionStatus.pending, SubscriptionStatus.paused):
             raise ValueError("An admin can grant trial, active, past_due or cancelled.")
+        if self.complimentary:
+            self.reason = (self.reason or "").strip()
+            if not self.reason:
+                raise ValueError("Say why this plan is complimentary (reason).")
+            if self.ends_at is not None:
+                ends = self.ends_at if self.ends_at.tzinfo else self.ends_at.replace(tzinfo=timezone.utc)
+                if ends <= datetime.now(timezone.utc):
+                    raise ValueError("ends_at must be in the future, or null for no end.")
+        elif self.ends_at is not None:
+            raise ValueError("ends_at is for a complimentary plan.")
         return self
 
 
@@ -239,6 +434,10 @@ class EntitlementsOut(CustomBaseModel):
     #: Events created before this keep their paid ticketing and are not
     #: capped on registrations (subscriptions.gates.grandfathered).
     grandfathered_before: datetime | None = None
+    #: The plan above is given by MyOtherApp for nothing, until
+    #: `comp_ends_at` (null: no end). Checkout is refused while it runs.
+    complimentary: bool = False
+    comp_ends_at: datetime | None = None
 
 
 class StartSubscriptionIn(CustomBaseModel):
@@ -391,12 +590,15 @@ def plan_to_dict(plan, subscriber_count: int = 0) -> dict:
     }
 
 
-def subscription_dict(row, club=None) -> dict:
-    """One place that turns a ClubSubscriptions row into SubscriptionOut."""
+def subscription_dict(row, club=None, *, admin: bool = False, granter=None) -> dict:
+    """One place that turns a ClubSubscriptions row into SubscriptionOut, or
+    with `admin` into AdminSubscriptionOut. The club's own view never carries
+    `comp_reason` or `granted_by`. `granter` is the Users row behind
+    `granted_by`, when the caller has it loaded."""
     from app.api.subscriptions.service import CHECKOUT_TTL, in_grace, is_entitled
 
     club = club if club is not None else getattr(row, "club", None)
-    return {
+    out = {
         "id": row.id,
         "club": {"id": club.id, "name": club.name} if club else None,
         "plan": plan_to_dict(row.plan) if row.plan else None,
@@ -415,7 +617,17 @@ def subscription_dict(row, club=None) -> dict:
         "halted_at": row.halted_at,
         "grace_ends_at": row.grace_ends_at,
         "in_grace": in_grace(row),
+        "complimentary": bool(row.complimentary),
+        "comp_ends_at": row.comp_ends_at if row.complimentary else None,
     }
+    if admin:
+        out["comp_reason"] = row.comp_reason
+        out["granted_by"] = (
+            {"id": granter.id, "name": granter.full_name or granter.username or granter.email}
+            if granter is not None
+            else ({"id": row.granted_by, "name": None} if row.granted_by else None)
+        )
+    return out
 
 
 def _is_billable(plan) -> bool:

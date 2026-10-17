@@ -56,6 +56,18 @@ GRACE_DAYS = 7
 GRACE_REMINDER = timedelta(hours=48)
 #: A club on a trial hears this long before the trial ends (and billing starts).
 TRIAL_REMINDER = timedelta(hours=72)
+#: A club on a complimentary plan hears this long before it ends; so do the admins.
+COMP_REMINDER = timedelta(days=7)
+
+#: Statuses in which a Razorpay subscription can still charge the club, once
+#: it has been authorised. A complimentary plan is never granted on top of
+#: one of these without stopping it first (409 LIVE_SUBSCRIPTION).
+LIVE_AT_RAZORPAY = (
+    SubscriptionStatus.trial,
+    SubscriptionStatus.active,
+    SubscriptionStatus.past_due,
+    SubscriptionStatus.paused,
+)
 
 
 def _now() -> datetime:
@@ -75,8 +87,13 @@ def _when(value) -> datetime | None:
 
 
 def _entitled(*, status, billed, authenticated_at, activated_at, trial_started_at,
-              cancel_at_period_end, current_period_end, now, grace_ends_at=None) -> bool:
+              cancel_at_period_end, current_period_end, now, grace_ends_at=None,
+              comp_ends_at=None) -> bool:
     status = _status(status)
+    if comp_ends_at is not None and comp_ends_at <= now:
+        # A complimentary plan ends on time, whether or not the sweep that
+        # moves the club back has run yet.
+        return False
     if status == SubscriptionStatus.active:
         return True
     if status == SubscriptionStatus.trial:
@@ -120,7 +137,58 @@ def is_entitled(subscription: ClubSubscriptions, now: datetime | None = None) ->
         current_period_end=subscription.current_period_end,
         now=now or _now(),
         grace_ends_at=subscription.grace_ends_at,
+        comp_ends_at=subscription.comp_ends_at if subscription.complimentary else None,
     )
+
+
+def comp_live(subscription: ClubSubscriptions | None, now: datetime | None = None) -> bool:
+    """A complimentary plan that is still running."""
+    return bool(
+        subscription is not None
+        and subscription.complimentary
+        and _status(subscription.status) == SubscriptionStatus.active
+        and (subscription.comp_ends_at is None or subscription.comp_ends_at > (now or _now()))
+    )
+
+
+def comp_over(subscription: ClubSubscriptions | None, now: datetime | None = None) -> bool:
+    """A complimentary plan whose end has passed, not yet put away."""
+    return bool(
+        subscription is not None
+        and subscription.complimentary
+        and subscription.comp_ends_at is not None
+        and subscription.comp_ends_at <= (now or _now())
+    )
+
+
+def live_at_razorpay(subscription: ClubSubscriptions | None) -> bool:
+    """A Razorpay subscription that can still charge the club."""
+    return bool(
+        subscription is not None
+        and subscription.razorpay_subscription_id
+        and _status(subscription.status) in LIVE_AT_RAZORPAY
+    )
+
+
+def paying(subscription: ClubSubscriptions, now: datetime | None = None) -> bool:
+    """
+    Whether this row counts as revenue: paid for, and still being paid for.
+
+    Active, or past due with Razorpay still retrying or within the grace it
+    gave (a club that had paid). Never a complimentary plan, never a trial,
+    and never a row worth nothing (`mrr_paise` 0: a free plan granted by hand).
+    """
+    if subscription.complimentary or (subscription.mrr_paise or 0) <= 0:
+        return False
+    status = _status(subscription.status)
+    if status == SubscriptionStatus.active:
+        return True
+    if status == SubscriptionStatus.past_due:
+        now = now or _now()
+        return subscription.activated_at is not None and (
+            subscription.grace_ends_at is None or subscription.grace_ends_at > now
+        )
+    return False
 
 
 def in_grace(subscription: ClubSubscriptions, now: datetime | None = None) -> bool:
@@ -146,6 +214,15 @@ def previous_entitled(subscription: ClubSubscriptions, now: datetime | None = No
         cancel_at_period_end=prev.get("cancel_at_period_end"),
         current_period_end=_when(prev.get("current_period_end")),
         now=now or _now(),
+    )
+
+
+def restorable(subscription: ClubSubscriptions, now: datetime | None = None) -> bool:
+    """What the club had before is an admin's grant that would still stand
+    (no Razorpay subscription: that one was stopped when it was replaced)."""
+    prev = subscription.previous_state or {}
+    return bool(
+        prev.get("plan_id") and not prev.get("razorpay_subscription_id") and previous_entitled(subscription, now)
     )
 
 
@@ -253,9 +330,13 @@ async def _resolve(session, row, now) -> Entitlements:
         if is_entitled(row, now):
             if row.plan and not row.plan.is_deleted:
                 return _from_plan(row.plan, row)
-        elif row.status == SubscriptionStatus.pending and previous_entitled(row, now):
+        elif (
+            (row.status == SubscriptionStatus.pending and previous_entitled(row, now))
+            or (comp_over(row, now) and restorable(row, now))
+        ):
             # Mid-checkout: the plan the club had keeps going until Razorpay
-            # confirms the new one.
+            # confirms the new one. A complimentary plan that has ended: the
+            # admin's grant from before it, until the sweep puts it back.
             previous = (
                 await session.execute(
                     select(Plans)
@@ -485,20 +566,42 @@ def mrr_for(plan: Plans, cycle: BillingCycle) -> int:
     return plan.price_monthly_paise
 
 
-async def get_club_subscription(session, club_id: int) -> ClubSubscriptions | None:
-    return (
-        await session.execute(
-            select(ClubSubscriptions)
-            .where(
-                ClubSubscriptions.club_id == club_id,
-                ClubSubscriptions.is_deleted == False,
-            )
-            .options(
-                selectinload(ClubSubscriptions.plan).selectinload(Plans.limits),
-                selectinload(ClubSubscriptions.plan).selectinload(Plans.features),
-            )
+async def get_club_subscription(session, club_id: int, *, for_update: bool = False) -> ClubSubscriptions | None:
+    """The club's live row. `for_update` locks it until the transaction ends,
+    for a change that calls Razorpay in between (a webhook about the same
+    subscription waits rather than acting on what it read before)."""
+    query = (
+        select(ClubSubscriptions)
+        .where(
+            ClubSubscriptions.club_id == club_id,
+            ClubSubscriptions.is_deleted == False,
         )
-    ).scalar_one_or_none()
+        .options(
+            selectinload(ClubSubscriptions.plan).selectinload(Plans.limits),
+            selectinload(ClubSubscriptions.plan).selectinload(Plans.features),
+        )
+    )
+    if for_update:
+        query = query.with_for_update(of=ClubSubscriptions).execution_options(populate_existing=True)
+    return (await session.execute(query)).scalar_one_or_none()
+
+
+async def _live_club(session, club_id: int) -> Clubs:
+    club = await session.get(Clubs, club_id)
+    if not club or club.is_deleted:
+        raise CustomHTTPException(status_code=404, message="Club not found")
+    return club
+
+
+def clear_comp(subscription: ClubSubscriptions) -> bool:
+    """No longer complimentary. Returns whether it was."""
+    was = bool(subscription.complimentary)
+    subscription.complimentary = False
+    subscription.comp_reason = None
+    subscription.comp_ends_at = None
+    subscription.granted_by = None
+    subscription.comp_reminded_at = None
+    return was
 
 
 async def assign_plan(
@@ -508,6 +611,7 @@ async def assign_plan(
     plan: Plans,
     cycle: BillingCycle,
     status: SubscriptionStatus = SubscriptionStatus.active,
+    granted_by: int | None = None,
 ) -> ClubSubscriptions:
     """
     Put a club on a plan, without charging anything.
@@ -516,17 +620,21 @@ async def assign_plan(
     one. Taking money is `billing.start_subscription`, deliberately separate:
     nothing in this module should be able to charge a card as a side effect of
     an admin changing a dropdown.
+
+    This is the paid path (a deal invoiced by hand): it counts in MRR at the
+    plan's price. A plan given for nothing is `grant_complimentary`.
     """
-    club = await session.get(Clubs, club_id)
-    if not club or club.is_deleted:
-        raise CustomHTTPException(status_code=404, message="Club not found")
+    await _live_club(session, club_id)
 
     subscription = await get_club_subscription(session, club_id)
     if subscription is None:
         subscription = ClubSubscriptions(club_id=club_id)
         session.add(subscription)
 
+    clear_comp(subscription)
+    subscription.granted_by = granted_by
     subscription.plan_id = plan.id
+    subscription.plan = plan
     subscription.cycle = cycle
     subscription.status = status
     subscription.mrr_paise = mrr_for(plan, cycle) if status != SubscriptionStatus.cancelled else 0
@@ -546,6 +654,91 @@ async def assign_plan(
     clear_grace(subscription)
     await session.flush()
     return subscription
+
+
+async def grant_complimentary(
+    session,
+    *,
+    club_id: int,
+    plan: Plans,
+    cycle: BillingCycle,
+    reason: str,
+    ends_at: datetime | None,
+    granted_by: int | None,
+    now: datetime | None = None,
+) -> ClubSubscriptions:
+    """
+    Give a club a plan for nothing: active, worth 0 a month, until `ends_at`
+    (or with no end). Never charged and never counted as revenue.
+
+    The caller has already made sure no Razorpay subscription can charge the
+    club (router.assign_plan: a live one is cancelled first or refused). Its
+    id moves off the row, into `previous_state` with the rest of what the club
+    had, so a late webhook about it cannot touch the comp, and the sweep can
+    put back an admin's earlier grant when this one ends. Granting over a comp
+    keeps what was there before the first one.
+    """
+    now = now or _now()
+    await _live_club(session, club_id)
+
+    subscription = await get_club_subscription(session, club_id)
+    if subscription is None:
+        subscription = ClubSubscriptions(club_id=club_id)
+        session.add(subscription)
+        previous = None
+    elif subscription.complimentary:
+        previous = subscription.previous_state
+    elif subscription.plan_id is not None:
+        previous = _snapshot(subscription)
+    else:
+        previous = None
+
+    subscription.plan_id = plan.id
+    subscription.plan = plan
+    subscription.cycle = cycle
+    subscription.status = SubscriptionStatus.active
+    subscription.mrr_paise = 0
+    subscription.current_period_end = ends_at
+    subscription.razorpay_subscription_id = None
+    subscription.last_failure_reason = None
+    subscription.pending_since = None
+    subscription.authenticated_at = None
+    # Never paid for: `activated_at` means Razorpay took money.
+    subscription.activated_at = None
+    subscription.trial_ends_at = None
+    subscription.cancel_at_period_end = False
+    subscription.cancel_requested_at = None
+    clear_grace(subscription)
+    subscription.previous_state = previous
+
+    subscription.complimentary = True
+    subscription.comp_reason = reason
+    subscription.comp_ends_at = ends_at
+    subscription.granted_by = granted_by
+    subscription.comp_reminded_at = None
+    await session.flush()
+    return subscription
+
+
+def end_comp(subscription: ClubSubscriptions, now: datetime | None = None, *, restore: bool = True) -> str:
+    """
+    A complimentary plan ends (its date passed) or is revoked: back to an
+    admin's grant from before it when `restore` and one would still stand,
+    otherwise cancelled, so Free. Returns "restored" or "cancelled".
+    """
+    now = now or _now()
+    clear_comp(subscription)
+    if restore and restorable(subscription, now):
+        revert_checkout(subscription)
+        return "restored"
+    subscription.previous_state = None
+    subscription.pending_since = None
+    subscription.cancel_at_period_end = False
+    subscription.cancel_requested_at = subscription.cancel_requested_at or now
+    subscription.status = SubscriptionStatus.cancelled
+    subscription.mrr_paise = 0
+    subscription.current_period_end = now
+    return "cancelled"
 
 
 # ---------------------------------------------------------------------------
@@ -624,6 +817,10 @@ def record_checkout(
     subscription.cancel_requested_at = None
     subscription.last_failure_reason = None
     clear_grace(subscription)
+    # The checkout route settles a comp that ended and refuses one that has
+    # not, so nothing complimentary is left to carry over; cleared all the
+    # same, so a paid checkout can never inherit a comp's flags.
+    clear_comp(subscription)
     return subscription
 
 
@@ -759,44 +956,50 @@ async def usage(session, club_id: int, now: datetime | None = None) -> dict:
     }
 
 
-async def mrr_totals(session) -> dict:
-    """Headline numbers for the admin screen."""
-    rows = (
-        await session.execute(
-            select(
-                func.coalesce(func.sum(ClubSubscriptions.mrr_paise), 0),
-                func.count(ClubSubscriptions.id),
-            ).where(
-                ClubSubscriptions.is_deleted == False,
-                ClubSubscriptions.status.in_(ENTITLED_STATUSES),
-            )
-        )
-    ).one()
-    mrr, active = rows
-
-    by_status = dict(
+async def current_subscriptions(session) -> list[ClubSubscriptions]:
+    """Every club's live row, for the revenue figures: clubs that have been
+    deleted are left out (their past payments stay in the ledger)."""
+    return list(
         (
             await session.execute(
-                select(ClubSubscriptions.status, func.count(ClubSubscriptions.id))
-                .where(ClubSubscriptions.is_deleted == False)
-                .group_by(ClubSubscriptions.status)
+                select(ClubSubscriptions)
+                .join(Clubs, Clubs.id == ClubSubscriptions.club_id)
+                .where(ClubSubscriptions.is_deleted == False, Clubs.is_deleted == False)  # noqa: E712
+                .options(selectinload(ClubSubscriptions.plan))
             )
-        ).all()
-    )
-    in_grace_count = await session.scalar(
-        select(func.count(ClubSubscriptions.id)).where(
-            ClubSubscriptions.is_deleted == False,
-            ClubSubscriptions.status == SubscriptionStatus.past_due,
-            ClubSubscriptions.grace_ends_at > _now(),
         )
+        .scalars()
+        .all()
+    )
+
+
+async def mrr_totals(session, now: datetime | None = None) -> dict:
+    """
+    Headline numbers for the admin screen.
+
+    MRR is what paying subscriptions bring in a month (`paying`): never a
+    complimentary plan, which has its own count, and never a trial.
+    """
+    now = now or _now()
+    rows = await current_subscriptions(session)
+    by_status: dict = {}
+    for row in rows:
+        by_status[_status(row.status)] = by_status.get(_status(row.status), 0) + 1
+    payers = [row for row in rows if paying(row, now)]
+    mrr = sum(int(row.mrr_paise or 0) for row in payers)
+    comps = sum(1 for row in rows if comp_live(row, now))
+    active = sum(
+        1 for row in rows if _status(row.status) in ENTITLED_STATUSES and not row.complimentary
     )
 
     return {
-        "mrr_paise": int(mrr or 0),
+        "mrr_paise": mrr,
         # Annual run rate, the number a board asks for. Derived here so the
         # dashboard cannot multiply it by the wrong factor.
-        "arr_paise": int(mrr or 0) * 12,
-        "active_subscriptions": int(active or 0),
+        "arr_paise": mrr * 12,
+        "active_subscriptions": active,
+        "paying": len(payers),
+        "complimentary": comps,
         "trialing": int(by_status.get(SubscriptionStatus.trial, 0)),
         "past_due": int(by_status.get(SubscriptionStatus.past_due, 0)),
         "cancelled": int(by_status.get(SubscriptionStatus.cancelled, 0)),
@@ -804,7 +1007,7 @@ async def mrr_totals(session) -> dict:
         "paused": int(by_status.get(SubscriptionStatus.paused, 0)),
         # Past due, Razorpay done retrying, still within its grace: the ones
         # about to drop to Free unless someone acts.
-        "in_grace": int(in_grace_count or 0),
+        "in_grace": sum(1 for row in rows if in_grace(row, now)),
     }
 
 
