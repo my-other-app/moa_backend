@@ -104,11 +104,14 @@ class AppConfig(BaseSettings):
 
     # Club plans (app/api/subscriptions/gates.py). PLAN_ENFORCEMENT=false is
     # the kill switch: every plan gate lets everything through, as before the
-    # plans existed. An event created before PLAN_ENFORCEMENT_FROM keeps its
-    # paid ticketing and is not capped on registrations, so nobody part-way
-    # through buying a ticket is turned away by the switch-on.
+    # plans existed. An event created before PLAN_ENFORCEMENT_FROM and held
+    # within PLAN_GRANDFATHER_DAYS of it is "grandfathered": no event-scoped
+    # gate applies to it (paid tickets, registration caps, live room, ID
+    # cards...), so nothing under way breaks at the switch-on. The window
+    # stops an old event being redated and reused for ever.
     PLAN_ENFORCEMENT: bool = True
     PLAN_ENFORCEMENT_FROM: datetime = datetime(2026, 10, 18, 0, 0, tzinfo=_IST)
+    PLAN_GRANDFATHER_DAYS: int = 90
 
     @field_validator("PLAN_ENFORCEMENT_FROM")
     @classmethod

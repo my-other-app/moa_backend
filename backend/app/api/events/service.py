@@ -269,12 +269,13 @@ async def update_event(
     )
     if (db_event.lifecycle or EventStatus.published) in LOCKED_STATUSES:
         raise CustomHTTPException(409, message="This event is closed, so its settings are read-only. Move its status back to Live on the closeout page to change them.", error_code="EVENT_LOCKED")
-    # The club's plan: free to paid needs tickets; the store and swag switched on need theirs.
+    # The club's plan: free to paid needs tickets; the store and swag switched
+    # on need theirs. Not for a grandfathered event, judged by its new date.
     from app.api.subscriptions import gates
 
     await gates.check_event_update(
         session, db_event, has_fee=event.has_fee, merch_enabled=getattr(event, "merch_enabled", None),
-        swag_enabled=getattr(event, "swag_enabled", None), actor=actor,
+        swag_enabled=getattr(event, "swag_enabled", None), event_datetime=event.event_datetime, actor=actor,
     )
 
     if event.poster:
@@ -490,7 +491,12 @@ async def get_event(session: AsyncSession, event_id: str | int, user_id: int | N
     # cannot see, and the retention column is an enum the response reads as text.
     data["status"] = event.status
     data["retention_mode"] = getattr(event.retention_mode, "value", event.retention_mode) or "keep"
-    
+    # Whether the plan's event-scoped locks pass this event by; the dashboard
+    # reads this one flag rather than working the rule out itself.
+    from app.api.subscriptions import gates
+
+    data["plan_grandfathered"] = await gates.plan_grandfathered(session, event)
+
     # Get event files (downloads) - available to all users
     data["downloads"] = [
         {"name": f.name, "url": f.file} 

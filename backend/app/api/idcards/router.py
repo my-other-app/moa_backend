@@ -25,7 +25,7 @@ async def summary(session: SessionDep, user: ClubAuth, event_id: int) -> CardSum
 @router.patch("/settings", summary="Who may print again, auto-print, pre-printed stock")
 async def settings(session: SessionDep, user: ClubAuth, event_id: int, body: CardSettingsUpdate) -> CardSettings:
     event = await deliveries.event_for_club(session, user, event_id)
-    await gates.require_feature(session, event.club_id, "badges", actor=user)
+    await gates.require_feature(session, event.club_id, "badges", actor=user, event=event)
     return CardSettings(**await service.update_settings(session, event, body))
 
 

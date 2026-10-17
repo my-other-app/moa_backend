@@ -81,7 +81,7 @@ async def patch_quiz(session: SessionDep, user: ClubAuth, event_id: int, body: Q
 @router.post("/quiz/questions", summary="Add a question", status_code=201)
 async def add_question(session: SessionDep, user: ClubAuth, event_id: int, body: QuizQuestionIn) -> QuizQuestionOut:
     event = await deliveries.event_for_club(session, user, event_id)
-    await gates.require_feature(session, event.club_id, "quiz", actor=user)
+    await gates.require_feature(session, event.club_id, "quiz", actor=user, event=event)
     return QuizQuestionOut(**await service.add_question(session, await service.quiz_of(session, event), body))
 
 
@@ -112,7 +112,7 @@ async def host_action(session: SessionDep, user: ClubAuth, event_id: int, action
         raise CustomHTTPException(404, message="Unknown action")
     if action == "start":
         # Starting is the plan's; a quiz already running can always be moved on or ended.
-        await gates.require_feature(session, event.club_id, "quiz", actor=user)
+        await gates.require_feature(session, event.club_id, "quiz", actor=user, event=event)
     quiz = await service.quiz_of(session, event)
     return HostState(**await fn(session, quiz))
 
@@ -159,7 +159,7 @@ async def list_questions(session: SessionDep, user: ClubAuth, event_id: int) -> 
 @router.patch("/questions/settings", summary="Whether a question waits for approval")
 async def qa_settings(session: SessionDep, user: ClubAuth, event_id: int, body: QASettings) -> QABoard:
     event = await deliveries.event_for_club(session, user, event_id)
-    await gates.require_feature(session, event.club_id, "qa", actor=user)
+    await gates.require_feature(session, event.club_id, "qa", actor=user, event=event)
     return QABoard(**await service.set_qa(session, event, body.approve_first))
 
 
@@ -174,7 +174,7 @@ async def moderate(session: SessionDep, user: ClubAuth, event_id: int, question_
 async def ask(request: Request, session: SessionDep, event_id: int, body: AskIn, user: OptionalAuth = None) -> QuestionOut:
     event = await _public_event(session, event_id)
     # The floor is open only on a plan with Q&A; the guest is not told why.
-    if not await gates.allows(session, event.club_id, "qa", actor=user):
+    if not await gates.allows(session, event.club_id, "qa", actor=user, event=event):
         raise CustomHTTPException(409, message="Questions aren't open for this event right now.", error_code="QA_CLOSED")
     key = service.voter_key_of(request)
     reg = await service._registration_of(session, event, user)
@@ -200,7 +200,7 @@ async def list_polls(session: SessionDep, user: ClubAuth, event_id: int) -> list
 @router.post("/polls", summary="A new poll, as a draft", status_code=201)
 async def create_poll(session: SessionDep, user: ClubAuth, event_id: int, body: PollIn) -> PollOut:
     event = await deliveries.event_for_club(session, user, event_id)
-    await gates.require_feature(session, event.club_id, "polls", actor=user)
+    await gates.require_feature(session, event.club_id, "polls", actor=user, event=event)
     return PollOut(**await service.create_poll(session, event, body))
 
 
@@ -215,7 +215,7 @@ async def poll_status(session: SessionDep, user: ClubAuth, event_id: int, poll_i
     event = await deliveries.event_for_club(session, user, event_id)
     if body.status == "live":
         # Launching is the plan's; closing a poll that is up never is.
-        await gates.require_feature(session, event.club_id, "polls", actor=user)
+        await gates.require_feature(session, event.club_id, "polls", actor=user, event=event)
     return PollOut(**await service.set_poll_status(session, event, poll_id, body.status))
 
 
@@ -297,7 +297,12 @@ async def shift(session: SessionDep, user: ClubAuth, event_id: int, body: ShiftI
 async def feed(request: Request, session: SessionDep, event_id: int) -> Feed:
     event = await _public_event(session, event_id)
     key = (request.headers.get(service.VOTER_HEADER) or "").strip() or None
-    return Feed(**await service.feed(session, event, key))
+    out = await service.feed(session, event, key)
+    # The floor shows as closed when the club's plan has no Q&A (and the event
+    # is not grandfathered), so the ask box never appears only to refuse.
+    if out["qa"]["open"] and not await gates.allows_for_feed(session, event.club_id, "qa", event=event):
+        out["qa"]["open"] = False
+    return Feed(**out)
 
 
 @router.get("/screen", summary="The big screen")

@@ -731,14 +731,225 @@ async def test_a_paid_event_made_before_the_cutoff_still_registers_and_pays(clie
     assert r.status_code == 200, r.text
 
 
-async def test_a_free_event_from_before_the_cutoff_does_not_turn_paid_on_free(client, session, world, monkeypatch):
-    """Grandfathering keeps an event as it was; it does not let an old free
-    event be made into a new paid one."""
+async def grandfather(session, monkeypatch, event):
+    """Enforcement began yesterday; `event` was made the day before."""
     monkeypatch.setattr(settings, "PLAN_ENFORCEMENT_FROM", NOW - timedelta(days=1))
-    world.event.created_at = NOW - timedelta(days=2)
+    event.created_at = NOW - timedelta(days=2)
     await session.commit()
+
+
+#: The ACTIONS that are about one event, and so pass a grandfathered one by.
+EVENT_SCOPED_ACTIONS = ("quiz", "polls", "qa", "links", "report", "merch", "swag", "badges", "teams", "judging", "rounds")
+#: The ones about the whole club, enforced whatever its events.
+CLUB_WIDE_ACTIONS = ("tickets", "website", "roles", "finance")
+
+
+def test_the_actions_split_into_event_scoped_and_club_wide():
+    assert set(EVENT_SCOPED_ACTIONS) | set(CLUB_WIDE_ACTIONS) == set(ACTIONS)
+    assert set(EVENT_SCOPED_ACTIONS) <= gates.EVENT_SCOPED_FEATURES
+    assert set(CLUB_WIDE_ACTIONS) - {"tickets"} == gates.CLUB_WIDE_FEATURES
+    assert not gates.EVENT_SCOPED_FEATURES & gates.CLUB_WIDE_FEATURES
+
+
+@pytest.mark.parametrize("flag", EVENT_SCOPED_ACTIONS)
+async def test_a_grandfathered_event_keeps_every_event_scoped_feature_on_free(client, session, world, monkeypatch, flag):
+    """An event under way at the switch-on: its live room, links, report,
+    store and swag (past Free's zero items too), ID cards and competition
+    carry on as they were."""
+    await grandfather(session, monkeypatch, world.event)
+    r = await ACTIONS[flag][1](client, world, world.h)
+    assert r.status_code < 300, r.text
+
+
+@pytest.mark.parametrize("flag", CLUB_WIDE_ACTIONS)
+async def test_club_wide_gates_hold_whatever_the_clubs_events(client, session, world, monkeypatch, flag):
+    """`tickets` here is a new event being created: never grandfathered."""
+    await grandfather(session, monkeypatch, world.event)
+    r = await ACTIONS[flag][1](client, world, world.h)
+    assert r.status_code == 403 and r.json()["errors"]["feature"] == flag
+
+
+async def test_the_clubs_own_links_and_card_design_stay_gated(client, session, world, monkeypatch):
+    await grandfather(session, monkeypatch, world.event)
+    r = await client.post(f"{API}/clubs/links", json={"name": "Bio", "utm_source": "insta", "utm_medium": "bio"}, headers=world.h)
+    assert r.status_code == 403 and r.json()["errors"]["feature"] == "links"
+    r = await client.put(f"{API}/clubs/designs/badge/layout", json={}, headers=world.h)
+    assert r.status_code == 403 and r.json()["errors"]["feature"] == "badges"
+    # The event's own card design is the event's: past the gate, on to validation.
+    r = await client.put(f"{API}/events/{world.event.id}/designs/badge/layout", json={}, headers=world.h)
+    assert r.status_code == 422, r.text
+
+
+async def test_a_grandfathered_events_door_keeps_printing_cards(client, session, world, monkeypatch, make_user, make_registration):
+    guest = await make_user(email="door-card@example.com")
+    reg = await make_registration(event=world.event, user=guest)
+    await grandfather(session, monkeypatch, world.event)
+    r = await client.get(f"{API}/events/{world.event.id}/idcards/{reg.id}.pdf?record=false", headers=world.h)
+    assert r.status_code == 200 and r.headers["content-type"] == "application/pdf"
+
+
+async def test_a_grandfathered_events_room_keeps_its_floor_and_networking(client, session, world, monkeypatch, make_user, mint_token):
+    world.event.event_datetime = NOW - timedelta(minutes=30)
+    await grandfather(session, monkeypatch, world.event)
+    room = {"X-Live-Key": "browser-key-0002"}
+    feed = (await client.get(f"{API}/events/{world.event.id}/live")).json()
+    assert feed["qa"]["open"] is True
+    r = await client.post(f"{API}/events/{world.event.id}/live/questions", json={"text": "Slides after?"}, headers=room)
+    assert r.status_code == 201, r.text
+    guest = await make_user(email="mingler@example.com")
+    await session.commit()
+    r = await client.get(f"{API}/events/{world.event.id}/networking", headers=auth_header(await mint_token(guest)))
+    assert r.json().get("error_code") != "NETWORKING_UNAVAILABLE"
+
+
+async def test_the_live_feed_shows_the_floor_closed_when_the_plan_has_no_qa(client, session, world, monkeypatch):
+    url = f"{API}/events/{world.event.id}/live"
+    assert (await client.get(url)).json()["qa"]["open"] is False
+    await on_plan(session, world, "growth")
+    gates.reset()  # the feed remembers a club's answer for half a minute
+    assert (await client.get(url)).json()["qa"]["open"] is True
+    monkeypatch.setattr(settings, "PLAN_ENFORCEMENT", False)
+    await on_plan(session, world, "free")
+    assert (await client.get(url)).json()["qa"]["open"] is True
+
+
+async def test_a_grandfathered_event_may_still_turn_paid(client, session, world, monkeypatch):
+    await grandfather(session, monkeypatch, world.event)
     r = await client.put(f"{API}/events/update/{world.event.id}", data=update_form(world, name="Gate Night", has_fee="true", reg_fee="100"), headers=world.h)
+    assert r.status_code == 200, r.text
+
+
+async def test_grandfathering_ends_with_the_window(client, session, world, monkeypatch, make_event):
+    """Created before the cutoff but held more than PLAN_GRANDFATHER_DAYS
+    after it: an old event redated for reuse is gated like a new one."""
+    await grandfather(session, monkeypatch, world.event)
+    assert settings.PLAN_GRANDFATHER_DAYS == 90
+    edge = gates.grace_until()
+    assert edge == NOW - timedelta(days=1) + timedelta(days=90)
+    assert gates.grandfathered(world.event, event_datetime=edge - timedelta(seconds=1))
+    assert not gates.grandfathered(world.event, event_datetime=edge)
+
+    # Redated past the window in the edit that turns it paid: refused.
+    far = dict(update_form(world, name="Gate Night", has_fee="true", reg_fee="100"), event_datetime=(edge + timedelta(days=1)).isoformat())
+    r = await client.put(f"{API}/events/update/{world.event.id}", data=far, headers=world.h)
     assert r.status_code == 403 and r.json()["errors"]["feature"] == "tickets"
+
+    # Moved past it already: the live room and the caps apply again.
+    world.event.event_datetime = edge + timedelta(days=1)
+    await session.commit()
+    r = await ACTIONS["polls"][1](client, world, world.h)
+    assert r.status_code == 403 and r.json()["errors"]["feature"] == "polls"
+    await set_limit(session, world, "free", registrations_per_event=1)
+    assert (await register(client, world.event.id, 1)).status_code == 200
+    assert (await register(client, world.event.id, 2)).status_code == 409
+
+
+async def test_an_old_paid_event_moved_past_the_window_still_sells_but_is_capped(client, session, world, monkeypatch, make_event):
+    monkeypatch.setattr(settings, "PLAN_ENFORCEMENT_FROM", NOW - timedelta(days=1))
+    paid = await make_event(club=world.club, created_by=world.owner, name="Old Paid Night", has_fee=True, reg_fee=100.0,
+                            event_datetime=gates.grace_until() + timedelta(days=10))
+    paid.created_at = NOW - timedelta(days=3)
+    await session.commit()
+    assert not gates.grandfathered(paid)
+    # Kept paid through an edit: the tickets gate only fires on free to paid.
+    keep = dict(update_form(world, name="Old Paid Night", has_fee="true", reg_fee="100"), event_datetime=paid.event_datetime.isoformat())
+    assert (await client.put(f"{API}/events/update/{paid.id}", data=keep, headers=world.h)).status_code == 200
+    # Selling: registrations open, up to the plan's cap of paid ones.
+    await set_limit(session, world, "free", registrations_per_event=1)
+    first = await register(client, paid.id, 1)
+    assert first.status_code == 200 and first.json()["pay_amount"] == 100.0
+    reg = await session.get(EventRegistrationsLink, uuid.UUID(first.json()["event_registration_id"]))
+    reg.is_paid = True
+    await session.commit()
+    assert (await register(client, paid.id, 2)).status_code == 409
+
+
+# ─── Duplicating ─────────────────────────────────────────────────────────
+
+
+async def _stocked(session, w):
+    """The world's event with handout items, an ID card design and report recipients."""
+    from app.api.idcards.models import BadgeTemplates
+    from app.api.merch.models import MerchItems
+    from app.api.templates_audience import TemplateAudience
+
+    for n in range(3):
+        session.add(MerchItems(event_id=w.event.id, name=f"Sticker {n}", stock=10))
+    session.add(BadgeTemplates(club_id=w.club.id, event_id=w.event.id, audience=TemplateAudience.event_default, name="Card", config={}))
+    w.event.report_recipients = ["boss@example.com"]
+    await session.commit()
+
+
+def _copy(client, w, headers=None):
+    return client.post(f"{API}/events/{w.event.id}/duplicate", json={"name": "Copy", "event_datetime": (NOW + timedelta(days=30)).isoformat()}, headers=headers or w.h)
+
+
+async def test_a_copy_on_free_leaves_behind_what_free_does_not_have(client, session, world):
+    from app.api.idcards.models import BadgeTemplates
+    from app.api.merch.models import MerchItems
+
+    await _stocked(session, world)
+    r = await _copy(client, world)
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["skipped"] == ["report", "badges", "swag"]
+    assert body["copied"]["merch"] == 0
+    copy = await session.get(Events, body["id"])
+    assert copy.report_recipients == []
+    assert await session.scalar(select(MerchItems.id).where(MerchItems.event_id == copy.id)) is None
+    assert await session.scalar(select(BadgeTemplates.id).where(BadgeTemplates.event_id == copy.id)) is None
+
+
+async def test_a_copy_carries_at_most_the_plans_items(client, session, world):
+    await _stocked(session, world)
+    await on_plan(session, world, "pro")
+    await set_limit(session, world, "pro", merch_items_per_event=1)
+    body = (await _copy(client, world)).json()
+    assert body["skipped"] == ["merch_items_per_event"]
+    assert body["copied"]["merch"] == 1 and body["copied"]["designs"] == 1
+    copy = await session.get(Events, body["id"])
+    assert copy.report_recipients == ["boss@example.com"]
+
+
+async def test_a_copy_with_nothing_to_leave_says_so(client, session, world):
+    body = (await _copy(client, world)).json()
+    assert body["skipped"] == []
+
+
+async def test_an_admin_copies_everything(client, session, world, make_admin):
+    await _stocked(session, world)
+    body = (await _copy(client, world, await impersonating(session, make_admin, world))).json()
+    assert body["skipped"] == [] and body["copied"]["merch"] == 3 and body["copied"]["designs"] == 1
+
+
+# ─── What the dashboard reads of an event ────────────────────────────────
+
+
+async def test_an_events_page_says_whether_the_plan_passes_it_by(client, session, world, monkeypatch, make_event):
+    url = f"{API}/events/info/{world.event.id}"
+    body = (await client.get(url)).json()
+    assert body["plan_grandfathered"] is False
+    assert datetime.fromisoformat(body["created_at"]) == world.event.created_at
+
+    await grandfather(session, monkeypatch, world.event)
+    assert (await client.get(url)).json()["plan_grandfathered"] is True
+    # Past the window: not any more.
+    world.event.event_datetime = gates.grace_until() + timedelta(hours=1)
+    await session.commit()
+    assert (await client.get(url)).json()["plan_grandfathered"] is False
+    world.event.event_datetime = NOW + timedelta(days=5)
+    await session.commit()
+    # Nothing enforced, nothing to be exempt from.
+    monkeypatch.setattr(settings, "PLAN_ENFORCEMENT", False)
+    assert (await client.get(url)).json()["plan_grandfathered"] is False
+
+
+async def test_without_a_free_plan_no_event_is_marked_grandfathered(client, session, make_club, make_event, monkeypatch):
+    owner, club = await make_club(name="Planless Club", email="planless@example.com")
+    event = await make_event(club=club, created_by=owner, name="Planless Night", event_datetime=NOW + timedelta(days=5))
+    await grandfather(session, monkeypatch, event)
+    assert gates.grandfathered(event)
+    assert (await client.get(f"{API}/events/info/{event.id}")).json()["plan_grandfathered"] is False
 
 
 # ─── Telling the owner ───────────────────────────────────────────────────

@@ -27,8 +27,15 @@ Nothing here is enforced when:
 - the acting user is an admin, or an admin acting as the club (impersonation);
 - `settings.PLAN_ENFORCEMENT` is false (the kill switch);
 - the platform has no free plan (`service._unlimited`: everything allowed);
-- for paid ticketing and the registration caps, the event was created before
-  `settings.PLAN_ENFORCEMENT_FROM` ("grandfathered").
+- for an event-scoped gate, the event is grandfathered: created before
+  `settings.PLAN_ENFORCEMENT_FROM` and happening before that plus
+  `settings.PLAN_GRANDFATHER_DAYS`. Events already under way keep working as
+  they were -- paid tickets, both registration caps, the live room,
+  networking, its links, report, store and swag, ID cards, competitions --
+  so nothing breaks mid-event at the switch-on. Club-wide gates (website and
+  its templates, roles and seats, finance, the club's own links and card
+  design, events and announcements per month) hold for every club. The
+  scope rule lives in `_exempt`; call sites only pass `event=`.
 
 Limits deliberately not enforced:
 
@@ -63,6 +70,22 @@ REGISTRATIONS_CLOSED_MESSAGE = "This event isn't taking more registrations right
 
 #: Every plan has these; nothing gates them.
 ALWAYS_ALLOWED = frozenset({"checkin", "certificates", "regform", "reviews", "threads"})
+
+#: Gates about one event, which a grandfathered event is exempt from. Asked
+#: with `event=`, they let a grandfathered one through (`_exempt`). `links`
+#: is event-scoped only for an event's links: the club's own links are asked
+#: without an event, and so are always enforced.
+EVENT_SCOPED_FEATURES = frozenset({
+    "tickets", "quiz", "polls", "qa", "networking", "links", "report",
+    "merch", "swag", "badges", "teams", "judging", "rounds",
+})
+EVENT_SCOPED_LIMITS = frozenset({"registrations_per_event", "merch_items_per_event"})
+#: Gates about the whole club, enforced whatever its events: website,
+#: roles, finance, and the per-club limits (events and announcements per
+#: month, committee seats, website templates, registrations per month --
+#: though a registration to a grandfathered event is never refused, it still
+#: counts in `usage`).
+CLUB_WIDE_FEATURES = frozenset({"website", "roles", "finance"})
 
 #: The limits nothing enforces, and why (see the module docstring).
 NOT_ENFORCED = {
@@ -131,15 +154,52 @@ def cutoff() -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
-def grandfathered(event) -> bool:
-    """Made before enforcement began: its paid ticketing and registration caps
-    are left as they were. An event not saved yet is never grandfathered."""
-    created = getattr(event, "created_at", None)
-    if created is None:
+def _aware(value: Optional[datetime]) -> Optional[datetime]:
+    if value is None:
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def grace_until() -> datetime:
+    """An event made before the cutoff stays grandfathered only while it
+    happens before this: the cutoff plus PLAN_GRANDFATHER_DAYS."""
+    return cutoff() + timedelta(days=int(settings.PLAN_GRANDFATHER_DAYS))
+
+
+def grandfathered(event, *, event_datetime: Optional[datetime] = None) -> bool:
+    """An event already under way when enforcement began, which the switch-on
+    must not break: created before `PLAN_ENFORCEMENT_FROM`, and happening
+    before `grace_until()`. Every event-scoped gate leaves it alone (see
+    EVENT_SCOPED); the club-wide ones do not.
+
+    Both conditions, so an old event cannot be redated and reused for ever:
+    moved past the window, it is gated like any other from then on. A paid
+    one keeps selling (the tickets gate only fires on free to paid), but is
+    capped. `event_datetime` judges an edit by the date it is being moved to.
+    An event not saved yet, or without a date, is never grandfathered."""
+    created = _aware(getattr(event, "created_at", None))
+    when = _aware(event_datetime if event_datetime is not None else getattr(event, "event_datetime", None))
+    if created is None or when is None:
         return False
-    if created.tzinfo is None:
-        created = created.replace(tzinfo=timezone.utc)
-    return created < cutoff()
+    return created < cutoff() and when < grace_until()
+
+
+async def plan_grandfathered(session, event) -> bool:
+    """`grandfathered`, as the dashboard reads it (events/info): false too
+    when nothing is enforced -- the switch is off, or there is no Free plan
+    for a club without a subscription to fall to."""
+    if not enforcing() or getattr(event, "club_id", None) is None or not grandfathered(event):
+        return False
+    from sqlalchemy import select
+
+    from app.api.subscriptions.models import Plans
+    from app.api.subscriptions.service import DEFAULT_PLAN_KEY
+
+    return bool(
+        await session.scalar(
+            select(Plans.id).where(Plans.key == DEFAULT_PLAN_KEY, Plans.is_deleted == False).limit(1)  # noqa: E712
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -369,19 +429,55 @@ def registrations_closed() -> CustomHTTPException:
 # ---------------------------------------------------------------------------
 
 
-async def allows(session, club_id: Optional[int], feature: str, *, actor=None) -> bool:
+def _exempt(key: str, event) -> bool:
+    """The grandfather rule, in one place: an event-scoped gate asked about a
+    grandfathered event lets it through. A club-wide key never is exempt,
+    whatever event it is asked about."""
+    return event is not None and (key in EVENT_SCOPED_FEATURES or key in EVENT_SCOPED_LIMITS) and grandfathered(event)
+
+
+async def allows(session, club_id: Optional[int], feature: str, *, actor=None, event=None) -> bool:
     """Whether `feature` may be used, without raising: for the attendee-facing
-    places, which refuse in their own words rather than the plan's."""
-    if feature in ALWAYS_ALLOWED or not enforcing() or club_id is None or bypassed(actor):
+    places, which refuse in their own words rather than the plan's. Pass the
+    `event` the use is on, so a grandfathered one is let through."""
+    if feature in ALWAYS_ALLOWED or not enforcing() or club_id is None or bypassed(actor) or _exempt(feature, event):
         return True
     return (await entitlements(session, club_id)).allows(feature)
 
 
-async def require_feature(session, club_id: Optional[int], key: str, *, actor=None) -> None:
-    """Raise 403 PLAN_FEATURE_LOCKED unless the club's plan includes `key`."""
-    if await allows(session, club_id, key, actor=actor):
+async def require_feature(session, club_id: Optional[int], key: str, *, actor=None, event=None) -> None:
+    """Raise 403 PLAN_FEATURE_LOCKED unless the club's plan includes `key`.
+    Pass the `event` for an event-scoped feature: a grandfathered one is exempt."""
+    if await allows(session, club_id, key, actor=actor, event=event):
         return
     raise await feature_locked(session, key)
+
+
+#: How long the live room's feed trusts what it last read of a club's plan.
+#: The feed is polled by every phone in the room; an upgrade shows within this.
+FEED_TTL = timedelta(seconds=30)
+_feed: dict = {}
+
+
+async def allows_for_feed(session, club_id: Optional[int], feature: str, *, event) -> bool:
+    """`allows` for the public live feed, remembered for FEED_TTL per club."""
+    if feature in ALWAYS_ALLOWED or not enforcing() or club_id is None or _exempt(feature, event):
+        return True
+    now = datetime.now(timezone.utc)
+    hit = _feed.get((club_id, feature))
+    if hit is not None and hit[0] > now:
+        return hit[1]
+    allowed = (await entitlements(session, club_id)).allows(feature)
+    _feed[(club_id, feature)] = (now + FEED_TTL, allowed)
+    return allowed
+
+
+async def cap(session, club_id: Optional[int], limit_key: str, *, actor=None) -> Optional[int]:
+    """The club's cap on `limit_key` as it applies to this caller: None when
+    nothing is enforced for it (admin, switch off, unlimited)."""
+    if limit_key in NOT_ENFORCED or not enforcing() or club_id is None or bypassed(actor):
+        return None
+    return (await entitlements(session, club_id)).limit(limit_key)
 
 
 async def require_within(
@@ -394,12 +490,14 @@ async def require_within(
     actor=None,
     template: Optional[str] = None,
     feature: Optional[str] = None,
+    event=None,
 ) -> None:
     """Raise 403 PLAN_LIMIT_REACHED unless `used + adding` fits the club's
     cap. `used` is counted here for the per-club limits; a per-event or a
     template limit is counted by the caller and passed in. `feature` is the
-    one the action also needs, so the plan suggested has it too."""
-    if limit_key in NOT_ENFORCED or not enforcing() or club_id is None or bypassed(actor):
+    one the action also needs, so the plan suggested has it too. Pass the
+    `event` for a per-event limit: a grandfathered one is exempt."""
+    if limit_key in NOT_ENFORCED or not enforcing() or club_id is None or bypassed(actor) or _exempt(limit_key, event):
         return
     ent = await entitlements(session, club_id)
     cap = ent.limit(limit_key)
@@ -504,26 +602,47 @@ async def check_event_create(session, club_id: Optional[int], *, has_fee: bool, 
     await require_within(session, club_id, "events_per_month", actor=actor)
 
 
-async def check_event_update(session, event, *, has_fee=None, merch_enabled=None, swag_enabled=None, actor=None) -> None:
+async def check_event_update(
+    session, event, *, has_fee=None, merch_enabled=None, swag_enabled=None, event_datetime=None, actor=None
+) -> None:
     """An event's settings changing. Only a switch turned on is gated: a paid
-    event stays paid (grandfathered or not), and an event switching the store
-    off is never refused."""
+    event stays paid, and an event switching the store off is never refused.
+    A grandfathered event is exempt -- judged by the date it is being moved
+    to (`event_datetime`), so redating it past the window does not carry the
+    exemption along."""
+    from types import SimpleNamespace
+
+    # The event as it will be: its own creation, the date it is being given.
+    scope = SimpleNamespace(created_at=event.created_at, event_datetime=event_datetime or event.event_datetime)
     if has_fee and not event.has_fee:
-        await require_feature(session, event.club_id, "tickets", actor=actor)
+        await require_feature(session, event.club_id, "tickets", actor=actor, event=scope)
     if merch_enabled and not event.merch_enabled:
-        await require_feature(session, event.club_id, "merch", actor=actor)
+        await require_feature(session, event.club_id, "merch", actor=actor, event=scope)
     if swag_enabled and not event.swag_enabled:
-        await require_feature(session, event.club_id, "swag", actor=actor)
+        await require_feature(session, event.club_id, "swag", actor=actor, event=scope)
 
 
 async def check_merch_item(session, event, feature: str, *, actor=None) -> None:
     """A new item for an event's store (`merch`) or its handouts (`swag`)."""
-    await require_feature(session, event.club_id, feature, actor=actor)
-    if not enforcing() or bypassed(actor):
+    await require_feature(session, event.club_id, feature, actor=actor, event=event)
+    if not enforcing() or bypassed(actor) or _exempt("merch_items_per_event", event):
         return
     await require_within(
         session, event.club_id, "merch_items_per_event", used=await merch_items(session, event.id), actor=actor, feature=feature
     )
+
+
+async def duplicate_allowances(session, club_id: Optional[int], *, actor=None) -> dict:
+    """What a copy of an event may carry over. The copy is a new event, never
+    grandfathered, so it gets only what the plan allows: the handouts with
+    `swag`, at most `merch_items_per_event` of them, the ID card designs with
+    `badges`, the report's recipients with `report`."""
+    return {
+        "swag": await allows(session, club_id, "swag", actor=actor),
+        "badges": await allows(session, club_id, "badges", actor=actor),
+        "report": await allows(session, club_id, "report", actor=actor),
+        "merch_items_per_event": await cap(session, club_id, "merch_items_per_event", actor=actor),
+    }
 
 
 async def check_template(session, club_id: int, template: Optional[str], *, actor=None) -> None:
@@ -541,7 +660,9 @@ async def check_registration(session, event, *, organiser: bool = False, actor=N
     """A new registration, from any path. The plan's per-event cap stacks on
     the organiser's own `max_participants` (whichever is lower holds; theirs
     is checked first and keeps its own answer), and the club-wide monthly cap
-    on top. Grandfathered events are never capped.
+    on top. A grandfathered event is capped by neither: a registration to it
+    is never refused, though it still counts in the month's `usage` (and so
+    against the club's other events).
 
     An attendee is told only that registrations are closed (409); the
     organiser adding someone by hand, importing or at the door gets the
@@ -550,17 +671,17 @@ async def check_registration(session, event, *, organiser: bool = False, actor=N
         return
     ent = await entitlements(session, event.club_id)
     for limit_key in ("registrations_per_event", "registrations_per_month"):
-        cap = ent.limit(limit_key)
-        if cap is None:
+        limit = ent.limit(limit_key)
+        if limit is None:
             continue
         used = (
             await event_registrations(session, event)
             if limit_key == "registrations_per_event"
             else await count(session, event.club_id, limit_key)
         )
-        if used + 1 <= cap:
+        if used + 1 <= limit:
             continue
-        refusal = await limit_reached(session, ent, limit_key, cap=cap, used=used)
+        refusal = await limit_reached(session, ent, limit_key, cap=limit, used=used)
         notify_paused(
             club_id=event.club_id,
             limit_key=limit_key,
@@ -585,6 +706,7 @@ _told: dict = {}
 def reset() -> None:
     """Forget what this process remembers (for tests)."""
     _told.clear()
+    _feed.clear()
 
 
 def schedule(coro) -> None:

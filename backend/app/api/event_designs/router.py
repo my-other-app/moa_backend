@@ -139,13 +139,15 @@ async def _event_for_editing(session, user, event_id: int) -> Events:
     return event
 
 
-async def _plan_allows(session, club_id, kind: "DesignKind", user) -> None:
+async def _plan_allows(session, club_id, kind: "DesignKind", user, event=None) -> None:
     """An ID card design is part of badge printing, and so of the club's plan.
-    Tickets, certificates and programmes are on every plan."""
+    Tickets, certificates and programmes are on every plan. An event's own
+    design passes its `event`, so a grandfathered one is exempt; the club's
+    default design (club_designs) passes none and is always gated."""
     if kind is DesignKind.badge:
         from app.api.subscriptions import gates
 
-        await gates.require_feature(session, club_id, "badges", actor=user)
+        await gates.require_feature(session, club_id, "badges", actor=user, event=event)
 
 
 def _describe(template, event_id: int, audience: TemplateAudience) -> DesignResponse:
@@ -216,7 +218,7 @@ async def save_design(
     template they started from is left untouched.
     """
     event = await _event_for_editing(session, user, event_id)
-    await _plan_allows(session, event.club_id, kind, user)
+    await _plan_allows(session, event.club_id, kind, user, event)
     model = _MODELS[kind]
 
     template = await fork_for_event(
@@ -349,7 +351,7 @@ async def save_artwork(
     it -- the same trap the club endpoints document.
     """
     event = await _event_for_editing(session, user, event_id)
-    await _plan_allows(session, event.club_id, kind, user)
+    await _plan_allows(session, event.club_id, kind, user, event)
     model = _MODELS[kind]
     allowed = _IMAGE_FIELDS[kind]
 
@@ -749,7 +751,7 @@ async def save_layout(
     """Forks the design onto the event on first save, like the config does,
     and bumps the version so a document can say which design it was made from."""
     event = await _event_for_editing(session, user, event_id)
-    await _plan_allows(session, event.club_id, kind, user)
+    await _plan_allows(session, event.club_id, kind, user, event)
     layout = _validate_layout(kind, body, prefixes=_prefixes_for(event))
 
     template = await fork_for_event(

@@ -98,7 +98,7 @@ async def card_pdf(session, event: Events, registration_id, *, actor: GateActor,
     # attendees page, a kiosk): badge printing is the club's plan's.
     from app.api.subscriptions import gates
 
-    await gates.require_feature(session, event.club_id, "badges", actor=actor.user)
+    await gates.require_feature(session, event.club_id, "badges", actor=actor.user, event=event)
     reg = await registration_of(session, event, registration_id)
     if record:
         ok, why = may_print_again(event.reprint_policy or ReprintPolicy.anyone, reg.badge_printed_at, actor.full, override)
@@ -132,7 +132,7 @@ async def batch_pdf(session, event: Events, *, scope: str, role: Optional[str], 
     through the desk machine or at a print shop."""
     from app.api.subscriptions import gates
 
-    await gates.require_feature(session, event.club_id, "badges", actor=actor.user)
+    await gates.require_feature(session, event.club_id, "badges", actor=actor.user, event=event)
     regs = await batch_targets(session, event, scope=scope, role=role)
     merged = pdfium.PdfDocument.new()
     styles: dict = {}

@@ -820,13 +820,12 @@ async def get_networking_attendees(
     Only available during the event + 1 hour buffer.
     Requires the requesting user to be checked in.
     """
-    from sqlalchemy import select
     from app.api.events.models import Events
 
-    # Networking is part of the hosting club's plan; an attendee is told only
-    # that it is not on for this event.
-    club_id = await session.scalar(select(Events.club_id).where(Events.id == event_id))
-    if not await gates.allows(session, club_id, "networking", actor=user):
+    # Networking is part of the hosting club's plan (never refused on a
+    # grandfathered event); an attendee is told only that it is not on.
+    hosted = await session.get(Events, event_id)
+    if hosted is not None and not await gates.allows(session, hosted.club_id, "networking", actor=user, event=hosted):
         raise CustomHTTPException(
             403, message="Networking isn't available for this event.", error_code="NETWORKING_UNAVAILABLE"
         )

@@ -66,7 +66,7 @@ async def patch_settings(session: SessionDep, user: ClubAuth, event_id: int, bod
     c = await service.get_or_create(session, event)
     if body.enabled and not c.enabled:
         # Turning the competition on is the plan's; turning it off never is.
-        await gates.require_feature(session, event.club_id, "teams", actor=user)
+        await gates.require_feature(session, event.club_id, "teams", actor=user, event=event)
     await service.patch_settings(session, c, body.model_dump(exclude_unset=True))
     return await _state(session, event)
 
@@ -97,7 +97,7 @@ async def delete_track(session: SessionDep, user: ClubAuth, event_id: int, track
 @router.post("/teams", summary="A team made by the organiser, with whoever is named", status_code=201)
 async def create_team(session: SessionDep, user: ClubAuth, event_id: int, body: TeamIn) -> CompetitionState:
     event = await deliveries.event_for_club(session, user, event_id)
-    await gates.require_feature(session, event.club_id, "teams", actor=user)
+    await gates.require_feature(session, event.club_id, "teams", actor=user, event=event)
     c = await service.get_or_create(session, event)
     await service.create_team(session, c, event, body.name, body.track_id, body.registration_ids)
     return await _state(session, event)
@@ -108,7 +108,7 @@ async def patch_team(session: SessionDep, user: ClubAuth, event_id: int, team_id
     event = await deliveries.event_for_club(session, user, event_id)
     if body.stage is not None:
         # Moving a team through the rounds by hand is rounds, like advancing them.
-        await gates.require_feature(session, event.club_id, "rounds", actor=user)
+        await gates.require_feature(session, event.club_id, "rounds", actor=user, event=event)
     c = await service.get_or_create(session, event)
     await service.patch_team(session, c, await service.team_for(session, c, team_id), body.model_dump(exclude_unset=True))
     return await _state(session, event)
@@ -150,7 +150,7 @@ async def submissions_action(session: SessionDep, user: ClubAuth, event_id: int,
 @router.post("/judges", summary="A judge", status_code=201)
 async def add_judge(session: SessionDep, user: ClubAuth, event_id: int, body: JudgeIn) -> CompetitionState:
     event = await deliveries.event_for_club(session, user, event_id)
-    await gates.require_feature(session, event.club_id, "judging", actor=user)
+    await gates.require_feature(session, event.club_id, "judging", actor=user, event=event)
     await service.add_judge(session, await service.get_or_create(session, event), body.model_dump())
     return await _state(session, event)
 
@@ -182,7 +182,7 @@ async def put_score(session: SessionDep, user: ClubAuth, event_id: int, judge_id
 @router.post("/rounds/advance", summary="Shortlist the top of the entered, or make finalists of the top of the shortlist")
 async def advance(session: SessionDep, user: ClubAuth, event_id: int, body: AdvanceIn) -> CompetitionState:
     event = await deliveries.event_for_club(session, user, event_id)
-    await gates.require_feature(session, event.club_id, "rounds", actor=user)
+    await gates.require_feature(session, event.club_id, "rounds", actor=user, event=event)
     await service.advance(session, await service.get_or_create(session, event), body.to, body.size)
     return await _state(session, event)
 

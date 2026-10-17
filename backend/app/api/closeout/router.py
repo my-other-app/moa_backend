@@ -27,7 +27,7 @@ async def reports(session: SessionDep, user: ClubAuth, event_id: int) -> list[Re
 @router.post("/reports", summary="Generate the report as of now", status_code=201)
 async def generate(session: SessionDep, user: ClubAuth, event_id: int) -> ReportOut:
     event = await deliveries.event_for_club(session, user, event_id)
-    await gates.require_feature(session, event.club_id, "report", actor=user)
+    await gates.require_feature(session, event.club_id, "report", actor=user, event=event)
     row = await service.generate(session, event, user)
     return ReportOut(**service.report_out(row, user.full_name or user.email))
 
@@ -52,7 +52,7 @@ async def patch_settings(session: SessionDep, user: ClubAuth, event_id: int, bod
     recipients = body.report_recipients
     if recipients and list(recipients) != list(event.report_recipients or []):
         # Naming people to send the report to is sending it; the plan's.
-        await gates.require_feature(session, event.club_id, "report", actor=user)
+        await gates.require_feature(session, event.club_id, "report", actor=user, event=event)
     return SettingsOut(**await service.update_settings(session, event, body))
 
 

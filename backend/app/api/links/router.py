@@ -59,7 +59,7 @@ async def event_link_detail(session: SessionDep, user: ClubAuth, event_id: int, 
 @router.post("/events/{event_id}/links", summary="A new tracking link for this event", status_code=201)
 async def create_event_link(session: SessionDep, user: ClubAuth, event_id: int, body: LinkCreate) -> LinkOut:
     event = await deliveries.event_for_club(session, user, event_id)
-    await gates.require_feature(session, event.club_id, "links", actor=user)
+    await gates.require_feature(session, event.club_id, "links", actor=user, event=event)
     return _out(await service.create(session, event.club, event, body, user), event.club, event)
 
 
