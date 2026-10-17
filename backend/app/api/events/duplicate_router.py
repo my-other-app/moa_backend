@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 from app.api.deliveries import service as deliveries
 from app.api.events.duplicate import duplicate_event
+from app.api.subscriptions import gates
 from app.core.auth.dependencies import ClubAuth
 from app.db.core import SessionDep
 
@@ -36,6 +37,8 @@ async def duplicate(session: SessionDep, user: ClubAuth, event_id: int, body: Du
     organisers come across; doors, team and agenda when asked; the venue, the
     guest list and every record of the day stay behind. The copy starts as a draft."""
     source = await deliveries.event_for_club(session, user, event_id)
+    # A new event: this month's count, and paid tickets when the copy is paid.
+    await gates.check_event_create(session, source.club_id, has_fee=bool(source.has_fee), actor=user)
     return Duplicated(**await duplicate_event(
         session, source, user, name=body.name, event_datetime=body.event_datetime, duration=body.duration,
         copy_doors=body.copy_doors, copy_team=body.copy_team, copy_agenda=body.copy_agenda, copy_merch=body.copy_merch,

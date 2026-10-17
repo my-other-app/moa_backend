@@ -9,6 +9,7 @@ from app.api.deliveries import service as deliveries
 from app.api.idcards import service
 from app.api.idcards.models import PrintSource
 from app.api.idcards.schemas import CardSettings, CardSettingsUpdate, CardSummary, PrintJobOut
+from app.api.subscriptions import gates
 from app.core.auth.dependencies import ClubAuth
 from app.db.core import SessionDep
 
@@ -24,6 +25,7 @@ async def summary(session: SessionDep, user: ClubAuth, event_id: int) -> CardSum
 @router.patch("/settings", summary="Who may print again, auto-print, pre-printed stock")
 async def settings(session: SessionDep, user: ClubAuth, event_id: int, body: CardSettingsUpdate) -> CardSettings:
     event = await deliveries.event_for_club(session, user, event_id)
+    await gates.require_feature(session, event.club_id, "badges", actor=user)
     return CardSettings(**await service.update_settings(session, event, body))
 
 

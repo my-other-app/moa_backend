@@ -9,6 +9,7 @@ from app.api.deliveries import service as deliveries
 from app.api.links import overview as overview_mod
 from app.api.links import service
 from app.api.links.schemas import LinkCreate, LinkDetail, LinkOut, LinkPatch, LinksOverview, LinksSummary
+from app.api.subscriptions import gates
 from app.config import settings
 from app.core.auth.dependencies import ClubAuth
 from app.db.core import SessionDep
@@ -58,6 +59,7 @@ async def event_link_detail(session: SessionDep, user: ClubAuth, event_id: int, 
 @router.post("/events/{event_id}/links", summary="A new tracking link for this event", status_code=201)
 async def create_event_link(session: SessionDep, user: ClubAuth, event_id: int, body: LinkCreate) -> LinkOut:
     event = await deliveries.event_for_club(session, user, event_id)
+    await gates.require_feature(session, event.club_id, "links", actor=user)
     return _out(await service.create(session, event.club, event, body, user), event.club, event)
 
 
@@ -103,6 +105,7 @@ async def club_link_detail(session: SessionDep, user: ClubAuth, link_id: UUID, d
 @router.post("/clubs/links", summary="A new tracking link to the club page", status_code=201)
 async def create_club_link(session: SessionDep, user: ClubAuth, body: LinkCreate) -> LinkOut:
     club = await _club_for(session, user)
+    await gates.require_feature(session, club.id, "links", actor=user)
     return _out(await service.create(session, club, None, body, user), club)
 
 

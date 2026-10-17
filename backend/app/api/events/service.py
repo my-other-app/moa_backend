@@ -254,6 +254,7 @@ async def update_event(
     event_id: int,
     speaker_photos: Optional[list[UploadFile]] = None,
     as_admin: bool = False,
+    actor=None,
 ):
     db_event = await session.execute(
         select(Events)
@@ -268,6 +269,13 @@ async def update_event(
     )
     if (db_event.lifecycle or EventStatus.published) in LOCKED_STATUSES:
         raise CustomHTTPException(409, message="This event is closed, so its settings are read-only. Move its status back to Live on the closeout page to change them.", error_code="EVENT_LOCKED")
+    # The club's plan: free to paid needs tickets; the store and swag switched on need theirs.
+    from app.api.subscriptions import gates
+
+    await gates.check_event_update(
+        session, db_event, has_fee=event.has_fee, merch_enabled=getattr(event, "merch_enabled", None),
+        swag_enabled=getattr(event, "swag_enabled", None), actor=actor,
+    )
 
     if event.poster:
         content = io.BytesIO(await event.poster.read())

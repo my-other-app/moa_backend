@@ -139,6 +139,15 @@ async def _event_for_editing(session, user, event_id: int) -> Events:
     return event
 
 
+async def _plan_allows(session, club_id, kind: "DesignKind", user) -> None:
+    """An ID card design is part of badge printing, and so of the club's plan.
+    Tickets, certificates and programmes are on every plan."""
+    if kind is DesignKind.badge:
+        from app.api.subscriptions import gates
+
+        await gates.require_feature(session, club_id, "badges", actor=user)
+
+
 def _describe(template, event_id: int, audience: TemplateAudience) -> DesignResponse:
     """Turn a resolved row into the answer, naming the level it came from."""
     if template.event_id == event_id:
@@ -207,6 +216,7 @@ async def save_design(
     template they started from is left untouched.
     """
     event = await _event_for_editing(session, user, event_id)
+    await _plan_allows(session, event.club_id, kind, user)
     model = _MODELS[kind]
 
     template = await fork_for_event(
@@ -339,6 +349,7 @@ async def save_artwork(
     it -- the same trap the club endpoints document.
     """
     event = await _event_for_editing(session, user, event_id)
+    await _plan_allows(session, event.club_id, kind, user)
     model = _MODELS[kind]
     allowed = _IMAGE_FIELDS[kind]
 
@@ -738,6 +749,7 @@ async def save_layout(
     """Forks the design onto the event on first save, like the config does,
     and bumps the version so a document can say which design it was made from."""
     event = await _event_for_editing(session, user, event_id)
+    await _plan_allows(session, event.club_id, kind, user)
     layout = _validate_layout(kind, body, prefixes=_prefixes_for(event))
 
     template = await fork_for_event(

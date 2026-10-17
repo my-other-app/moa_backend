@@ -24,6 +24,7 @@ from app.api.event_designs.router import (
     DesignKind,
     _club_layout_prefix,
     _layout_dto,
+    _plan_allows,
     _starter_of,
     _store_layout_image,
     _validate_layout,
@@ -108,6 +109,7 @@ async def save_layout(session: SessionDep, user: ClubAuth, kind: DesignKind, bod
     """Becomes the one default of its kind for the club; the version climbs so
     an event forked later can say which design it came from."""
     club = await _club_for(session, user)
+    await _plan_allows(session, club.id, kind, user)
     layout = _validate_layout(kind, body, prefixes=(_club_layout_prefix(club.id),))
     model = _MODELS[kind]
     template = await _default_row(session, club.id, kind)

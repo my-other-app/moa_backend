@@ -8,6 +8,7 @@ from app.api.events.models import Events
 from app.api.merch import service as merch_photos
 from app.api.store import service
 from app.api.store.schemas import Catalog, OrderOut, OrdersPage, SettingsPatch, StoreItemIn, StoreItemOut, StoreItemPatch, StoreSummary
+from app.api.subscriptions import gates
 from app.core.auth.dependencies import ClubAuth
 from app.db.core import SessionDep
 from app.response import CustomHTTPException
@@ -31,6 +32,7 @@ async def summary(session: SessionDep, user: ClubAuth, event_id: int) -> StoreSu
 @router.patch("/settings", summary="Switch merchandise or swag on or off for this event")
 async def settings(session: SessionDep, user: ClubAuth, event_id: int, body: SettingsPatch) -> dict:
     event = await deliveries.event_for_club(session, user, event_id)
+    await gates.check_event_update(session, event, merch_enabled=body.merch_enabled, swag_enabled=body.swag_enabled, actor=user)
     if body.merch_enabled is not None:
         event.merch_enabled = body.merch_enabled
     if body.swag_enabled is not None:
@@ -42,6 +44,7 @@ async def settings(session: SessionDep, user: ClubAuth, event_id: int, body: Set
 @router.post("", summary="Put an item on the shelf", status_code=201)
 async def create_item(session: SessionDep, user: ClubAuth, event_id: int, body: StoreItemIn) -> StoreItemOut:
     event = await deliveries.event_for_club(session, user, event_id)
+    await gates.check_merch_item(session, event, "merch", actor=user)
     return StoreItemOut(**await service.create_item(session, event, body))
 
 

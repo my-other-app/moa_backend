@@ -9,6 +9,7 @@ from app.api.clubs.models import Clubs
 from app.api.deliveries import service as deliveries
 from app.api.finance import service
 from app.api.finance.schemas import ExpenseCreate, ExpenseOut, ExpensePatch, FinanceSummary
+from app.api.subscriptions import gates
 from app.core.auth.dependencies import ClubAuth
 from app.db.core import SessionDep
 from app.response import CustomHTTPException
@@ -50,12 +51,14 @@ async def club_statement(session: SessionDep, user: ClubAuth, frm: Optional[date
 @router.post("/clubs/finance/expenses", summary="Log an expense, against an event or against the club", status_code=201)
 async def create_expense(session: SessionDep, user: ClubAuth, body: ExpenseCreate) -> ExpenseOut:
     club = await _club_for(session, user)
+    await gates.require_feature(session, club.id, "finance", actor=user)
     return ExpenseOut(**await service.create_expense(session, club, body, user))
 
 
 @router.patch("/clubs/finance/expenses/{expense_id}", summary="Correct an expense")
 async def update_expense(session: SessionDep, user: ClubAuth, expense_id: UUID, body: ExpensePatch) -> ExpenseOut:
     club = await _club_for(session, user)
+    await gates.require_feature(session, club.id, "finance", actor=user)
     x = await service.expense_for(session, club, expense_id)
     return ExpenseOut(**await service.update_expense(session, club, x, body))
 
