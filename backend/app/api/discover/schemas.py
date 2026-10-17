@@ -258,3 +258,9 @@ class BackfillCounts(BaseModel):
 class BackfillResult(BaseModel):
     events: BackfillCounts
     clubs: BackfillCounts
+
+
+class CounterFixes(BaseModel):
+    """How many events' going counts and clubs' follower counts had to be recounted."""
+    events: int
+    clubs: int

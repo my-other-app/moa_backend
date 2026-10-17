@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import and_, delete, func, or_, select, text
 from sqlalchemy.orm import joinedload
 
 from app.api.checkins.models import CheckIns
@@ -25,7 +25,7 @@ from app.api.deliveries import service as deliveries
 from app.api.deliveries.models import Deliveries
 from app.api.emails.models import MessageDeliveries, Messages
 from app.api.events.documents import EVENT_TIMEZONE, ROLE_LABELS
-from app.api.events.models import EventRatingsLink, EventRegistrationsLink, Events
+from app.api.events.models import EventRatingsLink, EventRegistrationsLink, Events, ends_at_sql
 from app.api.kiosk.models import SelfCheckInSessions
 from app.api.merch.models import MerchItems
 from app.config import settings
@@ -356,7 +356,40 @@ async def advance_clock(session, now: Optional[datetime] = None) -> int:
     archived once retention has run, or a month on when there is nothing to
     scrub. Only events on the clock."""
     now = now or datetime.now(timezone.utc)
-    events = list((await session.scalars(select(Events).where(Events.is_deleted == False, Events.status_clock == True, Events.lifecycle.in_([EventStatus.published, EventStatus.live, EventStatus.closed])))).all())  # noqa: E712
+    # Only the events whose status this minute can move: one that has started,
+    # one past its end and grace, one closed whose contacts are scrubbed or
+    # whose month is up. Every other event on the clock (every upcoming one)
+    # was read here each minute and left as it was: thousands of rows read
+    # and a query each for the closed ones, on the web worker, every minute.
+    # The rules below still decide; this only leaves out rows they would not move.
+    end_sql = ends_at_sql(Events)
+    job_done = (
+        select(RetentionJobs.id)
+        .where(RetentionJobs.event_id == Events.id, RetentionJobs.state == RetentionState.deleted)
+        .exists()
+    )
+    can_move = or_(
+        and_(Events.lifecycle == EventStatus.published, Events.event_datetime <= now),
+        and_(
+            Events.lifecycle == EventStatus.live,
+            end_sql + func.coalesce(Events.close_after_minutes, 240) * text("INTERVAL '1 minute'") <= now,
+        ),
+        and_(
+            Events.lifecycle == EventStatus.closed,
+            or_(
+                job_done,
+                and_(
+                    or_(Events.retention_mode.is_(None), Events.retention_mode == RetentionMode.keep),
+                    # ARCHIVE_AFTER in hours, as timedelta counts it (a "30 days" interval would follow the clock changes of the session's zone).
+                    end_sql + text(f"INTERVAL '{int(ARCHIVE_AFTER.total_seconds() // 3600)} hours'") <= now,
+                ),
+            ),
+        ),
+    )
+    events = list((await session.scalars(select(Events).where(Events.is_deleted == False, Events.status_clock == True, Events.lifecycle.in_([EventStatus.published, EventStatus.live, EventStatus.closed]), can_move))).all())  # noqa: E712
+    jobs = {}
+    if events:
+        jobs = {j.event_id: j for j in (await session.scalars(select(RetentionJobs).where(RetentionJobs.event_id.in_([e.id for e in events])))).all()}
     moved = 0
     for e in events:
         before = lifecycle(e)
@@ -366,7 +399,7 @@ async def advance_clock(session, now: Optional[datetime] = None) -> int:
         if e.lifecycle is EventStatus.live and now >= end + timedelta(minutes=e.close_after_minutes or 240):
             e.lifecycle = EventStatus.closed
         if e.lifecycle is EventStatus.closed:
-            job = await session.scalar(select(RetentionJobs).where(RetentionJobs.event_id == e.id))
+            job = jobs.get(e.id)
             done = job is not None and job.state is RetentionState.deleted
             if done or ((e.retention_mode or RetentionMode.keep) is RetentionMode.keep and now >= end + ARCHIVE_AFTER):
                 e.lifecycle = EventStatus.archived
@@ -397,6 +430,21 @@ async def sweep(session, now: Optional[datetime] = None) -> dict:
     return {"moved": moved, "ran": ran}
 
 
+async def _check_counters(session) -> None:
+    """Every few hours, recount any going/follower counter that disagrees with its rows."""
+    from app.api.discover import counters
+
+    if not counters.due():
+        return
+    try:
+        fixed = await counters.reconcile(session)
+        if fixed["events"] or fixed["clubs"]:
+            logger.warning("recounted %d going count(s) and %d follower count(s) that disagreed with their rows", fixed["events"], fixed["clubs"])
+    except Exception:  # noqa: BLE001
+        logger.exception("counter reconcile failed")
+        await session.rollback()
+
+
 async def sweep_loop(interval: int = 60) -> None:
     """Runs for the life of the process; one worker at a time."""
     await asyncio.sleep(7)
@@ -408,6 +456,7 @@ async def sweep_loop(interval: int = 60) -> None:
                         r = await sweep(session)
                         if r["moved"] or r["ran"]:
                             logger.info("closeout sweep moved %d status(es), ran %d retention job(s)", r["moved"], r["ran"])
+                        await _check_counters(session)
                     finally:
                         await session.execute(text(f"SELECT pg_advisory_unlock({SWEEP_LOCK})"))
         except asyncio.CancelledError:

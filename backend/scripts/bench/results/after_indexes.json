@@ -1,0 +1,484 @@
+{
+ "by_endpoint": {
+  "home": [],
+  "home (cold)": [
+   "clubs_pkey",
+   "event_categories_pkey",
+   "events_pkey",
+   "ix_club_interests_club",
+   "ix_club_threads_newest",
+   "ix_events_club_start",
+   "ix_events_ends_at",
+   "ix_events_shown_start",
+   "ix_thread_poll_options_thread_id"
+  ],
+  "home lat/lng": [],
+  "home lat/lng (cold)": [
+   "clubs_pkey",
+   "event_categories_pkey",
+   "events_pkey",
+   "ix_club_interests_club",
+   "ix_club_threads_newest",
+   "ix_events_club_start",
+   "ix_events_ends_at",
+   "ix_events_shown_point",
+   "ix_events_shown_start",
+   "ix_thread_poll_options_thread_id"
+  ],
+  "events": [
+   "clubs_pkey",
+   "event_categories_pkey",
+   "events_pkey",
+   "ix_events_ends_at",
+   "ix_events_shown_start"
+  ],
+  "events q": [
+   "clubs_pkey",
+   "event_categories_pkey",
+   "events_pkey",
+   "ix_clubs_name_trgm",
+   "ix_events_ends_at",
+   "ix_events_shown_start"
+  ],
+  "events q short": [
+   "clubs_pkey",
+   "event_categories_pkey",
+   "events_pkey",
+   "ix_events_ends_at",
+   "ix_events_shown_start"
+  ],
+  "events q typo": [
+   "clubs_pkey",
+   "event_categories_pkey",
+   "events_pkey",
+   "ix_clubs_name_trgm",
+   "ix_events_category_start",
+   "ix_events_club_start",
+   "ix_events_ends_at",
+   "ix_events_location_trgm",
+   "ix_events_name_trgm"
+  ],
+  "events q relevance": [
+   "clubs_pkey",
+   "event_categories_pkey",
+   "events_pkey",
+   "ix_clubs_name_trgm",
+   "ix_events_ends_at"
+  ],
+  "events this_weekend": [
+   "clubs_pkey",
+   "event_categories_pkey",
+   "events_pkey",
+   "ix_events_ends_at",
+   "ix_events_shown_start"
+  ],
+  "events category": [
+   "clubs_pkey",
+   "event_categories_pkey",
+   "events_pkey",
+   "ix_events_category_start"
+  ],
+  "events online": [
+   "clubs_pkey",
+   "event_categories_pkey",
+   "events_pkey",
+   "ix_events_ends_at",
+   "ix_events_shown_start"
+  ],
+  "events free": [
+   "clubs_pkey",
+   "event_categories_pkey",
+   "events_pkey",
+   "ix_events_ends_at",
+   "ix_events_shown_start"
+  ],
+  "events lat/lng (radius 50, date)": [
+   "clubs_pkey",
+   "event_categories_pkey",
+   "events_pkey",
+   "ix_events_ends_at",
+   "ix_events_shown_start"
+  ],
+  "events distance r=50": [
+   "clubs_pkey",
+   "event_categories_pkey",
+   "events_pkey",
+   "ix_events_ends_at",
+   "ix_events_shown_point"
+  ],
+  "events distance r=300": [
+   "clubs_pkey",
+   "event_categories_pkey",
+   "events_pkey",
+   "ix_events_ends_at",
+   "ix_events_shown_point"
+  ],
+  "events popular": [
+   "clubs_pkey",
+   "event_categories_pkey",
+   "events_pkey",
+   "ix_events_ends_at"
+  ],
+  "events offset=480": [
+   "clubs_pkey",
+   "event_categories_pkey",
+   "events_pkey",
+   "ix_events_ends_at",
+   "ix_events_shown_start"
+  ],
+  "clubs": [
+   "clubs_pkey",
+   "ix_club_interests_club",
+   "ix_events_club_start"
+  ],
+  "clubs q": [
+   "clubs_pkey",
+   "ix_club_interests_club",
+   "ix_events_club_start"
+  ],
+  "clubs q typo": [
+   "clubs_pkey",
+   "ix_club_interests_club",
+   "ix_clubs_location_trgm",
+   "ix_clubs_name_trgm",
+   "ix_clubs_tagline_trgm",
+   "ix_events_club_start"
+  ],
+  "clubs interest": [
+   "clubs_pkey",
+   "ix_club_interests_club",
+   "ix_club_interests_interest",
+   "ix_events_club_start"
+  ],
+  "clubs nearby": [
+   "clubs_pkey",
+   "ix_club_interests_club",
+   "ix_events_club_start"
+  ],
+  "clubs popular": [
+   "clubs_pkey",
+   "ix_club_interests_club",
+   "ix_events_club_start"
+  ],
+  "club page (big)": [
+   "club_socials_club_id_is_deleted_key",
+   "clubs_pkey",
+   "events_pkey",
+   "ix_club_interests_club",
+   "ix_club_partners_club_id",
+   "ix_club_team_members_club_id",
+   "ix_club_threads_club_created",
+   "ix_clubs_slug",
+   "ix_events_club_start",
+   "ix_thread_poll_options_thread_id"
+  ],
+  "event page": [
+   "clubs_pkey",
+   "events_pkey",
+   "ix_club_team_members_club_id",
+   "ix_event_interests_event",
+   "ix_event_speakers_event_id",
+   "ix_events_category_start",
+   "ix_events_club_start",
+   "ix_events_slug"
+  ],
+  "threads": [
+   "clubs_pkey",
+   "ix_club_threads_newest",
+   "ix_thread_poll_options_thread_id"
+  ],
+  "categories": [],
+  "sitemap": [],
+  "sitemap (cold)": [
+   "clubs_pkey",
+   "ix_events_ends_at",
+   "ix_events_shown_start"
+  ],
+  "categories (cold)": [
+   "ix_events_ends_at"
+  ],
+  "app for-you": [
+   "clubs_pkey",
+   "events_pkey",
+   "ix_club_users_user",
+   "ix_event_interests_interest",
+   "ix_events_ends_at",
+   "ix_registrations_user",
+   "ix_user_interests_user",
+   "ix_user_profiles_user",
+   "users_pkey"
+  ],
+  "app list upcoming": [
+   "clubs_pkey",
+   "events_pkey",
+   "ix_events_ends_at",
+   "ix_registrations_user",
+   "ix_user_profiles_user",
+   "users_pkey"
+  ],
+  "app list search": [
+   "clubs_pkey",
+   "events_pkey",
+   "ix_events_category_start",
+   "ix_events_name_trgm",
+   "ix_registrations_user",
+   "ix_user_profiles_user",
+   "users_pkey"
+  ],
+  "app list following": [
+   "clubs_pkey",
+   "events_pkey",
+   "ix_club_users_user",
+   "ix_events_club_start",
+   "ix_registrations_user",
+   "ix_user_profiles_user",
+   "users_pkey"
+  ],
+  "app list interests": [
+   "clubs_pkey",
+   "events_pkey",
+   "ix_event_interests_interest",
+   "ix_registrations_user",
+   "ix_user_profiles_user",
+   "users_pkey"
+  ]
+ },
+ "by_index": {
+  "club_socials_club_id_is_deleted_key": [
+   "club page (big)"
+  ],
+  "clubs_pkey": [
+   "home (cold)",
+   "home lat/lng (cold)",
+   "events",
+   "events q",
+   "events q short",
+   "events q typo",
+   "events q relevance",
+   "events this_weekend",
+   "events category",
+   "events online",
+   "events free",
+   "events lat/lng (radius 50, date)",
+   "events distance r=50",
+   "events distance r=300",
+   "events popular",
+   "events offset=480",
+   "clubs",
+   "clubs q",
+   "clubs q typo",
+   "clubs interest",
+   "clubs nearby",
+   "clubs popular",
+   "club page (big)",
+   "event page",
+   "threads",
+   "sitemap (cold)",
+   "app for-you",
+   "app list upcoming",
+   "app list search",
+   "app list following",
+   "app list interests"
+  ],
+  "event_categories_pkey": [
+   "home (cold)",
+   "home lat/lng (cold)",
+   "events",
+   "events q",
+   "events q short",
+   "events q typo",
+   "events q relevance",
+   "events this_weekend",
+   "events category",
+   "events online",
+   "events free",
+   "events lat/lng (radius 50, date)",
+   "events distance r=50",
+   "events distance r=300",
+   "events popular",
+   "events offset=480"
+  ],
+  "events_pkey": [
+   "home (cold)",
+   "home lat/lng (cold)",
+   "events",
+   "events q",
+   "events q short",
+   "events q typo",
+   "events q relevance",
+   "events this_weekend",
+   "events category",
+   "events online",
+   "events free",
+   "events lat/lng (radius 50, date)",
+   "events distance r=50",
+   "events distance r=300",
+   "events popular",
+   "events offset=480",
+   "club page (big)",
+   "event page",
+   "app for-you",
+   "app list upcoming",
+   "app list search",
+   "app list following",
+   "app list interests"
+  ],
+  "ix_club_interests_club": [
+   "home (cold)",
+   "home lat/lng (cold)",
+   "clubs",
+   "clubs q",
+   "clubs q typo",
+   "clubs interest",
+   "clubs nearby",
+   "clubs popular",
+   "club page (big)"
+  ],
+  "ix_club_interests_interest": [
+   "clubs interest"
+  ],
+  "ix_club_partners_club_id": [
+   "club page (big)"
+  ],
+  "ix_club_team_members_club_id": [
+   "club page (big)",
+   "event page"
+  ],
+  "ix_club_threads_club_created": [
+   "club page (big)"
+  ],
+  "ix_club_threads_newest": [
+   "home (cold)",
+   "home lat/lng (cold)",
+   "threads"
+  ],
+  "ix_club_users_user": [
+   "app for-you",
+   "app list following"
+  ],
+  "ix_clubs_location_trgm": [
+   "clubs q typo"
+  ],
+  "ix_clubs_name_trgm": [
+   "events q",
+   "events q typo",
+   "events q relevance",
+   "clubs q typo"
+  ],
+  "ix_clubs_slug": [
+   "club page (big)"
+  ],
+  "ix_clubs_tagline_trgm": [
+   "clubs q typo"
+  ],
+  "ix_event_interests_event": [
+   "event page"
+  ],
+  "ix_event_interests_interest": [
+   "app for-you",
+   "app list interests"
+  ],
+  "ix_event_speakers_event_id": [
+   "event page"
+  ],
+  "ix_events_category_start": [
+   "events q typo",
+   "events category",
+   "event page",
+   "app list search"
+  ],
+  "ix_events_club_start": [
+   "home (cold)",
+   "home lat/lng (cold)",
+   "events q typo",
+   "clubs",
+   "clubs q",
+   "clubs q typo",
+   "clubs interest",
+   "clubs nearby",
+   "clubs popular",
+   "club page (big)",
+   "event page",
+   "app list following"
+  ],
+  "ix_events_ends_at": [
+   "home (cold)",
+   "home lat/lng (cold)",
+   "events",
+   "events q",
+   "events q short",
+   "events q typo",
+   "events q relevance",
+   "events this_weekend",
+   "events online",
+   "events free",
+   "events lat/lng (radius 50, date)",
+   "events distance r=50",
+   "events distance r=300",
+   "events popular",
+   "events offset=480",
+   "sitemap (cold)",
+   "categories (cold)",
+   "app for-you",
+   "app list upcoming"
+  ],
+  "ix_events_location_trgm": [
+   "events q typo"
+  ],
+  "ix_events_name_trgm": [
+   "events q typo",
+   "app list search"
+  ],
+  "ix_events_shown_point": [
+   "home lat/lng (cold)",
+   "events distance r=50",
+   "events distance r=300"
+  ],
+  "ix_events_shown_start": [
+   "home (cold)",
+   "home lat/lng (cold)",
+   "events",
+   "events q",
+   "events q short",
+   "events this_weekend",
+   "events online",
+   "events free",
+   "events lat/lng (radius 50, date)",
+   "events offset=480",
+   "sitemap (cold)"
+  ],
+  "ix_events_slug": [
+   "event page"
+  ],
+  "ix_registrations_user": [
+   "app for-you",
+   "app list upcoming",
+   "app list search",
+   "app list following",
+   "app list interests"
+  ],
+  "ix_thread_poll_options_thread_id": [
+   "home (cold)",
+   "home lat/lng (cold)",
+   "club page (big)",
+   "threads"
+  ],
+  "ix_user_interests_user": [
+   "app for-you"
+  ],
+  "ix_user_profiles_user": [
+   "app for-you",
+   "app list upcoming",
+   "app list search",
+   "app list following",
+   "app list interests"
+  ],
+  "users_pkey": [
+   "app for-you",
+   "app list upcoming",
+   "app list search",
+   "app list following",
+   "app list interests"
+  ]
+ }
+}

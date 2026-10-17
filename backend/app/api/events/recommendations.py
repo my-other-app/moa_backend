@@ -8,17 +8,26 @@ events before reaching anything they could attend.
 The ranking is a weighted sum evaluated in one query. Weights are module
 constants so they can be tuned without touching the SQL, and every component
 is bounded, so no single signal can run away with the ordering.
+
+The user's side of the score (their interests, their clubs, where they have
+been) is read once per request as small grouped subqueries joined to the
+candidates by key, not once per candidate event: with ten thousand upcoming
+events, a correlated count per event and per signal was tens of thousands
+of index probes, and the history counts had no index at all. Popularity reads
+events.going_count, which a trigger keeps equal to the count it replaces.
 """
 
-from sqlalchemy import Float, Integer, and_, case, cast, func, literal, select, text
+from sqlalchemy import ARRAY, Float, Integer, and_, any_, bindparam, case, cast, func, literal, literal_column, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
+from app.api.closeout.models import EventStatus
 from app.api.clubs.models import ClubUsersLink, Clubs
 from app.api.events.models import (
     EventInterestsLink,
     EventRegistrationsLink,
     Events,
+    ends_at_sql,
 )
 from app.api.users.models import UserInterests, UserProfiles
 
@@ -48,11 +57,6 @@ W_CLOSING_SOON = 0.75
 POPULARITY_REGISTRATION_FACTOR = 5
 
 
-def _hours(column):
-    """`duration` (a float number of hours) as a Postgres interval."""
-    return column * text("INTERVAL '1 hour'")
-
-
 async def for_you_events(
     session: AsyncSession,
     user_id: int,
@@ -65,20 +69,25 @@ async def for_you_events(
     without a second pass.
     """
     now = func.now()
-    event_end = Events.event_datetime + _hours(Events.duration)
+    # The same instant as event_datetime + duration hours, in the form
+    # ix_events_ends_at indexes.
+    event_end = ends_at_sql(Events)
 
-    # --- The user's own context, as scalar subqueries ------------------------
-    # Subqueries rather than joins throughout: a join against several
-    # one-to-many link tables multiplies rows and then needs a GROUP BY over
-    # every selected column, which is both slower and a standing invitation
-    # to a grouping bug.
-    user_interest_ids = (
-        select(UserInterests.interest_id)
+    # --- The user's own context, each read once ------------------------------
+    # Joined to the candidates by key rather than correlated per event. A
+    # plain join against several one-to-many link tables would multiply rows,
+    # so each is first grouped down to one row per key.
+
+    # The user's interests as one array, so the lookup below can use the
+    # (interest_id, event_id) index rather than read every event's interests.
+    user_interest_ids = func.coalesce(
+        select(func.array_agg(UserInterests.interest_id))
         .where(
             UserInterests.user_id == user_id,
             UserInterests.is_deleted == False,
         )
-        .scalar_subquery()
+        .scalar_subquery(),
+        cast(literal_column("'{}'"), ARRAY(Integer)),
     )
 
     user_org_id = (
@@ -88,71 +97,62 @@ async def for_you_events(
         .scalar_subquery()
     )
 
-    # How many of this event's interests the user shares.
-    shared_interests = (
-        select(func.count())
-        .select_from(EventInterestsLink)
+    # How many of each event's interests the user shares.
+    shared = (
+        select(EventInterestsLink.event_id, func.count().label("n"))
         .where(
-            EventInterestsLink.event_id == Events.id,
             EventInterestsLink.is_deleted == False,
-            EventInterestsLink.interest_id.in_(user_interest_ids),
+            EventInterestsLink.interest_id == any_(user_interest_ids),
         )
-        .scalar_subquery()
+        .group_by(EventInterestsLink.event_id)
+        .subquery("me_shared_interests")
     )
 
-    # The user's relationship with this event's club, if any.
-    def _club_flag(column):
-        return (
-            select(func.count())
-            .select_from(ClubUsersLink)
-            .where(
-                ClubUsersLink.club_id == Events.club_id,
-                ClubUsersLink.user_id == user_id,
-                ClubUsersLink.is_deleted == False,
-                column == True,
-            )
-            .scalar_subquery()
-        )
+    # The user's relationship with each club they have one with: 1 or 0.
+    def _flag(column):
+        return func.max(case((column == True, 1), else_=0))
 
-    is_pinned = _club_flag(ClubUsersLink.is_pinned)
-    is_following = _club_flag(ClubUsersLink.is_following)
+    clubs_of_mine = (
+        select(
+            ClubUsersLink.club_id,
+            _flag(ClubUsersLink.is_pinned).label("pinned"),
+            _flag(ClubUsersLink.is_following).label("following"),
+        )
+        .where(ClubUsersLink.user_id == user_id, ClubUsersLink.is_deleted == False)
+        .group_by(ClubUsersLink.club_id)
+        .subquery("me_clubs")
+    )
 
     # Behavioural: has this user turned up for this club, or this kind of
     # event, before? A registration is a stronger statement of taste than a
-    # checkbox ticked once at onboarding.
-    club_history = (
-        select(func.count())
-        .select_from(EventRegistrationsLink)
-        .join(Events.__table__.alias("prev_event"), text("prev_event.id = event_registrations_link.event_id"))
-        .where(
-            EventRegistrationsLink.user_id == user_id,
-            EventRegistrationsLink.is_deleted == False,
-            text("prev_event.club_id = events.club_id"),
+    # checkbox ticked once at onboarding. (Any earlier event counts, deleted
+    # or not, as it always has: hence the plain table alias.)
+    def _history(column_name: str, label: str):
+        prev = Events.__table__.alias(f"prev_{label}")
+        key = prev.c[column_name]
+        return (
+            select(key.label("key"), func.count().label("n"))
+            .select_from(EventRegistrationsLink)
+            .join(prev, prev.c.id == EventRegistrationsLink.event_id)
+            .where(
+                EventRegistrationsLink.user_id == user_id,
+                EventRegistrationsLink.is_deleted == False,
+            )
+            .group_by(key)
+            .subquery(f"me_{label}_history")
         )
-        .scalar_subquery()
-    )
 
-    category_history = (
-        select(func.count())
-        .select_from(EventRegistrationsLink)
-        .join(Events.__table__.alias("prev_cat_event"), text("prev_cat_event.id = event_registrations_link.event_id"))
-        .where(
-            EventRegistrationsLink.user_id == user_id,
-            EventRegistrationsLink.is_deleted == False,
-            text("prev_cat_event.category_id = events.category_id"),
-        )
-        .scalar_subquery()
-    )
+    club_history_rows = _history("club_id", "club")
+    category_history_rows = _history("category_id", "category")
 
-    registration_count = (
-        select(func.count())
-        .select_from(EventRegistrationsLink)
-        .where(
-            EventRegistrationsLink.event_id == Events.id,
-            EventRegistrationsLink.is_deleted == False,
-        )
-        .scalar_subquery()
-    )
+    shared_interests = func.coalesce(shared.c.n, 0)
+    is_pinned = func.coalesce(clubs_of_mine.c.pinned, 0)
+    is_following = func.coalesce(clubs_of_mine.c.following, 0)
+    club_history = func.coalesce(club_history_rows.c.n, 0)
+    category_history = func.coalesce(category_history_rows.c.n, 0)
+    # Kept by a trigger on event_registrations_link: the count of rows that
+    # are not deleted, which is what was counted here per event.
+    registration_count = Events.going_count
 
     # --- Score components ----------------------------------------------------
     interest_score = W_INTEREST * func.least(shared_interests, INTEREST_CAP)
@@ -230,11 +230,24 @@ async def for_you_events(
         .exists()
     )
 
+    # Ranked on narrow rows (the id and the score); only the page's events
+    # are then read in full.
     query = (
-        select(Events, score)
+        select(Events.id, score)
         .outerjoin(Clubs, Clubs.id == Events.club_id)
+        .outerjoin(shared, shared.c.event_id == Events.id)
+        .outerjoin(clubs_of_mine, clubs_of_mine.c.club_id == Events.club_id)
+        .outerjoin(club_history_rows, club_history_rows.c.key == Events.club_id)
+        .outerjoin(category_history_rows, category_history_rows.c.key == Events.category_id)
         .where(
             Events.is_deleted == False,
+            # Only what the public can see: published or live, from a club that
+            # is verified and not deleted (the discover pages' rule). Drafts and
+            # unverified clubs' events used to reach the feed. The statuses are
+            # written into the SQL so the partial indexes on them still apply.
+            Events.lifecycle.in_(bindparam(None, [EventStatus.published, EventStatus.live], expanding=True, literal_execute=True)),
+            Clubs.is_verified == True,  # noqa: E712
+            Clubs.is_deleted == False,  # noqa: E712
             # Not finished. `duration` is hours after event_datetime.
             event_end >= now,
             # Registration still open. A null end date means no deadline was
@@ -243,7 +256,6 @@ async def for_you_events(
             ~already_registered,
             ~club_hidden,
         )
-        .options(joinedload(Events.category), joinedload(Events.club))
         # Score first; event date and id break ties so that paging through the
         # feed cannot show the same event twice or skip one. Without the id,
         # two events scoring equally at the same instant order arbitrarily and
@@ -253,6 +265,14 @@ async def for_you_events(
         .offset(offset)
     )
 
-    result = await session.execute(query)
-    rows = result.unique().all()
-    return [row[0] for row in rows], [float(row[1]) for row in rows]
+    ranked = (await session.execute(query)).all()
+    if not ranked:
+        return [], []
+    loaded = await session.scalars(
+        select(Events)
+        .where(Events.id.in_([event_id for event_id, _ in ranked]))
+        .options(joinedload(Events.category), joinedload(Events.club))
+    )
+    by_id = {e.id: e for e in loaded.unique().all()}
+    rows = [(by_id[event_id], score_) for event_id, score_ in ranked if event_id in by_id]
+    return [e for e, _ in rows], [float(score_) for _, score_ in rows]

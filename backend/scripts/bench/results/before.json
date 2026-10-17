@@ -1,0 +1,364 @@
+{
+ "label": "before",
+ "note": "origin/master 43f0d71, 2026-10-17; parsed from the run's log (the run stopped at the app endpoints on an expired token; those were run again separately)",
+ "results": [
+  {
+   "name": "home",
+   "n": 3,
+   "p50": 89782.9,
+   "p95": 96209.4,
+   "p99": 96780.7,
+   "statements_min": 41,
+   "statements_max": 41,
+   "sql_ms": 1738.6
+  },
+  {
+   "name": "home lat/lng",
+   "n": 3,
+   "p50": 87609.8,
+   "p95": 102235.2,
+   "p99": 103535.3,
+   "statements_min": 42,
+   "statements_max": 42,
+   "sql_ms": 989.8
+  },
+  {
+   "name": "events",
+   "n": 3,
+   "p50": 76986.5,
+   "p95": 83686.5,
+   "p99": 84282.0,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 663.1
+  },
+  {
+   "name": "events q",
+   "n": 10,
+   "p50": 2051.7,
+   "p95": 2630.8,
+   "p99": 2925.6,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 55.6
+  },
+  {
+   "name": "events q short",
+   "n": 3,
+   "p50": 28306.3,
+   "p95": 29232.7,
+   "p99": 29315.0,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 136.1
+  },
+  {
+   "name": "events this_weekend",
+   "n": 4,
+   "p50": 6064.3,
+   "p95": 6156.4,
+   "p99": 6160.9,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 69.8
+  },
+  {
+   "name": "events category",
+   "n": 3,
+   "p50": 7175.0,
+   "p95": 7767.2,
+   "p99": 7819.9,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 83.7
+  },
+  {
+   "name": "events online",
+   "n": 3,
+   "p50": 10633.3,
+   "p95": 10661.2,
+   "p99": 10663.7,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 89.4
+  },
+  {
+   "name": "events free",
+   "n": 3,
+   "p50": 53531.5,
+   "p95": 54338.3,
+   "p99": 54410.0,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 246.7
+  },
+  {
+   "name": "events lat/lng (radius 50, date)",
+   "n": 3,
+   "p50": 73885.4,
+   "p95": 77725.7,
+   "p99": 78067.1,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 187.1
+  },
+  {
+   "name": "events distance r=50",
+   "n": 3,
+   "p50": 78300.1,
+   "p95": 78584.6,
+   "p99": 78609.9,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 250.3
+  },
+  {
+   "name": "events distance r=300",
+   "n": 3,
+   "p50": 76029.9,
+   "p95": 76600.7,
+   "p99": 76651.4,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 214.5
+  },
+  {
+   "name": "events popular",
+   "n": 3,
+   "p50": 76834.5,
+   "p95": 76918.6,
+   "p99": 76926.1,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 627.4
+  },
+  {
+   "name": "events offset=480",
+   "n": 3,
+   "p50": 76464.0,
+   "p95": 78899.6,
+   "p99": 79116.1,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 575.6
+  },
+  {
+   "name": "clubs",
+   "n": 4,
+   "p50": 6114.4,
+   "p95": 6349.6,
+   "p99": 6378.0,
+   "statements_min": 7,
+   "statements_max": 7,
+   "sql_ms": 91.5
+  },
+  {
+   "name": "clubs q",
+   "n": 130,
+   "p50": 137.8,
+   "p95": 295.3,
+   "p99": 377.8,
+   "statements_min": 7,
+   "statements_max": 7,
+   "sql_ms": 46.5
+  },
+  {
+   "name": "clubs interest",
+   "n": 44,
+   "p50": 411.3,
+   "p95": 588.4,
+   "p99": 663.7,
+   "statements_min": 7,
+   "statements_max": 7,
+   "sql_ms": 59.2
+  },
+  {
+   "name": "clubs nearby",
+   "n": 4,
+   "p50": 6100.8,
+   "p95": 6663.3,
+   "p99": 6729.1,
+   "statements_min": 7,
+   "statements_max": 7,
+   "sql_ms": 57.1
+  },
+  {
+   "name": "clubs popular",
+   "n": 4,
+   "p50": 6118.3,
+   "p95": 6730.9,
+   "p99": 6809.1,
+   "statements_min": 7,
+   "statements_max": 7,
+   "sql_ms": 79.2
+  },
+  {
+   "name": "club page (big)",
+   "n": 169,
+   "p50": 108.7,
+   "p95": 156.3,
+   "p99": 280.1,
+   "statements_min": 14,
+   "statements_max": 14,
+   "sql_ms": 53.3
+  },
+  {
+   "name": "event page",
+   "n": 169,
+   "p50": 108.4,
+   "p95": 162.5,
+   "p99": 295.5,
+   "statements_min": 11,
+   "statements_max": 11,
+   "sql_ms": 48.0
+  },
+  {
+   "name": "threads",
+   "n": 133,
+   "p50": 132.1,
+   "p95": 289.3,
+   "p99": 377.9,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 32.9
+  },
+  {
+   "name": "categories",
+   "n": 300,
+   "p50": 16.4,
+   "p95": 28.3,
+   "p99": 44.9,
+   "statements_min": 2,
+   "statements_max": 2,
+   "sql_ms": 13.8
+  },
+  {
+   "name": "sitemap",
+   "n": 275,
+   "p50": 49.8,
+   "p95": 192.5,
+   "p99": 262.4,
+   "statements_min": 2,
+   "statements_max": 2,
+   "sql_ms": 30.3
+  },
+  {
+   "name": "events q typo",
+   "path": "/discover/events",
+   "params": {
+    "q": "robtics"
+   },
+   "n": 300,
+   "p50": 40.171229495172156,
+   "p95": 47.12854584904562,
+   "p99": 67.19467667033304,
+   "mean": 41.35158678671966,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 37.102688056935826,
+   "bytes": 2061
+  },
+  {
+   "name": "events q relevance",
+   "path": "/discover/events",
+   "params": {
+    "q": "robotics",
+    "sort": "relevance"
+   },
+   "unsupported": "422 {\"message\":\"Invalid request\",\"errors\":{\"sort\":\"Input should be 'date', 'distance' or 'popular'\"},\"error_code\":null,\"track_id\":null}"
+  },
+  {
+   "name": "clubs q typo",
+   "path": "/discover/clubs",
+   "params": {
+    "q": "robtics"
+   },
+   "n": 300,
+   "p50": 6.225666500540683,
+   "p95": 10.423303852439858,
+   "p99": 11.393156911581173,
+   "mean": 7.492595419632077,
+   "statements_min": 2,
+   "statements_max": 2,
+   "sql_ms": 5.1414633765913695,
+   "bytes": 747
+  },
+  {
+   "name": "app for-you",
+   "path": "/events/for-you",
+   "params": {},
+   "n": 3,
+   "p50": 203330.14695799648,
+   "p95": 204092.12959549768,
+   "p99": 204159.8613854978,
+   "mean": 201571.93912466514,
+   "statements_min": 2,
+   "statements_max": 2,
+   "sql_ms": 201425.24593033644,
+   "bytes": 19848
+  },
+  {
+   "name": "app list upcoming",
+   "path": "/events/list",
+   "params": {
+    "is_ended": "false"
+   },
+   "n": 160,
+   "p50": 115.87281250103842,
+   "p95": 146.77447260328327,
+   "p99": 280.49676494207233,
+   "mean": 125.59529556274357,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 45.43884371933018,
+   "bytes": 18983
+  },
+  {
+   "name": "app list search",
+   "path": "/events/list",
+   "params": {
+    "search": "robotics"
+   },
+   "n": 146,
+   "p50": 129.9312915034534,
+   "p95": 153.70885425363667,
+   "p99": 301.114522946591,
+   "mean": 137.34874795194978,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 48.22647292460977,
+   "bytes": 22320
+  },
+  {
+   "name": "app list following",
+   "path": "/events/list",
+   "params": {
+    "is_following": "true"
+   },
+   "n": 162,
+   "p50": 112.22077050115331,
+   "p95": 216.88328155360009,
+   "p99": 345.1546237407444,
+   "mean": 123.82746527150573,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 42.43796738264342,
+   "bytes": 19231
+  },
+  {
+   "name": "app list interests",
+   "path": "/events/list",
+   "params": {
+    "interest_ids": "21"
+   },
+   "unsupported": "500 could not identify an equality operator for type json[] (DISTINCT over events.*)"
+  }
+ ],
+ "targets": {
+  "club": "club-439-blockchain",
+  "event": "e5594-ux-jam",
+  "interest": 21,
+  "category": 7,
+  "user_id": 1
+ }
+}

@@ -109,6 +109,19 @@ def _reset_rate_limiter():
 
 
 @pytest.fixture(autouse=True)
+def _fresh_discover_state():
+    """The discover site keeps a minute's answers, and looks for map links to
+    read at most once a minute, process-wide. Each test starts without either;
+    a test of the cache turns it on itself."""
+    from app.api.discover import cache, geo
+
+    cache.reset(enabled=False)
+    geo.reset_scan()
+    yield
+    cache.reset(enabled=False)
+
+
+@pytest.fixture(autouse=True)
 def _quiet_email(monkeypatch):
     """Transactional mail never leaves the suite. A sign-in from a device the
     account has not seen sends one, which is every first login in every test;

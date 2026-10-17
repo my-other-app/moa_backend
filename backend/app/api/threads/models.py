@@ -28,6 +28,11 @@ class ClubThreads(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     views_count = Column(Integer, nullable=False, default=0)
     created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
+    __table_args__ = (
+        # The newest posts across every club: the discover feed and the front page.
+        sa.Index("ix_club_threads_newest", sa.text("created_at DESC"), "id", postgresql_where=sa.text("NOT is_deleted")),
+    )
+
 
 class ThreadPollOptions(AbstractSQLModel):
     __tablename__ = "thread_poll_options"

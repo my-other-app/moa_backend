@@ -1,5 +1,7 @@
 # from geoalchemy2 import Geometry
+import sqlalchemy as sa
 from sqlalchemy import (
+    DDL,
     Boolean,
     Column,
     ForeignKey,
@@ -8,6 +10,7 @@ from sqlalchemy import (
     Float,
     UniqueConstraint,
 )
+from sqlalchemy import event as sa_event
 from sqlmodel import Field, SQLModel
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
@@ -68,6 +71,10 @@ class Clubs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     brand_secondary = Column(String(7), nullable=True)
     initial_password = Column(String, nullable=True)
     is_verified = Column(Boolean, nullable=False, default=False)
+    # How many follow the club: kept by a trigger on club_users_link in the
+    # same transaction as every follow, unfollow or delete there (see
+    # FOLLOWER_COUNT_SQL below), so lists sort by it without counting.
+    follower_count = Column(Integer, nullable=False, default=0, server_default="0")
 
     user = relationship("Users", back_populates="club")
     org = relationship("Organizations", back_populates="clubs")
@@ -81,6 +88,12 @@ class Clubs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     notes = relationship("Notes", back_populates="club")
     socials = relationship("ClubSocials", back_populates="club", uselist=False)
 
+    __table_args__ = (
+        sa.Index("ix_clubs_name_trgm", "name", postgresql_using="gin", postgresql_ops={"name": "gin_trgm_ops"}, postgresql_where=sa.text("NOT is_deleted")),
+        sa.Index("ix_clubs_tagline_trgm", "tagline", postgresql_using="gin", postgresql_ops={"tagline": "gin_trgm_ops"}, postgresql_where=sa.text("NOT is_deleted")),
+        sa.Index("ix_clubs_location_trgm", "location_name", postgresql_using="gin", postgresql_ops={"location_name": "gin_trgm_ops"}, postgresql_where=sa.text("NOT is_deleted")),
+    )
+
 
 class ClubInterestsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     __tablename__ = "clubs_interests_link"
@@ -91,6 +104,11 @@ class ClubInterestsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
 
     club = relationship("Clubs")
     interest = relationship("Interests")
+
+    __table_args__ = (
+        sa.Index("ix_club_interests_club", "club_id", postgresql_where=sa.text("NOT is_deleted")),
+        sa.Index("ix_club_interests_interest", "interest_id", "club_id", postgresql_where=sa.text("NOT is_deleted")),
+    )
 
 
 class ClubUsersLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
@@ -108,7 +126,11 @@ class ClubUsersLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     club = relationship("Clubs", back_populates="followers")
     user = relationship("Users")
 
-    __table_args__ = (UniqueConstraint("club_id", "user_id", "is_deleted"),)
+    __table_args__ = (
+        UniqueConstraint("club_id", "user_id", "is_deleted"),
+        # One person's clubs: following, pinned, hidden (the app's feeds).
+        sa.Index("ix_club_users_user", "user_id", postgresql_where=sa.text("NOT is_deleted")),
+    )
 
 
 class Notes(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
@@ -174,3 +196,37 @@ class ClubPartners(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         S3ImageField(upload_to="clubs/partners/", variations={"thumbnail": {"width": 150, "height": 150}, "medium": {"width": 400, "height": 400}}),
         nullable=True,
     )
+
+
+# ─── clubs.follower_count, kept by the database ───────────────────────────
+#
+# Counts rows that are following and not deleted. A trigger, so a follow
+# from the app, a tracking link, an admin tool or raw SQL is counted the same
+# way, in the writer's transaction. The migration discover_perf installs the
+# same function and trigger.
+
+FOLLOWER_COUNT_SQL = (
+    """
+    CREATE OR REPLACE FUNCTION moa_follower_count() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF TG_OP = 'UPDATE' AND OLD.club_id = NEW.club_id AND OLD.is_following = NEW.is_following AND OLD.is_deleted = NEW.is_deleted THEN
+        RETURN NULL;
+      END IF;
+      IF TG_OP IN ('UPDATE', 'DELETE') AND OLD.is_following AND NOT OLD.is_deleted THEN
+        UPDATE clubs SET follower_count = follower_count - 1 WHERE id = OLD.club_id;
+      END IF;
+      IF TG_OP IN ('UPDATE', 'INSERT') AND NEW.is_following AND NOT NEW.is_deleted THEN
+        UPDATE clubs SET follower_count = follower_count + 1 WHERE id = NEW.club_id;
+      END IF;
+      RETURN NULL;
+    END $$
+    """,
+    """
+    CREATE TRIGGER trg_club_users_follower_count
+    AFTER INSERT OR DELETE OR UPDATE OF club_id, is_following, is_deleted ON club_users_link
+    FOR EACH ROW EXECUTE FUNCTION moa_follower_count()
+    """,
+)
+
+for _sql in FOLLOWER_COUNT_SQL:
+    sa_event.listen(ClubUsersLink.__table__, "after_create", DDL(_sql).execute_if(dialect="postgresql"))

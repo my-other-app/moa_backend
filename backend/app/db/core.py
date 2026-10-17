@@ -11,12 +11,21 @@ from app.db.registry import *
 # pool_size/max_overflow give each worker process up to 30 concurrent
 # connections; check pool_size * settings.WORKERS against Postgres's
 # max_connections if WORKERS is ever increased beyond 1.
+# plan_cache_mode: asyncpg prepares every statement, and after five runs
+# Postgres may switch a prepared statement to one "generic" plan made without
+# the parameters' values. For a query whose best plan depends on them -- a
+# search for "ai" (no trigram to look up) against one for "robotics", or a
+# date that is now rather than any date -- the generic plan can be ten times
+# slower (scripts/bench/RESULTS.md has one). Planning each run with the real
+# values costs a fraction of a millisecond, which is what every statement
+# paid for its first five runs anyway.
 engine = create_async_engine(
     settings.DATABASE_URL,
     pool_size=10,
     max_overflow=20,
     pool_recycle=1800,
     pool_pre_ping=True,
+    connect_args={"server_settings": {"plan_cache_mode": "force_custom_plan"}},
 )
 
 # Shared so tests can build their own session against the same semantics.
@@ -42,18 +51,21 @@ async def get_session():
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
-# setup logging for sqlalchamey
+# Every SQL statement with its parameters, to stdout and logs/sql.log -- only
+# when asked for (APP_SQL_LOG=true). It used to be always on, in production
+# too: the parameters carry people's emails, phones and names, and the file
+# grew without bound.
+if settings.SQL_LOG:
+    logging.basicConfig()
+    logger = logging.getLogger("sqlalchemy.engine")
+    logger.setLevel(logging.INFO)
 
-logging.basicConfig()
-logger = logging.getLogger("sqlalchemy.engine")
-logger.setLevel(logging.INFO)
+    os.makedirs("logs", exist_ok=True)
 
-os.makedirs("logs", exist_ok=True)
+    file_handler = logging.FileHandler("logs/sql.log")
+    file_handler.setLevel(logging.INFO)
 
-file_handler = logging.FileHandler("logs/sql.log")
-file_handler.setLevel(logging.INFO)
+    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    file_handler.setFormatter(formatter)
 
-formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-file_handler.setFormatter(formatter)
-
-logger.addHandler(file_handler)
+    logger.addHandler(file_handler)

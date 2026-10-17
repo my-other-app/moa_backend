@@ -188,6 +188,8 @@ class UserProfiles(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     org = relationship("Organizations")
     avatar = relationship("UserAvatars")
 
+    __table_args__ = (sa.Index("ix_user_profiles_user", "user_id"),)
+
     def __repr__(self):
         return self.username
 
@@ -201,6 +203,8 @@ class UserInterests(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
 
     # user = relationship("Users")
     interest = relationship("Interests")
+
+    __table_args__ = (sa.Index("ix_user_interests_user", "user_id"),)
 
 
 class UserDeviceTokens(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):

@@ -17,6 +17,9 @@ class AppConfig(BaseSettings):
     WORKERS: int = 1
     PORT: int = 8000
     DEBUG: bool = False
+    # Log every SQL statement with its parameters (app/db/core.py). Off by
+    # default: the parameters are personal data.
+    SQL_LOG: bool = False
     CORS_ORIGINS: list[str] | str
     APP_VERSION: str = "1.0"
 
