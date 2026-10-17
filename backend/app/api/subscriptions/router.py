@@ -15,9 +15,10 @@ from fastapi import APIRouter, Query, Request, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
+from app.api.admin_alerts import notify
 from app.api.audit import service as audit
 from app.api.clubs.models import Clubs
-from app.api.subscriptions import billing, service
+from app.api.subscriptions import billing, notices, service
 from app.api.subscriptions.models import (
     BillingCycle,
     ClubSubscriptions,
@@ -28,8 +29,10 @@ from app.api.subscriptions.models import (
     SubscriptionStatus,
 )
 from app.api.subscriptions.schemas import (
+    AdminCancelIn,
     AssignPlanIn,
     EntitlementsOut,
+    ExtendGraceIn,
     PlanIn,
     PlanOut,
     PublicPlansOut,
@@ -503,6 +506,15 @@ async def assign_plan(
         summary=f"Moved club {club_id} to plan “{plan.name}” ({cycle.value})",
         request=request,
     )
+    club = await session.get(Clubs, club_id)
+    await notify(
+        session, "plan_assigned",
+        title=f"{_admin_name(user)} moved {club.name} to {plan.name}",
+        body=f"{plan.name}, {cycle.value}, {SubscriptionStatus(payload.status).value}. Nothing was charged.",
+        club=club, subscription=subscription, dedupe=False,
+        data={"plan": plan.key, "cycle": cycle.value, "status": SubscriptionStatus(payload.status).value,
+              "by": getattr(user, "email", None), "action": "assign"},
+    )
     await session.commit()
 
     fresh = await service.get_club_subscription(session, club_id)
@@ -548,6 +560,209 @@ async def retry_charge(
     # The outcome arrives as a webhook; saying "retried" would be claiming
     # more than we know.
     return {"message": "Razorpay has been asked to retry. The result arrives shortly."}
+
+
+def _admin_name(user) -> str:
+    return getattr(user, "email", None) or "An admin"
+
+
+async def _admin_subscription(session, subscription_id: int) -> ClubSubscriptions:
+    row = await session.scalar(
+        select(ClubSubscriptions)
+        .where(ClubSubscriptions.id == subscription_id, ClubSubscriptions.is_deleted == False)  # noqa: E712
+        .options(
+            selectinload(ClubSubscriptions.club),
+            selectinload(ClubSubscriptions.plan).selectinload(Plans.limits),
+            selectinload(ClubSubscriptions.plan).selectinload(Plans.features),
+        )
+        .execution_options(populate_existing=True)
+    )
+    if row is None:
+        raise CustomHTTPException(status_code=404, message="Subscription not found")
+    return row
+
+
+async def _fresh(session, subscription_id: int) -> dict:
+    row = await session.scalar(
+        select(ClubSubscriptions)
+        .where(ClubSubscriptions.id == subscription_id)
+        .options(
+            selectinload(ClubSubscriptions.club),
+            selectinload(ClubSubscriptions.plan).selectinload(Plans.limits),
+            selectinload(ClubSubscriptions.plan).selectinload(Plans.features),
+        )
+        .execution_options(populate_existing=True)
+    )
+    return subscription_dict(row)
+
+
+@admin_router.post(
+    "/subscriptions/{subscription_id}/extend-grace", summary="Give a past-due club more time (admin)"
+)
+async def extend_grace(
+    subscription_id: int,
+    payload: ExtendGraceIn,
+    session: SessionDep,
+    user: MoneyAuth,
+    request: Request = None,
+) -> SubscriptionOut:
+    """
+    Move a past-due club's grace end `days` later (1 to 30): from its current
+    end, or from now if it has already run out. A past-due club with no grace
+    yet (Razorpay still retrying) gets one starting now. The club keeps its
+    plan until the new end; nothing is charged or cancelled.
+
+    Refused (422 NOT_PAST_DUE) for any other status, and (422 NEVER_PAID) for
+    a Razorpay subscription that was never paid for -- it has no access to
+    keep; move the club to a plan instead.
+    """
+    row = await _admin_subscription(session, subscription_id)
+    if row.status != SubscriptionStatus.past_due:
+        raise CustomHTTPException(
+            status_code=422,
+            message=f"Only a past-due subscription has a grace to extend; this one is {row.status.value}.",
+            error_code="NOT_PAST_DUE",
+        )
+    if row.razorpay_subscription_id and row.activated_at is None:
+        raise CustomHTTPException(
+            status_code=422,
+            message="This subscription was never paid for, so there is no access to keep. Move the club to a plan instead.",
+            error_code="NEVER_PAID",
+        )
+
+    previous_end = row.grace_ends_at
+    service.extend_grace(row, payload.days)
+    club_name = row.club.name if row.club else f"club {row.club_id}"
+    ends = notices.day(row.grace_ends_at)
+
+    await audit.record(
+        session,
+        actor=user,
+        action="subscription.extend_grace",
+        entity_type="club",
+        entity_id=row.club_id,
+        summary=f"Extended {club_name}'s grace by {payload.days} day{'s' if payload.days != 1 else ''}, to {ends}",
+        details={
+            "subscription_id": row.id,
+            "days": payload.days,
+            "from": previous_end.isoformat() if previous_end else None,
+            "to": row.grace_ends_at.isoformat(),
+        },
+        request=request,
+    )
+    await notify(
+        session, "plan_assigned",
+        title=f"{_admin_name(user)} extended {club_name}'s grace to {ends}",
+        body=f"{payload.days} more day{'s' if payload.days != 1 else ''} on {row.plan.name if row.plan else 'its plan'}.",
+        club=row.club, subscription=row, dedupe=False,
+        data={
+            "action": "extend_grace", "days": payload.days, "by": getattr(user, "email", None),
+            "grace_ends_at": row.grace_ends_at.isoformat(),
+            "previous_grace_ends_at": previous_end.isoformat() if previous_end else None,
+        },
+    )
+    await session.commit()
+    return await _fresh(session, row.id)
+
+
+@admin_router.post(
+    "/subscriptions/{subscription_id}/cancel", summary="Cancel a club's subscription (admin)"
+)
+async def admin_cancel_subscription(
+    subscription_id: int,
+    payload: AdminCancelIn,
+    session: SessionDep,
+    user: MoneyAuth,
+    request: Request = None,
+) -> SubscriptionOut:
+    """
+    Cancel for the club, the way the club's own cancel does.
+
+    - `at_period_end: true`: the club keeps what it paid for (or its trial)
+      until `current_period_end`, then Free. Razorpay stops at the end of the
+      cycle for an active subscription, at once for any other.
+    - `at_period_end: false`: Razorpay stops now and so does access: the club
+      goes to Free, or back to an admin's grant it had before a checkout.
+    - A checkout still pending is closed and the club goes back to what it had.
+    - A plan an admin granted has nothing at Razorpay; it is cancelled here.
+
+    409 NOTHING_TO_CANCEL when it is cancelled already (and, for `false`, no
+    paid-for days are left to end). 502 RAZORPAY_ERROR when Razorpay refuses:
+    nothing is changed here then, so the club is never shown cancelled while
+    Razorpay can still charge it.
+    """
+    row = await _admin_subscription(session, subscription_id)
+    now = datetime.now(timezone.utc)
+    service.settle_stale_pending(row, now)
+    at_period_end = bool(payload.at_period_end)
+    rzp = row.razorpay_subscription_id
+    club_name = row.club.name if row.club else f"club {row.club_id}"
+    plan_name = row.plan.name if row.plan else "its plan"
+    was = row.status.value
+
+    if row.status == SubscriptionStatus.cancelled:
+        if at_period_end or not service.is_entitled(row, now):
+            await session.commit()
+            raise CustomHTTPException(
+                status_code=409, message="This subscription is already cancelled.", error_code="NOTHING_TO_CANCEL",
+            )
+        outcome = service.end_now(row, now)
+    elif row.status == SubscriptionStatus.pending:
+        if rzp:
+            billing.close_unpaid_checkout(rzp)
+        service.revert_checkout(row)
+        outcome = "checkout_closed"
+    elif rzp:
+        if not (at_period_end and row.cancel_at_period_end):
+            try:
+                billing.cancel_subscription(
+                    rzp, at_period_end=at_period_end and row.status == SubscriptionStatus.active
+                )
+            except Exception as exc:  # noqa: BLE001
+                raise CustomHTTPException(
+                    status_code=502,
+                    message=f"Razorpay did not cancel the subscription: {str(exc)[:200]}",
+                    error_code="RAZORPAY_ERROR",
+                )
+        if at_period_end:
+            row.cancel_at_period_end = True
+            row.cancel_requested_at = row.cancel_requested_at or now
+            outcome = "at_period_end"
+        else:
+            outcome = service.end_now(row, now)
+    else:
+        row.cancel_at_period_end = at_period_end
+        row.cancel_requested_at = now
+        row.pending_since = None
+        service.mark_cancelled(row)
+        outcome = "at_period_end" if service.is_entitled(row, now) else "cancelled"
+
+    await audit.record(
+        session,
+        actor=user,
+        action="subscription.admin_cancel",
+        entity_type="club",
+        entity_id=row.club_id,
+        summary=f"Cancelled {club_name}'s {plan_name} subscription ({'at period end' if at_period_end else 'now'})",
+        details={"subscription_id": row.id, "at_period_end": at_period_end, "outcome": outcome,
+                 "razorpay_subscription_id": rzp, "previous_status": was},
+        request=request,
+    )
+    if outcome != "checkout_closed":
+        await notify(
+            session, "subscription_cancelled",
+            title=f"{_admin_name(user)} cancelled {club_name}'s {plan_name} subscription",
+            body=(
+                f"Access runs to the end of the period ({notices.day(row.current_period_end)})."
+                if service.is_entitled(row, now) and row.current_period_end
+                else "Access ended now."
+            ),
+            club=row.club, subscription=row, dedupe=False,
+            data={"by": "admin", "admin": getattr(user, "email", None), "at_period_end": at_period_end,
+                  "outcome": outcome, "previous_status": was},
+        )
+    await session.commit()
+    return await _fresh(session, row.id)
 
 
 # ---------------------------------------------------------------------------
@@ -740,6 +955,7 @@ async def cancel_my_subscription(
             error_code="NO_SUBSCRIPTION",
         )
 
+    alert = False
     if row.status == SubscriptionStatus.pending:
         billing.close_unpaid_checkout(row.razorpay_subscription_id)
         service.revert_checkout(row)
@@ -750,6 +966,22 @@ async def cancel_my_subscription(
         )
         row.cancel_at_period_end = True
         row.cancel_requested_at = now
+        alert = True
+
+    if alert:
+        plan_name = row.plan.name if row.plan else "its plan"
+        await notify(
+            session, "subscription_cancelled",
+            title=f"{club.name} cancelled its {plan_name} subscription",
+            body=(
+                f"Access runs to {notices.day(row.current_period_end)}, then Free."
+                if row.current_period_end and row.current_period_end > now
+                else "Access has ended; the club is on Free."
+            ),
+            club=club, subscription=row,
+            data={"by": "club", "status": row.status.value,
+                  "current_period_end": row.current_period_end.isoformat() if row.current_period_end else None},
+        )
 
     await audit.record(
         session,

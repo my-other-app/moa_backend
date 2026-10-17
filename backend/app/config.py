@@ -78,6 +78,11 @@ class AppConfig(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int
 
     DISCORD_ERROR_WEBHOOK: str | None = None
+    # Who hears about billing and new club applications (app/api/admin_alerts):
+    # a comma-separated list of addresses, each alert one mail to all of them.
+    ADMIN_ALERT_EMAILS: str = "support@myotherapp.in"
+    # The same alerts posted to a Discord channel. Unset: no post.
+    ADMIN_ALERT_DISCORD_WEBHOOK: str | None = None
 
     # Where a link in an email points: the API as the public reaches it.
     PUBLIC_API_URL: str = "https://api.myotherapp.in"

@@ -49,6 +49,14 @@ LIVE_BILLED_STATUSES = (
 #: it had. The Razorpay checkout link is made to expire at the same moment.
 CHECKOUT_TTL = timedelta(hours=24)
 
+#: How long a club that had paid keeps its plan after Razorpay stops retrying
+#: a failed renewal (`subscription.halted`). Then it moves to Free.
+GRACE_DAYS = 7
+#: The club and the admin hear this long before a grace runs out.
+GRACE_REMINDER = timedelta(hours=48)
+#: A club on a trial hears this long before the trial ends (and billing starts).
+TRIAL_REMINDER = timedelta(hours=72)
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -67,7 +75,7 @@ def _when(value) -> datetime | None:
 
 
 def _entitled(*, status, billed, authenticated_at, activated_at, trial_started_at,
-              cancel_at_period_end, current_period_end, now) -> bool:
+              cancel_at_period_end, current_period_end, now, grace_ends_at=None) -> bool:
     status = _status(status)
     if status == SubscriptionStatus.active:
         return True
@@ -78,6 +86,10 @@ def _entitled(*, status, billed, authenticated_at, activated_at, trial_started_a
     if status == SubscriptionStatus.past_due:
         # Razorpay retries a failed renewal for days and a paying club keeps
         # its plan meanwhile. A subscription never paid for has nothing to keep.
+        # Once Razorpay gives up, the grace it was given ends on time even if
+        # the sweep that moves the club to Free has not run yet.
+        if grace_ends_at is not None and grace_ends_at <= now:
+            return False
         return not billed or activated_at is not None
     if status == SubscriptionStatus.cancelled:
         # Cancelled by the club at period end: what it paid for (or the trial
@@ -107,6 +119,16 @@ def is_entitled(subscription: ClubSubscriptions, now: datetime | None = None) ->
         cancel_at_period_end=subscription.cancel_at_period_end,
         current_period_end=subscription.current_period_end,
         now=now or _now(),
+        grace_ends_at=subscription.grace_ends_at,
+    )
+
+
+def in_grace(subscription: ClubSubscriptions, now: datetime | None = None) -> bool:
+    """Past due, Razorpay has stopped retrying, and the grace has not run out."""
+    return (
+        _status(subscription.status) == SubscriptionStatus.past_due
+        and subscription.grace_ends_at is not None
+        and subscription.grace_ends_at > (now or _now())
     )
 
 
@@ -519,6 +541,9 @@ async def assign_plan(
         subscription.activated_at = subscription.activated_at or now
     subscription.pending_since = None
     subscription.previous_state = None
+    # The admin decided what the club has now; a grace that was running for
+    # the old arrangement no longer applies.
+    clear_grace(subscription)
     await session.flush()
     return subscription
 
@@ -598,6 +623,7 @@ def record_checkout(
     subscription.cancel_at_period_end = False
     subscription.cancel_requested_at = None
     subscription.last_failure_reason = None
+    clear_grace(subscription)
     return subscription
 
 
@@ -757,6 +783,13 @@ async def mrr_totals(session) -> dict:
             )
         ).all()
     )
+    in_grace_count = await session.scalar(
+        select(func.count(ClubSubscriptions.id)).where(
+            ClubSubscriptions.is_deleted == False,
+            ClubSubscriptions.status == SubscriptionStatus.past_due,
+            ClubSubscriptions.grace_ends_at > _now(),
+        )
+    )
 
     return {
         "mrr_paise": int(mrr or 0),
@@ -767,6 +800,11 @@ async def mrr_totals(session) -> dict:
         "trialing": int(by_status.get(SubscriptionStatus.trial, 0)),
         "past_due": int(by_status.get(SubscriptionStatus.past_due, 0)),
         "cancelled": int(by_status.get(SubscriptionStatus.cancelled, 0)),
+        "pending": int(by_status.get(SubscriptionStatus.pending, 0)),
+        "paused": int(by_status.get(SubscriptionStatus.paused, 0)),
+        # Past due, Razorpay done retrying, still within its grace: the ones
+        # about to drop to Free unless someone acts.
+        "in_grace": int(in_grace_count or 0),
     }
 
 
@@ -799,3 +837,76 @@ def mark_cancelled(subscription: ClubSubscriptions) -> None:
         and subscription.current_period_end > now
     ):
         subscription.current_period_end = now
+
+
+# ---------------------------------------------------------------------------
+# Grace: a paying club keeps its plan for GRACE_DAYS after Razorpay gives up
+# ---------------------------------------------------------------------------
+
+
+def start_grace(subscription: ClubSubscriptions, now: datetime | None = None, *, days: int = GRACE_DAYS) -> bool:
+    """
+    Razorpay has stopped retrying a renewal: the club keeps its plan for
+    `days` more, then the sweep moves it to Free. Returns whether a grace
+    began (False: one was already running -- it is lengthened, never cut).
+
+    Only for a subscription that was paid for and is now past due; a checkout
+    or trial that never charged has nothing to keep (`is_entitled`).
+    """
+    now = now or _now()
+    if _status(subscription.status) != SubscriptionStatus.past_due or subscription.activated_at is None:
+        return False
+    ends = now + timedelta(days=days)
+    if subscription.halted_at is not None and subscription.grace_ends_at is not None:
+        if subscription.grace_ends_at < ends:
+            subscription.grace_ends_at = ends
+        return False
+    subscription.halted_at = now
+    subscription.grace_ends_at = ends
+    subscription.grace_reminded_at = None
+    return True
+
+
+def clear_grace(subscription: ClubSubscriptions) -> bool:
+    """Paid, resumed or reactivated: the grace is over. Returns whether one was running."""
+    running = subscription.halted_at is not None or subscription.grace_ends_at is not None
+    subscription.halted_at = None
+    subscription.grace_ends_at = None
+    subscription.grace_reminded_at = None
+    return running
+
+
+def extend_grace(subscription: ClubSubscriptions, days: int, now: datetime | None = None) -> None:
+    """An admin gives a past-due club `days` more: from the grace's end, or
+    from now when it has already run out. A past-due club with no grace yet
+    (Razorpay still retrying) gets one starting now."""
+    now = now or _now()
+    if subscription.grace_ends_at is None:
+        subscription.halted_at = subscription.halted_at or now
+        subscription.grace_ends_at = now + timedelta(days=days)
+        subscription.grace_reminded_at = None
+        return
+    base = max(subscription.grace_ends_at, now)
+    subscription.grace_ends_at = base + timedelta(days=days)
+    if subscription.grace_ends_at - now > GRACE_REMINDER:
+        # A new end far enough off deserves its own "two days left".
+        subscription.grace_reminded_at = None
+
+
+def end_now(subscription: ClubSubscriptions, now: datetime | None = None) -> str:
+    """
+    Take the plan away now: back to an admin's grant from before the checkout
+    when `previous_state` holds one that would still stand, otherwise
+    cancelled (so Free). Returns "restored" or "cancelled".
+    """
+    now = now or _now()
+    prev = subscription.previous_state or {}
+    if prev.get("plan_id") and not prev.get("razorpay_subscription_id") and previous_entitled(subscription, now):
+        revert_checkout(subscription)
+        return "restored"
+    subscription.cancel_at_period_end = False
+    subscription.cancel_requested_at = subscription.cancel_requested_at or now
+    subscription.pending_since = None
+    subscription.previous_state = None
+    mark_cancelled(subscription)
+    return "cancelled"

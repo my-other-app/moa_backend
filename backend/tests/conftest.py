@@ -151,6 +151,20 @@ def _quiet_email(monkeypatch):
     yield
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def _after_commit_finished(_quiet_email):
+    """Mail queued to go after a commit (app.core.after_commit) runs on a
+    worker thread. Every test waits for it before its patches come off, so a
+    mail from one test never reaches the real provider after it."""
+    from app.api.admin_alerts import service as admin_alerts
+    from app.core import after_commit
+
+    admin_alerts.reset_for_tests()
+    yield
+    await after_commit.drain()
+    admin_alerts.reset_for_tests()
+
+
 @pytest_asyncio.fixture
 async def client(session):
     """An httpx client wired to the real FastAPI app, with get_session overridden

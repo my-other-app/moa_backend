@@ -277,6 +277,28 @@ def failure_reason_from_payload(payload: dict) -> str | None:
     return payment.get("error_description") or payment.get("error_reason")
 
 
+def short_url_from_payload(payload: dict) -> str | None:
+    """Razorpay's hosted page for the subscription, where a club can update
+    how it pays. On subscription events; absent on payment ones."""
+    entity = payload.get("payload", {}).get("subscription", {}).get("entity", {}) or {}
+    url = entity.get("short_url")
+    return url if isinstance(url, str) and url.startswith("https://") else None
+
+
+def paid_count_from_payload(payload: dict) -> int | None:
+    """How many charges Razorpay has taken on the subscription, if it says."""
+    entity = payload.get("payload", {}).get("subscription", {}).get("entity", {}) or {}
+    try:
+        return int(entity["paid_count"]) if entity.get("paid_count") is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def payment_from_payload(payload: dict) -> dict:
+    """The payment entity on a charged or failed event: id, amount (paise), method."""
+    return payload.get("payload", {}).get("payment", {}).get("entity", {}) or {}
+
+
 def razorpay_plan_id_from_payload(payload: dict) -> str | None:
     entity = payload.get("payload", {}).get("subscription", {}).get("entity", {})
     return entity.get("plan_id")
@@ -303,9 +325,12 @@ def apply_event(
 
     - pending --authenticated--> trial, when a trial was granted at checkout;
       otherwise stays pending (authorised, waiting for the first charge)
-    - pending | trial | past_due | paused --activated / charged--> active
-    - active | trial --pending / halted--> past_due (pending stays pending)
-    - any --paused--> paused;  paused | past_due --resumed--> active
+    - pending | trial | past_due | paused --activated / charged--> active,
+      clearing any grace
+    - active | trial --pending / halted--> past_due (pending stays pending);
+      halted on one that was paid for starts its grace (service.start_grace)
+    - any --paused--> paused;  paused | past_due --resumed--> active, clearing
+      any grace
     - pending --cancelled / completed--> back to what the club had before
     - anything else --cancelled / completed--> cancelled
     - updated: the plan or cycle changed at Razorpay (`new_plan`, resolved by
@@ -335,6 +360,7 @@ def apply_event(
     if event in ("subscription.activated", "subscription.charged"):
         period_end = period_end_from_payload(payload)
         service.mark_charged(subscription, period_end=period_end)
+        service.clear_grace(subscription)
         # A plan change at Razorpay's end (an upgrade mid-cycle) is reflected
         # in MRR here, where the plan row is to hand.
         if subscription.plan:
@@ -343,6 +369,10 @@ def apply_event(
 
     if event in ("subscription.pending", "subscription.halted"):
         service.mark_failed(subscription, reason=failure_reason_from_payload(payload))
+        if event == "subscription.halted":
+            # Razorpay has stopped retrying. A club that paid keeps its plan
+            # for GRACE_DAYS more; one that never paid had nothing to keep.
+            service.start_grace(subscription, now)
         return True
 
     if event == "subscription.paused":
@@ -355,6 +385,7 @@ def apply_event(
             subscription.status = SubscriptionStatus.active
             subscription.last_failure_reason = None
             subscription.activated_at = subscription.activated_at or now
+            service.clear_grace(subscription)
             if subscription.plan:
                 subscription.mrr_paise = mrr_for(subscription.plan, subscription.cycle)
             return True
