@@ -39,7 +39,10 @@ async def get_user(session: AsyncSession, username_or_id: str, *, password_holde
         # The address as stored first; failing that, ignoring case and stray
         # spaces ("Ravi@Gmail.com" for ravi@gmail.com) -- but only when that
         # finds one account, never a guess between two.
-        result = (await session.execute(query.where(Users.email == username_or_id))).scalars().first()
+        # Oldest first: one address can hold an app account and a club
+        # account, and without an order Postgres hands back whichever row it
+        # reaches first -- which changes as the table is vacuumed.
+        result = (await session.execute(query.where(Users.email == username_or_id).order_by(Users.id))).scalars().first()
         if result is None:
             loose = (await session.execute(
                 query.where(func.lower(func.btrim(Users.email)) == username_or_id.strip().lower()).limit(2)
