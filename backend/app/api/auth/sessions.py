@@ -47,12 +47,10 @@ async def start(
     user_agent = None
     ip_address = None
     if request is not None:
+        from app.core.net import client_address
+
         user_agent = (request.headers.get("user-agent") or "")[:255] or None
-        forwarded = request.headers.get("x-forwarded-for")
-        if forwarded:
-            ip_address = forwarded.split(",")[0].strip()[:45]
-        elif request.client:
-            ip_address = request.client.host[:45]
+        ip_address = client_address(request)[:45] or None
 
     row = UserSessions(
         id=uuid.uuid4(),

@@ -16,12 +16,11 @@ logger = logging.getLogger(__name__)
 def _client_ip(request: Request | None) -> str | None:
     if request is None:
         return None
-    # Behind nginx, so the forwarded header is the real client; the first
-    # entry is the originating address.
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()[:45]
-    return request.client.host[:45] if request.client else None
+    # The caller as app.core.net reads it: the forwarded headers only from
+    # our own proxy, right to left, so a client cannot write its own.
+    from app.core.net import client_address
+
+    return client_address(request)[:45] or None
 
 
 async def record(
