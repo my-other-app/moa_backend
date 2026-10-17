@@ -1,0 +1,446 @@
+{
+ "label": "s2_w1",
+ "db": "moa_s2",
+ "workers": 1,
+ "mix": [
+  [
+   "home",
+   40
+  ],
+  [
+   "search",
+   25
+  ],
+  [
+   "event",
+   10
+  ],
+  [
+   "club",
+   10
+  ],
+  [
+   "foryou",
+   10
+  ],
+  [
+   "list",
+   5
+  ]
+ ],
+ "results": [
+  {
+   "concurrency": 10,
+   "duration_s": 40.0,
+   "requests": 198,
+   "rps": 5.0,
+   "error_rate": 0.0101,
+   "codes": {
+    "200": 196,
+    "ReadTimeout": 2
+   },
+   "errors": {
+    "home ReadTimeout": 2
+   },
+   "latency_ms": {
+    "p50": 782.2,
+    "p95": 17199.9,
+    "p99": 44583.9,
+    "mean": 3707.8
+   },
+   "by_kind": {
+    "club": {
+     "n": 12,
+     "p50": 64.3,
+     "p95": 204.8,
+     "p99": 247.8
+    },
+    "event": {
+     "n": 20,
+     "p50": 938.8,
+     "p95": 2555.0,
+     "p99": 3147.1
+    },
+    "foryou": {
+     "n": 21,
+     "p50": 3405.1,
+     "p95": 4525.1,
+     "p99": 4795.5
+    },
+    "home": {
+     "n": 90,
+     "p50": 149.2,
+     "p95": 29976.6,
+     "p99": 60002.8
+    },
+    "list": {
+     "n": 8,
+     "p50": 1544.0,
+     "p95": 3563.2,
+     "p99": 4080.7
+    },
+    "search": {
+     "n": 47,
+     "p50": 3693.9,
+     "p95": 13585.4,
+     "p99": 30450.2
+    }
+   },
+   "cpu_cores_busy": {
+    "server": 0.09,
+    "loadgen": 0.0,
+    "machine": 4.01,
+    "machine_before": 2.88,
+    "postgres_est": 1.04
+   },
+   "pg_backends": {
+    "active|": {
+     "mean": 0.8,
+     "max": 8
+    },
+    "active|Client": {
+     "mean": 0.0,
+     "max": 1
+    },
+    "active|IO:BufFileRead": {
+     "mean": 0.0,
+     "max": 1
+    },
+    "active|IO:BufFileWrite": {
+     "mean": 0.0,
+     "max": 1
+    },
+    "active|IO:DataFileRead": {
+     "mean": 4.2,
+     "max": 11
+    },
+    "active|IPC": {
+     "mean": 2.2,
+     "max": 10
+    },
+    "active|LWLock:BufferMapping": {
+     "mean": 0.0,
+     "max": 3
+    },
+    "active|LWLock:SharedTidBitmap": {
+     "mean": 0.0,
+     "max": 1
+    },
+    "active|Timeout": {
+     "mean": 0.0,
+     "max": 1
+    },
+    "idle in transaction|Client": {
+     "mean": 0.8,
+     "max": 9
+    },
+    "idle|Client": {
+     "mean": 7.3,
+     "max": 10
+    }
+   },
+   "server": {
+    "workers": [
+     {
+      "pid": 76055,
+      "requests": 205,
+      "max_inflight": 13,
+      "pool_checked_out": 2,
+      "pool_overflow": 2,
+      "loop_lag_p99_ms": 62.5,
+      "loop_lag_max_ms": 329.8
+     }
+    ],
+    "loop_lag_ms": {
+     "p50": 1.06,
+     "p99": 62.5,
+     "max": 329.8
+    },
+    "for_update_ms": {
+     "n": 0,
+     "p50": NaN,
+     "p95": NaN,
+     "p99": NaN,
+     "max": 0
+    }
+   }
+  },
+  {
+   "concurrency": 50,
+   "duration_s": 40.0,
+   "requests": 401,
+   "rps": 10.0,
+   "error_rate": 0.0,
+   "codes": {
+    "200": 401
+   },
+   "errors": {},
+   "latency_ms": {
+    "p50": 5521.9,
+    "p95": 18113.2,
+    "p99": 25063.2,
+    "mean": 6687.1
+   },
+   "by_kind": {
+    "club": {
+     "n": 40,
+     "p50": 2767.5,
+     "p95": 3990.1,
+     "p99": 4012.7
+    },
+    "event": {
+     "n": 38,
+     "p50": 3724.2,
+     "p95": 8790.1,
+     "p99": 8976.5
+    },
+    "foryou": {
+     "n": 45,
+     "p50": 9189.5,
+     "p95": 13695.9,
+     "p99": 14004.6
+    },
+    "home": {
+     "n": 160,
+     "p50": 3577.0,
+     "p95": 24099.7,
+     "p99": 25063.9
+    },
+    "list": {
+     "n": 19,
+     "p50": 4454.4,
+     "p95": 9327.3,
+     "p99": 10226.4
+    },
+    "search": {
+     "n": 99,
+     "p50": 7778.1,
+     "p95": 16525.7,
+     "p99": 26643.8
+    }
+   },
+   "cpu_cores_busy": {
+    "server": 0.31,
+    "loadgen": 0.01,
+    "machine": 6.74,
+    "machine_before": 1.54,
+    "postgres_est": 4.88
+   },
+   "pg_backends": {
+    "None|": {
+     "mean": 0.0,
+     "max": 2
+    },
+    "active|": {
+     "mean": 6.9,
+     "max": 22
+    },
+    "active|Client": {
+     "mean": 0.3,
+     "max": 15
+    },
+    "active|IO:BufFileRead": {
+     "mean": 0.2,
+     "max": 3
+    },
+    "active|IO:BufFileWrite": {
+     "mean": 0.5,
+     "max": 7
+    },
+    "active|IO:DataFileRead": {
+     "mean": 9.0,
+     "max": 30
+    },
+    "active|IPC": {
+     "mean": 7.7,
+     "max": 22
+    },
+    "active|LWLock:BufferMapping": {
+     "mean": 3.0,
+     "max": 28
+    },
+    "active|LWLock:SharedTidBitmap": {
+     "mean": 0.0,
+     "max": 1
+    },
+    "active|Timeout": {
+     "mean": 0.1,
+     "max": 2
+    },
+    "idle in transaction|Client": {
+     "mean": 6.2,
+     "max": 28
+    },
+    "idle|Client": {
+     "mean": 1.5,
+     "max": 10
+    }
+   },
+   "server": {
+    "workers": [
+     {
+      "pid": 76055,
+      "requests": 530,
+      "max_inflight": 56,
+      "pool_checked_out": 20,
+      "pool_overflow": 20,
+      "loop_lag_p99_ms": 156.4,
+      "loop_lag_max_ms": 1273.9
+     }
+    ],
+    "loop_lag_ms": {
+     "p50": 0.98,
+     "p99": 156.4,
+     "max": 1273.9
+    },
+    "for_update_ms": {
+     "n": 0,
+     "p50": NaN,
+     "p95": NaN,
+     "p99": NaN,
+     "max": 0
+    }
+   }
+  },
+  {
+   "concurrency": 200,
+   "duration_s": 40.0,
+   "requests": 479,
+   "rps": 12.0,
+   "error_rate": 0.1441,
+   "codes": {
+    "200": 410,
+    "500": 25,
+    "ReadTimeout": 44
+   },
+   "errors": {
+    "event 500": 2,
+    "search 500": 9,
+    "list 500": 4,
+    "club 500": 3,
+    "foryou 500": 4,
+    "home 500": 3,
+    "home ReadTimeout": 43,
+    "search ReadTimeout": 1
+   },
+   "latency_ms": {
+    "p50": 29191.9,
+    "p95": 60003.1,
+    "p99": 60005.3,
+    "mean": 30717.8
+   },
+   "by_kind": {
+    "club": {
+     "n": 57,
+     "p50": 21057.5,
+     "p95": 29965.7,
+     "p99": 30243.7
+    },
+    "event": {
+     "n": 49,
+     "p50": 25927.4,
+     "p95": 33133.7,
+     "p99": 33737.7
+    },
+    "foryou": {
+     "n": 56,
+     "p50": 29296.5,
+     "p95": 34701.6,
+     "p99": 35752.9
+    },
+    "home": {
+     "n": 159,
+     "p50": 32309.8,
+     "p95": 60004.7,
+     "p99": 60026.0
+    },
+    "list": {
+     "n": 30,
+     "p50": 27154.9,
+     "p95": 31610.7,
+     "p99": 32973.3
+    },
+    "search": {
+     "n": 128,
+     "p50": 31331.1,
+     "p95": 40999.5,
+     "p99": 53561.9
+    }
+   },
+   "cpu_cores_busy": {
+    "server": 0.14,
+    "loadgen": 0.01,
+    "machine": 5.79,
+    "machine_before": 1.7,
+    "postgres_est": 3.94
+   },
+   "pg_backends": {
+    "active|": {
+     "mean": 3.5,
+     "max": 25
+    },
+    "active|Client": {
+     "mean": 0.0,
+     "max": 1
+    },
+    "active|IO:BufFileRead": {
+     "mean": 0.2,
+     "max": 4
+    },
+    "active|IO:BufFileWrite": {
+     "mean": 0.2,
+     "max": 4
+    },
+    "active|IO:DataFileRead": {
+     "mean": 9.0,
+     "max": 19
+    },
+    "active|IPC": {
+     "mean": 9.9,
+     "max": 24
+    },
+    "active|LWLock:BufferMapping": {
+     "mean": 1.4,
+     "max": 21
+    },
+    "active|Timeout": {
+     "mean": 0.1,
+     "max": 5
+    },
+    "idle in transaction|Client": {
+     "mean": 9.7,
+     "max": 27
+    },
+    "idle|Client": {
+     "mean": 0.6,
+     "max": 9
+    }
+   },
+   "server": {
+    "workers": [
+     {
+      "pid": 76055,
+      "requests": 718,
+      "max_inflight": 205,
+      "pool_checked_out": 28,
+      "pool_overflow": 20,
+      "loop_lag_p99_ms": 65.0,
+      "loop_lag_max_ms": 536.6
+     }
+    ],
+    "loop_lag_ms": {
+     "p50": 1.0,
+     "p99": 65.0,
+     "max": 536.6
+    },
+    "for_update_ms": {
+     "n": 0,
+     "p50": NaN,
+     "p95": NaN,
+     "p99": NaN,
+     "max": 0
+    }
+   }
+  }
+ ]
+}

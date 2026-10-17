@@ -1,0 +1,153 @@
+[
+ {
+  "kind": "event",
+  "mode": "app",
+  "event": "big",
+  "event_id": 5844,
+  "registered_before": 28500,
+  "n": 500,
+  "seconds": 10.0,
+  "wall_s": 14.83,
+  "throughput_per_s": 33.7,
+  "answered": 500,
+  "p50_ms": 4142.0,
+  "p95_ms": 6454.0,
+  "p99_ms": 7495.6,
+  "max_ms": 9171.6,
+  "codes": {
+   "200": 500
+  },
+  "going_count_after": 29000,
+  "rows_after": 29000,
+  "counter_matches": true,
+  "journey_templates_on_event": 4,
+  "max_lock_waiters": 29,
+  "share_of_time_someone_waited_on_a_lock": 0.76,
+  "server": {
+   "workers": [
+    {
+     "pid": 80640,
+     "requests": 500,
+     "max_inflight": 301,
+     "pool_checked_out": 1,
+     "pool_overflow": 1,
+     "loop_lag_p99_ms": 91.0,
+     "loop_lag_max_ms": 312.9
+    }
+   ],
+   "loop_lag_ms": {
+    "p50": 0.83,
+    "p99": 91.0,
+    "max": 312.9
+   },
+   "for_update_ms": {
+    "n": 500,
+    "p50": 382.38,
+    "p95": 769.0,
+    "p99": 897.9,
+    "max": 953.3
+   }
+  },
+  "label": "s2 w1 app big pdf0"
+ },
+ {
+  "kind": "event",
+  "mode": "app",
+  "event": "empty",
+  "event_id": 34,
+  "registered_before": 0,
+  "n": 500,
+  "seconds": 10.0,
+  "wall_s": 11.23,
+  "throughput_per_s": 44.5,
+  "answered": 500,
+  "p50_ms": 1405.8,
+  "p95_ms": 2229.2,
+  "p99_ms": 2599.0,
+  "max_ms": 2870.0,
+  "codes": {
+   "200": 500
+  },
+  "going_count_after": 500,
+  "rows_after": 500,
+  "counter_matches": true,
+  "journey_templates_on_event": 12,
+  "max_lock_waiters": 25,
+  "share_of_time_someone_waited_on_a_lock": 0.81,
+  "server": {
+   "workers": [
+    {
+     "pid": 80640,
+     "requests": 500,
+     "max_inflight": 118,
+     "pool_checked_out": 0,
+     "pool_overflow": 0,
+     "loop_lag_p99_ms": 61.3,
+     "loop_lag_max_ms": 993.2
+    }
+   ],
+   "loop_lag_ms": {
+    "p50": 2.27,
+    "p99": 61.3,
+    "max": 993.2
+   },
+   "for_update_ms": {
+    "n": 500,
+    "p50": 143.6,
+    "p95": 269.6,
+    "p99": 338.0,
+    "max": 415.4
+   }
+  },
+  "label": "s2 w1 app empty pdf0"
+ },
+ {
+  "kind": "follow",
+  "club_id": 66092,
+  "followers_before": 60185,
+  "n": 10000,
+  "concurrency": 100,
+  "wall_s": 60.6,
+  "throughput_per_s": 165.0,
+  "answered": 10000,
+  "p50_ms": 539.1,
+  "p95_ms": 960.8,
+  "p99_ms": 2912.1,
+  "max_ms": 6088.3,
+  "codes": {
+   "200": 9999,
+   "ReadError": 1
+  },
+  "follower_count_after": 70184,
+  "rows_after": 70184,
+  "counter_matches": true,
+  "max_lock_waiters": 22,
+  "share_of_time_someone_waited_on_a_lock": 0.47,
+  "server": {
+   "workers": [
+    {
+     "pid": 80640,
+     "requests": 9999,
+     "max_inflight": 108,
+     "pool_checked_out": 0,
+     "pool_overflow": 0,
+     "loop_lag_p99_ms": 27.8,
+     "loop_lag_max_ms": 64.7
+    }
+   ],
+   "loop_lag_ms": {
+    "p50": 0.46,
+    "p99": 27.8,
+    "max": 64.7
+   },
+   "for_update_ms": {
+    "n": 0,
+    "p50": NaN,
+    "p95": NaN,
+    "p99": NaN,
+    "max": 0
+   }
+  },
+  "label": "s2 w1 follow 10k c100"
+ }
+]

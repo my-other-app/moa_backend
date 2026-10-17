@@ -1,0 +1,499 @@
+{
+ "label": "s0_w4",
+ "db": "moa_s0",
+ "workers": 4,
+ "mix": [
+  [
+   "home",
+   40
+  ],
+  [
+   "search",
+   25
+  ],
+  [
+   "event",
+   10
+  ],
+  [
+   "club",
+   10
+  ],
+  [
+   "foryou",
+   10
+  ],
+  [
+   "list",
+   5
+  ]
+ ],
+ "results": [
+  {
+   "concurrency": 10,
+   "duration_s": 40.0,
+   "requests": 7704,
+   "rps": 192.6,
+   "error_rate": 0.0,
+   "codes": {
+    "200": 7704
+   },
+   "errors": {},
+   "latency_ms": {
+    "p50": 27.4,
+    "p95": 153.0,
+    "p99": 253.1,
+    "mean": 52.0
+   },
+   "by_kind": {
+    "club": {
+     "n": 721,
+     "p50": 48.4,
+     "p95": 180.1,
+     "p99": 321.9
+    },
+    "event": {
+     "n": 775,
+     "p50": 39.9,
+     "p95": 154.2,
+     "p99": 577.8
+    },
+    "foryou": {
+     "n": 771,
+     "p50": 103.7,
+     "p95": 235.0,
+     "p99": 427.3
+    },
+    "home": {
+     "n": 3141,
+     "p50": 12.5,
+     "p95": 81.7,
+     "p99": 158.8
+    },
+    "list": {
+     "n": 392,
+     "p50": 54.6,
+     "p95": 168.9,
+     "p99": 248.6
+    },
+    "search": {
+     "n": 1904,
+     "p50": 36.3,
+     "p95": 140.8,
+     "p99": 217.9
+    }
+   },
+   "cpu_cores_busy": {
+    "server": 1.99,
+    "loadgen": 0.17,
+    "machine": 6.74,
+    "machine_before": 1.89,
+    "postgres_est": 2.69
+   },
+   "pg_backends": {
+    "active|": {
+     "mean": 2.6,
+     "max": 9
+    },
+    "active|Client": {
+     "mean": 0.2,
+     "max": 2
+    },
+    "active|IO:DataFileRead": {
+     "mean": 0.7,
+     "max": 5
+    },
+    "idle in transaction|": {
+     "mean": 0.1,
+     "max": 2
+    },
+    "idle in transaction|Client": {
+     "mean": 4.3,
+     "max": 9
+    },
+    "idle|": {
+     "mean": 0.0,
+     "max": 1
+    },
+    "idle|Client": {
+     "mean": 24.4,
+     "max": 32
+    }
+   },
+   "server": {
+    "workers": [
+     {
+      "pid": 61789,
+      "requests": 1847,
+      "max_inflight": 2,
+      "pool_checked_out": 0,
+      "pool_overflow": -3,
+      "loop_lag_p99_ms": 84.2,
+      "loop_lag_max_ms": 1146.3
+     },
+     {
+      "pid": 61788,
+      "requests": 1866,
+      "max_inflight": 3,
+      "pool_checked_out": 1,
+      "pool_overflow": -3,
+      "loop_lag_p99_ms": 60.8,
+      "loop_lag_max_ms": 1087.5
+     },
+     {
+      "pid": 61791,
+      "requests": 1875,
+      "max_inflight": 3,
+      "pool_checked_out": 1,
+      "pool_overflow": -2,
+      "loop_lag_p99_ms": 56.7,
+      "loop_lag_max_ms": 1073.4
+     },
+     {
+      "pid": 61790,
+      "requests": 4453,
+      "max_inflight": 12,
+      "pool_checked_out": 7,
+      "pool_overflow": 0,
+      "loop_lag_p99_ms": 138.5,
+      "loop_lag_max_ms": 1284.8
+     }
+    ],
+    "loop_lag_ms": {
+     "p50": 1.17,
+     "p99": 95.2,
+     "max": 1284.8
+    },
+    "for_update_ms": {
+     "n": 0,
+     "p50": NaN,
+     "p95": NaN,
+     "p99": NaN,
+     "max": 0
+    }
+   }
+  },
+  {
+   "concurrency": 50,
+   "duration_s": 40.0,
+   "requests": 6626,
+   "rps": 165.7,
+   "error_rate": 0.0,
+   "codes": {
+    "200": 6626
+   },
+   "errors": {},
+   "latency_ms": {
+    "p50": 179.2,
+    "p95": 1091.8,
+    "p99": 1613.3,
+    "mean": 306.4
+   },
+   "by_kind": {
+    "club": {
+     "n": 655,
+     "p50": 210.8,
+     "p95": 653.8,
+     "p99": 964.0
+    },
+    "event": {
+     "n": 670,
+     "p50": 185.3,
+     "p95": 660.1,
+     "p99": 1055.2
+    },
+    "foryou": {
+     "n": 673,
+     "p50": 987.1,
+     "p95": 1605.4,
+     "p99": 1956.4
+    },
+    "home": {
+     "n": 2616,
+     "p50": 47.4,
+     "p95": 520.0,
+     "p99": 996.3
+    },
+    "list": {
+     "n": 330,
+     "p50": 239.4,
+     "p95": 838.6,
+     "p99": 1250.9
+    },
+    "search": {
+     "n": 1682,
+     "p50": 254.2,
+     "p95": 928.6,
+     "p99": 1802.1
+    }
+   },
+   "cpu_cores_busy": {
+    "server": 2.39,
+    "loadgen": 0.29,
+    "machine": 7.54,
+    "machine_before": 1.68,
+    "postgres_est": 3.18
+   },
+   "pg_backends": {
+    "active|": {
+     "mean": 23.9,
+     "max": 45
+    },
+    "active|Client": {
+     "mean": 1.1,
+     "max": 9
+    },
+    "active|IO:DataFileRead": {
+     "mean": 0.1,
+     "max": 3
+    },
+    "active|LWLock:LockManager": {
+     "mean": 0.5,
+     "max": 13
+    },
+    "idle in transaction|": {
+     "mean": 1.7,
+     "max": 11
+    },
+    "idle in transaction|Client": {
+     "mean": 10.5,
+     "max": 30
+    },
+    "idle in transaction|LWLock:LockManager": {
+     "mean": 0.0,
+     "max": 1
+    },
+    "idle|": {
+     "mean": 0.3,
+     "max": 4
+    },
+    "idle|Client": {
+     "mean": 18.1,
+     "max": 40
+    }
+   },
+   "server": {
+    "workers": [
+     {
+      "pid": 61789,
+      "requests": 3944,
+      "max_inflight": 18,
+      "pool_checked_out": 5,
+      "pool_overflow": 5,
+      "loop_lag_p99_ms": 116.8,
+      "loop_lag_max_ms": 1146.3
+     },
+     {
+      "pid": 61788,
+      "requests": 2706,
+      "max_inflight": 32,
+      "pool_checked_out": 2,
+      "pool_overflow": 0,
+      "loop_lag_p99_ms": 160.6,
+      "loop_lag_max_ms": 267.7
+     },
+     {
+      "pid": 61791,
+      "requests": 4037,
+      "max_inflight": 28,
+      "pool_checked_out": 1,
+      "pool_overflow": 1,
+      "loop_lag_p99_ms": 143.0,
+      "loop_lag_max_ms": 1073.4
+     },
+     {
+      "pid": 61790,
+      "requests": 7064,
+      "max_inflight": 20,
+      "pool_checked_out": 8,
+      "pool_overflow": 3,
+      "loop_lag_p99_ms": 162.1,
+      "loop_lag_max_ms": 1284.8
+     }
+    ],
+    "loop_lag_ms": {
+     "p50": 1.18,
+     "p99": 148.5,
+     "max": 1284.8
+    },
+    "for_update_ms": {
+     "n": 0,
+     "p50": NaN,
+     "p95": NaN,
+     "p99": NaN,
+     "max": 0
+    }
+   }
+  },
+  {
+   "concurrency": 200,
+   "duration_s": 40.0,
+   "requests": 3621,
+   "rps": 90.5,
+   "error_rate": 0.0713,
+   "codes": {
+    "200": 3363,
+    "500": 248,
+    "ReadError": 10
+   },
+   "errors": {
+    "home 500": 64,
+    "foryou 500": 23,
+    "search 500": 81,
+    "list 500": 14,
+    "event 500": 41,
+    "club 500": 25,
+    "home ReadError": 4,
+    "search ReadError": 1,
+    "foryou ReadError": 3,
+    "list ReadError": 1,
+    "event ReadError": 1
+   },
+   "latency_ms": {
+    "p50": 2005.7,
+    "p95": 6802.4,
+    "p99": 9752.6,
+    "mean": 2534.9
+   },
+   "by_kind": {
+    "club": {
+     "n": 372,
+     "p50": 2114.1,
+     "p95": 7194.0,
+     "p99": 9315.4
+    },
+    "event": {
+     "n": 367,
+     "p50": 2064.1,
+     "p95": 7048.6,
+     "p99": 9043.9
+    },
+    "foryou": {
+     "n": 377,
+     "p50": 3216.2,
+     "p95": 7701.0,
+     "p99": 9473.8
+    },
+    "home": {
+     "n": 1421,
+     "p50": 1356.6,
+     "p95": 6588.7,
+     "p99": 10051.7
+    },
+    "list": {
+     "n": 190,
+     "p50": 2136.6,
+     "p95": 6332.6,
+     "p99": 9433.8
+    },
+    "search": {
+     "n": 894,
+     "p50": 2107.4,
+     "p95": 6654.1,
+     "p99": 8439.4
+    }
+   },
+   "cpu_cores_busy": {
+    "server": 1.2,
+    "loadgen": 0.63,
+    "machine": 6.15,
+    "machine_before": 1.87,
+    "postgres_est": 2.45
+   },
+   "pg_backends": {
+    "active|": {
+     "mean": 21.2,
+     "max": 70
+    },
+    "active|Client": {
+     "mean": 2.9,
+     "max": 13
+    },
+    "active|IO:DataFileRead": {
+     "mean": 0.2,
+     "max": 3
+    },
+    "active|LWLock:LockManager": {
+     "mean": 4.1,
+     "max": 42
+    },
+    "active|Timeout": {
+     "mean": 0.0,
+     "max": 1
+    },
+    "idle in transaction|": {
+     "mean": 1.6,
+     "max": 12
+    },
+    "idle in transaction|Client": {
+     "mean": 7.7,
+     "max": 38
+    },
+    "idle in transaction|LWLock:LockManager": {
+     "mean": 0.1,
+     "max": 1
+    },
+    "idle|": {
+     "mean": 0.4,
+     "max": 5
+    },
+    "idle|Client": {
+     "mean": 24.8,
+     "max": 40
+    }
+   },
+   "server": {
+    "workers": [
+     {
+      "pid": 61789,
+      "requests": 5303,
+      "max_inflight": 83,
+      "pool_checked_out": 1,
+      "pool_overflow": 0,
+      "loop_lag_p99_ms": 167.6,
+      "loop_lag_max_ms": 513.3
+     },
+     {
+      "pid": 61788,
+      "requests": 1753,
+      "max_inflight": 104,
+      "pool_checked_out": 0,
+      "pool_overflow": 0,
+      "loop_lag_p99_ms": 138.3,
+      "loop_lag_max_ms": 332.7
+     },
+     {
+      "pid": 61791,
+      "requests": 4982,
+      "max_inflight": 108,
+      "pool_checked_out": 0,
+      "pool_overflow": 0,
+      "loop_lag_p99_ms": 190.5,
+      "loop_lag_max_ms": 381.6
+     },
+     {
+      "pid": 61790,
+      "requests": 8004,
+      "max_inflight": 87,
+      "pool_checked_out": 0,
+      "pool_overflow": 0,
+      "loop_lag_p99_ms": 173.2,
+      "loop_lag_max_ms": 659.9
+     }
+    ],
+    "loop_lag_ms": {
+     "p50": 1.03,
+     "p99": 173.3,
+     "max": 659.9
+    },
+    "for_update_ms": {
+     "n": 0,
+     "p50": NaN,
+     "p95": NaN,
+     "p99": NaN,
+     "max": 0
+    }
+   }
+  }
+ ]
+}

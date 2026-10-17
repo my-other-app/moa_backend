@@ -1,0 +1,574 @@
+{
+ "label": "s1_w4",
+ "db": "moa_s1",
+ "workers": 4,
+ "mix": [
+  [
+   "home",
+   40
+  ],
+  [
+   "search",
+   25
+  ],
+  [
+   "event",
+   10
+  ],
+  [
+   "club",
+   10
+  ],
+  [
+   "foryou",
+   10
+  ],
+  [
+   "list",
+   5
+  ]
+ ],
+ "results": [
+  {
+   "concurrency": 10,
+   "duration_s": 40.0,
+   "requests": 826,
+   "rps": 20.6,
+   "error_rate": 0.0,
+   "codes": {
+    "200": 826
+   },
+   "errors": {},
+   "latency_ms": {
+    "p50": 227.5,
+    "p95": 1984.0,
+    "p99": 3934.9,
+    "mean": 525.5
+   },
+   "by_kind": {
+    "club": {
+     "n": 77,
+     "p50": 166.1,
+     "p95": 665.5,
+     "p99": 991.6
+    },
+    "event": {
+     "n": 83,
+     "p50": 205.3,
+     "p95": 971.4,
+     "p99": 1247.9
+    },
+    "foryou": {
+     "n": 82,
+     "p50": 1585.7,
+     "p95": 2715.0,
+     "p99": 2887.8
+    },
+    "home": {
+     "n": 321,
+     "p50": 20.1,
+     "p95": 689.2,
+     "p99": 2995.3
+    },
+    "list": {
+     "n": 42,
+     "p50": 485.3,
+     "p95": 1641.8,
+     "p99": 1789.3
+    },
+    "search": {
+     "n": 221,
+     "p50": 383.9,
+     "p95": 2506.2,
+     "p99": 6647.8
+    }
+   },
+   "cpu_cores_busy": {
+    "server": 0.57,
+    "loadgen": 0.03,
+    "machine": 7.52,
+    "machine_before": 1.86,
+    "postgres_est": 5.06
+   },
+   "pg_backends": {
+    "None|": {
+     "mean": 0.1,
+     "max": 2
+    },
+    "active|": {
+     "mean": 4.9,
+     "max": 14
+    },
+    "active|Client": {
+     "mean": 0.0,
+     "max": 1
+    },
+    "active|IO:DataFileRead": {
+     "mean": 3.6,
+     "max": 11
+    },
+    "active|IPC": {
+     "mean": 1.7,
+     "max": 10
+    },
+    "active|LWLock:BufferMapping": {
+     "mean": 0.3,
+     "max": 3
+    },
+    "active|LWLock:ParallelQueryDSA": {
+     "mean": 0.0,
+     "max": 1
+    },
+    "active|LWLock:SharedTidBitmap": {
+     "mean": 0.3,
+     "max": 4
+    },
+    "active|Timeout": {
+     "mean": 0.0,
+     "max": 1
+    },
+    "idle in transaction|": {
+     "mean": 0.1,
+     "max": 2
+    },
+    "idle in transaction|Client": {
+     "mean": 1.4,
+     "max": 9
+    },
+    "idle|": {
+     "mean": 0.0,
+     "max": 1
+    },
+    "idle|Client": {
+     "mean": 23.3,
+     "max": 28
+    }
+   },
+   "server": {
+    "workers": [
+     {
+      "pid": 87886,
+      "requests": 1152,
+      "max_inflight": 11,
+      "pool_checked_out": 7,
+      "pool_overflow": 3,
+      "loop_lag_p99_ms": 115.6,
+      "loop_lag_max_ms": 466.3
+     },
+     {
+      "pid": 87883,
+      "requests": 151,
+      "max_inflight": 3,
+      "pool_checked_out": 0,
+      "pool_overflow": -3,
+      "loop_lag_p99_ms": 39.4,
+      "loop_lag_max_ms": 537.9
+     },
+     {
+      "pid": 87885,
+      "requests": 165,
+      "max_inflight": 3,
+      "pool_checked_out": 1,
+      "pool_overflow": -3,
+      "loop_lag_p99_ms": 54.8,
+      "loop_lag_max_ms": 987.7
+     },
+     {
+      "pid": 87884,
+      "requests": 143,
+      "max_inflight": 3,
+      "pool_checked_out": 1,
+      "pool_overflow": -3,
+      "loop_lag_p99_ms": 42.6,
+      "loop_lag_max_ms": 191.1
+     }
+    ],
+    "loop_lag_ms": {
+     "p50": 1.05,
+     "p99": 63.9,
+     "max": 987.7
+    },
+    "for_update_ms": {
+     "n": 0,
+     "p50": NaN,
+     "p95": NaN,
+     "p99": NaN,
+     "max": 0
+    }
+   }
+  },
+  {
+   "concurrency": 50,
+   "duration_s": 40.0,
+   "requests": 1252,
+   "rps": 31.3,
+   "error_rate": 0.0,
+   "codes": {
+    "200": 1252
+   },
+   "errors": {},
+   "latency_ms": {
+    "p50": 432.4,
+    "p95": 8772.8,
+    "p99": 9862.9,
+    "mean": 1782.9
+   },
+   "by_kind": {
+    "club": {
+     "n": 121,
+     "p50": 148.6,
+     "p95": 532.8,
+     "p99": 664.0
+    },
+    "event": {
+     "n": 133,
+     "p50": 418.8,
+     "p95": 1172.9,
+     "p99": 1390.2
+    },
+    "foryou": {
+     "n": 146,
+     "p50": 8288.1,
+     "p95": 9875.1,
+     "p99": 10389.6
+    },
+    "home": {
+     "n": 472,
+     "p50": 30.2,
+     "p95": 930.4,
+     "p99": 3405.8
+    },
+    "list": {
+     "n": 56,
+     "p50": 1028.0,
+     "p95": 3091.3,
+     "p99": 4867.1
+    },
+    "search": {
+     "n": 324,
+     "p50": 2054.9,
+     "p95": 4530.6,
+     "p99": 11854.4
+    }
+   },
+   "cpu_cores_busy": {
+    "server": 0.75,
+    "loadgen": 0.04,
+    "machine": 7.36,
+    "machine_before": 3.92,
+    "postgres_est": 2.65
+   },
+   "pg_backends": {
+    "None|": {
+     "mean": 0.0,
+     "max": 1
+    },
+    "active|": {
+     "mean": 37.1,
+     "max": 52
+    },
+    "active|Client": {
+     "mean": 0.2,
+     "max": 2
+    },
+    "active|IO:BufFileRead": {
+     "mean": 0.1,
+     "max": 1
+    },
+    "active|IO:BufFileWrite": {
+     "mean": 0.1,
+     "max": 1
+    },
+    "active|IO:DataFileRead": {
+     "mean": 3.7,
+     "max": 15
+    },
+    "active|IO:DataFileWrite": {
+     "mean": 0.0,
+     "max": 2
+    },
+    "active|IPC": {
+     "mean": 1.9,
+     "max": 13
+    },
+    "active|LWLock:BufferMapping": {
+     "mean": 8.2,
+     "max": 30
+    },
+    "active|LWLock:LockManager": {
+     "mean": 0.0,
+     "max": 1
+    },
+    "active|LWLock:SharedTidBitmap": {
+     "mean": 0.2,
+     "max": 2
+    },
+    "idle in transaction|": {
+     "mean": 0.1,
+     "max": 2
+    },
+    "idle in transaction|Client": {
+     "mean": 2.1,
+     "max": 9
+    },
+    "idle|": {
+     "mean": 0.1,
+     "max": 2
+    },
+    "idle|Client": {
+     "mean": 18.7,
+     "max": 39
+    }
+   },
+   "server": {
+    "workers": [
+     {
+      "pid": 87886,
+      "requests": 718,
+      "max_inflight": 19,
+      "pool_checked_out": 5,
+      "pool_overflow": 5,
+      "loop_lag_p99_ms": 95.4,
+      "loop_lag_max_ms": 249.2
+     },
+     {
+      "pid": 87883,
+      "requests": 350,
+      "max_inflight": 6,
+      "pool_checked_out": 0,
+      "pool_overflow": -1,
+      "loop_lag_p99_ms": 31.7,
+      "loop_lag_max_ms": 195.3
+     },
+     {
+      "pid": 87885,
+      "requests": 976,
+      "max_inflight": 22,
+      "pool_checked_out": 1,
+      "pool_overflow": 1,
+      "loop_lag_p99_ms": 82.7,
+      "loop_lag_max_ms": 229.8
+     },
+     {
+      "pid": 87884,
+      "requests": 673,
+      "max_inflight": 15,
+      "pool_checked_out": 5,
+      "pool_overflow": 5,
+      "loop_lag_p99_ms": 57.0,
+      "loop_lag_max_ms": 376.6
+     }
+    ],
+    "loop_lag_ms": {
+     "p50": 1.04,
+     "p99": 58.0,
+     "max": 376.6
+    },
+    "for_update_ms": {
+     "n": 0,
+     "p50": NaN,
+     "p95": NaN,
+     "p99": NaN,
+     "max": 0
+    }
+   }
+  },
+  {
+   "concurrency": 200,
+   "duration_s": 40.0,
+   "requests": 1126,
+   "rps": 28.1,
+   "error_rate": 0.024,
+   "codes": {
+    "200": 1099,
+    "500": 26,
+    "ReadError": 1
+   },
+   "errors": {
+    "search 500": 3,
+    "home 500": 13,
+    "event 500": 7,
+    "foryou 500": 1,
+    "event ReadError": 1,
+    "list 500": 2
+   },
+   "latency_ms": {
+    "p50": 8283.6,
+    "p95": 25284.1,
+    "p99": 41147.5,
+    "mean": 9414.1
+   },
+   "by_kind": {
+    "club": {
+     "n": 90,
+     "p50": 2951.8,
+     "p95": 14096.0,
+     "p99": 14673.2
+    },
+    "event": {
+     "n": 109,
+     "p50": 3683.3,
+     "p95": 16613.0,
+     "p99": 17448.9
+    },
+    "foryou": {
+     "n": 155,
+     "p50": 13939.6,
+     "p95": 25310.3,
+     "p99": 27876.5
+    },
+    "home": {
+     "n": 419,
+     "p50": 9186.8,
+     "p95": 30881.4,
+     "p99": 42373.3
+    },
+    "list": {
+     "n": 58,
+     "p50": 4716.4,
+     "p95": 17682.5,
+     "p99": 18613.2
+    },
+    "search": {
+     "n": 295,
+     "p50": 6069.1,
+     "p95": 19912.5,
+     "p99": 37420.1
+    }
+   },
+   "cpu_cores_busy": {
+    "server": 0.68,
+    "loadgen": 0.06,
+    "machine": 7.37,
+    "machine_before": 4.19,
+    "postgres_est": 2.44
+   },
+   "pg_backends": {
+    "None|": {
+     "mean": 0.0,
+     "max": 1
+    },
+    "None|LWLock:BufferMapping": {
+     "mean": 0.0,
+     "max": 1
+    },
+    "active|": {
+     "mean": 43.1,
+     "max": 74
+    },
+    "active|Client": {
+     "mean": 0.7,
+     "max": 16
+    },
+    "active|IO:BufFileRead": {
+     "mean": 0.1,
+     "max": 2
+    },
+    "active|IO:BufFileWrite": {
+     "mean": 0.2,
+     "max": 3
+    },
+    "active|IO:DataFileRead": {
+     "mean": 5.4,
+     "max": 26
+    },
+    "active|IPC": {
+     "mean": 3.6,
+     "max": 24
+    },
+    "active|LWLock:BufferMapping": {
+     "mean": 15.2,
+     "max": 48
+    },
+    "active|LWLock:SharedTidBitmap": {
+     "mean": 0.1,
+     "max": 2
+    },
+    "active|Timeout": {
+     "mean": 0.1,
+     "max": 5
+    },
+    "idle in transaction|": {
+     "mean": 0.2,
+     "max": 2
+    },
+    "idle in transaction|Client": {
+     "mean": 13.5,
+     "max": 61
+    },
+    "idle in transaction|IO:DataFileRead": {
+     "mean": 0.0,
+     "max": 1
+    },
+    "idle in transaction|LWLock:BufferMapping": {
+     "mean": 0.0,
+     "max": 1
+    },
+    "idle|": {
+     "mean": 0.0,
+     "max": 1
+    },
+    "idle|Client": {
+     "mean": 12.2,
+     "max": 38
+    },
+    "idle|IO:DataFileRead": {
+     "mean": 0.0,
+     "max": 1
+    }
+   },
+   "server": {
+    "workers": [
+     {
+      "pid": 87886,
+      "requests": 838,
+      "max_inflight": 99,
+      "pool_checked_out": 0,
+      "pool_overflow": 0,
+      "loop_lag_p99_ms": 132.5,
+      "loop_lag_max_ms": 431.4
+     },
+     {
+      "pid": 87883,
+      "requests": 688,
+      "max_inflight": 60,
+      "pool_checked_out": 0,
+      "pool_overflow": 0,
+      "loop_lag_p99_ms": 60.4,
+      "loop_lag_max_ms": 361.9
+     },
+     {
+      "pid": 87885,
+      "requests": 1801,
+      "max_inflight": 122,
+      "pool_checked_out": 29,
+      "pool_overflow": 20,
+      "loop_lag_p99_ms": 136.8,
+      "loop_lag_max_ms": 386.6
+     },
+     {
+      "pid": 87884,
+      "requests": 1042,
+      "max_inflight": 23,
+      "pool_checked_out": 0,
+      "pool_overflow": 0,
+      "loop_lag_p99_ms": 61.0,
+      "loop_lag_max_ms": 306.1
+     }
+    ],
+    "loop_lag_ms": {
+     "p50": 1.04,
+     "p99": 86.7,
+     "max": 431.4
+    },
+    "for_update_ms": {
+     "n": 0,
+     "p50": NaN,
+     "p95": NaN,
+     "p99": NaN,
+     "max": 0
+    }
+   }
+  }
+ ]
+}

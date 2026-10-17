@@ -1,0 +1,638 @@
+{
+ "label": "s1",
+ "targets": {
+  "club": "club-5533-debate",
+  "event": "e8066-mobile-apps-night",
+  "interest": 51,
+  "category": 6,
+  "user_id": 1
+ },
+ "results": [
+  {
+   "name": "home",
+   "path": "/discover/home",
+   "params": {},
+   "n": 300,
+   "p50": 1.442062999785776,
+   "p95": 1.6486291502360475,
+   "p99": 4.506361749945414,
+   "mean": 1.532909996659934,
+   "statements_min": 0,
+   "statements_max": 0,
+   "sql_ms": 0,
+   "bytes": 35232
+  },
+  {
+   "name": "home (cold)",
+   "path": "/discover/home",
+   "params": {},
+   "n": 38,
+   "p50": 519.6621669999786,
+   "p95": 610.1327893000414,
+   "p99": 727.79082457987,
+   "mean": 531.978702789418,
+   "statements_min": 17,
+   "statements_max": 17,
+   "sql_ms": 491.03438860513387,
+   "bytes": 35232
+  },
+  {
+   "name": "home lat/lng",
+   "path": "/discover/home",
+   "params": {
+    "lat": 12.9716,
+    "lng": 77.5946
+   },
+   "n": 300,
+   "p50": 2.1908120002080977,
+   "p95": 2.3756669501608485,
+   "p99": 2.9531879201430713,
+   "mean": 2.2870337466717197,
+   "statements_min": 0,
+   "statements_max": 0,
+   "sql_ms": 0,
+   "bytes": 45283
+  },
+  {
+   "name": "home lat/lng (cold)",
+   "path": "/discover/home",
+   "params": {
+    "lat": 12.9716,
+    "lng": 77.5946
+   },
+   "n": 29,
+   "p50": 689.1717499997867,
+   "p95": 758.1913171999986,
+   "p99": 977.8564935202662,
+   "mean": 703.23034179314,
+   "statements_min": 26,
+   "statements_max": 26,
+   "sql_ms": 627.1888294827947,
+   "bytes": 45283
+  },
+  {
+   "name": "events",
+   "path": "/discover/events",
+   "params": {},
+   "n": 251,
+   "p50": 59.438709000005474,
+   "p95": 131.20604200003072,
+   "p99": 614.393729500307,
+   "mean": 81.63924520718807,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 70.56242977689426,
+   "bytes": 21778
+  },
+  {
+   "name": "events q",
+   "path": "/discover/events",
+   "params": {
+    "q": "robotics"
+   },
+   "n": 88,
+   "p50": 75.70860400005586,
+   "p95": 1172.3851772001797,
+   "p99": 1911.8920217499444,
+   "mean": 228.31549295452965,
+   "statements_min": 3,
+   "statements_max": 5,
+   "sql_ms": 213.66040770452733,
+   "bytes": 22772
+  },
+  {
+   "name": "events q short",
+   "path": "/discover/events",
+   "params": {
+    "q": "ai"
+   },
+   "n": 211,
+   "p50": 83.50541699974201,
+   "p95": 143.00829149988203,
+   "p99": 215.9301206000693,
+   "mean": 95.14597280093729,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 86.2102892085648,
+   "bytes": 22872
+  },
+  {
+   "name": "events q typo",
+   "path": "/discover/events",
+   "params": {
+    "q": "robtics"
+   },
+   "n": 66,
+   "p50": 301.4428749997933,
+   "p95": 333.8822187497499,
+   "p99": 353.5222209497987,
+   "mean": 305.6581489999685,
+   "statements_min": 5,
+   "statements_max": 5,
+   "sql_ms": 279.32996281819294,
+   "bytes": 22772
+  },
+  {
+   "name": "events q relevance",
+   "path": "/discover/events",
+   "params": {
+    "q": "robotics",
+    "sort": "relevance"
+   },
+   "n": 158,
+   "p50": 119.11835399996562,
+   "p95": 158.59209015004583,
+   "p99": 418.73288500017736,
+   "mean": 127.69688767089582,
+   "statements_min": 3,
+   "statements_max": 5,
+   "sql_ms": 114.32897286706262,
+   "bytes": 22729
+  },
+  {
+   "name": "events this_weekend",
+   "path": "/discover/events",
+   "params": {
+    "when": "this_weekend"
+   },
+   "n": 300,
+   "p50": 29.001249999964784,
+   "p95": 42.9140222501701,
+   "p99": 47.96000616007403,
+   "mean": 30.373936383324086,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 23.468825119969857,
+   "bytes": 21776
+  },
+  {
+   "name": "events category",
+   "path": "/discover/events",
+   "params": {
+    "category": 6
+   },
+   "n": 236,
+   "p50": 69.81587499990383,
+   "p95": 119.5991045002529,
+   "p99": 246.68185624996116,
+   "mean": 84.965591457611,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 78.29414550848993,
+   "bytes": 24083
+  },
+  {
+   "name": "events online",
+   "path": "/discover/events",
+   "params": {
+    "type": "online"
+   },
+   "n": 300,
+   "p50": 55.47139600002993,
+   "p95": 89.14219134994711,
+   "p99": 118.0440309201821,
+   "mean": 59.97946512000908,
+   "statements_min": 3,
+   "statements_max": 5,
+   "sql_ms": 52.35314265000852,
+   "bytes": 21813
+  },
+  {
+   "name": "events free",
+   "path": "/discover/events",
+   "params": {
+    "price": "free"
+   },
+   "n": 300,
+   "p50": 62.23208300002625,
+   "p95": 88.13096219971612,
+   "p99": 106.65024332957262,
+   "mean": 64.12587084332397,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 54.73510522333072,
+   "bytes": 22498
+  },
+  {
+   "name": "events lat/lng (radius 50, date)",
+   "path": "/discover/events",
+   "params": {
+    "lat": 12.9716,
+    "lng": 77.5946
+   },
+   "n": 247,
+   "p50": 71.74345900011758,
+   "p95": 99.32081709985141,
+   "p99": 154.21436032019284,
+   "mean": 81.00298359918288,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 70.71842202430557,
+   "bytes": 22148
+  },
+  {
+   "name": "events distance r=50",
+   "path": "/discover/events",
+   "params": {
+    "lat": 12.9716,
+    "lng": 77.5946,
+    "sort": "distance",
+    "radius_km": 50
+   },
+   "n": 272,
+   "p50": 74.44268750009542,
+   "p95": 78.63887294993219,
+   "p99": 93.22423839007118,
+   "mean": 73.70752497425816,
+   "statements_min": 4,
+   "statements_max": 6,
+   "sql_ms": 57.43435103674616,
+   "bytes": 23908
+  },
+  {
+   "name": "events distance r=300",
+   "path": "/discover/events",
+   "params": {
+    "lat": 9.9312,
+    "lng": 76.2673,
+    "sort": "distance",
+    "radius_km": 300
+   },
+   "n": 245,
+   "p50": 82.67958400028874,
+   "p95": 85.43446680005218,
+   "p99": 89.69162547999076,
+   "mean": 81.72167328570214,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 63.02488281637347,
+   "bytes": 23628
+  },
+  {
+   "name": "events popular",
+   "path": "/discover/events",
+   "params": {
+    "sort": "popular"
+   },
+   "n": 239,
+   "p50": 84.478124999805,
+   "p95": 88.13556309983142,
+   "p99": 93.47530088014538,
+   "mean": 83.91410076151318,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 69.48746302927339,
+   "bytes": 23275
+  },
+  {
+   "name": "events offset=480",
+   "path": "/discover/events",
+   "params": {
+    "offset": 480
+   },
+   "n": 300,
+   "p50": 64.73208300008082,
+   "p95": 73.58670175010502,
+   "p99": 112.44936333988785,
+   "mean": 64.80431734666278,
+   "statements_min": 3,
+   "statements_max": 5,
+   "sql_ms": 51.407683326697224,
+   "bytes": 23958
+  },
+  {
+   "name": "clubs",
+   "path": "/discover/clubs",
+   "params": {},
+   "n": 300,
+   "p50": 19.388479500094036,
+   "p95": 22.12077739977758,
+   "p99": 23.016614590014797,
+   "mean": 19.570695310011008,
+   "statements_min": 6,
+   "statements_max": 6,
+   "sql_ms": 13.589493259984616,
+   "bytes": 14150
+  },
+  {
+   "name": "clubs q",
+   "path": "/discover/clubs",
+   "params": {
+    "q": "robotics"
+   },
+   "n": 300,
+   "p50": 14.853666999897541,
+   "p95": 21.21096844996373,
+   "p99": 22.988728669861278,
+   "mean": 14.791163183340359,
+   "statements_min": 6,
+   "statements_max": 6,
+   "sql_ms": 9.277599993335267,
+   "bytes": 13887
+  },
+  {
+   "name": "clubs q typo",
+   "path": "/discover/clubs",
+   "params": {
+    "q": "robtics"
+   },
+   "n": 300,
+   "p50": 25.53129150010136,
+   "p95": 32.92771010001161,
+   "p99": 37.44361375002422,
+   "mean": 25.044060403339852,
+   "statements_min": 8,
+   "statements_max": 8,
+   "sql_ms": 16.797065939998294,
+   "bytes": 13887
+  },
+  {
+   "name": "clubs interest",
+   "path": "/discover/clubs",
+   "params": {
+    "interest": 51
+   },
+   "n": 300,
+   "p50": 16.724562500030515,
+   "p95": 19.28987464996226,
+   "p99": 21.593176999867865,
+   "mean": 16.905475503316058,
+   "statements_min": 6,
+   "statements_max": 6,
+   "sql_ms": 11.081275810021603,
+   "bytes": 15402
+  },
+  {
+   "name": "clubs nearby",
+   "path": "/discover/clubs",
+   "params": {
+    "lat": 12.9716,
+    "lng": 77.5946,
+    "sort": "nearby"
+   },
+   "n": 79,
+   "p50": 249.70024999993257,
+   "p95": 282.4868339001568,
+   "p99": 339.7742740198282,
+   "mean": 255.43703743038992,
+   "statements_min": 6,
+   "statements_max": 6,
+   "sql_ms": 238.64475789872515,
+   "bytes": 13062
+  },
+  {
+   "name": "clubs popular",
+   "path": "/discover/clubs",
+   "params": {
+    "sort": "popular"
+   },
+   "n": 300,
+   "p50": 18.01527099996747,
+   "p95": 20.952488149896453,
+   "p99": 26.87395875015225,
+   "mean": 18.585967213351374,
+   "statements_min": 6,
+   "statements_max": 7,
+   "sql_ms": 13.02940722002404,
+   "bytes": 14150
+  },
+  {
+   "name": "club page (big)",
+   "path": "/discover/clubs/club-5533-debate",
+   "params": {},
+   "n": 300,
+   "p50": 16.600250499777758,
+   "p95": 19.02419020018442,
+   "p99": 19.937112919860738,
+   "mean": 16.15317419332314,
+   "statements_min": 14,
+   "statements_max": 14,
+   "sql_ms": 8.373915173324349,
+   "bytes": 17396
+  },
+  {
+   "name": "event page",
+   "path": "/discover/events/e8066-mobile-apps-night",
+   "params": {},
+   "n": 300,
+   "p50": 20.223354500103596,
+   "p95": 25.805700000046272,
+   "p99": 29.020507000082034,
+   "mean": 19.896084599981805,
+   "statements_min": 11,
+   "statements_max": 11,
+   "sql_ms": 11.252976073360514,
+   "bytes": 9903
+  },
+  {
+   "name": "threads",
+   "path": "/discover/threads",
+   "params": {},
+   "n": 300,
+   "p50": 28.951729499794965,
+   "p95": 31.416062200173656,
+   "p99": 36.12225607970686,
+   "mean": 28.95686748664654,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 21.751548783355855,
+   "bytes": 24439
+  },
+  {
+   "name": "categories",
+   "path": "/discover/categories",
+   "params": {},
+   "n": 300,
+   "p50": 1.1577505001696409,
+   "p95": 1.7099774002190316,
+   "p99": 2.28715124978862,
+   "mean": 1.2280933566762542,
+   "statements_min": 0,
+   "statements_max": 0,
+   "sql_ms": 0,
+   "bytes": 2438
+  },
+  {
+   "name": "sitemap",
+   "path": "/discover/sitemap",
+   "params": {},
+   "n": 300,
+   "p50": 1.052729499861016,
+   "p95": 1.2685851001833726,
+   "p99": 1.33553416009363,
+   "mean": 1.0887211166664201,
+   "statements_min": 0,
+   "statements_max": 0,
+   "sql_ms": 0,
+   "bytes": 799323
+  },
+  {
+   "name": "sitemap (cold)",
+   "path": "/discover/sitemap",
+   "params": {},
+   "n": 126,
+   "p50": 157.186083499937,
+   "p95": 222.00016650015186,
+   "p99": 251.30832325021402,
+   "mean": 159.28530157935666,
+   "statements_min": 2,
+   "statements_max": 2,
+   "sql_ms": 102.97268980156736,
+   "bytes": 799323
+  },
+  {
+   "name": "categories (cold)",
+   "path": "/discover/categories",
+   "params": {},
+   "n": 300,
+   "p50": 40.78366649991949,
+   "p95": 43.62306490004358,
+   "p99": 50.86445825025746,
+   "mean": 40.44136982333839,
+   "statements_min": 2,
+   "statements_max": 2,
+   "sql_ms": 33.045651969985855,
+   "bytes": 2438
+  },
+  {
+   "name": "app for-you",
+   "path": "/events/for-you",
+   "params": {},
+   "n": 70,
+   "p50": 282.17737499994655,
+   "p95": 333.9229770504062,
+   "p99": 352.7910227901521,
+   "mean": 286.55234291429355,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 271.2549048000321,
+   "bytes": 20074
+  },
+  {
+   "name": "app list upcoming",
+   "path": "/events/list",
+   "params": {
+    "is_ended": "false"
+   },
+   "n": 300,
+   "p50": 42.73325000008299,
+   "p95": 48.02691249969939,
+   "p99": 66.30565049981666,
+   "mean": 43.06563239999529,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 31.804405473346073,
+   "bytes": 19114
+  },
+  {
+   "name": "app list search",
+   "path": "/events/list",
+   "params": {
+    "search": "robotics"
+   },
+   "n": 300,
+   "p50": 21.262228999830768,
+   "p95": 146.69831664996315,
+   "p99": 414.58934200039874,
+   "mean": 46.13066611332822,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 29.673429236693966,
+   "bytes": 21756
+  },
+  {
+   "name": "app list following",
+   "path": "/events/list",
+   "params": {
+    "is_following": "true"
+   },
+   "n": 300,
+   "p50": 17.432229499945606,
+   "p95": 21.15633400010211,
+   "p99": 31.743624669761598,
+   "mean": 17.875748056673427,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 9.729125863326166,
+   "bytes": 20171
+  },
+  {
+   "name": "app list interests",
+   "path": "/events/list",
+   "params": {
+    "interest_ids": "51"
+   },
+   "n": 203,
+   "p50": 77.2785419999309,
+   "p95": 200.40736249998173,
+   "p99": 304.7411378198466,
+   "mean": 98.69909427094136,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 87.37812665023893,
+   "bytes": 20862
+  },
+  {
+   "name": "events offset=4800",
+   "path": "/discover/events",
+   "params": {
+    "offset": 4800
+   },
+   "n": 300,
+   "p50": 64.86735400017096,
+   "p95": 87.57272770012605,
+   "p99": 103.57970282961097,
+   "mean": 66.19133944665919,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 54.945271140002966,
+   "bytes": 23533
+  },
+  {
+   "name": "clubs offset=2400",
+   "path": "/discover/clubs",
+   "params": {
+    "offset": 2400
+   },
+   "n": 300,
+   "p50": 25.148187500008135,
+   "p95": 30.74072885010537,
+   "p99": 40.050699249741136,
+   "mean": 26.083779199996876,
+   "statements_min": 6,
+   "statements_max": 6,
+   "sql_ms": 19.94155856335965,
+   "bytes": 13262
+  },
+  {
+   "name": "app list ended",
+   "path": "/events/list",
+   "params": {
+    "is_ended": "true"
+   },
+   "n": 155,
+   "p50": 85.73375000014494,
+   "p95": 468.27916689971966,
+   "p99": 955.0939400002264,
+   "mean": 129.0754132064326,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 112.52701012251617,
+   "bytes": 19997
+  },
+  {
+   "name": "calendar",
+   "path": "/discover/calendar",
+   "params": {},
+   "unsupported": "404 {\"detail\":\"Not Found\"}"
+  },
+  {
+   "name": "club events page 2",
+   "path": "/discover/clubs/club-5533-debate/events",
+   "params": {
+    "offset": 24
+   },
+   "unsupported": "404 {\"detail\":\"Not Found\"}"
+  }
+ ]
+}

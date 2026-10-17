@@ -82,15 +82,16 @@ def pct(values: list[float], p: float) -> float:
 
 
 async def pick_targets(session) -> dict:
-    """The big club, a popular upcoming event, and the bench user's token."""
+    """The big club, a popular upcoming event, and the bench user's token.
+    The most followed club and the most registered event, by the counters the
+    triggers keep (equal to counting the rows, and cheap at any size)."""
     big_club = (await session.execute(text(
-        "SELECT c.slug FROM clubs c JOIN club_users_link f ON f.club_id = c.id AND f.is_following AND NOT f.is_deleted "
-        "WHERE c.is_verified AND NOT c.is_deleted GROUP BY c.id ORDER BY count(*) DESC LIMIT 1"
+        "SELECT c.slug FROM clubs c WHERE c.is_verified AND NOT c.is_deleted ORDER BY c.follower_count DESC, c.id LIMIT 1"
     ))).scalar()
     event_slug = (await session.execute(text(
-        "SELECT e.slug FROM events e JOIN clubs c ON c.id = e.club_id JOIN event_registrations_link r ON r.event_id = e.id AND NOT r.is_deleted "
+        "SELECT e.slug FROM events e JOIN clubs c ON c.id = e.club_id "
         "WHERE NOT e.is_deleted AND e.status IN ('published', 'live') AND c.is_verified AND NOT c.is_deleted "
-        "AND e.event_datetime > now() GROUP BY e.id ORDER BY count(*) DESC LIMIT 1"
+        "AND e.event_datetime > now() ORDER BY e.going_count DESC, e.id LIMIT 1"
     ))).scalar()
     interest = (await session.execute(text(
         "SELECT interest_id FROM clubs_interests_link GROUP BY 1 ORDER BY count(*) DESC LIMIT 1"
@@ -181,6 +182,14 @@ def endpoints(t: dict) -> list[tuple[str, str, dict, bool]]:
         ("app list search", "/events/list", {"search": "robotics"}, True),
         ("app list following", "/events/list", {"is_following": "true"}, True),
         ("app list interests", "/events/list", {"interest_ids": str(t["interest"])}, True),
+        # Added for the scale study: deep pages, the app's past list, and the
+        # endpoints the discover work in flight adds (recorded as "not
+        # offered" until they are on the branch measured).
+        ("events offset=4800", "/discover/events", {"offset": 4800}, False),
+        ("clubs offset=2400", "/discover/clubs", {"offset": 2400}, False),
+        ("app list ended", "/events/list", {"is_ended": "true"}, True),
+        ("calendar", "/discover/calendar", {}, False),
+        ("club events page 2", f"/discover/clubs/{t['club']}/events", {"offset": 24}, False),
     ]
 
 
