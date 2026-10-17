@@ -45,9 +45,14 @@ async def create_club(
     is_admin_created: bool = False,
     requested_plan: str | None = None,
     requested_cycle: str | None = None,
+    location_link: str | None = None,
+    contact_phone: str | None = None,
+    contact_email: str | None = None,
+    socials: dict | None = None,
 ) -> Clubs:
     """Create a new club. `requested_plan`/`requested_cycle` must already be
-    checked (see subscriptions.service.requested_plan_key)."""
+    checked (see subscriptions.service.requested_plan_key). `socials` is
+    instagram / linkedin / youtube / website; a blank one is left out."""
     if not is_admin_created and not password:
         raise CustomHTTPException(400, "Password is required")
 
@@ -80,13 +85,17 @@ async def create_club(
         slug=slug,
         about=about,
         org_id=org_id,
-        location_name=location_name,
         user_id=club_user.id,
         is_verified=is_admin_created,
         requested_plan=requested_plan,
         requested_cycle=requested_cycle,
+        contact_phone=(contact_phone or "").strip() or None,
+        contact_email=(contact_email or "").strip() or None,
         # Note: initial_password removed for security - use password reset flow instead
     )
+    # The place as the profile form saves it: a map link that carries a point
+    # gives it now; a short link or bare words are placed after the answer.
+    geo.apply_place(club, link=location_link, venue=location_name)
 
     if logo:
         content = io.BytesIO(await logo.read())
@@ -98,6 +107,10 @@ async def create_club(
     session.add(club)
     await session.commit()
     await session.refresh(club)
+
+    links = {key: (value or "").strip() or None for key, value in (socials or {}).items()}
+    if any(links.values()):
+        session.add(ClubSocials(club_id=club.id, **links))
 
     if interest_ids:
         interests = await session.scalars(
@@ -223,6 +236,33 @@ async def approve_club(session: AsyncSession, club_id: int) -> Clubs:
     # MissingGreenlet, since Pydantic can't await it.
     await session.refresh(club, attribute_names=["interests"])
     return club
+
+
+def send_approved_email(to: str, *, club_name: str) -> None:
+    """"Your club is approved -- log in", to the club's sign-in address. Sent
+    after the approval's answer; a mail that cannot go out is logged, never
+    turned into a failed approval."""
+    import html as html_mod
+    import logging
+
+    from app.config import settings
+    from app.core.email import email as email_mod
+
+    link = f"{settings.PUBLIC_WEB_URL.rstrip('/')}/login"
+    text = (
+        f"{club_name} is approved on MyOtherApp.\n\n"
+        f"Log in to your club's dashboard with the email and password you signed up with: {link}\n"
+    )
+    safe = html_mod.escape(club_name)
+    html = (
+        f"<p><strong>{safe}</strong> is approved on MyOtherApp.</p>"
+        f"<p>Log in to your club's dashboard with the email and password you signed up with.</p>"
+        f'<p><a href="{link}">Log in</a></p>'
+    )
+    try:
+        email_mod.send_email(recipients=[to], subject=f"{club_name} is approved — log in", text=text, html=html)
+    except Exception:
+        logging.getLogger(__name__).warning("approval email to %s could not be sent", to, exc_info=True)
 
 
 async def reject_club(session: AsyncSession, club_id: int) -> Clubs:

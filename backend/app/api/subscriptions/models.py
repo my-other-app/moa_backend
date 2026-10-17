@@ -24,6 +24,7 @@ month is the kind of bug that surfaces in an annual reconciliation.
 from enum import Enum as PyEnum
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     CheckConstraint,
     Column,
@@ -55,10 +56,18 @@ class BillingCycle(PyEnum):
 
 
 class SubscriptionStatus(PyEnum):
+    #: Checkout opened, nothing confirmed by Razorpay yet. Grants nothing: the
+    #: club keeps whatever it had before (see `previous_state`), or Free.
+    pending = "pending"
+    #: Razorpay confirmed the mandate and the plan has a trial the club has
+    #: not used before. Entitled from the `authenticated` webhook on.
     trial = "trial"
     active = "active"
-    #: A charge failed. The club keeps access while Razorpay retries.
+    #: A charge failed. The club keeps access while Razorpay retries -- but
+    #: only if this subscription was ever paid for (`activated_at`).
     past_due = "past_due"
+    #: Paused at Razorpay. Not charged, so not entitled.
+    paused = "paused"
     cancelled = "cancelled"
 
 
@@ -323,6 +332,25 @@ class ClubSubscriptions(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     #: Why the last charge failed, verbatim from Razorpay, for the admin
     #: screen. Cleared on a successful charge.
     last_failure_reason = Column(String(255), nullable=True)
+
+    # The billing state machine (see service.is_entitled). Each timestamp is
+    # when Razorpay -- or an admin assigning the plan -- confirmed that step.
+    #: When this checkout was opened; a `pending` older than a day falls back.
+    pending_since = Column(TZAwareDateTime(timezone=True), nullable=True)
+    #: The `subscription.authenticated` webhook: the club authorised the mandate.
+    authenticated_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    #: The first `activated`/`charged`: this subscription has been paid for.
+    activated_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    #: When the club's trial began. Never cleared: a club gets one trial, ever.
+    trial_started_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    #: When the trial granted at checkout ends (null: no trial was granted).
+    trial_ends_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    #: The club cancelled; it keeps access until `current_period_end`.
+    cancel_at_period_end = Column(Boolean, nullable=False, default=False, server_default="false")
+    cancel_requested_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    #: What the club had before this checkout, restored if the checkout is
+    #: abandoned (stale after a day) or cancelled before it was paid.
+    previous_state = Column(JSON, nullable=True)
 
     plan = relationship("Plans", back_populates="subscriptions")
     club = relationship("Clubs")

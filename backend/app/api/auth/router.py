@@ -173,7 +173,25 @@ async def login_for_access_token(
             _set_auth_cookies(request, response, token.access_token, token.refresh_token)
             return token
 
-    user = await authenticate_user(session, form_data.username, form_data.password)
+    user = None
+    tried_club = False
+    if "club" in (form_data.scopes or []):
+        # On the clubs dashboard the club account comes first: the same
+        # address may also be the person's app account, and that one cannot
+        # open a club's dashboard. Without the scope (the app) nothing changes.
+        from app.core.auth.authentication import authenticate_club_account
+
+        user = await authenticate_club_account(session, form_data.username, form_data.password)
+        tried_club = True
+        if user is not None and not user.club.is_verified:
+            await refuse(user, "blocked", status.HTTP_403_FORBIDDEN, "Your club is waiting for approval. We will email you when it is approved.", error_code="CLUB_NOT_VERIFIED")
+    if user is None:
+        from app.api.users.models import UserTypes
+
+        user = await authenticate_user(
+            session, form_data.username, form_data.password,
+            exclude_type=UserTypes.club if tried_club else None,
+        )
     if not user:
         await refuse(None, "wrong_password", status.HTTP_401_UNAUTHORIZED, "Incorrect username or password", headers={"WWW-Authenticate": "Bearer"})
     # Said plainly at the door: a suspended account used to get tokens here

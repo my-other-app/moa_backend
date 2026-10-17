@@ -408,6 +408,9 @@ async def handle_razorpay_webhook(
         await _handle_subscription_event(session, event_name, data)
         return None
 
+    if event_name == "payment.failed" and await _handle_subscription_payment_failure(session, data):
+        return None
+
     if data.get("event") == "refund.processed":
         # Covers a refund initiated directly from the Razorpay dashboard,
         # outside our app's own /payments/{id}/refund endpoint.
@@ -453,7 +456,8 @@ async def _handle_subscription_event(session: AsyncSession, event: str, data: di
     note is what makes a subscription created outside this app findable.
     """
     from app.api.subscriptions import billing as subscription_billing
-    from app.api.subscriptions.models import ClubSubscriptions
+    from app.api.subscriptions import service as subscription_service
+    from app.api.subscriptions.models import BillingCycle, ClubSubscriptions, Plans
 
     if event not in subscription_billing.HANDLED_EVENTS:
         logger.info("Ignoring Razorpay event %s", event)
@@ -468,10 +472,17 @@ async def _handle_subscription_event(session: AsyncSession, event: str, data: di
             .options(selectinload(ClubSubscriptions.plan))
         )
 
-    if subscription is None:
+    new_plan = new_cycle = None
+    if subscription is None and event in subscription_billing.CONFIRMING_EVENTS:
+        # A subscription we hold no id for, being authorised or paid: one
+        # whose checkout fell back before the club finished it, or one made
+        # outside this app. Found by the club in its notes and adopted -- but
+        # never over a different subscription that can still charge the club,
+        # and only for confirming events: a stray `cancelled` for an old id
+        # must not end whatever the club has now.
         club_id = subscription_billing.club_id_from_payload(data)
         if club_id is not None:
-            subscription = await session.scalar(
+            candidate = await session.scalar(
                 select(ClubSubscriptions)
                 .where(
                     ClubSubscriptions.club_id == club_id,
@@ -479,10 +490,24 @@ async def _handle_subscription_event(session: AsyncSession, event: str, data: di
                 )
                 .options(selectinload(ClubSubscriptions.plan))
             )
-            # First event for a subscription the club authorised: adopt the
-            # Razorpay id so later events match on it directly.
-            if subscription is not None and razorpay_id:
+            live_elsewhere = (
+                candidate is not None
+                and candidate.razorpay_subscription_id
+                and candidate.razorpay_subscription_id != razorpay_id
+                and candidate.status in subscription_service.LIVE_BILLED_STATUSES
+            )
+            if candidate is not None and not live_elsewhere and razorpay_id:
+                subscription = candidate
                 subscription.razorpay_subscription_id = razorpay_id
+                notes = subscription_billing.notes_from_payload(data)
+                noted = await session.scalar(
+                    select(Plans).where(Plans.key == notes.get("plan_key"), Plans.is_deleted == False)
+                ) if notes.get("plan_key") else None
+                if noted is not None:
+                    subscription.plan_id = noted.id
+                    subscription.plan = noted
+                if notes.get("cycle") in {c.value for c in BillingCycle}:
+                    subscription.cycle = BillingCycle(notes["cycle"])
 
     if subscription is None:
         # Logged, not raised: a 500 makes Razorpay retry forever, and an event
@@ -492,6 +517,42 @@ async def _handle_subscription_event(session: AsyncSession, event: str, data: di
         )
         return None
 
-    if subscription_billing.apply_event(subscription, event, data):
+    if event == "subscription.updated":
+        rp_plan = subscription_billing.razorpay_plan_id_from_payload(data)
+        if rp_plan:
+            new_plan = await session.scalar(
+                select(Plans).where(
+                    (Plans.razorpay_plan_id_monthly == rp_plan) | (Plans.razorpay_plan_id_yearly == rp_plan)
+                )
+            )
+            if new_plan is not None:
+                new_cycle = (
+                    BillingCycle.yearly if new_plan.razorpay_plan_id_yearly == rp_plan else BillingCycle.monthly
+                )
+
+    if subscription_billing.apply_event(subscription, event, data, new_plan=new_plan, new_cycle=new_cycle):
         await session.commit()
     return None
+
+
+async def _handle_subscription_payment_failure(session: AsyncSession, data: dict) -> bool:
+    """
+    A failed charge on a club's subscription: say why on the row, and a
+    running subscription becomes past due. Returns False when the payment is
+    not a subscription's, so the caller handles it as before.
+    """
+    from app.api.subscriptions import billing as subscription_billing
+    from app.api.subscriptions.models import ClubSubscriptions
+
+    razorpay_id = subscription_billing.subscription_id_for_payment(data)
+    if not razorpay_id:
+        return False
+    subscription = await session.scalar(
+        select(ClubSubscriptions).where(ClubSubscriptions.razorpay_subscription_id == razorpay_id)
+    )
+    if subscription is None:
+        logger.warning("Razorpay payment.failed for unknown subscription %s", razorpay_id)
+        return True
+    if subscription_billing.apply_payment_failure(subscription, data):
+        await session.commit()
+    return True

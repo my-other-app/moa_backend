@@ -45,13 +45,14 @@ class CreateClub:
         org_id: int | None = Form(None),
         location_name: str | None = Form(None),
         location_link: str | None = Form(None),
-        contact_phone: str | None = Form(None),
-        contact_email: str | None = Form(None),
+        contact_phone: str | None = Form(None, max_length=20),
+        contact_email: str | None = Form(None, max_length=100),
         interest_ids: str | None = Form(None),
-        instagram: str | None = Form(None),
-        linkedin: str | None = Form(None),
-        youtube: str | None = Form(None),
-        website: str | None = Form(None),
+        # club_socials holds 255 a link.
+        instagram: str | None = Form(None, max_length=255),
+        linkedin: str | None = Form(None, max_length=255),
+        youtube: str | None = Form(None, max_length=255),
+        website: str | None = Form(None, max_length=255),
         # What the club picked on the pricing page; checked by the endpoint
         # and dropped when it names no public plan or cycle.
         requested_plan: str | None = Form(None),

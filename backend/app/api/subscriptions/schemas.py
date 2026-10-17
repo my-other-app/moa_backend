@@ -146,11 +146,22 @@ class SubscriptionOut(CustomBaseModel):
     club: PlanClubMin | None = None
     plan: PlanOut | None = None
     cycle: str
+    #: pending | trial | active | past_due | paused | cancelled
     status: str
     current_period_end: datetime | None = None
     mrr_paise: int = 0
     last_failure_reason: str | None = None
     razorpay_subscription_id: str | None = None
+    #: Whether this subscription grants its plan right now (service.is_entitled).
+    entitled: bool = False
+    #: The club cancelled; access runs until `current_period_end`.
+    cancel_at_period_end: bool = False
+    cancel_requested_at: datetime | None = None
+    #: When the trial granted at checkout ends (null: no trial).
+    trial_ends_at: datetime | None = None
+    #: While pending: when checkout opened, and when it falls back unpaid.
+    pending_since: datetime | None = None
+    checkout_expires_at: datetime | None = None
 
 
 class SubscriptionTotals(CustomBaseModel):
@@ -166,6 +177,14 @@ class AssignPlanIn(CustomBaseModel):
     plan_id: int
     cycle: BillingCycle = BillingCycle.monthly
     status: SubscriptionStatus = SubscriptionStatus.active
+
+    @model_validator(mode="after")
+    def _a_state_an_admin_can_grant(self) -> "AssignPlanIn":
+        # pending and paused are Razorpay's to set: one is a checkout nobody
+        # has paid, the other a subscription Razorpay stopped charging.
+        if SubscriptionStatus(self.status) in (SubscriptionStatus.pending, SubscriptionStatus.paused):
+            raise ValueError("An admin can grant trial, active, past_due or cancelled.")
+        return self
 
 
 class EntitlementsOut(CustomBaseModel):
@@ -186,17 +205,42 @@ class EntitlementsOut(CustomBaseModel):
     #: preselect it once the club is approved. Null when it picked nothing.
     requested_plan: str | None = None
     requested_cycle: str | None = None
+    #: The club's own subscription state, whatever grants the plan above:
+    #: e.g. "pending" while a checkout waits on Razorpay. Null with none.
+    subscription_status: str | None = None
+    #: Counted against the per-club limits: events_per_month,
+    #: registrations_per_month, committee_seats, announcements_per_month.
+    usage: dict[str, int] = Field(default_factory=dict)
 
 
 class StartSubscriptionIn(CustomBaseModel):
-    plan_id: int
+    """The plan by id or by key (the key the pricing page shows); one of the two."""
+
+    plan_id: int | None = None
+    plan_key: str | None = Field(None, max_length=40)
     cycle: BillingCycle = BillingCycle.monthly
+
+    @model_validator(mode="after")
+    def _one_plan(self) -> "StartSubscriptionIn":
+        if self.plan_id is None and not (self.plan_key or "").strip():
+            raise ValueError("Name the plan: plan_id or plan_key.")
+        return self
 
 
 class StartSubscriptionOut(CustomBaseModel):
     checkout_url: str | None = None
     razorpay_subscription_id: str
-    status: str | None = None
+    #: Always "pending": nothing is granted until Razorpay confirms.
+    status: str = "pending"
+    #: What Razorpay called the new subscription ("created").
+    razorpay_status: str | None = None
+    plan_key: str
+    cycle: str
+    #: The trial this checkout carries: the plan's, or 0 when the club has
+    #: had a trial before.
+    trial_days: int = 0
+    #: When the checkout link stops working and the club falls back unpaid.
+    expires_at: datetime
 
 
 # ---------------------------------------------------------------------------
@@ -211,9 +255,11 @@ class PublicPlanFeature(CustomBaseModel):
 
 
 class PublicPlan(CustomBaseModel):
-    """One plan as the pricing page shows it. No ids, Razorpay ids or
-    subscriber counts: nothing a visitor has any use for."""
+    """One plan as the pricing page shows it. No Razorpay ids or subscriber
+    counts: nothing a visitor has any use for. The id is there so checkout can
+    name the plan either way."""
 
+    id: int
     key: str
     name: str
     tagline: str | None = None
@@ -242,6 +288,7 @@ class PublicPlansOut(CustomBaseModel):
 
 def public_plan_dict(plan) -> dict:
     return {
+        "id": plan.id,
         "key": plan.key,
         "name": plan.name,
         "tagline": plan.tagline,
@@ -313,6 +360,30 @@ def plan_to_dict(plan, subscriber_count: int = 0) -> dict:
             else {key: False for key in FEATURE_KEYS}
         ),
         "feature_groups": {k: list(v) for k, v in FEATURE_GROUPS.items()},
+    }
+
+
+def subscription_dict(row, club=None) -> dict:
+    """One place that turns a ClubSubscriptions row into SubscriptionOut."""
+    from app.api.subscriptions.service import CHECKOUT_TTL, is_entitled
+
+    club = club if club is not None else getattr(row, "club", None)
+    return {
+        "id": row.id,
+        "club": {"id": club.id, "name": club.name} if club else None,
+        "plan": plan_to_dict(row.plan) if row.plan else None,
+        "cycle": getattr(row.cycle, "value", row.cycle),
+        "status": getattr(row.status, "value", row.status),
+        "current_period_end": row.current_period_end,
+        "mrr_paise": row.mrr_paise,
+        "last_failure_reason": row.last_failure_reason,
+        "razorpay_subscription_id": row.razorpay_subscription_id,
+        "entitled": is_entitled(row),
+        "cancel_at_period_end": bool(row.cancel_at_period_end),
+        "cancel_requested_at": row.cancel_requested_at,
+        "trial_ends_at": row.trial_ends_at,
+        "pending_since": row.pending_since,
+        "checkout_expires_at": row.pending_since + CHECKOUT_TTL if row.pending_since else None,
     }
 
 

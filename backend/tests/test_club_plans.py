@@ -109,7 +109,7 @@ async def test_a_plan_on_the_page_carries_every_limit_and_the_whole_catalog(clie
     plan = (await client.get(f"{API}/plans")).json()["plans"][0]
 
     assert set(plan) == {
-        "key", "name", "tagline", "price_monthly_paise", "price_yearly_paise", "trial_days",
+        "id", "key", "name", "tagline", "price_monthly_paise", "price_yearly_paise", "trial_days",
         "contact_sales", "featured", "limits", "features",
     }
     # Every column, with null for unlimited and 0 kept apart from it.

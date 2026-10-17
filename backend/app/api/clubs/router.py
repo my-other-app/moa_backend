@@ -2,6 +2,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request, UploadFile, Qu
 from sqlalchemy import select
 
 from app.api.clubs.models import Clubs
+from app.api.users.models import Users
 from app.response import CustomHTTPException
 from app.api.clubs.schemas import (
     ClubTeamMemberOut,
@@ -96,6 +97,15 @@ async def create_club(
         interest_ids=club.interest_ids,
         requested_plan=requested_plan,
         requested_cycle=requested_cycle,
+        location_link=club.location_link,
+        contact_phone=club.contact_phone,
+        contact_email=club.contact_email,
+        socials={
+            "instagram": club.instagram,
+            "linkedin": club.linkedin,
+            "youtube": club.youtube,
+            "website": club.website,
+        },
     )
     _follow_map_link(background_tasks, club)
     return club
@@ -176,9 +186,20 @@ async def list_all_clubs_admin(
 
 @router.post("/{club_id}/approve", summary="Approve a pending club (admin)")
 async def approve_club_endpoint(
-    club_id: int, session: SessionDep, user: ModerateAuth, request: Request = None
+    club_id: int,
+    session: SessionDep,
+    user: ModerateAuth,
+    background_tasks: BackgroundTasks,
+    request: Request = None,
 ) -> ClubAdminDetailResponse:
+    """Approve a club. The first approval emails the club's sign-in address
+    that it can now log in (after the answer; a mail that fails is logged)."""
+    was_verified = await session.scalar(select(Clubs.is_verified).where(Clubs.id == club_id))
     club = await service.approve_club(session, club_id)
+    if was_verified is False:
+        owner_email = await session.scalar(select(Users.email).where(Users.id == club.user_id))
+        if owner_email:
+            background_tasks.add_task(service.send_approved_email, owner_email, club_name=club.name)
     await audit.record(
         session,
         actor=user,
