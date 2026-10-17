@@ -22,6 +22,10 @@ from app.core.utils.discord import notify_error
 from app.core.middlewares.process_time_middleware import ProcessingTimeMiddleware
 from app.core.middlewares.security_headers_middleware import SecurityHeadersMiddleware
 from app.core.rate_limit import limiter
+from app.core import redact
+
+# A club webhook's token never reaches the access log whole.
+redact.install()
 
 
 @asynccontextmanager

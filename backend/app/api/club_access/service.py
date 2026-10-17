@@ -97,6 +97,12 @@ async def check_member(session, request: Request, user: Users, member_id: int) -
             error_code="ACCESS_REMOVED",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    if policy.owner_only(request.method, request.url.path):
+        raise _refuse(
+            status.HTTP_403_FORBIDDEN,
+            "Only the club's owner can change where its payments go.",
+            "OWNER_ONLY",
+        )
     if not policy.allows(member.role, request.method, request.url.path):
         raise _refuse(
             status.HTTP_403_FORBIDDEN,

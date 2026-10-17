@@ -496,6 +496,9 @@ async def get_event(session: AsyncSession, event_id: str | int, user_id: int | N
     from app.api.subscriptions import gates
 
     data["plan_grandfathered"] = await gates.plan_grandfathered(session, event)
+    from app.api.payment_gateways import service as payment_gateways
+
+    data["payments_to"] = await payment_gateways.payments_to(session, event.club_id)
 
     # Get event files (downloads) - available to all users
     data["downloads"] = [

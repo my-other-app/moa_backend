@@ -44,9 +44,17 @@ class PaymentOrders(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     notes = Column(String, nullable=True)
     source = Column(String, nullable=False)
     payload = Column(JSON, nullable=False)
+    # The club's own Razorpay account the order was made on; null = the
+    # platform's. Set once, at creation, and never changed: the payment is
+    # verified and refunded through this account even after the club replaces
+    # or disconnects it (app/api/payment_gateways).
+    payment_gateway_id = Column(
+        Integer, ForeignKey("club_payment_gateways.id"), nullable=True, index=True
+    )
 
     payment_logs = relationship("PaymentLogs", back_populates="order")
     user = relationship("Users")
+    payment_gateway = relationship("ClubPaymentGateways")
 
 
 class PaymentLogs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):

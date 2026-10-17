@@ -1,7 +1,6 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
 import logging
-import traceback
 import uuid
 import multiprocessing
 from typing import Optional
@@ -22,13 +21,15 @@ async def notify_error(request: Request, exc: Exception, track_id: str):
     """
     if not settings.DISCORD_ERROR_WEBHOOK:
         return
+    from app.core import redact
+
+    # Never a club webhook's whole token, and never the message of an error
+    # on a route whose body holds a Razorpay key secret (app/core/redact.py).
     error_details = {
         "track_id": track_id,
-        "path": request.url.path,
+        "path": redact.path(request.url.path),
         "method": request.method,
-        "traceback": "".join(
-            traceback.format_exception(type(exc), exc, exc.__traceback__)
-        ),
+        "traceback": redact.error_traceback(request.url.path, exc),
     }
 
     await send_discord_notification(error_details)

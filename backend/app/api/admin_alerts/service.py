@@ -47,6 +47,9 @@ KINDS: dict[str, str] = {
     "subscription_resumed": "A subscription was resumed",
     "subscription_cancelled": "A subscription was cancelled or completed",
     "plan_assigned": "An admin changed a club's plan",
+    "payment_gateway_connected": "A club connected its own Razorpay account",
+    "payment_gateway_failed": "A club's own Razorpay account stopped working, or a webhook for it had a bad signature",
+    "payment_gateway_disconnected": "A club's own Razorpay account was disconnected or disabled",
 }
 
 DEDUPE_WINDOW = timedelta(minutes=10)

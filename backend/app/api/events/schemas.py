@@ -608,6 +608,10 @@ class EventDetailResponse(CustomBaseModel):
     #: no event-scoped lock applies to it. False whenever nothing is enforced
     #: (the switch is off, or there is no Free plan).
     plan_grandfathered: bool = Field(False)
+    #: Whose Razorpay account takes this event's ticket and merch payments:
+    #: "club" when the club has connected its own and it is working,
+    #: "platform" otherwise (app/api/payment_gateways).
+    payments_to: str = Field("platform")
     # User-specific fields (only populated when authenticated)
     is_registered: bool = Field(False)
     is_attended: bool = Field(False)

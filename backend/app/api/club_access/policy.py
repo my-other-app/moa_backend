@@ -36,6 +36,10 @@ _OWNER_ACCOUNT = _rx(
     r"^/api/v1/user(?:/|$)",
 )
 _OWNER_WRITES = _rx(r"^/api/v1/clubs/subscription")
+# Where the club's money goes, and the keys to its Razorpay account: changed
+# by the owner alone (OWNER_ONLY). Read like the rest of the money: admins
+# only, and never with the webhook secret (payment_gateways.router).
+_GATEWAY = _rx(r"^/api/v1/clubs/payments/gateway(?:/|$)")
 
 # Money: figures, statements, the ledger, refunds.
 _MONEY = _rx(
@@ -74,6 +78,8 @@ def allows(role: str, method: str, path: str) -> bool:
         return True
     if _OWNER_ACCOUNT.search(path):
         return False
+    if _GATEWAY.search(path):
+        return role == "admin" and method == "GET"
     if _ACCESS.search(path):
         return role == "admin" and method == "GET" and bool(_ACCESS_LIST.search(path))
     if method in WRITES and _OWNER_WRITES.search(path):
@@ -91,6 +97,11 @@ def allows(role: str, method: str, path: str) -> bool:
     return False
 
 
+def owner_only(method: str, path: str) -> bool:
+    """A change no member makes, whatever their role (refused as OWNER_ONLY)."""
+    return method.upper() in WRITES and bool(_GATEWAY.search(path))
+
+
 def can(role: str) -> dict:
     """What the dashboard should offer this role. Mirrors `allows`."""
     owner = role == "owner"
@@ -104,4 +115,5 @@ def can(role: str) -> dict:
         "edit_events": editor,
         "delete_events": admin,
         "door": True,
+        "payment_gateway": owner,
     }
