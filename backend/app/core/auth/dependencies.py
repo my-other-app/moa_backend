@@ -69,6 +69,10 @@ async def get_current_user(
         from app.api.club_access import service as club_access
 
         await club_access.check_member(session, request, user, token_data.member_id)
+    # Plan gates let admins through, and an admin acting as a club with them.
+    from app.api.subscriptions import gates
+
+    gates.note_actor(user, token_data.impersonated_by)
     return user
 
 

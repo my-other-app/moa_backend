@@ -72,6 +72,12 @@ application.include_router(router=api_router)
 from app.api.links.router import public_router as public_links_router  # noqa: E402
 
 application.include_router(router=public_links_router, tags=["tracking-links"])
+# Innermost: each request's plan-gate scope, so one request resolves a club's
+# entitlements once and knows whether an admin is behind it
+# (app/api/subscriptions/gates.py).
+from app.api.subscriptions.gates import RequestScope as PlanGateScope  # noqa: E402
+
+application.add_middleware(PlanGateScope)
 # print(settings.cors_origins)
 # if settings.DEBUG:
 application.add_middleware(

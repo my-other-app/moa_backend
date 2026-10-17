@@ -17,7 +17,9 @@ from app.api.club_access.schemas import (
     RoleChange,
     RoleOption,
 )
+from app.api.club_access.models import DEFAULT_ROLE
 from app.api.clubs.models import Clubs
+from app.api.subscriptions import gates
 from app.core.auth.dependencies import ClubAuth
 from app.core.rate_limit import limiter
 from app.db.core import SessionDep
@@ -45,6 +47,16 @@ async def _owners_club(session, request: Request, user) -> Clubs:
     return club
 
 
+async def _plan_allows(session, club: Clubs, role: str, user, *, new_seat: bool) -> None:
+    """Every plan may add people as Editor (the default role) up to its
+    committee seats; any other role is the plan's `roles`."""
+    service.check_role(role)
+    if role != DEFAULT_ROLE:
+        await gates.require_feature(session, club.id, "roles", actor=user)
+    if new_seat:
+        await gates.require_within(session, club.id, "committee_seats", actor=user)
+
+
 @router.get("", summary="Everyone who can sign in to this club's dashboard")
 async def list_access(request: Request, session: SessionDep, user: ClubAuth) -> AccessList:
     club = await service.club_of(session, user)
@@ -60,6 +72,7 @@ async def list_access(request: Request, session: SessionDep, user: ClubAuth) -> 
 @limiter.limit("20/hour")
 async def invite(request: Request, session: SessionDep, user: ClubAuth, body: InviteRequest, background: BackgroundTasks) -> InviteResponse:
     club = await _owners_club(session, request, user)
+    await _plan_allows(session, club, body.role, user, new_seat=True)
     member, token = await service.invite(session, club, email=body.email, full_name=body.full_name, role=body.role)
     await session.commit()
     background.add_task(service.send_invite_email, member, club_name=club.name, token=token)
@@ -79,6 +92,7 @@ async def resend(request: Request, member_id: int, session: SessionDep, user: Cl
 @router.patch("/{member_id}", summary="Change someone's role")
 async def change_role(request: Request, member_id: int, session: SessionDep, user: ClubAuth, body: RoleChange) -> MemberRow:
     club = await _owners_club(session, request, user)
+    await _plan_allows(session, club, body.role, user, new_seat=False)
     member = await service.set_role(session, club, member_id, body.role)
     await session.commit()
     return MemberRow(**service.to_row(member))

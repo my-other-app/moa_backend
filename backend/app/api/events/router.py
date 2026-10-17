@@ -36,6 +36,7 @@ from app.api.audit import service as audit
 from app.core.response.sorting import apply_sort
 from app.api.events.access import is_admin_user
 from app.api.events import wallet_service
+from app.api.subscriptions import gates
 from app.api.users.models import UserTypes
 from app.api.templates_audience import RegistrationRole
 from app.api.events.tickets import poster_url, role_of, ticket_document
@@ -128,6 +129,8 @@ async def create_event(
     event: EventCreate = Depends(),
     speaker_photos: List[UploadFile] = File([]),
 ) -> EventCreateUpdateResponse:
+    if user.club is not None:
+        await gates.check_event_create(session, user.club.id, has_fee=event.has_fee, actor=user)
     created = await service.create_event(
         session,
         user_id=user.id,
@@ -180,6 +183,7 @@ async def update_event(
         event_id=event_id,
         speaker_photos=speaker_photos,
         as_admin=is_admin_user(user),
+        actor=user,
     )
     _follow_map_link(background_tasks, updated)
     return updated
@@ -816,6 +820,15 @@ async def get_networking_attendees(
     Only available during the event + 1 hour buffer.
     Requires the requesting user to be checked in.
     """
+    from app.api.events.models import Events
+
+    # Networking is part of the hosting club's plan (never refused on a
+    # grandfathered event); an attendee is told only that it is not on.
+    hosted = await session.get(Events, event_id)
+    if hosted is not None and not await gates.allows(session, hosted.club_id, "networking", actor=user, event=hosted):
+        raise CustomHTTPException(
+            403, message="Networking isn't available for this event.", error_code="NETWORKING_UNAVAILABLE"
+        )
     result = await networking_service.get_networking_attendees(
         session, event_id, user.id
     )

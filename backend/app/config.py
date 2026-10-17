@@ -1,10 +1,13 @@
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
 
-from pydantic import PostgresDsn, RedisDsn, model_validator
+from pydantic import PostgresDsn, RedisDsn, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # The public site's address before it moved to the bare domain; old links still come from it.
 FORMER_SITE_ORIGIN = "https://events.myotherapp.in"
+
+_IST = timezone(timedelta(hours=5, minutes=30))
 
 
 class AppConfig(BaseSettings):
@@ -103,6 +106,24 @@ class AppConfig(BaseSettings):
     # A club's published website at its own address (served by the club-sites Cloudflare Worker).
     # PUBLIC_CLUB_URL stays the public site's page tracking links land on; it frames the same site.
     PUBLIC_CLUB_SITE_URL: str = "https://{slug}.myotherapp.in"
+
+    # Club plans (app/api/subscriptions/gates.py). PLAN_ENFORCEMENT=false is
+    # the kill switch: every plan gate lets everything through, as before the
+    # plans existed. An event created before PLAN_ENFORCEMENT_FROM and held
+    # within PLAN_GRANDFATHER_DAYS of it is "grandfathered": no event-scoped
+    # gate applies to it (paid tickets, registration caps, live room, ID
+    # cards...), so nothing under way breaks at the switch-on. The window
+    # stops an old event being redated and reused for ever.
+    PLAN_ENFORCEMENT: bool = True
+    PLAN_ENFORCEMENT_FROM: datetime = datetime(2026, 10, 18, 0, 0, tzinfo=_IST)
+    PLAN_GRANDFATHER_DAYS: int = 90
+
+    @field_validator("PLAN_ENFORCEMENT_FROM")
+    @classmethod
+    def _aware_cutoff(cls, value: datetime) -> datetime:
+        """A cutoff written without an offset is read as India time, the
+        clock every plan month is counted on."""
+        return value if value.tzinfo else value.replace(tzinfo=_IST)
 
     CORS_ORIGINS: list[str] | str
 

@@ -19,6 +19,7 @@ from app.api.merch.schemas import (
     VariantIn,
     VariantPatch,
 )
+from app.api.subscriptions import gates
 from app.core.auth.dependencies import ClubAuth
 from app.db.core import SessionDep
 from app.response import CustomHTTPException
@@ -42,6 +43,8 @@ async def fields(session: SessionDep, user: ClubAuth, event_id: int) -> list[Fie
 @router.post("", summary="A new item", status_code=201)
 async def create_item(session: SessionDep, user: ClubAuth, event_id: int, body: MerchItemIn) -> MerchItemOut:
     event = await deliveries.event_for_club(session, user, event_id)
+    # These are the handouts at the door: swag, by the plan's naming.
+    await gates.check_merch_item(session, event, "swag", actor=user)
     return MerchItemOut(**await service.create_item(session, event, body))
 
 

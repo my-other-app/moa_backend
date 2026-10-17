@@ -17,6 +17,9 @@ from app.db.base import AbstractSQLModel
 from app.db.mixins import TimestampsMixin
 
 ROLES = ("admin", "editor", "door")
+#: A member's role when none is chosen, and the one role every plan may give
+#: (any other is the plan's `roles` feature; see subscriptions.gates).
+DEFAULT_ROLE = "editor"
 STATUSES = ("invited", "active", "removed")
 
 
@@ -29,7 +32,7 @@ class ClubMembers(AbstractSQLModel, TimestampsMixin):
     # land on exactly one club.
     email = Column(String(100), nullable=False)
     full_name = Column(String(80), nullable=True)
-    role = Column(String(16), nullable=False, default="editor")
+    role = Column(String(16), nullable=False, default=DEFAULT_ROLE)
     status = Column(String(16), nullable=False, default="invited")
     password = Column(String(255), nullable=True)
     # sha256 of the link's token; the token itself only ever exists in the mail.

@@ -7,7 +7,14 @@ its page names. What is a judgement call is asked for: the doors, the team,
 the agenda. What is never the same is left out: the venue, the
 registrations, every handover, every report. The copy starts as a draft on
 the clock.
+
+The copy is a new event, so it carries only what the club's plan allows
+(`allowed`, from subscriptions.gates.duplicate_allowances): without `swag` no
+handout items, never more than `merch_items_per_event` of them, without
+`badges` no ID card designs, without `report` no report recipients. What was
+left behind is named in `skipped`, by flag or limit key, rather than refused.
 """
+import logging
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -26,6 +33,8 @@ from app.api.merch.models import MerchItems, MerchVariants
 from app.api.organisers.models import EventTeamMembers
 from app.api.ticket_templates.models import TicketTemplates
 from app.core.utils.keys import generate_slug
+
+logger = logging.getLogger(__name__)
 
 SETTINGS = (
     "category_id", "has_fee", "reg_fee", "has_prize", "prize_amount", "is_online", "about", "contact_name", "contact_phone", "contact_email", "url",
@@ -47,10 +56,16 @@ async def _event_rows(session, model, event_id: int) -> list:
 async def duplicate_event(
     session, source: Events, user, *, name: str, event_datetime: datetime, duration: Optional[float] = None,
     copy_doors: bool = False, copy_team: bool = False, copy_agenda: bool = False, copy_merch: bool = True,
+    allowed: Optional[dict] = None,
 ) -> dict:
+    allowed = {"swag": True, "badges": True, "report": True, "merch_items_per_event": None, **(allowed or {})}
+    skipped: list[str] = []
     new = Events(name=name.strip(), slug=generate_slug(name), event_datetime=event_datetime, duration=duration or source.duration, club_id=source.club_id, images=[], reg_startdate=datetime.now(timezone.utc))
     for key in SETTINGS:
         setattr(new, key, getattr(source, key))
+    if new.report_recipients and not allowed["report"]:
+        new.report_recipients = []
+        skipped.append("report")
     new.lifecycle = EventStatus.draft
     new.status_clock = True
     session.add(new)
@@ -67,7 +82,11 @@ async def duplicate_event(
 
     # The event's own designs; a club default needs no copying, the new event resolves to it anyway.
     for model in DESIGN_MODELS:
-        for row in await _event_rows(session, model, source.id):
+        rows = await _event_rows(session, model, source.id)
+        if rows and model is BadgeTemplates and not allowed["badges"]:
+            skipped.append("badges")
+            continue
+        for row in rows:
             session.add(model(club_id=row.club_id, event_id=new.id, audience=row.audience, name=row.name, is_default=row.is_default, config=dict(row.config or {})))
             copied["designs"] += 1
 
@@ -79,7 +98,14 @@ async def duplicate_event(
         copied["emails"] += 1
 
     if copy_merch:
-        items = list((await session.scalars(select(MerchItems).options(selectinload(MerchItems.variants)).where(MerchItems.event_id == source.id))).all())
+        items = list((await session.scalars(select(MerchItems).options(selectinload(MerchItems.variants)).where(MerchItems.event_id == source.id).order_by(MerchItems.created_at))).all())
+        cap = allowed["merch_items_per_event"]
+        if items and not allowed["swag"]:
+            skipped.append("swag")
+            items = []
+        elif cap is not None and len(items) > cap:
+            skipped.append("merch_items_per_event")
+            items = items[:cap]
         for m in items:
             item = MerchItems(event_id=new.id, name=m.name, photo_key=m.photo_key, stock=m.stock, eligibility_field=m.eligibility_field, eligibility_value=m.eligibility_value, variant_field=m.variant_field)
             item.variants = [MerchVariants(label=v.label, stock=v.stock) for v in m.variants]
@@ -113,4 +139,6 @@ async def duplicate_event(
             copied["agenda"] += 1
 
     await session.commit()
-    return {"id": new.id, "slug": new.slug, "name": new.name, "copied": copied}
+    if skipped:
+        logger.info("Event %s copied to %s without %s (the club's plan)", source.id, new.id, ", ".join(skipped))
+    return {"id": new.id, "slug": new.slug, "name": new.name, "copied": copied, "skipped": skipped}

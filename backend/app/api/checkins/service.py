@@ -296,7 +296,7 @@ async def walkup(session, event: Events, body, actor: GateActor, background_task
     data = await register_event(
         session=session, full_name=name, email=account_email, phone=phone, user_id=user.id, event_id=event.id,
         additional_details=body.custom_fields or None, role=role, notify=False, relaxed_fields=True,
-        store_picks=body.store or None,
+        store_picks=body.store or None, by_organiser=True,
     )
     reg = await registration_of(session, event, data["event_registration_id"])
     if event.has_fee and not reg.is_paid:

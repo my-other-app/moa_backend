@@ -602,6 +602,12 @@ class EventDetailResponse(CustomBaseModel):
     status: str = Field("published")
     status_clock: bool = Field(True)
     retention_mode: str = Field("keep")
+    created_at: datetime | None = Field(None)
+    #: Whether the club's plan leaves this event as it was when enforcement
+    #: began (subscriptions.gates.grandfathered, its date window included):
+    #: no event-scoped lock applies to it. False whenever nothing is enforced
+    #: (the switch is off, or there is no Free plan).
+    plan_grandfathered: bool = Field(False)
     # User-specific fields (only populated when authenticated)
     is_registered: bool = Field(False)
     is_attended: bool = Field(False)
