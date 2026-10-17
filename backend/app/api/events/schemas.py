@@ -14,6 +14,7 @@ from app.api.interests.schemas import InterestPublic
 from app.response import CustomHTTPException
 from app.core.response.base_model import CustomBaseModel
 from app.api.auth.schemas import Token
+from app.api.discover.geo import pin_from_form
 
 
 class FieldTypes(enum.Enum):
@@ -164,6 +165,15 @@ class Event(EventBase):
     event_guidelines: str | None = Field(None)
 
 
+#: The pin's form fields: range-checked here, paired by pin_from_form.
+def _lat_form():
+    return Form(None, ge=-90, le=90, description="The venue's latitude, from the dashboard's map; sent with lng")
+
+
+def _lng_form():
+    return Form(None, ge=-180, le=180, description="The venue's longitude, from the dashboard's map; sent with lat")
+
+
 class EventCreate:
     def __init__(
         self,
@@ -176,6 +186,9 @@ class EventCreate:
         location_name: Optional[str] = Form(None),
         # A map link for the venue; a point is read from it for "near you".
         location_link: Optional[str] = Form(None, max_length=2000),
+        # A pin from the dashboard's map: the point itself, above any link's.
+        lat: Optional[float] = _lat_form(),
+        lng: Optional[float] = _lng_form(),
         has_prize: bool = Form(False),
         prize_amount: Optional[float] = Form(None),
         is_online: bool = Form(False),
@@ -214,6 +227,7 @@ class EventCreate:
         self.duration = duration
         self.location_name = location_name
         self.location_link = location_link
+        self.pin = pin_from_form(lat, lng)
         self.has_prize = has_prize
         self.prize_amount = prize_amount
         self.is_online = is_online
@@ -287,6 +301,12 @@ class EventEdit(EventCreate):
         # link (a form posts "" as omitted), so removing it takes clear_location_link.
         location_link: Optional[str] = Form(None, max_length=2000),
         clear_location_link: bool = Form(False),
+        # A pin from the dashboard's map. It stays through later saves and
+        # link changes until new values replace it, or clear_point drops it
+        # back to the point the link or the venue's words give.
+        lat: Optional[float] = _lat_form(),
+        lng: Optional[float] = _lng_form(),
+        clear_point: bool = Form(False),
         has_prize: bool = Form(False),
         prize_amount: Optional[float] = Form(None),
         is_online: bool = Form(False),
@@ -322,6 +342,8 @@ class EventEdit(EventCreate):
             duration=duration,
             location_name=location_name,
             location_link=location_link,
+            lat=lat,
+            lng=lng,
             has_prize=has_prize,
             prize_amount=prize_amount,
             is_online=is_online,
@@ -347,6 +369,7 @@ class EventEdit(EventCreate):
             certificate_template_id=certificate_template_id,
         )
         self.clear_location_link = clear_location_link
+        self.clear_point = clear_point
 
 
 class EventRatingCreate(CustomBaseModel):
@@ -418,6 +441,13 @@ class EventCreateUpdateResponse(CustomBaseModel):
     event_datetime: datetime = Field(...)
     duration: float = Field(...)
     location_name: str | None = Field(None)
+    location_link: str | None = Field(None)
+    # The venue's point as it stands after the save, and where it came from:
+    # 'manual' (a pin), 'link' (the map link) or 'geocoded' (the venue's
+    # words). A point still to be found after the save is null here.
+    lat: float | None = Field(None)
+    lng: float | None = Field(None)
+    geo_source: str | None = Field(None)
     has_fee: bool = Field(...)
     reg_fee: float | None = Field(None)
     has_prize: bool = Field(True)
@@ -540,6 +570,11 @@ class EventDetailResponse(CustomBaseModel):
     duration: float = Field(...)
     location_name: str | None = Field(None)
     location_link: str | None = Field(None)
+    # The venue's pin for the dashboard's map, and where it came from:
+    # 'manual', 'link' or 'geocoded' (null when there is no point yet).
+    lat: float | None = Field(None)
+    lng: float | None = Field(None)
+    geo_source: str | None = Field(None)
     has_fee: bool = Field(...)
     reg_fee: float | None = Field(None)
     has_prize: bool = Field(True)

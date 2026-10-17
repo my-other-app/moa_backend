@@ -21,6 +21,9 @@ from app.api.auth.schemas import (
     EmailCodeSent,
     EmailVerified,
     EmailVerifyRequest,
+    PasswordForgotRequest,
+    PasswordForgotResponse,
+    PasswordResetConfirm,
     Token,
     GoogleSignInRequest,
     AppleSignInRequest,
@@ -398,6 +401,77 @@ async def verify_email(
         merged=bool(summary.get("merged")),
         registrations_transferred=int(summary.get("registrations_transferred") or 0),
     )
+
+
+def _caller_address(request: Request) -> str:
+    """The rate limiter's key for the forgotten-password pair: the caller's
+    address as app.core.net reads it (the forwarded headers only from our own
+    proxy, right to left), so a caller can neither share everyone's budget
+    nor write a fresh address to dodge its own."""
+    from app.api.security.service import client_ip
+
+    return client_ip(request) or "unknown"
+
+
+@router.post("/password/forgot", summary="Send a code to reset a forgotten password")
+@limiter.limit("5/minute;20/hour", key_func=_caller_address)
+async def forgot_password(
+    request: Request,
+    body: PasswordForgotRequest,
+    background: BackgroundTasks,
+) -> PasswordForgotResponse:
+    """
+    Always 200 `{"sent": true}`, at once, whatever the address: it never says
+    whether there is an account. After the response, when the address has an
+    app account that signs in with a password, a six-digit code goes to it
+    (good for fifteen minutes; at most one a minute and ten a day per
+    address, past which nothing goes). Google and Apple accounts get nothing.
+    """
+    from app.api.auth import password_reset
+
+    background.add_task(password_reset.request_reset, body.email)
+    return PasswordForgotResponse()
+
+
+@router.post("/password/reset", summary="Set a new password with the code from the email, and sign in")
+@limiter.limit("10/minute", key_func=_caller_address)
+async def reset_password(
+    request: Request,
+    response: Response,
+    body: PasswordResetConfirm,
+    session: SessionDep,
+) -> Token:
+    """
+    The code and the new password: on a match the password is set, every
+    other session ends, the address counts as verified, whatever was booked
+    as a guest under it comes into the account, and the answer is the same
+    tokens as `/auth/token` (the person is signed in).
+
+    A wrong code -- or an address with no live code, account or not -- is a
+    400 CODE_INVALID with `errors.attempts_left`; the fifth wrong try kills
+    the code (CODE_LOCKED); an old, used or replaced one is CODE_EXPIRED. An
+    account with two-factor on also needs `totp_code`: 401 TOTP_REQUIRED
+    without it, TOTP_INVALID (a wrong try) when it is wrong.
+    """
+    from app.api.auth import password_reset
+    from app.api.security import service as security
+    from app.api.users.service import merge_guest_into_user
+
+    user = await password_reset.reset(
+        session, email=body.email, code=body.code, new_password=body.new_password, totp_code=body.totp_code,
+    )
+    # Never raises: a merge that fails is undone on its own and tried again later.
+    await merge_guest_into_user(session, user)
+    await session.commit()
+    await session.refresh(user)
+    token = await service.create_access_refresh_tokens(user, session=session, request=request)
+    await security.record(
+        session, request=request, identifier=user.email, user=user, method="password_reset", result="signed_in",
+        session_id=security.sid_in(token.access_token),
+    )
+    await session.commit()
+    _set_auth_cookies(request, response, token.access_token, token.refresh_token)
+    return token
 
 
 @router.post("/change-password", summary="Change user password")

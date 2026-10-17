@@ -302,6 +302,9 @@ async def claim_for_provider(session, user: Users, *, method: str) -> bool:
         .execution_options(synchronize_session=False)
     )
     await _close_open_codes(session, user.id, now)
+    from app.api.auth import password_reset
+
+    await password_reset.close_for_user(session, user.id, now)
 
     from app.api.security import service as security
 

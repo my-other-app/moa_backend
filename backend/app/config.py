@@ -87,6 +87,13 @@ class AppConfig(BaseSettings):
     PUBLIC_SITE_URL: str = "https://myotherapp.in"
     # Where an address is turned into a place for the Security page; {ip} is filled in. Empty disables it.
     GEOIP_URL: str = "https://ipapi.co/{ip}/json/"
+    # Placing a venue typed without a map link (app/api/discover/geocode.py):
+    # OpenStreetMap's Nominatim, at most one request a second, every answer and
+    # every miss kept in geocode_cache. The address goes in the User-Agent, as
+    # Nominatim's usage policy asks. GEOCODER_ENABLED=false stops it entirely.
+    GEOCODER_ENABLED: bool = True
+    GEOCODER_URL: str = "https://nominatim.openstreetmap.org/search"
+    GEOCODER_EMAIL: str = "support@myotherapp.in"
     PUBLIC_CLUB_URL: str = "https://myotherapp.in/clubs/{slug}"
     # A club's published website at its own address (served by the club-sites Cloudflare Worker).
     # PUBLIC_CLUB_URL stays the public site's page tracking links land on; it frames the same site.

@@ -2,8 +2,8 @@
 import, pointed at a scratch database (``moa_bench`` unless BENCH_DB says
 otherwise). Import this before anything under ``app``.
 
-Nothing here reaches the network: the address lookup is switched off, and
-image URLs are signed locally with throwaway keys.
+Nothing here reaches the network: the address lookup and the venue geocoder
+are switched off, and image URLs are signed locally with throwaway keys.
 """
 import os
 
@@ -12,6 +12,7 @@ DB = os.environ.get("BENCH_DB", "moa_bench")
 os.environ["APP_DATABASE_URL"] = f"postgresql+asyncpg://localhost:5432/{DB}"
 os.environ["APP_DATABASE_URL_SYNC"] = f"postgresql://localhost:5432/{DB}"
 os.environ["APP_GEOIP_URL"] = ""
+os.environ["APP_GEOCODER_ENABLED"] = "false"
 for key, value in {
     "APP_SECRET_KEY": "bench-secret-key-not-for-production",
     "APP_CORS_ORIGINS": '["http://testserver"]',

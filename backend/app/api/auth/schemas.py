@@ -123,6 +123,25 @@ class EmailVerified(CustomBaseModel):
     registrations_transferred: int = 0
 
 
+class PasswordForgotRequest(CustomBaseModel):
+    email: str = Field(..., min_length=1, max_length=254, description="The account's email address")
+
+
+class PasswordForgotResponse(CustomBaseModel):
+    """Always the same, whether or not the address has an account."""
+
+    sent: bool = True
+
+
+class PasswordResetConfirm(CustomBaseModel):
+    email: str = Field(..., min_length=1, max_length=254)
+    code: str = Field(..., min_length=1, max_length=20, description="The six-digit code from the email")
+    # The same rule as signing up (/user/register) and the app: 6 or more.
+    new_password: str = Field(..., min_length=6)
+    # Only for an account with two-factor on: its authenticator or a recovery code.
+    totp_code: str | None = Field(None, max_length=64)
+
+
 class AppleSignInRequest(CustomBaseModel):
     """Request schema for Apple Sign In"""
     identity_token: str = Field(..., description="JWT identity token from Apple")
