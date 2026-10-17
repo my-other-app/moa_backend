@@ -949,12 +949,15 @@ async def get_ticket_details(session: AsyncSession, ticket_id: str | int):
 
 async def list_deleted_events(session: AsyncSession, limit: int = 20, offset: int = 0):
     """Soft-deleted events, so a deletion can be found and undone."""
+    # include_deleted on each: the session hides deleted rows from every ORM
+    # query (app.db.listeners), so without it this finds none.
     total = await session.scalar(
-        select(func.count(Events.id)).where(Events.is_deleted == True)
+        select(func.count(Events.id)).where(Events.is_deleted == True).execution_options(include_deleted=True)
     )
     rows = await session.scalars(
         select(Events)
         .where(Events.is_deleted == True)
+        .execution_options(include_deleted=True)
         # interests included: the response model reads it, and a lazy load
         # during serialisation happens outside the async context and raises
         # MissingGreenlet.
@@ -974,6 +977,7 @@ async def restore_event(session: AsyncSession, event_id: int):
     event = await session.scalar(
         select(Events)
         .where(Events.id == event_id, Events.is_deleted == True)
+        .execution_options(include_deleted=True)
         .options(
             selectinload(Events.category),
             selectinload(Events.club),

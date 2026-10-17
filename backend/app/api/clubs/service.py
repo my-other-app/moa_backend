@@ -234,8 +234,7 @@ async def approve_club(session: AsyncSession, club_id: int) -> Clubs:
     # expires attributes by default, and a later *lazy* load during response
     # serialization (outside the session's async context) would raise
     # MissingGreenlet, since Pydantic can't await it.
-    await session.refresh(club, attribute_names=["interests"])
-    return club
+    return await club_for_answer(session, club.id)
 
 
 def send_approved_email(to: str, *, club_name: str) -> None:
@@ -278,8 +277,27 @@ async def reject_club(session: AsyncSession, club_id: int) -> Clubs:
     club = await get_club(club_id, session)
     club.soft_delete()
     await session.commit()
-    await session.refresh(club, attribute_names=["interests"])
-    return club
+    return await club_for_answer(session, club.id)
+
+
+async def club_for_answer(session: AsyncSession, club_id: int) -> Clubs:
+    """
+    The club as an admin answer (ClubAdminDetailResponse) reads it, with its
+    interests and organisation loaded -- the schema reads `org`, and a lazy
+    load while Pydantic serialises raises MissingGreenlet, so a club in an
+    organisation turned its own approve, reject or delete into a 500 after the
+    change had committed.
+
+    Read with `include_deleted`: after a reject or delete the club *is*
+    deleted, and the session hides deleted rows from every ORM query
+    (app.db.listeners), so a plain `refresh` found no row and failed too.
+    """
+    return await session.scalar(
+        select(Clubs)
+        .where(Clubs.id == club_id)
+        .options(selectinload(Clubs.interests), selectinload(Clubs.org))
+        .execution_options(include_deleted=True, populate_existing=True)
+    )
 
 
 async def get_club_admin_detail(session: AsyncSession, club_id: int):
@@ -356,8 +374,7 @@ async def delete_club(session: AsyncSession, club_id: int) -> Clubs:
     club = await get_club(club_id, session)
     club.soft_delete()
     await session.commit()
-    await session.refresh(club, attribute_names=["interests"])
-    return club
+    return await club_for_answer(session, club.id)
 
 
 async def list_deleted_clubs(session: AsyncSession, limit: int = 20, offset: int = 0):
@@ -367,19 +384,76 @@ async def list_deleted_clubs(session: AsyncSession, limit: int = 20, offset: int
     Everything in this product soft-deletes and nothing restored, so "reject"
     and "delete" were effectively permanent -- the dialogs said a developer
     could undo it, which was true and also an admission the product could not.
+
+    Every statement here says `include_deleted`. The session hides deleted
+    rows from every ORM query (app.db.listeners); asking for
+    `is_deleted == True` without it ANDs `is_deleted IS false` on and finds
+    nothing, which is why the Trash was empty in production. The organisation
+    and the owner's address are read the same way: either may have been
+    deleted along with the club.
     """
+    see_all = {"include_deleted": True}
     total = await session.scalar(
-        select(func.count(Clubs.id)).where(Clubs.is_deleted == True)
+        select(func.count(Clubs.id)).where(Clubs.is_deleted == True).execution_options(**see_all)
     )
-    rows = await session.scalars(
-        select(Clubs)
-        .where(Clubs.is_deleted == True)
-        .options(selectinload(Clubs.interests))
-        .order_by(Clubs.deleted_at.desc().nulls_last(), Clubs.id.desc())
-        .limit(limit)
-        .offset(offset)
+    clubs = list(
+        await session.scalars(
+            select(Clubs)
+            .where(Clubs.is_deleted == True)
+            .options(selectinload(Clubs.interests))
+            .order_by(Clubs.deleted_at.desc().nulls_last(), Clubs.id.desc())
+            .limit(limit)
+            .offset(offset)
+            .execution_options(**see_all)
+        )
     )
-    return list(rows), (total or 0)
+    org_ids = {club.org_id for club in clubs if club.org_id}
+    orgs = dict(
+        (
+            await session.execute(
+                select(Organizations.id, Organizations.name)
+                .where(Organizations.id.in_(org_ids))
+                .execution_options(**see_all)
+            )
+        ).all()
+    ) if org_ids else {}
+    owner_ids = {club.user_id for club in clubs if club.user_id}
+    owners = dict(
+        (
+            await session.execute(
+                select(Users.id, Users.email).where(Users.id.in_(owner_ids)).execution_options(**see_all)
+            )
+        ).all()
+    ) if owner_ids else {}
+
+    rows = []
+    for club in clubs:
+        rows.append(
+            {
+                "id": club.id,
+                "name": club.name,
+                "slug": club.slug,
+                "logo": club.logo,
+                "about": club.about,
+                "location_name": club.location_name,
+                "location_link": club.location_link,
+                "contact_phone": club.contact_phone,
+                "contact_email": club.contact_email,
+                "created_at": club.created_at,
+                "deleted_at": club.deleted_at,
+                "is_verified": club.is_verified,
+                "interests": [
+                    {"id": i.id, "name": i.name, "icon": i.icon,
+                     "icon_type": getattr(i.icon_type, "value", i.icon_type)}
+                    for i in (club.interests or [])
+                ],
+                "org": {"id": club.org_id, "name": orgs[club.org_id]} if club.org_id in orgs else None,
+                "owner_email": owners.get(club.user_id),
+                "requested_plan": club.requested_plan,
+                "requested_cycle": club.requested_cycle,
+            }
+        )
+    return rows, (total or 0)
 
 
 async def restore_club(session: AsyncSession, club_id: int) -> Clubs:
@@ -389,18 +463,32 @@ async def restore_club(session: AsyncSession, club_id: int) -> Clubs:
     Restoring does not re-verify: a club deleted while pending comes back
     pending, so an admin still makes the approval decision deliberately
     rather than inheriting it from an undo.
+
+    The club's sign-in account comes back with it when it was deleted too (an
+    admin deleting a club's account deletes the club: users.service), or the
+    restored club could never sign in. Read with `include_deleted`, as in
+    `list_deleted_clubs`: without it the deleted club is never found.
     """
     club = await session.scalar(
-        select(Clubs).where(Clubs.id == club_id, Clubs.is_deleted == True)
+        select(Clubs)
+        .where(Clubs.id == club_id, Clubs.is_deleted == True)
+        .execution_options(include_deleted=True)
     )
     if not club:
         raise CustomHTTPException(404, "No deleted club with that id")
 
     club.is_deleted = False
     club.deleted_at = None
+    owner = await session.scalar(
+        select(Users)
+        .where(Users.id == club.user_id, Users.is_deleted == True, Users.user_type == UserTypes.club)
+        .execution_options(include_deleted=True)
+    )
+    if owner is not None:
+        owner.is_deleted = False
+        owner.deleted_at = None
     await session.commit()
-    await session.refresh(club, attribute_names=["interests"])
-    return club
+    return await club_for_answer(session, club.id)
 
 
 async def get_all_clubs(

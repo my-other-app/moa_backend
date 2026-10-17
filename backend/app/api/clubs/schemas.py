@@ -414,6 +414,8 @@ class ClubAdminDetailResponse(CustomBaseModel):
     #: queue shows what each applicant expects to be on.
     requested_plan: str | None = Field(None)
     requested_cycle: str | None = Field(None)
+    #: When it was deleted: set on the Trash's rows, null everywhere else.
+    deleted_at: datetime | None = Field(None)
 
 
 class NoteCreateUpdateResponse(CustomBaseModel):

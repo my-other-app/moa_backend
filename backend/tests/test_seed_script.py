@@ -128,9 +128,13 @@ async def test_remove_is_a_soft_delete(session, world):
 
     await remove(session)
 
-    # Soft, like the rest of the platform, so a mistake is recoverable.
+    # Soft, like the rest of the platform, so a mistake is recoverable. Read
+    # with include_deleted: the session hides deleted rows, as production's
+    # does (app.db.listeners).
     still_there = (
-        await session.scalars(select(Events).where(Events.id.in_(before)))
+        await session.scalars(
+            select(Events).where(Events.id.in_(before)).execution_options(include_deleted=True)
+        )
     ).all()
     assert len(still_there) == len(before)
     assert all(e.is_deleted for e in still_there)
