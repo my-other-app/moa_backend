@@ -73,9 +73,14 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     about = Column(String, nullable=True)
     location_name = Column(String, nullable=True)
     location_link = Column(String, nullable=True)
-    # Where the venue is, read from location_link (a map link) when it holds one; for "near you".
+    # Where the venue is, for "near you": read from location_link (a map
+    # link) when it holds one, found from location_name by the geocoder when
+    # it does not, or pinned by hand on the dashboard's map.
     lat = Column(Float, nullable=True)
     lng = Column(Float, nullable=True)
+    # Which of those the point came from: 'manual' > 'link' > 'geocoded'; a
+    # weaker one never replaces a stronger (app.api.discover.geo.apply_place).
+    geo_source = Column(String(10), nullable=True)
     has_prize = Column(Boolean, nullable=False, default=False)
     prize_amount = Column(Numeric(10, 2), nullable=True)
     contact_name = Column(String, nullable=True)

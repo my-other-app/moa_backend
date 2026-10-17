@@ -122,6 +122,25 @@ def _fresh_discover_state():
 
 
 @pytest.fixture(autouse=True)
+def _no_geocoder(monkeypatch):
+    """The venue geocoder never runs in the suite unless a test turns it on,
+    and never reaches the network even then: a test that wants answers puts
+    its own fake in front of it (tests/test_geocoding.py)."""
+    import httpx
+
+    from app.api.discover import geocode
+
+    def unreachable(request):
+        raise AssertionError(f"the geocoder tried to reach the network: {request.url}")
+
+    monkeypatch.setattr(settings, "GEOCODER_ENABLED", False)
+    monkeypatch.setattr(geocode, "_http", lambda: httpx.AsyncClient(transport=httpx.MockTransport(unreachable)))
+    geocode.reset()
+    yield
+    geocode.reset()
+
+
+@pytest.fixture(autouse=True)
 def _quiet_email(monkeypatch):
     """Transactional mail never leaves the suite. A sign-in from a device the
     account has not seen sends one, which is every first login in every test;

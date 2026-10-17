@@ -6,6 +6,7 @@ from app.api.users.schemas import UserPublic
 from app.core.storage.fields import S3Image
 from app.api.interests.schemas import InterestPublic
 from app.core.response.base_model import CustomBaseModel
+from app.api.discover.geo import pin_from_form
 
 
 class ClubBaseMin(CustomBaseModel):
@@ -92,7 +93,15 @@ class UpdateClub:
         brand_primary: str | None = Form(None),
         brand_secondary: str | None = Form(None),
         tagline: str | None = Form(None, max_length=120),
+        # A pin from the dashboard's map: the club's point itself, above any
+        # link's. It stays through later saves until new values replace it,
+        # or clear_point drops it back to the link's or the words' point.
+        lat: float | None = Form(None, ge=-90, le=90),
+        lng: float | None = Form(None, ge=-180, le=180),
+        clear_point: bool = Form(False),
     ):
+        self.pin = pin_from_form(lat, lng)
+        self.clear_point = clear_point
         self.name = name
         self.logo = logo
         self.tagline = tagline
@@ -273,6 +282,10 @@ class ClubCreateUpdateResponse(CustomBaseModel):
     org_id: int | None = Field(None)
     location_name: str | None = Field(None)
     location_link: str | None = Field(None)
+    # The club's point after the save and where it came from: 'manual', 'link' or 'geocoded'.
+    lat: float | None = Field(None)
+    lng: float | None = Field(None)
+    geo_source: str | None = Field(None)
     contact_phone: str | None = Field(None)
     contact_email: str | None = Field(None)
     created_at: datetime = Field(...)
@@ -308,6 +321,11 @@ class ClubPublicDetailResponse(CustomBaseModel):
     team: list[ClubTeamMemberOut] = Field(default_factory=list)
     location_name: str | None = Field(None)
     location_link: str | None = Field(None)
+    # The club's pin for the dashboard's map, and where it came from:
+    # 'manual', 'link' or 'geocoded' (null when it has no point of its own).
+    lat: float | None = Field(None)
+    lng: float | None = Field(None)
+    geo_source: str | None = Field(None)
     about: str | None = Field(None)
     rating: float = Field(...)
     total_ratings: int = Field(...)

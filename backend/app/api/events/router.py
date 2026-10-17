@@ -84,9 +84,10 @@ router.include_router(registration_router, tags=["Registration"])
 
 
 def _follow_map_link(background_tasks: BackgroundTasks, event) -> None:
-    """A short map link (maps.app.goo.gl…) is followed after the answer, to find the venue's point."""
-    if geo.needs_resolving(event):
-        background_tasks.add_task(geo.resolve_and_store, "event", event.id)
+    """A venue still without a point is placed after the answer: its short map
+    link (maps.app.goo.gl…) followed, or else its words geocoded."""
+    if geo.needs_locating(event):
+        background_tasks.add_task(geo.locate_and_store, "event", event.id)
 
 
 def _role_of(registration) -> Optional[RegistrationRole]:
@@ -157,6 +158,7 @@ async def create_event(
         speakers=event.speakers,
         speaker_photos=speaker_photos,
         status=event.status,
+        pin=event.pin,
     )
     _follow_map_link(background_tasks, created)
     return created

@@ -10,7 +10,7 @@ from fastapi import APIRouter, BackgroundTasks, Path, Query, Request, Response
 from app.api.discover import counters, geo, service
 from app.api.discover.schemas import (
     BackfillResult, CalendarMonth, CategoryCount, ClubEvents, ClubPage, ClubSearch, CounterFixes, EventPage, EventSearch,
-    Home, Sitemap, Where,
+    GeocodeBackfillResult, Home, Sitemap, Where,
 )
 from app.api.threads.schemas import ThreadPage
 from app.core.auth.dependencies import AdminAuth, OptionalAuth
@@ -191,6 +191,22 @@ async def sitemap(request: Request, session: SessionDep, user: OptionalAuth) -> 
 @admin_router.post("/geo-backfill", summary="Read the point out of every event and club map link that has none yet")
 async def geo_backfill(session: SessionDep, user: AdminAuth) -> BackfillResult:
     return BackfillResult(**await geo.backfill_all(session))
+
+
+@admin_router.post("/geocode-backfill", summary="Place every event and club without a point by geocoding its venue's words")
+async def geocode_backfill(
+    session: SessionDep,
+    user: AdminAuth,
+    max_requests: int = Query(30, ge=0, le=50, description="At most this many requests go to the geocoder (one a second); words it already answered cost none"),
+) -> GeocodeBackfillResult:
+    """Events not over yet first, then clubs, then past events. Only rows
+    without any point are written, so a pin or a map link's point is never
+    touched. Run it again while `remaining` is above zero.
+
+    At one request a second a run takes up to about `max_requests` seconds,
+    so the cap keeps it inside the proxy's minute; what it found is committed
+    as it goes, so even a run cut short keeps its work."""
+    return GeocodeBackfillResult(**await geo.geocode_backfill(session, max_requests=max_requests))
 
 
 @admin_router.post("/reconcile-counters", summary="Recount any event's going count or club's follower count that disagrees with its rows")

@@ -275,6 +275,27 @@ class BackfillResult(BaseModel):
     clubs: BackfillCounts
 
 
+class GeocodeCounts(BaseModel):
+    # Rows whose words the geocoder has answered for (from its cache or just now).
+    checked: int
+    # Of those, the rows that got a point.
+    geocoded: int
+    not_found: int
+
+
+class GeocodeBackfillResult(BaseModel):
+    """What one run of the venue geocoder's backfill did."""
+    # False when GEOCODER_ENABLED is off: then nothing was done.
+    enabled: bool
+    events: GeocodeCounts
+    clubs: GeocodeCounts
+    # Requests sent to the geocoder in this run (one a second).
+    requests: int
+    # Rows left without an answer: the request budget ran out, the geocoder
+    # paused or did not answer. Run it again for them.
+    remaining: int
+
+
 class CounterFixes(BaseModel):
     """How many events' going counts and clubs' follower counts had to be recounted."""
     events: int

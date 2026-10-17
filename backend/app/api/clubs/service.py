@@ -146,10 +146,14 @@ async def update_club(session: AsyncSession, club_id: int, club: CreateClub):
         if value and not HEX_COLOUR.match(value):
             raise CustomHTTPException(422, message=f"{key.replace('_', ' ')}: use a 6-digit hex colour, like #1db9a0.")
         setattr(db_club, key, value or None)
-    db_club.location_name = club.location_name
-    # A changed map link moves the club's point (read now, or followed after the save); the same link keeps it.
-    if ((club.location_link or "").strip() or None) != db_club.location_link:
-        geo.set_link(db_club, club.location_link)
+    # The place, by geo.apply_place's precedence (a pin, then the map link,
+    # then the words). A changed map link moves a derived point (read now, or
+    # followed after the save); the same link keeps it. A pin stays until new
+    # pin values come or clear_point drops it.
+    geo.apply_place(
+        db_club, link=club.location_link, venue=club.location_name,
+        manual=getattr(club, "pin", None), clear_point=bool(getattr(club, "clear_point", False)),
+    )
     db_club.org_id = club.org_id
     db_club.contact_phone = club.contact_phone
     db_club.contact_email = club.contact_email
@@ -876,6 +880,9 @@ async def get_club_details(
         "about": club.about,
         "location_name": club.location_name,
         "location_link": club.location_link,
+        "lat": club.lat,
+        "lng": club.lng,
+        "geo_source": club.geo_source,
         "contact_phone": club.contact_phone,
         "contact_email": club.contact_email,
         "brand_primary": club.brand_primary,

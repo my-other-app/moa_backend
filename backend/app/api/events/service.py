@@ -82,6 +82,7 @@ async def create_event(
     speakers: Optional[list[EventSpeakerCreate]] = None,
     speaker_photos: Optional[list[UploadFile]] = None,
     status: Optional[str] = None,
+    pin: Optional[tuple[float, float]] = None,
     *args,
     **kwargs,
 ):
@@ -141,9 +142,10 @@ async def create_event(
         from app.api.closeout.models import EventStatus
 
         db_event.lifecycle = EventStatus(status)
-    # The venue's point, read from its map link now when the link holds one;
-    # a short link is followed after the save (see the router).
-    geo.set_link(db_event, location_link)
+    # The venue's point: the pin when one came, else read from its map link
+    # now when the link holds one; a short link is followed, or the venue's
+    # words geocoded, after the save (see the router).
+    geo.apply_place(db_event, link=location_link, manual=pin)
     if poster:
         content = io.BytesIO(await poster.read())
         db_event.poster = {
@@ -290,15 +292,23 @@ async def update_event(
     db_event.category_id = event.category_id
     db_event.has_fee = event.has_fee
     db_event.reg_fee = event.reg_fee
-    db_event.location_name = event.location_name
-    # The map link: a new one moves the point, a removal clears both, nothing sent keeps them.
+    db_event.is_online = event.is_online
+    # The place, by geo.apply_place's precedence (a pin, then the map link,
+    # then the venue's words). The map link: a new one moves a derived point, a
+    # removal clears both, nothing sent keeps them. A pin stays until new pin
+    # values come or clear_point drops it.
     if getattr(event, "clear_location_link", False):
-        geo.set_link(db_event, None)
+        map_link = None
     elif getattr(event, "location_link", None) is not None:
-        geo.set_link(db_event, event.location_link)
+        map_link = event.location_link
+    else:
+        map_link = geo.KEEP
+    geo.apply_place(
+        db_event, link=map_link, venue=event.location_name,
+        manual=getattr(event, "pin", None), clear_point=bool(getattr(event, "clear_point", False)),
+    )
     db_event.has_prize = event.has_prize
     db_event.prize_amount = event.prize_amount
-    db_event.is_online = event.is_online
     if getattr(event, "merch_enabled", None) is not None:
         db_event.merch_enabled = event.merch_enabled
     if getattr(event, "swag_enabled", None) is not None:
