@@ -79,6 +79,11 @@ application.add_middleware(
 application.add_middleware(ProcessingTimeMiddleware)
 application.add_middleware(SecurityHeadersMiddleware)
 application.add_middleware(SlowAPIMiddleware)
+# Outermost, so the rate limiter and everything after it see the caller
+# rather than Docker's bridge address (app.core.net).
+from app.core.net import ClientAddressMiddleware  # noqa: E402
+
+application.add_middleware(ClientAddressMiddleware)
 
 # @application.exception_handler(ValidationError)
 # async def validation_exception_handler2(request, exc):

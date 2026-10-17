@@ -759,10 +759,9 @@ def cell_is_cacheable(c: tuple[int, int]) -> bool:
 
 
 def client_ip(request) -> str:
-    forwarded = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
-    if forwarded:
-        return forwarded
-    return request.client.host if request.client else ""
+    from app.core.net import client_address
+
+    return client_address(request)
 
 
 def _is_public(ip: str) -> bool:
