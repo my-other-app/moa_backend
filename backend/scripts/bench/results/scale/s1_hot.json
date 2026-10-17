@@ -1,0 +1,440 @@
+[
+ {
+  "kind": "event",
+  "mode": "app",
+  "event": "big",
+  "event_id": 8066,
+  "registered_before": 7600,
+  "n": 500,
+  "seconds": 10.0,
+  "wall_s": 13.36,
+  "throughput_per_s": 37.4,
+  "answered": 500,
+  "p50_ms": 3460.8,
+  "p95_ms": 5259.7,
+  "p99_ms": 6475.8,
+  "max_ms": 7431.5,
+  "codes": {
+   "200": 500
+  },
+  "going_count_after": 8100,
+  "rows_after": 8100,
+  "counter_matches": true,
+  "journey_templates_on_event": 12,
+  "max_lock_waiters": 29,
+  "share_of_time_someone_waited_on_a_lock": 0.77,
+  "server": {
+   "workers": [
+    {
+     "pid": 91400,
+     "requests": 500,
+     "max_inflight": 243,
+     "pool_checked_out": 0,
+     "pool_overflow": 0,
+     "loop_lag_p99_ms": 89.5,
+     "loop_lag_max_ms": 1907.7
+    }
+   ],
+   "loop_lag_ms": {
+    "p50": 1.51,
+    "p99": 89.5,
+    "max": 1907.7
+   },
+   "for_update_ms": {
+    "n": 500,
+    "p50": 252.95,
+    "p95": 747.4,
+    "p99": 2635.4,
+    "max": 2667.9
+   }
+  },
+  "label": "s1 w1 app big"
+ },
+ {
+  "kind": "event",
+  "mode": "app",
+  "event": "empty",
+  "event_id": 46,
+  "registered_before": 0,
+  "n": 500,
+  "seconds": 10.0,
+  "wall_s": 11.6,
+  "throughput_per_s": 43.1,
+  "answered": 500,
+  "p50_ms": 48.8,
+  "p95_ms": 2011.4,
+  "p99_ms": 2305.9,
+  "max_ms": 2828.4,
+  "codes": {
+   "200": 500
+  },
+  "going_count_after": 500,
+  "rows_after": 500,
+  "counter_matches": true,
+  "journey_templates_on_event": 12,
+  "max_lock_waiters": 27,
+  "share_of_time_someone_waited_on_a_lock": 0.38,
+  "server": {
+   "workers": [
+    {
+     "pid": 91400,
+     "requests": 500,
+     "max_inflight": 102,
+     "pool_checked_out": 0,
+     "pool_overflow": 0,
+     "loop_lag_p99_ms": 54.4,
+     "loop_lag_max_ms": 98.9
+    }
+   ],
+   "loop_lag_ms": {
+    "p50": 0.47,
+    "p99": 54.4,
+    "max": 98.9
+   },
+   "for_update_ms": {
+    "n": 500,
+    "p50": 0.78,
+    "p95": 683.9,
+    "p99": 928.1,
+    "max": 937.5
+   }
+  },
+  "label": "s1 w1 app empty"
+ },
+ {
+  "kind": "event",
+  "mode": "public",
+  "event": "big",
+  "event_id": 8066,
+  "registered_before": 8100,
+  "n": 500,
+  "seconds": 10.0,
+  "wall_s": 14.72,
+  "throughput_per_s": 34.0,
+  "answered": 500,
+  "p50_ms": 1884.0,
+  "p95_ms": 5865.5,
+  "p99_ms": 6437.4,
+  "max_ms": 6841.8,
+  "codes": {
+   "200": 500
+  },
+  "going_count_after": 8600,
+  "rows_after": 8600,
+  "counter_matches": true,
+  "journey_templates_on_event": 12,
+  "max_lock_waiters": 26,
+  "share_of_time_someone_waited_on_a_lock": 0.76,
+  "server": {
+   "workers": [
+    {
+     "pid": 91400,
+     "requests": 500,
+     "max_inflight": 212,
+     "pool_checked_out": 0,
+     "pool_overflow": 0,
+     "loop_lag_p99_ms": 91.9,
+     "loop_lag_max_ms": 104.1
+    }
+   ],
+   "loop_lag_ms": {
+    "p50": 2.33,
+    "p99": 91.9,
+    "max": 104.1
+   },
+   "for_update_ms": {
+    "n": 500,
+    "p50": 398.35,
+    "p95": 723.2,
+    "p99": 909.2,
+    "max": 1082.4
+   }
+  },
+  "label": "s1 w1 public big"
+ },
+ {
+  "kind": "follow",
+  "club_id": 12223,
+  "followers_before": 23852,
+  "n": 10000,
+  "concurrency": 100,
+  "wall_s": 64.34,
+  "throughput_per_s": 155.4,
+  "answered": 10000,
+  "p50_ms": 470.0,
+  "p95_ms": 1766.3,
+  "p99_ms": 4149.1,
+  "max_ms": 5994.1,
+  "codes": {
+   "200": 9997,
+   "ReadError": 3
+  },
+  "follower_count_after": 33849,
+  "rows_after": 33849,
+  "counter_matches": true,
+  "max_lock_waiters": 29,
+  "share_of_time_someone_waited_on_a_lock": 0.86,
+  "server": {
+   "workers": [
+    {
+     "pid": 91400,
+     "requests": 9997,
+     "max_inflight": 108,
+     "pool_checked_out": 0,
+     "pool_overflow": 0,
+     "loop_lag_p99_ms": 27.8,
+     "loop_lag_max_ms": 116.7
+    }
+   ],
+   "loop_lag_ms": {
+    "p50": 0.67,
+    "p99": 27.8,
+    "max": 116.7
+   },
+   "for_update_ms": {
+    "n": 0,
+    "p50": NaN,
+    "p95": NaN,
+    "p99": NaN,
+    "max": 0
+   }
+  },
+  "label": "s1 w1 follow 10k c100"
+ },
+ {
+  "kind": "event",
+  "mode": "app",
+  "event": "big",
+  "event_id": 8066,
+  "registered_before": 8600,
+  "n": 500,
+  "seconds": 10.0,
+  "wall_s": 42.86,
+  "throughput_per_s": 11.7,
+  "answered": 500,
+  "p50_ms": 29636.2,
+  "p95_ms": 37981.0,
+  "p99_ms": 40655.9,
+  "max_ms": 42145.8,
+  "codes": {
+   "200": 471,
+   "500": 28,
+   "ReadError": 1
+  },
+  "going_count_after": 9071,
+  "rows_after": 9071,
+  "counter_matches": true,
+  "journey_templates_on_event": 12,
+  "max_lock_waiters": 96,
+  "share_of_time_someone_waited_on_a_lock": 0.67,
+  "server": {
+   "workers": [
+    {
+     "pid": 92735,
+     "requests": 37,
+     "max_inflight": 29,
+     "pool_checked_out": 1,
+     "pool_overflow": 0,
+     "loop_lag_p99_ms": 17.6,
+     "loop_lag_max_ms": 2245.2
+    },
+    {
+     "pid": 92734,
+     "requests": 318,
+     "max_inflight": 318,
+     "pool_checked_out": 0,
+     "pool_overflow": 0,
+     "loop_lag_p99_ms": 167.6,
+     "loop_lag_max_ms": 965.6
+    },
+    {
+     "pid": 92733,
+     "requests": 33,
+     "max_inflight": 23,
+     "pool_checked_out": 0,
+     "pool_overflow": 0,
+     "loop_lag_p99_ms": 29.2,
+     "loop_lag_max_ms": 1321.6
+    },
+    {
+     "pid": 92736,
+     "requests": 111,
+     "max_inflight": 111,
+     "pool_checked_out": 0,
+     "pool_overflow": 0,
+     "loop_lag_p99_ms": 70.4,
+     "loop_lag_max_ms": 1245.9
+    }
+   ],
+   "loop_lag_ms": {
+    "p50": 1.05,
+    "p99": 110.8,
+    "max": 2245.2
+   },
+   "for_update_ms": {
+    "n": 471,
+    "p50": 1543.45,
+    "p95": 17783.7,
+    "p99": 19157.0,
+    "max": 20237.3
+   }
+  },
+  "label": "s1 w4 app big"
+ },
+ {
+  "kind": "event",
+  "mode": "app",
+  "event": "empty",
+  "event_id": 53,
+  "registered_before": 0,
+  "n": 500,
+  "seconds": 10.0,
+  "wall_s": 10.02,
+  "throughput_per_s": 49.9,
+  "answered": 500,
+  "p50_ms": 525.9,
+  "p95_ms": 2592.0,
+  "p99_ms": 3803.8,
+  "max_ms": 5633.0,
+  "codes": {
+   "200": 500
+  },
+  "going_count_after": 500,
+  "rows_after": 500,
+  "counter_matches": true,
+  "journey_templates_on_event": 20,
+  "max_lock_waiters": 75,
+  "share_of_time_someone_waited_on_a_lock": 0.57,
+  "server": {
+   "workers": [
+    {
+     "pid": 92735,
+     "requests": 206,
+     "max_inflight": 53,
+     "pool_checked_out": 0,
+     "pool_overflow": 0,
+     "loop_lag_p99_ms": 27.4,
+     "loop_lag_max_ms": 2245.2
+    },
+    {
+     "pid": 92734,
+     "requests": 119,
+     "max_inflight": 19,
+     "pool_checked_out": 0,
+     "pool_overflow": 0,
+     "loop_lag_p99_ms": 76.2,
+     "loop_lag_max_ms": 1396.2
+    },
+    {
+     "pid": 92733,
+     "requests": 161,
+     "max_inflight": 35,
+     "pool_checked_out": 0,
+     "pool_overflow": 0,
+     "loop_lag_p99_ms": 27.4,
+     "loop_lag_max_ms": 1321.6
+    },
+    {
+     "pid": 92736,
+     "requests": 195,
+     "max_inflight": 111,
+     "pool_checked_out": 0,
+     "pool_overflow": 0,
+     "loop_lag_p99_ms": 68.0,
+     "loop_lag_max_ms": 1566.9
+    }
+   ],
+   "loop_lag_ms": {
+    "p50": 1.03,
+    "p99": 53.0,
+    "max": 2245.2
+   },
+   "for_update_ms": {
+    "n": 653,
+    "p50": 485.54,
+    "p95": 12517.4,
+    "p99": 18432.3,
+    "max": 20237.3
+   }
+  },
+  "label": "s1 w4 app empty"
+ },
+ {
+  "kind": "follow",
+  "club_id": 3209,
+  "followers_before": 30885,
+  "n": 10000,
+  "concurrency": 100,
+  "wall_s": 53.87,
+  "throughput_per_s": 185.6,
+  "answered": 10000,
+  "p50_ms": 20.1,
+  "p95_ms": 3156.0,
+  "p99_ms": 6318.0,
+  "max_ms": 18803.1,
+  "codes": {
+   "500": 7407,
+   "ReadError": 86,
+   "200": 2506,
+   "RemoteProtocolError": 1
+  },
+  "follower_count_after": 33391,
+  "rows_after": 33391,
+  "counter_matches": true,
+  "max_lock_waiters": 95,
+  "share_of_time_someone_waited_on_a_lock": 0.9,
+  "server": {
+   "workers": [
+    {
+     "pid": 92735,
+     "requests": 2219,
+     "max_inflight": 53,
+     "pool_checked_out": 0,
+     "pool_overflow": 0,
+     "loop_lag_p99_ms": 24.8,
+     "loop_lag_max_ms": 876.7
+    },
+    {
+     "pid": 92734,
+     "requests": 3726,
+     "max_inflight": 32,
+     "pool_checked_out": 0,
+     "pool_overflow": 0,
+     "loop_lag_p99_ms": 47.9,
+     "loop_lag_max_ms": 153.3
+    },
+    {
+     "pid": 92733,
+     "requests": 1316,
+     "max_inflight": 35,
+     "pool_checked_out": 0,
+     "pool_overflow": 0,
+     "loop_lag_p99_ms": 15.9,
+     "loop_lag_max_ms": 953.4
+    },
+    {
+     "pid": 92736,
+     "requests": 3214,
+     "max_inflight": 111,
+     "pool_checked_out": 0,
+     "pool_overflow": 0,
+     "loop_lag_p99_ms": 61.3,
+     "loop_lag_max_ms": 1566.9
+    }
+   ],
+   "loop_lag_ms": {
+    "p50": 0.85,
+    "p99": 41.7,
+    "max": 1566.9
+   },
+   "for_update_ms": {
+    "n": 534,
+    "p50": 640.76,
+    "p95": 13530.6,
+    "p99": 18520.6,
+    "max": 20237.3
+   }
+  },
+  "label": "s1 w4 follow 10k c100"
+ }
+]

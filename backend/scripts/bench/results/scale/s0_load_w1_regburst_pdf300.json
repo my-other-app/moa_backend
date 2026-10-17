@@ -1,0 +1,157 @@
+{
+ "label": "s0_w1_regburst_pdf300",
+ "db": "moa_s0",
+ "workers": 1,
+ "mix": [
+  [
+   "home",
+   40
+  ],
+  [
+   "search",
+   25
+  ],
+  [
+   "event",
+   10
+  ],
+  [
+   "club",
+   10
+  ],
+  [
+   "foryou",
+   10
+  ],
+  [
+   "list",
+   5
+  ]
+ ],
+ "results": [
+  {
+   "concurrency": 10,
+   "duration_s": 40.0,
+   "requests": 1913,
+   "rps": 47.8,
+   "error_rate": 0.0005,
+   "codes": {
+    "200": 1912,
+    "500": 1
+   },
+   "errors": {
+    "club 500": 1
+   },
+   "latency_ms": {
+    "p50": 74.6,
+    "p95": 177.9,
+    "p99": 4418.2,
+    "mean": 275.4
+   },
+   "by_kind": {
+    "club": {
+     "n": 171,
+     "p50": 119.2,
+     "p95": 217.9,
+     "p99": 24393.0
+    },
+    "event": {
+     "n": 192,
+     "p50": 94.0,
+     "p95": 262.1,
+     "p99": 7704.2
+    },
+    "foryou": {
+     "n": 195,
+     "p50": 114.7,
+     "p95": 244.7,
+     "p99": 3273.1
+    },
+    "home": {
+     "n": 778,
+     "p50": 30.2,
+     "p95": 121.5,
+     "p99": 333.6
+    },
+    "list": {
+     "n": 100,
+     "p50": 85.1,
+     "p95": 158.4,
+     "p99": 2983.8
+    },
+    "search": {
+     "n": 477,
+     "p50": 71.6,
+     "p95": 161.3,
+     "p99": 5338.2
+    }
+   },
+   "cpu_cores_busy": {
+    "server": 0.35,
+    "loadgen": 0.02,
+    "machine": 3.07,
+    "machine_before": 2.26,
+    "postgres_est": 0.44
+   },
+   "pg_backends": {
+    "active|": {
+     "mean": 0.2,
+     "max": 3
+    },
+    "active|Client": {
+     "mean": 0.5,
+     "max": 4
+    },
+    "active|IO:DataFileRead": {
+     "mean": 0.0,
+     "max": 2
+    },
+    "active|Lock:transactionid": {
+     "mean": 0.7,
+     "max": 4
+    },
+    "active|Lock:tuple": {
+     "mean": 7.8,
+     "max": 26
+    },
+    "idle in transaction|": {
+     "mean": 0.1,
+     "max": 2
+    },
+    "idle in transaction|Client": {
+     "mean": 12.9,
+     "max": 28
+    },
+    "idle|Client": {
+     "mean": 4.1,
+     "max": 15
+    }
+   },
+   "server": {
+    "workers": [
+     {
+      "pid": 63795,
+      "requests": 621,
+      "max_inflight": 495,
+      "pool_checked_out": 28,
+      "pool_overflow": 20,
+      "loop_lag_p99_ms": 874.5,
+      "loop_lag_max_ms": 881.8
+     }
+    ],
+    "loop_lag_ms": {
+     "p50": 259.06,
+     "p99": 874.5,
+     "max": 881.8
+    },
+    "for_update_ms": {
+     "n": 490,
+     "p50": 756.93,
+     "p95": 2900.6,
+     "p99": 4292.9,
+     "max": 6293.4
+    }
+   }
+  }
+ ]
+}

@@ -1,0 +1,638 @@
+{
+ "label": "s2",
+ "targets": {
+  "club": "club-7371-sculpture",
+  "event": "e5844-drones-workshop",
+  "interest": 24,
+  "category": 2,
+  "user_id": 1
+ },
+ "results": [
+  {
+   "name": "home",
+   "path": "/discover/home",
+   "params": {},
+   "n": 300,
+   "p50": 1.37447900033294,
+   "p95": 1.5463187503883093,
+   "p99": 1.6192830092586519,
+   "mean": 1.3947533067099962,
+   "statements_min": 0,
+   "statements_max": 0,
+   "sql_ms": 0,
+   "bytes": 38258
+  },
+  {
+   "name": "home (cold)",
+   "path": "/discover/home",
+   "params": {},
+   "n": 5,
+   "p50": 2266.6690419991937,
+   "p95": 7293.637091199344,
+   "p99": 7296.008151039132,
+   "mean": 4235.603841599732,
+   "statements_min": 17,
+   "statements_max": 17,
+   "sql_ms": 4162.573375800639,
+   "bytes": 38258
+  },
+  {
+   "name": "home lat/lng",
+   "path": "/discover/home",
+   "params": {
+    "lat": 12.9716,
+    "lng": 77.5946
+   },
+   "n": 300,
+   "p50": 6.671729499430512,
+   "p95": 7.473737850432372,
+   "p99": 15.9289904103025,
+   "mean": 7.130822639895389,
+   "statements_min": 0,
+   "statements_max": 0,
+   "sql_ms": 0,
+   "bytes": 49622
+  },
+  {
+   "name": "home lat/lng (cold)",
+   "path": "/discover/home",
+   "params": {
+    "lat": 12.9716,
+    "lng": 77.5946
+   },
+   "n": 5,
+   "p50": 3166.9083340002544,
+   "p95": 3504.4199161991855,
+   "p99": 3512.8505160389614,
+   "mean": 3274.8282585998822,
+   "statements_min": 26,
+   "statements_max": 53,
+   "sql_ms": 3006.9511666020844,
+   "bytes": 49622
+  },
+  {
+   "name": "events",
+   "path": "/discover/events",
+   "params": {},
+   "n": 45,
+   "p50": 244.3199170011212,
+   "p95": 275.6989164005063,
+   "p99": 5334.571687959988,
+   "mean": 460.92313695569624,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 446.4749954220072,
+   "bytes": 22976
+  },
+  {
+   "name": "events q",
+   "path": "/discover/events",
+   "params": {
+    "q": "robotics"
+   },
+   "n": 5,
+   "p50": 5260.095833999003,
+   "p95": 6286.920824999834,
+   "p99": 6353.8652649997675,
+   "mean": 5341.259283600084,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 5320.835341600468,
+   "bytes": 23117
+  },
+  {
+   "name": "events q short",
+   "path": "/discover/events",
+   "params": {
+    "q": "ai"
+   },
+   "n": 5,
+   "p50": 3934.217667001576,
+   "p95": 5833.124558399868,
+   "p99": 5920.752811679704,
+   "mean": 4489.312608600449,
+   "statements_min": 3,
+   "statements_max": 5,
+   "sql_ms": 4467.2282079998695,
+   "bytes": 23352
+  },
+  {
+   "name": "events q typo",
+   "path": "/discover/events",
+   "params": {
+    "q": "robtics"
+   },
+   "n": 5,
+   "p50": 19727.46937500051,
+   "p95": 23709.248591399228,
+   "p99": 24340.707584679185,
+   "mean": 18929.616208399966,
+   "statements_min": 5,
+   "statements_max": 7,
+   "sql_ms": 18858.01085880048,
+   "bytes": 23117
+  },
+  {
+   "name": "events q relevance",
+   "path": "/discover/events",
+   "params": {
+    "q": "robotics",
+    "sort": "relevance"
+   },
+   "n": 5,
+   "p50": 12315.853292000611,
+   "p95": 15648.4153170004,
+   "p99": 15817.66069700061,
+   "mean": 11021.75265040023,
+   "statements_min": 3,
+   "statements_max": 5,
+   "sql_ms": 10973.690083000474,
+   "bytes": 23817
+  },
+  {
+   "name": "events this_weekend",
+   "path": "/discover/events",
+   "params": {
+    "when": "this_weekend"
+   },
+   "n": 5,
+   "p50": 6342.112749998705,
+   "p95": 9007.387591399674,
+   "p99": 9408.0456846796,
+   "mean": 6826.691508399381,
+   "statements_min": 3,
+   "statements_max": 5,
+   "sql_ms": 6795.276450000529,
+   "bytes": 22975
+  },
+  {
+   "name": "events category",
+   "path": "/discover/events",
+   "params": {
+    "category": 2
+   },
+   "n": 5,
+   "p50": 2188.804875000642,
+   "p95": 6921.444700400388,
+   "p99": 7592.188773680173,
+   "mean": 3417.600891800612,
+   "statements_min": 3,
+   "statements_max": 5,
+   "sql_ms": 3395.8674165991397,
+   "bytes": 23098
+  },
+  {
+   "name": "events online",
+   "path": "/discover/events",
+   "params": {
+    "type": "online"
+   },
+   "n": 65,
+   "p50": 224.4888749992242,
+   "p95": 256.9163331994787,
+   "p99": 311.21877524019504,
+   "mean": 231.03324349215723,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 216.71612752311026,
+   "bytes": 23617
+  },
+  {
+   "name": "events free",
+   "path": "/discover/events",
+   "params": {
+    "price": "free"
+   },
+   "n": 32,
+   "p50": 251.28164599937008,
+   "p95": 2117.4221440506667,
+   "p99": 5663.222323539997,
+   "mean": 569.5850273749556,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 554.9272017815383,
+   "bytes": 23209
+  },
+  {
+   "name": "events lat/lng (radius 50, date)",
+   "path": "/discover/events",
+   "params": {
+    "lat": 12.9716,
+    "lng": 77.5946
+   },
+   "n": 30,
+   "p50": 400.01304150064243,
+   "p95": 1217.2318373508451,
+   "p99": 1691.7750599997457,
+   "mean": 508.6131790669849,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 490.14969040029735,
+   "bytes": 23570
+  },
+  {
+   "name": "events distance r=50",
+   "path": "/discover/events",
+   "params": {
+    "lat": 12.9716,
+    "lng": 77.5946,
+    "sort": "distance",
+    "radius_km": 50
+   },
+   "n": 30,
+   "p50": 310.2500000004511,
+   "p95": 1115.4392874997934,
+   "p99": 1254.3459487499604,
+   "mean": 508.3076917000653,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 487.7221305337419,
+   "bytes": 23621
+  },
+  {
+   "name": "events distance r=300",
+   "path": "/discover/events",
+   "params": {
+    "lat": 9.9312,
+    "lng": 76.2673,
+    "sort": "distance",
+    "radius_km": 300
+   },
+   "n": 34,
+   "p50": 339.6008334993894,
+   "p95": 818.7828127001007,
+   "p99": 1636.3908485296652,
+   "mean": 443.49476467622856,
+   "statements_min": 4,
+   "statements_max": 6,
+   "sql_ms": 423.33119373506634,
+   "bytes": 23080
+  },
+  {
+   "name": "events popular",
+   "path": "/discover/events",
+   "params": {
+    "sort": "popular"
+   },
+   "n": 6,
+   "p50": 2661.2101879991314,
+   "p95": 2864.7456255002908,
+   "p99": 2868.4272923001117,
+   "mean": 2668.095194666421,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 2646.274117832945,
+   "bytes": 23685
+  },
+  {
+   "name": "events offset=480",
+   "path": "/discover/events",
+   "params": {
+    "offset": 480
+   },
+   "n": 53,
+   "p50": 251.8667499989533,
+   "p95": 339.18841660015454,
+   "p99": 926.0429450005146,
+   "mean": 286.32083020760166,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 272.1706659244173,
+   "bytes": 23125
+  },
+  {
+   "name": "clubs",
+   "path": "/discover/clubs",
+   "params": {},
+   "n": 271,
+   "p50": 54.84337500092806,
+   "p95": 58.65504150006018,
+   "p99": 67.5411167991115,
+   "mean": 55.36056531365152,
+   "statements_min": 6,
+   "statements_max": 7,
+   "sql_ms": 43.097101214131165,
+   "bytes": 14681
+  },
+  {
+   "name": "clubs q",
+   "path": "/discover/clubs",
+   "params": {
+    "q": "robotics"
+   },
+   "n": 300,
+   "p50": 23.373291500320192,
+   "p95": 27.570116950209922,
+   "p99": 29.216578089799437,
+   "mean": 22.005156913346582,
+   "statements_min": 6,
+   "statements_max": 6,
+   "sql_ms": 14.18453185671145,
+   "bytes": 13595
+  },
+  {
+   "name": "clubs q typo",
+   "path": "/discover/clubs",
+   "params": {
+    "q": "robtics"
+   },
+   "n": 300,
+   "p50": 20.243145499989623,
+   "p95": 23.53652709953167,
+   "p99": 27.924170839469287,
+   "mean": 20.8493580832995,
+   "statements_min": 8,
+   "statements_max": 8,
+   "sql_ms": 14.611906140010737,
+   "bytes": 13595
+  },
+  {
+   "name": "clubs interest",
+   "path": "/discover/clubs",
+   "params": {
+    "interest": 24
+   },
+   "n": 246,
+   "p50": 61.2092080000366,
+   "p95": 64.75726025155382,
+   "p99": 66.88706874965646,
+   "mean": 61.08317987398151,
+   "statements_min": 6,
+   "statements_max": 6,
+   "sql_ms": 48.43957410560144,
+   "bytes": 13860
+  },
+  {
+   "name": "clubs nearby",
+   "path": "/discover/clubs",
+   "params": {
+    "lat": 12.9716,
+    "lng": 77.5946,
+    "sort": "nearby"
+   },
+   "n": 5,
+   "p50": 63322.647750001124,
+   "p95": 67191.13495819984,
+   "p99": 67641.68945803962,
+   "mean": 59519.189200200344,
+   "statements_min": 6,
+   "statements_max": 7,
+   "sql_ms": 59441.885924800226,
+   "bytes": 14746
+  },
+  {
+   "name": "clubs popular",
+   "path": "/discover/clubs",
+   "params": {
+    "sort": "popular"
+   },
+   "n": 266,
+   "p50": 55.81718749999709,
+   "p95": 62.433697750293504,
+   "p99": 81.41481250113434,
+   "mean": 56.55730666918193,
+   "statements_min": 6,
+   "statements_max": 7,
+   "sql_ms": 45.39813865800594,
+   "bytes": 14681
+  },
+  {
+   "name": "club page (big)",
+   "path": "/discover/clubs/club-7371-sculpture",
+   "params": {},
+   "n": 300,
+   "p50": 13.70695850073389,
+   "p95": 16.607024999302666,
+   "p99": 17.51237591885001,
+   "mean": 13.584956533316776,
+   "statements_min": 14,
+   "statements_max": 14,
+   "sql_ms": 7.125799513135765,
+   "bytes": 12728
+  },
+  {
+   "name": "event page",
+   "path": "/discover/events/e5844-drones-workshop",
+   "params": {},
+   "n": 5,
+   "p50": 3410.0684999993973,
+   "p95": 4058.939833200929,
+   "p99": 4176.424466640965,
+   "mean": 3566.395883200312,
+   "statements_min": 11,
+   "statements_max": 11,
+   "sql_ms": 3542.2110583978792,
+   "bytes": 7830
+  },
+  {
+   "name": "threads",
+   "path": "/discover/threads",
+   "params": {},
+   "n": 300,
+   "p50": 42.78520849948109,
+   "p95": 52.86898959902828,
+   "p99": 75.07387250045197,
+   "mean": 43.52792194666108,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 34.92822066674004,
+   "bytes": 31708
+  },
+  {
+   "name": "categories",
+   "path": "/discover/categories",
+   "params": {},
+   "n": 300,
+   "p50": 1.2066249992130906,
+   "p95": 1.6841038490383662,
+   "p99": 2.830564410633085,
+   "mean": 1.2701527966904298,
+   "statements_min": 0,
+   "statements_max": 0,
+   "sql_ms": 0,
+   "bytes": 2423
+  },
+  {
+   "name": "sitemap",
+   "path": "/discover/sitemap",
+   "params": {},
+   "n": 300,
+   "p50": 1.1075210004491964,
+   "p95": 1.2334100996667985,
+   "p99": 1.3029071703749648,
+   "mean": 1.1038720633162789,
+   "statements_min": 0,
+   "statements_max": 0,
+   "sql_ms": 0,
+   "bytes": 801795
+  },
+  {
+   "name": "sitemap (cold)",
+   "path": "/discover/sitemap",
+   "params": {},
+   "n": 5,
+   "p50": 3308.313707999332,
+   "p95": 4148.798100000931,
+   "p99": 4246.741620001194,
+   "mean": 3374.1827916001057,
+   "statements_min": 2,
+   "statements_max": 2,
+   "sql_ms": 3283.774358201117,
+   "bytes": 801795
+  },
+  {
+   "name": "categories (cold)",
+   "path": "/discover/categories",
+   "params": {},
+   "n": 5,
+   "p50": 3169.442459000493,
+   "p95": 3396.403900000587,
+   "p99": 3414.4661800008907,
+   "mean": 3220.7918836000317,
+   "statements_min": 2,
+   "statements_max": 2,
+   "sql_ms": 3204.656416400394,
+   "bytes": 2423
+  },
+  {
+   "name": "app for-you",
+   "path": "/events/for-you",
+   "params": {},
+   "n": 5,
+   "p50": 4094.4148329999734,
+   "p95": 7410.782466399541,
+   "p99": 7914.725859679456,
+   "mean": 4953.018750000047,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 4913.49271660074,
+   "bytes": 20329
+  },
+  {
+   "name": "app list upcoming",
+   "path": "/events/list",
+   "params": {
+    "is_ended": "false"
+   },
+   "n": 5,
+   "p50": 3505.3225419997034,
+   "p95": 3875.2373250001256,
+   "p99": 3916.6893650001293,
+   "mean": 3315.5863252002746,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 3250.2785165990645,
+   "bytes": 20062
+  },
+  {
+   "name": "app list search",
+   "path": "/events/list",
+   "params": {
+    "search": "robotics"
+   },
+   "n": 6,
+   "p50": 2428.171666999333,
+   "p95": 3045.182301499608,
+   "p99": 3134.983193099561,
+   "mean": 2556.602548499844,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 2527.6640488339885,
+   "bytes": 21800
+  },
+  {
+   "name": "app list following",
+   "path": "/events/list",
+   "params": {
+    "is_following": "true"
+   },
+   "n": 300,
+   "p50": 24.724770500142768,
+   "p95": 28.665154150530725,
+   "p99": 34.50298091920557,
+   "mean": 25.441179276610153,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 16.207894906674483,
+   "bytes": 17924
+  },
+  {
+   "name": "app list interests",
+   "path": "/events/list",
+   "params": {
+    "interest_ids": "24"
+   },
+   "n": 5,
+   "p50": 4816.138207999757,
+   "p95": 5414.092716599771,
+   "p99": 5461.303743319659,
+   "mean": 4406.077324800208,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 4358.938441800274,
+   "bytes": 19405
+  },
+  {
+   "name": "events offset=4800",
+   "path": "/discover/events",
+   "params": {
+    "offset": 4800
+   },
+   "n": 5,
+   "p50": 7287.541540999882,
+   "p95": 10905.254274799881,
+   "p99": 11143.755721359848,
+   "mean": 8226.028724799835,
+   "statements_min": 3,
+   "statements_max": 5,
+   "sql_ms": 8193.989799599149,
+   "bytes": 24080
+  },
+  {
+   "name": "clubs offset=2400",
+   "path": "/discover/clubs",
+   "params": {
+    "offset": 2400
+   },
+   "n": 222,
+   "p50": 66.58027049979864,
+   "p95": 73.06347355033722,
+   "p99": 83.91445986013422,
+   "mean": 67.87499585590086,
+   "statements_min": 6,
+   "statements_max": 7,
+   "sql_ms": 54.9850407523663,
+   "bytes": 13927
+  },
+  {
+   "name": "app list ended",
+   "path": "/events/list",
+   "params": {
+    "is_ended": "true"
+   },
+   "n": 6,
+   "p50": 2652.997062500617,
+   "p95": 3754.9443435000285,
+   "p99": 4020.6577351000305,
+   "mean": 2844.3010693335964,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 2817.3344236674893,
+   "bytes": 21025
+  },
+  {
+   "name": "calendar",
+   "path": "/discover/calendar",
+   "params": {},
+   "unsupported": "404 {\"detail\":\"Not Found\"}"
+  },
+  {
+   "name": "club events page 2",
+   "path": "/discover/clubs/club-7371-sculpture/events",
+   "params": {
+    "offset": 24
+   },
+   "unsupported": "404 {\"detail\":\"Not Found\"}"
+  }
+ ]
+}

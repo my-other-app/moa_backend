@@ -1,0 +1,99 @@
+{
+ "db": "moa_s1",
+ "clock": [
+  {
+   "ms": 263.5,
+   "statements": 1,
+   "moved": 0
+  },
+  {
+   "ms": 121.4,
+   "statements": 1,
+   "moved": 0
+  },
+  {
+   "ms": 125.4,
+   "statements": 1,
+   "moved": 0
+  }
+ ],
+ "drift": [
+  {
+   "ms": 3814.6,
+   "events": 0,
+   "clubs": 0
+  },
+  {
+   "ms": 3248.5,
+   "events": 0,
+   "clubs": 0
+  },
+  {
+   "ms": 4240.3,
+   "events": 0,
+   "clubs": 0
+  }
+ ],
+ "email_sweep": [
+  {
+   "events_with_templates": 2000,
+   "templates": 8000,
+   "insert_ms": 990,
+   "email_templates_bytes": 12402688,
+   "runs": [
+    {
+     "rows": 4000,
+     "query_ms": 2910.7,
+     "loop_ms": 75.5,
+     "due": 0
+    },
+    {
+     "rows": 4000,
+     "query_ms": 557.2,
+     "loop_ms": 80.8,
+     "due": 0
+    }
+   ]
+  },
+  {
+   "events_with_templates": 10000,
+   "templates": 40000,
+   "insert_ms": 6464,
+   "email_templates_bytes": 73883648,
+   "runs": [
+    {
+     "rows": 20000,
+     "query_ms": 11819.4,
+     "loop_ms": 372.5,
+     "due": 0
+    },
+    {
+     "rows": 20000,
+     "query_ms": 15140.7,
+     "loop_ms": 517.8,
+     "due": 0
+    }
+   ]
+  },
+  {
+   "events_with_templates": 40000,
+   "templates": 160000,
+   "insert_ms": 18090,
+   "email_templates_bytes": 307265536,
+   "runs": [
+    {
+     "rows": 80000,
+     "query_ms": 69979.6,
+     "loop_ms": 1982.1,
+     "due": 0
+    },
+    {
+     "rows": 80000,
+     "query_ms": 77401.8,
+     "loop_ms": 2183.3,
+     "due": 0
+    }
+   ]
+  }
+ ]
+}
