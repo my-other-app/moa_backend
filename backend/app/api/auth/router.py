@@ -405,8 +405,9 @@ async def verify_email(
 
 def _caller_address(request: Request) -> str:
     """The rate limiter's key for the forgotten-password pair: the caller's
-    address, the first forwarded hop as the discover API takes it (the peer
-    alone can be the proxy's, the same for everyone)."""
+    address as app.core.net reads it (the forwarded headers only from our own
+    proxy, right to left), so a caller can neither share everyone's budget
+    nor write a fresh address to dodge its own."""
     from app.api.security.service import client_ip
 
     return client_ip(request) or "unknown"

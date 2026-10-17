@@ -136,8 +136,8 @@ class PasswordForgotResponse(CustomBaseModel):
 class PasswordResetConfirm(CustomBaseModel):
     email: str = Field(..., min_length=1, max_length=254)
     code: str = Field(..., min_length=1, max_length=20, description="The six-digit code from the email")
-    # The same rule as signing up (/user/register): a password is required.
-    new_password: str = Field(..., min_length=1)
+    # The same rule as signing up (/user/register) and the app: 6 or more.
+    new_password: str = Field(..., min_length=6)
     # Only for an account with two-factor on: its authenticator or a recovery code.
     totp_code: str | None = Field(None, max_length=64)
 
