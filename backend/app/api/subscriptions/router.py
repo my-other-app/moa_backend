@@ -17,7 +17,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.audit import service as audit
 from app.api.clubs.models import Clubs
-from app.api.subscriptions import billing, service
+from app.api.subscriptions import billing, gates, service
 from app.api.subscriptions.models import (
     BillingCycle,
     ClubSubscriptions,
@@ -596,6 +596,8 @@ async def my_entitlements(session: SessionDep, user: ClubAuth) -> EntitlementsOu
         "limits": resolved.limits,
         "features": resolved.features,
         "configured": resolved.configured,
+        "enforced": gates.enforcing(),
+        "grandfathered_before": gates.cutoff(),
         "requested_plan": club.requested_plan,
         "requested_cycle": club.requested_cycle,
         "subscription_status": (

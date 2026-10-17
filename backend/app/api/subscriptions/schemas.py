@@ -211,6 +211,12 @@ class EntitlementsOut(CustomBaseModel):
     #: Counted against the per-club limits: events_per_month,
     #: registrations_per_month, committee_seats, announcements_per_month.
     usage: dict[str, int] = Field(default_factory=dict)
+    #: Whether the plan is enforced at all (the PLAN_ENFORCEMENT switch). When
+    #: false every gate lets everything through, whatever `features` says.
+    enforced: bool = True
+    #: Events created before this keep their paid ticketing and are not
+    #: capped on registrations (subscriptions.gates.grandfathered).
+    grandfathered_before: datetime | None = None
 
 
 class StartSubscriptionIn(CustomBaseModel):
