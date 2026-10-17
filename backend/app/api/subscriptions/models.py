@@ -369,8 +369,25 @@ class ClubSubscriptions(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     #: When the "your trial ends on ..." mail went. Never cleared: one per club.
     trial_reminded_at = Column(TZAwareDateTime(timezone=True), nullable=True)
 
+    # Complimentary: a plan MyOtherApp gives a club for nothing -- a sponsored
+    # or privileged club. Always `active`, `mrr_paise` 0, no Razorpay
+    # subscription, and never counted as revenue. Until `comp_ends_at` (null:
+    # no end), then the hourly sweep puts back what the club had before
+    # (`previous_state`) or moves it to Free; `is_entitled` stops honouring it
+    # the moment it ends whether or not the sweep has run. All four are
+    # cleared when the comp ends, is revoked, or is replaced.
+    complimentary = Column(Boolean, nullable=False, default=False, server_default="false")
+    #: Why it was given. For the admins only: never shown to the club.
+    comp_reason = Column(String(200), nullable=True)
+    comp_ends_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    #: The admin who granted it.
+    granted_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    #: When the "your complimentary plan ends in a week" mail went.
+    comp_reminded_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+
     plan = relationship("Plans", back_populates="subscriptions")
     club = relationship("Clubs")
+    granter = relationship("Users", foreign_keys=[granted_by])
 
     __table_args__ = (
         # One live subscription per club. `is_deleted` is in the key so a
@@ -378,6 +395,71 @@ class ClubSubscriptions(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         # history -- the same shape the club/user link tables use.
         UniqueConstraint("club_id", "is_deleted", name="uq_club_subscription_live"),
         CheckConstraint("mrr_paise >= 0", name="ck_subscription_mrr_non_negative"),
+    )
+
+
+class ChargeStatus(PyEnum):
+    captured = "captured"
+    refunded = "refunded"
+    partially_refunded = "partially_refunded"
+    #: A charge Razorpay attempted and could not take (`payment.failed`).
+    #: Listed so the admin sees it; never counted as money.
+    failed = "failed"
+
+
+class SubscriptionCharges(AbstractSQLModel, TimestampsMixin):
+    """Every payment Razorpay took for a club's subscription: the platform's
+    revenue ledger (subscriptions.ledger).
+
+    One row per Razorpay payment, written from `subscription.charged` (or the
+    backfill), the unique payment id making a repeated delivery a no-op; a
+    `payment.failed` on a subscription is a `failed` row, which every sum
+    leaves out. Refunds update `refunded_paise` and `status` in place. A
+    complimentary plan has no Razorpay subscription, so it never has a row
+    here.
+
+    Plain strings for status rather than a Postgres enum: the ledger is read
+    far more than it changes, and a new state should not need an enum
+    migration.
+    """
+
+    __tablename__ = "subscription_charges"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    #: Null only if the subscription row were ever removed; the money stays.
+    subscription_id = Column(
+        Integer, ForeignKey("club_subscriptions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    club_id = Column(Integer, ForeignKey("clubs.id"), nullable=False, index=True)
+    plan_id = Column(Integer, ForeignKey("plans.id"), nullable=True)
+    cycle = Column(Enum(BillingCycle), nullable=True)
+    amount_paise = Column(Integer, nullable=False)
+    currency = Column(String(3), nullable=False, default="INR", server_default="INR")
+    razorpay_payment_id = Column(String(64), nullable=False, unique=True)
+    razorpay_invoice_id = Column(String(64), nullable=True)
+    #: Which Razorpay subscription the payment was for: a club's row is reused
+    #: when it subscribes again, so this is what tells two of them apart.
+    razorpay_subscription_id = Column(String(64), nullable=True, index=True)
+    status = Column(String(20), nullable=False, default=ChargeStatus.captured.value,
+                    server_default=ChargeStatus.captured.value)
+    refunded_paise = Column(Integer, nullable=False, default=0, server_default="0")
+    #: When Razorpay took the payment (its `created_at`), not when we heard.
+    charged_at = Column(TZAwareDateTime(timezone=True), nullable=False, index=True)
+
+    club = relationship("Clubs")
+    plan = relationship("Plans")
+    subscription = relationship("ClubSubscriptions")
+
+    __table_args__ = (
+        CheckConstraint("amount_paise >= 0", name="ck_subscription_charge_amount_non_negative"),
+        CheckConstraint(
+            "refunded_paise >= 0 AND refunded_paise <= amount_paise",
+            name="ck_subscription_charge_refund_in_range",
+        ),
+        CheckConstraint(
+            "status IN ('captured', 'refunded', 'partially_refunded', 'failed')",
+            name="ck_subscription_charge_status",
+        ),
     )
 
 

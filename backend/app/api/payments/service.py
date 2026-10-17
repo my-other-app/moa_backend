@@ -417,6 +417,11 @@ async def handle_razorpay_webhook(
         refund_entity = data.get("payload", {}).get("refund", {}).get("entity", None)
         if not refund_entity:
             raise RequestValidationError(payload="Invalid refund payload")
+        # A club's subscription payment: the revenue ledger's, not a ticket.
+        from app.api.subscriptions import ledger as subscription_ledger
+
+        if await subscription_ledger.apply_refund(session, data):
+            return None
 
         db_payment = await session.scalar(
             select(PaymentLogs)
@@ -470,6 +475,10 @@ async def _handle_subscription_event(session: AsyncSession, event: str, data: di
             select(ClubSubscriptions)
             .where(ClubSubscriptions.razorpay_subscription_id == razorpay_id)
             .options(selectinload(ClubSubscriptions.plan))
+            # Waits for an admin replacing this subscription with a
+            # complimentary plan (which moves the id off the row) and then
+            # finds nothing, rather than cancelling the comp it never saw.
+            .with_for_update(of=ClubSubscriptions)
         )
 
     new_plan = new_cycle = None
@@ -490,6 +499,9 @@ async def _handle_subscription_event(session: AsyncSession, event: str, data: di
                 )
                 .options(selectinload(ClubSubscriptions.plan))
             )
+            if candidate is not None and candidate.complimentary:
+                # A plan given for nothing: never replaced by a Razorpay one.
+                candidate = None
             live_elsewhere = (
                 candidate is not None
                 and candidate.razorpay_subscription_id
@@ -535,6 +547,11 @@ async def _handle_subscription_event(session: AsyncSession, event: str, data: di
     before = subscription_notices.capture(subscription)
     if subscription_billing.apply_event(subscription, event, data, new_plan=new_plan, new_cycle=new_cycle):
         await session.flush()
+        if event == "subscription.charged":
+            # The payment, into the platform's revenue ledger, once.
+            from app.api.subscriptions import ledger as subscription_ledger
+
+            await subscription_ledger.record_charge(session, subscription, data)
         # The admins' alerts and the club's mails, in the same transaction:
         # they are about this change, and go out only if it commits.
         await subscription_notices.after_webhook(session, subscription, event, data, before)
@@ -567,6 +584,10 @@ async def _handle_subscription_payment_failure(session: AsyncSession, data: dict
     before = subscription_notices.capture(subscription)
     if subscription_billing.apply_payment_failure(subscription, data):
         await session.flush()
+        # The attempt, in the revenue ledger as `failed` (never summed).
+        from app.api.subscriptions import ledger as subscription_ledger
+
+        await subscription_ledger.record_failure(session, subscription, data)
         await subscription_notices.after_payment_failure(session, subscription, data, before)
         await session.commit()
     return True
