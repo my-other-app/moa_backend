@@ -449,3 +449,13 @@ python -m scripts.bench.report scripts/bench/results/before.json scripts/bench/r
 The "before" run used the same scripts on origin/master 43f0d71 (and
 `signing fixed`, that commit plus `fields.py`) against the same database
 before `alembic upgrade discover_perf`.
+
+## Larger worlds
+
+`seed.py` now takes every count as a flag (`--scale 10`, or `--clubs`,
+`--upcoming`, `--past`, `--users`, `--registrations`, `--follows`,
+`--threads` …) and loads by COPY; with no flags it builds the world above
+(same sizes and spreads, new draws: the numbers above were reproduced within
+noise). The scale study at 15,000 and 100,000 clubs, with a load generator,
+hot-row writes and the background sweeps, is in `docs/SCALING.md` at the
+repository root; its raw results are in `results/scale/`.
