@@ -76,6 +76,15 @@ class AppConfig(BaseSettings):
     RAZORPAY_KEY_ID: str
     RAZORPAY_KEY_SECRET: str
     RAZORPAY_WEBHOOK_SECRET: str
+    # A club's own Razorpay account (app/api/payment_gateways): the Fernet key
+    # its saved key secret and webhook secret are encrypted with. A
+    # comma-separated list rotates: the first encrypts, every one decrypts.
+    # Unset: clubs cannot connect an account, and every payment goes to the
+    # platform's, as before.
+    PAYMENT_KEYS_SECRET: str = ""
+    # Whether a club may connect rzp_test_ keys. Off in production: a test
+    # key takes no real money, and an attendee would get a ticket for nothing.
+    ALLOW_TEST_GATEWAY_KEYS: bool = False
 
     ACCESS_TOKEN_EXPIRE_MINUTES: int
     REFRESH_TOKEN_EXPIRE_DAYS: int

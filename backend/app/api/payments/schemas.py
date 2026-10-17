@@ -27,6 +27,11 @@ class OrderCreateResponse(CustomBaseModel):
     amount: float = Field(...)
     currency: str = Field(...)
     status: str = Field(...)
+    #: The publishable key checkout must open with: the account the order was
+    #: made on, which is a club's own when it sells through one.
+    key_id: str = Field(...)
+    #: "platform" or "club": whose Razorpay account takes the money.
+    gateway: str = Field("platform")
 
 
 class PaymentVerifyResponse(CustomBaseModel):

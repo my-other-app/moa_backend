@@ -41,6 +41,10 @@ from app.api.interests.router import router as interests_router
 from app.api.home.router import router as home_router
 from app.api.notifications.router import router as notifications_router
 from app.api.payments.router import router as payments_router
+from app.api.payment_gateways.router import (
+    admin_router as payment_gateways_admin_router,
+    club_router as payment_gateways_club_router,
+)
 from app.api.ticket_templates.router import router as ticket_templates_router
 from app.api.badges.router import router as badges_router
 from app.api.audit.router import router as audit_router
@@ -84,6 +88,9 @@ api_router.include_router(router=sites_router, tags=["site"])
 api_router.include_router(router=sites_public_router, tags=["site"])
 # Before club_router: /clubs/access would otherwise be read as /clubs/{club_id}.
 api_router.include_router(router=club_access_router, tags=["club-access"])
+# Before club_router too: /clubs/payments/gateway is a literal path.
+api_router.include_router(router=payment_gateways_club_router)
+api_router.include_router(router=payment_gateways_admin_router)
 api_router.include_router(router=store_router, tags=["store"])
 api_router.include_router(router=store_public_router, tags=["store"])
 api_router.include_router(router=club_router, tags=["clubs"])

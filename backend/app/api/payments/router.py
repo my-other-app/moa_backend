@@ -1,3 +1,6 @@
+import hashlib
+import json
+import logging
 import uuid
 from datetime import datetime
 from fastapi.encoders import jsonable_encoder
@@ -26,22 +29,54 @@ from app.response import CustomHTTPException
 
 
 router = APIRouter(prefix="/payments", tags=["payments"])
+logger = logging.getLogger(__name__)
+
+
+#: Errors from making an order that the client is meant to read, rather than
+#: the generic 500 every other failure here becomes.
+_ORDER_ERRORS_SHOWN = {"UPDATE_APP_TO_PAY", "GATEWAY_UNAVAILABLE"}
 
 
 @router.post("/orders", summary="Create a new payment order")
 async def create_order(
-    request: OrderCreateRequest, session: SessionDep, user: DependsAuth
+    request: OrderCreateRequest,
+    session: SessionDep,
+    user: DependsAuth,
+    checkout: int | None = Query(
+        None,
+        description=(
+            "2 from a client that opens checkout with the order's own key_id. Without it, an "
+            "order on a club's own Razorpay account answers 409 UPDATE_APP_TO_PAY."
+        ),
+    ),
 ) -> OrderCreateResponse:
+    """
+    The Razorpay order to open checkout with. `key_id` is the publishable key
+    of the account the order was made on and `gateway` says whose it is:
+    "platform", or "club" for a club's own Razorpay account.
+    """
+    from app.api.payment_gateways import service as gateways
+
     try:
         order = await service.create_razorpay_order(
             session=session,
             source=request.source,
             payload=request.payload,
             user_id=user.id,
+            checkout_version=checkout,
         )
+        data = jsonable_encoder(order)
+        data.update(await gateways.checkout_fields(session, order))
+        return data
 
-        return jsonable_encoder(order)
-
+    except CustomHTTPException as e:
+        if e.error_code in _ORDER_ERRORS_SHOWN:
+            # Refused before anything was written.
+            raise
+        await session.rollback()
+        raise CustomHTTPException(
+            status_code=500, message=f"Failed to create order: {str(e)}"
+        )
     except Exception as e:
         await session.rollback()
         raise CustomHTTPException(
@@ -128,6 +163,55 @@ async def razorpay_webhook(request: Request, session: SessionDep):
     return await service.handle_razorpay_webhook(
         session, event_id=event_id, data=payload, signature=webhook_signature
     )
+
+
+@router.post("/webhook/club/{webhook_token}", summary="Razorpay webhook for a club's own account")
+async def club_razorpay_webhook(webhook_token: str, request: Request, session: SessionDep):
+    """
+    The webhook a club adds in its own Razorpay account, at the URL its
+    payment settings show. Signed with that gateway's own webhook secret; the
+    events are hints only (service.handle_club_webhook). Never logged with
+    the whole token.
+    """
+    from app.api.payment_gateways import crypto
+    from app.api.payment_gateways import service as gateways
+
+    gateway = await gateways.by_webhook_token(session, webhook_token)
+    if gateway is None:
+        raise CustomHTTPException(status_code=404, message="Not found")
+
+    raw = await request.body()
+    signature = request.headers.get("X-Razorpay-Signature", "")
+    try:
+        secret = crypto.decrypt(gateway.webhook_secret_enc)
+    except crypto.Unavailable:
+        logger.error("Club webhook %s: the webhook secret cannot be read", gateways.token_hint(webhook_token))
+        raise CustomHTTPException(status_code=503, message="Unavailable", error_code="GATEWAY_UNAVAILABLE")
+    if not gateways.signature_ok(raw, signature, secret):
+        logger.warning("Club webhook %s: bad signature", gateways.token_hint(webhook_token))
+        await gateways.bad_signature(session, gateway)
+        await session.commit()
+        raise CustomHTTPException(status_code=400, message="Invalid webhook signature", error_code="BAD_SIGNATURE")
+
+    try:
+        data = json.loads(raw.decode("utf-8") or "{}")
+    except ValueError:
+        raise CustomHTTPException(status_code=400, message="Invalid payload")
+    if not isinstance(data, dict):
+        raise CustomHTTPException(status_code=400, message="Invalid payload")
+    event_id = request.headers.get("X-Razorpay-Event-Id") or (
+        "body:" + hashlib.sha256(raw).hexdigest()[:40]
+    )
+    try:
+        outcome = await service.handle_club_webhook(
+            session, gateway, data, event_id=event_id, signature=signature
+        )
+    except service.ClubWebhookRetry:
+        raise CustomHTTPException(
+            status_code=502, message="Couldn't confirm the payment with Razorpay; deliver it again.",
+            error_code="RAZORPAY_UNREACHABLE",
+        )
+    return {"status": outcome}
 
 
 # @router.get("/orders/{order_id}", response_model=OrderResponse)
@@ -235,6 +319,10 @@ class AdminPaymentResponse(CustomBaseModel):
     # Only a captured payment can be refunded; surfacing it here saves the UI
     # re-deriving the rule and getting it wrong.
     is_refundable: bool = Field(False)
+    #: Whose Razorpay account took the money: "platform", or "club" for a
+    #: club's own (gateway_id is then its payment gateway).
+    gateway: str = Field("platform")
+    gateway_id: int | None = Field(None)
 
 
 @router.get("/admin/list", summary="List payments (admin)")
@@ -246,6 +334,7 @@ async def list_payments_admin(
     status: str | None = Query(None, description="captured, refunded, failed, ..."),
     search: str | None = Query(None, description="Payment, order or receipt id"),
     user_id: int | None = Query(None),
+    gateway: str | None = Query(None, description="platform or club: whose Razorpay account took it"),
 ) -> PaginatedResponse[AdminPaymentResponse]:
     """
     Every payment. There was no list endpoint at all, so the refund route
@@ -258,6 +347,7 @@ async def list_payments_admin(
         user_id=user_id,
         limit=pagination.limit,
         offset=pagination.offset,
+        gateway=gateway,
     )
     items = [
         AdminPaymentResponse(
@@ -285,6 +375,8 @@ async def list_payments_admin(
                 else None
             ),
             is_refundable=row.status == PaymentStatus.captured,
+            gateway="club" if row.order and row.order.payment_gateway_id else "platform",
+            gateway_id=row.order.payment_gateway_id if row.order else None,
         )
         for row in rows
     ]

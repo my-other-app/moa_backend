@@ -309,6 +309,46 @@ async def email_trial_ending(session, subscription, club_name: str) -> bool:
     )
 
 
+def _comp_episode(subscription) -> str:
+    """One complimentary grant: the row and the end it was given. Granting it
+    again with another end is a new one, with mails of its own."""
+    ends = subscription.comp_ends_at.isoformat() if subscription.comp_ends_at else "open"
+    return f"row:{subscription.id}:comp:{ends}"
+
+
+async def email_comp_ending(session, subscription, club_name: str, *, then: str) -> bool:
+    """A week before a complimentary plan ends. `then` is what the club has
+    after it: "the Free plan", or the plan it had before."""
+    plan, ends = _plan_name(subscription), day(subscription.comp_ends_at)
+    return await send_once(
+        session, subscription, "comp_ending", _comp_episode(subscription),
+        subject=f"Your complimentary {plan} ends on {ends}",
+        paragraphs=[
+            f"Hi {club_name},",
+            f"The {plan} plan MyOtherApp has given {club_name} ends on {ends}.",
+            f"After that, {club_name} is on {then}. Your events, followers and data stay where they are.",
+            f"To keep everything {plan} includes, subscribe from Billing once it ends, or talk to us.",
+        ],
+        button=("Billing", billing_url()),
+    )
+
+
+async def email_comp_ended(session, subscription, club_name: str, *, plan_name: str, then: str) -> bool:
+    """Once, when a complimentary plan has ended. Recorded against the comp
+    before the row moves on."""
+    return await send_once(
+        session, subscription, "comp_ended", _comp_episode(subscription),
+        subject=f"Your complimentary {plan_name} has ended",
+        paragraphs=[
+            f"Hi {club_name},",
+            f"The {plan_name} plan MyOtherApp gave {club_name} has ended, and {club_name} is on {then} now.",
+            "Your events, followers and data are all still there.",
+            f"To have {plan_name} back, subscribe from Billing.",
+        ],
+        button=("Choose a plan", billing_url()),
+    )
+
+
 # ─── After a webhook ────────────────────────────────────────────────────
 
 

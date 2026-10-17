@@ -86,9 +86,15 @@ async def session(_engine) -> AsyncSession:
     # expire_on_commit=False while production ran with the default True, so no
     # test could reproduce it.
     from app.db.core import SESSION_KWARGS
+    from app.db.listeners import add_loader_criteria
 
     session_factory = async_sessionmaker(bind=connection, **SESSION_KWARGS)
     session = session_factory()
+    # And production hides soft-deleted rows from every ORM query
+    # (app.db.core.get_session). Without this here, the admin's Trash passed
+    # every test while finding nothing in production: its `is_deleted ==
+    # True` was ANDed with the listener's `is_deleted IS false`.
+    add_loader_criteria(session)
     try:
         yield session
     finally:

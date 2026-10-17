@@ -776,13 +776,13 @@ async def test_an_admin_cannot_hand_out_razorpays_states(client, session, shop, 
     for status in ("pending", "paused"):
         response = await client.put(
             f"{API}/admin/subscriptions/club/{shop['club'].id}/plan",
-            json={"plan_id": shop["growth"].id, "cycle": "yearly", "status": status},
+            json={"plan_id": shop["growth"].id, "cycle": "yearly", "status": status, "complimentary": False},
             headers=header,
         )
         assert response.status_code == 422, response.text
     granted = await client.put(
         f"{API}/admin/subscriptions/club/{shop['club'].id}/plan",
-        json={"plan_id": shop["growth"].id, "cycle": "yearly", "status": "trial"},
+        json={"plan_id": shop["growth"].id, "cycle": "yearly", "status": "trial", "complimentary": False},
         headers=header,
     )
     assert granted.status_code == 200, granted.text

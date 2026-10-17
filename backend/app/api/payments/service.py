@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import hmac
 import time
@@ -33,12 +33,47 @@ razorpay_client = razorpay.Client(
 logger = logging.getLogger(__name__)
 
 
+class UpdateAppToPay(CustomHTTPException):
+    """An older app build, asked to pay an order on a club's own Razorpay
+    account: it opens checkout with the platform's key compiled in, which
+    cannot pay it. The website can."""
+
+    def __init__(self, web_url: str | None):
+        super().__init__(
+            status_code=409,
+            message="Update the MyOtherApp app to pay for this event, or pay on the website.",
+            error_code="UPDATE_APP_TO_PAY",
+            errors={"web_url": web_url},
+        )
+
+
 async def create_razorpay_order(
-    session: AsyncSession, source: str, payload: dict, user_id: int
+    session: AsyncSession,
+    source: str,
+    payload: dict,
+    user_id: int,
+    checkout_version: int | None = None,
 ):
+    """
+    The order checkout opens, on the Razorpay account that sells it: the
+    club's own when it has an active one (app/api/payment_gateways), the
+    platform's otherwise. `checkout_version` is the client's `checkout` query
+    parameter; below 2 the client cannot open a club's account, and is told
+    to update (UpdateAppToPay) rather than handed an order it cannot pay.
+    """
+    from app.api.payment_gateways import service as gateways
+    from app.api.payments.handlers import event_for_payload
+    from app.core import public_urls
+
     amount_in_rupee, db_receipt = await validate_payload(
         session=session, source=source, payload=payload
     )
+    event = await event_for_payload(session, source, payload)
+    club_id = event.club_id if event is not None else None
+    checkout = await gateways.for_new_order(session, club_id)
+    if checkout.kind == gateways.CLUB and not gateways.supports_club_checkout(checkout_version):
+        # Before anything is written or locked: there is nothing to undo.
+        raise UpdateAppToPay(public_urls.event_url(event.slug) if event is not None else None)
 
     # Serialize concurrent order-creation attempts for the same receipt so two
     # near-simultaneous requests can't both miss the existing-order check below
@@ -48,18 +83,7 @@ async def create_razorpay_order(
 
     current_timestamp = int(time.time())
     receipt = f"{db_receipt}#{current_timestamp}"
-
-    existing_order = await session.scalar(
-        select(PaymentOrders).where(PaymentOrders.receipt == db_receipt, PaymentOrders.status != OrderStatus.paid, PaymentOrders.status != OrderStatus.refunded).order_by(PaymentOrders.created_at.desc())
-    )
-    # Reused only while it still asks for the same money: a changed pick
-    # from the shelf means a fresh order, not a stale amount.
-    if existing_order and float(existing_order.amount) == float(amount_in_rupee):
-        return existing_order
-        return existing_order
-
     amount_in_paise = int(amount_in_rupee * 100)
-
     order_data = {
         "amount": amount_in_paise,
         "currency": "INR",
@@ -67,7 +91,39 @@ async def create_razorpay_order(
         "receipt": receipt,
     }
 
-    razorpay_order = razorpay_client.order.create(data=order_data)
+    # Twice at most: keys the club's account refuses mark it failed, and the
+    # second pass makes the order on the platform's instead.
+    for attempt in range(2):
+        if attempt:
+            checkout = await gateways.for_new_order(session, club_id)
+
+        same_account = (
+            PaymentOrders.payment_gateway_id.is_(None)
+            if checkout.gateway_id is None
+            else PaymentOrders.payment_gateway_id == checkout.gateway_id
+        )
+        existing_order = await session.scalar(
+            select(PaymentOrders).where(PaymentOrders.receipt == db_receipt, PaymentOrders.status != OrderStatus.paid, PaymentOrders.status != OrderStatus.refunded, same_account).order_by(PaymentOrders.created_at.desc())
+        )
+        # Reused only while it still asks for the same money, on the same
+        # account: a changed pick from the shelf, or a club that connected or
+        # dropped its own Razorpay since, means a fresh order.
+        if existing_order and float(existing_order.amount) == float(amount_in_rupee):
+            await session.commit()
+            return existing_order
+
+        try:
+            razorpay_order = checkout.client.order.create(data=order_data)
+        except Exception as exc:
+            if checkout.kind == gateways.CLUB and attempt == 0 and gateways.is_auth_error(exc):
+                await gateways.mark_failed(
+                    session, checkout.gateway,
+                    f"Razorpay refused the keys when making an order: {gateways.short_reason(exc)}",
+                )
+                await session.flush()
+                continue
+            raise
+        break
 
     db_order = PaymentOrders(
         receipt=db_receipt,
@@ -79,6 +135,7 @@ async def create_razorpay_order(
         currency="INR",
         status=OrderStatus.created,
         user_id=user_id,
+        payment_gateway_id=checkout.gateway_id,
     )
 
     session.add(db_order)
@@ -117,8 +174,20 @@ async def verify_razorpay_payment(
     if order.status == OrderStatus.paid:
         raise RequestValidationError(razorpay_order_id="Order already paid")
 
+    # The account the order was made on -- the club's own, or the platform's --
+    # whatever the club has connected since.
+    from app.api.payment_gateways import service as gateways
+
+    account = None
+
+    async def client():
+        nonlocal account
+        if account is None:
+            account = await gateways.for_order(session, order)
+        return account.client
+
     if not payment_details:
-        payment_details = razorpay_client.payment.fetch(razorpay_payment_id)
+        payment_details = (await client()).payment.fetch(razorpay_payment_id)
 
     # Make sure the payment being verified was actually made against this
     # order, not a different one — otherwise a real captured payment for
@@ -145,7 +214,7 @@ async def verify_razorpay_payment(
 
     if expand_payment_details:
         if payment_method in ("card"):
-            payment_details = razorpay_client.payment.fetch(
+            payment_details = (await client()).payment.fetch(
                 razorpay_payment_id, {"expand[]": payment_method}
             )
 
@@ -264,9 +333,11 @@ async def list_payments(
     user_id: int | None = None,
     limit: int = 20,
     offset: int = 0,
+    gateway: str | None = None,
 ):
     """
-    Every payment, for an admin.
+    Every payment, for an admin. `gateway`: "platform" for those paid into
+    the platform's Razorpay account, "club" for those paid into a club's own.
 
     There was no way to list these at all: the only payment route an admin had
     was the refund, which needs a payment id they had no way to look up. A
@@ -287,6 +358,13 @@ async def list_payments(
     filters = []
     if status:
         filters.append(PaymentLogs.status == status)
+    if gateway in ("platform", "club"):
+        on_club = PaymentOrders.payment_gateway_id.isnot(None)
+        filters.append(
+            PaymentLogs.order_id.in_(
+                select(PaymentOrders.id).where(on_club if gateway == "club" else ~on_club)
+            )
+        )
     if user_id is not None:
         # Through the order, which is what carries the payer.
         filters.append(
@@ -322,32 +400,44 @@ async def list_payments(
 
 
 async def get_payment_totals(session: AsyncSession) -> dict:
-    """Headline figures for the payments page."""
-    captured = await session.scalar(
-        select(func.coalesce(func.sum(PaymentLogs.amount), 0)).where(
-            PaymentLogs.status == PaymentStatus.captured,
-            PaymentLogs.is_deleted == False,
+    """Headline figures for the payments page, overall and split by whose
+    Razorpay account the money went to: the platform's, or clubs' own."""
+    on_club = PaymentOrders.payment_gateway_id.isnot(None)
+    live = PaymentLogs.is_deleted == False  # noqa: E712
+    captured = PaymentLogs.status == PaymentStatus.captured
+    refunded = PaymentLogs.status == PaymentStatus.refunded
+    failed = PaymentLogs.status == PaymentStatus.failed
+    row = (
+        await session.execute(
+            select(
+                func.coalesce(func.sum(PaymentLogs.amount).filter(captured, ~on_club), 0),
+                func.coalesce(func.sum(PaymentLogs.amount).filter(refunded, ~on_club), 0),
+                func.count(PaymentLogs.id).filter(failed, ~on_club),
+                func.coalesce(func.sum(PaymentLogs.amount).filter(captured, on_club), 0),
+                func.coalesce(func.sum(PaymentLogs.amount).filter(refunded, on_club), 0),
+                func.count(PaymentLogs.id).filter(failed, on_club),
+            )
+            .select_from(PaymentLogs)
+            .join(PaymentOrders, PaymentOrders.id == PaymentLogs.order_id)
+            .where(live)
         )
+    ).one()
+
+    def figures(cap, ref, fail) -> dict:
+        return {
+            "captured_total": float(cap or 0),
+            "refunded_total": float(ref or 0),
+            # Net of refunds: the gross figure alone overstates what was kept.
+            "net_total": float((cap or 0) - (ref or 0)),
+            "failed_count": int(fail or 0),
+        }
+
+    platform = figures(row[0], row[1], row[2])
+    club = figures(row[3], row[4], row[5])
+    overall = figures(
+        (row[0] or 0) + (row[3] or 0), (row[1] or 0) + (row[4] or 0), (row[2] or 0) + (row[5] or 0)
     )
-    refunded = await session.scalar(
-        select(func.coalesce(func.sum(PaymentLogs.amount), 0)).where(
-            PaymentLogs.status == PaymentStatus.refunded,
-            PaymentLogs.is_deleted == False,
-        )
-    )
-    failed = await session.scalar(
-        select(func.count(PaymentLogs.id)).where(
-            PaymentLogs.status == PaymentStatus.failed,
-            PaymentLogs.is_deleted == False,
-        )
-    )
-    return {
-        "captured_total": float(captured or 0),
-        "refunded_total": float(refunded or 0),
-        # Net of refunds: the gross figure alone overstates what was kept.
-        "net_total": float((captured or 0) - (refunded or 0)),
-        "failed_count": int(failed or 0),
-    }
+    return {**overall, "platform": platform, "club": club}
 
 
 async def refund_payment(session: AsyncSession, payment_log_id) -> PaymentLogs:
@@ -364,11 +454,22 @@ async def refund_payment(session: AsyncSession, payment_log_id) -> PaymentLogs:
             payment_log_id="Only a captured payment can be refunded"
         )
 
+    # Through the account the payment was made on: the club's own, or ours.
+    from app.api.payment_gateways import service as gateways
+
+    account = await gateways.for_order(session, db_payment.order)
     # No `amount` param — Razorpay refunds the full captured amount.
-    razorpay_client.payment.refund(db_payment.razorpay_payment_id)
+    account.client.payment.refund(db_payment.razorpay_payment_id)
 
     await _apply_refund(session, db_payment)
-    await session.refresh(db_payment)
+    # Read back with its order: the caller reports both, and a refresh alone
+    # leaves the order to a lazy load that async IO cannot do.
+    db_payment = await session.scalar(
+        select(PaymentLogs)
+        .where(PaymentLogs.id == db_payment.id)
+        .options(joinedload(PaymentLogs.order))
+        .execution_options(populate_existing=True)
+    )
     return db_payment
 
 
@@ -417,12 +518,21 @@ async def handle_razorpay_webhook(
         refund_entity = data.get("payload", {}).get("refund", {}).get("entity", None)
         if not refund_entity:
             raise RequestValidationError(payload="Invalid refund payload")
+        # A club's subscription payment: the revenue ledger's, not a ticket.
+        from app.api.subscriptions import ledger as subscription_ledger
+
+        if await subscription_ledger.apply_refund(session, data):
+            return None
 
         db_payment = await session.scalar(
             select(PaymentLogs)
             .where(PaymentLogs.razorpay_payment_id == refund_entity.get("payment_id"))
             .options(joinedload(PaymentLogs.order))
         )
+        if db_payment and db_payment.order.payment_gateway_id is not None:
+            # Made on a club's own account: the platform's cannot have refunded it.
+            logger.warning("Platform webhook refund for a club-gateway payment %s ignored", db_payment.razorpay_payment_id)
+            return None
         if db_payment and db_payment.status == PaymentStatus.captured:
             await _apply_refund(session, db_payment)
         return None
@@ -433,6 +543,15 @@ async def handle_razorpay_webhook(
 
     payment_id = payload.get("id")
     order_id = payload.get("order_id")
+
+    on_club_account = await session.scalar(
+        select(PaymentOrders.payment_gateway_id).where(PaymentOrders.razorpay_order_id == order_id)
+    )
+    if on_club_account is not None:
+        # The order lives on a club's own account; only that account's
+        # webhook (handle_club_webhook) may move it.
+        logger.warning("Platform webhook for club-gateway order %s ignored", order_id)
+        return None
 
     await verify_razorpay_payment(
         session=session,
@@ -445,6 +564,179 @@ async def handle_razorpay_webhook(
     await session.commit()
 
     return None
+
+
+class ClubWebhookRetry(Exception):
+    """Razorpay could not be asked about the payment: answer non-2xx so
+    Razorpay delivers the event again."""
+
+
+#: What a club's webhook acts on. Anything else is recorded and ignored --
+#: subscriptions in particular: a club's own account is not where it pays us.
+CLUB_PAYMENT_EVENTS = ("payment.authorized", "payment.captured", "payment.failed", "order.paid")
+CLUB_REFUND_EVENTS = ("refund.processed",)
+
+
+async def handle_club_webhook(session: AsyncSession, gateway, data: dict, event_id: str, signature: str) -> str:
+    """
+    An event from a club's own Razorpay account, its signature already
+    checked against that gateway's webhook secret.
+
+    Only a hint. Nothing is marked paid or refunded on its say-so: the payment
+    is fetched from Razorpay with the club's own keys, and what Razorpay says
+    is what is applied -- so a leaked webhook secret cannot mint a ticket. Only
+    orders made on this gateway are touched.
+
+    Recorded in the same idempotent log as the platform's webhook, keyed by
+    gateway: one Razorpay account connected by two clubs delivers the same
+    event to both, and each acts on its own orders. Returns what was done.
+    """
+    from sqlalchemy import delete
+
+    from app.api.payment_gateways import service as gateways
+
+    log_key = f"gw{gateway.id}:{event_id}"
+    gateway.last_webhook_at = datetime.now(timezone.utc)
+    if gateway.status == gateways.ACTIVE and gateway.last_error and "webhook" in gateway.last_error.lower():
+        gateway.last_error = None
+
+    existing = await session.scalar(select(RazorpayWebhookLogs.id).where(RazorpayWebhookLogs.event_id == log_key))
+    if existing:
+        await session.commit()
+        return "duplicate"
+
+    event_name = data.get("event") or ""
+    session.add(
+        RazorpayWebhookLogs(
+            event_id=log_key,
+            entity=data.get("entity") or "event",
+            event=event_name or "unknown",
+            signature=signature or "",
+            payload=data.get("payload") or {},
+        )
+    )
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        return "duplicate"
+
+    try:
+        return await _apply_club_event(session, gateway, event_name, data)
+    except ClubWebhookRetry:
+        # Nothing was changed yet. The log row goes, so Razorpay's next
+        # delivery is not mistaken for a duplicate.
+        await session.execute(delete(RazorpayWebhookLogs).where(RazorpayWebhookLogs.event_id == log_key))
+        await session.commit()
+        raise
+
+
+async def _fetch_payment(session, gateway, client, payment_id: str) -> dict | None:
+    """The payment as Razorpay holds it in the club's account; None when
+    Razorpay says there is no such payment there. Anything else that stops
+    the answer (Razorpay down, the keys refused) is a retry."""
+    from razorpay.errors import BadRequestError
+
+    from app.api.payment_gateways import service as gateways
+
+    try:
+        return client.payment.fetch(payment_id) or {}
+    except Exception as exc:  # noqa: BLE001
+        if isinstance(exc, BadRequestError) and not gateways.is_auth_error(exc):
+            logger.warning("Club gateway %s: Razorpay has no payment %s", gateway.id, payment_id)
+            return None
+        if gateways.is_auth_error(exc):
+            await gateways.mark_failed(
+                session, gateway, f"Razorpay refused the keys when checking a payment: {gateways.short_reason(exc)}"
+            )
+            await session.commit()
+        logger.warning("Club gateway %s: could not fetch payment %s: %s", gateway.id, payment_id, type(exc).__name__)
+        raise ClubWebhookRetry() from None
+
+
+async def _apply_club_event(session: AsyncSession, gateway, event_name: str, data: dict) -> str:
+    from app.api.payment_gateways import crypto
+    from app.api.payment_gateways import service as gateways
+
+    if event_name not in CLUB_PAYMENT_EVENTS + CLUB_REFUND_EVENTS:
+        return "ignored"
+    payload = data.get("payload") or {}
+
+    try:
+        client = gateways.client_for(gateway)
+    except crypto.Unavailable:
+        logger.error("Club gateway %s: keys cannot be read; webhook left for a retry", gateway.id)
+        raise ClubWebhookRetry() from None
+
+    if event_name in CLUB_REFUND_EVENTS:
+        refund = (payload.get("refund") or {}).get("entity") or {}
+        payment_id = refund.get("payment_id")
+        if not payment_id:
+            return "ignored"
+        db_payment = await session.scalar(
+            select(PaymentLogs)
+            .where(PaymentLogs.razorpay_payment_id == payment_id)
+            .options(joinedload(PaymentLogs.order))
+        )
+        if db_payment is None or db_payment.order.payment_gateway_id != gateway.id:
+            return "ignored"
+        if db_payment.status != PaymentStatus.captured:
+            return "ignored"
+        fetched = await _fetch_payment(session, gateway, client, payment_id)
+        if not fetched or fetched.get("order_id") != db_payment.order.razorpay_order_id:
+            return "ignored"
+        amount = int(fetched.get("amount") or 0)
+        refunded = int(fetched.get("amount_refunded") or 0)
+        # A full refund only: a partial one (the merch, say) leaves the ticket paid.
+        if fetched.get("status") == "refunded" or (amount > 0 and refunded >= amount):
+            await _apply_refund(session, db_payment)
+            return "refunded"
+        return "ignored"
+
+    entity = (payload.get("payment") or {}).get("entity") or {}
+    payment_id = entity.get("id")
+    if not payment_id:
+        return "ignored"
+    # Cheap first: a payment for an order we never made on this gateway (the
+    # club sells other things on its account) is none of ours.
+    claimed_order = entity.get("order_id")
+    if claimed_order:
+        mine = await session.scalar(
+            select(PaymentOrders.id).where(
+                PaymentOrders.razorpay_order_id == claimed_order,
+                PaymentOrders.payment_gateway_id == gateway.id,
+            )
+        )
+        if mine is None:
+            return "ignored"
+
+    fetched = await _fetch_payment(session, gateway, client, payment_id)
+    if not fetched:
+        return "ignored"
+    order_id = fetched.get("order_id")
+    order = await session.scalar(
+        select(PaymentOrders).where(PaymentOrders.razorpay_order_id == order_id)
+    ) if order_id else None
+    if order is None or order.payment_gateway_id != gateway.id:
+        return "ignored"
+    try:
+        db_payment = await verify_razorpay_payment(
+            session=session,
+            razorpay_order_id=order_id,
+            razorpay_payment_id=payment_id,
+            payment_details=fetched,
+            expand_payment_details=False,
+        )
+    except RequestValidationError as exc:
+        # Already paid by another payment, or a method this app does not
+        # read: a retry would say the same.
+        logger.warning("Club gateway %s: payment %s not applied: %s", gateway.id, payment_id, exc.errors)
+        if session.new or session.dirty or session.deleted:
+            await session.rollback()
+        return "ignored"
+    await session.commit()
+    status = getattr(db_payment, "status", None)
+    return str(getattr(status, "value", status) or "recorded")
 
 
 async def _handle_subscription_event(session: AsyncSession, event: str, data: dict):
@@ -470,6 +762,10 @@ async def _handle_subscription_event(session: AsyncSession, event: str, data: di
             select(ClubSubscriptions)
             .where(ClubSubscriptions.razorpay_subscription_id == razorpay_id)
             .options(selectinload(ClubSubscriptions.plan))
+            # Waits for an admin replacing this subscription with a
+            # complimentary plan (which moves the id off the row) and then
+            # finds nothing, rather than cancelling the comp it never saw.
+            .with_for_update(of=ClubSubscriptions)
         )
 
     new_plan = new_cycle = None
@@ -490,6 +786,9 @@ async def _handle_subscription_event(session: AsyncSession, event: str, data: di
                 )
                 .options(selectinload(ClubSubscriptions.plan))
             )
+            if candidate is not None and candidate.complimentary:
+                # A plan given for nothing: never replaced by a Razorpay one.
+                candidate = None
             live_elsewhere = (
                 candidate is not None
                 and candidate.razorpay_subscription_id
@@ -535,6 +834,11 @@ async def _handle_subscription_event(session: AsyncSession, event: str, data: di
     before = subscription_notices.capture(subscription)
     if subscription_billing.apply_event(subscription, event, data, new_plan=new_plan, new_cycle=new_cycle):
         await session.flush()
+        if event == "subscription.charged":
+            # The payment, into the platform's revenue ledger, once.
+            from app.api.subscriptions import ledger as subscription_ledger
+
+            await subscription_ledger.record_charge(session, subscription, data)
         # The admins' alerts and the club's mails, in the same transaction:
         # they are about this change, and go out only if it commits.
         await subscription_notices.after_webhook(session, subscription, event, data, before)
@@ -567,6 +871,10 @@ async def _handle_subscription_payment_failure(session: AsyncSession, data: dict
     before = subscription_notices.capture(subscription)
     if subscription_billing.apply_payment_failure(subscription, data):
         await session.flush()
+        # The attempt, in the revenue ledger as `failed` (never summed).
+        from app.api.subscriptions import ledger as subscription_ledger
+
+        await subscription_ledger.record_failure(session, subscription, data)
         await subscription_notices.after_payment_failure(session, subscription, data, before)
         await session.commit()
     return True

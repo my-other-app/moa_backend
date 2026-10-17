@@ -282,7 +282,8 @@ async def test_an_admin_moving_a_club_alerts_every_time(client, session, shop, m
     header = await _admin_header(make_admin, mint_token)
     for plan in ("growth", "pro"):
         response = await client.put(f"{API}/admin/subscriptions/club/{shop['club'].id}/plan",
-                                    json={"plan_id": shop[plan].id, "cycle": "monthly"}, headers=header)
+                                    json={"plan_id": shop[plan].id, "cycle": "monthly", "complimentary": False},
+                                    headers=header)
         assert response.status_code == 200, response.text
     alerts = await _alerts(session, "plan_assigned")
     assert [a.data["plan"] for a in alerts] == ["growth", "pro"]
@@ -610,7 +611,9 @@ async def test_the_sweep_runs_on_one_worker_at_a_time(session, _engine, shop):
         await other.execute(text(f"SELECT pg_advisory_lock({sweep.SWEEP_LOCK})"))
         assert await sweep.run_sweep(session) is None
         await other.execute(text(f"SELECT pg_advisory_unlock({sweep.SWEEP_LOCK})"))
-        assert await sweep.run_sweep(session) == {"downgraded": 0, "grace_reminded": 0, "trial_reminded": 0}
+        assert await sweep.run_sweep(session) == {
+            "downgraded": 0, "grace_reminded": 0, "trial_reminded": 0, "comp_ended": 0, "comp_reminded": 0,
+        }
         # And it lets go when done.
         assert await other.scalar(text(f"SELECT pg_try_advisory_lock({sweep.SWEEP_LOCK})")) is True
         await other.execute(text(f"SELECT pg_advisory_unlock({sweep.SWEEP_LOCK})"))

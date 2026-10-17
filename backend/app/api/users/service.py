@@ -807,6 +807,19 @@ async def admin_delete_user(session: AsyncSession, user_id: int):
 
     user.soft_delete()
     user.token_version += 1
+    if getattr(user.user_type, "value", user.user_type) == "club":
+        # A club's account is the club: without it nobody can sign in to it.
+        # The club goes to the Trash with it, where restoring the club brings
+        # the account back too (clubs.service.restore_club). Left live, it
+        # stayed on every list while nobody could run it, and never showed up
+        # in the Trash.
+        from app.api.clubs.models import Clubs
+
+        for club in await session.scalars(
+            select(Clubs).where(Clubs.user_id == user.id, Clubs.is_deleted == False)  # noqa: E712
+        ):
+            club.is_deleted = True
+            club.deleted_at = user.deleted_at
     await session.commit()
     return user
 

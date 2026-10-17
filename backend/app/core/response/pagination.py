@@ -54,9 +54,13 @@ def paginated_response(
     
     # If total is provided, use it to determine has_next
     if total is not None:
-        has_next = offset + len(result) < total
+        # Trimmed first: callers fetch one more row than asked for, and
+        # counting it made the last full page before the end claim there was
+        # no next page (a Trash of three in pages of two never reached the
+        # third).
         if len(result) > limit:
             result = result[:limit]
+        has_next = offset + len(result) < total
     else:
         # Fallback to old behavior
         has_next = len(result) > limit

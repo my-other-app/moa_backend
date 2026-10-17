@@ -150,6 +150,22 @@ async def validate_payload(session: AsyncSession, source: str, payload: dict):
     raise RequestValidationError(source="source is invalid")
 
 
+async def event_for_payload(session: AsyncSession, source: str, payload: dict) -> Events | None:
+    """
+    The event whose club is selling what this order pays for: the
+    registration's own event (not the payload's event_id, which the caller
+    wrote). Its club's Razorpay account takes the money.
+    """
+    if source == "event_registration":
+        registration_event = (
+            select(EventRegistrationsLink.event_id)
+            .where(EventRegistrationsLink.id == payload["event_registration_id"])
+            .scalar_subquery()
+        )
+        return await session.scalar(select(Events).where(Events.id == registration_event))
+    return None
+
+
 async def handle_post_payment(
     session: AsyncSession,
     order: PaymentOrders,
