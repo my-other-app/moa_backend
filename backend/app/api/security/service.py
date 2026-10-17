@@ -51,12 +51,11 @@ def _pct(cur: int, prev: int) -> float | None:
 
 
 def client_ip(request) -> str | None:
-    if request is None:
-        return None
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()[:45] or None
-    return request.client.host[:45] if request.client else None
+    # The first forwarded hop is whatever the caller typed; app.core.net
+    # believes the headers only from our own proxy, reading from the right.
+    from app.core.net import client_address
+
+    return client_address(request)[:45] or None
 
 
 def user_agent_of(request) -> str | None:

@@ -118,7 +118,10 @@ async def apple_sign_in(
 
 
 @router.post("/token", summary="get access token")
-@limiter.limit("5/minute")
+# Per caller address (app.core.net). A whole campus behind one Wi-Fi address
+# signs in through this at a fest, so the cap is loose; guessing one account's
+# password is stopped by the per-account lockout (LOGIN_LOCKED) below.
+@limiter.limit("20/minute")
 async def login_for_access_token(
     request: Request,
     response: Response,
@@ -170,6 +173,10 @@ async def login_for_access_token(
     user = await authenticate_user(session, form_data.username, form_data.password)
     if not user:
         await refuse(None, "wrong_password", status.HTTP_401_UNAUTHORIZED, "Incorrect username or password", headers={"WWW-Authenticate": "Bearer"})
+    # Said plainly at the door: a suspended account used to get tokens here
+    # and then a 403 on its first request.
+    if getattr(user, "is_active", True) is False:
+        await refuse(user, "blocked", status.HTTP_403_FORBIDDEN, "This account has been suspended", error_code="ACCOUNT_SUSPENDED")
 
     # Second factor, where the account has one. The password is verified
     # first so an attacker learns nothing new from the order; the distinct
