@@ -51,7 +51,7 @@ router.include_router(notifications_router, tags=["Club Notifications"])
 
 @router.post("/create", summary="create club")
 async def create_club(
-    session: SessionDep, club: CreateClub = Depends()
+    session: SessionDep, background_tasks: BackgroundTasks, club: CreateClub = Depends()
 ) -> ClubCreateUpdateResponse:
     """Create a club. the club will be now verified, and will be unable to login until the admin verifies it."""
     club = await service.create_club(
@@ -66,6 +66,7 @@ async def create_club(
         location_name=club.location_name,
         interest_ids=club.interest_ids,
     )
+    _follow_map_link(background_tasks, club)
     return club
 
 
@@ -179,9 +180,10 @@ async def reject_club_endpoint(
 
 
 def _follow_map_link(background_tasks: BackgroundTasks, club) -> None:
-    """A short map link (maps.app.goo.gl…) is followed after the answer, to find the club's point."""
-    if geo.needs_resolving(club):
-        background_tasks.add_task(geo.resolve_and_store, "club", club.id)
+    """A club still without a point is placed after the answer: its short map
+    link (maps.app.goo.gl…) followed, or else its place's words geocoded."""
+    if geo.needs_locating(club):
+        background_tasks.add_task(geo.locate_and_store, "club", club.id)
 
 
 @router.put("/update", summary="update club")

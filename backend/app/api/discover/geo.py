@@ -1,9 +1,18 @@
 """Where things are.
 
-Events and clubs carry a map link (usually Google Maps) and, since "near
-you", the coordinates read out of it. A link that holds them is read on the
-spot; a short link (maps.app.goo.gl and friends) holds nothing until it is
-followed, which happens after the save, never in its way.
+Events and clubs carry a point for "near you", from one of three sources,
+kept in `geo_source`, strongest first:
+
+- 'manual': pinned on the dashboard's map. Kept until new pin values come,
+  or `clear_point` drops it back to the other two.
+- 'link': read out of the map link (usually Google Maps). A link that holds
+  the point is read on the spot; a short link (maps.app.goo.gl and friends)
+  holds nothing until it is followed, which happens after the save.
+- 'geocoded': the venue's words looked up (geocode.py), after the save, when
+  there is no point from the other two.
+
+A weaker source never replaces a stronger one, and a derived point goes when
+what it was derived from is cleared or changed (apply_place).
 
 A visitor is placed by the browser when it says (lat/lng on the request), or
 roughly by their address otherwise. Nothing here raises: a place that cannot
@@ -18,6 +27,7 @@ import math
 import re
 import time
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from typing import Optional
 from urllib.parse import parse_qs, unquote, urljoin, urlparse
 
@@ -222,22 +232,125 @@ async def resolve_link(url: Optional[str]) -> Optional[Point]:
 
 # ─── Setting a row's point ────────────────────────────────────────────────
 
+MANUAL, LINK, GEOCODED = "manual", "link", "geocoded"
+#: Strongest first.
+SOURCES = (MANUAL, LINK, GEOCODED)
+KEEP = object()
+
+
+def _source(obj) -> Optional[str]:
+    return getattr(obj, "geo_source", None)
+
+
+def _clear_point(obj) -> None:
+    obj.lat = obj.lng = None
+    obj.geo_source = None
+
+
+def _words(text: Optional[str]) -> str:
+    return " ".join((text or "").split()).lower()
+
+
+def valid_point(lat, lng) -> Optional[Point]:
+    """A pin as given: a real point on the map, or None (out of range, not a
+    number, or "0,0", which is a default and not a place)."""
+    try:
+        return _valid(float(lat), float(lng))
+    except (TypeError, ValueError):
+        return None
+
+
+def pin_from_form(lat, lng) -> Optional[Point]:
+    """A pin from the dashboard's map, as a form sends it: both or neither,
+    and a real point. Anything else is a 422, field by field, as a bad form
+    value is."""
+    from fastapi.exceptions import RequestValidationError
+
+    if lat is None and lng is None:
+        return None
+    if lat is None or lng is None:
+        missing = "lat" if lat is None else "lng"
+        raise RequestValidationError([{"loc": ("body", missing), "msg": "Send lat and lng together, or neither.", "type": "value_error"}])
+    point = valid_point(lat, lng)
+    if point is None:
+        raise RequestValidationError([{"loc": ("body", "lat"), "msg": "Not a point on the map.", "type": "value_error"}])
+    return point
+
+
+def apply_place(obj, *, link=KEEP, venue=KEEP, manual: Optional[Point] = None, clear_point: bool = False) -> None:
+    """Save an event's or club's place: its map link, its venue's words and a
+    pin, and the point they give, by the precedence 'manual' > 'link' >
+    'geocoded'.
+
+    `link` and `venue`, when given, replace what the row has (KEEP leaves it).
+    `manual` is a pin from the dashboard's map: it becomes the point. Without
+    one, a pin already there stays, whatever the link and words become,
+    unless `clear_point` drops it. Below a pin: a link that holds a point gives
+    it now; a changed or cleared link takes its old point away, and so do
+    changed or cleared words a geocoded point came from. What is left without
+    a point is found after the save (needs_locating, locate_and_store)."""
+    old_link, old_venue = getattr(obj, "location_link", None), getattr(obj, "location_name", None)
+    if link is not KEEP:
+        obj.location_link = (link or "").strip() or None
+    if venue is not KEEP:
+        obj.location_name = venue
+    link_changed = getattr(obj, "location_link", None) != old_link
+    venue_changed = _words(getattr(obj, "location_name", None)) != _words(old_venue)
+
+    if manual is not None:
+        obj.lat, obj.lng = manual
+        obj.geo_source = MANUAL
+        return
+    if clear_point and _source(obj) == MANUAL:
+        _clear_point(obj)
+    if _source(obj) == MANUAL:
+        return
+
+    found = coords_from_link(obj.location_link) if obj.location_link else None
+    if found:
+        obj.lat, obj.lng = found
+        obj.geo_source = LINK
+        return
+    if getattr(obj, "lat", None) is None:
+        _clear_point(obj)
+    elif link_changed or clear_point:
+        # The old link's point (or one from before sources were kept), or a
+        # geocoded one that a new short link may well better.
+        _clear_point(obj)
+    elif _source(obj) == GEOCODED and venue_changed:
+        _clear_point(obj)
+
 
 def set_link(obj, link: Optional[str]) -> bool:
-    """Put a link on an event or club and read its point now when it holds one.
-
-    An empty link clears the point. Returns True when the point has to be
-    found by following the link, after the save."""
-    link = (link or "").strip() or None
-    obj.location_link = link
-    found = coords_from_link(link) if link else None
-    obj.lat, obj.lng = found if found else (None, None)
-    return bool(link and not found and is_short_link(link))
+    """Put a link on an event or club and read its point now when it holds one
+    (apply_place with only a link). A pin dropped by hand stays. Returns True
+    when the point has to be found by following the link, after the save."""
+    apply_place(obj, link=link)
+    return needs_resolving(obj)
 
 
 def needs_resolving(obj) -> bool:
     link = getattr(obj, "location_link", None)
     return bool(link and getattr(obj, "lat", None) is None and is_short_link(link))
+
+
+def _geocodable(obj) -> bool:
+    """A club, or an event in person: somewhere a venue's words can place."""
+    from app.api.discover import geocode
+
+    if getattr(obj, "is_online", False):
+        return False
+    return geocode.worth_asking(getattr(obj, "location_name", None))
+
+
+def needs_locating(obj) -> bool:
+    """Whether a saved row still has to find its point: by following its
+    short link, or failing that by geocoding its venue's words."""
+    if _source(obj) == MANUAL or getattr(obj, "lat", None) is not None:
+        return False
+    if needs_resolving(obj):
+        return True
+    return bool(settings.GEOCODER_ENABLED) and _geocodable(obj)
 
 
 @asynccontextmanager
@@ -258,30 +371,84 @@ def _model(kind: str):
     return Events if kind == "event" else Clubs
 
 
+def _may_place(obj, source: str) -> bool:
+    """Whether a point from `source` may go on the row: it has none, or only
+    a weaker one (a link's point replaces a geocoded one; nothing replaces a pin)."""
+    if getattr(obj, "lat", None) is None:
+        return True
+    return SOURCES.index(source) < SOURCES.index(_source(obj)) if _source(obj) in SOURCES else False
+
+
+def _upgradable(obj) -> bool:
+    """A geocoded point whose row has a link that may give a better one."""
+    link = getattr(obj, "location_link", None)
+    return _source(obj) == GEOCODED and bool(link) and (coords_from_link(link) is not None or is_short_link(link))
+
+
+async def _store(kind: str, obj_id: int, point: Point, source: str, *, link: Optional[str], venue: Optional[str]) -> bool:
+    """Keep a point found after the save, unless the row moved on meanwhile:
+    a pin or another point arrived, or the link or words it came from changed
+    (that save has its own task)."""
+    async with session_scope() as session:
+        obj = await session.get(_model(kind), obj_id)
+        if obj is None or not _may_place(obj, source):
+            return False
+        if obj.location_link != link:
+            return False
+        if source == GEOCODED and (_words(obj.location_name) != _words(venue) or not _geocodable(obj)):
+            return False
+        obj.lat, obj.lng = point
+        obj.geo_source = source
+        await session.commit()
+    return True
+
+
 async def resolve_and_store(kind: str, obj_id: int) -> bool:
     """Follow one row's link and keep the point it lands on. Never raises."""
     try:
-        model = _model(kind)
         async with session_scope() as session:
-            obj = await session.get(model, obj_id)
+            obj = await session.get(_model(kind), obj_id)
             link = getattr(obj, "location_link", None) if obj is not None else None
-            if not link or obj.lat is not None:
+            if not link or not _may_place(obj, LINK):
                 return False
+            venue = obj.location_name
         found = await resolve_link(link)
         _tried[(kind, obj_id)] = time.monotonic()
         if not found:
             return False
-        async with session_scope() as session:
-            obj = await session.get(model, obj_id)
-            # The link may have changed while it was being followed; that save has its own task.
-            if obj is None or obj.location_link != link:
-                return False
-            obj.lat, obj.lng = found
-            await session.commit()
-        return True
+        return await _store(kind, obj_id, found, LINK, link=link, venue=venue)
     except Exception:  # noqa: BLE001
         logger.warning("could not store the point for %s %s", kind, obj_id, exc_info=True)
         return False
+
+
+async def locate_and_store(kind: str, obj_id: int) -> Optional[str]:
+    """After a save: find a row's point and keep it. Its short link is
+    followed first; when that gives nothing (or there is none), its venue's
+    words are geocoded. Returns the source of the point kept, or None. Never
+    raises."""
+    from app.api.discover import geocode
+
+    try:
+        async with session_scope() as session:
+            obj = await session.get(_model(kind), obj_id)
+            if obj is None or _source(obj) == MANUAL or obj.lat is not None:
+                return None
+            link, venue, geocodable = obj.location_link, obj.location_name, _geocodable(obj)
+        if link and is_short_link(link):
+            found = await resolve_link(link)
+            _tried[(kind, obj_id)] = time.monotonic()
+            if found:
+                return LINK if await _store(kind, obj_id, found, LINK, link=link, venue=venue) else None
+        if not geocodable or not settings.GEOCODER_ENABLED:
+            return None
+        async with session_scope() as session:
+            found = await geocode.lookup(session, venue)
+        if found and await _store(kind, obj_id, found, GEOCODED, link=link, venue=venue):
+            return GEOCODED
+    except Exception:  # noqa: BLE001
+        logger.warning("could not locate %s %s", kind, obj_id, exc_info=True)
+    return None
 
 
 # ─── Backfill ──────────────────────────────────────────────────────────────
@@ -313,18 +480,31 @@ def reset_scan() -> None:
     _last_scan = -SCAN_EVERY
 
 
+def _wants_link_where(model):
+    """Rows with a link and no point, or only a geocoded one the link may better."""
+    from sqlalchemy import or_
+
+    return [
+        model.location_link.isnot(None), model.location_link != "", model.is_deleted == False,  # noqa: E712
+        or_(model.lat.is_(None), model.geo_source == GEOCODED),
+    ]
+
+
 async def missing(session, limit: Optional[int] = None, *, skip_recent: bool = True) -> list[tuple[str, int]]:
-    """Rows with a link and no point, events first."""
+    """Rows whose link may still give their point, events first: no point
+    yet, or a geocoded one under a link that holds or leads to a better one."""
     from app.api.clubs.models import Clubs
     from app.api.events.models import Events
 
     now = time.monotonic()
     out: list[tuple[str, int]] = []
     for kind, model in (("event", Events), ("club", Clubs)):
-        ids = (await session.scalars(
-            select(model.id).where(model.location_link.isnot(None), model.location_link != "", model.lat.is_(None), model.is_deleted == False).order_by(model.id.desc())  # noqa: E712
+        rows = (await session.execute(
+            select(model.id, model.location_link, model.lat, model.geo_source).where(*_wants_link_where(model)).order_by(model.id.desc())
         )).all()
-        for i in ids:
+        for i, link, lat, source in rows:
+            if lat is not None and not _upgradable(SimpleNamespace(location_link=link, geo_source=source)):
+                continue
             if skip_recent and now - _tried.get((kind, i), -RETRY_AFTER * 2) < RETRY_AFTER:
                 continue
             out.append((kind, i))
@@ -370,7 +550,8 @@ async def backfill_missing(limit: int) -> None:
 
 
 async def backfill_all(session) -> dict:
-    """Every row with a link and no point: read what can be read here, follow the rest."""
+    """Every row whose link may still give its point (missing): read what
+    can be read here, follow the rest."""
     from app.api.clubs.models import Clubs
     from app.api.events.models import Events
 
@@ -378,14 +559,15 @@ async def backfill_all(session) -> dict:
     follow: list[tuple[str, int]] = []
     for kind, model in (("event", Events), ("club", Clubs)):
         key = kind + "s"
-        rows = (await session.scalars(
-            select(model).where(model.location_link.isnot(None), model.location_link != "", model.lat.is_(None), model.is_deleted == False)  # noqa: E712
-        )).all()
+        rows = (await session.scalars(select(model).where(*_wants_link_where(model)))).all()
         for obj in rows:
+            if obj.lat is not None and not _upgradable(obj):
+                continue
             counts[key]["checked"] += 1
             found = coords_from_link(obj.location_link)
             if found:
                 obj.lat, obj.lng = found
+                obj.geo_source = LINK
                 counts[key]["resolved"] += 1
             elif is_short_link(obj.location_link):
                 follow.append((kind, obj.id))
@@ -393,6 +575,79 @@ async def backfill_all(session) -> dict:
     for (kind, _), ok in zip(follow, await _resolve_many(follow)):
         if ok:
             counts[kind + "s"]["resolved"] += 1
+    return counts
+
+
+async def geocode_backfill(session, *, max_requests: int = 30, now=None) -> dict:
+    """Geocode the venue's words of every row still without a point: events
+    not over yet first (soonest first), then clubs, then past events (newest
+    first). Words already asked about cost nothing and are applied however
+    many rows share them; at most `max_requests` go to the geocoder (one a
+    second), and `remaining` counts the rows left for another run. A pin or a
+    link's point is never touched: only rows without a point are written."""
+    from datetime import datetime, timezone
+
+    from sqlalchemy import func
+
+    from app.api.clubs.models import Clubs
+    from app.api.discover import geocode
+    from app.api.events.models import Events, ends_at_sql
+
+    now = now or datetime.now(timezone.utc)
+    counts = {
+        "enabled": bool(settings.GEOCODER_ENABLED),
+        "events": {"checked": 0, "geocoded": 0, "not_found": 0},
+        "clubs": {"checked": 0, "geocoded": 0, "not_found": 0},
+        "requests": 0,
+        "remaining": 0,
+    }
+    if not settings.GEOCODER_ENABLED:
+        return counts
+
+    def lacking(model):
+        conds = [model.lat.is_(None), model.is_deleted == False, model.location_name.isnot(None), func.btrim(model.location_name) != ""]  # noqa: E712
+        if model is Events:
+            conds.append(func.coalesce(Events.is_online, False) == False)  # noqa: E712
+        return conds
+
+    batches = (
+        ("event", Events, select(Events.id, Events.location_name).where(*lacking(Events), ends_at_sql(Events) >= now).order_by(Events.event_datetime, Events.id)),
+        ("club", Clubs, select(Clubs.id, Clubs.location_name).where(*lacking(Clubs)).order_by(Clubs.id)),
+        ("event", Events, select(Events.id, Events.location_name).where(*lacking(Events), ends_at_sql(Events) < now).order_by(Events.event_datetime.desc(), Events.id.desc())),
+    )
+    for kind, model, stmt in batches:
+        key = kind + "s"
+        rows = [(i, v, geocode.normalise(v)) for i, v in (await session.execute(stmt)).all()]
+        rows = [r for r in rows if r[2] is not None]
+        answers = await geocode.cached_many(session, [q for _, _, q in rows])
+        written = 0
+        for obj_id, venue, query in rows:
+            known, point = answers[query]
+            if not known:
+                if counts["requests"] >= max_requests or geocode.paused():
+                    counts["remaining"] += 1
+                    continue
+                counts["requests"] += 1
+                known, point = await geocode.ask(session, query)
+                if not known:
+                    counts["remaining"] += 1
+                    continue
+                answers[query] = (True, point)
+            counts[key]["checked"] += 1
+            if point is None:
+                counts[key]["not_found"] += 1
+                continue
+            # Only where nothing arrived meanwhile, and the words are still these.
+            done = await session.execute(
+                model.__table__.update()
+                .where(model.id == obj_id, model.lat.is_(None), model.location_name == venue)
+                .values(lat=point[0], lng=point[1], geo_source=GEOCODED)
+            )
+            counts[key]["geocoded"] += done.rowcount or 0
+            written += 1
+            if written % 200 == 0:
+                await session.commit()
+        await session.commit()
     return counts
 
 
@@ -504,10 +759,9 @@ def cell_is_cacheable(c: tuple[int, int]) -> bool:
 
 
 def client_ip(request) -> str:
-    forwarded = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
-    if forwarded:
-        return forwarded
-    return request.client.host if request.client else ""
+    from app.core.net import client_address
+
+    return client_address(request)
 
 
 def _is_public(ip: str) -> bool:

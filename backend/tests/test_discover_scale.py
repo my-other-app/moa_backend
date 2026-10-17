@@ -504,6 +504,8 @@ async def test_statements_per_request_do_not_grow_with_the_number_of_events(clie
         e = Events(slug=f"b-{uuid.uuid4().hex[:8]}", images=[], duration=2.0, club_id=clubs[club_i].id, category_id=w.categories[cat_i].id, lifecycle=EventStatus.published, **kw)
         session.add(e)
         w.events.append(e)
+    # And one the first club held, so its past list has a page from the start.
+    session.add(Events(slug=f"b-{uuid.uuid4().hex[:8]}", name="Held Before", images=[], duration=2.0, club_id=clubs[0].id, category_id=w.categories[0].id, lifecycle=EventStatus.closed, event_datetime=w.now - 5 * day))
     await session.flush()
     for e in w.events:
         session.add(EventInterestsLink(event_id=e.id, interest_id=w.interests[0].id))
@@ -514,6 +516,7 @@ async def test_statements_per_request_do_not_grow_with_the_number_of_events(clie
     session.add(ThreadPollOptions(thread_id=thread.id, label="Yes", sort_order=0))
     await session.commit()
     page_slug = w.events[0].slug
+    today = w.now.astimezone(service.IST).date()
 
     paths = [
         (f"{API}/home", {}, {}), (f"{API}/home", {"lat": BLR[0], "lng": BLR[1]}, {}), (f"{API}/home", {}, token),
@@ -523,6 +526,10 @@ async def test_statements_per_request_do_not_grow_with_the_number_of_events(clie
         (f"{API}/clubs", {}, {}), (f"{API}/clubs", {"lat": BLR[0], "lng": BLR[1], "sort": "nearby"}, {}), (f"{API}/clubs", {"q": "bounded"}, {}),
         (f"{API}/clubs/{clubs[0].slug}", {}, {}), (f"{API}/events/{page_slug}", {}, {}), (f"{API}/threads", {}, {}),
         (f"{API}/categories", {}, {}), (f"{API}/sitemap", {}, {}),
+        (f"{API}/clubs/{clubs[0].slug}/events", {"when": "upcoming"}, {}), (f"{API}/clubs/{clubs[0].slug}/events", {"when": "past"}, {}),
+        (f"{API}/events", {"from": today.isoformat(), "to": (today + timedelta(days=30)).isoformat()}, {}),
+        (f"{API}/calendar", {"month": today.strftime("%Y-%m")}, {}),
+        (f"{API}/calendar", {"month": today.strftime("%Y-%m"), "lat": BLR[0], "lng": BLR[1], "q": "robotics"}, {}),
         ("/api/v1/events/for-you", {}, token), ("/api/v1/events/list", {"is_ended": "false"}, token),
         ("/api/v1/events/list", {"search": "a"}, token), ("/api/v1/events/list", {"interest_ids": str(w.interests[0].id)}, token),
     ]

@@ -145,6 +145,16 @@ async def create_user(
 ):
     # Guests may share an address or a phone; every other kind may not.
     if user_type != UserTypes.guest:
+        # An address taken in another case ("Ravi@x" against "ravi@x") is
+        # taken: two such accounts would split one person's tickets and make
+        # signing in depend on how the address was typed.
+        taken = await session.scalar(
+            select(Users.id).where(
+                same_email(Users.email, email), Users.user_type == user_type, Users.is_deleted == False  # noqa: E712
+            ).limit(1)
+        )
+        if taken is not None:
+            raise CustomHTTPException(status_code=400, message="Invalid Request", errors={"email": "email already exists"})
         await validate_unique(
             session,
             unique_together=[

@@ -27,7 +27,8 @@ import re
 import statistics
 import sys
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -115,9 +116,23 @@ def _forget() -> None:
     cache.reset()
 
 
+def _days() -> dict:
+    """Calendar days and months in India, relative to today, for the date filters."""
+    today = datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Kolkata")).date()
+    n = today.year * 12 + today.month  # next month, 1-based
+    return dict(
+        week_out=(today + timedelta(days=7)).isoformat(), week_out_end=(today + timedelta(days=13)).isoformat(),
+        today=today.isoformat(), quarter=(today + timedelta(days=90)).isoformat(),
+        far=(today + timedelta(days=150)).isoformat(),
+        month=f"{today.year:04d}-{today.month:02d}", next_month=f"{n // 12:04d}-{n % 12 + 1:02d}",
+        year_back=f"{today.year - 1:04d}-{today.month:02d}",
+    )
+
+
 def endpoints(t: dict) -> list[tuple[str, str, dict, bool]]:
     """(name, path, params, signed_in); a name ending in "(cold)" empties the
     shared cache before every request, so it times the work a cache miss does."""
+    d = _days()
     return [
         ("home", "/discover/home", {}, False),
         ("home (cold)", "/discover/home", {}, False),
@@ -137,6 +152,18 @@ def endpoints(t: dict) -> list[tuple[str, str, dict, bool]]:
         ("events distance r=300", "/discover/events", {**KOCHI, "sort": "distance", "radius_km": 300}, False),
         ("events popular", "/discover/events", {"sort": "popular"}, False),
         ("events offset=480", "/discover/events", {"offset": 480}, False),
+        ("events from/to a week, a week out", "/discover/events", {"from": d["week_out"], "to": d["week_out_end"]}, False),
+        ("events from/to the next 90 days", "/discover/events", {"from": d["today"], "to": d["quarter"]}, False),
+        ("events from/to one day 150 days out", "/discover/events", {"from": d["far"], "to": d["far"]}, False),
+        ("calendar", "/discover/calendar", {"month": d["month"]}, False),
+        ("calendar (cold)", "/discover/calendar", {"month": d["month"]}, False),
+        ("calendar next month (cold)", "/discover/calendar", {"month": d["next_month"]}, False),
+        ("calendar a year back (cold)", "/discover/calendar", {"month": d["year_back"]}, False),
+        ("calendar q (cold)", "/discover/calendar", {"month": d["next_month"], "q": "robotics"}, False),
+        ("calendar lat/lng (cold)", "/discover/calendar", {"month": d["next_month"], **BLR}, False),
+        ("club events past (big)", f"/discover/clubs/{t['club']}/events", {"when": "past"}, False),
+        ("club events upcoming (big)", f"/discover/clubs/{t['club']}/events", {"when": "upcoming"}, False),
+        ("club events past offset=48 (big)", f"/discover/clubs/{t['club']}/events", {"when": "past", "offset": 48, "limit": 48}, False),
         ("clubs", "/discover/clubs", {}, False),
         ("clubs q", "/discover/clubs", {"q": "robotics"}, False),
         ("clubs q typo", "/discover/clubs", {"q": "robtics"}, False),

@@ -44,6 +44,7 @@ from app.core.auth.permissions import (
 )
 from app.api.interests.schemas import InterestPublic
 from app.api.auth import service as auth_service
+from app.core.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -72,15 +73,25 @@ async def merge_guests(request: Request, session: SessionDep, admin: ModerateAut
 
 
 @router.post("/register", summary="Register a new user")
+# Per caller address (app.core.net): loose enough for a campus behind one
+# Wi-Fi address, tight enough that a script cannot mint accounts by the
+# thousand.
+@limiter.limit("20/minute")
 async def register_user(
+    request: Request,
     user: UserCreate,
     session: SessionDep,
     background: BackgroundTasks,
 ) -> UserRegisterResponse:
+    # The app's own rule, held here too: the server took any length before.
+    if user.password and len(user.password) < 6:
+        raise CustomHTTPException(400, message="Invalid Request", errors={"password": "Use at least 6 characters"})
     user = await service.create_user(
         session,
         full_name=user.full_name,
-        email=user.email,
+        # Stored in one case, so signing in and finding the account never
+        # depend on how the address was typed.
+        email=user.email.strip().lower(),
         phone=user.phone,
         password=user.password,
     )
@@ -100,7 +111,10 @@ async def register_user(
         # A rollback expires the account; reload it rather than let the token
         # code lazy-load it (MissingGreenlet on the async engine).
         await session.refresh(user)
-    token = await auth_service.create_access_refresh_tokens(user)
+    # With a session row, like every other sign-in: it shows on the Security
+    # page and can be signed out from there.
+    token = await auth_service.create_access_refresh_tokens(user, session=session, request=request)
+    await session.commit()
     return {
         "username": user.username,
         "access_token": token.access_token,

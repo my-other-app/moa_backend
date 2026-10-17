@@ -111,6 +111,21 @@ class EventSearch(BaseModel):
     categories: list[SearchCategory]
 
 
+class ClubEvents(BaseModel):
+    """A club's events, a page at a time (past: newest first; upcoming: soonest first)."""
+    items: list[EventCard]
+    total: int
+    offset: int
+    limit: int
+
+
+class CalendarMonth(BaseModel):
+    """How many public events touch each day of a month ("YYYY-MM-DD", days
+    in India); days with none are left out."""
+    month: str
+    days: dict[str, int]
+
+
 class ClubSearch(BaseModel):
     items: list[ClubCard]
     total: int
@@ -258,6 +273,27 @@ class BackfillCounts(BaseModel):
 class BackfillResult(BaseModel):
     events: BackfillCounts
     clubs: BackfillCounts
+
+
+class GeocodeCounts(BaseModel):
+    # Rows whose words the geocoder has answered for (from its cache or just now).
+    checked: int
+    # Of those, the rows that got a point.
+    geocoded: int
+    not_found: int
+
+
+class GeocodeBackfillResult(BaseModel):
+    """What one run of the venue geocoder's backfill did."""
+    # False when GEOCODER_ENABLED is off: then nothing was done.
+    enabled: bool
+    events: GeocodeCounts
+    clubs: GeocodeCounts
+    # Requests sent to the geocoder in this run (one a second).
+    requests: int
+    # Rows left without an answer: the request budget ran out, the geocoder
+    # paused or did not answer. Run it again for them.
+    remaining: int
 
 
 class CounterFixes(BaseModel):

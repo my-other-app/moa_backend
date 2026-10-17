@@ -55,9 +55,13 @@ class Clubs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     # location = Column(Geometry("POINT"), nullable=True)
     location_name = Column(String, nullable=True)
     location_link = Column(String, nullable=True)
-    # Read from location_link when it is a map link; a club without one is placed by its events.
+    # Read from location_link when it is a map link, found from location_name
+    # by the geocoder when it is not, or pinned by hand on the dashboard's map;
+    # a club without any is placed by its events.
     lat = Column(Float, nullable=True)
     lng = Column(Float, nullable=True)
+    # 'manual' > 'link' > 'geocoded' (app.api.discover.geo.apply_place).
+    geo_source = Column(String(10), nullable=True)
     rating = Column(Float, nullable=False, default=0)
     total_ratings = Column(Integer, nullable=False, default=0)
     user_id = Column(

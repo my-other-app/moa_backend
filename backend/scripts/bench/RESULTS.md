@@ -327,6 +327,7 @@ endpoint, under EXPLAIN):
 | `ix_club_interests_club`, `ix_club_interests_interest` | clubs_interests_link (club_id) / (interest_id, club_id) WHERE NOT is_deleted | club cards; clubs by interest |
 | `ix_user_interests_user`, `ix_user_profiles_user` | (user_id) | For You; the app's lists |
 | `ix_club_threads_newest` | club_threads (created_at DESC, id) WHERE NOT is_deleted | front page posts, the threads feed |
+| `ix_events_span` (`discovery_polish`) | events GiST (tstzrange(start, GREATEST(start, end), '[]')) | the calendar; `from`/`to` on the event search (see the last section) |
 
 Extension: `pg_trgm`.
 
@@ -449,6 +450,151 @@ python -m scripts.bench.report scripts/bench/results/before.json scripts/bench/r
 The "before" run used the same scripts on origin/master 43f0d71 (and
 `signing fixed`, that commit plus `fields.py`) against the same database
 before `alembic upgrade discover_perf`.
+
+## Calendar, date ranges and a club's events (`discovery_polish`)
+
+Three new reads on the public site: `/discover/calendar?month=` (events per
+day of a month, in India), `from`/`to` on `/discover/events` (days in
+India, an event matches if it touches them), and
+`/discover/clubs/{slug}/events` (a club's past or upcoming events, paged).
+
+`moa_bench` had been dropped, so these were measured on a fresh copy made
+the same way (`BENCH_DB=moa_bench_polish python -m scripts.bench.seed`:
+schema by alembic, `discovery_polish` included, the same seeded data). The
+machine was running other test suites at the time (load average 3–12), so
+the timings are indicative; the plans and buffer counts are not affected.
+October 2026 is the densest month of the data: 5,325 public events touch
+it, 5,826 event-days.
+
+| endpoint | p50 / p95 ms (n=200) | stmts |
+|---|---:|---:|
+| calendar (warm: the minute cache) | 1.2 / 1.4 | 0 |
+| calendar, this month (cold) | 15.9 / 22.5 | 1 |
+| calendar, next month (cold) | 15.2 / 17.7 | 1 |
+| calendar, a year back (cold; held events) | 8.8 / 10.0 | 1 |
+| calendar, `q=robotics` (cold) | 10.7 / 14.1 | 1 |
+| calendar, within 50 km of Bengaluru (cold) | 12.4 / 15.7 | 1 |
+| events `from`/`to`: a week, a week out (1,913 events) | 14.8 / 17.7 | 3 |
+| events `from`/`to`: the next 90 days (10,071) | 21.9 / 30.0 | 3 |
+| events `from`/`to`: one day 150 days out (1) | 6.7 / 9.2 | 3 |
+| club events, past (the biggest club) | 7.3 / 16.1 | 4 |
+| club events, upcoming (the biggest club) | 7.3 / 7.9 | 4 |
+| club events, past, offset beyond the end | 3.4 / 4.0 | 2 |
+
+(The search's third statement is the page's going counters; its categories
+come from the minute cache. A club's events: the club, the count, the page,
+the counters; past the end only the first two.)
+
+### One index for "touches these days": `ix_events_span`
+
+"An event touches [a, b)" is `start < b AND end > a`: two one-sided ranges
+on two different expressions, which no B-tree serves as one range. For the
+calendar's past months it is worse: `ix_events_shown_start` only holds
+published and live events, and `end > a` on `ix_events_ends_at` is
+everything that ended after `a`. So a GiST index on each event as a range,
+`tstzrange(start, GREATEST(start, end), '[]')`, and `span && [a, b)`, with
+the exact rule (`start < b AND (end > a OR start >= a)`: an event ending at
+midnight is not on the next day, one of no length is on the day it starts)
+as a filter on what the index finds. `GREATEST` keeps the range from being
+inverted, which would make a write with a negative duration fail.
+
+The index is **not partial**. With it partial (`WHERE NOT is_deleted AND
+status IN (…)`) the planner ignored its statistics (Postgres only reads
+expression statistics from indexes without a predicate) and estimated every
+stretch at 513 rows, whatever its length. The 90-day page then went through
+the span index and a top-N sort of 10,830 rows (19.1 ms) instead of walking
+`ix_events_shown_start` in order and stopping after 24 (0.48 ms now). With
+the statistics, a week's estimate is 2,213 (actual 2,218) and 90 days'
+11,522 (actual 11,674). The migration ends with `ANALYZE events` so the
+statistics are there from the start. On writes it costs about 70 µs per
+event whose times change (5,000 start-time changes: 628 ms with it, 261 ms
+without); the going-count updates the registration trigger makes change
+no column it covers, so they only touch it when a row cannot be updated in
+place (no HOT update). Size: 8.9 MB for 37,000 events.
+
+**A week, a week out**: the span index and the date index ANDed, 2,071 rows
+read, the 24 kept by a top-N sort:
+
+```
+Aggregate  (actual time=4.135..4.136 rows=1)
+  ->  Nested Loop  (rows=1913)
+        ->  Bitmap Heap Scan on events  (rows=2071)  Heap Blocks: exact=1756
+              ->  BitmapAnd
+                    ->  Bitmap Index Scan on ix_events_span  (rows=2218)
+                          Index Cond: (tstzrange(event_datetime, GREATEST(…), '[]') && '["2026-10-24 00:00:00+05:30","2026-10-31 00:00:00+05:30")')
+                    ->  Bitmap Index Scan on ix_events_shown_start  (rows=5456)
+                          Index Cond: (event_datetime < '2026-10-31 00:00:00+05:30')
+        ->  Memoize -> Index Scan using clubs_pkey on clubs  (Hits: 1306  Misses: 765)
+Execution Time: 4.155 ms
+```
+
+**The next 90 days**: the count reads what is on through the span and
+end indexes (11.6 ms, two workers); the page walks `ix_events_shown_start`
+in order and stops at 24 (0.48 ms).
+
+**One day 150 days out**: the span index alone, 1 row (0.03 ms).
+
+### The calendar: one statement, the month's events once
+
+```sql
+SELECT days.day, count(*)
+FROM (SELECT start, end FROM events JOIN clubs … WHERE <public> AND span && [month) AND <exact>) AS month_events
+JOIN generate_series(greatest(day_of(start), first), least(day_of(last instant on), last), '1 day') AS days(day) ON true
+GROUP BY days.day
+```
+
+The month's events are found once through `ix_events_span`; each gives
+only the days it touches (a series of its own, cut to the month), and those
+are counted. The first version joined every event to every day of the month
+by the overlap rule: 31 × 4,972 rows tested (148,306 thrown away) and the
+end expression worked out for each pair, 21.8 ms; per event, 11.5 ms for the
+same month (best of 5, EXPLAIN ANALYZE). The densest month, as it runs now:
+
+```
+Finalize GroupAggregate  (actual time=8.179..9.156 rows=29)
+  ->  Gather Merge  Workers Launched: 2
+        ->  Partial HashAggregate  (rows=29 loops=3)
+              ->  Nested Loop  (rows=1942 loops=3)
+                    ->  Nested Loop  (rows=1657 loops=3)
+                          ->  Parallel Bitmap Heap Scan on events  (rows=1775 loops=3)  Heap Blocks: exact=1432
+                                ->  BitmapAnd
+                                      ->  Bitmap Index Scan on ix_events_span  (rows=5657)
+                                      ->  BitmapOr
+                                            ->  Bitmap Index Scan on ix_events_shown_start  (rows=5722)
+                                            ->  Bitmap Index Scan on ix_events_ends_at  (rows=24633)
+                          ->  Index Scan using clubs_pkey on clubs  (loops=5325)
+                    ->  Function Scan on generate_series days  (rows=1 loops=4972)
+Execution Time: 9.180 ms
+```
+
+(The `BitmapOr` is the planner serving the visibility rule's two arms, on
+now or still to come / held and over, from the two existing indexes. A year
+back the same plan reads 706 events, 1.7 ms.) The answer is kept for the
+minute per month, filters and place (`("calendar", …, minute)` in the
+shared cache); a typo in `q` that finds nothing tries trigrams once more,
+as the search does.
+
+### A club's events
+
+`ix_events_club_start (club_id, event_datetime) WHERE NOT is_deleted`
+serves both directions: past is walked backwards from now and stops after
+the page (the same rule as the club page's six), upcoming forwards. Four
+statements, whatever the club holds.
+
+### Reproduce
+
+```
+createdb moa_bench_polish
+BENCH_DB=moa_bench_polish python -m scripts.bench.seed
+BENCH_DB=moa_bench_polish python -m scripts.bench.run --label polish --freeze --only "from/to,calendar,club events" --n 200 --budget 15
+BENCH_DB=moa_bench_polish python -m scripts.bench.run --only "from/to,calendar,club events" --warmup 2 --min 3 --n 5 --budget 1 --explain plans.txt --indexes indexes.json
+```
+
+`discovery_polish` on this data: about 2 s of SQL (marking 27,694 points as
+from links 1.3 s, the index 0.3 s, `ANALYZE events` 0.4 s); 11.8 s for the
+whole alembic run with the machine loaded. At production's size,
+milliseconds; the `ALTER TABLE` holds the events table for the length of
+the migration's one transaction.
 
 ## Larger worlds
 
