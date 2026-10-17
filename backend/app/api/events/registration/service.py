@@ -156,9 +156,15 @@ async def register_event(
     tracking_ref: str | None = None,
     store_picks: list | None = None,
     claim_existing: bool = True,
+    by_organiser: bool = False,
 ):
     """`relaxed_fields` is for a guest registered at the door: nothing is
     required there, and what they answer goes on the record.
+
+    `by_organiser` is for the club adding a guest itself (by hand, by import,
+    at the door): when the club's plan caps registrations it is told the
+    plan's reason, where a guest on the public form is only told that
+    registrations are closed.
 
     `notify=False` is for a guest the organiser adds or imports: the
     confirmation goes out later through Send tickets, where it is recorded,
@@ -288,6 +294,13 @@ async def register_event(
         # if db_event.has_fee and registration.is_paid:
         #     raise CustomHTTPException(400, message="Already registered for this event")
     else:
+        # The club's plan caps registrations per event and per month, on top
+        # of the organiser's own max_participants above (never for an event
+        # made before the caps began).
+        from app.api.subscriptions import gates
+
+        await gates.check_registration(session, db_event, organiser=by_organiser)
+
         ticket_id = generate_ticket_id()
 
         registration = EventRegistrationsLink(
@@ -726,6 +739,7 @@ async def bulk_import_event_registrations(
                     background_task_log_id=background_log.id,
                     role=role,
                     notify=notify,
+                    by_organiser=True,
                 )
 
                 registration_logs.append(
@@ -1292,7 +1306,7 @@ async def add_attendee(
         raise CustomHTTPException(400, message="The guest account could not be created")
     data = await register_event(
         session=session, full_name=full_name, email=email, phone=phone, user_id=user.id, event_id=event_id,
-        additional_details=additional_details, role=role, notify=False,
+        additional_details=additional_details, role=role, notify=False, by_organiser=True,
     )
     return await get_registration(session, user_id, event_id, str(data["event_registration_id"]), as_admin=as_admin)
 

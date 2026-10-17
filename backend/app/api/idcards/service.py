@@ -94,6 +94,11 @@ async def registration_of(session, event: Events, registration_id) -> EventRegis
 async def card_pdf(session, event: Events, registration_id, *, actor: GateActor, source: PrintSource, record: bool, override: bool = False, door: Optional[str] = None) -> bytes:
     """One guest's card. Recording it is what turns the reprint rule on
     for next time, so a preview (`record=False`) never counts."""
+    # Every way a card is printed comes through here (the console, the
+    # attendees page, a kiosk): badge printing is the club's plan's.
+    from app.api.subscriptions import gates
+
+    await gates.require_feature(session, event.club_id, "badges", actor=actor.user, event=event)
     reg = await registration_of(session, event, registration_id)
     if record:
         ok, why = may_print_again(event.reprint_policy or ReprintPolicy.anyone, reg.badge_printed_at, actor.full, override)
@@ -125,6 +130,9 @@ async def batch_targets(session, event: Events, *, scope: str, role: Optional[st
 async def batch_pdf(session, event: Events, *, scope: str, role: Optional[str], record: bool, actor: GateActor) -> tuple[bytes, int]:
     """Every card in one PDF, a page each, so it prints on a card printer
     through the desk machine or at a print shop."""
+    from app.api.subscriptions import gates
+
+    await gates.require_feature(session, event.club_id, "badges", actor=actor.user, event=event)
     regs = await batch_targets(session, event, scope=scope, role=role)
     merged = pdfium.PdfDocument.new()
     styles: dict = {}

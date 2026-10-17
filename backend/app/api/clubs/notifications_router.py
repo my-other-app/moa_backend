@@ -107,7 +107,12 @@ async def send_notification_to_participants(
             message="You don't have permission to send notifications for this event",
             notifications_sent=0,
         )
-    
+
+    # The club's plan counts announcements per month.
+    from app.api.subscriptions import gates
+
+    await gates.require_within(session, event.club_id, "announcements_per_month", actor=user)
+
     # Send notifications with audience targeting
     logger.info(f"Calling notify_event_participants for event {event_id}")
     sent_count, participant_ids = await notify_event_participants(

@@ -651,11 +651,17 @@ async def test_an_application_with_no_links_makes_no_socials_row(client, session
 async def test_approval_emails_the_club_once(client, session, make_admin, mint_token, monkeypatch):
     from app.core.email import email as email_mod
 
+    from app.core import after_commit
+
     sent = []
     monkeypatch.setattr(email_mod, "send_email", lambda **kw: sent.append(kw))
     applied = await client.post(f"{API}/clubs/create", data={"email": "approve-me@example.com", "password": "Password123!", "name": "Approve Me"})
     club_id = applied.json()["id"]
     header = auth_header(await mint_token(await make_admin()))
+    # The application itself alerts the admins (test_billing_alerts.py);
+    # this test is about the club's own mail.
+    await after_commit.drain()
+    sent.clear()
 
     assert (await client.post(f"{API}/clubs/{club_id}/approve", headers=header)).status_code == 200
     assert [m["recipients"] for m in sent] == [["approve-me@example.com"]]

@@ -44,6 +44,10 @@ async def lifespan(app: FastAPI):
     from app.api.live.service import sweep_loop as feedback_sweep_loop
 
     feedback = asyncio.create_task(feedback_sweep_loop())
+    # Billing: graces running out and trials about to bill, once an hour.
+    from app.api.subscriptions.sweep import sweep_loop as billing_sweep_loop
+
+    billing = asyncio.create_task(billing_sweep_loop())
     # What import and startup built (models, routes, schemas, the S3 service
     # model: some 740,000 objects) lives as long as the process. Frozen out
     # of the collector's reach, a full collection no longer walks all of it:
@@ -55,6 +59,7 @@ async def lifespan(app: FastAPI):
     sweeper.cancel()
     closer.cancel()
     feedback.cancel()
+    billing.cancel()
 
 
 application = FastAPI(default_response_class=ORJSONResponse, lifespan=lifespan)
@@ -67,6 +72,12 @@ application.include_router(router=api_router)
 from app.api.links.router import public_router as public_links_router  # noqa: E402
 
 application.include_router(router=public_links_router, tags=["tracking-links"])
+# Innermost: each request's plan-gate scope, so one request resolves a club's
+# entitlements once and knows whether an admin is behind it
+# (app/api/subscriptions/gates.py).
+from app.api.subscriptions.gates import RequestScope as PlanGateScope  # noqa: E402
+
+application.add_middleware(PlanGateScope)
 # print(settings.cors_origins)
 # if settings.DEBUG:
 application.add_middleware(

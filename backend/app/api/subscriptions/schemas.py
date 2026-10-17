@@ -162,6 +162,13 @@ class SubscriptionOut(CustomBaseModel):
     #: While pending: when checkout opened, and when it falls back unpaid.
     pending_since: datetime | None = None
     checkout_expires_at: datetime | None = None
+    #: Grace: Razorpay stopped retrying a failed renewal at `halted_at` (or an
+    #: admin started a grace then); the club keeps its plan until
+    #: `grace_ends_at`, then moves to Free. Null when no grace is running.
+    halted_at: datetime | None = None
+    grace_ends_at: datetime | None = None
+    #: Past due with a grace that has not run out.
+    in_grace: bool = False
 
 
 class SubscriptionTotals(CustomBaseModel):
@@ -171,6 +178,21 @@ class SubscriptionTotals(CustomBaseModel):
     trialing: int = 0
     past_due: int = 0
     cancelled: int = 0
+    #: Checkouts Razorpay has not confirmed yet.
+    pending: int = 0
+    paused: int = 0
+    #: Past due, Razorpay done retrying, grace still running (also counted in past_due).
+    in_grace: int = 0
+
+
+class ExtendGraceIn(CustomBaseModel):
+    #: Days added to the grace's end (or, with no grace yet, from now).
+    days: int = Field(..., ge=1, le=30)
+
+
+class AdminCancelIn(CustomBaseModel):
+    #: True: the club keeps what it paid for until the period ends. False: now.
+    at_period_end: bool = True
 
 
 class AssignPlanIn(CustomBaseModel):
@@ -211,6 +233,12 @@ class EntitlementsOut(CustomBaseModel):
     #: Counted against the per-club limits: events_per_month,
     #: registrations_per_month, committee_seats, announcements_per_month.
     usage: dict[str, int] = Field(default_factory=dict)
+    #: Whether the plan is enforced at all (the PLAN_ENFORCEMENT switch). When
+    #: false every gate lets everything through, whatever `features` says.
+    enforced: bool = True
+    #: Events created before this keep their paid ticketing and are not
+    #: capped on registrations (subscriptions.gates.grandfathered).
+    grandfathered_before: datetime | None = None
 
 
 class StartSubscriptionIn(CustomBaseModel):
@@ -365,7 +393,7 @@ def plan_to_dict(plan, subscriber_count: int = 0) -> dict:
 
 def subscription_dict(row, club=None) -> dict:
     """One place that turns a ClubSubscriptions row into SubscriptionOut."""
-    from app.api.subscriptions.service import CHECKOUT_TTL, is_entitled
+    from app.api.subscriptions.service import CHECKOUT_TTL, in_grace, is_entitled
 
     club = club if club is not None else getattr(row, "club", None)
     return {
@@ -384,6 +412,9 @@ def subscription_dict(row, club=None) -> dict:
         "trial_ends_at": row.trial_ends_at,
         "pending_since": row.pending_since,
         "checkout_expires_at": row.pending_since + CHECKOUT_TTL if row.pending_since else None,
+        "halted_at": row.halted_at,
+        "grace_ends_at": row.grace_ends_at,
+        "in_grace": in_grace(row),
     }
 
 

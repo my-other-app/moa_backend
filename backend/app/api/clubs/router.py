@@ -107,6 +107,17 @@ async def create_club(
             "website": club.website,
         },
     )
+    from app.api.admin_alerts import notify
+
+    plan_note = f" They picked {requested_plan} ({requested_cycle or 'monthly'})." if requested_plan else ""
+    await notify(
+        session, "club_applied",
+        title=f"New club application: {club.name}",
+        body=f"{club.name} applied for a club account.{plan_note} Approve or reject it under Clubs.",
+        club=club,
+        data={"requested_plan": requested_plan, "requested_cycle": requested_cycle, "contact_email": club.contact_email},
+    )
+    await session.commit()
     _follow_map_link(background_tasks, club)
     return club
 

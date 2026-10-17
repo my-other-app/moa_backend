@@ -530,7 +530,14 @@ async def _handle_subscription_event(session: AsyncSession, event: str, data: di
                     BillingCycle.yearly if new_plan.razorpay_plan_id_yearly == rp_plan else BillingCycle.monthly
                 )
 
+    from app.api.subscriptions import notices as subscription_notices
+
+    before = subscription_notices.capture(subscription)
     if subscription_billing.apply_event(subscription, event, data, new_plan=new_plan, new_cycle=new_cycle):
+        await session.flush()
+        # The admins' alerts and the club's mails, in the same transaction:
+        # they are about this change, and go out only if it commits.
+        await subscription_notices.after_webhook(session, subscription, event, data, before)
         await session.commit()
     return None
 
@@ -548,11 +555,18 @@ async def _handle_subscription_payment_failure(session: AsyncSession, data: dict
     if not razorpay_id:
         return False
     subscription = await session.scalar(
-        select(ClubSubscriptions).where(ClubSubscriptions.razorpay_subscription_id == razorpay_id)
+        select(ClubSubscriptions)
+        .where(ClubSubscriptions.razorpay_subscription_id == razorpay_id)
+        .options(selectinload(ClubSubscriptions.plan))
     )
     if subscription is None:
         logger.warning("Razorpay payment.failed for unknown subscription %s", razorpay_id)
         return True
+    from app.api.subscriptions import notices as subscription_notices
+
+    before = subscription_notices.capture(subscription)
     if subscription_billing.apply_payment_failure(subscription, data):
+        await session.flush()
+        await subscription_notices.after_payment_failure(session, subscription, data, before)
         await session.commit()
     return True

@@ -13,6 +13,7 @@ from app.api.links import service as links
 from app.api.sites import service
 from app.api.sites.analytics import site_analytics
 from app.api.sites.schemas import PreviewOut, SiteOut, SitePatch
+from app.api.subscriptions import gates
 from app.config import settings
 from app.core.auth.dependencies import ClubAuth
 from app.core.rate_limit import limiter
@@ -42,7 +43,12 @@ async def get_site(session: SessionDep, user: ClubAuth) -> SiteOut:
 @router.patch("", summary="Template, look, font, headline, subline, sections")
 async def patch_site(session: SessionDep, user: ClubAuth, body: SitePatch) -> SiteOut:
     club = await _club_for(session, user)
-    s = await service.patch(session, await service.get_or_create(session, club), body.model_dump(exclude_unset=True))
+    await gates.require_feature(session, club.id, "website", actor=user)
+    current = await service.get_or_create(session, club)
+    if body.template and body.template != current.template:
+        # Choosing a template: the plan allows the first N in catalogue order.
+        await gates.check_template(session, club.id, body.template, actor=user)
+    s = await service.patch(session, current, body.model_dump(exclude_unset=True))
     return SiteOut(**await service.out(session, club, s))
 
 
@@ -62,7 +68,11 @@ async def preview(session: SessionDep, user: ClubAuth, body: SitePatch) -> Previ
 @router.post("/publish", summary="Make the page from the saved choices and put it at the public address")
 async def publish(session: SessionDep, user: ClubAuth) -> SiteOut:
     club = await _club_for(session, user)
-    s = await service.publish(session, club, await service.get_or_create(session, club))
+    await gates.require_feature(session, club.id, "website", actor=user)
+    current = await service.get_or_create(session, club)
+    # A template chosen on a bigger plan is not published on a smaller one.
+    await gates.check_template(session, club.id, current.template, actor=user)
+    s = await service.publish(session, club, current)
     return SiteOut(**await service.out(session, club, s))
 
 

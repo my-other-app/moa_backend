@@ -21,6 +21,7 @@ exactly, and a subscription price that drifts by a hundredth of a rupee a
 month is the kind of bug that surfaces in an annual reconciliation.
 """
 
+from datetime import datetime, timezone
 from enum import Enum as PyEnum
 
 from sqlalchemy import (
@@ -33,6 +34,7 @@ from sqlalchemy import (
     Integer,
     String,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import relationship
 
@@ -352,6 +354,21 @@ class ClubSubscriptions(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     #: abandoned (stale after a day) or cancelled before it was paid.
     previous_state = Column(JSON, nullable=True)
 
+    # Grace (service.start_grace): Razorpay gave up retrying a renewal on a
+    # subscription that had been paid for. The club stays `past_due` and keeps
+    # its plan until `grace_ends_at`, then the hourly sweep moves it to Free.
+    # A charge, a resume or an activation clears all three.
+    #: When the grace began: Razorpay's `subscription.halted`, or an admin
+    #: starting one by hand.
+    halted_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    #: When access ends unless the club pays. Past it, `is_entitled` is false
+    #: whether or not the sweep has run.
+    grace_ends_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    #: When the "two days left" reminder went (club and admin).
+    grace_reminded_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    #: When the "your trial ends on ..." mail went. Never cleared: one per club.
+    trial_reminded_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+
     plan = relationship("Plans", back_populates="subscriptions")
     club = relationship("Clubs")
 
@@ -361,4 +378,38 @@ class ClubSubscriptions(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         # history -- the same shape the club/user link tables use.
         UniqueConstraint("club_id", "is_deleted", name="uq_club_subscription_live"),
         CheckConstraint("mrr_paise >= 0", name="ck_subscription_mrr_non_negative"),
+    )
+
+
+class SubscriptionEmails(AbstractSQLModel):
+    """Each billing mail a club was sent (subscriptions.notices).
+
+    The unique key is what makes "at most once" hold when two webhooks race:
+    a mail is recorded before it is sent, and the second insert of the same
+    (subscription, kind, episode) finds the first and sends nothing.
+
+    `episode` names what the mail is about, so the same kind can be sent again
+    for something new: the Razorpay subscription for a welcome or a trial
+    reminder, the grace's start for grace mails, the failed payment for a
+    failure.
+    """
+
+    __tablename__ = "subscription_emails"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    subscription_id = Column(
+        Integer, ForeignKey("club_subscriptions.id", ondelete="CASCADE"), nullable=False
+    )
+    kind = Column(String(40), nullable=False)
+    episode = Column(String(160), nullable=False)
+    recipient = Column(String(254), nullable=True)
+    created_at = Column(
+        TZAwareDateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=text("now()"),
+    )
+
+    __table_args__ = (
+        UniqueConstraint("subscription_id", "kind", "episode", name="uq_subscription_email_once"),
     )
