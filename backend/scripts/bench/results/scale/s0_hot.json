@@ -1,0 +1,55 @@
+[
+ {
+  "kind": "event",
+  "mode": "app",
+  "event": "empty",
+  "event_id": 49,
+  "registered_before": 0,
+  "n": 500,
+  "seconds": 10.0,
+  "wall_s": 13.44,
+  "throughput_per_s": 37.2,
+  "answered": 500,
+  "p50_ms": 2262.3,
+  "p95_ms": 4287.5,
+  "p99_ms": 5160.3,
+  "max_ms": 6253.7,
+  "codes": {
+   "200": 500
+  },
+  "going_count_after": 500,
+  "rows_after": 500,
+  "counter_matches": true,
+  "journey_templates_on_event": 20,
+  "max_lock_waiters": 19,
+  "share_of_time_someone_waited_on_a_lock": 0.78,
+  "label": "s0 w1 app empty pdf0 (during load)"
+ },
+ {
+  "kind": "event",
+  "mode": "app",
+  "event": "empty",
+  "event_id": 63,
+  "registered_before": 0,
+  "n": 500,
+  "seconds": 10.0,
+  "wall_s": 103.88,
+  "throughput_per_s": 4.8,
+  "answered": 500,
+  "p50_ms": 38284.6,
+  "p95_ms": 74529.6,
+  "p99_ms": 84027.7,
+  "max_ms": 97179.8,
+  "codes": {
+   "200": 354,
+   "500": 146
+  },
+  "going_count_after": 490,
+  "rows_after": 490,
+  "counter_matches": true,
+  "journey_templates_on_event": 24,
+  "max_lock_waiters": 29,
+  "share_of_time_someone_waited_on_a_lock": 0.34,
+  "label": "s0 w1 app empty pdf300 (during load)"
+ }
+]

@@ -595,3 +595,13 @@ from links 1.3 s, the index 0.3 s, `ANALYZE events` 0.4 s); 11.8 s for the
 whole alembic run with the machine loaded. At production's size,
 milliseconds; the `ALTER TABLE` holds the events table for the length of
 the migration's one transaction.
+
+## Larger worlds
+
+`seed.py` now takes every count as a flag (`--scale 10`, or `--clubs`,
+`--upcoming`, `--past`, `--users`, `--registrations`, `--follows`,
+`--threads` …) and loads by COPY; with no flags it builds the world above
+(same sizes and spreads, new draws: the numbers above were reproduced within
+noise). The scale study at 15,000 and 100,000 clubs, with a load generator,
+hot-row writes and the background sweeps, is in `docs/SCALING.md` at the
+repository root; its raw results are in `results/scale/`.

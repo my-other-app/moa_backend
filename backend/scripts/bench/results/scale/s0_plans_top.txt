@@ -1,0 +1,813 @@
+=== home (cold)  /discover/home {}
+-- 31.7 ms in the app
+SELECT count(distinct(lower(trim(events.location_name)))) AS count_1  ...
+Aggregate  (cost=5360.63..5360.64 rows=1 width=8) (actual time=38.062..38.063 rows=1 loops=1)
+  ->  Sort  (cost=5199.40..5239.71 rows=16123 width=19) (actual time=36.211..36.903 rows=28952 loops=1)
+        Sort Key: (lower(TRIM(BOTH FROM events.location_name)))
+        Sort Method: quicksort  Memory: 2772kB
+        ->  Hash Join  (cost=121.39..4072.66 rows=16123 width=19) (actual time=0.560..29.160 rows=28952 loops=1)
+              Hash Cond: (events.club_id = clubs.id)
+              ->  Seq Scan on events  (cost=0.00..3905.50 rows=17386 width=23) (actual time=0.005..21.203 rows=30382 loops=1)
+                    Filter: ((NOT is_deleted) AND (NOT COALESCE(is_online, false)) AND (is_deleted IS FALSE) AND (status = ANY ('{published,live,closed,archived}'::eventstatus[])) AND (lower(TRIM(BOTH FROM location_name)
+                    Rows Removed by Filter: 6618
+              ->  Hash  (cost=104.00..104.00 rows=1391 width=4) (actual time=0.317..0.317 rows=1410 loops=1)
+                    Buckets: 2048  Batches: 1  Memory Usage: 66kB
+                    ->  Seq Scan on clubs  (cost=0.00..104.00 rows=1391 width=4) (actual time=0.002..0.254 rows=1410 loops=1)
+                          Filter: ((is_deleted IS FALSE) AND is_verified AND (NOT is_deleted))
+                          Rows Removed by Filter: 90
+Planning Time: 0.958 ms
+Execution Time: 38.086 ms
+
+
+=== home lat/lng (cold)  /discover/home {'lat': 12.9716, 'lng': 77.5946}
+-- 29.4 ms in the app
+SELECT count(distinct(lower(trim(events.location_name)))) AS count_1  ...
+Aggregate  (cost=5360.63..5360.64 rows=1 width=8) (actual time=31.669..31.669 rows=1 loops=1)
+  ->  Sort  (cost=5199.40..5239.71 rows=16123 width=19) (actual time=29.969..30.571 rows=28952 loops=1)
+        Sort Key: (lower(TRIM(BOTH FROM events.location_name)))
+        Sort Method: quicksort  Memory: 2772kB
+        ->  Hash Join  (cost=121.39..4072.66 rows=16123 width=19) (actual time=0.306..24.824 rows=28952 loops=1)
+              Hash Cond: (events.club_id = clubs.id)
+              ->  Seq Scan on events  (cost=0.00..3905.50 rows=17386 width=23) (actual time=0.005..18.112 rows=30382 loops=1)
+                    Filter: ((NOT is_deleted) AND (NOT COALESCE(is_online, false)) AND (is_deleted IS FALSE) AND (status = ANY ('{published,live,closed,archived}'::eventstatus[])) AND (lower(TRIM(BOTH FROM location_name)
+                    Rows Removed by Filter: 6618
+              ->  Hash  (cost=104.00..104.00 rows=1391 width=4) (actual time=0.297..0.297 rows=1410 loops=1)
+                    Buckets: 2048  Batches: 1  Memory Usage: 66kB
+                    ->  Seq Scan on clubs  (cost=0.00..104.00 rows=1391 width=4) (actual time=0.002..0.233 rows=1410 loops=1)
+                          Filter: ((is_deleted IS FALSE) AND is_verified AND (NOT is_deleted))
+                          Rows Removed by Filter: 90
+Planning Time: 0.131 ms
+Execution Time: 31.684 ms
+
+
+=== events  /discover/events {}
+-- 6.4 ms in the app
+SELECT count(events.id) AS count_1  ...
+Aggregate  (cost=3559.12..3559.13 rows=1 width=8) (actual time=7.062..7.063 rows=1 loops=1)
+  ->  Hash Join  (cost=349.34..3549.98 rows=3658 width=4) (actual time=1.086..6.661 rows=10634 loops=1)
+        Hash Cond: (events.club_id = clubs.id)
+        ->  Bitmap Heap Scan on events  (cost=227.95..3418.20 rows=3945 width=8) (actual time=0.736..4.932 rows=11195 loops=1)
+              Recheck Cond: ((timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-10-17 11:57:16.162725+05:30'::timestamp with time zone) AND (NOT is_deleted))
+              Filter: ((is_deleted IS FALSE) AND (status = ANY ('{published,live}'::eventstatus[])))
+              Rows Removed by Filter: 454
+              Heap Blocks: exact=930
+              ->  Bitmap Index Scan on ix_events_ends_at  (cost=0.00..226.96 rows=12090 width=0) (actual time=0.632..0.632 rows=11649 loops=1)
+                    Index Cond: (timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-10-17 11:57:16.162725+05:30'::timestamp with time zone)
+        ->  Hash  (cost=104.00..104.00 rows=1391 width=4) (actual time=0.343..0.343 rows=1410 loops=1)
+              Buckets: 2048  Batches: 1  Memory Usage: 66kB
+              ->  Seq Scan on clubs  (cost=0.00..104.00 rows=1391 width=4) (actual time=0.002..0.266 rows=1410 loops=1)
+                    Filter: ((is_deleted IS FALSE) AND is_verified AND (NOT is_deleted))
+                    Rows Removed by Filter: 90
+Planning Time: 0.165 ms
+Execution Time: 7.079 ms
+
+
+=== events q  /discover/events {'q': 'robotics'}
+-- 8.1 ms in the app
+SELECT count(events.id) AS count_1  ...
+Aggregate  (cost=3784.38..3784.39 rows=1 width=8) (actual time=7.507..7.508 rows=1 loops=1)
+  ->  Hash Join  (cost=458.39..3777.43 rows=2780 width=4) (actual time=1.131..7.499 rows=309 loops=1)
+        Hash Cond: (events.club_id = clubs.id)
+        ->  Bitmap Heap Scan on events  (cost=337.00..3648.15 rows=2998 width=8) (actual time=0.855..7.186 rows=316 loops=1)
+              Recheck Cond: ((timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-10-17 11:57:22.047313+05:30'::timestamp with time zone) AND (NOT is_deleted))
+              Filter: ((is_deleted IS FALSE) AND (status = ANY ('{published,live}'::eventstatus[])) AND (((name)::text ~~* '%robotics%'::text) OR ((location_name)::text ~~* '%robotics%'::text) OR (hashed SubPlan 1) OR (h
+              Rows Removed by Filter: 11333
+              Heap Blocks: exact=930
+              ->  Bitmap Index Scan on ix_events_ends_at  (cost=0.00..226.96 rows=12090 width=0) (actual time=0.373..0.373 rows=11649 loops=1)
+                    Index Cond: (timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-10-17 11:57:22.047313+05:30'::timestamp with time zone)
+              SubPlan 1
+                ->  Seq Scan on clubs clubs_1  (cost=0.00..107.75 rows=15 width=4) (actual time=0.010..0.378 rows=21 loops=1)
+                      Filter: ((NOT is_deleted) AND (is_deleted IS FALSE) AND ((name)::text ~~* '%robotics%'::text))
+                      Rows Removed by Filter: 1479
+              SubPlan 2
+                ->  Seq Scan on event_categories  (cost=0.00..1.50 rows=1 width=4) (actual time=0.009..0.009 rows=0 loops=1)
+                      Filter: ((NOT is_deleted) AND (is_deleted IS FALSE) AND ((name)::text ~~* '%robotics%'::text))
+                      Rows Removed by Filter: 40
+        ->  Hash  (cost=104.00..104.00 rows=1391 width=4) (actual time=0.273..0.273 rows=1410 loops=1)
+              Buckets: 2048  Batches: 1  Memory Usage: 66kB
+              ->  Seq Scan on clubs  (cost=0.00..104.00 rows=1391 width=4) (actual time=0.002..0.211 rows=1410 loops=1)
+                    Filter: ((is_deleted IS FALSE) AND is_verified AND (NOT is_deleted))
+                    Rows Removed by Filter: 90
+Planning Time: 0.307 ms
+Execution Time: 7.525 ms
+
+
+=== events q short  /discover/events {'q': 'ai'}
+-- 8.2 ms in the app
+SELECT count(events.id) AS count_1  ...
+Aggregate  (cost=3786.12..3786.13 rows=1 width=8) (actual time=7.745..7.745 rows=1 loops=1)
+  ->  Hash Join  (cost=458.62..3778.47 rows=3063 width=4) (actual time=0.734..7.652 rows=3879 loops=1)
+        Hash Cond: (events.club_id = clubs.id)
+        ->  Bitmap Heap Scan on events  (cost=337.24..3648.39 rows=3303 width=8) (actual time=0.461..7.043 rows=4063 loops=1)
+              Recheck Cond: ((timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-10-17 11:57:26.953292+05:30'::timestamp with time zone) AND (NOT is_deleted))
+              Filter: ((is_deleted IS FALSE) AND (status = ANY ('{published,live}'::eventstatus[])) AND (((name)::text ~~* '%ai%'::text) OR ((location_name)::text ~~* '%ai%'::text) OR (hashed SubPlan 1) OR (hashed SubPla
+              Rows Removed by Filter: 7585
+              Heap Blocks: exact=930
+              ->  Bitmap Index Scan on ix_events_ends_at  (cost=0.00..226.96 rows=12090 width=0) (actual time=0.400..0.400 rows=11648 loops=1)
+                    Index Cond: (timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-10-17 11:57:26.953292+05:30'::timestamp with time zone)
+              SubPlan 1
+                ->  Seq Scan on clubs clubs_1  (cost=0.00..107.75 rows=74 width=4) (actual time=0.016..0.375 rows=68 loops=1)
+                      Filter: ((NOT is_deleted) AND (is_deleted IS FALSE) AND ((name)::text ~~* '%ai%'::text))
+                      Rows Removed by Filter: 1432
+              SubPlan 2
+                ->  Seq Scan on event_categories  (cost=0.00..1.50 rows=4 width=4) (actual time=0.009..0.009 rows=0 loops=1)
+                      Filter: ((NOT is_deleted) AND (is_deleted IS FALSE) AND ((name)::text ~~* '%ai%'::text))
+                      Rows Removed by Filter: 40
+        ->  Hash  (cost=104.00..104.00 rows=1391 width=4) (actual time=0.270..0.270 rows=1410 loops=1)
+              Buckets: 2048  Batches: 1  Memory Usage: 66kB
+              ->  Seq Scan on clubs  (cost=0.00..104.00 rows=1391 width=4) (actual time=0.002..0.210 rows=1410 loops=1)
+                    Filter: ((is_deleted IS FALSE) AND is_verified AND (NOT is_deleted))
+                    Rows Removed by Filter: 90
+Planning Time: 0.312 ms
+Execution Time: 7.761 ms
+
+
+=== events q typo  /discover/events {'q': 'robtics'}
+-- 12.1 ms in the app
+SELECT count(events.id) AS count_1  ...
+Aggregate  (cost=5809.47..5809.48 rows=1 width=8) (actual time=3.067..3.069 rows=1 loops=1)
+  ->  Nested Loop  (cost=2570.56..5809.24 rows=91 width=4) (actual time=3.067..3.068 rows=0 loops=1)
+        ->  Hash Join  (cost=2570.29..5770.89 rows=98 width=8) (actual time=3.066..3.068 rows=0 loops=1)
+              Hash Cond: (events.id = words_e1.id)
+              ->  Bitmap Heap Scan on events  (cost=227.95..3418.20 rows=3945 width=8) (actual time=0.531..0.532 rows=1 loops=1)
+                    Recheck Cond: ((timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-10-17 11:57:39.582045+05:30'::timestamp with time zone) AND (NOT is_deleted)
+                    Filter: ((is_deleted IS FALSE) AND (status = ANY ('{published,live}'::eventstatus[])))
+                    Heap Blocks: exact=1
+                    ->  Bitmap Index Scan on ix_events_ends_at  (cost=0.00..226.96 rows=12090 width=0) (actual time=0.465..0.465 rows=11648 loops=1)
+                          Index Cond: (timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-10-17 11:57:39.582045+05:30'::timestamp with time zone)
+              ->  Hash  (cost=2330.86..2330.86 rows=918 width=4) (actual time=2.530..2.531 rows=0 loops=1)
+                    Buckets: 1024  Batches: 1  Memory Usage: 8kB
+                    ->  HashAggregate  (cost=2321.68..2330.86 rows=918 width=4) (actual time=2.529..2.531 rows=0 loops=1)
+                          Group Key: words_e1.id
+                          Batches: 1  Memory Usage: 49kB
+                          ->  Append  (cost=167.70..2319.38 rows=918 width=4) (actual time=2.526..2.527 rows=0 loops=1)
+                                ->  Bitmap Heap Scan on events words_e1  (cost=167.70..187.15 rows=5 width=4) (actual time=2.407..2.407 rows=0 loops=1)
+                                      Recheck Cond: ((((name)::text %> 'robtics'::text) AND (NOT is_deleted)) OR (((location_name)::text %> 'robtics'::text) AND (NOT is_deleted)))
+                                      Rows Removed by Index Recheck: 583
+                                      Filter: ((is_deleted IS FALSE) AND (((name)::text %> 'robtics'::text) OR ((location_name)::text %> 'robtics'::text)))
+                                      Heap Blocks: exact=542
+                                      ->  BitmapOr  (cost=167.70..167.70 rows=5 width=0) (actual time=0.164..0.165 rows=0 loops=1)
+                                            ->  Bitmap Index Scan on ix_events_name_trgm  (cost=0.00..81.81 rows=4 width=0) (actual time=0.150..0.150 rows=583 loops=1)
+                                                  Index Cond: ((name)::text %> 'robtics'::text)
+                                            ->  Bitmap Index Scan on ix_events_location_trgm  (cost=0.00..85.89 rows=2 width=0) (actual time=0.014..0.014 rows=0 loops=1)
+                                                  Index Cond: ((location_name)::text %> 'robtics'::text)
+                                ->  Nested Loop  (cost=78.06..172.05 rows=24 width=4) (actual time=0.070..0.070 rows=0 loops=1)
+                                      ->  Bitmap Heap Scan on clubs words_club  (cost=73.59..77.60 rows=1 width=4) (actual time=0.070..0.070 rows=0 loops=1)
+
+=== events q relevance  /discover/events {'q': 'robotics', 'sort': 'relevance'}
+-- 10.4 ms in the app
+SELECT event_categories.id, event_categories.name, event_categories.icon, event_categories.icon_type, event_categories.created_by_id, event_categories.created_at, event_categories.updated_at, event_categories.is_deleted, ...
+Incremental Sort  (cost=3937.09..4131.25 rows=23 width=1707) (actual time=9.350..9.352 rows=24 loops=1)
+  Sort Key: (GREATEST((word_similarity('robotics'::text, (events_1.name)::text))::double precision, ('0.8'::double precision * word_similarity('robotics'::text, (clubs_1.name)::text)), ('0.6'::double precision * word_sim
+  Presorted Key: (GREATEST((word_similarity('robotics'::text, (events_1.name)::text))::double precision, ('0.8'::double precision * word_similarity('robotics'::text, (clubs_1.name)::text)), ('0.6'::double precision * wor
+  Full-sort Groups: 1  Sort Method: quicksort  Average Memory: 50kB  Peak Memory: 50kB
+  ->  Nested Loop Left Join  (cost=3928.30..4130.22 rows=23 width=1707) (actual time=9.237..9.306 rows=24 loops=1)
+        ->  Nested Loop  (cost=3928.16..4126.60 rows=23 width=1623) (actual time=9.234..9.288 rows=24 loops=1)
+              ->  Nested Loop  (cost=3927.88..4119.27 rows=24 width=1014) (actual time=9.228..9.258 rows=24 loops=1)
+                    ->  Limit  (cost=3927.59..3927.65 rows=24 width=24) (actual time=9.220..9.222 rows=24 loops=1)
+                          ->  Sort  (cost=3927.59..3934.54 rows=2780 width=24) (actual time=9.219..9.221 rows=24 loops=1)
+                                Sort Key: (GREATEST((word_similarity('robotics'::text, (events_1.name)::text))::double precision, ('0.8'::double precision * word_similarity('robotics'::text, (clubs_1.name)::text)), ('0.6
+                                Sort Method: top-N heapsort  Memory: 27kB
+                                ->  Hash Left Join  (cost=460.29..3849.96 rows=2780 width=24) (actual time=1.261..9.186 rows=309 loops=1)
+                                      Hash Cond: (events_1.category_id = event_categories_1.id)
+                                      ->  Hash Join  (cost=458.39..3777.43 rows=2780 width=85) (actual time=1.245..7.525 rows=309 loops=1)
+                                            Hash Cond: (events_1.club_id = clubs_1.id)
+                                            ->  Bitmap Heap Scan on events events_1  (cost=337.00..3648.15 rows=2998 width=65) (actual time=0.934..7.176 rows=316 loops=1)
+                                                  Recheck Cond: ((timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-10-17 11:57:47.707027+05:30'::timestamp with t
+                                                  Filter: ((is_deleted IS FALSE) AND (status = ANY ('{published,live}'::eventstatus[])) AND (((name)::text ~~* '%robotics%'::text) OR ((location_name)::text ~~* '%robotics%
+                                                  Rows Removed by Filter: 11332
+                                                  Heap Blocks: exact=930
+                                                  ->  Bitmap Index Scan on ix_events_ends_at  (cost=0.00..226.96 rows=12090 width=0) (actual time=0.420..0.420 rows=11648 loops=1)
+                                                        Index Cond: (timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-10-17 11:57:47.707027+05:30'::timestamp wit
+                                                  SubPlan 1
+                                                    ->  Seq Scan on clubs clubs_2  (cost=0.00..107.75 rows=15 width=4) (actual time=0.012..0.404 rows=21 loops=1)
+                                                          Filter: ((NOT is_deleted) AND (is_deleted IS FALSE) AND ((name)::text ~~* '%robotics%'::text))
+                                                          Rows Removed by Filter: 1479
+                                                  SubPlan 2
+                                                    ->  Seq Scan on event_categories event_categories_2  (cost=0.00..1.50 rows=1 width=4) (actual time=0.009..0.009 rows=0 loops=1)
+
+=== events this_weekend  /discover/events {'when': 'this_weekend'}
+-- 7.0 ms in the app
+SELECT count(events.id) AS count_1  ...
+Aggregate  (cost=3566.93..3566.94 rows=1 width=8) (actual time=5.847..5.850 rows=1 loops=1)
+  ->  Hash Join  (cost=325.97..3560.51 rows=2570 width=4) (actual time=2.392..5.743 rows=756 loops=1)
+        Hash Cond: (events.club_id = clubs.id)
+        ->  Bitmap Heap Scan on events  (cost=204.59..3431.83 rows=2771 width=8) (actual time=0.752..3.729 rows=800 loops=1)
+              Recheck Cond: ((event_datetime < '2026-10-19 00:00:00+05:30'::timestamp with time zone) AND (NOT is_deleted) AND (status = ANY ('{published,live}'::eventstatus[])))
+              Filter: ((is_deleted IS FALSE) AND (timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-10-17 11:57:52.473142+05:30'::timestamp with time zone) AND (t
+              Rows Removed by Filter: 874
+              Heap Blocks: exact=1220
+              ->  Bitmap Index Scan on ix_events_shown_start  (cost=0.00..203.89 rows=8481 width=0) (actual time=0.395..0.395 rows=1674 loops=1)
+                    Index Cond: (event_datetime < '2026-10-19 00:00:00+05:30'::timestamp with time zone)
+        ->  Hash  (cost=104.00..104.00 rows=1391 width=4) (actual time=1.628..1.629 rows=1410 loops=1)
+              Buckets: 2048  Batches: 1  Memory Usage: 66kB
+              ->  Seq Scan on clubs  (cost=0.00..104.00 rows=1391 width=4) (actual time=0.010..1.078 rows=1410 loops=1)
+                    Filter: ((is_deleted IS FALSE) AND is_verified AND (NOT is_deleted))
+                    Rows Removed by Filter: 90
+Planning Time: 0.693 ms
+Execution Time: 5.904 ms
+
+
+=== events category  /discover/events {'category': 2}
+-- 6.4 ms in the app
+SELECT count(events.id) AS count_1  ...
+Aggregate  (cost=3328.98..3328.99 rows=1 width=8) (actual time=6.423..6.425 rows=1 loops=1)
+  ->  Hash Join  (cost=202.98..3328.13 rows=339 width=4) (actual time=2.106..6.278 rows=1032 loops=1)
+        Hash Cond: (events.club_id = clubs.id)
+        ->  Bitmap Heap Scan on events  (cost=81.60..3205.78 rows=366 width=8) (actual time=0.981..4.707 rows=1079 loops=1)
+              Recheck Cond: ((category_id = 2) AND (NOT is_deleted))
+              Filter: ((is_deleted IS FALSE) AND (status = ANY ('{published,live}'::eventstatus[])) AND (timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-10-17 1
+              Rows Removed by Filter: 2268
+              Heap Blocks: exact=2041
+              ->  Bitmap Index Scan on ix_events_category_start  (cost=0.00..81.51 rows=3362 width=0) (actual time=0.540..0.540 rows=3347 loops=1)
+                    Index Cond: (category_id = 2)
+        ->  Hash  (cost=104.00..104.00 rows=1391 width=4) (actual time=1.104..1.104 rows=1410 loops=1)
+              Buckets: 2048  Batches: 1  Memory Usage: 66kB
+              ->  Seq Scan on clubs  (cost=0.00..104.00 rows=1391 width=4) (actual time=0.007..0.778 rows=1410 loops=1)
+                    Filter: ((is_deleted IS FALSE) AND is_verified AND (NOT is_deleted))
+                    Rows Removed by Filter: 90
+Planning Time: 0.452 ms
+Execution Time: 6.463 ms
+
+
+=== events online  /discover/events {'type': 'online'}
+-- 6.9 ms in the app
+SELECT count(events.id) AS count_1  ...
+Aggregate  (cost=3541.71..3541.72 rows=1 width=8) (actual time=6.539..6.539 rows=1 loops=1)
+  ->  Hash Join  (cost=348.50..3540.32 rows=555 width=4) (actual time=1.994..6.470 rows=1597 loops=1)
+        Hash Cond: (events.club_id = clubs.id)
+        ->  Bitmap Heap Scan on events  (cost=227.11..3417.36 rows=599 width=8) (actual time=1.402..5.615 rows=1686 loops=1)
+              Recheck Cond: ((timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-10-17 11:58:01.24717+05:30'::timestamp with time zone) AND (NOT is_deleted))
+              Filter: (is_online AND (is_deleted IS FALSE) AND (status = ANY ('{published,live}'::eventstatus[])))
+              Rows Removed by Filter: 9962
+              Heap Blocks: exact=930
+              ->  Bitmap Index Scan on ix_events_ends_at  (cost=0.00..226.96 rows=12090 width=0) (actual time=1.336..1.336 rows=11648 loops=1)
+                    Index Cond: (timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-10-17 11:58:01.24717+05:30'::timestamp with time zone)
+        ->  Hash  (cost=104.00..104.00 rows=1391 width=4) (actual time=0.588..0.589 rows=1410 loops=1)
+              Buckets: 2048  Batches: 1  Memory Usage: 66kB
+              ->  Seq Scan on clubs  (cost=0.00..104.00 rows=1391 width=4) (actual time=0.003..0.474 rows=1410 loops=1)
+                    Filter: ((is_deleted IS FALSE) AND is_verified AND (NOT is_deleted))
+                    Rows Removed by Filter: 90
+Planning Time: 0.134 ms
+Execution Time: 6.557 ms
+
+
+=== events free  /discover/events {'price': 'free'}
+-- 5.5 ms in the app
+SELECT count(events.id) AS count_1  ...
+Aggregate  (cost=3548.86..3548.87 rows=1 width=8) (actual time=5.921..5.922 rows=1 loops=1)
+  ->  Hash Join  (cost=348.85..3544.28 rows=1829 width=4) (actual time=0.923..5.652 rows=7550 loops=1)
+        Hash Cond: (events.club_id = clubs.id)
+        ->  Bitmap Heap Scan on events  (cost=227.46..3417.71 rows=1972 width=8) (actual time=0.613..4.424 rows=7958 loops=1)
+              Recheck Cond: ((timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-10-17 11:58:05.094959+05:30'::timestamp with time zone) AND (NOT is_deleted))
+              Filter: ((NOT COALESCE(has_fee, false)) AND (is_deleted IS FALSE) AND (status = ANY ('{published,live}'::eventstatus[])))
+              Rows Removed by Filter: 3690
+              Heap Blocks: exact=930
+              ->  Bitmap Index Scan on ix_events_ends_at  (cost=0.00..226.96 rows=12090 width=0) (actual time=0.508..0.508 rows=11648 loops=1)
+                    Index Cond: (timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-10-17 11:58:05.094959+05:30'::timestamp with time zone)
+        ->  Hash  (cost=104.00..104.00 rows=1391 width=4) (actual time=0.308..0.308 rows=1410 loops=1)
+              Buckets: 2048  Batches: 1  Memory Usage: 66kB
+              ->  Seq Scan on clubs  (cost=0.00..104.00 rows=1391 width=4) (actual time=0.002..0.240 rows=1410 loops=1)
+                    Filter: ((is_deleted IS FALSE) AND is_verified AND (NOT is_deleted))
+                    Rows Removed by Filter: 90
+Planning Time: 0.130 ms
+Execution Time: 5.936 ms
+
+
+=== events lat/lng (radius 50, date)  /discover/events {'lat': 12.9716, 'lng': 77.5946}
+-- 6.5 ms in the app
+SELECT count(events.id) AS count_1  ...
+Aggregate  (cost=4274.77..4274.78 rows=1 width=8) (actual time=6.159..6.160 rows=1 loops=1)
+  ->  Hash Join  (cost=348.87..4269.97 rows=1921 width=4) (actual time=0.985..6.052 rows=3342 loops=1)
+        Hash Cond: (events.club_id = clubs.id)
+        ->  Bitmap Heap Scan on events  (cost=227.48..4143.13 rows=2071 width=8) (actual time=0.619..5.294 rows=3561 loops=1)
+              Recheck Cond: ((timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-10-17 11:58:09.611503+05:30'::timestamp with time zone) AND (NOT is_deleted))
+              Filter: ((is_deleted IS FALSE) AND (status = ANY ('{published,live}'::eventstatus[])) AND (is_online OR (lat IS NULL) OR (lng IS NULL) OR ((lat >= '12.521939718137734'::double precision) AND (lat <= '13.421
+              Rows Removed by Filter: 8087
+              Heap Blocks: exact=930
+              ->  Bitmap Index Scan on ix_events_ends_at  (cost=0.00..226.96 rows=12090 width=0) (actual time=0.531..0.531 rows=11648 loops=1)
+                    Index Cond: (timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-10-17 11:58:09.611503+05:30'::timestamp with time zone)
+        ->  Hash  (cost=104.00..104.00 rows=1391 width=4) (actual time=0.364..0.364 rows=1410 loops=1)
+              Buckets: 2048  Batches: 1  Memory Usage: 66kB
+              ->  Seq Scan on clubs  (cost=0.00..104.00 rows=1391 width=4) (actual time=0.003..0.282 rows=1410 loops=1)
+                    Filter: ((is_deleted IS FALSE) AND is_verified AND (NOT is_deleted))
+                    Rows Removed by Filter: 90
+Planning Time: 0.213 ms
+Execution Time: 6.181 ms
+
+
+=== events distance r=50  /discover/events {'lat': 12.9716, 'lng': 77.5946, 'sort': 'distance', 'radius_km': 50}
+-- 7.9 ms in the app
+SELECT count(events.id) AS count_1  ...
+Aggregate  (cost=4274.77..4274.78 rows=1 width=8) (actual time=7.331..7.332 rows=1 loops=1)
+  ->  Hash Join  (cost=348.87..4269.97 rows=1921 width=4) (actual time=1.194..7.203 rows=3342 loops=1)
+        Hash Cond: (events.club_id = clubs.id)
+        ->  Bitmap Heap Scan on events  (cost=227.48..4143.13 rows=2071 width=8) (actual time=0.760..6.302 rows=3561 loops=1)
+              Recheck Cond: ((timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-10-17 11:58:15.491486+05:30'::timestamp with time zone) AND (NOT is_deleted))
+              Filter: ((is_deleted IS FALSE) AND (status = ANY ('{published,live}'::eventstatus[])) AND (is_online OR (lat IS NULL) OR (lng IS NULL) OR ((lat >= '12.521939718137734'::double precision) AND (lat <= '13.421
+              Rows Removed by Filter: 8087
+              Heap Blocks: exact=930
+              ->  Bitmap Index Scan on ix_events_ends_at  (cost=0.00..226.96 rows=12090 width=0) (actual time=0.654..0.654 rows=11648 loops=1)
+                    Index Cond: (timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-10-17 11:58:15.491486+05:30'::timestamp with time zone)
+        ->  Hash  (cost=104.00..104.00 rows=1391 width=4) (actual time=0.432..0.432 rows=1410 loops=1)
+              Buckets: 2048  Batches: 1  Memory Usage: 66kB
+              ->  Seq Scan on clubs  (cost=0.00..104.00 rows=1391 width=4) (actual time=0.003..0.335 rows=1410 loops=1)
+                    Filter: ((is_deleted IS FALSE) AND is_verified AND (NOT is_deleted))
+                    Rows Removed by Filter: 90
+Planning Time: 0.240 ms
+Execution Time: 7.351 ms
+
+
+=== events distance r=300  /discover/events {'lat': 9.9312, 'lng': 76.2673, 'sort': 'distance', 'radius_km': 300}
+-- 5.3 ms in the app
+SELECT count(events.id) AS count_1  ...
+Aggregate  (cost=4274.92..4274.93 rows=1 width=8) (actual time=4.884..4.885 rows=1 loops=1)
+  ->  Hash Join  (cost=348.88..4270.05 rows=1947 width=4) (actual time=0.739..4.786 rows=4054 loops=1)
+        Hash Cond: (events.club_id = clubs.id)
+        ->  Bitmap Heap Scan on events  (cost=227.49..4143.14 rows=2100 width=8) (actual time=0.461..4.162 rows=4279 loops=1)
+              Recheck Cond: ((timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-10-17 11:58:22.679255+05:30'::timestamp with time zone) AND (NOT is_deleted))
+              Filter: ((is_deleted IS FALSE) AND (status = ANY ('{published,live}'::eventstatus[])) AND (is_online OR (lat IS NULL) OR (lng IS NULL) OR ((lat >= '7.2332388088263855'::double precision) AND (lat <= '12.629
+              Rows Removed by Filter: 7369
+              Heap Blocks: exact=930
+              ->  Bitmap Index Scan on ix_events_ends_at  (cost=0.00..226.96 rows=12090 width=0) (actual time=0.396..0.396 rows=11648 loops=1)
+                    Index Cond: (timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-10-17 11:58:22.679255+05:30'::timestamp with time zone)
+        ->  Hash  (cost=104.00..104.00 rows=1391 width=4) (actual time=0.277..0.277 rows=1410 loops=1)
+              Buckets: 2048  Batches: 1  Memory Usage: 66kB
+              ->  Seq Scan on clubs  (cost=0.00..104.00 rows=1391 width=4) (actual time=0.002..0.218 rows=1410 loops=1)
+                    Filter: ((is_deleted IS FALSE) AND is_verified AND (NOT is_deleted))
+                    Rows Removed by Filter: 90
+Planning Time: 0.148 ms
+Execution Time: 4.899 ms
+
+
+=== events popular  /discover/events {'sort': 'popular'}
+-- 6.0 ms in the app
+SELECT event_categories.id, event_categories.name, event_categories.icon, event_categories.icon_type, event_categories.created_by_id, event_categories.created_at, event_categories.updated_at, event_categories.is_deleted, ...
+Incremental Sort  (cost=3670.77..3864.93 rows=23 width=1703) (actual time=5.602..5.603 rows=24 loops=1)
+  Sort Key: ((events_1.going_count + COALESCE(events_1.page_views, 0))) DESC, events_1.event_datetime, events_1.id
+  Presorted Key: ((events_1.going_count + COALESCE(events_1.page_views, 0))), events_1.event_datetime
+  Full-sort Groups: 1  Sort Method: quicksort  Average Memory: 50kB  Peak Memory: 50kB
+  ->  Nested Loop Left Join  (cost=3661.98..3863.90 rows=23 width=1703) (actual time=5.506..5.571 rows=24 loops=1)
+        ->  Nested Loop  (cost=3661.84..3860.28 rows=23 width=1619) (actual time=5.502..5.554 rows=24 loops=1)
+              ->  Nested Loop  (cost=3661.56..3852.95 rows=24 width=1010) (actual time=5.498..5.527 rows=24 loops=1)
+                    ->  Limit  (cost=3661.27..3661.33 rows=24 width=20) (actual time=5.494..5.495 rows=24 loops=1)
+                          ->  Sort  (cost=3661.27..3670.42 rows=3658 width=20) (actual time=5.493..5.494 rows=24 loops=1)
+                                Sort Key: ((events_1.going_count + COALESCE(events_1.page_views, 0))) DESC, events_1.event_datetime, events_1.id
+                                Sort Method: top-N heapsort  Memory: 27kB
+                                ->  Hash Join  (cost=349.34..3559.12 rows=3658 width=20) (actual time=0.702..4.953 rows=10633 loops=1)
+                                      Hash Cond: (events_1.club_id = clubs_1.id)
+                                      ->  Bitmap Heap Scan on events events_1  (cost=227.95..3418.20 rows=3945 width=24) (actual time=0.438..3.635 rows=11194 loops=1)
+                                            Recheck Cond: ((timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-10-17 11:58:27.574564+05:30'::timestamp with time zo
+                                            Filter: ((is_deleted IS FALSE) AND (status = ANY ('{published,live}'::eventstatus[])))
+                                            Rows Removed by Filter: 454
+                                            Heap Blocks: exact=930
+                                            ->  Bitmap Index Scan on ix_events_ends_at  (cost=0.00..226.96 rows=12090 width=0) (actual time=0.376..0.376 rows=11648 loops=1)
+                                                  Index Cond: (timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-10-17 11:58:27.574564+05:30'::timestamp with time
+                                      ->  Hash  (cost=104.00..104.00 rows=1391 width=4) (actual time=0.262..0.262 rows=1410 loops=1)
+                                            Buckets: 2048  Batches: 1  Memory Usage: 66kB
+                                            ->  Seq Scan on clubs clubs_1  (cost=0.00..104.00 rows=1391 width=4) (actual time=0.002..0.203 rows=1410 loops=1)
+                                                  Filter: ((is_deleted IS FALSE) AND is_verified AND (NOT is_deleted))
+                                                  Rows Removed by Filter: 90
+                    ->  Index Scan using events_pkey on events  (cost=0.29..7.97 rows=1 width=994) (actual time=0.001..0.001 rows=1 loops=24)
+                          Index Cond: (id = events_1.id)
+                          Filter: (is_deleted IS FALSE)
+
+=== events offset=480  /discover/events {'offset': 480}
+-- 6.9 ms in the app
+SELECT count(events.id) AS count_1  ...
+Aggregate  (cost=3559.12..3559.13 rows=1 width=8) (actual time=6.529..6.530 rows=1 loops=1)
+  ->  Hash Join  (cost=349.34..3549.98 rows=3658 width=4) (actual time=1.219..6.174 rows=10633 loops=1)
+        Hash Cond: (events.club_id = clubs.id)
+        ->  Bitmap Heap Scan on events  (cost=227.95..3418.20 rows=3945 width=8) (actual time=0.861..4.566 rows=11194 loops=1)
+              Recheck Cond: ((timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-10-17 11:58:31.987954+05:30'::timestamp with time zone) AND (NOT is_deleted))
+              Filter: ((is_deleted IS FALSE) AND (status = ANY ('{published,live}'::eventstatus[])))
+              Rows Removed by Filter: 454
+              Heap Blocks: exact=930
+              ->  Bitmap Index Scan on ix_events_ends_at  (cost=0.00..226.96 rows=12090 width=0) (actual time=0.741..0.741 rows=11648 loops=1)
+                    Index Cond: (timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-10-17 11:58:31.987954+05:30'::timestamp with time zone)
+        ->  Hash  (cost=104.00..104.00 rows=1391 width=4) (actual time=0.356..0.356 rows=1410 loops=1)
+              Buckets: 2048  Batches: 1  Memory Usage: 66kB
+              ->  Seq Scan on clubs  (cost=0.00..104.00 rows=1391 width=4) (actual time=0.002..0.275 rows=1410 loops=1)
+                    Filter: ((is_deleted IS FALSE) AND is_verified AND (NOT is_deleted))
+                    Rows Removed by Filter: 90
+Planning Time: 0.139 ms
+Execution Time: 6.546 ms
+
+
+=== clubs  /discover/clubs {}
+-- 4.8 ms in the app
+SELECT clubs.id, clubs.slug, clubs.name, clubs.logo, clubs.about, clubs.tagline, clubs.cover, clubs.org_id, clubs.location_name, clubs.location_link, clubs.lat, clubs.lng, clubs.rating, clubs.total_ratings, clubs.user_id ...
+Limit  (cost=146.32..146.38 rows=24 width=641) (actual time=4.367..4.376 rows=24 loops=1)
+  ->  Sort  (cost=146.32..149.80 rows=1391 width=641) (actual time=4.366..4.370 rows=24 loops=1)
+        Sort Key: follower_count DESC, ((lower((name)::text))::text) COLLATE "C", id
+        Sort Method: top-N heapsort  Memory: 49kB
+        ->  Seq Scan on clubs  (cost=0.00..107.48 rows=1391 width=641) (actual time=0.016..2.056 rows=1410 loops=1)
+              Filter: (is_verified AND (NOT is_deleted) AND (is_deleted IS FALSE))
+              Rows Removed by Filter: 90
+Planning Time: 0.222 ms
+Execution Time: 4.449 ms
+
+
+=== clubs q  /discover/clubs {'q': 'robotics'}
+-- 3.9 ms in the app
+SELECT count(clubs.id) AS count_1  ...
+Aggregate  (cost=115.33..115.34 rows=1 width=8) (actual time=3.401..3.401 rows=1 loops=1)
+  ->  Seq Scan on clubs  (cost=0.00..115.25 rows=31 width=4) (actual time=0.095..3.393 rows=21 loops=1)
+        Filter: (is_verified AND (NOT is_deleted) AND (is_deleted IS FALSE) AND (((name)::text ~~* '%robotics%'::text) OR ((tagline)::text ~~* '%robotics%'::text) OR ((location_name)::text ~~* '%robotics%'::text)))
+        Rows Removed by Filter: 1479
+Planning Time: 0.716 ms
+Execution Time: 3.421 ms
+
+
+=== clubs q typo  /discover/clubs {'q': 'robtics'}
+-- 6.8 ms in the app
+SELECT clubs.id, clubs.slug, clubs.name, clubs.logo, clubs.about, clubs.tagline, clubs.cover, clubs.org_id, clubs.location_name, clubs.location_link, clubs.lat, clubs.lng, clubs.rating, clubs.total_ratings, clubs.user_id ...
+Limit  (cost=115.26..115.27 rows=1 width=641) (actual time=5.719..5.719 rows=0 loops=1)
+  ->  Sort  (cost=115.26..115.27 rows=1 width=641) (actual time=5.719..5.719 rows=0 loops=1)
+        Sort Key: follower_count DESC, ((lower((name)::text))::text) COLLATE "C", id
+        Sort Method: quicksort  Memory: 25kB
+        ->  Seq Scan on clubs  (cost=0.00..115.25 rows=1 width=641) (actual time=5.718..5.718 rows=0 loops=1)
+              Filter: (is_verified AND (NOT is_deleted) AND (is_deleted IS FALSE) AND (((name)::text %> 'robtics'::text) OR ((tagline)::text %> 'robtics'::text) OR ((location_name)::text %> 'robtics'::text)))
+              Rows Removed by Filter: 1500
+Planning Time: 0.845 ms
+Execution Time: 5.728 ms
+
+
+=== clubs interest  /discover/clubs {'interest': 27}
+-- 2.7 ms in the app
+SELECT events.club_id, count(events.id) AS count_1  ...
+GroupAggregate  (cost=1343.35..1344.07 rows=41 width=12) (actual time=1.348..1.384 rows=23 loops=1)
+  Group Key: events.club_id
+  ->  Sort  (cost=1343.35..1343.45 rows=41 width=8) (actual time=1.342..1.354 rows=158 loops=1)
+        Sort Key: events.club_id
+        Sort Method: quicksort  Memory: 29kB
+        ->  Hash Join  (cost=223.48..1342.25 rows=41 width=8) (actual time=0.780..1.311 rows=158 loops=1)
+              Hash Cond: (events.club_id = clubs.id)
+              ->  Bitmap Heap Scan on events  (cost=102.09..1220.75 rows=44 width=8) (actual time=0.132..0.624 rows=158 loops=1)
+                    Recheck Cond: ((club_id = ANY ('{694,553,687,538,686,957,404,23,226,199,1415,770,73,1442,148,536,987,1220,77,196,1356,395,1399,1050}'::integer[])) AND (NOT is_deleted))
+                    Filter: ((is_deleted IS FALSE) AND (status = ANY ('{published,live}'::eventstatus[])) AND (timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-1
+                    Rows Removed by Filter: 301
+                    Heap Blocks: exact=428
+                    ->  Bitmap Index Scan on ix_events_club_start  (cost=0.00..102.02 rows=406 width=0) (actual time=0.082..0.083 rows=459 loops=1)
+                          Index Cond: (club_id = ANY ('{694,553,687,538,686,957,404,23,226,199,1415,770,73,1442,148,536,987,1220,77,196,1356,395,1399,1050}'::integer[]))
+              ->  Hash  (cost=104.00..104.00 rows=1391 width=4) (actual time=0.639..0.639 rows=1410 loops=1)
+                    Buckets: 2048  Batches: 1  Memory Usage: 66kB
+                    ->  Seq Scan on clubs  (cost=0.00..104.00 rows=1391 width=4) (actual time=0.004..0.455 rows=1410 loops=1)
+                          Filter: ((is_deleted IS FALSE) AND is_verified AND (NOT is_deleted))
+                          Rows Removed by Filter: 90
+Planning Time: 0.552 ms
+Execution Time: 1.427 ms
+
+
+=== clubs nearby  /discover/clubs {'lat': 12.9716, 'lng': 77.5946, 'sort': 'nearby'}
+-- 5.5 ms in the app
+SELECT clubs.id, clubs.slug, clubs.name, clubs.logo, clubs.about, clubs.tagline, clubs.cover, clubs.org_id, clubs.location_name, clubs.location_link, clubs.lat, clubs.lng, clubs.rating, clubs.total_ratings, clubs.user_id ...
+Limit  (cost=131507.66..131507.72 rows=24 width=634) (actual time=5.547..5.548 rows=24 loops=1)
+  ->  Sort  (cost=131507.66..131508.83 rows=468 width=634) (actual time=5.546..5.547 rows=24 loops=1)
+        Sort Key: ((CASE WHEN ((CASE WHEN ((clubs.lat IS NOT NULL) AND (clubs.lng IS NOT NULL)) THEN clubs.lat ELSE (avg(events.lat)) END IS NOT NULL) AND (CASE WHEN ((clubs.lat IS NOT NULL) AND (clubs.lng IS NOT NULL)) 
+        Sort Method: top-N heapsort  Memory: 52kB
+        ->  Nested Loop Left Join  (cost=94.31..131494.59 rows=468 width=634) (actual time=0.011..5.402 rows=115 loops=1)
+              Filter: ((CASE WHEN ((CASE WHEN ((clubs.lat IS NOT NULL) AND (clubs.lng IS NOT NULL)) THEN clubs.lat ELSE (avg(events.lat)) END IS NOT NULL) AND (CASE WHEN ((clubs.lat IS NOT NULL) AND (clubs.lng IS NOT NUL
+              Rows Removed by Filter: 1295
+              ->  Seq Scan on clubs  (cost=0.00..104.00 rows=1391 width=609) (actual time=0.002..0.310 rows=1410 loops=1)
+                    Filter: (is_verified AND (NOT is_deleted) AND (is_deleted IS FALSE))
+                    Rows Removed by Filter: 90
+              ->  Aggregate  (cost=94.31..94.32 rows=1 width=16) (actual time=0.003..0.003 rows=1 loops=1410)
+                    ->  Result  (cost=4.47..94.27 rows=7 width=16) (actual time=0.001..0.003 rows=4 loops=1410)
+                          One-Time Filter: ((clubs.lat IS NULL) OR (clubs.lng IS NULL))
+                          ->  Bitmap Heap Scan on events  (cost=4.47..94.27 rows=7 width=16) (actual time=0.003..0.012 rows=18 loops=287)
+                                Recheck Cond: ((club_id = clubs.id) AND (NOT is_deleted))
+                                Filter: ((lat IS NOT NULL) AND (lng IS NOT NULL) AND (NOT COALESCE(is_online, false)) AND (is_deleted IS FALSE) AND (status <> 'draft'::eventstatus))
+                                Rows Removed by Filter: 6
+                                Heap Blocks: exact=6743
+                                ->  Bitmap Index Scan on ix_events_club_start  (cost=0.00..4.47 rows=24 width=0) (actual time=0.002..0.002 rows=24 loops=287)
+                                      Index Cond: (club_id = clubs.id)
+Planning Time: 0.210 ms
+Execution Time: 5.587 ms
+
+
+=== clubs popular  /discover/clubs {'sort': 'popular'}
+-- 3.8 ms in the app
+SELECT events.club_id, count(events.id) AS count_1  ...
+GroupAggregate  (cost=1431.31..1432.10 rows=45 width=12) (actual time=3.028..3.139 rows=24 loops=1)
+  Group Key: events.club_id
+  ->  Sort  (cost=1431.31..1431.42 rows=45 width=8) (actual time=3.019..3.044 rows=159 loops=1)
+        Sort Key: events.club_id
+        Sort Method: quicksort  Memory: 29kB
+        ->  Hash Join  (cost=223.84..1430.07 rows=45 width=8) (actual time=1.841..2.958 rows=159 loops=1)
+              Hash Cond: (events.club_id = clubs.id)
+              ->  Bitmap Heap Scan on events  (cost=102.45..1308.56 rows=49 width=8) (actual time=0.357..1.380 rows=159 loops=1)
+                    Recheck Cond: ((club_id = ANY ('{125,694,462,553,170,699,1424,687,401,783,538,355,407,889,143,265,834,268,360,471,147,966,945,937}'::integer[])) AND (NOT is_deleted))
+                    Filter: ((is_deleted IS FALSE) AND (status = ANY ('{published,live}'::eventstatus[])) AND (timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-1
+                    Rows Removed by Filter: 349
+                    Heap Blocks: exact=472
+                    ->  Bitmap Index Scan on ix_events_club_start  (cost=0.00..102.38 rows=449 width=0) (actual time=0.210..0.210 rows=508 loops=1)
+                          Index Cond: (club_id = ANY ('{125,694,462,553,170,699,1424,687,401,783,538,355,407,889,143,265,834,268,360,471,147,966,945,937}'::integer[]))
+              ->  Hash  (cost=104.00..104.00 rows=1391 width=4) (actual time=1.470..1.471 rows=1410 loops=1)
+                    Buckets: 2048  Batches: 1  Memory Usage: 66kB
+                    ->  Seq Scan on clubs  (cost=0.00..104.00 rows=1391 width=4) (actual time=0.009..1.030 rows=1410 loops=1)
+                          Filter: ((is_deleted IS FALSE) AND is_verified AND (NOT is_deleted))
+                          Rows Removed by Filter: 90
+Planning Time: 0.782 ms
+Execution Time: 3.219 ms
+
+
+=== club page (big)  /discover/clubs/club-125-open-source {}
+-- 1.7 ms in the app
+SELECT event_categories.id, event_categories.name, event_categories.icon, event_categories.icon_type, event_categories.created_by_id, event_categories.created_at, event_categories.updated_at, event_categories.is_deleted, ...
+Limit  (cost=64.34..64.35 rows=1 width=1687) (actual time=0.169..0.172 rows=3 loops=1)
+  ->  Sort  (cost=64.34..64.35 rows=1 width=1687) (actual time=0.168..0.170 rows=3 loops=1)
+        Sort Key: events.event_datetime, events.id
+        Sort Method: quicksort  Memory: 30kB
+        ->  Nested Loop Left Join  (cost=4.67..64.33 rows=1 width=1687) (actual time=0.087..0.142 rows=3 loops=1)
+              Join Filter: (event_categories.id = events.category_id)
+              Rows Removed by Join Filter: 13
+              ->  Nested Loop  (cost=4.67..62.43 rows=1 width=1603) (actual time=0.063..0.103 rows=3 loops=1)
+                    ->  Bitmap Heap Scan on events  (cost=4.39..54.13 rows=1 width=994) (actual time=0.040..0.064 rows=3 loops=1)
+                          Recheck Cond: ((club_id = 125) AND (NOT is_deleted))
+                          Filter: ((is_deleted IS FALSE) AND (status = ANY ('{published,live}'::eventstatus[])) AND (timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '
+                          Rows Removed by Filter: 5
+                          Heap Blocks: exact=8
+                          ->  Bitmap Index Scan on ix_events_club_start  (cost=0.00..4.39 rows=13 width=0) (actual time=0.011..0.011 rows=8 loops=1)
+                                Index Cond: (club_id = 125)
+                    ->  Index Scan using clubs_pkey on clubs  (cost=0.28..8.29 rows=1 width=609) (actual time=0.007..0.008 rows=1 loops=3)
+                          Index Cond: (id = 125)
+                          Filter: ((is_deleted IS FALSE) AND is_verified AND (NOT is_deleted))
+              ->  Seq Scan on event_categories  (cost=0.00..1.40 rows=40 width=84) (actual time=0.004..0.005 rows=5 loops=3)
+                    Filter: (is_deleted IS FALSE)
+Planning Time: 0.800 ms
+Execution Time: 0.375 ms
+
+
+=== event page  /discover/events/e827-quiz-circle {}
+-- 3.0 ms in the app
+SELECT event_categories.id, event_categories.name, event_categories.icon, event_categories.icon_type, event_categories.created_by_id, event_categories.created_at, event_categories.updated_at, event_categories.is_deleted, ...
+Limit  (cost=0.56..121.41 rows=4 width=1687) (actual time=1.145..1.344 rows=4 loops=1)
+  ->  Nested Loop Left Join  (cost=0.56..10060.78 rows=333 width=1687) (actual time=1.144..1.342 rows=4 loops=1)
+        ->  Nested Loop  (cost=0.56..10055.11 rows=333 width=1603) (actual time=1.120..1.312 rows=4 loops=1)
+              ->  Index Scan using ix_events_shown_start on events  (cost=0.29..9569.20 rows=359 width=994) (actual time=1.098..1.268 rows=4 loops=1)
+                    Filter: ((is_deleted IS FALSE) AND (club_id <> 358) AND (category_id = 10) AND (timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-10-17 11:59:
+                    Rows Removed by Filter: 932
+              ->  Index Scan using clubs_pkey on clubs  (cost=0.28..1.35 rows=1 width=609) (actual time=0.006..0.006 rows=1 loops=4)
+                    Index Cond: (id = events.club_id)
+                    Filter: ((is_deleted IS FALSE) AND is_verified AND (NOT is_deleted))
+        ->  Materialize  (cost=0.00..1.50 rows=1 width=84) (actual time=0.003..0.003 rows=1 loops=4)
+              ->  Seq Scan on event_categories  (cost=0.00..1.50 rows=1 width=84) (actual time=0.010..0.011 rows=1 loops=1)
+                    Filter: ((is_deleted IS FALSE) AND (id = 10))
+                    Rows Removed by Filter: 9
+Planning Time: 0.624 ms
+Execution Time: 1.476 ms
+
+
+=== threads  /discover/threads {}
+-- 5.1 ms in the app
+SELECT count(*) AS count_1  ...
+Aggregate  (cost=1184.37..1184.38 rows=1 width=8) (actual time=6.648..6.649 rows=1 loops=1)
+  ->  Hash Join  (cost=121.39..1139.89 rows=17790 width=0) (actual time=0.360..5.921 rows=18206 loops=1)
+        Hash Cond: (club_threads.club_id = clubs.id)
+        ->  Seq Scan on club_threads  (cost=0.00..968.00 rows=19184 width=4) (actual time=0.002..3.011 rows=19588 loops=1)
+              Filter: ((NOT is_deleted) AND (is_deleted IS FALSE))
+              Rows Removed by Filter: 412
+        ->  Hash  (cost=104.00..104.00 rows=1391 width=4) (actual time=0.356..0.356 rows=1410 loops=1)
+              Buckets: 2048  Batches: 1  Memory Usage: 66kB
+              ->  Seq Scan on clubs  (cost=0.00..104.00 rows=1391 width=4) (actual time=0.002..0.277 rows=1410 loops=1)
+                    Filter: ((is_deleted IS FALSE) AND is_verified AND (NOT is_deleted))
+                    Rows Removed by Filter: 90
+Planning Time: 0.149 ms
+Execution Time: 6.660 ms
+
+
+=== sitemap (cold)  /discover/sitemap {}
+-- 20.1 ms in the app
+SELECT events.slug, events.updated_at  ...
+Limit  (cost=4727.19..4739.69 rows=5000 width=43) (actual time=22.222..22.640 rows=5000 loops=1)
+  ->  Sort  (cost=4727.19..4745.40 rows=7282 width=43) (actual time=22.218..22.448 rows=5000 loops=1)
+        Sort Key: events.event_datetime DESC, events.id DESC
+        Sort Method: top-N heapsort  Memory: 1116kB
+        ->  Hash Join  (cost=510.10..4260.05 rows=7282 width=43) (actual time=3.892..19.586 rows=18394 loops=1)
+              Hash Cond: (events.club_id = clubs.id)
+              ->  Bitmap Heap Scan on events  (cost=388.71..4117.99 rows=7853 width=47) (actual time=3.124..16.567 rows=19319 loops=1)
+                    Recheck Cond: (((event_datetime >= '2025-10-17 11:59:36.429482+05:30'::timestamp with time zone) AND (NOT is_deleted) AND (status = ANY ('{published,live}'::eventstatus[]))) OR ((timezone('UTC'::text,
+                    Filter: ((is_deleted IS FALSE) AND (event_datetime >= '2025-10-17 11:59:36.429482+05:30'::timestamp with time zone) AND (((status = ANY ('{published,live}'::eventstatus[])) AND (timezone('UTC'::text, 
+                    Rows Removed by Filter: 16504
+                    Heap Blocks: exact=2869
+                    ->  BitmapOr  (cost=388.71..388.71 rows=18695 width=0) (actual time=2.673..2.674 rows=0 loops=1)
+                          ->  Bitmap Index Scan on ix_events_shown_start  (cost=0.00..157.82 rows=6605 width=0) (actual time=0.768..0.768 rows=11568 loops=1)
+                                Index Cond: (event_datetime >= '2025-10-17 11:59:36.429482+05:30'::timestamp with time zone)
+                          ->  Bitmap Index Scan on ix_events_ends_at  (cost=0.00..226.96 rows=12090 width=0) (actual time=1.904..1.904 rows=24629 loops=1)
+                                Index Cond: (timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) < '2026-10-17 11:59:36.429482+05:30'::timestamp with time zone)
+              ->  Hash  (cost=104.00..104.00 rows=1391 width=4) (actual time=0.761..0.761 rows=1410 loops=1)
+                    Buckets: 2048  Batches: 1  Memory Usage: 66kB
+                    ->  Seq Scan on clubs  (cost=0.00..104.00 rows=1391 width=4) (actual time=0.007..0.554 rows=1410 loops=1)
+                          Filter: ((is_deleted IS FALSE) AND is_verified AND (NOT is_deleted))
+                          Rows Removed by Filter: 90
+Planning Time: 0.506 ms
+Execution Time: 22.841 ms
+
+
+=== categories (cold)  /discover/categories {}
+-- 4.8 ms in the app
+SELECT events.category_id, count(events.id) AS count_1  ...
+HashAggregate  (cost=3568.27..3568.67 rows=40 width=12) (actual time=4.881..4.883 rows=40 loops=1)
+  Group Key: events.category_id
+  Batches: 1  Memory Usage: 24kB
+  ->  Hash Join  (cost=349.34..3549.98 rows=3658 width=8) (actual time=0.681..4.127 rows=10633 loops=1)
+        Hash Cond: (events.club_id = clubs.id)
+        ->  Bitmap Heap Scan on events  (cost=227.95..3418.20 rows=3945 width=12) (actual time=0.430..2.987 rows=11194 loops=1)
+              Recheck Cond: ((timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-10-17 11:59:39.278033+05:30'::timestamp with time zone) AND (NOT is_deleted))
+              Filter: ((is_deleted IS FALSE) AND (status = ANY ('{published,live}'::eventstatus[])))
+              Rows Removed by Filter: 454
+              Heap Blocks: exact=930
+              ->  Bitmap Index Scan on ix_events_ends_at  (cost=0.00..226.96 rows=12090 width=0) (actual time=0.361..0.361 rows=11648 loops=1)
+                    Index Cond: (timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-10-17 11:59:39.278033+05:30'::timestamp with time zone)
+        ->  Hash  (cost=104.00..104.00 rows=1391 width=4) (actual time=0.248..0.248 rows=1410 loops=1)
+              Buckets: 2048  Batches: 1  Memory Usage: 66kB
+              ->  Seq Scan on clubs  (cost=0.00..104.00 rows=1391 width=4) (actual time=0.002..0.191 rows=1410 loops=1)
+                    Filter: ((is_deleted IS FALSE) AND is_verified AND (NOT is_deleted))
+                    Rows Removed by Filter: 90
+Planning Time: 0.117 ms
+Execution Time: 4.901 ms
+
+
+=== app for-you  /events/for-you {}
+-- 46.2 ms in the app
+SELECT events.id, $1::FLOAT * least(coalesce(me_shared_interests.n, $2::INTEGER), $3::INTEGER) + $4::FLOAT * least(coalesce(me_clubs.pinned, $5::INTEGER), $6::INTEGER) + $7::FLOAT * least(coalesce(me_clubs.following, $8: ...
+Limit  (cost=5775.05..5775.08 rows=11 width=20) (actual time=27.880..27.895 rows=11 loops=1)
+  InitPlan 1 (returns $0)
+    ->  Limit  (cost=0.29..8.31 rows=1 width=4) (actual time=0.004..0.004 rows=1 loops=1)
+          ->  Index Scan using ix_user_profiles_user on user_profiles  (cost=0.29..8.31 rows=1 width=4) (actual time=0.004..0.004 rows=1 loops=1)
+                Index Cond: (user_id = 1)
+                Filter: (is_deleted IS FALSE)
+  ->  Sort  (cost=5766.74..5772.01 rows=2107 width=20) (actual time=27.879..27.891 rows=11 loops=1)
+        Sort Key: (((((((((('2.5'::double precision * (LEAST(COALESCE((count(*)), '0'::bigint), '3'::bigint))::double precision) + ('3.5'::double precision * (LEAST(COALESCE(me_clubs.pinned, 0), 1))::double precision)) +
+        Sort Method: top-N heapsort  Memory: 26kB
+        ->  Hash Anti Join  (cost=5074.81..5719.76 rows=2107 width=20) (actual time=11.156..27.333 rows=10317 loops=1)
+              Hash Cond: (events.id = event_registrations_link.event_id)
+              ->  Hash Left Join  (cost=5042.80..5345.10 rows=2107 width=64) (actual time=11.139..19.555 rows=10334 loops=1)
+                    Hash Cond: (events.category_id = me_category_history.key)
+                    ->  Hash Left Join  (cost=4952.34..5248.52 rows=2107 width=60) (actual time=11.108..18.335 rows=10334 loops=1)
+                          Hash Cond: (events.club_id = me_club_history.key)
+                          ->  Hash Left Join  (cost=4861.89..5152.53 rows=2107 width=56) (actual time=11.052..17.549 rows=10334 loops=1)
+                                Hash Cond: (events.club_id = me_clubs.club_id)
+                                ->  Nested Loop Anti Join  (cost=4845.80..5130.90 rows=2107 width=48) (actual time=11.035..15.707 rows=10334 loops=1)
+                                      Join Filter: (club_users_link.club_id = events.club_id)
+                                      ->  Hash Join  (cost=4841.48..5083.33 rows=2108 width=48) (actual time=11.024..14.690 rows=10334 loops=1)
+                                            Hash Cond: (events.club_id = clubs.id)
+                                            ->  Hash Right Join  (cost=4720.09..4955.96 rows=2273 width=44) (actual time=10.576..12.897 rows=10880 loops=1)
+                                                  Hash Cond: (event_interests_link.event_id = events.id)
+                                                  ->  HashAggregate  (cost=1183.22..1287.47 rows=10425 width=12) (actual time=1.959..2.417 rows=5920 loops=1)
+                                                        Group Key: event_interests_link.event_id
+                                                        Batches: 1  Memory Usage: 913kB
+                                                        InitPlan 2 (returns $1)
+                                                          ->  Aggregate  (cost=8.50..8.51 rows=1 width=32) (actual time=0.015..0.015 rows=1 loops=1)
+
+=== app list upcoming  /events/list {'is_ended': 'false'}
+-- 6.4 ms in the app
+SELECT events.id  ...
+Limit  (cost=3543.85..3543.88 rows=11 width=12) (actual time=5.270..5.271 rows=11 loops=1)
+  ->  Sort  (cost=3543.85..3554.54 rows=4276 width=12) (actual time=5.269..5.270 rows=11 loops=1)
+        Sort Key: event_datetime, id
+        Sort Method: top-N heapsort  Memory: 25kB
+        ->  Bitmap Heap Scan on events  (cost=228.04..3448.51 rows=4276 width=12) (actual time=0.497..4.731 rows=11648 loops=1)
+              Recheck Cond: (NOT is_deleted)
+              Filter: ((is_deleted IS FALSE) AND (status <> 'archived'::eventstatus) AND (now() <= timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval)))))
+              Heap Blocks: exact=930
+              ->  Bitmap Index Scan on ix_events_ends_at  (cost=0.00..226.97 rows=12090 width=0) (actual time=0.431..0.431 rows=11648 loops=1)
+                    Index Cond: (timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= now())
+Planning Time: 0.081 ms
+Execution Time: 5.290 ms
+
+
+=== app list search  /events/list {'search': 'robotics'}
+-- 3.3 ms in the app
+SELECT events.id  ...
+Limit  (cost=3506.22..3506.25 rows=11 width=12) (actual time=2.171..2.179 rows=11 loops=1)
+  InitPlan 1 (returns $0)
+    ->  Aggregate  (cost=1.50..1.51 rows=1 width=32) (actual time=0.052..0.053 rows=1 loops=1)
+          ->  Seq Scan on event_categories  (cost=0.00..1.50 rows=1 width=4) (actual time=0.049..0.049 rows=0 loops=1)
+                Filter: ((NOT is_deleted) AND (is_deleted IS FALSE) AND ((name)::text ~~* '%robotics%'::text))
+                Rows Removed by Filter: 40
+  ->  Sort  (cost=3504.70..3512.87 rows=3267 width=12) (actual time=2.170..2.174 rows=11 loops=1)
+        Sort Key: events.event_datetime, events.id
+        Sort Method: top-N heapsort  Memory: 25kB
+        ->  Bitmap Heap Scan on events  (cost=280.90..3431.86 rows=3267 width=12) (actual time=0.465..2.095 rows=201 loops=1)
+              Recheck Cond: ((((name)::text ~~* '%robotics%'::text) AND (NOT is_deleted)) OR ((category_id = ANY (COALESCE($0, '{}'::integer[]))) AND (NOT is_deleted)))
+              Filter: ((is_deleted IS FALSE) AND (status <> 'archived'::eventstatus))
+              Rows Removed by Filter: 382
+              Heap Blocks: exact=542
+              ->  BitmapOr  (cost=280.90..280.90 rows=9562 width=0) (actual time=0.319..0.321 rows=0 loops=1)
+                    ->  Bitmap Index Scan on ix_events_name_trgm  (cost=0.00..71.54 rows=1449 width=0) (actual time=0.261..0.262 rows=583 loops=1)
+                          Index Cond: ((name)::text ~~* '%robotics%'::text)
+                    ->  Bitmap Index Scan on ix_events_category_start  (cost=0.00..207.72 rows=8113 width=0) (actual time=0.058..0.058 rows=0 loops=1)
+                          Index Cond: (category_id = ANY (COALESCE($0, '{}'::integer[])))
+Planning Time: 0.304 ms
+Execution Time: 2.220 ms
+
+
+=== app list following  /events/list {'is_following': 'true'}
+-- 2.1 ms in the app
+SELECT events.id  ...
+Limit  (cost=68.94..68.97 rows=11 width=12) (actual time=0.595..0.601 rows=11 loops=1)
+  ->  Sort  (cost=68.94..69.00 rows=25 width=12) (actual time=0.594..0.597 rows=11 loops=1)
+        Sort Key: events.event_datetime, events.id
+        Sort Method: top-N heapsort  Memory: 25kB
+        ->  Nested Loop  (cost=0.86..68.38 rows=25 width=12) (actual time=0.115..0.557 rows=92 loops=1)
+              ->  Nested Loop  (cost=0.57..41.24 rows=3 width=8) (actual time=0.018..0.068 rows=10 loops=1)
+                    ->  Index Scan using ix_club_users_user on club_users_link  (cost=0.29..16.35 rows=3 width=4) (actual time=0.010..0.018 rows=10 loops=1)
+                          Index Cond: (user_id = 1)
+                          Filter: ((is_deleted IS FALSE) AND is_following)
+                    ->  Index Scan using clubs_pkey on clubs  (cost=0.28..8.29 rows=1 width=4) (actual time=0.004..0.004 rows=1 loops=10)
+                          Index Cond: (id = club_users_link.club_id)
+                          Filter: (is_deleted IS FALSE)
+              ->  Index Scan using ix_events_club_start on events  (cost=0.29..8.96 rows=9 width=16) (actual time=0.026..0.046 rows=9 loops=10)
+                    Index Cond: (club_id = clubs.id)
+                    Filter: ((is_deleted IS FALSE) AND (status <> 'archived'::eventstatus))
+                    Rows Removed by Filter: 16
+Planning Time: 1.428 ms
+Execution Time: 0.642 ms
+
+
+=== app list interests  /events/list {'interest_ids': '27'}
+-- 10.1 ms in the app
+SELECT events.id  ...
+Limit  (cost=4077.21..4077.23 rows=11 width=12) (actual time=10.042..10.044 rows=11 loops=1)
+  ->  Sort  (cost=4077.21..4078.25 rows=417 width=12) (actual time=10.041..10.042 rows=11 loops=1)
+        Sort Key: events.event_datetime, events.id
+        Sort Method: top-N heapsort  Memory: 25kB
+        ->  Hash Semi Join  (cost=678.57..4067.91 rows=417 width=12) (actual time=0.534..10.016 rows=402 loops=1)
+              Hash Cond: (events.id = event_interests_link.event_id)
+              ->  Seq Scan on events  (cost=0.00..3350.50 rows=12828 width=12) (actual time=0.004..8.849 rows=13086 loops=1)
+                    Filter: ((NOT is_deleted) AND (is_deleted IS FALSE) AND (status <> 'archived'::eventstatus))
+                    Rows Removed by Filter: 23914
+              ->  Hash  (cost=663.54..663.54 rows=1203 width=4) (actual time=0.520..0.521 rows=1229 loops=1)
+                    Buckets: 2048  Batches: 1  Memory Usage: 60kB
+                    ->  Bitmap Heap Scan on event_interests_link  (cost=25.62..663.54 rows=1203 width=4) (actual time=0.101..0.465 rows=1229 loops=1)
+                          Recheck Cond: ((interest_id = 27) AND (NOT is_deleted))
+                          Filter: (is_deleted IS FALSE)
+                          Heap Blocks: exact=542
+                          ->  Bitmap Index Scan on ix_event_interests_interest  (cost=0.00..25.32 rows=1203 width=0) (actual time=0.065..0.065 rows=1229 loops=1)
+                                Index Cond: (interest_id = 27)
+Planning Time: 0.167 ms
+Execution Time: 10.060 ms
+
+
+=== events offset=4800  /discover/events {'offset': 4800}
+-- 6.4 ms in the app
+SELECT event_categories.id, event_categories.name, event_categories.icon, event_categories.icon_type, event_categories.created_by_id, event_categories.created_at, event_categories.updated_at, event_categories.is_deleted, ...
+Incremental Sort  (cost=3784.41..3784.46 rows=2 width=1699) (actual time=6.583..6.585 rows=24 loops=1)
+  Sort Key: events_1.event_datetime, events_1.id
+  Presorted Key: events_1.event_datetime
+  Full-sort Groups: 1  Sort Method: quicksort  Average Memory: 50kB  Peak Memory: 50kB
+  ->  Nested Loop Left Join  (cost=3776.33..3784.40 rows=1 width=1699) (actual time=6.470..6.550 rows=24 loops=1)
+        ->  Nested Loop  (cost=3776.19..3784.24 rows=1 width=1615) (actual time=6.466..6.530 rows=24 loops=1)
+              ->  Nested Loop  (cost=3775.91..3783.94 rows=1 width=1006) (actual time=6.462..6.499 rows=24 loops=1)
+                    ->  Limit  (cost=3775.62..3775.62 rows=1 width=16) (actual time=6.454..6.456 rows=24 loops=1)
+                          ->  Sort  (cost=3766.47..3775.62 rows=3658 width=16) (actual time=6.202..6.358 rows=4824 loops=1)
+                                Sort Key: events_1.event_datetime, events_1.id
+                                Sort Method: top-N heapsort  Memory: 963kB
+                                ->  Hash Join  (cost=349.34..3549.98 rows=3658 width=16) (actual time=0.780..4.649 rows=10633 loops=1)
+                                      Hash Cond: (events_1.club_id = clubs_1.id)
+                                      ->  Bitmap Heap Scan on events events_1  (cost=227.95..3418.20 rows=3945 width=16) (actual time=0.474..3.392 rows=11194 loops=1)
+                                            Recheck Cond: ((timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-10-17 12:00:30.153153+05:30'::timestamp with time zo
+                                            Filter: ((is_deleted IS FALSE) AND (status = ANY ('{published,live}'::eventstatus[])))
+                                            Rows Removed by Filter: 454
+                                            Heap Blocks: exact=930
+                                            ->  Bitmap Index Scan on ix_events_ends_at  (cost=0.00..226.96 rows=12090 width=0) (actual time=0.405..0.405 rows=11648 loops=1)
+                                                  Index Cond: (timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) >= '2026-10-17 12:00:30.153153+05:30'::timestamp with time
+                                      ->  Hash  (cost=104.00..104.00 rows=1391 width=4) (actual time=0.301..0.301 rows=1410 loops=1)
+                                            Buckets: 2048  Batches: 1  Memory Usage: 66kB
+                                            ->  Seq Scan on clubs clubs_1  (cost=0.00..104.00 rows=1391 width=4) (actual time=0.003..0.240 rows=1410 loops=1)
+                                                  Filter: ((is_deleted IS FALSE) AND is_verified AND (NOT is_deleted))
+                                                  Rows Removed by Filter: 90
+                    ->  Index Scan using events_pkey on events  (cost=0.29..8.31 rows=1 width=994) (actual time=0.001..0.001 rows=1 loops=24)
+                          Index Cond: (id = events_1.id)
+                          Filter: (is_deleted IS FALSE)
+
+=== clubs offset=2400  /discover/clubs {'offset': 2400}
+-- 2.6 ms in the app
+SELECT count(clubs.id) AS count_1  ...
+Aggregate  (cost=107.48..107.49 rows=1 width=8) (actual time=0.519..0.519 rows=1 loops=1)
+  ->  Seq Scan on clubs  (cost=0.00..104.00 rows=1391 width=4) (actual time=0.006..0.423 rows=1410 loops=1)
+        Filter: (is_verified AND (NOT is_deleted) AND (is_deleted IS FALSE))
+        Rows Removed by Filter: 90
+Planning Time: 0.102 ms
+Execution Time: 0.540 ms
+
+
+=== app list ended  /events/list {'is_ended': 'true'}
+-- 6.9 ms in the app
+SELECT events.id  ...
+Limit  (cost=3543.85..3543.88 rows=11 width=12) (actual time=6.874..6.875 rows=11 loops=1)
+  ->  Sort  (cost=3543.85..3554.54 rows=4276 width=12) (actual time=6.874..6.874 rows=11 loops=1)
+        Sort Key: event_datetime DESC, id DESC
+        Sort Method: top-N heapsort  Memory: 25kB
+        ->  Bitmap Heap Scan on events  (cost=228.04..3448.51 rows=4276 width=12) (actual time=0.999..6.803 rows=1438 loops=1)
+              Recheck Cond: (NOT is_deleted)
+              Filter: ((is_deleted IS FALSE) AND (status <> 'archived'::eventstatus) AND (now() > timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval)))))
+              Rows Removed by Filter: 23191
+              Heap Blocks: exact=2068
+              ->  Bitmap Index Scan on ix_events_ends_at  (cost=0.00..226.97 rows=12090 width=0) (actual time=0.841..0.841 rows=24629 loops=1)
+                    Index Cond: (timezone('UTC'::text, (timezone('UTC'::text, event_datetime) + (duration * '01:00:00'::interval))) < now())
+Planning Time: 0.056 ms
+Execution Time: 6.884 ms
+

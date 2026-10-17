@@ -1,0 +1,301 @@
+{
+ "counts": {
+  "clubs": 15000,
+  "upcoming": 120000,
+  "past": 250000,
+  "users": 600000,
+  "registrations": 4000000,
+  "follows": 1500000,
+  "threads": 200000,
+  "likes": 1200000,
+  "comments": 400000
+ },
+ "max_event_regs": 8000,
+ "seeded_at": "2026-10-17T06:31:06.315410+00:00",
+ "seconds": {
+  "plan": 0.3,
+  "users": 15.6,
+  "clubs": 17.1,
+  "events": 35.0,
+  "event links": 41.3,
+  "registrations": 99.5,
+  "follows": 109.5,
+  "threads": 146.4,
+  "indexes": 180.5,
+  "vacuum": 185.4
+ },
+ "index_build_seconds": {
+  "ix_club_partners_club_id": 0.02,
+  "ix_club_partners_is_deleted": 0.0,
+  "ix_club_sites_club_id": 0.01,
+  "ix_club_socials_is_deleted": 0.01,
+  "ix_club_team_members_club_id": 0.12,
+  "ix_club_team_members_is_deleted": 0.01,
+  "ix_club_threads_club_created": 0.27,
+  "ix_club_threads_club_id": 0.04,
+  "ix_club_threads_is_deleted": 0.05,
+  "ix_club_threads_newest": 0.13,
+  "ix_club_users_link_is_deleted": 1.72,
+  "ix_club_users_link_tracking_link_id": 0.29,
+  "ix_club_users_user": 0.58,
+  "ix_clubs_is_deleted": 0.02,
+  "ix_clubs_location_trgm": 0.04,
+  "ix_clubs_name_trgm": 0.07,
+  "ix_clubs_slug": 0.01,
+  "ix_clubs_tagline_trgm": 0.06,
+  "ix_club_interests_club": 0.04,
+  "ix_club_interests_interest": 0.02,
+  "ix_clubs_interests_link_is_deleted": 0.01,
+  "ix_event_interests_event": 0.55,
+  "ix_event_interests_interest": 0.37,
+  "ix_event_interests_link_is_deleted": 0.14,
+  "ix_event_registrations_link_admission_no": 3.57,
+  "ix_event_registrations_link_is_deleted": 1.88,
+  "ix_event_registrations_link_ticket_id": 3.74,
+  "ix_event_registrations_link_tracking_link_id": 1.69,
+  "ix_registrations_user": 2.28,
+  "ix_event_speakers_event_id": 0.22,
+  "ix_events_category_start": 1.94,
+  "ix_events_club_start": 0.23,
+  "ix_events_ends_at": 0.16,
+  "ix_events_is_deleted": 0.08,
+  "ix_events_location_trgm": 1.11,
+  "ix_events_name_trgm": 1.56,
+  "ix_events_shown_point": 0.08,
+  "ix_events_shown_start": 0.07,
+  "ix_events_slug": 0.35,
+  "ix_thread_comments_is_deleted": 0.07,
+  "ix_thread_comments_thread_id": 0.07,
+  "ix_thread_likes_thread_id": 0.84,
+  "ix_thread_poll_options_thread_id": 0.02,
+  "ix_user_interests_is_deleted": 0.75,
+  "ix_user_interests_user": 0.63,
+  "ix_user_profiles_is_deleted": 0.56,
+  "ix_user_profiles_user": 1.01,
+  "ix_users_email_normalised": 3.38,
+  "ix_users_is_deleted": 1.83,
+  "uq_users_email_user_type": 0.98,
+  "uq_users_phone_user_type": 0.34
+ },
+ "database_bytes": 2971038179,
+ "tables": {
+  "events": {
+   "rows": 370000,
+   "heap_bytes": 235929600,
+   "index_bytes": 107782144,
+   "total_bytes": 343810048,
+   "bytes_per_row": 929.2
+  },
+  "event_registrations_link": {
+   "rows": 4000020,
+   "heap_bytes": 630996992,
+   "index_bytes": 586891264,
+   "total_bytes": 1218093056,
+   "bytes_per_row": 304.5
+  },
+  "club_users_link": {
+   "rows": 1500010,
+   "heap_bytes": 114843648,
+   "index_bytes": 149938176,
+   "total_bytes": 264839168,
+   "bytes_per_row": 176.6
+  },
+  "users": {
+   "rows": 615000,
+   "heap_bytes": 121864192,
+   "index_bytes": 127238144,
+   "total_bytes": 249167872,
+   "bytes_per_row": 405.2
+  },
+  "user_profiles": {
+   "rows": 600000,
+   "heap_bytes": 50675712,
+   "index_bytes": 35061760,
+   "total_bytes": 85786624,
+   "bytes_per_row": 143.0
+  },
+  "user_interests": {
+   "rows": 1800367,
+   "heap_bytes": 122912768,
+   "index_bytes": 78209024,
+   "total_bytes": 201179136,
+   "bytes_per_row": 111.7
+  },
+  "clubs": {
+   "rows": 15000,
+   "heap_bytes": 7290880,
+   "index_bytes": 4128768,
+   "total_bytes": 11460608,
+   "bytes_per_row": 764.0
+  },
+  "event_interests_link": {
+   "rows": 739945,
+   "heap_bytes": 50520064,
+   "index_bytes": 52305920,
+   "total_bytes": 102866944,
+   "bytes_per_row": 139.0
+  },
+  "club_threads": {
+   "rows": 200000,
+   "heap_bytes": 60030976,
+   "index_bytes": 26140672,
+   "total_bytes": 86220800,
+   "bytes_per_row": 431.1
+  },
+  "thread_likes": {
+   "rows": 1200000,
+   "heap_bytes": 101351424,
+   "index_bytes": 125804544,
+   "total_bytes": 227213312,
+   "bytes_per_row": 189.3
+  },
+  "thread_comments": {
+   "rows": 400000,
+   "heap_bytes": 37240832,
+   "index_bytes": 24289280,
+   "total_bytes": 61579264,
+   "bytes_per_row": 153.9
+  },
+  "club_team_members": {
+   "rows": 59669,
+   "heap_bytes": 7380992,
+   "index_bytes": 2531328,
+   "total_bytes": 9953280,
+   "bytes_per_row": 166.8
+  },
+  "event_speakers": {
+   "rows": 231979,
+   "heap_bytes": 23461888,
+   "index_bytes": 9003008,
+   "total_bytes": 32505856,
+   "bytes_per_row": 140.1
+  }
+ },
+ "indexes": [
+  {
+   "index": "event_registrations_link_pkey",
+   "table": "event_registrations_link",
+   "bytes": 160768000
+  },
+  {
+   "index": "event_registrations_link_event_id_user_id_is_deleted_key",
+   "table": "event_registrations_link",
+   "bytes": 159064064
+  },
+  {
+   "index": "ix_event_registrations_link_ticket_id",
+   "table": "event_registrations_link",
+   "bytes": 131710976
+  },
+  {
+   "index": "club_users_link_club_id_user_id_is_deleted_key",
+   "table": "club_users_link",
+   "bytes": 72392704
+  },
+  {
+   "index": "uq_thread_likes_thread_user",
+   "table": "thread_likes",
+   "bytes": 66871296
+  },
+  {
+   "index": "thread_likes_pkey",
+   "table": "thread_likes",
+   "bytes": 47546368
+  },
+  {
+   "index": "ix_registrations_user",
+   "table": "event_registrations_link",
+   "bytes": 40943616
+  },
+  {
+   "index": "user_interests_pkey",
+   "table": "user_interests",
+   "bytes": 40452096
+  },
+  {
+   "index": "ix_event_registrations_link_admission_no",
+   "table": "event_registrations_link",
+   "bytes": 38928384
+  },
+  {
+   "index": "users_username_key",
+   "table": "users",
+   "bytes": 34103296
+  },
+  {
+   "index": "club_users_link_pkey",
+   "table": "club_users_link",
+   "bytes": 33710080
+  },
+  {
+   "index": "uq_users_email_user_type",
+   "table": "users",
+   "bytes": 30564352
+  },
+  {
+   "index": "ix_event_registrations_link_is_deleted",
+   "table": "event_registrations_link",
+   "bytes": 27738112
+  },
+  {
+   "index": "ix_event_registrations_link_tracking_link_id",
+   "table": "event_registrations_link",
+   "bytes": 27738112
+  },
+  {
+   "index": "ix_events_name_trgm",
+   "table": "events",
+   "bytes": 25812992
+  },
+  {
+   "index": "ix_user_interests_user",
+   "table": "user_interests",
+   "bytes": 25255936
+  },
+  {
+   "index": "ix_users_email_normalised",
+   "table": "users",
+   "bytes": 25001984
+  },
+  {
+   "index": "ix_club_users_user",
+   "table": "club_users_link",
+   "bytes": 22994944
+  },
+  {
+   "index": "uq_users_phone_user_type",
+   "table": "users",
+   "bytes": 19447808
+  },
+  {
+   "index": "thread_comments_pkey",
+   "table": "thread_comments",
+   "bytes": 17473536
+  },
+  {
+   "index": "ix_events_location_trgm",
+   "table": "events",
+   "bytes": 16760832
+  },
+  {
+   "index": "ix_event_interests_interest",
+   "table": "event_interests_link",
+   "bytes": 16646144
+  },
+  {
+   "index": "event_interests_link_pkey",
+   "table": "event_interests_link",
+   "bytes": 16637952
+  },
+  {
+   "index": "ix_events_slug",
+   "table": "events",
+   "bytes": 16547840
+  },
+  {
+   "index": "ix_event_interests_event",
+   "table": "event_interests_link",
+   "bytes": 13869056
+  }
+ ]
+}

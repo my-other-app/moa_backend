@@ -1,0 +1,49 @@
+{
+ "db": "moa_s2",
+ "clock": [
+  {
+   "ms": 4672.8,
+   "statements": 3,
+   "moved": 812
+  },
+  {
+   "ms": 3902.8,
+   "statements": 3,
+   "moved": 812
+  }
+ ],
+ "drift": [
+  {
+   "ms": 20419.9,
+   "events": 0,
+   "clubs": 0
+  },
+  {
+   "ms": 19133.6,
+   "events": 0,
+   "clubs": 0
+  }
+ ],
+ "email_sweep": [
+  {
+   "events_with_templates": 10000,
+   "templates": 40000,
+   "insert_ms": 7176,
+   "email_templates_bytes": 61677568,
+   "runs": [
+    {
+     "rows": 20000,
+     "query_ms": 15933.9,
+     "loop_ms": 374.9,
+     "due": 0
+    },
+    {
+     "rows": 20000,
+     "query_ms": 17704.8,
+     "loop_ms": 377.5,
+     "due": 0
+    }
+   ]
+  }
+ ]
+}
