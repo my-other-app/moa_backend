@@ -179,8 +179,23 @@ def _sorted(templates: list[EmailTemplates]) -> list[EmailTemplates]:
     return sorted(templates, key=lambda t: (STAGE_ORDER.get(t.stage, 99), t.created_at or datetime.min.replace(tzinfo=timezone.utc)))
 
 
+#: First keys of the advisory locks that keep two requests from copying the
+#: same journey emails at once (the second key is the club's or event's id).
+_LIBRARY_LOCK = 7_316_301
+_EVENT_EMAILS_LOCK = 7_316_302
+
+
+async def _hold(session, first: int, second: int) -> None:
+    """A transaction-scoped advisory lock: whoever comes second waits, then
+    reads what the first one wrote. A burst of first registrations used to
+    copy an event's journey emails three to six times, so every attendee got
+    each reminder that many times."""
+    await session.execute(select(func.pg_advisory_xact_lock(first, second)))
+
+
 async def ensure_library(session, club_id: int) -> list[EmailTemplates]:
     """The club's library, with the four journey emails present."""
+    await _hold(session, _LIBRARY_LOCK, club_id)
     rows = list(await session.scalars(select(EmailTemplates).where(EmailTemplates.club_id == club_id, EmailTemplates.event_id.is_(None))))
     have = {t.stage for t in rows}
     added = False
@@ -200,6 +215,7 @@ async def ensure_event_templates(session, event: Events) -> list[EmailTemplates]
     club's library the first time, so a club's design carries over."""
     if event.club_id is None:
         raise CustomHTTPException(422, message="This event has no club, so it has no emails to send from.")
+    await _hold(session, _EVENT_EMAILS_LOCK, event.id)
     rows = list(await session.scalars(select(EmailTemplates).where(EmailTemplates.event_id == event.id)))
     have = {t.stage for t in rows if t.stage is not EmailStage.CUSTOM}
     missing = [EmailStage(s) for s in JOURNEY_STAGES if EmailStage(s) not in have]
