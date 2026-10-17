@@ -111,6 +111,21 @@ class EventSearch(BaseModel):
     categories: list[SearchCategory]
 
 
+class ClubEvents(BaseModel):
+    """A club's events, a page at a time (past: newest first; upcoming: soonest first)."""
+    items: list[EventCard]
+    total: int
+    offset: int
+    limit: int
+
+
+class CalendarMonth(BaseModel):
+    """How many public events touch each day of a month ("YYYY-MM-DD", days
+    in India); days with none are left out."""
+    month: str
+    days: dict[str, int]
+
+
 class ClubSearch(BaseModel):
     items: list[ClubCard]
     total: int

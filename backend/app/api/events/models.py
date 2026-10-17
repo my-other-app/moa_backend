@@ -183,6 +183,21 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         # "Near you": a latitude/longitude box first, the exact distance after.
         sa.Index("ix_events_shown_point", "lat", "lng", postgresql_where=sa.text("NOT is_deleted AND status IN ('published', 'live') AND lat IS NOT NULL AND lng IS NOT NULL")),
         # Words anywhere in the name or the place: trigram indexes serve ILIKE '%…%' and similarity.
+        # What overlaps a stretch of time, held events included: the calendar
+        # and the date-range search. The event as the closed range from its
+        # start to its end; never inverted, so a bad duration cannot fail a write.
+        # Over every row, not partial: the planner only uses an expression
+        # index's statistics when the index is not partial, and without them
+        # it takes any stretch of days to hold a few hundred events.
+        sa.Index(
+            "ix_events_span",
+            sa.func.tstzrange(
+                event_datetime,
+                sa.func.greatest(event_datetime, sa.func.timezone(sa.literal_column("'UTC'"), sa.func.timezone(sa.literal_column("'UTC'"), event_datetime) + duration * sa.text("INTERVAL '1 hour'"))),
+                sa.literal_column("'[]'"),
+            ),
+            postgresql_using="gist",
+        ),
         sa.Index("ix_events_name_trgm", "name", postgresql_using="gin", postgresql_ops={"name": "gin_trgm_ops"}, postgresql_where=sa.text("NOT is_deleted")),
         sa.Index("ix_events_location_trgm", "location_name", postgresql_using="gin", postgresql_ops={"location_name": "gin_trgm_ops"}, postgresql_where=sa.text("NOT is_deleted")),
     )
@@ -206,6 +221,15 @@ def ends_at_sql(model=None):
     m = model if model is not None else Events
     utc = sa.literal_column("'UTC'")
     return sa.func.timezone(utc, sa.func.timezone(utc, m.event_datetime) + m.duration * sa.text("INTERVAL '1 hour'"))
+
+
+def span_sql(model=None):
+    """The event as a closed range of instants, start to end, as SQL: what
+    ix_events_span indexes, so `span && range` is an index probe. Closed, so
+    an event of no length is still a point in time; never inverted (a range
+    whose end is before its start is an error), whatever the duration."""
+    m = model if model is not None else Events
+    return sa.func.tstzrange(m.event_datetime, sa.func.greatest(m.event_datetime, ends_at_sql(m)), sa.literal_column("'[]'"))
 
 
 class EventSpeakers(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):

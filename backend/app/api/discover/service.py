@@ -29,13 +29,13 @@ events and clubs:
 from __future__ import annotations
 
 import heapq
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
 import orjson
 
-from sqlalchemy import and_, bindparam, case, exists, func, or_, select, text, true, union
+from sqlalchemy import DateTime, and_, bindparam, case, cast, column, exists, func, literal_column, or_, select, text, true, union
 from sqlalchemy.orm import aliased, contains_eager, selectinload
 
 from app.api.agenda import service as agenda
@@ -45,7 +45,7 @@ from app.api.clubs.events_list import registration_open
 from app.api.clubs.models import ClubInterestsLink, Clubs, ClubSocials, ClubTeamMembers
 from app.api.discover import cache, geo
 from app.api.events.documents import EVENT_TIMEZONE
-from app.api.events.models import EventCategories, EventInterestsLink, Events, ends_at_sql
+from app.api.events.models import EventCategories, EventInterestsLink, Events, ends_at_sql, span_sql
 from app.api.interests.models import Interests
 from app.api.organisers import service as organisers
 from app.api.sites import service as sites
@@ -68,6 +68,11 @@ ALSO_ON = 4
 SITEMAP_MAX = 5000
 SITEMAP_PAST = timedelta(days=365)
 WHENS = ("any", "today", "tomorrow", "this_week", "this_weekend", "next_week", "this_month")
+#: The longest stretch `from`…`to` may cover, in days, both ends counted.
+RANGE_MAX_DAYS = 366
+#: How far from this month the calendar answers, either way.
+CALENDAR_MONTHS = 24
+CLUB_PAST_ON_PAGE = 6
 # Rounding slack when a cached pool is cut by distance: far below a metre.
 _SLACK_KM = 1e-6
 
@@ -151,6 +156,50 @@ def window(when: str, now: datetime) -> tuple[Optional[datetime], Optional[datet
         first_next = (today.replace(day=1) + timedelta(days=32)).replace(day=1)
         return now, first_next
     return None, None
+
+
+def day_start(d: date) -> datetime:
+    """Midnight in India at the start of a calendar day."""
+    return datetime.combine(d, time.min, tzinfo=IST)
+
+
+def date_range(start: Optional[date], end: Optional[date]) -> tuple[Optional[datetime], Optional[datetime]]:
+    """[`start` 00:00, the day after `end` 00:00) in India, either end open.
+    Raises 422 for a range that ends before it starts or covers more than
+    RANGE_MAX_DAYS days."""
+    if start is not None and end is not None:
+        if start > end:
+            raise CustomHTTPException(422, message="Invalid request", errors={"to": "Must be on or after `from`."})
+        if (end - start).days + 1 > RANGE_MAX_DAYS:
+            raise CustomHTTPException(422, message="Invalid request", errors={"to": f"A range can cover at most {RANGE_MAX_DAYS} days."})
+    return (day_start(start) if start else None, day_start(end + timedelta(days=1)) if end else None)
+
+
+def _overlaps(start: Optional[datetime], end: Optional[datetime]) -> list:
+    """An event that touches [start, end): it starts inside, or it started
+    before and is still on at `start` (a half-open overlap; an event of no
+    length counts where it starts). Either end may be open.
+
+    With both ends, the event's span is probed through ix_events_span (a
+    GiST range index) and the exact rule decides; with one, the start or end
+    index bounds it. The planner picks between them on statistics: a short
+    stretch through the span index, a long one by walking the date index in
+    order (RESULTS.md)."""
+    conds: list = []
+    start = _instant(start) if isinstance(start, datetime) else start
+    end = _instant(end) if isinstance(end, datetime) else end
+    if start is not None and end is not None:
+        conds.append(span_sql(Events).op("&&")(func.tstzrange(start, end, literal_column("'[)'"))))
+    if end is not None:
+        conds.append(Events.event_datetime < end)
+    if start is not None:
+        conds.append(or_(_end_expr() > start, Events.event_datetime >= start))
+    return conds
+
+
+def _instant(dt: datetime):
+    """A moment as SQL, typed as one (timestamptz) whatever it is compared with."""
+    return cast(dt, DateTime(timezone=True))
 
 
 # ─── Events ──────────────────────────────────────────────────────────────
@@ -253,13 +302,9 @@ def _popularity():
     return Events.going_count + func.coalesce(Events.page_views, 0)
 
 
-def _conditions(now: datetime, *, when: str = "any", category: Optional[int] = None, type_: str = "any", price: str = "any", club_id: Optional[int] = None) -> list:
-    conds = _visible_where(now)
-    start, end = window(when, now)
-    if start is not None:
-        conds.append(_end_expr() >= start)
-    if end is not None:
-        conds.append(Events.event_datetime < end)
+def _filters(*, category: Optional[int] = None, type_: str = "any", price: str = "any", club_id: Optional[int] = None) -> list:
+    """What a visitor narrows a list by, beside when and where."""
+    conds: list = []
     if category:
         conds.append(Events.category_id == category)
     if type_ == "online":
@@ -273,6 +318,23 @@ def _conditions(now: datetime, *, when: str = "any", category: Optional[int] = N
     if club_id is not None:
         conds.append(Events.club_id == club_id)
     return conds
+
+
+def _conditions(
+    now: datetime, *, when: str = "any", category: Optional[int] = None, type_: str = "any", price: str = "any",
+    club_id: Optional[int] = None, days: Optional[tuple[Optional[datetime], Optional[datetime]]] = None,
+) -> list:
+    """What is on, narrowed. `days`, a (start, end) from date_range, replaces `when`."""
+    conds = _visible_where(now)
+    if days is not None and (days[0] is not None or days[1] is not None):
+        conds += _overlaps(*days)
+    else:
+        start, end = window(when, now)
+        if start is not None:
+            conds.append(_end_expr() >= start)
+        if end is not None:
+            conds.append(Events.event_datetime < end)
+    return conds + _filters(category=category, type_=type_, price=price, club_id=club_id)
 
 
 def filtered(now: datetime, *, when: str = "any", category: Optional[int] = None, type_: str = "any", price: str = "any", q: Optional[str] = None, club_id: Optional[int] = None):
@@ -440,10 +502,14 @@ async def _page(session, conds: list, keys: list[tuple], offset: int, limit: int
 async def search_events(
     session, where: dict, *, q: Optional[str], when: str, category: Optional[int], type_: str, price: str,
     radius_km: float, sort: str, offset: int, limit: int, now: Optional[datetime] = None,
+    from_: Optional[date] = None, to: Optional[date] = None,
 ) -> dict:
+    """`from_`/`to` (calendar days in India, both ends counted), when either
+    is given, replace `when`: an event matches if it touches that stretch."""
     now = now or now_utc()
     here = _here(where)
-    conds = _conditions(now, when=when, category=category, type_=type_, price=price)
+    days = date_range(from_, to) if (from_ is not None or to is not None) else None
+    conds = _conditions(now, when=when, category=category, type_=type_, price=price, days=days)
     radius = here is not None and type_ != "online" and radius_km > 0
     if radius:
         conds.append(_within(here, radius_km))
@@ -487,6 +553,89 @@ async def search_events(
         items=[card(e, now, going.get(e.id, 0), _event_km(e, here)) for e in page],
         total=total, offset=offset, limit=limit, where=where, categories=cats,
     )
+
+
+# ─── The calendar ────────────────────────────────────────────────────────
+
+
+def month_bounds(month: str, now: datetime) -> tuple[date, date]:
+    """The first day of "YYYY-MM" and of the month after. 422 for a month more
+    than CALENDAR_MONTHS from this one (in India) either way."""
+    year, mon = int(month[:4]), int(month[5:7])
+    local = now.astimezone(IST)
+    if abs((year * 12 + mon - 1) - (local.year * 12 + local.month - 1)) > CALENDAR_MONTHS:
+        raise CustomHTTPException(422, message="Invalid request", errors={"month": f"Pick a month within {CALENDAR_MONTHS} months of this one."})
+    return date(year, mon, 1), date(year + mon // 12, mon % 12 + 1, 1)
+
+
+async def _day_counts(session, first: date, after: date, conds: list) -> dict[str, int]:
+    """How many of the events `conds` admits touch each day of [first, after),
+    days in India, in one statement. Only days with something on come back.
+
+    The month's events are found once, through ix_events_span; each then
+    gives the days it touches, from the day it starts to the day it is last on
+    (its end less a microsecond: an event ending at midnight is not on the
+    next day; one of no length is on the day it starts), cut to the month, by
+    a generate_series of its own; and the days are counted. The work is the
+    month's events and the days they touch, never every event against every
+    day."""
+    start, end = day_start(first), day_start(after)
+    month_events = (
+        select(Events.event_datetime.label("starts"), _end_expr().label("ends"))
+        .select_from(Events).join(Clubs, Clubs.id == Events.club_id)
+        .where(*conds, *_overlaps(start, end))
+        .subquery("month_events")
+    )
+
+    def local_day(instant):
+        """The calendar day in India an instant falls on, as a plain timestamp at its midnight."""
+        return func.date_trunc("day", func.timezone(literal_column("'Asia/Kolkata'"), instant))
+
+    starts, ends = month_events.c.starts, month_events.c.ends
+    last_on = case((ends > starts, ends - literal_column("INTERVAL '1 microsecond'")), else_=starts)
+    month_first = cast(datetime.combine(first, time.min), DateTime(timezone=False))
+    month_last = cast(datetime.combine(after - timedelta(days=1), time.min), DateTime(timezone=False))
+    days = (
+        func.generate_series(func.greatest(local_day(starts), month_first), func.least(local_day(last_on), month_last), literal_column("INTERVAL '1 day'"))
+        .table_valued(column("day", DateTime(timezone=False)))
+        .render_derived(name="days")
+    )
+    rows = await session.execute(select(days.c.day, func.count()).select_from(month_events).join(days, true()).group_by(days.c.day))
+    return {d.date().isoformat(): int(n) for d, n in rows.all() if n}
+
+
+async def _calendar(session, now: datetime, first: date, after: date, *, words: Optional[str], category, type_: str, price: str, here, radius_km: float) -> dict[str, int]:
+    conds = _public_where(now) + [_in(Events.lifecycle, HELD)] + _filters(category=category, type_=type_, price=price)
+    if here is not None:
+        conds.append(_within(here, radius_km))
+    counts = await _day_counts(session, first, after, conds + ([_event_words(words)] if words else []))
+    if words and not counts and _fuzzy_worthwhile(words):
+        # As the search does: nothing has these letters in this order, so forgive a typo.
+        await _fuzzy(session)
+        counts = await _day_counts(session, first, after, conds + [_event_words_fuzzy(words)])
+    return counts
+
+
+async def calendar(
+    session, where: dict, *, month: str, q: Optional[str], category: Optional[int], type_: str, price: str,
+    radius_km: float, now: Optional[datetime] = None,
+) -> dict:
+    """How many public events touch each day of `month` (days in India), with
+    the search's filters: what is on or to come as the search shows it, and
+    on days already past, what was held (as a club page's past list shows
+    it), so the calendar shows what happened too. An event that runs over
+    several days counts on each. Kept for the minute per filter and place."""
+    now = now or now_utc()
+    first, after = month_bounds(month, now)
+    here = _here(where)
+    radius = here is not None and type_ != "online" and radius_km > 0
+    words = q.strip().lower() if q and q.strip() else None  # ILIKE and trigrams ignore case alike
+    place = (here, radius_km) if radius else (None, None)
+    key = ("calendar", month, words, category, type_, price, place, cache.minute(now))
+    days = await cache.shared.remember(key, lambda: _calendar(
+        session, now, first, after, words=words, category=category, type_=type_, price=price, here=place[0], radius_km=radius_km,
+    ))
+    return dict(month=month, days=dict(days))
 
 
 # ─── Clubs ───────────────────────────────────────────────────────────────
@@ -690,6 +839,41 @@ def _team_member(m: ClubTeamMembers, role: Optional[str]) -> dict:
     )
 
 
+def _club_past_where(club_id: int, now: datetime) -> list:
+    """What a club held: over, and published, live, closed or archived (never
+    a draft or a deleted event). The club page's past list and its "all past
+    events" pages both read it, newest first (_CLUB_PAST_ORDER)."""
+    return [Events.club_id == club_id, Events.is_deleted == False, _in(Events.lifecycle, HELD), _end_expr() < now]  # noqa: E712
+
+
+_CLUB_PAST_ORDER = (Events.event_datetime.desc(), Events.id.desc())
+
+
+async def club_events(session, slug: str, when: str, offset: int, limit: int, now: Optional[datetime] = None) -> dict:
+    """Every event of a club, a page at a time: `past` by the club page's
+    past rule, newest first; `upcoming` as the search shows them, soonest
+    first. 404 for a club the public cannot see.
+
+    Four statements whatever the club holds: the club, the count, the page
+    (chosen on narrow rows by ix_events_club_start, then read in full) and the
+    page's going counters (going_counts)."""
+    now = now or now_utc()
+    club_id = await session.scalar(select(Clubs.id).where(Clubs.slug == slug, *_club_visible()))
+    if club_id is None:
+        raise CustomHTTPException(404, message="Club not found")
+    if when == "past":
+        conds, keys = _club_past_where(club_id, now), [(Events.event_datetime, True), (Events.id, True)]
+    else:
+        conds, keys = _conditions(now, club_id=club_id), [(Events.event_datetime, False), (Events.id, False)]
+    total = await _count(session, _event_count(conds))
+    page = await _page(session, conds, keys, offset, limit) if total > offset else []
+    going = await going_counts(session, [e.id for e in page])
+    return dict(
+        items=[card(e, now, going.get(e.id, 0)) for e in page],
+        total=total, offset=offset, limit=limit,
+    )
+
+
 async def club_page(session, slug: str, viewer_id: Optional[int], now: Optional[datetime] = None) -> dict:
     now = now or now_utc()
     club = await session.scalar(select(Clubs).where(Clubs.slug == slug, *_club_visible()))
@@ -703,10 +887,8 @@ async def club_page(session, slug: str, viewer_id: Optional[int], now: Optional[
     )
 
     upcoming = await _rows(session, filtered(now, club_id=club.id).limit(60))
-    past_where = [
-        Events.club_id == club.id, Events.is_deleted == False, _in(Events.lifecycle, HELD), _end_expr() < now,  # noqa: E712
-    ]
-    past = await _rows(session, _event_select().where(*past_where).order_by(Events.event_datetime.desc(), Events.id.desc()).limit(6))
+    past_where = _club_past_where(club.id, now)
+    past = await _rows(session, _event_select().where(*past_where).order_by(*_CLUB_PAST_ORDER).limit(CLUB_PAST_ON_PAGE))
     detail["events_held"] = int(await session.scalar(select(func.count(Events.id)).where(*past_where)) or 0)
     going = await going_counts(session, [e.id for e in upcoming + past])
 
