@@ -75,6 +75,11 @@ class Clubs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     brand_secondary = Column(String(7), nullable=True)
     initial_password = Column(String, nullable=True)
     is_verified = Column(Boolean, nullable=False, default=False)
+    # The plan key and cycle ('monthly' | 'yearly') chosen on the sign-up form,
+    # for the admin approving it and for the dashboard to preselect afterwards.
+    # A request, not a subscription: nothing is granted or charged by it.
+    requested_plan = Column(String(40), nullable=True)
+    requested_cycle = Column(String(10), nullable=True)
     # How many follow the club: kept by a trigger on club_users_link in the
     # same transaction as every follow, unfollow or delete there (see
     # FOLLOWER_COUNT_SQL below), so lists sort by it without counting.

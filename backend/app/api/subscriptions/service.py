@@ -184,6 +184,52 @@ async def list_plans(session, *, include_hidden: bool = False) -> list[tuple[Pla
     return [(plan, counts.get(plan.id, 0)) for plan in plans]
 
 
+async def public_plans(session) -> list[Plans]:
+    """The plans on the pricing page: public, not deleted, in display order.
+
+    `legacy` is excluded by the visibility filter itself -- an archived plan
+    keeps its subscribers but is no longer for sale.
+    """
+    return list(
+        (
+            await session.execute(
+                select(Plans)
+                .where(Plans.is_deleted == False, Plans.visibility == PlanVisibility.public)
+                .options(selectinload(Plans.limits), selectinload(Plans.features))
+                .order_by(Plans.sort_order, Plans.price_monthly_paise, Plans.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+async def requested_plan_key(session, raw: str | None) -> str | None:
+    """
+    The plan a sign-up form asked for, if it names one on the pricing page.
+
+    Anything else -- a typo, a withdrawn plan, a hidden bespoke one -- is
+    dropped rather than refused: the choice is a hint for the admin, and an
+    application should not fail over it.
+    """
+    key = (raw or "").strip().lower()
+    if not key or len(key) > 40:
+        return None
+    found = await session.scalar(
+        select(Plans.key).where(
+            Plans.key == key,
+            Plans.is_deleted == False,
+            Plans.visibility == PlanVisibility.public,
+        )
+    )
+    return found
+
+
+def requested_cycle_value(raw: str | None) -> str | None:
+    value = (raw or "").strip().lower()
+    return value if value in {cycle.value for cycle in BillingCycle} else None
+
+
 async def get_plan(session, plan_id: int) -> Plans:
     plan = (
         await session.execute(

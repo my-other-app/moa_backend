@@ -10,7 +10,7 @@ to re-attempt a charge that already failed.
 
 from typing import Optional
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Query, Request, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
@@ -31,14 +31,19 @@ from app.api.subscriptions.schemas import (
     EntitlementsOut,
     PlanIn,
     PlanOut,
+    PublicPlansOut,
     StartSubscriptionIn,
     StartSubscriptionOut,
     SubscriptionOut,
     SubscriptionTotals,
     plan_to_dict,
+    public_plan_dict,
+    yearly_months_free,
 )
 from app.core.auth.dependencies import AdminAuth, ClubAuth
 from app.core.auth.permissions import MoneyAuth
+from app.core.net import client_address
+from app.core.rate_limit import limiter
 from app.core.response.pagination import (
     PaginatedResponse,
     PaginationParams,
@@ -49,6 +54,38 @@ from app.response import CustomHTTPException
 
 admin_router = APIRouter(prefix="/admin", tags=["subscriptions"])
 club_router = APIRouter(prefix="/clubs", tags=["subscriptions"])
+public_router = APIRouter(prefix="/plans", tags=["subscriptions"])
+
+#: The same budget as the discover routes behind the public site.
+PUBLIC_LIMIT = "120/minute"
+
+
+def _visitor(request: Request) -> str:
+    return client_address(request) or "unknown"
+
+
+# ---------------------------------------------------------------------------
+# The pricing page
+# ---------------------------------------------------------------------------
+
+
+@public_router.get("", summary="The plans on the pricing page (public)")
+@limiter.limit(PUBLIC_LIMIT, key_func=_visitor)
+async def pricing(request: Request, response: Response, session: SessionDep) -> PublicPlansOut:
+    """
+    Public plans in display order, each with every limit (null = unlimited)
+    and the whole public feature catalog marked included or not.
+
+    Cacheable for five minutes: a price an admin changes reaches the page
+    within that, and the page does not ask the database on every visit.
+    """
+    plans = await service.public_plans(session)
+    response.headers["Cache-Control"] = "public, max-age=300"
+    return {
+        "currency": "INR",
+        "yearly_months_free": yearly_months_free(plans),
+        "plans": [public_plan_dict(plan) for plan in plans],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +131,8 @@ async def create_plan(
         trial_days=payload.trial_days,
         visibility=payload.visibility,
         sort_order=payload.sort_order,
+        featured=bool(payload.featured),
+        contact_sales=bool(payload.contact_sales),
     )
     session.add(plan)
     await session.flush()
@@ -144,6 +183,11 @@ async def update_plan(
     plan.trial_days = payload.trial_days
     plan.visibility = payload.visibility
     plan.sort_order = payload.sort_order
+    # Only when sent: see PlanIn. Omitting them keeps what is there.
+    if payload.featured is not None:
+        plan.featured = payload.featured
+    if payload.contact_sales is not None:
+        plan.contact_sales = payload.contact_sales
 
     if price_changed:
         # Razorpay plans are immutable, so the old ids no longer describe this
@@ -214,6 +258,10 @@ async def duplicate_plan(
         trial_days=source.trial_days,
         visibility=PlanVisibility.hidden,
         sort_order=source.sort_order,
+        contact_sales=source.contact_sales,
+        # Not featured: the highlight belongs to the plan it was given to,
+        # and a copy made public later would make two "Most popular" plans.
+        featured=False,
         # Deliberately not copied: a Razorpay plan belongs to the plan that
         # created it, and sharing the id would bill this plan's subscribers
         # against the other one.
@@ -577,6 +625,8 @@ async def my_entitlements(session: SessionDep, user: ClubAuth) -> EntitlementsOu
         "limits": resolved.limits,
         "features": resolved.features,
         "configured": resolved.configured,
+        "requested_plan": club.requested_plan,
+        "requested_cycle": club.requested_cycle,
     }
 
 
@@ -604,6 +654,13 @@ async def start_subscription(
     if plan.visibility == PlanVisibility.legacy:
         raise CustomHTTPException(
             status_code=422, message="This plan is no longer offered."
+        )
+    if plan.contact_sales:
+        # Priced per deal: an admin assigns it once terms are agreed, and a
+        # checkout here would charge whatever placeholder price it carries.
+        raise CustomHTTPException(
+            status_code=422,
+            message="This plan is arranged with our team. Talk to us and we will set it up.",
         )
     if service.price_for(plan, payload.cycle) <= 0:
         raise CustomHTTPException(

@@ -43,8 +43,11 @@ async def create_club(
     logo: UploadFile | None = None,
     interest_ids: list[int] | None = None,
     is_admin_created: bool = False,
+    requested_plan: str | None = None,
+    requested_cycle: str | None = None,
 ) -> Clubs:
-    """Create a new club."""
+    """Create a new club. `requested_plan`/`requested_cycle` must already be
+    checked (see subscriptions.service.requested_plan_key)."""
     if not is_admin_created and not password:
         raise CustomHTTPException(400, "Password is required")
 
@@ -80,6 +83,8 @@ async def create_club(
         location_name=location_name,
         user_id=club_user.id,
         is_verified=is_admin_created,
+        requested_plan=requested_plan,
+        requested_cycle=requested_cycle,
         # Note: initial_password removed for security - use password reset flow instead
     )
 
@@ -277,6 +282,8 @@ async def get_club_admin_detail(session: AsyncSession, club_id: int):
     )
 
     detail["is_verified"] = club.is_verified if club else False
+    detail["requested_plan"] = club.requested_plan if club else None
+    detail["requested_cycle"] = club.requested_cycle if club else None
     detail["is_deleted"] = club.is_deleted if club else False
     detail["created_at"] = club.created_at if club else None
     detail["owner"] = (
@@ -581,6 +588,8 @@ async def _attach_admin_fields(session: AsyncSession, clubs, rows: list[dict]) -
         # The club's sign-in address, which is not contact_email: that one is
         # published on the club's page and is often a committee alias.
         row["owner_email"] = club.user.email if club.user else None
+        row["requested_plan"] = club.requested_plan
+        row["requested_cycle"] = club.requested_cycle
 
 
 async def follow_club(session: AsyncSession, club_id: int, user_id: int, tracking_ref: str | None = None):

@@ -85,6 +85,12 @@ class Plans(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     #: Display order on the pricing page, low to high.
     sort_order = Column(Integer, nullable=False, default=0, server_default="0")
 
+    #: The plan the pricing page highlights ("Most popular").
+    featured = Column(Boolean, nullable=False, default=False, server_default="false")
+    #: Priced on request: the pricing page says "Talk to us" instead of a
+    #: price, and a club cannot start it at checkout.
+    contact_sales = Column(Boolean, nullable=False, default=False, server_default="false")
+
     #: Razorpay's own plan ids, one per cycle. Null until the plan is synced;
     #: a paid plan cannot be subscribed to until both exist.
     razorpay_plan_id_monthly = Column(String(64), nullable=True)
@@ -192,6 +198,42 @@ FEATURE_GROUPS: dict[str, tuple[str, ...]] = {
 }
 
 FEATURE_KEYS = tuple(key for keys in FEATURE_GROUPS.values() for key in keys)
+
+#: The pricing page's feature list: each flag whose feature exists in the
+#: product, worded the way the product says it, in the order a comparison
+#: table reads (roughly the tier that first includes it).
+#:
+#: A flag with nothing built behind it yet (`UNBUILT_FEATURES`) stays in the
+#: admin editor but is left out here, so the public page never sells something
+#: a club cannot use. When one is built, add it here; the public list follows.
+FEATURE_CATALOG: tuple[tuple[str, str], ...] = (
+    ("checkin", "Check-in at the door"),
+    ("certificates", "Certificates"),
+    ("regform", "Custom registration questions"),
+    ("reviews", "Ratings and reviews"),
+    ("threads", "Threads to your followers"),
+    ("tickets", "Paid tickets with Razorpay"),
+    ("website", "Club website"),
+    ("quiz", "Live room: quiz"),
+    ("polls", "Live room: polls"),
+    ("qa", "Live room: Q&A"),
+    ("networking", "Attendee networking"),
+    ("links", "Tracking links"),
+    ("report", "Post-event reports"),
+    ("merch", "Merchandise store"),
+    ("swag", "Swag handouts at the door"),
+    ("badges", "ID cards and badge printing"),
+    ("roles", "Team roles and access"),
+    ("teams", "Competitions: teams and submissions"),
+    ("judging", "Competitions: judging"),
+    ("rounds", "Competitions: rounds and leaderboard"),
+    ("finance", "Finance and expenses"),
+)
+
+#: Flags in the editor with no feature behind them yet: waitlist, coupons,
+#: per-session check-in, custom domain, removing the "Made with MyOtherApp"
+#: footer, enforced 2FA for a team, next-day payouts, student SSO, API access.
+UNBUILT_FEATURES = frozenset(FEATURE_KEYS) - {key for key, _ in FEATURE_CATALOG}
 
 
 def _flag() -> Column:

@@ -48,6 +48,7 @@ from app.api.backups.router import router as backups_router
 from app.api.subscriptions.router import (
     admin_router as subscriptions_admin_router,
     club_router as subscriptions_club_router,
+    public_router as subscriptions_public_router,
 )
 from app.api import admin_overview
 from app.api.certificate_templates.router import router as certificate_templates_router
@@ -123,6 +124,7 @@ api_router.include_router(router=backups_router)
 api_router.include_router(router=subscriptions_club_router)
 api_router.include_router(router=email_library_router, tags=["emails"])
 api_router.include_router(router=subscriptions_admin_router)
+api_router.include_router(router=subscriptions_public_router)
 
 
 @api_router.get("/background-task-log/{task_id}", tags=["root"])

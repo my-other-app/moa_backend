@@ -3,6 +3,7 @@ from datetime import datetime
 from pydantic import Field, model_validator
 
 from app.api.subscriptions.models import (
+    FEATURE_CATALOG,
     FEATURE_GROUPS,
     FEATURE_KEYS,
     LIMIT_KEYS,
@@ -90,6 +91,12 @@ class PlanIn(CustomBaseModel):
     trial_days: int = Field(0, ge=0, le=365)
     visibility: PlanVisibility = PlanVisibility.hidden
     sort_order: int = Field(0, ge=0)
+    #: Omitted means "leave as it is" on update and false on create. The
+    #: admin editor predates both and sends the whole plan on every save, so
+    #: a default of false would quietly unfeature a plan whenever someone
+    #: corrected its tagline.
+    featured: bool | None = None
+    contact_sales: bool | None = None
     limits: PlanLimitsIn = Field(default_factory=PlanLimitsIn)
     features: PlanFeaturesIn = Field(default_factory=PlanFeaturesIn)
 
@@ -115,6 +122,8 @@ class PlanOut(CustomBaseModel):
     trial_days: int = 0
     visibility: str
     sort_order: int = 0
+    featured: bool = False
+    contact_sales: bool = False
     #: Whether the plan can actually be billed. A paid plan with no Razorpay
     #: plan id cannot be subscribed to, and the admin screen says so rather
     #: than letting someone publish it and find out at checkout.
@@ -173,6 +182,10 @@ class EntitlementsOut(CustomBaseModel):
     #: everything is permitted -- see service._unlimited. Surfaced so the
     #: admin screen can warn rather than the product silently ungating.
     configured: bool = True
+    #: What the club picked on the sign-up form, so the dashboard can
+    #: preselect it once the club is approved. Null when it picked nothing.
+    requested_plan: str | None = None
+    requested_cycle: str | None = None
 
 
 class StartSubscriptionIn(CustomBaseModel):
@@ -184,6 +197,93 @@ class StartSubscriptionOut(CustomBaseModel):
     checkout_url: str | None = None
     razorpay_subscription_id: str
     status: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# The public pricing page
+# ---------------------------------------------------------------------------
+
+
+class PublicPlanFeature(CustomBaseModel):
+    key: str
+    label: str
+    included: bool
+
+
+class PublicPlan(CustomBaseModel):
+    """One plan as the pricing page shows it. No ids, Razorpay ids or
+    subscriber counts: nothing a visitor has any use for."""
+
+    key: str
+    name: str
+    tagline: str | None = None
+    price_monthly_paise: int = 0
+    price_yearly_paise: int = 0
+    trial_days: int = 0
+    #: Priced on request: show "Talk to us" rather than the (zero) price.
+    contact_sales: bool = False
+    #: The plan to highlight ("Most popular").
+    featured: bool = False
+    #: Every limit column; null is unlimited, 0 is none allowed.
+    limits: dict[str, int | None]
+    #: The whole public catalog in a fixed order, each marked included or
+    #: not, so every plan has the same rows and a comparison table lines up.
+    features: list[PublicPlanFeature]
+
+
+class PublicPlansOut(CustomBaseModel):
+    currency: str = "INR"
+    #: How many months a yearly plan saves, when every paid plan's yearly
+    #: price is the same whole number of monthly prices ("2 months free").
+    #: Null when they differ or none is discounted.
+    yearly_months_free: int | None = None
+    plans: list[PublicPlan]
+
+
+def public_plan_dict(plan) -> dict:
+    return {
+        "key": plan.key,
+        "name": plan.name,
+        "tagline": plan.tagline,
+        "price_monthly_paise": plan.price_monthly_paise,
+        "price_yearly_paise": plan.price_yearly_paise,
+        "trial_days": plan.trial_days,
+        "contact_sales": bool(plan.contact_sales),
+        "featured": bool(plan.featured),
+        "limits": (
+            {key: getattr(plan.limits, key) for key in LIMIT_KEYS}
+            if plan.limits
+            else {key: None for key in LIMIT_KEYS}
+        ),
+        "features": [
+            {
+                "key": key,
+                "label": label,
+                "included": bool(plan.features and getattr(plan.features, key)),
+            }
+            for key, label in FEATURE_CATALOG
+        ],
+    }
+
+
+def yearly_months_free(plans) -> int | None:
+    """
+    The "N months free" a pricing page's monthly/yearly switch can promise.
+
+    Only stated when it is true of every paid plan: one plan priced at eleven
+    months and another at ten would make any single number wrong for one of
+    them. Free and priced-on-request plans have nothing to discount.
+    """
+    found = set()
+    for plan in plans:
+        monthly, yearly = plan.price_monthly_paise, plan.price_yearly_paise
+        if plan.contact_sales or monthly <= 0 or yearly <= 0:
+            continue
+        months, remainder = divmod(yearly, monthly)
+        if remainder or months >= 12:
+            return None
+        found.add(12 - months)
+    return found.pop() if len(found) == 1 else None
 
 
 def plan_to_dict(plan, subscriber_count: int = 0) -> dict:
@@ -198,6 +298,8 @@ def plan_to_dict(plan, subscriber_count: int = 0) -> dict:
         "trial_days": plan.trial_days,
         "visibility": getattr(plan.visibility, "value", plan.visibility),
         "sort_order": plan.sort_order,
+        "featured": bool(plan.featured),
+        "contact_sales": bool(plan.contact_sales),
         "billable": _is_billable(plan),
         "subscriber_count": subscriber_count,
         "limits": (
