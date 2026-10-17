@@ -92,6 +92,8 @@ def start_subscription(
     club_name: str,
     notify_email: str | None,
     notify_phone: str | None,
+    trial_days: int | None = None,
+    expire_by: int | None = None,
 ) -> dict:
     """
     Create a Razorpay subscription and return the checkout URL.
@@ -99,7 +101,14 @@ def start_subscription(
     This does not charge anything by itself: it creates an authorisation the
     club completes at `short_url`. The first charge arrives as a webhook once
     they have.
+
+    `trial_days` is what the caller decided the club may have (a club gets one
+    trial, ever); None means the plan's own. `expire_by` (unix seconds) is when
+    the checkout link stops working, matching when a pending checkout falls
+    back, so a club cannot pay for a checkout we have already given up on.
     """
+    if trial_days is None:
+        trial_days = plan.trial_days
     razorpay_plan_id = sync_plan(plan, cycle)
 
     payload = {
@@ -115,8 +124,10 @@ def start_subscription(
             "cycle": cycle.value,
         },
     }
-    if plan.trial_days:
-        payload["start_at"] = _trial_start(plan.trial_days)
+    if trial_days:
+        payload["start_at"] = _trial_start(trial_days)
+    if expire_by:
+        payload["expire_by"] = expire_by
 
     notify = {}
     if notify_email:
@@ -154,6 +165,37 @@ def cancel_subscription(subscription_id: str, *, at_period_end: bool = True) -> 
     )
 
 
+#: Razorpay states in which a subscription can no longer charge anyone.
+_FINISHED = {"cancelled", "completed", "expired"}
+
+
+def close_unpaid_checkout(subscription_id: str) -> None:
+    """
+    Make sure a checkout nobody paid for can never be paid: cancel it now.
+
+    If Razorpay refuses because it is already over (expired, cancelled), that
+    is the outcome wanted. Anything else is raised as a 502: going on to open
+    a second checkout while the first could still be paid is how a club ends
+    up billed twice.
+    """
+    try:
+        cancel_subscription(subscription_id, at_period_end=False)
+        return
+    except Exception:
+        logger.info("Razorpay refused to cancel %s; checking whether it is over", subscription_id, exc_info=True)
+    try:
+        state = (razorpay_client.subscription.fetch(subscription_id) or {}).get("status")
+    except Exception:
+        state = None
+    if state in _FINISHED:
+        return
+    raise CustomHTTPException(
+        status_code=502,
+        message="Razorpay did not confirm the earlier checkout is closed. Try again in a minute.",
+        error_code="CHECKOUT_NOT_CLOSED",
+    )
+
+
 def retry_charge(subscription_id: str) -> None:
     """
     Ask Razorpay to retry a failed charge now.
@@ -177,12 +219,24 @@ def retry_charge(subscription_id: str) -> None:
 #: at -- Razorpay adds events, and reacting to one we do not understand is
 #: how a subscription ends up in a state nobody intended.
 HANDLED_EVENTS = {
+    "subscription.authenticated",
     "subscription.activated",
     "subscription.charged",
     "subscription.pending",
     "subscription.halted",
+    "subscription.paused",
+    "subscription.resumed",
+    "subscription.updated",
     "subscription.cancelled",
     "subscription.completed",
+}
+
+#: Events that confirm the club authorised or paid for the subscription
+#: Razorpay is talking about -- the ones a late, unmatched delivery may adopt.
+CONFIRMING_EVENTS = {
+    "subscription.authenticated",
+    "subscription.activated",
+    "subscription.charged",
 }
 
 
@@ -223,15 +277,60 @@ def failure_reason_from_payload(payload: dict) -> str | None:
     return payment.get("error_description") or payment.get("error_reason")
 
 
-def apply_event(subscription: ClubSubscriptions, event: str, payload: dict) -> bool:
+def razorpay_plan_id_from_payload(payload: dict) -> str | None:
+    entity = payload.get("payload", {}).get("subscription", {}).get("entity", {})
+    return entity.get("plan_id")
+
+
+def notes_from_payload(payload: dict) -> dict:
+    entity = payload.get("payload", {}).get("subscription", {}).get("entity", {})
+    return entity.get("notes") or {}
+
+
+def apply_event(
+    subscription: ClubSubscriptions,
+    event: str,
+    payload: dict,
+    *,
+    new_plan: Plans | None = None,
+    new_cycle: BillingCycle | None = None,
+    now=None,
+) -> bool:
     """
     Move our row to match the event. Returns whether anything changed.
+
+    The state machine (service.is_entitled says what each state grants):
+
+    - pending --authenticated--> trial, when a trial was granted at checkout;
+      otherwise stays pending (authorised, waiting for the first charge)
+    - pending | trial | past_due | paused --activated / charged--> active
+    - active | trial --pending / halted--> past_due (pending stays pending)
+    - any --paused--> paused;  paused | past_due --resumed--> active
+    - pending --cancelled / completed--> back to what the club had before
+    - anything else --cancelled / completed--> cancelled
+    - updated: the plan or cycle changed at Razorpay (`new_plan`, resolved by
+      the caller from Razorpay's plan id)
 
     Imported lazily by the webhook handler so this module stays free of
     session handling -- it decides *what* the new state is; the caller owns
     the transaction.
     """
+    from datetime import datetime, timezone
+
     from app.api.subscriptions import service
+    from app.api.subscriptions.models import SubscriptionStatus
+
+    now = now or datetime.now(timezone.utc)
+    status = subscription.status
+
+    if event == "subscription.authenticated":
+        subscription.authenticated_at = subscription.authenticated_at or now
+        if status == SubscriptionStatus.pending and subscription.trial_ends_at and subscription.trial_ends_at > now:
+            subscription.status = SubscriptionStatus.trial
+            subscription.trial_started_at = subscription.trial_started_at or now
+            subscription.current_period_end = subscription.trial_ends_at
+            service.checkout_confirmed(subscription)
+        return True
 
     if event in ("subscription.activated", "subscription.charged"):
         period_end = period_end_from_payload(payload)
@@ -246,9 +345,69 @@ def apply_event(subscription: ClubSubscriptions, event: str, payload: dict) -> b
         service.mark_failed(subscription, reason=failure_reason_from_payload(payload))
         return True
 
+    if event == "subscription.paused":
+        subscription.status = SubscriptionStatus.paused
+        subscription.mrr_paise = 0
+        return True
+
+    if event == "subscription.resumed":
+        if status in (SubscriptionStatus.paused, SubscriptionStatus.past_due):
+            subscription.status = SubscriptionStatus.active
+            subscription.last_failure_reason = None
+            subscription.activated_at = subscription.activated_at or now
+            if subscription.plan:
+                subscription.mrr_paise = mrr_for(subscription.plan, subscription.cycle)
+            return True
+        return False
+
+    if event == "subscription.updated":
+        if new_plan is None:
+            logger.info("Razorpay subscription.updated for a plan we do not know; ignored")
+            return False
+        subscription.plan_id = new_plan.id
+        subscription.plan = new_plan
+        if new_cycle is not None:
+            subscription.cycle = new_cycle
+        if subscription.status == SubscriptionStatus.active:
+            subscription.mrr_paise = mrr_for(new_plan, subscription.cycle)
+        return True
+
     if event in ("subscription.cancelled", "subscription.completed"):
-        service.mark_cancelled(subscription)
+        if status == SubscriptionStatus.pending:
+            # A checkout that was never paid for ending: the club goes back
+            # to what it had.
+            service.revert_checkout(subscription)
+        else:
+            service.mark_cancelled(subscription)
         return True
 
     logger.info("Ignoring unhandled Razorpay subscription event %s", event)
     return False
+
+
+def apply_payment_failure(subscription: ClubSubscriptions, payload: dict) -> bool:
+    """A `payment.failed` for one of this subscription's charges: say why,
+    and a running subscription is now past due. Razorpay retries on its own."""
+    from app.api.subscriptions import service
+
+    service.mark_failed(subscription, reason=failure_reason_from_payload(payload))
+    return True
+
+
+def subscription_id_for_payment(payload: dict) -> str | None:
+    """The Razorpay subscription a payment event belongs to, if any: on the
+    payment itself, alongside it, or on the invoice it paid."""
+    payment = payload.get("payload", {}).get("payment", {}).get("entity", {}) or {}
+    found = payment.get("subscription_id") or (
+        payload.get("payload", {}).get("subscription", {}).get("entity", {}) or {}
+    ).get("id")
+    if found:
+        return found
+    invoice_id = payment.get("invoice_id")
+    if not invoice_id:
+        return None
+    try:
+        return (razorpay_client.invoice.fetch(invoice_id) or {}).get("subscription_id")
+    except Exception:
+        logger.warning("Could not read Razorpay invoice %s for a failed payment", invoice_id, exc_info=True)
+        return None

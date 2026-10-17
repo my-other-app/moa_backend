@@ -24,6 +24,7 @@ month is the kind of bug that surfaces in an annual reconciliation.
 from enum import Enum as PyEnum
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     CheckConstraint,
     Column,
@@ -55,10 +56,18 @@ class BillingCycle(PyEnum):
 
 
 class SubscriptionStatus(PyEnum):
+    #: Checkout opened, nothing confirmed by Razorpay yet. Grants nothing: the
+    #: club keeps whatever it had before (see `previous_state`), or Free.
+    pending = "pending"
+    #: Razorpay confirmed the mandate and the plan has a trial the club has
+    #: not used before. Entitled from the `authenticated` webhook on.
     trial = "trial"
     active = "active"
-    #: A charge failed. The club keeps access while Razorpay retries.
+    #: A charge failed. The club keeps access while Razorpay retries -- but
+    #: only if this subscription was ever paid for (`activated_at`).
     past_due = "past_due"
+    #: Paused at Razorpay. Not charged, so not entitled.
+    paused = "paused"
     cancelled = "cancelled"
 
 
@@ -84,6 +93,12 @@ class Plans(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     )
     #: Display order on the pricing page, low to high.
     sort_order = Column(Integer, nullable=False, default=0, server_default="0")
+
+    #: The plan the pricing page highlights ("Most popular").
+    featured = Column(Boolean, nullable=False, default=False, server_default="false")
+    #: Priced on request: the pricing page says "Talk to us" instead of a
+    #: price, and a club cannot start it at checkout.
+    contact_sales = Column(Boolean, nullable=False, default=False, server_default="false")
 
     #: Razorpay's own plan ids, one per cycle. Null until the plan is synced;
     #: a paid plan cannot be subscribed to until both exist.
@@ -193,6 +208,42 @@ FEATURE_GROUPS: dict[str, tuple[str, ...]] = {
 
 FEATURE_KEYS = tuple(key for keys in FEATURE_GROUPS.values() for key in keys)
 
+#: The pricing page's feature list: each flag whose feature exists in the
+#: product, worded the way the product says it, in the order a comparison
+#: table reads (roughly the tier that first includes it).
+#:
+#: A flag with nothing built behind it yet (`UNBUILT_FEATURES`) stays in the
+#: admin editor but is left out here, so the public page never sells something
+#: a club cannot use. When one is built, add it here; the public list follows.
+FEATURE_CATALOG: tuple[tuple[str, str], ...] = (
+    ("checkin", "Check-in at the door"),
+    ("certificates", "Certificates"),
+    ("regform", "Custom registration questions"),
+    ("reviews", "Ratings and reviews"),
+    ("threads", "Threads to your followers"),
+    ("tickets", "Paid tickets with Razorpay"),
+    ("website", "Club website"),
+    ("quiz", "Live room: quiz"),
+    ("polls", "Live room: polls"),
+    ("qa", "Live room: Q&A"),
+    ("networking", "Attendee networking"),
+    ("links", "Tracking links"),
+    ("report", "Post-event reports"),
+    ("merch", "Merchandise store"),
+    ("swag", "Swag handouts at the door"),
+    ("badges", "ID cards and badge printing"),
+    ("roles", "Team roles and access"),
+    ("teams", "Competitions: teams and submissions"),
+    ("judging", "Competitions: judging"),
+    ("rounds", "Competitions: rounds and leaderboard"),
+    ("finance", "Finance and expenses"),
+)
+
+#: Flags in the editor with no feature behind them yet: waitlist, coupons,
+#: per-session check-in, custom domain, removing the "Made with MyOtherApp"
+#: footer, enforced 2FA for a team, next-day payouts, student SSO, API access.
+UNBUILT_FEATURES = frozenset(FEATURE_KEYS) - {key for key, _ in FEATURE_CATALOG}
+
 
 def _flag() -> Column:
     """A feature flag. Off by default: a new flag must be granted, never
@@ -281,6 +332,25 @@ class ClubSubscriptions(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     #: Why the last charge failed, verbatim from Razorpay, for the admin
     #: screen. Cleared on a successful charge.
     last_failure_reason = Column(String(255), nullable=True)
+
+    # The billing state machine (see service.is_entitled). Each timestamp is
+    # when Razorpay -- or an admin assigning the plan -- confirmed that step.
+    #: When this checkout was opened; a `pending` older than a day falls back.
+    pending_since = Column(TZAwareDateTime(timezone=True), nullable=True)
+    #: The `subscription.authenticated` webhook: the club authorised the mandate.
+    authenticated_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    #: The first `activated`/`charged`: this subscription has been paid for.
+    activated_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    #: When the club's trial began. Never cleared: a club gets one trial, ever.
+    trial_started_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    #: When the trial granted at checkout ends (null: no trial was granted).
+    trial_ends_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    #: The club cancelled; it keeps access until `current_period_end`.
+    cancel_at_period_end = Column(Boolean, nullable=False, default=False, server_default="false")
+    cancel_requested_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    #: What the club had before this checkout, restored if the checkout is
+    #: abandoned (stale after a day) or cancelled before it was paid.
+    previous_state = Column(JSON, nullable=True)
 
     plan = relationship("Plans", back_populates="subscriptions")
     club = relationship("Clubs")

@@ -1,8 +1,8 @@
 from typing import List
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Response
 
 from app.db.core import SessionDep
-from app.core.auth.dependencies import AdminAuth, DependsAuth
+from app.core.auth.dependencies import AdminAuth
 from app.api.interests import service
 from app.api.audit import service as audit
 from app.api.interests.schemas import (
@@ -14,16 +14,31 @@ from app.api.interests.schemas import (
 )
 
 from app.core.auth.permissions import ContentAuth, DestroyAuth
+from app.core.rate_limit import limiter
 
 router = APIRouter(prefix="/interests")
 
 
+def _caller(request: Request) -> str:
+    from app.core.net import client_address
+
+    return client_address(request) or "unknown"
+
+
 @router.get(
-    "/list", summary="List all interests", description="List based on categories"
+    "/list", summary="List all interests (public)", description="List based on categories"
 )
+@limiter.limit("120/minute", key_func=_caller)
 async def list_interests(
-    user: DependsAuth, session: SessionDep = SessionDep()
+    request: Request, response: Response, session: SessionDep
 ) -> List[InterestCategoryWiseListResponse]:
+    """
+    Every interest by category: ids, names and icons, nothing about anyone.
+
+    Public because the club sign-up form asks for interests before there is
+    an account to sign in with. The app, signed in, gets the same answer.
+    """
+    response.headers["Cache-Control"] = "public, max-age=300"
     return await service.list_interests(session=session)
 
 

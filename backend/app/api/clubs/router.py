@@ -2,6 +2,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request, UploadFile, Qu
 from sqlalchemy import select
 
 from app.api.clubs.models import Clubs
+from app.api.users.models import Users
 from app.response import CustomHTTPException
 from app.api.clubs.schemas import (
     ClubTeamMemberOut,
@@ -34,6 +35,7 @@ from app.api.discover import geo
 from app.api.audit import service as audit
 from app.core.auth.dependencies import ClubAuth, DependsAuth, UserAuth, AdminAuth
 from app.core.auth.permissions import ContentAuth, DestroyAuth, ModerateAuth
+from app.core.rate_limit import limiter
 from app.core.response.pagination import (
     PaginatedResponse,
     PaginationParams,
@@ -48,12 +50,40 @@ from app.api.clubs.notifications_router import router as notifications_router
 router = APIRouter(prefix="/clubs")
 router.include_router(notifications_router, tags=["Club Notifications"])
 
+#: Club applications per caller. Each one makes a login and waits in the
+#: admin's queue, so a script filling the queue costs a person's time to
+#: clear; a real club applies once, and a committee sharing a campus address
+#: still has room for a few retries.
+APPLICATION_LIMIT = "5/hour;20/day"
+
+
+def _applicant(request: Request) -> str:
+    from app.core.net import client_address
+
+    return client_address(request) or "unknown"
+
 
 @router.post("/create", summary="create club")
+@limiter.limit(APPLICATION_LIMIT, key_func=_applicant)
 async def create_club(
-    session: SessionDep, background_tasks: BackgroundTasks, club: CreateClub = Depends()
+    request: Request,
+    session: SessionDep,
+    background_tasks: BackgroundTasks,
+    club: CreateClub = Depends(),
 ) -> ClubCreateUpdateResponse:
-    """Create a club. the club will be now verified, and will be unable to login until the admin verifies it."""
+    """
+    Apply for a club account. The club is unverified, and cannot sign in until
+    an admin approves it.
+
+    `requested_plan` (a public plan's key) and `requested_cycle` ('monthly' or
+    'yearly') record what the club picked on the pricing page, for the admin
+    and for the dashboard to preselect after approval. An unknown plan or
+    cycle is dropped, not refused; neither grants or charges anything.
+    """
+    from app.api.subscriptions.service import requested_cycle_value, requested_plan_key
+
+    requested_plan = await requested_plan_key(session, club.requested_plan)
+    requested_cycle = requested_cycle_value(club.requested_cycle) if requested_plan else None
     club = await service.create_club(
         session,
         name=club.name,
@@ -65,6 +95,17 @@ async def create_club(
         org_id=club.org_id,
         location_name=club.location_name,
         interest_ids=club.interest_ids,
+        requested_plan=requested_plan,
+        requested_cycle=requested_cycle,
+        location_link=club.location_link,
+        contact_phone=club.contact_phone,
+        contact_email=club.contact_email,
+        socials={
+            "instagram": club.instagram,
+            "linkedin": club.linkedin,
+            "youtube": club.youtube,
+            "website": club.website,
+        },
     )
     _follow_map_link(background_tasks, club)
     return club
@@ -145,9 +186,20 @@ async def list_all_clubs_admin(
 
 @router.post("/{club_id}/approve", summary="Approve a pending club (admin)")
 async def approve_club_endpoint(
-    club_id: int, session: SessionDep, user: ModerateAuth, request: Request = None
+    club_id: int,
+    session: SessionDep,
+    user: ModerateAuth,
+    background_tasks: BackgroundTasks,
+    request: Request = None,
 ) -> ClubAdminDetailResponse:
+    """Approve a club. The first approval emails the club's sign-in address
+    that it can now log in (after the answer; a mail that fails is logged)."""
+    was_verified = await session.scalar(select(Clubs.is_verified).where(Clubs.id == club_id))
     club = await service.approve_club(session, club_id)
+    if was_verified is False:
+        owner_email = await session.scalar(select(Users.email).where(Users.id == club.user_id))
+        if owner_email:
+            background_tasks.add_task(service.send_approved_email, owner_email, club_name=club.name)
     await audit.record(
         session,
         actor=user,

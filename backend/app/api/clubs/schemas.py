@@ -45,13 +45,18 @@ class CreateClub:
         org_id: int | None = Form(None),
         location_name: str | None = Form(None),
         location_link: str | None = Form(None),
-        contact_phone: str | None = Form(None),
-        contact_email: str | None = Form(None),
+        contact_phone: str | None = Form(None, max_length=20),
+        contact_email: str | None = Form(None, max_length=100),
         interest_ids: str | None = Form(None),
-        instagram: str | None = Form(None),
-        linkedin: str | None = Form(None),
-        youtube: str | None = Form(None),
-        website: str | None = Form(None),
+        # club_socials holds 255 a link.
+        instagram: str | None = Form(None, max_length=255),
+        linkedin: str | None = Form(None, max_length=255),
+        youtube: str | None = Form(None, max_length=255),
+        website: str | None = Form(None, max_length=255),
+        # What the club picked on the pricing page; checked by the endpoint
+        # and dropped when it names no public plan or cycle.
+        requested_plan: str | None = Form(None),
+        requested_cycle: str | None = Form(None),
     ):
         self.email = email
         self.phone = phone
@@ -71,6 +76,8 @@ class CreateClub:
         self.website = website
         self.contact_phone = contact_phone
         self.contact_email = contact_email
+        self.requested_plan = requested_plan
+        self.requested_cycle = requested_cycle
 
 
 class UpdateClub:
@@ -368,6 +375,9 @@ class ClubAdminFullResponse(ClubPublicDetailResponse):
     is_deleted: bool = Field(False)
     created_at: datetime | None = Field(None)
     owner: ClubOwnerDetail | None = Field(None)
+    #: The plan and cycle picked on the sign-up form, if any.
+    requested_plan: str | None = Field(None)
+    requested_cycle: str | None = Field(None)
     admin_stats: ClubAdminStats = Field(...)
 
 
@@ -400,6 +410,10 @@ class ClubAdminDetailResponse(CustomBaseModel):
     org: ClubOrgMin | None = Field(None)
     #: The club's sign-in address, not the contact address on its page.
     owner_email: str | None = Field(None)
+    #: The plan and cycle picked on the sign-up form, if any, so the approval
+    #: queue shows what each applicant expects to be on.
+    requested_plan: str | None = Field(None)
+    requested_cycle: str | None = Field(None)
 
 
 class NoteCreateUpdateResponse(CustomBaseModel):

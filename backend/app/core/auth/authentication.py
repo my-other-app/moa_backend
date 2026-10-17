@@ -21,10 +21,13 @@ def get_password_hash(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
-async def get_user(session: AsyncSession, username_or_id: str, *, password_holders: bool = False):
+async def get_user(session: AsyncSession, username_or_id: str, *, password_holders: bool = False, exclude_type: UserTypes | None = None):
     query = select(Users).options(
         joinedload(Users.club), joinedload(Users.profile)
     ).where(Users.is_deleted == False)
+    if exclude_type is not None:
+        # The clubs dashboard, having tried the club account already.
+        query = query.where(Users.user_type != exclude_type)
     if password_holders:
         # Guests never sign in and have no password, and one address can
         # stand behind several of them: an arbitrary first row must not be a
@@ -66,8 +69,46 @@ async def get_volunteer(username_or_id: str):
         return result
 
 
-async def authenticate_user(session: AsyncSession, username: str, password: str):
-    user = await get_user(session, username, password_holders=True)
+async def authenticate_club_account(session: AsyncSession, username: str, password: str):
+    """
+    The club account behind this address or username, when the password is
+    its own -- for the clubs dashboard's sign-in (scope "club") only.
+
+    One address can hold a club account and an app account. `get_user` takes
+    whichever row comes first, which on the dashboard could be the person's
+    app account. Here the club account is looked for alone. Returned whether
+    or not the club is approved yet, so the caller can say so; None when
+    there is no such account, the club was rejected, or the password is not
+    this account's.
+    """
+    query = (
+        select(Users)
+        .options(joinedload(Users.club), joinedload(Users.profile))
+        .where(
+            Users.is_deleted == False,  # noqa: E712
+            Users.user_type == UserTypes.club,
+            Users.password.isnot(None),
+        )
+    )
+    if "@" in username:
+        user = (await session.execute(query.where(Users.email == username))).scalars().first()
+        if user is None:
+            loose = (await session.execute(
+                query.where(func.lower(func.btrim(Users.email)) == username.strip().lower()).limit(2)
+            )).unique().scalars().all()
+            user = loose[0] if len(loose) == 1 else None
+    else:
+        user = (await session.execute(query.where(Users.username == username))).scalars().first()
+
+    if user is None or user.club is None or user.club.is_deleted:
+        return None
+    if not verify_password(password, user.password):
+        return None
+    return user
+
+
+async def authenticate_user(session: AsyncSession, username: str, password: str, *, exclude_type: UserTypes | None = None):
+    user = await get_user(session, username, password_holders=True, exclude_type=exclude_type)
     if not user or not user.password:
         return False
     if not verify_password(password, user.password):
