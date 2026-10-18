@@ -266,8 +266,9 @@ class AppConfig(BaseSettings):
     # ledger's monthly sums. Turn on only after the backfill
     # (scripts/ledger_backfill.py) and a clean compare (scripts/ledger_compare.py).
     LEDGER_READS: bool = False
-    # When the daily ledger job runs (drift reconcile, failed postings, and
-    # Razorpay's payments and refunds of the day before), as HH:MM in India.
+    # When the daily ledger job runs (failed postings retried, drift put
+    # right, and -- once the history is backfilled -- Razorpay's payments and
+    # refunds of the day before checked), as HH:MM in India. Empty: never.
     LEDGER_DAILY_AT: str = "02:30"
 
     @field_validator("PLAN_ENFORCEMENT_FROM")

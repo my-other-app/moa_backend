@@ -12,7 +12,12 @@
    (`ledger_unbalanced`).
 4. razorpay: the day before's payments and refunds at Razorpay, for the
    platform's account and every club's own, against the ledger
-   (recon.reconcile_day; `ledger_mismatch`).
+   (recon.reconcile_day; `ledger_mismatch`) -- only once the history has
+   been backfilled (scripts/ledger_backfill.py leaves its mark): against a
+   ledger without it, every payment from before the deploy would read as
+   missing.
+
+APP_LEDGER_DAILY_AT empty switches the whole job off.
 
 One worker at a time, as the payments sweep: the run is claimed in
 scheduled_runs under a transaction-scoped advisory lock, let go as the claim
@@ -301,11 +306,15 @@ async def repost(session, source: str, source_id: str) -> Optional[int]:
 # ─── The daily run ───────────────────────────────────────────────────────
 
 
-def _daily_at() -> tuple[int, int]:
+def _daily_at() -> Optional[tuple[int, int]]:
+    """LEDGER_DAILY_AT as (hour, minute) in India; None when it is empty (off)."""
     from app.config import settings
 
+    raw = (settings.LEDGER_DAILY_AT or "").strip()
+    if not raw:
+        return None
     try:
-        hh, mm = (int(x) for x in (settings.LEDGER_DAILY_AT or "02:30").split(":", 1))
+        hh, mm = (int(x) for x in raw.split(":", 1))
         return hh, mm
     except ValueError:
         return 2, 30
@@ -313,8 +322,11 @@ def _daily_at() -> tuple[int, int]:
 
 def due(last_started: Optional[datetime], now: datetime) -> bool:
     """Once a day: the first look after LEDGER_DAILY_AT (IST) on a day it has not run."""
+    at = _daily_at()
+    if at is None:
+        return False
     local = now.astimezone(book.IST)
-    hh, mm = _daily_at()
+    hh, mm = at
     if (local.hour, local.minute) < (hh, mm):
         return False
     return last_started is None or last_started.astimezone(book.IST).date() < local.date()
@@ -329,7 +341,7 @@ async def _claim(session, now: datetime) -> Optional[dict]:
         await session.commit()
         return None
     row = (await session.execute(select(ScheduledRuns.started_at, ScheduledRuns.result).where(ScheduledRuns.name == JOB))).first()
-    if row is not None and not due(row[0], now):
+    if not due(row[0] if row is not None else None, now):
         await session.commit()
         return None
     stmt = pg_insert(ScheduledRuns.__table__).values(name=JOB, started_at=now, finished_at=None)
@@ -373,7 +385,13 @@ async def run_daily(session, now: Optional[datetime] = None, *, previous: Option
     await session.commit()
     await step("reconcile", reconcile(session, clubs=clubs, months=months, deadline=deadline))
     await step("unbalanced", _check_balance(session, watermark))
-    if razorpay:
+    from app.api.ledger import backfill
+
+    if not razorpay:
+        pass
+    elif not await backfill.complete(session):
+        done["razorpay"] = {"skipped": "the ledger's history has not been backfilled yet (scripts/ledger_backfill.py)"}
+    else:
         await step("razorpay", recon.reconcile_day(session, (now.astimezone(book.IST) - timedelta(days=1)).date(),
                                                    deadline=deadline))
     return done

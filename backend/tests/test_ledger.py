@@ -896,10 +896,25 @@ async def test_the_daily_job_runs_once_a_day_after_its_hour(session, monkeypatch
     payer, reg = await _guest(session, make_user, make_registration, event)
     await _pay(session, rzp, payer, event, reg)
 
+    # Before the history is backfilled, Razorpay is not asked: everything
+    # from before the deploy would read as missing.
     at = (today + timedelta(hours=3)).astimezone(timezone.utc)
     done = await jobs.run_if_due(session, now=at)
     assert done is not None and done["reconcile"]["clubs"] >= 1 and done["unbalanced"] == {"unbalanced": 0}
-    assert days == [(today - timedelta(days=1)).date()]
+    assert "skipped" in done["razorpay"] and days == []
     assert await jobs.run_if_due(session, now=at + timedelta(hours=1)) is None
     row = await session.get(ScheduledRuns, jobs.JOB)
     assert row.result["watermark"] == int(await session.scalar(select(func.max(LedgerEntries.id))))
+
+    # Backfilled: the next day's run checks the day before at Razorpay.
+    from app.api.ledger import backfill
+
+    assert (await backfill.backfill(session))["failed"] == 0 and await backfill.complete(session)
+    done = await jobs.run_if_due(session, now=at + DAY)
+    assert days == [today.date()] and done["razorpay"] == {"day": today.date().isoformat(), "accounts": {}}
+
+    # Switched off: never due.
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "LEDGER_DAILY_AT", "")
+    assert not jobs.due(None, at + 2 * DAY)
