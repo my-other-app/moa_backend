@@ -233,6 +233,8 @@ async def resend(session, request, *, kind: str, code: str, email: str) -> None:
         .where(EventRegistrationsLink.ticket_id == code, EventRegistrationsLink.is_deleted == False)  # noqa: E712
     )
     event = reg.event if reg is not None else None
+    # Read now: a failed send below rolls back, and expires them.
+    reg_id, found = (reg.id if reg is not None else None), reg is not None
     matched = bool(
         reg is not None and event is not None and not event.is_deleted
         and reg.email and _normal(reg.email) == _normal(email)
@@ -241,14 +243,19 @@ async def resend(session, request, *, kind: str, code: str, email: str) -> None:
     if matched:
         # To the registration's own address, through the queue every ticket
         # goes through; refused (False) inside its ten-minute gap, or when
-        # there is nothing to send (revoked, no certificate issued).
-        sent = await deliveries.resend_document(session, event, reg, DeliveryKind(kind))
-    outcome = "sent" if sent else "matched, not sent" if matched else "wrong address" if reg is not None else "no such ticket"
+        # there is nothing to send (revoked, no certificate issued). A
+        # failure is logged, not raised: a 500 only on a match would say
+        # which address is the right one.
+        try:
+            sent = await deliveries.resend_document(session, event, reg, DeliveryKind(kind))
+        except Exception:  # noqa: BLE001
+            logger.exception("a fresh %s link for %s could not be queued", kind, code)
+            await session.rollback()
+    outcome = "sent" if sent else "matched, not sent" if matched else "wrong address" if found else "no such ticket"
     await audit.record(
-        session, actor=None, action=f"{kind}_link.resend", entity_type="registration",
-        entity_id=reg.id if reg is not None else None,
+        session, actor=None, action=f"{kind}_link.resend", entity_type="registration", entity_id=reg_id,
         summary=f"A fresh {kind} link was asked for {code[:CODE_MAX]}: {outcome}",
-        details={"kind": kind, "code": code[:CODE_MAX], "found": reg is not None, "matched": matched, "sent": sent},
+        details={"kind": kind, "code": code[:CODE_MAX], "found": found, "matched": matched, "sent": sent},
         request=request,
     )
     await session.commit()

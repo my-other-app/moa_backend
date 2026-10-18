@@ -190,6 +190,19 @@ async def test_a_fresh_link_goes_only_on_a_match_and_only_to_the_registered_addr
     assert all(owner not in (r.summary or "") and "someone-else" not in str(r.details) for r in rows)
 
 
+async def test_a_send_that_breaks_still_answers_the_same(client, session, world, outbox, monkeypatch):
+    """A 500 only on a match would say which address is the right one."""
+    async def broken(*a, **k):
+        raise RuntimeError("the queue is down")
+
+    monkeypatch.setattr(deliveries, "resend_document", broken)
+    code, email = world["a"].ticket_id, world["a"].email  # the failure rolls back, and expires them
+    r = await _ask(client, "ticket", code, email)
+    assert (r.status_code, r.json()["message"]) == (200, old_links.GENERIC) and outbox == []
+    row = await session.scalar(select(AdminAuditLogs).where(AdminAuditLogs.action == "ticket_link.resend"))
+    assert row.details == {"kind": "ticket", "code": code, "found": True, "matched": True, "sent": False}
+
+
 async def test_a_certificate_link_gets_the_certificate_again(client, session, world, outbox):
     b = world["b"]
     assert (await _ask(client, "certificate", b.ticket_id, b.email)).status_code == 200
