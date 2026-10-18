@@ -3,8 +3,9 @@
 - jobs: one row per piece of work set off after a request (a mail, a push
   fan-out, a retention run...), written in the same transaction as the change
   it is about and run once that commits (app/core/jobs.py). Indexes:
-  - ix_jobs_claim (name, priority DESC, run_at, id) over unfinished rows: the
-    claim's FOR UPDATE SKIP LOCKED walk, per name;
+  - ix_jobs_claim (name, priority, run_at, id) over unfinished rows: the
+    claim's FOR UPDATE SKIP LOCKED walk, per name and priority, each a range
+    that ends at the first row not yet due;
   - uq_jobs_dedupe_key, unique over unfinished rows: enqueue's ON CONFLICT
     DO NOTHING for a job already waiting;
   - ix_jobs_finished_at and ix_jobs_dead: the maintenance pass's deletes and
@@ -55,8 +56,18 @@ def upgrade() -> None:
         sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("statement_timestamp()")),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("statement_timestamp()")),
+        sa.CheckConstraint("priority BETWEEN -2 AND 2", name="ck_jobs_priority"),
     )
-    op.create_index("ix_jobs_claim", "jobs", ["name", sa.text("priority DESC"), "run_at", "id"], postgresql_where=sa.text(UNFINISHED))
+    op.create_index("ix_jobs_claim", "jobs", ["name", "priority", "run_at", "id"], postgresql_where=sa.text(UNFINISHED))
+    # A queue: every job is an insert and two updates, so dead row versions
+    # pile up fast and every claim walks past their index entries until a
+    # vacuum. Vacuumed every few thousand of them rather than at a fraction
+    # of a table that keeps days of finished rows (the visibility map lets
+    # it skip those pages, which no longer change).
+    op.execute(
+        "ALTER TABLE jobs SET (autovacuum_vacuum_scale_factor = 0, autovacuum_vacuum_threshold = 2000, "
+        "autovacuum_analyze_scale_factor = 0, autovacuum_analyze_threshold = 5000)"
+    )
     op.create_index("uq_jobs_dedupe_key", "jobs", ["dedupe_key"], unique=True, postgresql_where=sa.text(f"dedupe_key IS NOT NULL AND {UNFINISHED}"))
     op.create_index("ix_jobs_finished_at", "jobs", ["finished_at"], postgresql_where=sa.text("finished_at IS NOT NULL"))
     op.create_index("ix_jobs_dead", "jobs", ["updated_at"], postgresql_where=sa.text("dead"))

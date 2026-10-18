@@ -14,9 +14,13 @@ loop from the requests. Now each is a row in `jobs`:
   a no-op while the first is unfinished (a partial unique index, ON CONFLICT
   DO NOTHING).
 - A runner claims due rows in batches: `SELECT ... FOR UPDATE SKIP LOCKED`
-  over the claim index (name, priority DESC, run_at, id) among unfinished
-  rows, so two runners -- two processes, or the API and the worker -- never
-  take one row. A claim is a lease: `run_at` and `locked_until` move LEASE
+  over the claim index (name, priority, run_at, id) among unfinished rows,
+  so two runners -- two processes, or the API and the worker -- never take
+  one row. Each (name, priority) is its own bounded range of the index --
+  from the oldest due row to the first not yet due -- so a claim reads only
+  rows it may take, however many wait for later (retries in backoff, jobs
+  with a run_at): priority is one of PRIORITIES, and the claim walks them
+  from the highest down, stopping once it has enough. A claim is a lease: `run_at` and `locked_until` move LEASE
   seconds ahead (less for a handler with a shorter timeout), and `attempts`
   goes up. While the job runs, its runner renews the lease every
   HEARTBEAT_SECONDS. A runner that dies mid-job (a deploy, an OOM) stops
@@ -105,6 +109,9 @@ MAINTENANCE_SECONDS = 300.0
 CLEANUP_BATCH = 5000
 #: Advisory lock: one runner at a time does the maintenance pass.
 MAINTENANCE_LOCK = 774_501
+#: The priorities a job may have, highest first. Higher goes first among the
+#: jobs due of a name; a value outside is taken as the nearest of these.
+PRIORITIES = (2, 1, 0, -1, -2)
 
 UNFINISHED = "finished_at IS NULL AND NOT dead"
 DEDUPE_WHERE = f"dedupe_key IS NOT NULL AND {UNFINISHED}"
@@ -122,12 +129,14 @@ class Jobs(AbstractSQLModel):
     __table_args__ = (
         # The claim: per name, highest priority first, then the longest due.
         # Only unfinished rows, so it stays the size of the backlog.
-        sa.Index("ix_jobs_claim", "name", sa.text("priority DESC"), "run_at", "id", postgresql_where=sa.text(UNFINISHED)),
+        sa.Index("ix_jobs_claim", "name", "priority", "run_at", "id", postgresql_where=sa.text(UNFINISHED)),
         # One unfinished job per dedupe key; a finished or dead one frees it.
         sa.Index("uq_jobs_dedupe_key", "dedupe_key", unique=True, postgresql_where=sa.text(DEDUPE_WHERE)),
         # The maintenance pass's deletes, and the admin's dead letters.
         sa.Index("ix_jobs_finished_at", "finished_at", postgresql_where=sa.text("finished_at IS NOT NULL")),
         sa.Index("ix_jobs_dead", "updated_at", postgresql_where=sa.text("dead")),
+        # The claim walks these levels; a row at any other could never be taken.
+        sa.CheckConstraint("priority BETWEEN -2 AND 2", name="ck_jobs_priority"),
     )
 
     id = Column(BigInteger, Identity(), primary_key=True)
@@ -147,6 +156,14 @@ class Jobs(AbstractSQLModel):
     finished_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     created_at = Column(TZAwareDateTime(timezone=True), nullable=False, server_default=sa.text("statement_timestamp()"))
     updated_at = Column(TZAwareDateTime(timezone=True), nullable=False, server_default=sa.text("statement_timestamp()"))
+
+
+# A queue churns: vacuumed every few thousand dead rows, as migration
+# w2_platform sets it; here for create_all (the test suite).
+event.listen(Jobs.__table__, "after_create", sa.DDL(
+    "ALTER TABLE jobs SET (autovacuum_vacuum_scale_factor = 0, autovacuum_vacuum_threshold = 2000, "
+    "autovacuum_analyze_scale_factor = 0, autovacuum_analyze_threshold = 5000)"
+))
 
 
 class JobWorkers(AbstractSQLModel):
@@ -254,6 +271,10 @@ def _plain(value: Any):
     raise TypeError(f"{type(value).__name__} is not something a job's payload can hold")
 
 
+def clamp_priority(priority: int) -> int:
+    return max(min(PRIORITIES), min(max(PRIORITIES), int(priority)))
+
+
 def as_json(payload: Optional[dict]) -> dict:
     """The payload as the handler will see it: JSON, round-tripped now so a
     value that cannot be stored fails the enqueue, not the job."""
@@ -266,12 +287,13 @@ async def enqueue(
 ) -> None:
     """Write job `name` in the caller's transaction; it runs once that
     commits. With `dedupe_key`, nothing is written while an unfinished job
-    has the same key. `run_at`: not before then. Higher `priority` goes first."""
+    has the same key. `run_at`: not before then. Higher `priority` goes first
+    (one of PRIORITIES, -2 to 2; the nearest is taken)."""
     h = _handlers.get(name)
     if h is None:
         logger.warning("job %s is enqueued but no handler is registered in this process", name)
     values: dict[str, Any] = dict(
-        name=name, payload=as_json(payload), priority=int(priority),
+        name=name, payload=as_json(payload), priority=clamp_priority(priority),
         max_attempts=h.max_attempts if h else DEFAULT_MAX_ATTEMPTS, dedupe_key=dedupe_key,
     )
     if run_at is not None:
@@ -289,7 +311,7 @@ def add(session, name: str, payload: dict, *, priority: int = 0) -> Jobs:
     """`enqueue` for code that cannot await (app.core.after_commit): the row
     is added to the session and written with its next flush. No dedupe."""
     h = _handlers.get(name)
-    row = Jobs(name=name, payload=as_json(payload), priority=int(priority), max_attempts=h.max_attempts if h else DEFAULT_MAX_ATTEMPTS)
+    row = Jobs(name=name, payload=as_json(payload), priority=clamp_priority(priority), max_attempts=h.max_attempts if h else DEFAULT_MAX_ATTEMPTS)
     sync = getattr(session, "sync_session", session)
     sync.add(row)
     _after_commit(session, row)
@@ -395,6 +417,9 @@ class Claimed:
     max_attempts: int
 
 
+# Per name, per priority (highest first): the oldest due rows, a bounded
+# range of the claim index that stops at the first row not yet due. The
+# levels are walked in order and the walk stops once a name has its slots.
 _CLAIM = """
 WITH want AS (
     SELECT * FROM unnest(CAST(:names AS text[]), CAST(:slots AS int[]), CAST(:leases AS float8[])) AS w(name, slots, lease)
@@ -402,13 +427,18 @@ WITH want AS (
     SELECT j.id, w.lease
     FROM want w
     CROSS JOIN LATERAL (
-        SELECT jobs.id, jobs.priority, jobs.run_at
-        FROM jobs
-        WHERE jobs.name = w.name AND jobs.finished_at IS NULL AND NOT jobs.dead
-          AND jobs.run_at <= statement_timestamp() {only}
-        ORDER BY jobs.priority DESC, jobs.run_at, jobs.id
+        SELECT x.id, x.priority, x.run_at
+        FROM unnest(CAST(:levels AS int[])) AS l(priority)
+        CROSS JOIN LATERAL (
+            SELECT jobs.id, jobs.priority, jobs.run_at
+            FROM jobs
+            WHERE jobs.name = w.name AND jobs.priority = l.priority AND jobs.finished_at IS NULL AND NOT jobs.dead
+              AND jobs.run_at <= statement_timestamp() {only}
+            ORDER BY jobs.run_at, jobs.id
+            LIMIT w.slots
+            FOR UPDATE SKIP LOCKED
+        ) x
         LIMIT w.slots
-        FOR UPDATE SKIP LOCKED
     ) j
     ORDER BY j.priority DESC, j.run_at, j.id
     LIMIT :total
@@ -435,7 +465,7 @@ async def claim(me: str, want: list[tuple[str, int, float]], total: int, *, ids:
         return []
     params = {
         "names": [w[0] for w in want], "slots": [int(w[1]) for w in want], "leases": [float(w[2]) for w in want],
-        "total": int(total), "me": me,
+        "levels": list(PRIORITIES), "total": int(total), "me": me,
     }
     stmt = CLAIM_SQL
     if ids is not None:
@@ -602,6 +632,7 @@ class Runner:
         self.handled = 0
         self.failed = 0
         self._wake: Optional[asyncio.Event] = None
+        self._halt: Optional[asyncio.Event] = None
         self._main_task: Optional[asyncio.Task] = None
         self._house_task: Optional[asyncio.Task] = None
         self._running: dict[asyncio.Task, Claimed] = {}
@@ -611,6 +642,7 @@ class Runner:
     def start(self) -> "Runner":
         loop = asyncio.get_running_loop()
         self._wake = asyncio.Event()
+        self._halt = asyncio.Event()
         self._main_task = loop.create_task(self._main(), name=f"jobs:{self.kind}")
         self._house_task = loop.create_task(self._housekeeping(), name=f"jobs:{self.kind}:housekeeping")
         return self
@@ -701,7 +733,11 @@ class Runner:
                 raise
             except Exception:  # noqa: BLE001
                 logger.warning("job runner housekeeping failed", exc_info=True)
-            await asyncio.sleep(HEARTBEAT_SECONDS)
+            # Asleep until the next beat, or until told to stop.
+            try:
+                await asyncio.wait_for(self._halt.wait(), timeout=HEARTBEAT_SECONDS)
+            except asyncio.TimeoutError:
+                pass
 
     async def beat(self) -> None:
         now = _now()
@@ -730,10 +766,15 @@ class Runner:
         self._stopping = True
         if self._wake is not None:
             self._wake.set()
-        for task in (self._main_task, self._house_task):
-            if task is not None and not task.done():
-                task.cancel()
-        await asyncio.gather(*(t for t in (self._main_task, self._house_task) if t is not None), return_exceptions=True)
+            self._halt.set()
+        # The loops finish the statement they are in (a claim, a beat) and
+        # stop; cancelling them mid-statement would drop the connection.
+        loops = [t for t in (self._main_task, self._house_task) if t is not None and not t.done()]
+        if loops:
+            _, slow = await asyncio.wait(loops, timeout=min(2.0, max(0.1, timeout)))
+            for t in slow:
+                t.cancel()
+            await asyncio.gather(*loops, return_exceptions=True)
         tasks = list(self._running)
         pending: set = set()
         if tasks:
