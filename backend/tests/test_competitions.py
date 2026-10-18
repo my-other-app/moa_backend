@@ -7,14 +7,20 @@ import pytest
 
 from tests.conftest import auth_header
 
+#: The competition's clock, frozen here for every test (the `world` fixture).
+#: Read at import, it used to drift from the wall clock while the suite ran:
+#: a mentor's first slot, on the hour after NOW, was already past by the time
+#: the office-hours test booked it whenever NOW fell late in an hour.
 NOW = datetime.now(timezone.utc)
 
 
 @pytest.fixture
 async def world(client, session, make_club, make_event, make_user, make_registration, mint_token, monkeypatch):
+    from app.api.competitions import service as competitions
     from app.core.rate_limit import limiter
 
     monkeypatch.setattr(limiter, "enabled", False)
+    monkeypatch.setattr(competitions, "_now", lambda: NOW)
     owner, club = await make_club(name="Circuit Society", email="comp@example.com")
     event = await make_event(club=club, created_by=owner, name="Hack Night 04", event_datetime=NOW + timedelta(days=2), duration=8.0)
     users = [await make_user(email=f"hacker{i}@example.com") for i in range(5)]
