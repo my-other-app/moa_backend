@@ -195,7 +195,7 @@ async def create(session, club: Clubs, user, *, body: str, notify_followers: boo
     return _out(t, club, options, False, None)
 
 
-@jobs.handler("threads.tell_followers", max_attempts=4, timeout=1800.0)
+@jobs.handler("threads.tell_followers", max_attempts=4, timeout=1800.0, concurrency=2)
 async def _tell_job(p: dict) -> None:
     await tell_followers(int(p["club_id"]), uuid.UUID(str(p["thread_id"])))
 

@@ -113,7 +113,7 @@ async def enqueue_push(session: AsyncSession, *, type: str, event_id: int, title
     )
 
 
-@jobs.handler("notifications.push", max_attempts=4, timeout=900.0)
+@jobs.handler("notifications.push", max_attempts=4, timeout=900.0, concurrency=2)
 async def _push_job(p: dict) -> None:
     """Read who holds the notification (by the event's index), then push in
     FCM batches (app.core.notifications.service). Run again, it pushes again."""

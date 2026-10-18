@@ -240,7 +240,7 @@ async def approve_club(session: AsyncSession, club_id: int) -> Clubs:
     return await club_for_answer(session, club.id)
 
 
-@jobs.handler("clubs.approved_email", max_attempts=4, timeout=60.0)
+@jobs.handler("clubs.approved_email", max_attempts=4, timeout=60.0, priority=jobs.HIGH)
 async def _approved_email_job(p: dict) -> None:
     import asyncio
 

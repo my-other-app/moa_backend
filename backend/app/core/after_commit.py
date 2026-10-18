@@ -199,17 +199,17 @@ async def _call(job: str, payload: dict) -> None:
 
 # The admin alert delivers itself: when it dies, there is nobody to tell
 # but the log (and its row in the bell, which is already there).
-@jobs.handler("admin_alerts.deliver", max_attempts=6, timeout=60.0, alert_dead=False)
+@jobs.handler("admin_alerts.deliver", max_attempts=6, timeout=60.0, alert_dead=False, priority=jobs.HIGH)
 async def _admin_alert(payload: dict) -> None:
     await _call("admin_alerts.deliver", payload)
 
 
-@jobs.handler("mail.billing_notice", max_attempts=6, timeout=60.0)
+@jobs.handler("mail.billing_notice", max_attempts=6, timeout=60.0, priority=jobs.HIGH)
 async def _billing_notice(payload: dict) -> None:
     await _call("mail.billing_notice", payload)
 
 
-@jobs.handler("mail.club_domain_notice", max_attempts=6, timeout=60.0)
+@jobs.handler("mail.club_domain_notice", max_attempts=6, timeout=60.0, priority=jobs.HIGH)
 async def _club_domain_notice(payload: dict) -> None:
     await _call("mail.club_domain_notice", payload)
 

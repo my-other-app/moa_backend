@@ -445,7 +445,7 @@ async def sweep(session, now: Optional[datetime] = None) -> dict:
     return {"moved": moved, "queued": len(due)}
 
 
-@jobs.handler("closeout.retention", max_attempts=3, timeout=900.0)
+@jobs.handler("closeout.retention", max_attempts=3, timeout=900.0, concurrency=1, priority=jobs.LOW)
 async def _retention_job(p: dict) -> None:
     """Forward only, under the event's lock, so it is safe run twice: a run
     that already reported goes on to the scrub; one already scrubbed stops."""

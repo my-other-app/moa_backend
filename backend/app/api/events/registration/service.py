@@ -785,7 +785,7 @@ async def enqueue_import(session: AsyncSession, event_id: int, df: DataFrame, ba
     )
 
 
-@jobs.handler("registrations.import", max_attempts=3, timeout=3600.0, concurrency=1)
+@jobs.handler("registrations.import", max_attempts=3, timeout=3600.0, concurrency=1, priority=jobs.LOW)
 async def _import_job(p: dict) -> None:
     """Run once: an import whose log is no longer STARTED has finished.
     Cut off half way, it is run again on the same log, and carries on."""

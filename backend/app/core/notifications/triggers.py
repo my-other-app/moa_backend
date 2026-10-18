@@ -64,7 +64,7 @@ def broadcasts_on() -> bool:
     return bool(settings.PUSH_TOPICS or settings.INBOX_SHARED)
 
 
-@jobs.handler("notifications.new_event", max_attempts=6, timeout=600.0)
+@jobs.handler("notifications.new_event", max_attempts=6, timeout=600.0, concurrency=2)
 async def _new_event_job(p: dict) -> None:
     club_id, event_id = int(p["club_id"]), int(p["event_id"])
     title, body = f"🎉 New from {p['club_name']}!", f"Check out: {p['event_name']}"
@@ -136,7 +136,7 @@ async def notify_users_by_interest(
     return None
 
 
-@jobs.handler("notifications.interest", max_attempts=6, timeout=600.0)
+@jobs.handler("notifications.interest", max_attempts=6, timeout=600.0, concurrency=2)
 async def _interest_job(p: dict) -> None:
     from app.api.interests.models import Interests
     from app.api.notifications.models import Notifications

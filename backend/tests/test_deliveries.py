@@ -187,3 +187,16 @@ async def test_another_club_cannot_send_or_read(client, world):
     e = world["event"].id
     assert (await _send(client, {"event": world["event"], "club": world["other"]})).status_code == 403
     assert (await client.get(f"/api/v1/events/{e}/deliveries", headers=world["other"])).status_code == 403
+
+
+async def test_one_guests_send_goes_before_a_send_to_everyone(client, session, world, outbox, background):
+    """The job for one guest's ticket is HIGH, so it is not queued behind a
+    hall's survey mails or a close-out; a send to the whole event is NORMAL."""
+    from sqlalchemy import select
+
+    from app.core import jobs
+
+    await _send(client, world)
+    await client.post(f"/api/v1/events/{world['event'].id}/tickets/{world['a'].id}/send", headers=world["club"])
+    rows = (await session.execute(select(jobs.Jobs.payload, jobs.Jobs.priority).where(jobs.Jobs.name == "deliveries.send").order_by(jobs.Jobs.id))).all()
+    assert [(p["kind"], prio) for p, prio in rows] == [("ticket", jobs.NORMAL), ("ticket", jobs.HIGH)]
