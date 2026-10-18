@@ -507,13 +507,11 @@ async def test_a_message_has_several_mails_in_flight(session, world, outbox, bac
     await session.commit()
     outbox.state["delay"] = 0.1
     msg = await emails.send_broadcast(session, world.event, subject="Doors at six", body="See you.", design=None, attachments=emails.EmailAttachments(), audience=EmailAudience())
-    started = time.monotonic()
     await emails.run_message(msg.id)
-    took = time.monotonic() - started
     assert len(outbox.sent) == 12
+    # Several at once, never more than the limit. (Measured as overlap, not
+    # by the clock: a wall-clock bound failed on a loaded machine.)
     assert 2 <= outbox.state["most"] <= 4
-    # One by one would have taken 1.2 s of sending alone.
-    assert took < 1.0
 
 
 async def test_the_bucket_keeps_the_rate_and_slows_when_throttled():
@@ -733,10 +731,12 @@ async def test_the_lifespan_ends_with_the_shutdown(monkeypatch):
     async def forever():
         await asyncio.sleep(3600)
 
-    for module, name in (
+    loops = (
         ("app.api.emails.service", "sweep_loop"), ("app.api.closeout.service", "sweep_loop"), ("app.api.live.service", "sweep_loop"),
         ("app.api.subscriptions.sweep", "sweep_loop"), ("app.api.discover.counters", "check_loop"), ("app.api.club_domains.sweep", "sweep_loop"),
-    ):
+        ("app.api.store.sweep", "sweep_loop"), ("app.api.payments.sweep", "sweep_loop"), ("app.api.auth.retention", "sweep_loop"),
+    )
+    for module, name in loops:
         monkeypatch.setattr(__import__(module, fromlist=[name]), name, forever)
     monkeypatch.setattr(seed, "seed_badges", nothing)
     monkeypatch.setattr(core, "check_connection_budget", nothing)
@@ -754,7 +754,7 @@ async def test_the_lifespan_ends_with_the_shutdown(monkeypatch):
             pass
     finally:
         gc.unfreeze()
-    assert len(calls) == 1 and len(calls[0]) == 6 and all(t.done() for t in calls[0])
+    assert len(calls) == 1 and len(calls[0]) == len(loops) and all(t.done() for t in calls[0])
 
 
 # ─── 9. An audience counted by the database ──────────────────────────────────
