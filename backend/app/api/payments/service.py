@@ -33,6 +33,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
+from app.api.ledger import book as ledger_book
+from app.api.ledger import service as ledger
 from app.api.payments import rzp
 from app.api.payments.handlers import (
     Applied,
@@ -393,6 +395,8 @@ async def apply_payment(
         # The order was paid already, by another payment: this one bought
         # nothing, and goes back whole. The first stands.
         log.refund_reason, log.refund_requested_at = DUPLICATE, now
+        # In the ledger as taken and owed back (unapplied), with the capture.
+        await ledger.capture(session, log, order)
         await session.commit()
         await settle_refund(session, log.id)
         return await _log_with_order(session, payment_id)
@@ -400,6 +404,9 @@ async def apply_payment(
     order.status = OrderStatus.paid
     # The sums below read the payment's row: written first (no autoflush).
     await session.flush()
+    # The money into the ledger, and (handle_post_payment) what it bought,
+    # in this same transaction.
+    await ledger.capture(session, log, order)
     outcome = await handle_post_payment(session, order, background_tasks=background_tasks, commit=False)
     if outcome.full:
         log.refund_reason, log.refund_requested_at = EVENT_FULL, now
@@ -475,7 +482,7 @@ async def ensure_applied(session: AsyncSession, order_id, *, background_tasks: B
 # ─── Refunds ─────────────────────────────────────────────────────────────
 
 
-async def _apply_refund(session: AsyncSession, db_payment: PaymentLogs) -> None:
+async def _apply_refund(session: AsyncSession, db_payment: PaymentLogs, *, refund_id: str | None = None) -> None:
     """Shared state-reversal for a captured payment being refunded — used by
     the admin-triggered refund endpoint, the refund.processed webhook branch
     (a refund initiated directly from the Razorpay dashboard converges on the
@@ -483,16 +490,22 @@ async def _apply_refund(session: AsyncSession, db_payment: PaymentLogs) -> None:
 
     A duplicate payment's refund touches nothing but itself: the order's
     first payment still stands.
+
+    The ledger gets what the refund took back (the ticket, the store orders)
+    and the money going out, in the same transaction; a registration paid
+    before the ledger existed is posted as it stood first (ensure_history).
     """
-    db_payment.status = PaymentStatus.refunded
     order = db_payment.order
     registration = None
     if db_payment.refund_reason != DUPLICATE:
-        order.status = OrderStatus.refunded
-
         # Re-blocks check-in via the existing has_fee-and-not-is_paid gate in
         # checkin_user/mark_attendance — no changes needed there.
         registration = await registration_for_order(session, order, lock=True)
+        if registration:
+            await ledger.ensure_history(session, registration)
+    db_payment.status = PaymentStatus.refunded
+    if db_payment.refund_reason != DUPLICATE:
+        order.status = OrderStatus.refunded
         if registration:
             registration.is_paid = False
             registration.paid_amount = 0
@@ -501,10 +514,19 @@ async def _apply_refund(session: AsyncSession, db_payment: PaymentLogs) -> None:
             from app.api.store import service as store
 
             await store.mark_refunded(session, registration.id)
+            await ledger.sync_registration(session, registration, kind=ledger_book.UNAPPLY,
+                                           origin_at=db_payment.created_at)
+    await ledger.refund(session, db_payment, order, registration=registration, refund_id=refund_id)
     if db_payment.refund_reason in (EVENT_FULL, DUPLICATE):
         await _tell_auto_refund(session, db_payment, order, registration)
 
     await session.commit()
+
+
+def _refund_id(answer) -> str | None:
+    """The refund's id in Razorpay's answer, for the ledger (and the daily
+    reconciliation, which matches refunds by it)."""
+    return (answer or {}).get("id") if isinstance(answer, dict) else None
 
 
 async def _already_refunded(account, payment_id: str) -> bool:
@@ -545,8 +567,9 @@ async def settle_refund(session: AsyncSession, log_id) -> bool:
         return False
     await session.commit()
 
+    refund_id = None
     try:
-        await rzp.call(account.client.payment.refund, payment_id)
+        refund_id = _refund_id(await rzp.call(account.client.payment.refund, payment_id))
     except Exception as exc:  # noqa: BLE001
         if not await _already_refunded(account, payment_id):
             logger.warning("Automatic refund of %s failed: %s", payment_id, type(exc).__name__)
@@ -558,7 +581,7 @@ async def settle_refund(session: AsyncSession, log_id) -> bool:
         .with_for_update(of=PaymentLogs).execution_options(populate_existing=True)
     )
     if log is not None and log.status == PaymentStatus.captured:
-        await _apply_refund(session, log)
+        await _apply_refund(session, log, refund_id=refund_id)
     else:
         await session.commit()
     return True
@@ -778,14 +801,14 @@ async def refund_payment(session: AsyncSession, payment_log_id) -> PaymentLogs:
     # Nothing held while Razorpay answers.
     await session.commit()
     # No `amount` param — Razorpay refunds the full captured amount.
-    await rzp.call(account.client.payment.refund, payment_id)
+    refund_id = _refund_id(await rzp.call(account.client.payment.refund, payment_id))
 
     db_payment = await session.scalar(
         select(PaymentLogs).where(PaymentLogs.id == payment_log_id).options(joinedload(PaymentLogs.order))
         .with_for_update(of=PaymentLogs).execution_options(populate_existing=True)
     )
     if db_payment.status == PaymentStatus.captured:
-        await _apply_refund(session, db_payment)
+        await _apply_refund(session, db_payment, refund_id=refund_id)
     else:
         await session.commit()
     # Read back with its order: the caller reports both, and a refresh alone
@@ -974,7 +997,7 @@ async def _apply_platform_event(session: AsyncSession, event_name: str, data: di
             .with_for_update(of=PaymentLogs).execution_options(populate_existing=True)
         )
         if db_payment is not None and db_payment.status == PaymentStatus.captured:
-            await _apply_refund(session, db_payment)
+            await _apply_refund(session, db_payment, refund_id=refund_entity.get("id"))
         return
 
     entity = data.get("payload", {}).get("payment", {}).get("entity", None)
@@ -1133,7 +1156,7 @@ async def _apply_club_event(session: AsyncSession, gateway, event_name: str, dat
                 .with_for_update(of=PaymentLogs).execution_options(populate_existing=True)
             )
             if db_payment.status == PaymentStatus.captured:
-                await _apply_refund(session, db_payment)
+                await _apply_refund(session, db_payment, refund_id=refund.get("id"))
             return "refunded"
         return "ignored"
 

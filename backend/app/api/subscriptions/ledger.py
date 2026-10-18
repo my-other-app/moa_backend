@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from app.api.ledger import service as money_ledger
 from app.api.payments import rzp
 from app.api.subscriptions import billing
 from app.api.subscriptions.models import (
@@ -98,7 +99,10 @@ async def _insert(
     """One payment into the ledger, unless it is there already. Returns the
     new row's id, or None (already recorded, or not a payment we can read).
     In a SAVEPOINT: a ledger row that cannot be written never takes the
-    webhook's state change with it -- the backfill can add it later."""
+    webhook's state change with it -- the backfill can add it later.
+
+    A charge taken is posted to the money ledger with it (app.api.ledger),
+    in the same SAVEPOINT."""
     payment_id = payment.get("id")
     amount = payment.get("amount")
     if not payment_id or amount is None:
@@ -122,12 +126,15 @@ async def _insert(
     )
     try:
         async with session.begin_nested():
-            return await session.scalar(
+            new_id = await session.scalar(
                 pg_insert(SubscriptionCharges)
                 .values(**values)
                 .on_conflict_do_nothing(index_elements=["razorpay_payment_id"])
                 .returning(SubscriptionCharges.id)
             )
+            if new_id is not None and not failed:
+                await money_ledger.charge(session, await session.get(SubscriptionCharges, new_id))
+            return new_id
     except Exception:  # noqa: BLE001
         logger.warning("subscription charge %s could not be recorded", payment_id, exc_info=True)
         return None
@@ -166,6 +173,8 @@ async def record_charge(session, subscription: ClubSubscriptions, payload: dict)
             earlier.refunded_paise = 0
             earlier.status = ChargeStatus.captured.value
             earlier.charged_at = _at(payment.get("created_at")) or earlier.charged_at
+            await session.flush()
+            await money_ledger.charge(session, earlier)
             return earlier.id
     return new_id
 
@@ -227,7 +236,10 @@ async def apply_refund(session, data: dict) -> bool:
             logger.warning("Could not read Razorpay payment %s for its refunds", payment_id, exc_info=True)
     if total is None:
         total = int(charge.refunded_paise or 0) + int(refund.get("amount") or 0)
-    _set_refunded(charge, int(total))
+    if _set_refunded(charge, int(total)):
+        # What is now refunded, less what the ledger has given back.
+        await session.flush()
+        await money_ledger.charge(session, charge)
     await session.commit()
     return True
 
@@ -326,6 +338,8 @@ async def backfill(session, *, client=None) -> dict:
                     select(SubscriptionCharges).where(SubscriptionCharges.razorpay_payment_id == payment_id)
                 )
                 if charge is not None and _set_refunded(charge, int(payment["amount_refunded"])):
+                    await session.flush()
+                    await money_ledger.charge(session, charge)
                     done["updated"] += 1
         await session.commit()
     return done
