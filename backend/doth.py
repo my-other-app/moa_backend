@@ -80,6 +80,12 @@ async def lifespan(app: FastAPI):
     from app.api.auth.retention import sweep_loop as account_sweep_loop
 
     accounts = asyncio.create_task(account_sweep_loop())
+    # The money ledger, once a day on one process: failed postings retried,
+    # the monthly sums checked against the entries, and yesterday's payments
+    # and refunds at Razorpay against the ledger.
+    from app.api.ledger.jobs import daily_loop as ledger_daily_loop
+
+    ledger_daily = asyncio.create_task(ledger_daily_loop())
     # What import and startup built (models, routes, schemas, the S3 service
     # model: some 740,000 objects) lives as long as the process. Frozen out
     # of the collector's reach, a full collection no longer walks all of it:
@@ -88,7 +94,7 @@ async def lifespan(app: FastAPI):
     gc.collect()
     gc.freeze()
     yield
-    await shutdown([sweeper, closer, feedback, billing, counters, domains, store_holds, payments_sweep, accounts])
+    await shutdown([sweeper, closer, feedback, billing, counters, domains, store_holds, payments_sweep, accounts, ledger_daily])
 
 
 #: Seconds shutdown may take, in all. Docker kills the container ten seconds
