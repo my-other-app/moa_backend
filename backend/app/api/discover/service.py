@@ -1674,39 +1674,37 @@ async def _near_pool(session, now: datetime, since: datetime, centre: tuple[floa
             .order_by(Events.event_datetime, Events.id).limit(n)
         ), centre, far, sure, pool)
 
-    # Each cell's walk asks what its index answers (the cell, shown, the
-    # lower bound, the cursor) and the distance, so the planner reads it in
-    # order and stops at the chunk; asked the rest too, it could not see how
-    # few rows fail them and fetched every row of every cell to sort (1,318
-    # a cell, 18,643 heap pages, at a lakh of clubs). The rest -- not over, a
-    # listed club's -- is `keep`, worked out on the rows read, and the walk
-    # goes on past the few that fail it. (A row with a cell is held in
-    # person with a point.)
+    # Each cell read in its index's order (geocell, event_datetime, id),
+    # stopping at the chunk. The planner cannot see how few of a cell's rows
+    # fail these conditions (it expected 7 a cell where there were 1,318, at
+    # a lakh of clubs) and would fetch every row of every cell to sort them
+    # (18,643 heap pages, for 21 a cell kept); with bitmap scans off for
+    # these statements only, it walks the index and stops (one chunk, about
+    # 3,000 pages for the events, measured). Reading the rows first and
+    # testing them after needs no setting, but reads past every row a test
+    # fails -- events over and not yet closed by the clock -- in chunks four
+    # times bigger each (25,000-32,000 pages, measured).
     each = select(func.unnest(bindparam("near_cells", near_cells, type_=ARRAY(Integer))).label("cell")).subquery("near_cells")
-    unlisted = select(Clubs.id).where(Clubs.listed == False)  # noqa: E712
 
     def chunk_of(last, n: int):
         per_cell = (
-            select(Events.id, Events.lat, Events.lng, Events.event_datetime, Events.duration, Events.club_id)
-            .where(
-                Events.geocell.isnot(None), Events.geocell == each.c.cell, Events.is_deleted == False,  # noqa: E712
-                _in(Events.lifecycle, SHOWN), Events.event_datetime >= since,
-                geo.km_sql(centre[0], centre[1], Events.lat, Events.lng) <= far,
-                *([cursors.after(order, last)] if last is not None else []),
-            )
+            select(Events.id, Events.lat, Events.lng, Events.event_datetime)
+            .where(Events.geocell.isnot(None), Events.geocell == each.c.cell, *conds,
+                   *([cursors.after(order, last)] if last is not None else []))
             .order_by(Events.event_datetime, Events.id).limit(n)
             .lateral("per_cell")
         )
         c = per_cell.c
-        utc = literal_column("'UTC'")
-        ends = func.timezone(utc, func.timezone(utc, c.event_datetime) + c.duration * text("INTERVAL '1 hour'"))
-        keep = and_(ends >= _instant(now), c.club_id.isnot(None), c.club_id.notin_(unlisted))
         return (
-            select(c.id, c.lat, c.lng, c.event_datetime, keep.label("keep")).select_from(each).join(per_cell, true())
+            select(c.id, c.lat, c.lng, c.event_datetime, true().label("keep")).select_from(each).join(per_cell, true())
             .order_by(c.event_datetime, c.id).limit(n)
         )
 
-    return await _near_walk(session, chunk_of, centre, far, sure, pool)
+    # Reset on success; a failure ends in a rollback, which drops the setting anyway.
+    await session.execute(text("SET LOCAL enable_bitmapscan = off"))
+    got = await _near_walk(session, chunk_of, centre, far, sure, pool)
+    await session.execute(text("RESET enable_bitmapscan"))
+    return got
 
 
 async def _near_walk(session, chunk_of, centre, far, sure, pool) -> dict:
