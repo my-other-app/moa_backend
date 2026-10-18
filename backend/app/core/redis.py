@@ -211,10 +211,12 @@ class _Hub:
             await asyncio.sleep(min(30.0, 0.5 * 2 ** failures))
 
     async def stop(self) -> None:
-        if self.task is not None and not self.task.done():
-            self.task.cancel()
-            await asyncio.gather(self.task, return_exceptions=True)
-        self.task = None
+        task, self.task = self.task, None
+        if task is None or task.done():
+            return
+        task.cancel()
+        if task.get_loop() is asyncio.get_running_loop():
+            await asyncio.gather(task, return_exceptions=True)
 
 
 def _text(value) -> str:
@@ -236,17 +238,51 @@ async def publish(channel: str, message: dict) -> None:
         _broker.deliver(channel, json.loads(data))
 
 
-async def subscribe(channel: str) -> AsyncIterator[dict]:
-    """Every message published to `channel` from now on, until the caller
-    stops iterating. Across processes with Redis, within this one without."""
-    q = _broker.add(channel)
-    if client() is not None:
-        _hub.ensure()
-    try:
-        while True:
-            yield await q.get()
-    finally:
-        _broker.remove(channel, q)
+class Subscription:
+    """What `subscribe` returns: an async iterator of the channel's messages,
+    subscribed from the moment it is made (not from the first `__anext__`,
+    so nothing published in between is missed). Close it -- `aclose()`, or
+    `async with` -- when done; one dropped unclosed is removed when collected."""
+
+    def __init__(self, channel: str):
+        self.channel = channel
+        self._queue: Optional[asyncio.Queue] = _broker.add(channel)
+        if client() is not None:
+            try:
+                _hub.ensure()
+            except RuntimeError:  # no running loop: the in-process broker only
+                pass
+
+    def __aiter__(self) -> "Subscription":
+        return self
+
+    async def __anext__(self) -> dict:
+        if self._queue is None:
+            raise StopAsyncIteration
+        return await self._queue.get()
+
+    async def aclose(self) -> None:
+        self._close()
+
+    def _close(self) -> None:
+        if self._queue is not None:
+            _broker.remove(self.channel, self._queue)
+            self._queue = None
+
+    async def __aenter__(self) -> "Subscription":
+        return self
+
+    async def __aexit__(self, *exc) -> None:
+        self._close()
+
+    def __del__(self):
+        self._close()
+
+
+def subscribe(channel: str) -> AsyncIterator[dict]:
+    """Every message published to `channel` from now on, until it is closed.
+    Across processes with Redis, within this one without."""
+    return Subscription(channel)
 
 
 def subscribers(channel: str) -> int:
@@ -266,8 +302,15 @@ async def close() -> None:
 
 
 def reset_for_tests() -> None:
+    """Forget the client and the subscriptions. The suite closes each test's
+    loop after it, and with it whatever ran there."""
     global _client, _client_loop, _down_until
     _client, _client_loop, _down_until = None, None, 0.0
     _broker.subscribers.clear()
-    _hub.task = None
+    task, _hub.task = _hub.task, None
+    if task is not None and not task.done():
+        try:
+            task.cancel()
+        except RuntimeError:  # its loop is closed already
+            pass
     _hub.connected = False
