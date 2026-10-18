@@ -308,3 +308,35 @@ async def test_drafts_and_unverified_clubs_never_reach_the_feed(
 
     assert "Shown Night" in items
     assert "Draft Night" not in items and "Shadow Night" not in items
+
+
+async def test_an_interest_under_one_of_your_topics_counts_for_less_than_your_own(
+    client, session, make_club, make_event, make_user, mint_token, tag_event, give_user_interest, link_club,
+):
+    """Someone who picked Cybersecurity: a Cybersecurity event first, then one
+    on Web Development (the same topic, Development), then one on Drawing."""
+    from app.api.interests.models import InterestCategory, Interests
+
+    dev, arts = InterestCategory(name="Development"), InterestCategory(name="Arts")
+    session.add_all([dev, arts])
+    await session.flush()
+    cyber, web, drawing = (Interests(name=n, category_id=c.id) for n, c in (("Cybersecurity", dev), ("Web Development", dev), ("Drawing", arts)))
+    session.add_all([cyber, web, drawing])
+    await session.flush()
+    owner, club = await make_club(name="Topic Feed Club", email="f-topics@example.com")
+    for name, interest in (("Paint Night", drawing), ("Web Night", web), ("Security Night", cyber)):
+        await tag_event(await make_event(club=club, created_by=owner, name=name, event_datetime=soon(10)), interest)
+
+    user = await make_user(email="u-topics@example.com")
+    await give_user_interest(user, cyber)
+    await link_club(user, club, is_following=True)  # all three are candidates, and the club counts the same for each
+    token = await mint_token(user)
+
+    assert names(await feed(client, token))[:3] == ["Security Night", "Web Night", "Paint Night"]
+
+    from app.api.events import recommendations
+
+    events, ranked = await recommendations.for_you_events(session, user.id, limit=20)
+    scores = {e.name: s for e, s in zip(events, ranked)}
+    assert round(scores["Web Night"] - scores["Paint Night"], 3) == 1.0
+    assert round(scores["Security Night"] - scores["Web Night"], 3) == 1.5
