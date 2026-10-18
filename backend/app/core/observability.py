@@ -41,6 +41,8 @@ logger = logging.getLogger(__name__)
 REQUEST_ID_HEADER = "X-Request-ID"
 _SAFE_ID = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
 _request_id: ContextVar[Optional[str]] = ContextVar("request_id", default=None)
+#: Whether init_sentry started Sentry in this process.
+_sentry_started = False
 
 BACKEND = Path(__file__).resolve().parents[2]
 
@@ -82,7 +84,7 @@ class RequestIdMiddleware:
                 break
         request_id = incoming if incoming and _SAFE_ID.match(incoming) else uuid.uuid4().hex
         token = _request_id.set(request_id)
-        if sentry_enabled():
+        if _sentry_started:
             import sentry_sdk
 
             sentry_sdk.set_tag("request_id", request_id)
@@ -329,10 +331,17 @@ def init_sentry(component: str = "api") -> bool:
     top), so the integrations see every route."""
     if not sentry_enabled():
         return False
-    import sentry_sdk
-    from sentry_sdk.integrations.fastapi import FastApiIntegration
-    from sentry_sdk.integrations.logging import LoggingIntegration
-    from sentry_sdk.integrations.starlette import StarletteIntegration
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.fastapi import FastApiIntegration
+        from sentry_sdk.integrations.logging import LoggingIntegration
+        from sentry_sdk.integrations.starlette import StarletteIntegration
+    except ImportError:
+        # A DSN set on a container whose image predates sentry-sdk: say so,
+        # and serve without error tracking rather than not at all. Rebuild
+        # the image (install_requirements) to turn it on.
+        logger.error("APP_SENTRY_DSN is set but sentry-sdk is not installed in this image; error tracking is off")
+        return False
 
     sentry_sdk.init(
         dsn=settings.SENTRY_DSN.strip(),
@@ -355,5 +364,7 @@ def init_sentry(component: str = "api") -> bool:
         ],
     )
     sentry_sdk.set_tag("component", component)
+    global _sentry_started
+    _sentry_started = True
     logger.info("Sentry is on (%s, release %s)", settings.SENTRY_ENVIRONMENT, release())
     return True
