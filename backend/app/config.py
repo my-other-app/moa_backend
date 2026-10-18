@@ -76,6 +76,10 @@ class AppConfig(BaseSettings):
     RAZORPAY_KEY_ID: str
     RAZORPAY_KEY_SECRET: str
     RAZORPAY_WEBHOOK_SECRET: str
+    # How long one call to Razorpay may take, in seconds, before it is given
+    # up on (app/api/payments/rzp.py). The SDK is synchronous: every call
+    # runs in a worker thread, so the event loop keeps serving meanwhile.
+    RAZORPAY_TIMEOUT: float = 20.0
     # A club's own Razorpay account (app/api/payment_gateways): the Fernet key
     # its saved key secret and webhook secret are encrypted with. A
     # comma-separated list rotates: the first encrypts, every one decrypts.
