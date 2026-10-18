@@ -252,7 +252,15 @@ class AppConfig(BaseSettings):
     # own, never on the event loop and never on the default pool that the
     # Razorpay, SES and S3 calls wait in. A wkhtmltopdf, wkhtmltoimage or
     # openssl run longer than RENDER_TIMEOUT seconds is killed.
-    RENDER_THREADS: int = 3
+    # Per process, so the box runs up to APP_WORKERS x this at once (and the
+    # worker's own, when it runs). 2, not 3: reportlab draws under the GIL,
+    # so on an idle 8-core laptop a third thread added a tenth to a burst's
+    # renders a second and doubled how late the process's event loop
+    # answered meanwhile (p99 20 -> 40 ms; scripts/bench/render_threads.py,
+    # docs/OPERATIONS.md section 10) -- and the box has two vCPUs for three
+    # processes, so there is no spare core for it. Each HTML design or
+    # receipt is a wkhtmltopdf process besides: 6 at once, not 9.
+    RENDER_THREADS: int = 2
     RENDER_TIMEOUT: float = 30.0
     # Bytes of bucket images (logos, artwork, posters) each process keeps for
     # the renderer; the least recently used go first. One object larger than

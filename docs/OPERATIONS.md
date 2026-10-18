@@ -832,6 +832,53 @@ A migration (one connection), a backup's `pg_dump` and a psql session come
 out of what is left. Memory: each connection is a process of a few MB,
 inside Postgres's 1280m.
 
+**Renders.** Tickets, certificates, ID cards, previews and wallet passes are
+drawn on `APP_RENDER_THREADS` threads per process (default **2**, was 3), so
+the box draws at most `APP_WORKERS` x that at once (6 with three workers),
+plus the worker's own when it runs. reportlab draws under the GIL: more
+threads in one process mostly take turns, and every turn is time the
+process's event loop -- its requests -- does not get. Measured with
+`python -m scripts.bench.render_threads --renders 240 --threads 1 2 3`
+(an Apple M2, idle cores, one process; medians of three rounds; the loop
+asks to wake every 5 ms):
+
+| Threads | Renders a second | Loop late by, p50 / p95 / p99 |
+|---|---|---|
+| 1 | 28.5 | 2.6 / 13.2 / 14.0 ms |
+| 2 | 37.3 | 7.2 / 19.0 / 19.5 ms |
+| 3 | 40.9 | 8.5 / 26.3 / 40.1 ms |
+
+The third thread bought a tenth more throughput from a spare core the
+2-vCPU box does not have (three API processes and Postgres share two), and
+doubled the loop's p99. HTML designs and receipts are a wkhtmltopdf process
+per render besides, outside the GIL but not outside the backend's 2304m
+(1.43 GB in use with nothing rendering). Nothing caps renders across
+processes: that needs a shared counter (Redis or Postgres) on every render,
+and the per-process cap times `APP_WORKERS` already bounds the box.
+
+**The job queue's slots.** Each runner (one per API process, unless
+`APP_JOBS_WORKER`) holds `APP_JOBS_CONCURRENCY` jobs (4; the worker 2). A
+job's priority picks which due job takes a free slot first, whatever its
+name; a name's cap keeps the heavy ones to a few slots. The handler sets
+both (`app/core/jobs.py`; `tests/test_jobs.py` lists them all);
+`APP_JOBS_LIMITS="name=n,..."` overrides a cap without a deploy.
+
+| Priority | Jobs | Cap per runner |
+|---|---|---|
+| HIGH (1): someone is waiting | `payments.receipt` | 2 (a wkhtmltopdf each) |
+| | `deliveries.send` for one guest's ticket or certificate (registration, payment, sent again) | 2, shared with the event-wide sends below (one name) |
+| | `clubs.approved_email`, `mail.billing_notice`, `mail.club_domain_notice`, `admin_alerts.deliver`, `checkins.after` | -- |
+| NORMAL (0): a send to many | `deliveries.send` for a whole event, `emails.send_message` | 2 (renders) |
+| | `notifications.new_event`, `notifications.interest`, `notifications.push`, `threads.tell_followers` | 2 (minutes-long fan-outs) |
+| | `notifications.broadcast`, `push.topic`, `push.devices`, `push.unsubscribe`, `live.survey_mail` | -- (short) |
+| LOW (-1): nobody watches | `closeout.retention`, `registrations.import` | 1 |
+
+Priorities order the claims; they do not take a slot back. A runner whose
+four slots all hold long jobs (two event-wide sends and two announcements,
+say) makes the next ticket wait for one of them, or for another runner. With
+three API runners that takes a dozen long jobs at once; if it ever happens,
+lower those caps with `APP_JOBS_LIMITS`.
+
 **Applying the limits.** Compose applies a service's limits, log options and
 restart policy when it next creates the container: the backend's on its next
 recreate, the worker's, Redis's and Meilisearch's when first started.
