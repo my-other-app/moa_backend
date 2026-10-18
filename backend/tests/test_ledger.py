@@ -918,3 +918,23 @@ async def test_the_daily_job_runs_once_a_day_after_its_hour(session, monkeypatch
 
     monkeypatch.setattr(settings, "LEDGER_DAILY_AT", "")
     assert not jobs.due(None, at + 2 * DAY)
+
+
+@pytest.mark.failures_expected
+async def test_a_batch_with_a_bad_posting_still_posts_the_rest(session):
+    """The backfill's batches: one posting that cannot be written (here, a
+    registration id that is no id) costs only itself; an unbalanced one is
+    refused before the batch; the same key twice in a batch is one posting."""
+    def comp(key, **extra):
+        return book.Txn(key=key, kind=book.COMP, lines=[book.Line(book.COMPS, 0, 1)], occurred_at=NOW,
+                        source="test", source_id=key, **extra)
+
+    txns = [comp("batch:1"), comp("batch:1"), comp("batch:bad", registration_id="not-a-uuid"), comp("batch:2"),
+            book.Txn(key="batch:unbalanced", kind=book.CAPTURE, lines=[book.Line(book.GATEWAY, 5)], occurred_at=NOW,
+                     source="test", source_id="batch:unbalanced")]
+    assert await book.post_many(session, txns) == 2
+    await session.commit()
+    assert sorted(x.txn_key for x in await _lines(session)) == ["batch:1", "batch:2"]
+    assert {a.data["source_id"] for a in await _alerts(session, "ledger_post_failed")} == {"batch:bad", "batch:unbalanced"}
+    # Again: nothing new.
+    assert await book.post_many(session, [comp("batch:1"), comp("batch:2")]) == 0
