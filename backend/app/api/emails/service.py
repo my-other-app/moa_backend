@@ -18,6 +18,8 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 
 from app.api.clubs.models import Clubs
@@ -54,6 +56,7 @@ from app.core.mail.schema import (
 from app.core.mail.starters import email_starter
 from app.core.storage import objects
 from app.core.storage.images import image_ext
+from app.db.locks import singleton
 from app.response import CustomHTTPException
 
 logger = logging.getLogger(__name__)
@@ -179,34 +182,47 @@ def _sorted(templates: list[EmailTemplates]) -> list[EmailTemplates]:
     return sorted(templates, key=lambda t: (STAGE_ORDER.get(t.stage, 99), t.created_at or datetime.min.replace(tzinfo=timezone.utc)))
 
 
-#: First keys of the advisory locks that keep two requests from copying the
-#: same journey emails at once (the second key is the club's or event's id).
-_LIBRARY_LOCK = 7_316_301
-_EVENT_EMAILS_LOCK = 7_316_302
+# A burst of first registrations used to copy an event's journey emails three
+# to six times, so every attendee got each reminder that many times. The
+# unique indexes on (event_id, stage) and, for the library, (club_id, stage)
+# (journey stages only) now make a second copy impossible: the copies go in
+# with ON CONFLICT DO NOTHING, and whoever comes second waits for the first
+# to commit, inserts nothing, and reads back the first one's rows. No lock of
+# our own is needed (the advisory locks that did this job are gone).
+
+_ROW_COLUMNS = (
+    "id", "club_id", "event_id", "stage", "name", "subject", "design", "attachments", "audience", "trigger",
+    "channels", "enabled", "version", "source_id", "created_by",
+)
 
 
-async def _hold(session, first: int, second: int) -> None:
-    """A transaction-scoped advisory lock: whoever comes second waits, then
-    reads what the first one wrote. A burst of first registrations used to
-    copy an event's journey emails three to six times, so every attendee got
-    each reminder that many times."""
-    await session.execute(select(func.pg_advisory_xact_lock(first, second)))
+def _row(club_id: int, event_id: Optional[int], stage: EmailStage, fields: EmailTemplateFields, *, source_id=None) -> dict:
+    tpl = _new(club_id, event_id, stage, fields, source_id=source_id)
+    now = datetime.now(timezone.utc)
+    return {**{c: getattr(tpl, c) for c in _ROW_COLUMNS}, "created_at": now, "updated_at": now}
+
+
+async def _insert_missing(session, rows: list[dict]) -> None:
+    """Insert the journey emails nobody has yet; any another request inserted
+    meanwhile is left as it is. No conflict target: the unique index that
+    raises the conflict is uq_email_templates_event_stage or, for the library,
+    uq_email_templates_library_stage, and the statement also runs (without
+    the guarantee) on a database the migration has not reached yet."""
+    await session.execute(pg_insert(EmailTemplates.__table__).values(rows).on_conflict_do_nothing())
+
+
+def _library_query(club_id: int):
+    return select(EmailTemplates).where(EmailTemplates.club_id == club_id, EmailTemplates.event_id.is_(None))
 
 
 async def ensure_library(session, club_id: int) -> list[EmailTemplates]:
     """The club's library, with the four journey emails present."""
-    await _hold(session, _LIBRARY_LOCK, club_id)
-    rows = list(await session.scalars(select(EmailTemplates).where(EmailTemplates.club_id == club_id, EmailTemplates.event_id.is_(None))))
+    rows = list(await session.scalars(_library_query(club_id)))
     have = {t.stage for t in rows}
-    added = False
-    for stage in JOURNEY_STAGES:
-        if EmailStage(stage) not in have:
-            tpl = _new(club_id, None, EmailStage(stage), email_starter(stage))
-            session.add(tpl)
-            rows.append(tpl)
-            added = True
-    if added:
-        await session.flush()
+    missing = [EmailStage(s) for s in JOURNEY_STAGES if EmailStage(s) not in have]
+    if missing:
+        await _insert_missing(session, [_row(club_id, None, stage, email_starter(stage.value)) for stage in missing])
+        rows = list(await session.scalars(_library_query(club_id)))
     return _sorted(rows)
 
 
@@ -215,18 +231,18 @@ async def ensure_event_templates(session, event: Events) -> list[EmailTemplates]
     club's library the first time, so a club's design carries over."""
     if event.club_id is None:
         raise CustomHTTPException(422, message="This event has no club, so it has no emails to send from.")
-    await _hold(session, _EVENT_EMAILS_LOCK, event.id)
-    rows = list(await session.scalars(select(EmailTemplates).where(EmailTemplates.event_id == event.id)))
+    query = select(EmailTemplates).where(EmailTemplates.event_id == event.id)
+    rows = list(await session.scalars(query))
     have = {t.stage for t in rows if t.stage is not EmailStage.CUSTOM}
     missing = [EmailStage(s) for s in JOURNEY_STAGES if EmailStage(s) not in have]
     if missing:
         library = {t.stage: t for t in await ensure_library(session, event.club_id)}
-        for stage in missing:
-            src = library[stage]
-            tpl = _new(event.club_id, event.id, stage, fields_of(src), source_id=src.id)
-            session.add(tpl)
-            rows.append(tpl)
+        await _insert_missing(
+            session,
+            [_row(event.club_id, event.id, stage, fields_of(library[stage]), source_id=library[stage].id) for stage in missing],
+        )
         await session.commit()
+        rows = list(await session.scalars(query))
     return _sorted(rows)
 
 
@@ -249,7 +265,12 @@ async def create_template(session, *, club_id: int, event_id: Optional[int], fie
             raise CustomHTTPException(409, message=f"There is already a {EMAIL_STAGE_META[stage.value]['label']} email.")
     tpl = _new(club_id, event_id, stage, fields, created_by=created_by)
     session.add(tpl)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        # The same journey stage made a moment ago by another request.
+        await session.rollback()
+        raise CustomHTTPException(409, message=f"There is already a {EMAIL_STAGE_META[stage.value]['label']} email.")
     return tpl
 
 
@@ -456,18 +477,25 @@ async def compose(
         parts.append({"filename": f"{cid}.{image_ext(data)}", "content": data, "content_id": cid})
         return f"cid:{cid}"
 
+    # Storage reads, image downloads, the QR and the render all block: they
+    # run in a worker thread, so a send (the minute sweep's included) never
+    # holds the event loop that every other request on this worker needs.
     blocks = _image_blocks(design)
     for b in blocks:
         if b.source == "upload" and b.image_key and b.image_key not in images:
-            src = inline(objects.get_bytes(b.image_key), f"img-{len(images) + 1}")
+            src = inline(await asyncio.to_thread(objects.get_bytes, b.image_key), f"img-{len(images) + 1}")
             if src:
                 images[b.image_key] = src
-    logo = inline(fetch_bytes(logo_url), "org-logo") if design.theme.logo == "org_logo" and logo_url else None
-    icon = inline(fetch_bytes(poster_url(event) or ""), "event-icon") if any(b.source == "event_icon" for b in blocks) else None
+    logo = inline(await asyncio.to_thread(fetch_bytes, logo_url), "org-logo") if design.theme.logo == "org_logo" and logo_url else None
+    icon = inline(await asyncio.to_thread(fetch_bytes, poster_url(event) or ""), "event-icon") if any(b.source == "event_icon" for b in blocks) else None
     qr = None
     if uses_qr(design):
-        qr = inline(base64.b64decode(qr_png_base64(reg.ticket_id if reg is not None else "SAMPLE")), "ticket-qr")
-    out = render_email(RenderInput(subject=subject, design=design, values=values, brand_primary=brand, logo_url=logo, event_icon_url=icon, images=images, qr_url=qr))
+        png = await asyncio.to_thread(qr_png_base64, reg.ticket_id if reg is not None else "SAMPLE")
+        qr = inline(base64.b64decode(png), "ticket-qr")
+    out = await asyncio.to_thread(
+        render_email,
+        RenderInput(subject=subject, design=design, values=values, brand_primary=brand, logo_url=logo, event_icon_url=icon, images=images, qr_url=qr),
+    )
     version = 0
     if reg is not None:
         if attachments.ticket_pdf and reg.ticket_revoked_at is None:
@@ -784,51 +812,66 @@ async def invite_email(session, reg: EventRegistrationsLink, event: Events) -> O
 # --- timers -----------------------------------------------------------------------
 
 
+def due_query(now: datetime):
+    """The enabled timed emails whose instant fell in the last SWEEP_GRACE,
+    on events not deleted. An index range read of email_templates.due_at
+    (ix_email_templates_due): the rows that can be due now and no others,
+    however many events have journey emails. It used to read every timed
+    email ever enabled, past events' included, and decide in Python: 72 s a
+    minute at 40,000 events, on a web worker's event loop."""
+    return (
+        select(EmailTemplates, Events)
+        .join(Events, Events.id == EmailTemplates.event_id)
+        .options(joinedload(Events.club))
+        .where(
+            EmailTemplates.enabled == True,  # noqa: E712
+            EmailTemplates.due_at.isnot(None),
+            EmailTemplates.due_at >= now - SWEEP_GRACE,
+            EmailTemplates.due_at <= now,
+            Events.is_deleted == False,  # noqa: E712
+        )
+        .order_by(EmailTemplates.due_at)
+    )
+
+
 async def sweep(session, now: Optional[datetime] = None) -> int:
     """Send every timed journey email that has come due and not yet gone.
     Once per template, ever: the message row is the record."""
     now = now or datetime.now(timezone.utc)
-    rows = (
-        await session.execute(
-            select(EmailTemplates, Events)
-            .join(Events, Events.id == EmailTemplates.event_id)
-            .options(joinedload(Events.club))
-            .where(
-                EmailTemplates.enabled == True,
-                EmailTemplates.event_id.isnot(None),
-                Events.is_deleted == False,
-                EmailTemplates.trigger["mode"].as_string().in_(["BEFORE_START", "AFTER_END"]),
-            )
-        )
-    ).unique().all()
+    rows = (await session.execute(due_query(now))).unique().all()
     sent = 0
     for tpl, event in rows:
-        due = due_at(event, fields_of(tpl).trigger)
-        if due is None or due > now or due < now - SWEEP_GRACE:
-            continue
-        already = await session.scalar(select(func.count()).select_from(Messages).where(Messages.template_id == tpl.id, Messages.scheduled == True))
-        if already:
-            continue
-        msg = await send_template(session, event, tpl, scheduled=True)
-        await process_message(session, msg.id)
-        sent += 1
+        try:
+            # The stored instant chose the row; the rule itself still decides.
+            due = due_at(event, fields_of(tpl).trigger)
+            if due is None or due > now or due < now - SWEEP_GRACE:
+                continue
+            already = await session.scalar(select(func.count()).select_from(Messages).where(Messages.template_id == tpl.id, Messages.scheduled == True))  # noqa: E712
+            if already:
+                continue
+            msg = await send_template(session, event, tpl, scheduled=True)
+            await process_message(session, msg.id)
+            sent += 1
+        except Exception:  # noqa: BLE001
+            # One email that cannot go must not hold up the others.
+            logger.exception("timed email %s could not be sent", tpl.id)
+            await session.rollback()
     return sent
 
 
 async def sweep_loop(interval: int = 60) -> None:
     """Runs for the life of the process. One worker at a time does the
-    sending, by taking a Postgres advisory lock for the sweep."""
+    sending: the one holding the sweep's advisory lock, taken on a
+    connection of its own (app.db.locks)."""
     await asyncio.sleep(5)
     while True:
         try:
             async with deliveries.session_scope() as session:
-                if await session.scalar(text(f"SELECT pg_try_advisory_lock({SWEEP_LOCK})")):
-                    try:
+                async with singleton(session, SWEEP_LOCK) as mine:
+                    if mine:
                         n = await sweep(session)
                         if n:
                             logger.info("email sweep sent %d timed email(s)", n)
-                    finally:
-                        await session.execute(text(f"SELECT pg_advisory_unlock({SWEEP_LOCK})"))
         except asyncio.CancelledError:
             raise
         except Exception:

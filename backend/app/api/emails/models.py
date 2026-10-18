@@ -10,7 +10,8 @@ import enum
 import uuid
 
 import sqlalchemy as sa
-from sqlalchemy import JSON, UUID, Boolean, Column, Enum, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import DDL, JSON, UUID, Boolean, Column, Enum, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import event as sa_event
 from sqlalchemy.orm import relationship
 
 from app.api.deliveries.models import DeliveryChannel, DeliveryOutcome, DeliveryStatus
@@ -48,6 +49,26 @@ class EmailTemplates(AbstractSQLModel, TimestampsMixin):
     # The library template this event copy came from, if any.
     source_id = Column(UUID(as_uuid=True), nullable=True)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    # When a timed journey email (BEFORE_START / AFTER_END) comes due: the
+    # event's start or end moved by the trigger's minutes. Null for anything
+    # else (library templates, the invite, custom emails, manual sends).
+    # Written by the database (EMAIL_DUE_AT_SQL below), on every insert, every
+    # change of the trigger and every change of the event's start or length,
+    # so no write path can leave it stale. The minute sweep reads only the
+    # templates whose instant has come (ix_email_templates_due).
+    due_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        sa.Index("ix_email_templates_due", "due_at", postgresql_where=sa.text("enabled AND due_at IS NOT NULL")),
+        # One of each journey email per event, and per club library: two
+        # requests copying them at once insert, the second does nothing
+        # (ON CONFLICT), and both read back the same four.
+        sa.Index("uq_email_templates_event_stage", "event_id", "stage", unique=True, postgresql_where=sa.text("stage <> 'CUSTOM'")),
+        sa.Index(
+            "uq_email_templates_library_stage", "club_id", "stage", unique=True,
+            postgresql_where=sa.text("event_id IS NULL AND stage <> 'CUSTOM'"),
+        ),
+    )
 
 
 class MessageKind(enum.Enum):
@@ -112,3 +133,72 @@ class MessageDeliveries(AbstractSQLModel, TimestampsMixin):
 
     message = relationship("Messages", back_populates="deliveries")
     registration = relationship("EventRegistrationsLink")
+
+
+# ─── email_templates.due_at, kept by the database ─────────────────────────
+#
+# moa_email_due_at mirrors emails.service.due_at exactly: BEFORE_START is the
+# start less the minutes, AFTER_END the end (start + duration hours) plus
+# them; anything else, or no minutes, has no instant. Triggers keep the
+# column right whoever writes: a template inserted or its trigger or event
+# changed, and an event whose start or length changes. The migration
+# write_path installs the same and fills in every existing row.
+
+EMAIL_DUE_AT_SQL = (
+    """
+    CREATE OR REPLACE FUNCTION moa_email_due_at(trig json, starts timestamptz, hours double precision)
+    RETURNS timestamptz LANGUAGE plpgsql STABLE AS $$
+    DECLARE
+      mode text := trig->>'mode';
+      mins text := trig->>'minutes';
+    BEGIN
+      IF starts IS NULL OR mode IS NULL OR mode NOT IN ('BEFORE_START', 'AFTER_END')
+         OR mins IS NULL OR mins !~ '^[0-9]+(\.0+)?$' OR mins::numeric = 0 THEN
+        RETURN NULL;
+      END IF;
+      IF mode = 'BEFORE_START' THEN
+        RETURN starts - make_interval(mins => mins::numeric::int);
+      END IF;
+      RETURN starts + coalesce(hours, 0) * interval '1 hour' + make_interval(mins => mins::numeric::int);
+    END $$
+    """,
+    """
+    CREATE OR REPLACE FUNCTION moa_email_template_due() RETURNS trigger LANGUAGE plpgsql AS $$
+    DECLARE
+      starts timestamptz;
+      hours double precision;
+    BEGIN
+      IF NEW.event_id IS NULL THEN
+        NEW.due_at := NULL;
+        RETURN NEW;
+      END IF;
+      SELECT event_datetime, duration INTO starts, hours FROM events WHERE id = NEW.event_id;
+      NEW.due_at := moa_email_due_at(NEW.trigger, starts, hours);
+      RETURN NEW;
+    END $$
+    """,
+    """
+    CREATE TRIGGER trg_email_templates_due
+    BEFORE INSERT OR UPDATE OF trigger, event_id ON email_templates
+    FOR EACH ROW EXECUTE FUNCTION moa_email_template_due()
+    """,
+    """
+    CREATE OR REPLACE FUNCTION moa_event_email_due() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF NEW.event_datetime IS DISTINCT FROM OLD.event_datetime OR NEW.duration IS DISTINCT FROM OLD.duration THEN
+        UPDATE email_templates SET due_at = moa_email_due_at(trigger, NEW.event_datetime, NEW.duration)
+        WHERE event_id = NEW.id;
+      END IF;
+      RETURN NULL;
+    END $$
+    """,
+    """
+    CREATE TRIGGER trg_events_email_due
+    AFTER UPDATE OF event_datetime, duration ON events
+    FOR EACH ROW EXECUTE FUNCTION moa_event_email_due()
+    """,
+)
+
+# On email_templates' creation: events exists by then (the foreign key orders them).
+for _sql in EMAIL_DUE_AT_SQL:
+    sa_event.listen(EmailTemplates.__table__, "after_create", DDL(_sql).execute_if(dialect="postgresql"))

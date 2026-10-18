@@ -20,6 +20,9 @@ class AppConfig(BaseSettings):
     WORKERS: int = 1
     PORT: int = 8000
     DEBUG: bool = False
+    # uvicorn's line per request. nginx in front already logs every request,
+    # so this is a second copy, written on every request; false drops it.
+    ACCESS_LOG: bool = True
     # Log every SQL statement with its parameters (app/db/core.py). Off by
     # default: the parameters are personal data.
     SQL_LOG: bool = False
@@ -28,6 +31,13 @@ class AppConfig(BaseSettings):
 
     DATABASE_URL: str
     DATABASE_URL_SYNC: str
+    # Connections each worker process may hold: DB_POOL_SIZE kept open, up to
+    # DB_MAX_OVERFLOW more under load. Every worker has its own pool, so
+    # WORKERS x (DB_POOL_SIZE + DB_MAX_OVERFLOW) must fit in Postgres's
+    # max_connections; startup logs a warning when it does not
+    # (app.db.core.check_connection_budget). Behind PgBouncer: 5 and 5.
+    DB_POOL_SIZE: int = 10
+    DB_MAX_OVERFLOW: int = 20
     # Mounted from the host, deliberately outside the directory the deploy
     # rsyncs with --delete -- a backup inside it would be erased by the next
     # deploy, which is the opposite of the point.

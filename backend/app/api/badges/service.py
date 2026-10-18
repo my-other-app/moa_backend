@@ -22,77 +22,37 @@ logger = logging.getLogger(__name__)
 # ─── User badge checks ───────────────────────────────────────────────
 
 async def _get_user_metrics(session: AsyncSession, user_id: int) -> dict:
-    """Compute all metrics needed for user badge checks in one pass."""
+    """Compute all metrics needed for user badge checks in one pass.
 
-    # events_registered
-    events_registered = await session.scalar(
-        select(func.count()).where(
-            EventRegistrationsLink.user_id == user_id,
-            EventRegistrationsLink.is_deleted == False,
+    One statement over the user's live registrations (ix_registrations_user),
+    each metric a filtered count, with the ratings count beside it. It was
+    seven statements, run after every registration."""
+    R = EventRegistrationsLink
+    live = R.is_deleted == False  # noqa: E712
+    row = (
+        await session.execute(
+            select(
+                func.count(),
+                func.count().filter(R.is_attended == True),  # noqa: E712
+                func.count().filter(R.position == 1),
+                func.count().filter(R.position == 2),
+                func.count().filter(R.position == 3),
+                func.count().filter(R.is_paid == True),  # noqa: E712
+                select(func.count())
+                .where(EventRatingsLink.user_id == user_id, EventRatingsLink.is_deleted == False)  # noqa: E712
+                .scalar_subquery(),
+            ).where(R.user_id == user_id, live)
         )
-    ) or 0
-
-    # events_attended
-    events_attended = await session.scalar(
-        select(func.count()).where(
-            EventRegistrationsLink.user_id == user_id,
-            EventRegistrationsLink.is_attended == True,
-            EventRegistrationsLink.is_deleted == False,
-        )
-    ) or 0
-
-    # events_won (position == 1)
-    events_won = await session.scalar(
-        select(func.count()).where(
-            EventRegistrationsLink.user_id == user_id,
-            EventRegistrationsLink.position == 1,
-            EventRegistrationsLink.is_deleted == False,
-        )
-    ) or 0
-
-    # runner_up_count (position == 2)
-    runner_up_count = await session.scalar(
-        select(func.count()).where(
-            EventRegistrationsLink.user_id == user_id,
-            EventRegistrationsLink.position == 2,
-            EventRegistrationsLink.is_deleted == False,
-        )
-    ) or 0
-
-    # podium_count (position == 3)
-    podium_count = await session.scalar(
-        select(func.count()).where(
-            EventRegistrationsLink.user_id == user_id,
-            EventRegistrationsLink.position == 3,
-            EventRegistrationsLink.is_deleted == False,
-        )
-    ) or 0
-
-    # events_rated
-    events_rated = await session.scalar(
-        select(func.count()).where(
-            EventRatingsLink.user_id == user_id,
-            EventRatingsLink.is_deleted == False,
-        )
-    ) or 0
-
-    # events_paid
-    events_paid = await session.scalar(
-        select(func.count()).where(
-            EventRegistrationsLink.user_id == user_id,
-            EventRegistrationsLink.is_paid == True,
-            EventRegistrationsLink.is_deleted == False,
-        )
-    ) or 0
-
+    ).one()
+    registered, attended, won, runner_up, podium, paid, rated = (int(v or 0) for v in row)
     return {
-        "events_registered": events_registered,
-        "events_attended": events_attended,
-        "events_won": events_won,
-        "runner_up_count": runner_up_count,
-        "podium_count": podium_count,
-        "events_rated": events_rated,
-        "events_paid": events_paid,
+        "events_registered": registered,
+        "events_attended": attended,
+        "events_won": won,
+        "runner_up_count": runner_up,
+        "podium_count": podium,
+        "events_rated": rated,
+        "events_paid": paid,
     }
 
 
