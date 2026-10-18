@@ -243,12 +243,16 @@ async def create_event(
             event_name=created_event.name,
         )
         
-        # Trigger 2: Notify users with matching interests (excludes followers)
-        if created_event.category:
+        # Trigger 2: people who picked an interest under the event's topics
+        # (not its followers). By topic, not by the event's type: the type's
+        # id used to be matched against topic ids, so a Workshop reached
+        # whoever had picked an interest under the topic sharing its number.
+        topics = created_event.topics
+        if topics:
             await notify_users_by_interest(
                 session=session,
-                category_id=created_event.category.id,
-                category_name=created_event.category.name,
+                category_id=[t["id"] for t in topics],
+                category_name=topics[0]["name"],
                 club_id=created_event.club.id,
                 event_id=created_event.id,
                 event_name=created_event.name,

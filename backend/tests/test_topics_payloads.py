@@ -128,3 +128,54 @@ async def test_more_clubs_cost_no_more_statements(client, session, scene, make_c
         session.add(ClubInterestsLink(club_id=c.id, interest_id=(scene["web"] if n % 2 else scene["drawing"]).id))
     await session.commit()
     assert await count() == few
+
+
+async def test_a_new_event_is_pushed_to_people_by_its_topics_not_its_type(client, session, scene, make_user, monkeypatch):
+    """The interest push matched the event's type id against topic ids. Now:
+    whoever picked an interest under one of the event's topics (not only
+    the same interest), and nobody for the topic sharing the type's number."""
+    from app.api.events.models import EventCategories
+    from app.api.notifications.models import Notifications
+    from app.api.users.models import UserInterests
+    from app.config import settings
+    from sqlalchemy import select
+
+    monkeypatch.setattr(settings, "INTEREST_PUSH_MAX_PER_EVENT", 100)
+    monkeypatch.setattr(settings, "INTEREST_PUSH_MAX_PER_USER_PER_DAY", 5)
+    painter = await make_user(email="topics-push-painter@example.com")
+    coder = await make_user(email="topics-push-coder@example.com")
+    session.add(UserInterests(user_id=painter.id, interest_id=scene["drawing"].id))
+    session.add(UserInterests(user_id=coder.id, interest_id=scene["web"].id))
+    sketching = Interests(name="Sketching", slug="sketching", category_id=scene["arts"].id)
+    session.add(sketching)
+    # The event's type, and a topic with the same number: what the old rule went by.
+    workshop = EventCategories(name="Topic Workshop")
+    session.add(workshop)
+    await session.flush()
+    if workshop.id == scene["arts"].id:
+        workshop = EventCategories(name="Topic Workshop Again")
+        session.add(workshop)
+        await session.flush()
+    if workshop.id == scene["dev"].id:
+        decoy = coder
+    else:
+        numbered = InterestCategory(id=workshop.id, name="Numbered Topic", slug="numbered-topic")
+        session.add(numbered)
+        await session.flush()
+        decoy = await make_user(email="topics-push-decoy@example.com")
+        picked = Interests(name="Numbered Interest", slug="numbered-interest", category_id=numbered.id)
+        session.add(picked)
+        await session.flush()
+        session.add(UserInterests(user_id=decoy.id, interest_id=picked.id))
+    await session.commit()
+    form = {
+        "name": "Sketch Night", "event_datetime": (datetime.now(timezone.utc) + timedelta(days=9)).isoformat(), "duration": "2",
+        "has_fee": "false", "status": "published", "category_id": str(workshop.id), "interest_ids": str(sketching.id),
+    }
+
+    r = await client.post(f"{API}/events/create", data=form, headers=scene["h_owner"])
+
+    assert r.status_code == 200, r.text
+    assert r.json()["topics"] == scene["both"][1:]
+    told = set((await session.scalars(select(Notifications.user_id).where(Notifications.type == "nearby_event", Notifications.event_id == r.json()["id"]))).all())
+    assert told == {painter.id} and decoy.id not in told
