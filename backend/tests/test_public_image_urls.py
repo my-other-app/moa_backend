@@ -117,8 +117,25 @@ def test_the_setting_stays_within_what_sigv4_signs(given, kept):
     assert AppConfig(PUBLIC_IMAGE_URL_TTL=given).PUBLIC_IMAGE_URL_TTL == kept
 
 
-def test_an_agenda_speaker_photo_is_a_public_link(signer):
-    row = AgendaItems(id=None, event_id=1, title="Keynote", speaker="Dr. Rao", speaker_photo_key="media/agenda/rao.png")
-    out = agenda.item_out(row, set())
-    assert out["speaker_photo_url"]
-    assert signer == [("media/agenda/rao.png", WEEK)]
+def test_an_agenda_speaker_photo_from_the_events_uploads_is_a_public_link(signer):
+    from app.api.event_designs.router import _layout_prefix
+
+    key = f"{_layout_prefix(1)}speaker-abc.png"
+    row = AgendaItems(id=None, event_id=1, title="Keynote", speaker="Dr. Rao", speaker_photo_key=key)
+    assert agenda.item_out(row, set())["speaker_photo_url"]
+    assert signer == [(key, WEEK)]
+
+
+def test_any_other_key_an_organiser_typed_keeps_its_hour(monkeypatch):
+    """The key is not checked on save: a week of somebody else's file would
+    be worse than the hour it always had."""
+    from app.api.event_designs.router import _layout_prefix
+    from app.core.storage import objects
+
+    asked = []
+    monkeypatch.setattr(objects, "presigned_url", lambda key, expires=3600: asked.append((key, expires)) or f"https://files.test/{key}")
+    monkeypatch.setattr(objects, "public_url", lambda key: pytest.fail(f"signed {key} for a week"))
+    for key in (f"{_layout_prefix(2)}speaker.png", "media/templates/certificates/signatures/x.png", f"{_layout_prefix(1)}../../2/layout/x.png"):
+        row = AgendaItems(id=None, event_id=1, title="Keynote", speaker_photo_key=key)
+        assert agenda.item_out(row, set())["speaker_photo_url"] == f"https://files.test/{key}"
+    assert [e for _, e in asked] == [HOUR, HOUR, HOUR]
