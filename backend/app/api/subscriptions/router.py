@@ -988,6 +988,18 @@ async def _settled_subscription(session, club_id: int):
     return row
 
 
+#: First key of the advisory lock a club's checkout takes.
+_CHECKOUT_LOCK = 7_420_388
+
+
+def _complimentary_refusal() -> CustomHTTPException:
+    return CustomHTTPException(
+        status_code=409,
+        message="Your plan is provided by MyOtherApp — talk to us to change it.",
+        error_code="COMPLIMENTARY_PLAN",
+    )
+
+
 async def _settle_ended_comp(session, row, now: datetime | None = None) -> bool:
     """Put away a complimentary plan the sweep has not reached yet. Returns
     whether there was one. Commits."""
@@ -1065,11 +1077,7 @@ async def start_subscription(
     club = await _own_club(session, user)
     current = await service.get_club_subscription(session, club.id)
     if service.comp_live(current):
-        raise CustomHTTPException(
-            status_code=409,
-            message="Your plan is provided by MyOtherApp — talk to us to change it.",
-            error_code="COMPLIMENTARY_PLAN",
-        )
+        raise _complimentary_refusal()
     # A comp that has ended but the sweep has not put away yet: put away now,
     # so the checkout starts from what the club really has.
     await _settle_ended_comp(session, current)
@@ -1090,7 +1098,19 @@ async def start_subscription(
         )
 
     now = datetime.now(timezone.utc)
-    row = await service.get_club_subscription(session, club.id)
+    # One checkout per club at a time, from here to the commit: a double
+    # click used to open two Razorpay subscriptions, each request reading the
+    # row before the other wrote it, and the one not kept could still be
+    # authorised and charge the club. The second click now waits, then finds
+    # the first's checkout and replaces it (cancelled at Razorpay) as any
+    # unauthorised checkout is. The row is locked as well, so a webhook about
+    # the club's subscription waits too. Held across the Razorpay calls on
+    # purpose -- the one place this module does: it is one club's own click,
+    # each call is bounded by RAZORPAY_TIMEOUT, and nothing else waits on it.
+    await session.execute(select(func.pg_advisory_xact_lock(_CHECKOUT_LOCK, club.id)))
+    row = await service.get_club_subscription(session, club.id, for_update=True)
+    if service.comp_live(row, now):
+        raise _complimentary_refusal()
     service.settle_stale_pending(row, now)
 
     replacing = None
