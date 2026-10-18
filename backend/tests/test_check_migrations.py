@@ -76,7 +76,7 @@ def _rules(versions: Path, since="w2_base") -> list[str]:
 
 
 def test_the_real_migrations_after_the_cutoff_are_clean():
-    """Every migration added after the cutoff (topics) is lock-safe, or says
+    """Every migration added after the cutoff (topic_placeholders) is lock-safe, or says
     on its line why a finding does not apply."""
     findings, checked = cm.check()
     assert not findings, "\n".join(str(f) for f in findings)

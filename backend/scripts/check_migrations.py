@@ -53,9 +53,12 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Iterable, Optional
 
-#: The newest migration when this check was introduced (2026-10-18): it and
-#: its ancestors are not checked.
-CUTOFF = "topics"
+#: The newest migration on master when this check was introduced
+#: (2026-10-18): it and its ancestors are not checked. topic_placeholders
+#: landed on master while the check was being written; its two UPDATEs are
+#: bounded by the placeholder value on the topic tables (tens of rows), so
+#: batches would buy nothing, and a shipped migration is not rewritten.
+CUTOFF = "topic_placeholders"
 
 VERSIONS = Path(__file__).resolve().parents[1] / "migrations" / "versions"
 

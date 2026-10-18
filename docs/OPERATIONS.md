@@ -104,7 +104,7 @@ $DC exec -T -e APP_MIGRATION_STATEMENT_TIMEOUT=10min backend alembic upgrade hea
 ```
 
 Writing a new migration: `python scripts/check_migrations.py` (also in the
-lint workflow) flags, in every migration after `topics`, a non-concurrent
+lint workflow) flags, in every migration after `topic_placeholders`, a non-concurrent
 index on a hot table, CONCURRENTLY outside an autocommit block, ADD COLUMN NOT
 NULL without a default, an UPDATE of a whole table or one not in committed
 batches, a column type change or ALTER TYPE, and DDL on a hot table without
