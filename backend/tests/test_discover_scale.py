@@ -562,7 +562,9 @@ async def test_statements_per_request_do_not_grow_with_the_number_of_events(clie
     assert sum(1 for _, f, m in table if m == f) >= len(table) - 2, table
     # The most is the front page for a place with nothing cached (26): every
     # section, the nearest clubs' cards and the categories, a query or two each.
-    assert max(few) <= 30, table
+    # (The front page with a point: 29 statements, and the two that keep
+    # "near you" walking each grid cell in order, SET LOCAL and RESET.)
+    assert max(few) <= 32, table
 
 
 # ─── The counters ────────────────────────────────────────────────────────

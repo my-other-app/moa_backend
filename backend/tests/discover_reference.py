@@ -4,7 +4,11 @@ distances, counts and order worked out in Python. Kept here as the yardstick
 the new queries are held to: same rows, same order, same numbers.
 
 With the rules changed since on purpose (discover_integrity): every word of
-a query must match (a word under three letters as a whole word), "popular"
+a query must match (a word under three letters as a whole word) anywhere the
+row is found by -- for an event its name, place and tag, its club's name and
+place, its category, its interests and their topics; for a club its name,
+tagline, place, interests and topics -- case and accents ignored
+(w2_search's search_text), "popular"
 is popularity.value (attention decayed by age), and For You spreads its
 first cards over clubs and counts an interest the user did not pick, under
 one of their topics, for W_SIBLING_INTEREST (topics).
@@ -15,6 +19,7 @@ cards' presentation, which the new code still builds with the same functions.
 from __future__ import annotations
 
 import re
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -27,7 +32,7 @@ from app.api.discover import geo, popularity
 from app.api.discover.service import WHOLE_WORD_BELOW, window, words_of
 from app.api.events.models import EventCategories, EventInterestsLink, EventRegistrationsLink, Events
 from app.api.events import recommendations as rec
-from app.api.interests.models import Interests
+from app.api.interests.models import InterestCategory, Interests
 from app.api.users.models import UserInterests, UserProfiles
 
 SHOWN = (EventStatus.published, EventStatus.live)
@@ -75,25 +80,53 @@ def _filtered(now, *, when="any", category=None, type_="any", price="any", q=Non
     return stmt.order_by(Events.event_datetime, Events.id)
 
 
+def fold(t: str) -> str:
+    """Lowercased, accents off: how search_text and a query compare."""
+    return "".join(c for c in unicodedata.normalize("NFKD", t) if not unicodedata.combining(c)).lower()
+
+
 def has_word(texts, word: str) -> bool:
     """`word` in any of `texts`: a substring from three letters, else a whole word."""
+    word = fold(word)
     for t in texts:
         if not t:
             continue
         if len(word) >= WHOLE_WORD_BELOW:
-            if word in t.lower():
+            if word in fold(t):
                 return True
-        elif re.search(r"(?<!\w)" + re.escape(word) + r"(?!\w)", t, re.I):
+        elif re.search(r"(?<!\w)" + re.escape(word) + r"(?!\w)", fold(t)):
             return True
     return False
 
 
 def words_match(q, texts) -> bool:
-    return all(has_word(texts, w) for w in words_of(q))
+    return all(has_word(texts, w) for w in words_of(fold(q or "")))
 
 
-def _event_texts(e):
-    return [e.name, e.club.name if e.club else None, e.location_name, e.category.name if e.category else None]
+async def interest_texts(session, link, owner_col, ids) -> dict:
+    """For each owner (event or club) id, the names of its live interests and their live topics."""
+    out: dict = {i: [] for i in ids}
+    if not ids:
+        return out
+    rows = await session.execute(
+        select(owner_col, Interests.name, InterestCategory.name, InterestCategory.is_deleted)
+        .join(Interests, Interests.id == link.interest_id)
+        .outerjoin(InterestCategory, InterestCategory.id == Interests.category_id)
+        .where(owner_col.in_(ids), link.is_deleted == False, Interests.is_deleted == False)  # noqa: E712
+        .execution_options(include_deleted=True)
+    )
+    for owner, name, topic, topic_deleted in rows.all():
+        out[owner].append(name)
+        if topic and not topic_deleted:
+            out[owner].append(topic)
+    return out
+
+
+def _event_texts(e, extra=()):
+    club = e.club
+    cat = e.category if e.category is not None and not e.category.is_deleted else None
+    return [e.name, e.location_name, e.event_tag, club.name if club else None, club.location_name if club else None,
+            cat.name if cat else None, *extra]
 
 
 def popular_key(e, going):
@@ -131,7 +164,8 @@ def _km(e, here):
 async def search_events(session, here, *, q=None, when="any", category=None, type_="any", price="any", radius_km=50.0, sort="date", offset=0, limit=24, now) -> dict:
     rows = list((await session.scalars(_filtered(now, when=when, category=category, type_=type_, price=price, q=q))).unique().all())
     if words_of(q):
-        rows = [e for e in rows if words_match(q, _event_texts(e))]
+        extra = await interest_texts(session, EventInterestsLink, EventInterestsLink.event_id, [e.id for e in rows])
+        rows = [e for e in rows if words_match(q, _event_texts(e, extra[e.id]))]
     dist = {e.id: _km(e, here) for e in rows}
     if here is not None and type_ != "online" and radius_km > 0:
         rows = [e for e in rows if e.is_online or dist[e.id] is None or dist[e.id] <= radius_km]
@@ -174,7 +208,8 @@ async def _club_rows(session, *, q=None, interest=None):
         )))
     rows = list((await session.scalars(stmt.order_by(Clubs.id))).all())
     if words_of(q):
-        rows = [c for c in rows if words_match(q, [c.name, c.tagline, c.location_name])]
+        extra = await interest_texts(session, ClubInterestsLink, ClubInterestsLink.club_id, [c.id for c in rows])
+        rows = [c for c in rows if words_match(q, [c.name, c.tagline, c.location_name, *extra[c.id]])]
     return rows
 
 

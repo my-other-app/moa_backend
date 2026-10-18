@@ -327,7 +327,7 @@ database storage growth above 20 GB a month.
 | do | trigger / note |
 |---|---|
 | **Partition `event_registrations_link`** by hash of `event_id` (16–32 parts), and archive registrations of events closed more than a year (detach old partitions or move them to a cheaper table). | ~10 crore rows. The primary key becomes `(id, event_id)`; the tables that reference a registration by id (deliveries, payments) need the event id with it. Plan it a quarter ahead. |
-| **Search**: keep pg_trgm while only upcoming events are searched (fix 13) and p95 stays under 200 ms; then **Meilisearch** (self-hosted, cheap) or **Amazon OpenSearch**, fed from an outbox table by the job queue. | Typos, ranking and facets across lakhs of events are what a search engine is for. |
+| **Search**: keep pg_trgm while only upcoming events are searched (fix 13) and p95 stays under 200 ms; then **Meilisearch** (self-hosted, cheap) or **Amazon OpenSearch**, fed from an outbox table by the job queue. | Typos, ranking and facets across lakhs of events are what a search engine is for. *Built (Wave 2, `w2_search`): Meilisearch behind `APP_SEARCH_URL`, fed from `search_outbox` by a leader loop until the job queue lands; off by default.* |
 | **CDN caching of public discover responses** with `Cache-Control: public, s-maxage=30–60, stale-while-revalidate=60`; the per-viewer parts (liked posts) fetched separately. | Takes most anonymous traffic off the API. |
 | **Per-user and per-IP rate limits in Redis**, a WAF rule set on CloudFront. | Protects the write paths and the expensive searches. |
 
@@ -373,6 +373,23 @@ per-word search; "popular" on a stored, decayed `events.popularity`; the
 discover caches serve stale while one task rebuilds (fix 10's single-flight,
 still per process). Measured in `backend/scripts/bench/RESULTS.md` under
 "Integrity and the live room".
+
+*Wave 2, 18 October 2026 (branch `feat/w2-search`, migration `w2_search`):*
+search and "near you". Every word is now tested against one normalised,
+trigram-indexed column (`search_text` on events, clubs and users: names,
+places, clubs, categories, interests, topics, tags; kept by triggers), and
+"near you" reads the 0.5° grid cells that cover the radius on
+`ix_events_shown_cell` / `ix_clubs_listed_cell` before the exact haversine.
+Meilisearch (self-hosted, a `meilisearch` service in docker-compose.prod.yml)
+is wired in behind `APP_SEARCH_URL`: a transactional outbox drained on one
+process, a reconcile every six hours, searches with words routed to it
+behind a circuit breaker with Postgres as the fallback. Measured at a lakh
+of clubs in `backend/scripts/bench/RESULTS.md`, "Search and geo, Wave 2":
+the front page's "near you" in a busy city 4 s / 18,000 pages → 35-47 ms /
+11,500-13,600; distance in a busy latitude band 57,622 → 15,698 pages; two
+words or a rare word 84,000 → 7,000-9,000 pages; a common word costs what its
+matches cost (now more of them: interests and topics count), which is
+Meilisearch's job once it is on.
 
 1. **Bound every "what is on" query from below.** In `app/api/discover/service.py`,
    `_visible_where` / `_conditions` (and `_public_where` for upcoming), add

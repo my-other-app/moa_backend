@@ -112,6 +112,11 @@ async def pick_targets(session) -> dict:
 
 BLR = dict(lat=12.9716, lng=77.5946)
 KOCHI = dict(lat=9.9312, lng=76.2673)
+MUMBAI = dict(lat=19.0760, lng=72.8777)
+# Places with nothing seeded within a hundred kilometres: where a walk in
+# date order, boxed, read every event still to come before giving up.
+LEH = dict(lat=34.1526, lng=77.5771)
+PORT_BLAIR = dict(lat=11.6234, lng=92.7265)
 
 
 def _forget() -> None:
@@ -224,6 +229,20 @@ def endpoints(t: dict) -> list[tuple[str, str, dict, bool]]:
         ("sitemap events page 1 (cold)", "/discover/sitemap/events/1", {}, False),
         ("sitemap events page 1", "/discover/sitemap/events/1", {}, False),
         ("sitemap clubs page 1 (cold)", "/discover/sitemap/clubs/1", {}, False),
+        # Added with w2-search: "near you" where little or nothing is near
+        # (the grid cells), and words found through search_text.
+        ("home lat/lng Leh (cold)", "/discover/home", LEH, False),
+        ("home lat/lng Port Blair (cold)", "/discover/home", PORT_BLAIR, False),
+        ("home lat/lng Mumbai (cold)", "/discover/home", MUMBAI, False),
+        ("events lat/lng Leh (radius 50, date)", "/discover/events", LEH, False),
+        ("events distance r=50 Mumbai", "/discover/events", {**MUMBAI, "sort": "distance", "radius_km": 50}, False),
+        ("events distance r=50 Leh", "/discover/events", {**LEH, "sort": "distance", "radius_km": 50}, False),
+        ("clubs nearby Leh", "/discover/clubs", {**LEH, "sort": "nearby"}, False),
+        ("clubs r=50 popular", "/discover/clubs", {**BLR, "radius_km": 50}, False),
+        ("events q two words", "/discover/events", {"q": "robotics kochi", "radius_km": 0}, False),
+        ("events q city", "/discover/events", {"q": "bengaluru", "radius_km": 0}, False),
+        ("events q rare", "/discover/events", {"q": "sculpture showcase", "radius_km": 0}, False),
+        ("app clubs search", "/clubs/list", {"search": "robotics"}, True),
     ]
 
 

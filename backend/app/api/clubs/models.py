@@ -17,7 +17,7 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from app.core.utils.db_fields import TZAwareDateTime
 from app.db.base import AbstractSQLModel
 from app.db.mixins import SoftDeleteMixin, TimestampsMixin
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import deferred, relationship
 
 from app.core.storage.fields import S3ImageField
 
@@ -105,6 +105,11 @@ class Clubs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     # block on the organisation changes it behind any loaded copy, so the
     # rules ask for it in a WHERE rather than off an object.
     listed = Column(Boolean, nullable=False, server_default=sa.false(), server_onupdate=sa.FetchedValue())
+    # Name, tagline, place, interests and their topics, lowercased and
+    # unaccented (app.api.search.text); the grid cell of its place
+    # (app.api.discover.cells). Kept by triggers; only SQL reads them.
+    search_text = deferred(Column(sa.Text, nullable=True))
+    geocell = deferred(Column(Integer, nullable=True))
     __mapper_args__ = {"eager_defaults": True}
 
     user = relationship("Users", back_populates="club")
@@ -127,9 +132,11 @@ class Clubs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         return loaded_topics(self)
 
     __table_args__ = (
+        # The name alone, for the admin's tools; everything a club is found by (search_text) for the searches.
         sa.Index("ix_clubs_name_trgm", "name", postgresql_using="gin", postgresql_ops={"name": "gin_trgm_ops"}, postgresql_where=sa.text("NOT is_deleted")),
-        sa.Index("ix_clubs_tagline_trgm", "tagline", postgresql_using="gin", postgresql_ops={"tagline": "gin_trgm_ops"}, postgresql_where=sa.text("NOT is_deleted")),
-        sa.Index("ix_clubs_location_trgm", "location_name", postgresql_using="gin", postgresql_ops={"location_name": "gin_trgm_ops"}, postgresql_where=sa.text("NOT is_deleted")),
+        sa.Index("ix_clubs_search_trgm", "search_text", postgresql_using="gin", postgresql_ops={"search_text": "gin_trgm_ops"}, postgresql_where=sa.text("NOT is_deleted")),
+        # "Clubs near": the listed clubs in a handful of grid cells (app.api.discover.cells).
+        sa.Index("ix_clubs_listed_cell", "geocell", postgresql_where=sa.text("listed AND geocell IS NOT NULL")),
         # The club an account owns: every signed-in request loads it with the
         # user (app.core.auth), which read the whole table without this.
         sa.Index("ix_clubs_user_id", "user_id"),

@@ -202,6 +202,23 @@ class AppConfig(BaseSettings):
     GEOCODER_ENABLED: bool = True
     GEOCODER_URL: str = "https://nominatim.openstreetmap.org/search"
     GEOCODER_EMAIL: str = "support@myotherapp.in"
+    # Meilisearch (app/core/search.py, app/api/search): unset, every search
+    # is Postgres's (search_text and its trigram indexes), as before. Set
+    # (e.g. http://meilisearch:7700 and the instance's master or an admin
+    # key), the search outbox is carried to it, the indexes are built once
+    # by one process, and searches with words ask it -- falling back to
+    # Postgres on any failure, and for SEARCH_BREAKER_SECONDS after
+    # SEARCH_BREAKER_FAILURES failures in a row. SEARCH_TIMEOUT bounds each
+    # call (seconds). SEARCH_INDEX_PREFIX names the indexes ({prefix}events,
+    # {prefix}clubs), so two environments can share one instance. The indexes
+    # are compared with the database every SEARCH_RECONCILE_HOURS.
+    SEARCH_URL: str = ""
+    SEARCH_KEY: str = ""
+    SEARCH_TIMEOUT: float = 0.8
+    SEARCH_BREAKER_FAILURES: int = 3
+    SEARCH_BREAKER_SECONDS: float = 30.0
+    SEARCH_INDEX_PREFIX: str = "moa_"
+    SEARCH_RECONCILE_HOURS: float = 6.0
     PUBLIC_CLUB_URL: str = "https://myotherapp.in/clubs/{slug}"
     # A club's published website at its own address (served by the club-sites Cloudflare Worker).
     # PUBLIC_CLUB_URL stays the public site's page tracking links land on; it frames the same site.

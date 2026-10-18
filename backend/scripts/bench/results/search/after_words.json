@@ -1,0 +1,246 @@
+{
+ "label": "after2",
+ "targets": {
+  "club": "club-86872-yoga",
+  "event": "e263768-biotech-hackathon",
+  "event_big_category": "e252999-cricket-panel",
+  "interest": 24,
+  "category": 4,
+  "user_id": 1
+ },
+ "results": [
+  {
+   "name": "events q",
+   "path": "/discover/events",
+   "params": {
+    "q": "robotics"
+   },
+   "n": 6,
+   "p50": 1550.470875496103,
+   "p95": 3136.559958496946,
+   "p99": 3350.518825298059,
+   "mean": 1772.062916830085,
+   "statements_min": 6,
+   "statements_max": 6,
+   "sql_ms": 1753.5699168220162,
+   "bytes": 34248,
+   "pages": 78227,
+   "pages_hit": 58907,
+   "pages_read": 19320
+  },
+  {
+   "name": "events q short",
+   "path": "/discover/events",
+   "params": {
+    "q": "ai"
+   },
+   "n": 5,
+   "p50": 2206.6716669942252,
+   "p95": 2397.1270420006476,
+   "p99": 2426.132842001971,
+   "mean": 2080.5341333994875,
+   "statements_min": 3,
+   "statements_max": 4,
+   "sql_ms": 2063.931766792666,
+   "bytes": 33321,
+   "pages": 105892,
+   "pages_hit": 61346,
+   "pages_read": 44546
+  },
+  {
+   "name": "events q typo",
+   "path": "/discover/events",
+   "params": {
+    "q": "robtics"
+   },
+   "n": 15,
+   "p50": 403.7461669940967,
+   "p95": 1069.89773389796,
+   "p99": 1238.4857803772318,
+   "mean": 485.472886331263,
+   "statements_min": 7,
+   "statements_max": 8,
+   "sql_ms": 543.3250607951777,
+   "bytes": 34268,
+   "pages": 29957,
+   "pages_hit": 251,
+   "pages_read": 29706
+  },
+  {
+   "name": "events q relevance",
+   "path": "/discover/events",
+   "params": {
+    "q": "robotics",
+    "sort": "relevance"
+   },
+   "n": 5,
+   "p50": 4750.543458998436,
+   "p95": 6459.462016794713,
+   "p99": 6758.248036954901,
+   "mean": 4826.33389159746,
+   "statements_min": 6,
+   "statements_max": 6,
+   "sql_ms": 4807.072133597103,
+   "bytes": 34248,
+   "pages": 78235,
+   "pages_hit": 58617,
+   "pages_read": 19618
+  },
+  {
+   "name": "calendar q (cold)",
+   "path": "/discover/calendar",
+   "params": {
+    "month": "2026-11",
+    "q": "robotics"
+   },
+   "n": 15,
+   "p50": 47.12479199224617,
+   "p95": 52.867191894620184,
+   "p99": 55.14643838250777,
+   "mean": 46.1423833311225,
+   "statements_min": 1,
+   "statements_max": 1,
+   "sql_ms": 41.52907519795311,
+   "bytes": 538,
+   "pages": 31696,
+   "pages_hit": 31696,
+   "pages_read": 0
+  },
+  {
+   "name": "clubs q",
+   "path": "/discover/clubs",
+   "params": {
+    "q": "robotics"
+   },
+   "n": 15,
+   "p50": 11.703374999342486,
+   "p95": 18.051516798732333,
+   "p99": 20.211669758136846,
+   "mean": 12.652288799290545,
+   "statements_min": 6,
+   "statements_max": 6,
+   "sql_ms": 5.947149733159071,
+   "bytes": 17620,
+   "pages": 1580,
+   "pages_hit": 1580,
+   "pages_read": 0
+  },
+  {
+   "name": "clubs q typo",
+   "path": "/discover/clubs",
+   "params": {
+    "q": "robtics"
+   },
+   "n": 15,
+   "p50": 25.726459003635682,
+   "p95": 34.68100430327467,
+   "p99": 35.79416726832278,
+   "mean": 26.77209726922835,
+   "statements_min": 8,
+   "statements_max": 8,
+   "sql_ms": 20.80334726100167,
+   "bytes": 17620,
+   "pages": 9453,
+   "pages_hit": 6645,
+   "pages_read": 2808
+  },
+  {
+   "name": "app list search",
+   "path": "/events/list",
+   "params": {
+    "search": "robotics"
+   },
+   "n": 5,
+   "p50": 10859.79462499381,
+   "p95": 10888.099925004644,
+   "p99": 10891.292985003674,
+   "mean": 10246.086641598959,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 10195.470242001466,
+   "bytes": 21709,
+   "pages": 28592,
+   "pages_hit": 111,
+   "pages_read": 28481
+  },
+  {
+   "name": "events q two words",
+   "path": "/discover/events",
+   "params": {
+    "q": "robotics kochi",
+    "radius_km": 0
+   },
+   "n": 15,
+   "p50": 25.221834002877586,
+   "p95": 47.094996403029654,
+   "p99": 49.85003287933068,
+   "mean": 28.900944598717615,
+   "statements_min": 6,
+   "statements_max": 6,
+   "sql_ms": 20.344410998707946,
+   "bytes": 34395,
+   "pages": 6865,
+   "pages_hit": 6841,
+   "pages_read": 24
+  },
+  {
+   "name": "events q city",
+   "path": "/discover/events",
+   "params": {
+    "q": "bengaluru",
+    "radius_km": 0
+   },
+   "n": 15,
+   "p50": 113.14033299277071,
+   "p95": 465.0415875003083,
+   "p99": 858.443617499142,
+   "mean": 184.46983886630431,
+   "statements_min": 6,
+   "statements_max": 6,
+   "sql_ms": 174.55916393276613,
+   "bytes": 34785,
+   "pages": 91761,
+   "pages_hit": 71825,
+   "pages_read": 19936
+  },
+  {
+   "name": "events q rare",
+   "path": "/discover/events",
+   "params": {
+    "q": "sculpture showcase",
+    "radius_km": 0
+   },
+   "n": 15,
+   "p50": 35.75016699323896,
+   "p95": 45.85329620895208,
+   "p99": 50.17082564911106,
+   "mean": 37.30747206912687,
+   "statements_min": 6,
+   "statements_max": 6,
+   "sql_ms": 29.4622998694346,
+   "bytes": 35810,
+   "pages": 8845,
+   "pages_hit": 8841,
+   "pages_read": 4
+  },
+  {
+   "name": "app clubs search",
+   "path": "/clubs/list",
+   "params": {
+    "search": "robotics"
+   },
+   "n": 15,
+   "p50": 20.297541996114887,
+   "p95": 43.953416898148056,
+   "p99": 83.69498338433908,
+   "mean": 25.16032226558309,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 13.919469465812048,
+   "bytes": 14935,
+   "pages": 3609,
+   "pages_hit": 3609,
+   "pages_read": 0
+  }
+ ]
+}

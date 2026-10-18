@@ -63,12 +63,17 @@ def start_loops() -> list[asyncio.Task]:
     # each money transition's own transaction, never here or in a job: this
     # only repairs and checks them.
     from app.api.ledger.jobs import daily_loop as ledger_daily_loop
+    # Search: the outbox drained (to Meilisearch when APP_SEARCH_URL is set;
+    # taxonomy renames into search_text always), the indexes built and
+    # checked -- every second or five, on one process (app.api.search.sync).
+    from app.api.search.sync import loop as search_sync_loop
 
     return [
         asyncio.create_task(loop())
         for loop in (
             sweep_loop, closeout_sweep_loop, feedback_sweep_loop, billing_sweep_loop, counter_check_loop,
             domains_sweep_loop, store_sweep_loop, payments_sweep_loop, account_sweep_loop, ledger_daily_loop,
+            search_sync_loop,
         )
     ]
 
