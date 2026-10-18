@@ -273,6 +273,7 @@ async def test_a_provider_timeout_is_tried_again_later_under_the_same_key(sessio
         await session.execute(update(Deliveries).where(Deliveries.id == row.id).values(next_attempt_at=datetime.now(timezone.utc) - timedelta(seconds=1)))
         await session.commit()
         assert (await deliveries.resume(session))["started"] == 1
+        await jobs.settle()
         await pipeline.drain()
     finally:
         email_mod.send_email = real
@@ -291,6 +292,7 @@ async def test_a_claim_left_by_a_dead_worker_is_put_back_and_sent(session, world
     await session.commit()
     resumed = await deliveries.resume(session)
     assert resumed["stale"] == len(world.regs) and resumed["started"] == 1
+    await jobs.settle()
     await pipeline.drain()
     assert len(outbox.sent) == len(world.regs)
     assert all(d.status is DeliveryStatus.sent for d in (await _rows(session, world.event.id)).values())
@@ -301,6 +303,7 @@ async def test_a_queue_whose_worker_never_started_is_picked_up(session, world, o
     await session.execute(update(Deliveries).where(Deliveries.id.in_(q["ids"])).values(updated_at=datetime.now(timezone.utc) - timedelta(minutes=3)))
     await session.commit()
     assert (await deliveries.resume(session))["started"] == 1
+    await jobs.settle()
     await pipeline.drain()
     assert len(outbox.sent) == len(world.regs)
     # A day-old queue is not sent: it may be for an event now over.
@@ -323,6 +326,7 @@ async def test_a_reminder_cut_off_by_a_deploy_is_finished_not_sent_again(session
 
     resumed = await emails.resume_messages(session)
     assert resumed["started"] == 1
+    await jobs.settle()
     await pipeline.drain()
     msg = await session.get(Messages, msg.id, populate_existing=True)
     assert msg.status is MessageStatus.SENT and msg.sent_count == len(world.regs)
@@ -355,6 +359,7 @@ async def test_a_provider_down_for_good_is_given_up_on_and_the_admins_told(sessi
     await session.execute(update(Deliveries).where(Deliveries.id == row.id).values(next_attempt_at=datetime.now(timezone.utc) - timedelta(seconds=1)))
     await session.commit()
     await deliveries.resume(session)
+    await jobs.settle()
     await pipeline.drain()
     row = (await _rows(session, world.event.id))[a.id]
     assert row.status is DeliveryStatus.dead and row.error.startswith("gave up after 2 tries")
@@ -648,11 +653,11 @@ async def test_a_mail_cut_off_by_a_restart_is_sent_when_its_lease_runs_out(sessi
                     locked_by="api:gone:1:abc", locked_until=past, run_at=past)
     session.add(cut)
     await session.commit()
-    assert await jobs.run_due() == 1
+    assert await jobs.run_due(ids=[cut.id]) == 1
     assert len(sent) == 1 and sent[0]["recipients"] == ["ops@example.com"] and "Alert 8" in sent[0]["subject"]
     row = await session.get(jobs.Jobs, cut.id, populate_existing=True)
     assert row.finished_at is not None and row.attempts == 2 and row.locked_by is None
-    assert await jobs.run_due() == 0  # sent once
+    assert await jobs.run_due(ids=[cut.id]) == 0  # sent once
 
 
 async def test_a_billing_mail_the_provider_refuses_is_retried_then_given_up_on(session, monkeypatch):
@@ -676,7 +681,7 @@ async def test_a_billing_mail_the_provider_refuses_is_retried_then_given_up_on(s
     for _ in range(row.max_attempts - 1):
         await session.execute(update(jobs.Jobs).where(jobs.Jobs.id == row.id).values(run_at=datetime.now(timezone.utc) - timedelta(seconds=1)))
         await session.commit()
-        await jobs.run_due()
+        await jobs.run_due(ids=[row.id])
         row = await session.get(jobs.Jobs, row.id, populate_existing=True)
         waits.append((row.run_at - datetime.now(timezone.utc)).total_seconds())
     assert len([t for t in tries if t["recipients"] == ["owner@example.com"]]) == row.max_attempts and row.dead is True
@@ -724,6 +729,9 @@ async def test_the_old_outbox_rows_are_moved_into_jobs_and_sent(session, monkeyp
     sent: list = []
     monkeypatch.setattr(email_mod, "send_email", lambda **kw: sent.append(kw))
     monkeypatch.setattr(settings, "ADMIN_ALERT_EMAILS", "ops@example.com")
+    # The model is gone, so create_all no longer makes it; a database made
+    # before may still have one (dropped here inside the test's transaction).
+    await session.execute(text("DROP TABLE IF EXISTS after_commit_jobs"))
     await session.execute(text("""
         CREATE TABLE after_commit_jobs (id uuid PRIMARY KEY, job varchar(200) NOT NULL, payload json NOT NULL,
             attempts integer NOT NULL, next_attempt_at timestamptz NOT NULL, last_error varchar(400), dead boolean NOT NULL,
@@ -743,7 +751,7 @@ async def test_the_old_outbox_rows_are_moved_into_jobs_and_sent(session, monkeyp
     assert await session.scalar(text("SELECT job FROM after_commit_jobs")) == "app.no_such_module:gone"
     [row] = list(await session.scalars(select(jobs.Jobs)))
     assert row.name == "admin_alerts.deliver" and row.attempts == 2
-    assert await jobs.run_due() == 1
+    assert await jobs.run_due(ids=[row.id]) == 1
     assert len(sent) == 1 and "Alert 11" in sent[0]["subject"]
 
 

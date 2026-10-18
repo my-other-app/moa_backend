@@ -41,6 +41,7 @@ from app.api.events.access import ensure_event_access, is_admin_user
 from app.api.events.documents import EVENT_TIMEZONE
 from app.api.events.models import EventRegistrationsLink, Events
 from app.api.events.tickets import ticket_document
+from app.core import jobs
 from app.core import providers as providers_mod
 from app.core.email import email as email_mod
 from app.core.email import transport
@@ -135,10 +136,13 @@ async def queue(
     registration_ids: Optional[list] = None,
     only: str = "unsent",
     force: bool = False,
+    send: bool = False,
 ) -> dict:
     """Put a pending row in place for every guest and channel that should be
     sent, and answer with what was queued and why the rest was not. Nothing is
-    sent here; `run` does that after the response.
+    sent here. With `send`, the job that sends them (`start`) is written in
+    the same transaction as the rows, so the rows cannot be committed without
+    it; otherwise the caller sends them (`run`, `deliver`).
 
     One statement per channel: INSERT ... ON CONFLICT DO UPDATE ... WHERE the
     row may be queued again. Two clicks at once both succeed and queue each
@@ -202,6 +206,8 @@ async def queue(
                 .returning(table.c.id)
             )
         ids.extend((await session.execute(stmt)).scalars().all())
+    if send and ids:
+        await start(session, event.id, kind)
     await session.commit()
     return {
         "queued": len(ids) + in_flight,
@@ -516,10 +522,35 @@ async def _run_due(event_id: int, kind: DeliveryKind) -> int:
     )
 
 
+# --- the jobs ---------------------------------------------------------------
+
+
+@jobs.handler("deliveries.send", max_attempts=6, timeout=3600.0, concurrency=2)
+async def _send_job(payload: dict) -> None:
+    """What is pending and due of one event's tickets or certificates: the
+    rows are claimed one by one before they are sent, so this job running
+    twice, or beside another send of the same event, sends nobody twice. A
+    big send takes minutes at the provider's pace (an hour is its limit;
+    what is left then is the resumer's)."""
+    event_id, kind = int(payload["event_id"]), DeliveryKind(payload["kind"])
+    await pipeline.run(("delivery-job", uuid.uuid4()), lambda: _run_due(event_id, kind))
+
+
+async def start(session, event_id: int, kind: DeliveryKind, *, dedupe: bool = False) -> None:
+    """Have the event's pending sends of this kind sent after the caller's
+    commit -- by this process's job runner, or the worker's. `dedupe`: not
+    if a job for them is already waiting or running (the resumer's minute)."""
+    await jobs.enqueue(
+        session, "deliveries.send", {"event_id": int(event_id), "kind": kind.value},
+        dedupe_key=f"deliveries:{int(event_id)}:{kind.value}" if dedupe else None,
+    )
+
+
 async def resume(session, now: Optional[datetime] = None) -> dict:
     """The minute sweep's look at deliveries: put back the claims of workers
-    that died, give up on what waited too long or failed too often, and start
-    a job for each event with something due. Starts jobs; sends nothing here."""
+    that died, give up on what waited too long or failed too often, and
+    enqueue a job for each event with something due (one per event and kind,
+    not one a minute while a long send runs). Sends nothing here."""
     now = now or pipeline.now()
     db = _db(session)
     stale = (
@@ -572,24 +603,21 @@ async def resume(session, now: Optional[datetime] = None) -> dict:
         )
     ).all()
     started = 0
-    for event_id, kind in due:
-        key = ("deliveries", event_id, kind.value)
-        if not pipeline.running(key):
-            pipeline.spawn(key, lambda e=event_id, k=kind: _run_due(e, k))
-            started += 1
+    if due:
+        async with db.tx() as s:
+            for event_id, kind in due:
+                await start(s, event_id, kind, dedupe=True)
+                started += 1
     return {"stale": len(stale), "too_old": len(too_old), "dead": len(gave_up), "started": started}
 
 
 async def send_ticket(session, event: Events, registration: EventRegistrationsLink, background_tasks=None) -> None:
     """The ticket email at registration or payment: queued like any other
-    send, so the attendee list shows it landing, and sent after the response
-    when there is a response to wait for. Nothing is re-sent if the guest
-    already has one."""
-    result = await queue(session, event, DeliveryKind.ticket, registration_ids=[registration.id], only="unsent")
-    if not result["ids"]:
-        return
-    if background_tasks is not None:
-        background_tasks.add_task(run, result["ids"])
+    send, so the attendee list shows it landing, and -- when there is a
+    response to wait for (`background_tasks`) -- sent by a job after the
+    commit, off the request. Nothing is re-sent if the guest already has one."""
+    result = await queue(session, event, DeliveryKind.ticket, registration_ids=[registration.id], only="unsent", send=background_tasks is not None)
+    if not result["ids"] or background_tasks is not None:
         return
     for did in result["ids"]:
         await deliver(session, did)
@@ -616,12 +644,10 @@ async def resend_ticket(session, event: Events, registration: EventRegistrations
         last = prior.sent_at if prior.status is DeliveryStatus.sent else prior.updated_at
         if last is not None and datetime.now(timezone.utc) - last < RESEND_GAP:
             return False
-    result = await queue(session, event, DeliveryKind.ticket, registration_ids=[registration.id], force=True)
+    result = await queue(session, event, DeliveryKind.ticket, registration_ids=[registration.id], force=True, send=background_tasks is not None)
     if not result["ids"]:
         return False
-    if background_tasks is not None:
-        background_tasks.add_task(run, result["ids"])
-    else:
+    if background_tasks is None:
         for did in result["ids"]:
             await deliver(session, did)
     return True

@@ -45,6 +45,7 @@ from app.api.events.models import EventRegistrationsLink, Events
 from app.api.events.tickets import poster_url, ticket_document
 from app.api.templates_audience import RegistrationRole
 from app.config import settings
+from app.core import jobs
 from app.core.email import email as email_mod
 from app.core.email import transport
 from app.core.mail import links, suppression
@@ -636,8 +637,9 @@ async def start_message(
     client_ref=None,
     created_by=None,
 ) -> Messages:
-    """The message and one pending delivery per guest. Nothing is sent here;
-    `run_message` does that after the response, or a job the timer starts.
+    """The message and one pending delivery per guest, and the job that sends
+    them (`enqueue_send`), in one transaction. Nothing is sent here: the job
+    runs after the commit, in this process or the worker.
 
     Sent once however it is asked: a `client_ref` the event has seen returns
     that message (two at once: the unique index decides, and the second
@@ -689,6 +691,8 @@ async def start_message(
             )
         )
         msg.recipients = inserted.rowcount or 0
+        # Its sending, written with it: committed together or not at all.
+        await enqueue_send(session, msg.id)
         await session.commit()
     except IntegrityError:
         # The same client_ref, committed a moment ago by the other click.
@@ -940,6 +944,20 @@ def start_job(message_id) -> None:
     pipeline.spawn(("message", message_id), lambda: _run_message(message_id))
 
 
+@jobs.handler("emails.send_message", max_attempts=6, timeout=3600.0, concurrency=2)
+async def _message_job(payload: dict) -> None:
+    """Send what is left of one message. Each guest's copy is claimed before
+    it goes, so the job running twice, or beside the resumer, mails nobody
+    twice; a message cut off by a deploy is finished by the next run."""
+    await run_message(uuid.UUID(str(payload["message_id"])))
+
+
+async def enqueue_send(session, message_id) -> None:
+    """The message's sending, as a job after the caller's commit: one waiting
+    or running job per message (the resumer asks every minute)."""
+    await jobs.enqueue(session, "emails.send_message", {"message_id": str(message_id)}, dedupe_key=f"emails:message:{message_id}")
+
+
 async def resume_messages(session, now: Optional[datetime] = None) -> dict:
     """The minute sweep's look at messages: put back the claims of workers
     that died, give up on rows tried too often, finish what was cut off --
@@ -983,7 +1001,8 @@ async def resume_messages(session, now: Optional[datetime] = None) -> dict:
             await finish_message(db, message_id)
             late += 1
         elif not pipeline.running(("message", message_id)):
-            start_job(message_id)
+            async with db.tx() as s:
+                await enqueue_send(s, message_id)
             started += 1
     return {"stale": len(stale), "dead": len(gave_up), "started": started, "late": late}
 
@@ -1111,10 +1130,11 @@ def due_query(now: datetime):
 
 async def sweep(session, now: Optional[datetime] = None) -> int:
     """Queue every timed journey email that has come due and not yet gone,
-    and start its job. Once per template, ever: the message row is the
-    record -- and a message cut off half-sent is finished by the resumer,
-    not sent again. Sends nothing itself, so one big reminder never holds up
-    the sweep (or anyone else's reminder) while it goes. Returns how many it queued."""
+    each with the job that sends it (start_message). Once per template, ever:
+    the message row is the record -- and a message cut off half-sent is
+    finished by the resumer, not sent again. Sends nothing itself, so one big
+    reminder never holds up the sweep (or anyone else's reminder) while it
+    goes. Returns how many it queued."""
     now = now or datetime.now(timezone.utc)
     queued: list = []
     # The session is the sweep's until it is done with it; the jobs start after.
@@ -1135,8 +1155,6 @@ async def sweep(session, now: Optional[datetime] = None) -> int:
                 # One email that cannot go must not hold up the others.
                 logger.exception("timed email %s could not be queued", tpl.id)
                 await session.rollback()
-    for message_id in queued:
-        start_job(message_id)
     return len(queued)
 
 

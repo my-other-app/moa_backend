@@ -74,6 +74,11 @@ async def queue(_engine, monkeypatch):
     monkeypatch.setattr(jobs, "session_scope", scope)
     monkeypatch.setattr(settings, "JOBS_POLL_SECONDS", 0.05)
     started: list = []
+    # Committed jobs another test left behind are not this test's to run or count.
+    async with make() as s:
+        await s.execute(delete(jobs.Jobs))
+        await s.execute(delete(jobs.JobWorkers))
+        await s.commit()
 
     def runner(kind="worker", **kw):
         r = jobs.Runner(kind=kind, maintenance=False, **kw).start()
@@ -127,7 +132,12 @@ async def test_a_job_is_written_with_the_change_and_goes_with_its_rollback(sessi
     await session.commit()
     await jobs.settle()
     assert [p["n"] for p in SEEN["test.record"]] == [1, 2]
-    assert await jobs.run_due() == 0
+    assert await jobs.run_due(ids=await _ids(session)) == 0
+
+
+async def _ids(session) -> list[int]:
+    """This test's jobs (committed ones other tests left are not its to run)."""
+    return list((await session.scalars(select(jobs.Jobs.id))).all())
 
 
 async def test_a_payload_is_json_and_what_is_not_fails_the_enqueue(session):
@@ -160,7 +170,7 @@ async def test_run_at_and_priority(session):
     await jobs.enqueue(session, "test.record", {"n": "normal"})
     await jobs.enqueue(session, "test.record", {"n": "urgent"}, priority=10)
     await session.commit()
-    await jobs.run_due()
+    await jobs.run_due(ids=await _ids(session))
     assert [p["n"] for p in SEEN["test.record"]] == ["urgent", "normal", "low"]
 
 
@@ -431,3 +441,24 @@ async def test_jobs_finished_are_deleted_at_once_with_no_keeping(queue, monkeypa
         await s.commit()
     await jobs.run_due()
     assert SEEN["test.record"] == [{"n": 1}] and await _rows(queue.make) == []
+
+
+# ─── Every enqueue has its handler ───────────────────────────────────────
+
+
+def test_every_job_the_code_enqueues_has_a_handler():
+    """A name with no handler is never claimed: it would wait for ever.
+    Every literal name passed to enqueue in app/ must be registered once the
+    app is imported, as the worker imports it."""
+    import re
+    from pathlib import Path
+
+    import doth  # noqa: F401
+
+    root = Path(__file__).resolve().parents[1] / "app"
+    names = set()
+    for path in root.rglob("*.py"):
+        names |= set(re.findall(r"""jobs\.enqueue\(\s*\w+,\s*["']([\w.]+)["']""", path.read_text()))
+    assert names, "no enqueue found: the pattern above is out of date"
+    missing = sorted(n for n in names if n not in jobs.handlers())
+    assert missing == []

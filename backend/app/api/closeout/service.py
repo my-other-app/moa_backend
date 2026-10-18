@@ -29,6 +29,7 @@ from app.api.events.models import EventRatingsLink, EventRegistrationsLink, Even
 from app.api.kiosk.models import SelfCheckInSessions
 from app.api.merch.models import MerchItems
 from app.config import settings
+from app.core import jobs
 from app.core.email import email as email_mod
 from app.core.storage import objects
 from app.db.locks import singleton
@@ -114,13 +115,17 @@ def report_out(r: CloseoutReports, by_name: Optional[str]) -> dict:
 
 
 async def generate(session, event: Events, user=None) -> CloseoutReports:
-    """The report as of now, rendered and kept; nothing else changes."""
+    """The report as of now, rendered and kept; nothing else changes. The
+    drawing runs on the render threads and the upload on a worker thread:
+    neither holds the event loop (the PDF and S3's answer used to)."""
+    from app.core.layout import pool
+
     f = await figures(session, event)
     now = datetime.now(timezone.utc)
     stamp = now.strftime("%Y%m%d%H%M")
-    pdf = report_pdf(f, now, EVENT_TIMEZONE)
+    pdf = await pool.run(report_pdf, f, now, EVENT_TIMEZONE)
     key = os.path.join(settings.S3_BASE_PATH, "events", str(event.id), "closeout") + f"/{uuid.uuid4().hex}.pdf"
-    objects.put_bytes(key, pdf, "application/pdf")
+    await asyncio.to_thread(objects.put_bytes, key, pdf, "application/pdf")
     row = CloseoutReports(event_id=event.id, pdf_key=key, filename=f"{event.slug}-closeout-{stamp}.pdf", figures=f, generated_at=now, generated_by=user.id if user is not None else None, delivered_to=[])
     session.add(row)
     await session.commit()
@@ -130,13 +135,14 @@ async def generate(session, event: Events, user=None) -> CloseoutReports:
 async def deliver(session, event: Events, report: CloseoutReports, recipients: list) -> tuple:
     """Deliver to every recipient. Partial delivery counts as failure: the
     caller must not scrub anything unless `failed` is empty."""
-    pdf = objects.get_bytes(report.pdf_key)
+    pdf = await asyncio.to_thread(objects.get_bytes, report.pdf_key)
     if not pdf:
         raise CustomHTTPException(500, message="The report file is missing from storage.")
     delivered, failed = [], []
     for to in recipients:
         try:
-            email_mod.send_email_with_attachment(
+            await asyncio.to_thread(
+                email_mod.send_email_with_attachment,
                 recipients=to, subject=f"Closeout report — {event.name}",
                 body_text=f"The closeout report for {event.name} is attached. Guest data is scrubbed once this report is confirmed delivered to every recipient.",
                 body_html=f"<p>The closeout report for <strong>{event.name}</strong> is attached.</p><p>Guest data is scrubbed once this report is confirmed delivered to every recipient.</p>",
@@ -419,23 +425,34 @@ async def advance_clock(session, now: Optional[datetime] = None) -> int:
 
 
 async def sweep(session, now: Optional[datetime] = None) -> dict:
-    """Called every minute: move the clocks, then run every due retention job."""
+    """Called every minute: move the clocks, then hand every due retention
+    run to a job (`closeout.retention`). The report is drawn, stored and
+    mailed there -- in the worker when there is one -- not in the sweep,
+    which used to do them one after another on the web process's loop."""
     now = now or datetime.now(timezone.utc)
     moved = await advance_clock(session, now)
     due = list((await session.execute(
-        select(RetentionJobs, Events).join(Events, Events.id == RetentionJobs.event_id).options(joinedload(Events.club))
+        select(RetentionJobs.event_id).join(Events, Events.id == RetentionJobs.event_id)
         .where(Events.retention_mode == RetentionMode.delete, Events.is_deleted == False, RetentionJobs.state.in_([RetentionState.pending, RetentionState.report_sent, RetentionState.failed]), RetentionJobs.run_at <= now)  # noqa: E712
-        .limit(50)
-    )).all())
-    ran = 0
-    for _job, event in due:
-        try:
-            await run_retention(session, event, manual=False)
-            ran += 1
-        except Exception:  # noqa: BLE001
-            logger.exception("retention run failed for event %s", event.id)
-            await session.rollback()
-    return {"moved": moved, "ran": ran}
+        .limit(500)
+    )).scalars().all())
+    for event_id in due:
+        # One waiting or running per event; the run itself takes the event's lock.
+        await jobs.enqueue(session, "closeout.retention", {"event_id": int(event_id)}, dedupe_key=f"closeout:retention:{int(event_id)}")
+    if due:
+        await session.commit()
+    return {"moved": moved, "queued": len(due)}
+
+
+@jobs.handler("closeout.retention", max_attempts=3, timeout=900.0)
+async def _retention_job(p: dict) -> None:
+    """Forward only, under the event's lock, so it is safe run twice: a run
+    that already reported goes on to the scrub; one already scrubbed stops."""
+    async with jobs.scope() as session:
+        event = await session.scalar(select(Events).options(joinedload(Events.club)).where(Events.id == int(p["event_id"])))
+        if event is None or event.is_deleted:
+            return
+        await run_retention(session, event, manual=False)
 
 
 async def sweep_loop(interval: int = 60) -> None:
@@ -450,8 +467,8 @@ async def sweep_loop(interval: int = 60) -> None:
                 async with singleton(session, SWEEP_LOCK) as mine:
                     if mine:
                         r = await sweep(session)
-                        if r["moved"] or r["ran"]:
-                            logger.info("closeout sweep moved %d status(es), ran %d retention job(s)", r["moved"], r["ran"])
+                        if r["moved"] or r["queued"]:
+                            logger.info("closeout sweep moved %d status(es), queued %d retention run(s)", r["moved"], r["queued"])
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001
