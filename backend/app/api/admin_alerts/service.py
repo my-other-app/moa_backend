@@ -62,6 +62,10 @@ KINDS: dict[str, str] = {
     "payment_refund_failed": "Razorpay did not take an automatic refund; the sweep keeps trying",
     "payment_unapplied": "A captured payment had not been applied to its registration; the repair sweep applied it, or could not (data.repaired)",
     "subscription_orphan_charged": "Razorpay charged a subscription no club row holds (a second checkout, or one made elsewhere); it was cancelled at Razorpay",
+    "ledger_post_failed": "A money transition could not be written to the ledger; the daily ledger job posts it again (data: source, source_id, key)",
+    "ledger_drift": "The ledger's monthly sums had drifted from its entries; the daily reconcile put them right (data: rows, clubs)",
+    "ledger_unbalanced": "Ledger postings whose lines do not sum to zero (data: keys)",
+    "ledger_mismatch": "Razorpay's payments or refunds for a day disagree with the ledger (data: day, gateway, and each mismatch)",
 }
 
 DEDUPE_WINDOW = timedelta(minutes=10)
