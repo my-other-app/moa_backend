@@ -36,7 +36,7 @@ def ref(topic) -> dict:
 
 
 @pytest.fixture
-async def scene(session, make_club, make_event):
+async def scene(session, make_club, make_event, make_user, make_registration):
     now = datetime.now(timezone.utc)
     dev = InterestCategory(name="Development", slug="development", color="#2563EB", sort_order=1)
     arts = InterestCategory(name="Arts", slug="arts", color="#EA580C", sort_order=2)
@@ -80,6 +80,8 @@ async def scene(session, make_club, make_event):
     )
     # A link taken off counts for nothing.
     session.add(EventInterestsLink(event_id=e["plain"].id, interest_id=i["music"].id, is_deleted=True))
+    # Someone going to the event with no interests: its row still comes back with the counts.
+    await make_registration(event=e["plain"], user=await make_user(email="topics-going@example.com"))
     await session.commit()
     return dict(now=now, dev=dev, arts=arts, community=community, i=i, coders=coders, painters=painters, quiet=quiet, e=e)
 
@@ -187,7 +189,7 @@ async def test_cards_pages_and_clubs_carry_their_topics(client, scene):
     assert cards[e["hack"].id]["topics"] == [dev]
     assert cards[e["mixed"].id]["topics"] == [dev, arts]
     assert cards[e["sketch"].id]["topics"] == [arts]
-    assert cards[e["plain"].id]["topics"] == []
+    assert cards[e["plain"].id]["topics"] == [] and cards[e["plain"].id]["going"] == 1
 
     home = await _get(client, "/home")
     assert {c["id"]: c["topics"] for c in home["this_week"]}[e["mixed"].id] == [dev, arts]
