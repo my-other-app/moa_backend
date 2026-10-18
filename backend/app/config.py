@@ -38,6 +38,21 @@ class AppConfig(BaseSettings):
     # (app.db.core.check_connection_budget). Behind PgBouncer: 5 and 5.
     DB_POOL_SIZE: int = 10
     DB_MAX_OVERFLOW: int = 20
+    # `alembic upgrade` runs beside the live API (app/db/migration_session.py
+    # says why each exists). Postgres durations; "0" turns one off. A DDL
+    # statement waits at most MIGRATION_LOCK_TIMEOUT for its lock, then the
+    # migration's transaction rolls back and is tried again, up to
+    # MIGRATION_LOCK_ATTEMPTS times, the pause doubling from
+    # MIGRATION_RETRY_WAIT seconds. A statement may run
+    # MIGRATION_STATEMENT_TIMEOUT, except an index built CONCURRENTLY (and the
+    # other statements that block no one), which gets
+    # MIGRATION_ONLINE_STATEMENT_TIMEOUT: none.
+    MIGRATION_LOCK_TIMEOUT: str = "5s"
+    MIGRATION_STATEMENT_TIMEOUT: str = "30s"
+    MIGRATION_ONLINE_STATEMENT_TIMEOUT: str = "0"
+    MIGRATION_IDLE_TIMEOUT: str = "60s"
+    MIGRATION_LOCK_ATTEMPTS: int = 4
+    MIGRATION_RETRY_WAIT: float = 5.0
     # Mounted from the host, deliberately outside the directory the deploy
     # rsyncs with --delete -- a backup inside it would be erased by the next
     # deploy, which is the opposite of the point.
