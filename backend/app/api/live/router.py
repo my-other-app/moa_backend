@@ -2,6 +2,8 @@
 anyone with the browser key (and a player key, for the quiz)."""
 from uuid import UUID
 
+import orjson
+
 from fastapi import APIRouter, Query, Request, Response
 
 from app.api.deliveries import service as deliveries
@@ -134,9 +136,14 @@ async def join_quiz(request: Request, session: SessionDep, body: JoinIn, user: O
     return JoinOut(**out)
 
 
-@public_router.get("/events/{event_id}/live/quiz/play", summary="The player's view of the quiz right now")
-async def play_state(request: Request, session: SessionDep, event_id: int) -> PlayerState:
-    return PlayerState(**await service.player_state(session, event_id, request.headers.get(service.PLAYER_HEADER, "")))
+@public_router.get("/events/{event_id}/live/quiz/play", response_model=PlayerState, summary="The player's view of the quiz right now")
+async def play_state(request: Request, session: SessionDep, event_id: int) -> Response:
+    """Polled every two seconds by every player: read from the quiz snapshot
+    and written straight out (the shape is PlayerState's), with no model
+    built per poll."""
+    out = await service.player_state(session, event_id, request.headers.get(service.PLAYER_HEADER, ""))
+    # default=str: ids come back from asyncpg as its own UUID type, which orjson does not know.
+    return Response(content=orjson.dumps(out, default=str), media_type="application/json")
 
 
 @public_router.post("/events/{event_id}/live/quiz/answer", summary="Answer the open question")

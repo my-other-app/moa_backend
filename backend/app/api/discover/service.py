@@ -1531,14 +1531,21 @@ async def _near_pool(session, now: datetime, since: datetime, centre: tuple[floa
     # after the last row read), growing, and stop at the chunk that settles
     # it: a box around a big city holds thousands of events to come, and the
     # list is settled by the first few dozen near the centre.
-    conds = [*_visible_where(now, since), _in_person_point(), geo.in_box_sql(geo.bbox(centre[0], centre[1], far), Events.lat, Events.lng)]
+    # The club rule as "not one of the unlisted clubs" (a hashed list of the
+    # few), not a join: joined, every event in the box looked its club up
+    # (three pages each; 18,000 of the 23,000 the read took at 15,000 clubs).
+    conds = [
+        Events.is_deleted == False, _in(Events.lifecycle, SHOWN), _end_expr() >= now, Events.event_datetime >= since,  # noqa: E712
+        Events.club_id.isnot(None), Events.club_id.notin_(select(Clubs.id).where(Clubs.listed == False)),  # noqa: E712
+        _in_person_point(), geo.in_box_sql(geo.bbox(centre[0], centre[1], far), Events.lat, Events.lng),
+    ]
     order = [(Events.event_datetime, False), (Events.id, False)]
     pool: list[tuple[int, float, float]] = []
     certain = 0
     last = None
     chunk = NEAR_CHUNK
     while True:
-        stmt = select(Events.id, Events.lat, Events.lng, Events.event_datetime).join(Clubs, Clubs.id == Events.club_id).where(*conds)
+        stmt = select(Events.id, Events.lat, Events.lng, Events.event_datetime).where(*conds)
         if last is not None:
             stmt = stmt.where(cursors.after(order, last))
         rows = (await session.execute(stmt.order_by(Events.event_datetime, Events.id).limit(chunk))).all()

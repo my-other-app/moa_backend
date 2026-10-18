@@ -143,6 +143,9 @@ class Clubs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         ),
         # The listed clubs, newest first: the app's club list (its default order) and discover's sort=newest.
         sa.Index("ix_clubs_listed_newest", sa.text("created_at DESC"), sa.text("id DESC"), postgresql_where=sa.text("listed")),
+        # The few clubs that are not listed: "not one of these" is a hashed
+        # list read from this index, where a join would look up each event's club.
+        sa.Index("ix_clubs_unlisted", "id", postgresql_where=sa.text("NOT listed")),
     )
 
 

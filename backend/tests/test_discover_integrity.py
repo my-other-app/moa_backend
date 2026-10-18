@@ -43,7 +43,7 @@ async def world(client, session, make_club, make_user, mint_token, monkeypatch):
     async def scope():
         yield session
 
-    monkeypatch.setattr(threads_service, "session_scope", scope)
+    monkeypatch.setattr(threads_service, "session_scope", scope, raising=False)  # (no such hook before followers were told after the answer)
     now = datetime.now(timezone.utc)
     tech = EventCategories(name="Tech")
     session.add(tech)

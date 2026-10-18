@@ -20,7 +20,7 @@ write, and the indexes the live room, threads, clubs and "popular" walk.
 - The front page's "cities" is counted again at the next refresh (it now
   counts places on the map, not venue strings).
 - Indexes, built CONCURRENTLY (each dropped first if a failed run left it
-  invalid): ix_clubs_listed_popular, ix_clubs_listed_newest,
+  invalid): ix_clubs_listed_popular, ix_clubs_listed_newest, ix_clubs_unlisted,
   ix_clubs_link_unchecked, ix_events_shown_popular, ix_events_link_unchecked,
   ix_club_users_followers, ix_club_threads_club_newest,
   ix_thread_comments_thread_created, ix_live_quiz_players_board,
@@ -208,6 +208,7 @@ SHOWN = "NOT is_deleted AND status IN ('published', 'live')"
 INDEXES = (
     ("ix_clubs_listed_popular", 'clubs (follower_count DESC, lower(name) COLLATE "C", id) WHERE listed'),
     ("ix_clubs_listed_newest", "clubs (created_at DESC, id DESC) WHERE listed"),
+    ("ix_clubs_unlisted", "clubs (id) WHERE NOT listed"),
     ("ix_clubs_link_unchecked", f"clubs (link_checked_at NULLS FIRST, id) WHERE {WANTS_LINK}"),
     ("ix_events_shown_popular", f"events (popularity DESC, event_datetime, id) WHERE {SHOWN}"),
     ("ix_events_link_unchecked", f"events (link_checked_at NULLS FIRST, id) WHERE {WANTS_LINK}"),
