@@ -62,8 +62,9 @@ logger = logging.getLogger(__name__)
 
 DEBOUNCE_SECONDS = 3.0
 TIMEOUT_SECONDS = 3.0
-#: At most this many entries in each list of one POST; more go in several.
-MAX_PER_POST = 400
+#: At most this many entries in each list of one POST, more going in several:
+#: the site's handler reads no more than 200 of each.
+MAX_PER_POST = 200
 #: A club's most recent events, told along with a change to the club.
 CLUB_EVENTS = 100
 

@@ -23,6 +23,10 @@ SITE_READ_ROUTERS = (
     ("app.api.discover.router", "router"),
     ("app.api.subscriptions.router", "public_router"),
 )
+#: And single public reads on routers that also hold other things.
+SITE_READ_ENDPOINTS = frozenset({
+    "app.api.interests.router.list_interests",
+})
 SITE_SCOPE = "site-reads"
 _DEFAULT_SITE_LIMIT = "3000/minute"
 
@@ -79,11 +83,12 @@ _site_reads: Optional[frozenset] = None
 
 
 def site_read_names() -> frozenset:
-    """Every GET route on SITE_READ_ROUTERS, by the name slowapi knows it by.
-    Worked out on first use, when every route has long been declared."""
+    """Every GET route on SITE_READ_ROUTERS, and SITE_READ_ENDPOINTS, by the
+    name slowapi knows each by. Worked out on first use, when every route has
+    long been declared."""
     global _site_reads
     if _site_reads is None:
-        names = set()
+        names = set(SITE_READ_ENDPOINTS)
         for module, attr in SITE_READ_ROUTERS:
             router = getattr(importlib.import_module(module), attr)
             for route in router.routes:

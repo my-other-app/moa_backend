@@ -83,8 +83,9 @@ async def test_the_sites_bucket_is_bounded_and_shared_by_all_its_reads(client, t
     r = await client.get(f"{API}/locate", headers=from_site())
     assert r.status_code == 429
     assert (await client.get(f"{API}/categories", headers=from_site())).status_code == 429
-    # The pricing page is one of the site's reads too.
+    # The pricing page and the list of interests are among the site's reads too.
     assert (await client.get("/api/v1/plans", headers=from_site())).status_code == 429
+    assert (await client.get("/api/v1/interests/list", headers=from_site())).status_code == 429
 
 
 async def test_each_token_has_its_own_bucket_so_one_can_be_rotated_in(client, tokens, monkeypatch):
@@ -129,7 +130,11 @@ async def test_the_token_lifts_no_limit_on_sign_in(client, tokens):
 
 def test_only_the_public_reads_are_the_sites():
     names = rate_limit.site_read_names()
-    assert {"app.api.discover.router.locate", "app.api.discover.router.event_page", "app.api.discover.router.sitemap", "app.api.subscriptions.router.pricing"} <= names
+    assert {
+        "app.api.discover.router.locate", "app.api.discover.router.event_page", "app.api.discover.router.sitemap",
+        "app.api.subscriptions.router.pricing", "app.api.interests.router.list_interests",
+    } <= names
+    assert not any(n.startswith("app.api.interests.") and n != "app.api.interests.router.list_interests" for n in names)
     assert not any(n.startswith(("app.api.auth.", "app.api.club_access.", "app.api.threads.", "app.api.live.")) for n in names)
     assert not any("geo_backfill" in n or "reconcile" in n for n in names)  # the admin's discover routes are not reads
     # The hook the bucket hangs on: slowapi's every @limit-ed route goes through it.
