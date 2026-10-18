@@ -61,6 +61,8 @@ async def home(request: Request, session: SessionDep, user: OptionalAuth, backgr
 
 Q = Query(None, max_length=100)
 Category = Query(None, description="An event category id")
+Topic = Query(None, max_length=80, description="A topic's slug or id: events (or clubs) with any interest under it")
+Interest = Query(None, le=2**31 - 1, description="An interest id; wins over `topic` when both are given")
 Kind = Query("any", alias="type")
 Price = Query("any")
 Radius = Query(50, ge=0, le=20000, description="Only with a known place, for in-person events; 0 for anywhere")
@@ -79,6 +81,8 @@ async def events(
     from_: Optional[date] = Query(None, alias="from", description="YYYY-MM-DD, a day in India: with `to` (or alone), replaces `when`"),
     to: Optional[date] = Query(None, description="YYYY-MM-DD, a day in India, counted in full; at most 366 days after `from`"),
     category: Optional[int] = Category,
+    topic: Optional[str] = Topic,
+    interest: Optional[int] = Interest,
     type_: Literal["any", "in_person", "online"] = Kind,
     price: Literal["any", "free", "paid"] = Price,
     lat: Optional[float] = Lat,
@@ -94,12 +98,15 @@ async def events(
 ) -> EventSearch:
     """`from`/`to`: an event matches if it touches [from 00:00, to + 1 day
     00:00) in India. 422 when `from` is after `to` or the range covers more
-    than 366 days."""
+    than 366 days. `topic` (slug or id) and `interest` narrow to events with
+    that interest or any under that topic; a topic no live one has finds
+    nothing. Beside `categories`, `topics`: every topic with what is on in it."""
     service.date_range(from_, to)  # a 422 before anything is looked up
     where = await geo.where(request, lat, lng)
     return EventSearch(**await service.search_events(
         session, where, q=q, when=when, category=category, type_=type_, price=price,
         radius_km=radius_km, sort=sort, offset=offset, limit=limit, from_=from_, to=to, after=after,
+        topic=topic, interest=interest,
     ))
 
 
@@ -112,6 +119,8 @@ async def calendar(
     month: str = Query(..., pattern=r"^\d{4}-(0[1-9]|1[0-2])$", description="YYYY-MM, within 24 months of this one"),
     q: Optional[str] = Q,
     category: Optional[int] = Category,
+    topic: Optional[str] = Topic,
+    interest: Optional[int] = Interest,
     type_: Literal["any", "in_person", "online"] = Kind,
     price: Literal["any", "free", "paid"] = Price,
     lat: Optional[float] = Lat,
@@ -124,6 +133,7 @@ async def calendar(
     where = await geo.where(request, lat, lng)
     return CalendarMonth(**await service.calendar(
         session, where, month=month, q=q, category=category, type_=type_, price=price, radius_km=radius_km,
+        topic=topic, interest=interest,
     ))
 
 
@@ -134,14 +144,15 @@ async def event_page(request: Request, session: SessionDep, user: OptionalAuth, 
     return EventPage(**await service.event_page(session, ref))
 
 
-@router.get("/clubs", summary="Clubs to find: by words, interest and distance")
+@router.get("/clubs", summary="Clubs to find: by words, topic, interest and distance")
 @limiter.limit(LIMIT, key_func=_visitor)
 async def clubs(
     request: Request,
     session: SessionDep,
     user: OptionalAuth,
     q: Optional[str] = Query(None, max_length=100),
-    interest: Optional[int] = Query(None, description="An interest id"),
+    topic: Optional[str] = Topic,
+    interest: Optional[int] = Query(None, le=2**31 - 1, description="An interest id; wins over `topic` when both are given"),
     lat: Optional[float] = Lat,
     lng: Optional[float] = Lng,
     radius_km: float = Query(50, ge=0, le=20000, description="Only with a known place; 0 for anywhere"),
@@ -153,6 +164,7 @@ async def clubs(
     where = await geo.where(request, lat, lng)
     return ClubSearch(**await service.search_clubs(
         session, where, q=q, interest=interest, radius_km=radius_km, sort=sort, offset=offset, limit=limit, after=after,
+        topic=topic,
     ))
 
 

@@ -132,8 +132,8 @@ async def with_counts(session, now: Optional[datetime] = None) -> list[dict]:
 
 
 def find(topics: list[dict], ref: str) -> Optional[dict]:
-    """The topic a slug, or an id, names."""
-    ref = (ref or "").strip()
+    """The topic a slug (in any case), or an id, names."""
+    ref = (ref or "").strip().lower()
     for t in topics:
         if t["slug"] == ref or (ref.isdigit() and t["id"] == int(ref)):
             return t
