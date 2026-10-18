@@ -94,6 +94,47 @@ services:
       doth_network:
         ipv4_address: 192.168.5.100
 
+  # Search (backend/app/core/search.py, backend/app/api/search/). Idle until
+  # the backend's .env has APP_SEARCH_URL=http://meilisearch:7700 and
+  # APP_SEARCH_KEY (the master key below); without them every search is
+  # Postgres's, as before. The deploy recreates only `backend`, so this is
+  # started once, by hand, after MEILI_MASTER_KEY (16+ bytes) is in .env:
+  #   sudo docker-compose -f docker-compose.prod.yml up -d meilisearch
+  # No published port: only the backend reaches it, over doth_network. The
+  # backend builds the indexes itself the first time it finds them missing
+  # (scripts/search_reindex.py --status shows them). The data is in the
+  # meili_data volume; losing it costs a rebuild from Postgres, not data.
+  # MEILI_MASTER_KEY defaults to empty so a .env without it still parses for
+  # the backend's deploy; in production mode Meilisearch then refuses to
+  # start, loudly, rather than run without a key.
+  meilisearch:
+    image: getmeili/meilisearch:v1.54.3
+    container_name: doth-live-meilisearch
+    restart: unless-stopped
+    environment:
+      MEILI_ENV: production
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-}
+      MEILI_NO_ANALYTICS: "true"
+      MEILI_DB_PATH: /meili_data/data.ms
+      # Indexing shares the box with Postgres and the API: two threads, and
+      # well under the container's limit.
+      MEILI_MAX_INDEXING_THREADS: "2"
+      MEILI_MAX_INDEXING_MEMORY: 384MiB
+    volumes:
+      - meili_data:/meili_data
+    expose:
+      - "7700"
+    # Lakhs of events and clubs fit easily; raise it towards a crore.
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:7700/health || exit 1"]
+      interval: 15s
+      retries: 5
+      start_period: 10s
+    # Any free address: other containers find it as `meilisearch`.
+    networks:
+      - doth_network
+
   # nginx:
   #   container_name: bcards-nginx
   #   build: nginx
@@ -112,3 +153,4 @@ services:
 
 volumes:
   postgres_data:
+  meili_data:

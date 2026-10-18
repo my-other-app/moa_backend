@@ -99,12 +99,15 @@ def us(dt: datetime) -> int:
 
 
 def _geo_radius(here: tuple[float, float], radius_km: float) -> str:
-    """Meilisearch's circle, a hair wider than ours: its haversine need not
-    use our Earth's radius, and an event it leaves out is lost, while one it
-    lets in past the edge is dropped when the page is read back (the exact
-    km_sql there)."""
-    metres = radius_km * 1000.0 * 1.005 + 1.0
-    return f"_geoRadius({here[0]:.7f}, {here[1]:.7f}, {metres:.1f})"
+    """Meilisearch's circle for ours. Its haversine (milli's
+    distance_between_two_points, by the geoutils crate) uses an Earth of
+    6,371,000 m and rounds to the millimetre; ours (geo.km) 6,371,008.8 m.
+    So its distances are 1.4 parts in a million shorter, and the same
+    radius plus a centimetre already holds every point ours does. The few
+    it lets in beyond the edge (within centimetres of it) are dropped when
+    the page is read back, by the exact km_sql."""
+    metres = radius_km * 1000.0 + 0.01
+    return f"_geoRadius({here[0]:.7f}, {here[1]:.7f}, {metres:.3f})"
 
 
 async def topic_ref(session, topic: Optional[str]) -> Optional[int]:
