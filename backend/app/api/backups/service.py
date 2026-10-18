@@ -13,16 +13,21 @@ written to the audit log every time.
 """
 
 import asyncio
+import logging
 import os
 import re
 import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 from urllib.parse import unquote, urlparse
 
+from app.api.backups import offsite
 from app.config import settings
 from app.response import CustomHTTPException
+
+logger = logging.getLogger(__name__)
 
 # Custom format: compressed, and restorable selectively with pg_restore.
 SUFFIX = ".dump"
@@ -147,7 +152,8 @@ async def create_backup() -> Backup:
 
     if process.returncode != 0:
         partial.unlink(missing_ok=True)
-        detail = (stderr or b"").decode(errors="replace").strip()
+        # Scrubbed: a connection error quotes the server it was talking to.
+        detail = offsite.scrub((stderr or b"").decode(errors="replace").strip())
         # The version mismatch is the likely one and is unhelpful unless quoted:
         # pg_dump refuses to dump a server newer than itself.
         raise CustomHTTPException(
@@ -171,3 +177,35 @@ def path_for_download(name: str) -> Path:
 
 def delete_backup(name: str) -> None:
     _resolve(name).unlink()
+
+
+#: Seconds an off-site upload may take before the caller stops waiting.
+UPLOAD_TIMEOUT = 900
+
+
+@dataclass
+class OffsiteResult:
+    tier: str
+    key: Optional[str] = None
+    sha256: Optional[str] = None
+    error: Optional[str] = None
+
+
+async def copy_offsite(backup: Backup, *, scheduled: bool = False, s3=None) -> Optional[OffsiteResult]:
+    """Upload `backup` to the off-site bucket (app/api/backups/offsite.py).
+    None when off-site copies are off. A failure is returned, not raised: the
+    local dump is still good, and the caller says what happened."""
+    if not offsite.enabled():
+        return None
+    directory = backup_dir()
+    tier = offsite.tier_for(backup.created_at, directory, scheduled=scheduled)
+    try:
+        copy = await asyncio.wait_for(
+            asyncio.to_thread(offsite.upload, directory / backup.name, tier=tier, s3=s3),
+            timeout=UPLOAD_TIMEOUT,
+        )
+    except Exception as error:  # noqa: BLE001 -- reported to the caller
+        message = offsite.scrub(f"{type(error).__name__}: {error}")[:300]
+        logger.error("Off-site copy of %s failed: %s", backup.name, message)
+        return OffsiteResult(tier=tier, error=message)
+    return OffsiteResult(tier=tier, key=copy.key, sha256=copy.sha256)

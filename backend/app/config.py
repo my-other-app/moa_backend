@@ -57,6 +57,24 @@ class AppConfig(BaseSettings):
     # rsyncs with --delete -- a backup inside it would be erased by the next
     # deploy, which is the opposite of the point.
     BACKUP_DIR: str = "/backups"
+    # The off-site copy of every dump (app/api/backups/offsite.py): uploaded
+    # to BACKUP_S3_BUCKET under BACKUP_S3_PREFIX, daily/ or weekly/, with
+    # server-side encryption (BACKUP_S3_SSE: AES256, or aws:kms with
+    # BACKUP_S3_KMS_KEY_ID) and the dump's sha256 in its metadata. Empty
+    # bucket: no off-site copy, as before. BACKUP_S3_ACCESS_KEY and
+    # BACKUP_S3_SECRET_KEY: a user that may put, list and read backups/ and
+    # nothing else (no delete: the lifecycle rule expires them); unset, the
+    # media bucket's S3_ACCESS_KEY and S3_SECRET_KEY.
+    BACKUP_S3_BUCKET: str = ""
+    BACKUP_S3_PREFIX: str = "backups/"
+    BACKUP_S3_REGION: str = "ap-south-1"
+    BACKUP_S3_SSE: str = "AES256"
+    BACKUP_S3_KMS_KEY_ID: str = ""
+    BACKUP_S3_ACCESS_KEY: str = ""
+    BACKUP_S3_SECRET_KEY: str = ""
+    # How many dumps scripts/backup.py leaves in BACKUP_DIR (the newest),
+    # deleting older ones only after a good off-site upload. 0 keeps every one.
+    BACKUP_KEEP_LOCAL: int = 0
 
     S3_BUCKET: str
     S3_ACCESS_KEY: str
