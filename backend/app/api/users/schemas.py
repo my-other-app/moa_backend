@@ -264,6 +264,9 @@ class FCMTokenRequest(CustomBaseModel):
     """Request schema for registering FCM token"""
     fcm_token: str = Field(..., description="Firebase Cloud Messaging token")
     platform: str = Field(..., description="Device platform (ios/android)")
+    # 1 from an app that subscribes to its person's FCM topics (GET
+    # /notifications/topics); absent from an app from before them.
+    topics: int = Field(0, ge=0, le=1, description="1: this app subscribes to its FCM topics")
 
 
 class FCMTokenDelete(CustomBaseModel):

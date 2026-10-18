@@ -606,6 +606,7 @@ async def register_fcm_token(
         user_id=user.id,
         fcm_token=body.fcm_token,
         platform=body.platform,
+        supports_topics=body.topics == 1,
     )
     return FCMTokenResponse(success=True, message="FCM token registered successfully")
 

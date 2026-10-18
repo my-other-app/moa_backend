@@ -726,10 +726,15 @@ async def follow_club(session: AsyncSession, club_id: int, user_id: int, trackin
 
     link = await links.by_code(session, tracking_ref) if tracking_ref else None
     link_id = link.id if link is not None and link.club_id == club_id else None
-    stmt = _link_upsert(club_id, user_id, is_following=True, tracking_link_id=link_id)
+    # followed_at: when this follow began, for the shared inbox
+    # (app.core.notifications.inbox). A new follow is unmuted.
+    stmt = _link_upsert(club_id, user_id, is_following=True, tracking_link_id=link_id, followed_at=datetime.now(timezone.utc))
     stmt = stmt.on_conflict_do_update(
         index_elements=["club_id", "user_id", "is_deleted"],
-        set_={"is_following": True, "updated_at": stmt.excluded.updated_at, "tracking_link_id": func.coalesce(stmt.excluded.tracking_link_id, ClubUsersLink.tracking_link_id)},
+        set_={
+            "is_following": True, "updated_at": stmt.excluded.updated_at, "followed_at": stmt.excluded.followed_at, "is_muted": False,
+            "tracking_link_id": func.coalesce(stmt.excluded.tracking_link_id, ClubUsersLink.tracking_link_id),
+        },
         where=ClubUsersLink.is_following == False,  # noqa: E712
     ).returning(ClubUsersLink.id)
     row_id = await session.scalar(stmt)
@@ -757,6 +762,11 @@ async def unfollow_club(session: AsyncSession, club_id: int, user_id: int):
     )
     if row_id is None:
         raise CustomHTTPException(409, "not following the club")
+    # Their devices leave the club's topic now, not at their next start.
+    from app.core.notifications import topics
+    from app.core.notifications.delivery import club_topic
+
+    await topics.forget(session, user_id, [club_topic(club_id)])
     await session.commit()
     _forget_for_you(user_id)
     return await _link_row(session, row_id)

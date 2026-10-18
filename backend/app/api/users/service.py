@@ -728,15 +728,22 @@ async def list_interests(session: AsyncSession, user_id: int):
 async def select_interests(
     session: AsyncSession, user_id: int, interest_ids: list[int]
 ):
-    """Replace the account's interests with these: one DELETE and one INSERT
-    ... SELECT ... ON CONFLICT DO NOTHING, whatever the list's length. It was
-    a query per interest, and two saves at once could leave duplicates. Ids
-    that are not live interests are left out, as before."""
+    """Replace the account's interests with these: one DELETE of those no
+    longer picked and one INSERT ... SELECT ... ON CONFLICT, whatever the
+    list's length. It was a query per interest, and two saves at once could
+    leave duplicates. Ids that are not live interests are left out, as before.
+
+    An interest kept keeps its row, and so when it was picked: the shared
+    inbox lists a topic's broadcasts from then (app.core.notifications.inbox).
+    A topic that leaves the person's list goes from their devices too."""
+    from app.core.notifications import topics
     from app.core.notifications.service import int_array
 
+    watch = await topics.has_topic_devices(session, user_id)
+    before = await topics.interest_topics(session, user_id) if watch else []
     await session.execute(
         delete(UserInterests)
-        .where(UserInterests.user_id == user_id)
+        .where(UserInterests.user_id == user_id, UserInterests.interest_id != sa.all_(int_array(interest_ids)))
         .execution_options(include_deleted=True, synchronize_session=False)
     )
     if interest_ids:
@@ -748,11 +755,15 @@ async def select_interests(
             sa.literal(now, UserInterests.__table__.c.updated_at.type),
             sa.false(),
         ).where(Interests.id == sa.any_(int_array(interest_ids)), Interests.is_deleted == False)  # noqa: E712
-        await session.execute(
-            pg_insert(UserInterests)
-            .from_select(["user_id", "interest_id", "created_at", "updated_at", "is_deleted"], live)
-            .on_conflict_do_nothing(index_elements=["user_id", "interest_id"])
-        )
+        stmt = pg_insert(UserInterests).from_select(["user_id", "interest_id", "created_at", "updated_at", "is_deleted"], live)
+        # A row deleted with the account comes back as new; a live one is left alone.
+        await session.execute(stmt.on_conflict_do_update(
+            index_elements=["user_id", "interest_id"],
+            set_={"is_deleted": False, "deleted_at": None, "created_at": stmt.excluded.created_at, "updated_at": stmt.excluded.updated_at},
+            where=UserInterests.is_deleted == True,  # noqa: E712
+        ))
+    if watch:
+        await topics.forget(session, user_id, set(before) - set(await topics.interest_topics(session, user_id)))
     await session.commit()
     _forget_for_you(user_id)
     return None
@@ -1231,25 +1242,34 @@ async def update_fcm_token(
     user_id: int,
     fcm_token: str,
     platform: str,
+    supports_topics: bool = False,
 ):
     """Store the device's FCM token for push notifications: one upsert.
 
     One install, one account: a token signed in to here stops being anyone
     else's, so a phone handed from one person to the next (or signed out
     without reaching DELETE /user/fcm-token) stops getting the first one's
-    pushes. Each of a person's devices keeps its own row."""
+    pushes. Each of a person's devices keeps its own row.
+
+    `supports_topics`: the app on the device subscribes to its person's FCM
+    topics (it sent `topics: 1`). Every registration says it afresh, so an
+    app from before topics on the same install says no again."""
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
     from app.api.users.models import UserDeviceTokens
 
     now = datetime.now(timezone.utc)
     stmt = pg_insert(UserDeviceTokens).values(
-        user_id=user_id, fcm_token=fcm_token, platform=platform, is_deleted=False, created_at=now, updated_at=now,
+        user_id=user_id, fcm_token=fcm_token, platform=platform, supports_topics=bool(supports_topics),
+        is_deleted=False, created_at=now, updated_at=now,
     )
     await session.execute(
         stmt.on_conflict_do_update(
             index_elements=[UserDeviceTokens.fcm_token],
-            set_={"user_id": user_id, "platform": platform, "is_deleted": False, "deleted_at": None, "updated_at": now},
+            set_={
+                "user_id": user_id, "platform": platform, "supports_topics": bool(supports_topics),
+                "is_deleted": False, "deleted_at": None, "updated_at": now,
+            },
         )
     )
     # Beyond MAX_DEVICES_PER_USER, the ones registered longest ago go.
