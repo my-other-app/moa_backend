@@ -77,28 +77,28 @@ def ist_month(column):
 # ─── Reconcile: the sums against the entries ─────────────────────────────
 
 
-async def reconcile_club(session, club_id: int) -> int:
-    """ledger_monthly's rows for one club (0: entries with no club) made to
-    agree with its entries. Rows corrected; the caller commits."""
-    owner = E.club_id.is_(None) if club_id == 0 else E.club_id == club_id
+async def reconcile_event(session, club_id: int, event_id: int) -> int:
+    """ledger_monthly's rows for one club's event (0: its lines with no
+    event; club 0: lines with no club) made to agree with the entries.
+    Rows corrected; the caller commits, letting the rows' locks go."""
+    club = E.club_id.is_(None) if club_id == 0 else E.club_id == club_id
+    event = E.event_id.is_(None) if event_id == 0 else E.event_id == event_id
     seen = {
         tuple(r[:7]): (int(r[7]), int(r[8]), int(r[9]))
         for r in (await session.execute(
             select(LM.club_id, LM.event_id, LM.gateway_id, LM.month, LM.origin_month, LM.account, LM.kind,
                    LM.amount_paise, LM.units, LM.entries)
-            .where(LM.club_id == club_id)
+            .where(LM.club_id == club_id, LM.event_id == event_id)
             .with_for_update()
         )).all()
     }
-    month, origin = ist_month(E.occurred_at), ist_month(E.origin_at)
-    event, gateway = func.coalesce(E.event_id, 0), func.coalesce(E.gateway_id, 0)
+    month, origin, gateway = ist_month(E.occurred_at), ist_month(E.origin_at), func.coalesce(E.gateway_id, 0)
     computed = {
-        (club_id, int(r[0]), int(r[1]), r[2], r[3], r[4], r[5]): (int(r[6]), int(r[7]), int(r[8]))
+        (club_id, event_id, int(r[0]), r[1], r[2], r[3], r[4]): (int(r[5]), int(r[6]), int(r[7]))
         for r in (await session.execute(
-            select(event, gateway, month, origin, E.account, E.kind,
-                   func.sum(E.amount_paise), func.sum(E.units), func.count())
-            .where(owner)
-            .group_by(event, gateway, month, origin, E.account, E.kind)
+            select(gateway, month, origin, E.account, E.kind, func.sum(E.amount_paise), func.sum(E.units), func.count())
+            .where(club, event)
+            .group_by(gateway, month, origin, E.account, E.kind)
         )).all()
     }
     deltas = {}
@@ -109,8 +109,28 @@ async def reconcile_club(session, club_id: int) -> int:
     if deltas:
         await book.add_to(session, LM, book.MONTHLY_KEY, deltas)
         # Rows that summed nothing (no entries) are taken away.
-        await session.execute(delete(LM).where(LM.club_id == club_id, LM.entries == 0, LM.amount_paise == 0, LM.units == 0))
+        await session.execute(delete(LM).where(
+            LM.club_id == club_id, LM.event_id == event_id, LM.entries == 0, LM.amount_paise == 0, LM.units == 0))
     return len(deltas)
+
+
+async def reconcile_club(session, club_id: int) -> int:
+    """One club's sums, an event at a time (each its own transaction, so a
+    club's postings wait for one event's check at most, not the club's):
+    its events', its sums', and its lines with no event. Rows corrected."""
+    from app.api.events.models import Events
+
+    events = {0}
+    if club_id:
+        events |= set((await session.scalars(
+            select(Events.id).where(Events.club_id == club_id).execution_options(include_deleted=True)
+        )).all())
+    events |= set((await session.scalars(select(LM.event_id).where(LM.club_id == club_id).distinct())).all())
+    fixed = 0
+    for event_id in sorted(events):
+        fixed += await reconcile_event(session, club_id, event_id)
+        await session.commit()
+    return fixed
 
 
 async def reconcile_platform_month(session, month: date) -> int:

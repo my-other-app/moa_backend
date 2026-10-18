@@ -264,7 +264,7 @@ async def sync_registration(
 ) -> int | None:
     """
     Post the difference between what the registration's rows say it holds
-    (`target`) and what the ledger holds for it (`balances`), in `accounts`,
+    (`want_for`) and what the ledger holds for it (`balances`), in `accounts`,
     balanced against the kind's account. The caller has made the change and
     not committed. Lines written; None when `wait=False` and another
     transaction is posting for it (the backfill comes back to it).
@@ -484,6 +484,6 @@ async def comp_granted(session, *, audit_id: int | None, club_id: int, subscript
     source_id = str(audit_id) if audit_id is not None else f"sub{subscription_id}:{at.isoformat()}"
     return await book.post(session, Txn(
         key=f"{book.COMP}:{source_id}", kind=book.COMP, lines=[Line(book.COMPS, 0, 1)],
-        occurred_at=at, origin_at=at, source=book.SRC_AUDIT if audit_id is not None else book.SRC_SUBSCRIPTION,
+        occurred_at=at, origin_at=at, source=book.SRC_AUDIT if audit_id is not None else "club_subscriptions",
         source_id=source_id, club_id=club_id, note=f"subscription {subscription_id}" if subscription_id else None,
     ))

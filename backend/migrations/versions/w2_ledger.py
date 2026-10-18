@@ -96,7 +96,7 @@ def upgrade() -> None:
                     postgresql_where=sa.text("razorpay_payment_id IS NOT NULL"))
     op.create_index("ix_ledger_entries_gateway_day", "ledger_entries", ["occurred_at"],
                     postgresql_where=sa.text("account = 'gateway'"))
-    op.create_index("ix_ledger_entries_club", "ledger_entries", ["club_id", "id"])
+    op.create_index("ix_ledger_entries_club", "ledger_entries", ["club_id", "event_id"])
     op.create_index("ix_ledger_entries_subscribers", "ledger_entries", ["source_id"],
                     postgresql_where=sa.text("account = 'subscribers'"))
     for sql in APPEND_ONLY_SQL:

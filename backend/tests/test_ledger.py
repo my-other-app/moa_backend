@@ -938,3 +938,20 @@ async def test_a_batch_with_a_bad_posting_still_posts_the_rest(session):
     assert {a.data["source_id"] for a in await _alerts(session, "ledger_post_failed")} == {"batch:bad", "batch:unbalanced"}
     # Again: nothing new.
     assert await book.post_many(session, [comp("batch:1"), comp("batch:2")]) == 0
+
+
+async def test_drift_is_put_right_for_lines_with_no_club_or_event(session):
+    """Money with no club (and no event) has its sums too, under club 0."""
+    for i in range(2):
+        await book.post(session, book.Txn(
+            key=f"test:no-club:{i}", kind=book.CAPTURE, lines=[book.Line(book.GATEWAY, 100), book.Line(book.UNAPPLIED, -100)],
+            occurred_at=NOW, source="test", source_id=str(i),
+        ))
+    await session.commit()
+    await session.execute(update(LedgerMonthly).where(LedgerMonthly.club_id == 0, LedgerMonthly.account == "gateway")
+                          .values(amount_paise=1))
+    await session.commit()
+    done = await jobs.reconcile(session, clubs=[0], months=[book.month_of(NOW)])
+    assert done["rows_fixed"] == 1 and done["clubs_fixed"] == [0]
+    row = await session.scalar(select(LedgerMonthly).where(LedgerMonthly.club_id == 0, LedgerMonthly.account == "gateway"))
+    assert (row.amount_paise, row.entries) == (200, 2)

@@ -103,8 +103,8 @@ class LedgerEntries(AbstractSQLModel):
               postgresql_where=text("razorpay_payment_id IS NOT NULL")),
         # The daily reconciliation's walk: gateway lines of one day.
         Index("ix_ledger_entries_gateway_day", "occurred_at", postgresql_where=text("account = 'gateway'")),
-        # The drift reconcile, one club at a time; and lines since a watermark.
-        Index("ix_ledger_entries_club", "club_id", "id"),
+        # The drift reconcile, a club's event at a time.
+        Index("ix_ledger_entries_club", "club_id", "event_id"),
         # A subscription's first charge (book.FIRST_CHARGE markers).
         Index("ix_ledger_entries_subscribers", "source_id", postgresql_where=text("account = 'subscribers'")),
     )
