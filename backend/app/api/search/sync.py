@@ -47,10 +47,11 @@ from app.api.search import docs, text as stext
 from app.config import settings
 from app.core import search
 from app.db.locks import singleton
+from app.db import lock_keys
 
 logger = logging.getLogger(__name__)
 
-SEARCH_LOCK = 773_140
+SEARCH_LOCK = lock_keys.SEARCH_SYNC
 #: Outbox rows read per batch.
 BATCH = 500
 #: Rows a taxonomy change rewrites per statement.

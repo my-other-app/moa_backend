@@ -30,6 +30,7 @@ from app.api.admin_alerts.models import AdminNotifications
 from app.config import settings
 from app.core.after_commit import run_after_commit
 from app.core.email import plain
+from app.db import lock_keys
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +74,7 @@ KINDS: dict[str, str] = {
 DEDUPE_WINDOW = timedelta(minutes=10)
 
 #: First key of the advisory lock two alerts of one kind about one thing take.
-_DEDUPE_LOCK = 7_420_311
+_DEDUPE_LOCK = lock_keys.ADMIN_ALERT_DEDUPE
 
 
 def _now() -> datetime:

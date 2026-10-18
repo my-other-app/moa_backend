@@ -45,11 +45,12 @@ from app.api.ledger import book
 from app.api.ledger.book import Line, Txn
 from app.api.ledger.models import LedgerEntries as E
 from app.core import money
+from app.db import lock_keys
 
 logger = logging.getLogger(__name__)
 
 #: First key of the advisory locks taken here: (LOCK_NS, a registration or a subscription).
-LOCK_NS = 7_420_455
+LOCK_NS = lock_keys.LEDGER
 
 ZERO = (0, 0)
 

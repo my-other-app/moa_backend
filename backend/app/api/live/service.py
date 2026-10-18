@@ -69,12 +69,13 @@ from app.config import settings
 from app.core import jobs
 from app.core.email import email as email_mod
 from app.response import CustomHTTPException
+from app.db import lock_keys
 
 logger = logging.getLogger(__name__)
 
 VOTER_HEADER = "X-Live-Key"
 PLAYER_HEADER = "X-Live-Player"
-SWEEP_LOCK = 7_301_010
+SWEEP_LOCK = lock_keys.LIVE_SWEEP
 # Answers after the clock plus this grace still count, for a slow phone.
 ANSWER_GRACE = 2
 UPDATE_TYPE = "event_live_update"

@@ -36,6 +36,7 @@ from app.core.email import email as email_mod
 from app.core.utils.db_fields import TZAwareDateTime
 from app.db.base import AbstractSQLModel
 from app.response import CustomHTTPException
+from app.db import lock_keys
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ DAY = timedelta(hours=24)
 
 #: First key of the advisory lock that keeps two sends for one account apart,
 #: so a double tap cannot slip two codes past the once-a-minute rule.
-_SEND_LOCK = 7_316_204
+_SEND_LOCK = lock_keys.VERIFICATION_SEND
 
 
 class EmailVerificationCodes(AbstractSQLModel):

@@ -34,11 +34,12 @@ from app.core.email import email as email_mod
 from app.core.storage import objects
 from app.db.locks import singleton
 from app.response import CustomHTTPException
+from app.db import lock_keys
 
 logger = logging.getLogger(__name__)
 
-SWEEP_LOCK = 773102
-RETENTION_LOCK = 773103
+SWEEP_LOCK = lock_keys.CLOSEOUT_SWEEP
+RETENTION_LOCK = lock_keys.CLOSEOUT_RETENTION
 # A closed event with nothing to scrub is archived this long after it ends.
 ARCHIVE_AFTER = timedelta(days=30)
 

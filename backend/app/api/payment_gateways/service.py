@@ -42,6 +42,7 @@ from app.api.payment_gateways.models import (
 )
 from app.config import settings
 from app.response import CustomHTTPException
+from app.db import lock_keys
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +69,7 @@ _TOKEN = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
 #: Seconds to wait for Razorpay when checking keys.
 CHECK_TIMEOUT = 10
 #: First key of the advisory lock a club's connect takes.
-_CONNECT_LOCK = 7_420_377
+_CONNECT_LOCK = lock_keys.GATEWAY_CONNECT
 
 
 def _now() -> datetime:

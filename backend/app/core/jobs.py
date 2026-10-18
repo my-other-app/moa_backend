@@ -86,6 +86,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.config import settings
 from app.core.utils.db_fields import TZAwareDateTime
 from app.db.base import AbstractSQLModel
+from app.db import lock_keys
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +109,7 @@ ALIVE_WITHIN = timedelta(seconds=60)
 MAINTENANCE_SECONDS = 300.0
 CLEANUP_BATCH = 5000
 #: Advisory lock: one runner at a time does the maintenance pass.
-MAINTENANCE_LOCK = 774_501
+MAINTENANCE_LOCK = lock_keys.JOBS_MAINTENANCE
 #: The priorities a job may have, highest first. Higher goes first among the
 #: jobs due of a name; a value outside is taken as the nearest of these.
 PRIORITIES = (2, 1, 0, -1, -2)

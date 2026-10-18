@@ -30,6 +30,7 @@ from app.db.errors import constraint_of
 from app.api.interests.models import Interests
 from app.api.events.models import EventInterestsLink, EventRegistrationsLink, Events
 from app.api.badges.models import UserBadges
+from app.db import lock_keys
 
 logger = logging.getLogger(__name__)
 
@@ -234,7 +235,7 @@ VERIFIED_PROVIDERS = (SigninProviders.google, SigninProviders.apple)
 PAYMENT_UNDER_WAY = timedelta(hours=24)
 
 #: First key of the advisory lock that keeps two merges for one account apart.
-_MERGE_LOCK = 7_316_203
+_MERGE_LOCK = lock_keys.USER_MERGE
 
 _NOTHING = {"merged": False, "guests_merged": 0}
 

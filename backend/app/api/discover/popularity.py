@@ -37,12 +37,13 @@ from typing import Optional
 from sqlalchemy import text
 
 from app.db.locks import singleton
+from app.db import lock_keys
 
 logger = logging.getLogger(__name__)
 
 DECAY_DAYS = 30.0
 EVERY_SECONDS = 180
-LOCK = 7_731_402
+LOCK = lock_keys.DISCOVER_POPULARITY
 
 #: The stored number for an event row `e` (SQL), as `refresh` writes it.
 FORMULA = (
