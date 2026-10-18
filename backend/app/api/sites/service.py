@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.api.clubs import service as clubs
 from app.api.clubs.models import Clubs, ClubSocials, ClubUsersLink
@@ -161,10 +160,14 @@ async def preview_html(session: AsyncSession, club: Clubs, choices: dict) -> str
 
 
 async def publish(session: AsyncSession, club: Clubs, s: ClubSites) -> ClubSites:
+    # Stamped with when the reading began, not when it ended: a change made
+    # while the page was being made is then newer than it, and the sites
+    # sweep (app/api/sites/sweep.py) makes the page again.
+    started = _now()
     # Publishing is what gives the site its own tracking link, from the first time.
     link = await links.ensure_website_link(session, club)
     s.html = render(await site_data(session, club, _choices(s), link.code))
-    s.published_at = _now()
+    s.published_at = started
     await session.commit()
     await session.refresh(s)
     return s
@@ -183,25 +186,29 @@ async def out(session: AsyncSession, club: Clubs, s: ClubSites) -> dict:
 
 
 async def published_html(session: AsyncSession, slug: str) -> str | None:
-    club = await session.scalar(select(Clubs).options(selectinload(Clubs.interests)).where(Clubs.slug == slug, Clubs.is_deleted == False))  # noqa: E712
-    if club is None:
-        return None
-    s = await session.scalar(select(ClubSites).where(ClubSites.club_id == club.id))
-    return s.html if s is not None and s.html else None
+    """The stored page, in one query: no club row loaded (it loaded the club
+    and all its interests, which the page never used), only the HTML."""
+    html = await session.scalar(
+        select(ClubSites.html).join(Clubs, Clubs.id == ClubSites.club_id).where(Clubs.slug == slug, Clubs.is_deleted == False)  # noqa: E712
+    )
+    return html or None
 
 
-async def republish_for_club(session: AsyncSession, club_id: int) -> None:
-    """Called when the club's events change: a published site is made again so it never goes stale. Never raises."""
+async def republish_for_club(session: AsyncSession, club_id: int) -> bool:
+    """Called when the club's events change: a published site is made again so
+    it never goes stale. Never raises; whether a page was made."""
     try:
         s = await session.scalar(select(ClubSites).where(ClubSites.club_id == club_id))
         if s is None or not s.published_at:
-            return
+            return False
         club = await session.scalar(select(Clubs).where(Clubs.id == club_id))
         if club is None:
-            return
+            return False
         await publish(session, club, s)
+        return True
     except Exception:  # noqa: BLE001 — a site that fails to rebuild must never block an event save
         await session.rollback()
+        return False
 
 
 async def republish_for_event(session: AsyncSession, event_id: int) -> None:

@@ -3,7 +3,6 @@ its images for anyone."""
 import json
 from urllib.parse import unquote
 
-import boto3
 from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
@@ -12,11 +11,13 @@ from app.api.clubs.models import Clubs
 from app.api.links import service as links
 from app.api.sites import service
 from app.api.sites.analytics import site_analytics
+from app.api.sites.render import site_csp
 from app.api.sites.schemas import PreviewOut, SiteOut, SitePatch
 from app.api.subscriptions import gates
 from app.config import settings
 from app.core.auth.dependencies import ClubAuth
 from app.core.rate_limit import limiter
+from app.core.storage.fields import signed_url
 from app.db.core import SessionDep
 from app.response import CustomHTTPException
 
@@ -105,7 +106,12 @@ async def site_page(session: SessionDep, slug: str) -> HTMLResponse:
     html = await service.published_html(session, slug)
     if html is None:
         raise CustomHTTPException(404, message="This club has not published a site")
-    return HTMLResponse(html, headers={"Cache-Control": "public, max-age=300"})
+    # The same policy the club-sites Worker sends, so the page is held to it
+    # at this address too (not framed: the API answers X-Frame-Options DENY).
+    return HTMLResponse(html, headers={
+        "Cache-Control": "public, max-age=300",
+        "Content-Security-Policy": site_csp(settings.PUBLIC_API_URL, frame_ancestors=""),
+    })
 
 
 @public_router.get("/{slug}/i", summary="One of the page's images: a fresh signed link to the bucket")
@@ -113,5 +119,7 @@ async def site_image(slug: str, k: str = Query(..., max_length=400)) -> Redirect
     key = unquote(k)
     if not key.startswith(IMAGE_PREFIXES) or not key.lower().endswith(IMAGE_EXTS) or ".." in key:
         raise CustomHTTPException(404, message="No such image")
-    url = boto3.client("s3", aws_access_key_id=settings.S3_ACCESS_KEY, aws_secret_access_key=settings.S3_SECRET_KEY).generate_presigned_url("get_object", Params={"Bucket": settings.S3_BUCKET, "Key": key}, ExpiresIn=3600)
+    # The process's one signer (and its cache of links), not a new boto3
+    # client per image: making one loads the S3 service model, ~4 ms each.
+    url = signed_url(key)
     return RedirectResponse(url, status_code=302, headers={"Cache-Control": "public, max-age=1800"})
