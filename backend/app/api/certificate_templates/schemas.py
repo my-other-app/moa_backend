@@ -54,6 +54,14 @@ class CertificateTemplateConfig(BaseModel):
     signature_1_url: Optional[str] = Field(default=None, description="Auto-populated from signature_1 upload")
     signature_2_url: Optional[str] = Field(default=None, description="Auto-populated from signature_2 upload")
 
+    # The bucket keys behind those links. The config keeps these; the links
+    # above are signed afresh whenever it is read (app/api/templates_images).
+    logo_key: Optional[str] = Field(default=None, description="The logo upload's key; set by the server")
+    secondary_logo_key: Optional[str] = Field(default=None, description="The secondary_logo upload's key; set by the server")
+    background_image_key: Optional[str] = Field(default=None, description="The background_image upload's key; set by the server")
+    signature_1_key: Optional[str] = Field(default=None, description="The signature_1 upload's key; set by the server")
+    signature_2_key: Optional[str] = Field(default=None, description="The signature_2 upload's key; set by the server")
+
 
 class CertificateTemplateCreate(BaseModel):
     name: str = Field(..., max_length=100)

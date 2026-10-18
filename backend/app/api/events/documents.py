@@ -168,15 +168,17 @@ def image_width(style, *, default: int) -> int:
 # ran, so what the canvas showed is what prints. What follows is the bridge
 # from our rows to that renderer's inputs.
 
+import logging
 import urllib.request
 from datetime import datetime, timezone as _tz
-from functools import lru_cache
 
 from sqlalchemy import inspect as sa_inspect
 
+from app.config import settings
 from app.core.layout.model import TicketLayoutFields, ticket_area
 from app.core.storage import objects
-from app.core.layout.renderer import RenderInput, pdf_to_png, render_pdf
+from app.core.storage.bucket import key_from_url
+from app.core.layout.renderer import RenderInput, pdf_to_png, render_pdf, render_pdf_pages
 from app.core.layout.tokens import (
     TokenAttendee,
     TokenCertificate,
@@ -307,38 +309,98 @@ def layout_colors(style: dict, club=None) -> dict:
     return {"primary": primary, "secondary": pick("secondary_text_color", DEFAULT_SECONDARY, "brand_secondary"), "ticketType": primary}
 
 
-@lru_cache(maxsize=64)
+logger = logging.getLogger(__name__)
+
+# Images at an address outside our bucket, which a few old configs still
+# name. Kept like the bucket's (objects.ByteCache): by bytes, never a failure.
+_remote = objects.ByteCache(
+    lambda: max(0, settings.RENDER_IMAGE_CACHE_MB) * objects.MB // 4,
+    lambda: max(0, settings.RENDER_IMAGE_CACHE_ITEM_MB) * objects.MB,
+)
+
+
 def fetch_bytes(url: str) -> Optional[bytes]:
-    """An image the design points at. Cached per process: a club's logo is
-    the same bytes on every ticket of the batch."""
+    """An image the design points at, by its address.
+
+    One of our bucket's links is read by its key (objects.get_bytes), so the
+    same logo signed at two different times is one cached copy, and a link
+    that has expired still reads. Anything else is fetched over https,
+    with a time limit and a size limit. A failure is never cached: it used
+    to be (`lru_cache` kept the None), and one slow answer from S3 blanked a
+    club's logo on every ticket until the process restarted."""
     if not url:
         return None
-    try:
-        with urllib.request.urlopen(url, timeout=10) as r:  # noqa: S310 - our own storage URLs
-            return r.read()
-    except Exception:
+    key = key_from_url(url)
+    if key:
+        return objects.get_bytes(key)
+    if not url.lower().startswith("https://"):
+        # Never plain http, never file: or anything else -- the renderer
+        # must not be what reads an internal address a design names.
         return None
+    hit = _remote.get(url)
+    if hit is not None:
+        return hit
+    cap = max(1, settings.RENDER_IMAGE_CACHE_ITEM_MB) * objects.MB
+    try:
+        with urllib.request.urlopen(url, timeout=10) as r:  # noqa: S310 - https only, checked above
+            data = r.read(cap + 1)
+    except Exception as exc:
+        logger.warning("design image %s could not be read: %s", url[:200], exc)
+        return None
+    if not data or len(data) > cap:
+        return None
+    _remote.put(url, data)
+    return data
 
 
-def render_layout_document(style: dict, values: dict, qr_value: str, *, title: str,
-                           event_icon_url: Optional[str] = None, skip_preprinted: bool = False,
-                           agenda: Optional[list] = None, fit: str = "stretch", page=None, club=None) -> bytes:
-    """The PDF of a layered design, for one set of values.
+def _template_bytes(style: dict, layout: TicketLayoutFields) -> tuple[Optional[bytes], bool]:
+    """The artwork the design is drawn on: an upload in the designer (a key
+    in the layout) or the template's background image. And whether it read."""
+    from app.api.templates_images import key_of
 
-    `agenda` is the run of show an agenda layer draws; `page` and `fit`
-    put the design on another page than it was drawn for (a screen-shaped
-    programme fitted onto A4)."""
+    key = layout.canvas.template_key or key_of(style, "background_image")
+    if key:
+        data = objects.get_bytes(key)
+        return data, data is not None
+    # A background named by an address outside the bucket.
+    url = style.get("background_image_url") if "background_image_key" not in style else None
+    if url:
+        data = fetch_bytes(url)
+        return data, data is not None
+    return None, True
+
+
+def _logo_bytes(style: dict) -> tuple[Optional[bytes], bool]:
+    from app.api.templates_images import key_of
+
+    key = key_of(style, "logo")
+    if key:
+        data = objects.get_bytes(key)
+        return data, data is not None
+    url = style.get("logo_url") if "logo_key" not in style else None
+    if url:
+        data = fetch_bytes(url)
+        return data, data is not None
+    return None, True
+
+
+def layout_input(style: dict, values: dict, qr_value: str, *, title: str,
+                 event_icon_url: Optional[str] = None, skip_preprinted: bool = False,
+                 agenda: Optional[list] = None, fit: str = "stretch", page=None, club=None) -> tuple[RenderInput, bool]:
+    """What the renderer draws for one design and one set of values -- the
+    images read (by key, from the cache) -- and whether every image read."""
     layout = layout_of(style)
-    # A template uploaded in the designer is an object key; one set on the
-    # template's artwork field is a URL. Either way the renderer gets bytes.
-    template_key = layout.canvas.template_key
-    template = objects.get_bytes(template_key) if template_key else fetch_bytes(style.get("background_image_url") or "")
+    template, ok_template = _template_bytes(style, layout)
     images = {
         l.image_key: objects.get_bytes(l.image_key)
         for l in layout.layers
         if l.kind == "image" and l.image_key
     }
-    return render_pdf(RenderInput(
+    logo, ok_logo = _logo_bytes(style) if any(l.kind == "image" and l.source == "org_logo" for l in layout.layers) else (None, True)
+    wants_icon = any(l.kind == "image" and l.source == "event_icon" for l in layout.layers)
+    icon = fetch_bytes(event_icon_url or "") if wants_icon else None
+    complete = ok_template and ok_logo and all(v is not None for v in images.values()) and (icon is not None or not (wants_icon and event_icon_url))
+    inp = RenderInput(
         title=title,
         canvas=layout.canvas,
         layers=layout.layers,
@@ -349,12 +411,44 @@ def render_layout_document(style: dict, values: dict, qr_value: str, *, title: s
         fit=fit,
         template=template,
         images={k: v for k, v in images.items() if v},
-        org_logo=fetch_bytes(style.get("logo_url") or ""),
-        event_icon=fetch_bytes(event_icon_url or ""),
+        org_logo=logo,
+        event_icon=icon,
         skip_preprinted=skip_preprinted,
         agenda=agenda or [],
         timezone=EVENT_TIMEZONE,
-    ))
+    )
+    return inp, complete
+
+
+def render_layout(style: dict, values: dict, qr_value: str, *, title: str, **kwargs) -> tuple[bytes, bool]:
+    """`render_layout_document`, and whether every image the design names
+    was read. A render missing one still prints -- a ticket without its
+    logo beats no ticket -- but it is not kept (app.api.events.doc_cache)."""
+    inp, complete = layout_input(style, values, qr_value, title=title, **kwargs)
+    return render_pdf(inp), complete
+
+
+def render_layout_pages(pages: list[dict], *, title: str) -> bytes:
+    """Many layered documents as one PDF, a page each (a batch of ID cards).
+    Each item holds `layout_input`'s arguments."""
+    return render_pdf_pages([layout_input(**page)[0] for page in pages], title=title)
+
+
+def render_layout_document(style: dict, values: dict, qr_value: str, *, title: str,
+                           event_icon_url: Optional[str] = None, skip_preprinted: bool = False,
+                           agenda: Optional[list] = None, fit: str = "stretch", page=None, club=None) -> bytes:
+    """The PDF of a layered design, for one set of values.
+
+    `agenda` is the run of show an agenda layer draws; `page` and `fit`
+    put the design on another page than it was drawn for (a screen-shaped
+    programme fitted onto A4).
+
+    Blocking: it reads images and draws. Async code runs it through
+    app.core.layout.pool."""
+    return render_layout(
+        style, values, qr_value, title=title, event_icon_url=event_icon_url, skip_preprinted=skip_preprinted,
+        agenda=agenda, fit=fit, page=page, club=club,
+    )[0]
 
 
 def layout_png(style: dict, pdf: bytes) -> bytes:

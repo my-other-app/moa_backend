@@ -1,22 +1,21 @@
 """ID cards: the design, each guest's card, batches, and the rule for a
 second card."""
-import io
 import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-import pypdfium2 as pdfium
 from sqlalchemy import func, select
 from sqlalchemy.orm import joinedload
 
 from app.api.checkins.gate_auth import GateActor
-from app.api.events.documents import layout_values, render_layout_document, in_layout_mode, layout_colors
+from app.api.events.documents import layout_values, render_layout_document, render_layout_pages, in_layout_mode, layout_colors
 from app.api.events.models import EventRegistrationsLink, Events
 from app.api.events.tickets import design_version_of, poster_url, role_of
 from app.api.idcards.models import BadgeTemplates, PrintJobs, PrintSource, ReprintPolicy
 from app.api.templates_audience import RegistrationRole
 from app.api.templates_resolve import resolve_template
+from app.core.layout import pool
 from app.core.layout.model import TicketLayoutFields, dump
 from app.core.layout.starters import badge_starter
 from app.response import CustomHTTPException
@@ -72,12 +71,19 @@ def skip_preprinted_for(event: Events, style: dict) -> bool:
     return bool(event.preprinted_carries) or any(l.get("preprinted") for l in layout.get("layers") or []) or bool((layout.get("canvas") or {}).get("templatePreprinted"))
 
 
-def render_card(event: Events, reg: EventRegistrationsLink, style: dict, *, for_print: bool) -> bytes:
-    values = layout_values(reg, event, "badge")
-    return render_layout_document(
-        style, values, reg.ticket_id, title=f"ID card {reg.ticket_id}", event_icon_url=poster_url(event),
+def card_args(event: Events, reg: EventRegistrationsLink, style: dict, *, for_print: bool) -> dict:
+    """What one card's render needs, read from the rows here, on the loop;
+    the drawing then touches no database (app.core.layout.pool)."""
+    return dict(
+        style=style, values=layout_values(reg, event, "badge"), qr_value=reg.ticket_id,
+        title=f"ID card {reg.ticket_id}", event_icon_url=poster_url(event),
         skip_preprinted=for_print and skip_preprinted_for(event, style), club=getattr(event, "club", None),
     )
+
+
+def render_card(event: Events, reg: EventRegistrationsLink, style: dict, *, for_print: bool) -> bytes:
+    """One card's PDF. Blocks while it draws: async code uses card_pdf."""
+    return render_layout_document(**card_args(event, reg, style, for_print=for_print))
 
 
 async def registration_of(session, event: Events, registration_id) -> EventRegistrationsLink:
@@ -105,7 +111,8 @@ async def card_pdf(session, event: Events, registration_id, *, actor: GateActor,
         if not ok:
             raise CustomHTTPException(403, message=why, error_code="REPRINT_REFUSED")
     style = await badge_style(session, event, role_of(reg))
-    pdf = render_card(event, reg, style, for_print=record)
+    # Drawn on the render pool, off the event loop.
+    pdf = await pool.run(render_layout_document, **card_args(event, reg, style, for_print=record))
     if record:
         overrode = bool(reg.badge_printed_at) and override and actor.full and (event.reprint_policy or ReprintPolicy.anyone) is not ReprintPolicy.anyone
         session.add(PrintJobs(id=uuid.uuid4(), event_id=event.id, registration_id=reg.id, source=source, door_label=door or (actor.door.name if actor.door else None), requested_by=actor.user_id, cards=1, design_version=design_version_of(style), overrode=overrode))
@@ -134,23 +141,21 @@ async def batch_pdf(session, event: Events, *, scope: str, role: Optional[str], 
 
     await gates.require_feature(session, event.club_id, "badges", actor=actor.user, event=event)
     regs = await batch_targets(session, event, scope=scope, role=role)
-    merged = pdfium.PdfDocument.new()
-    styles: dict = {}
-    for reg in regs:
-        key = role_of(reg)
-        if key not in styles:
-            styles[key] = await badge_style(session, event, key)
-        card = pdfium.PdfDocument(render_card(event, reg, styles[key], for_print=record))
-        merged.import_pages(card, pages=None)
-        card.close()
     if not regs:
         # An empty batch is still a PDF, so the download says so rather than failing.
         from app.core.layout.renderer import blank_page_pdf
 
         return blank_page_pdf("No cards to print."), 0
-    buf = io.BytesIO()
-    merged.save(buf)
-    merged.close()
+    # Every row read here, on the loop; then one document of a page per card,
+    # drawn on the render pool (it used to be a PDF per card, merged by pdfium).
+    styles: dict = {}
+    pages = []
+    for reg in regs:
+        key = role_of(reg)
+        if key not in styles:
+            styles[key] = await badge_style(session, event, key)
+        pages.append(card_args(event, reg, styles[key], for_print=record))
+    pdf = await pool.run(render_layout_pages, pages, title=f"{event.name} · ID cards")
     if record:
         now = datetime.now(timezone.utc)
         version = max((design_version_of(s) for s in styles.values()), default=0)
@@ -158,7 +163,7 @@ async def batch_pdf(session, event: Events, *, scope: str, role: Optional[str], 
         for reg in regs:
             reg.badge_printed_at = now
         await session.commit()
-    return buf.getvalue(), len(regs)
+    return pdf, len(regs)
 
 
 def settings_of(event: Events) -> dict:

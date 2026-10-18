@@ -1,4 +1,3 @@
-import io
 import json
 import logging
 from typing import Optional
@@ -6,6 +5,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.templates_audience import RegistrationRole
+from app.api.templates_images import CERTIFICATE_FIELDS, shown, stored
+from app.core.storage.fields import upload
 from app.api.templates_resolve import resolve_template
 from app.api.certificate_templates.models import CertificateTemplates
 from app.api.certificate_templates.schemas import CertificateTemplateConfig
@@ -42,11 +43,9 @@ async def create_certificate_template(
 
     await _apply_uploads(template, logo, secondary_logo, background_image, signature_1, signature_2)
 
-    session.add(template)
-    await session.commit()
-    await session.refresh(template)
-
+    # The uploads' keys into the config the renderer reads.
     _sync_urls_to_config(template)
+    session.add(template)
     await session.commit()
     await session.refresh(template)
 
@@ -102,9 +101,7 @@ async def update_certificate_template(
 
     await _apply_uploads(template, logo, secondary_logo, background_image, signature_1, signature_2)
 
-    await session.commit()
-    await session.refresh(template)
-
+    # The uploads' keys into the config the renderer reads.
     _sync_urls_to_config(template)
     await session.commit()
     await session.refresh(template)
@@ -189,7 +186,7 @@ async def get_template_for_event(
         role=role,
     )
     if template is not None:
-        return template.config
+        return shown(template.config, template, fields=FIELDS)
 
     # An explicitly assigned club template, from before events could own
     # their own design. Still honoured so existing events keep rendering
@@ -203,7 +200,7 @@ async def get_template_for_event(
             )
         )
         if assigned is not None:
-            return assigned.config
+            return shown(assigned.config, assigned, fields=FIELDS)
 
     return _default_config()
 
@@ -214,23 +211,33 @@ def _default_config() -> dict:
     return CertificateTemplateConfig().model_dump()
 
 
-def _extract_url(field_val) -> Optional[str]:
-    if isinstance(field_val, str):
-        return field_val
-    if isinstance(field_val, dict) and "original" in field_val:
-        return field_val["original"]
-    return None
+FIELDS = CERTIFICATE_FIELDS
 
 
 def _sync_urls_to_config(template: CertificateTemplates) -> None:
-    """Sync S3 uploaded image URLs into the config JSON."""
-    config = dict(template.config) if template.config else {}
-    config["logo_url"] = _extract_url(template.logo)
-    config["secondary_logo_url"] = _extract_url(template.secondary_logo)
-    config["background_image_url"] = _extract_url(template.background_image)
-    config["signature_1_url"] = _extract_url(template.signature_1)
-    config["signature_2_url"] = _extract_url(template.signature_2)
-    template.config = config
+    """Sync the uploaded images' keys into the config JSON.
+
+    Keys, not the presigned URLs this used to copy: those lasted an hour,
+    and the document printed from them lost its logo and artwork when they
+    ran out. The columns are what an upload or a removal changes here, so
+    they decide every field (app.api.templates_images.stored)."""
+    template.config = stored(template.config, template, fields=FIELDS, touched=FIELDS)
+
+
+def response_of(template: CertificateTemplates) -> dict:
+    """The template as the dashboard reads it: its config with a link signed
+    now for every image (the stored config holds keys only)."""
+    return {
+        "id": template.id,
+        "name": template.name,
+        "is_default": template.is_default,
+        "config": shown(template.config, template, fields=FIELDS),
+        "logo": template.logo,
+        "secondary_logo": template.secondary_logo,
+        "background_image": template.background_image,
+        "signature_1": template.signature_1,
+        "signature_2": template.signature_2,
+    }
 
 
 async def _apply_uploads(
@@ -243,20 +250,15 @@ async def _apply_uploads(
 ) -> None:
     """Apply file uploads to the template model."""
     if logo and logo.filename:
-        content = io.BytesIO(await logo.read())
-        template.logo = {"bytes": content, "filename": logo.filename}
+        template.logo = await upload(CertificateTemplates.logo, {"bytes": await logo.read(), "filename": logo.filename})
     if secondary_logo and secondary_logo.filename:
-        content = io.BytesIO(await secondary_logo.read())
-        template.secondary_logo = {"bytes": content, "filename": secondary_logo.filename}
+        template.secondary_logo = await upload(CertificateTemplates.secondary_logo, {"bytes": await secondary_logo.read(), "filename": secondary_logo.filename})
     if background_image and background_image.filename:
-        content = io.BytesIO(await background_image.read())
-        template.background_image = {"bytes": content, "filename": background_image.filename}
+        template.background_image = await upload(CertificateTemplates.background_image, {"bytes": await background_image.read(), "filename": background_image.filename})
     if signature_1 and signature_1.filename:
-        content = io.BytesIO(await signature_1.read())
-        template.signature_1 = {"bytes": content, "filename": signature_1.filename}
+        template.signature_1 = await upload(CertificateTemplates.signature_1, {"bytes": await signature_1.read(), "filename": signature_1.filename})
     if signature_2 and signature_2.filename:
-        content = io.BytesIO(await signature_2.read())
-        template.signature_2 = {"bytes": content, "filename": signature_2.filename}
+        template.signature_2 = await upload(CertificateTemplates.signature_2, {"bytes": await signature_2.read(), "filename": signature_2.filename})
 
 
 async def _unset_club_defaults(session: AsyncSession, club_id: int) -> None:

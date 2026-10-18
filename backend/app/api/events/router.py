@@ -8,23 +8,21 @@ from fastapi import (
     File,
     UploadFile,
 )
-from datetime import timedelta
-import base64
-import io
-import qrcode
-from app.core.utils.pdf import generate_image_bytes, generate_pdf_bytes
+import hashlib
+from app.core.utils.pdf import generate_image_bytes, generate_pdf_bytes  # noqa: F401 - tests patch generate_pdf_bytes here
+from app.api.events import doc_cache
 from app.api.events.documents import (
     apply_layers,
     document_values,
     image_width,
     in_layout_mode,
     layout_png,
-    layout_values,
-    pdf_page_options,
     qr_data_url,
-    qr_png_base64,
-    render_layout_document,
 )
+from app.api.templates_images import CERTIFICATE_FIELDS, TICKET_FIELDS, embedded
+from app.core.layout import pool
+from app.core.net import client_address
+from app.core.rate_limit import limiter
 from fastapi.encoders import jsonable_encoder
 import logging
 from typing import Optional, List
@@ -39,8 +37,15 @@ from app.api.events import wallet_service
 from app.api.subscriptions import gates
 from app.api.users.models import UserTypes
 from app.api.templates_audience import RegistrationRole
-from app.api.events.tickets import poster_url, role_of, ticket_document
-from app.api.events.certificates import availability, certificate_context, qr_text as certificate_qr_text
+from app.api.events.tickets import role_of, ticket_document, ticket_payload, ticket_style
+from app.api.events.certificates import (
+    availability,
+    certificate_context,
+    certificate_document,
+    certificate_job,
+    certificate_style,
+    qr_text as certificate_qr_text,
+)
 from app.response import CustomHTTPException
 from app.api.events.schemas import (
     EventAdminListResponse,
@@ -549,63 +554,29 @@ async def get_ticket_image(
     registration = await service.get_ticket_details(session, ticket_id=ticket_id)
     _assert_can_access_ticket(user, registration)
 
-    from app.api.ticket_templates.service import get_template_for_event
-
-    style = await get_template_for_event(
-        session, registration.event_id, role=_role_of(registration)
-    )
-    event = registration.event
-    event_endtime = (
-        event.event_datetime + timedelta(hours=event.duration)
-        if event.duration
-        else None
-    )
-    email_payload = {
-        "ticket_id": registration.ticket_id,
-        "participant_name": registration.full_name,
-        "event_name": event.name,
-        "event_date": event.event_datetime.strftime("%d %b %Y"),
-        "event_time": (
-            event.event_datetime.strftime("%I:%M %p")
-            + (" - " + event_endtime.strftime("%I:%M %p"))
-            if event_endtime
-            else ""
-        ),
-        "event_location": event.location_name,
-        "event_prizes": f"Prizes worth ₹{event.prize_amount}" if event.prize_amount else None,
-        "organizer_name": event.club.name,
-        "contact_email": event.contact_email,
-        "contact_phone": event.contact_phone,
-        "qr_code": qr_png_base64(registration.ticket_id),
-    }
+    style = await ticket_style(session, registration)
+    headers = {"Cache-Control": "private, max-age=300"}
     if in_layout_mode(style):
-        pdf = render_layout_document(
-            style, layout_values(registration, event, "ticket"), registration.ticket_id,
-            title=f"Ticket {registration.ticket_id}", event_icon_url=_poster_url(event),
-        )
-        return Response(
-            content=layout_png(style, pdf),
-            media_type="image/png",
-            headers={"Cache-Control": "private, max-age=300"},
-        )
+        # The PDF the download is (kept in the bucket once drawn), as a PNG.
+        doc = await ticket_document(session, registration, style)
+        png = await pool.run(layout_png, style, doc.content)
+        return Response(content=png, media_type="image/png", headers=headers)
 
-    style = apply_layers(style, document_values(registration, event))
+    payload = ticket_payload(registration)
+    styled = apply_layers(style, document_values(registration, registration.event))
+    # The built-in card is 600px wide; a layered design is its artwork.
+    width = image_width(styled, default=600)
+    qr_url = qr_data_url(registration.ticket_id)
 
-    image_bytes = generate_image_bytes(
-        template_path="events/ticket.html",
-        context={
-            "email_payload": email_payload,
-            "style": style,
-            "qr_code_url": qr_data_url(registration.ticket_id),
-        },
-        # The built-in card is 600px wide; a layered design is its artwork.
-        width=image_width(style, default=600),
-    )
-    return Response(
-        content=image_bytes.getvalue(),
-        media_type="image/png",
-        headers={"Cache-Control": "private, max-age=300"},
-    )
+    def draw() -> bytes:
+        inline, _ = embedded(styled, fields=TICKET_FIELDS)
+        return generate_image_bytes(
+            template_path="events/ticket.html",
+            context={"email_payload": payload, "style": inline, "qr_code_url": qr_url},
+            width=width,
+        ).getvalue()
+
+    return Response(content=await pool.run(draw), media_type="image/png", headers=headers)
 
 
 @router.get("/count-view/{event_id}", summary="Increment event view count")
@@ -687,12 +658,12 @@ async def get_certificate_style(
     return style
 
 
-async def _certificate_render_context(session, ticket_id: str) -> dict:
-    """The template context for a certificate, shared by the PDF and the PNG.
+async def _certificate_for(session, ticket_id: str):
+    """The registration and its certificate design, once it holds one.
 
-    Both renders go through this so the preview the app shows and the file
-    the download produces cannot drift apart -- they are the same template
-    with the same payload, rendered by the same engine.
+    The PNG and the PDF both come through here, so the preview the app shows
+    and the file the download produces are the same document: the same
+    design, the same values, the same engine.
     """
     registration = await service.get_ticket_details(session, ticket_id=ticket_id)
 
@@ -706,36 +677,49 @@ async def _certificate_render_context(session, ticket_id: str) -> dict:
                 else "Certificate is only available for attendees who checked in"
             ),
         )
+    return registration, await certificate_style(session, registration)
 
-    from app.api.certificate_templates.service import get_template_for_event
 
-    style = await get_template_for_event(
-        session, registration.event_id, role=_role_of(registration)
-    )
+async def _certificate_render_context(session, ticket_id: str) -> dict:
+    """The HTML template's context for a certificate, as both renders build it."""
+    registration, style = await _certificate_for(session, ticket_id)
     context = certificate_context(registration, style)
     return {**context, "registration": registration, "qr_text": certificate_qr_text(registration)}
 
 
-def _poster_url(event) -> Optional[str]:
-    return poster_url(event)
+# Public and unauthenticated, and each one a render: limited per address.
+# Generous, because a campus behind one NAT address is many people; with
+# max-age=300 and the ETag an app showing a list asks again rarely.
+CERTIFICATE_LIMIT = "120/minute"
 
 
-def _layout_certificate(context: dict, as_png: bool) -> Response:
-    registration = context["registration"]
-    style = context["style"]
-    pdf = render_layout_document(
-        style, layout_values(registration, registration.event, "certificate"), context["qr_text"],
-        title=f"Certificate {registration.ticket_id}", event_icon_url=_poster_url(registration.event),
-    )
-    if as_png:
-        return Response(content=layout_png(style, pdf), media_type="image/png",
-                        headers={"Cache-Control": "public, max-age=86400"})
-    return Response(content=pdf, media_type="application/pdf",
-                    headers={"Content-Disposition": f'attachment; filename="certificate-{registration.ticket_id}.pdf"'})
+def _visitor(request: Request) -> str:
+    return client_address(request) or "unknown"
+
+
+def _certificate_headers(registration, job, kind: str) -> dict:
+    """Five minutes, not a day: a certificate can be revoked or redesigned,
+    and a day-long public cache kept serving the old one. The ETag names the
+    design version, the revocation and everything printed, so a client
+    asking again gets a 304 until one of them changes."""
+    seed = f"{kind}|{job.design_version}|{getattr(registration, 'certificate_revoked_at', None)}|{job.fingerprint}"
+    return {
+        "Cache-Control": "public, max-age=300",
+        "ETag": f'"{hashlib.sha256(seed.encode()).hexdigest()[:32]}"',
+    }
+
+
+def _not_modified(request: Request, headers: dict) -> Optional[Response]:
+    sent = request.headers.get("if-none-match") or ""
+    if headers["ETag"] in [t.strip() for t in sent.split(",")]:
+        return Response(status_code=304, headers=headers)
+    return None
 
 
 @router.get("/certificates/{ticket_id}/image", summary="Get certificate as an image")
+@limiter.limit(CERTIFICATE_LIMIT, key_func=_visitor)
 async def get_certificate_image(
+    request: Request,
     ticket_id: str,
     session: SessionDep = SessionDep,
 ) -> Response:
@@ -749,29 +733,35 @@ async def get_certificate_image(
     Same template, same payload and the same rendering engine as the PDF,
     so what is previewed is what is downloaded.
     """
-    context = await _certificate_render_context(session, ticket_id)
-    if in_layout_mode(context["style"]):
-        return _layout_certificate(context, as_png=True)
+    registration, style = await _certificate_for(session, ticket_id)
+    job = certificate_job(registration, style)
+    headers = _certificate_headers(registration, job, "png")
+    if (unchanged := _not_modified(request, headers)) is not None:
+        return unchanged
 
-    image_bytes = generate_image_bytes(
-        template_path="events/certificate.html",
-        context=context,
-        width=image_width(context["style"], default=1400),
-    )
+    if in_layout_mode(style):
+        pdf = await doc_cache.cached(job.cache_key("certificate", registration.id), job.draw)
+        png = await pool.run(layout_png, style, pdf)
+        return Response(content=png, media_type="image/png", headers=headers)
 
-    return Response(
-        content=image_bytes.getvalue(),
-        media_type="image/png",
-        headers={
-            # Certificates do not change once issued, so this is worth
-            # caching hard: the app shows it in a list and a detail view.
-            "Cache-Control": "public, max-age=86400",
-        },
-    )
+    context = certificate_context(registration, style)
+    width = image_width(context["style"], default=1400)
+
+    def draw() -> bytes:
+        inline, _ = embedded(context["style"], fields=CERTIFICATE_FIELDS)
+        return generate_image_bytes(
+            template_path="events/certificate.html",
+            context={**context, "style": inline},
+            width=width,
+        ).getvalue()
+
+    return Response(content=await pool.run(draw), media_type="image/png", headers=headers)
 
 
 @router.get("/certificates/{ticket_id}/pdf", summary="Get certificate PDF")
+@limiter.limit(CERTIFICATE_LIMIT, key_func=_visitor)
 async def get_certificate_pdf(
+    request: Request,
     ticket_id: str,
     session: SessionDep = SessionDep,
 ) -> Response:
@@ -779,24 +769,17 @@ async def get_certificate_pdf(
     Generate and download a PDF certificate of participation.
     Only available for attendees who have checked in (is_attended=True).
     """
-    context = await _certificate_render_context(session, ticket_id)
-    if in_layout_mode(context["style"]):
-        return _layout_certificate(context, as_png=False)
+    registration, style = await _certificate_for(session, ticket_id)
+    job = certificate_job(registration, style)
+    headers = _certificate_headers(registration, job, "pdf")
+    if (unchanged := _not_modified(request, headers)) is not None:
+        return unchanged
 
-    pdf_bytes = generate_pdf_bytes(
-        template_path="events/certificate.html",
-        context=context,
-        options=pdf_page_options(
-            context["style"], default={"orientation": "Landscape"}
-        ),
-    )
-
+    doc = await certificate_document(session, registration, style)
     return Response(
-        content=pdf_bytes.getvalue(),
+        content=doc.content,
         media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'attachment; filename="certificate-{ticket_id}.pdf"'
-        }
+        headers={**headers, "Content-Disposition": f'attachment; filename="{doc.filename}"'},
     )
 
 

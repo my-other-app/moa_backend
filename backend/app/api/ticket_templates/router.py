@@ -41,7 +41,7 @@ async def create_ticket_template(
         logo=logo, secondary_logo=secondary_logo,
         background_image=background_image,
     )
-    return template
+    return service.response_of(template)
 
 
 @router.get("/list", summary="List ticket templates")
@@ -51,7 +51,7 @@ async def list_ticket_templates(
 ) -> List[TicketTemplateResponse]:
     """List all ticket templates for your club."""
     club_id = await _get_club_id(session, user.id)
-    return await service.list_ticket_templates(session, club_id)
+    return [service.response_of(t) for t in await service.list_ticket_templates(session, club_id)]
 
 
 @router.put("/{template_id}", summary="Update a ticket template")
@@ -71,13 +71,14 @@ async def update_ticket_template(
 ) -> TicketTemplateResponse:
     """Update your ticket template with optional file uploads."""
     club_id = await _get_club_id(session, user.id)
-    return await service.update_ticket_template(
+    template = await service.update_ticket_template(
         session, template_id, club_id, name, is_default, config,
         logo=logo, secondary_logo=secondary_logo,
         background_image=background_image,
         remove_logo=remove_logo, remove_secondary_logo=remove_secondary_logo,
         remove_background_image=remove_background_image,
     )
+    return service.response_of(template)
 
 
 @router.delete("/{template_id}", summary="Delete a ticket template")
