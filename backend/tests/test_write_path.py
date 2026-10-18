@@ -264,7 +264,7 @@ async def test_a_burst_on_a_free_event_never_oversells(_engine):
             await s.commit()
         outcomes = await _register_all(make, w["event"], people)
         assert sum(1 for o in outcomes if o[0] == "ok") == 5
-        assert all(o == (400, "Event is full") for o in outcomes if o[0] != "ok")
+        assert all(o == (400, "EVENT_FULL") for o in outcomes if o[0] != "ok")
         going, regs = await _rows(make, w["event"])
         assert going == len(regs) == 5
         # Each its own admission number, none skipped: only a registration that got a place took one.
@@ -303,7 +303,7 @@ async def test_a_burst_on_a_paid_event_keeps_its_places_for_the_paid(_engine):
             )
             await s.commit()
         late = await _register_all(make, w["event"], people[8:])
-        assert late == [(400, "Event is full")] * 2
+        assert late == [(400, "EVENT_FULL")] * 2
     finally:
         await _drop_world(make, w, extra_users=[u for u, _ in people])
 
