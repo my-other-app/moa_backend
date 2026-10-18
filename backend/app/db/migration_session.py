@@ -11,7 +11,10 @@ that traffic.
   query in front, and requests time out behind it. With lock_timeout the
   ALTER gives up after a few seconds instead, its transaction rolls back
   (releasing every lock it held, so the queue drains at once), and the
-  migration is tried again after a pause: `run`, below.
+  migration is tried again after a pause: `run`, below. In an autocommit
+  block every statement is its own transaction, so there the one statement
+  is tried again in place (`_do_execute`): a statement that timed out
+  waiting changed nothing, and the block's earlier statements stay done.
 - **statement_timeout.** A statement that holds a strong lock for long -- a
   column type change that rewrites the table, a CHECK or foreign key added
   without NOT VALID, an index built without CONCURRENTLY -- blocks the table
@@ -155,6 +158,8 @@ class Guard:
         event.listen(engine, "after_cursor_execute", self._after)
         event.listen(engine, "handle_error", self._on_error)
         event.listen(engine, "commit", self._on_commit)
+        event.listen(engine, "do_execute", self._do_execute)
+        event.listen(engine, "do_execute_no_params", self._do_execute_no_params)
 
     def _set(self, dbapi_connection, statement_timeout: str, lock_timeout: str) -> None:
         cursor = dbapi_connection.cursor()
@@ -182,6 +187,42 @@ class Guard:
 
     def _after(self, conn, cursor, statement, parameters, context, executemany) -> None:
         self._restore(conn, cursor.connection)
+
+    def _do_execute(self, cursor, statement, parameters, context, *, no_params: bool = False) -> Optional[bool]:
+        """A statement in an autocommit block that times out on a lock is
+        tried again in place. It is its own transaction, so the attempt that
+        timed out changed nothing and nothing else is held meanwhile. Not an
+        online statement: a CONCURRENTLY build that fails leaves an INVALID
+        index, which `IF NOT EXISTS` would then take for a finished one."""
+        if not getattr(cursor.connection, "autocommit", False) or is_online(statement):
+            return None  # SQLAlchemy's own execute, once
+        for number in range(1, self.attempts + 1):
+            try:
+                if no_params:
+                    cursor.execute(statement)
+                else:
+                    cursor.execute(statement, parameters)
+                return True
+            except Exception as error:  # noqa: BLE001 -- re-raised unless retryable
+                reason = retryable(error)
+                if reason is None or number == self.attempts:
+                    raise
+                wait = self._pause(number)
+                logger.warning(
+                    "%s on a statement in an autocommit block (%s); it changed nothing, "
+                    "trying it again in %.1fs (attempt %d of %d)",
+                    reason, _snippet(statement), wait, number + 1, self.attempts,
+                )
+                self.sleep(wait)
+        return True  # pragma: no cover -- the loop returns or raises
+
+    def _do_execute_no_params(self, cursor, statement, context) -> Optional[bool]:
+        return self._do_execute(cursor, statement, None, context, no_params=True)
+
+    def _pause(self, number: int) -> float:
+        """Doubling from retry_wait, with jitter so two retrying runs do not
+        line up again."""
+        return self.retry_wait * (2 ** (number - 1)) * random.uniform(1.0, 1.5)
 
     def _on_error(self, exception_context) -> None:
         conn = exception_context.connection
@@ -242,9 +283,10 @@ class Guard:
                 if self.partial:
                     raise MigrationLockTimeout(
                         f"A migration ({where}) hit a {reason} after it had committed part of its work "
-                        "in an autocommit block, so it was not retried: running it again repeats that "
-                        "part. Check the migration is idempotent (IF NOT EXISTS, a dropped INVALID index) "
-                        "before running `alembic upgrade head` again. What held the lock: "
+                        "in an autocommit block (a statement in the block is retried in place, "
+                        f"{self.attempts} times), so the migration was not run again: that would repeat "
+                        "the committed part. Check the migration is idempotent (IF NOT EXISTS, a dropped "
+                        "INVALID index) before running `alembic upgrade head` again. What held the lock: "
                         "docs/OPERATIONS.md, 'A stalled migration'."
                     ) from error
                 if number == self.attempts:
@@ -255,12 +297,17 @@ class Guard:
                         "Something holds the table -- a long query or an open transaction. Find it: "
                         "docs/OPERATIONS.md, 'A stalled migration'."
                     ) from error
-                wait = self.retry_wait * (2 ** (number - 1)) * random.uniform(1.0, 1.5)
+                wait = self._pause(number)
                 logger.warning(
                     "%s on a migration (%s), rolled back; trying again in %.1fs (attempt %d of %d)",
                     reason, where, wait, number + 1, self.attempts,
                 )
                 self.sleep(wait)
+
+
+def _snippet(statement: str) -> str:
+    one = " ".join(str(statement).split())
+    return one if len(one) <= 80 else one[:77] + "..."
 
 
 def retryable(error: BaseException) -> Optional[str]:

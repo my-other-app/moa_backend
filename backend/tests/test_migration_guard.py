@@ -159,7 +159,7 @@ def test_run_does_not_retry_a_migration_that_committed_part_of_its_work():
         guard._on_commit(None)  # an autocommit block committed before the failure
         raise _Wrapped(_PgError("55P03"))
 
-    with pytest.raises(MigrationLockTimeout, match="was not retried"):
+    with pytest.raises(MigrationLockTimeout, match="was not run again"):
         guard.run(attempt)
     assert len(calls) == 1
 
@@ -375,6 +375,33 @@ def test_gives_up_after_the_attempts_and_leaves_nothing_half_done(db, tmp_path, 
     assert _one(db, "SELECT to_regclass('beside_it')::text") is None
 
 
+def test_a_statement_in_an_autocommit_block_is_retried_in_place(db, tmp_path, caplog):
+    """Each statement there is its own transaction: the one that timed out is
+    tried again by itself, and the statements before it are not repeated
+    (the INSERT would put a second row in)."""
+    with db.cursor() as cur:
+        cur.execute("CREATE TABLE t (id int); CREATE TABLE ran (n int)")
+    blocker = _blocker(settings.DATABASE_URL_SYNC, "LOCK TABLE t IN ACCESS SHARE MODE")
+    release = threading.Timer(0.9, blocker.rollback)
+    release.start()
+    cfg = _chain(tmp_path, """
+        with op.get_context().autocommit_block():
+            op.execute('INSERT INTO ran VALUES (1)')
+            op.execute('ALTER TABLE t ADD COLUMN z int')
+    """)
+    try:
+        with caplog.at_level(logging.WARNING, logger="alembic.env"):
+            command.upgrade(cfg, "head")
+    finally:
+        release.join()
+        blocker.close()
+    retries = [r.getMessage() for r in caplog.records if "trying it again" in r.getMessage()]
+    assert retries and "autocommit block" in retries[0] and "ALTER TABLE t ADD COLUMN z" in retries[0]
+    assert not [r for r in caplog.records if "trying again in" in r.getMessage()]  # not the whole migration
+    assert _one(db, "SELECT count(*) FROM ran") == 1
+    assert _version(db) == "m1"
+
+
 def test_a_migration_that_committed_part_of_its_work_is_not_retried(db, tmp_path, caplog):
     with db.cursor() as cur:
         cur.execute("CREATE TABLE t (id int)")
@@ -386,7 +413,7 @@ def test_a_migration_that_committed_part_of_its_work_is_not_retried(db, tmp_path
     """)
     try:
         with caplog.at_level(logging.WARNING, logger="alembic.env"):
-            with pytest.raises(MigrationLockTimeout, match="was not retried"):
+            with pytest.raises(MigrationLockTimeout, match="was not run again"):
                 command.upgrade(cfg, "head")
     finally:
         blocker.close()
