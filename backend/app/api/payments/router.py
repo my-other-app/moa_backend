@@ -32,8 +32,8 @@ router = APIRouter(prefix="/payments", tags=["payments"])
 logger = logging.getLogger(__name__)
 
 
-#: Errors from making an order that the client is meant to read, rather than
-#: the generic 500 every other failure here becomes.
+#: Errors from making an order that are refused before anything is written,
+#: passed on as they are.
 _ORDER_ERRORS_SHOWN = {"UPDATE_APP_TO_PAY", "GATEWAY_UNAVAILABLE"}
 
 
@@ -70,8 +70,12 @@ async def create_order(
         return data
 
     except CustomHTTPException as e:
-        if e.error_code in _ORDER_ERRORS_SHOWN:
-            # Refused before anything was written.
+        if e.error_code in _ORDER_ERRORS_SHOWN or e.status_code < 500:
+            # Refused before anything was written: a refusal the client is
+            # meant to read (409 ALREADY_PAID, 422 NOTHING_TO_PAY, 404
+            # REGISTRATION_NOT_FOUND, a 400 naming the payload's missing
+            # fields), not a failure. These all came back as 500 "Failed to
+            # create order".
             raise
         await session.rollback()
         raise CustomHTTPException(
@@ -91,15 +95,26 @@ async def verify_payment(
     background_tasks: BackgroundTasks,
 ) -> PaymentVerifyResponse:
 
-    payment = await service.verify_razorpay_payment(
-        session=session,
-        razorpay_order_id=request.razorpay_order_id,
-        razorpay_payment_id=request.razorpay_payment_id,
-        background_tasks=background_tasks,
-    )
+    from razorpay.errors import BadRequestError
+
+    from app.api.payment_gateways import service as gateways
+
+    try:
+        payment = await service.verify_razorpay_payment(
+            session=session,
+            razorpay_order_id=request.razorpay_order_id,
+            razorpay_payment_id=request.razorpay_payment_id,
+            background_tasks=background_tasks,
+        )
+    except BadRequestError as exc:
+        if gateways.is_auth_error(exc):
+            raise
+        # Razorpay has no such payment: an answer, not a crash. Nothing was
+        # kept; the request's session goes without a commit.
+        raise CustomHTTPException(404, message="Payment not found", error_code="PAYMENT_NOT_FOUND")
 
     if not payment:
-        raise HTTPException(status_code=404, detail="Payment not found")
+        raise CustomHTTPException(404, message="Payment not found", error_code="PAYMENT_NOT_FOUND")
 
     return {
         "payment_status": payment.status.value,

@@ -112,7 +112,7 @@ async def test_readers_like_comment_and_are_counted_once(client, world):
     c = await client.post(f"{url}/comments", json={"body": "Congrats Byte Benders!"}, headers=world["fan_h"])
     assert c.status_code == 201 and c.json()["author"]["is_club"] is False and c.json()["author"]["name"] == world["fan"].full_name
     reply = await client.post(f"{POST}/{t['id']}/comments", json={"body": "Thank you all!"}, headers=h)
-    assert reply.status_code == 201 and reply.json()["author"] == {"id": world["owner"].id, "name": "Circuit Society", "is_club": True}
+    assert reply.status_code == 201 and reply.json()["author"] == {"id": world["owner"].id, "name": "Circuit Society", "is_club": True, "avatar": None}
     assert (await client.post(f"{url}/comments", json={"body": "  "}, headers=world["fan_h"])).status_code == 422
     listed = (await client.get(f"{url}/comments")).json()
     assert [x["body"] for x in listed] == ["Congrats Byte Benders!", "Thank you all!"]

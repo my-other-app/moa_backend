@@ -24,6 +24,11 @@ from app.api.club_designs.router import router as club_designs_router
 from app.api.finance.router import router as finance_router
 from app.api.security.router import router as security_router
 from app.api.threads.router import public_router as threads_public_router, router as threads_router
+from app.api.reports.router import (
+    admin_router as reports_admin_router,
+    blocks_router as user_blocks_router,
+    router as reports_router,
+)
 from app.api.live.router import public_router as live_public_router, router as live_router
 from app.api.competitions.router import public_router as competition_public_router, router as competition_router
 from app.api.sites.router import public_router as sites_public_router, router as sites_router
@@ -85,6 +90,9 @@ api_router.include_router(router=finance_router, tags=["finance"])
 api_router.include_router(router=threads_router, tags=["threads"])
 api_router.include_router(router=security_router, tags=["security"])
 api_router.include_router(router=threads_public_router, tags=["threads"])
+api_router.include_router(router=reports_router)
+api_router.include_router(router=user_blocks_router)
+api_router.include_router(router=reports_admin_router)
 api_router.include_router(router=live_router, tags=["live"])
 api_router.include_router(router=live_public_router, tags=["live"])
 api_router.include_router(router=competition_router, tags=["competition"])

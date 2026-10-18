@@ -19,6 +19,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.api.clubs.models import Clubs, ClubUsersLink
+from app.api.reports import service as reports
 from app.api.threads.models import ClubThreads, ThreadComments, ThreadLikes, ThreadPollOptions, ThreadViews, ThreadVotes
 from app.api.threads.schemas import MAX_BODY, MAX_OPTION, MAX_OPTIONS
 from app.api.users.models import Users
@@ -311,17 +312,22 @@ async def vote(session, t: ClubThreads, user, option_id) -> dict:
 
 async def _comment_out(c: ThreadComments, club: Clubs, users: dict[int, Users]) -> dict:
     if c.user_id == club.user_id:
-        author = dict(id=c.user_id, name=club.name, is_club=True)
+        author = dict(id=c.user_id, name=club.name, is_club=True, avatar=club.logo)
     else:
         u = users.get(c.user_id)
-        author = dict(id=c.user_id, name=(u.full_name if u and u.full_name else "A follower"), is_club=False)
+        author = dict(id=c.user_id, name=(u.full_name if u and u.full_name else "A follower"), is_club=False, avatar=reports.avatar(u))
     return dict(id=str(c.id), body=c.body, author=author, created_at=_iso(c.created_at))
 
 
-async def comments(session, t: ClubThreads, club: Clubs) -> list[dict]:
+async def comments(session, t: ClubThreads, club: Clubs, viewer_id: int | None = None) -> list[dict]:
+    """The comments under a post, oldest first, as this viewer may see them:
+    without anyone they have blocked, and without a comment enough people
+    have reported (app/api/reports) unless they wrote it."""
     rows = list((await session.scalars(select(ThreadComments).where(ThreadComments.thread_id == t.id, ThreadComments.is_deleted == False).order_by(ThreadComments.created_at, ThreadComments.id))).all())  # noqa: E712
-    ids = {c.user_id for c in rows if c.user_id is not None}
-    users = {u.id: u for u in (await session.scalars(select(Users).where(Users.id.in_(ids)))).all()} if ids else {}
+    blocked = await reports.blocked_by(session, viewer_id)
+    hidden = await reports.hidden_comments(session, [c.id for c in rows])
+    rows = [c for c in rows if c.user_id not in blocked and (c.id not in hidden or (viewer_id is not None and c.user_id == viewer_id))]
+    users = await reports.people(session, {c.user_id for c in rows})
     return [await _comment_out(c, club, users) for c in rows]
 
 
@@ -331,8 +337,7 @@ async def add_comment(session, t: ClubThreads, club: Clubs, user, body: str) -> 
     t.comments_count += 1
     await session.commit()
     await session.refresh(c)
-    users = {user.id: user}
-    return await _comment_out(c, club, users)
+    return await _comment_out(c, club, await reports.people(session, [user.id]))
 
 
 async def remove_comment(session, t: ClubThreads, club: Clubs, comment_id, *, by_user, as_club: bool) -> None:

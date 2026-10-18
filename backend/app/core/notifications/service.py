@@ -8,8 +8,8 @@ via Firebase Cloud Messaging (FCM).
 import logging
 from typing import Optional
 import firebase_admin
-from firebase_admin import credentials, messaging
-from sqlalchemy import select
+from firebase_admin import credentials, exceptions as firebase_exceptions, messaging
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.users.models import UserDeviceTokens
@@ -116,6 +116,44 @@ async def get_fcm_token_for_user(
     return row[0] if row else None
 
 
+def is_dead_token(exc: BaseException | None) -> bool:
+    """Whether FCM's answer means this token will never take a message again:
+    UNREGISTERED (the app was uninstalled, or the token rotated), or
+    INVALID_ARGUMENT about the token itself. INVALID_ARGUMENT is also FCM's
+    answer to a bad message (a payload too big, a bad image URL) -- every
+    token fails that one the same way -- so only one that names the
+    registration token condemns it."""
+    if isinstance(exc, messaging.UnregisteredError):
+        return True
+    if isinstance(exc, firebase_exceptions.InvalidArgumentError):
+        return "registration token" in str(exc).lower()
+    return False
+
+
+async def prune_tokens(session: AsyncSession, tokens: list[str]) -> int:
+    """Delete the rows for tokens FCM said are dead, for every account that
+    has them. Never raises: a push must not fail what it was telling about.
+    Commits, so the rows stay gone even when the caller has nothing left to
+    commit (a push is sent after the change it announces is kept)."""
+    tokens = sorted(set(t for t in tokens if t))
+    if not tokens:
+        return 0
+    try:
+        async with session.begin_nested():
+            result = await session.execute(
+                delete(UserDeviceTokens)
+                .where(UserDeviceTokens.fcm_token.in_(tokens))
+                .execution_options(include_deleted=True, synchronize_session=False)
+            )
+        await session.commit()
+        removed = int(result.rowcount or 0)
+        logger.info("Removed %d dead FCM token rows", removed)
+        return removed
+    except Exception:  # noqa: BLE001
+        logger.warning("Dead FCM tokens could not be removed", exc_info=True)
+        return 0
+
+
 async def send_notification_to_user(
     session: AsyncSession,
     user_id: int,
@@ -141,7 +179,10 @@ async def send_notification_to_user(
         logger.debug(f"No FCM token found for user {user_id}")
         return False
     
-    return await _send_to_token(token, title, body, data)
+    dead: list[str] = []
+    sent = await _send_to_token(token, title, body, data, dead=dead)
+    await prune_tokens(session, dead)
+    return sent
 
 
 async def send_notification_to_users(
@@ -174,7 +215,10 @@ async def send_notification_to_users(
         logger.debug(f"No FCM tokens found for users {user_ids}")
         return 0
     
-    return await _send_to_tokens(tokens, title, body, data, image_url)
+    dead: list[str] = []
+    sent = await _send_to_tokens(tokens, title, body, data, image_url, dead=dead)
+    await prune_tokens(session, dead)
+    return sent
 
 
 async def _send_to_token(
@@ -182,8 +226,10 @@ async def _send_to_token(
     title: str,
     body: str,
     data: Optional[dict] = None,
+    dead: Optional[list] = None,
 ) -> bool:
-    """Send notification to a single FCM token."""
+    """Send notification to a single FCM token. A token FCM says is dead is
+    added to `dead`, for the caller to remove (prune_tokens)."""
     if not initialize_firebase():
         logger.error("Firebase not initialized, cannot send notification")
         return False
@@ -217,11 +263,13 @@ async def _send_to_token(
         logger.info(f"Successfully sent notification: {response}")
         return True
         
-    except messaging.UnregisteredError:
-        logger.warning(f"Token is unregistered, should be removed: {token[:20]}...")
-        return False
     except Exception as e:
-        logger.error(f"Failed to send notification: {e}")
+        if is_dead_token(e):
+            logger.warning(f"Token is dead ({type(e).__name__}), removing it: {token[:20]}...")
+            if dead is not None:
+                dead.append(token)
+        else:
+            logger.error(f"Failed to send notification: {e}")
         return False
 
 
@@ -231,8 +279,10 @@ async def _send_to_tokens(
     body: str,
     data: Optional[dict] = None,
     image_url: Optional[str] = None,
+    dead: Optional[list] = None,
 ) -> int:
-    """Send notification to multiple FCM tokens using batch send."""
+    """Send notification to multiple FCM tokens using batch send. Tokens FCM
+    says are dead are added to `dead`, for the caller to remove."""
     if not tokens:
         return 0
     
@@ -282,13 +332,15 @@ async def _send_to_tokens(
             f"{response.failure_count} failures"
         )
         
-        # Log failed tokens for debugging
+        # Log failed tokens for debugging; collect the dead ones.
         if response.failure_count > 0:
             for idx, send_response in enumerate(response.responses):
                 if not send_response.success:
                     logger.warning(
                         f"Failed to send to token {idx}: {send_response.exception}"
                     )
+                    if dead is not None and is_dead_token(send_response.exception):
+                        dead.append(tokens[idx])
         
         return response.success_count
         

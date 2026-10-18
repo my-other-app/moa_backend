@@ -19,7 +19,7 @@ from app.api.payments.models import (
     RazorpayWebhookLogs,
 )
 from app.api.events.models import EventRegistrationsLink
-from app.core.validations.exceptions import RequestValidationError
+from app.core.validations.exceptions import CodedRequestError, RequestValidationError
 from app.response import CustomHTTPException
 from app.config import settings
 from app.api.payments.background_tasks import send_payment_confirmation_email
@@ -160,7 +160,7 @@ async def verify_razorpay_payment(
     )
 
     if not order:
-        raise CustomHTTPException(404, "Payment order not found")
+        raise CustomHTTPException(404, "Payment order not found", error_code="ORDER_NOT_FOUND")
 
     db_payment = await session.scalar(
         select(PaymentLogs)
@@ -172,7 +172,7 @@ async def verify_razorpay_payment(
         return db_payment
 
     if order.status == OrderStatus.paid:
-        raise RequestValidationError(razorpay_order_id="Order already paid")
+        raise CodedRequestError(409, "This order is already paid.", "ALREADY_PAID", razorpay_order_id="Order already paid")
 
     # The account the order was made on -- the club's own, or the platform's --
     # whatever the club has connected since.
@@ -193,8 +193,9 @@ async def verify_razorpay_payment(
     # order, not a different one — otherwise a real captured payment for
     # order A could be used to mark an unrelated order B as paid.
     if payment_details.get("order_id") != razorpay_order_id:
-        raise RequestValidationError(
-            razorpay_order_id="This payment does not belong to the specified order."
+        raise CodedRequestError(
+            400, "This payment does not belong to the specified order.", "PAYMENT_ORDER_MISMATCH",
+            razorpay_order_id="This payment does not belong to the specified order.",
         )
 
     if not db_payment:
@@ -240,7 +241,7 @@ async def verify_razorpay_payment(
 
     else:
 
-        raise RequestValidationError(payment_method="Invalid payment method")
+        raise CodedRequestError(400, "This payment method is not supported.", "UNSUPPORTED_PAYMENT_METHOD", payment_method="Invalid payment method")
 
     if payment_status == "captured":
         db_payment.status = PaymentStatus.captured

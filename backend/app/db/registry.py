@@ -37,3 +37,4 @@ from app.api.club_access import models as _club_access_models  # noqa: F401
 from app.api.club_domains import models as _club_domain_models  # noqa: F401
 from app.api.organisers import models as _organiser_models  # noqa: F401
 from app.api.discover.geocode import GeocodeCache  # noqa: F401
+from app.api.reports import models as _report_models  # noqa: F401

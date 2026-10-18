@@ -266,6 +266,11 @@ class FCMTokenRequest(CustomBaseModel):
     platform: str = Field(..., description="Device platform (ios/android)")
 
 
+class FCMTokenDelete(CustomBaseModel):
+    """The token to stop sending this account's pushes to: the device's own, at sign-out."""
+    token: str = Field(..., min_length=1, max_length=512)
+
+
 class FCMTokenResponse(CustomBaseModel):
     """Response schema for FCM token registration"""
     success: bool = Field(...)

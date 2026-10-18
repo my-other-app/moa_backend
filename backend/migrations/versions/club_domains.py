@@ -13,13 +13,13 @@ Downgrade drops the table and renames the column back; the flags it set
 stay set.
 
 Revision ID: club_domains
-Revises: admin_revenue
+Revises: content_reports
 """
 import sqlalchemy as sa
 from alembic import op
 
 revision = "club_domains"
-down_revision = "admin_revenue"
+down_revision = "content_reports"
 branch_labels = None
 depends_on = None
 
