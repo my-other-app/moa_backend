@@ -2,7 +2,8 @@
 
 How to deploy, roll back, unstick a migration, restore a backup, rotate a
 secret, turn on the new services, size the server and every service on it,
-and keep its disk from filling. Every command is meant to be copied. Commands under **Read-only** change nothing; anything
+keep its disk from filling, and open the live room's streams. Every command
+is meant to be copied. Commands under **Read-only** change nothing; anything
 that changes something says so.
 
 The production box runs `docker-compose.prod.yml` from
@@ -918,3 +919,89 @@ sudo growpart /dev/nvme0n1 1                # or /dev/xvda 1, as lsblk shows
 sudo resize2fs /dev/nvme0n1p1               # ext4; xfs_growfs / for xfs
 ```
 
+---
+
+## 12. The live room's streams (`APP_LIVE_SSE`)
+
+With `APP_LIVE_SSE=true` the live room is pushed over server-sent events:
+`GET /api/v1/events/{id}/live/stream`, one long response per phone or console
+(the client contract is the branch's LIVE_SSE.md). Unset (the default), the
+stream answers 404 and every client keeps polling. A stream is a socket held
+for as long as someone watches, so three things on the box must allow for
+thousands of them before it is turned on.
+
+**1. nginx: a location for the stream.** `nginx.conf` in the repository has
+it in each API server block, before `location /`; the host's nginx needs the
+same in the server block(s) for `api.myotherapp.in` (and any other name
+pointing at the API), with the upstream port that block's `location /` uses:
+
+```nginx
+location ~ ^/api/v1/events/\d+/live/stream$ {
+    proxy_pass http://localhost:8000;          # the port this server block's location / uses
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_buffering off;                       # frames as they are written
+    proxy_cache off;
+    gzip off;
+    proxy_read_timeout 120s;                   # the stream pings every 15 s
+    send_timeout 60s;                          # a phone that stops reading is let go
+}
+```
+
+Without it a stream still works (the app sends `X-Accel-Buffering: no`, so
+nginx passes frames through unbuffered), but the default 60 s
+`proxy_read_timeout` cuts it, and a stalled phone is held longer.
+
+**2. nginx: connections and open files.** Each open stream holds two
+connections in nginx (the phone's and the one to the backend), and each is
+an open file. Ubuntu's default is `worker_connections 768` per worker
+process (`worker_processes auto`: one per vCPU, so 1,536 on two vCPUs): some
+700 streams in all, then nginx refuses connections for everyone, page loads
+included. In `/etc/nginx/nginx.conf`, main context and `events`:
+
+```nginx
+worker_rlimit_nofile 65536;          # main context: open files per worker process
+
+events {
+    worker_connections 16384;        # per worker: about 8,000 streams each, with normal traffic beside
+}
+```
+
+Each idle connection costs nginx a few hundred bytes (with `proxy_buffering
+off`, a small buffer while a frame passes), so this is memory well inside the
+OS share of section 10. Read-only checks, then apply:
+
+```bash
+sudo nginx -T 2>/dev/null | grep -E 'worker_(processes|connections|rlimit_nofile)'
+grep 'open files' /proc/$(pgrep -f 'nginx: worker' | head -1)/limits
+sudo nginx -t                         # read-only: the new config parses
+sudo systemctl reload nginx           # changes: workers restart gracefully, no connection dropped
+```
+
+**3. The backend: open files and memory.** `docker-compose.prod.yml` raises
+the backend's open-file limit to 65,536 (Docker's default soft limit is
+1,024: about a thousand phones a container). It applies when the backend is
+next recreated (`recreate_backend`, or by hand `up -d --build --no-deps
+backend`); a restart keeps the old limit. Read-only check:
+`sudo docker exec doth-live-backend sh -c 'ulimit -n'`. A stream costs the
+backend about 40 KB (scripts/bench/RESULTS.md, "The live room pushed"): a
+hall of 3,000 phones some 120 MB, inside its 2304m (section 10). Each API
+process holds at most `APP_LIVE_SSE_MAX_STREAMS` (5,000), 4,000 per event
+and 3,000 per address; past them a phone is told 503 and polls.
+
+**Turning it on**, in order:
+
+1. Deploy with `APP_LIVE_SSE` unset (the streams answer 404).
+2. nginx: the location and the limits above; `nginx -t`, reload.
+3. With more than one API process (`APP_WORKERS` above 1), Redis first
+   (section 6): a change made in one process reaches the streams held by
+   the others only through it.
+4. The clients ship "stream first, poll on 404" (event site, app, clubs
+   dashboard).
+5. `APP_LIVE_SSE=true` in `PROD_ENV_VARIABLES`, then `sync_env` +
+   `recreate_backend` (a recreate, which builds; section 6). Unset it the
+   same way to put every client back on the poll.
