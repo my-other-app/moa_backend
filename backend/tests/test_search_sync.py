@@ -249,3 +249,11 @@ async def test_the_reindex_script_rebuilds_applies_settings_checks_and_reports(s
     assert (await search_reindex.run(session, "check"))["check"][search.EVENTS] == {"sent": 0, "removed": 0}
     got = await search_reindex.run(session, "status")
     assert got["configured"] and got["healthy"] and got["built"] and got[search.index(search.EVENTS)] >= 3
+
+
+def test_a_city_is_guessed_from_the_place_words():
+    assert docs.city_of("Lab 3, CUSAT, Cochin 682022") == "kochi"
+    assert docs.city_of("Seminar Hall, Bangalore - 560001") == "bengaluru"
+    assert docs.city_of(None, "Thrissur") == "thrissur"
+    assert docs.city_of("Online", "Mumbai") == "mumbai"
+    assert docs.city_of("682022", None) is None

@@ -103,6 +103,8 @@ _CITY_NAMES = {
     "new delhi": "delhi", "trichur": "thrissur", "quilon": "kollam", "alleppey": "alappuzha",
 }
 _PIN = re.compile(r"[\d\s-]+$")
+#: Words a venue field holds that are no city.
+_NOT_PLACES = {"online", "virtual", "zoom", "google meet", "tbd", "tba", "india"}
 
 
 def city_of(*places: Optional[str]) -> Optional[str]:
@@ -116,7 +118,7 @@ def city_of(*places: Optional[str]) -> Optional[str]:
         parts = [p.strip() for p in place.split(",") if p.strip()]
         while parts:
             last = _PIN.sub("", parts[-1]).strip().lower()
-            if last and not last.isdigit():
+            if last and not last.isdigit() and last not in _NOT_PLACES:
                 return _CITY_NAMES.get(last, last)
             parts.pop()
     return None
