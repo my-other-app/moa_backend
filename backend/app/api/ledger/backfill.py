@@ -314,20 +314,37 @@ async def _charges_batch(session, rows: list, done: dict) -> list:
     )).all():
         if group not in current or origin < current[group]:
             current[group] = origin
-    txns, earliest = [], {}
+    txns = []
     for charge in rows:
         done["seen"] += 1
         txns.append(ledger.charge_txn(charge))
         refund = ledger.charge_refund_txn(charge, int(refunded.get(charge.razorpay_payment_id) or 0), at=charge.updated_at)
         if refund is not None:
             txns.append(refund)
-        group = ledger._first_group(charge)
-        if group not in earliest or charge.charged_at < earliest[group].charged_at:
-            earliest[group] = charge
-    for group, charge in earliest.items():
+    for group, charge in (await _earliest_charges(session, groups)).items():
         txns += ledger.first_charge_txns(group, charge, current.get(group))
     done["lines"] += await book.post_many(session, txns)
     return busy
+
+
+async def _earliest_charges(session, groups: set) -> dict:
+    """Each subscription's earliest charge in the whole table, not the
+    batch's: charges stored newest first would otherwise move the first-
+    charge marker once for every charge of the subscription."""
+    from app.api.subscriptions.models import SubscriptionCharges as Charges
+
+    ints = [int(g) for g in groups if g.isdigit()]
+    out: dict = {}
+    for charge in (await session.scalars(
+        select(Charges).where(Charges.status != "failed", or_(
+            Charges.razorpay_subscription_id.in_(sorted(groups)), Charges.subscription_id.in_(ints),
+            Charges.razorpay_payment_id.in_(sorted(groups)),
+        ))
+    )).all():
+        group = ledger._first_group(charge)
+        if group in groups and (group not in out or charge.charged_at < out[group].charged_at):
+            out[group] = charge
+    return out
 
 
 async def _charges(session, done: dict, *, batch: int, since: datetime | None) -> None:

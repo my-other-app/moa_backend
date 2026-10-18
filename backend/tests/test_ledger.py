@@ -979,3 +979,26 @@ async def test_the_backfill_posts_a_deleted_registrations_money_too(session, rzp
     assert done["registrations"]["seen"] == 1 and done["payments"]["seen"] == 1
     assert await _balance(session, "tickets_online", registration_id=reg.id) == -7500
     assert await _balance(session, "unapplied", registration_id=reg.id) == 0
+
+
+async def test_the_backfill_marks_a_subscriptions_first_charge_once(session, rzp, monkeypatch, shop):
+    """Charges stored newest first (a backfill from Razorpay's invoices, say):
+    the first-charge marker goes straight to the earliest, not once per charge."""
+    from app.api.ledger import backfill
+    from tests.test_billing_alerts import _paid
+    from tests.test_revenue import _charged
+
+    post = book.post
+
+    async def nothing(session, txn):
+        return 0
+
+    await _paid(session, shop, sub_id="sub_newest_first")
+    monkeypatch.setattr(book, "post", nothing)
+    for i, days in enumerate((5, 35, 65)):
+        await _charged(session, "sub_newest_first", f"pay_nf_{i}", when=NOW - days * DAY)
+    monkeypatch.setattr(book, "post", post)
+
+    await backfill.backfill(session, batch=1)
+    marks = await _lines(session, account="subscribers")
+    assert [(x.units, x.origin_at) for x in marks] == [(1, (NOW - 65 * DAY).replace(microsecond=0))]
