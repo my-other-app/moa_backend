@@ -85,10 +85,10 @@ jobs:
               --exclude='.git/' \
               --exclude='__pycache__/' \
               --exclude='.env' \
-              -e "ssh -o StrictHostKeyChecking=no" ./ $USER@$REMOTE_IP:$PROJECT_PATH --rsync-path="sudo rsync"
+              -e "ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=20 -o ServerAliveCountMax=45" ./ $USER@$REMOTE_IP:$PROJECT_PATH --rsync-path="sudo rsync"
           fi
 
-          ssh -o StrictHostKeyChecking=no $USER@$REMOTE_IP <<EOF
+          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=20 -o ServerAliveCountMax=45 $USER@$REMOTE_IP <<EOF
           cd $PROJECT_PATH
 
           if [ "$SYNC_CODE" = "true" ]; then
