@@ -26,7 +26,13 @@ def add_loader_criteria(session):
         execute_state.statement = execute_state.statement.options(
             with_loader_criteria(
                 SoftDeleteMixin,
-                lambda cls: cls.is_deleted.is_(False),
+                # `= false`, never `IS false`. The column is NOT NULL, so the
+                # two mean the same rows; but Postgres folds `= false` into
+                # `NOT is_deleted` and can then use the partial indexes built
+                # `WHERE NOT is_deleted`, while `IS false` is a different
+                # expression that matches none of them -- every soft-deleted
+                # table's partial indexes went unused under this filter.
+                lambda cls: cls.is_deleted == False,  # noqa: E712
                 include_aliases=True,
             )
         )
