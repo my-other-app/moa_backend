@@ -9,7 +9,9 @@ fail the webhook or the request it describes.
 Identical alerts -- the same kind about the same subscription (or, with none,
 the same club) -- within ten minutes are one alert. Razorpay sends
 `payment.failed` and `subscription.pending` for one failed charge, seconds
-apart, and the admin needs to hear about it once.
+apart, and the admin needs to hear about it once. An alert about something
+else names what it is about with `dedupe_on` (a reported comment: its type
+and id), and the same kind about the same thing is one alert in the window.
 """
 from __future__ import annotations
 
@@ -52,6 +54,7 @@ KINDS: dict[str, str] = {
     "payment_gateway_connected": "A club connected its own Razorpay account",
     "payment_gateway_failed": "A club's own Razorpay account stopped working, or a webhook for it had a bad signature",
     "payment_gateway_disconnected": "A club's own Razorpay account was disconnected or disabled",
+    "content_reported": "Someone reported a thread, a comment, a user or a club (data: target_type, target_id, reason, report_count)",
 }
 
 DEDUPE_WINDOW = timedelta(minutes=10)
@@ -70,8 +73,9 @@ def _id(value) -> int | None:
     return getattr(value, "id", None)
 
 
-def _lock_key(kind: str, subscription_id: int | None, club_id: int | None) -> int:
-    raw = zlib.crc32(f"{kind}:{subscription_id}:{club_id}".encode())
+def _lock_key(kind: str, subscription_id: int | None, club_id: int | None, dedupe_on: dict | None = None) -> int:
+    about = ":".join(f"{k}={dedupe_on[k]}" for k in sorted(dedupe_on)) if dedupe_on else f"{subscription_id}:{club_id}"
+    raw = zlib.crc32(f"{kind}:{about}".encode())
     return raw - 2**32 if raw >= 2**31 else raw
 
 
@@ -85,6 +89,7 @@ async def notify(
     subscription=None,
     data: dict | None = None,
     dedupe: bool = True,
+    dedupe_on: dict | None = None,
 ) -> AdminNotifications | None:
     """
     Record an alert and, after commit, mail and post it. Returns the row, or
@@ -92,7 +97,10 @@ async def notify(
 
     `club` and `subscription` are rows or ids. `dedupe=False` is for an
     admin's own action: two deliberate changes ten minutes apart are two
-    things that happened, not one said twice.
+    things that happened, not one said twice. `dedupe_on` names what the
+    alert is about by keys of `data` (`{"target_type": "comment",
+    "target_id": "…"}`): the same kind with the same values in its data is
+    the duplicate, whatever club it names.
     """
     try:
         subscription_id = _id(subscription)
@@ -112,12 +120,14 @@ async def notify(
                 # other is writing the same alert right now.
                 got = await session.scalar(
                     text("SELECT pg_try_advisory_xact_lock(:ns, :key)"),
-                    {"ns": _DEDUPE_LOCK, "key": _lock_key(kind, subscription_id, club_id)},
+                    {"ns": _DEDUPE_LOCK, "key": _lock_key(kind, subscription_id, club_id, dedupe_on)},
                 )
                 if not got:
                     return None
                 same = [AdminNotifications.kind == kind, AdminNotifications.created_at >= now - DEDUPE_WINDOW]
-                if subscription_id is not None:
+                if dedupe_on:
+                    same += [AdminNotifications.data[k].as_string() == str(v) for k, v in dedupe_on.items()]
+                elif subscription_id is not None:
                     same.append(AdminNotifications.subscription_id == subscription_id)
                 elif club_id is not None:
                     same += [AdminNotifications.subscription_id.is_(None), AdminNotifications.club_id == club_id]
