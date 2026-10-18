@@ -4,7 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Query, Request, Response
 
-from app.api.checkins.gate_auth import GateAuth
+from app.api.checkins.gate_auth import GateFrameAuth
 from app.api.deliveries import service as deliveries
 from app.api.idcards import service
 from app.api.idcards.models import PrintSource
@@ -53,7 +53,7 @@ async def batch(
 
 @router.get("/{registration_id}.pdf", summary="One guest's card")
 async def card(
-    request: Request, session: SessionDep, actor: GateAuth, event_id: int, registration_id: UUID,
+    request: Request, session: SessionDep, actor: GateFrameAuth, event_id: int, registration_id: UUID,
     source: str = Query("manual", pattern="^(checkin|manual|walkup|kiosk|test)$"), record: bool = Query(True), override: bool = Query(False), door: Optional[str] = Query(None, max_length=40),
 ) -> Response:
     """From the console or the attendees page. Recording it (the default)
