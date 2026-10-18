@@ -1249,3 +1249,57 @@ dropdb moa_bench_live
 ```
 
 Raw results: `results/integrity/` (the live runs, both read runs, the seed's sizes).
+
+## The job queue and Redis (`feat/w2-platform`, 18 October 2026)
+
+What the durable job queue (`app/core/jobs.py`) costs and carries, measured
+with `scripts/bench/jobs_claim.py` on the laptop above (Postgres 16.10),
+while four other builders ran their test suites on it (load average 8–13):
+read the throughputs as a floor.
+
+The table held what a busy production queue would: 1,000,000 finished jobs
+(three days kept), 100,000 waiting for later (retries in backoff, jobs with
+a `run_at`), 1,000 dead, and 50,000 due now over 15 job names, 2% at a
+higher priority. Table 148 MB; the claim index (unfinished rows only) 8 MB.
+
+| | |
+|---|---:|
+| the claim: 16 jobs over 15 names, warm (EXPLAIN ANALYZE, median of 5) | 0.42 ms |
+| the claim with nothing due and 99,834 rows waiting for later, before (index `(name, priority DESC, run_at, id)`) | 4.5–6 ms warm, 66 ms first; 723 ms before a vacuum |
+| the same, after (index `(name, priority, run_at, id)`, one bounded range per name and priority level) | 0.29 ms |
+| drain: 50,000 due jobs, 4 runners x 16 in hand, each claim + no-op handler + settle | 1,881 jobs/s (26.6 s); every job ran exactly once |
+| enqueue: 16 writers, one job per transaction | 1,454 jobs/s |
+| what the INSERT adds to a request's transaction | p50 2.3 ms, p95 5.3 ms (under the load above) |
+| writers and runners together | 1,050 enqueued/s and 1,050 run/s; the oldest due job waited p50 0.03 s, max 0.22 s |
+
+The claim's plan (busy queue): per name, per priority level from the
+highest, an index range scan `name = $1 AND priority = $2 AND run_at <=
+statement_timestamp()` under LockRows (SKIP LOCKED) and a Limit, which stops
+at the first row not yet due and as soon as the name has its slots (39
+probes for 16 jobs over 15 names, 0.005 ms each); then the jobs' primary
+key for the UPDATE that takes the lease. Before, `run_at` was checked on
+every entry of a name's range, past its due rows into all those waiting for
+later: an idle runner, polling once a second, walked the whole schedule.
+
+Redis on the same machine (`scripts/bench/redis_paths.py`, database 13):
+
+| | p50 | p95 |
+|---|---:|---:|
+| a rate-limit hit, in memory | 0.003 ms | 0.003 ms |
+| a rate-limit hit, in Redis (synchronous, on the event loop) | 0.051 ms | 0.130 ms |
+| a cold discover key read from a sibling process's value (20 KB pickled) | 0.31 ms | 0.66 ms |
+| a message published in one process, heard by a subscriber in another | 0.14 ms | 0.29 ms |
+
+A cold front page built from the database costs 69–88 ms (p50, "home
+(cold)" in the first table above); with Redis each further worker reads the
+first one's in a third of a millisecond instead of building it again.
+
+```sh
+createdb moa_bench_jobs
+BENCH_DB=moa_bench_jobs python -m scripts.bench.jobs_claim --finished 1000000 --scheduled 100000 \
+    --due 50000 --runners 4 --concurrency 16 --writers 16 --seconds 10 --out results/platform/jobs_claim.json
+dropdb moa_bench_jobs
+BENCH_DB=moa_bench REDIS_BENCH_URL=redis://localhost:6379/13 python -m scripts.bench.redis_paths
+```
+
+Raw results: `results/platform/jobs_claim.json`.
