@@ -618,7 +618,7 @@ async def create_user_profile(
         select(UserProfiles).where(UserProfiles.user_id == user_id)
     )
     if profile:
-        raise CustomHTTPException(400, "Profile already exists")
+        raise CustomHTTPException(400, "Profile already exists", error_code="PROFILE_EXISTS")
     else:
         await validate_unique(
             session,
@@ -1094,6 +1094,20 @@ async def list_registered_events(
     return (await session.scalars(query)).all()
 
 
+async def remove_fcm_token(session: AsyncSession, user_id: int, fcm_token: str) -> int:
+    """Sign-out: this account stops getting pushes on the device that held
+    this token. Removing a token it never had removes nothing."""
+    from app.api.users.models import UserDeviceTokens
+
+    result = await session.execute(
+        delete(UserDeviceTokens)
+        .where(UserDeviceTokens.user_id == user_id, UserDeviceTokens.fcm_token == fcm_token)
+        .execution_options(include_deleted=True, synchronize_session=False)
+    )
+    await session.commit()
+    return int(result.rowcount or 0)
+
+
 async def update_fcm_token(
     session: AsyncSession,
     user_id: int,
@@ -1102,13 +1116,22 @@ async def update_fcm_token(
 ):
     """Store or update the user's FCM token for push notifications."""
     from app.api.users.models import UserDeviceTokens
-    
-    # Check if token already exists for this user/platform
+
+    # One install, one account: a token signed in to here stops being anyone
+    # else's, so a phone handed from one person to the next (or signed out
+    # without reaching DELETE /user/fcm-token) stops getting the first one's pushes.
+    await session.execute(
+        delete(UserDeviceTokens)
+        .where(UserDeviceTokens.fcm_token == fcm_token, UserDeviceTokens.user_id != user_id)
+        .execution_options(include_deleted=True, synchronize_session=False)
+    )
+    # Check if token already exists for this user/platform -- a removed row
+    # included: (user, platform) is unique whether or not it is deleted.
     existing = await session.scalar(
         select(UserDeviceTokens).where(
             UserDeviceTokens.user_id == user_id,
             UserDeviceTokens.platform == platform,
-        )
+        ).execution_options(include_deleted=True)
     )
     
     if existing:

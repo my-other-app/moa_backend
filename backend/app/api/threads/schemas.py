@@ -54,6 +54,9 @@ class Author(BaseModel):
     id: Optional[int]
     name: str
     is_club: bool
+    #: The club's logo, or the person's photo or picked avatar: an image's
+    #: variations by name ({"original", "thumbnail", ...}), or null.
+    avatar: Optional[dict] = None
 
 
 class CommentOut(BaseModel):

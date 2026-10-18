@@ -614,6 +614,13 @@ class EventDetailResponse(CustomBaseModel):
     payments_to: str = Field("platform")
     # User-specific fields (only populated when authenticated)
     is_registered: bool = Field(False)
+    #: Null when the viewer is not registered. True for a free event, or a
+    #: paid one that is paid; false while a paid event's ticket waits for
+    #: payment -- the door refuses that ticket (FEE_UNPAID).
+    is_paid: bool | None = Field(None)
+    #: The viewer's own registration, for POST /payments/orders when it is
+    #: not paid yet. Null when not registered.
+    registration_id: str | None = Field(None)
     is_attended: bool = Field(False)
     ticket_id: str | None = Field(None)
     ticket_url: str | None = Field(None)
