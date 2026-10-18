@@ -219,6 +219,15 @@ def _constraint_on(table: str, columns: list[str]):
     return row[0] if row else None
 
 
+def _ddl(sql: str) -> None:
+    """An ALTER TABLE that takes a strong lock for a moment: given up after
+    ten seconds rather than queued behind a long query with every request on
+    the table queued behind it. The run fails then, and is run again."""
+    op.execute("SET lock_timeout = '10s'")
+    op.execute(sql)
+    op.execute("RESET lock_timeout")
+
+
 def _column_exists(table: str, column: str) -> bool:
     return bool(op.get_bind().execute(
         sa.text("SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = :t AND column_name = :c"),
@@ -250,14 +259,17 @@ def _hash_pins(bind) -> int:
 
 def upgrade() -> None:
     # Fast, and first: the columns the new code reads.
-    op.add_column("events", sa.Column("kiosk_pin_hash", sa.String(160), nullable=True))
-    op.add_column("kiosk_devices", sa.Column("pin_attempts", sa.Integer(), nullable=False, server_default="0"))
-    op.add_column("kiosk_devices", sa.Column("pin_window_at", sa.DateTime(timezone=True), nullable=True))
-    op.add_column("competitions", sa.Column("score_method", sa.String(10), nullable=False, server_default="mean"))
-    op.add_column(
-        "competition_team_members",
-        sa.Column("competition_id", sa.Integer(), sa.ForeignKey("competitions.id", ondelete="CASCADE", name="fk_competition_team_members_competition"), nullable=True),
-    )
+    # IF NOT EXISTS: a run that failed later, in the autocommit part, left
+    # these committed but the revision unstamped, and is run again.
+    for sql in (
+        "ALTER TABLE events ADD COLUMN IF NOT EXISTS kiosk_pin_hash varchar(160)",
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS pin_attempts integer NOT NULL DEFAULT 0",
+        "ALTER TABLE kiosk_devices ADD COLUMN IF NOT EXISTS pin_window_at timestamptz",
+        "ALTER TABLE competitions ADD COLUMN IF NOT EXISTS score_method varchar(10) NOT NULL DEFAULT 'mean'",
+        "ALTER TABLE competition_team_members ADD COLUMN IF NOT EXISTS competition_id integer "
+        "CONSTRAINT fk_competition_team_members_competition REFERENCES competitions (id) ON DELETE CASCADE",
+    ):
+        _ddl(sql)
 
     with op.get_context().autocommit_block():
         bind = op.get_bind()
@@ -273,7 +285,7 @@ def upgrade() -> None:
             "UPDATE competition_team_members m SET competition_id = t.competition_id "
             "FROM competition_teams t WHERE t.id = m.team_id AND m.competition_id IS DISTINCT FROM t.competition_id"
         )))
-        _in_transaction(lambda b: b.execute(sa.text("ALTER TABLE competition_team_members ALTER COLUMN competition_id SET NOT NULL")))
+        _ddl("ALTER TABLE competition_team_members ALTER COLUMN competition_id SET NOT NULL")
 
         for name, table, unique, definition in INDEXES:
             if name in _FIXES and not _state(name):
@@ -283,21 +295,21 @@ def upgrade() -> None:
         # The constraints the new indexes replace, or become.
         old = _constraint_on(REG, ["event_id", "user_id", "is_deleted"])
         if old:
-            op.execute(f'ALTER TABLE {REG} DROP CONSTRAINT "{old}"')
-        op.execute("ALTER TABLE doors DROP CONSTRAINT IF EXISTS uq_doors_event_name")
+            _ddl(f'ALTER TABLE {REG} DROP CONSTRAINT "{old}"')
+        _ddl("ALTER TABLE doors DROP CONSTRAINT IF EXISTS uq_doors_event_name")
         if not _constraint_on("competition_team_members", ["competition_id", "registration_id"]):
-            op.execute("ALTER TABLE competition_team_members ADD CONSTRAINT uq_competition_members_once UNIQUE USING INDEX uq_competition_members_once")
+            _ddl("ALTER TABLE competition_team_members ADD CONSTRAINT uq_competition_members_once UNIQUE USING INDEX uq_competition_members_once")
 
 
 def downgrade() -> None:
     with op.get_context().autocommit_block():
         bind = op.get_bind()
-        op.execute("ALTER TABLE competition_team_members DROP CONSTRAINT IF EXISTS uq_competition_members_once")
+        _ddl("ALTER TABLE competition_team_members DROP CONSTRAINT IF EXISTS uq_competition_members_once")
         # The case-sensitive door constraint: the case-insensitive index
         # already keeps names unique, so this cannot fail.
         if not _constraint_on("doors", ["event_id", "name"]):
             _build("uq_doors_event_name", "doors", "UNIQUE", "(event_id, name)")
-            op.execute("ALTER TABLE doors ADD CONSTRAINT uq_doors_event_name UNIQUE USING INDEX uq_doors_event_name")
+            _ddl("ALTER TABLE doors ADD CONSTRAINT uq_doors_event_name UNIQUE USING INDEX uq_doors_event_name")
         retired_twice = bind.execute(sa.text(
             f"SELECT count(*) FROM (SELECT 1 FROM {REG} GROUP BY event_id, user_id, is_deleted HAVING count(*) > 1) s"
         )).scalar() or 0
@@ -310,7 +322,7 @@ def downgrade() -> None:
             )
         elif not _constraint_on(REG, ["event_id", "user_id", "is_deleted"]):
             _build("event_registrations_link_event_id_user_id_is_deleted_key", REG, "UNIQUE", "(event_id, user_id, is_deleted)")
-            op.execute(
+            _ddl(
                 f"ALTER TABLE {REG} ADD CONSTRAINT event_registrations_link_event_id_user_id_is_deleted_key "
                 "UNIQUE USING INDEX event_registrations_link_event_id_user_id_is_deleted_key"
             )

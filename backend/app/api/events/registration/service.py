@@ -749,6 +749,19 @@ async def get_registration(
     return scalar_result
 
 
+def _cell(value):
+    """A spreadsheet cell as an answer: numpy's numbers as Python's, a date
+    as its ISO text, a blank cell (NaN) as nothing -- what the answers'
+    bounds (answers.py) and the JSON column take."""
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    if hasattr(value, "item"):
+        value = value.item()
+    if isinstance(value, float) and value != value:
+        return None
+    return value
+
+
 async def bulk_import_event_registrations(
     session: AsyncSession,
     event_id: Events,
@@ -806,7 +819,9 @@ async def bulk_import_event_registrations(
                 if additional_details_fields:
                     for key in str(additional_details_fields).split(","):
                         if key in row:
-                            additional_details[key] = row[key]
+                            value = _cell(row[key])
+                            if value is not None:
+                                additional_details[key] = value
 
                 # Find or create user
                 user = await user_service.get_non_club_user_by_email(session, email)

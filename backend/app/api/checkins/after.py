@@ -85,6 +85,9 @@ async def _notify(session, a: Admitted) -> None:
             event_id=a.event_id, from_club_id=a.club_id, data={"event_name": a.event_name},
         )
         token = await push.get_fcm_token_for_user(session, a.user_id)
+        # End the read before the network call, so no pooled connection is
+        # held while FCM answers.
+        await session.commit()
         if not token:
             return
         dead: list[str] = []

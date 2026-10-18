@@ -648,6 +648,22 @@ async def test_an_import_into_an_event_that_is_gone_says_so(session):
     assert row.status == "FAILED" and any("987654321 not found" in e["message"] for e in row.logs), row.logs
 
 
+async def test_an_import_keeps_numbers_and_skips_blank_cells_in_the_answers(session, world):
+    from app.api.events.registration import service as registration
+    from app.api.service import create_background_task_log
+    import pandas as pd
+
+    log = await create_background_task_log(session, "Import", "event_registrations_bulk_import")
+    await session.flush()
+    sheet = pd.DataFrame([
+        {"full_name": "Sheet One", "email": "sheet1@example.com", "additional_details_fields": "age,city", "age": 21, "city": None},
+        {"full_name": "Sheet Two", "email": "sheet2@example.com", "additional_details_fields": "age,city", "age": 34, "city": "Kochi"},
+    ])
+    await registration.bulk_import_event_registrations(session, world["event"].id, sheet, log, notify=False)
+    rows = dict((await session.execute(select(EventRegistrationsLink.email, EventRegistrationsLink.additional_details).where(EventRegistrationsLink.event_id == world["event"].id, EventRegistrationsLink.email.like("sheet%")))).all())
+    assert rows == {"sheet1@example.com": {"age": 21}, "sheet2@example.com": {"age": 34, "city": "Kochi"}}, rows
+
+
 async def test_the_attendee_list_pages_through_an_index_by_name(client, session, world):
     await session.commit()
     with captured(session) as hit:
