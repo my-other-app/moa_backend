@@ -262,11 +262,14 @@ async def refresh_access_token(
     """
     A new access token -- and a NEW refresh token, which replaces the one
     sent: keep the one in the answer (the body, and the `refresh_token`
-    cookie). It expires when the one sent would have. The one sent is spent. Presented again within
-    REFRESH_REUSE_GRACE_SECONDS (a reply lost on the way, two tabs at once)
-    it is answered with the same generation as the first answer; after that,
-    it ends the session (401 SESSION_REUSED): two parties holding one
-    session means one of them stole it.
+    cookie). It expires when the one sent would have.
+
+    The one sent stays good until the new one is first used: presented
+    again before that (the answer was lost, the app was killed mid-refresh,
+    two tabs refreshed together) it is answered with the same new refresh
+    token again, however much later. Once the new one has been used, the
+    old one -- or anything older -- ends the session (401 SESSION_REUSED):
+    two parties holding one session means one of them stole it.
     """
     from app.api.auth import sessions as session_store
 
@@ -303,9 +306,7 @@ async def refresh_access_token(
             raise _unauthorized("Your access to this club's dashboard was removed", error_code="ACCESS_REMOVED")
 
     if payload.sid:
-        outcome, generation = await session_store.rotate(
-            session, payload.sid, int(payload.gen or 0), grace_seconds=settings.REFRESH_REUSE_GRACE_SECONDS,
-        )
+        outcome, generation = await session_store.rotate(session, payload.sid, int(payload.gen or 0))
         if outcome == "reused":
             from app.api.security import service as security
 
