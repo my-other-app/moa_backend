@@ -104,7 +104,7 @@ def item_out(m: EventStoreItems, earned: Decimal = Decimal(0)) -> dict:
     total, sold, held = _total(m), _sold(m), _held(m)
     return dict(
         id=str(m.id), event_id=m.event_id, name=m.name, description=m.description, photo_key=m.photo_key,
-        photo_url=objects.presigned_url(m.photo_key) if m.photo_key else None, price=_f(m.price), stock=m.stock, sold=sold, held=held, total=total,
+        photo_url=objects.photo_url(m.photo_key), price=_f(m.price), stock=m.stock, sold=sold, held=held, total=total,
         left=_left(total, sold, held), earned=_f(earned), available_roles=m.available_roles, free_roles=list(m.free_roles or []), on_sale=m.on_sale,
         sold_out=total > 0 and sold + held >= total, sort_order=m.sort_order,
         variants=[
@@ -214,7 +214,7 @@ async def catalog(session, event: Events) -> dict:
         if total > 0 and sold + held >= total:
             continue
         items.append(dict(
-            id=str(m.id), name=m.name, description=m.description, photo_url=objects.presigned_url(m.photo_key) if m.photo_key else None,
+            id=str(m.id), name=m.name, description=m.description, photo_url=objects.photo_url(m.photo_key),
             price=_f(Decimal(0) if "attendee" in (m.free_roles or []) else m.price), left=None if m.variants else _left(total, sold, held),
             variants=[
                 dict(id=str(v.id), label=v.label, left=_left(v.stock, v.sold_count, v.reserved_count))
