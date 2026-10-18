@@ -125,6 +125,11 @@ class AppConfig(BaseSettings):
     # (`openssl rand -hex 32`). Empty: no request is the site.
     SITE_TOKENS: str = ""
     SITE_RATE_LIMIT: str = "3000/minute"
+    # Told when an event's or a club's public page changes, so it renders the
+    # page again (app/core/site_revalidate.py): a POST with
+    # `Authorization: Bearer <SITE_REVALIDATE_SECRET>`. Empty secret: never told.
+    SITE_REVALIDATE_URL: str = "https://myotherapp.in/api/revalidate"
+    SITE_REVALIDATE_SECRET: str = ""
 
     @property
     def site_tokens(self) -> list[str]:
