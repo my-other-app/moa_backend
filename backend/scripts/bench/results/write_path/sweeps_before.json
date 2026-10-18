@@ -1,0 +1,99 @@
+{
+ "db": "moa_bench_sw",
+ "clock": [
+  {
+   "ms": 875.1,
+   "statements": 3,
+   "moved": 8
+  },
+  {
+   "ms": 159.3,
+   "statements": 3,
+   "moved": 8
+  },
+  {
+   "ms": 142.4,
+   "statements": 3,
+   "moved": 8
+  }
+ ],
+ "drift": [
+  {
+   "ms": 3198.9,
+   "events": 0,
+   "clubs": 0
+  },
+  {
+   "ms": 5513.6,
+   "events": 0,
+   "clubs": 0
+  },
+  {
+   "ms": 7460.5,
+   "events": 0,
+   "clubs": 0
+  }
+ ],
+ "email_sweep": [
+  {
+   "events_with_templates": 2000,
+   "templates": 8000,
+   "insert_ms": 886,
+   "email_templates_bytes": 12402688,
+   "runs": [
+    {
+     "rows": 4000,
+     "query_ms": 3002.0,
+     "loop_ms": 81.5,
+     "due": 0
+    },
+    {
+     "rows": 4000,
+     "query_ms": 393.8,
+     "loop_ms": 73.2,
+     "due": 0
+    }
+   ]
+  },
+  {
+   "events_with_templates": 10000,
+   "templates": 40000,
+   "insert_ms": 3942,
+   "email_templates_bytes": 73883648,
+   "runs": [
+    {
+     "rows": 20000,
+     "query_ms": 11452.9,
+     "loop_ms": 363.5,
+     "due": 0
+    },
+    {
+     "rows": 20000,
+     "query_ms": 15185.6,
+     "loop_ms": 370.8,
+     "due": 0
+    }
+   ]
+  },
+  {
+   "events_with_templates": 40000,
+   "templates": 160000,
+   "insert_ms": 18774,
+   "email_templates_bytes": 316882944,
+   "runs": [
+    {
+     "rows": 80000,
+     "query_ms": 60218.9,
+     "loop_ms": 1948.2,
+     "due": 0
+    },
+    {
+     "rows": 80000,
+     "query_ms": 83828.1,
+     "loop_ms": 2203.8,
+     "due": 0
+    }
+   ]
+  }
+ ]
+}

@@ -5,31 +5,58 @@ in app/api/events/models.py and FOLLOWER_COUNT_SQL in app/api/clubs/models.py).
 What can still put them out: something that writes with triggers switched off
 (a data-only restore with --disable-triggers, session_replication_role =
 replica) or edits a counter by hand. `reconcile` finds any row whose counter
-disagrees with its rows and recounts it; the closeout sweep runs it every few
-hours and an admin can run it at any time.
+disagrees with its rows and recounts it; an admin can run it at any time, and
+`check_loop` runs it every six hours.
 
 Each disagreeing row is recounted while holding that row's lock: a
 registration or follow in flight either finishes first (and is counted) or
 waits for the recount and then adds itself, so a reconcile running alongside
 writes cannot itself leave a counter wrong.
+
+How it is kept cheap:
+
+- One process runs it, every EVERY_SECONDS, whichever worker holds
+  COUNTERS_LOCK; the last run is a row in scheduled_runs that every worker
+  reads. It used to run in every worker on its first sweep after a deploy
+  (the schedule was a module variable): four full checks at once with four
+  workers, on the boxes that had just restarted.
+- It compares in slices of ids, one short statement each (an index-only read
+  of ix_registrations_event_created for the events), with a pause between,
+  so it never holds one long scan: the whole-table form took 3 s at 15,000
+  clubs and 19 s at a lakh (docs/SCALING.md).
 """
 from __future__ import annotations
 
-import time
+import asyncio
+import logging
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import text
+from sqlalchemy import select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-# A counter differs from what its rows say.
+from app.db.locks import singleton
+
+logger = logging.getLogger(__name__)
+
+# A counter differs from what its rows say, among ids lo..hi.
 _GOING_DRIFT = """
 SELECT e.id FROM events e
-LEFT JOIN (SELECT event_id, count(*) AS n FROM event_registrations_link WHERE NOT is_deleted GROUP BY event_id) c ON c.event_id = e.id
-WHERE e.going_count <> coalesce(c.n, 0)
+LEFT JOIN (
+  SELECT event_id, count(*) AS n FROM event_registrations_link
+  WHERE NOT is_deleted AND event_id BETWEEN :lo AND :hi
+  GROUP BY event_id
+) c ON c.event_id = e.id
+WHERE e.id BETWEEN :lo AND :hi AND e.going_count <> coalesce(c.n, 0)
 """
 _FOLLOWER_DRIFT = """
 SELECT k.id FROM clubs k
-LEFT JOIN (SELECT club_id, count(*) AS n FROM club_users_link WHERE is_following AND NOT is_deleted GROUP BY club_id) c ON c.club_id = k.id
-WHERE k.follower_count <> coalesce(c.n, 0)
+LEFT JOIN (
+  SELECT club_id, count(*) AS n FROM club_users_link
+  WHERE is_following AND NOT is_deleted AND club_id BETWEEN :lo AND :hi
+  GROUP BY club_id
+) c ON c.club_id = k.id
+WHERE k.id BETWEEN :lo AND :hi AND k.follower_count <> coalesce(c.n, 0)
 """
 _GOING_FIX = """
 UPDATE events SET going_count = (
@@ -42,21 +69,54 @@ UPDATE clubs SET follower_count = (
 ) WHERE id = :id
 """
 
+#: Ids per statement. An event has a few registrations and a club many
+#: follows, so clubs go in smaller slices; either way one statement reads a
+#: few hundred thousand rows at most at a lakh of clubs.
+EVENT_SLICE = 20_000
+CLUB_SLICE = 2_000
+#: The scheduled run's pause between slices, so the database serves others meanwhile.
+PAUSE = 0.05
+
 EVERY_SECONDS = 6 * 3600
-_last_run: Optional[float] = None
+COUNTERS_LOCK = 773_104
+JOB = "counters"
+#: The first look after a worker starts: never in the rush of a deploy.
+FIRST_LOOK_SECONDS = 300
+#: How often each worker looks whether the check is due.
+LOOK_EVERY_SECONDS = 600
 
 
-async def drift(session) -> dict:
+def slices(lo: Optional[int], hi: Optional[int], size: int):
+    """(lo, hi) id ranges of `size` covering lo..hi; none for an empty table."""
+    if lo is None or hi is None:
+        return
+    start = lo
+    while start <= hi:
+        yield start, min(start + size - 1, hi)
+        start += size
+
+
+async def _scan(session, table: str, sql: str, size: int, pause: float) -> list[int]:
+    lo, hi = (await session.execute(text(f"SELECT min(id), max(id) FROM {table}"))).one()
+    found: list[int] = []
+    for a, b in slices(lo, hi, size):
+        found.extend((await session.execute(text(sql), {"lo": a, "hi": b})).scalars().all())
+        if pause:
+            await asyncio.sleep(pause)
+    return found
+
+
+async def drift(session, *, pause: float = 0.0, event_slice: int = EVENT_SLICE, club_slice: int = CLUB_SLICE) -> dict:
     """The ids whose counter disagrees with its rows, without changing anything."""
     return dict(
-        events=list((await session.execute(text(_GOING_DRIFT))).scalars().all()),
-        clubs=list((await session.execute(text(_FOLLOWER_DRIFT))).scalars().all()),
+        events=await _scan(session, "events", _GOING_DRIFT, event_slice, pause),
+        clubs=await _scan(session, "clubs", _FOLLOWER_DRIFT, club_slice, pause),
     )
 
 
-async def reconcile(session) -> dict:
+async def reconcile(session, *, pause: float = 0.0) -> dict:
     """Recount every counter that disagrees with its rows; returns how many were put right."""
-    found = await drift(session)
+    found = await drift(session, pause=pause)
     for table, fix, ids in (("events", _GOING_FIX, found["events"]), ("clubs", _FOLLOWER_FIX, found["clubs"])):
         for row_id in ids:
             await session.execute(text(f"SELECT id FROM {table} WHERE id = :id FOR UPDATE"), {"id": row_id})
@@ -65,11 +125,50 @@ async def reconcile(session) -> dict:
     return dict(events=len(found["events"]), clubs=len(found["clubs"]))
 
 
-def due(now: Optional[float] = None) -> bool:
-    """Whether the sweep should reconcile now (every EVERY_SECONDS in this process)."""
-    global _last_run
-    now = time.monotonic() if now is None else now
-    if _last_run is not None and now - _last_run < EVERY_SECONDS:
-        return False
-    _last_run = now
-    return True
+async def _record(session, **values) -> None:
+    from app.api.models import ScheduledRuns
+
+    stmt = pg_insert(ScheduledRuns.__table__).values(name=JOB, **values)
+    await session.execute(stmt.on_conflict_do_update(index_elements=["name"], set_=values))
+    await session.commit()
+
+
+async def run_if_due(session, now: Optional[datetime] = None) -> Optional[dict]:
+    """The check, if no other process is running it and the last run is
+    EVERY_SECONDS old (or there has been none). Returns what was put right,
+    or None when it did not run."""
+    from app.api.models import ScheduledRuns
+
+    now = now or datetime.now(timezone.utc)
+    async with singleton(session, COUNTERS_LOCK) as mine:
+        if not mine:
+            return None
+        last = await session.scalar(select(ScheduledRuns.started_at).where(ScheduledRuns.name == JOB))
+        if last is not None and now - last < timedelta(seconds=EVERY_SECONDS):
+            return None
+        await _record(session, started_at=now)
+        fixed = await reconcile(session, pause=PAUSE)
+        await _record(session, finished_at=datetime.now(timezone.utc), result=fixed)
+        return fixed
+
+
+async def check_loop(interval: int = LOOK_EVERY_SECONDS) -> None:
+    """Runs for the life of the process; the check itself runs every six
+    hours on whichever process gets to it first."""
+    from app.api.deliveries import service as deliveries
+
+    await asyncio.sleep(FIRST_LOOK_SECONDS)
+    while True:
+        try:
+            async with deliveries.session_scope() as session:
+                fixed = await run_if_due(session)
+                if fixed and (fixed["events"] or fixed["clubs"]):
+                    logger.warning(
+                        "recounted %d going count(s) and %d follower count(s) that disagreed with their rows",
+                        fixed["events"], fixed["clubs"],
+                    )
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            logger.exception("counter check failed")
+        await asyncio.sleep(interval)

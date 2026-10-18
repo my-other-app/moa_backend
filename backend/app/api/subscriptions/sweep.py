@@ -147,7 +147,7 @@ async def expire_grace(session, sub: ClubSubscriptions, now: datetime) -> str:
         stopped = "already_requested"
     elif sub.razorpay_subscription_id:
         try:
-            await asyncio.to_thread(billing.cancel_subscription, sub.razorpay_subscription_id, at_period_end=False)
+            await billing.cancel_subscription(sub.razorpay_subscription_id, at_period_end=False)
             stopped = True
         except Exception:  # noqa: BLE001
             # Halted subscriptions do not charge on their own; the row is

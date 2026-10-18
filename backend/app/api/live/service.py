@@ -765,13 +765,16 @@ async def sweep_loop(interval: int = 60) -> None:
     while True:
         try:
             async with deliveries.session_scope() as session:
-                if await session.scalar(text(f"SELECT pg_try_advisory_lock({SWEEP_LOCK})")):
-                    try:
+                # The lock on a connection of its own (app.db.locks): taken
+                # through the session, it stayed with whichever pooled
+                # connection had it once the sweep committed.
+                from app.db.locks import singleton
+
+                async with singleton(session, SWEEP_LOCK) as mine:
+                    if mine:
                         n = await sweep(session)
                         if n:
                             logger.info("feedback sweep sent %d survey(s)", n)
-                    finally:
-                        await session.execute(text(f"SELECT pg_advisory_unlock({SWEEP_LOCK})"))
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001

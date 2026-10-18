@@ -815,11 +815,15 @@ async def admin_delete_user(session: AsyncSession, user_id: int):
         # in the Trash.
         from app.api.clubs.models import Clubs
 
-        for club in await session.scalars(
+        from app.api.subscriptions.club_deleted import end_for_deleted_club
+
+        for club in list(await session.scalars(
             select(Clubs).where(Clubs.user_id == user.id, Clubs.is_deleted == False)  # noqa: E712
-        ):
+        )):
             club.is_deleted = True
             club.deleted_at = user.deleted_at
+            # Its Razorpay subscription is cancelled with it; restoring the club does not restore it.
+            await end_for_deleted_club(session, club)
     await session.commit()
     return user
 

@@ -400,7 +400,7 @@ async def sync_plan(
     synced = []
     for cycle in (BillingCycle.monthly, BillingCycle.yearly):
         if service.price_for(plan, cycle) > 0:
-            billing.sync_plan(plan, cycle)
+            await billing.sync_plan(plan, cycle)
             synced.append(cycle.value)
 
     await audit.record(
@@ -649,7 +649,7 @@ async def _grant_complimentary(session, user, club, plan, cycle, payload, reques
         # club has a plan for nothing (502 CHECKOUT_NOT_CLOSED if Razorpay
         # will not confirm it).
         closed = row.razorpay_subscription_id
-        billing.close_unpaid_checkout(closed)
+        await billing.close_unpaid_checkout(closed)
         service.revert_checkout(row)
     if service.live_at_razorpay(row):
         if not payload.cancel_razorpay:
@@ -663,7 +663,7 @@ async def _grant_complimentary(session, user, club, plan, cycle, payload, reques
                 errors={"razorpay_subscription_id": row.razorpay_subscription_id, "status": row.status.value},
             )
         stopped = row.razorpay_subscription_id
-        stop_outcome = billing.stop_now(stopped)
+        stop_outcome = await billing.stop_now(stopped)
 
     ends_at = payload.ends_at
     subscription = await service.grant_complimentary(
@@ -726,7 +726,7 @@ async def retry_charge(
             message=f"Nothing to retry: this subscription is {subscription.status.value}.",
         )
 
-    billing.retry_charge(subscription.razorpay_subscription_id)
+    await billing.retry_charge(subscription.razorpay_subscription_id)
 
     await audit.record(
         session,
@@ -898,13 +898,13 @@ async def admin_cancel_subscription(
         outcome = service.end_now(row, now)
     elif row.status == SubscriptionStatus.pending:
         if rzp:
-            billing.close_unpaid_checkout(rzp)
+            await billing.close_unpaid_checkout(rzp)
         service.revert_checkout(row)
         outcome = "checkout_closed"
     elif rzp:
         if not (at_period_end and row.cancel_at_period_end):
             try:
-                billing.cancel_subscription(
+                await billing.cancel_subscription(
                     rzp, at_period_end=at_period_end and row.status == SubscriptionStatus.active
                 )
             except Exception as exc:  # noqa: BLE001
@@ -1113,10 +1113,10 @@ async def start_subscription(
 
     trial_days = 0 if await service.trial_used(session, club.id) else plan.trial_days
     if replacing:
-        billing.close_unpaid_checkout(replacing)
+        await billing.close_unpaid_checkout(replacing)
 
     expires_at = now + service.CHECKOUT_TTL
-    result = billing.start_subscription(
+    result = await billing.start_subscription(
         plan=plan,
         cycle=cycle,
         club_id=club.id,
@@ -1187,10 +1187,10 @@ async def cancel_my_subscription(
 
     alert = False
     if row.status == SubscriptionStatus.pending:
-        billing.close_unpaid_checkout(row.razorpay_subscription_id)
+        await billing.close_unpaid_checkout(row.razorpay_subscription_id)
         service.revert_checkout(row)
     elif not row.cancel_at_period_end:
-        billing.cancel_subscription(
+        await billing.cancel_subscription(
             row.razorpay_subscription_id,
             at_period_end=row.status == SubscriptionStatus.active,
         )

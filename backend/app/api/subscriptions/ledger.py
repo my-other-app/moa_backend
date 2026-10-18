@@ -17,13 +17,13 @@ calls are reads.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from app.api.payments import rzp
 from app.api.subscriptions import billing
 from app.api.subscriptions.models import (
     BillingCycle,
@@ -221,7 +221,7 @@ async def apply_refund(session, data: dict) -> bool:
     total = payment.get("amount_refunded") if payment.get("id") == payment_id else None
     if total is None:
         try:
-            fetched = await asyncio.to_thread(billing.razorpay_client.payment.fetch, payment_id)
+            fetched = await rzp.call(billing.razorpay_client.payment.fetch, payment_id)
             total = (fetched or {}).get("amount_refunded")
         except Exception:  # noqa: BLE001
             logger.warning("Could not read Razorpay payment %s for its refunds", payment_id, exc_info=True)
@@ -289,7 +289,7 @@ async def backfill(session, *, client=None) -> dict:
     for razorpay_id, row, plan_id, cycle in await _targets(session):
         done["scanned"] += 1
         try:
-            invoices = await asyncio.to_thread(_invoices, client, razorpay_id)
+            invoices = await rzp.call(_invoices, client, razorpay_id)
         except Exception:  # noqa: BLE001
             logger.warning("backfill: Razorpay would not list invoices for %s", razorpay_id, exc_info=True)
             done["failed"] += 1
@@ -305,7 +305,7 @@ async def backfill(session, *, client=None) -> dict:
                 "created_at": invoice.get("paid_at") or invoice.get("issued_at") or invoice.get("created_at"),
             }
             try:
-                fetched = await asyncio.to_thread(client.payment.fetch, payment_id) or {}
+                fetched = await rzp.call(client.payment.fetch, payment_id) or {}
                 payment.update({k: fetched[k] for k in ("amount", "currency", "created_at", "amount_refunded") if fetched.get(k) is not None})
             except Exception:  # noqa: BLE001
                 logger.info("backfill: payment %s not read; using its invoice", payment_id, exc_info=True)

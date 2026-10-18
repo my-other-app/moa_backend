@@ -13,7 +13,6 @@ built from it, and the publishable key id.
 """
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import hmac
 import logging
@@ -23,11 +22,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-import razorpay
 from razorpay.errors import BadRequestError
 from sqlalchemy import func, or_, select
 
 from app.api.payment_gateways import crypto
+from app.api.payments import rzp
 from app.api.payment_gateways.models import (
     ACTIVE,
     DISABLED,
@@ -123,8 +122,9 @@ def platform() -> Checkout:
 
 
 def make_client(key_id: str, key_secret: str):
-    """A Razorpay client on a club's account. The suite replaces this: no test reaches Razorpay."""
-    return razorpay.Client(auth=(key_id, key_secret))
+    """A Razorpay client on a club's account, whose requests time out. Call
+    it only through rzp.call. The suite replaces this: no test reaches Razorpay."""
+    return rzp.new_client(key_id, key_secret)
 
 
 def client_for(gateway: ClubPaymentGateways):
@@ -237,7 +237,7 @@ async def check_keys(key_id: str, key_secret: str) -> None:
         make_client(key_id, key_secret).order.all({"count": 1}, timeout=CHECK_TIMEOUT)
 
     try:
-        await asyncio.to_thread(probe)
+        await rzp.call(probe, timeout=CHECK_TIMEOUT)
     except BadRequestError as exc:
         raise KeysRefused(short_reason(exc, key_secret) or "Razorpay refused these keys") from None
     except Exception as exc:  # noqa: BLE001
