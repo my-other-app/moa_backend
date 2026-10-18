@@ -87,7 +87,7 @@ jobs:
             --exclude='.git/' \
             --exclude='__pycache__/' \
             --exclude='.env' \
-            -e "ssh -o StrictHostKeyChecking=no" ./ "$USER@$REMOTE_IP:$PROJECT_PATH" \
+            -e "ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=20 -o ServerAliveCountMax=45" ./ "$USER@$REMOTE_IP:$PROJECT_PATH" \
             --rsync-path="sudo rsync"
 
       - name: Sync environment variables
@@ -101,7 +101,7 @@ jobs:
           # Its own connection, with the secret as the only thing on stdin, so
           # it is never written into the deploy script or a temp file.
           printf '%s' "$ENV_VARS" \
-            | ssh -o StrictHostKeyChecking=no "$USER@$REMOTE_IP" \
+            | ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=20 -o ServerAliveCountMax=45 "$USER@$REMOTE_IP" \
                 "sudo tee '$PROJECT_PATH/.env' > /dev/null"
 
       - name: Deploy
@@ -141,6 +141,13 @@ jobs:
           # file. Nothing secret goes in here -- the env file has its own step.
           cat > deploy-remote.sh <<EOF
           set -eo pipefail
+          # A dropped SSH session must not kill the deploy half way: the
+          # image build can sit silent for minutes while pip installs, and on
+          # 2026-10-18 the connection broke there and left new code on disk
+          # with the old container running and no migration. Keepalives
+          # (below, on every ssh) stop the drop; ignoring HUP finishes the
+          # deploy on the server even if the session goes anyway.
+          trap '' HUP
           cd "$PROJECT_PATH"
 
           # Build, then recreate, then migrate. The container install_requirements
@@ -203,12 +210,12 @@ jobs:
 
           REMOTE_SCRIPT="/tmp/moa-deploy-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.sh"
 
-          ssh -o StrictHostKeyChecking=no "$USER@$REMOTE_IP" \
+          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=20 -o ServerAliveCountMax=45 "$USER@$REMOTE_IP" \
             "umask 077 && cat > '$REMOTE_SCRIPT'" < deploy-remote.sh
 
           # stdin is /dev/null, so no remote command can eat the script.
           set +e
-          ssh -o StrictHostKeyChecking=no "$USER@$REMOTE_IP" \
+          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=20 -o ServerAliveCountMax=45 "$USER@$REMOTE_IP" \
             "bash '$REMOTE_SCRIPT'; status=\$?; rm -f '$REMOTE_SCRIPT'; exit \$status" \
             < /dev/null | tee deploy-output.log
           status=${PIPESTATUS[0]}
