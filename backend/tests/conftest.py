@@ -34,6 +34,9 @@ os.environ.setdefault("APP_RAZORPAY_KEY_SECRET", "test-razorpay-key-secret")
 os.environ.setdefault("APP_RAZORPAY_WEBHOOK_SECRET", "test-razorpay-webhook-secret")
 os.environ.setdefault("APP_ACCESS_TOKEN_EXPIRE_MINUTES", "15")
 os.environ.setdefault("APP_REFRESH_TOKEN_EXPIRE_DAYS", "7")
+# Rendered documents are not kept in a bucket the suite does not have
+# (app.api.events.doc_cache); a test of that cache turns it on itself.
+os.environ.setdefault("APP_RENDER_DOC_CACHE", "false")
 
 import asyncio
 from datetime import datetime, timezone
@@ -144,6 +147,20 @@ def _no_geocoder(monkeypatch):
     geocode.reset()
     yield
     geocode.reset()
+
+
+@pytest.fixture(autouse=True)
+def _offline_bucket(monkeypatch):
+    """Reading an object never reaches S3 from the suite: the renderer now
+    reads a design's images by key (app.core.storage.objects), and a test
+    that wants bytes there puts its own `get_bytes` or `fetch` in place.
+    Each test starts with an empty image cache."""
+    from app.core.storage import objects
+
+    objects.cache_clear()
+    monkeypatch.setattr(objects, "fetch", lambda key, quiet_if_missing=False: None)
+    yield
+    objects.cache_clear()
 
 
 @pytest.fixture(autouse=True)

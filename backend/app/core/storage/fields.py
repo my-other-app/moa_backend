@@ -1,10 +1,16 @@
+import asyncio
 import boto3
 import logging
 import threading
 import time
 from collections import OrderedDict
+from dataclasses import dataclass, field
+from sqlalchemy import event
+from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import set_committed_value
 from sqlalchemy.types import TypeDecorator, String
-from PIL import Image
+from sqlalchemy.util.concurrency import await_only, in_greenlet
+from PIL import Image, ImageOps
 import io
 import uuid
 import os
@@ -72,48 +78,287 @@ def signed_url(key: str) -> str:
     return url
 
 
-class S3Image(dict):
-    def __init__(self, variations, **kwargs):
-        self.variations = variations
-        super().__init__(kwargs)
+# ─── Uploads ─────────────────────────────────────────────────────────────
+#
+# A picture is decoded, checked and sized before any of it is kept:
+#
+#   - its bytes are counted before anything decodes them;
+#   - its pixels are counted from the header before the decoder runs, and a
+#     picture over MAX_IMAGE_PIXELS is refused (a 20 KB PNG can claim to be
+#     50,000 x 50,000 and take gigabytes to open);
+#   - a JPEG is decoded straight at the size the variants need (`draft`),
+#     which is several times faster than decoding a phone photo in full;
+#   - the camera's orientation is applied (`exif_transpose`), so a portrait
+#     taken on a phone is upright in every variant and in the PDFs, whose
+#     renderer ignores EXIF;
+#   - the original is kept byte for byte -- it used to be re-encoded at
+#     JPEG's default quality 75, losing detail on every upload -- unless its
+#     orientation has to be baked in or it is larger than ORIGINAL_MAX_SIDE.
+#
+# All of it runs off the event loop. It used to run inside the column's
+# `process_bind_param`, during the flush, on the loop: a decode, a LANCZOS
+# resize per variant and four S3 PUTs held every other request in the
+# process. `upload` is the explicit step for code that saves an image; the
+# column still accepts the old dict/bytes values, and processes them on a
+# worker thread while the flush waits (see S3ImageField.process_bind_param).
 
-    def delete(self):
-        s3_client = boto3.client(
-            "s3",
-            aws_access_key_id=settings.S3_ACCESS_KEY,
-            aws_secret_access_key=settings.S3_SECRET_KEY,
+MAX_IMAGE_PIXELS = 40_000_000
+# Pillow's own guard: a warning above this, an error at twice it. Uploads are
+# refused above it by `_check_pixels` before Pillow gets that far.
+Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
+ORIGINAL_MAX_SIDE = 4096
+_FORMATS = {"JPEG": "jpeg", "MPO": "jpeg", "PNG": "png", "GIF": "gif", "WEBP": "webp"}
+_CONTENT_TYPES = {"jpeg": "image/jpeg", "jpg": "image/jpeg", "png": "image/png", "gif": "image/gif", "webp": "image/webp"}
+_ORIENTATION = 0x0112
+
+
+def _raw_of(value) -> tuple[bytes, Optional[str]]:
+    """The bytes and file name of whatever a caller assigned to the column."""
+    if isinstance(value, dict):
+        if "file" in value:
+            data, filename = value["file"].read(), getattr(value["file"], "filename", None)
+        elif "bytes" in value:
+            data, filename = value["bytes"], value.get("filename")
+        else:
+            raise ValueError("Invalid input format")
+    elif isinstance(value, (bytes, bytearray, io.BytesIO)):
+        data, filename = value, None
+    else:
+        raise ValueError("Unsupported input type")
+    if isinstance(data, io.BytesIO):
+        data.seek(0)
+    if hasattr(data, "read"):
+        data = data.read()
+    return bytes(data), filename
+
+
+def _too_big(limit: int) -> CustomHTTPException:
+    return CustomHTTPException(413, message=f"That image is over {limit // (1024 * 1024)} MB. Export it smaller and try again.")
+
+
+def _check_pixels(img: Image.Image) -> None:
+    if img.width * img.height > MAX_IMAGE_PIXELS:
+        raise CustomHTTPException(
+            422,
+            message=f"That image is {img.width} x {img.height} pixels. Use one under {MAX_IMAGE_PIXELS // 1_000_000} megapixels.",
         )
 
-        for key, value in self.variations.items():
+
+def _fit(size: tuple[int, int], box: tuple[int, int]) -> tuple[int, int]:
+    """Within `box`, keeping the shape, never larger than the picture is."""
+    w, h = size
+    scale = min(box[0] / w, box[1] / h, 1.0)
+    return max(1, round(w * scale)), max(1, round(h * scale))
+
+
+def _encode(img: Image.Image, ext: str) -> bytes:
+    out = io.BytesIO()
+    if ext == "jpeg":
+        if img.mode not in ("RGB", "L", "CMYK"):
+            img = img.convert("RGB")
+        img.save(out, format="JPEG", quality=88, optimize=True, progressive=True)
+    elif ext == "png":
+        img.save(out, format="PNG", optimize=True)
+    elif ext == "webp":
+        img.save(out, format="WEBP", quality=88, method=4)
+    else:
+        img.save(out, format=ext.upper())
+    return out.getvalue()
+
+
+@dataclass
+class Prepared:
+    """An upload, checked and sized, ready to store: name -> bytes."""
+
+    ext: str
+    original: bytes
+    variants: Dict[str, bytes] = field(default_factory=dict)
+
+    @property
+    def content_type(self) -> str:
+        return _CONTENT_TYPES.get(self.ext, f"image/{self.ext}")
+
+
+def prepare_image(raw: bytes, *, max_size: Optional[int], allowed: Optional[list], variations: dict) -> Prepared:
+    """Check one upload and make its variants. CPU only; no network."""
+    if max_size and len(raw) > max_size:
+        raise _too_big(max_size)
+    try:
+        img = Image.open(io.BytesIO(raw))
+    except Image.DecompressionBombError:
+        raise CustomHTTPException(422, message=f"That image is too large. Use one under {MAX_IMAGE_PIXELS // 1_000_000} megapixels.")
+    except Exception:
+        raise CustomHTTPException(422, message="That file is not an image we can read. Use PNG, JPEG or WebP.")
+    ext = _FORMATS.get((img.format or "").upper())
+    if ext is None or (allowed and ext not in allowed and not (ext == "jpeg" and "jpg" in allowed)):
+        raise CustomHTTPException(
+            status_code=422,
+            message=f"Unsupported image format. Allowed formats: {allowed}",
+        )
+    _check_pixels(img)
+
+    try:
+        orientation = img.getexif().get(_ORIENTATION, 1) or 1
+    except Exception:
+        orientation = 1
+    rotate = orientation != 1
+    oversized = max(img.size) > ORIGINAL_MAX_SIDE
+    boxes = [(int(v["width"]), int(v["height"])) for v in variations.values() if v.get("width") and v.get("height")]
+    need_full = rotate or oversized
+    # Decode a JPEG only as large as anything made from it needs.
+    if ext == "jpeg":
+        side = ORIGINAL_MAX_SIDE if need_full else max((max(b) for b in boxes), default=0)
+        if side and not (rotate and not oversized):
+            img.draft(img.mode if img.mode in ("RGB", "L", "CMYK") else "RGB", (side, side))
+    if not need_full and not boxes:
+        # Nothing to make: the bytes are checked, and kept as they are.
+        try:
+            # On a fresh handle: verify() must come straight after open().
+            Image.open(io.BytesIO(raw)).verify()
+        except Exception:
+            raise CustomHTTPException(422, message="That file is not an image we can read. Use PNG, JPEG or WebP.")
+        return Prepared(ext=ext, original=raw)
+
+    try:
+        img.load()
+        upright = ImageOps.exif_transpose(img) if rotate else img
+    except Image.DecompressionBombError:
+        raise CustomHTTPException(422, message=f"That image is too large. Use one under {MAX_IMAGE_PIXELS // 1_000_000} megapixels.")
+    except Exception:
+        raise CustomHTTPException(422, message="That file is not an image we can read. Use PNG, JPEG or WebP.")
+    if upright.mode == "P" and ext != "gif":
+        upright = upright.convert("RGBA")
+
+    original = raw
+    if need_full:
+        whole = upright
+        if max(whole.size) > ORIGINAL_MAX_SIDE:
+            whole = whole.resize(_fit(whole.size, (ORIGINAL_MAX_SIDE, ORIGINAL_MAX_SIDE)), Image.Resampling.LANCZOS)
+        if ext == "gif":
+            # An animation is kept whole; a sideways GIF is rare enough to leave.
+            original = raw
+        else:
+            original = _encode(whole, ext)
+
+    variants = {}
+    for name, spec in variations.items():
+        width, height = spec.get("width"), spec.get("height")
+        if not (width and height):
+            continue
+        size = _fit(upright.size, (int(width), int(height)))
+        resized = upright if size == upright.size else upright.resize(size, Image.Resampling.LANCZOS)
+        variants[name] = _encode(resized, ext)
+    return Prepared(ext=ext, original=original, variants=variants)
+
+
+def variant_key(key: str, name: str) -> str:
+    """Where the column keeps variant `name` of the original at `key`."""
+    folder, _, filename = key.rpartition("/")
+    stem, _, ext = filename.rpartition(".")
+    return f"{folder}/{stem}.{name}.{ext}" if folder else f"{stem}.{name}.{ext}"
+
+
+def stored_key(value) -> Optional[str]:
+    """The key behind whatever an image or file column holds: what was read
+    (S3Image, S3File), or a key just assigned."""
+    if value is None:
+        return None
+    variations = getattr(value, "variations", None)
+    if isinstance(variations, dict):
+        return variations.get("original")
+    path = getattr(value, "file_path", None)
+    if path:
+        return path
+    if isinstance(value, str):
+        return value or None
+    return None
+
+
+class S3Image(dict):
+    def __init__(self, variations, client=None, **kwargs):
+        self.variations = variations
+        self._client = client
+        super().__init__(kwargs)
+
+    def _delete_now(self, keys) -> None:
+        s3_client = self._client or _SIGNER
+        for value in keys:
             try:
                 s3_client.delete_object(Bucket=settings.S3_BUCKET, Key=value)
             except Exception as e:
                 logger.warning(f"Error deleting S3 object: {str(e)}")
 
+    def delete(self):
+        """Delete the original and its variants from the bucket. Inside the
+        event loop the deletes go to a worker thread rather than hold it."""
+        keys = list(self.variations.values())
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop is None:
+            self._delete_now(keys)
+        else:
+            loop.run_in_executor(None, self._delete_now, keys)
+
 
 class S3File(str):
-    def __new__(cls, file_path):
+    def __new__(cls, file_path, client=None):
         url = signed_url(file_path)
         obj = super().__new__(cls, url)
         obj.file_path = file_path
+        obj._client = client
         return obj
 
     def delete(self):
-        s3_client = boto3.client(
-            "s3",
-            aws_access_key_id=settings.S3_ACCESS_KEY,
-            aws_secret_access_key=settings.S3_SECRET_KEY,
-        )
+        s3_client = getattr(self, "_client", None) or _SIGNER
         try:
             s3_client.delete_object(Bucket=settings.S3_BUCKET, Key=self.file_path)
         except Exception as e:
             logger.warning(f"Error deleting S3 object: {str(e)}")
 
 
+def _field_of(column):
+    """The S3ImageField/S3FileField behind a mapped attribute or a Column."""
+    if isinstance(column, (S3ImageField, S3FileField)):
+        return column
+    prop = getattr(column, "property", None)
+    if prop is not None and getattr(prop, "columns", None):
+        return prop.columns[0].type
+    return column.type
+
+
+async def upload(column, value) -> Optional[str]:
+    """The explicit upload step: check, size and store `value` for `column`
+    off the event loop, and answer with the key to assign to it.
+
+        template.logo = await upload(TicketTemplates.logo, {"bytes": data, "filename": name})
+
+    The decoding and resizing run on the render pool, the PUTs on a worker
+    thread. A key (or nothing) is returned as it is.
+    """
+    target = _field_of(column)
+    if not value:
+        return None
+    if isinstance(value, str):
+        return value
+    passed = stored_key(value)
+    if passed:
+        return passed
+    if isinstance(target, S3ImageField):
+        from app.core.layout import pool
+
+        raw, filename = _raw_of(value)
+        prepared = await pool.run(target.prepare, raw)
+        return await asyncio.to_thread(target.store, prepared)
+    return await asyncio.to_thread(target.upload, value)
+
+
 class S3ImageField(TypeDecorator):
     """
     A custom SQLAlchemy field for handling images with S3 storage.
-    Only stores the original file path and generates variants on demand.
+    Stores the original's key; its variants sit beside it as
+    `{uuid}.{variant}.{ext}`.
     """
 
     impl = String
@@ -131,6 +376,9 @@ class S3ImageField(TypeDecorator):
         self.allowed_extensions = allowed_extensions
         self.bucket_name = settings.S3_BUCKET
         self.base_path = os.path.join(settings.S3_BASE_PATH, upload_to)
+        # The column's own folder, without the base path: a key keeps its
+        # folder when the base path setting changes.
+        self.folder = upload_to.strip("/")
         self.s3_client = boto3.client(
             "s3",
             aws_access_key_id=settings.S3_ACCESS_KEY,
@@ -138,57 +386,39 @@ class S3ImageField(TypeDecorator):
         )
         self.variations = variations
 
-    def _process_image_file(
-        self, image_data: Union[bytes, io.BytesIO], filename: Optional[str] = None
-    ) -> tuple:
-        """Process image data and return PIL Image and format."""
-        if isinstance(image_data, io.BytesIO):
-            img = Image.open(image_data)
-        else:
-            img = Image.open(io.BytesIO(image_data))
+    # The two halves of an upload: `prepare` is CPU (no network), `store` is
+    # the PUTs. `upload` is both, for a caller already off the loop.
 
-        if not img.format:
-            raise ValueError("Invalid image format")
+    def prepare(self, raw: bytes) -> Prepared:
+        return prepare_image(raw, max_size=self.max_size, allowed=self.allowed_extensions, variations=self.variations)
 
-        fmt = img.format.lower()
-
-        if self.allowed_extensions and fmt not in self.allowed_extensions:
-            raise CustomHTTPException(
-                status_code=422,
-                message=f"Unsupported image format. Allowed formats: {self.allowed_extensions}",
+    def store(self, prepared: Prepared) -> str:
+        full_path = os.path.join(self.base_path, f"{uuid.uuid4()}.{prepared.ext}")
+        for name, data in [(None, prepared.original), *prepared.variants.items()]:
+            self.s3_client.upload_fileobj(
+                io.BytesIO(data),
+                self.bucket_name,
+                full_path if name is None else variant_key(full_path, name),
+                ExtraArgs={"ContentType": prepared.content_type},
             )
+        return full_path
 
-        return img, fmt
-
-    def generate_variants(self, image: Image.Image, variations: dict) -> dict:
-        def resize_image(img: Image.Image, width: int, height: int) -> Image.Image:
-            img_ratio = img.width / img.height
-            target_ratio = width / height
-
-            if img_ratio > target_ratio:
-                # Image is wider than target, fit by width
-                new_width = width
-                new_height = round(width / img_ratio)
-            else:
-                # Image is taller than target, fit by height
-                new_height = height
-                new_width = round(height * img_ratio)
-
-            return img.resize((new_width, new_height), Image.LANCZOS)
-
-        variants = {}
-        for key, value in variations.items():
-            width = value.get("width")
-            height = value.get("height")
-            if width and height:
-                variants[key] = resize_image(image, width, height)
-
-        return variants
+    def upload(self, value) -> str:
+        raw, _ = _raw_of(value)
+        return self.store(self.prepare(raw))
 
     def process_bind_param(
         self, value: Union[Dict, bytes, io.BytesIO], dialect
     ) -> Optional[str]:
-        """Process the value before saving to database."""
+        """Process the value before saving to database.
+
+        A key is stored as it is, and so is an image read from another row
+        (copying a template's logo onto its fork used to fail here: an
+        S3Image is a dict without "bytes"). Anything else is an upload. Inside
+        an async session's flush this runs on the event loop, so the upload
+        is handed to `upload` and the flush waits for it without holding the
+        loop; outside one (a script, a sync session) it runs here.
+        """
 
         if not value:
             return None
@@ -196,101 +426,59 @@ class S3ImageField(TypeDecorator):
         if isinstance(value, str):
             return value
 
+        passed = stored_key(value)
+        if passed:
+            return passed
+
         try:
-            # Handle different input types
-            if isinstance(value, dict):
-                if "file" in value:
-                    # Handle file-like object (e.g., from Flask/FastAPI)
-                    image_data = value["file"].read()
-                    filename = value["file"].filename
-                elif "bytes" in value:
-                    # Handle raw bytes with optional filename
-                    image_data = value["bytes"]
-                    filename = value.get("filename")
-                else:
-                    raise ValueError("Invalid input format")
-            elif isinstance(value, (bytes, io.BytesIO)):
-                # Handle direct bytes or BytesIO input
-                image_data = value
-                filename = None
-            else:
-                raise ValueError("Unsupported input type")
-
-            # Process the image
-            img, fmt = self._process_image_file(image_data, filename)
-
-            file_uid = str(uuid.uuid4())
-
-            # Generate filename and path
-            new_filename = f"{file_uid}.{fmt}"
-            full_path = os.path.join(self.base_path, new_filename)
-
-            # Save to S3
-            buffer = io.BytesIO()
-            img.save(buffer, format=fmt)
-            buffer.seek(0)
-
-            if self.max_size and buffer.getbuffer().nbytes > self.max_size:
-                raise ValueError(
-                    f"Image size exceeds maximum allowed size of {self.max_size} bytes"
-                )
-
-            self.s3_client.upload_fileobj(
-                buffer,
-                self.bucket_name,
-                full_path,
-                ExtraArgs={"ContentType": f"image/{fmt}"},
-            )
-
-            if self.variations:
-                # Generate image variants
-                variants = self.generate_variants(img, self.variations)
-                for key, variant in variants.items():
-                    # variant_fmt = variant.format.lower()
-                    buffer = io.BytesIO()
-                    variant.save(buffer, format=fmt)
-                    buffer.seek(0)
-
-                    variant_path = os.path.join(
-                        self.base_path, f"{file_uid}.{key}.{fmt}"
-                    )
-                    self.s3_client.upload_fileobj(
-                        buffer,
-                        self.bucket_name,
-                        variant_path,
-                        ExtraArgs={"ContentType": f"image/{fmt}"},
-                    )
-
-            return full_path
+            key = await_only(upload(self, value)) if in_greenlet() else self.upload(value)
         except CustomHTTPException as e:
             raise e
         except Exception as e:
             raise ValueError(f"Error processing image: {str(e)}")
+        _remember_upload(value, key)
+        return key
+
+    def has_variants(self, key: str) -> bool:
+        """Whether the variants of `key` were made, as far as the key says.
+
+        Every upload through the column makes them all, beside the original
+        in the column's folder. A key from anywhere else -- another column's
+        folder, a designer upload, an address -- has none, and a link to a
+        variant that is not there is a broken image. Decided from the key
+        alone (a HEAD per variant per row read is not affordable): one in
+        the column's own folder, under whatever base path it was stored.
+        """
+        if not self.variations or "://" in key.replace(settings.S3_BASE_PATH, "", 1):
+            return False
+        folder = key.rpartition("/")[0].strip("/")
+        return bool(self.folder) and (folder == self.folder or folder.endswith("/" + self.folder))
 
     def process_result_value(self, value: str, dialect) -> Optional[str]:
-        """Process the value when retrieving from database."""
+        """Process the value when retrieving from database.
+
+        A variant that exists gets its own link; one that does not (see
+        `has_variants`) gets the original's, so a client reading
+        `poster["medium"]` still shows the picture rather than a 404.
+        """
         if not value:
             return None
 
-        ext = value.split(".")[-1]
-        file_name = ".".join(value.split(".")[:-1]).split("/")[-1]
-
+        original = signed_url(value)
         variations = {}
         variation_paths = {}
+        own = self.has_variants(value)
         for variation in self.variations:
-            variation_path = os.path.join(
-                self.base_path, f"{file_name}.{variation}.{ext}"
-            )
-            variation_paths[variation] = variation_path
-            try:
-                # s3_client.head_object(Bucket=self.bucket_name, Key=variation_path)
-                variations[variation] = signed_url(variation_path)
-            except:
-                pass
+            if own:
+                path = variant_key(value, variation)
+                variation_paths[variation] = path
+                variations[variation] = signed_url(path)
+            else:
+                variations[variation] = original
 
-        variations["original"] = signed_url(value)
+        variations["original"] = original
         variation_paths["original"] = value
-        return S3Image(variations=variation_paths, **variations)
+        return S3Image(variations=variation_paths, client=self.s3_client, **variations)
 
 
 class S3FileField(TypeDecorator):
@@ -319,80 +507,148 @@ class S3FileField(TypeDecorator):
             aws_secret_access_key=settings.S3_SECRET_KEY,
         )
 
+    def upload(self, value) -> str:
+        """Check and store one file; the key. Blocking: see `upload()`."""
+        if isinstance(value, dict):
+            if "file" in value:
+                file_data = value["file"].read()
+                filename = value["file"].filename
+            elif "bytes" in value:
+                file_data = value["bytes"]
+                filename = value.get("filename")
+            else:
+                raise ValueError("Invalid input format")
+        elif isinstance(value, (bytes, io.BytesIO)):
+            file_data = value
+            filename = None
+        else:
+            raise ValueError("Unsupported input type")
+
+        if not filename:
+            raise ValueError("Filename is required")
+
+        # Check file extension
+        ext = filename.split(".")[-1].lower()
+        if self.allowed_extensions and ext not in self.allowed_extensions:
+            raise ValueError(
+                f"Unsupported file extension. Allowed extensions: {self.allowed_extensions}"
+            )
+
+        # Generate unique filename
+        full_path = os.path.join(self.base_path, f"{uuid.uuid4()}.{ext}")
+
+        # Check file size
+        if isinstance(file_data, bytes):
+            file_size = len(file_data)
+            buffer = io.BytesIO(file_data)
+        else:
+            file_data.seek(0, os.SEEK_END)
+            file_size = file_data.tell()
+            file_data.seek(0)
+            buffer = file_data
+
+        if self.max_size and file_size > self.max_size:
+            raise ValueError(
+                f"File size exceeds maximum allowed size of {self.max_size} bytes"
+            )
+
+        self.s3_client.upload_fileobj(buffer, self.bucket_name, full_path)
+        return full_path
+
     def process_bind_param(
         self, value: Union[Dict, bytes, io.BytesIO], dialect
     ) -> Optional[str]:
-        """Process the value before saving to database."""
+        """Process the value before saving to database: a key as it is, an
+        upload off the event loop (see S3ImageField.process_bind_param)."""
         if not value:
             return None
 
         if isinstance(value, str):
             return value
 
+        passed = stored_key(value)
+        if passed:
+            return passed
+
         try:
-            # Handle different input types
-            if isinstance(value, dict):
-                if "file" in value:
-                    # Handle file-like object (e.g., from Flask/FastAPI)
-                    file_data = value["file"].read()
-                    filename = value["file"].filename
-                elif "bytes" in value:
-                    # Handle raw bytes with optional filename
-                    file_data = value["bytes"]
-                    filename = value.get("filename")
-                else:
-                    raise ValueError("Invalid input format")
-            elif isinstance(value, (bytes, io.BytesIO)):
-                # Handle direct bytes or BytesIO input
-                file_data = value
-                filename = None
-            else:
-                raise ValueError("Unsupported input type")
-
-            if not filename:
-                raise ValueError("Filename is required")
-
-            # Check file extension
-            ext = filename.split(".")[-1].lower()
-            if self.allowed_extensions and ext not in self.allowed_extensions:
-                raise ValueError(
-                    f"Unsupported file extension. Allowed extensions: {self.allowed_extensions}"
-                )
-
-            # Generate unique filename
-            file_uid = str(uuid.uuid4())
-            new_filename = f"{file_uid}.{ext}"
-            full_path = os.path.join(self.base_path, new_filename)
-
-            # Check file size
-            if isinstance(file_data, bytes):
-                file_size = len(file_data)
-                buffer = io.BytesIO(file_data)
-            else:
-                file_data.seek(0, os.SEEK_END)
-                file_size = file_data.tell()
-                file_data.seek(0)
-                buffer = file_data
-
-            if self.max_size and file_size > self.max_size:
-                raise ValueError(
-                    f"File size exceeds maximum allowed size of {self.max_size} bytes"
-                )
-
-            # Upload to S3
-            self.s3_client.upload_fileobj(
-                buffer,
-                self.bucket_name,
-                full_path,
-            )
-
-            return full_path
-
+            key = await_only(upload(self, value)) if in_greenlet() else self.upload(value)
         except Exception as e:
             raise ValueError(f"Error processing file: {str(e)}")
+        _remember_upload(value, key)
+        return key
 
     def process_result_value(self, value: str, dialect) -> Optional[S3File]:
         """Process the value when retrieving from database."""
         if not value:
             return None
-        return S3File(value)
+        return S3File(value, client=self.s3_client)
+
+
+# ─── After a flush, an uploaded column reads as it would from the database ───
+#
+# A service that assigns an upload ({"bytes": ..., "filename": ...}) and
+# commits keeps that dict on the object -- the sessions do not expire on
+# commit -- so a response built from the object afterwards serialised the
+# raw upload. Once the flush has stored the key, the attribute is set to what
+# reading the row back gives: the S3Image (or S3File), with its links.
+
+_UPLOADED_MAX = 1000
+_uploaded: "OrderedDict[int, tuple[object, str]]" = OrderedDict()
+_uploaded_lock = threading.Lock()
+_S3_ATTRS: Dict[object, tuple] = {}
+
+
+def _remember_upload(value, key: str) -> None:
+    with _uploaded_lock:
+        # The value is held too, so its id cannot be reused while it is here.
+        _uploaded[id(value)] = (value, key)
+        while len(_uploaded) > _UPLOADED_MAX:
+            _uploaded.popitem(last=False)
+
+
+def _s3_attrs(mapper) -> tuple:
+    """The (attribute, column type) pairs of a mapper's image and file columns."""
+    found = _S3_ATTRS.get(mapper)
+    if found is None:
+        found = tuple(
+            (prop.key, prop.columns[0].type)
+            for prop in mapper.column_attrs
+            if isinstance(prop.columns[0].type, (S3ImageField, S3FileField))
+        )
+        _S3_ATTRS[mapper] = found
+    return found
+
+
+def _is_upload(value) -> bool:
+    return bool(value) and not isinstance(value, str) and stored_key(value) is None
+
+
+@event.listens_for(Session, "before_flush")
+def _note_uploads(session, flush_context, instances) -> None:
+    pending = []
+    for obj in (*session.new, *session.dirty):
+        mapper = getattr(obj, "__mapper__", None)
+        if mapper is None:
+            continue
+        for attr, field_type in _s3_attrs(mapper):
+            value = obj.__dict__.get(attr)
+            if _is_upload(value):
+                pending.append((obj, attr, field_type, value))
+    # Replaced, never added to: a flush that failed left nothing worth keeping.
+    if pending:
+        session.info["_s3_uploads"] = pending
+    else:
+        session.info.pop("_s3_uploads", None)
+
+
+@event.listens_for(Session, "after_flush_postexec")
+def _show_uploads(session, flush_context) -> None:
+    pending = session.info.pop("_s3_uploads", None)
+    if not pending:
+        return
+    for obj, attr, field_type, value in pending:
+        with _uploaded_lock:
+            hit = _uploaded.pop(id(value), None)
+        if hit is None or hit[0] is not value or obj.__dict__.get(attr) is not value:
+            continue
+        set_committed_value(obj, attr, field_type.process_result_value(hit[1], None))

@@ -138,6 +138,23 @@ class AppConfig(BaseSettings):
     # What a club's CNAME points at: the zone's fallback origin for custom hostnames.
     SITES_CNAME_TARGET: str = "sites.myotherapp.in"
 
+    # Documents (app/core/layout/pool.py): tickets, certificates, ID cards,
+    # previews and wallet passes are drawn on RENDER_THREADS threads of their
+    # own, never on the event loop and never on the default pool that the
+    # Razorpay, SES and S3 calls wait in. A wkhtmltopdf, wkhtmltoimage or
+    # openssl run longer than RENDER_TIMEOUT seconds is killed.
+    RENDER_THREADS: int = 3
+    RENDER_TIMEOUT: float = 30.0
+    # Bytes of bucket images (logos, artwork, posters) each process keeps for
+    # the renderer; the least recently used go first. One object larger than
+    # RENDER_IMAGE_CACHE_ITEM_MB is never kept.
+    RENDER_IMAGE_CACHE_MB: int = 64
+    RENDER_IMAGE_CACHE_ITEM_MB: int = 8
+    # A rendered ticket or certificate PDF is kept in the bucket under
+    # docs/{kind}/{registration}/{design version}-{hash}.pdf, so a download,
+    # a resend or a bundle reuses it instead of drawing it again.
+    RENDER_DOC_CACHE: bool = True
+
     # Club plans (app/api/subscriptions/gates.py). PLAN_ENFORCEMENT=false is
     # the kill switch: every plan gate lets everything through, as before the
     # plans existed. An event created before PLAN_ENFORCEMENT_FROM and held

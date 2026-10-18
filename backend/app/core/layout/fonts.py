@@ -7,6 +7,7 @@ that fits on screen fits on paper.
 """
 
 import os
+import threading
 from functools import lru_cache
 from typing import Callable
 
@@ -67,12 +68,18 @@ def font_path(name: str) -> str:
     return os.path.join(FONT_DIR, f"{known}.ttf")
 
 
+# Renders run on several threads (app.core.layout.pool); reportlab's font
+# registry is a plain module-level dict, so a font is registered under a lock.
+_registering = threading.Lock()
+
+
 @lru_cache(maxsize=None)
 def register(name: str) -> str:
     """Register a file with reportlab once; returns the name to draw with."""
     known = name if name in FONT_METRICS else FALLBACK
-    if known not in pdfmetrics.getRegisteredFontNames():
-        pdfmetrics.registerFont(TTFont(known, font_path(known)))
+    with _registering:
+        if known not in pdfmetrics.getRegisteredFontNames():
+            pdfmetrics.registerFont(TTFont(known, font_path(known)))
     return known
 
 

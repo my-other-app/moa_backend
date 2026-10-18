@@ -1,12 +1,38 @@
 import io
-import os
-import tempfile
-import jinja2
 import logging
+import os
+import subprocess
+import tempfile
+from functools import lru_cache
+
+import jinja2
 import pdfkit
+
+from app.config import settings
 
 
 logger = logging.getLogger(__name__)
+
+
+@lru_cache(maxsize=8)
+def _environment(template_dir: str) -> jinja2.Environment:
+    """One Jinja environment per template folder, so compiled templates are kept."""
+    return jinja2.Environment(
+        loader=jinja2.FileSystemLoader(searchpath=template_dir),
+        autoescape=True,  # Protect against XSS in templates
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+
+
+@lru_cache(maxsize=1)
+def _wkhtmltopdf():
+    """Where wkhtmltopdf is. pdfkit asks `which` on every call; once is enough."""
+    return pdfkit.configuration()
+
+
+def render_html(template_path: str, context: dict, template_dir: str = None) -> str:
+    return _environment(template_dir or "templates/pdf/").get_template(template_path).render(context)
 
 
 def generate_pdf_bytes(
@@ -20,25 +46,15 @@ def generate_pdf_bytes(
     :param options: Optional PDFKit configuration options
     :param template_dir: Optional custom template directory (defaults to './')
     :return: PDF content as BytesIO object
+
+    wkhtmltopdf runs for at most RENDER_TIMEOUT seconds. pdfkit waits on it
+    with no limit at all, so a page that never finished loading held its
+    thread for good; the process is run here directly and killed when it
+    overruns. Blocks while it runs: async code calls this through
+    app.core.layout.pool.
     """
     try:
-        # Set template loader directory
-        template_loader_path = template_dir or "templates/pdf/"
-
-        # Create Jinja2 environment
-        template_loader = jinja2.FileSystemLoader(searchpath=template_loader_path)
-        template_env = jinja2.Environment(
-            loader=template_loader,
-            autoescape=True,  # Protect against XSS in templates
-            trim_blocks=True,
-            lstrip_blocks=True,
-        )
-
-        # Load the template
-        template = template_env.get_template(template_path)
-
-        # Render the template with context
-        html_out = template.render(context)
+        html_out = render_html(template_path, context, template_dir)
 
         # Default PDFKit options
         default_options = {
@@ -61,7 +77,7 @@ def generate_pdf_bytes(
             #
             # Club-supplied text reaches these templates, which is exactly
             # the input the advisory is about. Nothing here loads a local
-            # resource: artwork, logos and QR codes are all remote URLs and
+            # resource: artwork, logos and QR codes arrive as data: URIs and
             # the styles are inline, so this costs nothing.
             "disable-local-file-access": None,
         }
@@ -74,12 +90,21 @@ def generate_pdf_bytes(
             temp_output_path = temp_output.name
 
         try:
-            # Generate PDF using the temporary file
-            pdfkit.from_string(html_out, temp_output_path, options=pdf_options)
+            kit = pdfkit.PDFKit(html_out, "string", options=pdf_options, configuration=_wkhtmltopdf())
+            done = subprocess.run(
+                kit.command(temp_output_path),
+                input=html_out.encode("utf-8"),
+                capture_output=True,
+                timeout=settings.RENDER_TIMEOUT,
+            )
+            stderr = (done.stderr or done.stdout or b"").decode("utf-8", errors="replace")
+            pdfkit.PDFKit.handle_error(done.returncode, stderr)
 
             # Read the PDF into BytesIO
             with open(temp_output_path, "rb") as pdf_file:
                 pdf_buffer = io.BytesIO(pdf_file.read())
+            if not pdf_buffer.getbuffer().nbytes:
+                raise IOError("wkhtmltopdf wrote nothing")
 
             # Reset buffer position
             pdf_buffer.seek(0)
@@ -93,8 +118,10 @@ def generate_pdf_bytes(
 
     except jinja2.TemplateError as e:
         raise ValueError(f"Jinja2 Template Error: {e}")
-    except pdfkit.errors.PDFKitError as e:
-        raise RuntimeError(f"PDFKit Generation Error: {e}")
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(
+            f"PDF Generation Error: wkhtmltopdf ran longer than {settings.RENDER_TIMEOUT:g}s and was stopped"
+        )
     except IOError as e:
         raise IOError(f"File Operation Error: {e}")
     except Exception as e:
@@ -126,17 +153,7 @@ def generate_image_bytes(
     same rendering of the same template, not a second implementation that
     can drift from it.
     """
-    import subprocess
-    import tempfile
-
-    template_loader_path = template_dir or "templates/pdf/"
-    template_env = jinja2.Environment(
-        loader=jinja2.FileSystemLoader(searchpath=template_loader_path),
-        autoescape=True,
-        trim_blocks=True,
-        lstrip_blocks=True,
-    )
-    html_out = template_env.get_template(template_path).render(context)
+    html_out = render_html(template_path, context, template_dir)
 
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as out:
         output_path = out.name
@@ -167,7 +184,7 @@ def generate_image_bytes(
             input=html_out.encode("utf-8"),
             check=True,
             capture_output=True,
-            timeout=30,
+            timeout=settings.RENDER_TIMEOUT,
         )
         with open(output_path, "rb") as rendered:
             return _tighten_png(rendered.read())
