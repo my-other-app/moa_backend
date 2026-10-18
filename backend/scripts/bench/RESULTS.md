@@ -408,9 +408,8 @@ and top-N sorted on narrow rows). Before, each of the 11,300 candidates ran
 six correlated subqueries, two of them sequential scans of the 400,000
 registrations: 201 s of SQL.
 
-Full plans: `results/before_plans.txt` (the two slowest statements of each
-endpoint, old code; identical SQL to "before") and `results/after_plans.txt`
-(every statement, new code).
+Full plans: `--explain FILE` writes them (the two slowest statements of each
+endpoint, or every statement); they are not kept in the repository.
 
 ## The migration on this data
 
