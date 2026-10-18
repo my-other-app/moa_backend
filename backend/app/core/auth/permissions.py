@@ -37,6 +37,9 @@ RESET_CREDENTIALS = "reset_credentials"
 # the broadest action the API has: one response carries every user's details,
 # every payment and every password hash.
 EXPORT_DATA = "export_data"
+# A push to every device on the platform. Owner-only: it reaches every person
+# who ever installed the app, at once.
+BROADCAST = "broadcast"
 
 ROLE_CAPABILITIES: dict[AdminRoles, set[str]] = {
     AdminRoles.viewer: {VIEW},
@@ -51,6 +54,7 @@ ROLE_CAPABILITIES: dict[AdminRoles, set[str]] = {
         MANAGE_CONTENT,
         RESET_CREDENTIALS,
         EXPORT_DATA,
+        BROADCAST,
     },
 }
 
@@ -100,3 +104,4 @@ ManageAdminsAuth = Annotated[object, Depends(requires(MANAGE_ADMINS))]
 ContentAuth = Annotated[object, Depends(requires(MANAGE_CONTENT))]
 ResetCredentialsAuth = Annotated[object, Depends(requires(RESET_CREDENTIALS))]
 ExportDataAuth = Annotated[object, Depends(requires(EXPORT_DATA))]
+BroadcastAuth = Annotated[object, Depends(requires(BROADCAST))]

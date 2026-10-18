@@ -79,24 +79,22 @@ async def create_notifications_batch(
     """
     if not user_ids:
         return 0
-    
-    notifications = [
-        Notifications(
-            user_id=user_id,
-            title=title,
-            description=description,
-            type=type,
-            data=data,
-            from_club_id=from_club_id,
-            event_id=event_id,
-            status=NotificationStatus.unread,
-        )
-        for user_id in user_ids
-    ]
-    
-    session.add_all(notifications)
+    # One statement for the whole list (one array bind), however long it is:
+    # it was one INSERT per row.
+    from app.core.notifications.fanout import insert_for_audience, users_in
+
+    reached = await insert_for_audience(
+        session,
+        users_in(user_ids),
+        title=title,
+        description=description,
+        type=type,
+        data=data,
+        from_club_id=from_club_id,
+        event_id=event_id,
+    )
     await session.commit()
-    return len(notifications)
+    return len(reached)
 
 
 async def list_notifications(

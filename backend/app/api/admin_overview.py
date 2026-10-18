@@ -10,6 +10,14 @@ So it is one endpoint. Everything here is a GROUP BY or an aggregate executed in
 the database -- nothing walks rows in Python to count them, because the row
 counts grow with the platform and the aggregate counts do not.
 
+It is kept for ADMIN_OVERVIEW_CACHE_SECONDS (a minute) per window and order,
+and worked out once however many admins open it in that minute: it is about
+thirty aggregates over the largest tables. The two counts that are a read of
+a whole large table -- every account, every registration -- come from the
+planner's row estimate (pg_class.reltuples) once the table is past
+ESTIMATE_ABOVE rows, where a figure within a percent is all a dashboard tile
+needs; below that they are exact. `estimated` lists which ones were.
+
 Two deliberate omissions from the design:
 
 - "Where users are" needs a city on Users, which does not exist. Inventing one
@@ -19,10 +27,12 @@ Two deliberate omissions from the design:
   reason: a zero would read as "no subscriptions" rather than "not built".
 """
 
+import asyncio
+import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from sqlalchemy import Float, and_, cast, func, select
+from sqlalchemy import Float, and_, cast, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.admin_insights import get_trends
@@ -44,6 +54,16 @@ MAX_MONTHS = 12
 TOP_CLUBS = 8
 BREAKDOWN_ROWS = 6
 RUNNING_DAYS = 7
+#: Past this many rows a whole-table count is the planner's estimate.
+ESTIMATE_ABOVE = 1_000_000
+
+_cache: dict[tuple, tuple[float, dict]] = {}
+_locks: dict[tuple, asyncio.Lock] = {}
+
+
+def reset_cache() -> None:
+    _cache.clear()
+    _locks.clear()
 
 # Reused predicates. Every list endpoint filters soft deletes, so every count
 # here must too -- a figure that does not will disagree with the table it links
@@ -76,8 +96,26 @@ async def _scalar(session: AsyncSession, stmt) -> float:
     return _f(await session.scalar(stmt))
 
 
-async def _totals(session: AsyncSession) -> dict:
-    users = await _scalar(session, select(func.count(Users.id)))
+async def _estimate(session: AsyncSession, table: str) -> float | None:
+    """The planner's row count for `table`, when it is past ESTIMATE_ABOVE."""
+    rows = await session.scalar(
+        text("SELECT reltuples FROM pg_class WHERE relname = :t AND relkind = 'r' AND relnamespace = CAST(current_schema() AS regnamespace)"),
+        {"t": table},
+    )
+    return float(rows) if rows is not None and rows > ESTIMATE_ABOVE else None
+
+
+async def _count(session: AsyncSession, table: str, stmt, estimated: list) -> float:
+    guess = await _estimate(session, table)
+    if guess is not None:
+        estimated.append(table)
+        return guess
+    return await _scalar(session, stmt)
+
+
+async def _totals(session: AsyncSession, estimated: list | None = None) -> dict:
+    estimated = estimated if estimated is not None else []
+    users = await _count(session, "users", select(func.count(Users.id)), estimated)
     clubs = await _scalar(session, select(func.count(Clubs.id)).where(LIVE_CLUB))
     verified = await _scalar(
         session,
@@ -96,8 +134,8 @@ async def _totals(session: AsyncSession) -> dict:
             LIVE_EVENT, Events.event_datetime >= datetime.now(timezone.utc)
         ),
     )
-    registrations = await _scalar(
-        session, select(func.count(EventRegistrationsLink.id)).where(LIVE_REG)
+    registrations = await _count(
+        session, "event_registrations_link", select(func.count(EventRegistrationsLink.id)).where(LIVE_REG), estimated
     )
     attended = await _scalar(
         session,
@@ -267,9 +305,15 @@ async def _monthly(session: AsyncSession, column, *filters, value=None) -> list[
     """One row per calendar month, oldest first, capped to MAX_MONTHS."""
     bucket = func.date_trunc("month", column).label("month")
     aggregate = func.coalesce(func.sum(value), 0) if value is not None else func.count()
+    # Only the months that can be shown: a range on the column's index
+    # rather than a GROUP BY over every row the table has ever had.
+    now = datetime.now(timezone.utc)
+    first = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    for _ in range(MAX_MONTHS - 1):
+        first = (first - timedelta(days=1)).replace(day=1)
     rows = await session.execute(
         select(bucket, aggregate.label("value"))
-        .where(*filters)
+        .where(*filters, column >= first)
         .group_by(bucket)
         .order_by(bucket.desc())
         .limit(MAX_MONTHS)
@@ -470,13 +514,37 @@ async def _money(session: AsyncSession, days: int) -> dict:
 async def get_overview(
     session: AsyncSession, days: int = 30, top_by: str = "followers"
 ) -> dict:
-    days = max(1, min(days, MAX_WINDOW_DAYS))
+    """The Overview, from the minute's copy when there is one."""
+    from app.config import settings
 
-    totals = await _totals(session)
+    days = max(1, min(days, MAX_WINDOW_DAYS))
+    ttl = max(0, int(settings.ADMIN_OVERVIEW_CACHE_SECONDS or 0))
+    if ttl == 0:
+        return await _work_out(session, days, top_by)
+    key = (days, top_by)
+    hit = _cache.get(key)
+    if hit is not None and hit[0] > time.monotonic():
+        return hit[1]
+    lock = _locks.setdefault(key, asyncio.Lock())
+    async with lock:
+        # Whoever waited here gets what the first one worked out.
+        hit = _cache.get(key)
+        if hit is not None and hit[0] > time.monotonic():
+            return hit[1]
+        data = await _work_out(session, days, top_by)
+        _cache[key] = (time.monotonic() + ttl, data)
+        return data
+
+
+async def _work_out(session: AsyncSession, days: int, top_by: str) -> dict:
+    estimated: list[str] = []
+    totals = await _totals(session, estimated)
     averages = await _averages(session, totals)
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        # Which counts are the planner's estimate rather than exact.
+        "estimated": estimated,
         "period_days": days,
         "totals": totals,
         "today": await _today(session),

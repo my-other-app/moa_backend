@@ -14,7 +14,7 @@ from app.api.club_access.models import ROLES, ClubMembers
 from app.api.clubs.models import Clubs
 from app.api.users.models import Users, UserTypes
 from app.config import settings
-from app.core.auth.authentication import get_password_hash, verify_password
+from app.core.auth.authentication import get_password_hash_async, verify_password_async
 from app.core.email import email as email_mod
 from app.response import CustomHTTPException
 
@@ -270,7 +270,7 @@ async def accept(session, token: str, *, full_name: str | None, password: str) -
     name = (full_name or "").strip()[:80]
     if name:
         member.full_name = name
-    member.password = get_password_hash(password)
+    member.password = await get_password_hash_async(password)
     member.status = "active"
     member.accepted_at = _now()
     member.invite_token_hash = None
@@ -288,13 +288,14 @@ async def authenticate(session, email: str, password: str) -> ClubMembers | None
     if "@" not in address:
         return None
     member = await session.scalar(select(ClubMembers).where(ClubMembers.email == address, ClubMembers.status == "active"))
-    if member is None or not member.password or not verify_password(password, member.password):
+    # On a worker thread, and as slow for no member as for a wrong password.
+    if not await verify_password_async(password, member.password if member is not None else None):
         return None
     return member
 
 
 async def change_password(session, member: ClubMembers, *, current: str, new: str) -> None:
-    if not member.password or not verify_password(current or "", member.password):
+    if not await verify_password_async(current or "", member.password):
         raise _refuse(status.HTTP_400_BAD_REQUEST, "The current password is not right", "WRONG_PASSWORD")
-    member.password = get_password_hash(check_password(new))
+    member.password = await get_password_hash_async(check_password(new))
     await session.flush()

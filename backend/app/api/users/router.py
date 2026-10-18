@@ -28,7 +28,6 @@ from app.core.response.base_model import CustomBaseModel
 from app.response import CustomHTTPException
 from app.api.users import service
 from app.api.audit import service as audit
-from app.core.response.sorting import apply_sort
 from app.core.response.pagination import (
     PaginatedResponse,
     PaginationParams,
@@ -154,28 +153,62 @@ _USER_SORTS = {
     "username": "username",
 }
 
+#: A search shorter than this matches exactly (an id, an address, a
+#: username) and never by "contains": a trigram index cannot narrow one or
+#: two letters, so "contains" would read every account.
+_FUZZY_MIN = 3
+#: The list's total is counted up to this and no further (X-Total-Capped
+#: says when it stopped): counting a crore of accounts for a pager is a read
+#: of the whole table on every page.
+_TOTAL_CAP = 10_000
 
-def _user_list_filters(
+
+async def _search_criteria(session, search: str):
+    """What `search` means, cheapest first.
+
+    An exact id, address (through ix_users_email_normalised) or username is
+    found by index. A whole address that matches is the answer on its own.
+    Anything else is those exact matches together with "contains" on the
+    name, address and username, served by their trigram indexes -- for a
+    term of three characters or more; a shorter one matches exactly or not
+    at all, since a trigram index cannot narrow one or two letters and
+    "contains" would read every account."""
+    from sqlalchemy import false, func, or_, select
+
+    from app.api.users.models import Users
+
+    term = search.strip()
+    if not term:
+        return []
+    exact = [Users.username == term]
+    if term.isdigit() and len(term) < 10:
+        exact.append(Users.id == int(term))
+    if "@" in term:
+        exact.append(func.lower(func.btrim(Users.email)) == term.lower())
+    ids = list((await session.scalars(select(Users.id).where(or_(*exact)).limit(50))).all())
+    if ids and "@" in term:
+        return [Users.id.in_(ids)]
+    found = [Users.id.in_(ids)] if ids else []
+    if len(term) >= _FUZZY_MIN:
+        escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        like = f"%{escaped}%"
+        found += [Users.full_name.ilike(like), Users.email.ilike(like), Users.username.ilike(like)]
+    return [or_(*found)] if found else [false()]
+
+
+async def _user_list_filters(
+    session,
     search: str | None,
     user_type: str | None,
     provider: str | None,
     is_active: bool | None,
 ):
     """The WHERE clauses for the admin user list, as a list of criteria."""
-    from sqlalchemy import or_
-
     from app.api.users.models import Users
 
     criteria = []
     if search:
-        term = f"%{search}%"
-        criteria.append(
-            or_(
-                Users.full_name.ilike(term),
-                Users.email.ilike(term),
-                Users.username.ilike(term),
-            )
-        )
+        criteria.extend(await _search_criteria(session, search))
     if user_type:
         criteria.append(Users.user_type == user_type)
     if provider:
@@ -185,29 +218,59 @@ def _user_list_filters(
     return criteria
 
 
+def _sort_column(sort: str | None):
+    from app.api.users.models import Users
+
+    return getattr(Users, _USER_SORTS.get(sort or "", "created_at"))
+
+
+def _descending(order: str | None) -> bool:
+    return (order or "desc").lower() != "asc"
+
+
 def _sorted_user_query(query, sort: str | None, order: str | None):
     """
-    Apply the requested sort, then break ties on the primary key.
+    Order by the requested column, then the primary key the same way.
 
-    Without the final `id` key, rows sharing a sort value can appear on two
-    pages or on neither -- the database is free to return ties in any order,
-    and both the paged list and the chunked export read by offset.
+    Without the `id` key, rows sharing a sort value can appear on two pages
+    or on neither -- the database is free to return ties in any order. The
+    default, newest first, is (created_at DESC, id DESC): ix_users_created_id.
     """
     from app.api.users.models import Users
 
-    query = apply_sort(
-        query,
-        columns={name: getattr(Users, col) for name, col in _USER_SORTS.items()},
-        default=Users.created_at,
-        sort=sort,
-        order=order,
-    )
-    return query.order_by(Users.id.desc())
+    column = _sort_column(sort)
+    if _descending(order):
+        return query.order_by(column.desc(), Users.id.desc())
+    return query.order_by(column.asc(), Users.id.asc())
+
+
+def _after(sort: str | None, order: str | None, cursor: str | None):
+    """The keyset condition for the page after `cursor`, or None."""
+    from sqlalchemy import tuple_
+
+    from app.api.users.models import Users
+
+    if not cursor:
+        return None
+    try:
+        raw_value, raw_id = cursor.rsplit("~", 1)
+        last_id = int(raw_id)
+        last = datetime.fromisoformat(raw_value) if _sort_column(sort) is Users.created_at else raw_value
+    except (ValueError, TypeError):
+        raise CustomHTTPException(422, message="That cursor is not one this list gave out", error_code="BAD_CURSOR")
+    key = tuple_(_sort_column(sort), Users.id)
+    return key < tuple_(last, last_id) if _descending(order) else key > tuple_(last, last_id)
+
+
+def _cursor_of(db_user, sort: str | None) -> str:
+    value = getattr(db_user, _USER_SORTS.get(sort or "", "created_at"))
+    return f"{value.isoformat() if isinstance(value, datetime) else value}~{db_user.id}"
 
 
 @router.get("/admin/list", summary="List all users (admin)")
 async def list_all_users_admin(
     request: Request,
+    response: Response,
     session: SessionDep,
     pagination: PaginationParams,
     user: AdminAuth,
@@ -219,40 +282,60 @@ async def list_all_users_admin(
     is_active: bool | None = Query(
         None, description="true for active only, false for suspended only"
     ),
+    cursor: str | None = Query(None, description="From `next`: the page after the last row of the one before"),
 ) -> PaginatedResponse[AdminUserListResponse]:
-    """List all users for an admin."""
+    """List all users for an admin.
+
+    Paged by keyset: `next` carries a `cursor` (the last row's sort value and
+    id), and a page is an index range rather than a skip past every row
+    before it. `offset` still works without a cursor. `total` is counted up
+    to 10,000; past that it says 10,000 and the X-Total-Capped header is set.
+    """
+    from urllib.parse import urlencode
+
     from sqlalchemy import func, select
     from sqlalchemy.orm import selectinload
 
     from app.api.users.models import Users, UserProfiles
 
-    criteria = _user_list_filters(search, user_type, provider, is_active)
+    criteria = await _user_list_filters(session, search, user_type, provider, is_active)
 
     # The same criteria go on both queries, or the total disagrees with the
     # rows and the pager offers pages that do not exist.
     total = (
-        await session.execute(select(func.count(Users.id)).where(*criteria))
-    ).scalar() or 0
+        await session.scalar(
+            select(func.count()).select_from(select(Users.id).where(*criteria).limit(_TOTAL_CAP + 1).subquery())
+        )
+    ) or 0
+    if total > _TOTAL_CAP:
+        total = _TOTAL_CAP
+        response.headers["X-Total-Capped"] = "true"
 
+    after = _after(sort, order, cursor)
     query = (
         select(Users)
-        .where(*criteria)
+        .where(*criteria, *([after] if after is not None else []))
         .options(
             selectinload(Users.profile).selectinload(UserProfiles.org),
             selectinload(Users.profile).selectinload(UserProfiles.avatar),
             selectinload(Users.interests),
         )
-        .offset(pagination.offset)
         .limit(pagination.limit)
     )
-    result = await session.execute(_sorted_user_query(query, sort, order))
+    if after is None:
+        query = query.offset(pagination.offset)
+    rows = list((await session.execute(_sorted_user_query(query, sort, order))).scalars().all())
 
-    return paginated_response(
-        result.scalars().all(),
-        request=request,
-        schema=AdminUserListResponse,
-        total=total,
-    )
+    limit = pagination.limit - 1
+    page = paginated_response(rows, request=request, schema=AdminUserListResponse, total=total)
+    # The next page starts after this one's last row, not at an offset.
+    if len(rows) > limit:
+        params = {k: v for k, v in request.query_params.items() if k != "offset"}
+        params["cursor"] = _cursor_of(rows[limit - 1], sort)
+        page.next = f"{request.url.path}?{urlencode(params)}"
+    else:
+        page.next = None
+    return page
 
 
 #: Rows per database round trip while streaming the export. Big enough that a
@@ -298,7 +381,9 @@ async def export_users_admin(
     Streamed in chunks rather than assembled and returned: the box this runs
     on has a few hundred megabytes of headroom, and a full export held in
     memory as Python objects is the kind of thing that takes the API down
-    with it.
+    with it. Each chunk starts where the last one ended (a keyset on the
+    sort column and id), so chunk n costs what chunk 1 did; it skipped past
+    every earlier row by OFFSET, which made a large export quadratic.
 
     The request's own session is used while streaming, which is safe here:
     FastAPI closes the dependency exit stack after the response body has
@@ -310,7 +395,7 @@ async def export_users_admin(
 
     from app.api.users.models import Users
 
-    criteria = _user_list_filters(search, user_type, provider, is_active)
+    criteria = await _user_list_filters(session, search, user_type, provider, is_active)
 
     async def rows() -> AsyncIterator[str]:
         buffer = io.StringIO()
@@ -327,11 +412,11 @@ async def export_users_admin(
         writer.writerow([name for name, _ in _EXPORT_COLUMNS])
         yield "\ufeff" + drain()
 
-        offset = 0
+        cursor = None
         while True:
-            query = select(Users).where(*criteria).offset(offset).limit(_EXPORT_CHUNK)
-            result = await session.execute(_sorted_user_query(query, sort, order))
-            batch = result.scalars().all()
+            after = _after(sort, order, cursor)
+            query = select(Users).where(*criteria, *([after] if after is not None else [])).limit(_EXPORT_CHUNK)
+            batch = (await session.execute(_sorted_user_query(query, sort, order))).scalars().all()
             if not batch:
                 break
             for db_user in batch:
@@ -339,7 +424,9 @@ async def export_users_admin(
             yield drain()
             if len(batch) < _EXPORT_CHUNK:
                 break
-            offset += _EXPORT_CHUNK
+            cursor = _cursor_of(batch[-1], sort)
+            # The rows are written: let them go rather than keep every chunk.
+            session.expunge_all()
 
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     return StreamingResponse(

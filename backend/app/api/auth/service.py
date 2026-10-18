@@ -1,8 +1,14 @@
+import asyncio
+import re
+import threading
+import time
 from datetime import timedelta
 import logging
+import httpx
+import jwt
 from sqlalchemy.ext.asyncio import AsyncSession
+from google.auth import exceptions as google_exceptions
 from google.oauth2 import id_token
-from google.auth.transport import requests
 from app.core.auth.jwt import create_access_token
 from app.config import settings
 from fastapi import HTTPException
@@ -27,6 +33,55 @@ def _refuse_if_suspended(user) -> None:
         raise CustomHTTPException(status_code=403, message="This account has been suspended", error_code="ACCOUNT_SUSPENDED")
 
 
+class _GoogleCerts:
+    """The transport verify_oauth2_token fetches Google's signing
+    certificates through: kept for as long as Google's Cache-Control max-age
+    says (an hour if it says nothing), fetched again only after.
+
+    It fetched them on every sign-in, with a fresh connection, on the event
+    loop. Called from the worker thread verification runs on, so a fetch here
+    never holds the loop; one lock, so a burst of sign-ins at the moment the
+    certificates go stale makes one fetch."""
+
+    DEFAULT_TTL = 3600.0
+
+    class _Response:
+        def __init__(self, status: int, data: bytes, headers=None):
+            self.status, self.data, self.headers = status, data, headers or {}
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._cache: dict[str, tuple[float, bytes]] = {}
+
+    def reset(self) -> None:
+        with self._lock:
+            self._cache.clear()
+
+    @staticmethod
+    def _max_age(cache_control: str | None) -> float:
+        m = re.search(r"max-age=(\d+)", cache_control or "")
+        return float(m.group(1)) if m else _GoogleCerts.DEFAULT_TTL
+
+    def __call__(self, url, method="GET", body=None, headers=None, timeout=None, **kwargs):
+        with self._lock:
+            hit = self._cache.get(url)
+            if hit is not None and hit[0] > time.monotonic():
+                return self._Response(200, hit[1])
+            r = httpx.get(url, timeout=5.0)
+            if r.status_code == 200:
+                self._cache[url] = (time.monotonic() + self._max_age(r.headers.get("cache-control")), r.content)
+            return self._Response(r.status_code, r.content, dict(r.headers))
+
+
+_google_certs = _GoogleCerts()
+
+
+async def _verify_google(id_token_str: str, client_id: str) -> dict:
+    """Google's checks (signature, audience, issuer, expiry) on a worker
+    thread, against the cached certificates."""
+    return await asyncio.to_thread(id_token.verify_oauth2_token, id_token_str, _google_certs, client_id)
+
+
 async def google_signin(
     session: AsyncSession, id_token_str: str, platform: str = "web"
 ):
@@ -40,9 +95,7 @@ async def google_signin(
         if not client_id:
             raise CustomHTTPException(status_code=400, message=f"Invalid platform: {platform}", error_code="INVALID_PLATFORM")
 
-        idinfo = id_token.verify_oauth2_token(
-            id_token_str, requests.Request(), client_id
-        )
+        idinfo = await _verify_google(id_token_str, client_id)
 
         if not idinfo.get("email_verified"):
             raise CustomHTTPException(
@@ -93,13 +146,44 @@ async def google_signin(
         # Refusals made above on purpose (an unverified Google address, an
         # unknown platform) are answers, not crashes; they used to come back 500.
         raise
-    except ValueError as e:
+    except google_exceptions.TransportError:
+        logger.warning("Google's certificates could not be fetched", exc_info=True)
+        raise CustomHTTPException(status_code=503, message="Google sign-in is unavailable right now. Try again in a minute.", error_code="GOOGLE_UNAVAILABLE")
+    except ValueError:
         raise CustomHTTPException(
             status_code=401, message="Invalid authentication credentials", error_code="INVALID_GOOGLE_TOKEN"
         )
-    except Exception as e:
+    except Exception:
         logger.exception("Google signin error")
         raise CustomHTTPException(status_code=500, message="Internal Server Error")
+
+
+APPLE_KEYS_URL = "https://appleid.apple.com/auth/keys"
+_apple_keys = None
+
+
+def _apple_jwks():
+    """One key client for the process, keeping Apple's keys for an hour: it
+    was a new client, and a fetch of the keys, on every sign-in. Made on first
+    use (and again if the class it was made from is swapped, as tests do)."""
+    global _apple_keys
+    if _apple_keys is None or not isinstance(_apple_keys, jwt.PyJWKClient):
+        _apple_keys = jwt.PyJWKClient(APPLE_KEYS_URL, cache_keys=True, lifespan=3600, timeout=5)
+    return _apple_keys
+
+
+def _verify_apple(identity_token: str) -> dict:
+    """Apple's signature, audience and issuer checks. Blocking (a key fetch
+    when the cache is cold): run on a worker thread."""
+    signing_key = _apple_jwks().get_signing_key_from_jwt(identity_token)
+    return jwt.decode(
+        identity_token,
+        signing_key.key,
+        algorithms=["RS256"],
+        audience=settings.APPLE_CLIENT_ID if settings.APPLE_CLIENT_ID else None,
+        issuer="https://appleid.apple.com",
+        options={"verify_aud": bool(settings.APPLE_CLIENT_ID)},
+    )
 
 
 async def apple_signin(
@@ -117,35 +201,9 @@ async def apple_signin(
     - email: User's email (may be private relay)
     - email_verified: Whether email is verified
     """
-    import jwt
-    from jwt import PyJWKClient
-    
-    logger.info(f"Apple signin attempt - user_email: {user_email}, user_name: {user_name}")
-    logger.info(f"APPLE_CLIENT_ID configured: {settings.APPLE_CLIENT_ID}")
-    
     try:
-        # Apple's public keys endpoint
-        logger.info("Fetching Apple JWKS keys...")
-        jwks_client = PyJWKClient("https://appleid.apple.com/auth/keys")
-        
-        # Decode without verification first to get header
-        logger.info("Getting signing key from JWT...")
-        unverified_header = jwt.get_unverified_header(identity_token)
-        signing_key = jwks_client.get_signing_key_from_jwt(identity_token)
-        
-        # Verify the token
-        # audience can be your app's bundle ID or service ID
-        logger.info(f"Verifying token with audience: {settings.APPLE_CLIENT_ID}")
-        decoded = jwt.decode(
-            identity_token,
-            signing_key.key,
-            algorithms=["RS256"],
-            audience=settings.APPLE_CLIENT_ID if settings.APPLE_CLIENT_ID else None,
-            issuer="https://appleid.apple.com",
-            options={"verify_aud": bool(settings.APPLE_CLIENT_ID)}
-        )
-        logger.info(f"Token verified successfully. sub: {decoded.get('sub')}, email: {decoded.get('email')}")
-        
+        decoded = await asyncio.to_thread(_verify_apple, identity_token)
+
         # Extract user info from token
         apple_user_id = decoded.get("sub")  # Apple's unique user ID
         # Only the address Apple signed. The one the client sends beside the
@@ -205,15 +263,14 @@ async def apple_signin(
         )
     except CustomHTTPException:
         raise
+    except jwt.PyJWKClientConnectionError:
+        logger.warning("Apple's keys could not be fetched", exc_info=True)
+        raise CustomHTTPException(status_code=503, message="Sign in with Apple is unavailable right now. Try again in a minute.", error_code="APPLE_UNAVAILABLE")
+    except jwt.PyJWKClientError:
+        # Signed with a key Apple does not have.
+        raise CustomHTTPException(status_code=401, message="Invalid Apple authentication token")
     except Exception as e:
         logger.exception(f"Apple signin error: {e}")
-        # Check if it's a database constraint error (duplicate email)
-        error_msg = str(e).lower()
-        if "unique" in error_msg or "duplicate" in error_msg:
-            raise CustomHTTPException(
-                status_code=409, 
-                message="An account with this email already exists. Please sign in with your original method."
-            )
         raise CustomHTTPException(status_code=500, message="Internal Server Error")
 
 
@@ -248,6 +305,8 @@ async def create_access_refresh_tokens(
         token_version=user.token_version,
         sid=sid,
         member_id=member_id,
+        # A new session's first refresh token: sessions.rotate moves it on.
+        gen=0 if sid else None,
     )
     access_token = create_access_token(
         data=access_token_data.model_dump(), expires_delta=access_token_expires

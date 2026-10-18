@@ -306,47 +306,54 @@ def _result(state: RetentionState, refusal: Optional[str] = None, error: Optiona
 
 async def run_retention(session, event: Events, *, manual: bool, confirm_slug: Optional[str] = None, user=None) -> dict:
     """Generate the report (and, where recipients are named, confirm delivery
-    to every one of them), then scrub, in that order, forward only."""
-    locked = await session.scalar(text(f"SELECT pg_try_advisory_lock({RETENTION_LOCK}, :eid)"), {"eid": event.id})
-    if not locked:
-        if manual:
-            raise CustomHTTPException(409, message="A retention run for this event is already in progress.")
-        return _result(RetentionState.pending, error="already running")
-    try:
-        job = await ensure_job(session, event)
-        if job.state is RetentionState.deleted:
+    to every one of them), then scrub, in that order, forward only.
+
+    One run per event at a time: an advisory lock on (RETENTION_LOCK, event)
+    held on a connection of its own (app.db.locks.singleton). It was taken
+    through this session, which hands its connection back to the pool at each
+    of the commits below, so the unlock ran on another connection, released
+    nothing, and the event stayed locked until the first one was recycled."""
+    async with singleton(session, (RETENTION_LOCK, int(event.id))) as locked:
+        if not locked:
             if manual:
-                raise CustomHTTPException(409, message="This guest list was already scrubbed. Nothing is left to remove.", error_code="RETENTION_ALREADY_DELETED")
-            return _result(RetentionState.deleted, deleted=job.deleted_counts)
-        if manual and (confirm_slug or "").strip() != event.slug:
-            raise CustomHTTPException(422, message=f"The slug you typed does not match this event. Type {event.slug} exactly.", error_code="CONFIRMATION_MISMATCH")
-        now = datetime.now(timezone.utc)
-        if not manual and not ended(event, now):
-            job.last_refusal = "NOT_ENDED"
-            job.refused_at = now
+                raise CustomHTTPException(409, message="A retention run for this event is already in progress.")
+            return _result(RetentionState.pending, error="already running")
+        return await _run_retention(session, event, manual=manual, confirm_slug=confirm_slug, user=user)
+
+
+async def _run_retention(session, event: Events, *, manual: bool, confirm_slug: Optional[str], user) -> dict:
+    job = await ensure_job(session, event)
+    if job.state is RetentionState.deleted:
+        if manual:
+            raise CustomHTTPException(409, message="This guest list was already scrubbed. Nothing is left to remove.", error_code="RETENTION_ALREADY_DELETED")
+        return _result(RetentionState.deleted, deleted=job.deleted_counts)
+    if manual and (confirm_slug or "").strip() != event.slug:
+        raise CustomHTTPException(422, message=f"The slug you typed does not match this event. Type {event.slug} exactly.", error_code="CONFIRMATION_MISMATCH")
+    now = datetime.now(timezone.utc)
+    if not manual and not ended(event, now):
+        job.last_refusal = "NOT_ENDED"
+        job.refused_at = now
+        await session.commit()
+        return _result(job.state, refusal="NOT_ENDED")
+    if job.state in (RetentionState.pending, RetentionState.failed):
+        report = await generate(session, event, user)
+        recipients = list(event.report_recipients or [])
+        delivered, failed = await deliver(session, event, report, recipients) if recipients else ([], [])
+        job.attempts += 1
+        job.report_id = report.id
+        if failed:
+            job.state = RetentionState.failed
+            job.last_error = f"Report delivery failed for {len(failed)} of {len(recipients)} recipients: {failed[0]['error']}"
             await session.commit()
-            return _result(job.state, refusal="NOT_ENDED")
-        if job.state in (RetentionState.pending, RetentionState.failed):
-            report = await generate(session, event, user)
-            recipients = list(event.report_recipients or [])
-            delivered, failed = await deliver(session, event, report, recipients) if recipients else ([], [])
-            job.attempts += 1
-            job.report_id = report.id
-            if failed:
-                job.state = RetentionState.failed
-                job.last_error = f"Report delivery failed for {len(failed)} of {len(recipients)} recipients: {failed[0]['error']}"
-                await session.commit()
-                if manual:
-                    raise CustomHTTPException(409, message=f"{job.last_error}. Nothing was scrubbed.")
-                return _result(RetentionState.failed, error=job.last_error)
-            job.state = RetentionState.report_sent
-            job.last_error = None
-            job.last_refusal = None
-            await session.commit()
-        counts = await scrub(session, event, job)
-        return _result(RetentionState.deleted, deleted=counts)
-    finally:
-        await session.execute(text(f"SELECT pg_advisory_unlock({RETENTION_LOCK}, :eid)"), {"eid": event.id})
+            if manual:
+                raise CustomHTTPException(409, message=f"{job.last_error}. Nothing was scrubbed.")
+            return _result(RetentionState.failed, error=job.last_error)
+        job.state = RetentionState.report_sent
+        job.last_error = None
+        job.last_refusal = None
+        await session.commit()
+    counts = await scrub(session, event, job)
+    return _result(RetentionState.deleted, deleted=counts)
 
 
 # ─── The sweep ────────────────────────────────────────────────────────────

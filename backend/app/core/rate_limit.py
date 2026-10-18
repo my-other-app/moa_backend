@@ -103,11 +103,11 @@ def _is_site_read(request, endpoint_func) -> bool:
     return request.method in ("GET", "HEAD") and _name(endpoint_func) in site_read_names()
 
 
-# In-memory store (no Redis in this stack today, and WORKERS=1 in production
-# currently, so per-process limits are accurate). If the app is ever scaled to
-# multiple workers/instances, switch to a Redis-backed storage_uri so limits
-# are shared across processes.
-limiter = SiteAwareLimiter(key_func=get_remote_address)
+# In memory by default (no Redis in this stack today, and WORKERS=1 in
+# production, so per-process limits are accurate). APP_RATE_LIMIT_STORAGE
+# points it elsewhere -- redis://host:6379/0 -- once there is more than one
+# worker or host, so they share one budget instead of each keeping its own.
+limiter = SiteAwareLimiter(key_func=get_remote_address, storage_uri=settings.RATE_LIMIT_STORAGE or "memory://")
 
 
 def account_or_address(request) -> str:

@@ -1,3 +1,5 @@
+import uuid
+
 from sqlalchemy import JSON, UUID, Column, Enum, ForeignKey, Integer, String
 from app.db.base import AbstractSQLModel
 from app.db.mixins import SoftDeleteMixin, TimestampsMixin
@@ -36,11 +38,13 @@ class NotificationStatus(PyEnum):
 class Notifications(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     __tablename__ = "notifications"
 
+    # Made in Python, so the ORM can write a batch of these in one statement:
+    # with the SQL default it had to fetch each new key back, one INSERT per row.
     id = Column(
         UUID(as_uuid=True),
         primary_key=True,
         server_default=sa.text("gen_random_uuid()"),
-        default=sa.text("gen_random_uuid()"),
+        default=uuid.uuid4,
     )
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     title = Column(String, nullable=False)
@@ -61,3 +65,18 @@ class Notifications(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     from_user = relationship("Users", foreign_keys=[from_user_id])
     event = relationship("Events", foreign_keys=[event_id])
 
+    __table_args__ = (
+        # The inbox, newest first, and its unread count: both by person. Without
+        # these every inbox read, count and mark-all-read walked the whole table.
+        sa.Index(
+            "ix_notifications_user_created",
+            "user_id",
+            sa.text("created_at DESC"),
+            postgresql_where=sa.text("NOT is_deleted"),
+        ),
+        sa.Index(
+            "ix_notifications_user_unread",
+            "user_id",
+            postgresql_where=sa.text("status = 'unread' AND NOT is_deleted"),
+        ),
+    )
