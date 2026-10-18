@@ -1,6 +1,6 @@
 import asyncio
 import gc
-import traceback
+import logging
 import uuid
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
@@ -8,7 +8,7 @@ from fastapi.exceptions import RequestValidationError
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import HTMLResponse
 from starlette import status
-from sqlalchemy.exc import StatementError
+from sqlalchemy.exc import IntegrityError, StatementError
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -17,7 +17,7 @@ from app.api.router import api_router
 from app.config import settings
 from app.db.listeners import *
 from app.response import ErrorResponse, CustomHTTPException
-from app.core.utils.discord import notify_error
+from app.core.utils.discord import report_error
 from app.core.middlewares.process_time_middleware import ProcessingTimeMiddleware
 from app.core.middlewares.security_headers_middleware import SecurityHeadersMiddleware
 from app.core.rate_limit import limiter
@@ -143,13 +143,15 @@ application.add_middleware(ClientAddressMiddleware)
 
 
 @application.exception_handler(Exception)
-async def http_exception_handler(request: Request, exc: Exception):
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """The 500. The Discord report goes in the background (throttled, one
+    per kind of error and path at a time): it used to be awaited here, and a
+    500 took as long as two tries at the webhook did."""
     track_id = str(uuid.uuid4())
     try:
-        await notify_error(request, exc, track_id)
-    except Exception as e:
-        print("Error while sending error notification")
-        traceback.print_exc()
+        report_error(request, exc, track_id)
+    except Exception:  # noqa: BLE001
+        logging.getLogger(__name__).warning("Error while scheduling the error report", exc_info=True)
     return ErrorResponse(
         message="Internal Server Error",
         errors={"error": "An error occurred while processing the request"},
@@ -157,12 +159,43 @@ async def http_exception_handler(request: Request, exc: Exception):
     ).get_response(status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+#: What a unique, foreign-key or check violation says to the caller. Never the
+#: constraint's name or the row: those describe the schema and other people's data.
+_CONFLICTS = {
+    "23505": "That already exists.",
+    "23503": "That refers to something that does not exist, or is still in use.",
+    "23502": "A required value is missing.",
+    "23514": "That value is not allowed.",
+    "23P01": "That conflicts with something that already exists.",
+}
+
+
+@application.exception_handler(IntegrityError)
+async def integrity_error_handler(request: Request, exc: IntegrityError):
+    """A constraint the database held that the code did not check first --
+    most often two requests racing to make the same thing -- is a 409, not a
+    500 with a Discord report."""
+    from app.db.errors import constraint_of, sqlstate_of
+
+    code = sqlstate_of(exc)
+    logging.getLogger(__name__).warning(
+        "integrity error on %s %s: %s (%s)", request.method, request.url.path, code, constraint_of(exc)
+    )
+    return ErrorResponse(
+        message=_CONFLICTS.get(code or "", "That conflicts with something that already exists."),
+        error_code="CONFLICT",
+    ).get_response(status.HTTP_409_CONFLICT)
+
+
 @application.exception_handler(StatementError)
 async def statement_error_handler(request: Request, exc: StatementError):
+    """A refusal raised while SQLAlchemy was building a statement (a column
+    type checking its value) arrives wrapped. It used to be re-raised from
+    here, which Starlette does not hand to another handler: it became a bare
+    500. Now the wrapped refusal is answered, and anything else is the 500."""
     if isinstance(exc.orig, CustomHTTPException):
-        raise exc.orig
-    else:
-        raise exc
+        return exc.orig.get_response(exc.orig.status_code)
+    return await unhandled_exception_handler(request, exc)
 
 
 @application.exception_handler(RequestValidationError)
@@ -188,7 +221,7 @@ async def validation_exception_handler(request, exc):
 
 
 @application.exception_handler(CustomHTTPException)
-async def http_exception_handler(request: Request, exc: CustomHTTPException):
+async def custom_http_exception_handler(request: Request, exc: CustomHTTPException):
     return exc.get_response(exc.status_code)
 
 
