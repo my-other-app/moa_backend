@@ -17,9 +17,10 @@ import csv
 import io
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from typing import AsyncIterator
 from uuid import UUID
 
-from sqlalchemy import and_, exists, func, or_, select
+from sqlalchemy import and_, func, or_, select
 
 from app.api.closeout.models import EventStatus
 from app.api.events.models import EventCategories, EventRegistrationsLink as Reg, Events
@@ -102,11 +103,18 @@ def _months(frm: date, to: date) -> list[str]:
 
 # ─── Money, per event ────────────────────────────────────────────────────
 
-_REFUNDED = exists().where(
-    PaymentOrders.receipt == Reg.payment_receipt,
-    PaymentLogs.order_id == PaymentOrders.id,
-    PaymentLogs.status == PaymentStatus.refunded,
-)
+def _refunded_receipts():
+    """The receipts with a refunded payment, each once: a small set (refunds
+    are few, and ix_payment_logs_refunded_order reads only them), built once
+    per statement and joined, where a correlated EXISTS inside the aggregate's
+    FILTER was evaluated for every registration counted."""
+    return (
+        select(PaymentOrders.receipt.label("receipt"))
+        .join(PaymentLogs, PaymentLogs.order_id == PaymentOrders.id)
+        .where(PaymentLogs.status == PaymentStatus.refunded)
+        .group_by(PaymentOrders.receipt)
+        .subquery("refunded")
+    )
 
 
 def _blank() -> dict:
@@ -123,7 +131,8 @@ async def _per_event(session, event_ids: list[int]) -> dict[int, dict]:
     if not event_ids:
         return out
     paid = Reg.is_paid == True  # noqa: E712
-    owed = and_(Reg.is_paid == False, Events.has_fee == True, ~_REFUNDED)  # noqa: E712
+    refunded = _refunded_receipts()
+    owed = and_(Reg.is_paid == False, Events.has_fee == True, refunded.c.receipt.is_(None))  # noqa: E712
     # Paid online carries the provider's receipt; paid at the door, the desk took the money and there is none.
     online = and_(paid, Reg.payment_receipt.isnot(None))
     cash = and_(paid, Reg.payment_receipt.is_(None))
@@ -141,6 +150,7 @@ async def _per_event(session, event_ids: list[int]) -> dict[int, dict]:
             func.count().filter(cash),
         )
         .join(Events, Events.id == Reg.event_id)
+        .outerjoin(refunded, refunded.c.receipt == Reg.payment_receipt)
         .where(Reg.event_id.in_(event_ids), Reg.is_deleted == False)  # noqa: E712
         .group_by(Reg.event_id)
     )
@@ -541,23 +551,47 @@ async def club_statement(session, club, frm: date, to: date) -> str:
     return "﻿" + buf.getvalue()
 
 
-async def event_statement(session, event) -> str:
+#: Registrations read per round trip while a statement streams.
+STATEMENT_CHUNK = 1000
+
+
+async def event_statement(session, event) -> AsyncIterator[str]:
+    """The event's statement as CSV, a chunk at a time: every registration
+    with whether it was refunded (a join, where an IN over every receipt
+    failed past asyncpg's 32,767 parameters), read through a server-side
+    cursor STATEMENT_CHUNK rows at a time, so neither the registrations nor
+    the file are ever all in memory."""
     s = await event_summary(session, event)
-    regs = list((await session.scalars(select(Reg).where(Reg.event_id == event.id, Reg.is_deleted == False).order_by(Reg.created_at, Reg.id))).all())  # noqa: E712
-    refunded = set(
-        (await session.scalars(
-            select(PaymentOrders.receipt).join(PaymentLogs, PaymentLogs.order_id == PaymentOrders.id).where(PaymentLogs.status == PaymentStatus.refunded)
-            .where(PaymentOrders.receipt.in_([r.payment_receipt for r in regs if r.payment_receipt]) if regs else False)
-        )).all()
-    )
     buf, w = _writer()
+
+    def drain() -> str:
+        chunk = buf.getvalue()
+        buf.seek(0)
+        buf.truncate(0)
+        return chunk
+
     w.writerow(["Statement", _cell(event.name), _iso(event.event_datetime)[:10]])
     w.writerow([])
     w.writerow(["Registrations"])
     w.writerow(["Date", "Guest", "Email", "Ticket", "Fee", "Paid", "Status"])
-    for r in regs:
-        status = "refunded" if r.payment_receipt and r.payment_receipt in refunded else "paid" if r.is_paid else "unpaid" if event.has_fee else "free"
-        w.writerow([_iso(r.created_at)[:10], _cell(r.full_name), r.email, r.ticket_id, _f(r.actual_amount), _f(r.paid_amount), status])
+    yield "﻿" + drain()
+
+    refunded = _refunded_receipts()
+    rows = await session.stream(
+        select(
+            Reg.created_at, Reg.full_name, Reg.email, Reg.ticket_id, Reg.actual_amount, Reg.paid_amount, Reg.is_paid,
+            refunded.c.receipt.is_not(None),
+        )
+        .outerjoin(refunded, refunded.c.receipt == Reg.payment_receipt)
+        .where(Reg.event_id == event.id, Reg.is_deleted == False)  # noqa: E712
+        .order_by(Reg.created_at, Reg.id)
+        .execution_options(yield_per=STATEMENT_CHUNK)
+    )
+    async for part in rows.partitions(STATEMENT_CHUNK):
+        for created_at, name, email, ticket, fee, paid_amount, is_paid, was_refunded in part:
+            status = "refunded" if was_refunded else "paid" if is_paid else "unpaid" if event.has_fee else "free"
+            w.writerow([_iso(created_at)[:10], _cell(name), email, ticket, _f(fee), _f(paid_amount), status])
+        yield drain()
     _expenses_section(w, s["expenses"])
     _totals_section(w, s["figures"])
-    return "﻿" + buf.getvalue()
+    yield drain()

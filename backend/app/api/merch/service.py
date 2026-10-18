@@ -278,9 +278,11 @@ async def collect(session, event: Events, item_id: UUID, registration_id, actor:
                 return _result(rules.OUT_OF_STOCK, False, r.variant_label, 0)
             await session.execute(update(MerchItems).where(MerchItems.id == m.id).values(collected_count=MerchItems.collected_count + 1))
         else:
+            # Pieces given out by hand come off the same stock.
             row = (await session.execute(
-                update(MerchItems).where(MerchItems.id == m.id, MerchItems.collected_count < MerchItems.stock)
-                .values(collected_count=MerchItems.collected_count + 1).returning(MerchItems.stock, MerchItems.collected_count)
+                update(MerchItems).where(MerchItems.id == m.id, MerchItems.collected_count + MerchItems.manual_handed_out < MerchItems.stock)
+                .values(collected_count=MerchItems.collected_count + 1)
+                .returning(MerchItems.stock, MerchItems.collected_count + MerchItems.manual_handed_out)
             )).first()
             if row is None:
                 await session.rollback()
@@ -386,15 +388,25 @@ async def analytics(session, event: Events) -> dict:
 
 
 async def hand_out_by_hand(session, event: Events, item_id: UUID, delta: int) -> dict:
-    """A piece given out without a scan — counted, and taken back with Undo."""
+    """A piece given out without a scan — counted, and taken back with Undo.
+
+    One conditional UPDATE, bounded by the stock: two staff tapping at once
+    used to read the same count and both write it plus one, losing a piece
+    or giving out one more than there was."""
     m = await _item(session, event, item_id)
     total = _total(m)
-    nxt = (m.manual_handed_out or 0) + delta
-    if nxt < 0:
-        nxt = 0
-    if total and m.collected_count + nxt > total:
-        raise CustomHTTPException(422, message="Nothing left to hand out")
-    m.manual_handed_out = nxt
+    t = MerchItems.__table__
+    if delta > 0:
+        stmt = update(t).where(t.c.id == m.id, t.c.event_id == event.id)
+        if total:
+            stmt = stmt.where(t.c.collected_count + t.c.manual_handed_out + delta <= total)
+        stmt = stmt.values(manual_handed_out=t.c.manual_handed_out + delta).returning(t.c.id)
+        if (await session.execute(stmt)).first() is None:
+            raise CustomHTTPException(422, message="Nothing left to hand out")
+    else:
+        await session.execute(
+            update(t).where(t.c.id == m.id, t.c.event_id == event.id)
+            .values(manual_handed_out=func.greatest(t.c.manual_handed_out + delta, 0))
+        )
     await session.commit()
-    await session.refresh(m)
     return item_out(await _item(session, event, item_id))
