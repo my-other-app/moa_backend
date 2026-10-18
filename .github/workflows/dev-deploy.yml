@@ -105,28 +105,30 @@ jobs:
             printf "%s" "$ENV_VARS" | sudo tee .env > /dev/null
           fi
 
+          # Builds go through BuildKit: backend/Dockerfile uses pip cache
+          # mounts (docker buildx must be installed; live-deploy.yml says why).
           if [ "$RESTART_ALL" = "true" ]; then
             echo "Restarting all services..."
-            sudo docker-compose up --build -d
+            sudo env DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker-compose up --build -d
           fi
 
           if [ "$INSTALL_REQUIREMENTS" = "true" ]; then
             # Into the image, not the running container: a package installed
             # with exec pip install is gone at the next recreate (live-deploy.yml).
             echo "Rebuilding the backend image with its requirements..."
-            sudo docker-compose build backend
+            sudo env DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker-compose build backend
             sudo docker-compose up -d --no-deps --force-recreate backend
           fi
 
           if [ "$RESTART_DATABASE" = "true" ]; then
             echo "Restarting and rebuilding database service..."
-            sudo docker-compose build postgres
+            sudo env DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker-compose build postgres
             sudo docker-compose up -d postgres
           fi
 
           if [ "$BUILD_BACKEND" = "true" ]; then
             echo "Building backend service..."
-            sudo docker-compose build backend
+            sudo env DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker-compose build backend
           fi
 
           if [ "$UP_BACKEND" = "true" ]; then

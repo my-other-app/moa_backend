@@ -5,7 +5,14 @@ __pycache__
 *.pyc
 venv
 */venv
+.venv*
 .git
 .DS_Store
 *.log
 logs
+# Not needed in the image (the code is bind-mounted at run time anyway), and
+# each a reason for the build context to be bigger or the last layer to change.
+tests
+scripts/bench/results
+.pytest_cache
+.ruff_cache

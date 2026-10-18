@@ -18,3 +18,5 @@ backend/wallet_certs/*.csr
 .ruff_cache
 # Query plans the benchmark writes with --explain: large, and made again on demand.
 backend/scripts/bench/results/**/*.txt
+# The git sha the deploy writes for Sentry's release tag (app/core/observability.py).
+backend/REVISION

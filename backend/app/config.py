@@ -23,6 +23,21 @@ class AppConfig(BaseSettings):
     # uvicorn's line per request. nginx in front already logs every request,
     # so this is a second copy, written on every request; false drops it.
     ACCESS_LOG: bool = True
+    # One JSON object per log line (app/core/observability.py): time, level,
+    # logger, message and the request id, for a log shipper. Off: uvicorn's
+    # own format, as before. On (or SENTRY_DSN set), each request carries an
+    # id in X-Request-ID, in and out, and a 500's track_id is that id.
+    LOG_JSON: bool = False
+    # Error tracking with Sentry (app/core/observability.py). Empty DSN: off,
+    # and sentry_sdk is never imported. Personal data is scrubbed before an
+    # event leaves. SENTRY_RELEASE defaults to the git sha the deploy writes
+    # to backend/REVISION. SENTRY_SAMPLE_RATE: the share of errors sent;
+    # SENTRY_TRACES_SAMPLE_RATE: the share of requests traced (0: none).
+    SENTRY_DSN: str = ""
+    SENTRY_ENVIRONMENT: str = "production"
+    SENTRY_RELEASE: str = ""
+    SENTRY_SAMPLE_RATE: float = 1.0
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.0
     # Log every SQL statement with its parameters (app/db/core.py). Off by
     # default: the parameters are personal data.
     SQL_LOG: bool = False
@@ -38,10 +53,43 @@ class AppConfig(BaseSettings):
     # (app.db.core.check_connection_budget). Behind PgBouncer: 5 and 5.
     DB_POOL_SIZE: int = 10
     DB_MAX_OVERFLOW: int = 20
+    # `alembic upgrade` runs beside the live API (app/db/migration_session.py
+    # says why each exists). Postgres durations; "0" turns one off. A DDL
+    # statement waits at most MIGRATION_LOCK_TIMEOUT for its lock, then the
+    # migration's transaction rolls back and is tried again, up to
+    # MIGRATION_LOCK_ATTEMPTS times, the pause doubling from
+    # MIGRATION_RETRY_WAIT seconds. A statement may run
+    # MIGRATION_STATEMENT_TIMEOUT, except an index built CONCURRENTLY (and the
+    # other statements that block no one), which gets
+    # MIGRATION_ONLINE_STATEMENT_TIMEOUT: none.
+    MIGRATION_LOCK_TIMEOUT: str = "5s"
+    MIGRATION_STATEMENT_TIMEOUT: str = "30s"
+    MIGRATION_ONLINE_STATEMENT_TIMEOUT: str = "0"
+    MIGRATION_IDLE_TIMEOUT: str = "60s"
+    MIGRATION_LOCK_ATTEMPTS: int = 4
+    MIGRATION_RETRY_WAIT: float = 5.0
     # Mounted from the host, deliberately outside the directory the deploy
     # rsyncs with --delete -- a backup inside it would be erased by the next
     # deploy, which is the opposite of the point.
     BACKUP_DIR: str = "/backups"
+    # The off-site copy of every dump (app/api/backups/offsite.py): uploaded
+    # to BACKUP_S3_BUCKET under BACKUP_S3_PREFIX, daily/ or weekly/, with
+    # server-side encryption (BACKUP_S3_SSE: AES256, or aws:kms with
+    # BACKUP_S3_KMS_KEY_ID) and the dump's sha256 in its metadata. Empty
+    # bucket: no off-site copy, as before. BACKUP_S3_ACCESS_KEY and
+    # BACKUP_S3_SECRET_KEY: a user that may put, list and read backups/ and
+    # nothing else (no delete: the lifecycle rule expires them); unset, the
+    # media bucket's S3_ACCESS_KEY and S3_SECRET_KEY.
+    BACKUP_S3_BUCKET: str = ""
+    BACKUP_S3_PREFIX: str = "backups/"
+    BACKUP_S3_REGION: str = "ap-south-1"
+    BACKUP_S3_SSE: str = "AES256"
+    BACKUP_S3_KMS_KEY_ID: str = ""
+    BACKUP_S3_ACCESS_KEY: str = ""
+    BACKUP_S3_SECRET_KEY: str = ""
+    # How many dumps scripts/backup.py leaves in BACKUP_DIR (the newest),
+    # deleting older ones only after a good off-site upload. 0 keeps every one.
+    BACKUP_KEEP_LOCAL: int = 0
 
     S3_BUCKET: str
     S3_ACCESS_KEY: str

@@ -13,7 +13,14 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
-from app.api.router import api_router
+# Error tracking starts before any route is built: Sentry's integrations wrap
+# routes as they are made. Off, and sentry_sdk never imported, unless
+# APP_SENTRY_DSN is set (app/core/observability.py).
+from app.core import observability
+
+observability.init_sentry()
+
+from app.api.router import api_router  # noqa: E402
 from app.config import settings
 from app.db.listeners import *
 from app.response import ErrorResponse, CustomHTTPException
@@ -131,7 +138,17 @@ async def shutdown(loops: list, budget: float = SHUTDOWN_BUDGET) -> None:
 # every response -- because with a response model or a return type FastAPI
 # writes the JSON bytes itself through Pydantic, faster than orjson after
 # jsonable_encoder, and a custom class turned that path off.
-application = FastAPI(lifespan=lifespan)
+class Application(FastAPI):
+    def build_middleware_stack(self):
+        """With request ids on (APP_LOG_JSON or APP_SENTRY_DSN), their
+        middleware goes outside even Starlette's ServerErrorMiddleware, which
+        add_middleware cannot reach: so a 500 carries X-Request-ID too, and
+        the 500 handler still knows the id when it makes the track_id."""
+        stack = super().build_middleware_stack()
+        return observability.RequestIdMiddleware(stack) if observability.request_ids_enabled() else stack
+
+
+application = Application(lifespan=lifespan)
 
 application.state.limiter = limiter
 application.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
@@ -192,7 +209,9 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     """The 500. The Discord report goes in the background (throttled, one
     per kind of error and path at a time): it used to be awaited here, and a
     500 took as long as two tries at the webhook did."""
-    track_id = str(uuid.uuid4())
+    # The request's id when request ids are on (APP_LOG_JSON or Sentry), so
+    # the id a user quotes finds the log lines and the Sentry event too.
+    track_id = observability.current_request_id() or str(uuid.uuid4())
     try:
         report_error(request, exc, track_id)
     except Exception:  # noqa: BLE001
