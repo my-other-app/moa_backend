@@ -149,6 +149,32 @@ class AppConfig(BaseSettings):
     PLAN_ENFORCEMENT_FROM: datetime = datetime(2026, 10, 18, 0, 0, tzinfo=_IST)
     PLAN_GRANDFATHER_DAYS: int = 90
 
+    # ─── Accounts, sign-in and push (fix/accounts-integrity) ───────────────
+    # Where the rate limiter keeps its counts (slowapi/limits storage URI).
+    # memory:// is per process, which is exact while WORKERS=1; with more
+    # workers or hosts point it at Redis (redis://host:6379/0) so they share
+    # one budget. A redis:// URI needs the `redis` package installed.
+    RATE_LIMIT_STORAGE: str = "memory://"
+    # A refresh token is good once: each refresh hands back a new one. The one
+    # it replaced is still answered (with the same new token) for this many
+    # seconds -- a reply lost on a bad network, two tabs refreshing together
+    # -- and after that, presenting it ends the whole session as stolen.
+    REFRESH_REUSE_GRACE_SECONDS: int = 30
+    # An admin's session as someone else ends this many minutes after it
+    # starts, with no refresh (30 to 60).
+    IMPERSONATION_SESSION_MINUTES: int = 30
+    # A new event's push to people whose interests match it, beyond the
+    # club's followers: at most this many people per event, and nobody more
+    # than this many times a day. Followers are never capped.
+    INTEREST_PUSH_MAX_PER_EVENT: int = 5000
+    INTEREST_PUSH_MAX_PER_USER_PER_DAY: int = 3
+    # The admin Overview is kept this many seconds (0 = worked out every time).
+    ADMIN_OVERVIEW_CACHE_SECONDS: int = 60
+    # Housekeeping: how long sign-in attempts are kept, and how often the
+    # sweep removes those and the sessions that can never be used again.
+    SIGN_IN_ATTEMPTS_KEEP_DAYS: int = 180
+    ACCOUNT_SWEEP_SECONDS: int = 3600
+
     @field_validator("PLAN_ENFORCEMENT_FROM")
     @classmethod
     def _aware_cutoff(cls, value: datetime) -> datetime:
