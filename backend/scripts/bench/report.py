@@ -41,6 +41,8 @@ def main(paths: list[str]) -> None:
                 cells.append(("fails (500)" if code == "500" else f"not offered ({code})") + " | —")
                 continue
             stmts = str(row["statements_min"]) if row["statements_min"] == row["statements_max"] else f"{row['statements_min']}–{row['statements_max']}"
+            if "pages" in row:  # run.py --buffers
+                stmts += f", {row['pages']:,} pages"
             cells.append(f"{_ms(row['p50'])} / {_ms(row['p95'])} (n={row['n']}) | {stmts}")
         print(f"| {name} | " + " | ".join(cells) + " |")
 

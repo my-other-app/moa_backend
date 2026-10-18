@@ -605,3 +605,262 @@ the migration's one transaction.
 noise). The scale study at 15,000 and 100,000 clubs, with a load generator,
 hot-row writes and the background sweeps, is in `docs/SCALING.md` at the
 repository root; its raw results are in `results/scale/`.
+
+
+## Read paths at a lakh of clubs (`perf/discover-scale-2`, 18 October 2026)
+
+The read-path fixes from `docs/SCALING.md` section (d): 1 (a lower bound on
+what is on), 2 (capped totals), 3 (For You on a bounded candidate set), 4
+(each club's place kept on the club), 12 (the cities number), 13 (the typo
+fallback and `sort=relevance` look only at what can be on) and 14 (a paged
+sitemap). Migration `discover_scale`.
+
+### What changed
+
+- **What is on, bounded from below.** Every list of what is on or to come
+  asks for `start >= floor` beside `end >= now`; the floor is now minus 72
+  hours (`MAX_EVENT_HOURS`, now a limit on an event's length, checked on
+  create, edit and copy; an event saved before it keeps its length through
+  an edit that leaves it alone). While an event saved before the limit and
+  longer than it is still running, the floor reaches back to its start
+  (`discover/upcoming.py`: one lookup on `ix_events_long_ends_at`, which
+  holds only those, kept for the minute). So the floor never leaves out an
+  event that is on, and the date-ordered walks of `ix_events_shown_start`
+  start near now instead of at the oldest event still marked published.
+  Applied in the discover lists (`_visible_where`, `_conditions`, the
+  upcoming arm of `_public_where` where a caller has it), the club pages,
+  the event page's "more" and "similar", For You and the app's
+  `/events/list?is_ended=false`. Club-scoped dashboard lists are bounded by
+  the club and were left alone.
+- **Totals that stop.** `/discover/events`, `/discover/clubs` and
+  `/discover/threads` count at most 1,001 rows; past 1,000 they answer
+  `total: 1000, total_capped: true` and the pages go on (a page is asked
+  for, not worked out from the total). `sort=distance` counts the placed
+  part only as far as the page needs. The front page's "upcoming events" is
+  the sum of the per-category counts it already makes, not a count of its
+  own.
+- **For You.** Scores the UNION of: the soonest 200 events of the clubs the
+  user follows or pinned; the soonest 200 within 30 days sharing one of the
+  user's interests (skipped for a user with none); the 200 most popular in
+  the user's one-degree region (everywhere when unknown) and the 100 most
+  popular online events, both the same for everyone and kept for the minute.
+  The same formula; `me_shared_interests` counts the candidates only. Each
+  user's first 200 ids and scores are kept five minutes (`cache.personal`,
+  the in-process cache's interface, ready for a Redis store), forgotten on
+  follow, unfollow, pin, hide and a change of interests, and checked against
+  the rows before they are served (registered since, hidden, over or closed
+  ones drop out). The region comes from `lat`/`lng` on the request, else
+  from the address lookup if it already knows the address; the lookup is
+  never waited for here.
+- **Club places.** `clubs.place_lat` / `place_lng`, kept by triggers on
+  clubs and events in the writer's transaction (`discover/places.py`), with
+  `ix_clubs_place` over the listed clubs that have one. `search_clubs` boxes
+  the radius on it; the front page's "clubs near you" widens circles of 100
+  and 1,000 km on it until it has eight, instead of reading every club's
+  place every minute. `POST /admin/discover/recompute-club-places` and
+  `scripts/recompute_club_places.py` put right anything written with
+  triggers off.
+- **Cities** is kept in `discover_stats` and counted again in the
+  background, one process at a time, at most every 30 minutes.
+- **Search only what is on.** The typo fallback's three arms keep only shown
+  events starting from the floor, and find the event arm's candidates in new
+  trigram indexes over shown events only (`ix_events_shown_name_trgm`,
+  `ix_events_shown_location_trgm`; the status clock moves what is over out
+  of them, so no nightly rebuild). A search whose letters appear nowhere,
+  in any event, club or category of any date (a trigram probe, with
+  sequential scans off for that one statement), skips the substring pass,
+  which as a filter on what is on had to read every event on to find none.
+  `sort=relevance` ranks what the bounded conditions admit.
+- **The sitemap.** `GET /discover/sitemap/index` lists pages of 5,000 (events
+  then clubs, in id order, each with its size and newest change); `GET
+  /discover/sitemap/{events|clubs}/{page}` serves one, 404 past the last.
+  Every public event of any age (held ones stay indexable) and every listed
+  club. One statement numbers the rows and gives each page its first id (the
+  club rule as "not one of the unlisted clubs", a hashed list, so the events
+  are read once); a page is then a primary-key range. The boundaries are
+  kept an hour. `GET /discover/sitemap` is unchanged.
+- **For the site's feeds:** cards and the event page carry `summary` (the
+  description as one plain line, at most 200 characters, cut at a word),
+  `created_at` and `updated_at` (no publish time is kept; `created_at` stands
+  in), and `sort=newest` walks the new `ix_events_shown_created`.
+- **`ix_clubs_user_id`.** Every signed-in request loads the account's club by
+  `clubs.user_id`, which had no index: a read of the whole clubs table
+  (1,800 pages at 15,000 clubs) on every app request.
+
+### The measurements
+
+The same laptop as the scale study (Apple M2, 8 GB, Postgres 16 with its
+defaults), this time shared: another engineer's test suite and benchmark ran
+throughout (load average 5–17, swap in use, the events table pushed out of
+memory between runs). Timings of the same code moved by up to 20× between
+rounds, so each table gives, beside p50 / p95, the **pages** one request
+touches: shared buffers hit plus read, summed over `EXPLAIN (ANALYZE,
+BUFFERS)` of every statement it ran (`run.py --buffers`, new). Pages do not
+depend on what else the machine is doing; they are the work. Before and
+after ran back to back on the same data (`before` is `origin/master` at
+54839ed, from `git archive`). "(cold)" empties both caches before every
+request: the front page, For You and the sitemap index as a cache miss.
+"(user cold)" empties only what is kept per person: a user's first For You
+with the minute's shared lists already made, which is the usual miss in
+production.
+
+Worlds:
+
+- **S1**: `seed.py --scale 10` (15,000 clubs, 120,000 upcoming and 250,000
+  past events, 600,000 users, 4,000,000 registrations), as in the scale study.
+- **S2e**: S2's clubs and events (100,000 clubs, 300,000 upcoming and
+  1,000,000 past events) with fewer people (300,000 users, 1,500,000
+  registrations, 1,000,000 follows, 50,000 posts): 2.8 GB. The full S2
+  (9.7 GB) did not fit the disk left on the shared machine. The read paths
+  measured here depend on the events and clubs; For You and the app's lists
+  read one user's rows, which are the same size in both.
+
+**S2e**, before and after. p50 / p95 over n requests; the before column's
+slow rows rest on two or three requests each (one took 90 s), so read them as
+"at least this slow". Pages are per request.
+
+| endpoint | before p50 / p95 ms | stmts | pages | after p50 / p95 ms | stmts | pages |
+|---|---:|---:|---:|---:|---:|---:|
+| home (cold) | 34 s / 46 s (n=2) | 17–44 | 601,587 | 1.4 s / 1.4 s (n=3) | 17 | 85,993 |
+| home lat/lng (cold) | 3.4 s / 3.5 s (n=2) | 26 | 857,774 | 760 / 1.0 s (n=5) | 27 | 177,556 |
+| events | 2.1 s / 3.1 s (n=3) | 3 | 137,163 | 33.0 / 57.4 (n=30) | 3 | 5,670 |
+| events q typo | 7.4 s / 12 s (n=2) | 5 | 149,695 | 124 / 162 (n=30) | 7 | 12,916 |
+| events q relevance | 4.0 s / 4.2 s (n=2) | 3 | 222,948 | 201 / 303 (n=19) | 6 | 49,264 |
+| events distance r=50 | 6.2 s / 9.1 s (n=2) | 4–6 | 100,800 | 121 / 182 (n=30) | 4 | 87,421 |
+| events popular | 5.7 s / 6.3 s (n=2) | 3 | 208,726 | 240 / 326 (n=16) | 3 | 29,993 |
+| clubs | 60.2 / 83.0 (n=30) | 6 | 12,535 | 54.5 / 86.6 (n=30) | 6 | 12,651 |
+| clubs nearby | 86 s / 91 s (n=2) | 7 | 606,680 | 55.7 / 74.0 (n=30) | 6 | 14,573 |
+| event page | 3.9 s / 4.5 s (n=2) | 11 | 29,908 | 17.1 / 34.5 (n=30) | 11 | 108 |
+| threads | 32.1 / 78.9 (n=30) | 4 | 8,000 | 14.0 / 20.1 (n=30) | 4 | 3,976 |
+| sitemap (cold) | 3.4 s / 3.5 s (n=2) | 2 | 114,062 | 3.4 s / 4.0 s (n=2) | 2 | 120,897 |
+| app for-you | 4.9 s / 4.9 s (n=2) | 3 | 135,558 | 16.5 / 35.1 (n=30) | 3 | 1,708 |
+| events offset=4800 | 13 s / 15 s (n=2) | 3–5 | 157,158 | 40.3 / 98.6 (n=30) | 3 | 29,954 |
+| app for-you (cold) | 4.5 s / 5.6 s (n=2) | 3 | 135,558 | 463 / 575 (n=9) | 7 | 110,767 |
+| app for-you (user cold) | 5.4 s / 5.8 s (n=2) | 3 | 135,558 | 53.7 / 95.9 (n=30) | 4 | 44,298 |
+| app for-you lat/lng (cold) | 5.3 s / 5.5 s (n=2) | 3 | 135,558 | 909 / 1.5 s (n=5) | 7 | 173,334 |
+| event page (busiest category) | 4.5 s / 4.8 s (n=2) | 11 | 29,948 | 10.3 / 12.7 (n=30) | 11 | 130 |
+| events newest | — | — | — | 28.8 / 37.1 (n=30) | 3 | 5,586 |
+| sitemap index (cold) | not offered | — | — | 3.0 s / 3.8 s (n=2) | 2 | 149,057 |
+| sitemap events page 1 (cold) | not offered | — | — | 2.6 s / 2.7 s (n=2) | 2 | 154,106 |
+| sitemap events page 1 | — | — | — | 32.2 / 38.1 (n=30) | 1 | 17,037 |
+
+**S1**, before and after. (Measured before the last two changes: the typo
+arms on the shown-only trigram indexes, and the sitemap's boundaries as a
+hashed club list. S1 was dropped to make room for S2e.)
+
+| endpoint | before p50 / p95 ms | stmts | pages | after p50 / p95 ms | stmts | pages |
+|---|---:|---:|---:|---:|---:|---:|
+| home (cold) | 716 / 1.7 s (n=6) | 17 | 82,897 | 145 / 230 (n=33) | 17 | 25,952 |
+| home lat/lng (cold) | 970 / 1.1 s (n=6) | 26 | 166,403 | 191 / 284 (n=25) | 27 | 52,828 |
+| events | 89.8 / 120 (n=55) | 3 | 19,509 | 13.7 / 18.0 (n=51) | 3 | 3,191 |
+| events q typo | 308 / 410 (n=16) | 5–7 | 23,926 | 117 / 326 (n=31) | 7 | 11,842 |
+| events q relevance | 145 / 275 (n=30) | 3 | 24,565 | 79.9 / 199 (n=49) | 6 | 17,812 |
+| events distance r=50 | 86.1 / 172 (n=51) | 4 | 58,512 | 30.8 / 61.6 (n=60) | 4 | 26,936 |
+| events popular | 89.4 / 196 (n=47) | 3 | 21,575 | 47.6 / 102 (n=60) | 3 | 12,748 |
+| clubs | 21.5 / 34.8 (n=60) | 6 | 4,687 | 17.7 / 47.7 (n=60) | 6 | 3,989 |
+| clubs nearby | 330 / 521 (n=14) | 6 | 146,839 | 16.3 / 29.8 (n=60) | 6 | 6,971 |
+| event page | 14.1 / 18.8 (n=60) | 11 | 1,022 | 14.1 / 20.1 (n=60) | 11 | 115 |
+| threads | 36.6 / 65.8 (n=60) | 4 | 9,446 | 8.7 / 12.3 (n=60) | 4 | 2,912 |
+| sitemap (cold) | 356 / 710 (n=14) | 2 | 38,820 | 206 / 947 (n=19) | 2 | 38,820 |
+| app for-you | 426 / 627 (n=12) | 3 | 19,858 | 35.9 / 144 (n=60) | 3 | 1,494 |
+| events offset=4800 | 85.4 / 161 (n=52) | 3 | 34,934 | 14.2 / 19.4 (n=60) | 3 | 18,570 |
+| app for-you (cold) | 416 / 5.3 s (n=7) | 3 | 19,858 | 601 / 1.2 s (n=8) | 7 | 36,933 |
+| app for-you (user cold) | 482 / 907 (n=10) | 3 | 19,858 | 102 / 384 (n=39) | 4 | 16,428 |
+| app for-you lat/lng (cold) | 488 / 851 (n=10) | 3 | 19,858 | 248 / 960 (n=14) | 7 | 58,582 |
+| event page (busiest category) | 26.4 / 63.0 (n=60) | 11 | 7,949 | 11.1 / 15.7 (n=60) | 11 | 132 |
+| sitemap index (cold) | not offered | — | — | 114 / 163 (n=42) | 2 | 32,095 |
+| sitemap events page 1 (cold) | not offered | — | — | 200 / 633 (n=20) | 2 | 33,040 |
+
+The seven the study asked about, at S2e:
+
+| | before | after | pages before → after |
+|---|---:|---:|---:|
+| front page, cache miss | 34 s | 1.4 s | 601,587 → 85,993 |
+| front page with a point, cache miss | 3.4 s | 0.76 s | 857,774 → 177,556 |
+| `/discover/events`, first page | 2.1 s | 33 ms | 137,163 → 5,670 |
+| distance sort, 50 km | 6.2 s | 121 ms | 100,800 → 87,421 |
+| search with a typo | 7.4 s | 124 ms | 149,695 → 12,916 |
+| `/discover/clubs` near | 86 s | 56 ms | 606,680 → 14,573 |
+| For You (a user's first, the minute's lists made) | 5.4 s | 54 ms | 135,558 → 44,298 |
+| For You (kept) | 4.9 s | 17 ms | 135,558 → 1,708 |
+| event page, "similar" in the busiest category | 4.5 s | 10 ms | 29,948 → 130 |
+
+### What the pages say
+
+- **Bounded by the data, not growing with it**: the first page of events
+  (5,670 pages at S2e against 3,191 at S1, for 2.5 times the events on), the
+  event page (108–130), For You kept (1,500–1,700), clubs near (7,000 →
+  14,600 for 6.7 times the clubs: the box holds more clubs, not every club).
+  Before, each of these read most of the events or clubs table.
+- **The event page's "similar"** walked the category's past events before
+  reaching one that is on (29,948 pages); it now starts at the floor (130).
+- **For You** scores 400–700 candidates. A user's first ranking reads
+  44,000 pages at S2e, most of them the interests arm walking the soonest
+  upcoming events until it has 200 matches (proportional to how rare the
+  user's interests are, not to the number of events) and the candidates'
+  rows; kept, 1,700. "(cold)", which also rebuilds the region's and the
+  online popular lists (once a minute per process in production, shared by
+  everyone), is 110,000–173,000.
+- **Still proportional to what is on, once a minute per process**: the
+  front page's category counts and its "popular" (86,000 pages at S2e, a
+  sort of every upcoming event), "near you" (the events in a 70 km box,
+  ~90,000 more with a point), the distance sort (every in-person event in
+  the radius, 87,000), `sort=relevance` (every match on, 49,000), and For
+  You's shared popular lists. They are computed once a minute per process
+  and shared, which Redis (Phase 0) makes once a minute in all. The
+  substring search for a word that does occur is a filter on what is on:
+  cheap when the word is common (the capped count stops at 1,001), a read of
+  every event on when it is rare but present.
+- **The sitemap index** reads every event once (149,000 pages, 3 s at S2e)
+  and is kept an hour; a page is a primary-key range (17,000 pages, 32 ms).
+  The one-page `/discover/sitemap` is unchanged.
+
+### The migration
+
+`discover_scale` on S1 (370,000 events, 15,000 clubs): 8.2 s. On S2e
+(1,300,000 events, 100,000 clubs): 71.6 s with the machine at load 16, of
+which the place backfill (one grouped pass over the events with a point),
+the cities count (a distinct over every event) and the concurrent index
+builds (each a pass over the events) are the parts. Locks: the first
+transaction (columns, table, triggers) is catalogue-only and short; the
+backfill holds each club row it rewrites until it commits (a follow of such a
+club waits for it, seconds at a lakh of clubs); the indexes are built
+concurrently and block nothing. 99,863 of 100,000 clubs got a place. The
+backfill rewrites most clubs' rows; the migration vacuums clubs after it.
+
+### What is left
+
+- The minute's shared computations above (front page, near you, For You's
+  popular lists) are per process: Redis (`cache.shared` and
+  `cache.personal` have the interface for it) makes them once a minute in
+  all, and the per-user rankings shared between workers.
+- A rare word that does occur somewhere still reads every event on in the
+  substring pass; a search engine (Phase 2) or substring matching through
+  the shown-only trigram indexes when the word is rare would bound it.
+- The front page's "near you" pool reads every event in its box before
+  keeping the soonest; streaming it in date order would stop early.
+
+### Reproduce
+
+```
+cd backend
+git archive origin/master backend | tar -x -C /tmp/before     # the "before" code
+createdb moa_bench_s2e
+(cd /tmp/before/backend && BENCH_DB=moa_bench_s2e python -m scripts.bench.seed --clubs 100000 --upcoming 300000 \
+    --past 1000000 --users 300000 --registrations 1500000 --follows 1000000 --threads 50000 --likes 100000 \
+    --comments 30000 --sizes-out s2e_seed.json)
+KEYS="home (cold),home lat/lng (cold),events,events distance r=50,events q typo,events q relevance,events popular,\
+events offset=4800,clubs,clubs nearby,app for-you (cold),app for-you (user cold),app for-you lat/lng (cold),app for-you,\
+event page,event page (busiest category),threads,sitemap (cold),sitemap index (cold),sitemap events page 1 (cold),\
+sitemap events page 1,events newest"
+(cd /tmp/before/backend && BENCH_DB=moa_bench_s2e python -m scripts.bench.run --label before --freeze --n 30 --budget 4 \
+    --min 2 --warmup 1 --exact "$KEYS" --buffers --out before.json)   # copy this branch's run.py there first
+BENCH_DB=moa_bench_s2e python -c "from scripts.bench import _env; from alembic.config import Config; \
+    from alembic import command; command.upgrade(Config('alembic.ini'), 'head')"
+BENCH_DB=moa_bench_s2e python -m scripts.bench.run --label after --freeze --n 30 --budget 4 --min 2 --warmup 1 \
+    --exact "$KEYS" --buffers --out after.json
+python -m scripts.bench.report before.json after.json
+dropdb moa_bench_s2e
+```
+
+Raw results: `results/read_paths/` (`s1_*.json`, `s2e_*.json`, the seeds' sizes).
