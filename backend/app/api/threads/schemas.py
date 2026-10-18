@@ -48,6 +48,9 @@ class ThreadPage(BaseModel):
     total: int
     limit: int
     offset: int
+    # True when `total` stopped counting at its cap (the public feed counts at
+    # most 1,000): there are more than `total`, and the pages go on.
+    total_capped: bool = False
 
 
 class Author(BaseModel):

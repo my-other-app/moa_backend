@@ -351,6 +351,18 @@ Ordered by what they unblock. Expected gains are measured where marked
 (✓, from `s2_whatif.md` or the plans) and estimated otherwise. Do not change
 behaviour the site depends on without the tests RESULTS.md describes.
 
+*Status, 18 October 2026:* the read-path fixes 1, 2, 3, 4, 12, 13 (the bound
+on each arm, and trigram indexes over shown events, kept small by the status
+clock rather than a nightly rebuild) and 14 are on the branch
+`perf/discover-scale-2` (migration `discover_scale`), measured in
+`backend/scripts/bench/RESULTS.md` under "Read paths at a lakh of clubs".
+What each became, where it differs from the proposal below: the lower bound
+widens itself while an event saved before the 72-hour limit is still running
+(`discover/upcoming.py`); totals say `total_capped`; For You's ranking is kept
+per user in the process (`cache.personal`, the same interface a Redis store
+would take); the cities number lives in `discover_stats`, counted again in
+the background at most every 30 minutes.
+
 1. **Bound every "what is on" query from below.** In `app/api/discover/service.py`,
    `_visible_where` / `_conditions` (and `_public_where` for upcoming), add
    `Events.event_datetime >= now - timedelta(hours=MAX_EVENT_HOURS)` (72 today;

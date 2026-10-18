@@ -416,18 +416,34 @@ async def for_you(
     pagination: PaginationParams,
     session: SessionDep,
     user: DependsAuth,
+    background_tasks: BackgroundTasks,
     debug_scores: bool = Query(False, description="Include each event's score"),
+    lat: Optional[float] = Query(None, ge=-90, le=90, description="The device's latitude: the popular events near it are candidates; without it the address places the user, roughly"),
+    lng: Optional[float] = Query(None, ge=-180, le=180, description="The device's longitude"),
 ) -> PaginatedResponse[EventListResponse]:
     """Upcoming events ranked for this user.
 
     Replaces calling /events/list with no filters, which returned every event
     ever created oldest-first -- so the feed opened on an event from years ago.
+    The ranking is kept for a few minutes (recommendations.KEEP_SECONDS).
     """
+    # Where the user is picks the region whose popular events are candidates:
+    # the device's point, else what the address lookup already knows. That
+    # lookup is never waited for here; one not yet made is made after the
+    # response, for next time.
+    if lat is not None and lng is not None:
+        where = dict(lat=lat, lng=lng)
+    else:
+        ip = geo.client_ip(request)
+        known, where = geo.known_place(ip)
+        if not known:
+            background_tasks.add_task(geo.locate_ip, ip)
     events, scores = await recommendations.for_you_events(
         session,
         user_id=user.id,
         limit=pagination.limit,
         offset=pagination.offset,
+        where=where,
     )
 
     payload = []

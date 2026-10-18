@@ -48,6 +48,13 @@ class EventCard(BaseModel):
     capacity: Optional[int] = None
     status: Literal["upcoming", "closing_soon", "full", "live", "ended"]
     url: str
+    # The description as one line of plain text, at most 200 characters (cut
+    # at a word, with an ellipsis): enough for a feed without the event page.
+    summary: Optional[str] = None
+    # When the event was made (no publish time is kept; sort=newest orders
+    # by this) and last changed, ISO 8601.
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
 
 class ClubCard(BaseModel):
@@ -104,7 +111,10 @@ class Home(BaseModel):
 
 class EventSearch(BaseModel):
     items: list[EventCard]
+    # Exact up to 1,000; past that 1,000 with total_capped ("1,000+"), and
+    # the pages go on: load more until a page comes back short.
     total: int
+    total_capped: bool = False
     offset: int
     limit: int
     where: Where
@@ -128,7 +138,9 @@ class CalendarMonth(BaseModel):
 
 class ClubSearch(BaseModel):
     items: list[ClubCard]
+    # As EventSearch's.
     total: int
+    total_capped: bool = False
     offset: int
     limit: int
     where: Where
@@ -217,6 +229,9 @@ class PageEvent(BaseModel):
     guidelines: Optional[str] = None
     contact: EventContact
     url: str
+    summary: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
 
 class PageClub(BaseModel):
@@ -265,6 +280,28 @@ class Sitemap(BaseModel):
     clubs: list[SitemapEntry]
 
 
+class SitemapPageRef(BaseModel):
+    """One page of the paged sitemap: GET /discover/sitemap/{kind}/{page}."""
+    kind: Literal["events", "clubs"]
+    page: int
+    entries: int
+    # The newest change on the page, for the sitemap index's <lastmod>.
+    updated_at: Optional[str] = None
+
+
+class SitemapIndex(BaseModel):
+    """Every page of the sitemap, events then clubs, each at most page_size entries."""
+    page_size: int
+    pages: list[SitemapPageRef]
+
+
+class SitemapPage(BaseModel):
+    kind: Literal["events", "clubs"]
+    page: int
+    pages: int
+    items: list[SitemapEntry]
+
+
 class BackfillCounts(BaseModel):
     checked: int
     resolved: int
@@ -294,6 +331,11 @@ class GeocodeBackfillResult(BaseModel):
     # Rows left without an answer: the request budget ran out, the geocoder
     # paused or did not answer. Run it again for them.
     remaining: int
+
+
+class ClubPlaceFixes(BaseModel):
+    """How many clubs' stored places disagreed with their rows and were put right."""
+    clubs: int
 
 
 class CounterFixes(BaseModel):

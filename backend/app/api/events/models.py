@@ -187,6 +187,8 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         sa.Index("ix_events_club_start", "club_id", "event_datetime", postgresql_where=sa.text("NOT is_deleted")),
         sa.Index("ix_events_category_start", "category_id", "event_datetime", postgresql_where=sa.text("NOT is_deleted")),
         # "Near you": a latitude/longitude box first, the exact distance after.
+        # sort=newest on the public lists (the feeds): what can be shown, the latest made first.
+        sa.Index("ix_events_shown_created", "created_at", "id", postgresql_where=sa.text("NOT is_deleted AND status IN ('published', 'live')")),
         sa.Index("ix_events_shown_point", "lat", "lng", postgresql_where=sa.text("NOT is_deleted AND status IN ('published', 'live') AND lat IS NOT NULL AND lng IS NOT NULL")),
         # Words anywhere in the name or the place: trigram indexes serve ILIKE '%…%' and similarity.
         # What overlaps a stretch of time, held events included: the calendar
@@ -206,6 +208,21 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         ),
         sa.Index("ix_events_name_trgm", "name", postgresql_using="gin", postgresql_ops={"name": "gin_trgm_ops"}, postgresql_where=sa.text("NOT is_deleted")),
         sa.Index("ix_events_location_trgm", "location_name", postgresql_using="gin", postgresql_ops={"location_name": "gin_trgm_ops"}, postgresql_where=sa.text("NOT is_deleted")),
+        # The same over what can be shown only: the search's typo fallback
+        # looks among these, not every event ever held (the status clock
+        # moves what is over out of them; discover.service._matching).
+        sa.Index("ix_events_shown_name_trgm", "name", postgresql_using="gin", postgresql_ops={"name": "gin_trgm_ops"},
+                 postgresql_where=sa.text("NOT is_deleted AND status IN ('published', 'live')")),
+        sa.Index("ix_events_shown_location_trgm", "location_name", postgresql_using="gin", postgresql_ops={"location_name": "gin_trgm_ops"},
+                 postgresql_where=sa.text("NOT is_deleted AND status IN ('published', 'live')")),
+        # The few events longer than MAX_EVENT_HOURS (saved before that limit)
+        # by when they end: how far back "what is on" must look while one of
+        # them is still running (discover.upcoming).
+        sa.Index(
+            "ix_events_long_ends_at",
+            sa.func.timezone(sa.literal_column("'UTC'"), sa.func.timezone(sa.literal_column("'UTC'"), event_datetime) + duration * sa.text("INTERVAL '1 hour'")),
+            postgresql_where=sa.text("NOT is_deleted AND duration > 72"),
+        ),
     )
 
     @property
@@ -213,6 +230,14 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         if getattr(self, "is_deleted", False):
             return "cancelled"
         return (self.lifecycle or EventStatus.published).value
+
+
+#: The longest an event may run, in hours, checked when one is created, edited
+#: or copied (events.service.check_duration). Lists of what is on use it as a
+#: lower bound: an event not over yet started at most this long ago, so their
+#: walks start near now, not at the oldest event still marked published
+#: (discover.upcoming). ix_events_long_ends_at's predicate repeats the number.
+MAX_EVENT_HOURS = 72
 
 
 def ends_at_sql(model=None):

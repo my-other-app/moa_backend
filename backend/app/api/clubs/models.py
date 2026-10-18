@@ -86,6 +86,13 @@ class Clubs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     # same transaction as every follow, unfollow or delete there (see
     # FOLLOWER_COUNT_SQL below), so lists sort by it without counting.
     follower_count = Column(Integer, nullable=False, default=0, server_default="0")
+    # Where "clubs near" puts the club: its own point (lat, lng) when it has
+    # one, else the middle of its in-person events' points; null with neither.
+    # Kept by triggers on clubs and events in the writer's own transaction
+    # (app.api.discover.places), so a box on ix_clubs_place finds the clubs
+    # near a point without averaging every club's events.
+    place_lat = Column(Float, nullable=True)
+    place_lng = Column(Float, nullable=True)
 
     user = relationship("Users", back_populates="club")
     org = relationship("Organizations", back_populates="clubs")
@@ -103,6 +110,14 @@ class Clubs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         sa.Index("ix_clubs_name_trgm", "name", postgresql_using="gin", postgresql_ops={"name": "gin_trgm_ops"}, postgresql_where=sa.text("NOT is_deleted")),
         sa.Index("ix_clubs_tagline_trgm", "tagline", postgresql_using="gin", postgresql_ops={"tagline": "gin_trgm_ops"}, postgresql_where=sa.text("NOT is_deleted")),
         sa.Index("ix_clubs_location_trgm", "location_name", postgresql_using="gin", postgresql_ops={"location_name": "gin_trgm_ops"}, postgresql_where=sa.text("NOT is_deleted")),
+        # The club an account owns: every signed-in request loads it with the
+        # user (app.core.auth), which read the whole table without this.
+        sa.Index("ix_clubs_user_id", "user_id"),
+        # "Clubs near": the listed clubs that have a place, by latitude then longitude.
+        sa.Index(
+            "ix_clubs_place", "place_lat", "place_lng",
+            postgresql_where=sa.text("is_verified AND NOT is_deleted AND place_lat IS NOT NULL AND place_lng IS NOT NULL"),
+        ),
     )
 
 

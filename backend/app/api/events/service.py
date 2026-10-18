@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import io
 import logging
 from typing import Optional
@@ -17,6 +17,7 @@ from app.api.events.schemas import (
     EventSpeakerCreate,
 )
 from app.api.events.models import (
+    MAX_EVENT_HOURS,
     EventCategories,
     EventFiles,
     EventInterestsLink,
@@ -46,6 +47,20 @@ async def _republish_site(session, event_id: int) -> None:
     from app.api.sites import service as sites
 
     await sites.republish_for_event(session, event_id)
+
+
+def check_duration(duration: Optional[float], *, was: Optional[float] = None) -> None:
+    """422 for an event that would run longer than MAX_EVENT_HOURS. One saved
+    before the limit (`was`, its length now) keeps that length through an
+    edit that leaves it alone; changing it must bring it within the limit."""
+    if duration is None or float(duration) <= MAX_EVENT_HOURS:
+        return
+    if was is not None and float(duration) == float(was):
+        return
+    raise CustomHTTPException(
+        422, message="Invalid request",
+        errors={"duration": f"An event can run for at most {MAX_EVENT_HOURS} hours. For something longer, make one event a day."},
+    )
 
 
 async def create_event(
@@ -86,6 +101,7 @@ async def create_event(
     *args,
     **kwargs,
 ):
+    check_duration(duration)
     await validate_relations(
         session,
         {
@@ -267,6 +283,7 @@ async def update_event(
     ensure_event_access(
         db_event, user_id, as_admin, message="Not authorized to update this event"
     )
+    check_duration(event.duration, was=db_event.duration)
     if (db_event.lifecycle or EventStatus.published) in LOCKED_STATUSES:
         raise CustomHTTPException(409, message="This event is closed, so its settings are read-only. Move its status back to Live on the closeout page to change them.", error_code="EVENT_LOCKED")
     # The club's plan: free to paid needs tickets; the store and swag switched
@@ -664,8 +681,13 @@ async def list_events(
             # Past events: event has ended (end_time < now)
             query = query.filter(event_end_time < func.now())
         else:
-            # Upcoming/ongoing events: event hasn't ended yet (end_time >= now)
-            query = query.filter(event_end_time >= func.now())
+            # Upcoming/ongoing events: event hasn't ended yet (end_time >= now),
+            # and so started at most the longest an event runs ago: the walk in
+            # date order then starts near now (discover.upcoming).
+            from app.api.discover import upcoming
+
+            floor = await upcoming.hours(session, datetime.now(timezone.utc))
+            query = query.filter(event_end_time >= func.now(), Events.event_datetime >= func.now() - timedelta(hours=floor))
 
     # Order by event_datetime instead of created_at
     # Past events: most recently ended first

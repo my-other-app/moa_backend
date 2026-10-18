@@ -99,8 +99,15 @@ async def pick_targets(session) -> dict:
     category = (await session.execute(text(
         "SELECT category_id FROM events WHERE event_datetime > now() GROUP BY 1 ORDER BY count(*) DESC LIMIT 1"
     ))).scalar()
+    # An upcoming event in that busiest category: its page's "similar events" walk the category.
+    in_big_category = (await session.execute(text(
+        "SELECT e.slug FROM events e JOIN clubs c ON c.id = e.club_id "
+        "WHERE NOT e.is_deleted AND e.status IN ('published', 'live') AND c.is_verified AND NOT c.is_deleted "
+        "AND e.event_datetime > now() AND e.category_id = :cat ORDER BY e.event_datetime, e.id LIMIT 1"
+    ), {"cat": category})).scalar()
     user = (await session.execute(text("SELECT id, token_version FROM users WHERE email = 'bench.user@example.com'"))).first()
-    return dict(club=big_club, event=event_slug, interest=interest, category=category, user_id=user[0], token_version=user[1])
+    return dict(club=big_club, event=event_slug, event_big_category=in_big_category, interest=interest, category=category,
+                user_id=user[0], token_version=user[1])
 
 
 BLR = dict(lat=12.9716, lng=77.5946)
@@ -114,6 +121,18 @@ def _forget() -> None:
     except ImportError:
         return
     cache.reset()
+
+
+def _forget_personal() -> None:
+    """Empty only what is kept per person (For You's rankings): a new user's
+    first request, with the minute's shared lists already made."""
+    try:
+        from app.api.discover import cache
+    except ImportError:
+        return
+    store = getattr(cache, "personal", None)
+    if store is not None:
+        store.clear()
 
 
 def _days() -> dict:
@@ -131,7 +150,8 @@ def _days() -> dict:
 
 def endpoints(t: dict) -> list[tuple[str, str, dict, bool]]:
     """(name, path, params, signed_in); a name ending in "(cold)" empties the
-    shared cache before every request, so it times the work a cache miss does."""
+    shared cache before every request, so it times the work a cache miss does;
+    one ending in "(user cold)" empties only what is kept per person."""
     d = _days()
     return [
         ("home", "/discover/home", {}, False),
@@ -190,6 +210,20 @@ def endpoints(t: dict) -> list[tuple[str, str, dict, bool]]:
         ("app list ended", "/events/list", {"is_ended": "true"}, True),
         ("calendar", "/discover/calendar", {}, False),
         ("club events page 2", f"/discover/clubs/{t['club']}/events", {"offset": 24}, False),
+        # Added with perf/discover-scale-2: For You with nothing kept (its
+        # ranking is now kept per user for five minutes, so the plain row
+        # above is the kept case), a typo with nothing kept, and the paged
+        # sitemap (not offered before).
+        ("app for-you (cold)", "/events/for-you", {}, True),
+        ("app for-you (user cold)", "/events/for-you", {}, True),
+        ("app for-you lat/lng (cold)", "/events/for-you", BLR, True),
+        ("event page (cold)", f"/discover/events/{t['event']}", {}, False),
+        ("event page (busiest category)", f"/discover/events/{t['event_big_category']}", {}, False),
+        ("events newest", "/discover/events", {"sort": "newest"}, False),
+        ("sitemap index (cold)", "/discover/sitemap/index", {}, False),
+        ("sitemap events page 1 (cold)", "/discover/sitemap/events/1", {}, False),
+        ("sitemap events page 1", "/discover/sitemap/events/1", {}, False),
+        ("sitemap clubs page 1 (cold)", "/discover/sitemap/clubs/1", {}, False),
     ]
 
 
@@ -220,6 +254,26 @@ async def explain(engine, statements: list, top: Optional[int] = 2, used: Option
     return out
 
 
+async def pages_touched(engine, statements: list) -> dict:
+    """Shared buffers hit and read by the statements of one request, from
+    EXPLAIN (ANALYZE, BUFFERS) of each (the top node counts its children's).
+    A statement that ran after a SET LOCAL (the typo fallback's similarity
+    threshold) is re-run without it, so it may match more or less."""
+    hit = read = 0
+    async with engine.connect() as conn:
+        for statement, params, _ in statements:
+            if not statement.lstrip().upper().startswith(("SELECT", "WITH")):
+                continue
+            res = await conn.exec_driver_sql("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + statement, params)
+            plan = res.scalar()
+            plan = json.loads(plan) if isinstance(plan, str) else plan
+            top = plan[0]["Plan"]
+            hit += int(top.get("Shared Hit Blocks", 0))
+            read += int(top.get("Shared Read Blocks", 0))
+            await conn.rollback()
+    return dict(pages=hit + read, pages_hit=hit, pages_read=read)
+
+
 async def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--label", default="run")
@@ -229,10 +283,14 @@ async def main() -> None:
     p.add_argument("--budget", type=float, default=40.0)
     p.add_argument("--warmup", type=int, default=3)
     p.add_argument("--only", help="comma-separated substrings of endpoint names")
+    p.add_argument("--exact", help="comma-separated endpoint names, matched whole (with --only, either)")
     p.add_argument("--skip", help="comma-separated substrings of endpoint names to leave out")
     p.add_argument("--explain", help="write EXPLAIN (ANALYZE, BUFFERS) of the slowest statements here")
     p.add_argument("--explain-all", action="store_true", help="explain every statement of the request, not the slowest two")
     p.add_argument("--indexes", help="write which indexes each endpoint's plans use here (JSON); implies explaining every statement")
+    p.add_argument("--buffers", action="store_true",
+                   help="re-run every statement of one request per endpoint under EXPLAIN (ANALYZE, BUFFERS) and record the pages it touched "
+                        "(shared hit + read): the work a request does, whatever else the machine is doing")
     p.add_argument("--quiet-sql-log", action="store_true", help="turn the app's SQL statement log down to WARNING")
     p.add_argument("--freeze", action="store_true", help="gc.freeze() after import, as the app's startup does (doth.lifespan)")
     args = p.parse_args()
@@ -270,7 +328,12 @@ async def main() -> None:
     transport = ASGITransport(app=application)
     async with AsyncClient(transport=transport, base_url="http://bench") as client:
         for name, path, params, signed in endpoints(targets):
-            if args.only and not any(o.strip() in name for o in args.only.split(",")):
+            wanted = []
+            if args.only:
+                wanted.append(any(o.strip() in name for o in args.only.split(",")))
+            if args.exact:
+                wanted.append(name in [o.strip() for o in args.exact.split(",")])
+            if wanted and not any(wanted):
                 continue
             if args.skip and any(o.strip() in name for o in args.skip.split(",")):
                 continue
@@ -282,6 +345,8 @@ async def main() -> None:
                 h = {**headers, "X-Forwarded-For": f"10.{(ip >> 16) & 255}.{(ip >> 8) & 255}.{ip & 255}"}
                 if name.endswith("(cold)"):
                     _forget()
+                elif name.endswith("(user cold)"):
+                    _forget_personal()
                 cap.take()
                 cap.on = True
                 t0 = time.perf_counter()
@@ -319,11 +384,14 @@ async def main() -> None:
                 p50=pct(lat, 0.5) * 1000, p95=pct(lat, 0.95) * 1000, p99=pct(lat, 0.99) * 1000, mean=statistics.mean(lat) * 1000,
                 statements_min=min(counts), statements_max=max(counts), sql_ms=statistics.mean(sql_t) * 1000, bytes=size,
             )
+            if args.buffers:
+                row.update(await pages_touched(engine, last))
             results.append(row)
             if args.out:  # as it goes, so a run that dies late keeps what it measured
                 _write(args.out, args.label, targets, results)
             print(f"{name:<36} n={row['n']:>4}  p50 {row['p50']:8.1f}  p95 {row['p95']:8.1f}  p99 {row['p99']:8.1f} ms  "
-                  f"stmts {row['statements_min']}-{row['statements_max']}  sql {row['sql_ms']:7.1f} ms", flush=True)
+                  f"stmts {row['statements_min']}-{row['statements_max']}  sql {row['sql_ms']:7.1f} ms"
+                  + (f"  pages {row['pages']}" if "pages" in row else ""), flush=True)
             if args.explain or args.indexes:
                 used: set = set()
                 explained = await explain(engine, last, top=None if (args.explain_all or args.indexes) else 2, used=used)

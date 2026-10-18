@@ -823,6 +823,15 @@ async def locate_ip(ip: Optional[str]) -> Optional[dict]:
     return place
 
 
+def known_place(ip: Optional[str]) -> tuple[bool, Optional[dict]]:
+    """(known, place): what locate_ip has kept for this address, without
+    asking anyone. known is False when nothing is kept (or it has expired)."""
+    hit = _ip_cache.get(ip) if ip else None
+    if hit and hit[0] > time.monotonic():
+        return True, hit[1]
+    return False, None
+
+
 async def where(request, lat: Optional[float], lng: Optional[float]) -> dict:
     """The visitor's place for a request: the browser's point when given, else the address's."""
     ip_place = await locate_ip(client_ip(request))

@@ -52,6 +52,7 @@ from scripts.bench import _env  # noqa: F401  (settings before app)
 
 from sqlalchemy import create_engine, text
 
+from app.api.discover import places
 from app.config import settings
 from app.db import registry  # noqa: F401
 from app.db.base import _Base
@@ -112,6 +113,16 @@ TOPIC_STEPS = "ARRAY[1,7,11,13,17,19,23,29]"
 # plan row's n users (start + g*step mod U) are n different people.
 PRIMES = [1000003, 1000033, 1000037, 1000039, 1000081, 1000099, 1000117, 1000121, 1000133, 1000151, 1000159, 1000171,
           1000183, 1000187, 1000193, 1000199, 1000211, 1000213, 1000231, 1000249, 1000253, 1000273, 1000289, 1000291]
+
+# The front page's count of cities, as discover.stats keeps it.
+CITIES_SQL = """
+INSERT INTO discover_stats (name, value, computed_at)
+SELECT 'cities', count(DISTINCT lower(trim(e.location_name))), %(now)s
+FROM events e JOIN clubs c ON c.id = e.club_id
+WHERE NOT e.is_deleted AND e.status IN ('published', 'live', 'closed', 'archived') AND c.is_verified AND NOT c.is_deleted
+  AND NOT coalesce(e.is_online, false) AND lower(trim(e.location_name)) IS NOT NULL AND lower(trim(e.location_name)) <> ''
+ON CONFLICT (name) DO UPDATE SET value = excluded.value, computed_at = excluded.computed_at
+"""
 
 # The tables loaded here: their non-constraint indexes are dropped while loading and built again after.
 LOADED = ("users", "user_profiles", "user_interests", "clubs", "clubs_interests_link", "club_socials", "club_team_members",
@@ -685,6 +696,13 @@ class Seeder:
 
             self.build_indexes(raw, dropped)
             self.stamp("indexes")
+
+            # What triggers would have kept, had they been on: each club's
+            # place, and the front page's count of cities.
+            cur.execute(places.RECOMPUTE_SQL)
+            cur.execute(CITIES_SQL, dict(now=now))
+            raw.commit()
+            self.stamp("club places, cities")
         finally:
             raw.close()
         with self.engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
