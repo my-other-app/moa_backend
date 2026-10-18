@@ -68,7 +68,7 @@ async def delete_item(session: SessionDep, user: ClubAuth, event_id: int, item_i
 
 
 @router.get("/orders", summary="Who bought what, and whether they have it yet")
-async def orders(session: SessionDep, user: ClubAuth, event_id: int, q: Optional[str] = Query(None, max_length=120), status: Optional[str] = Query(None, pattern="^(paid|refunded|pending)$"), page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)) -> OrdersPage:
+async def orders(session: SessionDep, user: ClubAuth, event_id: int, q: Optional[str] = Query(None, max_length=120), status: Optional[str] = Query(None, pattern="^(paid|refunded|pending|oversold)$"), page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)) -> OrdersPage:
     event = await deliveries.event_for_club(session, user, event_id)
     return OrdersPage(**await service.orders(session, event, q=q, status=status, page=page, page_size=page_size))
 
@@ -77,6 +77,16 @@ async def orders(session: SessionDep, user: ClubAuth, event_id: int, q: Optional
 async def handover(session: SessionDep, user: ClubAuth, event_id: int, order_id: str) -> OrderOut:
     event = await deliveries.event_for_club(session, user, event_id)
     return OrderOut(**await service.hand_over(session, await service.order_for(session, event, order_id), user.id))
+
+
+@router.post("/orders/{order_id}/fulfil", summary="Settle an oversold order by handing it over after all")
+async def fulfil(session: SessionDep, user: ClubAuth, event_id: int, order_id: str) -> OrderOut:
+    """An order paid for when its pieces had sold out: once the organiser
+    has raised the stock, the pieces are taken and the order is paid (409
+    SOLD_OUT while they are still not there). The other way to settle one is
+    refunding the payment."""
+    event = await deliveries.event_for_club(session, user, event_id)
+    return OrderOut(**await service.fulfil(session, await service.order_for(session, event, order_id)))
 
 
 @router.post("/orders/{order_id}/handover/undo", summary="Take a handover back")
