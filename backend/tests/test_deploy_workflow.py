@@ -22,7 +22,7 @@ WORKFLOW = REPO / ".github" / "workflows" / "live-deploy.yml"
 pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
 
 FLAGS = ("SYNC_CODE", "RESTART_BACKEND", "INSTALL_REQUIREMENTS", "RESTART_DATABASE", "RESTART_ALL",
-         "MIGRATE", "UP_BACKEND", "BUILD_BACKEND")
+         "MIGRATE", "UP_BACKEND", "BUILD_BACKEND", "RECREATE_BACKEND")
 
 
 def _workflow() -> dict:
@@ -95,7 +95,7 @@ def _deploy(tmp_path, fakes, **inputs) -> tuple[subprocess.CompletedProcess, lis
 def test_every_input_is_kept_and_the_new_ones_are_there():
     inputs = _workflow()[True]["workflow_dispatch"]["inputs"]  # YAML 1.1 reads `on` as true
     for name in ("sync_code", "restart_backend", "sync_env", "install_requirements", "restart_database",
-                 "restart_all", "migrate", "up_backend", "build_backend"):
+                 "restart_all", "migrate", "up_backend", "build_backend", "recreate_backend"):
         assert inputs[name]["type"] == "boolean", name
     assert inputs["services"]["type"] == "string" and inputs["services"]["default"] == ""
     assert inputs["smoke_timeout"]["type"] == "number" and inputs["smoke_timeout"]["default"] == 180
@@ -171,6 +171,16 @@ def test_a_missing_buildx_stops_before_anything_changes(tmp_path, fakes):
     assert run.returncode == 1
     assert "docker buildx (BuildKit) is not installed" in run.stdout
     assert calls == ["docker buildx version"]
+
+
+def test_recreate_after_an_env_change_migrates_first_and_builds_nothing(tmp_path, fakes):
+    run, calls = _deploy(tmp_path, fakes, recreate_backend=True, migrate=True)
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert calls == [
+        "compose exec -T backend alembic upgrade head [buildkit=]",
+        "compose up -d --no-deps --force-recreate backend [buildkit=]",
+        "compose exec -T backend alembic current [buildkit=]",
+    ]
 
 
 def test_sync_and_restart_restarts_once(tmp_path, fakes):

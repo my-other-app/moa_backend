@@ -69,6 +69,11 @@ on:
         required: false
         default: false
         type: boolean
+      recreate_backend:
+        description: "Recreate the backend container without building (picks up .env changes; restart does not). With migrate, migrates first"
+        required: false
+        default: false
+        type: boolean
       services:
         description: "Start or refresh these extra services after the migration, space-separated (e.g. \"redis worker meilisearch\"); not backend or postgres"
         required: false
@@ -140,6 +145,10 @@ jobs:
           SYNC_CODE: ${{ github.event.inputs.sync_code }}
           UP_BACKEND: ${{ github.event.inputs.up_backend }}
           BUILD_BACKEND: ${{ github.event.inputs.build_backend }}
+          # A new container from the current image: the way an .env change
+          # (sync_env) reaches the process, since `restart` keeps the env the
+          # container was created with. install_requirements sets it too.
+          RECREATE_BACKEND: ${{ github.event.inputs.recreate_backend }}
           SERVICES: ${{ github.event.inputs.services }}
         run: |
           set -eo pipefail
