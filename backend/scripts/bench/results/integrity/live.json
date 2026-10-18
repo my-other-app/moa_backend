@@ -1,0 +1,634 @@
+[
+ {
+  "label": "before",
+  "what": "room",
+  "voters": 5000,
+  "players": 2000,
+  "levels": [
+   {
+    "kind": "room",
+    "concurrency": 32,
+    "duration_s": 20.0,
+    "requests": 896,
+    "rps": 44.8,
+    "people_served": 224,
+    "errors": 0,
+    "codes": {
+     "200": 896
+    },
+    "latency_ms": {
+     "p50": 663.4,
+     "p95": 1552.6,
+     "p99": 1820.6,
+     "mean": 712.4
+    },
+    "server_cpu_s": 23.4,
+    "postgres_cpu_s": 1.2,
+    "wall_s": 23.8,
+    "server": {
+     "workers": [
+      {
+       "pid": 78010,
+       "requests": 1054,
+       "max_inflight": 50,
+       "pool_checked_out": 28,
+       "pool_overflow": 20,
+       "loop_lag_p99_ms": 138.3,
+       "loop_lag_max_ms": 162.3
+      }
+     ],
+     "loop_lag_ms": {
+      "p50": 25.5,
+      "p99": 138.3,
+      "max": 162.3
+     },
+     "for_update_ms": {
+      "n": 0,
+      "p50": NaN,
+      "p95": NaN,
+      "p99": NaN,
+      "max": 0
+     },
+     "row_held_ms": {
+      "n": 0,
+      "p50": NaN,
+      "p95": NaN,
+      "p99": NaN,
+      "max": 0
+     }
+    }
+   },
+   {
+    "kind": "room",
+    "concurrency": 128,
+    "duration_s": 20.0,
+    "requests": 619,
+    "rps": 30.9,
+    "people_served": 154,
+    "errors": 0,
+    "codes": {
+     "200": 619
+    },
+    "latency_ms": {
+     "p50": 3921.3,
+     "p95": 7846.9,
+     "p99": 10297.3,
+     "mean": 3904.7
+    },
+    "server_cpu_s": 25.7,
+    "postgres_cpu_s": 1.6,
+    "wall_s": 26.2,
+    "server": {
+     "workers": [
+      {
+       "pid": 78010,
+       "requests": 837,
+       "max_inflight": 149,
+       "pool_checked_out": 28,
+       "pool_overflow": 20,
+       "loop_lag_p99_ms": 202.3,
+       "loop_lag_max_ms": 291.5
+      }
+     ],
+     "loop_lag_ms": {
+      "p50": 45.74,
+      "p99": 202.3,
+      "max": 291.5
+     },
+     "for_update_ms": {
+      "n": 0,
+      "p50": NaN,
+      "p95": NaN,
+      "p99": NaN,
+      "max": 0
+     },
+     "row_held_ms": {
+      "n": 0,
+      "p50": NaN,
+      "p95": NaN,
+      "p99": NaN,
+      "max": 0
+     }
+    }
+   }
+  ]
+ },
+ {
+  "label": "before",
+  "what": "quiz",
+  "voters": 5000,
+  "players": 2000,
+  "levels": [
+   {
+    "kind": "quiz",
+    "concurrency": 32,
+    "duration_s": 20.0,
+    "requests": 5221,
+    "rps": 261.1,
+    "people_served": 522,
+    "errors": 0,
+    "codes": {
+     "200": 5221
+    },
+    "latency_ms": {
+     "p50": 117.3,
+     "p95": 156.0,
+     "p99": 261.9,
+     "mean": 122.2
+    },
+    "server_cpu_s": 22.5,
+    "postgres_cpu_s": 1.3,
+    "wall_s": 23.3,
+    "server": {
+     "workers": [
+      {
+       "pid": 78010,
+       "requests": 5856,
+       "max_inflight": 47,
+       "pool_checked_out": 24,
+       "pool_overflow": 20,
+       "loop_lag_p99_ms": 15.9,
+       "loop_lag_max_ms": 27.8
+      }
+     ],
+     "loop_lag_ms": {
+      "p50": 3.58,
+      "p99": 15.9,
+      "max": 27.8
+     },
+     "for_update_ms": {
+      "n": 0,
+      "p50": NaN,
+      "p95": NaN,
+      "p99": NaN,
+      "max": 0
+     },
+     "row_held_ms": {
+      "n": 0,
+      "p50": NaN,
+      "p95": NaN,
+      "p99": NaN,
+      "max": 0
+     }
+    }
+   },
+   {
+    "kind": "quiz",
+    "concurrency": 128,
+    "duration_s": 20.0,
+    "requests": 5485,
+    "rps": 274.2,
+    "people_served": 548,
+    "errors": 0,
+    "codes": {
+     "200": 5485
+    },
+    "latency_ms": {
+     "p50": 456.4,
+     "p95": 1123.1,
+     "p99": 1500.7,
+     "mean": 462.4
+    },
+    "server_cpu_s": 23.0,
+    "postgres_cpu_s": 4.5,
+    "wall_s": 23.6,
+    "server": {
+     "workers": [
+      {
+       "pid": 78010,
+       "requests": 6275,
+       "max_inflight": 143,
+       "pool_checked_out": 28,
+       "pool_overflow": 20,
+       "loop_lag_p99_ms": 28.3,
+       "loop_lag_max_ms": 56.3
+      }
+     ],
+     "loop_lag_ms": {
+      "p50": 3.98,
+      "p99": 28.3,
+      "max": 56.3
+     },
+     "for_update_ms": {
+      "n": 0,
+      "p50": NaN,
+      "p95": NaN,
+      "p99": NaN,
+      "max": 0
+     },
+     "row_held_ms": {
+      "n": 0,
+      "p50": NaN,
+      "p95": NaN,
+      "p99": NaN,
+      "max": 0
+     }
+    }
+   }
+  ]
+ },
+ {
+  "label": "after",
+  "what": "room",
+  "voters": 5000,
+  "players": 2000,
+  "levels": [
+   {
+    "kind": "room",
+    "concurrency": 32,
+    "duration_s": 20.0,
+    "requests": 10766,
+    "rps": 538.3,
+    "people_served": 2691,
+    "errors": 0,
+    "codes": {
+     "200": 10766
+    },
+    "latency_ms": {
+     "p50": 47.7,
+     "p95": 122.7,
+     "p99": 168.4,
+     "mean": 59.2
+    },
+    "server_cpu_s": 21.7,
+    "postgres_cpu_s": 3.0,
+    "wall_s": 23.3,
+    "server": {
+     "workers": [
+      {
+       "pid": 79424,
+       "requests": 11823,
+       "max_inflight": 56,
+       "pool_checked_out": 1,
+       "pool_overflow": 0,
+       "loop_lag_p99_ms": 19.3,
+       "loop_lag_max_ms": 45.1
+      }
+     ],
+     "loop_lag_ms": {
+      "p50": 3.73,
+      "p99": 19.3,
+      "max": 45.1
+     },
+     "for_update_ms": {
+      "n": 0,
+      "p50": NaN,
+      "p95": NaN,
+      "p99": NaN,
+      "max": 0
+     },
+     "row_held_ms": {
+      "n": 0,
+      "p50": NaN,
+      "p95": NaN,
+      "p99": NaN,
+      "max": 0
+     }
+    }
+   },
+   {
+    "kind": "room",
+    "concurrency": 128,
+    "duration_s": 20.0,
+    "requests": 4706,
+    "rps": 235.3,
+    "people_served": 1176,
+    "errors": 2,
+    "codes": {
+     "200": 4704,
+     "ReadError": 2
+    },
+    "latency_ms": {
+     "p50": 340.7,
+     "p95": 1622.1,
+     "p99": 2508.6,
+     "mean": 529.0
+    },
+    "server_cpu_s": 15.6,
+    "postgres_cpu_s": 3.4,
+    "wall_s": 23.5,
+    "server": {
+     "workers": [
+      {
+       "pid": 79424,
+       "requests": 5425,
+       "max_inflight": 143,
+       "pool_checked_out": 30,
+       "pool_overflow": 20,
+       "loop_lag_p99_ms": 19.1,
+       "loop_lag_max_ms": 37.3
+      }
+     ],
+     "loop_lag_ms": {
+      "p50": 0.63,
+      "p99": 19.1,
+      "max": 37.3
+     },
+     "for_update_ms": {
+      "n": 0,
+      "p50": NaN,
+      "p95": NaN,
+      "p99": NaN,
+      "max": 0
+     },
+     "row_held_ms": {
+      "n": 0,
+      "p50": NaN,
+      "p95": NaN,
+      "p99": NaN,
+      "max": 0
+     }
+    }
+   }
+  ]
+ },
+ {
+  "label": "after",
+  "what": "quiz",
+  "voters": 5000,
+  "players": 2000,
+  "levels": [
+   {
+    "kind": "quiz",
+    "concurrency": 32,
+    "duration_s": 20.0,
+    "requests": 12916,
+    "rps": 645.8,
+    "people_served": 1291,
+    "errors": 0,
+    "codes": {
+     "200": 12916
+    },
+    "latency_ms": {
+     "p50": 45.8,
+     "p95": 74.7,
+     "p99": 93.3,
+     "mean": 49.6
+    },
+    "server_cpu_s": 22.0,
+    "postgres_cpu_s": 2.8,
+    "wall_s": 23.3,
+    "server": {
+     "workers": [
+      {
+       "pid": 79424,
+       "requests": 15237,
+       "max_inflight": 54,
+       "pool_checked_out": 0,
+       "pool_overflow": 0,
+       "loop_lag_p99_ms": 21.8,
+       "loop_lag_max_ms": 33.4
+      }
+     ],
+     "loop_lag_ms": {
+      "p50": 4.51,
+      "p99": 21.8,
+      "max": 33.4
+     },
+     "for_update_ms": {
+      "n": 0,
+      "p50": NaN,
+      "p95": NaN,
+      "p99": NaN,
+      "max": 0
+     },
+     "row_held_ms": {
+      "n": 0,
+      "p50": NaN,
+      "p95": NaN,
+      "p99": NaN,
+      "max": 0
+     }
+    }
+   },
+   {
+    "kind": "quiz",
+    "concurrency": 128,
+    "duration_s": 20.0,
+    "requests": 4804,
+    "rps": 240.2,
+    "people_served": 480,
+    "errors": 0,
+    "codes": {
+     "200": 4804
+    },
+    "latency_ms": {
+     "p50": 384.9,
+     "p95": 1458.1,
+     "p99": 2137.0,
+     "mean": 523.8
+    },
+    "server_cpu_s": 14.8,
+    "postgres_cpu_s": 2.2,
+    "wall_s": 23.7,
+    "server": {
+     "workers": [
+      {
+       "pid": 79424,
+       "requests": 5582,
+       "max_inflight": 129,
+       "pool_checked_out": 1,
+       "pool_overflow": 0,
+       "loop_lag_p99_ms": 16.0,
+       "loop_lag_max_ms": 26.5
+      }
+     ],
+     "loop_lag_ms": {
+      "p50": 0.56,
+      "p99": 16.0,
+      "max": 26.5
+     },
+     "for_update_ms": {
+      "n": 0,
+      "p50": NaN,
+      "p95": NaN,
+      "p99": NaN,
+      "max": 0
+     },
+     "row_held_ms": {
+      "n": 0,
+      "p50": NaN,
+      "p95": NaN,
+      "p99": NaN,
+      "max": 0
+     }
+    }
+   }
+  ]
+ },
+ {
+  "label": "after",
+  "what": "room",
+  "voters": 5000,
+  "players": 2000,
+  "levels": [
+   {
+    "kind": "room",
+    "concurrency": 64,
+    "duration_s": 20.0,
+    "requests": 11149,
+    "rps": 557.5,
+    "people_served": 2787,
+    "errors": 0,
+    "codes": {
+     "200": 11149
+    },
+    "latency_ms": {
+     "p50": 92.5,
+     "p95": 229.5,
+     "p99": 296.1,
+     "mean": 114.5
+    },
+    "server_cpu_s": 22.0,
+    "postgres_cpu_s": 1.6,
+    "wall_s": 23.3,
+    "server": {
+     "workers": [
+      {
+       "pid": 81286,
+       "requests": 12396,
+       "max_inflight": 100,
+       "pool_checked_out": 9,
+       "pool_overflow": 3,
+       "loop_lag_p99_ms": 31.9,
+       "loop_lag_max_ms": 56.2
+      }
+     ],
+     "loop_lag_ms": {
+      "p50": 6.19,
+      "p99": 31.9,
+      "max": 56.2
+     },
+     "for_update_ms": {
+      "n": 0,
+      "p50": NaN,
+      "p95": NaN,
+      "p99": NaN,
+      "max": 0
+     },
+     "row_held_ms": {
+      "n": 0,
+      "p50": NaN,
+      "p95": NaN,
+      "p99": NaN,
+      "max": 0
+     }
+    }
+   }
+  ]
+ },
+ {
+  "label": "after-orjson",
+  "what": "quiz",
+  "voters": 5000,
+  "players": 2000,
+  "levels": [
+   {
+    "kind": "quiz",
+    "concurrency": 32,
+    "duration_s": 20.0,
+    "requests": 13215,
+    "rps": 660.8,
+    "people_served": 1321,
+    "errors": 0,
+    "codes": {
+     "200": 13215
+    },
+    "latency_ms": {
+     "p50": 44.2,
+     "p95": 72.4,
+     "p99": 90.5,
+     "mean": 48.4
+    },
+    "server_cpu_s": 22.2,
+    "postgres_cpu_s": 2.7,
+    "wall_s": 23.3,
+    "server": {
+     "workers": [
+      {
+       "pid": 82075,
+       "requests": 15109,
+       "max_inflight": 64,
+       "pool_checked_out": 0,
+       "pool_overflow": -7,
+       "loop_lag_p99_ms": 21.2,
+       "loop_lag_max_ms": 30.1
+      }
+     ],
+     "loop_lag_ms": {
+      "p50": 4.38,
+      "p99": 21.2,
+      "max": 30.1
+     },
+     "for_update_ms": {
+      "n": 0,
+      "p50": NaN,
+      "p95": NaN,
+      "p99": NaN,
+      "max": 0
+     },
+     "row_held_ms": {
+      "n": 0,
+      "p50": NaN,
+      "p95": NaN,
+      "p99": NaN,
+      "max": 0
+     }
+    }
+   },
+   {
+    "kind": "quiz",
+    "concurrency": 64,
+    "duration_s": 20.0,
+    "requests": 13761,
+    "rps": 688.0,
+    "people_served": 1376,
+    "errors": 0,
+    "codes": {
+     "200": 13761
+    },
+    "latency_ms": {
+     "p50": 85.7,
+     "p95": 144.8,
+     "p99": 196.2,
+     "mean": 93.1
+    },
+    "server_cpu_s": 21.9,
+    "postgres_cpu_s": -2.6,
+    "wall_s": 23.3,
+    "server": {
+     "workers": [
+      {
+       "pid": 82075,
+       "requests": 15435,
+       "max_inflight": 104,
+       "pool_checked_out": 1,
+       "pool_overflow": -7,
+       "loop_lag_p99_ms": 33.6,
+       "loop_lag_max_ms": 40.7
+      }
+     ],
+     "loop_lag_ms": {
+      "p50": 8.72,
+      "p99": 33.6,
+      "max": 40.7
+     },
+     "for_update_ms": {
+      "n": 0,
+      "p50": NaN,
+      "p95": NaN,
+      "p99": NaN,
+      "max": 0
+     },
+     "row_held_ms": {
+      "n": 0,
+      "p50": NaN,
+      "p95": NaN,
+      "p99": NaN,
+      "max": 0
+     }
+    }
+   }
+  ]
+ }
+]
