@@ -31,7 +31,7 @@ on:
         default: false
         type: boolean
       install_requirements:
-        description: "Install backend requirements"
+        description: "Install backend requirements (rebuilds the backend image and recreates the container)"
         required: false
         default: false
         type: boolean
@@ -123,15 +123,29 @@ jobs:
 
           COMPOSE="sudo docker-compose -f docker-compose.prod.yml"
 
+          # install_requirements rebuilds the image from requirements.txt and
+          # recreates the container from it. It used to `exec pip install`
+          # into the running container, and a package installed that way lived
+          # only in that container: the next recreate (an `up` after an .env
+          # change, restart_all) started again from the image without it. On
+          # 2026-10-17 that took production down for 20 minutes -- fontTools,
+          # installed only by exec, was gone after a recreate. The image is
+          # now the one place the requirements are installed, so every later
+          # recreate has them too.
+          if [ "$INSTALL_REQUIREMENTS" = "true" ]; then
+            BUILD_BACKEND=true
+            RECREATE_BACKEND=true
+          fi
+
           # Built locally so the runner expands the flags, then shipped as a
           # file. Nothing secret goes in here -- the env file has its own step.
           cat > deploy-remote.sh <<EOF
           set -eo pipefail
           cd "$PROJECT_PATH"
 
-          # Recreating steps come first: packages installed into a running
-          # container with \`exec pip install\` do not survive a recreate, so
-          # install_requirements has to follow them, not precede them.
+          # Build, then recreate, then migrate. The container install_requirements
+          # recreates starts with the new code, image and dependencies, so the
+          # restart at the end is skipped after it (RECREATED).
           if [ "$RESTART_ALL" = "true" ]; then
             echo "::group::Restarting all services"
             $COMPOSE up --build -d
@@ -142,6 +156,17 @@ jobs:
             echo "::group::Building backend"
             $COMPOSE build backend
             echo "::endgroup::"
+          fi
+
+          if [ "$RECREATE_BACKEND" = "true" ]; then
+            echo "::group::Recreating backend from the new image"
+            # --no-deps: the backend only (without it compose also recreates
+            # postgres whenever its config, the shared .env, has changed).
+            # --force-recreate: always a new container, so it is certain the
+            # process below runs on this image.
+            $COMPOSE up -d --no-deps --force-recreate backend
+            echo "::endgroup::"
+            RECREATED=1
           fi
 
           if [ "$UP_BACKEND" = "true" ]; then
@@ -157,17 +182,6 @@ jobs:
             echo "::endgroup::"
           fi
 
-          if [ "$INSTALL_REQUIREMENTS" = "true" ]; then
-            echo "::group::Installing backend requirements"
-            # -T: without it this reads stdin and, when the script came in on
-            # stdin, consumed the rest of the deploy.
-            $COMPOSE exec -T backend pip install --no-cache-dir -r requirements.txt
-            echo "::endgroup::"
-            # A dependency added this way is only visible to code imported
-            # after it lands, so the restart below is not optional.
-            NEEDS_RESTART=1
-          fi
-
           if [ "$MIGRATE" = "true" ]; then
             echo "::group::Migrating database"
             $COMPOSE exec -T backend alembic upgrade head
@@ -176,9 +190,9 @@ jobs:
             echo "::endgroup::"
           fi
 
-          # Last, so the process that comes up sees the new code, the new
-          # dependencies and the new schema together.
-          if [ "$SYNC_CODE" = "true" ] || [ "$RESTART_BACKEND" = "true" ] || [ -n "\$NEEDS_RESTART" ]; then
+          # Last, so a process that was not recreated above picks up the new
+          # code and schema. One that was recreated already runs them.
+          if [ -z "\$RECREATED" ] && { [ "$SYNC_CODE" = "true" ] || [ "$RESTART_BACKEND" = "true" ]; }; then
             echo "::group::Restarting backend"
             $COMPOSE restart backend
             echo "::endgroup::"

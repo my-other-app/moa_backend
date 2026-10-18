@@ -19,7 +19,7 @@ on:
         default: false
         type: boolean
       install_requirements:
-        description: "Install backend requirements"
+        description: "Install backend requirements (rebuilds the backend image and recreates the container)"
         required: false
         default: false
         type: boolean
@@ -111,8 +111,11 @@ jobs:
           fi
 
           if [ "$INSTALL_REQUIREMENTS" = "true" ]; then
-            echo "Installing backend requirements..."
-           sudo  docker-compose exec backend pip install --no-cache-dir -r requirements.txt
+            # Into the image, not the running container: a package installed
+            # with exec pip install is gone at the next recreate (live-deploy.yml).
+            echo "Rebuilding the backend image with its requirements..."
+            sudo docker-compose build backend
+            sudo docker-compose up -d --no-deps --force-recreate backend
           fi
 
           if [ "$RESTART_DATABASE" = "true" ]; then
