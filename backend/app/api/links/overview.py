@@ -17,6 +17,7 @@ from uuid import UUID
 
 from sqlalchemy import and_, select
 
+from app.api.club_domains.lookup import active_host
 from app.api.clubs.models import Clubs, ClubUsersLink
 from app.api.events.models import EventRegistrationsLink, Events
 from app.api.links.models import TrackingClicks, TrackingLinks
@@ -147,6 +148,7 @@ async def overview(session, club: Clubs, event: Optional[Events], days: int, now
     events = await _events_of(session, links)
     clicks = await _clicks(session, ids, before)
     ever = await _all_time_clicks(session, ids)
+    site_host = await active_host(session, club.id) if event is None else None
     follows = [] if event is not None else await _follows(session, club.id, before)
     regs = await _registrations(session, club.id, event, before)
     later = await _registered_later(session, club.id, [f for f in follows if f.tracking_link_id and f.created_at >= since])
@@ -190,7 +192,7 @@ async def overview(session, club: Clubs, event: Optional[Events], days: int, now
     for l in links:
         n, c = c_now[l.id], v_now[l.id]
         rows.append(dict(
-            id=l.id, name=l.name, code=l.code, url=short_url(l), destination=destination(l, getattr(club, "slug", None), getattr(events.get(l.event_id), "slug", None)),
+            id=l.id, name=l.name, code=l.code, url=short_url(l), destination=destination(l, getattr(club, "slug", None), getattr(events.get(l.event_id), "slug", None), site_host),
             utm_source=l.utm_source, utm_medium=l.utm_medium, utm_campaign=l.utm_campaign, utm_content=l.utm_content,
             target=_target(l, events), kind=l.kind or "custom",
             conversion_noun="registration" if l.event_id else ("sign-up" if l.kind == "website" else "follow"),
@@ -288,7 +290,7 @@ async def detail(session, club: Clubs, event: Optional[Events], link_id: UUID, d
     hours = Counter(c.created_at.astimezone(IST).hour for c in clicks)
     target = event if event is not None else (await _events_of(session, [link])).get(link.event_id)
     return dict(
-        id=link.id, name=link.name, code=link.code, url=short_url(link), destination=destination(link, getattr(club, "slug", None), getattr(target, "slug", None)),
+        id=link.id, name=link.name, code=link.code, url=short_url(link), destination=destination(link, getattr(club, "slug", None), getattr(target, "slug", None), await active_host(session, club.id) if link.kind == "website" else None),
         clicks=len(clicks), uniques=len({c.visitor or str(c.id) for c in clicks}),
         first_click_at=clicks[0].created_at if clicks else None, last_click_at=clicks[-1].created_at if clicks else None,
         series=[dict(date=b, clicks=days_[b]) for b in buckets],

@@ -197,7 +197,7 @@ FEATURE_GROUPS: dict[str, tuple[str, ...]] = {
     ),
     "club": (
         "website",
-        "domain",
+        "custom_domain",
         "nobadge",
         "finance",
         "roles",
@@ -231,6 +231,7 @@ FEATURE_CATALOG: tuple[tuple[str, str], ...] = (
     ("networking", "Attendee networking"),
     ("links", "Tracking links"),
     ("report", "Post-event reports"),
+    ("custom_domain", "Your own domain for the club website"),
     ("merch", "Merchandise store"),
     ("swag", "Swag handouts at the door"),
     ("badges", "ID cards and badge printing"),
@@ -242,7 +243,7 @@ FEATURE_CATALOG: tuple[tuple[str, str], ...] = (
 )
 
 #: Flags in the editor with no feature behind them yet: waitlist, coupons,
-#: per-session check-in, custom domain, removing the "Made with MyOtherApp"
+#: per-session check-in, removing the "Made with MyOtherApp"
 #: footer, enforced 2FA for a team, next-day payouts, student SSO, API access.
 UNBUILT_FEATURES = frozenset(FEATURE_KEYS) - {key for key, _ in FEATURE_CATALOG}
 
@@ -291,7 +292,8 @@ class PlanFeatures(AbstractSQLModel, TimestampsMixin):
 
     # club
     website = _flag()
-    domain = _flag()
+    # Was `domain`, a placeholder, until the feature was built (migration club_domains).
+    custom_domain = _flag()
     nobadge = _flag()
     finance = _flag()
     roles = _flag()

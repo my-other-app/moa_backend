@@ -72,7 +72,7 @@ class PlanFeaturesIn(CustomBaseModel):
     report: bool = False
     # club
     website: bool = False
-    domain: bool = False
+    custom_domain: bool = False
     nobadge: bool = False
     finance: bool = False
     roles: bool = False

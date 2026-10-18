@@ -40,6 +40,7 @@ from sqlalchemy.orm import aliased, contains_eager, selectinload
 
 from app.api.agenda import service as agenda
 from app.api.closeout.models import EventStatus
+from app.api.club_domains.lookup import active_hosts
 from app.api.clubs import service as clubs_service
 from app.api.clubs.events_list import registration_open
 from app.api.clubs.models import ClubInterestsLink, Clubs, ClubSocials, ClubTeamMembers
@@ -715,6 +716,8 @@ async def club_cards(session, clubs: list[Clubs], now: datetime, *, distances: O
     upcoming = await _upcoming_counts(session, ids, now)
     interests = await _interest_names(session, ids)
     published = await _published(session, ids)
+    # A club's own domain, while it is active, is where its website is.
+    own = await active_hosts(session, published)
     return [
         dict(
             id=c.id, name=c.name, slug=c.slug,
@@ -724,7 +727,7 @@ async def club_cards(session, clubs: list[Clubs], now: datetime, *, distances: O
             followers=followers.get(c.id, 0), upcoming_events=upcoming.get(c.id, 0),
             interests=interests.get(c.id, []),
             distance_km=round(distances[c.id], 1) if distances.get(c.id) is not None else None,
-            website_url=sites.public_url(c) if c.id in published else None,
+            website_url=(f"https://{own[c.id]}" if c.id in own else sites.public_url(c)) if c.id in published else None,
         )
         for c in clubs
     ]

@@ -215,7 +215,9 @@ async def test_optional_questions_left_blank_do_not_block_and_a_missing_required
 
     r = await _register(client, strict.id, "strict@example.com")
     assert r.status_code == 400, r.text
-    assert r.json()["message"] == {"college": "This field is required"}
+    # A sentence in `message`, the field by key in `errors` (where the public site reads it).
+    assert r.json()["message"] == "Check your answers: College." and r.json()["error_code"] == "INVALID_ANSWERS"
+    assert r.json()["errors"] == {"college": "This field is required"}
 
 
 async def test_an_app_users_address_registers_under_a_fresh_guest_and_their_password_still_works(

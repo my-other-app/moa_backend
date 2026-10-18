@@ -224,7 +224,9 @@ async def _no_place(session: AsyncSession, event: Events, room, *, organiser: bo
     if going is None:
         return CustomHTTPException(404, message="Event not found")
     if room is None or room.event_cap is None or (event.max_participants and going >= event.max_participants):
-        return CustomHTTPException(400, message="Event is full")
+        return CustomHTTPException(
+            400, message="Event is full", error_code="EVENT_FULL", errors={"max_participants": event.max_participants}
+        )
     from app.api.subscriptions import gates
 
     return await gates.refuse_registration(
@@ -321,18 +323,18 @@ async def register_event(
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
     if db_event.reg_enddate and db_event.reg_enddate < now:
-        raise CustomHTTPException(400, message="Registration deadline has passed")
+        raise CustomHTTPException(400, message="Registration deadline has passed", error_code="REGISTRATIONS_CLOSED", errors={"closed_reason": "deadline_passed", "closed_at": db_event.reg_enddate.isoformat()})
     
     # Check if registration hasn't started yet
     if db_event.reg_startdate and db_event.reg_startdate > now:
-        raise CustomHTTPException(400, message="Registration has not started yet")
+        raise CustomHTTPException(400, message="Registration has not started yet", error_code="REGISTRATIONS_CLOSED", errors={"closed_reason": "not_started", "opens_at": db_event.reg_startdate.isoformat()})
 
     # Room left, as max_participants counts it: on a paid event the paid
     # registrations, on a free one all of them. An early answer; on a free
     # event take_place makes it exact.
     if db_event.max_participants:
         if await places_taken(session, db_event) >= db_event.max_participants:
-            raise CustomHTTPException(400, message="Event is full")
+            raise CustomHTTPException(400, message="Event is full", error_code="EVENT_FULL", errors={"max_participants": db_event.max_participants})
 
     if relaxed_fields:
         additional_details = {k: v for k, v in (additional_details or {}).items() if v not in (None, "")}
@@ -366,7 +368,11 @@ async def register_event(
                     errors[field.key] = "Invalid option selected"
             validated_additional_details[field.key] = value
         if errors:
-            raise CustomHTTPException(400, message=errors)
+            # A string message naming the questions by label, and each
+            # answer's problem by question key in `errors` -- where the public
+            # site's form reads them.
+            labels = [f.label for f in db_additional_details if f.key in errors]
+            raise CustomHTTPException(400, message=f"Check your answers: {', '.join(labels)}.", error_code="INVALID_ANSWERS", errors=errors)
         additional_details = validated_additional_details
 
     # An existing registration: this user's, or one made with this address.

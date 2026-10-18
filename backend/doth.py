@@ -60,6 +60,11 @@ async def lifespan(app: FastAPI):
     from app.api.discover.counters import check_loop as counter_check_loop
 
     counters = asyncio.create_task(counter_check_loop())
+
+    # Clubs' own domains: pending ones polled at Cloudflare, plans followed, every five minutes.
+    from app.api.club_domains.sweep import sweep_loop as domains_sweep_loop
+
+    domains = asyncio.create_task(domains_sweep_loop())
     # What import and startup built (models, routes, schemas, the S3 service
     # model: some 740,000 objects) lives as long as the process. Frozen out
     # of the collector's reach, a full collection no longer walks all of it:
@@ -73,6 +78,7 @@ async def lifespan(app: FastAPI):
     feedback.cancel()
     billing.cancel()
     counters.cancel()
+    domains.cancel()
 
 
 # No default_response_class: FastAPI's own JSON response is the default. It

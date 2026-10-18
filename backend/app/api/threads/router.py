@@ -78,7 +78,7 @@ async def delete_thread(session: SessionDep, user: ClubAuth, thread_id: str) -> 
 async def club_comments(session: SessionDep, user: ClubAuth, thread_id: str) -> list[CommentOut]:
     club = await _club_for(session, user)
     t = await service.thread_for_club(session, club, thread_id)
-    return [CommentOut(**c) for c in await service.comments(session, t, club)]
+    return [CommentOut(**c) for c in await service.comments(session, t, club, viewer_id=user.id)]
 
 
 @router.post("/{thread_id}/comments", summary="Reply as the club", status_code=201)
@@ -135,7 +135,7 @@ async def cast_vote(request: Request, session: SessionDep, user: UserAuth, threa
 @public_router.get("/threads/{thread_id}/comments", summary="The comments under a post")
 async def read_comments(session: SessionDep, user: OptionalAuth, thread_id: str) -> list[CommentOut]:
     t, club = await service.live_thread(session, thread_id)
-    return [CommentOut(**c) for c in await service.comments(session, t, club)]
+    return [CommentOut(**c) for c in await service.comments(session, t, club, viewer_id=user.id if user else None)]
 
 
 @public_router.post("/threads/{thread_id}/comments", summary="Comment on a post", status_code=201)

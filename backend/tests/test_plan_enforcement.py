@@ -6,8 +6,10 @@ Admins (and admins acting as a club) and the kill switch let everything
 through, and an event made before enforcement began keeps its paid tickets
 and is never capped on registrations.
 
-Every test here seeds the six draft plans with the migration's own seed, so
-the plans are the ones production has.
+Every test here seeds the six draft plans with the migration's own seed (and
+the club_domains migration's grant of `custom_domain`), so the plans are the
+ones production has. Cloudflare, for connecting a club's own domain, is the
+fake in tests/fake_cloudflare.py.
 """
 import importlib.util
 import pathlib
@@ -30,6 +32,7 @@ from app.api.subscriptions.models import FEATURE_CATALOG, BillingCycle, Plans
 from app.config import settings
 from app.core.auth.jwt import create_access_token
 from tests.conftest import auth_header
+from tests.fake_cloudflare import install
 
 API = "/api/v1"
 NOW = datetime.now(timezone.utc)
@@ -43,9 +46,9 @@ NAMES = {"free": "Free", "starter": "Starter", "growth": "Growth", "pro": "Pro",
 # ─── The world ───────────────────────────────────────────────────────────
 
 
-def _migration():
-    path = pathlib.Path(__file__).resolve().parents[1] / "migrations" / "versions" / "club_plans.py"
-    spec = importlib.util.spec_from_file_location("club_plans", path)
+def _migration(name="club_plans"):
+    path = pathlib.Path(__file__).resolve().parents[1] / "migrations" / "versions" / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -88,6 +91,12 @@ def mail(monkeypatch, session):
 
 
 @pytest.fixture(autouse=True)
+def cloudflare(monkeypatch):
+    """A club connecting its own domain reaches the fake Cloudflare, never the real one."""
+    return install(monkeypatch)
+
+
+@pytest.fixture(autouse=True)
 def files(monkeypatch):
     from app.core.storage import objects
 
@@ -100,12 +109,13 @@ def files(monkeypatch):
 
 @pytest_asyncio.fixture
 async def plans(session):
-    module = _migration()
+    module, domains = _migration(), _migration("club_domains")
     connection = await session.connection()
 
     def seed(sync):
         with Operations.context(MigrationContext.configure(connection=sync)):
-            return module.seed_plans()
+            module.seed_plans()
+            domains.grant()
 
     await connection.run_sync(seed)
     rows = (
@@ -196,6 +206,7 @@ ACTIONS = {
     "judging": ("pro", lambda c, w, h: c.post(f"{API}/events/{w.event.id}/competition/judges", json={"name": "Dr Rao"}, headers=h)),
     "rounds": ("pro", lambda c, w, h: c.post(f"{API}/events/{w.event.id}/competition/rounds/advance", json={"to": "shortlisted"}, headers=h)),
     "finance": ("campus", lambda c, w, h: c.post(f"{API}/clubs/finance/expenses", json={"title": "Chai", "amount": "120"}, headers=h)),
+    "custom_domain": ("growth", lambda c, w, h: c.put(f"{API}/clubs/site/domain", json={"host": "www.gateclub.org"}, headers=h)),
 }
 
 
@@ -741,7 +752,7 @@ async def grandfather(session, monkeypatch, event):
 #: The ACTIONS that are about one event, and so pass a grandfathered one by.
 EVENT_SCOPED_ACTIONS = ("quiz", "polls", "qa", "links", "report", "merch", "swag", "badges", "teams", "judging", "rounds")
 #: The ones about the whole club, enforced whatever its events.
-CLUB_WIDE_ACTIONS = ("tickets", "website", "roles", "finance")
+CLUB_WIDE_ACTIONS = ("tickets", "website", "custom_domain", "roles", "finance")
 
 
 def test_the_actions_split_into_event_scoped_and_club_wide():

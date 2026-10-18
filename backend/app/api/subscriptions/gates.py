@@ -33,7 +33,7 @@ Nothing here is enforced when:
   they were -- paid tickets, both registration caps, the live room,
   networking, its links, report, store and swag, ID cards, competitions --
   so nothing breaks mid-event at the switch-on. Club-wide gates (website and
-  its templates, roles and seats, finance, the club's own links and card
+  its templates and its own domain, roles and seats, finance, the club's own links and card
   design, events and announcements per month) hold for every club. The
   scope rule lives in `_exempt`; call sites only pass `event=`.
 
@@ -80,12 +80,12 @@ EVENT_SCOPED_FEATURES = frozenset({
     "merch", "swag", "badges", "teams", "judging", "rounds",
 })
 EVENT_SCOPED_LIMITS = frozenset({"registrations_per_event", "merch_items_per_event"})
-#: Gates about the whole club, enforced whatever its events: website,
-#: roles, finance, and the per-club limits (events and announcements per
-#: month, committee seats, website templates, registrations per month --
-#: though a registration to a grandfathered event is never refused, it still
-#: counts in `usage`).
-CLUB_WIDE_FEATURES = frozenset({"website", "roles", "finance"})
+#: Gates about the whole club, enforced whatever its events: website and
+#: its own domain, roles, finance, and the per-club limits (events and
+#: announcements per month, committee seats, website templates,
+#: registrations per month -- though a registration to a grandfathered event
+#: is never refused, it still counts in `usage`).
+CLUB_WIDE_FEATURES = frozenset({"website", "custom_domain", "roles", "finance"})
 
 #: The limits nothing enforces, and why (see the module docstring).
 NOT_ENFORCED = {
@@ -109,6 +109,7 @@ LABELS = dict(FEATURE_CATALOG)
 _SUBJECTS = {
     "tickets": ("Paid tickets", "are"),
     "website": ("A club website", "is"),
+    "custom_domain": ("Your own domain for the club website", "is"),
     "quiz": ("The live quiz", "is"),
     "polls": ("Live polls", "are"),
     "qa": ("Live Q&A", "is"),

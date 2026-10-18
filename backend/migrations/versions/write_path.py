@@ -25,14 +25,14 @@ Downgrade drops what this adds and puts the full tracking link index back.
 The duplicate journey emails it deleted are not restored.
 
 Revision ID: write_path
-Revises: admin_revenue
+Revises: club_domains
 """
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "write_path"
-down_revision = "admin_revenue"
+down_revision = "club_domains"
 branch_labels = None
 depends_on = None
 
