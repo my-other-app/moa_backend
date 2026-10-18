@@ -367,3 +367,27 @@ async def mint_token(session):
 
 def auth_header(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture(autouse=True)
+def _check_in_hooks_on_the_test_session(request, monkeypatch):
+    """What a check-in sets off after the response (app/api/checkins/after.py)
+    opens a session of its own. In a test that has a session, it uses that one
+    instead, so it sees the test's rows and is rolled back with them; the
+    request's BackgroundTasks finish before the client call returns, so the
+    two never run at once."""
+    if "session" not in request.fixturenames:
+        yield
+        return
+    from contextlib import asynccontextmanager
+
+    from app.api.checkins import after
+
+    test_session = request.getfixturevalue("session")
+
+    @asynccontextmanager
+    async def scope():
+        yield test_session
+
+    monkeypatch.setattr(after, "session_scope", scope)
+    yield

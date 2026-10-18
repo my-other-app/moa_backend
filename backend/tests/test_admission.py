@@ -1,4 +1,6 @@
-"""Admission numbers: a format per event, a number per ticket, never rewritten; the gate reads them."""
+"""Admission numbers: a format per event, a number per ticket, never rewritten.
+Staff find a guest by one; the scan never admits on one (they run in
+sequence, so anyone could print a QR for an unused number)."""
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -50,7 +52,7 @@ async def test_tickets_are_numbered_in_the_events_format_and_old_numbers_stay(cl
     assert (await client.get(_url(world), headers=h)).json()["next_number"] == "GDDB-003"
 
 
-async def test_the_gate_reads_an_admission_number_and_the_ticket_prints_it(client, session, world):
+async def test_staff_find_a_guest_by_admission_number_but_a_scan_of_one_admits_nobody(client, session, world):
     h = world["h"]
     event = world["event"]
     await client.post(_url(world, "/number-all"), headers=h)
@@ -62,16 +64,23 @@ async def test_the_gate_reads_an_admission_number_and_the_ticket_prints_it(clien
     assert rows.json()["items"][0]["admission_no"] == number
     found = await client.get(f"/api/v1/events/{event.id}/gate/search", params={"q": number}, headers=h)
     assert found.status_code == 200 and [r["admission_no"] for r in found.json()] == [number]
-    # Scanned (or typed) at the door, the number admits like the ticket code does.
-    scan = await client.post(f"/api/v1/events/{event.id}/gate/scan", json={"code": number.lower(), "door": "Gate A", "client_ref": "abcdefgh1234"}, headers=h)
-    assert scan.status_code == 200, scan.text
-    assert scan.json()["outcome"] == "CHECKED_IN"
+    # Scanned at the door, the number is not a ticket: MOA-0001 is guessable,
+    # MOA-0002 is next. A QR printed with it admits nobody, here or at a kiosk.
+    for code in (number, number.lower()):
+        scan = await client.post(f"/api/v1/events/{event.id}/gate/scan", json={"code": code, "door": "Gate A", "client_ref": f"adm-{code}"}, headers=h)
+        assert scan.status_code == 200, scan.text
+        assert scan.json()["outcome"] == "INVALID" and scan.json()["checked_in_at"] is None
+        # Typed off the ticket, it says whose it is, for a person to confirm.
+        assert scan.json()["hint"] == "ADMISSION_NUMBER" and scan.json()["attendee"]["name"] == "Ananya Iyer"
+    # Confirmed (or found in the search), a person admits them by hand.
+    by_hand = await client.post(f"/api/v1/events/{event.id}/gate/check-in/{scan.json()['attendee']['id']}", json={"door": "Desk"}, headers=h)
+    assert by_hand.json()["outcome"] == "CHECKED_IN"
     # The ticket's own token reads the number, not the scan code; the editor's sample guest reads the format.
     st = ticket_starter("classic")
     assert (await client.put(f"/api/v1/events/{event.id}/designs/ticket/layout", json=dump(TicketLayoutFields(canvas=st["canvas"], layers=st["layers"], page=st["page"])), headers=h)).status_code == 200
     layout = await client.get(f"/api/v1/events/{event.id}/designs/ticket/layout", headers=h)
     assert layout.json()["sampleValues"]["admission_no"] == f"MOA-0041-E{event.id}"
-    reg = await checkins.lookup(session, number)
+    reg = await checkins.registration_of(session, event, world["early"].id)
     assert layout_values(reg, reg.event, "ticket")["admission_no"] == number
     assert (await client.patch(_url(world), json={"prefix": "GDDB", "include_code": False}, headers=h)).status_code == 200
     assert (await client.get(f"/api/v1/events/{event.id}/designs/ticket/layout", headers=h)).json()["sampleValues"]["admission_no"] == "GDDB-0041"
