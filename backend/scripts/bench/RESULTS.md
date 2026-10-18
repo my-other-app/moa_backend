@@ -1249,3 +1249,302 @@ dropdb moa_bench_live
 ```
 
 Raw results: `results/integrity/` (the live runs, both read runs, the seed's sizes).
+
+## The job queue and Redis (`feat/w2-platform`, 18 October 2026)
+
+What the durable job queue (`app/core/jobs.py`) costs and carries, measured
+with `scripts/bench/jobs_claim.py` on the laptop above (Postgres 16.10),
+while four other builders ran their test suites on it (load average 8–13):
+read the throughputs as a floor.
+
+The table held what a busy production queue would: 1,000,000 finished jobs
+(three days kept), 100,000 waiting for later (retries in backoff, jobs with
+a `run_at`), 1,000 dead, and 50,000 due now over 15 job names, 2% at a
+higher priority. Table 148 MB; the claim index (unfinished rows only) 8 MB.
+
+| | |
+|---|---:|
+| the claim: 16 jobs over 15 names, warm (EXPLAIN ANALYZE, median of 5) | 0.42 ms |
+| the claim with nothing due and 99,834 rows waiting for later, before (index `(name, priority DESC, run_at, id)`) | 4.5–6 ms warm, 66 ms first; 723 ms before a vacuum |
+| the same, after (index `(name, priority, run_at, id)`, one bounded range per name and priority level) | 0.29 ms |
+| drain: 50,000 due jobs, 4 runners x 16 in hand, each claim + no-op handler + settle | 1,881 jobs/s (26.6 s); every job ran exactly once |
+| enqueue: 16 writers, one job per transaction | 1,454 jobs/s |
+| what the INSERT adds to a request's transaction | p50 2.3 ms, p95 5.3 ms (under the load above) |
+| writers and runners together | 1,050 enqueued/s and 1,050 run/s; the oldest due job waited p50 0.03 s, max 0.22 s |
+
+The claim's plan (busy queue): per name, per priority level from the
+highest, an index range scan `name = $1 AND priority = $2 AND run_at <=
+statement_timestamp()` under LockRows (SKIP LOCKED) and a Limit, which stops
+at the first row not yet due and as soon as the name has its slots (39
+probes for 16 jobs over 15 names, 0.005 ms each); then the jobs' primary
+key for the UPDATE that takes the lease. Before, `run_at` was checked on
+every entry of a name's range, past its due rows into all those waiting for
+later: an idle runner, polling once a second, walked the whole schedule.
+
+Redis on the same machine (`scripts/bench/redis_paths.py`, database 13):
+
+| | p50 | p95 |
+|---|---:|---:|
+| a rate-limit hit, in memory | 0.003 ms | 0.003 ms |
+| a rate-limit hit, in Redis (synchronous, on the event loop) | 0.051 ms | 0.130 ms |
+| a cold discover key read from a sibling process's value (20 KB pickled) | 0.31 ms | 0.66 ms |
+| a message published in one process, heard by a subscriber in another | 0.14 ms | 0.29 ms |
+
+A cold front page built from the database costs 69–88 ms (p50, "home
+(cold)" in the first table above); with Redis each further worker reads the
+first one's in a third of a millisecond instead of building it again.
+
+```sh
+createdb moa_bench_jobs
+BENCH_DB=moa_bench_jobs python -m scripts.bench.jobs_claim --finished 1000000 --scheduled 100000 \
+    --due 50000 --runners 4 --concurrency 16 --writers 16 --seconds 10 --out results/platform/jobs_claim.json
+dropdb moa_bench_jobs
+BENCH_DB=moa_bench REDIS_BENCH_URL=redis://localhost:6379/13 python -m scripts.bench.redis_paths
+```
+
+Raw results: `results/platform/jobs_claim.json`.
+
+## Search and geo, Wave 2 (`feat/w2-search`, 18 October 2026)
+
+### What changed
+
+- **search_text** on events, clubs and users: everything a row is found by,
+  lowercased and unaccented, in one column under one trigram index, kept by
+  triggers (`app/api/search/text.py`). An event is found by its interests,
+  topics, tag and its club's city as well as its name, place, club and
+  category. Discover's searches, the app's lists and the admin's user search
+  test each word against it: one LIKE (a typo: one `%>`) on one column,
+  where it was an OR over four columns of three tables.
+- **Grid cells** (`app/api/discover/cells.py`): `events.geocell` and
+  `clubs.geocell`, the 0.5° cell of an in-person event's point or a club's
+  place, kept by triggers, indexed with the date
+  (`ix_events_shown_cell (geocell, event_datetime, id)`). "Near you" reads the
+  cells that cover the radius -- an IN over 4-16 for 50 km, ranges further
+  out, the old box only past that -- then the exact haversine.
+- **Meilisearch**, off unless `APP_SEARCH_URL` is set (`app/core/search.py`,
+  `app/api/search/`): a transactional outbox, drained on one process; the
+  indexes built under another name and swapped in; a six-hourly reconcile;
+  searches with words routed to it behind a circuit breaker, every page read
+  back under Postgres's own conditions. Not measured here (no instance on
+  this machine); its correctness against Postgres is a test
+  (`tests/test_search_routing.py`, also runnable against a real instance).
+
+### The measurements
+
+**Data**: `seed.py --clubs 100000 --upcoming 300000 --past 200000 --users
+100000 --registrations 300000 --follows 300000 --threads 3000` (1.36 GB),
+seeded with master (39f6cc7, schema `topics`), measured, then `w2_search`
+applied in place and measured again. `clubs.listed` set first: the seeder
+left it false for every club (it loads with triggers off), so every public
+list was empty -- `seed.py` now sets it, and search_text and the cells. After
+the migration had rewritten every row, the tables were compacted (`VACUUM
+FULL`) so that both sides read tables of their natural size. **Machine**: the
+M2 laptop with 8 GB, shared with four other builders' suites and
+benchmarks (load 5-8, swapping): times swing by tens of times between runs,
+so the pages each call touches (shared buffers, from EXPLAIN (ANALYZE,
+BUFFERS) of the call's own statements) are the measure; times are p50.
+
+**"Near you"**, in process (`near.py`), master's code and this branch's on
+the same data, back to back; p50 ms / pages:
+
+| place | call | before ms | pages | after ms | pages |
+|---|---|---:|---:|---:|---:|
+| Bengaluru | front page "near you" pool | 4,090 | 18,151 | 46.6 | 11,473 |
+| Mumbai | front page "near you" pool | 3,945 | 16,192 | 34.0 | 13,588 |
+| Kochi | front page "near you" pool | 15.9 | 12,456 | 32.4 | 12,118 |
+| Leh, Port Blair (nothing near) | front page "near you" pool | 1.6-2.8 | 5-58 | 2.4 | 36 |
+| Mumbai | events within 50 km, by distance | 346 | 57,622 | 65.3 | 15,698 |
+| Kochi | events within 50 km, by distance | 56.8 | 33,394 | 84.2 | 12,078 |
+| Bengaluru | events within 50 km, by distance | 101 | 17,767 | 69.1 | 17,393 |
+| any | events within 50 km, by date | 23-91 | 4,353-11,639 | 20-58 | 4,316-7,077 |
+| any | clubs near (pool, radius, nearest first) | 15-56 | 6,028-13,972 | 19-71 | 7,409-14,848 |
+
+Of the "near you" pool's pages, 6,000-7,000 are the list of unlisted clubs
+(`NOT IN`, read from `ix_clubs_unlisted` and the clubs' rows), the same
+before and after; the events' own part went from 11,000-12,000 pages to
+about 4,000-5,000. The plans (Bengaluru):
+
+```
+before: Bitmap Heap Scan on events  (rows=15867)          -- every event in the latitude strip
+          -> Bitmap Index Scan on ix_events_shown_point  (rows=17199)
+        Sort (top-N)  -> Limit 64                        25,158 buffers
+after:  Nested Loop over 12 cells
+          -> Limit 64 -> Index Scan using ix_events_shown_cell  (rows=21 loops=12)
+               Index Cond: geocell = cell AND event_datetime >= since
+        Sort (top-N) -> Limit 64                         11,498 buffers, 6,400 of them the unlisted clubs
+```
+
+What it shows: the latitude strip was the cost where a city sits in a busy
+band (Mumbai, Kochi: three to four times the pages for distance) and in the
+front page's pool, which read every event to come in the strip to keep the
+first dozen; a cell walk reads a chunk per cell. Where little is near (Leh,
+Port Blair) the strip was already empty, and both are a few pages. The date
+order within a radius and the clubs near a point cost the same: they were
+already bounded by their own walks, and the clubs' box already sat on
+`ix_clubs_place`. The cell walk needs bitmap scans off for its statements
+(`SET LOCAL`, then `RESET`): the planner, unable to see how few of a cell's
+rows fail the filters, expected 7 rows a cell where there were 1,318 and
+fetched all of them to sort (18,643 heap pages). Testing the rows after
+reading them needs no setting, but reads past every row a test fails --
+events over and not yet closed by the status clock, which had not run on
+this data -- and took 25,000-32,000 pages.
+
+**Words**, through the API (`run.py --buffers`); before is master on the
+data as seeded, after is this branch after the migration and the compaction:
+
+| endpoint | before ms | pages | after ms | pages |
+|---|---:|---:|---:|---:|
+| `/discover/events?q=robotics kochi` | 500 | 83,368 | 25.2 | 6,865 |
+| `/discover/events?q=sculpture showcase` (rare words) | 1,982 | 84,667 | 35.8 | 8,845 |
+| `/discover/calendar?q=robotics` (cold) | 180 | 41,673 | 47.1 | 31,696 |
+| `/discover/events?q=robtics` (typo) | 543 | 12,089 | 404 | 29,957 |
+| `/discover/events?q=bengaluru` | 341 | 41,579 | 113 | 91,761 |
+| `/discover/events?q=robotics` (relevance) | 782 | 48,922 | 1,551 | 78,227 |
+| `/discover/events?q=ai` | 2,325 | 92,408 | 2,207 | 105,892 |
+| `/events/list?search=robotics` (the app) | 38 | 7,544 | 10,860 | 28,592 |
+| `/discover/clubs?q=robotics` | 10.5 | 3,587 | 11.7 | 1,580 |
+| `/clubs/list?search=robotics` (the app) | 26.9 | 4,184 | 20.3 | 3,609 |
+
+Two words and rare words are where one column pays: every word is a range of
+one trigram index and the AND narrows inside it (12 times fewer pages, 20-55
+times faster). A common word now matches more -- "robotics" is in 31,968
+events' search_text (their interest is Robotics) against 8,061 names -- and
+Postgres's cost for a ranked or date-ordered page of a common word is the
+cost of its matches: the relevance score of each, or the sort. That is what
+Meilisearch is for (it answers a page of a common word without visiting
+every match), and why it is wired in now; until it is on, those searches
+cost about as many pages more as they find more rows. (The app list's 10.9 s
+is this machine reading 28,592 pages from a disk shared with four other
+suites; its plan is master's -- a bitmap of the word's rows, a top-N sort.)
+
+### The migration
+
+`w2_search` on this data, with a writer updating random events and clubs
+every 10 ms throughout (51,313 writes): **31 minutes**, 0 failed writes,
+writes p50 5.6 ms, p99 179 ms. The time is the backfill rewriting 500,000
+events, 100,000 clubs and 200,000 users: 1.75 ms an event row on this
+machine at that moment, where a bare `UPDATE events SET popularity =
+popularity` of the same rows took 1.4 ms (the row and its twenty indexes);
+computing the text costs 0.27 ms of it. Production has a few thousand events:
+seconds. The first transaction (columns without a default, the outbox table,
+functions, triggers) holds its locks for well under a second, each under
+`lock_timeout 3s`; the eight index builds and drops are concurrent.
+
+148 writes waited over a second (one 20 s): every one of them, in a rerun on
+20,000 events, had touched a row inside the batch then being rewritten,
+which holds its rows until it commits -- 2,000 rows were 3.5-29 s on this
+machine. The backfill now takes exact rows and sizes each batch to take
+about 0.2 s; on the same slice, with the writer aimed at it: writes p99 27 s
+→ 65 ms, writes over 250 ms 3% → 0.2%, batch p50 0.2 s (one stalled 12 s on
+the shared disk).
+
+### What is left
+
+- Meilisearch measured against a real instance (none here; Docker was off
+  and the disk short): the parity battery runs against one with
+  `MEILI_TEST_URL`.
+- The unlisted-clubs list read by every "near you" chunk (6,000 pages at a
+  lakh of clubs): a `NOT IN` over `ix_clubs_unlisted` that the session's
+  soft-delete filter turns into a heap read.
+- A common word through Postgres costs its matches (above).
+
+### Reproduce
+
+```
+cd backend
+git worktree add --detach /tmp/master 39f6cc7                         # the code before
+createdb moa_w2s_bench
+(cd /tmp/master/backend && BENCH_DB=moa_w2s_bench python -m scripts.bench.seed --clubs 100000 --upcoming 300000 \
+    --past 200000 --users 100000 --registrations 300000 --follows 300000 --threads 3000 --likes 3000 --comments 3000)
+psql moa_w2s_bench -c "UPDATE clubs SET listed = listed"               # what master's seeder leaves out
+cp scripts/bench/run.py scripts/bench/near.py /tmp/master/backend/scripts/bench/
+ONLY="home lat/lng,events lat/lng,events distance,clubs nearby,clubs r=50,events q,clubs q,app list search,app clubs search,calendar q"
+(cd /tmp/master/backend && BENCH_DB=moa_w2s_bench python -m scripts.bench.run --label before --only "$ONLY" --buffers --freeze --out before.json)
+BENCH_DB=moa_w2s_bench python -c "from scripts.bench import _env; from alembic.config import Config; \
+    from alembic import command; command.upgrade(Config('alembic.ini'), 'head')"
+psql moa_w2s_bench -c "VACUUM FULL ANALYZE events" -c "VACUUM FULL ANALYZE clubs" -c "VACUUM FULL ANALYZE users"
+(cd /tmp/master/backend && BENCH_DB=moa_w2s_bench python -m scripts.bench.near --label before --n 8 --out near_before.json)
+BENCH_DB=moa_w2s_bench python -m scripts.bench.near --label after --n 8 --out near_after.json
+BENCH_DB=moa_w2s_bench python -m scripts.bench.run --label after --only "$ONLY" --buffers --freeze --out after.json
+dropdb moa_w2s_bench
+```
+
+## The live room pushed (`feat/w2-live`, 18 October 2026)
+
+Server-sent events for the live room (`app/api/live/stream.py`, behind
+`APP_LIVE_SSE`): one stream per phone, sent the body its poll returns when it
+changes. Measured with `scripts/bench/live_sse.py` against `serve.py`
+(uvicorn, httptools and uvloop, access log on, as production) on the laptop
+above -- 4 performance and 4 efficiency cores, shared with two other
+builders' test suites (load average 5-7) -- so read every number as a
+ceiling on cost and a floor on speed. The clients ran on the same machine.
+
+The room: the bench room of `live_sse.py setup` -- 120 questions with the
+votes of 2,000 browsers, a live poll half of them answered, ten updates: a
+34.6 KB feed. N phones, each a browser of its own, split over four client
+processes (four addresses). Once all have the room, a quiet window (SSE:
+pings only), then the host pins another question --actions times. Latency is
+from just before the host's request to the moment a phone had a body showing
+that question pinned; "to the last phone" is, per action, the slowest phone.
+
+| | phones | memory a connection | server CPU a second per 1,000 phones: quiet / while the host acts | latency p50 / p99 | to the last phone p50 / p99 |
+|---|---:|---:|---|---|---|
+| SSE, 1 worker | 1,000 | 38.4 KB | 0.023 s / 0.048 s | 122 / 228 ms | 134 / 232 ms |
+| polls every 5 s, 1 worker | 1,000 | 2.6 KB | 0.246 s / 0.287 s | 2,531 / 4,983 ms | 5,029 / 5,056 ms |
+| SSE, 1 worker | 2,000 | 39.0 KB | 0.013 s / 0.037 s | 162 / 328 ms | 183 / 328 ms |
+| SSE, 1 worker, Redis | 2,000 | 39.0 KB | 0.017 s / 0.038 s | 152 / 429 ms | 177 / 2,018 ms |
+| the same, again | 2,000 | 39.0 KB | 0.007 s / 0.042 s | 263 / 1,774 ms | 890 / 2,310 ms |
+| SSE, 2 workers, Redis | 2,000 | 38.4 KB | 0.018 s / 0.045 s | 161 / 370 ms | 218 / 2,143 ms |
+| polls every 5 s, 2 workers, Redis | 2,000 | 3.2 KB | 0.245 s / 0.283 s | 2,756 / 5,385 ms | 5,580 / 5,769 ms |
+
+What it says:
+
+- **CPU.** A quiet room of streams costs 0.007-0.023 s of server CPU a
+  second per 1,000 phones (a ping each 15 s, a rebuild each 5 s): 11-35
+  times less than the same phones polling (0.245 s, about 1.2 ms a poll,
+  middleware included). A change costs about 0.05 s per 1,000 phones (the
+  "acting" rate less the quiet one, times the 2 s between actions): ~50 us a
+  phone to write it a 34.6 KB frame. In process, without sockets, the feed
+  rebuilt the room once in 9 ms and then spent 8.8 us a stream (1,000
+  streams, one shared frame), 30 us a stream when half the browsers have
+  flags of their own (86 distinct bodies among 100 flagged browsers, each
+  made once). So a hall of 3,000 phones polling, 600 requests a second, is
+  about three quarters of a core; streamed, it is about 5% of one, plus a
+  sixth of a core-second each time the host acts.
+- **Memory.** About 39 KB of server memory an open stream (the footprint's
+  growth over the second wave of phones): 5,000 streams (the default
+  APP_LIVE_SSE_MAX_STREAMS) is about 200 MB a worker. A polling phone holds
+  3 KB (its keep-alive connection).
+- **Latency.** A host's action reaches the median phone in 120-260 ms and
+  every phone of a 2,000-phone room within 330 ms in the clean runs, against
+  2.5 s (median) and 5 s (last phone) for polls -- whose latency is the
+  poll's interval, whatever the server does. Redis adds nothing measurable:
+  a message crosses processes in a fraction of a millisecond.
+- **The tail.** Some runs (with Redis and without: a later 2,000-phone run
+  without Redis showed it too) have one action in which a cluster of phones
+  (0.3-9%) receives the frame 1-4 s late, all of them at the same instant.
+  Instrumented, the server had written every one of those frames within 215
+  ms of the change (each write handed to the kernel in at most 0.2 ms), with
+  its event loop never more than 150 ms late, no stream held by the pace, no
+  reconnect: the delay is between the server's sockets and the client
+  processes on this machine's loopback under load, not in the server.
+  Production's phones are behind nginx on real links.
+
+What is not measured here: the quiz's streams (small frames, one per player
+per change, ranks from the board in Redis), and phones on real networks.
+The middleware change on this branch (plain ASGI) is measured in its commit:
+a request through the stack 503 us before, 40 us after; a streamed chunk
+75.4 us before, 0.8 us after.
+
+```sh
+createdb moa_bench_sse
+BENCH_DB=moa_bench_sse python -m scripts.bench.live_sse setup --out room.json
+APP_LIVE_SSE=true [APP_REDIS_URL=redis://localhost:6379/12] BENCH_DB=moa_bench_sse \
+    python -m scripts.bench.serve --workers 1 --port 8095 &
+BENCH_DB=moa_bench_sse python -m scripts.bench.live_sse run --url http://127.0.0.1:8095 --room room.json \
+    --mode sse --clients 2000 --procs 4 --actions 10 --gap 2 --quiet 15 --server-pid <pid> --label ... --out live_sse.json
+#   ... --mode poll --actions 6 --gap 7 for the polls; a fresh server for each run
+dropdb moa_bench_sse
+```
+
+Raw results: `results/live/live_sse.json`.

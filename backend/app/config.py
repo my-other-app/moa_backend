@@ -23,6 +23,21 @@ class AppConfig(BaseSettings):
     # uvicorn's line per request. nginx in front already logs every request,
     # so this is a second copy, written on every request; false drops it.
     ACCESS_LOG: bool = True
+    # One JSON object per log line (app/core/observability.py): time, level,
+    # logger, message and the request id, for a log shipper. Off: uvicorn's
+    # own format, as before. On (or SENTRY_DSN set), each request carries an
+    # id in X-Request-ID, in and out, and a 500's track_id is that id.
+    LOG_JSON: bool = False
+    # Error tracking with Sentry (app/core/observability.py). Empty DSN: off,
+    # and sentry_sdk is never imported. Personal data is scrubbed before an
+    # event leaves. SENTRY_RELEASE defaults to the git sha the deploy writes
+    # to backend/REVISION. SENTRY_SAMPLE_RATE: the share of errors sent;
+    # SENTRY_TRACES_SAMPLE_RATE: the share of requests traced (0: none).
+    SENTRY_DSN: str = ""
+    SENTRY_ENVIRONMENT: str = "production"
+    SENTRY_RELEASE: str = ""
+    SENTRY_SAMPLE_RATE: float = 1.0
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.0
     # Log every SQL statement with its parameters (app/db/core.py). Off by
     # default: the parameters are personal data.
     SQL_LOG: bool = False
@@ -38,10 +53,58 @@ class AppConfig(BaseSettings):
     # (app.db.core.check_connection_budget). Behind PgBouncer: 5 and 5.
     DB_POOL_SIZE: int = 10
     DB_MAX_OVERFLOW: int = 20
+    # Which process this is: "api" (main.py, uvicorn's workers) or "worker"
+    # (`python -m app.worker` sets it before the settings are read). It picks
+    # the pool (app.db.core.pool_for) and tags Sentry's events.
+    PROCESS: str = "api"
+    # The job worker's own pool (the `worker` service in
+    # docker-compose.prod.yml). It runs at most JOBS_CONCURRENCY jobs (2
+    # there), and a mail send holds a connection only for each short
+    # transaction, never while rendering or waiting on the provider, so it
+    # needs far fewer than an API worker; a burst waits for a connection
+    # rather than failing. Every process reads both pools, so the budget
+    # check counts the worker on top of WORKERS x the API's pool wherever it
+    # runs: in the worker, and in the API once APP_JOBS_WORKER or
+    # APP_SWEEPS_IN_WORKER says there is one. docs/OPERATIONS.md, section 10.
+    WORKER_DB_POOL_SIZE: int = 4
+    WORKER_DB_MAX_OVERFLOW: int = 8
+    # `alembic upgrade` runs beside the live API (app/db/migration_session.py
+    # says why each exists). Postgres durations; "0" turns one off. A DDL
+    # statement waits at most MIGRATION_LOCK_TIMEOUT for its lock, then the
+    # migration's transaction rolls back and is tried again, up to
+    # MIGRATION_LOCK_ATTEMPTS times, the pause doubling from
+    # MIGRATION_RETRY_WAIT seconds. A statement may run
+    # MIGRATION_STATEMENT_TIMEOUT, except an index built CONCURRENTLY (and the
+    # other statements that block no one), which gets
+    # MIGRATION_ONLINE_STATEMENT_TIMEOUT: none.
+    MIGRATION_LOCK_TIMEOUT: str = "5s"
+    MIGRATION_STATEMENT_TIMEOUT: str = "30s"
+    MIGRATION_ONLINE_STATEMENT_TIMEOUT: str = "0"
+    MIGRATION_IDLE_TIMEOUT: str = "60s"
+    MIGRATION_LOCK_ATTEMPTS: int = 4
+    MIGRATION_RETRY_WAIT: float = 5.0
     # Mounted from the host, deliberately outside the directory the deploy
     # rsyncs with --delete -- a backup inside it would be erased by the next
     # deploy, which is the opposite of the point.
     BACKUP_DIR: str = "/backups"
+    # The off-site copy of every dump (app/api/backups/offsite.py): uploaded
+    # to BACKUP_S3_BUCKET under BACKUP_S3_PREFIX, daily/ or weekly/, with
+    # server-side encryption (BACKUP_S3_SSE: AES256, or aws:kms with
+    # BACKUP_S3_KMS_KEY_ID) and the dump's sha256 in its metadata. Empty
+    # bucket: no off-site copy, as before. BACKUP_S3_ACCESS_KEY and
+    # BACKUP_S3_SECRET_KEY: a user that may put, list and read backups/ and
+    # nothing else (no delete: the lifecycle rule expires them); unset, the
+    # media bucket's S3_ACCESS_KEY and S3_SECRET_KEY.
+    BACKUP_S3_BUCKET: str = ""
+    BACKUP_S3_PREFIX: str = "backups/"
+    BACKUP_S3_REGION: str = "ap-south-1"
+    BACKUP_S3_SSE: str = "AES256"
+    BACKUP_S3_KMS_KEY_ID: str = ""
+    BACKUP_S3_ACCESS_KEY: str = ""
+    BACKUP_S3_SECRET_KEY: str = ""
+    # How many dumps scripts/backup.py leaves in BACKUP_DIR (the newest),
+    # deleting older ones only after a good off-site upload. 0 keeps every one.
+    BACKUP_KEEP_LOCAL: int = 0
 
     S3_BUCKET: str
     S3_ACCESS_KEY: str
@@ -154,6 +217,23 @@ class AppConfig(BaseSettings):
     GEOCODER_ENABLED: bool = True
     GEOCODER_URL: str = "https://nominatim.openstreetmap.org/search"
     GEOCODER_EMAIL: str = "support@myotherapp.in"
+    # Meilisearch (app/core/search.py, app/api/search): unset, every search
+    # is Postgres's (search_text and its trigram indexes), as before. Set
+    # (e.g. http://meilisearch:7700 and the instance's master or an admin
+    # key), the search outbox is carried to it, the indexes are built once
+    # by one process, and searches with words ask it -- falling back to
+    # Postgres on any failure, and for SEARCH_BREAKER_SECONDS after
+    # SEARCH_BREAKER_FAILURES failures in a row. SEARCH_TIMEOUT bounds each
+    # call (seconds). SEARCH_INDEX_PREFIX names the indexes ({prefix}events,
+    # {prefix}clubs), so two environments can share one instance. The indexes
+    # are compared with the database every SEARCH_RECONCILE_HOURS.
+    SEARCH_URL: str = ""
+    SEARCH_KEY: str = ""
+    SEARCH_TIMEOUT: float = 0.8
+    SEARCH_BREAKER_FAILURES: int = 3
+    SEARCH_BREAKER_SECONDS: float = 30.0
+    SEARCH_INDEX_PREFIX: str = "moa_"
+    SEARCH_RECONCILE_HOURS: float = 6.0
     PUBLIC_CLUB_URL: str = "https://myotherapp.in/clubs/{slug}"
     # A club's published website at its own address (served by the club-sites Cloudflare Worker).
     # PUBLIC_CLUB_URL stays the public site's page tracking links land on; it frames the same site.
@@ -200,10 +280,18 @@ class AppConfig(BaseSettings):
     SITE_REVALIDATE_SECRET: str = ""
     # How long a signed link to a public picture stays valid, in seconds: an
     # event's poster, a club's logo and cover, a speaker's, team member's or
-    # partner's picture, a post's photo (app/core/storage/fields.py). A week,
-    # the most a SigV4 link allows. Private files -- tickets, certificates,
-    # template art and signatures, profile pictures, event files -- keep an hour.
+    # partner's picture, a post's photo, a stock avatar, a store item's photo
+    # (app/core/storage/fields.py). A week, the most a SigV4 link allows.
+    # Private files -- tickets, certificates, template art and signatures,
+    # profile pictures, event files -- keep an hour.
     PUBLIC_IMAGE_URL_TTL: int = 7 * 24 * 3600
+    # The media CDN in front of the bucket (the media Cloudflare Worker in the
+    # app repo, infra/cloudflare/media), e.g. https://media.myotherapp.in. Set,
+    # every public picture above is handed out as <MEDIA_CDN_URL>/<key>: one
+    # permanent address, cached at the edge near the viewer, no signature
+    # (app/core/storage/media.py). Unset: the week-signed links, as before.
+    # Private files never go through it, set or not.
+    MEDIA_CDN_URL: str = ""
 
     @field_validator("PUBLIC_IMAGE_URL_TTL")
     @classmethod
@@ -211,6 +299,22 @@ class AppConfig(BaseSettings):
         """Between an hour and SigV4's ceiling of a week: S3 refuses a link
         signed for longer, which would break every picture at once."""
         return max(3600, min(int(value), 7 * 24 * 3600))
+
+    @field_validator("MEDIA_CDN_URL")
+    @classmethod
+    def _cdn_origin(cls, value: str) -> str:
+        """An origin, no trailing slash; `media.myotherapp.in` is read as
+        https. A path, a query or a fragment is refused at startup rather than
+        quietly breaking every picture: each address is this, "/", the key."""
+        value = (value or "").strip()
+        if not value:
+            return ""
+        if "://" not in value:
+            value = f"https://{value}"
+        parts = urlsplit(value)
+        if parts.scheme not in ("https", "http") or not parts.hostname or parts.path.rstrip("/") or parts.query or parts.fragment:
+            raise ValueError("APP_MEDIA_CDN_URL must be an origin like https://media.myotherapp.in (no path)")
+        return f"{parts.scheme}://{parts.netloc.lower()}"
 
     @property
     def site_tokens(self) -> list[str]:
@@ -239,8 +343,9 @@ class AppConfig(BaseSettings):
     # ─── Accounts, sign-in and push (fix/accounts-integrity) ───────────────
     # Where the rate limiter keeps its counts (slowapi/limits storage URI).
     # memory:// is per process, which is exact while WORKERS=1; with more
-    # workers or hosts point it at Redis (redis://host:6379/0) so they share
-    # one budget. A redis:// URI needs the `redis` package installed.
+    # workers or hosts they need one shared store. Left at memory:// with
+    # REDIS_URL set, the limits use REDIS_URL (app/core/rate_limit.py); a
+    # URI here other than memory:// wins over that.
     RATE_LIMIT_STORAGE: str = "memory://"
     # An admin's session as someone else ends this many minutes after it
     # starts, with no refresh (30 to 60).
@@ -256,6 +361,96 @@ class AppConfig(BaseSettings):
     # sweep removes those and the sessions that can never be used again.
     SIGN_IN_ATTEMPTS_KEEP_DAYS: int = 180
     ACCOUNT_SWEEP_SECONDS: int = 3600
+
+    # ─── Platform: jobs, the worker, Redis (feat/w2-platform) ──────────────
+    # The job queue (app/core/jobs.py) is always on: work after a request is
+    # a row in `jobs`, written with the change it is about. Unset, each API
+    # process runs the jobs it wrote as soon as its transaction commits (and
+    # picks up retries and what a stopped process left). True: the API only
+    # writes them, and the worker (`python -m app.worker`) runs them. Turn it
+    # on only once the worker is running.
+    JOBS_WORKER: bool = False
+    # Jobs one process runs at once, all names together; a handler can ask
+    # for fewer of its own at a time. JOBS_LIMITS overrides that per name:
+    # "deliveries.send=2,notifications.followers=1".
+    JOBS_CONCURRENCY: int = 4
+    JOBS_LIMITS: str = ""
+    # How long a runner with nothing to do waits before looking again (a
+    # commit in the same process, or a finished job, wakes it sooner).
+    JOBS_POLL_SECONDS: float = 1.0
+    # Finished jobs are kept this many days (0: deleted as they finish), and
+    # dead ones -- tried max_attempts times -- this many.
+    JOBS_KEEP_DAYS: int = 3
+    JOBS_DEAD_KEEP_DAYS: int = 30
+    # On SIGTERM the worker stops taking jobs and gives the ones in hand this
+    # long to finish; the rest go back to the queue. Under the stop_grace_period
+    # docker-compose.prod.yml gives the worker.
+    JOBS_DRAIN_SECONDS: float = 25.0
+    # The leader-only loops (the email, closeout, billing, payments... sweeps
+    # started in doth.py's lifespan) run in the worker instead of the API.
+    # Each still takes its advisory lock, so one process runs each either way.
+    # Turn it on only with the worker running: with it on, the API runs none.
+    SWEEPS_IN_WORKER: bool = False
+    # Redis (app/core/redis.py), e.g. redis://redis:6379/0. Unset: no Redis
+    # anywhere, and everything works as before, per process. Set: the rate
+    # limits are shared (RATE_LIMIT_STORAGE above), the discover cache has a
+    # shared second level, and publish/subscribe crosses processes. Every
+    # call has a short timeout and falls back to the per-process way.
+    REDIS_URL: str = ""
+    # How long one Redis call may take before it is given up on, in seconds.
+    REDIS_TIMEOUT: float = 0.25
+
+    # ─── The money ledger (app/api/ledger) ─────────────────────────────────
+    # Every money transition is posted to the append-only ledger_entries and
+    # summed into ledger_monthly as it happens, whatever this says. This picks
+    # what the club finance pages, statements and the admin revenue page READ:
+    # false (default) works their figures out from registrations, orders,
+    # payment logs and subscription charges as before; true reads the
+    # ledger's monthly sums. Turn on only after the backfill
+    # (scripts/ledger_backfill.py) and a clean compare (scripts/ledger_compare.py).
+    LEDGER_READS: bool = False
+    # When the daily ledger job runs (failed postings retried, drift put
+    # right, and -- once the history is backfilled -- Razorpay's payments and
+    # refunds of the day before checked), as HH:MM in India. Empty: never.
+    LEDGER_DAILY_AT: str = "02:30"
+
+    # ─── Push by FCM topics (feat/w2-push) ──────────────────────────────────
+    # A broadcast -- a club's new post or event to its followers, a new event
+    # to people whose interests are under its topics, an announcement to
+    # everyone -- is one send to an FCM topic (club_{id}, topic_{slug}, all)
+    # instead of a send per device (app.core.notifications.delivery). Off:
+    # every push goes device by device, exactly as before. Turn it on only
+    # once most devices report topic support (GET
+    # /notifications/topics/adoption); until they all do, the ones that have
+    # not are still sent to one by one (PUSH_TOPICS_LEGACY), and no device is
+    # sent a broadcast both ways.
+    PUSH_TOPICS: bool = False
+    # With PUSH_TOPICS on, the devices that have not said they subscribe to
+    # topics (an app from before them) still get each broadcast, device by
+    # device. Turn it off once those are gone: a broadcast is then one send.
+    PUSH_TOPICS_LEGACY: bool = True
+    # A broadcast's inbox line is one shared row, read through each person's
+    # follows and interests, instead of a row per recipient
+    # (app.core.notifications.inbox). Off: a row per recipient, as before.
+    # Turned off after being on, the shared lines written meanwhile leave the
+    # inbox until it is on again (they are kept, not deleted).
+    INBOX_SHARED: bool = False
+    # A topic push cannot be capped per person (INTEREST_PUSH_MAX_PER_USER_PER_DAY):
+    # FCM sends it to whoever is subscribed. So with PUSH_TOPICS or
+    # INBOX_SHARED on, each topic has at most this many new-event pushes a day.
+    INTEREST_TOPIC_PUSH_MAX_PER_DAY: int = 3
+
+    # ─── The live room pushed (feat/w2-live) ───────────────────────────────
+    # Server-sent events for the live room (app/api/live/stream.py): one
+    # connection per phone or console, the room's state pushed when it
+    # changes, instead of a request per phone every two to five seconds.
+    # Unset, the stream answers 404 and every client keeps polling; the polls
+    # work either way. With several API processes it needs REDIS_URL, so a
+    # change made in one reaches the streams held by the others.
+    LIVE_SSE: bool = False
+    # Open streams one API process holds at most (each is a socket and a few
+    # tens of KB); past it a new one is told 503 and polls instead.
+    LIVE_SSE_MAX_STREAMS: int = 5000
 
     @field_validator("PLAN_ENFORCEMENT_FROM")
     @classmethod

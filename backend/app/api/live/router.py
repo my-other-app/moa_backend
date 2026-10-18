@@ -1,13 +1,16 @@
 """The live room: the console's side under ClubAuth, and the room's side for
-anyone with the browser key (and a player key, for the quiz)."""
+anyone with the browser key (and a player key, for the quiz). Each of the
+room's polls can also be had as a stream of server-sent events (stream.py,
+behind APP_LIVE_SSE)."""
 from uuid import UUID
 
 import orjson
 
 from fastapi import APIRouter, Query, Request, Response
+from fastapi.responses import JSONResponse
 
 from app.api.deliveries import service as deliveries
-from app.api.live import limits, room, service
+from app.api.live import limits, room, service, stream
 from app.api.live.schemas import (
     AnswerIn,
     AnswerOut,
@@ -316,3 +319,76 @@ async def feed(request: Request, session: SessionDep, event_id: int) -> Response
 async def screen(session: SessionDep, user: ClubAuth, event_id: int) -> Screen:
     event = await deliveries.event_for_club(session, user, event_id)
     return Screen(**await service.screen(session, event))
+
+
+# --- the room, pushed ----------------------------------------------------------------------
+
+
+async def _club_user(request: Request, session):
+    """The club (or admin) behind the request, checked as ClubAuth checks it."""
+    from app.core.auth.authentication import oauth2_scheme
+    from app.core.auth.dependencies import check_user_type, get_current_user
+
+    user = await get_current_user(request, await oauth2_scheme(request), session)
+    return await check_user_type(["club", "admin"])(request=request, current_user=user, session=session)
+
+
+@public_router.get(
+    "/events/{event_id}/live/stream",
+    summary="The room's polls as server-sent events: room, banner, quiz, host, screen, questions, polls",
+    response_class=Response,
+    responses={200: {"content": {"text/event-stream": {}}}},
+)
+async def live_stream(
+    request: Request, session: SessionDep, event_id: int, view: str = Query("room"),
+    key: str = Query("", description="The browser key, for a client that cannot send X-Live-Key (EventSource)"),
+    player: str = Query("", description="The player key, for a client that cannot send X-Live-Player"),
+    last_event_id: str = Query("", description="The last id seen, for a client that cannot send Last-Event-ID"),
+) -> Response:
+    """Each `snapshot` is the body the view's poll returns now, for this
+    client, with the version as its `id`; a `ping` every quiet 15 s; `gone`
+    when the room (or this player) is not there any more. The same
+    credentials as the poll: X-Live-Key (room), X-Live-Player (quiz), the
+    club's session (host, screen, questions, polls). `banner` is the event
+    page's strip, open to whoever may see the room: the event's status,
+    start and end and the banner (BannerFeed), sent when one of them
+    changes. 404 while APP_LIVE_SSE is off: the client polls."""
+    from app.core.net import client_address
+
+    if not stream.on():
+        raise CustomHTTPException(404, message="The live room is not pushed here; poll it.", error_code="LIVE_STREAM_OFF")
+    if view not in stream.VIEWS:
+        raise CustomHTTPException(422, message=f"view is one of: {', '.join(stream.VIEWS)}.")
+    voter_key = room.valid_key(request.headers.get(service.VOTER_HEADER) or key) if view == "room" else None
+    player_key = (request.headers.get(service.PLAYER_HEADER) or player).strip() if view == "quiz" else None
+    limits.check(request, "stream", voter_key or player_key or None)
+    address = client_address(request) or "unknown"
+    try:
+        stream.hub.admit(event_id, address)
+    except stream.Full as full:
+        # Answered here rather than raised: the API's error handler drops an
+        # exception's headers, and the client waits by Retry-After.
+        refusal = CustomHTTPException(503, message=f"Too many live streams here ({full}); poll for now.", error_code="LIVE_STREAM_FULL")
+        return JSONResponse(refusal.to_dict(), status_code=503, headers={"Retry-After": "60"})
+    voter = found = None
+    try:
+        if view in ("room", "banner"):
+            await room.room_of(session, event_id)
+            if voter_key is not None:
+                voter = await room.voter_of(session, event_id, voter_key)
+        elif view == "quiz":
+            quiz = await service._view_for(session, event_id)
+            found = await service._player(session, quiz, player_key)
+        else:
+            await deliveries.event_for_club(session, await _club_user(request, session), event_id)
+        # Nothing of the request's session is held while the stream is open:
+        # its transaction ends here and its connection goes back to the pool.
+        await session.commit()
+    except BaseException:
+        stream.hub.release(address)
+        raise
+    feed = stream.hub.feed(event_id)
+    listener = stream.Listener(view=view, event_id=event_id, key=voter_key or player_key, address=address, player=found)
+    feed.add(listener, voter)
+    last = stream.parse_version(request.headers.get("last-event-id") or last_event_id)
+    return stream.EventStream(feed, listener, last, stream.CLUB_LIFETIME if view in stream.CLUB_VIEWS else stream.LIFETIME)

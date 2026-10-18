@@ -324,7 +324,6 @@ async def add_event_attendee(
 async def import_event_registrations(
     user: ClubAuth,
     event_id: int,
-    background_tasks: BackgroundTasks,
     session: SessionDep = SessionDep,
     file: UploadFile = Form(...),
 ) -> ImportLogSummary:
@@ -346,10 +345,9 @@ async def import_event_registrations(
         session, f"Import {file.filename or 'guest list'} into '{event.name}'", "event_registrations_bulk_import",
     )
     background_log.event_id = event_id
+    # The rows run as a job after this answers (service.enqueue_import).
+    await service.enqueue_import(session, event_id, df, background_log, False)
     await session.commit()
-    background_tasks.add_task(
-        service.bulk_import_event_registrations, session, event_id, df, background_log, False
-    )
     return service.summarise_import(background_log)
 
 
@@ -366,7 +364,6 @@ async def list_event_imports(
 async def bulk_import_event_registrations(
     user: AdminAuth,
     event_id: int,
-    background_tasks: BackgroundTasks,
     session: SessionDep = SessionDep,
     file: UploadFile = Form(...),
 ) -> BackgroundTaskLogResponseSchema:
@@ -379,9 +376,8 @@ async def bulk_import_event_registrations(
         f"Bulk Import Event Registrations for '{event.name}'",
         "event_registrations_bulk_import",
     )
-    background_tasks.add_task(
-        service.bulk_import_event_registrations, session, event_id, df, background_log
-    )
+    await service.enqueue_import(session, event_id, df, background_log)
+    await session.commit()
     return jsonable_encoder(background_log)
 
 

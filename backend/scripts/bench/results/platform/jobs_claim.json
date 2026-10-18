@@ -1,0 +1,152 @@
+{
+  "args": {
+    "finished": 1000000,
+    "scheduled": 100000,
+    "due": 50000,
+    "runners": 4,
+    "concurrency": 16,
+    "writers": 16,
+    "seconds": 10.0,
+    "out": "scripts/bench/results/platform/jobs_claim.json"
+  },
+  "postgres": "16.10 (Homebrew)",
+  "seed": {
+    "seconds": 20.9,
+    "rows": 1151000,
+    "table": "148 MB",
+    "claim_index": "8272 kB"
+  },
+  "explain": [
+    "Update on jobs  (cost=8699.69..8835.02 rows=16 width=332) (actual time=0.243..0.323 rows=16 loops=1)",
+    "  Buffers: shared hit=554",
+    "  CTE picked",
+    "    ->  Limit  (cost=8699.22..8699.26 rows=16 width=26) (actual time=0.227..0.229 rows=16 loops=1)",
+    "          Buffers: shared hit=317",
+    "          ->  Sort  (cost=8699.22..8704.92 rows=2280 width=26) (actual time=0.227..0.228 rows=16 loops=1)",
+    "                Sort Key: x.priority DESC, x.run_at, x.id",
+    "                Sort Method: top-N heapsort  Memory: 27kB",
+    "                Buffers: shared hit=317",
+    "                ->  Nested Loop  (cost=0.43..8642.22 rows=2280 width=26) (actual time=0.016..0.219 rows=60 loops=1)",
+    "                      Buffers: shared hit=317",
+    "                      ->  Function Scan on w  (cost=0.01..0.16 rows=15 width=44) (actual time=0.002..0.003 rows=15 loops=1)",
+    "                      ->  Limit  (cost=0.42..574.62 rows=152 width=18) (actual time=0.012..0.014 rows=4 loops=15)",
+    "                            Buffers: shared hit=317",
+    "                            ->  Nested Loop  (cost=0.42..5723.46 rows=1515 width=18) (actual time=0.012..0.014 rows=4 loops=15)",
+    "                                  Buffers: shared hit=317",
+    "                                  ->  Function Scan on unnest l  (cost=0.00..0.05 rows=5 width=4) (actual time=0.000..0.000 rows=3 loops=15)",
+    "                                  ->  Subquery Scan on x  (cost=0.42..1141.65 rows=303 width=18) (actual time=0.004..0.005 rows=2 loops=39)",
+    "                                        Buffers: shared hit=317",
+    "                                        ->  Limit  (cost=0.42..1138.62 rows=303 width=24) (actual time=0.004..0.005 rows=2 loops=39)",
+    "                                              Buffers: shared hit=317",
+    "                                              ->  LockRows  (cost=0.42..11367.39 rows=3026 width=24) (actual time=0.004..0.005 rows=2 loops=39)",
+    "                                                    Buffers: shared hit=317",
+    "                                                    ->  Index Scan using ix_jobs_claim on jobs jobs_1  (cost=0.42..11337.13 rows=3026 width=24) (actual time=0.004..0.005 rows=2 loops=39)",
+    "                                                          Index Cond: (((name)::text = w.name) AND (priority = l.priority) AND (run_at <= statement_timestamp()))",
+    "                                                          Filter: ((finished_at IS NULL) AND (NOT dead))",
+    "                                                          Buffers: shared hit=241",
+    "  ->  Nested Loop  (cost=0.43..135.76 rows=16 width=332) (actual time=0.232..0.259 rows=16 loops=1)",
+    "        Buffers: shared hit=381",
+    "        ->  CTE Scan on picked  (cost=0.00..0.32 rows=16 width=56) (actual time=0.228..0.232 rows=16 loops=1)",
+    "              Buffers: shared hit=317",
+    "        ->  Index Scan using jobs_pkey on jobs  (cost=0.43..8.45 rows=1 width=18) (actual time=0.001..0.001 rows=1 loops=16)",
+    "              Index Cond: (id = picked.id)",
+    "              Buffers: shared hit=64",
+    "Planning:",
+    "  Buffers: shared hit=2",
+    "Planning Time: 0.077 ms",
+    "Execution Time: 0.337 ms"
+  ],
+  "claim_ms": {
+    "runs": [
+      0.967,
+      0.421,
+      0.443,
+      0.342,
+      0.337
+    ],
+    "median": 0.421
+  },
+  "drain": {
+    "jobs": 50000,
+    "seconds": 26.58,
+    "jobs_per_second": 1881,
+    "per_runner": [
+      12589,
+      12544,
+      12539,
+      12328
+    ],
+    "ran_twice": 0,
+    "ran": 50000
+  },
+  "enqueue": {
+    "writers": 16,
+    "jobs": 14569,
+    "seconds": 10.02,
+    "per_second": 1454,
+    "insert_ms": {
+      "p50": 2.328,
+      "p95": 5.339,
+      "p99": 15.571
+    },
+    "drained_after_seconds": 6.33
+  },
+  "steady": {
+    "enqueued_per_second": 1050,
+    "handled_per_second": 1050,
+    "oldest_due_seconds": {
+      "p50": 0.03,
+      "max": 0.22
+    }
+  },
+  "idle_claim": {
+    "scheduled_rows": 99834,
+    "runs_ms": [
+      0.697,
+      0.294,
+      0.27,
+      0.123,
+      0.314
+    ],
+    "median_ms": 0.294,
+    "plan": [
+      "Update on jobs  (cost=5595.88..5731.21 rows=16 width=332) (actual time=0.248..0.250 rows=0 loops=1)",
+      "  Buffers: shared hit=228",
+      "  CTE picked",
+      "    ->  Limit  (cost=5595.41..5595.45 rows=16 width=26) (actual time=0.247..0.248 rows=0 loops=1)",
+      "          Buffers: shared hit=228",
+      "          ->  Sort  (cost=5595.41..5598.90 rows=1395 width=26) (actual time=0.246..0.247 rows=0 loops=1)",
+      "                Sort Key: x.priority DESC, x.run_at, x.id",
+      "                Sort Method: quicksort  Memory: 25kB",
+      "                Buffers: shared hit=228",
+      "                ->  Nested Loop  (cost=0.43..5560.54 rows=1395 width=26) (actual time=0.244..0.245 rows=0 loops=1)",
+      "                      Buffers: shared hit=228",
+      "                      ->  Function Scan on w  (cost=0.01..0.16 rows=15 width=44) (actual time=0.003..0.007 rows=15 loops=1)",
+      "                      ->  Limit  (cost=0.42..369.76 rows=93 width=18) (actual time=0.016..0.016 rows=0 loops=15)",
+      "                            Buffers: shared hit=228",
+      "                            ->  Nested Loop  (cost=0.42..3693.82 rows=930 width=18) (actual time=0.015..0.015 rows=0 loops=15)",
+      "                                  Buffers: shared hit=228",
+      "                                  ->  Function Scan on unnest l  (cost=0.00..0.05 rows=5 width=4) (actual time=0.000..0.000 rows=5 loops=15)",
+      "                                  ->  Subquery Scan on x  (cost=0.42..736.89 rows=186 width=18) (actual time=0.003..0.003 rows=0 loops=75)",
+      "                                        Buffers: shared hit=228",
+      "                                        ->  Limit  (cost=0.42..735.03 rows=186 width=24) (actual time=0.003..0.003 rows=0 loops=75)",
+      "                                              Buffers: shared hit=228",
+      "                                              ->  LockRows  (cost=0.42..7334.70 rows=1857 width=24) (actual time=0.003..0.003 rows=0 loops=75)",
+      "                                                    Buffers: shared hit=228",
+      "                                                    ->  Index Scan using ix_jobs_claim on jobs jobs_1  (cost=0.42..7316.13 rows=1857 width=24) (actual time=0.002..0.002 rows=0 loops=75)",
+      "                                                          Index Cond: (((name)::text = w.name) AND (priority = l.priority) AND (run_at <= statement_timestamp()))",
+      "                                                          Filter: ((finished_at IS NULL) AND (NOT dead))",
+      "                                                          Buffers: shared hit=228",
+      "  ->  Nested Loop  (cost=0.43..135.76 rows=16 width=332) (actual time=0.248..0.248 rows=0 loops=1)",
+      "        Buffers: shared hit=228",
+      "        ->  CTE Scan on picked  (cost=0.00..0.32 rows=16 width=56) (actual time=0.247..0.247 rows=0 loops=1)",
+      "              Buffers: shared hit=228",
+      "        ->  Index Scan using jobs_pkey on jobs  (cost=0.43..8.45 rows=1 width=18) (never executed)",
+      "              Index Cond: (id = picked.id)",
+      "Planning:",
+      "  Buffers: shared hit=2",
+      "Planning Time: 0.187 ms",
+      "Execution Time: 0.314 ms"
+    ]
+  }
+}

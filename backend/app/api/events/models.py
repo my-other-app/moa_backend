@@ -14,7 +14,7 @@ from sqlalchemy import (
     Numeric,
     UniqueConstraint,
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import deferred, relationship
 import sqlalchemy as sa
 from sqlalchemy import DDL, event as sa_event
 
@@ -118,6 +118,14 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     # link that leads nowhere is not followed again for a while, by any process.
     link_checked_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     event_tag = Column(String(50), nullable=True)  # Tag like "Free", "Paid", "Featured", etc.
+    # Everything the event is found by -- its name, place and tag, its club's
+    # name and place, its category, its interests and their topics --
+    # lowercased and unaccented, in one column with one trigram index; kept
+    # by triggers (app.api.search.text). Deferred: only SQL reads it.
+    search_text = deferred(Column(sa.Text, nullable=True))
+    # The 0.5-degree grid cell its point is in, when held in person with a
+    # point (app.api.discover.cells): "near you" reads a handful of cells.
+    geocell = deferred(Column(Integer, nullable=True))
 
     category_id = Column(Integer, ForeignKey("event_categories.id"), nullable=False)
     club_id = Column(Integer, ForeignKey("clubs.id"), nullable=True)
@@ -235,15 +243,20 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
             ),
             postgresql_using="gist",
         ),
+        # The name alone, for the dashboards' and the admin's "name contains".
         sa.Index("ix_events_name_trgm", "name", postgresql_using="gin", postgresql_ops={"name": "gin_trgm_ops"}, postgresql_where=sa.text("NOT is_deleted")),
-        sa.Index("ix_events_location_trgm", "location_name", postgresql_using="gin", postgresql_ops={"location_name": "gin_trgm_ops"}, postgresql_where=sa.text("NOT is_deleted")),
-        # The same over what can be shown only: the search's typo fallback
-        # looks among these, not every event ever held (the status clock
-        # moves what is over out of them; discover.service._matching).
-        sa.Index("ix_events_shown_name_trgm", "name", postgresql_using="gin", postgresql_ops={"name": "gin_trgm_ops"},
+        # Words anywhere an event is found by (search_text): every event, for
+        # the app's list and the calendar; and what can be shown only, for the
+        # search and its typo fallback, which look among these and not every
+        # event ever held (the status clock moves what is over out of them).
+        sa.Index("ix_events_search_trgm", "search_text", postgresql_using="gin", postgresql_ops={"search_text": "gin_trgm_ops"},
+                 postgresql_where=sa.text("NOT is_deleted")),
+        sa.Index("ix_events_shown_search_trgm", "search_text", postgresql_using="gin", postgresql_ops={"search_text": "gin_trgm_ops"},
                  postgresql_where=sa.text("NOT is_deleted AND status IN ('published', 'live')")),
-        sa.Index("ix_events_shown_location_trgm", "location_name", postgresql_using="gin", postgresql_ops={"location_name": "gin_trgm_ops"},
-                 postgresql_where=sa.text("NOT is_deleted AND status IN ('published', 'live')")),
+        # "Near you": what can be shown in a handful of grid cells, soonest
+        # first within each (app.api.discover.cells).
+        sa.Index("ix_events_shown_cell", "geocell", "event_datetime", "id",
+                 postgresql_where=sa.text("NOT is_deleted AND status IN ('published', 'live') AND geocell IS NOT NULL")),
         # The few events longer than MAX_EVENT_HOURS (saved before that limit)
         # by when they end: how far back "what is on" must look while one of
         # them is still running (discover.upcoming).

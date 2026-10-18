@@ -18,6 +18,10 @@ What the room polls is read from second-long snapshots (room.py). Counters
 on a row (a question's votes, a player's score) move by one atomic UPDATE;
 a vote, an answer and a poll response are an INSERT ... ON CONFLICT, so a
 double tap is answered rather than a 500.
+
+Every change is told on the event's channel once committed (bus.py), for the
+room's streams (stream.py): the host's at once (room.room_changed and
+quiz_changed), the audience's folded a third of a second.
 """
 import asyncio
 import hashlib
@@ -40,7 +44,7 @@ from app.api.clubs.models import Clubs
 from app.api.deliveries import service as deliveries
 from app.api.events.documents import EVENT_TIMEZONE
 from app.api.events.models import EventRegistrationsLink, Events
-from app.api.live import room
+from app.api.live import board, bus, room
 from app.api.live.models import (
     Audience,
     FeedbackResponses,
@@ -62,7 +66,7 @@ from app.api.live.models import (
     UpdateKind,
 )
 from app.config import settings
-from app.core import after_commit
+from app.core import jobs
 from app.core.email import email as email_mod
 from app.response import CustomHTTPException
 
@@ -307,7 +311,7 @@ async def host_state(session, quiz: LiveQuizzes, now: Optional[datetime] = None)
     view = await room.quiz_view(session, quiz.event_id)
     out = {
         "status": quiz.status.value, "join_code": quiz.join_code, "title": quiz.title,
-        "players": len(view.players) if view is not None else await _player_count(session, quiz.id),
+        "players": view.player_count if view is not None else await _player_count(session, quiz.id),
         "current_index": quiz.current_index, "total": len(quiz.questions), "question": None,
         "leaderboard": list(view.board) if view is not None else await _leaderboard(session, quiz),
     }
@@ -329,10 +333,15 @@ async def join_quiz(session, code: str, name: str, registration_id=None) -> dict
     player = LiveQuizPlayers(quiz_id=quiz.id, name=name, player_key=secrets.token_urlsafe(24), registration_id=registration_id, score=0)
     session.add(player)
     await session.commit()
+    met = room.Player(id=player.id, name=player.name, score=0, created_at=player.created_at)
     # In the snapshot at once, so the new player's first poll finds them.
     view = room.quiz_kept(quiz.event_id)
     if view is not None and view.quiz_id == quiz.id:
-        view.players[player.player_key] = room.Player(id=player.id, name=player.name, score=0)
+        view.players[player.player_key] = met
+    run = board.token(quiz.status, quiz.join_code, quiz.ended_at)
+    if run is not None and board.on():
+        await board.joined(board.key(quiz.id, run), met.member())
+    bus.changed(quiz.event_id, "quiz")
     return {"event_id": quiz.event_id, "quiz_id": quiz.id, "title": quiz.title, "player_id": player.id, "player_key": player.player_key, "name": player.name}
 
 
@@ -343,12 +352,12 @@ async def _player(session, view: "room.QuizView", player_key: str) -> "room.Play
     if p is not None:
         return p
     row = (await session.execute(
-        select(LiveQuizPlayers.id, LiveQuizPlayers.name, LiveQuizPlayers.score)
+        select(LiveQuizPlayers.id, LiveQuizPlayers.name, LiveQuizPlayers.score, LiveQuizPlayers.created_at)
         .where(LiveQuizPlayers.quiz_id == view.quiz_id, LiveQuizPlayers.player_key == (player_key or ""))
     )).first()
     if row is None:
         raise CustomHTTPException(401, message="You are not in this quiz. Join again with the code on the screen.")
-    p = room.Player(id=row[0], name=row[1], score=row[2])
+    p = room.Player(id=row[0], name=row[1], score=row[2], created_at=row[3])
     view.players[player_key] = p
     return p
 
@@ -362,11 +371,19 @@ async def _view_for(session, event_id: int) -> "room.QuizView":
 
 async def player_state(session, event_id: int, player_key: str, now: Optional[datetime] = None) -> dict:
     """A player's poll: read from the quiz snapshot, no statement unless the
-    player is new to it."""
-    now = now or now_utc()
+    player is new to it (with the board in Redis, one round trip there for
+    their score and rank)."""
     view = await _view_for(session, event_id)
     player = await _player(session, view, player_key)
-    out = {"status": view.status.value, "title": view.title, "name": player.name, "score": player.score, "current_index": view.current_index, "total": len(view.questions), "question": None, "leaderboard": [], "rank": None}
+    standing = (await room.standings(session, view, [player]))[player.id]
+    return player_body(view, player, standing, now or now_utc())
+
+
+def player_body(view: "room.QuizView", player: "room.Player", standing: tuple, now: datetime) -> dict:
+    """What a player sees (PlayerState), from the snapshot and their
+    (score, rank): the poll's body, and the quiz stream's."""
+    score, rank = standing
+    out = {"status": view.status.value, "title": view.title, "name": player.name, "score": score, "current_index": view.current_index, "total": len(view.questions), "question": None, "leaderboard": [], "rank": None}
     q = view.current()
     if q is not None:
         left = _time_left(view.opened_at, q["seconds"], now)
@@ -378,7 +395,7 @@ async def player_state(session, event_id: int, player_key: str, now: Optional[da
         }
     if view.status is QuizStatus.ended or (view.status is QuizStatus.live and view.current_index >= 0):
         out["leaderboard"] = list(view.board)
-        out["rank"] = view.rank_of(player.score)
+        out["rank"] = rank
     return out
 
 
@@ -412,6 +429,9 @@ async def answer(session, event_id: int, player_key: str, option_key: str, now: 
     await session.commit()
     view.answers[player.id] = (option_key, points)
     player.score = int(score)
+    if view.board_key is not None:
+        await board.scored(view.board_key, player.member(), player.score)
+    bus.changed(event_id, "quiz")
     return {"correct": correct, "points": points, "score": player.score, "correct_key": q["correct_key"]}
 
 
@@ -433,6 +453,7 @@ async def ask(session, event: Events, text_: str, author_name: Optional[str], vo
     )
     session.add(row)
     await session.commit()
+    bus.changed(event.id, "room")
     return _question_row_out(row, mine=True)
 
 
@@ -520,6 +541,7 @@ async def vote(session, event_id: int, question_id: UUID, voter_key: str) -> dic
     kept = room.voter_kept(event_id, voter_key)
     if kept is not None:
         (kept.voted.add if voted else kept.voted.discard)(str(question_id))
+    bus.changed(event_id, "room", delta=["v", voter_key, str(question_id), 1 if voted else 0])
     return {"id": question_id, "votes": int(votes or 0), "voted": voted}
 
 
@@ -555,6 +577,8 @@ async def create_poll(session, event: Events, body) -> dict:
         raise CustomHTTPException(422, message="Ask the room something.")
     session.add(row)
     await session.commit()
+    # Not on the room's feed while a draft; on the console's list of polls.
+    room.room_changed(event.id)
     return await poll_out(session, row)
 
 
@@ -633,7 +657,8 @@ async def respond(session, event_id: int, poll_id: UUID, voter_key: str, value: 
         row = await _poll_in(session, event_id, poll_id)
         if row.status is not PollStatus.live:
             raise CustomHTTPException(409, message="This poll is not open.")
-        room.room_changed(event_id)
+        # Read afresh below; the streams are told once the answer commits.
+        room.forget_room(event_id)
         kind, options = row.kind, tuple(row.options or ())
     v = _clean_value(kind, options, value)
     # created_at from the clock, not the transaction: a word cloud's ties go to the word given first.
@@ -643,6 +668,7 @@ async def respond(session, event_id: int, poll_id: UUID, voter_key: str, value: 
     kept = room.voter_kept(event_id, voter_key)
     if kept is not None:
         kept.answers[str(poll_id)] = v
+    bus.changed(event_id, "room", delta=["r", voter_key, str(poll_id), v])
     snap = await room.room_of(session, event_id)
     poll = snap.data.get("poll")
     if poll is None or snap.poll_id != str(poll_id):
@@ -713,40 +739,83 @@ def _survey_email(event: Events, reg, org: str) -> dict:
     return {"subject": f"How was {event.name}?", "text": text_, "html": html}
 
 
-def _send_mails(mails: list[tuple], org: str) -> None:
-    """On a worker thread, after the commit that claimed the recipients."""
-    for reg_id, address, mail in mails:
-        try:
-            email_mod.send_email(recipients=[address], subject=mail["subject"], text=mail["text"], html=mail["html"], sender_name=org)
-        except Exception:  # noqa: BLE001
-            logger.exception("feedback survey email failed for registration %s", reg_id)
+SURVEY_MAIL = "live.survey_mail"
+
+
+def _survey_mail_key(survey_id, registration_id) -> str:
+    return f"live:survey:{survey_id}:{registration_id}"
 
 
 async def send_survey(session, event: Events, now: Optional[datetime] = None) -> dict:
     """To everyone who was checked in and has not been sent it yet; each gets
     a link only they hold. The recipients are claimed (feedback_sends) in the
     same transaction that marks the survey sent, so sending again, or the
-    sweep and a send at once, reaches only the people not sent yet; the mails
-    go after the commit, off the request."""
+    sweep and a send at once, reaches only the people not sent yet. Each
+    claimed guest's mail is a job of its own (SURVEY_MAIL), written in that
+    transaction: it survives a restart, is retried when the provider does not
+    take it, and marks the guest mailed (feedback_sends.mailed_at) once it
+    went, so a job run twice mails nobody twice."""
     survey = await survey_of(session, event)
     everyone = await audience_regs(session, event, Audience.checked_in)
     regs = [r for r in everyone if r.email]
-    claimed: set = set()
+    claimed: list = []
     if regs:
-        claimed = set((await session.scalars(
+        claimed = list((await session.scalars(
             pg_insert(FeedbackSends)
             .values([{"survey_id": survey.id, "registration_id": r.id} for r in regs])
             .on_conflict_do_nothing(index_elements=["survey_id", "registration_id"])
             .returning(FeedbackSends.registration_id)
         )).all())
-    org = (event.club.name if getattr(event, "club", None) else None) or "The organisers"
-    mails = [(r.id, r.email, _survey_email(event, r, org)) for r in regs if r.id in claimed]
     survey.sent_at = now or now_utc()
-    survey.sent_count = (survey.sent_count or 0) + len(mails)
-    if mails:
-        after_commit.run_after_commit(session, _send_mails, mails, org)
+    survey.sent_count = (survey.sent_count or 0) + len(claimed)
+    await jobs.enqueue_many(session, SURVEY_MAIL, [
+        ({"survey_id": survey.id, "registration_id": reg_id}, _survey_mail_key(survey.id, reg_id)) for reg_id in claimed
+    ])
     await session.commit()
-    return {"sent": len(mails), "invited": len(everyone), **survey_out(survey)}
+    return {"sent": len(claimed), "invited": len(everyone), **survey_out(survey)}
+
+
+@jobs.handler(SURVEY_MAIL, max_attempts=6, timeout=60.0)
+async def _survey_mail_job(payload: dict) -> None:
+    await mail_survey(UUID(str(payload["survey_id"])), UUID(str(payload["registration_id"])))
+
+
+async def mail_survey(survey_id: UUID, registration_id: UUID) -> bool:
+    """One guest's survey mail, unless it went already. True when it went now.
+
+    Read, send, then mark: a run cut off between the send and the mark sends
+    it again on the retry -- rather that than a mail claimed and never sent --
+    and the provider is given the same idempotency key both times, so one
+    that keeps them (Resend) delivers it once. A provider that does not take
+    it raises here, and the job is tried again later."""
+    async with jobs.scope() as s:
+        row = (await s.execute(
+            select(FeedbackSends.mailed_at, EventRegistrationsLink, Events)
+            .join(EventRegistrationsLink, EventRegistrationsLink.id == FeedbackSends.registration_id)
+            .join(FeedbackSurveys, FeedbackSurveys.id == FeedbackSends.survey_id)
+            .join(Events, Events.id == FeedbackSurveys.event_id)
+            .options(joinedload(Events.club))
+            .where(FeedbackSends.survey_id == survey_id, FeedbackSends.registration_id == registration_id)
+        )).first()
+        # End the read before the provider's call: no pooled connection held meanwhile.
+        await s.commit()
+    if row is None or row[0] is not None or not row[1].email:
+        return False
+    reg, event = row[1], row[2]
+    org = (event.club.name if event.club is not None else None) or "The organisers"
+    mail = _survey_email(event, reg, org)
+    await asyncio.to_thread(
+        email_mod.send_email, recipients=[reg.email], subject=mail["subject"], text=mail["text"], html=mail["html"],
+        sender_name=org, idempotency_key=_survey_mail_key(survey_id, registration_id),
+    )
+    async with jobs.scope() as s:
+        await s.execute(
+            update(FeedbackSends)
+            .where(FeedbackSends.survey_id == survey_id, FeedbackSends.registration_id == registration_id, FeedbackSends.mailed_at.is_(None))
+            .values(mailed_at=now_utc())
+        )
+        await s.commit()
+    return True
 
 
 async def _results(session, survey: FeedbackSurveys, invited: int) -> dict:

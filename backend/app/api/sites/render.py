@@ -2,10 +2,11 @@
 one of four templates, light or dark, in the club's colour and font.
 
 Every string from the database goes through `esc` (or, inside the JSON-LD
-script, `ld_json`). Images go through the site's own image route, because
-the bucket's URLs are signed and expire; the page must outlive them. The JS
-is small on purpose: the menu on a phone, a countdown on the Arena template,
-the year in the footer.
+script, `ld_json`). Images are on the media CDN when it is on -- permanent
+addresses, each size in the img's srcset -- and otherwise go through the
+site's own image route, because the bucket's URLs are signed and expire; the
+page must outlive them. The JS is small on purpose: the menu on a phone, a
+countdown on the Arena template, the year in the footer.
 
 The inline script and the inline stylesheet are the same bytes on every
 club's page -- one stylesheet per template and look, eight in all -- so the
@@ -24,6 +25,7 @@ from datetime import datetime
 from urllib.parse import quote
 
 from app.api.sites.models import FONTS, TEMPLATES, THEMES
+from app.core.storage import media
 
 
 
@@ -54,14 +56,22 @@ def _dark_enough(hex_: str) -> bool:
 
 
 def image_url(site_url: str, img, variation: str) -> str | None:
-    """The page's own image route for one of the bucket's images; None when the club has none."""
+    """One of the bucket's images at one size: its address on the media CDN
+    when that is on, else the page's own image route; None when the club has none."""
     if img is None:
         return None
     paths = getattr(img, "variations", None) or {}
     key = paths.get(variation) or paths.get("original")
     if not key:
         return None
-    return f"{site_url}/i?k={quote(key, safe='')}"
+    return media.cdn_url(key) or f"{site_url}/i?k={quote(key, safe='')}"
+
+
+def image_srcset(img) -> str | None:
+    """Every size of the image, for the img's srcset: only on the media CDN
+    (media.srcset), where each size is a cached file rather than a redirect
+    through the API."""
+    return media.srcset(img)
 
 
 def _day(dt: datetime) -> tuple[str, str]:
@@ -211,17 +221,35 @@ def _mark(name: str) -> str:
     return esc("".join(p[0] for p in parts[:2]).upper() or "C")
 
 
-def _img(url: str | None, name: str, cls: str = "") -> str:
+# How wide each kind of picture is drawn, for the browser to pick a size from
+# the srcset before it has laid the page out (the stylesheet above).
+SIZES = {
+    "brand": "34px",
+    "person": "72px",
+    "partner": "28px",
+    "poster": "(max-width: 720px) calc(100vw - 40px), 380px",
+    "gallery": "(max-width: 720px) 50vw, 280px",
+}
+
+
+def _srcset(srcset: str | None, kind: str) -> str:
+    """The srcset and sizes attributes of an img tag, leading space and all; nothing without a srcset."""
+    if not srcset:
+        return ""
+    return f' srcset="{esc(srcset)}" sizes="{esc(SIZES[kind])}"'
+
+
+def _img(url: str | None, name: str, cls: str = "", *, srcset: str | None = None, kind: str = "brand") -> str:
     """An image tag, or the initials in a mark when the club gave none."""
     if url:
-        return f'<img src="{esc(url)}" alt="" loading="lazy"{f" class={chr(34)}{cls}{chr(34)}" if cls else ""}>'
+        return f'<img src="{esc(url)}"{_srcset(srcset, kind)} alt="" loading="lazy"{f" class={chr(34)}{cls}{chr(34)}" if cls else ""}>'
     return f'<span class="mark">{_mark(name)}</span>'
 
 
 def _event_card(e: dict, template: str, register: str) -> str:
     mon, day = _day(e["starts_at"])
     meta = " · ".join(x for x in (e.get("where"), e.get("fee")) if x)
-    poster = f'<img class="poster" src="{esc(e["poster"])}" alt="" loading="lazy">' if e.get("poster") and template == "campus" else ""
+    poster = f'<img class="poster" src="{esc(e["poster"])}"{_srcset(e.get("poster_srcset"), "poster")} alt="" loading="lazy">' if e.get("poster") and template == "campus" else ""
     when = esc(_when(e["starts_at"]))
     meta_html = f" · {esc(meta)}" if meta else ""
     label = "Register" if e.get("upcoming") else "See the event"
@@ -264,7 +292,7 @@ def render(data: dict) -> str:
     if on.get("contact", True):
         nav_links.append('<a href="#contact">Contact</a>')
     follow_btn = f'<a class="btn btn-primary btn-sm" href="{esc(follow_url)}" target="_top">Follow</a>' if follow_url else ""
-    brand_img = _img(logo, name)
+    brand_img = _img(logo, name, srcset=club.get("logo_srcset"), kind="brand")
     parts = [
         f'<nav class="nav"><div class="wrap"><a class="brand" href="#top">{brand_img}<span>{esc(name)}</span></a>'
         f'<button class="menu" type="button" aria-label="Menu">☰</button><div class="links">{"".join(nav_links)}{follow_btn}</div></div></nav>'
@@ -302,7 +330,7 @@ def render(data: dict) -> str:
         )
 
     if on.get("past", True) and past:
-        pics = "".join(f'<a href="{esc(e["url"])}" title="{esc(e["name"])}" target="_top"><img src="{esc(e["poster"])}" alt="{esc(e["name"])}" loading="lazy"></a>' for e in past if e.get("poster")) if template == "campus" else ""
+        pics = "".join(f'<a href="{esc(e["url"])}" title="{esc(e["name"])}" target="_top"><img src="{esc(e["poster"])}"{_srcset(e.get("poster_srcset"), "gallery")} alt="{esc(e["name"])}" loading="lazy"></a>' for e in past if e.get("poster")) if template == "campus" else ""
         body = f'<div class="gallery">{pics}</div>' if pics else '<div class="grid">' + "".join(_event_card(e, template, e["url"]) for e in past) + "</div>"
         parts.append(f'<section id="past"><div class="wrap"><h2>Past events</h2>{body}</div></section>')
 
@@ -311,14 +339,14 @@ def render(data: dict) -> str:
         for m in data["team"]:
             so = "".join(f'<a href="{_href(u)}" target="_blank" rel="noreferrer">{esc(k)}</a>' for k, u in m["links"])
             so_html = f'<div class="so">{so}</div>' if so else ""
-            people.append(f'<div class="person">{_img(m.get("photo"), m["name"])}<b>{esc(m["name"])}</b><span>{esc(m.get("role") or "")}</span>{so_html}</div>')
+            people.append(f'<div class="person">{_img(m.get("photo"), m["name"], srcset=m.get("photo_srcset"), kind="person")}<b>{esc(m["name"])}</b><span>{esc(m.get("role") or "")}</span>{so_html}</div>')
         parts.append(f'<section id="team"><div class="wrap"><h2>The team</h2><div class="people">{"".join(people)}</div></div></section>')
 
     if on.get("partners", True) and data["partners"]:
         logos = []
         for p in data["partners"]:
             role = f'<span>{esc(p["role"])}</span>' if p.get("role") else ""
-            logos.append(f'<div class="logo">{_img(p.get("logo"), p["name"])}<div><div>{esc(p["name"])}</div>{role}</div></div>')
+            logos.append(f'<div class="logo">{_img(p.get("logo"), p["name"], srcset=p.get("logo_srcset"), kind="partner")}<div><div>{esc(p["name"])}</div>{role}</div></div>')
         parts.append(f'<section id="partners"><div class="wrap"><h2>Partners</h2><div class="logos">{"".join(logos)}</div></div></section>')
 
     if on.get("follow", True) and follow_url:

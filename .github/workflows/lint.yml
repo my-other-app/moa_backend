@@ -17,6 +17,9 @@ jobs:
           python-version: "3.11"
       - run: pip install -r requirements-dev.txt
       - run: ruff check .
+      # New migrations only (after the cutoff revision): what would lock a
+      # hot table or rewrite it while production serves. Standard library only.
+      - run: python scripts/check_migrations.py
 
   test:
     runs-on: ubuntu-latest

@@ -1,0 +1,331 @@
+{
+ "counts": {
+  "clubs": 100000,
+  "upcoming": 300000,
+  "past": 200000,
+  "users": 100000,
+  "registrations": 300000,
+  "follows": 300000,
+  "threads": 3000,
+  "likes": 3000,
+  "comments": 3000
+ },
+ "max_event_regs": 6000,
+ "seeded_at": "2026-10-18T15:22:56.815256+00:00",
+ "seconds": {
+  "plan": 0.2,
+  "users": 4.2,
+  "clubs": 12.9,
+  "events": 40.1,
+  "event links": 49.6,
+  "registrations": 53.7,
+  "follows": 55.3,
+  "threads": 55.4,
+  "indexes": 119.5,
+  "club places, cities": 143.8,
+  "vacuum": 157.3
+ },
+ "index_build_seconds": {
+  "ix_club_partners_club_id": 0.07,
+  "ix_club_partners_is_deleted": 0.04,
+  "ix_club_sites_club_id": 0.03,
+  "ix_club_socials_is_deleted": 0.06,
+  "ix_club_team_members_club_id": 0.42,
+  "ix_club_team_members_is_deleted": 0.11,
+  "ix_club_threads_club_created": 0.01,
+  "ix_club_threads_club_id": 0.02,
+  "ix_club_threads_club_newest": 0.01,
+  "ix_club_threads_is_deleted": 0.01,
+  "ix_club_threads_newest": 0.01,
+  "ix_club_users_followers": 0.44,
+  "ix_club_users_link_is_deleted": 0.1,
+  "ix_club_users_link_tracking_link_id": 0.08,
+  "ix_club_users_user": 0.14,
+  "ix_clubs_is_deleted": 2.26,
+  "ix_clubs_link_unchecked": 0.1,
+  "ix_clubs_listed_newest": 0.03,
+  "ix_clubs_listed_popular": 0.04,
+  "ix_clubs_location_trgm": 0.73,
+  "ix_clubs_name_trgm": 0.52,
+  "ix_clubs_place": 0.02,
+  "ix_clubs_slug": 0.06,
+  "ix_clubs_tagline_trgm": 0.48,
+  "ix_clubs_unlisted": 0.06,
+  "ix_clubs_user_id": 0.17,
+  "ix_club_interests_club": 1.18,
+  "ix_club_interests_interest": 0.14,
+  "ix_clubs_interests_link_is_deleted": 0.07,
+  "ix_event_interests_event": 0.86,
+  "ix_event_interests_interest": 0.61,
+  "ix_event_interests_link_is_deleted": 0.22,
+  "ix_event_registrations_link_admission_no": 0.25,
+  "ix_event_registrations_link_is_deleted": 0.08,
+  "ix_event_registrations_link_ticket_id": 0.15,
+  "ix_event_registrations_link_tracking_link_id": 0.03,
+  "ix_registrations_event_created": 0.22,
+  "ix_registrations_event_email": 0.32,
+  "ix_registrations_event_name": 0.46,
+  "ix_registrations_payment_receipt": 0.02,
+  "ix_registrations_user": 0.07,
+  "uq_registrations_event_admission": 0.03,
+  "uq_registrations_event_user_live": 0.08,
+  "ix_event_speakers_event_id": 0.31,
+  "ix_events_category_start": 0.95,
+  "ix_events_club_start": 3.23,
+  "ix_events_ends_at": 1.1,
+  "ix_events_is_deleted": 0.84,
+  "ix_events_link_unchecked": 1.43,
+  "ix_events_location_trgm": 4.15,
+  "ix_events_long_ends_at": 1.24,
+  "ix_events_name_trgm": 5.35,
+  "ix_events_shown_created": 0.66,
+  "ix_events_shown_location_trgm": 3.65,
+  "ix_events_shown_name_trgm": 3.98,
+  "ix_events_shown_point": 0.98,
+  "ix_events_shown_popular": 1.75,
+  "ix_events_shown_start": 1.02,
+  "ix_events_slug": 2.03,
+  "ix_events_span": 13.45,
+  "ix_thread_comments_is_deleted": 0.01,
+  "ix_thread_comments_thread_created": 0.0,
+  "ix_thread_comments_thread_id": 0.0,
+  "ix_thread_likes_thread_id": 0.01,
+  "ix_thread_poll_options_thread_id": 0.0,
+  "ix_user_interests_interest": 0.72,
+  "ix_user_interests_is_deleted": 0.15,
+  "ix_user_interests_user": 0.15,
+  "ux_user_interests_user_interest": 0.53,
+  "ix_user_profiles_is_deleted": 0.57,
+  "ix_user_profiles_user": 0.06,
+  "ux_user_profiles_user_live": 0.07,
+  "ix_users_created_id": 0.39,
+  "ix_users_email_normalised": 0.22,
+  "ix_users_email_trgm": 2.34,
+  "ix_users_full_name_trgm": 0.7,
+  "ix_users_is_deleted": 0.09,
+  "ix_users_username_trgm": 0.45,
+  "uq_users_email_user_type": 0.26,
+  "uq_users_phone_user_type": 0.19
+ },
+ "database_bytes": 1432170979,
+ "tables": {
+  "events": {
+   "rows": 500000,
+   "heap_bytes": 323272704,
+   "index_bytes": 245833728,
+   "total_bytes": 569229312,
+   "bytes_per_row": 1138.5
+  },
+  "event_registrations_link": {
+   "rows": 300020,
+   "heap_bytes": 46628864,
+   "index_bytes": 77971456,
+   "total_bytes": 124649472,
+   "bytes_per_row": 415.5
+  },
+  "club_users_link": {
+   "rows": 300010,
+   "heap_bytes": 22970368,
+   "index_bytes": 41205760,
+   "total_bytes": 64208896,
+   "bytes_per_row": 214.0
+  },
+  "users": {
+   "rows": 200000,
+   "heap_bytes": 38944768,
+   "index_bytes": 63733760,
+   "total_bytes": 102727680,
+   "bytes_per_row": 513.6
+  },
+  "user_profiles": {
+   "rows": 100000,
+   "heap_bytes": 8445952,
+   "index_bytes": 8159232,
+   "total_bytes": 16646144,
+   "bytes_per_row": 166.5
+  },
+  "user_interests": {
+   "rows": 301013,
+   "heap_bytes": 20553728,
+   "index_bytes": 26705920,
+   "total_bytes": 47292416,
+   "bytes_per_row": 157.1
+  },
+  "clubs": {
+   "rows": 100000,
+   "heap_bytes": 97910784,
+   "index_bytes": 77602816,
+   "total_bytes": 175570944,
+   "bytes_per_row": 1755.7
+  },
+  "event_interests_link": {
+   "rows": 1000121,
+   "heap_bytes": 68280320,
+   "index_bytes": 70664192,
+   "total_bytes": 138993664,
+   "bytes_per_row": 139.0
+  },
+  "club_threads": {
+   "rows": 3000,
+   "heap_bytes": 892928,
+   "index_bytes": 679936,
+   "total_bytes": 1613824,
+   "bytes_per_row": 537.9
+  },
+  "thread_likes": {
+   "rows": 3000,
+   "heap_bytes": 253952,
+   "index_bytes": 401408,
+   "total_bytes": 688128,
+   "bytes_per_row": 229.4
+  },
+  "thread_comments": {
+   "rows": 3000,
+   "heap_bytes": 286720,
+   "index_bytes": 458752,
+   "total_bytes": 786432,
+   "bytes_per_row": 262.1
+  },
+  "club_team_members": {
+   "rows": 401115,
+   "heap_bytes": 49569792,
+   "index_bytes": 16744448,
+   "total_bytes": 66363392,
+   "bytes_per_row": 165.4
+  },
+  "event_speakers": {
+   "rows": 313251,
+   "heap_bytes": 31686656,
+   "index_bytes": 12140544,
+   "total_bytes": 43868160,
+   "bytes_per_row": 140.0
+  }
+ },
+ "indexes": [
+  {
+   "index": "ix_events_span",
+   "table": "events",
+   "bytes": 38494208
+  },
+  {
+   "index": "ix_events_name_trgm",
+   "table": "events",
+   "bytes": 32677888
+  },
+  {
+   "index": "ix_events_shown_name_trgm",
+   "table": "events",
+   "bytes": 22691840
+  },
+  {
+   "index": "ix_event_interests_interest",
+   "table": "event_interests_link",
+   "bytes": 22487040
+  },
+  {
+   "index": "event_interests_link_pkey",
+   "table": "event_interests_link",
+   "bytes": 22487040
+  },
+  {
+   "index": "ix_events_slug",
+   "table": "events",
+   "bytes": 22405120
+  },
+  {
+   "index": "ix_events_location_trgm",
+   "table": "events",
+   "bytes": 21766144
+  },
+  {
+   "index": "ix_event_interests_event",
+   "table": "event_interests_link",
+   "bytes": 18735104
+  },
+  {
+   "index": "ix_clubs_name_trgm",
+   "table": "clubs",
+   "bytes": 18087936
+  },
+  {
+   "index": "ix_clubs_tagline_trgm",
+   "table": "clubs",
+   "bytes": 16744448
+  },
+  {
+   "index": "ix_events_club_start",
+   "table": "events",
+   "bytes": 15474688
+  },
+  {
+   "index": "ix_events_category_start",
+   "table": "events",
+   "bytes": 15441920
+  },
+  {
+   "index": "ix_clubs_location_trgm",
+   "table": "clubs",
+   "bytes": 15409152
+  },
+  {
+   "index": "club_users_link_club_id_user_id_is_deleted_key",
+   "table": "club_users_link",
+   "bytes": 14704640
+  },
+  {
+   "index": "ix_registrations_event_email",
+   "table": "event_registrations_link",
+   "bytes": 14172160
+  },
+  {
+   "index": "ix_registrations_event_name",
+   "table": "event_registrations_link",
+   "bytes": 14155776
+  },
+  {
+   "index": "ix_events_shown_location_trgm",
+   "table": "events",
+   "bytes": 13934592
+  },
+  {
+   "index": "event_registrations_link_pkey",
+   "table": "event_registrations_link",
+   "bytes": 11821056
+  },
+  {
+   "index": "ix_events_shown_popular",
+   "table": "events",
+   "bytes": 11714560
+  },
+  {
+   "index": "ix_registrations_event_created",
+   "table": "event_registrations_link",
+   "bytes": 11575296
+  },
+  {
+   "index": "events_pkey",
+   "table": "events",
+   "bytes": 11255808
+  },
+  {
+   "index": "ix_club_users_followers",
+   "table": "club_users_link",
+   "bytes": 11223040
+  },
+  {
+   "index": "users_username_key",
+   "table": "users",
+   "bytes": 11083776
+  },
+  {
+   "index": "ix_events_ends_at",
+   "table": "events",
+   "bytes": 10960896
+  },
+  {
+   "index": "ix_event_registrations_link_ticket_id",
+   "table": "event_registrations_link",
+   "bytes": 10084352
+  }
+ ]
+}

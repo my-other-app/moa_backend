@@ -17,6 +17,7 @@ from app.api.subscriptions import gates
 from app.config import settings
 from app.core.auth.dependencies import ClubAuth
 from app.core.rate_limit import limiter
+from app.core.storage import media
 from app.core.storage.fields import signed_url
 from app.db.core import SessionDep
 from app.response import CustomHTTPException
@@ -114,11 +115,17 @@ async def site_page(session: SessionDep, slug: str) -> HTMLResponse:
     })
 
 
-@public_router.get("/{slug}/i", summary="One of the page's images: a fresh signed link to the bucket")
+@public_router.get("/{slug}/i", summary="One of the page's images: its address on the media CDN, or a fresh signed link to the bucket")
 async def site_image(slug: str, k: str = Query(..., max_length=400)) -> RedirectResponse:
     key = unquote(k)
     if not key.startswith(IMAGE_PREFIXES) or not key.lower().endswith(IMAGE_EXTS) or ".." in key:
         raise CustomHTTPException(404, message="No such image")
+    # A page published before the media CDN was on still points here. With
+    # it on, a public picture's address never changes, so the redirect may
+    # be kept for a day.
+    cdn = media.cdn_url(key)
+    if cdn is not None:
+        return RedirectResponse(cdn, status_code=302, headers={"Cache-Control": "public, max-age=86400"})
     # The process's one signer (and its cache of links), not a new boto3
     # client per image: making one loads the S3 service model, ~4 ms each.
     # Every image on a club's page is a public picture: signed for

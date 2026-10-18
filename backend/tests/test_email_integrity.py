@@ -44,7 +44,7 @@ from app.api.hooks import service as hooks
 from app.api.hooks.verdicts import Verdict
 from app.api.users.models import Users, UserTypes
 from app.config import settings
-from app.core import after_commit
+from app.core import after_commit, jobs
 from app.core.email import email as email_mod
 from app.core.email import pace, transport
 from app.core.mail import suppression
@@ -273,6 +273,7 @@ async def test_a_provider_timeout_is_tried_again_later_under_the_same_key(sessio
         await session.execute(update(Deliveries).where(Deliveries.id == row.id).values(next_attempt_at=datetime.now(timezone.utc) - timedelta(seconds=1)))
         await session.commit()
         assert (await deliveries.resume(session))["started"] == 1
+        await jobs.settle()
         await pipeline.drain()
     finally:
         email_mod.send_email = real
@@ -291,6 +292,7 @@ async def test_a_claim_left_by_a_dead_worker_is_put_back_and_sent(session, world
     await session.commit()
     resumed = await deliveries.resume(session)
     assert resumed["stale"] == len(world.regs) and resumed["started"] == 1
+    await jobs.settle()
     await pipeline.drain()
     assert len(outbox.sent) == len(world.regs)
     assert all(d.status is DeliveryStatus.sent for d in (await _rows(session, world.event.id)).values())
@@ -301,6 +303,7 @@ async def test_a_queue_whose_worker_never_started_is_picked_up(session, world, o
     await session.execute(update(Deliveries).where(Deliveries.id.in_(q["ids"])).values(updated_at=datetime.now(timezone.utc) - timedelta(minutes=3)))
     await session.commit()
     assert (await deliveries.resume(session))["started"] == 1
+    await jobs.settle()
     await pipeline.drain()
     assert len(outbox.sent) == len(world.regs)
     # A day-old queue is not sent: it may be for an event now over.
@@ -323,6 +326,7 @@ async def test_a_reminder_cut_off_by_a_deploy_is_finished_not_sent_again(session
 
     resumed = await emails.resume_messages(session)
     assert resumed["started"] == 1
+    await jobs.settle()
     await pipeline.drain()
     msg = await session.get(Messages, msg.id, populate_existing=True)
     assert msg.status is MessageStatus.SENT and msg.sent_count == len(world.regs)
@@ -355,6 +359,7 @@ async def test_a_provider_down_for_good_is_given_up_on_and_the_admins_told(sessi
     await session.execute(update(Deliveries).where(Deliveries.id == row.id).values(next_attempt_at=datetime.now(timezone.utc) - timedelta(seconds=1)))
     await session.commit()
     await deliveries.resume(session)
+    await jobs.settle()
     await pipeline.drain()
     row = (await _rows(session, world.event.id))[a.id]
     assert row.status is DeliveryStatus.dead and row.error.startswith("gave up after 2 tries")
@@ -422,7 +427,7 @@ async def committed(_engine, monkeypatch):
             await s.execute(delete(Deliveries).where(Deliveries.event_id == world.event_id))
             await s.execute(delete(emails.EmailTemplates).where(emails.EmailTemplates.club_id == world.club_id))
             await s.execute(delete(AdminNotifications).where(AdminNotifications.club_id == world.club_id))
-            await s.execute(delete(after_commit.AfterCommitJobs))
+            await s.execute(delete(jobs.Jobs))
             await s.execute(delete(EventRegistrationsLink).where(EventRegistrationsLink.event_id == world.event_id))
             await s.execute(delete(Events).where(Events.id == world.event_id))
             await s.execute(delete(EventCategories).where(EventCategories.id == world.category_id))
@@ -620,16 +625,23 @@ async def test_a_mail_that_must_go_is_written_down_with_its_change(session, monk
     monkeypatch.setattr(settings, "ADMIN_ALERT_EMAILS", "ops@example.com")
     after_commit.run_after_commit(session, admin_alerts.deliver, _alert(7))
     await session.flush()
-    [row] = list(await session.scalars(select(after_commit.AfterCommitJobs)))
-    assert row.job == "app.api.admin_alerts.service:deliver" and row.payload["args"][0]["title"] == "Alert 7"
-    assert row.next_attempt_at > datetime.now(timezone.utc)
-    # A job that is not on the list stays in memory only.
+    [row] = list(await session.scalars(select(jobs.Jobs)))
+    assert row.name == "admin_alerts.deliver" and row.payload["args"][0]["title"] == "Alert 7"
+    # Due at once: the runner the commit wakes takes it, and a claim is a
+    # lock, so nothing else can send it too -- no grace to wait out.
+    assert row.run_at <= datetime.now(timezone.utc) and row.finished_at is None
+    # A call that is not on the list stays in memory only.
     after_commit.run_after_commit(session, sent.append, "not durable")
     await session.flush()
-    assert await session.scalar(select(func.count()).select_from(after_commit.AfterCommitJobs)) == 1
+    assert await session.scalar(select(func.count()).select_from(jobs.Jobs)) == 1
+    await session.commit()
+    await after_commit.drain()
+    assert len([m for m in sent if isinstance(m, dict)]) == 1 and "not durable" in sent
 
 
-async def test_a_mail_cut_off_by_a_restart_is_sent_by_the_resumer(session, monkeypatch):
+async def test_a_mail_cut_off_by_a_restart_is_sent_when_its_lease_runs_out(session, monkeypatch):
+    """A process that took the mail and stopped (a deploy) never settles it;
+    once its lease is over another runner takes it and sends it."""
     sent: list = []
     monkeypatch.setattr(email_mod, "send_email", lambda **kw: sent.append(kw))
     monkeypatch.setattr(settings, "ADMIN_ALERT_EMAILS", "ops@example.com")
@@ -637,26 +649,61 @@ async def test_a_mail_cut_off_by_a_restart_is_sent_by_the_resumer(session, monke
 
     admin_alerts.reset_for_tests()
     past = datetime.now(timezone.utc) - timedelta(minutes=1)
-    session.add(after_commit.AfterCommitJobs(id=uuid.uuid4(), job="app.api.admin_alerts.service:deliver", payload={"args": [_alert(8)], "kwargs": {}}, next_attempt_at=past))
-    session.add(after_commit.AfterCommitJobs(id=uuid.uuid4(), job="app.no_such_module:gone", payload={"args": [], "kwargs": {}}, next_attempt_at=past))
+    cut = jobs.Jobs(name="admin_alerts.deliver", payload={"args": [_alert(8)], "kwargs": {}}, attempts=1, max_attempts=6,
+                    locked_by="api:gone:1:abc", locked_until=past, run_at=past)
+    session.add(cut)
     await session.commit()
-    assert await after_commit.resume(session) == 1
+    assert await jobs.run_due(ids=[cut.id]) == 1
     assert len(sent) == 1 and sent[0]["recipients"] == ["ops@example.com"] and "Alert 8" in sent[0]["subject"]
-    [left] = list(await session.scalars(select(after_commit.AfterCommitJobs).execution_options(populate_existing=True)))
-    # The one that cannot run waits longer each time, then is given up on.
-    assert left.job == "app.no_such_module:gone" and left.attempts == 1 and left.next_attempt_at > datetime.now(timezone.utc)
-    for _ in range(after_commit.MAX_ATTEMPTS):
-        await session.execute(update(after_commit.AfterCommitJobs).where(after_commit.AfterCommitJobs.id == left.id).values(next_attempt_at=past))
+    row = await session.get(jobs.Jobs, cut.id, populate_existing=True)
+    assert row.finished_at is not None and row.attempts == 2 and row.locked_by is None
+    assert await jobs.run_due(ids=[cut.id]) == 0  # sent once
+
+
+async def test_a_billing_mail_the_provider_refuses_is_retried_then_given_up_on(session, monkeypatch):
+    """The strict twin raises, so an outage is retried with a growing wait,
+    and after the last try the job is dead and the admins are told."""
+    from app.api.subscriptions import notices
+
+    tries: list = []
+
+    def refuse(**kw):
+        tries.append(kw)
+        raise RuntimeError("SES is down")
+
+    monkeypatch.setattr(email_mod, "send_email", refuse)
+    after_commit.run_after_commit(session, notices._send, "owner@example.com", "Your plan", ["Hello"], None, None)
+    await session.commit()
+    await after_commit.drain()
+    [row] = list(await session.scalars(select(jobs.Jobs).where(jobs.Jobs.name == "mail.billing_notice")))
+    assert len(tries) == 1 and row.attempts == 1 and not row.dead and "SES is down" in row.last_error
+    waits = [(row.run_at - datetime.now(timezone.utc)).total_seconds()]
+    for _ in range(row.max_attempts - 1):
+        await session.execute(update(jobs.Jobs).where(jobs.Jobs.id == row.id).values(run_at=datetime.now(timezone.utc) - timedelta(seconds=1)))
         await session.commit()
-        await after_commit.resume(session)
-    assert (await session.get(after_commit.AfterCommitJobs, left.id, populate_existing=True)).dead is True
+        await jobs.run_due(ids=[row.id])
+        row = await session.get(jobs.Jobs, row.id, populate_existing=True)
+        waits.append((row.run_at - datetime.now(timezone.utc)).total_seconds())
+    assert len([t for t in tries if t["recipients"] == ["owner@example.com"]]) == row.max_attempts and row.dead is True
+    assert 10 <= waits[0] <= 35 and waits[1] > 25 and waits[2] > 55  # 30 s, then about 1, 2 minutes
+    from app.api.admin_alerts.models import AdminNotifications
+
+    [alert] = list(await session.scalars(select(AdminNotifications).where(AdminNotifications.kind == "job_dead")))
+    assert alert.data["name"] == "mail.billing_notice" and alert.data["job_id"] == row.id
 
 
 async def test_a_mail_that_went_is_crossed_off(_engine, monkeypatch):
     from app.api.admin_alerts import service as admin_alerts
 
     make = async_sessionmaker(bind=_engine, **SESSION_KWARGS)
-    monkeypatch.setattr(after_commit, "session_factory", make)
+
+    @asynccontextmanager
+    async def own():
+        async with make() as s:
+            yield s
+
+    # Committed rows, so the runner works on sessions of its own too.
+    monkeypatch.setattr(jobs, "session_scope", own)
     monkeypatch.setattr(settings, "ADMIN_ALERT_EMAILS", "ops@example.com")
     sent: list = []
     monkeypatch.setattr(email_mod, "send_email", lambda **kw: sent.append(kw))
@@ -668,16 +715,52 @@ async def test_a_mail_that_went_is_crossed_off(_engine, monkeypatch):
     try:
         assert len(sent) == 1
         async with make() as s:
-            assert await s.scalar(select(func.count()).select_from(after_commit.AfterCommitJobs)) == 0
+            [row] = list(await s.scalars(select(jobs.Jobs).where(jobs.Jobs.name == "admin_alerts.deliver")))
+            assert row.finished_at is not None and not row.dead
     finally:
         async with make() as s:
-            await s.execute(delete(after_commit.AfterCommitJobs))
+            await s.execute(delete(jobs.Jobs))
             await s.commit()
 
 
-def test_every_durable_job_can_be_found_by_its_name():
-    for name in after_commit.DURABLE:
+async def test_the_old_outbox_rows_are_moved_into_jobs_and_sent(session, monkeypatch):
+    """A row a process from before the change left in after_commit_jobs is
+    adopted by the jobs' maintenance and sent; one it does not know stays."""
+    sent: list = []
+    monkeypatch.setattr(email_mod, "send_email", lambda **kw: sent.append(kw))
+    monkeypatch.setattr(settings, "ADMIN_ALERT_EMAILS", "ops@example.com")
+    # The model is gone, so create_all no longer makes it; a database made
+    # before may still have one (dropped here inside the test's transaction).
+    await session.execute(text("DROP TABLE IF EXISTS after_commit_jobs"))
+    await session.execute(text("""
+        CREATE TABLE after_commit_jobs (id uuid PRIMARY KEY, job varchar(200) NOT NULL, payload json NOT NULL,
+            attempts integer NOT NULL, next_attempt_at timestamptz NOT NULL, last_error varchar(400), dead boolean NOT NULL,
+            created_at timestamptz NOT NULL)
+    """))
+    past = datetime.now(timezone.utc) - timedelta(minutes=3)
+    for job, payload in (
+        ("app.api.admin_alerts.service:deliver", {"args": [_alert(11)], "kwargs": {}}),
+        ("app.no_such_module:gone", {"args": [], "kwargs": {}}),
+    ):
+        await session.execute(
+            text("INSERT INTO after_commit_jobs VALUES (:id, :job, CAST(:payload AS json), 2, :at, NULL, false, :at)"),
+            {"id": uuid.uuid4(), "job": job, "payload": __import__("json").dumps(payload), "at": past},
+        )
+    await session.commit()
+    assert await after_commit.adopt_legacy(session) == 1
+    assert await session.scalar(text("SELECT job FROM after_commit_jobs")) == "app.no_such_module:gone"
+    [row] = list(await session.scalars(select(jobs.Jobs)))
+    assert row.name == "admin_alerts.deliver" and row.attempts == 2
+    assert await jobs.run_due(ids=[row.id]) == 1
+    assert len(sent) == 1 and "Alert 11" in sent[0]["subject"]
+
+
+def test_every_durable_call_has_its_job():
+    handlers = jobs.handlers()
+    for name, (job, runs, _what) in after_commit.DURABLE.items():
         assert callable(after_commit.resolve(name)), name
+        assert callable(after_commit.resolve(runs)), runs
+        assert job in handlers, job
 
 
 async def test_shutdown_waits_for_the_loops_the_mail_jobs_and_the_after_commit_mails(monkeypatch):
@@ -735,26 +818,68 @@ async def test_the_lifespan_ends_with_the_shutdown(monkeypatch):
         ("app.api.emails.service", "sweep_loop"), ("app.api.closeout.service", "sweep_loop"), ("app.api.live.service", "sweep_loop"),
         ("app.api.subscriptions.sweep", "sweep_loop"), ("app.api.discover.counters", "check_loop"), ("app.api.club_domains.sweep", "sweep_loop"),
         ("app.api.store.sweep", "sweep_loop"), ("app.api.payments.sweep", "sweep_loop"), ("app.api.auth.retention", "sweep_loop"),
+        ("app.api.ledger.jobs", "daily_loop"),
+        ("app.api.search.sync", "loop"),
     )
     for module, name in loops:
         monkeypatch.setattr(__import__(module, fromlist=[name]), name, forever)
     monkeypatch.setattr(seed, "seed_badges", nothing)
     monkeypatch.setattr(core, "check_connection_budget", nothing)
     calls: list = []
+    runners: list = []
 
-    async def shutdown(loops, budget=doth.SHUTDOWN_BUDGET):
+    async def shutdown(loops, budget=doth.SHUTDOWN_BUDGET, runner=None):
         calls.append(loops)
+        runners.append(runner)
         for t in loops:
             t.cancel()
         await asyncio.gather(*loops, return_exceptions=True)
+        if runner is not None:
+            await runner.stop(timeout=1.0)
 
     monkeypatch.setattr(doth, "shutdown", shutdown)
+    before = jobs.local()
     try:
         async with doth.lifespan(doth.application):
-            pass
+            # Without APP_JOBS_WORKER this process runs its own jobs.
+            assert isinstance(jobs.local(), jobs.Runner) and jobs.local().kind == "api"
     finally:
         gc.unfreeze()
+        jobs.use(before)
     assert len(calls) == 1 and len(calls[0]) == len(loops) and all(t.done() for t in calls[0])
+    assert isinstance(runners[0], jobs.Runner)
+
+
+async def test_the_lifespan_leaves_jobs_and_sweeps_to_the_worker_when_told(monkeypatch):
+    """APP_JOBS_WORKER: the API runs no job runner. APP_SWEEPS_IN_WORKER: no sweeps."""
+    import gc
+
+    import doth
+    from app.api.badges import seed
+    from app.db import core
+
+    async def nothing(*_a, **_k):
+        return None
+
+    monkeypatch.setattr(seed, "seed_badges", nothing)
+    monkeypatch.setattr(core, "check_connection_budget", nothing)
+    monkeypatch.setattr(settings, "JOBS_WORKER", True)
+    monkeypatch.setattr(settings, "SWEEPS_IN_WORKER", True)
+    monkeypatch.setattr(doth, "start_loops", lambda: (_ for _ in ()).throw(AssertionError("the API started the sweeps")))
+    seen: list = []
+
+    async def shutdown(loops, budget=doth.SHUTDOWN_BUDGET, runner=None):
+        seen.append((loops, runner))
+
+    monkeypatch.setattr(doth, "shutdown", shutdown)
+    before = jobs.use(None)
+    try:
+        async with doth.lifespan(doth.application):
+            assert jobs.local() is None
+    finally:
+        gc.unfreeze()
+        jobs.use(before)
+    assert seen == [([], None)]
 
 
 # ─── 9. An audience counted by the database ──────────────────────────────────

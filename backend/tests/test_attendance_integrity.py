@@ -315,9 +315,12 @@ async def _drop(make, w):
 
 @pytest.fixture
 def make(_engine, monkeypatch):
-    # The check-in hooks are not what these tests are about, and would write
-    # rows for the committed guests on a connection of their own.
-    monkeypatch.setattr(after_mod, "schedule", lambda *a, **k: None)
+    # The check-in hooks are not what these tests are about, and would leave
+    # jobs (and, run, rows) for the committed guests behind.
+    async def no_hooks(*_a, **_k):
+        return None
+
+    monkeypatch.setattr(after_mod, "enqueue", no_hooks)
 
     def factory():
         s = async_sessionmaker(bind=_engine, **SESSION_KWARGS)()

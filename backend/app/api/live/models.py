@@ -209,13 +209,18 @@ class FeedbackSurveys(AbstractSQLModel, TimestampsMixin):
 class FeedbackSends(AbstractSQLModel):
     """Who the survey went to: one row per guest, claimed before the mail goes,
     so sending again (or the sweep and a send at once) reaches only those not
-    sent yet."""
+    sent yet. The mail itself is a job per guest (service.SURVEY_MAIL), which
+    sets `mailed_at` once the provider took it: a job run again finds it set
+    and mails nobody twice; a guest claimed whose mail never went has none."""
 
     __tablename__ = "feedback_sends"
 
     survey_id = Column(UUID(as_uuid=True), ForeignKey("feedback_surveys.id", ondelete="CASCADE"), primary_key=True)
     registration_id = Column(UUID(as_uuid=True), ForeignKey("event_registrations_link.id", ondelete="CASCADE"), primary_key=True)
+    # Claimed: the guest is to be sent it.
     sent_at = Column(TZAwareDateTime(timezone=True), server_default=sa.func.now(), nullable=False)
+    # Mailed: the provider took it.
+    mailed_at = Column(TZAwareDateTime(timezone=True), nullable=True)
 
 
 class FeedbackResponses(AbstractSQLModel):

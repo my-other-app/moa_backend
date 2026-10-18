@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload, aliased, joinedload
 import secrets
 
 
+from app.core import jobs
 from app.core.utils.keys import generate_slug
 from app.response import CustomHTTPException
 from app.core.response.sorting import apply_sort
@@ -237,6 +238,13 @@ async def approve_club(session: AsyncSession, club_id: int) -> Clubs:
     # serialization (outside the session's async context) would raise
     # MissingGreenlet, since Pydantic can't await it.
     return await club_for_answer(session, club.id)
+
+
+@jobs.handler("clubs.approved_email", max_attempts=4, timeout=60.0)
+async def _approved_email_job(p: dict) -> None:
+    import asyncio
+
+    await asyncio.to_thread(send_approved_email, p["to"], club_name=p["club_name"])
 
 
 def send_approved_email(to: str, *, club_name: str) -> None:
@@ -514,9 +522,13 @@ def _clubs_filters(
 ):
     """The list's filters, each an EXISTS on the person's own link row (the
     unique (club_id, user_id, is_deleted) index) or on the club's interests,
-    so no join can repeat a club."""
+    so no join can repeat a club. `search` is normalised already
+    (search.text.normalise): every word in what the club is found by, as
+    discover's club search matches it (clubs.search_text)."""
     if search and search.strip():
-        query = query.where(Clubs.name.ilike(f"%{search.strip()}%"))
+        from app.api.discover import service as discover
+
+        query = query.where(discover._club_words(search))
     if org_id:
         query = query.where(Clubs.org_id == org_id)
     if interest_ids:
@@ -594,26 +606,44 @@ async def get_all_clubs(
     if not include_unverified:
         query = query.where(Clubs.listed == True)  # noqa: E712
 
+    # The public list's words with nothing of the person's own to filter by:
+    # Meilisearch when it is on and well (app.api.search.engine), which hands
+    # back the page's ids in the list's order; the rows are read here.
+    from app.api.search import engine
+    from app.api.search import text as stext
+
+    found = None
+    if search and search.strip():
+        if (not include_unverified and is_verified is None and org_id is None and is_following is None and is_pinned is None
+                and is_hidden is None and sort is None and order is None and offset + limit <= engine.MAX_HITS):
+            found = await engine.list_clubs(session, search, limit=limit, offset=offset, interest_ids=interest_ids)
+        search = await stext.normalise(session, search)
+
     query = _clubs_filters(
         query, user_id=user_id, org_id=org_id, is_following=is_following, is_pinned=is_pinned,
         is_hidden=is_hidden, interest_ids=interest_ids, search=search,
     )
 
-    ids = query.with_only_columns(Clubs.id).order_by(None)
-    if include_unverified:
-        total = int(await session.scalar(select(func.count()).select_from(ids.subquery())) or 0)
+    if found is not None:
+        page_ids, total = found
+        by_id = {r[0].id: r for r in (await session.execute(query.where(Clubs.id.in_(page_ids)))).all()} if page_ids else {}
+        results = [by_id[i] for i in page_ids if i in by_id]
     else:
-        total = int(await session.scalar(select(func.count()).select_from(ids.limit(LIST_COUNT_CAP + 1).subquery())) or 0)
+        ids = query.with_only_columns(Clubs.id).order_by(None)
+        if include_unverified:
+            total = int(await session.scalar(select(func.count()).select_from(ids.subquery())) or 0)
+        else:
+            total = int(await session.scalar(select(func.count()).select_from(ids.limit(LIST_COUNT_CAP + 1).subquery())) or 0)
 
-    query = apply_sort(
-        query,
-        columns={"created": Clubs.created_at, "name": Clubs.name, "followers": followers},
-        default=Clubs.created_at,
-        sort=sort,
-        order=order,
-    ).order_by(Clubs.id.desc()).limit(limit).offset(offset)
+        query = apply_sort(
+            query,
+            columns={"created": Clubs.created_at, "name": Clubs.name, "followers": followers},
+            default=Clubs.created_at,
+            sort=sort,
+            order=order,
+        ).order_by(Clubs.id.desc()).limit(limit).offset(offset)
 
-    results = (await session.execute(query)).all()
+        results = (await session.execute(query)).all()
     if not include_unverified and total > LIST_COUNT_CAP:
         # Past the cap: at least one more than this page reaches when there is a next page.
         total = max(LIST_COUNT_CAP, offset + len(results))
@@ -718,10 +748,15 @@ async def follow_club(session: AsyncSession, club_id: int, user_id: int, trackin
 
     link = await links.by_code(session, tracking_ref) if tracking_ref else None
     link_id = link.id if link is not None and link.club_id == club_id else None
-    stmt = _link_upsert(club_id, user_id, is_following=True, tracking_link_id=link_id)
+    # followed_at: when this follow began, for the shared inbox
+    # (app.core.notifications.inbox). A new follow is unmuted.
+    stmt = _link_upsert(club_id, user_id, is_following=True, tracking_link_id=link_id, followed_at=datetime.now(timezone.utc))
     stmt = stmt.on_conflict_do_update(
         index_elements=["club_id", "user_id", "is_deleted"],
-        set_={"is_following": True, "updated_at": stmt.excluded.updated_at, "tracking_link_id": func.coalesce(stmt.excluded.tracking_link_id, ClubUsersLink.tracking_link_id)},
+        set_={
+            "is_following": True, "updated_at": stmt.excluded.updated_at, "followed_at": stmt.excluded.followed_at, "is_muted": False,
+            "tracking_link_id": func.coalesce(stmt.excluded.tracking_link_id, ClubUsersLink.tracking_link_id),
+        },
         where=ClubUsersLink.is_following == False,  # noqa: E712
     ).returning(ClubUsersLink.id)
     row_id = await session.scalar(stmt)
@@ -749,6 +784,11 @@ async def unfollow_club(session: AsyncSession, club_id: int, user_id: int):
     )
     if row_id is None:
         raise CustomHTTPException(409, "not following the club")
+    # Their devices leave the club's topic now, not at their next start.
+    from app.core.notifications import topics
+    from app.core.notifications.delivery import club_topic
+
+    await topics.forget(session, user_id, [club_topic(club_id)])
     await session.commit()
     _forget_for_you(user_id)
     return await _link_row(session, row_id)

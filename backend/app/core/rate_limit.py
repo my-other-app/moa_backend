@@ -105,11 +105,71 @@ def _is_site_read(request, endpoint_func) -> bool:
     return request.method in ("GET", "HEAD") and _name(endpoint_func) in site_read_names()
 
 
-# In memory by default (no Redis in this stack today, and WORKERS=1 in
-# production, so per-process limits are accurate). APP_RATE_LIMIT_STORAGE
-# points it elsewhere -- redis://host:6379/0 -- once there is more than one
-# worker or host, so they share one budget instead of each keeping its own.
-limiter = SiteAwareLimiter(key_func=get_remote_address, storage_uri=settings.RATE_LIMIT_STORAGE or "memory://")
+def storage_uri() -> str:
+    """Where the counts live: APP_RATE_LIMIT_STORAGE when it names a store,
+    else Redis when APP_REDIS_URL is set, else this process's memory."""
+    uri = (settings.RATE_LIMIT_STORAGE or "").strip() or "memory://"
+    if uri == "memory://" and (settings.REDIS_URL or "").strip():
+        return settings.REDIS_URL.strip()
+    return uri
+
+
+def storage_options(uri: str) -> dict:
+    """For Redis: short timeouts (a limit is checked on the event loop, on
+    every limited request) and keys of our own."""
+    if not uri.startswith(("redis://", "rediss://", "redis+unix://")):
+        return {}
+    timeout = float(settings.REDIS_TIMEOUT)
+    return {"socket_timeout": timeout, "socket_connect_timeout": timeout, "key_prefix": "moa:limits"}
+
+
+class _FailSafe:
+    """The limiter's counter, falling back to this process's memory the
+    moment the shared store fails (Redis down, a timeout), so a request is
+    limited per process rather than answered with a 500. slowapi's own
+    recovery check puts the shared store back once it answers again.
+
+    slowapi falls back only inside its own route check; the site's bucket
+    and the live room's limits call the counter directly
+    (`limiter.limiter.hit`), and would raise. Every caller goes through this."""
+
+    def __init__(self, owner: "SiteAwareLimiter"):
+        self._owner = owner
+
+    def __getattr__(self, name: str):
+        owner = self._owner
+
+        def call(*args, **kwargs):
+            fallback = owner._fallback_limiter
+            if owner._storage_dead and fallback is not None:
+                return getattr(fallback, name)(*args, **kwargs)
+            try:
+                return getattr(owner._limiter, name)(*args, **kwargs)
+            except Exception:  # noqa: BLE001
+                if fallback is None:
+                    raise
+                if not owner._storage_dead:
+                    logger.warning("rate limit storage unreachable; counting in this process until it answers", exc_info=True)
+                owner._storage_dead = True
+                return getattr(fallback, name)(*args, **kwargs)
+
+        return call
+
+
+class SharedLimiter(SiteAwareLimiter):
+    @property
+    def limiter(self):
+        return _FailSafe(self)
+
+
+# In memory by default: per process, which is exact while WORKERS=1. With
+# Redis (APP_REDIS_URL, or a redis:// APP_RATE_LIMIT_STORAGE) every worker
+# and host shares one budget instead of each keeping its own, and falls back
+# to its own memory while Redis does not answer.
+_uri = storage_uri()
+limiter = SharedLimiter(
+    key_func=get_remote_address, storage_uri=_uri, storage_options=storage_options(_uri), in_memory_fallback_enabled=True,
+)
 
 
 def account_or_address(request) -> str:

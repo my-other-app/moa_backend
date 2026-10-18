@@ -169,7 +169,7 @@ async def _search_criteria(session, search: str):
     An exact id, address (through ix_users_email_normalised) or username is
     found by index. A whole address that matches is the answer on its own.
     Anything else is those exact matches together with "contains" on the
-    name, address and username, served by their trigram indexes -- for a
+    name, address and username, served by one trigram index -- for a
     term of three characters or more; a shorter one matches exactly or not
     at all, since a trigram index cannot narrow one or two letters and
     "contains" would read every account."""
@@ -190,9 +190,14 @@ async def _search_criteria(session, search: str):
         return [Users.id.in_(ids)]
     found = [Users.id.in_(ids)] if ids else []
     if len(term) >= _FUZZY_MIN:
-        escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        like = f"%{escaped}%"
-        found += [Users.full_name.ilike(like), Users.email.ilike(like), Users.username.ilike(like)]
+        # The name, username and address are one column, lowercased and
+        # unaccented (app.api.search.text), under one trigram index; the
+        # term is normalised the same way, so "jose" finds "José".
+        from app.api.search import text as stext
+
+        folded = await stext.normalise(session, term)
+        escaped = folded.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        found.append(Users.search_text.like(f"%{escaped}%", escape="\\"))
     return [or_(*found)] if found else [false()]
 
 
@@ -606,6 +611,7 @@ async def register_fcm_token(
         user_id=user.id,
         fcm_token=body.fcm_token,
         platform=body.platform,
+        supports_topics=body.topics == 1,
     )
     return FCMTokenResponse(success=True, message="FCM token registered successfully")
 

@@ -3,7 +3,7 @@ import io
 import logging
 from typing import Optional
 from fastapi import Request, UploadFile
-from sqlalchemy import ARRAY, Integer, and_, any_, cast, delete, exists, literal_column, select, func, or_, text
+from sqlalchemy import and_, delete, exists, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
 from sqlalchemy.dialects.postgresql import INTERVAL
@@ -610,22 +610,21 @@ async def list_events(
     # than sorting thousands of whole rows with their club and category.
     query = select(Events.id).where(Events.is_deleted == False)
 
-    # Search filter - use ILIKE for case-insensitive pattern matching
-    # Searches in event name and category name. The category side is the ids
-    # of the categories whose name matches, compared as one array, so both
-    # sides of the OR can use an index (a trigram index on the name).
+    # Words: every word somewhere the event is found by (its name, place,
+    # club, category, interests and topics), as discover's search matches
+    # them: one trigram-indexed column, events.search_text. With Meilisearch
+    # on and well, a search here with nothing of the person's own to filter
+    # by asks it instead (app.api.search.engine), with the same rules.
     if search and search.strip():
-        search_pattern = f"%{search.strip()}%"
-        matching_categories = select(func.array_agg(EventCategories.id)).where(
-            EventCategories.name.ilike(search_pattern),
-            EventCategories.is_deleted == False,
-        ).scalar_subquery()
-        query = query.filter(
-            or_(
-                Events.name.ilike(search_pattern),
-                Events.category_id == any_(func.coalesce(matching_categories, cast(literal_column("'{}'"), ARRAY(Integer)))),
-            )
-        )
+        from app.api.discover import service as discover
+        from app.api.search import engine
+        from app.api.search import text as stext
+
+        if is_following is None and is_registered is None and offset + limit <= engine.MAX_HITS:
+            found = await engine.list_events(session, search, limit=limit, offset=offset, is_ended=is_ended, interest_ids=interest_ids)
+            if found is not None:
+                return found
+        query = query.filter(discover._event_words(await stext.normalise(session, search)))
 
     # Filter by interests: an event with any of them, once. A semi-join
     # (EXISTS) rather than a join and DISTINCT: DISTINCT over every column of
@@ -671,10 +670,16 @@ async def list_events(
                 ),
             ).filter(EventRegistrationsLink.id == None)
 
-    # Filter by ended status (FIXED: corrected logic)
-    # Archived events leave the public lists; a guest's own registrations still show them.
+    # Archived events leave the public lists; a guest's own registrations still
+    # show them. So do drafts and the events of clubs the public may not see
+    # (unverified, deleted, under a blocked organisation): every public rule
+    # is clubs.listed, as on the discover site.
     if not is_registered:
-        query = query.filter(Events.lifecycle != EventStatus.archived)
+        query = query.filter(
+            Events.lifecycle.notin_((EventStatus.archived, EventStatus.draft)),
+            Events.club_id.isnot(None),
+            Events.club_id.notin_(select(Clubs.id).where(Clubs.listed == False)),  # noqa: E712
+        )
 
     # event_end_time = event_datetime + duration hours
     if is_ended is not None:

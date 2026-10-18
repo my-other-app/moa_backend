@@ -104,7 +104,7 @@ def item_out(m: EventStoreItems, earned: Decimal = Decimal(0)) -> dict:
     total, sold, held = _total(m), _sold(m), _held(m)
     return dict(
         id=str(m.id), event_id=m.event_id, name=m.name, description=m.description, photo_key=m.photo_key,
-        photo_url=objects.presigned_url(m.photo_key) if m.photo_key else None, price=_f(m.price), stock=m.stock, sold=sold, held=held, total=total,
+        photo_url=objects.photo_url(m.photo_key), price=_f(m.price), stock=m.stock, sold=sold, held=held, total=total,
         left=_left(total, sold, held), earned=_f(earned), available_roles=m.available_roles, free_roles=list(m.free_roles or []), on_sale=m.on_sale,
         sold_out=total > 0 and sold + held >= total, sort_order=m.sort_order,
         variants=[
@@ -214,7 +214,7 @@ async def catalog(session, event: Events) -> dict:
         if total > 0 and sold + held >= total:
             continue
         items.append(dict(
-            id=str(m.id), name=m.name, description=m.description, photo_url=objects.presigned_url(m.photo_key) if m.photo_key else None,
+            id=str(m.id), name=m.name, description=m.description, photo_url=objects.photo_url(m.photo_key),
             price=_f(Decimal(0) if "attendee" in (m.free_roles or []) else m.price), left=None if m.variants else _left(total, sold, held),
             variants=[
                 dict(id=str(v.id), label=v.label, left=_left(v.stock, v.sold_count, v.reserved_count))
@@ -394,7 +394,13 @@ async def place_order(session, event: Events, reg: Reg, picks, role: str = "atte
     order.held_until = _now() + HOLD_FOR
     await session.flush()
     if total == 0:
+        # Given free (a role's free pick): sold at nothing, and in the
+        # ledger as a zero-rupee comp, so the pieces are still counted.
+        from app.api.ledger import book as ledger_book
+        from app.api.ledger import service as ledger
+
         await mark_paid(session, order)
+        await ledger.sync_registration(session, reg, kind=ledger_book.COMP, accounts=(ledger_book.STORE, ledger_book.STORE_HELD))
     return order
 
 
@@ -467,13 +473,25 @@ async def mark_paid(session, order: EventStoreOrders) -> str:
 async def fulfil(session, order: EventStoreOrders) -> dict:
     """An oversold order the organiser has found the pieces for (stock
     raised): taken from the shelf now, and paid. SOLD_OUT while the pieces
-    still are not there."""
+    still are not there. In the ledger, its money moves from held to sold,
+    dated when it was paid (the finance page's month for it)."""
+    from app.api.ledger import book as ledger_book
+    from app.api.ledger import service as ledger
+
+    # The registration before the order, as a refund takes them: two that
+    # meet wait for one another rather than deadlock.
+    reg = await session.scalar(select(Reg).where(Reg.id == order.registration_id).with_for_update())
     o = await _locked(session, order)
     if o is None or o.status != "oversold":
         raise CustomHTTPException(409, message="Only an oversold order is fulfilled", error_code="NOT_OVERSOLD")
     if not await _take_all(session, o, _sell_fresh):
         raise CustomHTTPException(409, message="The pieces are still not in stock. Raise the stock first, or refund.", error_code="SOLD_OUT")
+    if reg is not None:
+        await ledger.ensure_history(session, reg)
     o.status = "paid"
+    if reg is not None:
+        await ledger.sync_registration(session, reg, kind=ledger_book.FULFIL, at=_now(), origin_at=o.paid_at,
+                                       accounts=(ledger_book.STORE, ledger_book.STORE_HELD))
     await session.commit()
     reg = await session.get(Reg, o.registration_id)
     return order_out(o, reg)

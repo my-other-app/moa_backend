@@ -1,0 +1,558 @@
+{
+ "label": "after",
+ "targets": {
+  "club": "club-86872-yoga",
+  "event": "e263768-biotech-hackathon",
+  "event_big_category": "e35860-marketing-summit",
+  "interest": 24,
+  "category": 4,
+  "user_id": 1
+ },
+ "results": [
+  {
+   "name": "home lat/lng",
+   "path": "/discover/home",
+   "params": {
+    "lat": 12.9716,
+    "lng": 77.5946
+   },
+   "n": 20,
+   "p50": 6.871603996842168,
+   "p95": 7.797122586634941,
+   "p99": 7.917424513143487,
+   "mean": 7.0638770012010355,
+   "statements_min": 0,
+   "statements_max": 0,
+   "sql_ms": 0,
+   "bytes": 65227,
+   "pages": 0,
+   "pages_hit": 0,
+   "pages_read": 0
+  },
+  {
+   "name": "home lat/lng (cold)",
+   "path": "/discover/home",
+   "params": {
+    "lat": 12.9716,
+    "lng": 77.5946
+   },
+   "n": 5,
+   "p50": 18322.64120801119,
+   "p95": 18890.7975161972,
+   "p99": 18986.28883603611,
+   "mean": 16394.734800004517,
+   "statements_min": 28,
+   "statements_max": 81,
+   "sql_ms": 16684.352400607895,
+   "bytes": 65204,
+   "pages": 127678,
+   "pages_hit": 19335,
+   "pages_read": 108343
+  },
+  {
+   "name": "events q",
+   "path": "/discover/events",
+   "params": {
+    "q": "robotics"
+   },
+   "n": 7,
+   "p50": 1986.5408750047209,
+   "p95": 2399.9305836041453,
+   "p99": 2493.114283925388,
+   "mean": 1768.65408343396,
+   "statements_min": 6,
+   "statements_max": 7,
+   "sql_ms": 2080.004690851118,
+   "bytes": 34457,
+   "pages": 98848,
+   "pages_hit": 78881,
+   "pages_read": 19967
+  },
+  {
+   "name": "events q short",
+   "path": "/discover/events",
+   "params": {
+    "q": "ai"
+   },
+   "n": 5,
+   "p50": 4424.525791007909,
+   "p95": 5648.267949800356,
+   "p99": 5777.8339563607005,
+   "mean": 4619.18368319748,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 4586.256483005127,
+   "bytes": 32895,
+   "pages": 151544,
+   "pages_hit": 81199,
+   "pages_read": 70345
+  },
+  {
+   "name": "events q typo",
+   "path": "/discover/events",
+   "params": {
+    "q": "robtics"
+   },
+   "n": 13,
+   "p50": 354.52504199929535,
+   "p95": 2701.5967669984084,
+   "p99": 3012.62998699618,
+   "mean": 940.4639360772518,
+   "statements_min": 7,
+   "statements_max": 8,
+   "sql_ms": 917.346631233858,
+   "bytes": 34477,
+   "pages": 30522,
+   "pages_hit": 317,
+   "pages_read": 30205
+  },
+  {
+   "name": "events q relevance",
+   "path": "/discover/events",
+   "params": {
+    "q": "robotics",
+    "sort": "relevance"
+   },
+   "n": 20,
+   "p50": 207.30674999504117,
+   "p95": 996.5056836575969,
+   "p99": 1187.2317367390492,
+   "mean": 376.26306870006374,
+   "statements_min": 6,
+   "statements_max": 6,
+   "sql_ms": 362.3526083494653,
+   "bytes": 34457,
+   "pages": 99937,
+   "pages_hit": 80594,
+   "pages_read": 19343
+  },
+  {
+   "name": "events lat/lng (radius 50, date)",
+   "path": "/discover/events",
+   "params": {
+    "lat": 12.9716,
+    "lng": 77.5946
+   },
+   "n": 20,
+   "p50": 57.057562000409234,
+   "p95": 106.22946069634062,
+   "p99": 199.94192493904833,
+   "mean": 71.30362714960938,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 62.293201801367104,
+   "bytes": 34784,
+   "pages": 9066,
+   "pages_hit": 4718,
+   "pages_read": 4348
+  },
+  {
+   "name": "events distance r=50",
+   "path": "/discover/events",
+   "params": {
+    "lat": 12.9716,
+    "lng": 77.5946,
+    "sort": "distance",
+    "radius_km": 50
+   },
+   "n": 20,
+   "p50": 206.1283544971957,
+   "p95": 1894.0357381557988,
+   "p99": 2021.377981225232,
+   "mean": 525.8304209994094,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 512.5049124537327,
+   "bytes": 35160,
+   "pages": 18589,
+   "pages_hit": 3908,
+   "pages_read": 14681
+  },
+  {
+   "name": "events distance r=300",
+   "path": "/discover/events",
+   "params": {
+    "lat": 9.9312,
+    "lng": 76.2673,
+    "sort": "distance",
+    "radius_km": 300
+   },
+   "n": 20,
+   "p50": 181.9064375013113,
+   "p95": 291.82587500035896,
+   "p99": 453.01427500104154,
+   "mean": 198.4996229497483,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 186.94989789946703,
+   "bytes": 34342,
+   "pages": 31500,
+   "pages_hit": 3414,
+   "pages_read": 28086
+  },
+  {
+   "name": "calendar q (cold)",
+   "path": "/discover/calendar",
+   "params": {
+    "month": "2026-11",
+    "q": "robotics"
+   },
+   "n": 20,
+   "p50": 39.72500000236323,
+   "p95": 55.512062805064495,
+   "p99": 62.01417895645135,
+   "mean": 42.604793698410504,
+   "statements_min": 1,
+   "statements_max": 1,
+   "sql_ms": 38.23610840263427,
+   "bytes": 538,
+   "pages": 40379,
+   "pages_hit": 40379,
+   "pages_read": 0
+  },
+  {
+   "name": "calendar lat/lng (cold)",
+   "path": "/discover/calendar",
+   "params": {
+    "month": "2026-11",
+    "lat": 12.9716,
+    "lng": 77.5946
+   },
+   "n": 20,
+   "p50": 175.18779200327117,
+   "p95": 396.8455190421083,
+   "p99": 462.7941702073439,
+   "mean": 223.43666874949122,
+   "statements_min": 1,
+   "statements_max": 1,
+   "sql_ms": 216.4616082001885,
+   "bytes": 559,
+   "pages": 51002,
+   "pages_hit": 57,
+   "pages_read": 50945
+  },
+  {
+   "name": "clubs q",
+   "path": "/discover/clubs",
+   "params": {
+    "q": "robotics"
+   },
+   "n": 20,
+   "p50": 8.921020998968743,
+   "p95": 12.166231596347645,
+   "p99": 13.68151351678534,
+   "mean": 9.793895849725232,
+   "statements_min": 6,
+   "statements_max": 6,
+   "sql_ms": 4.87876045081066,
+   "bytes": 17636,
+   "pages": 1777,
+   "pages_hit": 1777,
+   "pages_read": 0
+  },
+  {
+   "name": "clubs q typo",
+   "path": "/discover/clubs",
+   "params": {
+    "q": "robtics"
+   },
+   "n": 20,
+   "p50": 28.258791506232228,
+   "p95": 35.77603989979253,
+   "p99": 38.80080798873677,
+   "mean": 28.693564551213058,
+   "statements_min": 8,
+   "statements_max": 8,
+   "sql_ms": 22.39564134797547,
+   "bytes": 17636,
+   "pages": 9727,
+   "pages_hit": 6211,
+   "pages_read": 3516
+  },
+  {
+   "name": "clubs nearby",
+   "path": "/discover/clubs",
+   "params": {
+    "lat": 12.9716,
+    "lng": 77.5946,
+    "sort": "nearby"
+   },
+   "n": 20,
+   "p50": 40.07275000913069,
+   "p95": 47.30076490013744,
+   "p99": 48.303552976431085,
+   "mean": 41.152668751601595,
+   "statements_min": 7,
+   "statements_max": 7,
+   "sql_ms": 34.09078360054991,
+   "bytes": 17734,
+   "pages": 16669,
+   "pages_hit": 10071,
+   "pages_read": 6598
+  },
+  {
+   "name": "app list search",
+   "path": "/events/list",
+   "params": {
+    "search": "robotics"
+   },
+   "n": 5,
+   "p50": 3959.946624992881,
+   "p95": 4314.379941992229,
+   "p99": 4367.02932199114,
+   "mean": 4040.360183196026,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 3999.343975415104,
+   "bytes": 21741,
+   "pages": 31243,
+   "pages_hit": 1632,
+   "pages_read": 29611
+  },
+  {
+   "name": "home lat/lng Leh (cold)",
+   "path": "/discover/home",
+   "params": {
+    "lat": 34.1526,
+    "lng": 77.5771
+   },
+   "n": 5,
+   "p50": 3760.3429589944426,
+   "p95": 4437.157317192759,
+   "p99": 4504.635730632581,
+   "mean": 3845.2129835961387,
+   "statements_min": 27,
+   "statements_max": 27,
+   "sql_ms": 3761.5097574074753,
+   "bytes": 49864,
+   "pages": 99845,
+   "pages_hit": 23505,
+   "pages_read": 76340
+  },
+  {
+   "name": "home lat/lng Port Blair (cold)",
+   "path": "/discover/home",
+   "params": {
+    "lat": 11.6234,
+    "lng": 92.7265
+   },
+   "n": 5,
+   "p50": 7863.513749995036,
+   "p95": 9594.807941804174,
+   "p99": 9899.346688364167,
+   "mean": 8081.723966795835,
+   "statements_min": 28,
+   "statements_max": 81,
+   "sql_ms": 8009.443334589014,
+   "bytes": 49189,
+   "pages": 111023,
+   "pages_hit": 12342,
+   "pages_read": 98681
+  },
+  {
+   "name": "home lat/lng Mumbai (cold)",
+   "path": "/discover/home",
+   "params": {
+    "lat": 19.076,
+    "lng": 72.8777
+   },
+   "n": 5,
+   "p50": 14329.085249992204,
+   "p95": 19088.47366660775,
+   "p99": 19569.47063332831,
+   "mean": 15581.894641602412,
+   "statements_min": 27,
+   "statements_max": 80,
+   "sql_ms": 15481.26496723271,
+   "bytes": 62883,
+   "pages": 127619,
+   "pages_hit": 21136,
+   "pages_read": 106483
+  },
+  {
+   "name": "events lat/lng Leh (radius 50, date)",
+   "path": "/discover/events",
+   "params": {
+    "lat": 34.1526,
+    "lng": 77.5771
+   },
+   "n": 20,
+   "p50": 185.91825000476092,
+   "p95": 344.291554195661,
+   "p99": 453.4169780350928,
+   "mean": 196.92334179999307,
+   "statements_min": 3,
+   "statements_max": 4,
+   "sql_ms": 182.4603582987038,
+   "bytes": 34691,
+   "pages": 5497,
+   "pages_hit": 5264,
+   "pages_read": 233
+  },
+  {
+   "name": "events distance r=50 Mumbai",
+   "path": "/discover/events",
+   "params": {
+    "lat": 19.076,
+    "lng": 72.8777,
+    "sort": "distance",
+    "radius_km": 50
+   },
+   "n": 6,
+   "p50": 2153.843437496107,
+   "p95": 5900.249667010939,
+   "p99": 6783.346267011802,
+   "mean": 2937.6678750025653,
+   "statements_min": 4,
+   "statements_max": 5,
+   "sql_ms": 4044.696368165508,
+   "bytes": 35054,
+   "pages": 16788,
+   "pages_hit": 3847,
+   "pages_read": 12941
+  },
+  {
+   "name": "events distance r=50 Leh",
+   "path": "/discover/events",
+   "params": {
+    "lat": 34.1526,
+    "lng": 77.5771,
+    "sort": "distance",
+    "radius_km": 50
+   },
+   "n": 20,
+   "p50": 422.4378955041175,
+   "p95": 1504.4631041469988,
+   "p99": 2124.314987221732,
+   "mean": 609.7127165507118,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 587.565402250766,
+   "bytes": 34705,
+   "pages": 5534,
+   "pages_hit": 4748,
+   "pages_read": 786
+  },
+  {
+   "name": "clubs nearby Leh",
+   "path": "/discover/clubs",
+   "params": {
+    "lat": 34.1526,
+    "lng": 77.5771,
+    "sort": "nearby"
+   },
+   "n": 20,
+   "p50": 75.818312499905,
+   "p95": 757.9237874968387,
+   "p99": 1024.6900575076866,
+   "mean": 183.58541855122894,
+   "statements_min": 7,
+   "statements_max": 7,
+   "sql_ms": 171.17760430119233,
+   "bytes": 19458,
+   "pages": 22485,
+   "pages_hit": 8865,
+   "pages_read": 13620
+  },
+  {
+   "name": "clubs r=50 popular",
+   "path": "/discover/clubs",
+   "params": {
+    "lat": 12.9716,
+    "lng": 77.5946,
+    "radius_km": 50
+   },
+   "n": 20,
+   "p50": 20.083916999283247,
+   "p95": 35.09371105028549,
+   "p99": 35.75494220742257,
+   "mean": 22.449954300100217,
+   "statements_min": 7,
+   "statements_max": 7,
+   "sql_ms": 14.82043505020556,
+   "bytes": 17840,
+   "pages": 1569,
+   "pages_hit": 1232,
+   "pages_read": 337
+  },
+  {
+   "name": "events q two words",
+   "path": "/discover/events",
+   "params": {
+    "q": "robotics kochi",
+    "radius_km": 0
+   },
+   "n": 20,
+   "p50": 32.15129150339635,
+   "p95": 77.60153509661907,
+   "p99": 112.5627070134214,
+   "mean": 39.53186885191826,
+   "statements_min": 6,
+   "statements_max": 6,
+   "sql_ms": 28.02215579795302,
+   "bytes": 34397,
+   "pages": 8346,
+   "pages_hit": 8341,
+   "pages_read": 5
+  },
+  {
+   "name": "events q city",
+   "path": "/discover/events",
+   "params": {
+    "q": "bengaluru",
+    "radius_km": 0
+   },
+   "n": 5,
+   "p50": 2644.7087499982445,
+   "p95": 3438.405183609575,
+   "p99": 3567.5060703302734,
+   "mean": 2624.0355084009934,
+   "statements_min": 6,
+   "statements_max": 7,
+   "sql_ms": 2602.4315918097273,
+   "bytes": 34876,
+   "pages": 117045,
+   "pages_hit": 95252,
+   "pages_read": 21793
+  },
+  {
+   "name": "events q rare",
+   "path": "/discover/events",
+   "params": {
+    "q": "sculpture showcase",
+    "radius_km": 0
+   },
+   "n": 20,
+   "p50": 28.04735400422942,
+   "p95": 33.395234007184634,
+   "p99": 35.18351400984102,
+   "mean": 29.134895901370328,
+   "statements_min": 6,
+   "statements_max": 6,
+   "sql_ms": 21.46578130123089,
+   "bytes": 35806,
+   "pages": 11697,
+   "pages_hit": 11697,
+   "pages_read": 0
+  },
+  {
+   "name": "app clubs search",
+   "path": "/clubs/list",
+   "params": {
+    "search": "robotics"
+   },
+   "n": 20,
+   "p50": 20.699478998722043,
+   "p95": 28.15288684141706,
+   "p99": 30.72314376579015,
+   "mean": 21.76856880032574,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 15.302485653955955,
+   "bytes": 14935,
+   "pages": 3768,
+   "pages_hit": 3768,
+   "pages_read": 0
+  }
+ ]
+}

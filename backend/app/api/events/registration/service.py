@@ -17,6 +17,7 @@ from app.api.events.registration import answers
 from app.api.service import update_background_task_log
 from app.api.users.models import UserProfiles, UserTypes, Users
 from app.api.admission import service as admission
+from app.core import jobs
 from app.core.utils.keys import TICKET_ID_INDEX, generate_ticket_id, violated_constraint
 from app.core.validations.schema import validate_relations
 from app.response import CustomHTTPException
@@ -766,6 +767,38 @@ def _cell(value):
     if isinstance(value, float) and value != value:
         return None
     return value
+
+
+async def enqueue_import(session: AsyncSession, event_id: int, df: DataFrame, background_log: BackgroundTaskLogs, notify: bool = True) -> None:
+    """The import as a job (`registrations.import`), run after the caller's
+    commit -- by the worker when there is one -- on a session of its own. The
+    sheet's rows travel in the job as JSON (pandas writes NaN as null and
+    dates as ISO text), so a deploy mid-import does not lose the file: the
+    job is taken again and carries on."""
+    import json as _json
+
+    rows = _json.loads(df.to_json(orient="records", date_format="iso"))
+    await jobs.enqueue(
+        session, "registrations.import",
+        {"event_id": int(event_id), "log_id": str(background_log.id), "notify": bool(notify), "rows": rows, "columns": list(map(str, df.columns))},
+        dedupe_key=f"registrations:import:{background_log.id}",
+    )
+
+
+@jobs.handler("registrations.import", max_attempts=3, timeout=3600.0, concurrency=1)
+async def _import_job(p: dict) -> None:
+    """Run once: an import whose log is no longer STARTED has finished.
+    Cut off half way, it is run again on the same log, and carries on."""
+    from uuid import UUID
+
+    from app.api.models import BackgroundTaskLogs
+
+    async with jobs.scope() as session:
+        log = await session.get(BackgroundTaskLogs, UUID(p["log_id"]))
+        if log is None or log.status != "STARTED":
+            return
+        df = DataFrame(p.get("rows") or [], columns=p.get("columns") or None)
+        await bulk_import_event_registrations(session, int(p["event_id"]), df, log, bool(p.get("notify", True)))
 
 
 async def bulk_import_event_registrations(

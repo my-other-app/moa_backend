@@ -1,5 +1,31 @@
 version: "1.1"
 
+# One box runs all of this, Postgres included, beside two other projects
+# (bcards and letmego). Its docker-compose is v2 (2.33.1 on 2026-10-18),
+# which ignores the version key above and reads mem_limit and cpus on every
+# service, so those are what is used here (deploy.resources would need
+# --compatibility under v1; v2 reads both, and both at once is an error).
+#
+# - Every service has a memory limit, so a leak or a spike is killed and
+#   restarted inside its own container instead of the kernel's OOM killer
+#   choosing a victim on the whole box -- possibly Postgres.
+# - The background services (worker, redis, meilisearch) have a CPU limit
+#   under the box's two vCPUs, so a render, an index build or a big send
+#   never takes the API's CPU. The API and Postgres may use the whole box.
+# - The numbers, why each is what it is, and the totals against 2, 4 and
+#   8 GB boxes are in docs/OPERATIONS.md, section 10: change them there and
+#   here together. A limit reaches a container when it is next created, or
+#   at once with `docker update` (section 10).
+# - restart: unless-stopped everywhere. on-failure, which postgres and
+#   backend had, restarts a container only when it exits with an error;
+#   stopped cleanly -- Docker or the host restarting, as a resize does -- it
+#   exits 0 and stays down. unless-stopped brings each one back unless
+#   someone stopped it on purpose.
+# - A plain `up -d` with no service named would start every service here,
+#   redis, worker and meilisearch too, whether the box can hold them or not
+#   (today's 4 GB box cannot). Always name the service: `up -d --build
+#   --no-deps backend` (section 6).
+
 networks:
   doth_network:
     ipam:
@@ -10,7 +36,25 @@ services:
   postgres:
     image: postgres:17.4
     container_name: doth-live-postgres
-    restart: on-failure
+    restart: unless-stopped
+    # 1.25 GB. Postgres runs the image's defaults here (nothing in this file
+    # sets them; docs/SCALING.md found none changed in the volume):
+    # shared_buffers 128 MB, work_mem 4 MB, maintenance_work_mem 64 MB,
+    # max_connections 100. They fit with room: 128 MB shared, a few MB a
+    # connection (under 500 MB with all 100 open), a sort or hash of 4-8 MB
+    # in the few running at once, autovacuum's 64 MB times its 3 workers.
+    # The rest is page cache, which the kernel charges to the container and
+    # takes back under the limit rather than killing anything. In use on
+    # 2026-10-18: 155 MB. Raise shared_buffers, raise this by as much.
+    mem_limit: 1280m
+    cpus: 2
+    # Every container's log is a file on the host's disk (5 GB free on
+    # 2026-10-18) that Docker never trims by itself: at most 5 x 20 MB each.
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
     env_file:
       - .env
     ports:
@@ -32,8 +76,11 @@ services:
 
   backend:
     build: backend/
+    # Named, so the worker below runs the very image the backend was built
+    # into (an install_requirements deploy rebuilds it for both).
+    image: moa-backend:live
     container_name: doth-live-backend
-    volumes:
+    volumes: &backend-volumes
       - ./backend:/backend
       # Backups, on the host and outside /var/www/myotherapp-production.
       #
@@ -50,7 +97,7 @@ services:
       - /var/backups/myotherapp:/backups
     env_file:
       - .env
-    environment:
+    environment: &backend-environment
       # Rebuilt from the parts rather than taken from .env, because the .env
       # copy hardcodes an IP: it said 192.168.1.101 while postgres sits on
       # 192.168.5.101. A packet to a dead address on an unrouted subnet is
@@ -77,7 +124,27 @@ services:
       - postgres
     command: >
       python main.py
-    restart: on-failure
+    restart: unless-stopped
+    # 2.25 GB: 1.43 GB in use on 2026-10-18 (APP_WORKERS uvicorn workers,
+    # each about 0.35-0.4 GB once the app is imported), plus the render
+    # pool's peaks: wkhtmltopdf, and the ticket, certificate and wallet
+    # renders, run inside this container; with APP_LIVE_SSE, about 40 KB an
+    # open stream besides (3,000 phones: some 120 MB). A leak here is killed
+    # and restarted here, not in Postgres. CPU: the whole box.
+    mem_limit: 2304m
+    cpus: 2
+    logging: *logging
+    # Open files: every client connection is one, and with the live room's
+    # streams (APP_LIVE_SSE) a phone holds one for as long as it watches.
+    # Docker's default soft limit (1,024 on current engines) would cap a
+    # room at about a thousand phones with nothing said; this lets a worker
+    # reach APP_LIVE_SSE_MAX_STREAMS and the pool and files besides. Applied
+    # when the backend is next recreated (install_requirements or
+    # recreate_backend; a restart keeps the container's old limits).
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     ports:
       # Two host ports for one container port, deliberately. nginx on this box
       # proxies api.myotherapp.com to 8001 and api.myotherapp.in (plus the
@@ -93,6 +160,136 @@ services:
     networks:
       doth_network:
         ipv4_address: 192.168.5.100
+
+  # The job queue's worker (backend/app/worker.py): the same image, code, env
+  # and mounts as the backend, running jobs instead of serving requests. Not
+  # started by a normal deploy: once, with the deploy's `services: worker` or
+  # by hand, `up -d --build --no-deps worker` -- then the API
+  # is told to leave its jobs to it with APP_JOBS_WORKER=true (and, if
+  # wanted, its sweeps with APP_SWEEPS_IN_WORKER=true). The deploy restarts it
+  # with the backend from then on. On SIGTERM it finishes what it has in
+  # hand for up to APP_JOBS_DRAIN_SECONDS (25 s) and hands the rest back; the
+  # grace period below is longer than that, so Docker never kills it mid-job.
+  worker:
+    build: backend/
+    image: moa-backend:live
+    container_name: doth-live-worker
+    volumes: *backend-volumes
+    env_file:
+      - .env
+    environment:
+      <<: *backend-environment
+      # Two jobs at once. The API's own runner takes APP_JOBS_CONCURRENCY
+      # (4) from .env; set here, that value does not reach the worker. On two
+      # vCPUs shared with the API a third render or send would only wait for
+      # the CPU. Its database pool is its own (APP_WORKER_DB_POOL_SIZE and
+      # APP_WORKER_DB_MAX_OVERFLOW, 4 + 8, in app/config.py, which the API
+      # reads too): the connection budget counts it on top of the API's.
+      APP_JOBS_CONCURRENCY: "2"
+    depends_on:
+      - postgres
+    command: >
+      python -m app.worker
+    restart: unless-stopped
+    stop_grace_period: 35s
+    # 768 MB: one process of the app, as an API worker is (0.35-0.4 GB once
+    # imported), and two jobs' renders, PDFs or sheet imports on top. One
+    # CPU, so a big send or a close-out report never takes the API's.
+    mem_limit: 768m
+    cpus: 1
+    logging: *logging
+    networks:
+      doth_network:
+        ipv4_address: 192.168.5.103
+
+  # Shared state for several API processes (backend/app/core/redis.py): the
+  # rate limits' counts, the discover cache's second level, publish/subscribe
+  # across processes. Nothing in it is the only copy of anything: Postgres is
+  # the truth, and with Redis gone everything falls back to per process. So
+  # no published port (the backend and worker reach it as redis:6379 on this
+  # network) and no persistence at all (appendonly no, no snapshots): a
+  # restart starts empty, which costs some rate-limit counts and cold cache
+  # keys, and Redis never forks to write a file, so it never needs twice its
+  # memory. maxmemory 192 MB with allkeys-lru: when full it drops the least
+  # recently used keys rather than refuse a write; the container's 256 MB
+  # covers Redis's own overhead above that.
+  # Started once (`services: redis`, or by hand `up -d --build --no-deps redis`),
+  # then APP_REDIS_URL=redis://redis:6379/0 and the backend recreated with a
+  # build (docs/OPERATIONS.md, section 6).
+  redis:
+    image: redis:7-alpine
+    container_name: doth-live-redis
+    command: ["redis-server", "--appendonly", "no", "--save", "", "--maxmemory", "192mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      # Nothing is written here; mounted so the image's VOLUME /data is not a
+      # new anonymous volume left behind by every recreate.
+      - redis_data:/data
+    restart: unless-stopped
+    mem_limit: 256m
+    cpus: 0.5
+    logging: *logging
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      retries: 5
+    networks:
+      doth_network:
+        ipv4_address: 192.168.5.102
+
+  # Search (backend/app/core/search.py, backend/app/api/search/). Idle until
+  # the backend's .env has APP_SEARCH_URL=http://meilisearch:7700 and
+  # APP_SEARCH_KEY (the master key below); without them every search is
+  # Postgres's, as before. The deploy recreates only `backend`, so this is
+  # started once, by hand, after MEILI_MASTER_KEY (16+ bytes) is in .env:
+  #   sudo docker-compose -f docker-compose.prod.yml up -d --build --no-deps meilisearch < /dev/null
+  # then, with APP_SEARCH_URL and APP_SEARCH_KEY in .env, the processes that
+  # read them are recreated -- always building, never a plain `up -d` (on
+  # 2026-10-17 one recreated the backend from an image without its packages):
+  #   sudo docker-compose -f docker-compose.prod.yml up -d --build --no-deps backend worker < /dev/null
+  # (`worker` only if it runs; docs/OPERATIONS.md, section 6.)
+  # No published port: only the backend reaches it, over doth_network. The
+  # backend builds the indexes itself the first time it finds them missing
+  # (scripts/search_reindex.py --status shows them). The data is in the
+  # meili_data volume; losing it costs a rebuild from Postgres, not data.
+  # MEILI_MASTER_KEY defaults to empty so a .env without it still parses for
+  # the backend's deploy; in production mode Meilisearch then refuses to
+  # start, loudly, rather than run without a key.
+  meilisearch:
+    image: getmeili/meilisearch:v1.54.3
+    container_name: doth-live-meilisearch
+    restart: unless-stopped
+    environment:
+      MEILI_ENV: production
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-}
+      MEILI_NO_ANALYTICS: "true"
+      MEILI_DB_PATH: /meili_data/data.ms
+      # Indexing shares two vCPUs with Postgres and the API: one thread, and
+      # at most 256 MiB for it. Unset, Meilisearch takes up to two thirds of
+      # the memory it sees, which in a container can be the host's.
+      MEILI_MAX_INDEXING_THREADS: "1"
+      MEILI_MAX_INDEXING_MEMORY: 256MiB
+    volumes:
+      - meili_data:/meili_data
+    expose:
+      - "7700"
+    # 768 MB: indexing's 256 MiB (a soft cap: it may go a little over),
+    # searches and the process itself; the indexes are memory-mapped files
+    # whose pages the kernel drops under the limit, not the process's own
+    # memory. Lakhs of events and clubs fit; towards a crore, a bigger box
+    # first, then more here. One CPU, for the same reason as the worker.
+    mem_limit: 768m
+    cpus: 1
+    logging: *logging
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:7700/health || exit 1"]
+      interval: 15s
+      retries: 5
+      start_period: 10s
+    # A fixed address, as every service here has: one started later can
+    # never take another's while that one is being recreated.
+    networks:
+      doth_network:
+        ipv4_address: 192.168.5.104
 
   # nginx:
   #   container_name: bcards-nginx
@@ -112,3 +309,5 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
+  meili_data:

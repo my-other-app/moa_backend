@@ -13,6 +13,7 @@ import pytest
 from app.api.deliveries import pipeline
 from app.api.deliveries import service as deliveries
 from app.api.emails import service
+from app.core import jobs
 from app.core.email import email as email_mod
 from app.core.layout.model import TicketLayoutFields, dump
 from app.core.layout.starters import ticket_starter
@@ -253,8 +254,9 @@ async def test_a_timed_email_goes_out_once_when_due(client, session, world, outb
 
     assert await service.sweep(session, now=START - timedelta(hours=25)) == 0
     assert await service.sweep(session, now=START - timedelta(hours=23)) == 1
-    # The sweep only queues: the sending is a job beside it.
+    # The sweep only queues: the sending is a job after its commit.
     assert outbox["sent"] == []
+    await jobs.settle()
     await pipeline.drain()
     assert await service.sweep(session, now=START - timedelta(hours=22)) == 0
     assert len(outbox["sent"]) == 3
@@ -274,6 +276,7 @@ async def test_a_timed_email_goes_out_once_when_due(client, session, world, outb
     # Five hours after the start, two have come due: this one and the
     # reminder the starter times for just before the doors open.
     assert await service.sweep(session, now=START + timedelta(hours=5)) == 2
+    await jobs.settle()
     await pipeline.drain()
     assert await service.sweep(session, now=START + timedelta(hours=6)) == 0
 

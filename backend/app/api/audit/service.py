@@ -33,9 +33,10 @@ async def record(
     summary: str | None = None,
     details: dict | None = None,
     request: Request | None = None,
-) -> None:
+) -> AdminAuditLogs | None:
     """
-    Append one entry.
+    Append one entry. Returns it (flushed, with its id), or None when it
+    could not be written.
 
     Never raises, and never leaves the session unusable. An audit write that
     fails must not fail the action it is describing -- an admin blocked from
@@ -54,20 +55,21 @@ async def record(
         # line could not be written, which is the opposite of the intent.
         # Rolling back to the savepoint discards only the log row.
         async with session.begin_nested():
-            session.add(
-                AdminAuditLogs(
-                    actor_id=getattr(actor, "id", None),
-                    actor_email=getattr(actor, "email", None),
-                    action=action,
-                    entity_type=entity_type,
-                    entity_id=None if entity_id is None else str(entity_id)[:64],
-                    summary=summary[:255] if summary else None,
-                    details=details,
-                    ip_address=_client_ip(request),
-                )
+            entry = AdminAuditLogs(
+                actor_id=getattr(actor, "id", None),
+                actor_email=getattr(actor, "email", None),
+                action=action,
+                entity_type=entity_type,
+                entity_id=None if entity_id is None else str(entity_id)[:64],
+                summary=summary[:255] if summary else None,
+                details=details,
+                ip_address=_client_ip(request),
             )
+            session.add(entry)
+        return entry
     except Exception:
         logger.exception("Failed to write audit log for action %s", action)
+        return None
 
 
 async def list_entries(

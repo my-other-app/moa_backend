@@ -1,3 +1,4 @@
+import logging
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config
@@ -7,6 +8,7 @@ from alembic import context
 
 from app.config import settings
 from app.db.base import AbstractSQLModel
+from app.db.migration_session import Guard
 from app.db.registry import *
 
 # this is the Alembic Config object, which provides
@@ -50,6 +52,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        transaction_per_migration=True,
     )
 
     with context.begin_transaction():
@@ -57,23 +60,53 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    """Run migrations in 'online' mode.
+    """Run migrations in 'online' mode, guarded for a live database.
 
-    In this scenario we need to create an Engine
-    and associate a connection with the context.
+    Production migrates while the API serves from the same database, so:
 
+    - Each migration runs in its own transaction (transaction_per_migration).
+      It used to be one transaction for every pending migration, so a lock
+      taken by an early ALTER TABLE on a hot table was held until the last
+      migration committed -- or until a later migration's autocommit block
+      committed it -- and every request touching that table waited the whole
+      time. Now a migration's locks go when it commits, and a failure leaves
+      the ones before it applied and stamped.
+    - The session has a lock_timeout, a statement_timeout and an
+      idle_in_transaction_session_timeout (app/db/migration_session.py says
+      why each; the settings are APP_MIGRATION_* in app/config.py). An index
+      built CONCURRENTLY is exempt from the statement limit: it blocks no one,
+      and killing it half way leaves an INVALID index.
+    - A migration whose lock is not granted in time is rolled back and tried
+      again on a fresh connection, a few times with a growing pause, then the
+      run fails loudly. The rollback releases everything it held, so the
+      requests that queued behind the waiting ALTER go through while we pause.
     """
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    guard = Guard.from_settings(settings)
+    logging.getLogger("alembic.env").info("Migration guard: %s", guard.describe())
 
-    with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+    def attempt() -> None:
+        connectable = engine_from_config(
+            config.get_section(config.config_ini_section, {}),
+            prefix="sqlalchemy.",
+            poolclass=pool.NullPool,
+            connect_args=guard.connect_args(),
+        )
+        guard.install(connectable)
+        try:
+            with connectable.connect() as connection:
+                context.configure(
+                    connection=connection,
+                    target_metadata=target_metadata,
+                    transaction_per_migration=True,
+                    on_version_apply=guard.on_version_apply,
+                )
 
-        with context.begin_transaction():
-            context.run_migrations()
+                with context.begin_transaction():
+                    context.run_migrations()
+        finally:
+            connectable.dispose()
+
+    guard.run(attempt)
 
 
 if context.is_offline_mode():

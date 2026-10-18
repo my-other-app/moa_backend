@@ -11,6 +11,15 @@ name: Live Deployment
 # /dev/null, every `exec` passes `-T`, `set -e` makes a failure fail the job,
 # and the last line prints a marker that a following step greps for. A
 # truncated script can no longer pass for a successful one.
+#
+# The rendered script is checked with `bash -n` on the runner before it is
+# shipped, so a quoting slip in this file fails here rather than half way
+# through on the server. After the deploy, the smoke check asks the API until
+# it answers 200 three times running, and fails the job if that does not
+# happen within smoke_timeout seconds: a deploy that left the site down is
+# red, not green. `services` starts or refreshes the extra containers (redis,
+# worker, meilisearch...) after the migration. docs/OPERATIONS.md is the
+# runbook for all of it.
 
 on:
   workflow_dispatch:
@@ -60,6 +69,21 @@ on:
         required: false
         default: false
         type: boolean
+      recreate_backend:
+        description: "Recreate the backend container, built first from the cache (picks up .env changes; restart does not). With migrate, migrates first"
+        required: false
+        default: false
+        type: boolean
+      services:
+        description: "Start or refresh these extra services after the migration, space-separated (e.g. \"redis worker meilisearch\"); not backend or postgres"
+        required: false
+        default: ""
+        type: string
+      smoke_timeout:
+        description: "Seconds the API has to answer 200 (three times running) after the deploy before the job fails"
+        required: false
+        default: 180
+        type: number
 
 jobs:
   deploy:
@@ -67,7 +91,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Configure SSH key
         uses: webfactory/ssh-agent@v0.9.0
@@ -81,6 +105,9 @@ jobs:
           USER: ${{ secrets.PROD_REMOTE_USER }}
           PROJECT_PATH: ${{ secrets.PROD_PROJECT_PATH }}
         run: |
+          # The commit being deployed, for Sentry's release tag
+          # (app/core/observability.py): the server has no .git to ask.
+          printf '%s\n' "$GITHUB_SHA" > backend/REVISION
           rsync -avz --delete \
             --exclude='README.md' \
             --exclude='.gitignore' \
@@ -118,10 +145,42 @@ jobs:
           SYNC_CODE: ${{ github.event.inputs.sync_code }}
           UP_BACKEND: ${{ github.event.inputs.up_backend }}
           BUILD_BACKEND: ${{ github.event.inputs.build_backend }}
+          # A new container: the way an .env change (sync_env) reaches the
+          # process, since `restart` keeps the env the container was created
+          # with. Built first (see below). install_requirements sets it too.
+          RECREATE_BACKEND: ${{ github.event.inputs.recreate_backend }}
+          SERVICES: ${{ github.event.inputs.services }}
         run: |
           set -eo pipefail
 
           COMPOSE="sudo docker-compose -f docker-compose.prod.yml"
+          # Builds go through BuildKit: backend/Dockerfile keeps pip's
+          # downloads in a cache mount, and installs requirements-base.txt in
+          # a layer of its own, so a one-line change to requirements.txt no
+          # longer reinstalls everything (on 2026-10-18 a full reinstall took
+          # 25 minutes on the server and starved the live API). docker-compose
+          # v2 builds with BuildKit already; v1 only with these two set, and
+          # sudo drops the caller's environment -- hence env.
+          BUILD="sudo env DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker-compose -f docker-compose.prod.yml"
+
+          # The extra services are written into the remote script, so only
+          # service names get through. backend and postgres have their own
+          # inputs, and their own order (migrate before recreate), which this
+          # must not go around.
+          set -f
+          for svc in $SERVICES; do
+            if ! printf '%s' "$svc" | grep -Eq '^[a-z0-9][a-z0-9_-]{0,62}$'; then
+              echo "::error::services: '$svc' is not a service name"
+              exit 1
+            fi
+            case "$svc" in
+              backend|postgres)
+                echo "::error::services: $svc is deployed by its own inputs (build_backend, install_requirements, restart_database...), not this one"
+                exit 1
+                ;;
+            esac
+          done
+          set +f
 
           # install_requirements rebuilds the image from requirements.txt and
           # recreates the container from it. It used to `exec pip install`
@@ -137,6 +196,14 @@ jobs:
             RECREATE_BACKEND=true
           fi
 
+          # And so every recreate builds first: a container is only ever made
+          # from an image that has what requirements.txt says, whatever the
+          # last deploy did. When nothing changed the build is the cache's
+          # (seconds, the code layer at most), and it is the same image.
+          if [ "$RECREATE_BACKEND" = "true" ] || [ "$UP_BACKEND" = "true" ]; then
+            BUILD_BACKEND=true
+          fi
+
           # Built locally so the runner expands the flags, then shipped as a
           # file. Nothing secret goes in here -- the env file has its own step.
           cat > deploy-remote.sh <<EOF
@@ -150,19 +217,34 @@ jobs:
           trap '' HUP
           cd "$PROJECT_PATH"
 
+          # backend/Dockerfile needs BuildKit (its cache mounts); without
+          # buildx the build would fail part way. Checked first, so nothing
+          # has changed when it is missing.
+          if [ "$BUILD_BACKEND" = "true" ] || [ "$RESTART_ALL" = "true" ]; then
+            if ! sudo docker buildx version > /dev/null 2>&1; then
+              echo "::error::docker buildx (BuildKit) is not installed on the server, and backend/Dockerfile needs it: install docker-buildx-plugin (docs/OPERATIONS.md, Builds). Nothing was changed."
+              exit 1
+            fi
+          fi
+
           # Build, migrate, then recreate. The container
           # install_requirements recreates starts with the new code, image and
           # dependencies, so the restart at the end is skipped after it
           # (RECREATED).
+          #
+          # restart_all names postgres and backend: a bare up would also start
+          # redis, worker and meilisearch, which run only once started on
+          # purpose (a box too small for them is OOM-killed otherwise). A
+          # running worker is recreated below; the others build nothing.
           if [ "$RESTART_ALL" = "true" ]; then
             echo "::group::Restarting all services"
-            $COMPOSE up --build -d
+            $BUILD up --build -d postgres backend
             echo "::endgroup::"
           fi
 
           if [ "$BUILD_BACKEND" = "true" ]; then
             echo "::group::Building backend"
-            $COMPOSE build backend
+            $BUILD build backend
             echo "::endgroup::"
           fi
 
@@ -205,7 +287,7 @@ jobs:
 
           if [ "$RESTART_DATABASE" = "true" ]; then
             echo "::group::Rebuilding database"
-            $COMPOSE build postgres
+            $BUILD build postgres
             $COMPOSE up -d postgres
             echo "::endgroup::"
           fi
@@ -220,6 +302,53 @@ jobs:
             echo "::endgroup::"
           fi
 
+          # The job worker runs the same code as the backend and must never
+          # run older code than the API that enqueues for it (a job name it
+          # does not know waits; a payload it does not expect fails). It is
+          # started once by hand (docker-compose.prod.yml); from then on it
+          # goes with the backend here: recreated from the new image when the
+          # backend was (or restart_all rebuilt it), else restarted. On
+          # SIGTERM it hands its jobs back. After the migration, and before
+          # the extra services below: a worker that was not running is left
+          # to them (one start, not a start and then a recreate), and one this
+          # step just recreated is up to date, so their up -d leaves it alone.
+          if [ -n "\$($COMPOSE ps -q worker 2>/dev/null)" ]; then
+            if [ -n "\$RECREATED" ] || [ "$RESTART_ALL" = "true" ]; then
+              echo "::group::Recreating worker from the new image"
+              $COMPOSE up -d --no-deps --force-recreate worker
+              echo "::endgroup::"
+            elif [ "$SYNC_CODE" = "true" ] || [ "$RESTART_BACKEND" = "true" ]; then
+              echo "::group::Restarting worker"
+              $COMPOSE restart worker
+              echo "::endgroup::"
+            fi
+          fi
+
+          # After the migration, so a worker starts on the schema it expects.
+          # --no-deps: this service only, never postgres or backend with it.
+          # --build: one with a build (the worker: the backend's image) is
+          # built first, from the cache when nothing changed, so it never
+          # starts from an image older than requirements.txt (the 2026-10-17
+          # outage was a container made from a stale image); the others have
+          # nothing to build. A service whose config and image are unchanged
+          # is left running. Names only (checked on the runner), split on
+          # spaces.
+          EXTRA_SERVICES="$SERVICES"
+          if [ -n "\$EXTRA_SERVICES" ]; then
+            echo "::group::Starting or refreshing: \$EXTRA_SERVICES"
+            KNOWN=\$($COMPOSE config --services)
+            for svc in \$EXTRA_SERVICES; do
+              if ! printf '%s\n' "\$KNOWN" | grep -qx "\$svc"; then
+                echo "::error::docker-compose.prod.yml has no service \$svc"
+                exit 1
+              fi
+            done
+            for svc in \$EXTRA_SERVICES; do
+              $BUILD up -d --build --no-deps "\$svc"
+            done
+            echo "::endgroup::"
+          fi
+
           # Last, so a process that was not recreated above picks up the new
           # code and schema. One that was recreated already runs them.
           if [ -z "\$RECREATED" ] && { [ "$SYNC_CODE" = "true" ] || [ "$RESTART_BACKEND" = "true" ]; }; then
@@ -228,8 +357,26 @@ jobs:
             echo "::endgroup::"
           fi
 
+          # Disk: a build leaves the image it replaced behind, untagged, and
+          # the box had 5 GB free on 2026-10-18 with each image about 3 GB.
+          # Once the new one runs (backend and worker recreated above), drop
+          # images no container uses and build cache unused for a day. Neither
+          # touches an image a container runs or one with a tag (the rollback
+          # tag in docs/OPERATIONS.md), and the cache the build just used is
+          # kept. A failure here only warns: the deploy itself is done.
+          if [ "$BUILD_BACKEND" = "true" ] || [ "$RESTART_ALL" = "true" ]; then
+            echo "::group::Pruning unused images and day-old build cache"
+            sudo docker image prune -f || echo "::warning::docker image prune failed: prune by hand (docs/OPERATIONS.md, Disk)"
+            sudo docker builder prune -f --filter until=24h || echo "::warning::docker builder prune failed: prune by hand (docs/OPERATIONS.md, Disk)"
+            echo "::endgroup::"
+          fi
+
           echo "MOA_DEPLOY_COMPLETE"
           EOF
+
+          # A syntax error in what was rendered fails here, before anything
+          # reaches the server.
+          bash -n deploy-remote.sh
 
           REMOTE_SCRIPT="/tmp/moa-deploy-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.sh"
 
@@ -261,3 +408,37 @@ jobs:
             echo "::error::migrate was requested but the migration step did not run."
             exit 1
           fi
+
+      # Healthy means three 200s in a row from the public address, through
+      # nginx and TLS, within smoke_timeout seconds (the backend is down for
+      # about a minute after a recreate). Until /readyz exists the pricing
+      # page's endpoint stands in; set the repository variable PROD_SMOKE_URL
+      # to https://api.myotherapp.in/readyz when it does. A query string the
+      # API ignores keeps any cache in front from answering for it.
+      - name: Smoke check
+        env:
+          SMOKE_URL: ${{ vars.PROD_SMOKE_URL || 'https://api.myotherapp.in/api/v1/plans' }}
+          SMOKE_TIMEOUT: ${{ github.event.inputs.smoke_timeout || 180 }}
+          SMOKE_INTERVAL: "5"
+        run: |
+          set -u
+          deadline=$(( $(date +%s) + SMOKE_TIMEOUT ))
+          attempt=0
+          ok=0
+          while :; do
+            attempt=$((attempt + 1))
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 \
+              -H "Cache-Control: no-cache" -H "X-Request-ID: deploy-smoke-${GITHUB_RUN_ID:-local}-$attempt" \
+              "$SMOKE_URL?smoke=${GITHUB_RUN_ID:-local}-$attempt" 2>/dev/null) || code=000
+            if [ "$code" = "200" ]; then ok=$((ok + 1)); else ok=0; fi
+            echo "attempt $attempt: HTTP $code ($ok of 3 in a row)"
+            if [ "$ok" -ge 3 ]; then
+              echo "Healthy: $SMOKE_URL answered 200 three times running."
+              exit 0
+            fi
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::The API did not answer 200 three times running within ${SMOKE_TIMEOUT}s ($SMOKE_URL, last HTTP $code). The deploy may have left it down: docs/OPERATIONS.md, Rollback."
+              exit 1
+            fi
+            sleep "$SMOKE_INTERVAL"
+          done

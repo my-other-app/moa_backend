@@ -7,6 +7,12 @@
   body. Nothing here logs request bodies, but an error report about them
   gives the traceback's frames and the exception's type, never its message,
   which could quote what was sent.
+- The live room's stream (EventSource cannot send headers) carries the
+  browser's key and the player's key in its query string, and a player key
+  is enough to answer as that player: `key`, `player` and, beside them,
+  `last_event_id` -- and any `...token...` parameter -- are written as
+  [Filtered] wherever a URL is logged (the access line, JSON or not, and
+  Sentry's events through observability.scrub_event).
 """
 import logging
 import re
@@ -14,10 +20,19 @@ import traceback
 
 _CLUB_WEBHOOK = re.compile(r"(/payments/webhook/club/)([A-Za-z0-9_-]{0,6})[A-Za-z0-9_-]*")
 _SENSITIVE_BODIES = re.compile(r"^/api/v1/clubs/payments/gateway(?:/|$)")
+#: A query parameter whose value must not be logged, and its value (up to
+#: the next parameter, fragment, space or quote).
+SECRET_QUERY = re.compile(r"(?i)([?&;](?:key|player|last_event_id|\w*token\w*)=)[^&;#\s\"']*")
+FILTERED = "[Filtered]"
+
+
+def query(value: str) -> str:
+    """`value` (a path, a URL, a log line) with every secret query value filtered."""
+    return SECRET_QUERY.sub(lambda m: m.group(1) + FILTERED, value)
 
 
 def path(value: str) -> str:
-    return _CLUB_WEBHOOK.sub(lambda m: f"{m.group(1)}{m.group(2)}…", value)
+    return query(_CLUB_WEBHOOK.sub(lambda m: f"{m.group(1)}{m.group(2)}…", value))
 
 
 def is_sensitive(value: str) -> bool:
@@ -34,7 +49,8 @@ def error_traceback(request_path: str, exc: BaseException) -> str:
 
 
 class AccessLogFilter(logging.Filter):
-    """uvicorn's access line, with a club webhook's token cut short."""
+    """uvicorn's access line, with a club webhook's token cut short and the
+    secret query values filtered (its path argument carries the query)."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         if isinstance(record.args, tuple) and record.args:

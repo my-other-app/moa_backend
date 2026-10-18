@@ -19,7 +19,7 @@ from app.api.merch import rules
 from app.api.merch.models import MerchCollections, MerchItems, MerchVariants
 from app.api.users.models import Users
 from app.config import settings
-from app.core.storage import objects
+from app.core.storage import media, objects
 from app.response import CustomHTTPException
 
 # ─── Items ────────────────────────────────────────────────────────────────
@@ -32,7 +32,7 @@ def _total(m: MerchItems) -> int:
 def item_out(m: MerchItems) -> dict:
     return {
         "id": m.id, "event_id": m.event_id, "name": m.name, "photo_key": m.photo_key,
-        "photo_url": objects.presigned_url(m.photo_key) if m.photo_key else None,
+        "photo_url": objects.photo_url(m.photo_key),
         "stock": m.stock, "collected": m.collected_count, "total": _total(m),
         "eligibility_field": m.eligibility_field, "eligibility_value": m.eligibility_value, "variant_field": m.variant_field,
         "variants": [{"id": v.id, "label": v.label, "stock": v.stock, "collected": v.collected_count} for v in m.variants],
@@ -196,9 +196,10 @@ def store_photo(event_id: int, raw: bytes) -> dict:
             fmt = "PNG"
         raw = out.getvalue()
     ext = _EXT[fmt]
-    key = os.path.join(settings.S3_BASE_PATH, "events", str(event_id), "merch") + f"/{uuid4().hex}.{ext}"
+    # A versioned name, written once: the media CDN may keep it for a year.
+    key = os.path.join(settings.S3_BASE_PATH, "events", str(event_id), "merch") + f"/{media.versioned_name(ext)}"
     objects.put_bytes(key, raw, "image/jpeg" if ext == "jpg" else f"image/{ext}")
-    return {"key": key, "url": objects.presigned_url(key)}
+    return {"key": key, "url": objects.photo_url(key)}
 
 
 # ─── At the gate ──────────────────────────────────────────────────────────
@@ -222,7 +223,7 @@ async def status_for(session, event: Events, registration_id) -> dict:
         r = rules.resolve(m, reg, event, m.id in collected)
         can_pick = r.status in (rules.NO_VARIANT_VALUE, rules.NO_MATCHING_VARIANT)
         rows.append({
-            "item_id": m.id, "name": m.name, "photo_url": objects.presigned_url(m.photo_key) if m.photo_key else None,
+            "item_id": m.id, "name": m.name, "photo_url": objects.photo_url(m.photo_key),
             "status": r.status, "variant_label": r.variant_label, "remaining": r.remaining,
             "on_file": rules.field_value(reg, event, m.variant_field) if m.variant_field else None,
             # Offered only when their record cannot answer: the volunteer completes it, then collects.

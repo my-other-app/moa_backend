@@ -35,6 +35,7 @@ from app.api.discover import geo
 from app.api.audit import service as audit
 from app.core.auth.dependencies import ClubAuth, DependsAuth, UserAuth, AdminAuth
 from app.core.auth.permissions import ContentAuth, DestroyAuth, ModerateAuth
+from app.core import jobs
 from app.core.rate_limit import limiter
 from app.core.response.pagination import (
     PaginatedResponse,
@@ -200,17 +201,17 @@ async def approve_club_endpoint(
     club_id: int,
     session: SessionDep,
     user: ModerateAuth,
-    background_tasks: BackgroundTasks,
     request: Request = None,
 ) -> ClubAdminDetailResponse:
     """Approve a club. The first approval emails the club's sign-in address
-    that it can now log in (after the answer; a mail that fails is logged)."""
+    that it can now log in (a job after the answer; a mail that fails is logged)."""
     was_verified = await session.scalar(select(Clubs.is_verified).where(Clubs.id == club_id))
     club = await service.approve_club(session, club_id)
     if was_verified is False:
         owner_email = await session.scalar(select(Users.email).where(Users.id == club.user_id))
         if owner_email:
-            background_tasks.add_task(service.send_approved_email, owner_email, club_name=club.name)
+            # A job, committed with the audit line below.
+            await jobs.enqueue(session, "clubs.approved_email", {"to": owner_email, "club_name": club.name}, dedupe_key=f"clubs:approved:{club.id}")
     await audit.record(
         session,
         actor=user,

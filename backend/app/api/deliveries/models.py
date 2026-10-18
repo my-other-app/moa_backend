@@ -157,5 +157,4 @@ class DeliveryAttempts(AbstractSQLModel):
 
 
 # Kept with the models so the registry (and Alembic, and create_all) knows them.
-from app.core.after_commit import AfterCommitJobs  # noqa: E402,F401
 from app.core.mail.suppression import EmailSuppressions  # noqa: E402,F401

@@ -33,3 +33,6 @@ for key, value in {
     "APP_REFRESH_TOKEN_EXPIRE_DAYS": "7",
 }.items():
     os.environ.setdefault(key, value)
+# Admin alerts a benchmark raises stay in its database: no mail, no Discord.
+os.environ["APP_ADMIN_ALERT_EMAILS"] = ""
+os.environ.pop("APP_ADMIN_ALERT_DISCORD_WEBHOOK", None)

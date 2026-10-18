@@ -273,6 +273,15 @@ class Feed(BaseModel):
     quiz: dict
 
 
+class BannerFeed(BaseModel):
+    """The event page's live strip (the stream's view=banner): what the
+    room's feed says of the event and its banner, with the event's start and
+    end -- a few hundred bytes where the whole feed is ~30 KB."""
+
+    event: dict
+    banner: Optional[UpdateOut] = None
+
+
 class Screen(BaseModel):
     event: dict
     pinned: Optional[QuestionOut] = None

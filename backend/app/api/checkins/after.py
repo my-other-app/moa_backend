@@ -2,9 +2,11 @@
 them, and the badges it may earn them and the club.
 
 None of it is the door's business, so none of it holds the door up. The
-scan answers first; this runs afterwards, on a session of its own (the
-request's is closed by then), with the push sent from a worker thread so a
-slow FCM never stalls the event loop every other request shares.
+scan answers first; this runs afterwards as a job (`checkins.after`, written
+in the check-in's own transaction: app.core.jobs), on a session of its own,
+with the push sent from a worker thread so a slow FCM never stalls the event
+loop. Run twice (the queue is at least once), the guest still has one note:
+it is not written again for a check-in that already has one.
 """
 from __future__ import annotations
 
@@ -14,17 +16,13 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Optional
 
+from app.core import jobs
 from app.db.core import AsyncSessionLocal
 from app.db.listeners import add_loader_criteria
 
 logger = logging.getLogger(__name__)
 
 TITLE = "✅ Checked in successfully!"
-
-#: Runs started without a request to hang them on, held so they are not
-#: collected mid-run.
-_running: set[asyncio.Task] = set()
-
 
 @dataclass(frozen=True)
 class Admitted:
@@ -43,25 +41,16 @@ async def session_scope():
         yield session
 
 
-def schedule(background, admitted: Admitted) -> None:
-    """Run the hooks after the response: on the request's BackgroundTasks
-    when there is one, else as a task of its own."""
-    if background is not None:
-        background.add_task(run, admitted)
-        return
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:  # pragma: no cover - no loop, nothing to defer to
-        return
-    task = loop.create_task(run(admitted))
-    _running.add(task)
-    task.add_done_callback(_running.discard)
+async def enqueue(session, admitted: Admitted) -> None:
+    """The hooks as a job, in the caller's transaction: they run once it commits."""
+    await jobs.enqueue(session, "checkins.after", {
+        "user_id": admitted.user_id, "event_id": admitted.event_id, "event_name": admitted.event_name, "club_id": admitted.club_id,
+    })
 
 
-async def drain() -> None:
-    """Wait for runs started without a request. For tests and shutdown."""
-    while _running:
-        await asyncio.gather(*list(_running), return_exceptions=True)
+@jobs.handler("checkins.after", max_attempts=4, timeout=120.0)
+async def _after_job(p: dict) -> None:
+    await run(Admitted(user_id=int(p["user_id"]), event_id=int(p["event_id"]), event_name=p["event_name"], club_id=p.get("club_id")))
 
 
 async def run(admitted: Admitted) -> None:
@@ -78,8 +67,17 @@ async def _notify(session, a: Admitted) -> None:
     from app.api.notifications import service as notes
     from app.core.notifications import service as push
 
+    from sqlalchemy import select
+
+    from app.api.notifications.models import Notifications
+
     body = f"Welcome to {a.event_name}. Enjoy the event!"
     try:
+        told = await session.scalar(select(Notifications.id).where(
+            Notifications.user_id == a.user_id, Notifications.event_id == a.event_id, Notifications.type == "event_checkin",
+        ).limit(1))
+        if told is not None:
+            return
         await notes.create_notification(
             session=session, user_id=a.user_id, title=TITLE, description=body, type="event_checkin",
             event_id=a.event_id, from_club_id=a.club_id, data={"event_name": a.event_name},

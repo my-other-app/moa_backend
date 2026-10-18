@@ -26,6 +26,7 @@ from app.api.notifications.models import Notifications
 from app.api.security.models import SignInAttempts
 from app.api.users.models import AdminRoles, UserDeviceTokens, UserTypes, Users
 from app.config import settings
+from app.core import jobs
 from app.core.notifications import service as push
 from app.core.rate_limit import limiter
 from tests.conftest import auth_header
@@ -162,11 +163,19 @@ async def test_followers_are_told_in_one_insert(session, make_club, make_event, 
 
     seen, stop = _count_inserts(session, "notifications")
     try:
-        reached = await notify_followers_of_new_event(session, club.id, club.name, ev.id, "Hack Night")
+        # A job after the commit (app.core.jobs); in the suite it runs when waited for.
+        assert await notify_followers_of_new_event(session, club.id, club.name, ev.id, "Hack Night") is None
+        assert fcm.batches == []
+        await jobs.settle()
     finally:
         stop()
     assert len(seen) == 1, seen
-    assert reached == 300 and fcm.batches == [300]
+    assert fcm.batches == [300]
+    rows = await session.scalar(select(func.count()).select_from(Notifications).where(Notifications.from_club_id == club.id, Notifications.type == "new_event"))
+    assert rows == 300
+    # Once per event: told again (a retry, a second call), nobody gets a second row.
+    await notify_followers_of_new_event(session, club.id, club.name, ev.id, "Hack Night")
+    await jobs.settle()
     rows = await session.scalar(select(func.count()).select_from(Notifications).where(Notifications.from_club_id == club.id, Notifications.type == "new_event"))
     assert rows == 300
 
@@ -233,6 +242,7 @@ async def test_the_interest_push_is_capped_per_event_and_per_person_per_day(sess
     await session.flush()
 
     await notify_users_by_interest(session, category.id, category.name, club.id, ev.id, "Drone Day")
+    await jobs.settle()
 
     told = set((await session.scalars(select(Notifications.user_id).where(Notifications.type == "nearby_event", Notifications.event_id == ev.id))).all())
     assert told == {ids[-3], ids[-4], ids[-5]}
@@ -291,7 +301,8 @@ async def test_a_push_to_every_device_is_for_owners_only(client, session, make_a
     assert (await client.post(f"{API}/notifications/test/send-all", json=body, headers=auth_header(await mint_token(support)))).status_code == 403
     r = await client.post(f"{API}/notifications/test/send-all", json=body, headers=auth_header(await mint_token(owner)))
     assert r.status_code == 200, r.text
-    assert r.json()["tokens_count"] >= 3 and r.json()["sent_count"] == r.json()["tokens_count"]
+    # Answered before the sends; by the time the client has it, the jobs ran (the suite runs them after each request).
+    assert r.json()["tokens_count"] >= 3 and sum(fcm.batches) == r.json()["tokens_count"]
     assert all(b <= 500 for b in fcm.batches)
 
 

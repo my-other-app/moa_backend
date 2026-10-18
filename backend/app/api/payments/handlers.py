@@ -101,12 +101,17 @@ async def validate_event_registration_payload(session: AsyncSession, payload: di
     return (amount_to_pay, receipt)
 
 
-async def registration_for_order(session: AsyncSession, order: PaymentOrders, *, lock: bool = False) -> EventRegistrationsLink | None:
+async def registration_for_order(
+    session: AsyncSession, order: PaymentOrders, *, lock: bool = False, include_deleted: bool = False,
+) -> EventRegistrationsLink | None:
     """The registration an order pays for: by the id the order was made
     with (its primary key), checked against the receipt; by the receipt when
-    the order carries no usable id. `lock` takes its row."""
+    the order carries no usable id. `lock` takes its row; `include_deleted`
+    finds one deleted since (the ledger: its money was still taken)."""
     def query():
         q = select(EventRegistrationsLink)
+        if include_deleted:
+            q = q.execution_options(include_deleted=True)
         return q.with_for_update().execution_options(populate_existing=True) if lock else q
 
     raw = (order.payload or {}).get("event_registration_id")
@@ -153,13 +158,20 @@ async def handle_event_registration_payment(
     A ticket about to become paid on a paid event first takes its place
     (capacity.take_paid_place). With none left, nothing is applied, the
     picks' hold is given back, and `full` says so.
+
+    What was applied goes into the ledger in the same transaction (an APPLY
+    posting: the ticket and the orders, against the money captured).
     """
+    from app.api.ledger import book as ledger_book
+    from app.api.ledger import service as ledger
     from app.api.payments import capacity
     from app.api.store import service as store
 
     event_registration = await registration_for_order(session, order, lock=True)
     if not event_registration:
         raise RequestValidationError(receipt="receipt is invalid")
+    # Paid before the ledger existed: posted as it stands, before this changes it.
+    await ledger.ensure_history(session, event_registration)
     outcome = Applied(registration_id=event_registration.id, event_id=event_registration.event_id)
 
     # PaymentLogs.amount is rupees (Numeric), like every other money column.
@@ -207,6 +219,7 @@ async def handle_event_registration_payment(
     event_registration.paid_amount = min(actual, ticket_paid)
     event_registration.is_paid = becomes_paid
     outcome.newly_paid = becomes_paid and not was_paid
+    await ledger.sync_registration(session, event_registration, kind=ledger_book.APPLY, channel=ledger.ONLINE)
     if commit:
         await session.commit()
         await send_ticket_if_paid(session, outcome, background_tasks)

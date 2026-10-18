@@ -30,7 +30,9 @@ from app.api.discover import cursor as cursors, visitors
 from app.api.reports import service as reports
 from app.api.threads.models import ClubThreads, ThreadComments, ThreadLikes, ThreadPollOptions, ThreadVotes
 from app.api.threads.schemas import MAX_BODY, MAX_OPTION, MAX_OPTIONS
+from app.api.notifications.models import Notifications
 from app.api.users.models import Users
+from app.core import jobs
 from app.response import CustomHTTPException
 
 logger = logging.getLogger(__name__)
@@ -168,9 +170,9 @@ def parse_options(raw: str | None) -> list[str]:
 
 
 async def create(session, club: Clubs, user, *, body: str, notify_followers: bool, poll_options: list[str], image) -> dict:
-    """The post. Telling the followers is the caller's to schedule after the
-    answer (tell_followers), so a club with a lakh of followers posts as fast
-    as one with ten."""
+    """The post, and -- when the followers are to be told -- the job that
+    tells them (`threads.tell_followers`), committed with it: a club with a
+    lakh of followers posts as fast as one with ten."""
     body = (body or "").strip()
     if not body:
         raise CustomHTTPException(422, message="Write something first")
@@ -185,19 +187,35 @@ async def create(session, club: Clubs, user, *, body: str, notify_followers: boo
     await session.flush()
     for i, label in enumerate(poll_options):
         session.add(ThreadPollOptions(thread_id=t.id, label=label, sort_order=i))
+    if notify_followers:
+        await jobs.enqueue(session, "threads.tell_followers", {"club_id": club.id, "thread_id": str(t.id)}, dedupe_key=f"threads:tell:{t.id}")
     await session.commit()
     await session.refresh(t)
     options = (await _options_for(session, [t.id]))[t.id]
     return _out(t, club, options, False, None)
 
 
+@jobs.handler("threads.tell_followers", max_attempts=4, timeout=1800.0)
+async def _tell_job(p: dict) -> None:
+    await tell_followers(int(p["club_id"]), uuid.UUID(str(p["thread_id"])))
+
+
 async def tell_followers(club_id: int, thread_id) -> int:
     """A push to every follower, and a line in each inbox: after the post was
     answered, on a session of its own, TELL_BATCH followers at a time (read
     in id order through the club's follower index, never all at once).
-    Returns how many were told. Never raises."""
+    Followers who already have the post's line are skipped, so a run cut off
+    by a deploy and run again goes on from where it stopped rather than
+    telling anyone twice. Returns how many were told one by one. Never raises.
+
+    With PUSH_TOPICS or INBOX_SHARED on, the post is a broadcast instead
+    (app.core.notifications.fanout.announce): one inbox row and one send to
+    club_{id}, written once however often this runs; 0 is returned."""
     from app.api.notifications.service import create_notifications_batch
+    from app.core.notifications import delivery, fanout
     from app.core.notifications.service import send_notification_to_users
+    from app.core.notifications.topics import settings_off
+    from app.core.notifications.triggers import broadcasts_on
 
     told = 0
     try:
@@ -209,17 +227,35 @@ async def tell_followers(club_id: int, thread_id) -> int:
             preview = t.body if len(t.body) <= 140 else t.body[:137].rstrip() + "…"
             title = f"{club.name} asked a question" if t.kind == "poll" else f"{club.name} posted"
             data = {"type": "club_thread", "thread_id": str(t.id), "club_id": str(club.id)}
+            if broadcasts_on():
+                # One row and one topic send (fanout.announce); the devices
+                # that still need it one by one are the push.devices jobs'.
+                await fanout.announce(session, fanout.Broadcast(
+                    kind="club_thread", ref=str(t.id), title=title, body=preview, data=data, push_data=data,
+                    from_club_id=club.id, club_id=club.id,
+                ), topic=delivery.club_topic(club.id))
+                return 0
             last = 0
             while True:
                 ids = list((await session.scalars(
                     select(ClubUsersLink.user_id).where(
                         ClubUsersLink.club_id == club.id, ClubUsersLink.is_following == True, ClubUsersLink.is_deleted == False,  # noqa: E712
+                        ClubUsersLink.is_muted == False, ~settings_off("clubs", ClubUsersLink.user_id),  # noqa: E712
                         ClubUsersLink.user_id > last,
                     ).order_by(ClubUsersLink.user_id).limit(TELL_BATCH)
                 )).all())
                 if not ids:
                     break
                 last = ids[-1]
+                already = set((await session.scalars(
+                    select(Notifications.user_id).where(
+                        Notifications.user_id.in_(ids), Notifications.type == "club_thread", Notifications.from_club_id == club.id,
+                        Notifications.data["thread_id"].as_string() == str(t.id),
+                    )
+                )).all())
+                ids = [i for i in ids if i not in already]
+                if not ids:
+                    continue
                 await create_notifications_batch(session, user_ids=ids, title=title, description=preview, type="club_thread", data=data, from_club_id=club.id)
                 await session.commit()
                 await send_notification_to_users(session, ids, title, preview, data=data)

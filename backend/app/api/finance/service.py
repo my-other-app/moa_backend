@@ -10,6 +10,11 @@ against the club.
 The period picks events by their date, and every figure on the page is a sum
 over those events, so the tiles, the months, the types and the table agree.
 An event's own page needs no period: its money is its money.
+
+Two ways to the same figures (settings.LEDGER_READS, app/api/ledger/reads.py):
+worked out here from the registrations, store orders and payment logs on
+every view, or read from the money ledger's monthly sums, a few rows per
+event. scripts/ledger_compare.py runs both and expects the same numbers.
 """
 from __future__ import annotations
 
@@ -26,6 +31,7 @@ from app.api.closeout.models import EventStatus
 from app.api.events.models import EventCategories, EventRegistrationsLink as Reg, Events
 from app.api.finance.models import ClubExpenses
 from app.api.finance.schemas import CATEGORIES, EXPENSE_CATEGORIES, INCOME_CATEGORIES, ExpenseCreate, ExpensePatch
+from app.api.ledger import reads as ledger_reads
 from app.api.payments.models import PaymentLogs, PaymentOrders, PaymentStatus
 from app.api.store.models import EventStoreOrders
 from app.core.utils.time_buckets import utc_trunc
@@ -127,6 +133,8 @@ def _blank() -> dict:
 
 async def _per_event(session, event_ids: list[int]) -> dict[int, dict]:
     """Registrations, what they paid, what is still owed, what was refunded and what was spent — per event, all time."""
+    if ledger_reads.enabled():
+        return await ledger_reads.per_event(session, event_ids)
     out = {i: _blank() for i in event_ids}
     if not event_ids:
         return out
@@ -166,6 +174,16 @@ async def _per_event(session, event_ids: list[int]) -> dict[int, dict]:
     )
     for eid, amount, n in (await session.execute(q)).all():
         out[eid].update(refunds=Decimal(amount), refund_count=n)
+    await _expense_totals(session, event_ids, out)
+    # Merchandise paid for with the ticket, kept apart from the ticket itself.
+    q = select(EventStoreOrders.event_id, func.coalesce(func.sum(EventStoreOrders.total), 0)).where(EventStoreOrders.event_id.in_(event_ids), EventStoreOrders.status == "paid").group_by(EventStoreOrders.event_id)
+    for eid, amount in (await session.execute(q)).all():
+        out[eid].update(merch=Decimal(amount))
+    return out
+
+
+async def _expense_totals(session, event_ids: list[int], out: dict[int, dict]) -> None:
+    """The events' expenses and other income, from the club's own book."""
     q = (
         select(ClubExpenses.event_id, ClubExpenses.kind, func.coalesce(func.sum(ClubExpenses.amount), 0), func.count())
         .where(ClubExpenses.event_id.in_(event_ids), ClubExpenses.is_deleted == False)  # noqa: E712
@@ -176,11 +194,6 @@ async def _per_event(session, event_ids: list[int]) -> dict[int, dict]:
             out[eid].update(other_income=Decimal(amount), other_income_count=n)
         else:
             out[eid].update(expenses=Decimal(amount), expense_count=n)
-    # Merchandise paid for with the ticket, kept apart from the ticket itself.
-    q = select(EventStoreOrders.event_id, func.coalesce(func.sum(EventStoreOrders.total), 0)).where(EventStoreOrders.event_id.in_(event_ids), EventStoreOrders.status == "paid").group_by(EventStoreOrders.event_id)
-    for eid, amount in (await session.execute(q)).all():
-        out[eid].update(merch=Decimal(amount))
-    return out
 
 
 def _totals(rows: list[dict], overheads: list[ClubExpenses] | None = None) -> dict:
@@ -366,6 +379,27 @@ async def event_summary(session, event) -> dict:
     cur = _totals([money])
 
     # Here the months say when the money moved, not when the event was.
+    months = await (ledger_reads.event_months(session, event.id) if ledger_reads.enabled() else _event_months(session, event))
+    expenses = await _expense_rows(session, event.club_id, [event.id], None, None)
+    for x in expenses:
+        months.setdefault(x["incurred_on"][:7], _new_month(""))["other" if x["kind"] == INCOME else "expenses"] += Decimal(str(x["amount"]))
+    keys = sorted(months) or [_month_of(event.event_datetime.astimezone(timezone.utc))]
+    first, last = date.fromisoformat(keys[0] + "-01"), date.fromisoformat(keys[-1] + "-01")
+    filled = {m: months.get(m, _new_month(m)) for m in _months(first, last)}
+
+    row = _event_row(event, money, "", now)
+    return dict(
+        scope="event", period=dict(start=first, end=event.event_datetime.astimezone(timezone.utc).date()),
+        figures=_figures(cur), deltas=_deltas(cur, None), by_month=_month_rows(filled), by_type=[], by_event=[],
+        expenses=expenses, by_category=await _by_category(session, event.club_id, [event.id], None, None), income_by_category=await _by_category(session, event.club_id, [event.id], None, None, kind=INCOME), channels=_channels(cur),
+        attention=_attention([row]), ahead=_ahead([row]),
+        categories=list(EXPENSE_CATEGORIES), income_categories=list(INCOME_CATEGORIES), generated_at=_iso(now),
+    )
+
+
+async def _event_months(session, event) -> dict[str, dict]:
+    """The event's tickets (by when the guest registered), refunds (by when
+    the payment was refunded) and merchandise (by when it was paid), by month."""
     months: dict[str, dict] = {}
     paid = Reg.is_paid == True  # noqa: E712
     by_reg_month = utc_trunc("month", Reg.created_at)
@@ -387,21 +421,7 @@ async def event_summary(session, event) -> dict:
     q = select(by_merch_month, func.sum(EventStoreOrders.total)).where(EventStoreOrders.event_id == event.id, EventStoreOrders.status == "paid", EventStoreOrders.paid_at.is_not(None)).group_by(by_merch_month)
     for when, amount in (await session.execute(q)).all():
         months.setdefault(_month_of(when), _new_month(""))["merch"] += Decimal(amount or 0)
-    expenses = await _expense_rows(session, event.club_id, [event.id], None, None)
-    for x in expenses:
-        months.setdefault(x["incurred_on"][:7], _new_month(""))["other" if x["kind"] == INCOME else "expenses"] += Decimal(str(x["amount"]))
-    keys = sorted(months) or [_month_of(event.event_datetime.astimezone(timezone.utc))]
-    first, last = date.fromisoformat(keys[0] + "-01"), date.fromisoformat(keys[-1] + "-01")
-    filled = {m: months.get(m, _new_month(m)) for m in _months(first, last)}
-
-    row = _event_row(event, money, "", now)
-    return dict(
-        scope="event", period=dict(start=first, end=event.event_datetime.astimezone(timezone.utc).date()),
-        figures=_figures(cur), deltas=_deltas(cur, None), by_month=_month_rows(filled), by_type=[], by_event=[],
-        expenses=expenses, by_category=await _by_category(session, event.club_id, [event.id], None, None), income_by_category=await _by_category(session, event.club_id, [event.id], None, None, kind=INCOME), channels=_channels(cur),
-        attention=_attention([row]), ahead=_ahead([row]),
-        categories=list(EXPENSE_CATEGORIES), income_categories=list(INCOME_CATEGORIES), generated_at=_iso(now),
-    )
+    return months
 
 
 # ─── Expenses ────────────────────────────────────────────────────────────

@@ -18,6 +18,7 @@ from typing import Dict, Optional, Union
 
 
 from app.config import settings
+from app.core.storage import media
 from app.response import CustomHTTPException
 
 logger = logging.getLogger(__name__)
@@ -287,8 +288,14 @@ def stored_key(value) -> Optional[str]:
 
 
 class S3Image(dict):
-    def __init__(self, variations, client=None, **kwargs):
+    """A picture read from an image column: its links by size, as a dict
+    (what a response serialises); `variations` holds the keys behind them,
+    and `widths` the box each size was made to fit, for the sizes that exist
+    (media.srcset)."""
+
+    def __init__(self, variations, client=None, widths=None, **kwargs):
         self.variations = variations
+        self.widths = widths or {}
         self._client = client
         super().__init__(kwargs)
 
@@ -374,7 +381,11 @@ class S3ImageField(TypeDecorator):
 
     `public=True` for a picture anyone may see (an event's poster, a club's
     logo): its links are signed for PUBLIC_IMAGE_URL_TTL rather than an hour
-    (see signed_url).
+    (see signed_url), or are on the media CDN when it is on (media.public_url).
+
+    Every upload is stored under a versioned name (`v-<uuid4 hex>.<ext>`,
+    media.versioned_name): a key is written once and never again, so the
+    CDN may keep it for a year.
     """
 
     impl = String
@@ -411,7 +422,7 @@ class S3ImageField(TypeDecorator):
         return prepare_image(raw, max_size=self.max_size, allowed=self.allowed_extensions, variations=self.variations)
 
     def store(self, prepared: Prepared) -> str:
-        full_path = os.path.join(self.base_path, f"{uuid.uuid4()}.{prepared.ext}")
+        full_path = os.path.join(self.base_path, media.versioned_name(prepared.ext))
         for name, data in [(None, prepared.original), *prepared.variants.items()]:
             self.s3_client.upload_fileobj(
                 io.BytesIO(data),
@@ -482,22 +493,27 @@ class S3ImageField(TypeDecorator):
         if not value:
             return None
 
-        public = getattr(self, "public", False)
-        original = signed_url(value, public=public)
+        # A public picture's links come from the one builder: on the CDN when
+        # it is on, else signed for a week. A private file's, for an hour.
+        link = media.public_url if getattr(self, "public", False) else signed_url
+        original = link(value)
         variations = {}
         variation_paths = {}
+        widths = {}
         own = self.has_variants(value)
-        for variation in self.variations:
+        for variation, spec in self.variations.items():
             if own:
                 path = variant_key(value, variation)
                 variation_paths[variation] = path
-                variations[variation] = signed_url(path, public=public)
+                variations[variation] = link(path)
+                if spec.get("width"):
+                    widths[variation] = int(spec["width"])
             else:
                 variations[variation] = original
 
         variations["original"] = original
         variation_paths["original"] = value
-        return S3Image(variations=variation_paths, client=self.s3_client, **variations)
+        return S3Image(variations=variation_paths, client=self.s3_client, widths=widths, **variations)
 
 
 class S3FileField(TypeDecorator):

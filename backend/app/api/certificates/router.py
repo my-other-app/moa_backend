@@ -50,25 +50,23 @@ async def issue(session: SessionDep, user: ClubAuth, event_id: int, body: IssueR
 
 @router.post("/send", summary="Email certificates to the guests issued one")
 async def send(
-    session: SessionDep, user: ClubAuth, event_id: int, body: SendTicketsRequest, background_tasks: BackgroundTasks
+    session: SessionDep, user: ClubAuth, event_id: int, body: SendTicketsRequest
 ) -> SendResponse:
     event = await deliveries.event_for_club(session, user, event_id)
     result = await deliveries.queue(
-        session, event, DeliveryKind.certificate, registration_ids=body.registration_ids, only=body.only, force=body.only == "all"
+        session, event, DeliveryKind.certificate, registration_ids=body.registration_ids, only=body.only, force=body.only == "all", send=True,
     )
-    background_tasks.add_task(deliveries.run, result["ids"])
     return SendResponse(**{k: v for k, v in result.items() if k != "ids"})
 
 
 @router.post("/{registration_id}/send", summary="One guest's certificate again")
 async def send_one(
-    session: SessionDep, user: ClubAuth, event_id: int, registration_id: UUID, background_tasks: BackgroundTasks
+    session: SessionDep, user: ClubAuth, event_id: int, registration_id: UUID
 ) -> SendResponse:
     event = await deliveries.event_for_club(session, user, event_id)
     result = await deliveries.queue(
-        session, event, DeliveryKind.certificate, registration_ids=[registration_id], only="all", force=True
+        session, event, DeliveryKind.certificate, registration_ids=[registration_id], only="all", force=True, send=True
     )
-    background_tasks.add_task(deliveries.run, result["ids"])
     return SendResponse(**{k: v for k, v in result.items() if k != "ids"})
 
 
