@@ -200,10 +200,18 @@ class AppConfig(BaseSettings):
     SITE_REVALIDATE_SECRET: str = ""
     # How long a signed link to a public picture stays valid, in seconds: an
     # event's poster, a club's logo and cover, a speaker's, team member's or
-    # partner's picture, a post's photo (app/core/storage/fields.py). A week,
-    # the most a SigV4 link allows. Private files -- tickets, certificates,
-    # template art and signatures, profile pictures, event files -- keep an hour.
+    # partner's picture, a post's photo, a stock avatar, a store item's photo
+    # (app/core/storage/fields.py). A week, the most a SigV4 link allows.
+    # Private files -- tickets, certificates, template art and signatures,
+    # profile pictures, event files -- keep an hour.
     PUBLIC_IMAGE_URL_TTL: int = 7 * 24 * 3600
+    # The media CDN in front of the bucket (the media Cloudflare Worker in the
+    # app repo, infra/cloudflare/media), e.g. https://media.myotherapp.in. Set,
+    # every public picture above is handed out as <MEDIA_CDN_URL>/<key>: one
+    # permanent address, cached at the edge near the viewer, no signature
+    # (app/core/storage/media.py). Unset: the week-signed links, as before.
+    # Private files never go through it, set or not.
+    MEDIA_CDN_URL: str = ""
 
     @field_validator("PUBLIC_IMAGE_URL_TTL")
     @classmethod
@@ -211,6 +219,22 @@ class AppConfig(BaseSettings):
         """Between an hour and SigV4's ceiling of a week: S3 refuses a link
         signed for longer, which would break every picture at once."""
         return max(3600, min(int(value), 7 * 24 * 3600))
+
+    @field_validator("MEDIA_CDN_URL")
+    @classmethod
+    def _cdn_origin(cls, value: str) -> str:
+        """An origin, no trailing slash; `media.myotherapp.in` is read as
+        https. A path, a query or a fragment is refused at startup rather than
+        quietly breaking every picture: each address is this, "/", the key."""
+        value = (value or "").strip()
+        if not value:
+            return ""
+        if "://" not in value:
+            value = f"https://{value}"
+        parts = urlsplit(value)
+        if parts.scheme not in ("https", "http") or not parts.hostname or parts.path.rstrip("/") or parts.query or parts.fragment:
+            raise ValueError("APP_MEDIA_CDN_URL must be an origin like https://media.myotherapp.in (no path)")
+        return f"{parts.scheme}://{parts.netloc.lower()}"
 
     @property
     def site_tokens(self) -> list[str]:

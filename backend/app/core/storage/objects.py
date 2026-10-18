@@ -20,6 +20,7 @@ from typing import Callable, Optional
 import boto3
 
 from app.config import settings
+from app.core.storage import media
 
 logger = logging.getLogger(__name__)
 
@@ -50,12 +51,22 @@ def presigned_url(key: str, expires: int = 3600) -> str:
 
 
 def public_url(key: str) -> str:
-    """A link to a picture anyone may see (an agenda's speaker photo): signed
-    for PUBLIC_IMAGE_URL_TTL and the same link for half of that, like the
-    public image columns (app.core.storage.fields.signed_url)."""
-    from app.core.storage.fields import signed_url
+    """A link to a picture anyone may see (an agenda's speaker photo), made
+    like the public image columns' (app.core.storage.media.public_url): on the
+    media CDN when it is on and the key is in a public folder, else signed for
+    PUBLIC_IMAGE_URL_TTL and the same link for half of that."""
+    return media.public_url(key)
 
-    return signed_url(key, public=True)
+
+def photo_url(key: Optional[str]) -> Optional[str]:
+    """A link to a product photo (the event's store, the merch desk). The
+    store shows it to anyone, so it is a public picture: on the media CDN
+    when that is on and the key is under an event's merch folder
+    (media.PUBLIC_FOLDERS). Otherwise -- the CDN off, or a key from anywhere
+    else, which an item may name -- the hour-signed link it always had."""
+    if not key:
+        return None
+    return media.public_url(key, otherwise=lambda k: presigned_url(k))
 
 
 class ByteCache:

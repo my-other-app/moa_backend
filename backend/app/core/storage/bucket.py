@@ -12,6 +12,7 @@ from typing import Iterable, Optional
 from urllib.parse import unquote, urlsplit
 
 from app.config import settings
+from app.core.storage import media
 
 
 def _bucket() -> str:
@@ -24,10 +25,16 @@ def key_from_url(url: Optional[str]) -> Optional[str]:
     Understands the shapes boto3 signs: virtual-hosted
     (`{bucket}.s3[.{region}].amazonaws.com/{key}`) and path style
     (`s3[.{region}].amazonaws.com/{bucket}/{key}`). The query (the signature)
-    is ignored, so an expired URL still names its key.
+    is ignored, so an expired URL still names its key. And, while the media
+    CDN is on, its addresses (`{APP_MEDIA_CDN_URL}/{key}`, public pictures
+    only: media.key_from_url), so a poster handed out on the CDN is read by
+    its key like any other -- from the process's cache, never over HTTP.
     """
     if not url or not isinstance(url, str):
         return None
+    on_cdn = media.key_from_url(url)
+    if on_cdn:
+        return on_cdn
     try:
         parts = urlsplit(url.strip())
     except ValueError:
