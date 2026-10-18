@@ -29,6 +29,37 @@ from app.core import site_revalidate  # noqa: F401
 redact.install()
 
 
+def start_loops() -> list[asyncio.Task]:
+    """The leader-only loops: each takes an advisory lock on every pass, so
+    however many processes start them, one runs each pass. Started here by
+    the API, or by the worker under APP_SWEEPS_IN_WORKER (app/worker.py)."""
+    # Timed journey emails: one sweep a minute, one worker at a time.
+    from app.api.emails.service import sweep_loop
+    from app.api.closeout.service import sweep_loop as closeout_sweep_loop
+    from app.api.live.service import sweep_loop as feedback_sweep_loop
+    # Billing: graces running out and trials about to bill, once an hour.
+    from app.api.subscriptions.sweep import sweep_loop as billing_sweep_loop
+    # The going/follower counter check: every six hours, on one process.
+    from app.api.discover.counters import check_loop as counter_check_loop
+    # Clubs' own domains: pending ones polled at Cloudflare, plans followed, every five minutes.
+    from app.api.club_domains.sweep import sweep_loop as domains_sweep_loop
+    # Store holds that ran out given back, every minute.
+    from app.api.store.sweep import sweep_loop as store_sweep_loop
+    # Payments: open orders reconciled with Razorpay, unapplied captures
+    # repaired, automatic refunds retried -- every ten minutes, one worker.
+    from app.api.payments.sweep import sweep_loop as payments_sweep_loop
+    # Spent sessions and old sign-in attempts out, hourly, on one process.
+    from app.api.auth.retention import sweep_loop as account_sweep_loop
+
+    return [
+        asyncio.create_task(loop())
+        for loop in (
+            sweep_loop, closeout_sweep_loop, feedback_sweep_loop, billing_sweep_loop, counter_check_loop,
+            domains_sweep_loop, store_sweep_loop, payments_sweep_loop, account_sweep_loop,
+        )
+    ]
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: seed badge definitions
@@ -44,42 +75,16 @@ async def lifespan(app: FastAPI):
     from app.db.core import check_connection_budget
 
     await check_connection_budget()
-    # Timed journey emails: one sweep a minute, one worker at a time.
-    from app.api.emails.service import sweep_loop
+    # The sweeps, here unless the worker runs them (APP_SWEEPS_IN_WORKER).
+    loops = [] if settings.SWEEPS_IN_WORKER else start_loops()
+    # The jobs this process writes, run as soon as they commit -- unless the
+    # worker runs them (APP_JOBS_WORKER), when this process only writes them.
+    from app.core import jobs
 
-    sweeper = asyncio.create_task(sweep_loop())
-    from app.api.closeout.service import sweep_loop as closeout_sweep_loop
-
-    closer = asyncio.create_task(closeout_sweep_loop())
-    from app.api.live.service import sweep_loop as feedback_sweep_loop
-
-    feedback = asyncio.create_task(feedback_sweep_loop())
-    # Billing: graces running out and trials about to bill, once an hour.
-    from app.api.subscriptions.sweep import sweep_loop as billing_sweep_loop
-
-    billing = asyncio.create_task(billing_sweep_loop())
-    # The going/follower counter check: every six hours, on one process.
-    from app.api.discover.counters import check_loop as counter_check_loop
-
-    counters = asyncio.create_task(counter_check_loop())
-
-    # Clubs' own domains: pending ones polled at Cloudflare, plans followed, every five minutes.
-    from app.api.club_domains.sweep import sweep_loop as domains_sweep_loop
-
-    domains = asyncio.create_task(domains_sweep_loop())
-    # Store holds that ran out given back, every minute.
-    from app.api.store.sweep import sweep_loop as store_sweep_loop
-
-    store_holds = asyncio.create_task(store_sweep_loop())
-    # Payments: open orders reconciled with Razorpay, unapplied captures
-    # repaired, automatic refunds retried -- every ten minutes, one worker.
-    from app.api.payments.sweep import sweep_loop as payments_sweep_loop
-
-    payments_sweep = asyncio.create_task(payments_sweep_loop())
-    # Spent sessions and old sign-in attempts out, hourly, on one process.
-    from app.api.auth.retention import sweep_loop as account_sweep_loop
-
-    accounts = asyncio.create_task(account_sweep_loop())
+    runner = None
+    if not settings.JOBS_WORKER:
+        runner = jobs.Runner(kind="api").start()
+        jobs.use(runner)
     # What import and startup built (models, routes, schemas, the S3 service
     # model: some 740,000 objects) lives as long as the process. Frozen out
     # of the collector's reach, a full collection no longer walks all of it:
@@ -88,7 +93,7 @@ async def lifespan(app: FastAPI):
     gc.collect()
     gc.freeze()
     yield
-    await shutdown([sweeper, closer, feedback, billing, counters, domains, store_holds, payments_sweep, accounts])
+    await shutdown(loops, runner=runner)
 
 
 #: Seconds shutdown may take, in all. Docker kills the container ten seconds
@@ -97,14 +102,14 @@ async def lifespan(app: FastAPI):
 SHUTDOWN_BUDGET = 5.0
 
 
-async def shutdown(loops: list, budget: float = SHUTDOWN_BUDGET) -> None:
-    """Stop the background loops and wait for them to stop; give the mail
-    jobs in hand time to finish (new ones are not started); then wait for
-    the after-commit mails. Each wait is bounded, together within `budget`:
-    what is cut off -- a mail job, a durable after-commit mail -- is in the
-    database and the next process's resumer finishes it."""
+async def shutdown(loops: list, budget: float = SHUTDOWN_BUDGET, runner=None) -> None:
+    """Stop the background loops and wait for them to stop; stop taking jobs
+    and give the ones in hand, and the mail sends, time to finish (new ones
+    are not started); then wait for the after-commit calls. Each wait is
+    bounded, together within `budget`: what is cut off -- a job, a mail send
+    -- is in the database, handed back or resumed by the next process."""
     from app.api.deliveries import pipeline
-    from app.core import after_commit, background
+    from app.core import after_commit, background, jobs, redis
 
     loop = asyncio.get_running_loop()
     deadline = loop.time() + budget
@@ -114,16 +119,26 @@ async def shutdown(loops: list, budget: float = SHUTDOWN_BUDGET) -> None:
 
     for task in loops:
         task.cancel()
-    _, stuck = await asyncio.wait(loops, timeout=min(1.0, left()))
-    if stuck:
-        print(f"Warning: {len(stuck)} background loop(s) did not stop in time")
-    await pipeline.shutdown(timeout=left() * 0.6)
+    if loops:
+        _, stuck = await asyncio.wait(loops, timeout=min(1.0, left()))
+        if stuck:
+            print(f"Warning: {len(stuck)} background loop(s) did not stop in time")
+    # The runner and the mail pumps stop together: a delivery job's pump is
+    # one of the jobs in hand.
+    share = left() * 0.6
+    stopping = [pipeline.shutdown(timeout=share)]
+    if runner is not None:
+        stopping.append(runner.stop(timeout=share))
+    await asyncio.gather(*stopping, return_exceptions=True)
+    if runner is not None and jobs.local() is runner:
+        jobs.use(None)
     await after_commit.drain(timeout=left())
     # Fan-outs started after a response (app/core/background.py): bounded too.
     try:
         await asyncio.wait_for(background.drain(), timeout=left())
     except asyncio.TimeoutError:
         print("Warning: background fan-outs did not finish before shutdown")
+    await redis.close()
 
 
 # No default_response_class: FastAPI's own JSON response is the default. It
@@ -141,6 +156,10 @@ application.include_router(router=api_router)
 from app.api.links.router import public_router as public_links_router  # noqa: E402
 
 application.include_router(router=public_links_router, tags=["tracking-links"])
+# Liveness and readiness at the root, beside /ping (app/api/health.py).
+from app.api.health import public_router as health_router  # noqa: E402
+
+application.include_router(router=health_router)
 # Innermost: each request's plan-gate scope, so one request resolves a club's
 # entitlements once and knows whether an admin is behind it
 # (app/api/subscriptions/gates.py).

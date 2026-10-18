@@ -45,7 +45,6 @@ from app.api.events.models import EventRegistrationsLink, Events
 from app.api.events.tickets import poster_url, ticket_document
 from app.api.templates_audience import RegistrationRole
 from app.config import settings
-from app.core import after_commit
 from app.core.email import email as email_mod
 from app.core.email import transport
 from app.core.mail import links, suppression
@@ -1142,14 +1141,14 @@ async def sweep(session, now: Optional[datetime] = None) -> int:
 
 
 async def resume(session, now: Optional[datetime] = None) -> dict:
-    """Everything left half-done by a process that stopped: deliveries,
-    messages, and the after-commit mails that must go. Each part on its own,
-    so one that fails does not keep the others from running."""
+    """Everything left half-done by a process that stopped: deliveries and
+    messages. (The after-commit mails that must go are jobs now, and a job
+    left by a stopped process is taken again when its lease runs out.) Each
+    part on its own, so one that fails does not keep the other from running."""
     out: dict = {}
     for name, part in (
         ("deliveries", lambda: deliveries.resume(session, now)),
         ("messages", lambda: resume_messages(session, now)),
-        ("after_commit", lambda: after_commit.resume(session, now)),
     ):
         try:
             out[name] = await part()

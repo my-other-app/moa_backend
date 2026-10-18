@@ -199,16 +199,23 @@ async def _owner_address(session, club_id: int) -> str | None:
     return await owner_address(session, club_id)
 
 
-def _send(to: str, subject: str, paragraphs: list[str], button, footer: str | None) -> None:
-    """After commit, on a worker thread. Logged, never raised."""
+def send(to: str, subject: str, paragraphs: list[str], button, footer: str | None) -> None:
+    """The mail, raising when the provider did not take it: what the durable
+    job runs (app.core.after_commit), so an outage is retried."""
     from app.core.email import email as email_mod
 
+    email_mod.send_email(
+        recipients=[to], subject=subject,
+        text=plain.text(paragraphs, button=button, footer=footer),
+        html=plain.render(paragraphs, button=button, footer=footer),
+    )
+
+
+def _send(to: str, subject: str, paragraphs: list[str], button, footer: str | None) -> None:
+    """What callers queue after commit: a job that runs `send` when there is a
+    loop, else this, in line. Logged, never raised."""
     try:
-        email_mod.send_email(
-            recipients=[to], subject=subject,
-            text=plain.text(paragraphs, button=button, footer=footer),
-            html=plain.render(paragraphs, button=button, footer=footer),
-        )
+        send(to, subject, paragraphs, button, footer)
     except Exception:  # noqa: BLE001
         logger.warning("club domain email (%s) to %s could not be sent", subject, to, exc_info=True)
 

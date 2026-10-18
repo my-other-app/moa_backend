@@ -62,6 +62,7 @@ KINDS: dict[str, str] = {
     "payment_refund_failed": "Razorpay did not take an automatic refund; the sweep keeps trying",
     "payment_unapplied": "A captured payment had not been applied to its registration; the repair sweep applied it, or could not (data.repaired)",
     "subscription_orphan_charged": "Razorpay charged a subscription no club row holds (a second checkout, or one made elsewhere); it was cancelled at Razorpay",
+    "job_dead": "A background job (a mail, a fan-out, a retention run) failed on every try and was given up on (data: job_id, name, attempts, error)",
 }
 
 DEDUPE_WINDOW = timedelta(minutes=10)

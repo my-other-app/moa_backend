@@ -59,6 +59,7 @@ from app.api.ticket_templates.router import router as ticket_templates_router
 from app.api.badges.router import router as badges_router
 from app.api.audit.router import router as audit_router
 from app.api.admin_alerts.router import router as admin_alerts_router
+from app.api.health import admin_router as admin_jobs_router
 from app.api.backups.router import router as backups_router
 from app.api.subscriptions.router import (
     admin_router as subscriptions_admin_router,
@@ -144,6 +145,8 @@ api_router.include_router(router=certificate_templates_router, tags=["certificat
 api_router.include_router(router=badges_router, tags=["badges"])
 api_router.include_router(router=audit_router)
 api_router.include_router(router=admin_alerts_router)
+# The job queue at a glance, and a dead job put back (app/api/health.py).
+api_router.include_router(router=admin_jobs_router)
 api_router.include_router(router=backups_router)
 # Before the clubs router: these are literal paths under /clubs, and the
 # clubs router owns the parameterised ones.
