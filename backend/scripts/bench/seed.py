@@ -53,6 +53,7 @@ from scripts.bench import _env  # noqa: F401  (settings before app)
 from sqlalchemy import create_engine, text
 
 from app.api.discover import places
+from app.api.interests.models import slugify
 from app.config import settings
 from app.db import registry  # noqa: F401
 from app.db.base import _Base
@@ -419,13 +420,17 @@ class Seeder:
                     c.add((i + 1, name, icon))
                 c.flush()
                 shipped = list(range(1, len(CATEGORIES) + 1))
-            c = Copy(raw, "interest_categories", ["id", "name"], now)
+            # The topics migration seeds the default tree; the bench's own six
+            # groups of sixty take its place (the links below draw ids 1..60).
+            cur.execute("DELETE FROM interests")
+            cur.execute("DELETE FROM interest_categories")
+            c = Copy(raw, "interest_categories", ["id", "name", "slug", "sort_order"], now)
             for i in range(6):
-                c.add((i + 1, f"Group {i + 1}"))
+                c.add((i + 1, f"Group {i + 1}", f"group-{i + 1}", i + 1))
             c.flush()
-            c = Copy(raw, "interests", ["id", "name", "icon", "category_id"], now)
+            c = Copy(raw, "interests", ["id", "name", "slug", "icon", "category_id", "sort_order"], now)
             for i, t in enumerate(TOPICS):
-                c.add((i + 1, t, "✨", (i % 6) + 1))
+                c.add((i + 1, t, f"{slugify(t)}-{i + 1}", "✨", (i % 6) + 1, i // 6 + 1))
             c.flush()
             n_orgs = max(80, n["clubs"] // 20)
             c = Copy(raw, "organizations", ["id", "name", "type"], now)

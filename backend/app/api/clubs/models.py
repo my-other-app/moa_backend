@@ -119,6 +119,13 @@ class Clubs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     notes = relationship("Notes", back_populates="club")
     socials = relationship("ClubSocials", back_populates="club", uselist=False)
 
+    @property
+    def topics(self) -> list[dict]:
+        """The topics of its interests, when loaded with their categories (app.api.interests.topics.loaded_topics)."""
+        from app.api.interests.topics import loaded_topics
+
+        return loaded_topics(self)
+
     __table_args__ = (
         sa.Index("ix_clubs_name_trgm", "name", postgresql_using="gin", postgresql_ops={"name": "gin_trgm_ops"}, postgresql_where=sa.text("NOT is_deleted")),
         sa.Index("ix_clubs_tagline_trgm", "tagline", postgresql_using="gin", postgresql_ops={"tagline": "gin_trgm_ops"}, postgresql_where=sa.text("NOT is_deleted")),

@@ -25,6 +25,8 @@ EVENT_KEYS = {
     "category", "interests", "guidelines", "contact", "url",
     # For the site's feeds: the description as one plain line, and the dates.
     "summary", "created_at", "updated_at",
+    # The topics of its interests (Topics).
+    "topics",
 }
 
 
@@ -141,6 +143,7 @@ async def test_the_page_by_slug(client, session, world):
     assert datetime.fromisoformat(ev["reg_opens_at"]) == main.reg_startdate and datetime.fromisoformat(ev["reg_closes_at"]) == main.reg_enddate
     assert ev["status"] == "upcoming" and ev["registration_open"] is True
     assert ev["category"] == {"id": world["tech"].id, "name": "EP Tech"} and ev["interests"] == ["EP Robotics", "EP AI"]
+    assert [t["name"] for t in ev["topics"]] == ["EP interests"]
     assert ev["guidelines"] == "Bring a laptop."
     assert ev["contact"] == {"name": "Asha", "email": "asha@circuit.example", "phone": "+91 90000 00000"}
     assert ev["url"] == f"{SITE}/events/{main.slug}"

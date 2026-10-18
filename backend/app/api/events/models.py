@@ -186,6 +186,13 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     ratings = relationship("EventRatingsLink", back_populates="event")
     speakers = relationship("EventSpeakers", back_populates="event", order_by="EventSpeakers.display_order")
 
+    @property
+    def topics(self) -> list[dict]:
+        """The topics of its interests, when loaded with their categories (app.api.interests.topics.loaded_topics)."""
+        from app.api.interests.topics import loaded_topics
+
+        return loaded_topics(self)
+
     model_config = ConfigDict(from_attributes=True)
 
     __table_args__ = (

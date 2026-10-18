@@ -67,16 +67,23 @@ from app.api.events.models import (
     Events,
     ends_at_sql,
 )
+from app.api.interests.models import Interests
 from app.api.users.models import UserInterests, UserProfiles
 
 # --- Weights -----------------------------------------------------------------
-# "Balanced": the most a user can earn from interests (3 x 2.5 = 7.5) is close
-# to the most they can earn from club ties (3.5 + 2.5 = 6.0), so neither a
+# "Balanced": the most a user can earn from interests (3 x 2.5 = 7.5, and 1 for
+# a sibling) is close to the most they can earn from club ties (3.5 + 2.5 =
+# 6.0), so neither a
 # topic match nor a club subscription can bury the other. Organisation,
 # history, popularity and urgency are tiebreakers an order of magnitude
 # smaller, there to order events that are otherwise equally relevant.
 W_INTEREST = 2.5
 INTEREST_CAP = 3  # beyond three shared interests, more tells us little
+# An interest the user did not pick under a topic one of theirs is in (Web
+# Development for someone who picked Cybersecurity): a weaker sign, counted
+# once, so it lifts an event above an unrelated one and never above one
+# that shares an interest outright.
+W_SIBLING_INTEREST = 1.0
 W_PINNED = 3.5
 W_FOLLOWING = 2.5
 W_SAME_ORG = 1.5
@@ -380,6 +387,24 @@ async def _score(session, user_id: int, floor_hours: float, listed: list[int], i
         .subquery("me_shared_interests")
     )
 
+    # And how many interests each has that the user did not pick, under a
+    # topic of one they did (the topics: the categories of their few interests).
+    mine = Interests.__table__.alias("me_interests")
+    my_topics = select(mine.c.category_id).where(mine.c.id == any_(user_interest_ids), mine.c.is_deleted == False)  # noqa: E712
+    sibling = (
+        select(EventInterestsLink.event_id, func.count().label("n"))
+        .join(Interests, Interests.id == EventInterestsLink.interest_id)
+        .where(
+            EventInterestsLink.is_deleted == False,  # noqa: E712
+            EventInterestsLink.event_id.in_(select(candidates.c.id)),
+            ~(EventInterestsLink.interest_id == any_(user_interest_ids)),
+            Interests.is_deleted == False,  # noqa: E712
+            Interests.category_id.in_(my_topics),
+        )
+        .group_by(EventInterestsLink.event_id)
+        .subquery("me_sibling_interests")
+    )
+
     # The user's relationship with each club they have one with: 1 or 0.
     def _flag(column):
         return func.max(case((column == True, 1), else_=0))
@@ -427,7 +452,9 @@ async def _score(session, user_id: int, floor_hours: float, listed: list[int], i
     registration_count = Events.going_count
 
     # --- Score components ----------------------------------------------------
-    interest_score = W_INTEREST * func.least(shared_interests, INTEREST_CAP)
+    interest_score = W_INTEREST * func.least(shared_interests, INTEREST_CAP) + (
+        W_SIBLING_INTEREST * func.least(func.coalesce(sibling.c.n, 0), 1)
+    )
 
     club_score = (
         W_PINNED * func.least(is_pinned, 1) + W_FOLLOWING * func.least(is_following, 1)
@@ -508,6 +535,7 @@ async def _score(session, user_id: int, floor_hours: float, listed: list[int], i
         select(Events.id, score, Events.club_id)
         .outerjoin(Clubs, Clubs.id == Events.club_id)
         .outerjoin(shared, shared.c.event_id == Events.id)
+        .outerjoin(sibling, sibling.c.event_id == Events.id)
         .outerjoin(clubs_of_mine, clubs_of_mine.c.club_id == Events.club_id)
         .outerjoin(club_history_rows, club_history_rows.c.key == Events.club_id)
         .outerjoin(category_history_rows, category_history_rows.c.key == Events.category_id)

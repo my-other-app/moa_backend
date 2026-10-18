@@ -26,6 +26,8 @@ SITE_READ_ROUTERS = (
 #: And single public reads on routers that also hold other things.
 SITE_READ_ENDPOINTS = frozenset({
     "app.api.interests.router.list_interests",
+    "app.api.interests.router.list_topics",
+    "app.api.interests.router.get_topic",
 })
 SITE_SCOPE = "site-reads"
 _DEFAULT_SITE_LIMIT = "3000/minute"

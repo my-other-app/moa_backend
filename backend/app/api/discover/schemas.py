@@ -5,6 +5,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel
 
 from app.api.agenda.schemas import AgendaItemOut
+from app.api.interests.schemas import TopicRef
 from app.api.threads.schemas import ThreadOut
 
 
@@ -55,6 +56,8 @@ class EventCard(BaseModel):
     # by this) and last changed, ISO 8601.
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+    # The distinct topics of the event's interests, in topic order.
+    topics: list[TopicRef] = []
 
 
 class ClubCard(BaseModel):
@@ -70,6 +73,8 @@ class ClubCard(BaseModel):
     interests: list[str]
     distance_km: Optional[float] = None
     website_url: Optional[str] = None
+    # The distinct topics of all the club's interests, in topic order.
+    topics: list[TopicRef] = []
 
 
 class CategoryCount(BaseModel):
@@ -82,6 +87,15 @@ class CategoryCount(BaseModel):
 class SearchCategory(BaseModel):
     id: int
     name: str
+    upcoming: int
+
+
+class SearchTopic(BaseModel):
+    """A topic beside the search, with its upcoming events (as /interests/topics counts them)."""
+    id: int
+    slug: str
+    name: str
+    color: Optional[str] = None
     upcoming: int
 
 
@@ -121,6 +135,8 @@ class EventSearch(BaseModel):
     limit: int
     where: Where
     categories: list[SearchCategory]
+    # Every topic, in topic order, whether anything is on in it or not.
+    topics: list[SearchTopic] = []
     # Pass as `after` for the next page (offset stops at 1,000); null on the last page.
     next_cursor: Optional[str] = None
 
@@ -231,6 +247,7 @@ class PageEvent(BaseModel):
     registration_open: bool
     category: Optional[CategoryRef] = None
     interests: list[str]
+    topics: list[TopicRef] = []
     guidelines: Optional[str] = None
     contact: EventContact
     url: str
