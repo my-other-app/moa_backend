@@ -34,6 +34,11 @@ limits (MIGRATION_ONLINE_STATEMENT_TIMEOUT, none by default): a big index
 built concurrently must not be killed half way by the guard meant for a
 blocking ALTER, which would leave an INVALID index behind.
 
+The session settings go in as libpq startup options, so migrations must
+reach Postgres directly (APP_DATABASE_URL_SYNC), never through a PgBouncer in
+transaction mode, which refuses startup options and cannot keep a session's
+SET between statements.
+
 Settings (app/config.py): MIGRATION_LOCK_TIMEOUT, MIGRATION_STATEMENT_TIMEOUT,
 MIGRATION_ONLINE_STATEMENT_TIMEOUT, MIGRATION_IDLE_TIMEOUT,
 MIGRATION_LOCK_ATTEMPTS, MIGRATION_RETRY_WAIT. A timeout of "0" turns that
@@ -103,7 +108,7 @@ class Guard:
     #: Swapped in tests, so a retry does not really wait.
     sleep: Callable[[float], None] = time.sleep
     # Per attempt: whether the migration being run has committed part of its
-    # work (an autocommit block) -- see on_commit.
+    # work (an autocommit block) -- see _on_commit.
     _step_done: bool = field(default=False, repr=False)
     partial: bool = field(default=False, repr=False)
     applied: list = field(default_factory=list, repr=False)

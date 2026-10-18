@@ -187,8 +187,11 @@ _SENSITIVE_KEY = re.compile(
 _TEXT_RULES = (
     (re.compile(r"(\w+://)([^/@\s:]*):([^/@\s]+)@"), r"\1\2:" + FILTERED + "@"),
     (re.compile(r"\beyJ[\w-]{6,}\.[\w-]{6,}\.[\w-]{6,}"), "[jwt]"),
-    (re.compile(r"(?i)\b(bearer|basic)\s+[\w.~+/=-]{8,}"), r"\1 [token]"),
-    (re.compile(r"\b(?:rzp_(?:live|test)_|whsec_|re_|sk_live_|sk_test_)[A-Za-z0-9_]{8,}"), "[key]"),
+    (re.compile(r"(?i)\b(bearer)\s+[\w.~+/=-]{8,}"), r"\1 [token]"),
+    (re.compile(r"\b(?:rzp_(?:live|test)_|whsec_|sk_live_|sk_test_)[A-Za-z0-9_]{8,}"), "[key]"),
+    # Resend's re_...: only with a digit and a capital in it, so a function
+    # called re_send_tickets in a traceback is left alone.
+    (re.compile(r"\bre_(?=[A-Za-z0-9_]*\d)(?=[A-Za-z0-9_]*[A-Z])[A-Za-z0-9_]{16,}"), "[key]"),
     (re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"), "[key]"),
     (re.compile(r"(?i)([?&;\s](?:token|access_token|refresh_token|code|key|signature|password|secret|otp|email|phone)=)[^&\s#]+"), r"\1" + FILTERED),
     (re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+"), "[email]"),

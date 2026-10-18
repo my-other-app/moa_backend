@@ -59,6 +59,7 @@ def test_everything_is_off_by_default():
         ("key rzp_live_AbCdEf123456789 failed", "rzp_live_AbCdEf123456789"),
         ("whsec_abcdefghijklmnop is wrong", "whsec_abcdefghijklmnop"),
         ("AKIAIOSFODNN7EXAMPLE denied", "AKIAIOSFODNN7EXAMPLE"),
+        ("resend said no to re_Ab12Cd34_EfGh56IjKl78MnOp", "re_Ab12Cd34_EfGh56IjKl78MnOp"),
     ],
 )
 def test_scrub_text(text, leaked):
@@ -72,6 +73,7 @@ def test_scrub_text(text, leaked):
         "took 1760000000 ms",                                   # a timestamp is not a phone
         "KeyError: 'club_id'",
         "/api/v1/events/42/registrations",
+        "in re_send_tickets_for_event: Basic authentication required",
     ],
 )
 def test_scrub_text_keeps_what_debugging_needs(text):
