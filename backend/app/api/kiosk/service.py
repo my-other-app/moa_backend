@@ -16,6 +16,7 @@ from app.api.events.models import EventRegistrationsLink, Events
 from app.api.events.tickets import poster_url
 from app.api.idcards.models import PrintJobs, ReprintPolicy
 from app.api.idcards.service import may_print_again
+from app.api.kiosk import pins
 from app.api.kiosk.auth import kiosk_actor, new_token
 from app.api.kiosk.models import KioskDevices, SelfCheckInVerify
 from app.config import settings
@@ -93,7 +94,7 @@ def kiosk_settings(event: Events) -> dict:
         "self_check_in_enabled": bool(event.self_check_in_enabled),
         "self_check_in_verify": (event.self_check_in_verify or SelfCheckInVerify.email).value,
         "self_check_in_print": bool(event.self_check_in_print),
-        "has_pin": bool(event.kiosk_pin),
+        "has_pin": bool(event.kiosk_pin_hash),
     }
 
 
@@ -110,7 +111,10 @@ async def update_kiosk_settings(session, event: Events, body) -> dict:
         event.self_check_in_print = bool(changes["self_check_in_print"])
     if "kiosk_pin" in changes:
         pin = (changes["kiosk_pin"] or "").strip()
-        event.kiosk_pin = pin or None
+        if pin and len(pin) < 4:
+            raise CustomHTTPException(422, message="A PIN of four characters or more.", errors={"fields": {"kiosk_pin": "Four characters or more."}})
+        # Kept only as a salted hash; the PIN itself is never stored.
+        event.kiosk_pin_hash = await pins.hash_pin_async(pin) if pin else None
     await session.commit()
     return kiosk_settings(event)
 
@@ -164,14 +168,14 @@ def _guest(reg: EventRegistrationsLink, res: dict, event: Events) -> dict:
     }
 
 
-async def redeem(session, device: KioskDevices, *, code: str, client_ref: str) -> dict:
+async def redeem(session, device: KioskDevices, *, code: str, client_ref: str, background=None) -> dict:
     """A ticket at the kiosk: checked in the instant the code reads, with a
     token the guest can undo it with for a few minutes."""
     event = device.event
     actor = kiosk_actor(device)
     if not checkins.door_open(event):
         return {"outcome": "EVENT_NOT_OPEN", "guest": None, "other_event": None, "redemption_token": None, "print_url": None}
-    res = await checkins.scan(session, event, code=code, door_label=device.door_label, client_ref=client_ref, scanned_at=None, actor=actor, via=CheckInVia.kiosk)
+    res = await checkins.scan(session, event, code=code, door_label=device.door_label, client_ref=client_ref, scanned_at=None, actor=actor, via=CheckInVia.kiosk, background=background)
     outcome = "MATCHED" if res["outcome"] in ("CHECKED_IN", "ALREADY_CHECKED_IN") else ("NO_MATCH" if res["outcome"] == "INVALID" else res["outcome"])
     if outcome != "MATCHED" or not res["attendee"]:
         return {"outcome": outcome, "guest": None, "other_event": res.get("other_event"), "redemption_token": None, "print_url": None}
@@ -213,9 +217,15 @@ async def card_for_redemption(session, device: KioskDevices, token: str) -> byte
 
 
 async def staff(session, device: KioskDevices, pin: str) -> dict:
+    """The PIN, against its hash in constant time, a few tries per kiosk at
+    most (pins.ATTEMPTS in pins.WINDOW): each try is counted before the
+    PIN is looked at, so parallel guesses share the one budget."""
     event = device.event
-    if not event.kiosk_pin or event.kiosk_pin != (pin or "").strip():
+    if not await pins.take_attempt(session, device.id):
+        raise CustomHTTPException(429, message="Too many wrong PINs on this kiosk. Try again in a few minutes.", error_code="PIN_LOCKED")
+    if not await pins.verify_pin_async((pin or "").strip(), event.kiosk_pin_hash):
         raise CustomHTTPException(403, message="That PIN does not open staff mode on this kiosk.")
+    await pins.clear_attempts(session, device.id)
     since = datetime.now(timezone.utc) - timedelta(hours=24)
     printed_today = await session.scalar(select(func.coalesce(func.sum(PrintJobs.cards), 0)).where(PrintJobs.event_id == event.id, PrintJobs.created_at >= since)) or 0
     here = await session.scalar(select(func.count()).select_from(CheckIns).where(CheckIns.kiosk_device_id == device.id)) or 0

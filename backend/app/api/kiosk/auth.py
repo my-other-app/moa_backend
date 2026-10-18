@@ -1,6 +1,7 @@
 """A kiosk is a device, not a person: it carries a token bound to one
 event, rotated per shift, revocable from the dashboard."""
 import hashlib
+import logging
 import secrets
 from datetime import datetime, timezone
 from typing import Annotated
@@ -16,6 +17,8 @@ from app.db.core import SessionDep
 from app.response import CustomHTTPException
 
 KIOSK_TOKEN_HEADER = "X-Kiosk-Token"
+
+logger = logging.getLogger(__name__)
 
 
 def hash_token(token: str) -> str:
@@ -38,7 +41,24 @@ async def device_by_token(session, token: str) -> KioskDevices | None:
 
 
 async def kiosk_device(request: Request, session: SessionDep) -> KioskDevices:
-    token = request.headers.get(KIOSK_TOKEN_HEADER) or request.query_params.get("token") or ""
+    """The token from the X-Kiosk-Token header only: in the query string it
+    lands in every access log between the tablet and here."""
+    return await _device(request, session, request.headers.get(KIOSK_TOKEN_HEADER) or "")
+
+
+async def kiosk_device_for_frame(request: Request, session: SessionDep) -> KioskDevices:
+    """For a card PDF the kiosk loads into a frame, which cannot send a
+    header: the header, else `?token=` -- deprecated, kept only while the
+    deployed kiosk prints that way (moa_web kioskCardUrl, kioskSelfCardUrl).
+    Fetching the PDF with the header and framing the blob ends it."""
+    token = request.headers.get(KIOSK_TOKEN_HEADER) or ""
+    if not token and request.query_params.get("token"):
+        token = request.query_params.get("token") or ""
+        logger.info("kiosk token read from the query string (deprecated) for %s", request.url.path)
+    return await _device(request, session, token)
+
+
+async def _device(request: Request, session, token: str) -> KioskDevices:
     device = await device_by_token(session, token)
     if device is None:
         raise CustomHTTPException(401, message="This kiosk is not paired, or its shift has ended. Pair it again from Team & doors.", error_code="KIOSK_UNPAIRED")
@@ -52,6 +72,7 @@ async def kiosk_device(request: Request, session: SessionDep) -> KioskDevices:
 
 
 KioskAuth = Annotated[KioskDevices, Depends(kiosk_device)]
+KioskFrameAuth = Annotated[KioskDevices, Depends(kiosk_device_for_frame)]
 
 
 def kiosk_actor(device: KioskDevices) -> GateActor:

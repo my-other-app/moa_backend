@@ -64,7 +64,9 @@ async def test_pairing_rotating_and_unpairing(client, world):
     assert (await client.get("/api/v1/kiosk/context", headers=world["kiosk"])).status_code == 401
     fresh = {"X-Kiosk-Token": rotated.json()["token"]}
     assert (await client.get("/api/v1/kiosk/context", headers=fresh)).status_code == 200
-    assert (await client.get("/api/v1/kiosk/context", params={"token": rotated.json()["token"]})).status_code == 200
+    # The token in the query string would land in every access log: the API
+    # takes it from the header only (the frame-loaded card PDFs excepted, for now).
+    assert (await client.get("/api/v1/kiosk/context", params={"token": rotated.json()["token"]})).status_code == 401
     assert (await client.delete(_url(world, f"/{world['device']['id']}"), headers=h)).json()["active"] is False
     assert (await client.get("/api/v1/kiosk/context", headers=fresh)).status_code == 401
 
