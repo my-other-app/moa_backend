@@ -23,6 +23,8 @@ EVENT_KEYS = {
     "is_online", "location_name", "location_link", "lat", "lng", "has_fee", "fee", "has_prize", "prize_amount",
     "capacity", "going", "seats_left", "reg_opens_at", "reg_closes_at", "status", "registration_open",
     "category", "interests", "guidelines", "contact", "url",
+    # For the site's feeds: the description as one plain line, and the dates.
+    "summary", "created_at", "updated_at",
 }
 
 
