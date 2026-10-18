@@ -48,9 +48,13 @@ SWITCHES = ("clubs", "topics", "platform")
 
 
 async def switches(session: AsyncSession, user_id: int) -> dict[str, bool]:
-    """The person's switches: every one on unless they turned it off."""
-    row = await session.scalar(select(NotificationSettings).where(NotificationSettings.user_id == user_id))
-    return {k: (getattr(row, k) if row is not None else True) for k in SWITCHES}
+    """The person's switches: every one on unless they turned it off. Read
+    as columns, not the row: a row this session already holds would answer
+    with what it held before an upsert in the same request."""
+    row = (await session.execute(
+        select(*(getattr(NotificationSettings, k) for k in SWITCHES)).where(NotificationSettings.user_id == user_id)
+    )).first()
+    return {k: (bool(getattr(row, k)) if row is not None else True) for k in SWITCHES}
 
 
 async def set_switches(session: AsyncSession, user_id: int, changes: dict[str, bool]) -> dict[str, bool]:

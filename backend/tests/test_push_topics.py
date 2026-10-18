@@ -362,7 +362,9 @@ async def test_a_switch_turned_off_drops_its_topics_and_its_pushes(client, sessi
     await jobs.settle()
     assert fcm.device_tokens() == ["tok-meera"]
     # With the clubs switch off, the club's line and push skip her as well.
-    await client.patch(f"{API}/notifications/settings", json={"clubs": False}, headers=h)
+    r = await client.patch(f"{API}/notifications/settings", json={"clubs": False}, headers=h)
+    assert r.json() == {"clubs": False, "topics": False, "platform": False}
+    assert fcm.unsubscribed[-1] == (["tok-asha"], f"club_{scene.club.id}")
     assert (await _topics(client, h))["topics"] == []
     flags(PUSH_TOPICS=False)
     await threads_service.tell_followers(scene.club.id, scene.thread.id)
