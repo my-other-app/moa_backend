@@ -2,6 +2,13 @@ import uvicorn
 from app.config import settings
 
 if __name__ == "__main__":
+    # APP_LOG_JSON: every line JSON, uvicorn's own included (app/core/
+    # observability.py). Otherwise uvicorn's default logging, as before.
+    log_options = {}
+    if settings.LOG_JSON:
+        from app.core.observability import logging_config
+
+        log_options = {"log_config": logging_config()}
     uvicorn.run(
         "doth:application",
         host="0.0.0.0",
@@ -17,4 +24,5 @@ if __name__ == "__main__":
         # finishes or hands over the mail in hand (doth.shutdown). Unset, it
         # waited for ever and Docker's kill came first, so that never ran.
         timeout_graceful_shutdown=4,
+        **log_options,
     )

@@ -23,6 +23,21 @@ class AppConfig(BaseSettings):
     # uvicorn's line per request. nginx in front already logs every request,
     # so this is a second copy, written on every request; false drops it.
     ACCESS_LOG: bool = True
+    # One JSON object per log line (app/core/observability.py): time, level,
+    # logger, message and the request id, for a log shipper. Off: uvicorn's
+    # own format, as before. On (or SENTRY_DSN set), each request carries an
+    # id in X-Request-ID, in and out, and a 500's track_id is that id.
+    LOG_JSON: bool = False
+    # Error tracking with Sentry (app/core/observability.py). Empty DSN: off,
+    # and sentry_sdk is never imported. Personal data is scrubbed before an
+    # event leaves. SENTRY_RELEASE defaults to the git sha the deploy writes
+    # to backend/REVISION. SENTRY_SAMPLE_RATE: the share of errors sent;
+    # SENTRY_TRACES_SAMPLE_RATE: the share of requests traced (0: none).
+    SENTRY_DSN: str = ""
+    SENTRY_ENVIRONMENT: str = "production"
+    SENTRY_RELEASE: str = ""
+    SENTRY_SAMPLE_RATE: float = 1.0
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.0
     # Log every SQL statement with its parameters (app/db/core.py). Off by
     # default: the parameters are personal data.
     SQL_LOG: bool = False
