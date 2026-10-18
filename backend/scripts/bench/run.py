@@ -219,8 +219,10 @@ def endpoints(t: dict) -> list[tuple[str, str, dict, bool]]:
         ("app for-you lat/lng (cold)", "/events/for-you", BLR, True),
         ("event page (cold)", f"/discover/events/{t['event']}", {}, False),
         ("event page (busiest category)", f"/discover/events/{t['event_big_category']}", {}, False),
+        ("events newest", "/discover/events", {"sort": "newest"}, False),
         ("sitemap index (cold)", "/discover/sitemap/index", {}, False),
         ("sitemap events page 1 (cold)", "/discover/sitemap/events/1", {}, False),
+        ("sitemap events page 1", "/discover/sitemap/events/1", {}, False),
         ("sitemap clubs page 1 (cold)", "/discover/sitemap/clubs/1", {}, False),
     ]
 
