@@ -122,6 +122,25 @@ async def test_remove_takes_out_the_seed_and_leaves_real_data(
     assert notes == []
 
 
+async def test_remove_takes_the_test_events_off_a_published_club_website(session, world):
+    """Everything public reads events live, except a club's published
+    website: a snapshot of its events, made when it publishes. --remove
+    makes it again."""
+    from app.api.clubs.models import Clubs
+    from app.api.sites import service as sites
+
+    await seed(session)
+    club = await session.scalar(select(Clubs).where(Clubs.name == "LetMeGoo"))
+    site = await sites.get_or_create(session, club)
+    await sites.publish(session, club, site)
+    assert MARKER in await sites.published_html(session, club.slug)
+
+    await remove(session)
+
+    html = await sites.published_html(session, club.slug)
+    assert html and MARKER not in html
+
+
 async def test_remove_is_a_soft_delete(session, world):
     await seed(session)
     before = {e.id for e in await _marked(session)}
