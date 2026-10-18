@@ -333,17 +333,20 @@ async def _earliest_charges(session, groups: set) -> dict:
     charge marker once for every charge of the subscription."""
     from app.api.subscriptions.models import SubscriptionCharges as Charges
 
+    from sqlalchemy import String, cast
+
     ints = [int(g) for g in groups if g.isdigit()]
+    group = func.coalesce(Charges.razorpay_subscription_id, cast(Charges.subscription_id, String), Charges.razorpay_payment_id)
     out: dict = {}
+    # One row a subscription (DISTINCT ON its group, earliest first), not every charge of it.
     for charge in (await session.scalars(
         select(Charges).where(Charges.status != "failed", or_(
             Charges.razorpay_subscription_id.in_(sorted(groups)), Charges.subscription_id.in_(ints),
             Charges.razorpay_payment_id.in_(sorted(groups)),
-        ))
+        )).distinct(group).order_by(group, Charges.charged_at)
     )).all():
-        group = ledger._first_group(charge)
-        if group in groups and (group not in out or charge.charged_at < out[group].charged_at):
-            out[group] = charge
+        if ledger._first_group(charge) in groups:
+            out[ledger._first_group(charge)] = charge
     return out
 
 
