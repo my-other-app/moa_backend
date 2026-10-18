@@ -955,3 +955,27 @@ async def test_drift_is_put_right_for_lines_with_no_club_or_event(session):
     assert done["rows_fixed"] == 1 and done["clubs_fixed"] == [0]
     row = await session.scalar(select(LedgerMonthly).where(LedgerMonthly.club_id == 0, LedgerMonthly.account == "gateway"))
     assert (row.amount_paise, row.entries) == (200, 2)
+
+
+async def test_the_backfill_posts_a_deleted_registrations_money_too(session, rzp, monkeypatch, make_club, make_event, make_user, make_registration):
+    """A guest who paid and deleted their account before the ledger existed:
+    the club took the money, and the backfill posts it."""
+    from app.api.ledger import backfill
+
+    post = book.post
+
+    async def nothing(session, txn):
+        return 0
+
+    owner, club, event = await _paid_event(make_club, make_event, session, fee="75.00")
+    payer, reg = await _guest(session, make_user, make_registration, event)
+    monkeypatch.setattr(book, "post", nothing)
+    await _pay(session, rzp, payer, event, reg)
+    monkeypatch.setattr(book, "post", post)
+    (await _reg(session, reg.id)).soft_delete()
+    await session.commit()
+
+    done = await backfill.backfill(session)
+    assert done["registrations"]["seen"] == 1 and done["payments"]["seen"] == 1
+    assert await _balance(session, "tickets_online", registration_id=reg.id) == -7500
+    assert await _balance(session, "unapplied", registration_id=reg.id) == 0
