@@ -1,6 +1,9 @@
 """Threads: a club posts, followers are told, readers like, vote and comment, and views count once a person."""
 import io
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
+from uuid import UUID
+from zoneinfo import ZoneInfo
 
 import pytest
 from PIL import Image
@@ -11,6 +14,7 @@ from app.core.rate_limit import limiter
 from tests.conftest import auth_header
 
 POST = "/api/v1/clubs/threads"
+IST = ZoneInfo("Asia/Kolkata")
 
 
 def _png() -> bytes:
@@ -185,6 +189,46 @@ async def test_the_threads_page_knows_what_waits_and_what_works(client, world):
     assert kinds["poll"]["posts"] == 1 and kinds["text"]["posts"] == 1 and kinds["photo"]["posts"] == 0 and kinds["photo"]["avg_reach"] is None
     assert i["notify"]["told"]["posts"] == 1 and i["notify"]["quiet"]["posts"] == 1
     assert i["all_time"]["posts"] == 2 and i["all_time"]["engagement"] == 5
+
+
+#: Sunday 18 October 2026, 23:50 in India, and the Monday after at 00:30:
+#: either side of an Indian week's start, both before Monday in UTC (18:20, 19:00).
+SUNDAY_NIGHT = datetime(2026, 10, 18, 23, 50, tzinfo=IST)
+MONDAY_EARLY = datetime(2026, 10, 19, 0, 30, tzinfo=IST)
+
+
+@pytest.mark.parametrize("now, latest, posts, reactions", [
+    # Just before the week turns: Sunday's post and like are the latest week.
+    (datetime(2026, 10, 18, 23, 58, tzinfo=IST), "2026-10-18", 1, 1),
+    # Just after, while UTC is still on Sunday: Monday's post and its two
+    # likes are a week of their own, and Sunday's are the week before.
+    (datetime(2026, 10, 19, 0, 40, tzinfo=IST), "2026-10-19", 1, 2),
+])
+async def test_weeks_turn_on_indian_time(client, world, session, monkeypatch, now, latest, posts, reactions):
+    from sqlalchemy import update
+
+    from app.api.threads import insights
+    from app.api.threads.models import ClubThreads, ThreadLikes
+
+    monkeypatch.setattr(insights, "_now", lambda: now.astimezone(timezone.utc))
+    h = world["h"]
+    made = [(SUNDAY_NIGHT, [world["fan_h"]])]
+    if now > MONDAY_EARLY:
+        made.append((MONDAY_EARLY, [world["fan_h"], world["fan2_h"]]))
+    for at, fans in made:
+        t = (await client.post(POST, data={"body": f"Posted {at:%a %H:%M}", "notify_followers": "false"}, headers=h)).json()["id"]
+        for fan in fans:
+            assert (await client.post(f"/api/v1/threads/{t}/like", headers=fan)).status_code == 200
+        await session.execute(update(ClubThreads).where(ClubThreads.id == UUID(t)).values(created_at=at))
+        await session.execute(update(ThreadLikes).where(ThreadLikes.thread_id == UUID(t)).values(created_at=at + timedelta(minutes=5)))
+    await session.commit()
+
+    weeks = (await client.get("/api/v1/clubs/threads/insights", headers=h)).json()["weeks"]
+    assert len(weeks) == 12
+    assert (weeks[-1]["week"], weeks[-1]["posts"], weeks[-1]["reactions"]) == (latest, posts, reactions)
+    if now > MONDAY_EARLY:
+        assert (weeks[-2]["week"], weeks[-2]["posts"], weeks[-2]["reactions"]) == ("2026-10-12", 1, 1)
+    assert sum(w["posts"] for w in weeks) == len(made)
 
 
 async def test_one_post_opens_from_its_notification(client, world):
