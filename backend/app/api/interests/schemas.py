@@ -1,6 +1,6 @@
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.api.interests.models import SLUG_MAX, InterestIconType
 from app.core.response.base_model import CustomBaseModel
@@ -8,6 +8,24 @@ from app.core.response.base_model import CustomBaseModel
 #: A slug as it appears in an address: lower case letters and digits, words joined by single hyphens.
 SLUG_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
 COLOR_PATTERN = r"^#[0-9A-Fa-f]{6}$"
+
+
+class _IconChecked(CustomBaseModel):
+    """An icon is what its type says: an emoji has a character outside ASCII
+    (the docs page's example value "string", sent as it was, filled every
+    early interest with that word), a url is an http(s) address."""
+
+    @model_validator(mode="after")
+    def _icon_matches_type(self):
+        icon = (self.icon or "").strip()
+        kind = getattr(self.icon_type, "value", self.icon_type)
+        if not icon or kind is None:
+            return self
+        if kind == "emoji" and (icon.isascii() or len(icon) > 16):
+            raise ValueError("icon: an emoji icon must be an emoji")
+        if kind == "url" and not icon.startswith(("https://", "http://")):
+            raise ValueError("icon: a url icon must be an http(s) address")
+        return self
 
 
 class _IconTypeAsText(CustomBaseModel):
@@ -19,7 +37,7 @@ class _IconTypeAsText(CustomBaseModel):
         return getattr(value, "value", value)
 
 
-class InterestCategoryCreate(CustomBaseModel):
+class InterestCategoryCreate(_IconChecked):
     name: str = Field(..., min_length=2, max_length=100)
     icon: str | None = None
     icon_type: InterestIconType | None = None
@@ -31,7 +49,7 @@ class InterestCategoryCreate(CustomBaseModel):
     sort_order: int | None = Field(None, ge=0)
 
 
-class InterestCategoryUpdate(CustomBaseModel):
+class InterestCategoryUpdate(_IconChecked):
     """A field left out of the body stays as it is; one sent as null is cleared
     (a slug cannot be cleared: null leaves it as it is)."""
 
@@ -44,7 +62,7 @@ class InterestCategoryUpdate(CustomBaseModel):
     sort_order: int | None = Field(None, ge=0)
 
 
-class InterestCreate(CustomBaseModel):
+class InterestCreate(_IconChecked):
     name: str
     icon: str | None = None
     icon_type: InterestIconType | None = None
