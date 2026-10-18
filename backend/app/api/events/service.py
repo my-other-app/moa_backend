@@ -225,7 +225,7 @@ async def create_event(
         .options(
             joinedload(Events.category),
             joinedload(Events.club),
-            selectinload(Events.interests),
+            selectinload(Events.interests).joinedload(Interests.category),
             selectinload(Events.speakers),
         )
         .limit(1)
@@ -437,7 +437,7 @@ async def update_event(
         .options(
             joinedload(Events.category),
             joinedload(Events.club),
-            selectinload(Events.interests),
+            selectinload(Events.interests).joinedload(Interests.category),
         )
         .limit(1)
     )
@@ -503,6 +503,7 @@ async def get_event(session: AsyncSession, event_id: str | int, user_id: int | N
     data = dict(event.__dict__)
     data["rating"] = db_event[1]
     data["total_rating"] = db_event[2]
+    data["topics"] = event.topics
     # The status clock as plain strings: `status` is a property the dict
     # cannot see, and the retention column is an enum the response reads as text.
     data["status"] = event.status
@@ -995,7 +996,7 @@ async def list_deleted_events(session: AsyncSession, limit: int = 20, offset: in
         .options(
             selectinload(Events.category),
             selectinload(Events.club),
-            selectinload(Events.interests),
+            selectinload(Events.interests).joinedload(Interests.category),
         )
         .order_by(Events.deleted_at.desc().nulls_last(), Events.id.desc())
         .limit(limit)
@@ -1012,7 +1013,7 @@ async def restore_event(session: AsyncSession, event_id: int):
         .options(
             selectinload(Events.category),
             selectinload(Events.club),
-            selectinload(Events.interests),
+            selectinload(Events.interests).joinedload(Interests.category),
         )
     )
     if not event:
