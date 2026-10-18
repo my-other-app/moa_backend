@@ -1,0 +1,280 @@
+{
+ "label": "before",
+ "results": [
+  {
+   "place": "Bengaluru",
+   "case": "near-you pool",
+   "n": 8,
+   "p50": 4090.2090834933915,
+   "p95": 5075.328833001549,
+   "statements": 1,
+   "pages": 18151,
+   "pages_hit": 6,
+   "pages_read": 18145
+  },
+  {
+   "place": "Bengaluru",
+   "case": "clubs pool (nearest 8, then around)",
+   "n": 8,
+   "p50": 28.82672950363485,
+   "p95": 116.15729199547786,
+   "statements": 2,
+   "pages": 10406,
+   "pages_hit": 10406,
+   "pages_read": 0
+  },
+  {
+   "place": "Bengaluru",
+   "case": "events within 50 km, by date",
+   "n": 8,
+   "p50": 22.671375001664273,
+   "p95": 29.58266600035131,
+   "statements": 3,
+   "pages": 4353,
+   "pages_hit": 3716,
+   "pages_read": 637
+  },
+  {
+   "place": "Bengaluru",
+   "case": "events within 50 km, by distance",
+   "n": 8,
+   "p50": 101.03647949290462,
+   "p95": 139.8066249967087,
+   "statements": 4,
+   "pages": 17767,
+   "pages_hit": 6248,
+   "pages_read": 11519
+  },
+  {
+   "place": "Bengaluru",
+   "case": "clubs within 50 km, nearest first",
+   "n": 8,
+   "p50": 44.96418749477016,
+   "p95": 62.989707992528565,
+   "statements": 7,
+   "pages": 10168,
+   "pages_hit": 3772,
+   "pages_read": 6396
+  },
+  {
+   "place": "Mumbai",
+   "case": "near-you pool",
+   "n": 8,
+   "p50": 3944.8369370002183,
+   "p95": 5464.547958996263,
+   "statements": 1,
+   "pages": 16192,
+   "pages_hit": 7,
+   "pages_read": 16185
+  },
+  {
+   "place": "Mumbai",
+   "case": "clubs pool (nearest 8, then around)",
+   "n": 8,
+   "p50": 38.347271001839545,
+   "p95": 115.40862500260118,
+   "statements": 2,
+   "pages": 10082,
+   "pages_hit": 10082,
+   "pages_read": 0
+  },
+  {
+   "place": "Mumbai",
+   "case": "events within 50 km, by date",
+   "n": 8,
+   "p50": 91.04683349141851,
+   "p95": 118.10104201140348,
+   "statements": 3,
+   "pages": 4389,
+   "pages_hit": 3909,
+   "pages_read": 480
+  },
+  {
+   "place": "Mumbai",
+   "case": "events within 50 km, by distance",
+   "n": 8,
+   "p50": 346.1842914985027,
+   "p95": 644.0991669951472,
+   "statements": 4,
+   "pages": 57622,
+   "pages_hit": 42865,
+   "pages_read": 14757
+  },
+  {
+   "place": "Mumbai",
+   "case": "clubs within 50 km, nearest first",
+   "n": 8,
+   "p50": 37.20779200375546,
+   "p95": 42.13762500148732,
+   "statements": 7,
+   "pages": 9929,
+   "pages_hit": 6292,
+   "pages_read": 3637
+  },
+  {
+   "place": "Kochi",
+   "case": "near-you pool",
+   "n": 8,
+   "p50": 15.943167003570125,
+   "p95": 19.94787500007078,
+   "statements": 1,
+   "pages": 12456,
+   "pages_hit": 12456,
+   "pages_read": 0
+  },
+  {
+   "place": "Kochi",
+   "case": "clubs pool (nearest 8, then around)",
+   "n": 8,
+   "p50": 14.865062505123205,
+   "p95": 21.68608301144559,
+   "statements": 2,
+   "pages": 6028,
+   "pages_hit": 6028,
+   "pages_read": 0
+  },
+  {
+   "place": "Kochi",
+   "case": "events within 50 km, by date",
+   "n": 8,
+   "p50": 29.017229004239198,
+   "p95": 32.49837500334252,
+   "statements": 3,
+   "pages": 4401,
+   "pages_hit": 3925,
+   "pages_read": 476
+  },
+  {
+   "place": "Kochi",
+   "case": "events within 50 km, by distance",
+   "n": 8,
+   "p50": 56.81254149385495,
+   "p95": 82.52083300612867,
+   "statements": 4,
+   "pages": 33394,
+   "pages_hit": 32759,
+   "pages_read": 635
+  },
+  {
+   "place": "Kochi",
+   "case": "clubs within 50 km, nearest first",
+   "n": 8,
+   "p50": 56.09681249916321,
+   "p95": 62.72424999042414,
+   "statements": 7,
+   "pages": 11053,
+   "pages_hit": 7945,
+   "pages_read": 3108
+  },
+  {
+   "place": "Leh",
+   "case": "near-you pool",
+   "n": 8,
+   "p50": 1.6013959975680336,
+   "p95": 1.9186249992344528,
+   "statements": 1,
+   "pages": 5,
+   "pages_hit": 5,
+   "pages_read": 0
+  },
+  {
+   "place": "Leh",
+   "case": "clubs pool (nearest 8, then around)",
+   "n": 8,
+   "p50": 24.78904200688703,
+   "p95": 25.821540999459103,
+   "statements": 3,
+   "pages": 8465,
+   "pages_hit": 8465,
+   "pages_read": 0
+  },
+  {
+   "place": "Leh",
+   "case": "events within 50 km, by date",
+   "n": 8,
+   "p50": 29.797729002893902,
+   "p95": 48.24695900606457,
+   "statements": 3,
+   "pages": 11639,
+   "pages_hit": 4012,
+   "pages_read": 7627
+  },
+  {
+   "place": "Leh",
+   "case": "events within 50 km, by distance",
+   "n": 8,
+   "p50": 30.3875829995377,
+   "p95": 37.3974999965867,
+   "statements": 4,
+   "pages": 4482,
+   "pages_hit": 4041,
+   "pages_read": 441
+  },
+  {
+   "place": "Leh",
+   "case": "clubs within 50 km, nearest first",
+   "n": 8,
+   "p50": 39.66493750340305,
+   "p95": 61.11191700620111,
+   "statements": 7,
+   "pages": 8646,
+   "pages_hit": 8646,
+   "pages_read": 0
+  },
+  {
+   "place": "Port Blair",
+   "case": "near-you pool",
+   "n": 8,
+   "p50": 2.7500420037540607,
+   "p95": 2.975665993290022,
+   "statements": 1,
+   "pages": 58,
+   "pages_hit": 58,
+   "pages_read": 0
+  },
+  {
+   "place": "Port Blair",
+   "case": "clubs pool (nearest 8, then around)",
+   "n": 8,
+   "p50": 53.008187998784706,
+   "p95": 56.28795799566433,
+   "statements": 4,
+   "pages": 13972,
+   "pages_hit": 13972,
+   "pages_read": 0
+  },
+  {
+   "place": "Port Blair",
+   "case": "events within 50 km, by date",
+   "n": 8,
+   "p50": 26.676792003854644,
+   "p95": 52.329666999867186,
+   "statements": 3,
+   "pages": 4449,
+   "pages_hit": 3994,
+   "pages_read": 455
+  },
+  {
+   "place": "Port Blair",
+   "case": "events within 50 km, by distance",
+   "n": 8,
+   "p50": 32.98779150645714,
+   "p95": 39.82987499330193,
+   "statements": 4,
+   "pages": 6126,
+   "pages_hit": 4043,
+   "pages_read": 2083
+  },
+  {
+   "place": "Port Blair",
+   "case": "clubs within 50 km, nearest first",
+   "n": 8,
+   "p50": 40.956437500426546,
+   "p95": 60.09212498611305,
+   "statements": 7,
+   "pages": 8624,
+   "pages_hit": 8624,
+   "pages_read": 0
+  }
+ ]
+}

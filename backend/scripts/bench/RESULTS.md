@@ -1249,3 +1249,168 @@ dropdb moa_bench_live
 ```
 
 Raw results: `results/integrity/` (the live runs, both read runs, the seed's sizes).
+
+## Search and geo, Wave 2 (`feat/w2-search`, 18 October 2026)
+
+### What changed
+
+- **search_text** on events, clubs and users: everything a row is found by,
+  lowercased and unaccented, in one column under one trigram index, kept by
+  triggers (`app/api/search/text.py`). An event is found by its interests,
+  topics, tag and its club's city as well as its name, place, club and
+  category. Discover's searches, the app's lists and the admin's user search
+  test each word against it: one LIKE (a typo: one `%>`) on one column,
+  where it was an OR over four columns of three tables.
+- **Grid cells** (`app/api/discover/cells.py`): `events.geocell` and
+  `clubs.geocell`, the 0.5° cell of an in-person event's point or a club's
+  place, kept by triggers, indexed with the date
+  (`ix_events_shown_cell (geocell, event_datetime, id)`). "Near you" reads the
+  cells that cover the radius -- an IN over 4-16 for 50 km, ranges further
+  out, the old box only past that -- then the exact haversine.
+- **Meilisearch**, off unless `APP_SEARCH_URL` is set (`app/core/search.py`,
+  `app/api/search/`): a transactional outbox, drained on one process; the
+  indexes built under another name and swapped in; a six-hourly reconcile;
+  searches with words routed to it behind a circuit breaker, every page read
+  back under Postgres's own conditions. Not measured here (no instance on
+  this machine); its correctness against Postgres is a test
+  (`tests/test_search_routing.py`, also runnable against a real instance).
+
+### The measurements
+
+**Data**: `seed.py --clubs 100000 --upcoming 300000 --past 200000 --users
+100000 --registrations 300000 --follows 300000 --threads 3000` (1.36 GB),
+seeded with master (39f6cc7, schema `topics`), measured, then `w2_search`
+applied in place and measured again. `clubs.listed` set first: the seeder
+left it false for every club (it loads with triggers off), so every public
+list was empty -- `seed.py` now sets it, and search_text and the cells. After
+the migration had rewritten every row, the tables were compacted (`VACUUM
+FULL`) so that both sides read tables of their natural size. **Machine**: the
+M2 laptop with 8 GB, shared with four other builders' suites and
+benchmarks (load 5-8, swapping): times swing by tens of times between runs,
+so the pages each call touches (shared buffers, from EXPLAIN (ANALYZE,
+BUFFERS) of the call's own statements) are the measure; times are p50.
+
+**"Near you"**, in process (`near.py`), master's code and this branch's on
+the same data, back to back; p50 ms / pages:
+
+| place | call | before ms | pages | after ms | pages |
+|---|---|---:|---:|---:|---:|
+| Bengaluru | front page "near you" pool | 4,090 | 18,151 | 46.6 | 11,473 |
+| Mumbai | front page "near you" pool | 3,945 | 16,192 | 34.0 | 13,588 |
+| Kochi | front page "near you" pool | 15.9 | 12,456 | 32.4 | 12,118 |
+| Leh, Port Blair (nothing near) | front page "near you" pool | 1.6-2.8 | 5-58 | 2.4 | 36 |
+| Mumbai | events within 50 km, by distance | 346 | 57,622 | 65.3 | 15,698 |
+| Kochi | events within 50 km, by distance | 56.8 | 33,394 | 84.2 | 12,078 |
+| Bengaluru | events within 50 km, by distance | 101 | 17,767 | 69.1 | 17,393 |
+| any | events within 50 km, by date | 23-91 | 4,353-11,639 | 20-58 | 4,316-7,077 |
+| any | clubs near (pool, radius, nearest first) | 15-56 | 6,028-13,972 | 19-71 | 7,409-14,848 |
+
+Of the "near you" pool's pages, 6,000-7,000 are the list of unlisted clubs
+(`NOT IN`, read from `ix_clubs_unlisted` and the clubs' rows), the same
+before and after; the events' own part went from 11,000-12,000 pages to
+about 4,000-5,000. The plans (Bengaluru):
+
+```
+before: Bitmap Heap Scan on events  (rows=15867)          -- every event in the latitude strip
+          -> Bitmap Index Scan on ix_events_shown_point  (rows=17199)
+        Sort (top-N)  -> Limit 64                        25,158 buffers
+after:  Nested Loop over 12 cells
+          -> Limit 64 -> Index Scan using ix_events_shown_cell  (rows=21 loops=12)
+               Index Cond: geocell = cell AND event_datetime >= since
+        Sort (top-N) -> Limit 64                         11,498 buffers, 6,400 of them the unlisted clubs
+```
+
+What it shows: the latitude strip was the cost where a city sits in a busy
+band (Mumbai, Kochi: three to four times the pages for distance) and in the
+front page's pool, which read every event to come in the strip to keep the
+first dozen; a cell walk reads a chunk per cell. Where little is near (Leh,
+Port Blair) the strip was already empty, and both are a few pages. The date
+order within a radius and the clubs near a point cost the same: they were
+already bounded by their own walks, and the clubs' box already sat on
+`ix_clubs_place`. The cell walk needs bitmap scans off for its statements
+(`SET LOCAL`, then `RESET`): the planner, unable to see how few of a cell's
+rows fail the filters, expected 7 rows a cell where there were 1,318 and
+fetched all of them to sort (18,643 heap pages). Testing the rows after
+reading them needs no setting, but reads past every row a test fails --
+events over and not yet closed by the status clock, which had not run on
+this data -- and took 25,000-32,000 pages.
+
+**Words**, through the API (`run.py --buffers`); before is master on the
+data as seeded, after is this branch after the migration and the compaction:
+
+| endpoint | before ms | pages | after ms | pages |
+|---|---:|---:|---:|---:|
+| `/discover/events?q=robotics kochi` | 500 | 83,368 | 25.2 | 6,865 |
+| `/discover/events?q=sculpture showcase` (rare words) | 1,982 | 84,667 | 35.8 | 8,845 |
+| `/discover/calendar?q=robotics` (cold) | 180 | 41,673 | 47.1 | 31,696 |
+| `/discover/events?q=robtics` (typo) | 543 | 12,089 | 404 | 29,957 |
+| `/discover/events?q=bengaluru` | 341 | 41,579 | 113 | 91,761 |
+| `/discover/events?q=robotics` (relevance) | 782 | 48,922 | 1,551 | 78,227 |
+| `/discover/events?q=ai` | 2,325 | 92,408 | 2,207 | 105,892 |
+| `/events/list?search=robotics` (the app) | 38 | 7,544 | 10,860 | 28,592 |
+| `/discover/clubs?q=robotics` | 10.5 | 3,587 | 11.7 | 1,580 |
+| `/clubs/list?search=robotics` (the app) | 26.9 | 4,184 | 20.3 | 3,609 |
+
+Two words and rare words are where one column pays: every word is a range of
+one trigram index and the AND narrows inside it (12 times fewer pages, 20-55
+times faster). A common word now matches more -- "robotics" is in 31,968
+events' search_text (their interest is Robotics) against 8,061 names -- and
+Postgres's cost for a ranked or date-ordered page of a common word is the
+cost of its matches: the relevance score of each, or the sort. That is what
+Meilisearch is for (it answers a page of a common word without visiting
+every match), and why it is wired in now; until it is on, those searches
+cost about as many pages more as they find more rows. (The app list's 10.9 s
+is this machine reading 28,592 pages from a disk shared with four other
+suites; its plan is master's -- a bitmap of the word's rows, a top-N sort.)
+
+### The migration
+
+`w2_search` on this data, with a writer updating random events and clubs
+every 10 ms throughout (51,313 writes): **31 minutes**, 0 failed writes,
+writes p50 5.6 ms, p99 179 ms. The time is the backfill rewriting 500,000
+events, 100,000 clubs and 200,000 users: 1.75 ms an event row on this
+machine at that moment, where a bare `UPDATE events SET popularity =
+popularity` of the same rows took 1.4 ms (the row and its twenty indexes);
+computing the text costs 0.27 ms of it. Production has a few thousand events:
+seconds. The first transaction (columns without a default, the outbox table,
+functions, triggers) holds its locks for well under a second, each under
+`lock_timeout 3s`; the eight index builds and drops are concurrent.
+
+148 writes waited over a second (one 20 s): every one of them, in a rerun on
+20,000 events, had touched a row inside the batch then being rewritten,
+which holds its rows until it commits -- 2,000 rows were 3.5-29 s on this
+machine. The backfill now takes exact rows and sizes each batch to take
+about 0.2 s; on the same slice, with the writer aimed at it: writes p99 27 s
+→ 65 ms, writes over 250 ms 3% → 0.2%, batch p50 0.2 s (one stalled 12 s on
+the shared disk).
+
+### What is left
+
+- Meilisearch measured against a real instance (none here; Docker was off
+  and the disk short): the parity battery runs against one with
+  `MEILI_TEST_URL`.
+- The unlisted-clubs list read by every "near you" chunk (6,000 pages at a
+  lakh of clubs): a `NOT IN` over `ix_clubs_unlisted` that the session's
+  soft-delete filter turns into a heap read.
+- A common word through Postgres costs its matches (above).
+
+### Reproduce
+
+```
+cd backend
+git worktree add --detach /tmp/master 39f6cc7                         # the code before
+createdb moa_w2s_bench
+(cd /tmp/master/backend && BENCH_DB=moa_w2s_bench python -m scripts.bench.seed --clubs 100000 --upcoming 300000 \
+    --past 200000 --users 100000 --registrations 300000 --follows 300000 --threads 3000 --likes 3000 --comments 3000)
+psql moa_w2s_bench -c "UPDATE clubs SET listed = listed"               # what master's seeder leaves out
+cp scripts/bench/run.py scripts/bench/near.py /tmp/master/backend/scripts/bench/
+ONLY="home lat/lng,events lat/lng,events distance,clubs nearby,clubs r=50,events q,clubs q,app list search,app clubs search,calendar q"
+(cd /tmp/master/backend && BENCH_DB=moa_w2s_bench python -m scripts.bench.run --label before --only "$ONLY" --buffers --freeze --out before.json)
+BENCH_DB=moa_w2s_bench python -c "from scripts.bench import _env; from alembic.config import Config; \
+    from alembic import command; command.upgrade(Config('alembic.ini'), 'head')"
+psql moa_w2s_bench -c "VACUUM FULL ANALYZE events" -c "VACUUM FULL ANALYZE clubs" -c "VACUUM FULL ANALYZE users"
+(cd /tmp/master/backend && BENCH_DB=moa_w2s_bench python -m scripts.bench.near --label before --n 8 --out near_before.json)
+BENCH_DB=moa_w2s_bench python -m scripts.bench.near --label after --n 8 --out near_after.json
+BENCH_DB=moa_w2s_bench python -m scripts.bench.run --label after --only "$ONLY" --buffers --freeze --out after.json
+dropdb moa_w2s_bench
+```

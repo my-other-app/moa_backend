@@ -52,7 +52,7 @@ from scripts.bench import _env  # noqa: F401  (settings before app)
 
 from sqlalchemy import create_engine, text
 
-from app.api.discover import places
+from app.api.discover import cells, places
 from app.api.interests.models import slugify
 from app.config import settings
 from app.db import registry  # noqa: F401
@@ -708,6 +708,20 @@ class Seeder:
             cur.execute(CITIES_SQL, dict(now=now))
             raw.commit()
             self.stamp("club places, cities")
+            # Whether each club is listed (left false for every club, so every
+            # public list was empty), and what each row is found by and the
+            # grid cell it is in -- without a search outbox row apiece.
+            cur.execute("SET moa.quiet_outbox = 'on'")
+            cur.execute("UPDATE clubs SET listed = listed")
+            cur.execute(f"UPDATE clubs SET search_text = moa_club_search_text(id, name, tagline, location_name), geocell = {cells.TRUE_CELL['clubs']}")
+            cur.execute(
+                "UPDATE events SET search_text = moa_event_search_text(id, name, location_name, event_tag, club_id, category_id), "
+                f"geocell = {cells.TRUE_CELL['events']}"
+            )
+            cur.execute("UPDATE users SET search_text = moa_user_search_text(full_name, username, email)")
+            cur.execute("RESET moa.quiet_outbox")
+            raw.commit()
+            self.stamp("listed, search_text, cells")
         finally:
             raw.close()
         with self.engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
