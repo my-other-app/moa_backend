@@ -637,10 +637,22 @@ async def resend_ticket(session, event: Events, registration: EventRegistrations
 
     Anyone can type an address into the public form, so this goes only to
     the registration's own address, and at most once every ten minutes."""
+    return await resend_document(session, event, registration, DeliveryKind.ticket, inline=background_tasks is None)
+
+
+async def resend_document(session, event: Events, registration: EventRegistrationsLink, kind: DeliveryKind, *, inline: bool = False) -> bool:
+    """A ticket or certificate once more, to the registration's own address,
+    for someone the public asked on behalf of: the registration form, a
+    stale link's "send me a fresh one" (app/api/emails/old_links.py).
+
+    At most once every RESEND_GAP per registration and kind; nothing when
+    there is nothing to send (a revoked ticket, no certificate issued).
+    Sent by a job after the caller's commit (HIGH: one guest's); `inline`
+    sends it now, on this session. True when it was queued."""
     prior = await session.scalar(
         select(Deliveries).where(
             Deliveries.registration_id == registration.id,
-            Deliveries.kind == DeliveryKind.ticket,
+            Deliveries.kind == kind,
             Deliveries.channel == DeliveryChannel.email,
         )
     )
@@ -648,10 +660,10 @@ async def resend_ticket(session, event: Events, registration: EventRegistrations
         last = prior.sent_at if prior.status is DeliveryStatus.sent else prior.updated_at
         if last is not None and datetime.now(timezone.utc) - last < RESEND_GAP:
             return False
-    result = await queue(session, event, DeliveryKind.ticket, registration_ids=[registration.id], force=True, send=background_tasks is not None)
+    result = await queue(session, event, kind, registration_ids=[registration.id], force=True, send=not inline)
     if not result["ids"]:
         return False
-    if background_tasks is None:
+    if inline:
         for did in result["ids"]:
             await deliver(session, did)
     return True
