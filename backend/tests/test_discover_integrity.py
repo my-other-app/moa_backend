@@ -464,8 +464,10 @@ async def test_near_you_stops_reading_once_it_is_settled(client, session, world,
     with statements(session) as seen:
         home = (await client.get(f"{API}/home", params={"lat": BLR[0], "lng": BLR[1]})).json()
     assert len(home["near"]) == service.NEAR_COUNT
-    chunks = [s for s in seen if s.lstrip().startswith("SELECT events.id, events.lat, events.lng, events.event_datetime")]
+    # Each chunk walks the grid cells around the point (a few rows per cell, in date order).
+    chunks = [s for s in seen if s.lstrip().startswith("SELECT per_cell.id, per_cell.lat, per_cell.lng, per_cell.event_datetime")]
     assert len(chunks) == 2  # 4 then 16: settled by the twelfth sure one, never all forty
+    assert all("events.geocell = near_cells.cell" in s for s in chunks)
 
 
 async def test_the_link_scan_reads_a_few_rows_and_skips_what_was_just_tried(session, world):

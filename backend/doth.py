@@ -80,6 +80,12 @@ async def lifespan(app: FastAPI):
     from app.api.auth.retention import sweep_loop as account_sweep_loop
 
     accounts = asyncio.create_task(account_sweep_loop())
+    # Search: the outbox drained (to Meilisearch when APP_SEARCH_URL is set;
+    # taxonomy renames into search_text always), the indexes built and
+    # checked -- every second or five, on one process (app.api.search.sync).
+    from app.api.search.sync import loop as search_sync_loop
+
+    search_sync = asyncio.create_task(search_sync_loop())
     # What import and startup built (models, routes, schemas, the S3 service
     # model: some 740,000 objects) lives as long as the process. Frozen out
     # of the collector's reach, a full collection no longer walks all of it:
@@ -88,7 +94,7 @@ async def lifespan(app: FastAPI):
     gc.collect()
     gc.freeze()
     yield
-    await shutdown([sweeper, closer, feedback, billing, counters, domains, store_holds, payments_sweep, accounts])
+    await shutdown([sweeper, closer, feedback, billing, counters, domains, store_holds, payments_sweep, accounts, search_sync])
 
 
 #: Seconds shutdown may take, in all. Docker kills the container ten seconds

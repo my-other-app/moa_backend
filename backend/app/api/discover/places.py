@@ -27,8 +27,9 @@ or scripts/recompute_club_places.py), which only writes the clubs whose
 stored place disagrees with their rows.
 
 The searches then use the place like the events' distance search uses an
-event's point: a latitude/longitude box on ix_clubs_place, then the exact
-haversine (geo.km_sql).
+event's point: the grid cells that cover the circle, on ix_clubs_listed_cell
+(cells.py; clubs.geocell is the place's cell, kept by a trigger), then the
+exact haversine (geo.km_sql).
 """
 from __future__ import annotations
 
@@ -37,7 +38,7 @@ from typing import Optional
 from sqlalchemy import DDL, and_, event as sa_event, or_, select, text
 
 from app.api.clubs.models import Clubs
-from app.api.discover import geo
+from app.api.discover import cells, geo
 from app.api.events.models import Events
 
 # ─── The triggers ─────────────────────────────────────────────────────────
@@ -199,12 +200,11 @@ def km_from(here: tuple[float, float]):
 
 def within(here: tuple[float, float], radius_km: float):
     """A club with no place cannot be ruled out; one with a place must be
-    inside the radius. The box goes first so the index finds the candidates
-    and the exact distance is only worked out for them."""
-    box = geo.bbox(here[0], here[1], radius_km)
+    inside the radius: in one of the grid cells that cover it (the cell
+    index finds the candidates, cells.py), then the exact distance."""
     return or_(
         Clubs.place_lat.is_(None), Clubs.place_lng.is_(None),
-        and_(geo.in_box_sql(box, Clubs.place_lat, Clubs.place_lng), km_from(here) <= radius_km),
+        cells.near_sql(here, radius_km, Clubs.geocell, Clubs.place_lat, Clubs.place_lng),
     )
 
 
@@ -224,7 +224,7 @@ async def nearest(session, centre: tuple[float, float], k: int) -> tuple[Optiona
     for r in RINGS_KM + (None,):
         conds = [*_listed(), placed()]
         if r is not None:
-            conds += [geo.in_box_sql(geo.bbox(centre[0], centre[1], r), Clubs.place_lat, Clubs.place_lng), d <= r]
+            conds.append(cells.near_sql(centre, r, Clubs.geocell, Clubs.place_lat, Clubs.place_lng))
         got = (await session.execute(
             select(Clubs.id, Clubs.place_lat, Clubs.place_lng, Clubs.follower_count, d).where(*conds).order_by(d).limit(k)
         )).all()
@@ -238,7 +238,7 @@ async def around(session, centre: tuple[float, float], radius_km: Optional[float
     `radius_km` of `centre`; every placed one when it is None."""
     conds = [*_listed(), placed()]
     if radius_km is not None:
-        conds += [geo.in_box_sql(geo.bbox(centre[0], centre[1], radius_km), Clubs.place_lat, Clubs.place_lng), km_from(centre) <= radius_km]
+        conds.append(cells.near_sql(centre, radius_km, Clubs.geocell, Clubs.place_lat, Clubs.place_lng))
     rows = await session.execute(select(Clubs.id, Clubs.place_lat, Clubs.place_lng, Clubs.follower_count).where(*conds))
     return [(i, float(la), float(ln), int(n or 0)) for i, la, ln, n in rows.all()]
 

@@ -14,13 +14,17 @@ events and clubs:
   shown (ix_events_shown_start), walked from the earliest start an event
   still on can have (upcoming.py), not from the oldest event still marked
   published.
-- Words: every word of the query must be found in the event's name or
-  place, or its club's or its category's name (an AND of per-word ORs):
-  case-blind substrings (ILIKE) for words of three letters or more, a whole
-  word for one of two letters ("ai" finds "AI Summit", not "Chair"), and a
-  single letter or sign is ignored. A search that finds nothing tries again
-  by trigram word similarity, which forgives a typo, through pg_trgm indexes.
-  With words, the default order is relevance.
+- Words: every word of the query must be found in what the event is found
+  by -- its name, place and tag, its club's name and place, its category,
+  its interests and their topics -- kept lowercased and unaccented in one
+  column, events.search_text (app.api.search.text): substrings (LIKE) for
+  words of three letters or more, a whole word for one of two letters ("ai"
+  finds "AI Summit", not "Chair"), and a single letter or sign is ignored.
+  One column and one trigram index per word, where it was four columns over
+  three tables. A search that finds nothing tries again by trigram word
+  similarity, which forgives a typo, through the same index. With words, the
+  default order is relevance. When Meilisearch is on and well, a search with
+  words asks it instead (app.api.search.engine) and Postgres is the fallback.
 - Distance is the same haversine as geo.km, in SQL, behind a latitude/
   longitude box (geo.bbox) that an index can find.
 - "Popular" sorts events by events.popularity (attention decayed by age,
@@ -51,7 +55,7 @@ from zoneinfo import ZoneInfo
 
 import orjson
 
-from sqlalchemy import DateTime, and_, bindparam, case, cast, column, exists, func, literal_column, or_, select, text, true, union
+from sqlalchemy import ARRAY, DateTime, Integer, and_, bindparam, case, cast, column, exists, func, literal_column, or_, select, text, true, union
 from sqlalchemy.orm import aliased, contains_eager, selectinload
 
 from app.api.agenda import service as agenda
@@ -60,12 +64,13 @@ from app.api.club_domains.lookup import active_hosts
 from app.api.clubs import service as clubs_service
 from app.api.clubs.events_list import registration_open
 from app.api.clubs.models import ClubInterestsLink, Clubs, ClubSocials, ClubTeamMembers
-from app.api.discover import cache, cursor as cursors, geo, places, stats as site_stats, upcoming
+from app.api.discover import cache, cells, cursor as cursors, geo, places, stats as site_stats, upcoming
 from app.api.events.documents import EVENT_TIMEZONE
 from app.api.events.models import EventCategories, EventInterestsLink, Events, ends_at_sql, span_sql
 from app.api.interests import topics as topic_refs
 from app.api.interests.models import InterestCategory, Interests
 from app.api.organisers import service as organisers
+from app.api.search import text as stext
 from app.api.sites import service as sites
 from app.api.sites.models import ClubSites
 from app.api.threads import service as threads
@@ -160,13 +165,15 @@ def words_of(q: Optional[str]) -> list[str]:
 
 
 def _matches(column, word: str):
-    """`column` holds `word`: as a substring (ILIKE, which the trigram
-    indexes serve) from three characters up; shorter, as a whole word, so
-    "ai" does not find "Chair" (a regular expression with word boundaries;
-    no index can serve a word this short, so it only ever filters)."""
+    """`column` (a search_text: lowercased, unaccented) holds `word` (a word
+    of a query normalised the same way): as a substring (LIKE, which the
+    trigram indexes serve) from three characters up; shorter, as a whole
+    word, so "ai" does not find "chair" (a regular expression with word
+    boundaries; no index can serve a word this short, so it only ever
+    filters)."""
     if len(word) >= WHOLE_WORD_BELOW:
-        return column.ilike(_like(word), escape="\\")
-    return column.op("~*")(r"\m" + re.escape(word) + r"\M")
+        return column.like(_like(word), escape="\\")
+    return column.op("~")(r"\m" + re.escape(word) + r"\M")
 
 
 def _img(value, *keys) -> Optional[str]:
@@ -316,53 +323,17 @@ def _event_select():
 
 
 def _event_word(w: str):
-    """One word anywhere in the event's name or place, its club's name or its
-    category's name (_matches).
-
-    Tested on what is on: the club and category sides are hashed lookups of
-    the few ids whose names match. Measured against the alternatives on
-    37,000 events (RESULTS.md): finding matches through trigram indexes over
-    every event, past ones included, costs more than this filter for any
-    word common enough to matter, because the events still to come are
-    already a small, indexed set."""
-    return or_(
-        _matches(Events.name, w),
-        _matches(Events.location_name, w),
-        Events.club_id.in_(select(Clubs.id).where(_matches(Clubs.name, w), Clubs.is_deleted == False)),  # noqa: E712
-        Events.category_id.in_(select(EventCategories.id).where(_matches(EventCategories.name, w), EventCategories.is_deleted == False)),  # noqa: E712
-    )
+    """One word anywhere the event is found by (events.search_text)."""
+    return _matches(Events.search_text, w)
 
 
 def _event_words(q: str):
-    """Every word of the query somewhere in the event, its club or its
-    category: "robotics kochi" is a robotics event in Kochi, not every
-    robotics event and every event in Kochi, nor only those with the two
-    words side by side."""
+    """Every word of the query somewhere the event is found by: "robotics
+    kochi" is a robotics event in Kochi, not every robotics event and every
+    event in Kochi, nor only those with the two words side by side. `q` is
+    normalised already (search_text.normalise)."""
     words = words_of(q)
     return and_(*[_event_word(w) for w in words]) if words else true()
-
-
-def _matching(event_match, club_match, category_match, since: Optional[datetime] = None):
-    """`events.id IN (…)`: the events whose own name or place, whose club's
-    name, or whose category's name matches. One arm per table, each through
-    that table's trigram index, and a semi-join the planner can drive from
-    the matches. With `since` (the search: only what is on), each arm keeps
-    only events that can be shown starting from then, so what it hands on is
-    what can be on and not every event ever held, and the event arm finds its
-    candidates through the trigram indexes over shown events
-    (ix_events_shown_*_trgm); without it (the calendar), any date and status."""
-    e1, e2, e3 = (aliased(Events, name=f"words_e{i}") for i in (1, 2, 3))
-    club = aliased(Clubs, name="words_club")
-    cat = aliased(EventCategories, name="words_category")
-
-    def on(e) -> list:
-        return [e.is_deleted == False] + ([_in(e.lifecycle, SHOWN), e.event_datetime >= since] if since is not None else [])  # noqa: E712
-
-    return Events.id.in_(union(
-        select(e1.id).where(event_match(e1), *on(e1)),
-        select(e2.id).join(club, club.id == e2.club_id).where(club_match(club), club.is_deleted == False, *on(e2)),  # noqa: E712
-        select(e3.id).join(cat, cat.id == e3.category_id).where(category_match(cat), cat.is_deleted == False, *on(e3)),  # noqa: E712
-    ))
 
 
 # How alike a word must be to count as a typo of it (pg_trgm word similarity;
@@ -371,24 +342,17 @@ def _matching(event_match, club_match, category_match, since: Optional[datetime]
 FUZZY_THRESHOLD = 0.5
 
 
-def _event_words_fuzzy(q: str, since: Optional[datetime] = None):
-    """The same places, by trigram word similarity (pg_trgm's `%>`): for when
-    a typo found nothing. Every word must still be found, each forgiven its
-    typo (a word under three letters, which has no trigram to forgive with,
-    as a whole word), so "robtics kochi" is a robotics event in Kochi and not
-    every robotics event. Here the trigram indexes find the few candidates;
-    as a filter, `%>` costs several microseconds a row. `since` as _matching."""
+def _event_words_fuzzy(q: str):
+    """The same, by trigram word similarity (pg_trgm's `%>`): for when a typo
+    found nothing. Every word must still be found, each forgiven its typo (a
+    word under three letters, which has no trigram to forgive with, as a
+    whole word), so "robtics kochi" is a robotics event in Kochi and not
+    every robotics event. The trigram index on search_text finds the few
+    candidates: over what can be shown (ix_events_shown_search_trgm) for the
+    search, whose conditions name it; over every event for the calendar."""
     arms = []
     for w in words_of(q):
-        if len(w) < WHOLE_WORD_BELOW:
-            arms.append(_event_word(w))
-            continue
-        arms.append(_matching(
-            lambda m, w=w: or_(m.name.op("%>")(w), m.location_name.op("%>")(w)),
-            lambda m, w=w: m.name.op("%>")(w),
-            lambda m, w=w: m.name.op("%>")(w),
-            since,
-        ))
+        arms.append(_event_word(w) if len(w) < WHOLE_WORD_BELOW else Events.search_text.op("%>")(w))
     return and_(*arms) if arms else true()
 
 
@@ -399,26 +363,20 @@ def _fuzzy_worthwhile(q: Optional[str]) -> bool:
 
 async def _nowhere(session, q: str) -> bool:
     """True when some word of the query (of three letters or more) is in no
-    event's name or place, and no club's or category's name, of any date:
-    then nothing on has every word, and a search can go straight to
-    forgiving a typo instead of reading every event on to find none (the
-    substring test is a filter on what is on, and a filter that matches
-    nothing reads everything).
+    event's search_text, of any date: then nothing on has every word, and a
+    search can go straight to forgiving a typo instead of reading every
+    event on to find none (the substring test is a filter on what is on, and
+    a filter that matches nothing reads everything).
 
-    Answered through the trigram indexes. Sequential scans are off for this
-    one statement: for EXISTS the planner would otherwise read the table
-    hoping for an early match, which for a typo never comes."""
+    Answered through ix_events_search_trgm. Sequential scans are off for
+    this one statement: for EXISTS the planner would otherwise read the
+    table hoping for an early match, which for a typo never comes."""
     words = [w for w in words_of(q) if len(w) >= WHOLE_WORD_BELOW]
     if not words:
         return False
 
     def anywhere(w: str):
-        p = _like(w)
-        return or_(
-            exists(select(Events.id).where(or_(Events.name.ilike(p, escape="\\"), Events.location_name.ilike(p, escape="\\")), Events.is_deleted == False)),  # noqa: E712
-            exists(select(Clubs.id).where(Clubs.name.ilike(p, escape="\\"), Clubs.is_deleted == False)),  # noqa: E712
-            exists(select(EventCategories.id).where(EventCategories.name.ilike(p, escape="\\"), EventCategories.is_deleted == False)),  # noqa: E712
-        )
+        return exists(select(Events.id).where(Events.search_text.like(_like(w), escape="\\"), Events.is_deleted == False))  # noqa: E712
 
     await session.execute(text("SET LOCAL enable_seqscan = off"))
     try:
@@ -591,14 +549,14 @@ def _in_person_point():
 
 def _within(here, radius_km: float):
     """Online events are anywhere, and an in-person one without a point cannot
-    be ruled out; the rest must be inside the radius. The box goes first so the
-    exact distance is only worked out for rows inside it."""
-    box = geo.bbox(here[0], here[1], radius_km)
+    be ruled out; the rest must be inside the radius: in one of the grid
+    cells that cover it (cells.py: an index probe per cell), then the exact
+    distance."""
     return or_(
         Events.is_online == True,  # noqa: E712
         Events.lat.is_(None),
         Events.lng.is_(None),
-        and_(geo.in_box_sql(box, Events.lat, Events.lng), geo.km_sql(here[0], here[1], Events.lat, Events.lng) <= radius_km),
+        cells.near_sql(here, radius_km, Events.geocell, Events.lat, Events.lng),
     )
 
 
@@ -832,11 +790,8 @@ async def search_events(
     now = now or now_utc()
     here = _here(where)
     days = date_range(from_, to) if (from_ is not None or to is not None) else None
+    raw_q, q = q, await stext.normalise(session, q)
     since = await upcoming.since(session, now)
-    conds = _conditions(now, since, when=when, category=category, type_=type_, price=price, days=days, topic=topic, interest=interest)
-    radius = here is not None and type_ != "online" and radius_km > 0
-    if radius:
-        conds.append(_within(here, radius_km))
     words = bool(words_of(q))
     if sort is None:
         sort = "relevance" if words else "date"
@@ -844,6 +799,24 @@ async def search_events(
         sort = "date"
     if sort == "distance" and here is None:
         sort = "date"
+    if words:
+        # Meilisearch, when it is on and well; Postgres below otherwise.
+        from app.api.search import engine
+
+        found = await engine.discover_events(
+            session, where, q=q, here=here, when=when, category=category, type_=type_, price=price, radius_km=radius_km,
+            sort=sort, offset=offset, limit=limit, now=now, since=since, days=days, topic=topic, interest=interest, after=after,
+        )
+        if found is not None:
+            return found
+        # A Meilisearch cursor carries an offset: carry on from it here.
+        resumed = engine.offset_of(after, f"events:{sort}")
+        if resumed is not None:
+            offset, after = resumed, None
+    conds = _conditions(now, since, when=when, category=category, type_=type_, price=price, days=days, topic=topic, interest=interest)
+    radius = here is not None and type_ != "online" and radius_km > 0
+    if radius:
+        conds.append(_within(here, radius_km))
     if words and _fuzzy_worthwhile(q) and await _nowhere(session, q):
         total, capped = 0, False  # a typo, most likely: no need to read what is on to find nothing
     else:
@@ -852,7 +825,7 @@ async def search_events(
         if total == 0 and _fuzzy_worthwhile(q):
             # Nothing has these letters in this order: forgive a typo.
             await _fuzzy(session)
-            conds.append(_event_words_fuzzy(q, since))
+            conds.append(_event_words_fuzzy(q))
             total, capped = await capped_count(session, _event_ids(conds))
         else:
             conds.append(_event_words(q))
@@ -863,7 +836,7 @@ async def search_events(
     if sort == "distance":
         page, next_cursor = await _distance_page(session, conds, here, radius_km if radius else None, offset, limit, total, capped, after)
     else:
-        keys, types = _sort_keys(sort, q)
+        keys, types = _sort_keys(sort, raw_q)
         start = cursors.decode(after, f"events:{sort}", types)
         if start is not None:
             conds.append(cursors.after(keys, start))
@@ -895,7 +868,9 @@ async def _distance_page(session, conds: list, here, radius_km: Optional[float],
     km = geo.km_sql(here[0], here[1], Events.lat, Events.lng)
     placed = conds + [_in_person_point()]
     if radius_km is not None:
-        placed.append(geo.in_box_sql(geo.bbox(here[0], here[1], radius_km), Events.lat, Events.lng))
+        # The cells that cover the circle: the cell index finds the placed part.
+        by_cell = cells.cover_sql(Events.geocell, cells.cover(here[0], here[1], radius_km))
+        placed.append(by_cell if by_cell is not None else geo.in_box_sql(geo.bbox(here[0], here[1], radius_km), Events.lat, Events.lng))
     unplaced = conds + [or_(Events.is_online == True, Events.lat.is_(None), Events.lng.is_(None))]  # noqa: E712
     placed_keys = [(km, False), *by_date]
     start = cursors.decode(after, "events:distance", DISTANCE_TYPES)
@@ -1011,7 +986,7 @@ async def calendar(
     first, after = month_bounds(month, now)
     here = _here(where)
     radius = here is not None and type_ != "online" and radius_km > 0
-    words = " ".join(words_of(q)) or None  # ILIKE and trigrams ignore case alike
+    words = " ".join(words_of(await stext.normalise(session, q))) or None
     centre = None
     if radius:
         c = geo.cell(*here)
@@ -1115,21 +1090,19 @@ async def club_cards(session, clubs: list[Clubs], now: datetime, *, since: datet
 
 
 def _club_words(q: str):
-    """Every word of the query in the club's name, tagline or place."""
+    """Every word of the (normalised) query in what the club is found by:
+    its name, tagline, place, interests and their topics (clubs.search_text)."""
     words = words_of(q)
     if not words:
         return true()
-    return and_(*[or_(_matches(Clubs.name, w), _matches(Clubs.tagline, w), _matches(Clubs.location_name, w)) for w in words])
+    return and_(*[_matches(Clubs.search_text, w) for w in words])
 
 
 def _club_words_fuzzy(q: str):
-    """Every word in the club's name, tagline or place, each forgiven a typo (as _event_words_fuzzy)."""
+    """Every word in the club's search_text, each forgiven a typo (as _event_words_fuzzy)."""
     arms = []
     for w in words_of(q):
-        if len(w) < WHOLE_WORD_BELOW:
-            arms.append(or_(_matches(Clubs.name, w), _matches(Clubs.tagline, w), _matches(Clubs.location_name, w)))
-        else:
-            arms.append(or_(Clubs.name.op("%>")(w), Clubs.tagline.op("%>")(w), Clubs.location_name.op("%>")(w)))
+        arms.append(_matches(Clubs.search_text, w) if len(w) < WHOLE_WORD_BELOW else Clubs.search_text.op("%>")(w))
     return and_(*arms) if arms else true()
 
 
@@ -1172,6 +1145,7 @@ async def search_clubs(
     `interest` wins when both are given."""
     now = now or now_utc()
     here = _here(where)
+    q = await stext.normalise(session, q)
     conds = list(_club_visible())
     picked = picks(ClubInterestsLink, ClubInterestsLink.club_id, Clubs.id, topic=topic, interest=interest or None)
     if picked is not None:
@@ -1187,6 +1161,21 @@ async def search_clubs(
         return select(Clubs.id).where(*conds, *extra)
 
     words = bool(words_of(q))
+    if sort not in ("nearby", "newest") or (sort == "nearby" and here is None):
+        sort = "popular"
+    if words:
+        # Meilisearch, when it is on and well; Postgres below otherwise.
+        from app.api.search import engine
+
+        found = await engine.discover_clubs(
+            session, where, q=q, here=here, interest=interest, topic=topic, radius_km=radius_km, sort=sort,
+            offset=offset, limit=limit, now=now, after=after,
+        )
+        if found is not None:
+            return found
+        resumed = engine.offset_of(after, f"clubs:{sort}")
+        if resumed is not None:
+            offset, after = resumed, None
     total, capped = await capped_count(session, ids([_club_words(q)] if words else []))
     if words:
         if total == 0 and _fuzzy_worthwhile(q):
@@ -1660,26 +1649,46 @@ async def _near_pool(session, now: datetime, since: datetime, centre: tuple[floa
     sure = NEAR_KM - reach - _SLACK_KM
     # Read in date order a chunk at a time (each a range of the date order
     # after the last row read), growing, and stop at the chunk that settles
-    # it: a box around a big city holds thousands of events to come, and the
-    # list is settled by the first few dozen near the centre.
+    # it: a city holds thousands of events to come, and the list is settled
+    # by the first few dozen near the centre.
     # The club rule as "not one of the unlisted clubs" (a hashed list of the
-    # few), not a join: joined, every event in the box looked its club up
-    # (three pages each; 18,000 of the 23,000 the read took at 15,000 clubs).
+    # few), not a join: joined, every event looked its club up.
     conds = [
         Events.is_deleted == False, _in(Events.lifecycle, SHOWN), _end_expr() >= now, Events.event_datetime >= since,  # noqa: E712
         Events.club_id.isnot(None), Events.club_id.notin_(select(Clubs.id).where(Clubs.listed == False)),  # noqa: E712
-        _in_person_point(), geo.in_box_sql(geo.bbox(centre[0], centre[1], far), Events.lat, Events.lng),
+        _in_person_point(), geo.km_sql(centre[0], centre[1], Events.lat, Events.lng) <= far,
     ]
     order = [(Events.event_datetime, False), (Events.id, False)]
+    # The cells within `far`, each walked in date order on ix_events_shown_cell
+    # (geocell, event_datetime, id) and merged: a chunk reads at most a chunk
+    # per cell, however many events the country has and however few are
+    # near. Where the cover is too wide to list (by a pole), the whole date
+    # order, boxed, as before.
+    near_cells = cells.listed(cells.cover(centre[0], centre[1], far))
+    if near_cells is None:
+        conds.append(geo.in_box_sql(geo.bbox(centre[0], centre[1], far), Events.lat, Events.lng))
     pool: list[tuple[int, float, float]] = []
     certain = 0
     last = None
     chunk = NEAR_CHUNK
     while True:
-        stmt = select(Events.id, Events.lat, Events.lng, Events.event_datetime).where(*conds)
-        if last is not None:
-            stmt = stmt.where(cursors.after(order, last))
-        rows = (await session.execute(stmt.order_by(Events.event_datetime, Events.id).limit(chunk))).all()
+        after_last = [cursors.after(order, last)] if last is not None else []
+        if near_cells is None:
+            stmt = select(Events.id, Events.lat, Events.lng, Events.event_datetime).where(*conds, *after_last).order_by(Events.event_datetime, Events.id).limit(chunk)
+        else:
+            each = select(func.unnest(bindparam("near_cells", near_cells, type_=ARRAY(Integer))).label("cell")).subquery("near_cells")
+            per_cell = (
+                select(Events.id, Events.lat, Events.lng, Events.event_datetime)
+                .where(Events.geocell.isnot(None), Events.geocell == each.c.cell, *conds, *after_last)
+                .order_by(Events.event_datetime, Events.id).limit(chunk)
+                .lateral("per_cell")
+            )
+            stmt = (
+                select(per_cell.c.id, per_cell.c.lat, per_cell.c.lng, per_cell.c.event_datetime)
+                .select_from(each).join(per_cell, true())
+                .order_by(per_cell.c.event_datetime, per_cell.c.id).limit(chunk)
+            )
+        rows = (await session.execute(stmt)).all()
         for event_id, lat, lng, starts in rows:
             last = [starts, event_id]
             d = geo.km(centre[0], centre[1], lat, lng)

@@ -151,19 +151,20 @@ async def test_the_walks_start_near_now_not_at_the_oldest_published_event(client
     await client.get(f"{API}/events")
     page_sql = next(s for s in statements_seen if "ORDER BY events.event_datetime" in s and "LIMIT" in s)
     assert "events.event_datetime >=" in page_sql
-    # The search's typo fallback looks only at what can be on, in each of its arms.
+    # The search's typo fallback looks only at what can be on: one column's
+    # trigram test, beside the lower bound on the start.
     statements_seen.clear()
     body = (await client.get(f"{API}/events", params={"q": "hackathn"})).json()
     assert _ids(body["items"]) == [scene["e"]["still_on"].id]  # "Three Day Hackathon", forgiven
     fuzzy = next(s for s in statements_seen if "%>" in s and "count(" in s.lower())
-    assert fuzzy.count("words_e1.event_datetime >=") == 1 and fuzzy.count("words_e2.event_datetime >=") == 1 and fuzzy.count("words_e3.event_datetime >=") == 1
+    assert "events.search_text %>" in fuzzy and "events.event_datetime >=" in fuzzy
     # The letters are nowhere, so what is on was never read to find none of them.
-    assert not any("ILIKE" in s and "count(" in s.lower() for s in statements_seen), statements_seen
+    assert not any("LIKE" in s and "count(" in s.lower() for s in statements_seen), statements_seen
     # Letters that are somewhere are looked for among what is on, as always,
     # even when only an event already over has them.
     statements_seen.clear()
     assert (await client.get(f"{API}/events", params={"q": "weekend's fest"})).json()["items"] == []
-    assert any("ILIKE" in s and "count(" in s.lower() for s in statements_seen)
+    assert any("LIKE" in s and "count(" in s.lower() for s in statements_seen)
 
 
 @pytest.fixture
