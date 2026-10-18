@@ -12,6 +12,7 @@ change, and what they cost must not grow with the number of events.
 - The front page's minute cache never carries anything of the reader's, and
   never answers with what an uncached page would not.
 """
+import asyncio
 import math
 import random
 import uuid
@@ -740,11 +741,21 @@ async def test_the_minute_cache_expires_and_a_new_event_shows_within_the_minute(
     assert (await service.home(session, {"lat": None, "lng": None}, None, now=now))["this_week"] == []
     # ...and past it, the first request still gets that page at once while one
     # task makes it again in the background (on a session of its own: here, the test's).
+    # Each part of the page that has gone stale is made again by a task of
+    # its own. Here they all share the test's one session, so they wait for
+    # the request that started them and then take turns: two operations at
+    # once on a session is an error that real tasks, each with its own
+    # session, never meet.
     from contextlib import asynccontextmanager
+
+    request_done = asyncio.Event()
+    one_at_a_time = asyncio.Lock()
 
     @asynccontextmanager
     async def scope():
-        yield session
+        await request_done.wait()
+        async with one_at_a_time:
+            yield session
 
     monkeypatch.setattr(geo, "session_scope", scope)
     clock = [cache.time.monotonic()]
@@ -752,6 +763,7 @@ async def test_the_minute_cache_expires_and_a_new_event_shows_within_the_minute(
     clock[0] += 61
     stale = await service.home(session, {"lat": None, "lng": None}, None, now=now + timedelta(seconds=61))
     assert stale["this_week"] == [] and cache.shared.stale_hits >= 1
+    request_done.set()
     await cache.shared.settle()
     later = await service.home(session, {"lat": None, "lng": None}, None, now=now + timedelta(seconds=62))
     assert _ids(later["this_week"]) == [late.id]
