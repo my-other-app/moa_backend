@@ -52,10 +52,14 @@ def send_email_with_attachment(
     aws_region: str = "ap-south-1",
     sender_name: Optional[str] = None,
     reply_to: Optional[str] = None,
+    idempotency_key: Optional[str] = None,
+    check_suppression: bool = True,
 ) -> Dict:
     """A mail with an optional file and an optional HTML template, sent
     through whichever provider is configured (see `transport`). Returns
-    `{"MessageId", "Provider"}`. `aws_region` is kept for old callers."""
+    `{"MessageId", "Provider"}`. `aws_region` is kept for old callers: the
+    region is APP_SES_REGION's. `idempotency_key` and `check_suppression`
+    are `transport.Mail`'s."""
     if isinstance(recipients, str):
         recipients = [recipients]
     if (html_template_path or html_template_str) and template_context:
@@ -69,6 +73,7 @@ def send_email_with_attachment(
     mail = transport.Mail(
         to=list(recipients), bcc=list(bcc_recipients or []), subject=subject, text=body_text, html=body_html,
         from_name=sender_name, from_address=sender, reply_to=reply_to, attachments=attachments,
+        idempotency_key=idempotency_key, check_suppression=check_suppression,
     )
     try:
         return transport.deliver(mail)
@@ -121,6 +126,8 @@ def send_email(
     sender_name: Optional[str] = None,
     aws_region: str = "ap-south-1",
     reply_to: Optional[str] = None,
+    idempotency_key: Optional[str] = None,
+    check_suppression: bool = True,
 ) -> Dict:
     """A designed email: a text and an HTML body, files attached, and pictures
     inline by Content-ID (`{"filename", "content", "content_id"}`) so the
@@ -130,5 +137,8 @@ def send_email(
         transport.Attachment(filename=a.get("filename") or "attachment", content=transport.as_bytes(a["content"]), content_id=a.get("content_id"))
         for a in attachments or []
     ]
-    mail = transport.Mail(to=list(recipients), subject=subject, text=text, html=html, from_name=sender_name, from_address=sender, reply_to=reply_to, attachments=files)
+    mail = transport.Mail(
+        to=list(recipients), subject=subject, text=text, html=html, from_name=sender_name, from_address=sender, reply_to=reply_to,
+        attachments=files, idempotency_key=idempotency_key, check_suppression=check_suppression,
+    )
     return transport.deliver(mail)

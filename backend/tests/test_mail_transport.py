@@ -17,7 +17,8 @@ from app.api.hooks import svix
 from app.config import settings
 from app.core.email import email as email_mod
 from app.core.email import transport
-from app.core.email.email import send_email as REAL_SEND_EMAIL  # captured before the suite's autouse stub replaces it
+from app.core.email.email import send_email as REAL_SEND_EMAIL
+from app.core.mail import suppression  # captured before the suite's autouse stub replaces it
 
 SECRET = "whsec_" + base64.b64encode(b"a-test-signing-secret-32-bytes!!").decode()
 
@@ -36,11 +37,12 @@ class FakeResponse:
 def wire(monkeypatch):
     """Resend over HTTP and SES over boto3, both recorded, neither reached."""
     transport.reset_for_tests()
-    calls = {"resend": [], "ses": []}
+    calls = {"resend": [], "ses": [], "clients": 0}
     replies: list = []
+    ses_replies: list = []
 
-    def post(url, json=None, headers=None, timeout=None):  # noqa: A002 - httpx's own keyword
-        calls["resend"].append({"url": url, "json": json, "headers": headers})
+    def post(body, headers):
+        calls["resend"].append({"url": transport.RESEND_URL, "json": body, "headers": headers})
         r = replies.pop(0) if replies else FakeResponse(200, {"id": f"re_{len(calls['resend'])}"})
         if isinstance(r, Exception):
             raise r
@@ -48,12 +50,21 @@ def wire(monkeypatch):
 
     class FakeSES:
         def send_raw_email(self, Source, Destinations, RawMessage):  # noqa: N803 - boto3's names
+            if ses_replies:
+                raise ses_replies.pop(0)
             calls["ses"].append({"source": Source, "destinations": Destinations, "raw": RawMessage["Data"]})
             return {"MessageId": f"ses-{len(calls['ses'])}"}
 
+    def new_client(*_a):
+        calls["clients"] += 1
+        return FakeSES()
+
     monkeypatch.setattr(email_mod, "send_email", REAL_SEND_EMAIL)
-    monkeypatch.setattr(transport.httpx, "post", post)
-    monkeypatch.setattr(transport.boto3, "client", lambda *a, **k: FakeSES())
+    monkeypatch.setattr(transport, "_post_resend", post)
+    monkeypatch.setattr(transport, "_new_ses_client", new_client)
+    # The suppression list is the database's; these tests are about the wire.
+    monkeypatch.setattr(suppression, "lookup_sync", lambda addresses: {})
+    calls["ses_replies"] = ses_replies
     monkeypatch.setattr(settings, "SES_DEFAULT_SENDER", "tickets@myotherapp.in")
     monkeypatch.setattr(settings, "MAIL_FROM_ADDRESS", "info@myotherapp.in")
     monkeypatch.setattr(settings, "MAIL_FROM_NAME", "MyOtherApp")
@@ -175,3 +186,144 @@ async def test_resends_word_lands_on_the_send_and_a_bounce_marks_the_address(cli
     assert rows["re_delivered"].outcome == DeliveryOutcome.read
     assert rows["re_bounced"].outcome == DeliveryOutcome.bounced and "does not exist" in rows["re_bounced"].reason
     assert reg.email_bounced_at is not None and "does not exist" in reg.email_bounce_reason
+
+
+# ─── One client, the right fallback, the warning (email integrity) ─────────
+
+
+def test_a_resend_timeout_is_tried_again_later_and_never_sent_again_through_ses(wire, monkeypatch):
+    """Resend may have taken a mail it did not answer for: SES now would be
+    the guest's second copy. A refusal (4xx) or no connection at all still
+    falls back, as it is certain nothing was taken."""
+    calls, replies = wire
+    _resend_on(monkeypatch)
+    replies.append(httpx.ReadTimeout("no answer"))
+    with pytest.raises(transport.MailDeferred):
+        email_mod.send_email(recipients=["a@example.com"], subject="1", text="x", html="<p>x</p>", idempotency_key="delivery-1")
+    replies.append(FakeResponse(502, {"name": "internal_server_error", "message": "upstream"}))
+    with pytest.raises(transport.MailDeferred):
+        email_mod.send_email(recipients=["a@example.com"], subject="1", text="x", html="<p>x</p>", idempotency_key="delivery-1")
+    assert calls["ses"] == []
+    # The retry carries the same key, so Resend sends it once whichever try it took.
+    assert [c["headers"]["Idempotency-Key"] for c in calls["resend"]] == ["delivery-1", "delivery-1"]
+    replies.append(FakeResponse(422, {"name": "validation_error", "message": "Invalid `to` field"}))
+    assert email_mod.send_email(recipients=["a@example.com"], subject="2", text="x", html="<p>x</p>")["Provider"] == "ses"
+
+
+def test_ses_throttling_and_silence_are_tried_again_and_a_rejection_is_final(wire, monkeypatch):
+    from botocore.exceptions import ClientError, ReadTimeoutError
+
+    calls, _ = wire
+    monkeypatch.setattr(settings, "MAIL_PROVIDER", "ses")
+
+    def refusal(code, status=400):
+        return ClientError({"Error": {"Code": code, "Message": code}, "ResponseMetadata": {"HTTPStatusCode": status}}, "SendRawEmail")
+
+    calls["ses_replies"].extend([refusal("Throttling"), ReadTimeoutError(endpoint_url="https://email.ap-south-1.amazonaws.com"), refusal("MessageRejected")])
+    with pytest.raises(transport.MailThrottled):
+        email_mod.send_email(recipients=["a@example.com"], subject="1", text="x", html="x")
+    with pytest.raises(transport.MailDeferred):
+        email_mod.send_email(recipients=["a@example.com"], subject="1", text="x", html="x")
+    with pytest.raises(ClientError) as rejected:
+        email_mod.send_email(recipients=["a@example.com"], subject="1", text="x", html="x")
+    assert not isinstance(rejected.value, transport.MailDeferred)
+
+
+def test_one_ses_client_serves_every_send_on_every_thread(monkeypatch):
+    """A client a mail meant a TLS handshake to ap-south-1 a mail, and
+    building clients from boto3's default session on many threads at once
+    is not safe. One client, built once, serves them all."""
+    import threading
+
+    import boto3
+
+    transport.reset_for_tests()
+    built: list = []
+
+    class FakeSES:
+        def send_raw_email(self, Source, Destinations, RawMessage):  # noqa: N803 - boto3's names
+            return {"MessageId": "ses-x"}
+
+    def client(self, service_name, *a, **k):
+        built.append((service_name, self.region_name, (k.get("config") or None) and k["config"].region_name))
+        return FakeSES()
+
+    monkeypatch.setattr(boto3.session.Session, "client", client)
+    monkeypatch.setattr(email_mod, "send_email", REAL_SEND_EMAIL)
+    monkeypatch.setattr(suppression, "lookup_sync", lambda addresses: {})
+    monkeypatch.setattr(settings, "MAIL_PROVIDER", "ses")
+
+    def burst():
+        for _ in range(5):
+            email_mod.send_email(recipients=["a@example.com"], subject="x", text="x", html="x")
+
+    threads = [threading.Thread(target=burst) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(built) == 1 and built[0][0] == "ses"
+    # Its region is a setting; ap-south-1 unless told otherwise.
+    assert built[0][1] == "ap-south-1"
+    monkeypatch.setattr(settings, "SES_REGION", "eu-west-1")
+    email_mod.send_email(recipients=["a@example.com"], subject="x", text="x", html="x")
+    assert len(built) == 2 and built[1][1] == "eu-west-1"
+    transport.reset_for_tests()
+
+
+def test_the_overhead_of_a_send_drops_with_one_client(monkeypatch, capsys):
+    """Measured with SES stubbed out, so no network: what is left of a send
+    is the work on our side. A client per mail rebuilt the whole botocore
+    client each time (and, live, its TLS connection to ap-south-1); one
+    client pays that once."""
+    import time
+
+    import boto3
+    from botocore.stub import Stubber
+
+    transport.reset_for_tests()
+    monkeypatch.setattr(settings, "MAIL_PROVIDER", "ses")
+    monkeypatch.setattr(suppression, "lookup_sync", lambda addresses: {})
+    n = 20
+    mail = transport.Mail(to=["a@example.com"], subject="x", text="x", html="<p>x</p>")
+    ok = {"MessageId": "ses-1"}
+
+    # Before: what the old _send_ses did for every mail.
+    started = time.perf_counter()
+    for _ in range(n):
+        client = boto3.client("ses", region_name="ap-south-1", aws_access_key_id="k", aws_secret_access_key="s")
+        with Stubber(client) as stub:
+            stub.add_response("send_raw_email", ok)
+            client.send_raw_email(Source="a@example.com", Destinations=["a@example.com"], RawMessage={"Data": "x"})
+    per_send_before = (time.perf_counter() - started) / n
+
+    # After: the transport's one client.
+    shared = transport._ses()
+    with Stubber(shared) as stub:
+        for _ in range(n):
+            stub.add_response("send_raw_email", ok)
+        started = time.perf_counter()
+        for _ in range(n):
+            transport._send_ses(mail)
+        per_send_after = (time.perf_counter() - started) / n
+    with capsys.disabled():
+        print(f"\n  SES per-send overhead, stubbed: {per_send_before * 1000:.1f} ms with a client a mail, {per_send_after * 1000:.1f} ms with one")
+    assert per_send_after * 2 < per_send_before
+    transport.reset_for_tests()
+
+
+def test_account_mail_to_a_suppressed_address_goes_with_a_warning(wire, monkeypatch, caplog):
+    """A password reset is asked for this minute; holding it back would lock
+    the person out. It goes -- and the log says the address is suppressed."""
+    calls, _ = wire
+    monkeypatch.setattr(settings, "MAIL_PROVIDER", "ses")
+    monkeypatch.setattr(suppression, "lookup_sync", lambda addresses: {"gone@example.com": "bounce"} if "gone@example.com" in addresses else {})
+    with caplog.at_level("WARNING", logger="app.core.mail.suppression"):
+        out = email_mod.send_email(recipients=["gone@example.com"], subject="Reset your password", text="x", html="x")
+    assert out["Provider"] == "ses" and len(calls["ses"]) == 1
+    assert any("suppressed" in r.getMessage() and "g***@example.com" in r.getMessage() for r in caplog.records)
+    # A sender that already looked (the event pipelines) is not looked up again.
+    looked: list = []
+    monkeypatch.setattr(suppression, "lookup_sync", lambda addresses: looked.append(addresses) or {})
+    email_mod.send_email(recipients=["b@example.com"], subject="x", text="x", html="x", check_suppression=False)
+    assert looked == []

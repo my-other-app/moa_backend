@@ -53,7 +53,8 @@ class AppConfig(BaseSettings):
     SES_DEFAULT_SENDER: str
     # Shared secret in the SES → SNS hook URL (?token=), on top of Amazon's signature.
     SES_WEBHOOK_TOKEN: str = ""
-    # Which provider sends mail: "ses" (default) or "resend", which falls back to SES on any refusal.
+    # Which provider sends mail: "ses" (default) or "resend", which falls back
+    # to SES when Resend refuses a mail (a 4xx) -- never when it may have taken it.
     MAIL_PROVIDER: str = "ses"
     RESEND_API_KEY: str = ""
     # The signing secret Resend shows for the webhook (whsec_…); without it the Resend hook refuses everything.
@@ -61,6 +62,20 @@ class AppConfig(BaseSettings):
     # The sender for platform mail through Resend: an address on its verified domain.
     MAIL_FROM_ADDRESS: str = "info@myotherapp.in"
     MAIL_FROM_NAME: str = "MyOtherApp"
+    # Where the SES identity lives. One client per process talks to it
+    # (app/core/email/transport.py), so its TLS connections are reused.
+    SES_REGION: str = "ap-south-1"
+    # Mails a second this process hands to the provider (a token bucket,
+    # app/core/email/pace.py). SES's sending quota starts at 14/s; with
+    # WORKERS > 1 each worker paces itself, so set it to quota / WORKERS.
+    MAIL_SEND_RATE: float = 14.0
+    # Mails one send (a message, a batch of tickets) has in flight at once:
+    # being rendered or waiting on the provider, all under the rate above.
+    MAIL_CONCURRENCY: int = 8
+    # Tries a mail gets while the provider is slow, throttling or down before
+    # it is given up on (status "dead", and the admins are told). The wait
+    # between tries doubles from a minute.
+    MAIL_MAX_ATTEMPTS: int = 6
     # WhatsApp Cloud API: the hook's verify token and app secret, and the sending credentials. Empty = no provider.
     WHATSAPP_VERIFY_TOKEN: str = ""
     WHATSAPP_APP_SECRET: str = ""
