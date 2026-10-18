@@ -198,7 +198,7 @@ async def pg_sampler(conn, db: str, stop: asyncio.Event, out: list) -> None:
 
 
 def server_stats(stats_dir: str) -> dict:
-    lags, locks, per = [], [], []
+    lags, locks, holds, per = [], [], [], []
     for path in glob.glob(os.path.join(stats_dir, "*.json")):
         try:
             d = json.load(open(path))
@@ -206,6 +206,7 @@ def server_stats(stats_dir: str) -> dict:
             continue
         lags += d["lags"]
         locks += d["locks"]
+        holds += d.get("holds", [])
         per.append(dict(pid=d["pid"], requests=d["requests"], max_inflight=d["max_inflight"], pool_checked_out=d["pool_checked_out"],
                         pool_overflow=d["pool_overflow"], loop_lag_p99_ms=round(pct(d["lags"], 0.99) * 1000, 1),
                         loop_lag_max_ms=round(max(d["lags"] or [0]) * 1000, 1)))
@@ -214,6 +215,9 @@ def server_stats(stats_dir: str) -> dict:
         loop_lag_ms=dict(p50=round(pct(lags, 0.5) * 1000, 2), p99=round(pct(lags, 0.99) * 1000, 1), max=round(max(lags or [0]) * 1000, 1)),
         for_update_ms=dict(n=len(locks), p50=round(pct(locks, 0.5) * 1000, 2), p95=round(pct(locks, 0.95) * 1000, 1),
                            p99=round(pct(locks, 0.99) * 1000, 1), max=round(max(locks or [0]) * 1000, 1)),
+        # How long a registration then held the event's row, to its commit (serve.py).
+        row_held_ms=dict(n=len(holds), p50=round(pct(holds, 0.5) * 1000, 2), p95=round(pct(holds, 0.95) * 1000, 1),
+                         p99=round(pct(holds, 0.99) * 1000, 1), max=round(max(holds or [0]) * 1000, 1)),
     )
 
 

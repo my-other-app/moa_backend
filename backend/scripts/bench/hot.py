@@ -76,6 +76,17 @@ async def hot_event(args) -> dict:
     # Open, free and uncapped, so every registration goes the whole way.
     await conn.execute("UPDATE events SET reg_startdate = now() - interval '1 day', reg_enddate = NULL, max_participants = NULL, "
                        "has_fee = false, reg_fee = NULL WHERE id = $1", event_id)
+    if args.plan:
+        # Under a plan's caps: the club on that plan (as an admin grants one),
+        # and the event made now, so it is not grandfathered past the gates.
+        # Every registration then also counts the event's and the club's month.
+        club_id = await conn.fetchval("SELECT club_id FROM events WHERE id = $1", event_id)
+        await conn.execute("UPDATE events SET created_at = now() WHERE id = $1", event_id)
+        await conn.execute("DELETE FROM club_subscriptions WHERE club_id = $1", club_id)
+        await conn.execute(
+            "INSERT INTO club_subscriptions (club_id, plan_id, cycle, status, mrr_paise, created_at, updated_at, is_deleted, "
+            "cancel_at_period_end, complimentary) SELECT $1, id, 'monthly', 'active', 0, now(), now(), false, false, false "
+            "FROM plans WHERE key = $2", club_id, args.plan)
     people = []
     if args.mode == "app":
         rows = await conn.fetch(
@@ -124,7 +135,7 @@ async def hot_event(args) -> dict:
         "SELECT e.going_count, (SELECT count(*) FROM event_registrations_link r WHERE r.event_id = e.id AND NOT r.is_deleted), "
         "(SELECT count(*) FROM email_templates t WHERE t.event_id = e.id) FROM events e WHERE e.id = $1", event_id)
     await conn.close()
-    out = dict(kind="event", mode=args.mode, event=args.event, event_id=event_id, registered_before=before, n=args.n, seconds=args.seconds,
+    out = dict(kind="event", mode=args.mode, event=args.event, plan=args.plan or None, event_id=event_id, registered_before=before, n=args.n, seconds=args.seconds,
                wall_s=round(wall, 2), throughput_per_s=round(len(lat) / wall, 1), **summary(lat, codes),
                going_count_after=going, rows_after=rows, counter_matches=going == rows, journey_templates_on_event=templates,
                max_lock_waiters=locks.get("max_lock_waiters", 0),
@@ -198,6 +209,7 @@ async def main() -> None:
     p.add_argument("--seconds", type=float, default=10.0, help="spread the registrations over this long (0: all at once)")
     p.add_argument("--event", choices=["big", "empty"], default="big", help="the most registered upcoming event, or one with none")
     p.add_argument("--mode", choices=["app", "public"], default="app")
+    p.add_argument("--plan", default="", help="put the event's club on this plan (e.g. campus) and the event under its caps")
     p.add_argument("--concurrency", type=int, default=100)
     p.add_argument("--workers", type=int, default=1)
     p.add_argument("--stats-dir", default="")

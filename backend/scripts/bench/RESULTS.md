@@ -605,3 +605,171 @@ the migration's one transaction.
 noise). The scale study at 15,000 and 100,000 clubs, with a load generator,
 hot-row writes and the background sweeps, is in `docs/SCALING.md` at the
 repository root; its raw results are in `results/scale/`.
+
+## The write path (`perf/write-path`, 18 October 2026)
+
+Registrations, the timed-email sweep and the counter check, before and after
+the branch `perf/write-path` (migration `write_path`; `docs/SCALING.md`
+section d, items 5, 6, 8, 9, 11, 15–18). Raw results in
+`results/write_path/`.
+
+**Data**: `seed.py --scale 10` (S1: 15,000 clubs, 370,000 events, 615,000
+users, 4,000,020 registrations, 1.5 million follows; 2.8 GB). The before runs
+used origin/master at 54839ed on the schema it migrates to; the after runs
+this branch after `alembic upgrade head`. **Machine**: the M2 laptop of the
+scale study, but shared this time with other engineers' test suites and
+benchmarks (on the same Postgres) and an Android build: load average 5–20
+while these ran. So every burst was run interleaved -- before, then after,
+the same configuration, each on a freshly started server (killed and its
+connections gone before the next), the same harness and data -- and the
+pairs are what to compare, not the absolute numbers. The first before runs,
+on a quieter machine (`hot_before_quiet.json`), took 19–20 registrations a
+second at one worker on both events without a failure -- when the biggest
+had 7,600 registrations; it has grown by 500 with every run since, and with
+it the ticket email's read of the event's deliveries (below) -- and 8–9 a
+second with 13–56 failures at four workers or under the campus plan.
+
+### 500 registrations in 10 seconds
+
+`hot.py event --n 500 --seconds 10`, signed-in app users, free and uncapped
+event; "campus" puts the club on that plan (20,000 a event, 1.5 lakh a
+month) with the event made today, so both plan caps are counted on every
+registration. *Waited for the row*: how long the statement that takes the
+event's row took (`SELECT … FOR UPDATE` before, the `UPDATE … RETURNING`
+of `take_place` after), for those that got it. *Held it*: from then to the
+commit. Errors are all 500s from the pool (30 s waiting for a connection)
+or, at four workers, Postgres out of connections.
+
+| | registered before | per second | p50 / p95 | errors | waited for the row p50 / p95 | held it p50 / p95 | loop lag p99 |
+|---|---:|---:|---|---:|---|---|---:|
+| **1 worker, empty event**, before | 0 | 13.8 | 11.0 s / 25.1 s | 0 | 637 ms / 1.1 s | 13 / 90 ms | 213 ms |
+| after | 0 | 17.8 | 8.6 s / 18.4 s | 0 | 224 ms / 1.5 s | 8 / 57 ms | 143 ms |
+| again, before | 0 | 13.5 | 16.4 s / 28.9 s | 0 | 107 ms / 3.8 s | 3 / 89 ms | 163 ms |
+| after | 0 | 20.0 | 7.1 s / 14.7 s | 0 | 118 ms / 602 ms | 8 / 44 ms | 168 ms |
+| **1 worker, the biggest event**, before | 11,934 | 7.1 | 30.1 s / 62.8 s | 301 | 3.5 s / 16.9 s | 105 / 963 ms | 301 ms |
+| after | 12,165 | 17.1 | 9.5 s / 18.3 s | 0 | 139 ms / 614 ms | 8 / 57 ms | 141 ms |
+| again, before | 12,665 | 6.4 | 50.9 s / 68.7 s | 230 | 2.5 s / 4.1 s | 71 / 316 ms | 428 ms |
+| after | 13,090 | 18.1 | 9.0 s / 18.3 s | 0 | 159 ms / 978 ms | 10 / 62 ms | 146 ms |
+| **1 worker, biggest, on campus**, before | 13,590 | 6.8 | 30.2 s / 66.6 s | 295 | 3.3 s / 17.5 s | 93 / 998 ms | 358 ms |
+| after | 13,838 | 11.5 | 8.9 s / 30.2 s | 0 | 192 ms / 1.0 s | 10 / 70 ms | 281 ms |
+| **4 workers, biggest**, before | 15,192 | 7.9 | 30.0 s / 58.1 s | 266 | 7.3 s / 22.6 s | 81 / 1,076 ms | 223 ms |
+| after | 15,438 | 22.0 | 6.2 s / 14.2 s | 35 | 1.1 s / 5.4 s | 13 / 73 ms | 67 ms |
+| after, `APP_DB_POOL_SIZE=5 APP_DB_MAX_OVERFLOW=15` | 15,903 | 26.3 | 5.9 s / 11.0 s | 0 | 758 ms / 4.7 s | 12 / 76 ms | 82 ms |
+| **4 workers, empty event**, before | 0 | 19.3 | 7.5 s / 17.9 s | 34 | 1.3 s / 5.1 s | 14 / 88 ms | 73 ms |
+| after | 0 | 38.2 | 1.2 s / 6.0 s | 142 | 829 ms / 5.3 s | 11 / 58 ms | 81 ms |
+| after, pool 5 + 15 | 0 | 28.6 | 4.5 s / 8.8 s | 0 | 616 ms / 4.8 s | 9 / 60 ms | 92 ms |
+
+What it shows:
+
+- **The event's row is held for the insert and the commit only: 8–13 ms at
+  the median, 44–76 ms at p95, the same on an empty event and on one with
+  15,000 registrations.** Before, a registration held it 70–120 ms (p50) and
+  up to a second (p95) on the big event -- through the duplicate check over
+  every registration, the plan's counts, and the rest -- so the queue for it
+  grew with the event.
+- **On the biggest event one worker went from 6–7 registrations a second,
+  with 230–300 of 500 failing, to 17–18 a second with none failing**; the
+  p95 from a minute to 18 s (the burst arrives at 50 a second, faster than
+  one worker on this machine can take any event's registrations). Part of
+  that is not the lock: each registration's ticket email
+  (`deliveries.queue`, called by `send_ticket`) read every delivery the
+  event had ever made -- about 3,700 rows on this event, a third of a second
+  of the worker's time per registration -- and now reads the guest's own.
+- Four workers: the pool settings are what keep them inside Postgres's 100
+  connections (four pools of 10 + 20 is 120; 5 + 15 is 80). With them, no
+  failures and 26–29 registrations a second, where before four workers made
+  the biggest event slower than one (7.9 a second, 266 failures).
+- The counters stayed equal to their rows and every event kept four journey
+  emails in every run, before and after.
+
+### The minute email sweep
+
+`sweeps.py --templates 2000,10000,40000`: that many events given the four
+journey emails (two timed and on), inside a transaction rolled back; what the
+sweep reads, twice (the first cold). Before: every timed email ever enabled,
+then decided in Python. After: `emails.due_query`, an index range read of
+`due_at` (`ix_email_templates_due`). In both, none of these was due at the
+moment measured; after, a due one is one more index entry.
+
+| events with journey emails | rows read before | before: query + Python | after: query |
+|---:|---:|---:|---:|
+| 2,000 | 4,000 | 0.39–3.0 s + 0.08 s | 0.6–8.3 ms |
+| 10,000 | 20,000 | 11.5–15.2 s + 0.37 s | 1.2–1.5 ms |
+| 40,000 | 80,000 | 60–84 s + 2.0 s | 1.3–13.8 ms |
+
+The price is on the write: inserting the 160,000 templates took 27.5 s
+against 18.8 s (the trigger looks up the event, and three more indexes),
+0.17 ms a template, paid four times per event, once.
+
+### The counter check
+
+`counters.drift`, three runs (the first cold). Before: two statements, one
+a scan of every registration (`GROUP BY event_id`), in every worker at its
+first sweep. After: 29 statements of 20,000 events or 2,000 clubs each, the
+events' read from `ix_registrations_event_created` alone; on one process,
+every six hours (`scheduled_runs`), with 50 ms between slices.
+
+| | total | statements | longest statement |
+|---|---:|---:|---:|
+| before | 3.2 / 5.5 / 7.5 s | 2 | ≈ the total |
+| after | 7.8 (cold) / 1.9 / 0.86 s | 29 | 2.9 s (cold) / 280 / 59 ms |
+
+### The statements behind it
+
+- The plan's monthly count (`gates.count`, every registration to a capped
+  club), for the club of the biggest event: before, a parallel scan of the
+  whole events table (the soft-delete filter's `is_deleted IS false` cannot
+  use `ix_events_club_start`, which says `WHERE NOT is_deleted`) and a heap
+  read of every registration: 37–62 ms warm, 8.9 s cold. After, the
+  deleted-events filter spelled out and the club's 85 events each probed in
+  `ix_registrations_event_created`, index-only: 8.8 ms warm (0.4 s cold). It
+  grows with the club's events, not the platform's.
+- The duplicate check: `user_id = ? OR email = ?` read every registration
+  of the event (on the biggest, 16,400 of them: 7.5 ms warm, 340 ms cold);
+  now two index probes (the address one 0.04 ms warm, 0.6–5.6 ms cold).
+- A paid event's places: an index-only count of its paid registrations.
+
+### The migration on this data
+
+`write_path` on S1 with 40,000 events' journey emails committed (176,000
+templates, 16,000 of them duplicates from the race, 4,000 messages sent
+from duplicates): **45 s**, nearly all of it the concurrent index builds,
+during which writes go on.
+
+| step | time |
+|---|---:|
+| add `due_at`, the functions and triggers, `scheduled_runs` | 1.1 s |
+| backfill `due_at` (176,000 templates, 20,000 events a statement) | 8.4 s |
+| find and remove the duplicates, re-point 4,000 messages and the copies' `source_id` | 1.6 s |
+| `uq_email_templates_*`, `ix_email_templates_due` | 1.0 s |
+| `ix_registrations_event_email` (4 million registrations) | 22.2 s |
+| `ix_registrations_event_created` | 8.5 s |
+| the partial tracking-link index, the full one dropped | 1.2 s |
+
+Per row: the backfill about 21,000 templates a second; the two
+registration indexes about 7.7 µs a registration together; the dedupe is
+one pass over the journey templates. At production's size today (a small
+fraction of S1) the whole migration is a few seconds; at a lakh of clubs
+(S2: 1.5 crore registrations) the registration indexes would take about two
+minutes, concurrently.
+
+### Reproduce
+
+```
+cd backend
+createdb moa_bench_sw
+BENCH_DB=moa_bench_sw python -m scripts.bench.seed --scale 10           # at the commit to measure "before" on
+BENCH_DB=moa_bench_sw python -m scripts.bench.sweeps --templates 2000,10000,40000 --runs 3 --out sweeps.json
+BENCH_DB=moa_bench_sw python -m scripts.bench.serve --workers 1 --port 8093 --stats-dir /tmp/s1 > server.log 2>&1 &
+BENCH_DB=moa_bench_sw python -m scripts.bench.hot event --url http://127.0.0.1:8093 --n 500 --seconds 10 --event big \
+    --stats-dir /tmp/s1 --out hot.json                                 # --event empty; --plan campus
+# stop the server: kill -9 whatever listens on the port (uvicorn's workers outlive their parent on macOS)
+# and wait until pg_stat_activity shows none of its connections, or the next run waits on its row locks
+BENCH_DB=moa_bench_sw python -c "from scripts.bench import _env; from alembic.config import Config; \
+    from alembic import command; command.upgrade(Config('alembic.ini'), 'head')"   # then the same runs again
+dropdb moa_bench_sw
+```
+
+`serve.py` now also records how long the event's row is held, to the commit
+(`row_held_ms` in the results), and `hot.py --plan KEY` puts the event under
+a plan's caps.

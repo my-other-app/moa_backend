@@ -1,0 +1,17 @@
+    1.08 s  ALTER TABLE email_templates ADD COLUMN due_at TIMESTAMP WITH TIME ZONE
+    1.24 s  UPDATE email_templates t SET due_at = moa_email_due_at(t.trigger, e.event_datetime, e.duration) FROM events e 
+    3.12 s  UPDATE email_templates t SET due_at = moa_email_due_at(t.trigger, e.event_datetime, e.duration) FROM events e 
+    4.08 s  UPDATE email_templates t SET due_at = moa_email_due_at(t.trigger, e.event_datetime, e.duration) FROM events e 
+    0.69 s  INSERT INTO _journey_duplicates (dup_id, keep_id) SELECT id, keep_id FROM ( SELECT id, first_value(id) OVER w 
+    0.06 s  UPDATE messages m SET template_id = d.keep_id FROM _journey_duplicates d WHERE m.template_id = d.dup_id
+    0.44 s  UPDATE email_templates t SET source_id = d.keep_id FROM _journey_duplicates d WHERE t.source_id = d.dup_id
+    0.11 s  DELETE FROM email_templates t USING _journey_duplicates d WHERE t.id = d.dup_id
+    0.33 s  CREATE UNIQUE INDEX CONCURRENTLY uq_email_templates_event_stage ON email_templates (event_id, stage) WHERE sta
+    0.31 s  INSERT INTO _journey_duplicates (dup_id, keep_id) SELECT id, keep_id FROM ( SELECT id, first_value(id) OVER w 
+    0.25 s  CREATE UNIQUE INDEX CONCURRENTLY uq_email_templates_library_stage ON email_templates (club_id, stage) WHERE ev
+    0.38 s  CREATE INDEX CONCURRENTLY ix_email_templates_due ON email_templates (due_at) WHERE enabled AND due_at IS NOT N
+   22.15 s  CREATE INDEX CONCURRENTLY ix_registrations_event_email ON event_registrations_link (event_id, lower(btrim(emai
+    8.54 s  CREATE INDEX CONCURRENTLY ix_registrations_event_created ON event_registrations_link (event_id, created_at) IN
+    1.03 s  CREATE INDEX CONCURRENTLY ix_event_registrations_link_tracking_link_id_p ON event_registrations_link (tracking
+    0.12 s  DROP INDEX CONCURRENTLY IF EXISTS ix_event_registrations_link_tracking_link_id
+{"total_s": 45.1}
