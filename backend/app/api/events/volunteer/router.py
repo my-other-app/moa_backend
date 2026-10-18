@@ -1,5 +1,5 @@
 from typing import List
-from fastapi import APIRouter
+from fastapi import APIRouter, BackgroundTasks
 
 from app.api.events.volunteer.schemas import (
     CheckinRequest,
@@ -65,11 +65,11 @@ async def list_volunteers(
 
 @router.post("/checkin/{event_id}", summary="Check-in a participant for an event")
 async def checkin_participant(
-    session: SessionDep, event_id: int, request: CheckinRequest, user: DependsAuth
+    session: SessionDep, event_id: int, request: CheckinRequest, user: DependsAuth, background_tasks: BackgroundTasks
 ) -> dict:
     if volunteer := await service.is_volunteer(session, user.id, event_id):
         await service.checkin_user(
-            session, event_id, ticker_id=request.ticket_id, volunteer_id=volunteer.id
+            session, event_id, ticker_id=request.ticket_id, volunteer_id=volunteer.id, background=background_tasks
         )
         return {"message": "User checked-in"}
     raise CustomHTTPException(

@@ -10,7 +10,7 @@ import enum
 import uuid
 
 import sqlalchemy as sa
-from sqlalchemy import UUID, Boolean, Column, Enum, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import UUID, Boolean, Column, Enum, ForeignKey, Integer, String
 from sqlalchemy.orm import relationship
 
 from app.core.utils.db_fields import TZAwareDateTime
@@ -46,7 +46,6 @@ class CheckInVia(enum.Enum):
 
 class Doors(AbstractSQLModel, TimestampsMixin):
     __tablename__ = "doors"
-    __table_args__ = (UniqueConstraint("event_id", "name", name="uq_doors_event_name"),)
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()"), default=uuid.uuid4)
     event_id = Column(Integer, ForeignKey("events.id"), nullable=False, index=True)
@@ -62,6 +61,10 @@ class Doors(AbstractSQLModel, TimestampsMixin):
     link_expires_at = Column(TZAwareDateTime(timezone=True), nullable=True)
 
     event = relationship("Events")
+
+    # One door per name on an event, whatever the case: a door is found by
+    # lower(name) ("gate a" is "Gate A"), so that is what is unique.
+    __table_args__ = (sa.Index("uq_doors_event_lower_name", event_id, sa.func.lower(name), unique=True),)
 
 
 class CheckIns(AbstractSQLModel, TimestampsMixin):

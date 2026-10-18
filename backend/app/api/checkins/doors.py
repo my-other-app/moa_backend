@@ -7,6 +7,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 
 from app.api.checkins.models import CheckIns, DoorKind, Doors
 from app.api.events.models import Events
@@ -29,17 +31,35 @@ async def by_name(session, event_id: int, name: str) -> Optional[Doors]:
 async def resolve(session, event_id: int, label: Optional[str], kind: DoorKind = DoorKind.door) -> Optional[Doors]:
     """The door a label refers to, made if it is new. A label typed as
     "gate a" finds "Gate A"; nothing is refused for its spelling. No label,
-    no door."""
+    no door.
+
+    Two first scans at a new door at once both make it: the insert yields
+    to uq_doors_event_lower_name (ON CONFLICT DO NOTHING) and both read
+    back the one door."""
     name = normalize(label or "")
     if not name:
         return None
     door = await by_name(session, event_id, name)
     if door is None:
         count = await session.scalar(select(func.count()).select_from(Doors).where(Doors.event_id == event_id)) or 0
-        door = Doors(id=uuid.uuid4(), event_id=event_id, name=name, kind=kind, sort_order=count, active=True)
-        session.add(door)
-        await session.flush()
+        now = datetime.now(timezone.utc)
+        await session.execute(
+            pg_insert(Doors.__table__)
+            .values(id=uuid.uuid4(), event_id=event_id, name=name, kind=kind, sort_order=count, active=True, link_can_walkup=False, created_at=now, updated_at=now)
+            .on_conflict_do_nothing()
+        )
+        door = await by_name(session, event_id, name)
     return door
+
+
+async def _save_name(session, door: Doors) -> None:
+    """Flush a new or renamed door; a name another door has (in any case)
+    is a 409, whichever request got there first."""
+    try:
+        async with session.begin_nested():
+            await session.flush()
+    except IntegrityError:
+        raise CustomHTTPException(409, message=f"There is already a door called “{door.name}”.", errors={"fields": {"name": "Pick a different name."}})
 
 
 async def options(session, event_id: int) -> list[Doors]:
@@ -101,6 +121,7 @@ async def create_door(session, event: Events, *, name: str, kind: DoorKind) -> D
     count = await session.scalar(select(func.count()).select_from(Doors).where(Doors.event_id == event.id)) or 0
     door = Doors(id=uuid.uuid4(), event_id=event.id, name=name, kind=kind, sort_order=count, active=True)
     session.add(door)
+    await _save_name(session, door)
     await session.commit()
     return door
 
@@ -128,6 +149,7 @@ async def update_door(session, event: Events, door_id, **changes) -> Doors:
         door.sort_order = int(changes["sort_order"])
     if changes.get("link_can_walkup") is not None:
         door.link_can_walkup = bool(changes["link_can_walkup"])
+    await _save_name(session, door)
     await session.commit()
     return door
 
