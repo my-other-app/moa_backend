@@ -81,6 +81,16 @@ services:
     command: >
       python main.py
     restart: on-failure
+    # Open files: every client connection is one, and with the live room's
+    # streams (APP_LIVE_SSE) a phone holds one for as long as it watches.
+    # Docker's default soft limit (1,024 on current engines) would cap a
+    # room at about a thousand phones with nothing said; this lets a worker
+    # reach APP_LIVE_SSE_MAX_STREAMS and the pool and files besides. Applied
+    # by the deploy's normal recreate of the backend.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     ports:
       # Two host ports for one container port, deliberately. nginx on this box
       # proxies api.myotherapp.com to 8001 and api.myotherapp.in (plus the
