@@ -746,8 +746,16 @@ async def follow_club(session: AsyncSession, club_id: int, user_id: int, trackin
 
     await links.attribute_follow(session, follow, club_id, tracking_ref)
     await session.commit()
+    _forget_for_you(user_id)
     await session.refresh(follow)
     return follow
+
+
+def _forget_for_you(user_id: int) -> None:
+    """Their For You ranking rests on the clubs they follow, pin and hide: work it out afresh."""
+    from app.api.events import recommendations
+
+    recommendations.forget(user_id)
 
 
 async def unfollow_club(session: AsyncSession, club_id: int, user_id: int):
@@ -771,6 +779,7 @@ async def unfollow_club(session: AsyncSession, club_id: int, user_id: int):
     follow.is_following = False
 
     await session.commit()
+    _forget_for_you(user_id)
     await session.refresh(follow)
     return follow
 
@@ -828,6 +837,7 @@ async def toggle_pin_club(
 
     link.is_pinned = not link.is_pinned
     await session.commit()
+    _forget_for_you(user_id)
     await session.refresh(link)
     return link
 
@@ -849,6 +859,7 @@ async def toggle_hide_club(
 
     link.is_hidden = not link.is_hidden
     await session.commit()
+    _forget_for_you(user_id)
     await session.refresh(link)
     return link
 

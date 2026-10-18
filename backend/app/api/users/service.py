@@ -699,7 +699,15 @@ async def select_interests(
             link = UserInterests(user_id=user_id, interest_id=id)
             session.add(link)
     await session.commit()
+    _forget_for_you(user_id)
     return None
+
+
+def _forget_for_you(user_id: int) -> None:
+    """Their For You ranking rests on their interests and clubs: work it out afresh."""
+    from app.api.events import recommendations
+
+    recommendations.forget(user_id)
 
 
 async def select_avatar(session: AsyncSession, user_id: int, avatar_id: int | None):

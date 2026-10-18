@@ -7,10 +7,10 @@ from typing import Literal, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Path, Query, Request, Response
 
-from app.api.discover import counters, geo, service
+from app.api.discover import counters, geo, places, service, stats
 from app.api.discover.schemas import (
-    BackfillResult, CalendarMonth, CategoryCount, ClubEvents, ClubPage, ClubSearch, CounterFixes, EventPage, EventSearch,
-    GeocodeBackfillResult, Home, Sitemap, Where,
+    BackfillResult, CalendarMonth, CategoryCount, ClubEvents, ClubPage, ClubPlaceFixes, ClubSearch, CounterFixes, EventPage,
+    EventSearch, GeocodeBackfillResult, Home, Sitemap, SitemapIndex, SitemapPage, Where,
 )
 from app.api.threads.schemas import ThreadPage
 from app.core.auth.dependencies import AdminAuth, OptionalAuth
@@ -53,6 +53,9 @@ async def home(request: Request, session: SessionDep, user: OptionalAuth, backgr
     # after this answers, at most once a minute (geo.scan_due).
     if geo.scan_due():
         background_tasks.add_task(geo.backfill_missing, LAZY_BACKFILL)
+    # The front page's "cities", counted again now and then (stats.py).
+    if stats.refresh_due():
+        background_tasks.add_task(stats.refresh)
     return Home(**data)
 
 
@@ -180,12 +183,33 @@ async def categories(request: Request, session: SessionDep, user: OptionalAuth) 
     return [CategoryCount(**c) for c in await service.categories(session, service.now_utc())]
 
 
-@router.get("/sitemap", summary="Every public event and club page, with when each last changed", response_model=Sitemap)
+@router.get("/sitemap", summary="Public event and club pages, with when each last changed (at most 5000 of each)", response_model=Sitemap)
 @limiter.limit(LIMIT, key_func=_visitor)
 async def sitemap(request: Request, session: SessionDep, user: OptionalAuth) -> Response:
-    """Events still to come or held in the last year, and every club; at most 5000 of each.
-    The body is made and checked against Sitemap once a minute (service.sitemap_json)."""
+    """Events still to come or held in the last year, and every club; at most
+    5000 of each (the latest events first). /sitemap/index and its pages list
+    them all. The body is made and checked against Sitemap once a minute
+    (service.sitemap_json)."""
     return Response(content=await service.sitemap_json(session), media_type="application/json")
+
+
+@router.get("/sitemap/index", summary="Every page of the sitemap: events, then clubs, at most 5000 entries a page")
+@limiter.limit(LIMIT, key_func=_visitor)
+async def sitemap_index(request: Request, session: SessionDep, user: OptionalAuth) -> SitemapIndex:
+    """What a sitemap index lists: each page's kind and number (its address
+    is /discover/sitemap/{kind}/{page}), how many entries it has and its
+    newest change. The pages' boundaries are kept for an hour."""
+    return SitemapIndex(**await service.sitemap_index(session))
+
+
+@router.get("/sitemap/{kind}/{page}", summary="One page of the sitemap: public events or clubs, in id order")
+@limiter.limit(LIMIT, key_func=_visitor)
+async def sitemap_page(
+    request: Request, session: SessionDep, user: OptionalAuth,
+    kind: Literal["events", "clubs"], page: int = Path(..., ge=1, le=100000),
+) -> SitemapPage:
+    """404 past the last page (/sitemap/index says how many there are)."""
+    return SitemapPage(**await service.sitemap_page(session, kind, page))
 
 
 @admin_router.post("/geo-backfill", summary="Read the point out of every event and club map link that has none yet")
@@ -207,6 +231,14 @@ async def geocode_backfill(
     so the cap keeps it inside the proxy's minute; what it found is committed
     as it goes, so even a run cut short keeps its work."""
     return GeocodeBackfillResult(**await geo.geocode_backfill(session, max_requests=max_requests))
+
+
+@admin_router.post("/recompute-club-places", summary="Store again every club's place (its point, else its events' middle) that disagrees with its rows")
+async def recompute_club_places(session: SessionDep, user: AdminAuth) -> ClubPlaceFixes:
+    """Triggers keep each club's place; this puts right what a write with
+    triggers switched off (a restore, a bulk load) left behind. Returns how
+    many were wrong: normally none."""
+    return ClubPlaceFixes(clubs=await places.recompute(session))
 
 
 @admin_router.post("/reconcile-counters", summary="Recount any event's going count or club's follower count that disagrees with its rows")

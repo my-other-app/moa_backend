@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field
 
 from app.api.deliveries import service as deliveries
 from app.api.events.duplicate import duplicate_event
+from app.api.events.models import MAX_EVENT_HOURS
+from app.api.events.service import check_duration
 from app.api.subscriptions import gates
 from app.core.auth.dependencies import ClubAuth
 from app.db.core import SessionDep
@@ -16,7 +18,7 @@ router = APIRouter(prefix="/events/{event_id}")
 class DuplicateBody(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     event_datetime: datetime
-    duration: Optional[float] = Field(default=None, gt=0, le=24 * 30)
+    duration: Optional[float] = Field(default=None, gt=0, le=MAX_EVENT_HOURS)
     # The parts of the setup that are a judgement call, rather than always wanted.
     copy_doors: bool = False
     copy_team: bool = False
@@ -45,6 +47,8 @@ async def duplicate(session: SessionDep, user: ClubAuth, event_id: int, body: Du
     The copy is a new event: it gets only what the club's plan allows, and
     `skipped` says what was left behind."""
     source = await deliveries.event_for_club(session, user, event_id)
+    # A copy of an event saved before the length limit needs a length within it.
+    check_duration(body.duration or source.duration)
     # A new event: this month's count, and paid tickets when the copy is paid.
     await gates.check_event_create(session, source.club_id, has_fee=bool(source.has_fee), actor=user)
     allowed = await gates.duplicate_allowances(session, source.club_id, actor=user)
