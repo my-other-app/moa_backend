@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime
 from typing import Optional
 from sqlalchemy import select, func, update
@@ -6,6 +7,8 @@ from sqlalchemy.orm import selectinload
 from app.api.notifications.models import Notifications, NotificationStatus
 from app.response import CustomHTTPException
 from app.api.users.models import Users, UserProfiles
+from app.config import settings
+from app.core.notifications import inbox
 
 
 async def create_notification(
@@ -98,10 +101,11 @@ async def create_notifications_batch(
 
 
 async def list_notifications(
-    session: AsyncSession, 
-    user_id: int, 
-    limit: int = 20, 
-    offset: int = 0
+    session: AsyncSession,
+    user_id: int,
+    limit: int = 20,
+    offset: int = 0,
+    cursor=None,
 ) -> list[Notifications]:
     """List notifications for a user with eager loading of relationships.
     
@@ -112,8 +116,12 @@ async def list_notifications(
         offset: Number of notifications to skip
         
     Returns:
-        List of notifications ordered by created_at descending
+        List of notifications ordered by created_at descending. With
+        INBOX_SHARED, the shared broadcasts the person can see are merged in
+        (app.core.notifications.inbox), and `cursor` pages by keyset.
     """
+    if settings.INBOX_SHARED:
+        return await inbox.page(session, user_id, limit=limit, offset=offset, cursor=cursor)
     query = (
         select(Notifications)
         .where(
@@ -146,8 +154,11 @@ async def get_unread_count(session: AsyncSession, user_id: int) -> int:
         user_id: User ID
         
     Returns:
-        Number of unread notifications
+        Number of unread notifications. With INBOX_SHARED, the shared
+        broadcasts' part of it stops at inbox.UNREAD_CAP.
     """
+    if settings.INBOX_SHARED:
+        return await inbox.personal_unread(session, user_id) + await inbox.shared_unread(session, user_id)
     query = select(func.count(Notifications.id)).where(
         Notifications.user_id == user_id,
         Notifications.status == NotificationStatus.unread,
@@ -173,10 +184,20 @@ async def mark_notification_as_read(
     Raises:
         CustomHTTPException: If notification not found or unauthorized
     """
+    try:
+        notification_id = uuid.UUID(str(notification_id))
+    except ValueError:
+        # Not an id at all: it used to reach the query and fail as a 500.
+        raise CustomHTTPException(404, "Notification not found")
     query = select(Notifications).where(Notifications.id == notification_id)
     result = await session.execute(query)
     notification = result.scalar_one_or_none()
-    
+
+    if not notification and settings.INBOX_SHARED:
+        # A shared broadcast's line: the reader's own state row says it is read.
+        line = await inbox.mark_read(session, user_id, notification_id)
+        if line is not None:
+            return line.as_row()
     if not notification:
         raise CustomHTTPException(404, "Notification not found")
     if notification.user_id != user_id:
@@ -198,6 +219,11 @@ async def mark_all_as_read(session: AsyncSession, user_id: int) -> int:
     Returns:
         Number of notifications updated
     """
+    if settings.INBOX_SHARED:
+        shared = await inbox.mark_all_read(session, user_id)
+        personal = await inbox.mark_personal_read(session, user_id)
+        await session.commit()
+        return personal + shared
     stmt = (
         update(Notifications)
         .where(
@@ -251,3 +277,22 @@ async def get_event_notification_stats(
     }
 
 
+
+
+async def dismiss_notification(session: AsyncSession, notification_id: str, user_id: int) -> None:
+    """The person is done with this line: it leaves their inbox. Their own
+    row is soft-deleted; a shared broadcast gets their dismissed state."""
+    try:
+        notification_id = uuid.UUID(str(notification_id))
+    except ValueError:
+        raise CustomHTTPException(404, "Notification not found")
+    notification = await session.scalar(select(Notifications).where(Notifications.id == notification_id))
+    if notification is not None:
+        if notification.user_id != user_id:
+            raise CustomHTTPException(403, "Not authorized to update this notification")
+        notification.soft_delete()
+        await session.commit()
+        return
+    if settings.INBOX_SHARED and await inbox.dismiss(session, user_id, notification_id):
+        return
+    raise CustomHTTPException(404, "Notification not found")

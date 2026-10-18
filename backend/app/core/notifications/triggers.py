@@ -10,6 +10,7 @@ Each trigger:
 """
 
 import logging
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Sequence
 from sqlalchemy import func, select
@@ -19,7 +20,8 @@ from app.api.clubs.models import ClubUsersLink
 from app.api.events.models import Events, EventRegistrationsLink
 from app.api.notifications import service as db_notification_service
 from app.core import jobs
-from app.core.notifications import fanout
+from app.core.notifications import delivery, fanout
+from app.core.notifications.topics import settings_off
 from app.core.notifications.service import (
     send_notification_to_user,
     send_notification_to_users,
@@ -54,24 +56,42 @@ async def notify_followers_of_new_event(
     await session.commit()
 
 
+def broadcasts_on() -> bool:
+    """Whether broadcasts go through fanout.announce (one row, a topic send)
+    rather than a row and a push per recipient, as before."""
+    from app.config import settings
+
+    return bool(settings.PUSH_TOPICS or settings.INBOX_SHARED)
+
+
 @jobs.handler("notifications.new_event", max_attempts=6, timeout=600.0)
 async def _new_event_job(p: dict) -> None:
     club_id, event_id = int(p["club_id"]), int(p["event_id"])
+    title, body = f"🎉 New from {p['club_name']}!", f"Check out: {p['event_name']}"
+    data = {"club_name": p["club_name"], "event_name": p["event_name"]}
+    push_data = {"type": "new_event", "event_id": str(event_id), "club_id": str(club_id)}
+    if broadcasts_on():
+        async with jobs.scope() as s:
+            await fanout.announce(s, fanout.Broadcast(
+                kind="new_event", ref=str(event_id), title=title, body=body, data=data, push_data=push_data,
+                from_club_id=club_id, event_id=event_id, club_id=club_id,
+            ), topic=delivery.club_topic(club_id))
+        return
     audience = (
         select(ClubUsersLink.user_id)
         .where(
             ClubUsersLink.club_id == club_id,
             ClubUsersLink.is_following == True,  # noqa: E712
             ClubUsersLink.is_deleted == False,  # noqa: E712
+            ClubUsersLink.is_muted == False,  # noqa: E712
+            ~settings_off("clubs", ClubUsersLink.user_id),
         )
         .distinct()
     )
     async with jobs.scope() as s:
         await _tell(
-            s, audience, title=f"🎉 New from {p['club_name']}!", body=f"Check out: {p['event_name']}", type="new_event",
-            from_club_id=club_id, event_id=event_id,
-            data={"club_name": p["club_name"], "event_name": p["event_name"]},
-            push_data={"type": "new_event", "event_id": str(event_id), "club_id": str(club_id)},
+            s, audience, title=title, body=body, type="new_event",
+            from_club_id=club_id, event_id=event_id, data=data, push_data=push_data,
         )
 
 
@@ -131,6 +151,14 @@ async def _interest_job(p: dict) -> None:
     club_id, event_id, category_name, event_name = int(p["club_id"]), int(p["event_id"]), p["category_name"], p["event_name"]
     title = f"📌 Event in {category_name}"
     body = f"New event matching your interests: {event_name}"
+    data = {"category_name": category_name, "event_name": event_name}
+    push_data = {"type": "interest_match", "event_id": str(event_id), "category_id": str(topic_ids[0])}
+    if broadcasts_on():
+        async with jobs.scope() as s:
+            await _announce_by_topic(
+                s, topic_ids, club_id=club_id, event_id=event_id, title=title, body=body, data=data, push_data=push_data,
+            )
+        return
     day_ago = datetime.now(timezone.utc) - timedelta(days=1)
     in_category = select(Interests.id).where(Interests.category_id.in_(topic_ids), Interests.is_deleted == False)  # noqa: E712
     follows = (
@@ -161,6 +189,7 @@ async def _interest_job(p: dict) -> None:
             UserInterests.is_deleted == False,  # noqa: E712
             ~follows,
             told_today < per_day,
+            ~settings_off("topics", UserInterests.user_id),
         )
         .group_by(UserInterests.user_id)
         .order_by(UserInterests.user_id.desc())
@@ -170,9 +199,50 @@ async def _interest_job(p: dict) -> None:
     async with jobs.scope() as s:
         await _tell(
             s, audience, title=title, body=body, type="nearby_event", from_club_id=club_id, event_id=event_id,
-            data={"category_name": category_name, "event_name": event_name},
-            push_data={"type": "interest_match", "event_id": str(event_id), "category_id": str(topic_ids[0])},
+            data=data, push_data=push_data,
         )
+
+
+async def _announce_by_topic(
+    session: AsyncSession, topic_ids: list[int], *, club_id: int, event_id: int, title: str, body: str, data: dict, push_data: dict,
+) -> bool:
+    """A new event to the people of its topics, as a broadcast: one send to
+    the topics' FCM condition, but not to the club's followers (they had
+    new_event through club_{id}). A topic push reaches whoever is subscribed,
+    so it cannot be capped per person: each topic takes at most
+    INTEREST_TOPIC_PUSH_MAX_PER_DAY of these a day instead, and a topic past
+    it is left out of this one. FCM takes five topics in a condition: the
+    club's and the event's first four, in topic order."""
+    from app.api.interests.models import InterestCategory
+    from app.api.notifications.models import NotificationBroadcasts
+    from app.config import settings
+
+    cap = max(0, int(settings.INTEREST_TOPIC_PUSH_MAX_PER_DAY))
+    topics = (await session.execute(
+        select(InterestCategory.id, InterestCategory.slug)
+        .where(InterestCategory.id.in_(topic_ids), InterestCategory.is_deleted == False)  # noqa: E712
+        .order_by(InterestCategory.sort_order, InterestCategory.name, InterestCategory.id)
+    )).all()
+    day_ago = datetime.now(timezone.utc) - timedelta(days=1)
+    sent_today = Counter(
+        int(t)
+        for audience in (await session.scalars(
+            select(NotificationBroadcasts.audience).where(
+                NotificationBroadcasts.type == "nearby_event", NotificationBroadcasts.created_at >= day_ago,
+                NotificationBroadcasts.push_id != delivery.push_id("nearby_event", event_id),
+            )
+        )).all()
+        for t in (audience or {}).get("topics") or ()
+    )
+    room = [t for t in topics if sent_today[t.id] < cap][:4]
+    if not room:
+        logger.info("No topic of event %s has room for another push today", event_id)
+        await session.commit()
+        return False
+    return await fanout.announce(session, fanout.Broadcast(
+        kind="nearby_event", ref=str(event_id), title=title, body=body, data=data, push_data=push_data,
+        from_club_id=club_id, event_id=event_id, topic_ids=[t.id for t in room], except_club_id=club_id,
+    ), condition=delivery.condition([delivery.topic_topic(t.slug) for t in room], unless=delivery.club_topic(club_id)))
 
 
 async def _tell(

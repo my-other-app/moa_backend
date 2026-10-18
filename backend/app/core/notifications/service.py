@@ -14,6 +14,12 @@ list of followers past that failed outright.
 
 A person can have several devices; each has its own row (one per token), and
 every one of them is sent to.
+
+A broadcast can go to an FCM topic instead (`send_to_topic`, with PUSH_TOPICS:
+app.core.notifications.delivery says which pushes are broadcasts): one request
+however many devices are subscribed. A push whose data carries a `push_id`
+gets it as Android's notification tag and APNs' collapse id, whichever way it
+is sent, so two copies of one push show as one.
 """
 
 import asyncio
@@ -267,21 +273,42 @@ def report_outcome(tried: int, sent: int, *, what: str) -> None:
         logger.info("Push %r: %d of %d devices", what, sent, tried)
 
 
+def _tag(data: Optional[dict]) -> Optional[str]:
+    """A broadcast's push_id (app.core.notifications.delivery), when the data
+    has one: Android's notification tag and APNs' collapse id, so a second
+    copy of the same push replaces the first in the tray instead of stacking."""
+    value = (data or {}).get("push_id")
+    return str(value)[:64] if value else None
+
+
+def _apns(image_url: Optional[str], tag: Optional[str]) -> messaging.APNSConfig:
+    return messaging.APNSConfig(
+        headers={"apns-collapse-id": tag} if tag else None,
+        payload=messaging.APNSPayload(aps=messaging.Aps(sound="default", badge=1)),
+        fcm_options=messaging.APNSFCMOptions(image=image_url) if image_url else None,
+    )
+
+
+def _android(image_url: Optional[str], tag: Optional[str]) -> messaging.AndroidConfig:
+    return messaging.AndroidConfig(
+        priority="high",
+        notification=messaging.AndroidNotification(
+            sound="default",
+            click_action="FLUTTER_NOTIFICATION_CLICK",
+            image=image_url,
+            tag=tag,
+        ),
+    )
+
+
 def _message(token: str, title: str, body: str, data: Optional[dict]) -> messaging.Message:
+    tag = _tag(data)
     return messaging.Message(
         notification=messaging.Notification(title=title, body=body),
         data=data or {},
         token=token,
-        android=messaging.AndroidConfig(
-            priority="high",
-            notification=messaging.AndroidNotification(
-                sound="default",
-                click_action="FLUTTER_NOTIFICATION_CLICK",
-            ),
-        ),
-        apns=messaging.APNSConfig(
-            payload=messaging.APNSPayload(aps=messaging.Aps(sound="default", badge=1)),
-        ),
+        android=_android(None, tag),
+        apns=_apns(None, tag),
     )
 
 
@@ -314,22 +341,13 @@ async def _send_to_token(
 
 
 def _multicast(tokens: list[str], title: str, body: str, data: Optional[dict], image_url: Optional[str]) -> messaging.MulticastMessage:
+    tag = _tag(data)
     return messaging.MulticastMessage(
         notification=messaging.Notification(title=title, body=body, image=image_url),
         data=data or {},
         tokens=tokens,
-        android=messaging.AndroidConfig(
-            priority="high",
-            notification=messaging.AndroidNotification(
-                sound="default",
-                click_action="FLUTTER_NOTIFICATION_CLICK",
-                image=image_url,
-            ),
-        ),
-        apns=messaging.APNSConfig(
-            payload=messaging.APNSPayload(aps=messaging.Aps(sound="default", badge=1)),
-            fcm_options=messaging.APNSFCMOptions(image=image_url) if image_url else None,
-        ),
+        android=_android(image_url, tag),
+        apns=_apns(image_url, tag),
     )
 
 
@@ -369,3 +387,83 @@ async def _send_to_tokens(
                         dead.append(batch[idx])
     logger.info("Batch send complete: %d of %d", sent, len(tokens))
     return sent
+
+
+# ─── Topics (feat/w2-push) ──────────────────────────────────────────────────
+
+
+class TopicSendFailed(Exception):
+    """FCM did not take a topic send, for a reason that may pass (it was
+    unavailable, over quota, answered with an internal error): the job that
+    sent it is tried again (app.core.jobs)."""
+
+
+#: FCM's answers that a retry cannot change: the message itself is wrong.
+_PERMANENT = (
+    firebase_exceptions.InvalidArgumentError, firebase_exceptions.PermissionDeniedError,
+    firebase_exceptions.NotFoundError, firebase_exceptions.UnauthenticatedError,
+)
+
+
+async def send_to_topic(
+    *,
+    topic: Optional[str] = None,
+    condition: Optional[str] = None,
+    title: str,
+    body: str,
+    data: Optional[dict] = None,
+    image_url: Optional[str] = None,
+) -> Optional[str]:
+    """One push to every device subscribed to `topic`, or matching
+    `condition` ("('topic_tech' in topics) && !('club_12' in topics)"): one
+    request, however many devices, on a worker thread. Returns FCM's message
+    id, or None when Firebase is not set up or FCM refused the message as
+    wrong (logged; trying again would not help). Raises TopicSendFailed for a
+    failure that may pass, so the job retries it -- with the same push_id, so
+    a device that did get the first shows it once."""
+    if (topic is None) == (condition is None):
+        raise ValueError("a topic send needs exactly one of topic and condition")
+    if not initialize_firebase():
+        logger.error("Firebase not initialized, cannot send %r to %s", title, topic or condition)
+        return None
+    tag = _tag(data)
+    message = messaging.Message(
+        notification=messaging.Notification(title=title, body=body, image=image_url),
+        data=data or {},
+        topic=topic,
+        condition=condition,
+        android=_android(image_url, tag),
+        apns=_apns(image_url, tag),
+    )
+    try:
+        message_id = await asyncio.to_thread(messaging.send, message)
+    except _PERMANENT as e:
+        logger.error("PUSH FAILED: FCM refused %r to %s: %s", title, topic or condition, e)
+        return None
+    except Exception as e:  # noqa: BLE001 -- unavailable, quota, internal, a network error
+        raise TopicSendFailed(f"{type(e).__name__}: {e}") from e
+    logger.info("Push %r to %s: %s", title, topic or condition, message_id)
+    return message_id
+
+
+#: Tokens firebase-admin takes in one subscribe or unsubscribe call.
+TOPIC_MANAGEMENT_BATCH = 1000
+
+
+async def unsubscribe_from_topic(tokens: list[str], topic: str) -> int:
+    """Take these devices out of `topic` (the server's side of a mute, an
+    unfollow, a switch turned off: the person's other devices leave at once,
+    not when each next opens the app). Returns how many FCM took out. Raises
+    TopicSendFailed when a batch could not be sent at all, for the job to retry."""
+    if not tokens or not initialize_firebase():
+        return 0
+    done = 0
+    for batch in _chunks(list(tokens), TOPIC_MANAGEMENT_BATCH):
+        try:
+            response = await asyncio.to_thread(messaging.unsubscribe_from_topic, batch, topic)
+        except Exception as e:  # noqa: BLE001
+            raise TopicSendFailed(f"{type(e).__name__}: {e}") from e
+        done += response.success_count
+        for error in response.errors or ():
+            logger.info("Token %d not taken out of %s: %s", error.index, topic, error.reason)
+    return done

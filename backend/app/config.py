@@ -382,6 +382,32 @@ class AppConfig(BaseSettings):
     # refunds of the day before checked), as HH:MM in India. Empty: never.
     LEDGER_DAILY_AT: str = "02:30"
 
+    # ─── Push by FCM topics (feat/w2-push) ──────────────────────────────────
+    # A broadcast -- a club's new post or event to its followers, a new event
+    # to people whose interests are under its topics, an announcement to
+    # everyone -- is one send to an FCM topic (club_{id}, topic_{slug}, all)
+    # instead of a send per device (app.core.notifications.delivery). Off:
+    # every push goes device by device, exactly as before. Turn it on only
+    # once most devices report topic support (GET
+    # /notifications/topics/adoption); until they all do, the ones that have
+    # not are still sent to one by one (PUSH_TOPICS_LEGACY), and no device is
+    # sent a broadcast both ways.
+    PUSH_TOPICS: bool = False
+    # With PUSH_TOPICS on, the devices that have not said they subscribe to
+    # topics (an app from before them) still get each broadcast, device by
+    # device. Turn it off once those are gone: a broadcast is then one send.
+    PUSH_TOPICS_LEGACY: bool = True
+    # A broadcast's inbox line is one shared row, read through each person's
+    # follows and interests, instead of a row per recipient
+    # (app.core.notifications.inbox). Off: a row per recipient, as before.
+    # Turned off after being on, the shared lines written meanwhile leave the
+    # inbox until it is on again (they are kept, not deleted).
+    INBOX_SHARED: bool = False
+    # A topic push cannot be capped per person (INTEREST_PUSH_MAX_PER_USER_PER_DAY):
+    # FCM sends it to whoever is subscribed. So with PUSH_TOPICS or
+    # INBOX_SHARED on, each topic has at most this many new-event pushes a day.
+    INTEREST_TOPIC_PUSH_MAX_PER_DAY: int = 3
+
     @field_validator("PLAN_ENFORCEMENT_FROM")
     @classmethod
     def _aware_cutoff(cls, value: datetime) -> datetime:

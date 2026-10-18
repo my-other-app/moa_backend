@@ -206,9 +206,16 @@ async def tell_followers(club_id: int, thread_id) -> int:
     in id order through the club's follower index, never all at once).
     Followers who already have the post's line are skipped, so a run cut off
     by a deploy and run again goes on from where it stopped rather than
-    telling anyone twice. Returns how many were told. Never raises."""
+    telling anyone twice. Returns how many were told one by one. Never raises.
+
+    With PUSH_TOPICS or INBOX_SHARED on, the post is a broadcast instead
+    (app.core.notifications.fanout.announce): one inbox row and one send to
+    club_{id}, written once however often this runs; 0 is returned."""
     from app.api.notifications.service import create_notifications_batch
+    from app.core.notifications import delivery, fanout
     from app.core.notifications.service import send_notification_to_users
+    from app.core.notifications.topics import settings_off
+    from app.core.notifications.triggers import broadcasts_on
 
     told = 0
     try:
@@ -220,11 +227,20 @@ async def tell_followers(club_id: int, thread_id) -> int:
             preview = t.body if len(t.body) <= 140 else t.body[:137].rstrip() + "…"
             title = f"{club.name} asked a question" if t.kind == "poll" else f"{club.name} posted"
             data = {"type": "club_thread", "thread_id": str(t.id), "club_id": str(club.id)}
+            if broadcasts_on():
+                # One row and one topic send (fanout.announce); the devices
+                # that still need it one by one are the push.devices jobs'.
+                await fanout.announce(session, fanout.Broadcast(
+                    kind="club_thread", ref=str(t.id), title=title, body=preview, data=data, push_data=data,
+                    from_club_id=club.id, club_id=club.id,
+                ), topic=delivery.club_topic(club.id))
+                return 0
             last = 0
             while True:
                 ids = list((await session.scalars(
                     select(ClubUsersLink.user_id).where(
                         ClubUsersLink.club_id == club.id, ClubUsersLink.is_following == True, ClubUsersLink.is_deleted == False,  # noqa: E712
+                        ClubUsersLink.is_muted == False, ~settings_off("clubs", ClubUsersLink.user_id),  # noqa: E712
                         ClubUsersLink.user_id > last,
                     ).order_by(ClubUsersLink.user_id).limit(TELL_BATCH)
                 )).all())

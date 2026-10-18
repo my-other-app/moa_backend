@@ -183,6 +183,13 @@ class ClubUsersLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     is_following = Column(Boolean, nullable=False, default=False)
     is_pinned = Column(Boolean, nullable=False, default=False)
     is_hidden = Column(Boolean, nullable=False, default=False)
+    # Following, but no pushes or inbox lines from the club: its club_{id}
+    # topic is not in the person's list (app.core.notifications.topics).
+    is_muted = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    # When the person last started following. A shared broadcast from the
+    # club is in their inbox only from then (app.core.notifications.inbox).
+    # None for follows from before w2_push: created_at stands in.
+    followed_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     # The tracking link whose code the follow carried, when it came through one.
     tracking_link_id = Column(PG_UUID(as_uuid=True), ForeignKey("tracking_links.id", ondelete="SET NULL"), nullable=True, index=True)
 

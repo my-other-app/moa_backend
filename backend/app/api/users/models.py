@@ -255,6 +255,10 @@ class UserDeviceTokens(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     fcm_token = Column(String(512), nullable=False)
     platform = Column(String(20), nullable=False)  # ios / android
+    # The app on this device subscribes to its person's FCM topics (it said
+    # `topics: 1` when it registered the token). Broadcasts reach it by
+    # topic once PUSH_TOPICS is on; a device without is sent them one by one.
+    supports_topics = Column(Boolean, nullable=False, default=False, server_default=sa.false())
 
     user = relationship("Users")
 
