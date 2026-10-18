@@ -70,7 +70,7 @@ on:
         default: false
         type: boolean
       recreate_backend:
-        description: "Recreate the backend container without building (picks up .env changes; restart does not). With migrate, migrates first"
+        description: "Recreate the backend container, built first from the cache (picks up .env changes; restart does not). With migrate, migrates first"
         required: false
         default: false
         type: boolean
@@ -145,9 +145,9 @@ jobs:
           SYNC_CODE: ${{ github.event.inputs.sync_code }}
           UP_BACKEND: ${{ github.event.inputs.up_backend }}
           BUILD_BACKEND: ${{ github.event.inputs.build_backend }}
-          # A new container from the current image: the way an .env change
-          # (sync_env) reaches the process, since `restart` keeps the env the
-          # container was created with. install_requirements sets it too.
+          # A new container: the way an .env change (sync_env) reaches the
+          # process, since `restart` keeps the env the container was created
+          # with. Built first (see below). install_requirements sets it too.
           RECREATE_BACKEND: ${{ github.event.inputs.recreate_backend }}
           SERVICES: ${{ github.event.inputs.services }}
         run: |
@@ -194,6 +194,14 @@ jobs:
           if [ "$INSTALL_REQUIREMENTS" = "true" ]; then
             BUILD_BACKEND=true
             RECREATE_BACKEND=true
+          fi
+
+          # And so every recreate builds first: a container is only ever made
+          # from an image that has what requirements.txt says, whatever the
+          # last deploy did. When nothing changed the build is the cache's
+          # (seconds, the code layer at most), and it is the same image.
+          if [ "$RECREATE_BACKEND" = "true" ] || [ "$UP_BACKEND" = "true" ]; then
+            BUILD_BACKEND=true
           fi
 
           # Built locally so the runner expands the flags, then shipped as a
@@ -318,9 +326,13 @@ jobs:
 
           # After the migration, so a worker starts on the schema it expects.
           # --no-deps: this service only, never postgres or backend with it.
-          # A service whose config and image are unchanged is left running;
-          # one built from backend/ is rebuilt only if its image is missing.
-          # Names only (checked on the runner), split on spaces.
+          # --build: one with a build (the worker: the backend's image) is
+          # built first, from the cache when nothing changed, so it never
+          # starts from an image older than requirements.txt (the 2026-10-17
+          # outage was a container made from a stale image); the others have
+          # nothing to build. A service whose config and image are unchanged
+          # is left running. Names only (checked on the runner), split on
+          # spaces.
           EXTRA_SERVICES="$SERVICES"
           if [ -n "\$EXTRA_SERVICES" ]; then
             echo "::group::Starting or refreshing: \$EXTRA_SERVICES"
@@ -332,7 +344,7 @@ jobs:
               fi
             done
             for svc in \$EXTRA_SERVICES; do
-              $BUILD up -d --no-deps "\$svc"
+              $BUILD up -d --build --no-deps "\$svc"
             done
             echo "::endgroup::"
           fi

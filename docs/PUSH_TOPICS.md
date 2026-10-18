@@ -78,9 +78,9 @@ was down for 20 minutes. `--no-deps` keeps Postgres out of it; `< /dev/null`
 keeps the command from reading the rest of a script it is run from. Leave
 `worker` out while the worker is not running (docs/OPERATIONS.md, section
 6: not on a box that cannot hold it). From the Live Deployment workflow,
-`sync_env` + `install_requirements` does the same (it builds, then recreates
-the backend and a running worker); `recreate_backend` alone recreates from
-the image already built, without building. Turning a switch off
+`sync_env` + `recreate_backend` does the same: it builds (from the cache when
+nothing changed), then recreates the backend and a running worker. Turning a
+switch off
 takes effect for the next broadcast; jobs already written still run.
 `INBOX_SHARED` turned off hides the shared lines written meanwhile until it
 is on again (they are kept; no rows per recipient are made for them).

@@ -163,7 +163,8 @@ services:
 
   # The job queue's worker (backend/app/worker.py): the same image, code, env
   # and mounts as the backend, running jobs instead of serving requests. Not
-  # started by a normal deploy: once, by hand, `up -d worker` -- then the API
+  # started by a normal deploy: once, with the deploy's `services: worker` or
+  # by hand, `up -d --build --no-deps worker` -- then the API
   # is told to leave its jobs to it with APP_JOBS_WORKER=true (and, if
   # wanted, its sweeps with APP_SWEEPS_IN_WORKER=true). The deploy restarts it
   # with the backend from then on. On SIGTERM it finishes what it has in
@@ -212,8 +213,9 @@ services:
   # memory. maxmemory 192 MB with allkeys-lru: when full it drops the least
   # recently used keys rather than refuse a write; the container's 256 MB
   # covers Redis's own overhead above that.
-  # Started once by hand (`up -d --no-deps redis`), then
-  # APP_REDIS_URL=redis://redis:6379/0 and the backend recreated (section 6).
+  # Started once (`services: redis`, or by hand `up -d --build --no-deps redis`),
+  # then APP_REDIS_URL=redis://redis:6379/0 and the backend recreated with a
+  # build (docs/OPERATIONS.md, section 6).
   redis:
     image: redis:7-alpine
     container_name: doth-live-redis
@@ -239,7 +241,7 @@ services:
   # APP_SEARCH_KEY (the master key below); without them every search is
   # Postgres's, as before. The deploy recreates only `backend`, so this is
   # started once, by hand, after MEILI_MASTER_KEY (16+ bytes) is in .env:
-  #   sudo docker-compose -f docker-compose.prod.yml up -d --no-deps meilisearch < /dev/null
+  #   sudo docker-compose -f docker-compose.prod.yml up -d --build --no-deps meilisearch < /dev/null
   # then, with APP_SEARCH_URL and APP_SEARCH_KEY in .env, the processes that
   # read them are recreated -- always building, never a plain `up -d` (on
   # 2026-10-17 one recreated the backend from an image without its packages):

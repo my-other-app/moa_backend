@@ -186,15 +186,28 @@ def test_a_missing_buildx_stops_before_anything_changes(tmp_path, fakes):
     assert calls == ["docker buildx version"]
 
 
-def test_recreate_after_an_env_change_migrates_first_and_builds_nothing(tmp_path, fakes):
+def test_recreate_after_an_env_change_builds_first_and_migrates_before_it(tmp_path, fakes):
+    """Never a container from an image that may be older than
+    requirements.txt (2026-10-17): a recreate builds first, from the cache
+    when nothing changed."""
     run, calls = _deploy(tmp_path, fakes, recreate_backend=True, migrate=True)
     assert run.returncode == 0, run.stdout + run.stderr
     assert calls == [
+        "docker buildx version",
+        "compose build backend [buildkit=1]",
         "compose exec -T backend alembic upgrade head [buildkit=]",
         "compose up -d --no-deps --force-recreate backend [buildkit=]",
         "compose exec -T backend alembic current [buildkit=]",
         "compose ps -q worker [buildkit=]",
+        *PRUNE,
     ]
+
+
+def test_up_backend_builds_first(tmp_path, fakes):
+    run, calls = _deploy(tmp_path, fakes, up_backend=True)
+    assert run.returncode == 0, run.stdout + run.stderr
+    order = [c for c in calls if not c.startswith("docker buildx")]
+    assert order.index("compose build backend [buildkit=1]") < order.index("compose up backend -d [buildkit=]")
 
 
 def test_sync_and_restart_restarts_once(tmp_path, fakes):
@@ -211,8 +224,8 @@ def test_services_start_after_the_migration_one_at_a_time(tmp_path, fakes):
         "compose exec -T backend alembic current [buildkit=]",
         "compose ps -q worker [buildkit=]",
         "compose config --services [buildkit=]",
-        "compose up -d --no-deps redis [buildkit=1]",
-        "compose up -d --no-deps worker [buildkit=1]",
+        "compose up -d --build --no-deps redis [buildkit=1]",
+        "compose up -d --build --no-deps worker [buildkit=1]",
         "compose restart backend [buildkit=]",
     ]
 
@@ -257,7 +270,7 @@ def test_a_running_worker_recreated_here_is_left_to_up_by_the_services_input(tmp
     assert run.returncode == 0, run.stdout + run.stderr
     order = [c for c in calls if not c.startswith("docker buildx")]
     assert order.index("compose up -d --no-deps --force-recreate worker [buildkit=]") < order.index(
-        "compose up -d --no-deps worker [buildkit=1]")
+        "compose up -d --build --no-deps worker [buildkit=1]")
     assert not [c for c in order if c.startswith("compose restart")]
 
 
@@ -277,7 +290,7 @@ def test_restart_all_starts_only_postgres_and_backend_and_recreates_a_running_wo
 
 
 def test_nothing_is_pruned_without_a_build(tmp_path, fakes):
-    for inputs in ({"sync_code": True, "migrate": True}, {"recreate_backend": True}, {"services": "redis"}):
+    for inputs in ({"sync_code": True, "migrate": True}, {"sync_code": True, "restart_backend": True}, {"services": "redis"}):
         run, calls = _deploy(tmp_path, fakes, **inputs)
         assert run.returncode == 0, run.stdout + run.stderr
         assert not [c for c in calls if "prune" in c], inputs

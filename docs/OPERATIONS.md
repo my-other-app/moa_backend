@@ -44,13 +44,13 @@ hand from the Actions tab). Its inputs:
 | `sync_code` | rsyncs the repository to the server (and writes `backend/REVISION`, the commit, for Sentry) |
 | `sync_env` | writes the `PROD_ENV_VARIABLES` secret to the server's `.env`. **It overwrites the file**: make sure the secret is current first |
 | `install_requirements` | builds the backend image, migrates (if `migrate`) in the running container, then recreates the backend from the new image |
-| `recreate_backend` | a new backend container from the current image, no build: how an `.env` change reaches the process (`restart` keeps the old environment). With `migrate`, migrates first |
+| `recreate_backend` | a new backend container (and a running worker's), built first: how an `.env` change reaches the process (`restart` keeps the old environment). The build is the cache's when nothing changed (seconds), so a container is never made from an image older than `requirements.txt` (the 2026-10-17 outage). With `migrate`, migrates first |
 | `migrate` | `alembic upgrade head` in the running backend container, then prints the applied revision |
 | `restart_backend` | `restart backend` (new code, same environment), skipped when the backend was recreated |
-| `build_backend`, `up_backend` | build the image / `up backend` (without `--no-deps`, which can also recreate postgres after an `.env` change: prefer `recreate_backend`) |
+| `build_backend`, `up_backend` | build the image / build, then `up backend` (without `--no-deps`, which can also recreate postgres after an `.env` change: prefer `recreate_backend`) |
 | `restart_database` | `up -d postgres` |
 | `restart_all` | `up --build -d postgres backend` (old order: recreate, then migrate), and recreates a running worker. Never the other services: a bare `up -d` would start them all |
-| `services` | starts or refreshes extra services after the migration, e.g. `redis worker meilisearch`: `up -d --no-deps <svc>` each. Not `backend` or `postgres` |
+| `services` | starts or refreshes extra services after the migration, e.g. `redis worker meilisearch`: `up -d --build --no-deps <svc>` each (the worker is built from the cache first; the others have nothing to build). Not `backend` or `postgres` |
 | `smoke_timeout` | seconds the API has to answer 200 three times running after the deploy (default 180) |
 
 Common runs:
@@ -61,7 +61,7 @@ Common runs:
 | Code + migration | `sync_code`, `migrate`, `restart_backend` |
 | New or changed requirements | `sync_code`, `install_requirements`, `migrate` |
 | `.env` change only | `sync_env`, `recreate_backend` |
-| Turn on a new service | `services: redis` first, then `sync_env` (its settings) with `install_requirements` (section 6) |
+| Turn on a new service | `services: redis` first, then `sync_env` (its settings) with `recreate_backend` (section 6) |
 
 What the job guarantees:
 
@@ -72,6 +72,9 @@ What the job guarantees:
   building and stops with nothing changed if it is missing (section 9).
 - Migrations run in the container that is serving, before any recreate: a
   failed migration leaves the old container serving.
+- Every recreate builds first (`recreate_backend`, `up_backend`, the
+  `services` input): from the cache, in seconds, when nothing changed, and
+  never a container from an image older than `requirements.txt`.
 - A running worker goes with the backend: recreated from the new image when
   the backend was (or `restart_all` rebuilt it), restarted when only the
   code changed. It is never started by the deploy except by `services`.
@@ -166,12 +169,17 @@ IMG=$(sudo docker inspect --format '{{.Config.Image}}' doth-live-backend)    # r
 sudo docker tag "$IMG" "$IMG-previous"                                       # changes: adds a tag
 ```
 
-and to go back (changes: recreates the backend):
+and to go back (changes: recreates the backend, and the worker if it runs):
 
 ```bash
 sudo docker tag "$IMG-previous" "$IMG"
-$DC up -d --no-deps --force-recreate backend
+$DC up -d --no-deps --force-recreate backend worker < /dev/null      # leave worker out if it is not running
 ```
+
+No `--build` here, on purpose: this is the one recreate that must use the
+image as tagged, and a build would make a new one from the current
+requirements over the tag you just restored. Everywhere else a recreate
+builds (section 6).
 
 **Schema.** Prefer a forward fix. If the new code must go and the old code
 cannot run on the new schema, take a backup first (section 4), then
@@ -424,8 +432,10 @@ Everything here changes the database.
    $DC exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d postgres -c "ALTER DATABASE \"$POSTGRES_DB\" RENAME TO broken_$(date +%Y%m%d)" -c "ALTER DATABASE restored RENAME TO \"$POSTGRES_DB\""'
    ```
 
-5. `$DC up -d --no-deps backend`, check `alembic current` matches the code
-   (migrate if the dump is older), and the smoke URL answers.
+5. `$DC up -d --build --no-deps backend < /dev/null` (and `worker` if it
+   runs; it was not stopped, so restart it: `$DC restart worker`), check
+   `alembic current` matches the code (migrate if the dump is older), and
+   the smoke URL answers.
 6. Drop `broken_*` only when sure.
 
 ---
@@ -502,8 +512,9 @@ set its setting and recreate what reads it.
 
 **Recreate means a fresh build.** A `restart` keeps the environment the
 container was made with, so a new setting needs a recreate, and every
-recreate builds: from the workflow, `sync_env` + `install_requirements`
-(it builds, recreates the backend and takes a running worker along); by hand:
+recreate builds: from the workflow, `sync_env` + `recreate_backend` (it
+builds, from the cache when nothing changed, recreates the backend and takes
+a running worker along); by hand:
 
 ```bash
 # Changes things: rebuilds the image if anything changed, recreates both.
@@ -517,15 +528,14 @@ Never `up -d` with no service named: it would start every service in the
 file, whether the box can hold them or not. `--no-deps` keeps Postgres out
 of it (its config, the shared `.env`, changes with every setting), and
 `< /dev/null` keeps the command from reading the rest of a script it is run
-from. (`recreate_backend` recreates from the image already built, without
-building: right for an `.env` change when the last requirements change went
-out with `install_requirements`.)
+from. (`recreate_backend` does the same from the workflow: it builds first,
+from the cache when nothing changed.)
 
 By hand on the server, the same as the `services` input (changes things):
 
 ```bash
 $DC config --services                         # read-only: what the file defines
-$DC up -d --no-deps redis < /dev/null         # start or refresh one service
+$DC up -d --build --no-deps redis < /dev/null # start or refresh one service (--build: a no-op for an image, a cached build for the worker)
 $DC ps
 $DC logs --tail=100 worker
 ```
@@ -629,8 +639,11 @@ Then build with it and recreate (instead of `install_requirements`):
 IMG=$(sudo docker inspect --format '{{.Config.Image}}' doth-live-backend)
 sudo docker buildx build --builder lowprio --load -t "$IMG" backend/
 $DC exec -T backend alembic upgrade head
-$DC up -d --no-deps --force-recreate backend
+$DC up -d --no-deps --force-recreate backend worker < /dev/null      # worker only if it runs
 ```
+
+(No `--build` on that last line: the image was just built, by the
+low-priority builder; `--build` would build it again on the default one.)
 
 `cpu-quota=50000` of `cpu-period=100000` holds the build to half a CPU, so
 the API keeps the rest; the build takes longer. Proved on Docker Desktop: the
@@ -651,7 +664,8 @@ yet tried on the server; it needs `docker buildx` (above).
   ```
 
   then on the server migrate and recreate as above (`exec ... alembic upgrade
-  head`, `up -d --no-deps --force-recreate backend`). The transfer is the
+  head`, `up -d --no-deps --force-recreate backend worker`, without `--build`:
+  the image is the one just loaded). The transfer is the
   whole image (about 3 GB uncompressed, much less gzipped); a registry sends
   only the changed layers.
 - **In CI**, with a registry (GHCR or ECR): a workflow builds with
