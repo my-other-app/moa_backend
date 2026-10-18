@@ -51,11 +51,13 @@ PUBLIC = [
     (Events, "poster"), (EventSpeakers, "photo"),
     (Clubs, "logo"), (Clubs, "cover"), (ClubTeamMembers, "photo"), (ClubPartners, "logo"),
     (ClubThreads, "image"),
+    # The stock avatars everyone picks from; a person's own photo stays private.
+    (UserAvatars, "image"),
 ]
 PRIVATE = [
     (TicketTemplates, "logo"), (TicketTemplates, "background_image"),
     (CertificateTemplates, "signature_1"), (CertificateTemplates, "background_image"),
-    (UserProfiles, "profile_pic"), (UserAvatars, "image"), (Organizations, "logo"),
+    (UserProfiles, "profile_pic"), (Organizations, "logo"),
 ]
 
 

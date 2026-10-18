@@ -12,7 +12,7 @@ from app.api.closeout.models import EventStatus
 from app.api.events.models import Events
 from app.api.links import service as links
 from app.api.sites.models import FONTS, SECTIONS, TEMPLATES, THEMES, ClubSites
-from app.api.sites.render import image_url, render
+from app.api.sites.render import image_srcset, image_url, render
 from app.config import settings
 from app.core import public_urls
 from app.response import CustomHTTPException
@@ -104,7 +104,8 @@ def _first_sentence(text: str | None) -> str | None:
 
 
 async def site_data(session: AsyncSession, club: Clubs, choices: dict, ref_code: str | None = None) -> dict:
-    """Everything the page is made from, with every image pointed at the site's own image route.
+    """Everything the page is made from, with every image on the media CDN
+    (each size in a srcset) when it is on, else pointed at the site's own image route.
 
     `ref_code` is the website's own tracking link: it rides on every event
     button as `sref`, so a sign-up that starts on the site is credited to it
@@ -120,21 +121,21 @@ async def site_data(session: AsyncSession, club: Clubs, choices: dict, ref_code:
         fee = f"₹{int(e.reg_fee)}" if e.has_fee and e.reg_fee else "Free"
         where = "Online" if e.is_online else (e.location_name or None)
         url = public_urls.event_url(e.slug) + (f"?sref={ref_code}" if ref_code else "")
-        return dict(id=e.id, name=e.name, starts_at=e.event_datetime, where=where, fee=fee, poster=image_url(base, e.poster, "medium"), url=url, upcoming=upcoming)
+        return dict(id=e.id, name=e.name, starts_at=e.event_datetime, where=where, fee=fee, poster=image_url(base, e.poster, "medium"), poster_srcset=image_srcset(e.poster), url=url, upcoming=upcoming)
 
     upcoming = [ev(e, True) for e in sorted((e for e in events if e.event_datetime >= now and e.lifecycle in (EventStatus.published, EventStatus.live)), key=lambda e: e.event_datetime)][:6]
     past = [ev(e, False) for e in events if e.event_datetime < now][:6]
     team = [
-        dict(name=m.name, role=m.role, photo=image_url(base, m.photo, "medium"), links=[(k, _social_href(k, getattr(m, k))) for k in ("instagram", "linkedin", "x", "website") if getattr(m, k)])
+        dict(name=m.name, role=m.role, photo=image_url(base, m.photo, "medium"), photo_srcset=image_srcset(m.photo), links=[(k, _social_href(k, getattr(m, k))) for k in ("instagram", "linkedin", "x", "website") if getattr(m, k)])
         for m in await clubs.list_team(session, club.id)
     ]
-    partners = [dict(name=p.name, role=p.role, logo=image_url(base, p.logo, "thumbnail")) for p in await clubs.list_partners(session, club.id)]
+    partners = [dict(name=p.name, role=p.role, logo=image_url(base, p.logo, "thumbnail"), logo_srcset=image_srcset(p.logo)) for p in await clubs.list_partners(session, club.id)]
     social_links = [(k.capitalize() if k != "youtube" else "YouTube", _social_href(k, getattr(socials, k))) for k in ("instagram", "linkedin", "youtube", "website") if socials is not None and getattr(socials, k)]
     default_headline = club.tagline or club.name
     default_subline = _first_sentence(club.about) if club.tagline else (_first_sentence(club.about) or None)
     return dict(
         site=choices, site_url=await site_address(session, club),
-        club=dict(name=club.name, about=club.about, tagline=club.tagline, location_name=club.location_name, contact_email=club.contact_email, brand_primary=club.brand_primary, logo_url=image_url(base, club.logo, "medium"), cover_url=image_url(base, club.cover, "original")),
+        club=dict(name=club.name, about=club.about, tagline=club.tagline, location_name=club.location_name, contact_email=club.contact_email, brand_primary=club.brand_primary, logo_url=image_url(base, club.logo, "medium"), logo_srcset=image_srcset(club.logo), cover_url=image_url(base, club.cover, "original")),
         default_headline=default_headline, default_subline=default_subline,
         upcoming=upcoming, past=past, team=team, partners=partners, socials=social_links,
         numbers=dict(followers=followers, events=sum(1 for e in events if e.event_datetime < now)),

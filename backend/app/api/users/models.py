@@ -62,6 +62,9 @@ class UserAvatars(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(20), nullable=False)
+    # The stock avatars people choose from (an admin uploads them): the
+    # same pictures for everyone, so public -- signed for a week, or on the
+    # media CDN. A person's own photo (UserProfiles.profile_pic) is not.
     image = Column(
         S3ImageField(
             upload_to="avatars/",
@@ -70,6 +73,7 @@ class UserAvatars(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
                 "medium": {"width": 500, "height": 500},
                 "large": {"width": 800, "height": 800},
             },
+            public=True,
         ),
         nullable=False,
     )
