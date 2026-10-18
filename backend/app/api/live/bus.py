@@ -23,6 +23,10 @@ labels what it sends with the version of the last message for its topics,
 so a phone reconnecting to another process with `Last-Event-ID` is sent
 nothing when nothing changed.
 
+A message says whether it was told at once (`h`: the host's change is in
+it): a stream that paces what it sends (the room feed, stream.PACE) sends
+such a change without waiting.
+
 A message may carry deltas: what one browser did (a vote, a poll answer), so
 a process holding that browser's stream updates its own flags without
 reading them again. At most MAX_DELTAS a message; past that `x` is set and
@@ -130,6 +134,8 @@ class _Pending:
     topics: set = field(default_factory=set)
     deltas: list = field(default_factory=list)
     overflow: bool = False
+    #: Something in it was told at once (the host's): streams send it unpaced.
+    now: bool = False
     timer: Optional[asyncio.TimerHandle] = None
     flushing: bool = False
 
@@ -159,6 +165,7 @@ def changed(event_id: int, *topics: str, delta: Optional[list] = None, now: bool
         else:
             p.overflow = True
     if now:
+        p.now = True
         if p.timer is not None:
             p.timer.cancel()
             p.timer = None
@@ -196,7 +203,7 @@ async def flush(event_id: int) -> Optional[dict]:
         return None
     try:
         v = await next_version(event_id)
-        message = {"v": v, "t": sorted(p.topics), "d": [] if p.overflow else p.deltas, "x": p.overflow}
+        message = {"v": v, "t": sorted(p.topics), "d": [] if p.overflow else p.deltas, "x": p.overflow, "h": p.now}
         await redis.publish(channel(event_id), message)
         return message
     except Exception:  # noqa: BLE001 - the streams' resync catches what this loses

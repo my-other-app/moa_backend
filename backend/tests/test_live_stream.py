@@ -141,6 +141,8 @@ async def streams(monkeypatch, session):
 
     monkeypatch.setattr(stream, "session_scope", scope)
     monkeypatch.setattr(stream, "RESYNC_SECONDS", 3600.0)
+    # Unpaced unless a test is about the pace.
+    monkeypatch.setattr(stream, "PACE", {})
     bus.reset_for_tests()
     yield hub
     await hub.close()
@@ -390,6 +392,42 @@ async def test_the_audiences_changes_are_folded_and_the_hosts_told_at_once(clien
     snap = await s.next_of("snapshot")
     assert snap["json"]["questions"][0]["pinned"] is True and "One more from the floor" in snap["data"]
     await heard.aclose()
+    await s.close()
+
+
+async def test_the_room_feed_paces_the_audiences_changes_but_not_the_hosts(client, world, streams, monkeypatch):
+    monkeypatch.setattr(stream, "PACE", {"room": 0.6})
+    await client.patch(_u(world, "/questions/settings"), json={"approve_first": False}, headers=world["h"])
+    s = await SSE(_s(world), _key(1), {"view": "room"}).open()
+    await streams.step()
+    await s.next_of("snapshot")
+    loop = asyncio.get_running_loop()
+    # Two of the audience's changes, moments after the last frame: one frame,
+    # the latest, when the pace allows.
+    t0 = loop.time()
+    await client.post(_u(world, "/questions"), json={"text": "First from the floor"}, headers=_key(2))
+    await streams.step()
+    await client.post(_u(world, "/questions"), json={"text": "Second from the floor"}, headers=_key(3))
+    await streams.step()
+    paced = await s.next_of("snapshot", timeout=2)
+    assert loop.time() - t0 >= 0.45 and "Second from the floor" in paced["data"]
+    assert int(paced["id"]) == streams.feeds[world["event"].id].version("room")
+    # The host's change right after: at once.
+    asked = next(q for q in paced["json"]["questions"] if q["text"] == "First from the floor")
+    t1 = loop.time()
+    await client.post(_u(world, f"/questions/{asked['id']}"), json={"action": "pin"}, headers=world["h"])
+    await streams.step()
+    pinned = await s.next_of("snapshot", timeout=2)
+    assert loop.time() - t1 < 0.4 and pinned["json"]["questions"][0]["pinned"] is True
+    # And the host's change while an audience frame is held goes at once, with it.
+    await client.post(_u(world, "/questions"), json={"text": "Third from the floor"}, headers=_key(4))
+    await streams.step()
+    await asyncio.sleep(0.05)
+    t2 = loop.time()
+    await client.post(_u(world, f"/questions/{asked['id']}"), json={"action": "unpin"}, headers=world["h"])
+    await streams.step()
+    both = await s.next_of("snapshot", timeout=2)
+    assert loop.time() - t2 < 0.4 and "Third from the floor" in both["data"] and not both["json"]["questions"][0]["pinned"]
     await s.close()
 
 

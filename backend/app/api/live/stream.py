@@ -88,6 +88,13 @@ LINGER_SECONDS = 20.0
 LIFETIME = 600.0
 CLUB_LIFETIME = 300.0
 SEND_TIMEOUT = 30.0
+#: The least time between two frames of a stream of this view, unless the
+#: newer is the host's (told at once). The room's feed is 30 KB a frame and a
+#: phone polled it every 5 s: a busy hall voting would otherwise send every
+#: phone a frame each third of a second -- 100 MB a second over a venue's
+#: Wi-Fi at 3,000 phones -- for counts nobody reads that fast. The quiz's
+#: frames are small and its players race: unpaced.
+PACE = {"room": 2.0}
 #: How long a new stream waits for the feed's first build before a ping.
 FIRST_BUILD_WAIT = 10.0
 #: Streams of one event, and from one address, one process holds at most.
@@ -160,6 +167,7 @@ class Listener:
     #: when it shows this stream something new).
     sent_version: Optional[int] = None
     sent_shows: Any = None
+    sent_at: float = 0.0
     wake: asyncio.Event = field(default_factory=asyncio.Event)
     closed: bool = False
 
@@ -172,6 +180,8 @@ class Feed:
         self.event_id = event_id
         self.listeners: set[Listener] = set()
         self.versions: dict[str, int] = {}
+        #: The latest version of each topic that the host's change made (sent unpaced).
+        self.urgent: dict[str, int] = {}
         self.room: Optional[room.Room] = None
         self.quiz: Optional[room.QuizView] = None
         #: Each streaming player's (score, rank), by player id, for self.quiz.
@@ -240,6 +250,16 @@ class Feed:
 
     def version(self, view: str) -> int:
         return max(self.versions.get(t, 0) for t in VIEWS[view])
+
+    def gone_for(self, listener: Listener) -> Optional[tuple[int, str]]:
+        """(status, message) when what the stream shows is gone, else None."""
+        return self.gone.get(listener.view) or (
+            self.gone_players.get(listener.key) if listener.view == "quiz" and listener.key else None
+        )
+
+    def urgent_since(self, view: str, version: Optional[int]) -> bool:
+        """Whether the host changed what this view shows after `version`."""
+        return max(self.urgent.get(t, 0) for t in VIEWS[view]) > (version or 0)
 
     def _wake(self, views: Optional[set] = None) -> None:
         for listener in self.listeners:
@@ -336,6 +356,8 @@ class Feed:
                 if t in bus.TOPICS:
                     topics.add(t)
                     self.versions[t] = max(self.versions.get(t, 0), v)
+                    if m.get("h"):
+                        self.urgent[t] = max(self.urgent.get(t, 0), v)
             if m.get("x"):
                 reread = True
             for delta in m.get("d") or ():
@@ -481,7 +503,7 @@ class Feed:
         """(version, what it shows, frame) for the stream now. Version None:
         the view is gone, and the frame says so."""
         view = listener.view
-        gone = self.gone.get(view) or (self.gone_players.get(listener.key) if view == "quiz" and listener.key else None)
+        gone = self.gone_for(listener)
         if gone is not None:
             return None, None, frame("gone", orjson.dumps({"status": gone[0], "message": gone[1]}))
         v = self.version(view)
@@ -698,6 +720,18 @@ class EventStream(Response):
                 return
             if listener.wake.is_set() and feed.has(listener.view):
                 listener.wake.clear()
+                due = listener.sent_at + PACE.get(listener.view, 0.0)
+                now = time.monotonic()
+                if (now < due and listener.sent_version is not None and feed.version(listener.view) != listener.sent_version
+                        and feed.gone_for(listener) is None and not feed.urgent_since(listener.view, listener.sent_version)):
+                    # The audience's, and the last frame was moments ago: sent
+                    # when its pace allows (the latest by then), or at once if
+                    # the host acts meanwhile.
+                    with suppress(TimeoutError):
+                        async with asyncio.timeout(due - now):
+                            await listener.wake.wait()
+                    listener.wake.set()
+                    continue
                 version, shows, data = feed.render(listener)
                 if version is None:
                     await write(data)
@@ -708,7 +742,7 @@ class EventStream(Response):
                     # change elsewhere in the room) is not sent.
                     if listener.sent_version is None or shows is not listener.sent_shows and shows != listener.sent_shows:
                         await write(data)
-                        quiet_since = time.monotonic()
+                        quiet_since = listener.sent_at = time.monotonic()
                     listener.sent_version, listener.sent_shows = version, shows
                 continue
             listener.wake.clear()
