@@ -138,6 +138,15 @@ async def shutdown(loops: list, budget: float = SHUTDOWN_BUDGET, runner=None) ->
         await asyncio.wait_for(background.drain(), timeout=left())
     except asyncio.TimeoutError:
         print("Warning: background fan-outs did not finish before shutdown")
+    # The live room: what it gathered to tell, then its feeds (their streams
+    # ended with their requests).
+    from app.api.live import bus as live_bus, stream as live_stream
+
+    try:
+        await asyncio.wait_for(live_bus.drain(), timeout=min(0.5, left()))
+    except asyncio.TimeoutError:
+        pass
+    await live_stream.hub.close()
     await redis.close()
 
 

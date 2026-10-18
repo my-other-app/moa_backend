@@ -312,16 +312,27 @@ async def feed_body(session, event_id: int, key: Optional[str]) -> bytes:
     return body_for(room, key, await voter_of(session, event_id, key))
 
 
-def body_for(room: Room, key: Optional[str], voter: Optional[Voter]) -> bytes:
-    """The room's body as one browser sees it: as it stands, or a copy with
-    its own flags (what it voted for, what it asked, its answer to the poll)."""
+def flags_of(room: Room, key: Optional[str], voter: Optional[Voter]) -> Optional[tuple]:
+    """What sets one browser's body apart from the room's: (the questions on
+    the feed it voted for, those it asked, its answer to the poll up), or
+    None when nothing does. Browsers with the same flags see the same body."""
     if key is None or voter is None:
-        return room.body
-    voted = voter.voted & room.question_ids
-    mine = set(room.asked_by.get(key, ()))
+        return None
+    voted = frozenset(voter.voted & room.question_ids)
+    mine = frozenset(room.asked_by.get(key, ()))
     answer = voter.answers.get(room.poll_id) if room.poll_id else None
     if not voted and not mine and answer is None:
+        return None
+    return voted, mine, answer
+
+
+def body_for(room: Room, key: Optional[str], voter: Optional[Voter], flags: Optional[tuple] = None) -> bytes:
+    """The room's body as one browser sees it: as it stands, or a copy with
+    its own flags (what it voted for, what it asked, its answer to the poll)."""
+    flags = flags if flags is not None else flags_of(room, key, voter)
+    if flags is None:
         return room.body
+    voted, mine, answer = flags
     data = dict(room.data)
     if voted or mine:
         data["questions"] = [
