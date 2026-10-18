@@ -150,7 +150,7 @@ jobs:
           trap '' HUP
           cd "$PROJECT_PATH"
 
-          # Build, migrate with the new image, then recreate. The container
+          # Build, migrate, then recreate. The container
           # install_requirements recreates starts with the new code, image and
           # dependencies, so the restart at the end is skipped after it
           # (RECREATED).
@@ -166,17 +166,22 @@ jobs:
             echo "::endgroup::"
           fi
 
-          # With a new image, migrate before it takes traffic: a one-off
-          # container from it (the same env and the synced code, which is
-          # bind-mounted) runs the migration while the old container still
-          # serves. If it fails -- a migration error, or a setting the new
-          # code refuses to start without -- set -e stops the deploy here and
-          # the old container goes on serving. Recreating first meant a new
-          # image that could not boot took the site down and left no running
+          # Migrate before the new image takes traffic, in the container still
+          # serving: the synced code is bind-mounted, so it already has the
+          # new migrations, and a failure -- a migration error, or a setting
+          # the new code refuses to start without -- stops the deploy here
+          # with that container still serving. Recreating first meant an image
+          # that could not boot took the site down and left no running
           # container to migrate with.
+          #
+          # Not a one-off "run" container from the new image: the backend has
+          # a fixed ipv4_address, which the running container holds, so "run"
+          # fails with "Address already in use" (the 2026-10-18 13:45 deploy).
+          # A migration that needs a package only the new image has fails
+          # here too, safely; run that one with the old order (restart_all).
           if [ "$MIGRATE" = "true" ] && [ "$RECREATE_BACKEND" = "true" ]; then
-            echo "::group::Migrating database with the new image"
-            $COMPOSE run --rm --no-deps -T backend alembic upgrade head
+            echo "::group::Migrating database before the new image takes traffic"
+            $COMPOSE exec -T backend alembic upgrade head
             echo "::endgroup::"
             MIGRATED=1
           fi
