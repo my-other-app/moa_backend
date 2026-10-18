@@ -367,3 +367,21 @@ async def mint_token(session):
 
 def auth_header(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture(autouse=True)
+def _fresh_account_caches():
+    """Process-wide caches the accounts code keeps: the admin Overview's
+    minute, the Discord error report's dedupe, Google's certificates and
+    Apple's keys. Each test starts without them."""
+    from app.api import admin_overview
+    from app.api.auth import service as auth_service
+    from app.core.utils import discord
+
+    admin_overview.reset_cache()
+    discord.reset_for_tests()
+    auth_service._google_certs.reset()
+    auth_service._apple_keys = None
+    yield
+    admin_overview.reset_cache()
+    discord.reset_for_tests()
