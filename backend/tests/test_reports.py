@@ -4,6 +4,7 @@ its author; a reader blocks someone and stops seeing their comments; an
 admin works the queue and resolves each report with everything on the same
 thing, and is told when something is reported."""
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import select
@@ -13,6 +14,7 @@ from app.api.audit.models import AdminAuditLogs
 from app.api.reports.models import ContentReports
 from app.api.threads.models import ClubThreads, ThreadComments
 from app.api.users.models import AdminRoles, Users, UserTypes
+from app.config import settings
 from app.core.notifications import service as push
 from app.core.rate_limit import limiter
 from tests.conftest import auth_header
@@ -33,6 +35,8 @@ async def world(client, session, make_club, make_user, make_admin, mint_token, m
     for name in ("writer", "fan", "fan2", "fan3", "fan4"):
         people[name] = await make_user(email=f"{name}-reports@example.com", username=f"{name}-reports")
         people[name].full_name = name.capitalize()
+        # Readers of some standing: a report from an account under a week old weighs half.
+        people[name].created_at = datetime.now(timezone.utc) - timedelta(days=60)
     guest = await make_user(email="guest-reports@example.com", username="guest-reports", user_type=UserTypes.guest)
     owner_admin = await make_admin(email="owner-reports@example.com")
     support = await make_admin(email="support-reports@example.com", role=AdminRoles.support)
@@ -146,6 +150,32 @@ async def test_three_reports_hide_a_comment_from_everyone_but_its_author_until_r
     assert r.json()["resolved"] == 3 and r.json()["report"]["status"] == "resolved" and r.json()["report"]["resolution"] == "dismiss"
     assert body in await _comments(client, thread["id"])
     assert body in await _comments(client, thread["id"], h["fan4"])
+
+
+async def test_fresh_accounts_weigh_half_and_the_threshold_is_a_setting(client, session, world, make_user, mint_token, monkeypatch):
+    """Three accounts made today cannot hide a comment on their own: each
+    report from an account under a week old weighs half."""
+    h, thread, comment = world["h"], world["thread"], world["comment"]
+    body = comment["body"]
+    fresh = []
+    for i in range(5):
+        u = await make_user(email=f"fresh-{i}-reports@example.com", username=f"fresh-{i}-reports")
+        fresh.append(auth_header(await mint_token(u)))
+    for who in fresh[:3]:
+        assert (await _report(client, who, "comment", comment["id"])).status_code == 201
+    assert body in await _comments(client, thread["id"])  # 1.5 of 3
+    # Two more fresh ones and one reader of standing: 2.5 + 1 = 3.5.
+    for who in fresh[3:]:
+        await _report(client, who, "comment", comment["id"])
+    assert body in await _comments(client, thread["id"])  # 2.5
+    await _report(client, h["fan"], "comment", comment["id"])
+    assert body not in await _comments(client, thread["id"])
+    # The admin's queue still counts people, not weight.
+    listed = (await client.get(f"{API}/admin/reports?status=open&target_type=comment", headers=world["admin_h"])).json()
+    assert {i["report_count"] for i in listed["items"]} == {6}
+    # The threshold is a setting.
+    monkeypatch.setattr(settings, "REPORTS_TO_HIDE", 4.0)
+    assert body in await _comments(client, thread["id"])
 
 
 # ─── Blocks ─────────────────────────────────────────────────────────────

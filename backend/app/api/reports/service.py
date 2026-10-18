@@ -5,7 +5,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
@@ -14,12 +14,15 @@ from app.api.clubs.models import Clubs
 from app.api.reports.models import ContentReports, UserBlocks
 from app.api.threads.models import ClubThreads, ThreadComments
 from app.api.users.models import UserProfiles, Users, UserTypes
+from app.config import settings
 from app.db.listeners import INCLUDE_DELETED
 from app.response import CustomHTTPException
 
-#: Open reports from this many different people hide a comment from everyone
-#: but its author until an admin resolves them.
-REPORTS_TO_HIDE = 3
+# Open reports weighing settings.REPORTS_TO_HIDE (three by default) hide a
+# comment from everyone but its author until an admin resolves them. A
+# report from an account younger than REPORT_NEW_ACCOUNT_DAYS weighs
+# REPORT_NEW_ACCOUNT_WEIGHT (a half), so three accounts made for the purpose
+# are not enough; a deleted account's report weighs nothing.
 #: Reports one person may make in an hour.
 REPORTS_PER_HOUR = 20
 RATE_WINDOW = timedelta(hours=1)
@@ -226,14 +229,33 @@ async def open_counts(session, pairs) -> dict[tuple[str, str], int]:
     return out
 
 
+async def open_weights(session, target_type: str, keys) -> dict[str, float]:
+    """The weight of the open reports on each thing: each reporter's report
+    counts 1, or REPORT_NEW_ACCOUNT_WEIGHT when their account is younger than
+    REPORT_NEW_ACCOUNT_DAYS. (One open report per person per thing: the
+    unique index uq_content_reports_open.)"""
+    keys = list(keys)
+    if not keys:
+        return {}
+    young = _now() - timedelta(days=settings.REPORT_NEW_ACCOUNT_DAYS)
+    weight = case((Users.created_at > young, settings.REPORT_NEW_ACCOUNT_WEIGHT), else_=1.0)
+    rows = await session.execute(
+        select(ContentReports.target_id, func.sum(weight))
+        .join(Users, Users.id == ContentReports.reporter_id)
+        .where(ContentReports.target_type == target_type, ContentReports.target_id.in_(keys), ContentReports.status == "open")
+        .group_by(ContentReports.target_id)
+    )
+    return {key: float(w) for key, w in rows.all()}
+
+
 async def hidden_comments(session, comment_ids) -> set:
-    """Of these comments, the ones reported by REPORTS_TO_HIDE or more
-    people whose reports are still open."""
+    """Of these comments, the ones whose open reports weigh
+    settings.REPORTS_TO_HIDE or more (open_weights)."""
     keys = {str(i): i for i in comment_ids}
     if not keys:
         return set()
-    counts = await open_counts(session, [("comment", k) for k in keys])
-    return {keys[k] for (_, k), n in counts.items() if n >= REPORTS_TO_HIDE}
+    weights = await open_weights(session, "comment", keys)
+    return {keys[k] for k, w in weights.items() if w >= settings.REPORTS_TO_HIDE}
 
 
 # ─── Reporting ──────────────────────────────────────────────────────────
@@ -384,11 +406,9 @@ async def _remove(session, target_type: str, key: str) -> bool:
         c = await session.scalar(select(ThreadComments).where(ThreadComments.id == uuid.UUID(key), ThreadComments.is_deleted == False))  # noqa: E712
         if c is None:
             return False
+        # The post's comments_count follows by trigger (threads.models.THREAD_COUNTS_SQL).
         c.is_deleted = True
         c.deleted_at = now
-        t = await session.scalar(select(ClubThreads).where(ClubThreads.id == c.thread_id).execution_options(**{INCLUDE_DELETED: True}))
-        if t is not None:
-            t.comments_count = max(0, (t.comments_count or 0) - 1)
         return True
     if target_type == "thread":
         t = await session.scalar(select(ClubThreads).where(ClubThreads.id == uuid.UUID(key), ClubThreads.is_deleted == False))  # noqa: E712

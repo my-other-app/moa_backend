@@ -7,7 +7,7 @@ from typing import Optional
 
 from sqlalchemy import func, select
 
-from app.api.clubs.models import Clubs, ClubUsersLink
+from app.api.clubs.models import Clubs
 from app.api.threads.models import ClubThreads, ThreadComments, ThreadLikes, ThreadVotes
 from app.api.threads.service import _options_for, _out
 
@@ -83,6 +83,21 @@ async def list_for_page(session, club: Clubs, *, scope: str = "all", sort: str =
     return dict(items=items, total=len(rows), limit=limit, offset=offset, counts=counts)
 
 
+async def _by_week(session, model, club: Clubs, since: datetime, *extra) -> dict:
+    """{(ISO year, ISO week): how many} of `model`'s rows on the club's posts since `since`."""
+    week = func.date_trunc("week", func.timezone("UTC", model.created_at))
+    rows = (await session.execute(
+        select(week, func.count())
+        .join(ClubThreads, ClubThreads.id == model.thread_id)
+        .where(ClubThreads.club_id == club.id, model.created_at > since, *extra)
+        .group_by(week)
+    )).all()
+    out: dict = defaultdict(int)
+    for monday, n in rows:
+        out[monday.isocalendar()[:2]] += int(n)
+    return out
+
+
 async def insights(session, club: Clubs) -> dict:
     now = _now()
     rows = await _rows(session, club)
@@ -103,17 +118,12 @@ async def insights(session, club: Clubs) -> dict:
         v = reach(ts)
         return round(100 * engaged(ts) / v, 1) if v else None
 
-    # Likes and comments as they landed, per week, for the last twelve weeks.
+    # Likes, comments and votes as they landed, per week, for the last twelve
+    # weeks: counted by the database, a row per week, not a row per reaction.
     since = now - timedelta(weeks=12)
-    likes_by_week: dict = defaultdict(int)
-    for (at,) in (await session.execute(select(ThreadLikes.created_at).join(ClubThreads, ClubThreads.id == ThreadLikes.thread_id).where(ClubThreads.club_id == club.id, ThreadLikes.created_at > since))).all():
-        likes_by_week[at.isocalendar()[:2]] += 1
-    comments_by_week: dict = defaultdict(int)
-    for (at,) in (await session.execute(select(ThreadComments.created_at).join(ClubThreads, ClubThreads.id == ThreadComments.thread_id).where(ClubThreads.club_id == club.id, ThreadComments.is_deleted == False, ThreadComments.created_at > since))).all():  # noqa: E712
-        comments_by_week[at.isocalendar()[:2]] += 1
-    votes_by_week: dict = defaultdict(int)
-    for (at,) in (await session.execute(select(ThreadVotes.created_at).join(ClubThreads, ClubThreads.id == ThreadVotes.thread_id).where(ClubThreads.club_id == club.id, ThreadVotes.created_at > since))).all():
-        votes_by_week[at.isocalendar()[:2]] += 1
+    likes_by_week = await _by_week(session, ThreadLikes, club, since)
+    comments_by_week = await _by_week(session, ThreadComments, club, since, ThreadComments.is_deleted == False)  # noqa: E712
+    votes_by_week = await _by_week(session, ThreadVotes, club, since)
     weeks = []
     for k in range(11, -1, -1):
         day = now - timedelta(weeks=k)
@@ -133,7 +143,8 @@ async def insights(session, club: Clubs) -> dict:
     told = [t for t in rows if t.notify_followers]
     quiet = [t for t in rows if not t.notify_followers]
     best = max(cur, key=lambda t: (_engagement(t, votes[t.id]), t.views_count or 0), default=None)
-    followers = await session.scalar(select(func.count()).select_from(ClubUsersLink).where(ClubUsersLink.club_id == club.id, ClubUsersLink.is_following == True, ClubUsersLink.is_deleted == False)) or 0  # noqa: E712
+    # Kept by a trigger on club_users_link: the follows that are following and not deleted.
+    followers = int(await session.scalar(select(Clubs.follower_count).where(Clubs.id == club.id)) or 0)
     return dict(
         posts=len(cur), posts_delta=(len(cur) - len(prev)) if (cur or prev) else None,
         reach=reach(cur), reach_delta=(reach(cur) - reach(prev)) if (cur or prev) else None,

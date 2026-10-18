@@ -1,9 +1,11 @@
 """Threads: a club posts, followers are told, readers like, vote and comment, and views count once a person."""
 import io
+from contextlib import asynccontextmanager
 
 import pytest
 from PIL import Image
 
+from app.api.threads import service as threads_service
 from app.core.notifications import service as push
 from app.core.rate_limit import limiter
 from tests.conftest import auth_header
@@ -27,6 +29,13 @@ async def world(client, session, make_club, make_user, mint_token, monkeypatch):
         return len(user_ids)
 
     monkeypatch.setattr(push, "send_notification_to_users", fake_push)
+
+    # Followers are told after the post is answered, on a session of its own: here, the test's.
+    @asynccontextmanager
+    async def scope():
+        yield session
+
+    monkeypatch.setattr(threads_service, "session_scope", scope)
     owner, club = await make_club(name="Circuit Society", email="threads@example.com")
     rival_owner, rival = await make_club(name="Rivals", email="rivals-threads@example.com")
     club.is_verified = True
