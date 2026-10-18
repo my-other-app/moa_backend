@@ -425,6 +425,8 @@ async def _send_receipt(session, order_id, payment_id: str, background_tasks) ->
         await jobs.enqueue(session, "payments.receipt", {"order_id": str(order_id), "payment_id": payment_id}, dedupe_key=f"payments:receipt:{payment_id}")
         await session.commit()
     except Exception:
+        # The payment stands either way; the caller reads on after this.
+        await session.rollback()
         logger.exception("Error queueing the payment confirmation email")
 
 
