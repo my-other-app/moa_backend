@@ -231,7 +231,7 @@ class TTLCache:
 #: The same for everyone. Each family keeps its own few: a page of calendar
 #: or "near you" keys never pushes out the front page.
 shared = TTLCache(families={
-    "home": 4, "categories": 8, "category-counts": 4, "interests": 16, "on-floor": 4,
+    "home": 4, "categories": 8, "category-counts": 4, "interests": 16, "topics": 4, "on-floor": 4,
     "calendar": 1024, "near": 4096, "home-clubs": 4096,
     "for-you-popular": 2048, "for-you-online": 4,
     "sitemap": 4, "sitemap-json": 4, "sitemap-bounds": 8,

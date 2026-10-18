@@ -700,8 +700,9 @@ async def test_the_interest_list_is_public(client, session):
     assert response.status_code == 200, response.text
     assert response.headers["cache-control"] == "public, max-age=300"
     [making] = [c for c in response.json() if c["name"] == "Making"]
-    assert set(making) == {"id", "name", "icon", "icon_type", "interests"}
-    assert [set(i) for i in making["interests"]] == [{"id", "name", "icon", "icon_type"}]
+    # What the shipped app and dashboards read, and what Topics added beside it.
+    assert set(making) == {"id", "name", "icon", "icon_type", "interests"} | {"slug", "color", "description", "sort_order"}
+    assert [set(i) for i in making["interests"]] == [{"id", "name", "icon", "icon_type"} | {"slug", "category_id", "sort_order"}]
 
 
 # ─── 11. Signing in to the clubs dashboard ───────────────────────────────

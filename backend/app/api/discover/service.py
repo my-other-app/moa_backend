@@ -604,6 +604,41 @@ async def category_counts(session, now: datetime, since: Optional[datetime] = No
     return {k: int(v) for k, v in rows.all()}
 
 
+async def topic_counts(session, now: datetime, since: Optional[datetime] = None) -> dict[str, dict[int, int]]:
+    """What is on in each topic and interest, and the listed clubs that pick
+    each topic, in three grouped statements: {"topic_events", "interest_events",
+    "topic_clubs"}, each {id: count}. An event with two interests in one
+    topic counts once for it. topic_refs.with_counts keeps the answer."""
+    since = since or await upcoming.since(session, now)
+    link = EventInterestsLink
+    events = func.count(func.distinct(Events.id))
+
+    def on(key):
+        return (
+            select(key, events).select_from(Events).join(Clubs, Clubs.id == Events.club_id)
+            .join(link, and_(link.event_id == Events.id, link.is_deleted == False))  # noqa: E712
+            .join(Interests, and_(Interests.id == link.interest_id, Interests.is_deleted == False))  # noqa: E712
+            .where(*_visible_where(now, since))
+            .group_by(key)
+        )
+
+    by_topic = await session.execute(on(Interests.category_id))
+    by_interest = await session.execute(on(Interests.id))
+    clubs = await session.execute(
+        select(Interests.category_id, func.count(func.distinct(Clubs.id)))
+        .select_from(Clubs)
+        .join(ClubInterestsLink, and_(ClubInterestsLink.club_id == Clubs.id, ClubInterestsLink.is_deleted == False))  # noqa: E712
+        .join(Interests, and_(Interests.id == ClubInterestsLink.interest_id, Interests.is_deleted == False))  # noqa: E712
+        .where(*_club_visible())
+        .group_by(Interests.category_id)
+    )
+    return dict(
+        topic_events={k: int(v) for k, v in by_topic.all()},
+        interest_events={k: int(v) for k, v in by_interest.all()},
+        topic_clubs={k: int(v) for k, v in clubs.all()},
+    )
+
+
 async def _counts_kept(session, now: datetime, since: Optional[datetime] = None) -> dict[int, int]:
     return await cache.kept(cache.shared, ("category-counts",), lambda s, n: category_counts(s, n, since if n is now else None), session, now)
 

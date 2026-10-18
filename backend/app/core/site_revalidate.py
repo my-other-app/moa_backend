@@ -8,7 +8,7 @@ the sitemap again within seconds rather than whenever its copy runs out:
     Authorization: Bearer <settings.SITE_REVALIDATE_SECRET>
     Content-Type: application/json
 
-    {"events": ["<slug>", "<id>", ...], "clubs": ["<slug>", ...], "sitemap": true}
+    {"events": ["<slug>", "<id>", ...], "clubs": ["<slug>", ...], "sitemap": true, "topics": true}
 
 `events` holds each event's slug and its id (as a string: the site has
 pages by both); a renamed event's old slug comes too, as does a club's.
@@ -28,6 +28,10 @@ sweep, approval and rejection, logo and cover uploads, scripts.
     recent events, whose pages show the club.
   * The rows those pages show: an event's speakers, agenda and organisers;
     a club's team, partners, socials and interests.
+
+An admin's change to the topic tree (a topic or an interest made, renamed,
+moved, reordered or deleted) is told as "topics": true (`topics_changed`,
+called by those endpoints), with whatever else is waiting.
 
 Counters and housekeeping -- page views, going and follower counts,
 admission numbers, door, kiosk and retention settings, timestamps -- change
@@ -93,6 +97,7 @@ _UNKNOWN = object()
 
 _pending_events: set[str] = set()
 _pending_clubs: set[str] = set()
+_pending_topics = False
 _timer: Optional[asyncio.TimerHandle] = None
 _sending: set[asyncio.Future] = set()
 
@@ -256,40 +261,58 @@ def _row_changed(obj, how: str) -> bool:
     return how != "dirty" or bool(_changed_keys(sa_inspect(obj), _STAMPS))
 
 
+def topics_changed(session) -> None:
+    """The topic tree changed: once `session` commits, the site is told
+    "topics": true with the next burst, so its topic pages and filters are
+    made again. Never raises."""
+    if not enabled():
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    try:
+        after_commit.run_after_commit(session, _queue, loop, frozenset(), frozenset(), True)
+    except Exception:  # noqa: BLE001
+        logger.warning("could not queue the site's topics revalidation", exc_info=True)
+
+
 # ─── Telling the site ─────────────────────────────────────────────────────
 
 
-def _queue(loop, events: frozenset, clubs: frozenset) -> None:
+def _queue(loop, events: frozenset, clubs: frozenset, topics: bool = False) -> None:
     """After the commit (on a worker thread): over to the loop, to wait out
     the burst. A script with no loop of its own sends at once."""
     if loop is not None and not loop.is_closed():
-        loop.call_soon_threadsafe(_add, events, clubs)
+        loop.call_soon_threadsafe(_add, events, clubs, topics)
         return
-    for payload in _payloads(events, clubs):
+    for payload in _payloads(events, clubs, topics):
         _send(payload)
 
 
-def _add(events: frozenset, clubs: frozenset) -> None:
-    global _timer
+def _add(events: frozenset, clubs: frozenset, topics: bool = False) -> None:
+    global _timer, _pending_topics
     _pending_events.update(events)
     _pending_clubs.update(clubs)
+    _pending_topics = _pending_topics or topics
     if _timer is None:
         _timer = asyncio.get_running_loop().call_later(DEBOUNCE_SECONDS, _fire)
 
 
 def _fire() -> None:
-    global _timer
+    global _timer, _pending_topics
     if _timer is not None:
         _timer.cancel()
         _timer = None
-    events, clubs = set(_pending_events), set(_pending_clubs)
+    events, clubs, topics = set(_pending_events), set(_pending_clubs), _pending_topics
     _pending_events.clear()
     _pending_clubs.clear()
-    if not events and not clubs:
+    _pending_topics = False
+    if not events and not clubs and not topics:
         return
     _forget_discover_answers()
     loop = asyncio.get_running_loop()
-    for payload in _payloads(events, clubs):
+    for payload in _payloads(events, clubs, topics):
         sent = loop.run_in_executor(None, _send, payload)
         _sending.add(sent)
         sent.add_done_callback(_sending.discard)
@@ -306,10 +329,14 @@ def _forget_discover_answers() -> None:
         logger.warning("could not empty the discover cache", exc_info=True)
 
 
-def _payloads(events, clubs) -> Iterator[dict]:
+def _payloads(events, clubs, topics: bool = False) -> Iterator[dict]:
+    """The POSTs: events and clubs MAX_PER_POST at a time, "topics" on the first."""
     events, clubs = sorted(events), sorted(clubs)
     for start in range(0, max(len(events), len(clubs), 1), MAX_PER_POST):
-        yield {"events": events[start:start + MAX_PER_POST], "clubs": clubs[start:start + MAX_PER_POST], "sitemap": True}
+        payload = {"events": events[start:start + MAX_PER_POST], "clubs": clubs[start:start + MAX_PER_POST], "sitemap": True}
+        if topics and start == 0:
+            payload["topics"] = True
+        yield payload
 
 
 def _http() -> httpx.Client:
@@ -344,7 +371,7 @@ async def flush(*, after: float = 0.0) -> None:
     if _timer is not None:
         _timer.cancel()
         _timer = None
-    if after and (_pending_events or _pending_clubs):
+    if after and (_pending_events or _pending_clubs or _pending_topics):
         await asyncio.sleep(after)
     _fire()
     if _sending:
@@ -352,9 +379,10 @@ async def flush(*, after: float = 0.0) -> None:
 
 
 def reset_for_tests() -> None:
-    global _timer
+    global _timer, _pending_topics
     if _timer is not None:
         _timer.cancel()
         _timer = None
     _pending_events.clear()
     _pending_clubs.clear()
+    _pending_topics = False
