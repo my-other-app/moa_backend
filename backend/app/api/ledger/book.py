@@ -45,6 +45,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 
+from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.api.ledger.models import SHARDS, LedgerEntries, LedgerMonthly, LedgerPlatformMonthly
@@ -177,14 +178,9 @@ async def post(session, txn: Txn) -> int:
     try:
         if sum(line.amount for line in lines) != 0:
             raise Unbalanced(f"{txn.key}: lines sum to {sum(line.amount for line in lines)} paise, not 0")
-        table = LedgerEntries.__table__
         async with session.begin_nested():
-            written = (await session.execute(
-                pg_insert(table).values(_rows(txn, lines))
-                .on_conflict_do_nothing(index_elements=["txn_key", "line"])
-                .returning(table.c.line)
-            )).scalars().all()
-            txn.written = [lines[i] for i in sorted(written)]
+            written = (await session.execute(_INSERT, _rows(txn, lines))).all()
+            txn.written = [lines[i] for _, i in sorted(written, key=lambda r: r[1])]
             if txn.written and len(txn.written) != len(lines):
                 # Some lines of this key were there and some not: the same
                 # key was posted with other lines. Kept as found; the
@@ -223,28 +219,49 @@ def _accumulate(monthly: dict, platform: dict, txn: Txn, lines: list[Line]) -> N
 MONTHLY_KEY = ("club_id", "event_id", "gateway_id", "month", "origin_month", "account", "kind")
 PLATFORM_KEY = ("month", "origin_month", "club_gateway", "account", "kind", "shard")
 
+# The statements are built once and run with a list of rows (SQLAlchemy's
+# insertmanyvalues): a multi-row VALUES built per call was compiled afresh
+# every time, and for a backfill batch that compiling was most of the cost.
+_ENTRIES = LedgerEntries.__table__
+_INSERT = (
+    pg_insert(_ENTRIES)
+    .on_conflict_do_nothing(index_elements=["txn_key", "line"])
+    .returning(_ENTRIES.c.txn_key, _ENTRIES.c.line)
+)
 
-async def add_to(session, model, key_names: tuple, sums: dict[tuple, list[int]]) -> None:
-    """Add `sums` ({key: [paise, units, entries]}) to `model`'s rows, one
-    UPSERT, in key order (two postings lock the rows they share in the same
-    order, and cannot deadlock on them)."""
-    if not sums:
-        return
+
+def _upsert(model, key_names: tuple):
     table = model.__table__
-    rows = [
-        {**dict(zip(key_names, key)), "amount_paise": v[0], "units": v[1], "entries": v[2]}
-        for key, v in sorted(sums.items(), key=lambda kv: tuple(str(k) for k in kv[0]))
-    ]
-    stmt = pg_insert(table).values(rows)
-    await session.execute(stmt.on_conflict_do_update(
+    stmt = pg_insert(table)
+    return stmt.on_conflict_do_update(
         index_elements=list(key_names),
         set_={
             "amount_paise": table.c.amount_paise + stmt.excluded.amount_paise,
             "units": table.c.units + stmt.excluded.units,
             "entries": table.c.entries + stmt.excluded.entries,
-            "updated_at": now(),
+            "updated_at": func.now(),
         },
-    ))
+    )
+
+
+_UPSERTS = {
+    (LedgerMonthly, MONTHLY_KEY): _upsert(LedgerMonthly, MONTHLY_KEY),
+    (LedgerPlatformMonthly, PLATFORM_KEY): _upsert(LedgerPlatformMonthly, PLATFORM_KEY),
+}
+
+
+async def add_to(session, model, key_names: tuple, sums: dict[tuple, list[int]]) -> None:
+    """Add `sums` ({key: [paise, units, entries]}) to `model`'s rows, in key
+    order (two postings lock the rows they share in the same order, and
+    cannot deadlock on them)."""
+    if not sums:
+        return
+    rows = [
+        {**dict(zip(key_names, key)), "amount_paise": v[0], "units": v[1], "entries": v[2]}
+        for key, v in sorted(sums.items(), key=lambda kv: tuple(str(k) for k in kv[0]))
+    ]
+    stmt = _UPSERTS.get((model, key_names))
+    await session.execute(_upsert(model, key_names) if stmt is None else stmt, rows)
 
 
 async def _add_to_sums(session, txn: Txn, lines: list[Line]) -> None:
@@ -285,16 +302,11 @@ async def post_many(session, txns: list[Txn]) -> int:
         for i, line in enumerate(lines):
             rows.append(_row(txn, i, line))
             index[(txn.key[:200], i)] = (txn, line)
-    table = LedgerEntries.__table__
     try:
         async with session.begin_nested():
             written = []
             for start in range(0, len(rows), CHUNK):
-                written += (await session.execute(
-                    pg_insert(table).values(rows[start:start + CHUNK])
-                    .on_conflict_do_nothing(index_elements=["txn_key", "line"])
-                    .returning(table.c.txn_key, table.c.line)
-                )).all()
+                written += (await session.execute(_INSERT, rows[start:start + CHUNK])).all()
             monthly, platform = _sums()
             for key, line in written:
                 txn, kept = index[(key, line)]
