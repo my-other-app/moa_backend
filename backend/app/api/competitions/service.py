@@ -2,7 +2,11 @@
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from sqlalchemy import func, select
+from statistics import mean, pstdev
+
+from sqlalchemy import func, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.competitions.models import (
@@ -31,13 +35,24 @@ def _now() -> datetime:
 # ─── The competition itself ──────────────────────────────────────────────
 
 
+async def find(session: AsyncSession, event: Events) -> Competitions | None:
+    """The event's competition, if anyone has made one. Reads only: the
+    public board and a guest's side never make one."""
+    return await session.scalar(select(Competitions).where(Competitions.event_id == event.id))
+
+
 async def get_or_create(session: AsyncSession, event: Events) -> Competitions:
-    c = await session.scalar(select(Competitions).where(Competitions.event_id == event.id))
+    """The organiser's first look makes it. Two first looks at once make one:
+    the insert yields to the unique event_id (ON CONFLICT DO NOTHING)."""
+    c = await find(session, event)
     if c is None:
-        c = Competitions(event_id=event.id, requirements=list(DEFAULT_REQUIREMENTS), rubric=list(DEFAULT_RUBRIC))
-        session.add(c)
+        await session.execute(
+            pg_insert(Competitions.__table__)
+            .values(event_id=event.id, requirements=list(DEFAULT_REQUIREMENTS), rubric=list(DEFAULT_RUBRIC))
+            .on_conflict_do_nothing(index_elements=["event_id"])
+        )
         await session.commit()
-        await session.refresh(c)
+        c = await find(session, event)
     return c
 
 
@@ -54,6 +69,7 @@ def _settings(c: Competitions) -> dict:
         submissions_close_at=c.submissions_close_at, submissions_closed_at=c.submissions_closed_at, submissions_open=submissions_open(c),
         requirements=c.requirements or [], rubric=c.rubric or [], leaderboard_public=c.leaderboard_public,
         shortlist_size=c.shortlist_size, final_size=c.final_size, slot_minutes=c.slot_minutes,
+        score_method=c.score_method or "mean",
     )
 
 
@@ -157,13 +173,24 @@ async def _track_or_none(session: AsyncSession, c: Competitions, track_id: int |
     return (await track_for(session, c, track_id)).id
 
 
+async def _flush_name(session: AsyncSession) -> None:
+    """Flush a new or renamed team: a name another team of the competition
+    has (in any case) is a 409, whichever request got there first
+    (uq_competition_teams_name)."""
+    try:
+        async with session.begin_nested():
+            await session.flush()
+    except IntegrityError:
+        raise CustomHTTPException(409, message="A team already has that name")
+
+
 async def create_team(session: AsyncSession, c: Competitions, event: Events, name: str, track_id: int | None, registration_ids: list[UUID], by: UUID | None = None) -> CompetitionTeams:
     name = name.strip()
     if await session.scalar(select(func.count()).select_from(CompetitionTeams).where(CompetitionTeams.competition_id == c.id, func.lower(CompetitionTeams.name) == name.lower())):
         raise CustomHTTPException(409, message="A team already has that name")
     team = CompetitionTeams(competition_id=c.id, name=name, track_id=await _track_or_none(session, c, track_id), created_by_registration_id=by)
     session.add(team)
-    await session.flush()
+    await _flush_name(session)
     for rid in registration_ids:
         await _add_member(session, c, event, team, rid)
     await session.commit()
@@ -178,11 +205,21 @@ async def _add_member(session: AsyncSession, c: Competitions, event: Events, tea
     existing = await team_of_registration(session, c, registration_id)
     if existing is not None:
         raise CustomHTTPException(409, message=f"{reg.full_name} is already on {existing.name}")
+    # The team's row, held to the commit: two joins at once cannot both see
+    # the last place free.
+    await session.execute(select(CompetitionTeams.id).where(CompetitionTeams.id == team.id).with_for_update())
     n = await session.scalar(select(func.count()).select_from(CompetitionTeamMembers).where(CompetitionTeamMembers.team_id == team.id))
     if n >= c.team_max:
         raise CustomHTTPException(409, message=f"{team.name} is full")
-    session.add(CompetitionTeamMembers(team_id=team.id, registration_id=registration_id))
-    await session.flush()
+    try:
+        async with session.begin_nested():
+            session.add(CompetitionTeamMembers(competition_id=c.id, team_id=team.id, registration_id=registration_id))
+            await session.flush()
+    except IntegrityError:
+        # One team per person per competition (uq_competition_members_once):
+        # they joined another team meanwhile.
+        other = await team_of_registration(session, c, registration_id)
+        raise CustomHTTPException(409, message=f"{reg.full_name} is already on {other.name if other else 'a team'}")
     seeker = await session.scalar(select(CompetitionSeekers).where(CompetitionSeekers.competition_id == c.id, CompetitionSeekers.registration_id == registration_id))
     if seeker is not None:
         await session.delete(seeker)
@@ -212,6 +249,7 @@ async def patch_team(session: AsyncSession, c: Competitions, team: CompetitionTe
         team.track_id = await _track_or_none(session, c, data["track_id"])
     if data.get("stage"):
         team.stage = TeamStage(data["stage"]).value
+    await _flush_name(session)
     await session.commit()
     await session.refresh(team)
     return team
@@ -261,6 +299,9 @@ def _submission_out(c: Competitions, team: CompetitionTeams) -> dict:
 async def put_submission(session: AsyncSession, c: Competitions, team: CompetitionTeams, fields: dict) -> CompetitionTeams:
     if not submissions_open(c):
         raise CustomHTTPException(409, message="Submissions are closed")
+    members = await session.scalar(select(func.count()).select_from(CompetitionTeamMembers).where(CompetitionTeamMembers.team_id == team.id)) or 0
+    if members < (c.team_min or 1):
+        raise CustomHTTPException(409, message=f"A team needs at least {c.team_min} people to submit; {team.name} has {members}.", error_code="TEAM_TOO_SMALL")
     known = {r["key"] for r in (c.requirements or [])}
     unknown = [k for k in fields if k not in known]
     if unknown:
@@ -354,50 +395,106 @@ async def _scores(session: AsyncSession, c: Competitions) -> list[CompetitionSco
     return list(rows.all())
 
 
-def _board(c: Competitions, teams: list[CompetitionTeams], scores: list[CompetitionScores], tracks: dict) -> list[dict]:
-    """Every team by its mean judge total; the unscored at the bottom, unranked."""
-    by_team: dict = {}
+SCORE_METHODS = ("mean", "zscore")
+
+
+def team_scores(c: Competitions, scores: list[CompetitionScores]) -> dict:
+    """{team id: (score, judges who scored it)}.
+
+    "mean" (the default): the mean of the judges' totals, out of a hundred.
+    "zscore": each judge's totals are first put on that judge's own scale
+    -- how far above or below their own average, in their own spread -- so a
+    hard marker and a generous one count alike; the team's score is the
+    mean of those, shown as 50 + 10z (a judge's average team scores 50). A
+    judge who scored one team, or gave every team the same, says nothing
+    about order and contributes 0."""
+    totals: dict = {}
     for s in scores:
         t = total_of(c, s.scores)
         if t is not None:
-            by_team.setdefault(s.team_id, []).append(t)
+            totals.setdefault(s.team_id, []).append((s.judge_id, t))
+    if (c.score_method or "mean") != "zscore":
+        return {team: (round(mean(t for _, t in pairs), 1), len(pairs)) for team, pairs in totals.items()}
+    by_judge: dict = {}
+    for pairs in totals.values():
+        for judge, t in pairs:
+            by_judge.setdefault(judge, []).append(t)
+    scale = {j: (mean(ts), pstdev(ts)) for j, ts in by_judge.items()}
+
+    def z(judge, t):
+        mu, sd = scale[judge]
+        return (t - mu) / sd if sd > 0 else 0.0
+
+    return {team: (round(50 + 10 * mean(z(j, t) for j, t in pairs), 1), len(pairs)) for team, pairs in totals.items()}
+
+
+def _board(c: Competitions, teams: list[CompetitionTeams], scores: list[CompetitionScores], tracks: dict) -> list[dict]:
+    """Every team by its score; the unscored at the bottom, unranked. Teams
+    on the same score share a rank (1, 2, 2, 4): the board does not pick
+    between them by their names."""
+    by_team = team_scores(c, scores)
     judges_total = len(c.judges)
     rows = []
     for t in teams:
-        totals = by_team.get(t.id, [])
-        rows.append(dict(rank=None, team_id=t.id, name=t.name, track=tracks.get(t.track_id), stage=t.stage, score=round(sum(totals) / len(totals), 1) if totals else None, judges_scored=len(totals), judges_total=judges_total))
+        score, scored = by_team.get(t.id, (None, 0))
+        rows.append(dict(rank=None, team_id=t.id, name=t.name, track=tracks.get(t.track_id), stage=t.stage, score=score, judges_scored=scored, judges_total=judges_total))
     rows.sort(key=lambda r: (r["score"] is None, -(r["score"] or 0), r["name"].lower()))
-    rank = 0
-    for r in rows:
-        if r["score"] is not None:
-            rank += 1
-            r["rank"] = rank
+    previous = None
+    for i, r in enumerate(rows, start=1):
+        if r["score"] is None:
+            continue
+        r["rank"] = previous["rank"] if previous is not None and previous["score"] == r["score"] else i
+        previous = r
     return rows
 
 
 # ─── Rounds ──────────────────────────────────────────────────────────────
 
 
-async def advance(session: AsyncSession, c: Competitions, to: str, size: int | None) -> None:
-    """Shortlist the top N of the entered by score; make finalists of the top M of the shortlist. Only scored teams move."""
+#: The stages at or past each round, which count towards its size.
+_REACHED = {"shortlisted": ("shortlisted", "finalist"), "finalist": ("finalist",)}
+_FROM = {"shortlisted": "entered", "finalist": "shortlisted"}
+
+
+async def advance(session: AsyncSession, c: Competitions, to: str, size: int | None) -> list[str]:
+    """Bring the round up to `size` teams (the shortlist, or the finalists):
+    the best-scored of the stage before move until it has that many. Run it
+    twice and the second moves nobody; teams moved by hand count. Only
+    scored teams move.
+
+    A tie at the cut -- two teams on the same score for the last place --
+    is not settled here: nothing moves, and the 409 names the teams, so the
+    organiser moves one by hand (or asks for a size the tie does not split)
+    and runs it again. Returns the names moved."""
+    # One advance at a time: the competition's row, held to the commit.
+    await session.execute(select(Competitions.id).where(Competitions.id == c.id).with_for_update())
     teams = await teams_of(session, c)
     scores = await _scores(session, c)
-    tracks = {t.id: t.name for t in c.tracks}
-    board = _board(c, teams, scores, tracks)
-    pool = {"shortlisted": ("entered", size or c.shortlist_size), "finalist": ("shortlisted", size or c.final_size)}[to]
-    from_stage, n = pool
+    board = _board(c, teams, scores, {t.id: t.name for t in c.tracks})
+    target = size or (c.shortlist_size if to == "shortlisted" else c.final_size)
     by_id = {t.id: t for t in teams}
-    moved = 0
-    for r in board:
-        if moved >= n:
-            break
-        if r["score"] is None:
-            break
-        t = by_id[r["team_id"]]
-        if t.stage == from_stage:
-            t.stage = to
-            moved += 1
+    have = sum(1 for t in teams if t.stage in _REACHED[to])
+    places = target - have
+    candidates = [r for r in board if r["score"] is not None and by_id[r["team_id"]].stage == _FROM[to]]
+    if places <= 0 or not candidates:
+        return []
+    chosen = candidates[:places]
+    if len(candidates) > places and candidates[places]["score"] == chosen[-1]["score"]:
+        cut = chosen[-1]["score"]
+        tied = [r for r in candidates if r["score"] == cut]
+        clear = sum(1 for r in candidates if r["score"] > cut)
+        names = ", ".join(r["name"] for r in tied)
+        left = places - clear
+        raise CustomHTTPException(
+            409,
+            message=f"{names} tie on {cut} for the last {'place' if left == 1 else f'{left} places'}. Move one by hand, or advance {have + clear} or {have + clear + len(tied)}.",
+            error_code="TIE_AT_CUT",
+            errors={"tied": [dict(team_id=r["team_id"], name=r["name"], score=r["score"]) for r in tied], "places_left": left, "score": cut},
+        )
+    for r in chosen:
+        by_id[r["team_id"]].stage = to
     await session.commit()
+    return [r["name"] for r in chosen]
 
 
 # ─── Office hours ────────────────────────────────────────────────────────
@@ -458,21 +555,36 @@ async def slot_for(session: AsyncSession, c: Competitions, slot_id: int) -> Comp
 
 
 async def set_slot(session: AsyncSession, c: Competitions, slot: CompetitionSlots, team_id: int | None, *, by_team: CompetitionTeams | None = None) -> CompetitionSlots:
-    """Book a slot for a team or free it. A team books only a free slot and frees only its own, one per mentor."""
+    """Book a slot for a team or free it. A team books only a free slot and
+    frees only its own; a team holds one slot per mentor.
+
+    Each is one conditional UPDATE, so two teams after the last slot cannot
+    both get it: a team's booking is `WHERE team_id IS NULL`, its freeing
+    `WHERE team_id = <its own>`, and uq_competition_slots_team refuses a
+    second slot with one mentor whoever books it."""
+    t = CompetitionSlots.__table__
+    stmt = update(t).where(t.c.id == slot.id).values(team_id=team_id).returning(t.c.id)
     if by_team is not None:
         if team_id is not None:
-            if slot.team_id is not None:
-                raise CustomHTTPException(409, message="That slot is taken")
             if slot.starts_at <= _now():
                 raise CustomHTTPException(409, message="That slot has passed")
             held = await session.scalar(select(func.count()).select_from(CompetitionSlots).where(CompetitionSlots.mentor_id == slot.mentor_id, CompetitionSlots.team_id == by_team.id))
             if held:
                 raise CustomHTTPException(409, message="Your team already has a slot with this mentor")
-        elif slot.team_id != by_team.id:
-            raise CustomHTTPException(403, message="That is not your team's slot")
+            stmt = stmt.where(t.c.team_id.is_(None))
+        else:
+            stmt = stmt.where(t.c.team_id == by_team.id)
     if team_id is not None:
         await team_for(session, c, team_id)
-    slot.team_id = team_id
+    try:
+        async with session.begin_nested():
+            done = (await session.execute(stmt)).first()
+    except IntegrityError:
+        raise CustomHTTPException(409, message="That team already has a slot with this mentor")
+    if done is None:
+        if by_team is not None and team_id is None:
+            raise CustomHTTPException(403, message="That is not your team's slot")
+        raise CustomHTTPException(409, message="That slot is taken")
     await session.commit()
     await session.refresh(slot)
     return slot
@@ -488,18 +600,14 @@ async def delete_slot(session: AsyncSession, slot: CompetitionSlots) -> None:
 
 async def _team_rows(session: AsyncSession, c: Competitions, event: Events, teams: list[CompetitionTeams], scores: list[CompetitionScores], tracks: dict, *, with_email: bool) -> list[dict]:
     regs = await _registrations(session, event.id, {m.registration_id for t in teams for m in t.members})
-    by_team: dict = {}
-    for s in scores:
-        t = total_of(c, s.scores)
-        if t is not None:
-            by_team.setdefault(s.team_id, []).append(t)
+    by_team = team_scores(c, scores)
     out = []
     for t in teams:
-        totals = by_team.get(t.id, [])
+        score, scored = by_team.get(t.id, (None, 0))
         members = [dict(registration_id=m.registration_id, name=regs[m.registration_id].full_name if m.registration_id in regs else "Guest", email=regs[m.registration_id].email if with_email and m.registration_id in regs else None) for m in t.members]
         out.append(dict(
             id=t.id, name=t.name, track_id=t.track_id, track=tracks.get(t.track_id), stage=t.stage, members=members, open_spots=max(0, c.team_max - len(members)),
-            submission=_submission_out(c, t), score=round(sum(totals) / len(totals), 1) if totals else None, judges_scored=len(totals), created_at=t.created_at,
+            submission=_submission_out(c, t), score=score, judges_scored=scored, created_at=t.created_at,
         ))
     return out
 
