@@ -53,6 +53,12 @@ class DeliveryStatus(enum.Enum):
 #: Waiting for a worker, or with one now.
 UNFINISHED = (DeliveryStatus.pending, DeliveryStatus.sending)
 
+#: How a status reads outside (the desk, the analytics, a report): a row
+#: being sent is still pending, and one given up on has failed -- its error
+#: says it was given up on. The statuses the outside knows are the others.
+SHOWN = {DeliveryStatus.sending: DeliveryStatus.pending, DeliveryStatus.dead: DeliveryStatus.failed}
+SHOWN_STATUSES = tuple(s for s in DeliveryStatus if s not in SHOWN)
+
 
 class DeliveryOutcome(enum.Enum):
     """What the provider's own webhook said became of it, after we sent it."""

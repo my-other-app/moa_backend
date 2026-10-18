@@ -27,6 +27,8 @@ from sqlalchemy.orm import joinedload
 
 from app.api.deliveries import pipeline
 from app.api.deliveries.models import (
+    SHOWN,
+    SHOWN_STATUSES,
     UNFINISHED,
     Deliveries,
     DeliveryAttempts,
@@ -666,11 +668,6 @@ async def bundle_zip(session, event: Events) -> bytes:
 
 # --- reading back -------------------------------------------------------------
 
-#: How a status reads outside: a row being sent is still pending to the
-#: desk, and one given up on has failed (its error says it was given up on).
-SHOWN = {DeliveryStatus.sending: DeliveryStatus.pending, DeliveryStatus.dead: DeliveryStatus.failed}
-
-
 def shown(status: DeliveryStatus) -> DeliveryStatus:
     return SHOWN.get(status, status)
 
@@ -706,7 +703,7 @@ async def summary(session, event: Events, kind: DeliveryKind) -> dict:
     channels = []
     for channel in DeliveryChannel:
         n = lambda s: counts.get((channel, s), 0)  # noqa: E731
-        with_row = sum(n(s) for s in DeliveryStatus)
+        with_row = sum(n(s) for s in SHOWN_STATUSES)
         channels.append({
             "channel": channel.value,
             "sent": n(DeliveryStatus.sent),
