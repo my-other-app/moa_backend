@@ -56,7 +56,7 @@ TREE = (
         "Web Development", "App Development", "Software Engineering", "Coding", "Open Source", "Cloud & DevOps",
         "Cybersecurity", "Data Science",
     )),
-    ("deep-tech", "Deep Tech", "#7C3AED", "🤖", "AI, robots, hardware and the far edge of science.", (
+    ("deep-tech", "Deep Tech", "#7C3AED", "🔬", "AI, robots, hardware and the far edge of science.", (
         "Artificial Intelligence", "Robotics", "IoT & Hardware", "Blockchain", "VR/AR", "Quantum Computing", "Space Exploration",
     )),
     ("design", "Design", "#DB2777", "🎨", "Interfaces, visuals and products people love to use.", (
@@ -74,7 +74,7 @@ TREE = (
     ("community", "Community", "#0D9488", "🤝", "Giving back, speaking up, debating and quizzing.", (
         "Volunteering", "Sustainability", "Public Speaking", "Debate & MUN", "Quizzing",
     )),
-    ("sports-fitness", "Sports & Fitness", "#CA8A04", "🏅", "Playing, training and getting outdoors.", (
+    ("sports-fitness", "Sports & Fitness", "#CA8A04", "⚽", "Playing, training and getting outdoors.", (
         "Sports", "Fitness", "Outdoors & Adventure",
     )),
 )
