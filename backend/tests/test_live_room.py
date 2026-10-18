@@ -4,14 +4,14 @@ taps, and a survey that goes to each guest once."""
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import select, text, update
 
 from app.api.checkins.models import CheckInVia, CheckIns
 from app.api.discover import cache
 from app.api.live import service
-from app.api.live.models import FeedbackSurveys, LiveQuizPlayers
+from app.api.live.models import FeedbackSends, FeedbackSurveys, LiveQuizPlayers
 from app.api.orgs.models import Organizations, OrgTypes
-from app.core import after_commit
+from app.core import after_commit, jobs
 from tests.conftest import auth_header
 from tests.racing import beaten_to, statements
 
@@ -313,3 +313,64 @@ async def test_the_sweep_finds_due_surveys_by_their_due_time(client, session, wo
     # What the sweep asks for is a range of the due index, not every survey never sent.
     sql = str(service.due_query(START).compile())
     assert "feedback_surveys.due_at <=" in sql and " LIMIT " in sql
+
+
+async def test_survey_mails_are_jobs_and_a_rerun_mails_nobody_twice(client, session, world, monkeypatch):
+    sent = []
+
+    def send_email(**kw):
+        sent.append((kw["recipients"][0], kw["idempotency_key"]))
+
+    monkeypatch.setattr(service.email_mod, "send_email", send_email)
+    g = world["guests"]
+    for reg in g:
+        session.add(CheckIns(event_id=world["event"].id, registration_id=reg.id, via=CheckInVia.gate, checked_in_at=START, door_label="Gate"))
+    await session.commit()
+
+    out = (await client.post(_u(world, "/feedback/send"), headers=world["h"])).json()
+    assert out["sent"] == 3 and sorted(a for a, _ in sent) == sorted(r.email for r in g)
+    survey = await service.survey_of(session, world["event"])
+    rows = (await session.execute(select(FeedbackSends.registration_id, FeedbackSends.mailed_at).where(FeedbackSends.survey_id == survey.id))).all()
+    assert len(rows) == 3 and all(at is not None for _, at in rows)
+    # One job per guest, keyed by the guest.
+    keys = (await session.scalars(text("SELECT dedupe_key FROM jobs WHERE name = 'live.survey_mail' ORDER BY dedupe_key"))).all()
+    assert keys == sorted(f"live:survey:{survey.id}:{r.id}" for r in g)
+
+    # The queue is at least once: every job run again mails nobody.
+    for reg in g:
+        await service._survey_mail_job({"survey_id": str(survey.id), "registration_id": str(reg.id)})
+    assert len(sent) == 3
+    # Sending the survey again writes no job and mails nobody.
+    again = (await client.post(_u(world, "/feedback/send"), headers=world["h"])).json()
+    await jobs.settle()
+    assert again["sent"] == 0 and len(sent) == 3
+
+    # A mail the provider does not take is tried again, and only that one.
+    later = await service.survey_of(session, world["event"])
+    await session.execute(update(FeedbackSends).where(FeedbackSends.survey_id == later.id, FeedbackSends.registration_id == g[1].id).values(mailed_at=None))
+    await session.commit()
+    calls = []
+
+    def refuse(**kw):
+        calls.append(kw["recipients"][0])
+        raise RuntimeError("the provider is down")
+
+    monkeypatch.setattr(service.email_mod, "send_email", refuse)
+    with pytest.raises(RuntimeError):
+        await service._survey_mail_job({"survey_id": str(later.id), "registration_id": str(g[1].id)})
+    assert (await session.scalar(select(FeedbackSends.mailed_at).where(FeedbackSends.registration_id == g[1].id))) is None
+    monkeypatch.setattr(service.email_mod, "send_email", send_email)
+    for reg in g:
+        await service._survey_mail_job({"survey_id": str(later.id), "registration_id": str(reg.id)})
+    assert [a for a, _ in sent[3:]] == [g[1].email] and calls == [g[1].email]
+    # The provider is given the same key each time, so a retry after a cut-off run is one mail.
+    assert sent[3][1] == f"live:survey:{later.id}:{g[1].id}"
+
+
+async def test_one_unfinished_job_per_guest_however_often_it_is_enqueued(session, world):
+    survey = await service.survey_of(session, world["event"])
+    items = [({"survey_id": str(survey.id), "registration_id": str(r.id)}, service._survey_mail_key(survey.id, r.id)) for r in world["guests"]]
+    assert await jobs.enqueue_many(session, service.SURVEY_MAIL, items) == 3
+    assert await jobs.enqueue_many(session, service.SURVEY_MAIL, items) == 0
+    await session.commit()
+    assert (await session.scalar(text("SELECT count(*) FROM jobs WHERE name = 'live.survey_mail' AND finished_at IS NULL"))) == 3

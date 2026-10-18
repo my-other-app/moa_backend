@@ -62,7 +62,7 @@ from app.api.live.models import (
     UpdateKind,
 )
 from app.config import settings
-from app.core import after_commit
+from app.core import jobs
 from app.core.email import email as email_mod
 from app.response import CustomHTTPException
 
@@ -713,40 +713,83 @@ def _survey_email(event: Events, reg, org: str) -> dict:
     return {"subject": f"How was {event.name}?", "text": text_, "html": html}
 
 
-def _send_mails(mails: list[tuple], org: str) -> None:
-    """On a worker thread, after the commit that claimed the recipients."""
-    for reg_id, address, mail in mails:
-        try:
-            email_mod.send_email(recipients=[address], subject=mail["subject"], text=mail["text"], html=mail["html"], sender_name=org)
-        except Exception:  # noqa: BLE001
-            logger.exception("feedback survey email failed for registration %s", reg_id)
+SURVEY_MAIL = "live.survey_mail"
+
+
+def _survey_mail_key(survey_id, registration_id) -> str:
+    return f"live:survey:{survey_id}:{registration_id}"
 
 
 async def send_survey(session, event: Events, now: Optional[datetime] = None) -> dict:
     """To everyone who was checked in and has not been sent it yet; each gets
     a link only they hold. The recipients are claimed (feedback_sends) in the
     same transaction that marks the survey sent, so sending again, or the
-    sweep and a send at once, reaches only the people not sent yet; the mails
-    go after the commit, off the request."""
+    sweep and a send at once, reaches only the people not sent yet. Each
+    claimed guest's mail is a job of its own (SURVEY_MAIL), written in that
+    transaction: it survives a restart, is retried when the provider does not
+    take it, and marks the guest mailed (feedback_sends.mailed_at) once it
+    went, so a job run twice mails nobody twice."""
     survey = await survey_of(session, event)
     everyone = await audience_regs(session, event, Audience.checked_in)
     regs = [r for r in everyone if r.email]
-    claimed: set = set()
+    claimed: list = []
     if regs:
-        claimed = set((await session.scalars(
+        claimed = list((await session.scalars(
             pg_insert(FeedbackSends)
             .values([{"survey_id": survey.id, "registration_id": r.id} for r in regs])
             .on_conflict_do_nothing(index_elements=["survey_id", "registration_id"])
             .returning(FeedbackSends.registration_id)
         )).all())
-    org = (event.club.name if getattr(event, "club", None) else None) or "The organisers"
-    mails = [(r.id, r.email, _survey_email(event, r, org)) for r in regs if r.id in claimed]
     survey.sent_at = now or now_utc()
-    survey.sent_count = (survey.sent_count or 0) + len(mails)
-    if mails:
-        after_commit.run_after_commit(session, _send_mails, mails, org)
+    survey.sent_count = (survey.sent_count or 0) + len(claimed)
+    await jobs.enqueue_many(session, SURVEY_MAIL, [
+        ({"survey_id": survey.id, "registration_id": reg_id}, _survey_mail_key(survey.id, reg_id)) for reg_id in claimed
+    ])
     await session.commit()
-    return {"sent": len(mails), "invited": len(everyone), **survey_out(survey)}
+    return {"sent": len(claimed), "invited": len(everyone), **survey_out(survey)}
+
+
+@jobs.handler(SURVEY_MAIL, max_attempts=6, timeout=60.0)
+async def _survey_mail_job(payload: dict) -> None:
+    await mail_survey(UUID(str(payload["survey_id"])), UUID(str(payload["registration_id"])))
+
+
+async def mail_survey(survey_id: UUID, registration_id: UUID) -> bool:
+    """One guest's survey mail, unless it went already. True when it went now.
+
+    Read, send, then mark: a run cut off between the send and the mark sends
+    it again on the retry -- rather that than a mail claimed and never sent --
+    and the provider is given the same idempotency key both times, so one
+    that keeps them (Resend) delivers it once. A provider that does not take
+    it raises here, and the job is tried again later."""
+    async with jobs.scope() as s:
+        row = (await s.execute(
+            select(FeedbackSends.mailed_at, EventRegistrationsLink, Events)
+            .join(EventRegistrationsLink, EventRegistrationsLink.id == FeedbackSends.registration_id)
+            .join(FeedbackSurveys, FeedbackSurveys.id == FeedbackSends.survey_id)
+            .join(Events, Events.id == FeedbackSurveys.event_id)
+            .options(joinedload(Events.club))
+            .where(FeedbackSends.survey_id == survey_id, FeedbackSends.registration_id == registration_id)
+        )).first()
+        # End the read before the provider's call: no pooled connection held meanwhile.
+        await s.commit()
+    if row is None or row[0] is not None or not row[1].email:
+        return False
+    reg, event = row[1], row[2]
+    org = (event.club.name if event.club is not None else None) or "The organisers"
+    mail = _survey_email(event, reg, org)
+    await asyncio.to_thread(
+        email_mod.send_email, recipients=[reg.email], subject=mail["subject"], text=mail["text"], html=mail["html"],
+        sender_name=org, idempotency_key=_survey_mail_key(survey_id, registration_id),
+    )
+    async with jobs.scope() as s:
+        await s.execute(
+            update(FeedbackSends)
+            .where(FeedbackSends.survey_id == survey_id, FeedbackSends.registration_id == registration_id, FeedbackSends.mailed_at.is_(None))
+            .values(mailed_at=now_utc())
+        )
+        await s.commit()
+    return True
 
 
 async def _results(session, survey: FeedbackSurveys, invited: int) -> dict:

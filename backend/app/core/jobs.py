@@ -307,6 +307,34 @@ async def enqueue(
         _after_commit(session, job_id)
 
 
+async def enqueue_many(
+    session, name: str, items: Iterable[tuple[dict, Optional[str]]], *, priority: int = 0, chunk: int = 1000,
+) -> int:
+    """`enqueue` for many jobs of one name -- (payload, dedupe_key) each -- in
+    a statement per `chunk` rather than one each: a survey to a hall is a job
+    per guest. Returns how many were written (a key already waiting is not)."""
+    h = _handlers.get(name)
+    if h is None:
+        logger.warning("job %s is enqueued but no handler is registered in this process", name)
+    rows = [
+        dict(name=name, payload=as_json(payload), priority=clamp_priority(priority),
+             max_attempts=h.max_attempts if h else DEFAULT_MAX_ATTEMPTS, dedupe_key=dedupe_key)
+        for payload, dedupe_key in items
+    ]
+    table = Jobs.__table__
+    written = 0
+    for i in range(0, len(rows), chunk):
+        stmt = (
+            pg_insert(table).values(rows[i:i + chunk])
+            .on_conflict_do_nothing(index_elements=[table.c.dedupe_key], index_where=sa.text(DEDUPE_WHERE))
+            .returning(table.c.id)
+        )
+        for job_id in (await session.execute(stmt)).scalars().all():
+            _after_commit(session, job_id)
+            written += 1
+    return written
+
+
 def add(session, name: str, payload: dict, *, priority: int = 0) -> Jobs:
     """`enqueue` for code that cannot await (app.core.after_commit): the row
     is added to the session and written with its next flush. No dedupe."""
