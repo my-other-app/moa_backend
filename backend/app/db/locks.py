@@ -23,8 +23,11 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 
 @asynccontextmanager
-async def singleton(target, key: int) -> AsyncIterator[bool]:
+async def singleton(target, key: int | tuple[int, int]) -> AsyncIterator[bool]:
     """Yields whether this process holds advisory lock `key` for the block.
+
+    `key` is one bigint, or two ints (Postgres's two-key form: a kind of
+    lock, and the row it is for).
 
     `target` is the engine, or the session the work will use: a session on an
     engine gets a separate connection for the lock; a session bound to one
@@ -41,10 +44,11 @@ async def singleton(target, key: int) -> AsyncIterator[bool]:
 
 
 @asynccontextmanager
-async def _held(conn, key: int) -> AsyncIterator[bool]:
-    got = bool(await conn.scalar(select(func.pg_try_advisory_lock(key))))
+async def _held(conn, key) -> AsyncIterator[bool]:
+    keys = tuple(key) if isinstance(key, (tuple, list)) else (key,)
+    got = bool(await conn.scalar(select(func.pg_try_advisory_lock(*keys))))
     try:
         yield got
     finally:
         if got:
-            await conn.scalar(select(func.pg_advisory_unlock(key)))
+            await conn.scalar(select(func.pg_advisory_unlock(*keys)))

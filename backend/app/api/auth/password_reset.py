@@ -327,18 +327,16 @@ async def reset(session, *, email: str, code: str, new_password: str, totp_code:
 
         if not totp_code:
             raise _refuse(status.HTTP_401_UNAUTHORIZED, "TOTP_REQUIRED", "Enter the code from your authenticator app as well.")
-        if not totp_service.verify(user.totp_secret, totp_code):
-            remaining = totp_service.consume_recovery_code(totp_code, user.totp_recovery_codes)
-            if remaining is None:
-                left = await _wrong_try(session, row, now)
-                if left == 0:
-                    raise _locked()
-                raise _refuse(status.HTTP_401_UNAUTHORIZED, "TOTP_INVALID", "That authenticator code is not valid.", attempts_left=left)
-            user.totp_recovery_codes = remaining
+        # A code is good once, and a recovery code is spent (app.api.auth.totp).
+        if not await totp_service.check_second_factor(session, user, totp_code):
+            left = await _wrong_try(session, row, now)
+            if left == 0:
+                raise _locked()
+            raise _refuse(status.HTTP_401_UNAUTHORIZED, "TOTP_INVALID", "That authenticator code is not valid.", attempts_left=left)
 
-    from app.core.auth.authentication import get_password_hash
+    from app.core.auth.authentication import get_password_hash_async
 
-    user.password = get_password_hash(new_password)
+    user.password = await get_password_hash_async(new_password)
     # Ends every access and refresh token issued before now, and every session.
     user.token_version = (user.token_version or 0) + 1
     await session.execute(

@@ -27,7 +27,13 @@ class SignInAttempts(AbstractSQLModel, TimestampsMixin):
     session_id = Column(UUID(as_uuid=True), nullable=True)
     place = Column(String(120), nullable=True)
 
-    __table_args__ = (Index("ix_sign_in_attempts_user_created", "user_id", "created_at"),)
+    __table_args__ = (
+        Index("ix_sign_in_attempts_user_created", "user_id", "created_at"),
+        # The lockout across every address counts one account's tries in the
+        # last hour; the sweep removes the oldest.
+        Index("ix_sign_in_attempts_identifier_created", "identifier", "created_at"),
+        Index("ix_sign_in_attempts_created", "created_at"),
+    )
 
 
 class IpPlaces(AbstractSQLModel):

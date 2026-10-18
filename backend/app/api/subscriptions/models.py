@@ -327,6 +327,17 @@ class ClubSubscriptions(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     #: paise. Stored rather than derived because a club on a legacy plan keeps
     #: the price it signed up at, which the plan row no longer remembers.
     mrr_paise = Column(Integer, nullable=False, default=0, server_default="0")
+    #: What the club pays each cycle, in paise: the plan's price when it
+    #: checked out (or an admin assigned it), kept so an admin editing the
+    #: plan's price later does not change what existing subscribers are
+    #: counted at (Razorpay keeps charging them the old price). MRR is worked
+    #: out from this (service.mrr_of). Null on rows from before it was kept:
+    #: the plan's price then.
+    price_paise = Column(Integer, nullable=True)
+    #: Razorpay's `created_at` of the newest subscription event applied to
+    #: this row. Razorpay does not deliver events in order; an older one
+    #: arriving after it is not applied (a late `pending` after `charged`).
+    last_event_at = Column(TZAwareDateTime(timezone=True), nullable=True)
 
     #: Razorpay's subscription id. Null for a plan that costs nothing and for
     #: a subscription an admin assigned by hand.
@@ -397,6 +408,7 @@ class ClubSubscriptions(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         # history -- the same shape the club/user link tables use.
         UniqueConstraint("club_id", "is_deleted", name="uq_club_subscription_live"),
         CheckConstraint("mrr_paise >= 0", name="ck_subscription_mrr_non_negative"),
+        CheckConstraint("price_paise IS NULL OR price_paise >= 0", name="ck_subscription_price_non_negative"),
     )
 
 

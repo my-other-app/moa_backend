@@ -8,7 +8,8 @@ from app.api.notifications.schemas import NotificationSchema
 from app.core.notifications import service as push_service
 from . import service
 
-from app.core.auth.permissions import ModerateAuth
+from app.core.auth.permissions import BroadcastAuth
+from app.core.rate_limit import account_or_address, limiter
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 
@@ -32,34 +33,16 @@ async def list_notifications(
     user: UserAuth,
 ):
     """List notifications for the authenticated user.
-    
+
     Returns paginated list of notifications with related club/user/event data.
     """
-
-    print(f"DEBUG: List notifications request for user {user.id} limit={pagination.limit} offset={pagination.offset}")
-    
-    try:
-        notifications = await service.list_notifications(
-            session=session,
-            user_id=user.id,
-            limit=pagination.limit,
-            offset=pagination.offset,
-        )
-        print(f"DEBUG: Service returned {len(notifications)} notifications")
-        
-        # Debug: Print first notification to check data
-        if notifications:
-            n = notifications[0]
-            print(f"DEBUG: First notification: ID={n.id}, Type={n.type}, Club={n.from_club_id}")
-            
-        response = paginated_response(notifications, request, schema=NotificationSchema)
-        print("DEBUG: Successfully serialized response")
-        return response
-    except Exception as e:
-        print(f"DEBUG: Error listing notifications: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        raise e
+    notifications = await service.list_notifications(
+        session=session,
+        user_id=user.id,
+        limit=pagination.limit,
+        offset=pagination.offset,
+    )
+    return paginated_response(notifications, request, schema=NotificationSchema)
 
 
 @router.get("/unread-count", response_model=UnreadCountResponse)
@@ -129,72 +112,73 @@ class ListTokensResponse(BaseModel):
     tokens: List[TokenInfo]
 
 
-@router.post("/test/send-all", response_model=SendPushResponse, summary="Send push to all devices")
+@router.post("/test/send-all", response_model=SendPushResponse, summary="Send push to all devices (owners)")
+@limiter.limit("2/hour", key_func=account_or_address)
 async def send_push_to_all_devices(
-    request: SendPushRequest,
+    request: Request,
+    body: SendPushRequest,
     session: SessionDep,
-    user: ModerateAuth,  # Admin only
+    user: BroadcastAuth,
 ):
     """
-    Send a test push notification to ALL registered devices.
-    
-    This is an admin-only endpoint for testing push notifications.
+    Send a push to EVERY registered device. Owners only, twice an hour, and
+    written to the audit log.
+
+    It answers at once with how many devices there are; the sends go after the
+    response, FCM_BATCH devices at a time read in key order, so a crore of
+    devices is never one list in memory nor one request held open.
     """
-    from sqlalchemy import select
+    from sqlalchemy import func, select
+
+    from app.api.audit import service as audit
     from app.api.users.models import UserDeviceTokens
-    
-    # Get all tokens
-    query = select(UserDeviceTokens).where(UserDeviceTokens.is_deleted == False)
-    result = await session.execute(query)
-    tokens = result.scalars().all()
-    
-    if not tokens:
-        return SendPushResponse(
-            success=False,
-            tokens_count=0,
-            sent_count=0,
-            message="No registered devices found"
-        )
-    
-    # Get all user IDs
-    user_ids = list(set([t.user_id for t in tokens]))
-    
-    # Send notifications
-    sent_count = await push_service.send_notification_to_users(
-        session=session,
-        user_ids=user_ids,
-        title=request.title,
-        body=request.body,
-        image_url=request.image_url,
+    from app.core.notifications import fanout
+
+    devices = await session.scalar(
+        select(func.count()).select_from(UserDeviceTokens).where(UserDeviceTokens.is_deleted == False)  # noqa: E712
+    ) or 0
+    if not devices:
+        return SendPushResponse(success=False, tokens_count=0, sent_count=0, message="No registered devices found")
+
+    await audit.record(
+        session, actor=user, action="notifications.broadcast", entity_type="notification",
+        summary=f"Pushed to every device: {body.title}"[:255], details={"title": body.title, "devices": devices}, request=request,
     )
-    
+    await session.commit()
+    title, text, image_url = body.title, body.body, body.image_url
+
+    async def job(s) -> int:
+        return await push_service.send_to_every_device(s, title, text, image_url=image_url)
+
+    sent = await fanout.dispatch(session, job, name="broadcast")
     return SendPushResponse(
-        success=sent_count > 0,
-        tokens_count=len(tokens),
-        sent_count=sent_count,
-        message=f"Sent to {sent_count} of {len(tokens)} devices"
+        success=True,
+        tokens_count=devices,
+        sent_count=int(sent or 0),
+        message=f"Sending to {devices} devices" if sent is None else f"Sent to {sent} of {devices} devices",
     )
 
 
-@router.get("/test/tokens", response_model=ListTokensResponse, summary="List all registered FCM tokens")
+@router.get("/test/tokens", response_model=ListTokensResponse, summary="The newest registered FCM tokens")
 async def list_all_tokens(
     session: SessionDep,
     user: AdminAuth,  # Admin only
 ):
     """
-    List all registered FCM tokens.
-    
-    This is an admin-only endpoint for debugging push notifications.
+    The 100 newest registered FCM tokens, and how many there are in all.
+
+    This is an admin-only endpoint for debugging push notifications. It used
+    to return every row in the table.
     """
-    from sqlalchemy import select
+    from sqlalchemy import func, select
     from app.api.users.models import UserDeviceTokens
-    
-    query = select(UserDeviceTokens).where(UserDeviceTokens.is_deleted == False)
-    result = await session.execute(query)
-    tokens = result.scalars().all()
-    
+
+    live = UserDeviceTokens.is_deleted == False  # noqa: E712
+    count = await session.scalar(select(func.count()).select_from(UserDeviceTokens).where(live)) or 0
+    tokens = (await session.scalars(select(UserDeviceTokens).where(live).order_by(UserDeviceTokens.id.desc()).limit(100))).all()
+
     return ListTokensResponse(
-        count=len(tokens),
+        count=count,
         tokens=[
             TokenInfo(
                 user_id=t.user_id,
@@ -244,12 +228,11 @@ async def send_push_to_single_token(
     token: str,
     title: str,
     body: str,
-    user: ModerateAuth,
+    user: BroadcastAuth,
 ):
     """
     Send push notification directly to a single token for debugging.
     """
-    import firebase_admin
     from firebase_admin import messaging
     
     try:
@@ -275,8 +258,10 @@ async def send_push_to_single_token(
             ),
         )
         
-        # Send
-        response = messaging.send(message)
+        # Send, on a worker thread: the SDK blocks until FCM answers.
+        import asyncio
+
+        response = await asyncio.to_thread(messaging.send, message)
         return {"success": True, "message_id": response}
         
     except Exception as e:

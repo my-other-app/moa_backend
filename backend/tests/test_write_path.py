@@ -576,6 +576,12 @@ def test_the_clients_requests_time_out(monkeypatch):
         raise requests.ConnectionError("not here")
 
     monkeypatch.setattr(requests.Session, "request", request)
+    # The SDK's own request (the suite's guard swaps it), on the faked session above.
+    import razorpay.client
+
+    from tests.conftest import REAL_RAZORPAY_REQUEST
+
+    monkeypatch.setattr(razorpay.client.Client, "request", REAL_RAZORPAY_REQUEST)
     client = rzp.new_client("rzp_test_x", "secret")
     with pytest.raises(requests.ConnectionError):
         client.order.fetch("order_1")

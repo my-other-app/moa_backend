@@ -179,8 +179,10 @@ async def put_score(session: SessionDep, user: ClubAuth, event_id: int, judge_id
     return await _state(session, event)
 
 
-@router.post("/rounds/advance", summary="Shortlist the top of the entered, or make finalists of the top of the shortlist")
+@router.post("/rounds/advance", summary="Bring the shortlist, or the finalists, up to a size: the best-scored move")
 async def advance(session: SessionDep, user: ClubAuth, event_id: int, body: AdvanceIn) -> CompetitionState:
+    """Idempotent: `size` is how many the round should hold, so a second call
+    moves nobody. A tie at the cut is a 409 TIE_AT_CUT naming the teams."""
     event = await deliveries.event_for_club(session, user, event_id)
     await gates.require_feature(session, event.club_id, "rounds", actor=user, event=event)
     await service.advance(session, await service.get_or_create(session, event), body.to, body.size)
@@ -239,8 +241,9 @@ async def delete_slot(session: SessionDep, user: ClubAuth, event_id: int, slot_i
 
 async def _mine(session, event_id: int, user):
     event = await _public_event(session, event_id)
-    c = await service.get_or_create(session, event)
-    if not c.enabled:
+    # A guest's side reads; only the organiser's first look makes one.
+    c = await service.find(session, event)
+    if c is None or not c.enabled:
         raise CustomHTTPException(404, message="This event has no competition")
     reg = await service.registration_of_user(session, event, user.id)
     return event, c, reg
@@ -342,6 +345,10 @@ async def my_free(session: SessionDep, user: UserAuth, event_id: int, slot_id: i
 
 @public_router.get("/events/{event_id}/competition/leaderboard", summary="The leaderboard, once the organisers make it public")
 async def leaderboard(session: SessionDep, event_id: int) -> PublicBoard:
+    """Reads only: anyone can call it, so it never makes a competition (it
+    used to, for every event id anyone asked about)."""
     event = await _public_event(session, event_id)
-    c = await service.get_or_create(session, event)
+    c = await service.find(session, event)
+    if c is None:
+        return PublicBoard(event_id=event.id, enabled=False, public=False, rows=[])
     return PublicBoard(**await service.public_board(session, c, event))

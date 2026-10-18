@@ -30,6 +30,7 @@ from app.api.events.models import (  # noqa: E402
     EventInterestsLink,
     Events,
 )
+from app.core import site_revalidate  # noqa: E402 (tells the public site what changed)
 from app.core.utils.keys import generate_slug  # noqa: E402
 from app.db.core import AsyncSessionLocal  # noqa: E402
 
@@ -282,6 +283,7 @@ async def remove(session: AsyncSession):
         )
     ).all()
     now = datetime.now(timezone.utc)
+    club_ids = sorted({event.club_id for event in events if event.club_id is not None})
     for event in events:
         event.is_deleted = True
         event.deleted_at = now
@@ -301,6 +303,18 @@ async def remove(session: AsyncSession):
     # Soft delete, matching how the rest of the platform removes things,
     # so this is reversible if it takes out something unexpected.
     print(f"Soft-deleted {len(events)} events and {len(notes)} notes.")
+
+    # Everything else public reads the events live and drops a deleted one at
+    # once: the discover site, its sitemap, the club pages, the feeds. A
+    # club's published website does not: it is a snapshot of the club's
+    # events, made when the club publishes (app/api/sites). Made again here,
+    # so the test events leave it too.
+    from app.api.sites import service as sites
+
+    for club_id in club_ids:
+        await sites.republish_for_club(session, club_id)
+    if club_ids:
+        print(f"Re-made the published website, if any, of {len(club_ids)} clubs.")
 
 
 def main():
@@ -329,11 +343,20 @@ def main():
         async with AsyncSessionLocal() as session:
             if args.remove:
                 await remove(session)
-                return
-            await seed(session)
-            if args.award_badges:
-                print()
-                await award_badges(session, args.award_badges)
+            else:
+                await seed(session)
+                if args.award_badges:
+                    print()
+                    await award_badges(session, args.award_badges)
+        if site_revalidate.enabled():
+            # This is not the API's process, so it cannot empty the API's
+            # minute of cached front page and sitemap; it waits that out
+            # instead, so the site does not re-render from the old copy.
+            from app.api.discover import cache
+
+            print("Telling the public site in about a minute, once the API's cached pages have turned over...")
+            await site_revalidate.flush(after=cache.TTL_SECONDS + 5)
+            print("Told the site.")
 
     asyncio.run(_run())
 

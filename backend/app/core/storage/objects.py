@@ -49,6 +49,15 @@ def presigned_url(key: str, expires: int = 3600) -> str:
     )
 
 
+def public_url(key: str) -> str:
+    """A link to a picture anyone may see (an agenda's speaker photo): signed
+    for PUBLIC_IMAGE_URL_TTL and the same link for half of that, like the
+    public image columns (app.core.storage.fields.signed_url)."""
+    from app.core.storage.fields import signed_url
+
+    return signed_url(key, public=True)
+
+
 class ByteCache:
     """Least recently used, capped by the bytes it holds rather than by count.
 

@@ -55,6 +55,11 @@ from app.api.auth.schemas import AuthTokenData
 from app.api.users.models import UserTypes, Users
 from app.api.clubs.models import Clubs
 from app.core.auth.authentication import get_password_hash
+import razorpay.client as _razorpay_client
+
+#: The SDK's own request method, for the one test that checks what it sends
+#: (on a faked requests session).
+REAL_RAZORPAY_REQUEST = _razorpay_client.Client.request
 
 
 @pytest.fixture(scope="session")
@@ -91,7 +96,12 @@ async def session(_engine) -> AsyncSession:
     from app.db.core import SESSION_KWARGS
     from app.db.listeners import add_loader_criteria
 
-    session_factory = async_sessionmaker(bind=connection, **SESSION_KWARGS)
+    # Each of the session's transactions is a SAVEPOINT inside the test's
+    # own: a commit releases it and a rollback undoes just that unit of work,
+    # as in production. (The default joined the test's transaction for
+    # rollbacks, so code that rolls back after a failure -- the webhook's
+    # retry, a sweep skipping one row -- wiped the whole test's data.)
+    session_factory = async_sessionmaker(bind=connection, join_transaction_mode="create_savepoint", **SESSION_KWARGS)
     session = session_factory()
     # And production hides soft-deleted rows from every ORM query
     # (app.db.core.get_session). Without this here, the admin's Trash passed
@@ -161,6 +171,24 @@ def _offline_bucket(monkeypatch):
     monkeypatch.setattr(objects, "fetch", lambda key, quiet_if_missing=False: None)
     yield
     objects.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _razorpay_unreachable(monkeypatch):
+    """Razorpay is live in production, and no test may reach it: the real
+    client's request method fails the test. A test fakes the calls it
+    expects (the platform client's methods, or a whole fake client)."""
+    import razorpay.client
+
+    from app.api.payment_gateways import service as gateways
+
+    def unreachable(self, method, path, **options):
+        raise AssertionError(f"a test tried to reach Razorpay: {method.upper()} {path}")
+
+    monkeypatch.setattr(razorpay.client.Client, "request", unreachable)
+    gateways.forget_clients()
+    yield
+    gateways.forget_clients()
 
 
 @pytest.fixture(autouse=True)
@@ -384,3 +412,45 @@ async def mint_token(session):
 
 def auth_header(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture(autouse=True)
+def _fresh_account_caches():
+    """Process-wide caches the accounts code keeps: the admin Overview's
+    minute, the Discord error report's dedupe, Google's certificates and
+    Apple's keys. Each test starts without them."""
+    from app.api import admin_overview
+    from app.api.auth import service as auth_service
+    from app.core.utils import discord
+
+    admin_overview.reset_cache()
+    discord.reset_for_tests()
+    auth_service._google_certs.reset()
+    auth_service._apple_keys = None
+    yield
+    admin_overview.reset_cache()
+    discord.reset_for_tests()
+
+
+@pytest.fixture(autouse=True)
+def _check_in_hooks_on_the_test_session(request, monkeypatch):
+    """What a check-in sets off after the response (app/api/checkins/after.py)
+    opens a session of its own. In a test that has a session, it uses that one
+    instead, so it sees the test's rows and is rolled back with them; the
+    request's BackgroundTasks finish before the client call returns, so the
+    two never run at once."""
+    if "session" not in request.fixturenames:
+        yield
+        return
+    from contextlib import asynccontextmanager
+
+    from app.api.checkins import after
+
+    test_session = request.getfixturevalue("session")
+
+    @asynccontextmanager
+    async def scope():
+        yield test_session
+
+    monkeypatch.setattr(after, "session_scope", scope)
+    yield

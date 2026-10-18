@@ -121,5 +121,7 @@ async def site_image(slug: str, k: str = Query(..., max_length=400)) -> Redirect
         raise CustomHTTPException(404, message="No such image")
     # The process's one signer (and its cache of links), not a new boto3
     # client per image: making one loads the S3 service model, ~4 ms each.
-    url = signed_url(key)
+    # Every image on a club's page is a public picture: signed for
+    # PUBLIC_IMAGE_URL_TTL, the same link for days.
+    url = signed_url(key, public=True)
     return RedirectResponse(url, status_code=302, headers={"Cache-Control": "public, max-age=1800"})

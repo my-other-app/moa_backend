@@ -46,33 +46,45 @@ def _signer():
 #
 # Even with one client, signing is about 70 µs a URL (botocore resolves the
 # endpoint rules every time), and every image column of every row read signs
-# four or five: a page of 24 event cards signed ~200 URLs. A URL valid for an
-# hour is reused for its first half hour, so whoever receives it has at
-# least 30 minutes to load the image, and the same image now has the same
-# address across page views, which lets browsers cache it.
+# four or five: a page of 24 event cards signed ~200 URLs. A URL is reused
+# for the first half of its life, so whoever receives it has at least the
+# other half to load the image, and the same image has the same address
+# across page views, which lets browsers and CDNs cache it.
+#
+# Two lives. A private file (a ticket's or certificate's art, a signature, a
+# profile picture, an event's files) is signed for an hour and reused for
+# half an hour. A public picture -- what the public site, the app and emails
+# show of an event or a club, columns declared `public=True` -- is signed
+# for settings.PUBLIC_IMAGE_URL_TTL (a week, SigV4's ceiling) and reused for
+# half of that: a link in an email or a cached page keeps working for days,
+# and a page shows the same URL for days rather than a new signature on
+# every request. Kept per (key, life): a key signed both ways never mixes.
 _SIGN_SECONDS = 3600
-_REUSE_SECONDS = 1800
-_SIGNED_MAX = 20000
-_signed: "OrderedDict[str, tuple[float, str]]" = OrderedDict()
+_SIGNED_MAX = 40000  # ~0.8 KB each: ~32 MB at the cap
+_signed: "OrderedDict[tuple[str, int], tuple[float, str]]" = OrderedDict()
 _signed_lock = threading.Lock()
 
 
-def signed_url(key: str) -> str:
-    """A presigned GET URL for `key`, valid for at least another 30 minutes."""
+def signed_url(key: str, *, public: bool = False) -> str:
+    """A presigned GET URL for `key`, valid for at least half its life
+    again: 30 minutes for a private file, half of PUBLIC_IMAGE_URL_TTL
+    (three and a half days) for a public picture."""
+    ttl = settings.PUBLIC_IMAGE_URL_TTL if public else _SIGN_SECONDS
+    slot = (key, ttl)
     now = time.monotonic()
     with _signed_lock:
-        hit = _signed.get(key)
+        hit = _signed.get(slot)
         if hit is not None and hit[0] > now:
-            _signed.move_to_end(key)
+            _signed.move_to_end(slot)
             return hit[1]
     url = _SIGNER.generate_presigned_url(
         "get_object",
         Params={"Bucket": settings.S3_BUCKET, "Key": key},
-        ExpiresIn=_SIGN_SECONDS,
+        ExpiresIn=ttl,
     )
     with _signed_lock:
-        _signed[key] = (now + _REUSE_SECONDS, url)
-        _signed.move_to_end(key)
+        _signed[slot] = (now + ttl / 2, url)
+        _signed.move_to_end(slot)
         while len(_signed) > _SIGNED_MAX:
             _signed.popitem(last=False)
     return url
@@ -359,6 +371,10 @@ class S3ImageField(TypeDecorator):
     A custom SQLAlchemy field for handling images with S3 storage.
     Stores the original's key; its variants sit beside it as
     `{uuid}.{variant}.{ext}`.
+
+    `public=True` for a picture anyone may see (an event's poster, a club's
+    logo): its links are signed for PUBLIC_IMAGE_URL_TTL rather than an hour
+    (see signed_url).
     """
 
     impl = String
@@ -370,8 +386,10 @@ class S3ImageField(TypeDecorator):
         max_size: int = 10 * 1024 * 1024,
         allowed_extensions: list[str] = ["jpg", "jpeg", "png", "gif", "webp"],
         variations: dict = {},
+        public: bool = False,
     ):
         super().__init__()
+        self.public = public
         self.max_size = max_size
         self.allowed_extensions = allowed_extensions
         self.bucket_name = settings.S3_BUCKET
@@ -464,7 +482,8 @@ class S3ImageField(TypeDecorator):
         if not value:
             return None
 
-        original = signed_url(value)
+        public = getattr(self, "public", False)
+        original = signed_url(value, public=public)
         variations = {}
         variation_paths = {}
         own = self.has_variants(value)
@@ -472,7 +491,7 @@ class S3ImageField(TypeDecorator):
             if own:
                 path = variant_key(value, variation)
                 variation_paths[variation] = path
-                variations[variation] = signed_url(path)
+                variations[variation] = signed_url(path, public=public)
             else:
                 variations[variation] = original
 

@@ -7,6 +7,7 @@ from app.core.response.base_model import CustomBaseModel
 class Token(CustomBaseModel):
     token_type: str
     access_token: str
+    # Empty for an admin's session as someone else, which is never renewed.
     refresh_token: str
 
 
@@ -26,6 +27,12 @@ class AuthTokenData(CustomBaseModel):
     # session acts as the club, and this says who is behind it. Checked on
     # every request (still a member; the role allows this) — see club_access.
     member_id: int | None = None
+    # A refresh token's place in its session's rotation (sessions.rotate).
+    # Absent on refresh tokens from before rotation: read as 0, the
+    # generation every session then had.
+    gen: int | None = None
+    # An impersonation hand-off's one-time id: the id its session will have.
+    jti: str | None = None
 
 
 class ImpersonationRequest(CustomBaseModel):

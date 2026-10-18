@@ -11,9 +11,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import func, or_, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import joinedload
 
+from app.api.checkins import after
 from app.api.checkins import doors as doors_mod
 from app.api.checkins.gate_auth import GateActor
 from app.api.checkins.models import CheckIns, CheckInVia, DoorKind, DoorMode, Doors
@@ -47,24 +48,67 @@ def door_open(event: Events, now: Optional[datetime] = None) -> bool:
     return start - timedelta(hours=24) <= now <= end + timedelta(minutes=event.close_after_minutes or 240)
 
 
-def _code_filter(code: str):
+def _code_filters(code: str) -> list:
+    """What a scanned code can be, each a probe of a unique index: the
+    registration's id, or its ticket id as minted (upper case; the input is
+    upper-cased, never the column, which would read every registration on
+    the platform), then as typed for any legacy id that is not upper case.
+
+    Never the admission number printed beside it: those run in sequence
+    (MOA-0042-E123), so anyone could print a QR for an unused one. Staff
+    find a guest by it in the search, and admit them there by hand."""
     code = code.strip()
+    if not code:
+        return []
     try:
-        return EventRegistrationsLink.id == uuid.UUID(code)
+        return [EventRegistrationsLink.id == uuid.UUID(code)]
     except ValueError:
-        # The scan code, or the admission number printed beside it.
-        return or_(func.upper(EventRegistrationsLink.ticket_id) == code.upper(), func.upper(EventRegistrationsLink.admission_no) == code.upper())
+        pass
+    found = [EventRegistrationsLink.ticket_id == code.upper()]
+    if code != code.upper():
+        found.append(EventRegistrationsLink.ticket_id == code)
+    return found
 
 
 def _loaded():
     return (joinedload(EventRegistrationsLink.event).joinedload(Events.club), joinedload(EventRegistrationsLink.user))
 
 
-async def lookup(session, code: str) -> Optional[EventRegistrationsLink]:
-    """The registration a scanned code names, whatever event it is for."""
-    if not code or not code.strip():
+async def lookup(session, event_id: int, code: str) -> Optional[EventRegistrationsLink]:
+    """The registration on this event a scanned code names."""
+    for where in _code_filters(code or ""):
+        reg = await session.scalar(
+            select(EventRegistrationsLink).options(*_loaded())
+            .where(EventRegistrationsLink.event_id == event_id, where, EventRegistrationsLink.is_deleted == False)
+        )
+        if reg is not None:
+            return reg
+    return None
+
+
+async def by_admission_no(session, event_id: int, code: str) -> Optional[EventRegistrationsLink]:
+    """The guest on this event an admission number names, off
+    uq_registrations_event_admission. For staff to confirm, never to admit."""
+    code = (code or "").strip()
+    if not code:
         return None
-    return await session.scalar(select(EventRegistrationsLink).options(*_loaded()).where(_code_filter(code), EventRegistrationsLink.is_deleted == False))
+    return await session.scalar(
+        select(EventRegistrationsLink).options(*_loaded())
+        .where(EventRegistrationsLink.event_id == event_id, EventRegistrationsLink.is_deleted == False, EventRegistrationsLink.admission_no.isnot(None), func.upper(EventRegistrationsLink.admission_no) == code.upper())
+    )
+
+
+async def elsewhere(session, code: str) -> Optional[EventRegistrationsLink]:
+    """On a miss: the same code on another event, to say WRONG_EVENT rather
+    than INVALID. The same unique indexes, without the event."""
+    for where in _code_filters(code or ""):
+        reg = await session.scalar(
+            select(EventRegistrationsLink).options(joinedload(EventRegistrationsLink.event))
+            .where(where, EventRegistrationsLink.is_deleted == False).limit(1)
+        )
+        if reg is not None:
+            return reg
+    return None
 
 
 async def registration_of(session, event: Events, registration_id) -> EventRegistrationsLink:
@@ -93,7 +137,7 @@ NO_BADGE = {"auto": False, "may_print": False, "printed_at": None, "policy": "an
 
 
 def _not_admitted(outcome: str, **more) -> dict:
-    return {"outcome": outcome, "attendee": None, "checked_in_at": None, "checked_in_by": None, "other_event": None, "revoked_at": None, "capture": {"ask": False, "required": False, "reason": "NOT_ADMITTED"}, "replayed": False, "badge": NO_BADGE, **more}
+    return {"outcome": outcome, "attendee": None, "checked_in_at": None, "checked_in_by": None, "other_event": None, "revoked_at": None, "capture": {"ask": False, "required": False, "reason": "NOT_ADMITTED"}, "replayed": False, "badge": NO_BADGE, "hint": None, **more}
 
 
 def _capture(event: Events, reg: EventRegistrationsLink) -> dict:
@@ -112,24 +156,6 @@ def _by_name(ci: CheckIns) -> str:
     return ci.door_label or "Someone"
 
 
-async def _after_admit(session, event: Events, reg: EventRegistrationsLink) -> None:
-    """The app's own hooks: a push to the guest, and the badges a check-in earns."""
-    try:
-        from app.core.notifications.triggers import notify_user_check_in
-
-        await notify_user_check_in(session=session, user_id=reg.user_id, event_id=event.id, event_name=event.name)
-    except Exception as exc:
-        logger.error("check-in notification failed: %s", exc)
-    try:
-        from app.api.badges.service import check_and_award_club_badges, check_and_award_user_badges
-
-        await check_and_award_user_badges(session, user_id=reg.user_id)
-        if event.club_id:
-            await check_and_award_club_badges(session, club_id=event.club_id)
-    except Exception as exc:
-        logger.error("badge check failed after check-in: %s", exc)
-
-
 def _door_kind_for(via: CheckInVia) -> DoorKind:
     if via is CheckInVia.kiosk:
         return DoorKind.kiosk
@@ -138,51 +164,74 @@ def _door_kind_for(via: CheckInVia) -> DoorKind:
     return DoorKind.door
 
 
-async def admit(session, event: Events, reg: EventRegistrationsLink, *, actor: GateActor, via: CheckInVia, door_label: Optional[str] = None, client_ref: Optional[str] = None, checked_in_at: Optional[datetime] = None, scanned_at: Optional[datetime] = None) -> CheckIns:
-    """The row, and the registration's mirror of it."""
+async def _insert_check_in(session, values: dict) -> bool:
+    """One row per guest, and one per client_ref: INSERT ... ON CONFLICT DO
+    NOTHING. False when a row was already there (another door got them
+    first, or this very scan was already recorded), which is not an error:
+    the caller reads the row back and says what happened."""
+    stmt = pg_insert(CheckIns.__table__).values(**values).on_conflict_do_nothing().returning(CheckIns.__table__.c.id)
+    return (await session.execute(stmt)).first() is not None
+
+
+async def admit(session, event: Events, reg: EventRegistrationsLink, *, actor: GateActor, via: CheckInVia, door_label: Optional[str] = None, client_ref: Optional[str] = None, checked_in_at: Optional[datetime] = None, scanned_at: Optional[datetime] = None, background=None) -> Optional[CheckIns]:
+    """The row, and the registration's mirror of it. None when someone else
+    admitted them first (or this client_ref already did): nothing is
+    written then. The app's own hooks run after the response (after.py)."""
     door = actor.door if actor.door is not None and not door_label else await doors_mod.resolve(session, event.id, door_label, _door_kind_for(via))
     now = datetime.now(timezone.utc)
-    row = CheckIns(
-        id=uuid.uuid4(), event_id=event.id, registration_id=reg.id, door_id=door.id if door else None, door_label=door.name if door else None,
-        checked_in_by=actor.user_id, via=via, checked_in_at=checked_in_at or now, scanned_at=scanned_at, client_ref=client_ref,
-    )
-    session.add(row)
+    when = checked_in_at or now
+    row_id = uuid.uuid4()
+    inserted = await _insert_check_in(session, dict(
+        id=row_id, event_id=event.id, registration_id=reg.id, door_id=door.id if door else None, door_label=door.name if door else None,
+        checked_in_by=actor.user_id, via=via, checked_in_at=when, scanned_at=scanned_at, client_ref=client_ref, created_at=now, updated_at=now,
+    ))
+    if not inserted:
+        await session.commit()
+        return None
     reg.is_attended = True
-    reg.attended_on = row.checked_in_at
+    reg.attended_on = when
     if actor.volunteer is not None:
         reg.volunteer_id = actor.volunteer.id
     await session.commit()
-    await _after_admit(session, event, reg)
-    return row
+    after.schedule(background, after.Admitted(user_id=reg.user_id, event_id=event.id, event_name=event.name, club_id=event.club_id))
+    return await check_in_of(session, reg.id)
 
 
-async def scan(session, event: Events, *, code: str, door_label: Optional[str], client_ref: Optional[str], scanned_at: Optional[datetime], actor: GateActor, via: CheckInVia = CheckInVia.gate, _retry: bool = True) -> dict:
-    """The hot path. Idempotent on `client_ref`. Seven outcomes, all answered, none raised."""
-    reg = await lookup(session, code)
+async def scan(session, event: Events, *, code: str, door_label: Optional[str], client_ref: Optional[str], scanned_at: Optional[datetime], actor: GateActor, via: CheckInVia = CheckInVia.gate, background=None) -> dict:
+    """The hot path. Idempotent on `client_ref`. Seven outcomes, all answered, none raised.
+
+    Every read is an index probe: the code on this event (the ticket id's
+    unique index), and only on a miss the same code anywhere, for
+    WRONG_EVENT. A race with another door is settled by the unique keys on
+    check_ins, never by an error."""
+    reg = await lookup(session, event.id, code)
     if reg is None:
+        other = await elsewhere(session, code)
+        if other is not None and other.event_id != event.id:
+            return _not_admitted("WRONG_EVENT", other_event={"name": other.event.name, "starts_at": other.event.event_datetime})
+        holder = await by_admission_no(session, event.id, code)
+        if holder is not None:
+            # The number printed under the QR, typed in: not a ticket, so not
+            # admitted. Who holds it comes back for a person to confirm, and
+            # admit by hand (POST /gate/check-in/{id}).
+            return _not_admitted("INVALID", attendee=summary(holder), hint="ADMISSION_NUMBER")
         return _not_admitted("INVALID")
-    if reg.event_id != event.id:
-        return _not_admitted("WRONG_EVENT", other_event={"name": reg.event.name, "starts_at": reg.event.event_datetime})
     if reg.ticket_revoked_at is not None:
         return _not_admitted("REVOKED", attendee=summary(reg), revoked_at=reg.ticket_revoked_at)
     existing = await check_in_of(session, reg.id)
     if existing is None and reg.is_attended:
         # Marked present before admissions were recorded: the mirror is the
-        # record, so give it a row rather than admit them twice.
-        existing = CheckIns(id=uuid.uuid4(), event_id=event.id, registration_id=reg.id, via=CheckInVia.desk, checked_in_at=reg.attended_on or datetime.now(timezone.utc))
-        session.add(existing)
+        # record, so give it a row rather than admit them twice. Two doors
+        # doing this at once both land on the one row.
+        await _insert_check_in(session, dict(
+            id=uuid.uuid4(), event_id=event.id, registration_id=reg.id, via=CheckInVia.desk,
+            checked_in_at=reg.attended_on or datetime.now(timezone.utc),
+            created_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc),
+        ))
         await session.commit()
         existing = await check_in_of(session, reg.id)
     if existing is not None:
-        replay = bool(client_ref) and existing.client_ref == client_ref
-        from app.api.idcards.service import badge_for_scan
-
-        return {
-            "outcome": "CHECKED_IN" if replay else "ALREADY_CHECKED_IN", "attendee": summary(reg, existing.checked_in_at), "checked_in_at": existing.checked_in_at,
-            "checked_in_by": {"name": _by_name(existing), "door": existing.door_label or "—"}, "other_event": None, "revoked_at": None, "capture": _capture(event, reg), "replayed": replay,
-            # A second scan is a resweep: the card prints only on a first admission.
-            "badge": {**badge_for_scan(event, reg, actor, admitted=False), "auto": False},
-        }
+        return _already(event, reg, existing, client_ref, actor)
     if not door_open(event):
         return _not_admitted("EVENT_NOT_OPEN", attendee=summary(reg))
     if event.has_fee and not reg.is_paid:
@@ -191,14 +240,15 @@ async def scan(session, event: Events, *, code: str, door_label: Optional[str], 
     when = now
     if via is CheckInVia.offline_sync and scanned_at is not None and scanned_at <= now and now - scanned_at < timedelta(hours=24):
         when = scanned_at
-    try:
-        row = await admit(session, event, reg, actor=actor, via=via, door_label=door_label, client_ref=client_ref, checked_in_at=when, scanned_at=scanned_at)
-    except IntegrityError:
-        # Lost a race, or this client_ref already committed: re-read and report the truth.
-        await session.rollback()
-        if not _retry:
-            raise
-        return await scan(session, event, code=code, door_label=door_label, client_ref=client_ref, scanned_at=scanned_at, actor=actor, via=via, _retry=False)
+    row = await admit(session, event, reg, actor=actor, via=via, door_label=door_label, client_ref=client_ref, checked_in_at=when, scanned_at=scanned_at, background=background)
+    if row is None:
+        # Lost a race to another door, or this client_ref already committed:
+        # the row that won says what happened.
+        existing = await check_in_of(session, reg.id)
+        if existing is None:
+            # The client_ref was used for someone else: a device bug, not a guest.
+            return _not_admitted("INVALID", attendee=summary(reg), error="That scan reference was already used for another guest.")
+        return _already(event, reg, existing, client_ref, actor)
     from app.api.idcards.service import badge_for_scan
 
     return {
@@ -207,24 +257,38 @@ async def scan(session, event: Events, *, code: str, door_label: Optional[str], 
     }
 
 
-async def scan_batch(session, event: Events, scans: list[dict], actor: GateActor) -> list[dict]:
+def _already(event: Events, reg: EventRegistrationsLink, existing: CheckIns, client_ref: Optional[str], actor: GateActor) -> dict:
+    from app.api.idcards.service import badge_for_scan
+
+    replay = bool(client_ref) and existing.client_ref == client_ref
+    return {
+        "outcome": "CHECKED_IN" if replay else "ALREADY_CHECKED_IN", "attendee": summary(reg, existing.checked_in_at), "checked_in_at": existing.checked_in_at,
+        "checked_in_by": {"name": _by_name(existing), "door": existing.door_label or "—"}, "other_event": None, "revoked_at": None, "capture": _capture(event, reg), "replayed": replay,
+        # A second scan is a resweep: the card prints only on a first admission.
+        "badge": {**badge_for_scan(event, reg, actor, admitted=False), "auto": False},
+    }
+
+
+async def scan_batch(session, event: Events, scans: list[dict], actor: GateActor, background=None) -> list[dict]:
     """The offline queue drained: each scan independently idempotent."""
     out = []
     for s in scans:
         try:
-            res = await scan(session, event, code=s["code"], door_label=s.get("door"), client_ref=s["client_ref"], scanned_at=s.get("scanned_at"), actor=actor, via=CheckInVia.offline_sync)
+            res = await scan(session, event, code=s["code"], door_label=s.get("door"), client_ref=s["client_ref"], scanned_at=s.get("scanned_at"), actor=actor, via=CheckInVia.offline_sync, background=background)
         except Exception as exc:
             logger.exception("offline scan %s failed", s.get("client_ref"))
+            await session.rollback()
             res = _not_admitted("INVALID", error=str(exc)[:200])
         out.append({"client_ref": s["client_ref"], "response": res})
     return out
 
 
-async def check_in_by_hand(session, event: Events, registration_id, door_label: Optional[str], actor: GateActor) -> dict:
+async def check_in_by_hand(session, event: Events, registration_id, door_label: Optional[str], actor: GateActor, background=None) -> dict:
     """Someone already on the list, with nothing to scan: the same path as a
-    scan, recorded as by hand at the desk."""
+    scan, recorded as by hand at the desk. Staff found them first (by name,
+    email, ticket or admission number), so a person has confirmed who it is."""
     reg = await registration_of(session, event, registration_id)
-    return await scan(session, event, code=reg.ticket_id, door_label=door_label or "Desk", client_ref=f"hand-{uuid.uuid4().hex}", scanned_at=None, actor=actor, via=CheckInVia.desk)
+    return await scan(session, event, code=str(reg.id), door_label=door_label or "Desk", client_ref=f"hand-{uuid.uuid4().hex}", scanned_at=None, actor=actor, via=CheckInVia.desk, background=background)
 
 
 async def undo(session, event: Events, registration_id, actor: GateActor) -> dict:
@@ -316,7 +380,7 @@ async def walkup(session, event: Events, body, actor: GateActor, background_task
     checks_in = True if via is CheckInVia.walkup else bool(event.spot_registration_checks_in)
     row = None
     if checks_in:
-        row = await admit(session, event, reg, actor=actor, via=via, door_label=body.door, client_ref=body.client_ref)
+        row = await admit(session, event, reg, actor=actor, via=via, door_label=body.door, client_ref=body.client_ref, background=background_tasks)
     sent = False
     if email:
         from app.api.deliveries import service as deliveries
@@ -333,9 +397,13 @@ async def walkup(session, event: Events, body, actor: GateActor, background_task
 
 
 async def search(session, event: Events, q: str) -> list[dict]:
+    """Staff looking someone up: by name, email, ticket or admission number.
+    An admission number typed whole comes first, off its own index
+    (uq_registrations_event_admission); a person then admits them by hand."""
     q = (q or "").strip()
     if len(q) < 2:
         return []
+    exact = await by_admission_no(session, event.id, q)
     pat = f"%{q}%"
     regs = list(
         await session.scalars(
@@ -344,6 +412,8 @@ async def search(session, event: Events, q: str) -> list[dict]:
             .order_by(EventRegistrationsLink.full_name).limit(8)
         )
     )
+    if exact is not None:
+        regs = [exact, *[r for r in regs if r.id != exact.id]][:8]
     return [summary(r, r.attended_on if r.is_attended else None) for r in regs]
 
 

@@ -35,6 +35,7 @@ class Clubs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
                 "medium": {"width": 500, "height": 500},
                 "large": {"width": 800, "height": 800},
             },
+            public=True,
         ),
         nullable=True,
     )
@@ -48,6 +49,7 @@ class Clubs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
                 "medium": {"width": 1200, "height": 400},
                 "large": {"width": 1800, "height": 600},
             },
+            public=True,
         ),
         nullable=True,
     )
@@ -200,7 +202,7 @@ class ClubTeamMembers(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     website = Column(String(255), nullable=True)
     sort_order = Column(Integer, nullable=False, default=0)
     photo = Column(
-        S3ImageField(upload_to="clubs/team/", variations={"thumbnail": {"width": 150, "height": 150}, "medium": {"width": 400, "height": 400}}),
+        S3ImageField(upload_to="clubs/team/", variations={"thumbnail": {"width": 150, "height": 150}, "medium": {"width": 400, "height": 400}}, public=True),
         nullable=True,
     )
 
@@ -217,7 +219,7 @@ class ClubPartners(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     since = Column(Integer, nullable=True)
     sort_order = Column(Integer, nullable=False, default=0)
     logo = Column(
-        S3ImageField(upload_to="clubs/partners/", variations={"thumbnail": {"width": 150, "height": 150}, "medium": {"width": 400, "height": 400}}),
+        S3ImageField(upload_to="clubs/partners/", variations={"thumbnail": {"width": 150, "height": 150}, "medium": {"width": 400, "height": 400}}, public=True),
         nullable=True,
     )
 

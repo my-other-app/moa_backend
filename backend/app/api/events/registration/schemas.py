@@ -34,7 +34,10 @@ class EventRegistrationRequest(CustomBaseModel):
     full_name: str = Field(..., max_length=100, min_length=3)
     email: EmailStr = Field(...)
     phone: str | None = Field(None)
-    additional_details: dict[str, str] | None = Field(None)
+    #: Answers to the event's own questions: text, a number, or for a
+    #: checkbox the options ticked (one, or a list). Bounded and checked
+    #: against the questions by answers.py.
+    additional_details: dict[str, str | int | float | bool | list[str] | None] | None = Field(None)
     organization: str | None = Field(None, max_length=200)
     #: The tracking link's code the page carried, so the sign-up is credited to it.
     ref: str | None = Field(None, max_length=16)

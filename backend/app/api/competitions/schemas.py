@@ -41,6 +41,9 @@ class SettingsPatch(BaseModel):
     shortlist_size: Optional[int] = Field(None, ge=1, le=100)
     final_size: Optional[int] = Field(None, ge=1, le=100)
     slot_minutes: Optional[int] = Field(None, ge=5, le=120)
+    #: How judges' totals make a team's score: their mean (the default), or
+    #: each judge's put on their own scale first (z-scores; service.team_scores).
+    score_method: Optional[Literal["mean", "zscore"]] = None
 
 
 class Settings(BaseModel):
@@ -57,6 +60,7 @@ class Settings(BaseModel):
     shortlist_size: int
     final_size: int
     slot_minutes: int
+    score_method: Literal["mean", "zscore"] = "mean"
 
 
 # ─── Tracks ──────────────────────────────────────────────────────────────

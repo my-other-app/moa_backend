@@ -5,6 +5,7 @@ office hours a team can book. Everything hangs off the event; a person is
 their registration for it."""
 import enum
 
+import sqlalchemy as sa
 from sqlalchemy import JSON, Boolean, Column, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -57,6 +58,8 @@ class Competitions(AbstractSQLModel, TimestampsMixin):
     shortlist_size = Column(Integer, nullable=False, default=4)
     final_size = Column(Integer, nullable=False, default=3)
     slot_minutes = Column(Integer, nullable=False, default=15)
+    # "mean" of the judges' totals, or "zscore": each judge on their own scale first.
+    score_method = Column(String(10), nullable=False, default="mean", server_default="mean")
 
     tracks = relationship("CompetitionTracks", order_by="CompetitionTracks.sort_order", cascade="all, delete-orphan", lazy="selectin")
     judges = relationship("CompetitionJudges", order_by="CompetitionJudges.sort_order", cascade="all, delete-orphan", lazy="selectin")
@@ -88,12 +91,21 @@ class CompetitionTeams(AbstractSQLModel, TimestampsMixin):
     members = relationship("CompetitionTeamMembers", cascade="all, delete-orphan", lazy="selectin", order_by="CompetitionTeamMembers.created_at")
     submission = relationship("CompetitionSubmissions", uselist=False, cascade="all, delete-orphan", lazy="selectin")
 
+    # One team per name in a competition, whatever the case.
+    __table_args__ = (sa.Index("uq_competition_teams_name", competition_id, sa.func.lower(name), unique=True),)
+
 
 class CompetitionTeamMembers(AbstractSQLModel, TimestampsMixin):
     __tablename__ = "competition_team_members"
-    __table_args__ = (UniqueConstraint("team_id", "registration_id", name="uq_competition_team_members_once"),)
+    __table_args__ = (
+        UniqueConstraint("team_id", "registration_id", name="uq_competition_team_members_once"),
+        # One team per person per competition, held by the database: two
+        # joins at once cannot put one ticket on two teams.
+        UniqueConstraint("competition_id", "registration_id", name="uq_competition_members_once"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    competition_id = Column(Integer, ForeignKey("competitions.id", ondelete="CASCADE"), nullable=False)
     team_id = Column(Integer, ForeignKey("competition_teams.id", ondelete="CASCADE"), nullable=False, index=True)
     registration_id = Column(UUID(as_uuid=True), ForeignKey("event_registrations_link.id", ondelete="CASCADE"), nullable=False, index=True)
 
@@ -158,10 +170,15 @@ class CompetitionMentors(AbstractSQLModel, TimestampsMixin):
 
 class CompetitionSlots(AbstractSQLModel, TimestampsMixin):
     __tablename__ = "competition_slots"
-    __table_args__ = (UniqueConstraint("mentor_id", "starts_at", name="uq_competition_slots_once"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     mentor_id = Column(Integer, ForeignKey("competition_mentors.id", ondelete="CASCADE"), nullable=False, index=True)
     starts_at = Column(TZAwareDateTime(timezone=True), nullable=False)
     minutes = Column(Integer, nullable=False, default=15)
     team_id = Column(Integer, ForeignKey("competition_teams.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    # A team holds one slot per mentor, whoever books it.
+    __table_args__ = (
+        UniqueConstraint("mentor_id", "starts_at", name="uq_competition_slots_once"),
+        sa.Index("uq_competition_slots_team", mentor_id, team_id, unique=True, postgresql_where=sa.text("team_id IS NOT NULL")),
+    )

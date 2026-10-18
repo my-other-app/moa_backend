@@ -3,11 +3,11 @@ phone pages its QR opens."""
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Query, Response
+from fastapi import APIRouter, BackgroundTasks, Query, Response
 
 from app.api.deliveries import service as deliveries
 from app.api.kiosk import self_service, service
-from app.api.kiosk.auth import KioskAuth
+from app.api.kiosk.auth import KioskAuth, KioskFrameAuth
 from app.api.kiosk.schemas import (
     KioskContext,
     KioskCreate,
@@ -82,8 +82,8 @@ async def kiosk_context(session: SessionDep, device: KioskAuth) -> KioskContext:
 
 
 @kiosk_router.post("/redeem", summary="A ticket at the kiosk")
-async def kiosk_redeem(session: SessionDep, device: KioskAuth, body: RedeemBody) -> RedeemResult:
-    return RedeemResult(**await service.redeem(session, device, code=body.code, client_ref=body.client_ref))
+async def kiosk_redeem(session: SessionDep, device: KioskAuth, body: RedeemBody, background_tasks: BackgroundTasks) -> RedeemResult:
+    return RedeemResult(**await service.redeem(session, device, code=body.code, client_ref=body.client_ref, background=background_tasks))
 
 
 @kiosk_router.post("/not-me", summary="“This isn't me”: undo a check-in this kiosk just made")
@@ -92,13 +92,14 @@ async def kiosk_not_me(session: SessionDep, device: KioskAuth, body: TokenBody) 
 
 
 @kiosk_router.get("/card.pdf", summary="The card for a guest this kiosk just admitted")
-async def kiosk_card(session: SessionDep, device: KioskAuth, redemption: str = Query(..., min_length=10)) -> Response:
+async def kiosk_card(session: SessionDep, device: KioskFrameAuth, redemption: str = Query(..., min_length=10)) -> Response:
     pdf = await service.card_for_redemption(session, device, redemption)
     return Response(content=pdf, media_type="application/pdf", headers={"Cache-Control": "no-store"})
 
 
 @kiosk_router.post("/staff", summary="Staff mode, by the event's PIN")
 async def kiosk_staff(session: SessionDep, device: KioskAuth, body: StaffBody) -> dict:
+    """Five tries per kiosk in fifteen minutes, then 429 until the window passes."""
     return await service.staff(session, device, body.pin)
 
 
@@ -108,7 +109,7 @@ async def kiosk_self_qr(session: SessionDep, device: KioskAuth) -> SelfQr:
 
 
 @kiosk_router.get("/self-card.pdf", summary="The card a phone asked to print here")
-async def kiosk_self_card(session: SessionDep, device: KioskAuth, session_id: str = Query(..., alias="session", min_length=10)) -> Response:
+async def kiosk_self_card(session: SessionDep, device: KioskFrameAuth, session_id: str = Query(..., alias="session", min_length=10)) -> Response:
     from app.api.idcards.models import PrintSource
     from app.api.idcards.service import card_pdf
     from app.api.kiosk.auth import kiosk_actor
@@ -153,8 +154,8 @@ async def self_resend(session: SessionDep, body: SessionBody) -> dict:
 
 
 @self_router.post("/check-in", summary="Through the door at the kiosk's gate")
-async def self_check_in(session: SessionDep, body: SessionBody) -> dict:
-    return await self_service.check_in(session, body.session)
+async def self_check_in(session: SessionDep, body: SessionBody, background_tasks: BackgroundTasks) -> dict:
+    return await self_service.check_in(session, body.session, background=background_tasks)
 
 
 @self_router.post("/print", summary="One tap: the card prints at the kiosk")

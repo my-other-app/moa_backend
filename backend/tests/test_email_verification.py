@@ -385,7 +385,7 @@ async def test_apple_takes_back_an_unverified_password_account_too(client, sessi
     version = account.token_version
 
     class Keys:
-        def __init__(self, url):
+        def __init__(self, url, **kwargs):
             pass
 
         def get_signing_key_from_jwt(self, token):

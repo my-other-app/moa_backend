@@ -34,6 +34,10 @@ class KioskDevices(AbstractSQLModel, TimestampsMixin):
     expires_at = Column(TZAwareDateTime(timezone=True), nullable=False)
     last_seen_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     revoked_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    # Staff-PIN tries in the current window (kiosk/pins.py): counted by a
+    # conditional UPDATE, so parallel guesses cannot slip past the limit.
+    pin_attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    pin_window_at = Column(TZAwareDateTime(timezone=True), nullable=True)
 
     event = relationship("Events")
     door = relationship("Doors")

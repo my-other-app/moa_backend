@@ -59,6 +59,13 @@ TRIAL_REMINDER = timedelta(hours=72)
 #: A club on a complimentary plan hears this long before it ends; so do the admins.
 COMP_REMINDER = timedelta(days=7)
 
+#: How long after the end of the period it paid for a Razorpay-billed
+#: `active` subscription still grants its plan with no word from Razorpay.
+#: A renewal's `charged` moves the end on; with none (a webhook lost, a
+#: subscription Razorpay stopped without telling us), the plan lapses here
+#: rather than running for ever.
+RENEWAL_GRACE = timedelta(days=3)
+
 #: Statuses in which a Razorpay subscription can still charge the club, once
 #: it has been authorised. A complimentary plan is never granted on top of
 #: one of these without stopping it first (409 LIVE_SUBSCRIPTION).
@@ -88,14 +95,17 @@ def _when(value) -> datetime | None:
 
 def _entitled(*, status, billed, authenticated_at, activated_at, trial_started_at,
               cancel_at_period_end, current_period_end, now, grace_ends_at=None,
-              comp_ends_at=None) -> bool:
+              comp_ends_at=None, admin_granted=False) -> bool:
     status = _status(status)
     if comp_ends_at is not None and comp_ends_at <= now:
         # A complimentary plan ends on time, whether or not the sweep that
         # moves the club back has run yet.
         return False
     if status == SubscriptionStatus.active:
-        return True
+        # Razorpay's `active` holds while the period it paid for (and a few
+        # days for the renewal to land) lasts. An admin's grant stands on
+        # the admin's word, whatever date is on the row.
+        return not (billed and not admin_granted and _lapsed(current_period_end, now))
     if status == SubscriptionStatus.trial:
         # A trial begins when Razorpay says the mandate is authorised, not when
         # checkout opened: a club that closes the checkout gets nothing.
@@ -121,6 +131,21 @@ def _entitled(*, status, billed, authenticated_at, activated_at, trial_started_a
     return False
 
 
+def _lapsed(current_period_end, now) -> bool:
+    return current_period_end is not None and current_period_end + RENEWAL_GRACE <= now
+
+
+def lapsed(subscription: ClubSubscriptions, now: datetime | None = None) -> bool:
+    """A Razorpay-billed `active` row whose paid period ended more than
+    RENEWAL_GRACE ago with no renewal heard of: it grants nothing."""
+    return bool(
+        _status(subscription.status) == SubscriptionStatus.active
+        and subscription.razorpay_subscription_id is not None
+        and subscription.granted_by is None
+        and _lapsed(subscription.current_period_end, now or _now())
+    )
+
+
 def is_entitled(subscription: ClubSubscriptions, now: datetime | None = None) -> bool:
     """Whether this row grants its plan right now.
 
@@ -138,6 +163,7 @@ def is_entitled(subscription: ClubSubscriptions, now: datetime | None = None) ->
         now=now or _now(),
         grace_ends_at=subscription.grace_ends_at,
         comp_ends_at=subscription.comp_ends_at if subscription.complimentary else None,
+        admin_granted=subscription.granted_by is not None,
     )
 
 
@@ -182,7 +208,7 @@ def paying(subscription: ClubSubscriptions, now: datetime | None = None) -> bool
         return False
     status = _status(subscription.status)
     if status == SubscriptionStatus.active:
-        return True
+        return not lapsed(subscription, now)
     if status == SubscriptionStatus.past_due:
         now = now or _now()
         return subscription.activated_at is not None and (
@@ -555,15 +581,37 @@ def price_for(plan: Plans, cycle: BillingCycle) -> int:
 
 def mrr_for(plan: Plans, cycle: BillingCycle) -> int:
     """
-    Monthly recurring revenue contribution, in paise.
+    Monthly recurring revenue contribution, in paise, at the plan's price
+    today. A subscription is counted at the price it pays (`mrr_of`).
 
     A yearly subscription contributes a twelfth of its price per month, not
     the whole thing -- summing yearly prices into MRR overstates it by an
     order of magnitude, which is the most common way this number is wrong.
     """
+    return mrr_from_price(price_for(plan, cycle), cycle)
+
+
+def mrr_from_price(price_paise: int, cycle: BillingCycle) -> int:
+    """A cycle's price as monthly revenue, in paise."""
     if BillingCycle(cycle) == BillingCycle.yearly:
-        return plan.price_yearly_paise // 12
-    return plan.price_monthly_paise
+        return int(price_paise or 0) // 12
+    return int(price_paise or 0)
+
+
+def price_of(subscription: ClubSubscriptions) -> int:
+    """What the subscription pays a cycle, in paise: the price it signed up
+    at, or (a row from before that was kept) the plan's."""
+    if subscription.price_paise is not None:
+        return int(subscription.price_paise)
+    plan = subscription.plan
+    return price_for(plan, subscription.cycle) if plan is not None else 0
+
+
+def mrr_of(subscription: ClubSubscriptions) -> int:
+    """The subscription's monthly revenue at the price it pays. An admin
+    editing the plan's price changes what new subscribers pay, not this:
+    Razorpay keeps charging existing ones the old price."""
+    return mrr_from_price(price_of(subscription), subscription.cycle)
 
 
 async def get_club_subscription(session, club_id: int, *, for_update: bool = False) -> ClubSubscriptions | None:
@@ -637,7 +685,8 @@ async def assign_plan(
     subscription.plan = plan
     subscription.cycle = cycle
     subscription.status = status
-    subscription.mrr_paise = mrr_for(plan, cycle) if status != SubscriptionStatus.cancelled else 0
+    subscription.price_paise = price_for(plan, cycle)
+    subscription.mrr_paise = mrr_of(subscription) if status != SubscriptionStatus.cancelled else 0
     subscription.last_failure_reason = None
     # The admin's word stands in for Razorpay's: a plan granted by hand is
     # entitled whether or not a Razorpay subscription sits on the row.
@@ -698,8 +747,10 @@ async def grant_complimentary(
     subscription.cycle = cycle
     subscription.status = SubscriptionStatus.active
     subscription.mrr_paise = 0
+    subscription.price_paise = 0
     subscription.current_period_end = ends_at
     subscription.razorpay_subscription_id = None
+    subscription.last_event_at = None
     subscription.last_failure_reason = None
     subscription.pending_since = None
     subscription.authenticated_at = None
@@ -749,7 +800,7 @@ def end_comp(subscription: ClubSubscriptions, now: datetime | None = None, *, re
 _SNAPSHOT = (
     "plan_id", "cycle", "status", "current_period_end", "mrr_paise", "razorpay_subscription_id",
     "authenticated_at", "activated_at", "trial_ends_at", "cancel_at_period_end",
-    "cancel_requested_at", "last_failure_reason",
+    "cancel_requested_at", "last_failure_reason", "price_paise", "last_event_at",
 )
 
 
@@ -808,6 +859,11 @@ def record_checkout(
     subscription.status = SubscriptionStatus.pending
     subscription.razorpay_subscription_id = razorpay_subscription_id
     subscription.mrr_paise = 0
+    # The price the club checks out at: what Razorpay will charge it, and
+    # what it is counted at once it pays, whatever the plan costs later.
+    subscription.price_paise = price_for(plan, cycle)
+    # A new Razorpay subscription: its events start their own order.
+    subscription.last_event_at = None
     subscription.current_period_end = None
     subscription.pending_since = now
     subscription.authenticated_at = None
@@ -846,6 +902,8 @@ def revert_checkout(subscription: ClubSubscriptions) -> None:
                 value = bool(value)
             elif field == "mrr_paise":
                 value = int(value or 0)
+            elif field == "price_paise":
+                value = int(value) if value is not None else None
             setattr(subscription, field, value)
     else:
         subscription.status = SubscriptionStatus.cancelled

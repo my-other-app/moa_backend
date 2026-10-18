@@ -3,6 +3,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Query, Response
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 
 from app.api.clubs.models import Clubs
@@ -80,6 +81,13 @@ async def event_finance(session: SessionDep, user: ClubAuth, event_id: int) -> F
 
 
 @router.get("/events/{event_id}/finance/statement.csv", summary="The event's ledger as a statement file")
-async def event_statement(session: SessionDep, user: ClubAuth, event_id: int) -> Response:
+async def event_statement(session: SessionDep, user: ClubAuth, event_id: int) -> StreamingResponse:
+    """Streamed: a big event's registrations are never all in memory. The
+    request's session outlives the body (FastAPI closes the dependency after
+    the response is sent), as the users export relies on."""
     event = await deliveries.event_for_club(session, user, event_id)
-    return _csv(await service.event_statement(session, event), f"{event.slug}-statement.csv")
+    return StreamingResponse(
+        service.event_statement(session, event),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{event.slug}-statement.csv"', "Cache-Control": "no-store"},
+    )

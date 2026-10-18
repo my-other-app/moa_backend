@@ -66,6 +66,9 @@ async def test_webhook_replay_is_idempotent(
             }
         },
     }
+    # The webhook is only a hint: Razorpay is asked, and says the same.
+    entity = webhook_data["payload"]["payment"]["entity"]
+    monkeypatch.setattr(razorpay_client.payment, "fetch", lambda payment_id, *a, **kw: dict(entity))
 
     await handle_razorpay_webhook(session, webhook_data, event_id="evt_replay_1", signature="sig")
     await handle_razorpay_webhook(session, webhook_data, event_id="evt_replay_1", signature="sig")
@@ -217,6 +220,8 @@ async def test_fractional_rupee_amount_survives_exactly(
             }
         },
     }
+    entity = webhook_data["payload"]["payment"]["entity"]
+    monkeypatch.setattr(razorpay_client.payment, "fetch", lambda payment_id, *a, **kw: dict(entity))
     await handle_razorpay_webhook(session, webhook_data, event_id="evt_precision_1", signature="sig")
 
     payment = await session.scalar(

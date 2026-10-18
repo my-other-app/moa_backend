@@ -39,11 +39,26 @@ def parallel_ids(rows: list) -> set:
     return out
 
 
+def _speaker_photo_url(r: AgendaItems) -> Optional[str]:
+    """The event page shows it, so a photo from the event's own uploads is a
+    public picture: signed for a week (objects.public_url). The key is the
+    organiser's to give and is not checked on save, so any other key keeps
+    the hour it always had rather than a week of anyone's file."""
+    key = r.speaker_photo_key
+    if not key:
+        return None
+    from app.api.event_designs.router import _layout_prefix
+
+    if r.event_id is not None and key.startswith(_layout_prefix(r.event_id)) and ".." not in key:
+        return objects.public_url(key)
+    return objects.presigned_url(key)
+
+
 def item_out(r: AgendaItems, parallel: set) -> dict:
     return {
         "id": r.id, "event_id": r.event_id, "starts_at": r.starts_at, "ends_at": r.ends_at, "title": r.title, "description": r.description,
         "speaker": r.speaker, "speaker_photo_key": r.speaker_photo_key,
-        "speaker_photo_url": objects.presigned_url(r.speaker_photo_key) if r.speaker_photo_key else None,
+        "speaker_photo_url": _speaker_photo_url(r),
         "location": r.location, "sort_order": r.sort_order, "parallel": r.id in parallel,
     }
 

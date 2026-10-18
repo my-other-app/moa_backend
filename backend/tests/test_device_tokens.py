@@ -76,10 +76,39 @@ async def test_a_removed_token_row_is_revived_not_duplicated(client, session, pe
     row = await session.scalar(select(UserDeviceTokens).where(UserDeviceTokens.user_id == people.asha.id))
     row.is_deleted = True
     await session.commit()
-    # (user, platform) is unique whether or not the row is deleted: it is reused.
-    assert (await _register(client, people.asha_h, "tok-new")).status_code == 200
-    rows = list((await session.scalars(select(UserDeviceTokens).where(UserDeviceTokens.user_id == people.asha.id).execution_options(include_deleted=True))).all())
-    assert len(rows) == 1 and rows[0].fcm_token == "tok-new" and rows[0].is_deleted is False
+    # A token is unique whether or not its row is deleted: it is reused.
+    assert (await _register(client, people.asha_h, "tok-old")).status_code == 200
+    rows = list((await session.scalars(select(UserDeviceTokens).where(UserDeviceTokens.user_id == people.asha.id).execution_options(include_deleted=True, populate_existing=True))).all())
+    assert len(rows) == 1 and rows[0].fcm_token == "tok-old" and rows[0].is_deleted is False
+
+
+async def test_a_second_phone_keeps_the_first(client, session, people, monkeypatch):
+    """Tokens were unique per (user, platform): a second Android phone took
+    the first one's place and only one of a person's devices got pushes."""
+    await _register(client, people.asha_h, "tok-phone-1")
+    await _register(client, people.asha_h, "tok-phone-2")
+    await _register(client, people.asha_h, "tok-ipad", platform="ios")
+    assert await _tokens(session, people.asha.id) == sorted([(people.asha.id, "tok-phone-1"), (people.asha.id, "tok-phone-2"), (people.asha.id, "tok-ipad")])
+
+    sent = []
+
+    def fake_multicast(message):
+        sent.append(list(message.tokens))
+        return SimpleNamespace(success_count=len(message.tokens), failure_count=0, responses=[])
+
+    monkeypatch.setattr(push, "initialize_firebase", lambda: True)
+    monkeypatch.setattr(messaging, "send_each_for_multicast", fake_multicast)
+    assert await push.send_notification_to_user(session, people.asha.id, "Hello", "World") is True
+    assert sent == [["tok-phone-1", "tok-phone-2", "tok-ipad"]]
+
+
+async def test_an_account_keeps_its_newest_ten_devices(client, session, people):
+    from app.api.users import service as users_service
+
+    for i in range(users_service.MAX_DEVICES_PER_USER + 2):
+        assert (await _register(client, people.asha_h, f"tok-many-{i:02d}")).status_code == 200
+    kept = sorted(t for _, t in await _tokens(session, people.asha.id))
+    assert kept == [f"tok-many-{i:02d}" for i in range(2, users_service.MAX_DEVICES_PER_USER + 2)]
 
 
 # ─── Dead tokens ────────────────────────────────────────────────────────

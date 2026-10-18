@@ -4,10 +4,18 @@ A stolen admin password was the whole chain: impersonation, refunds and
 deletion all sit behind it and nothing else stood in the way.
 """
 
+import time
+
 import pyotp
 import pytest
 
 from tests.conftest import auth_header
+
+
+def next_code(secret: str) -> str:
+    """The code after the current one. A code is good once, and enrolling
+    used the current one; the next is inside the one-step allowance."""
+    return pyotp.TOTP(secret).at(time.time() + 30)
 
 
 async def enrol(client, token) -> str:
@@ -110,7 +118,7 @@ async def test_login_succeeds_with_a_valid_code(client, make_admin, mint_token):
         data={
             "username": "twofaok@example.com",
             "password": "Password123!",
-            "totp_code": pyotp.TOTP(secret).now(),
+            "totp_code": next_code(secret),
         },
     )
 
@@ -172,7 +180,7 @@ async def test_disabling_requires_a_current_code(client, make_admin, mint_token)
     allowed = await client.post(
         "/api/v1/auth/2fa/disable",
         headers=auth_header(token),
-        json={"code": pyotp.TOTP(secret).now()},
+        json={"code": next_code(secret)},
     )
     assert allowed.status_code == 200, allowed.text
 

@@ -50,11 +50,19 @@ async def get_current_user(
         raise credentials_exception
     except Exception:
         raise credentials_exception
-    user = await get_user(session, user_id)
+    # An unapproved club's account is found, so the role check can answer
+    # 403 CLUB_NOT_VERIFIED; it was a 401, which every client reads as a dead
+    # session and answers by signing out.
+    user = await get_user(session, user_id, allow_unverified_club=True)
     if user is None:
         raise credentials_exception
     if user.token_version != token_data.token_version:
         raise credentials_exception
+    # An admin acting as someone else: only while the admin still exists, is
+    # active and may impersonate. (Such a session also has a hard end on its
+    # row, checked below, and no refresh token.)
+    if token_data.impersonated_by:
+        await check_impersonator(session, token_data.impersonated_by)
     # A session ended from the Security page dies now, not at its next refresh.
     if token_data.sid:
         from app.api.auth import sessions as session_store
@@ -74,6 +82,30 @@ async def get_current_user(
 
     gates.note_actor(user, token_data.impersonated_by)
     return user
+
+
+async def check_impersonator(session, admin_id: int):
+    """The admin behind an impersonated session, still allowed to be: a live,
+    active admin whose role may impersonate. 401 otherwise -- demoting or
+    suspending the admin ends every session they are holding as someone
+    else, at its next request."""
+    from app.api.users.models import UserTypes
+    from app.core.auth.permissions import IMPERSONATE, can
+
+    admin = await session.scalar(select(Users).where(Users.id == admin_id, Users.is_deleted == False))  # noqa: E712
+    if (
+        admin is None
+        or getattr(admin.user_type, "value", admin.user_type) != UserTypes.admin.value
+        or getattr(admin, "is_active", True) is False
+        or not can(admin, IMPERSONATE)
+    ):
+        raise CustomHTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            message="The admin session behind this one has ended",
+            error_code="IMPERSONATION_ENDED",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return admin
 
 
 async def get_current_user_if_valid(
@@ -155,7 +187,10 @@ def check_user_type(required_roles: Union[str, List[str]], optional=False):
             )
 
         if user_type == "club":
-            if not current_user.club.is_verified:
+            if current_user.club is None or not current_user.club.is_verified:
+                if optional:
+                    # A public page: an unapproved club reads it as a visitor.
+                    return None
                 raise CustomHTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     message="Club is not verified",

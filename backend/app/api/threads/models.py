@@ -16,7 +16,7 @@ class ClubThreads(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     club_id = Column(Integer, ForeignKey("clubs.id", ondelete="CASCADE"), nullable=False, index=True)
     body = Column(String(500), nullable=False)
     image = Column(
-        S3ImageField(upload_to="clubs/threads/", variations={"thumbnail": {"width": 300, "height": 300}, "medium": {"width": 900, "height": 900}, "large": {"width": 1600, "height": 1600}}),
+        S3ImageField(upload_to="clubs/threads/", variations={"thumbnail": {"width": 300, "height": 300}, "medium": {"width": 900, "height": 900}, "large": {"width": 1600, "height": 1600}}, public=True),
         nullable=True,
     )
     kind = Column(String(10), nullable=False, default="post")  # post | poll

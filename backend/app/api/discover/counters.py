@@ -1,7 +1,9 @@
-"""events.going_count and clubs.follower_count, checked against the rows.
+"""events.going_count, events.paid_count and clubs.follower_count, checked
+against the rows.
 
-Triggers keep both exact in the writer's own transaction (see GOING_COUNT_SQL
-in app/api/events/models.py and FOLLOWER_COUNT_SQL in app/api/clubs/models.py).
+Triggers keep them exact in the writer's own transaction (see GOING_COUNT_SQL
+and PAID_COUNT_SQL in app/api/events/models.py, and FOLLOWER_COUNT_SQL in
+app/api/clubs/models.py).
 What can still put them out: something that writes with triggers switched off
 (a data-only restore with --disable-triggers, session_replication_role =
 replica) or edits a counter by hand. `reconcile` finds any row whose counter
@@ -43,11 +45,12 @@ logger = logging.getLogger(__name__)
 _GOING_DRIFT = """
 SELECT e.id FROM events e
 LEFT JOIN (
-  SELECT event_id, count(*) AS n FROM event_registrations_link
+  SELECT event_id, count(*) AS n, count(*) FILTER (WHERE is_paid) AS paid FROM event_registrations_link
   WHERE NOT is_deleted AND event_id BETWEEN :lo AND :hi
   GROUP BY event_id
 ) c ON c.event_id = e.id
-WHERE e.id BETWEEN :lo AND :hi AND e.going_count <> coalesce(c.n, 0)
+WHERE e.id BETWEEN :lo AND :hi
+  AND (e.going_count <> coalesce(c.n, 0) OR e.paid_count <> coalesce(c.paid, 0))
 """
 _FOLLOWER_DRIFT = """
 SELECT k.id FROM clubs k
@@ -59,9 +62,10 @@ LEFT JOIN (
 WHERE k.id BETWEEN :lo AND :hi AND k.follower_count <> coalesce(c.n, 0)
 """
 _GOING_FIX = """
-UPDATE events SET going_count = (
-  SELECT count(*) FROM event_registrations_link r WHERE r.event_id = events.id AND NOT r.is_deleted
-) WHERE id = :id
+UPDATE events SET
+  going_count = (SELECT count(*) FROM event_registrations_link r WHERE r.event_id = events.id AND NOT r.is_deleted),
+  paid_count = (SELECT count(*) FROM event_registrations_link r WHERE r.event_id = events.id AND NOT r.is_deleted AND r.is_paid)
+WHERE id = :id
 """
 _FOLLOWER_FIX = """
 UPDATE clubs SET follower_count = (

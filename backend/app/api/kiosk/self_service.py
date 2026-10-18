@@ -13,8 +13,9 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import joinedload
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.api.checkins import service as checkins
 from app.api.checkins.models import CheckInVia
@@ -42,6 +43,10 @@ ROLE_LABEL = {"attendee": "Attendee", "speaker": "Speaker", "staff": "Staff"}
 
 def normalize_name(s: str) -> str:
     return " ".join(re.sub(r"[^\w\s]", " ", (s or "").lower()).split())
+
+
+def _escape_like(s: str) -> str:
+    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def mask_email(e: str) -> str:
@@ -90,6 +95,20 @@ async def mark_printed(session, device: KioskDevices, session_id: str) -> None:
 
 
 # --- the phone's side -----------------------------------------------------------
+
+
+async def _take(session, s: SelfCheckInSessions, column, cap: int) -> bool:
+    """One more try on `column`, only while under `cap`:
+    UPDATE ... SET n = n + 1 WHERE id = ? AND n < cap RETURNING n. The
+    session's copy is set to what the row now says."""
+    t = SelfCheckInSessions.__table__
+    col = t.c[column.key]
+    row = (await session.execute(update(t).where(t.c.id == s.id, col < cap).values({col: col + 1}).returning(col))).first()
+    if row is None:
+        set_committed_value(s, column.key, cap)
+        return False
+    set_committed_value(s, column.key, int(row[0]))
+    return True
 
 
 async def _load(session, session_id: str) -> SelfCheckInSessions:
@@ -163,16 +182,19 @@ async def lookup(session, session_id: str, name: str, contact: Optional[str]) ->
         return _none("DISABLED")
     if not checkins.door_open(event):
         return _none("EVENT_NOT_OPEN")
-    if s.lookups >= LOOKUP_ATTEMPTS:
+    if not await _take(session, s, SelfCheckInSessions.lookups, LOOKUP_ATTEMPTS):
         raise CustomHTTPException(429, message="Too many tries. Please see the desk.")
-    s.lookups += 1
     s.registration_id, s.verified, s.code_hash, s.checked_in, s.print_requested, s.printed = None, False, None, False, False, False
     wanted = normalize_name(name)
     tokens = wanted.split()
     if len(tokens) < 2:
         await session.commit()
         return _none("NOT_FOUND")
-    guests = list(await session.scalars(select(EventRegistrationsLink).where(EventRegistrationsLink.event_id == event.id, EventRegistrationsLink.is_deleted == False)))
+    # Only names holding every word typed come back from the database (a word
+    # of the normalised name is a run of the name as written, lower-cased);
+    # the exact rules below then run on those few, not on the whole list.
+    holding = [EventRegistrationsLink.full_name.ilike(f"%{_escape_like(t)}%", escape="\\") for t in tokens]
+    guests = list(await session.scalars(select(EventRegistrationsLink).where(EventRegistrationsLink.event_id == event.id, EventRegistrationsLink.is_deleted == False, *holding)))
     matches = [g for g in guests if normalize_name(g.full_name or "") == wanted]
     if not matches:
         def in_order(g):
@@ -233,14 +255,15 @@ async def verify(session, session_id: str, code: str) -> dict:
         return {"outcome": "EXPIRED", "attempts_left": None}
     if datetime.now(timezone.utc) - s.code_sent_at > CODE_TTL:
         return {"outcome": "EXPIRED", "attempts_left": None}
-    if s.code_attempts >= CODE_ATTEMPTS:
+    # The try is counted before the code is looked at, in one conditional
+    # UPDATE: parallel guesses cannot each read "0 tries so far".
+    if not await _take(session, s, SelfCheckInSessions.code_attempts, CODE_ATTEMPTS):
         return {"outcome": "LOCKED", "attempts_left": 0}
     if hmac.compare_digest(_code_hash(code.strip()), s.code_hash):
         s.verified = True
         s.code_hash = None
         await session.commit()
         return {"outcome": "READY", "attempts_left": None}
-    s.code_attempts += 1
     await session.commit()
     left = CODE_ATTEMPTS - s.code_attempts
     return {"outcome": "LOCKED" if left == 0 else "WRONG_CODE", "attempts_left": left}
@@ -252,7 +275,7 @@ def _guest(reg: EventRegistrationsLink) -> dict:
     return {"first_name": name.split(" ")[0] if name else "there", "display_name": name, "role_label": ROLE_LABEL.get(str(role), str(role).title()), "ticket_id": reg.ticket_id}
 
 
-async def check_in(session, session_id: str) -> dict:
+async def check_in(session, session_id: str, background=None) -> dict:
     """Verified: through the door at the kiosk's gate, the same way a scan would go."""
     s = await _load(session, session_id)
     if not s.registration_id or not s.verified:
@@ -262,7 +285,7 @@ async def check_in(session, session_id: str) -> dict:
     if not checkins.door_open(event):
         return {"outcome": "EVENT_NOT_OPEN", "guest": None, "can_print": False}
     reg = await checkins.registration_of(session, event, s.registration_id)
-    res = await checkins.scan(session, event, code=reg.ticket_id, door_label=device.door_label, client_ref=f"self-{s.id}", scanned_at=None, actor=kiosk_actor(device), via=CheckInVia.phone)
+    res = await checkins.scan(session, event, code=str(reg.id), door_label=device.door_label, client_ref=f"self-{s.id}", scanned_at=None, actor=kiosk_actor(device), via=CheckInVia.phone, background=background)
     if res["outcome"] not in ("CHECKED_IN", "ALREADY_CHECKED_IN"):
         return {"outcome": "EVENT_NOT_OPEN" if res["outcome"] == "EVENT_NOT_OPEN" else "REFUSED", "guest": None, "can_print": False, "why": res["outcome"]}
     if res["outcome"] == "CHECKED_IN":

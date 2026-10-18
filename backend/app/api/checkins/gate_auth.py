@@ -5,6 +5,7 @@ volunteer signed into their account (their switches), or a phone opened on
 a door's gate link (that door's switches, with the door as the name on
 every admission).
 """
+import logging
 from dataclasses import dataclass
 from typing import Annotated, Optional
 
@@ -23,6 +24,8 @@ from app.db.core import SessionDep
 from app.response import CustomHTTPException
 
 GATE_KEY_HEADER = "X-Gate-Key"
+
+logger = logging.getLogger(__name__)
 
 AnyUser = Annotated[Optional[Users], Depends(check_user_type([t.value for t in UserTypes], optional=True))]
 
@@ -83,10 +86,28 @@ async def actor_for(session, event: Events, user: Optional[Users], gate_key: Opt
 
 
 async def gate_actor(request: Request, session: SessionDep, event_id: int, user: AnyUser) -> GateActor:
+    """The key from the X-Gate-Key header only: a key in the query string
+    lands in every access log between the phone and here."""
     event = await load_event(session, event_id)
-    actor = await actor_for(session, event, user, request.headers.get(GATE_KEY_HEADER) or request.query_params.get("key"))
+    actor = await actor_for(session, event, user, request.headers.get(GATE_KEY_HEADER))
+    request.state.gate_event = event
+    return actor
+
+
+async def gate_actor_for_frame(request: Request, session: SessionDep, event_id: int, user: AnyUser) -> GateActor:
+    """For a PDF the console loads into a frame, which cannot send a header:
+    the header, else `?key=` -- deprecated, kept only while the deployed
+    console prints cards that way (moa_web idcards cardPdfUrl). Fetching the
+    PDF with the header and framing the blob ends it."""
+    key = request.headers.get(GATE_KEY_HEADER)
+    if not key and request.query_params.get("key"):
+        key = request.query_params.get("key")
+        logger.info("gate key read from the query string (deprecated) for %s", request.url.path)
+    event = await load_event(session, event_id)
+    actor = await actor_for(session, event, user, key)
     request.state.gate_event = event
     return actor
 
 
 GateAuth = Annotated[GateActor, Depends(gate_actor)]
+GateFrameAuth = Annotated[GateActor, Depends(gate_actor_for_frame)]

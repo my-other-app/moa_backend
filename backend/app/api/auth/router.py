@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, Form, Request, Response, BackgroundTasks
@@ -10,7 +11,7 @@ from app.core.auth.jwt import create_access_token, decode_jwt_token
 from app.core.auth.authentication import (
     authenticate_user,
     get_user,
-    get_password_hash,
+    get_password_hash_async,
 )
 from app.core.auth.dependencies import DependsAuth, AdminAuth, UserAuth
 from app.core.auth.permissions import ImpersonateAuth, ResetCredentialsAuth
@@ -39,6 +40,8 @@ from app.api.auth import service
 from app.db.core import SessionDep
 from app.core.response.base_model import CustomBaseModel
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth")
 
@@ -84,23 +87,26 @@ def _clear_auth_cookies(response: Response):
 
 
 @router.post("/google", summary="Sign in with Google")
+# Per caller address: a campus behind one Wi-Fi address signs in at a fest,
+# so loose; a script minting accounts or testing tokens meets it.
+@limiter.limit("30/minute")
 async def google_sign_in(
-    request: GoogleSignInRequest,
-    session: SessionDep = SessionDep,
+    request: Request,
+    body: GoogleSignInRequest,
+    session: SessionDep,
 ) -> Token:
-    user = await service.google_signin(session, request.id_token, request.platform)
-    # No HTTP Request here -- `request` is the body model -- so the session is
-    # recorded without a device or address rather than renaming a public
-    # parameter for the sake of two optional fields.
-    token = await service.create_access_refresh_tokens(user, session=session)
+    user = await service.google_signin(session, body.id_token, body.platform)
+    token = await service.create_access_refresh_tokens(user, session=session, request=request)
     await session.commit()
     return token
 
 
 @router.post("/apple", summary="Sign in with Apple")
+@limiter.limit("30/minute")
 async def apple_sign_in(
-    request: AppleSignInRequest,
-    session: SessionDep = SessionDep,
+    request: Request,
+    body: AppleSignInRequest,
+    session: SessionDep,
 ) -> Token:
     """
     Sign in with Apple.
@@ -110,12 +116,12 @@ async def apple_sign_in(
     """
     user = await service.apple_signin(
         session=session,
-        identity_token=request.identity_token,
-        authorization_code=request.authorization_code,
-        user_name=request.user_name,
-        user_email=request.user_email,
+        identity_token=body.identity_token,
+        authorization_code=body.authorization_code,
+        user_name=body.user_name,
+        user_email=body.user_email,
     )
-    token = await service.create_access_refresh_tokens(user, session=session)
+    token = await service.create_access_refresh_tokens(user, session=session, request=request)
     await session.commit()
     return token
 
@@ -129,18 +135,20 @@ async def login_for_access_token(
     request: Request,
     response: Response,
     session: SessionDep,
-    background: BackgroundTasks,
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
     totp_code: Optional[str] = Form(None),
 ) -> Token:
     from app.api.security import service as security
 
+    ip = security.client_ip(request)
+
     async def refuse(user, result: str, status_code: int, message: str, **extra):
         await security.record(session, request=request, identifier=form_data.username, user=user, method="password", result=result)
         await session.commit()
+        await security.place_later(session, ip)
         raise CustomHTTPException(status_code=status_code, message=message, **extra)
 
-    wait = await security.lockout_remaining(session, form_data.username, security.client_ip(request))
+    wait = await security.lockout_remaining(session, form_data.username, ip)
     if wait:
         await refuse(None, "blocked", status.HTTP_429_TOO_MANY_REQUESTS, f"Too many wrong passwords. Try again in {max(1, wait // 60)} min.", error_code="LOGIN_LOCKED")
 
@@ -163,13 +171,11 @@ async def login_for_access_token(
             await security.record(session, request=request, identifier=member.email, user=owner, method="password", result="signed_in", session_id=security.sid_in(token.access_token))
             member.last_seen_at = datetime.now(timezone.utc)
             await session.commit()
+            mail = None
             if first_time_here and getattr(owner, "notify_new_device", True):
                 device, _ = security.parse_agent(security.user_agent_of(request))
-                ip = security.client_ip(request)
-                background.add_task(
-                    security.send_new_device_email, member.email, account=club.name, device=device,
-                    place=await security.place_for(session, ip, resolve=False), ip=ip, when=datetime.now(timezone.utc),
-                )
+                mail = dict(to=member.email, account=club.name, device=device, when=datetime.now(timezone.utc))
+            await security.place_later(session, ip, new_device_mail=mail)
             _set_auth_cookies(request, response, token.access_token, token.refresh_token)
             return token
 
@@ -209,16 +215,11 @@ async def login_for_access_token(
         if not totp_code:
             await refuse(user, "totp_required", status.HTTP_401_UNAUTHORIZED, "Enter the code from your authenticator app", error_code="TOTP_REQUIRED")
 
-        if not totp_service.verify(user.totp_secret, totp_code):
-            remaining = totp_service.consume_recovery_code(
-                totp_code, user.totp_recovery_codes
-            )
-            if remaining is None:
-                await refuse(user, "totp_invalid", status.HTTP_401_UNAUTHORIZED, "That code is not valid", error_code="TOTP_INVALID")
-            # A recovery code is single use; leaving it active would turn one
-            # leaked code into permanent access.
-            user.totp_recovery_codes = remaining
-            await session.commit()
+        # A code is good once (a replayed one is refused) and a recovery code
+        # is spent: app.api.auth.totp.
+        if not await totp_service.check_second_factor(session, user, totp_code):
+            await refuse(user, "totp_invalid", status.HTTP_401_UNAUTHORIZED, "That code is not valid", error_code="TOTP_INVALID")
+        await session.commit()
     # Merge any guest accounts with matching email into this user
     from app.api.users.service import merge_guest_into_user
     await merge_guest_into_user(session, app_user=user)
@@ -234,15 +235,20 @@ async def login_for_access_token(
     first_time_here = await security.is_new_device(session, user.id, request)
     await security.record(session, request=request, identifier=form_data.username, user=user, method="password", result="signed_in", session_id=security.sid_in(token.access_token))
     await session.commit()
+    mail = None
     if first_time_here and getattr(user, "notify_new_device", True) and user.email:
         device, _ = security.parse_agent(security.user_agent_of(request))
-        ip = security.client_ip(request)
-        background.add_task(
-            security.send_new_device_email, user.email, account=await security.account_name(session, user), device=device,
-            place=await security.place_for(session, ip, resolve=False), ip=ip, when=datetime.now(timezone.utc),
-        )
+        mail = dict(to=user.email, account=await security.account_name(session, user), device=device, when=datetime.now(timezone.utc))
+    # The place is looked up after the commit, never inside the sign-in.
+    await security.place_later(session, ip, new_device_mail=mail)
     _set_auth_cookies(request, response, token.access_token, token.refresh_token)
     return token
+
+
+def _unauthorized(message: str, **extra) -> CustomHTTPException:
+    return CustomHTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED, message=message, headers={"WWW-Authenticate": "Bearer"}, **extra,
+    )
 
 
 @router.post("/refresh", summary="refresh access token")
@@ -253,98 +259,108 @@ async def refresh_access_token(
     session: SessionDep,
     token: Optional[str] = Form(None),
 ) -> Token:
+    """
+    A new access token -- and a NEW refresh token, which replaces the one
+    sent: keep the one in the answer (the body, and the `refresh_token`
+    cookie). It expires when the one sent would have.
+
+    The one sent stays good until the new one is first used: presented
+    again before that (the answer was lost, the app was killed mid-refresh,
+    two tabs refreshed together) it is answered with the same new refresh
+    token again, however much later. Once the new one has been used, the
+    old one -- or anything older -- ends the session (401 SESSION_REUSED):
+    two parties holding one session means one of them stole it.
+    """
+    from app.api.auth import sessions as session_store
+
     # Fall back to the refresh-token cookie when no form field is sent (the
     # cookie-auth path — see _set_auth_cookies).
     token = token or request.cookies.get(REFRESH_TOKEN_COOKIE_NAME)
     if not token:
-        raise CustomHTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            message="No refresh token provided",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise _unauthorized("No refresh token provided")
     try:
-        payload = decode_jwt_token(token)
-        payload = AuthTokenData(**payload)
-        if payload.token_type != "refresh_token":
-            raise CustomHTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                message="Invalid token type",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        user = await get_user(session, payload.user_id)
-        if not user:
-            raise CustomHTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                message="User not found",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        from app.api.auth import sessions as session_store
+        claims = decode_jwt_token(token)
+        payload = AuthTokenData(**claims)
+    except jwt.ExpiredSignatureError:
+        raise _unauthorized("Token has expired")
+    except (jwt.InvalidTokenError, ValueError, TypeError):
+        raise _unauthorized("Invalid token")
+    if payload.token_type != "refresh_token":
+        raise _unauthorized("Invalid token type")
+    if payload.impersonated_by:
+        # An admin's session as someone else is never renewed; one minted
+        # before that rule carried a refresh token, which stops here.
+        raise _unauthorized("An admin's session as someone else cannot be renewed", error_code="IMPERSONATION_ENDED")
+    user = await get_user(session, payload.user_id, allow_unverified_club=True)
+    if not user:
+        raise _unauthorized("User not found")
+    if getattr(user.user_type, "value", user.user_type) == "club" and (user.club is None or not user.club.is_verified):
+        raise CustomHTTPException(status_code=status.HTTP_403_FORBIDDEN, message="Club is not verified", error_code="CLUB_NOT_VERIFIED")
+    if payload.token_version != user.token_version:
+        raise _unauthorized("Token has been revoked, please log in again")
+    if payload.member_id:
+        from app.api.club_access.models import ClubMembers
 
-        if not await session_store.is_live(session, payload.sid):
+        member = await session.get(ClubMembers, payload.member_id)
+        if member is None or member.status != "active" or user.club is None or member.club_id != user.club.id:
+            raise _unauthorized("Your access to this club's dashboard was removed", error_code="ACCESS_REMOVED")
+
+    if payload.sid:
+        outcome, generation = await session_store.rotate(session, payload.sid, int(payload.gen or 0))
+        if outcome == "reused":
+            from app.api.security import service as security
+
+            # Ended for good, and on the Security page as such.
+            await security.record(
+                session, request=request, identifier=user.email, user=user, method="refresh", result="refresh_reused",
+                session_id=security.sid_in(token),
+            )
+            await session.commit()
+            logger.warning("A spent refresh token was presented for session %s of user %s: session ended", payload.sid, user.id)
+            raise _unauthorized("This session was ended because its sign-in was used from two places. Sign in again.", error_code="SESSION_REUSED")
+        if outcome == "ended":
             # Ended from the sessions screen. token_version is the blunt
             # instrument that ends every session; this ends one.
-            raise CustomHTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                message="This session was signed out",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        await session_store.touch(session, payload.sid)
-        await session.commit()
+            raise _unauthorized("This session was signed out")
+        sid = payload.sid
+    else:
+        # From before sessions existed: a session now, so this token is the
+        # last one with no rotation behind it.
+        sid = str(await session_store.start(session, user.id, request=request, member_id=payload.member_id))
+        generation = 0
+    await session.commit()
 
-        if payload.token_version != user.token_version:
-            raise CustomHTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                message="Token has been revoked, please log in again",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        if payload.member_id:
-            from app.api.club_access.models import ClubMembers
+    # A refresh is the one call every app session makes on its own,
+    # weeks after the sign-in that last merged.
+    from app.api.users.service import merge_guests_now
 
-            member = await session.get(ClubMembers, payload.member_id)
-            if member is None or member.status != "active" or user.club is None or member.club_id != user.club.id:
-                raise CustomHTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    message="Your access to this club's dashboard was removed",
-                    error_code="ACCESS_REMOVED",
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
-        # A refresh is the one call every app session makes on its own,
-        # weeks after the sign-in that last merged.
-        from app.api.users.service import merge_guests_now
-
-        await merge_guests_now(session, user)
-        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-        # The new access token keeps what the session is: its id (so ending
-        # it from Security ends it now), whose behalf it acts on, and the club
-        # member behind it. Dropping them here quietly turned every session
-        # into a plain one an hour after sign-in.
-        access_token_data = AuthTokenData(
-            user_id=user.id,
-            token_type="access_token",
-            token_version=user.token_version,
-            sid=payload.sid,
-            impersonated_by=payload.impersonated_by,
-            member_id=payload.member_id,
-        )
-        access_token = create_access_token(
-            data=access_token_data.model_dump(), expires_delta=access_token_expires
-        )
-        _set_auth_cookies(request, response, access_token, token)
-        return Token(
-            access_token=access_token, refresh_token=token, token_type="Bearer"
-        )
-    except jwt.ExpiredSignatureError:
-        raise CustomHTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            message="Token has expired",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    except jwt.InvalidTokenError:
-        raise CustomHTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            message="Invalid token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    await merge_guests_now(session, user)
+    # The new tokens keep what the session is: its id (so ending it from
+    # Security ends it now) and the club member behind it.
+    access_token = create_access_token(
+        data=AuthTokenData(
+            user_id=user.id, token_type="access_token", token_version=user.token_version,
+            sid=sid, member_id=payload.member_id,
+        ).model_dump(),
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+    )
+    # The new refresh token ends when the one it replaces did: rotation
+    # does not stretch a session past REFRESH_TOKEN_EXPIRE_DAYS from its
+    # sign-in.
+    ends = claims.get("exp")
+    lifetime = (
+        datetime.fromtimestamp(int(ends), timezone.utc) - datetime.now(timezone.utc)
+        if ends else timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    )
+    refresh_token = create_access_token(
+        data=AuthTokenData(
+            user_id=user.id, token_type="refresh_token", token_version=user.token_version,
+            sid=sid, member_id=payload.member_id, gen=generation,
+        ).model_dump(),
+        expires_delta=max(lifetime, timedelta(seconds=1)),
+    )
+    _set_auth_cookies(request, response, access_token, refresh_token)
+    return Token(access_token=access_token, refresh_token=refresh_token, token_type="Bearer")
 
 
 @router.post("/logout", summary="clear auth cookies")
@@ -488,36 +504,44 @@ async def reset_password(
         session_id=security.sid_in(token.access_token),
     )
     await session.commit()
+    await security.place_later(session, security.client_ip(request))
     _set_auth_cookies(request, response, token.access_token, token.refresh_token)
     return token
 
 
 @router.post("/change-password", summary="Change user password")
+@limiter.limit("5/minute", key_func=account_or_address)
 async def change_password(
-    request: ChangePasswordRequest,
+    request: Request,
+    body: ChangePasswordRequest,
     session: SessionDep,
     current_user: DependsAuth,
 ) -> ChangePasswordResponse:
-    from app.core.auth.authentication import verify_password
-    
-    # Verify old password
-    if not current_user.password or not verify_password(request.old_password, current_user.password):
+    """Five tries a minute per account, and a wrong current password counts
+    toward the account's lockout like a wrong sign-in does."""
+    from sqlalchemy import select
+    from app.api.security import service as security
+    from app.api.users.models import Users
+    from app.core.auth.authentication import verify_password_async
+
+    identifier = current_user.email or current_user.username
+    wait = await security.account_lockout_remaining(session, identifier, security.client_ip(request))
+    if wait:
+        raise CustomHTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, message=f"Too many wrong passwords. Try again in {max(1, wait // 60)} min.", error_code="LOGIN_LOCKED")
+    if not await verify_password_async(body.old_password, current_user.password):
+        await security.record(session, request=request, identifier=identifier, user=current_user, method="password", result="wrong_password")
+        await session.commit()
         raise CustomHTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             message="Incorrect old password",
         )
-        
-    from sqlalchemy import select
-    from app.api.users.models import Users
-    
+
     # Re-fetch user on the current active session to avoid detached instance issues
-    stmt = select(Users).where(Users.id == current_user.id)
-    result = await session.execute(stmt)
-    db_user = result.scalar_one()
+    db_user = (await session.execute(select(Users).where(Users.id == current_user.id))).scalar_one()
 
     # Hash and set new password, and bump token_version to invalidate any
     # access/refresh tokens issued before this change.
-    db_user.password = get_password_hash(request.new_password)
+    db_user.password = await get_password_hash_async(body.new_password)
     db_user.token_version += 1
     await session.commit()
 
@@ -546,57 +570,53 @@ async def admin_reset_password(
     - Club ID (numeric)
     """
     from sqlalchemy import select
-    from sqlalchemy.orm import joinedload
-    from app.api.users.models import Users
+    from app.api.users.models import Users, UserTypes
     from app.api.clubs.models import Clubs
 
-    user = None
     search_term = payload.email_or_username.strip()
-    
+
+    async def one(query, how: str):
+        """The one account `query` finds, None for none -- and 409 for more
+        than one: an address can hold an app account and a club account, and
+        two clubs can share a name. It was scalar_one_or_none: a 500."""
+        found = list((await session.scalars(query.limit(2))).unique().all())
+        if len(found) > 1:
+            raise CustomHTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                message=f"More than one account matches that {how}. Use the username or the club's id instead.",
+                error_code="AMBIGUOUS_ACCOUNT",
+            )
+        return found[0] if found else None
+
+    user = None
     # Try different search strategies
     if "@" in search_term:
         # Search by user email. Guests are left out: they have no password
         # to reset, and an address the public form has seen can have several.
-        from app.api.users.models import UserTypes
+        user = await one(select(Users).where(Users.email == search_term, Users.user_type != UserTypes.guest), "address")
 
-        query = select(Users).where(Users.email == search_term, Users.user_type != UserTypes.guest)
-        result = await session.execute(query)
-        user = result.scalar_one_or_none()
-    
     if not user and search_term.isdigit():
-        # Search by club ID
-        club_id = int(search_term)
-        query = select(Users).join(Clubs, Users.id == Clubs.user_id).where(Clubs.id == club_id)
-        result = await session.execute(query)
-        user = result.scalar_one_or_none()
-    
+        user = await one(select(Users).join(Clubs, Users.id == Clubs.user_id).where(Clubs.id == int(search_term)), "club id")
+
     if not user:
-        # Search by username
-        query = select(Users).where(Users.username == search_term)
-        result = await session.execute(query)
-        user = result.scalar_one_or_none()
-    
+        user = await one(select(Users).where(Users.username == search_term), "username")
+
     if not user:
-        # Search by club slug
-        query = select(Users).join(Clubs, Users.id == Clubs.user_id).where(Clubs.slug == search_term)
-        result = await session.execute(query)
-        user = result.scalar_one_or_none()
-    
+        user = await one(select(Users).join(Clubs, Users.id == Clubs.user_id).where(Clubs.slug == search_term), "club address")
+
     if not user:
         # Search by club name (case-insensitive)
-        query = select(Users).join(Clubs, Users.id == Clubs.user_id).where(Clubs.name.ilike(search_term))
-        result = await session.execute(query)
-        user = result.scalar_one_or_none()
-    
+        user = await one(select(Users).join(Clubs, Users.id == Clubs.user_id).where(Clubs.name.ilike(search_term)), "club name")
+
     if not user:
         raise CustomHTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             message=f"User or club '{search_term}' not found",
         )
-    
+
     # Hash and set new password, and bump token_version to invalidate any
     # access/refresh tokens issued before this reset.
-    user.password = get_password_hash(payload.new_password)
+    user.password = await get_password_hash_async(payload.new_password)
     user.token_version += 1
     await session.commit()
 
@@ -651,12 +671,17 @@ async def impersonate_user(
             403, message="Admins cannot impersonate other admins"
         )
 
+    import uuid
+
     token = create_access_token(
         data=AuthTokenData(
             user_id=target.id,
             token_type="impersonation",
             token_version=target.token_version,
             impersonated_by=admin.id,
+            # One exchange only: this becomes the session's id, and a second
+            # exchange finds it taken.
+            jti=str(uuid.uuid4()),
         ).model_dump(),
         expires_delta=timedelta(seconds=IMPERSONATION_TTL_SECONDS),
     )
@@ -686,7 +711,13 @@ async def impersonate_user(
     )
 
 
+def impersonation_minutes() -> int:
+    """How long an admin's session as someone else lasts: 30 to 60 minutes."""
+    return max(30, min(60, int(settings.IMPERSONATION_SESSION_MINUTES or 30)))
+
+
 @router.post("/impersonate/exchange", summary="Exchange a hand-off token for a session")
+@limiter.limit("10/minute")
 async def exchange_impersonation_token(
     response: Response,
     request: Request,
@@ -694,41 +725,76 @@ async def exchange_impersonation_token(
     token: str = Form(...),
 ) -> Token:
     """
-    Turn the hand-off token into normal session cookies.
+    Turn the hand-off token into a session as the target account.
 
     Unauthenticated by design -- the token is the credential. It is accepted
-    only if it is of type `impersonation` and still carries the admin that
-    minted it, so an ordinary access token cannot be replayed here to launder
-    itself into a session that looks real.
+    only if it is of type `impersonation`, still carries the admin that
+    minted it, and has not been exchanged before (its `jti` becomes the
+    session's id: a second exchange finds it taken). The admin must still be
+    an active admin allowed to impersonate.
+
+    The session has a row like any other -- the target sees it on their
+    Security page and can end it -- carries `impersonated_by`, ends
+    IMPERSONATION_SESSION_MINUTES (30 to 60) after this, and is never
+    renewed: there is no refresh token (`refresh_token` is empty, and the
+    refresh cookie is cleared). The exchange is in the audit log.
     """
+    import uuid
+
+    from app.api.auth import sessions as session_store
+    from app.core.auth.dependencies import check_impersonator
+
     try:
-        payload = decode_jwt_token(token)
-        data = AuthTokenData(**payload)
+        data = AuthTokenData(**decode_jwt_token(token))
     except Exception:
         raise CustomHTTPException(401, message="Invalid or expired token")
 
     if data.token_type != "impersonation" or not data.impersonated_by:
         raise CustomHTTPException(401, message="Not an impersonation token")
+    try:
+        sid = uuid.UUID(str(data.jti))
+    except (TypeError, ValueError):
+        # Minted before hand-offs were single-use.
+        raise CustomHTTPException(401, message="This link has expired. Start the session again.", error_code="HANDOFF_EXPIRED")
 
     target = await get_user(session, data.user_id)
     if not target or target.token_version != data.token_version:
         raise CustomHTTPException(401, message="Invalid or expired token")
+    admin = await check_impersonator(session, data.impersonated_by)
 
-    claims = AuthTokenData(
-        user_id=target.id,
-        token_type="access_token",
-        token_version=target.token_version,
-        impersonated_by=data.impersonated_by,
-    ).model_dump()
+    minutes = impersonation_minutes()
+    ends = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+    if not await session_store.start_once(
+        session, sid, target.id, request=request, impersonated_by=admin.id, expires_at=ends,
+    ):
+        raise CustomHTTPException(401, message="This link was already used. Start the session again.", error_code="HANDOFF_USED")
+    await audit.record(
+        session,
+        actor=admin,
+        action="user.impersonate.exchange",
+        entity_type="user",
+        entity_id=target.id,
+        summary=f"Session as {target.email or target.username} began",
+        details={"session_id": str(sid), "ends_at": ends.isoformat(), "minutes": minutes},
+        request=request,
+    )
+    await session.commit()
+
     access_token = create_access_token(
-        data=claims, expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        data=AuthTokenData(
+            user_id=target.id,
+            token_type="access_token",
+            token_version=target.token_version,
+            impersonated_by=admin.id,
+            sid=str(sid),
+        ).model_dump(),
+        expires_delta=timedelta(minutes=minutes),
     )
-    refresh_token = create_access_token(
-        data={**claims, "token_type": "refresh_token"},
-        expires_delta=timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
-    )
-    _set_auth_cookies(request, response, access_token, refresh_token)
-    return Token(access_token=access_token, refresh_token=refresh_token, token_type="bearer")
+    cookie_kwargs = dict(httponly=True, secure=request.url.scheme == "https", samesite="lax")
+    response.set_cookie(ACCESS_TOKEN_COOKIE_NAME, access_token, max_age=minutes * 60, **cookie_kwargs)
+    # Whatever refresh cookie this browser held belongs to another session.
+    response.delete_cookie(REFRESH_TOKEN_COOKIE_NAME)
+    return Token(access_token=access_token, refresh_token="", token_type="bearer")
 
 
 class SessionResponse(CustomBaseModel):
@@ -842,13 +908,15 @@ async def totp_status(user: DependsAuth) -> TotpStatusResponse:
 
 
 @router.post("/2fa/setup", summary="Start two-factor enrolment")
-async def totp_setup(session: SessionDep, user: DependsAuth) -> TotpSetupResponse:
+@limiter.limit("5/minute", key_func=account_or_address)
+async def totp_setup(request: Request, session: SessionDep, user: DependsAuth) -> TotpSetupResponse:
     """
     Generates a secret and returns the otpauth:// URI to scan.
 
     Two steps on purpose: the secret is stored but not enabled until the user
     proves they can read a code from it. Enabling here would lock out anyone
-    whose authenticator failed to scan.
+    whose authenticator failed to scan. Stored encrypted when the server has
+    a key (app.api.auth.totp).
     """
     from app.api.auth import totp as totp_service
     from sqlalchemy import select as sa_select
@@ -859,7 +927,8 @@ async def totp_setup(session: SessionDep, user: DependsAuth) -> TotpSetupRespons
 
     secret = totp_service.new_secret()
     db_user = await session.scalar(sa_select(UsersModel).where(UsersModel.id == user.id))
-    db_user.totp_secret = secret
+    db_user.totp_secret = totp_service.seal_secret(secret)
+    db_user.totp_last_step = None
     await session.commit()
 
     return TotpSetupResponse(
@@ -869,9 +938,12 @@ async def totp_setup(session: SessionDep, user: DependsAuth) -> TotpSetupRespons
 
 
 @router.post("/2fa/enable", summary="Confirm and enable two-factor")
+@limiter.limit("5/minute", key_func=account_or_address)
 async def totp_enable(
-    body: TotpEnableRequest, session: SessionDep, user: DependsAuth
+    request: Request, body: TotpEnableRequest, session: SessionDep, user: DependsAuth
 ) -> TotpEnableResponse:
+    """The code confirming enrolment is used up like any other: the next
+    sign-in needs the next one."""
     from app.api.auth import totp as totp_service
     from sqlalchemy import select as sa_select
     from app.api.users.models import Users as UsersModel
@@ -879,20 +951,44 @@ async def totp_enable(
     db_user = await session.scalar(sa_select(UsersModel).where(UsersModel.id == user.id))
     if not db_user.totp_secret:
         raise CustomHTTPException(400, message="Start setup first")
-    if not totp_service.verify(db_user.totp_secret, body.code):
+    if not await totp_service.accept_code(session, db_user, body.code):
         raise CustomHTTPException(400, message="That code is not valid")
 
-    plaintext, hashed = totp_service.generate_recovery_codes()
+    plaintext, stored = totp_service.generate_recovery_codes()
     db_user.totp_enabled = True
-    db_user.totp_recovery_codes = hashed
+    db_user.totp_recovery_codes = stored
     await session.commit()
 
     return TotpEnableResponse(enabled=True, recovery_codes=plaintext)
 
 
+@router.post("/2fa/recovery-codes", summary="Replace the recovery codes")
+@limiter.limit("5/minute", key_func=account_or_address)
+async def totp_new_recovery_codes(
+    request: Request, body: TotpEnableRequest, session: SessionDep, user: DependsAuth
+) -> TotpEnableResponse:
+    """A fresh set of eight, shown once, for a current authenticator code;
+    every earlier one stops working. Also how codes issued before the
+    current format are replaced."""
+    from app.api.auth import totp as totp_service
+    from sqlalchemy import select as sa_select
+    from app.api.users.models import Users as UsersModel
+
+    db_user = await session.scalar(sa_select(UsersModel).where(UsersModel.id == user.id))
+    if not db_user.totp_enabled:
+        raise CustomHTTPException(400, message="Two-factor is not enabled")
+    if not await totp_service.accept_code(session, db_user, body.code):
+        raise CustomHTTPException(400, message="That code is not valid")
+    plaintext, stored = totp_service.generate_recovery_codes()
+    db_user.totp_recovery_codes = stored
+    await session.commit()
+    return TotpEnableResponse(enabled=True, recovery_codes=plaintext)
+
+
 @router.post("/2fa/disable", summary="Turn two-factor off")
+@limiter.limit("5/minute", key_func=account_or_address)
 async def totp_disable(
-    body: TotpEnableRequest, session: SessionDep, user: DependsAuth
+    request: Request, body: TotpEnableRequest, session: SessionDep, user: DependsAuth
 ):
     """
     Requires a current code, not just a session. Otherwise anyone who walked
@@ -906,7 +1002,7 @@ async def totp_disable(
     db_user = await session.scalar(sa_select(UsersModel).where(UsersModel.id == user.id))
     if not db_user.totp_enabled:
         raise CustomHTTPException(400, message="Two-factor is not enabled")
-    if not totp_service.verify(db_user.totp_secret, body.code):
+    if not await totp_service.accept_code(session, db_user, body.code):
         raise CustomHTTPException(400, message="That code is not valid")
 
     db_user.totp_enabled = False

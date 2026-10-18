@@ -5,8 +5,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import joinedload
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.api.checkins.gate_auth import GateActor
 from app.api.events.documents import layout_values, render_layout_document, render_layout_pages, in_layout_mode, layout_colors
@@ -106,19 +107,41 @@ async def card_pdf(session, event: Events, registration_id, *, actor: GateActor,
 
     await gates.require_feature(session, event.club_id, "badges", actor=actor.user, event=event)
     reg = await registration_of(session, event, registration_id)
+    policy = event.reprint_policy or ReprintPolicy.anyone
+    printed_before = reg.badge_printed_at
     if record:
-        ok, why = may_print_again(event.reprint_policy or ReprintPolicy.anyone, reg.badge_printed_at, actor.full, override)
+        ok, why = may_print_again(policy, printed_before, actor.full, override)
         if not ok:
             raise CustomHTTPException(403, message=why, error_code="REPRINT_REFUSED")
+        # The claim, before anything is drawn: two doors printing the same
+        # guest at once under a one-card rule both read "not printed", so
+        # the rule is the UPDATE's own condition and only one gets the row.
+        claimed = await claim_print(session, reg.id, first_only=not may_print_again(policy, datetime.now(timezone.utc), actor.full, override)[0])
+        if claimed is None:
+            _, why = may_print_again(policy, datetime.now(timezone.utc), actor.full, override)
+            raise CustomHTTPException(403, message=why, error_code="REPRINT_REFUSED")
+        set_committed_value(reg, "badge_printed_at", claimed)
     style = await badge_style(session, event, role_of(reg))
     # Drawn on the render pool, off the event loop.
     pdf = await pool.run(render_layout_document, **card_args(event, reg, style, for_print=record))
     if record:
-        overrode = bool(reg.badge_printed_at) and override and actor.full and (event.reprint_policy or ReprintPolicy.anyone) is not ReprintPolicy.anyone
+        overrode = bool(printed_before) and override and actor.full and policy is not ReprintPolicy.anyone
         session.add(PrintJobs(id=uuid.uuid4(), event_id=event.id, registration_id=reg.id, source=source, door_label=door or (actor.door.name if actor.door else None), requested_by=actor.user_id, cards=1, design_version=design_version_of(style), overrode=overrode))
-        reg.badge_printed_at = datetime.now(timezone.utc)
         await session.commit()
     return pdf
+
+
+async def claim_print(session, registration_id, *, first_only: bool):
+    """Mark the card printed now. With `first_only` (the rule allows this
+    person a first card and no other), only while nothing has printed:
+    UPDATE ... WHERE badge_printed_at IS NULL. The new time, or None when
+    another print got there first. The row stays held until the commit."""
+    table = EventRegistrationsLink.__table__
+    stmt = update(table).where(table.c.id == registration_id).values(badge_printed_at=func.now()).returning(table.c.badge_printed_at)
+    if first_only:
+        stmt = stmt.where(table.c.badge_printed_at.is_(None))
+    row = (await session.execute(stmt)).first()
+    return row[0] if row else None
 
 
 def _active(event_id: int):
@@ -190,17 +213,23 @@ async def update_settings(session, event: Events, body) -> dict:
 
 
 async def summary(session, event: Events) -> dict:
-    regs = list(await session.scalars(select(EventRegistrationsLink.role, EventRegistrationsLink.badge_printed_at).where(EventRegistrationsLink.event_id == event.id, EventRegistrationsLink.is_deleted == False, EventRegistrationsLink.ticket_revoked_at.is_(None))))
-    rows = (await session.execute(select(EventRegistrationsLink.role, EventRegistrationsLink.badge_printed_at).where(EventRegistrationsLink.event_id == event.id, EventRegistrationsLink.is_deleted == False, EventRegistrationsLink.ticket_revoked_at.is_(None)))).all()
+    """Counted by the database, a row per role: it used to read every
+    registration of the event, twice."""
+    rows = (
+        await session.execute(
+            select(EventRegistrationsLink.role, func.count(), func.count(EventRegistrationsLink.badge_printed_at))
+            .where(EventRegistrationsLink.event_id == event.id, EventRegistrationsLink.is_deleted == False, EventRegistrationsLink.ticket_revoked_at.is_(None))
+            .group_by(EventRegistrationsLink.role)
+        )
+    ).all()
     by_role: dict = {}
-    for role, printed in rows:
+    for role, registered, printed in rows:
         r = getattr(role, "value", role) or "attendee"
         d = by_role.setdefault(r, {"role": r, "registered": 0, "printed": 0})
-        d["registered"] += 1
-        d["printed"] += 1 if printed else 0
+        d["registered"] += int(registered)
+        d["printed"] += int(printed)
     style = await badge_style(session, event, None)
     jobs = await session.scalar(select(func.count()).select_from(PrintJobs).where(PrintJobs.event_id == event.id)) or 0
-    del regs
     return {
         "registered": sum(d["registered"] for d in by_role.values()),
         "printed": sum(d["printed"] for d in by_role.values()),
