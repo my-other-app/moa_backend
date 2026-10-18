@@ -94,7 +94,8 @@ async def test_omitting_a_required_field_is_still_rejected(
         client, token, event_with_fields.id, {"dietary": "none"}, user.email)
 
     assert response.status_code == 400
-    assert "tshirt_size" in str(response.json()["message"])
+    # Named by key in `errors`; `message` is a sentence naming it by label.
+    assert "tshirt_size" in response.json()["errors"] and response.json()["error_code"] == "INVALID_ANSWERS"
 
 
 async def test_a_blank_required_field_is_rejected(
@@ -121,7 +122,8 @@ async def test_an_invalid_option_is_rejected(
     )
 
     assert response.status_code == 400
-    assert "tshirt_size" in str(response.json()["message"])
+    # Named by key in `errors`; `message` is a sentence naming it by label.
+    assert "tshirt_size" in response.json()["errors"] and response.json()["error_code"] == "INVALID_ANSWERS"
 
 
 async def test_the_optional_answer_is_stored_when_given(

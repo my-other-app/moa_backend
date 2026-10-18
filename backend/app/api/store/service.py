@@ -186,31 +186,36 @@ async def place_order(session, event: Events, reg: Reg, picks, role: str = "atte
         await session.flush()
         return None
     if not getattr(event, "merch_enabled", False):
-        raise CustomHTTPException(422, message="Merchandise is not on sale for this event")
+        raise CustomHTTPException(422, message="Merchandise is not on sale for this event", error_code="STORE_CLOSED")
     order = EventStoreOrders(event_id=event.id, registration_id=reg.id, user_id=reg.user_id, status="pending", total=Decimal(0))
     total = Decimal(0)
     seen = set()
     for p in picks:
         m = await session.scalar(select(EventStoreItems).where(EventStoreItems.id == p.item_id, EventStoreItems.event_id == event.id, EventStoreItems.is_deleted == False, EventStoreItems.on_sale == True))  # noqa: E712
         if m is None:
-            raise CustomHTTPException(422, message="One of the items is no longer on sale")
+            raise CustomHTTPException(422, message="One of the items is no longer on sale", error_code="ITEM_UNAVAILABLE", errors={"item_id": str(p.item_id)})
         if m.available_roles and role not in m.available_roles:
-            raise CustomHTTPException(422, message=f"{m.name} is not available to {role}s")
+            raise CustomHTTPException(422, message=f"{m.name} is not available to {role}s", error_code="ITEM_UNAVAILABLE", errors={"item_id": str(m.id)})
         variant = None
         if m.variants:
             variant = next((v for v in m.variants if p.variant_id is not None and v.id == p.variant_id), None)
             if variant is None:
-                raise CustomHTTPException(422, message=f"Pick a size for {m.name}")
+                raise CustomHTTPException(422, message=f"Pick a size for {m.name}", error_code="SIZE_REQUIRED", errors={"item_id": str(m.id)})
             key = (m.id, variant.id)
             left = variant.stock - variant.sold_count
         else:
             key = (m.id, None)
             left = (m.stock or 0) - m.sold_count
         if key in seen:
-            raise CustomHTTPException(422, message=f"{m.name} is in the order twice")
+            raise CustomHTTPException(422, message=f"{m.name} is in the order twice", error_code="ITEM_REPEATED", errors={"item_id": str(m.id)})
         seen.add(key)
         if p.qty > left:
-            raise CustomHTTPException(422, message=f"{m.name}{' ' + variant.label if variant else ''}: only {left} left" if left > 0 else f"{m.name}{' ' + variant.label if variant else ''} is sold out")
+            raise CustomHTTPException(
+                422,
+                message=f"{m.name}{' ' + variant.label if variant else ''}: only {left} left" if left > 0 else f"{m.name}{' ' + variant.label if variant else ''} is sold out",
+                error_code="SOLD_OUT",
+                errors={"item_id": str(m.id), "variant_id": str(variant.id) if variant else None, "available": max(0, left)},
+            )
         free = role in (m.free_roles or [])
         unit = Decimal(0) if free else Decimal(m.price)
         line_total = unit * p.qty

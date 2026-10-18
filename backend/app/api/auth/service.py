@@ -20,6 +20,13 @@ ACCESS_TOKEN_EXPIRE_MINUTES = settings.ACCESS_TOKEN_EXPIRE_MINUTES
 REFRESH_TOKEN_EXPIRE_DAYS = settings.REFRESH_TOKEN_EXPIRE_DAYS
 
 
+def _refuse_if_suspended(user) -> None:
+    """Said at the door, as the password sign-in does: a suspended account
+    was handed tokens here and refused on its first request."""
+    if getattr(user, "is_active", True) is False:
+        raise CustomHTTPException(status_code=403, message="This account has been suspended", error_code="ACCOUNT_SUSPENDED")
+
+
 async def google_signin(
     session: AsyncSession, id_token_str: str, platform: str = "web"
 ):
@@ -31,7 +38,7 @@ async def google_signin(
         }.get(platform)
 
         if not client_id:
-            raise HTTPException(status_code=400, detail=f"Invalid platform: {platform}")
+            raise CustomHTTPException(status_code=400, message=f"Invalid platform: {platform}", error_code="INVALID_PLATFORM")
 
         idinfo = id_token.verify_oauth2_token(
             id_token_str, requests.Request(), client_id
@@ -39,7 +46,7 @@ async def google_signin(
 
         if not idinfo.get("email_verified"):
             raise CustomHTTPException(
-                status_code=401, message="Google account email is not verified"
+                status_code=401, message="Google account email is not verified", error_code="EMAIL_NOT_VERIFIED"
             )
 
         email = idinfo["email"]
@@ -65,6 +72,7 @@ async def google_signin(
                 provider="google",
             )
         else:
+            _refuse_if_suspended(user)
             # Google checked the address: an unverified password account
             # under it is taken back from whoever set the password.
             await claim_for_provider(session, user, method="google")
@@ -87,7 +95,7 @@ async def google_signin(
         raise
     except ValueError as e:
         raise CustomHTTPException(
-            status_code=401, message="Invalid authentication credentials"
+            status_code=401, message="Invalid authentication credentials", error_code="INVALID_GOOGLE_TOKEN"
         )
     except Exception as e:
         logger.exception("Google signin error")
@@ -172,6 +180,7 @@ async def apple_signin(
                 provider="apple",
             )
         else:
+            _refuse_if_suspended(user)
             # Apple signed the address: see the matching call in google_signin.
             await claim_for_provider(session, user, method="apple")
 

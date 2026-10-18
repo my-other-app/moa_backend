@@ -96,7 +96,7 @@ async def register_event(
         if user.user_type != UserTypes.guest:
             if not user_service.emails_match(registration.email, user.email):
                 raise CustomHTTPException(
-                    400, "Email does not match with the logged in user email"
+                    400, "Email does not match with the logged in user email", error_code="EMAIL_MISMATCH"
                 )
             registration.email = user.email
     # Merge organization into additional_details if provided
