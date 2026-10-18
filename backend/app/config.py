@@ -440,6 +440,18 @@ class AppConfig(BaseSettings):
     # INBOX_SHARED on, each topic has at most this many new-event pushes a day.
     INTEREST_TOPIC_PUSH_MAX_PER_DAY: int = 3
 
+    # ─── The live room pushed (feat/w2-live) ───────────────────────────────
+    # Server-sent events for the live room (app/api/live/stream.py): one
+    # connection per phone or console, the room's state pushed when it
+    # changes, instead of a request per phone every two to five seconds.
+    # Unset, the stream answers 404 and every client keeps polling; the polls
+    # work either way. With several API processes it needs REDIS_URL, so a
+    # change made in one reaches the streams held by the others.
+    LIVE_SSE: bool = False
+    # Open streams one API process holds at most (each is a socket and a few
+    # tens of KB); past it a new one is told 503 and polls instead.
+    LIVE_SSE_MAX_STREAMS: int = 5000
+
     @field_validator("PLAN_ENFORCEMENT_FROM")
     @classmethod
     def _aware_cutoff(cls, value: datetime) -> datetime:

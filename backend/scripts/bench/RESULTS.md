@@ -1468,3 +1468,83 @@ BENCH_DB=moa_w2s_bench python -m scripts.bench.near --label after --n 8 --out ne
 BENCH_DB=moa_w2s_bench python -m scripts.bench.run --label after --only "$ONLY" --buffers --freeze --out after.json
 dropdb moa_w2s_bench
 ```
+
+## The live room pushed (`feat/w2-live`, 18 October 2026)
+
+Server-sent events for the live room (`app/api/live/stream.py`, behind
+`APP_LIVE_SSE`): one stream per phone, sent the body its poll returns when it
+changes. Measured with `scripts/bench/live_sse.py` against `serve.py`
+(uvicorn, httptools and uvloop, access log on, as production) on the laptop
+above -- 4 performance and 4 efficiency cores, shared with two other
+builders' test suites (load average 5-7) -- so read every number as a
+ceiling on cost and a floor on speed. The clients ran on the same machine.
+
+The room: the bench room of `live_sse.py setup` -- 120 questions with the
+votes of 2,000 browsers, a live poll half of them answered, ten updates: a
+34.6 KB feed. N phones, each a browser of its own, split over four client
+processes (four addresses). Once all have the room, a quiet window (SSE:
+pings only), then the host pins another question --actions times. Latency is
+from just before the host's request to the moment a phone had a body showing
+that question pinned; "to the last phone" is, per action, the slowest phone.
+
+| | phones | memory a connection | server CPU a second per 1,000 phones: quiet / while the host acts | latency p50 / p99 | to the last phone p50 / p99 |
+|---|---:|---:|---|---|---|
+| SSE, 1 worker | 1,000 | 38.4 KB | 0.023 s / 0.048 s | 122 / 228 ms | 134 / 232 ms |
+| polls every 5 s, 1 worker | 1,000 | 2.6 KB | 0.246 s / 0.287 s | 2,531 / 4,983 ms | 5,029 / 5,056 ms |
+| SSE, 1 worker | 2,000 | 39.0 KB | 0.013 s / 0.037 s | 162 / 328 ms | 183 / 328 ms |
+| SSE, 1 worker, Redis | 2,000 | 39.0 KB | 0.017 s / 0.038 s | 152 / 429 ms | 177 / 2,018 ms |
+| the same, again | 2,000 | 39.0 KB | 0.007 s / 0.042 s | 263 / 1,774 ms | 890 / 2,310 ms |
+| SSE, 2 workers, Redis | 2,000 | 38.4 KB | 0.018 s / 0.045 s | 161 / 370 ms | 218 / 2,143 ms |
+| polls every 5 s, 2 workers, Redis | 2,000 | 3.2 KB | 0.245 s / 0.283 s | 2,756 / 5,385 ms | 5,580 / 5,769 ms |
+
+What it says:
+
+- **CPU.** A quiet room of streams costs 0.007-0.023 s of server CPU a
+  second per 1,000 phones (a ping each 15 s, a rebuild each 5 s): 11-35
+  times less than the same phones polling (0.245 s, about 1.2 ms a poll,
+  middleware included). A change costs about 0.05 s per 1,000 phones (the
+  "acting" rate less the quiet one, times the 2 s between actions): ~50 us a
+  phone to write it a 34.6 KB frame. In process, without sockets, the feed
+  rebuilt the room once in 9 ms and then spent 8.8 us a stream (1,000
+  streams, one shared frame), 30 us a stream when half the browsers have
+  flags of their own (86 distinct bodies among 100 flagged browsers, each
+  made once). So a hall of 3,000 phones polling, 600 requests a second, is
+  about three quarters of a core; streamed, it is about 5% of one, plus a
+  sixth of a core-second each time the host acts.
+- **Memory.** About 39 KB of server memory an open stream (the footprint's
+  growth over the second wave of phones): 5,000 streams (the default
+  APP_LIVE_SSE_MAX_STREAMS) is about 200 MB a worker. A polling phone holds
+  3 KB (its keep-alive connection).
+- **Latency.** A host's action reaches the median phone in 120-260 ms and
+  every phone of a 2,000-phone room within 330 ms in the clean runs, against
+  2.5 s (median) and 5 s (last phone) for polls -- whose latency is the
+  poll's interval, whatever the server does. Redis adds nothing measurable:
+  a message crosses processes in a fraction of a millisecond.
+- **The tail.** Some runs (with Redis and without: a later 2,000-phone run
+  without Redis showed it too) have one action in which a cluster of phones
+  (0.3-9%) receives the frame 1-4 s late, all of them at the same instant.
+  Instrumented, the server had written every one of those frames within 215
+  ms of the change (each write handed to the kernel in at most 0.2 ms), with
+  its event loop never more than 150 ms late, no stream held by the pace, no
+  reconnect: the delay is between the server's sockets and the client
+  processes on this machine's loopback under load, not in the server.
+  Production's phones are behind nginx on real links.
+
+What is not measured here: the quiz's streams (small frames, one per player
+per change, ranks from the board in Redis), and phones on real networks.
+The middleware change on this branch (plain ASGI) is measured in its commit:
+a request through the stack 503 us before, 40 us after; a streamed chunk
+75.4 us before, 0.8 us after.
+
+```sh
+createdb moa_bench_sse
+BENCH_DB=moa_bench_sse python -m scripts.bench.live_sse setup --out room.json
+APP_LIVE_SSE=true [APP_REDIS_URL=redis://localhost:6379/12] BENCH_DB=moa_bench_sse \
+    python -m scripts.bench.serve --workers 1 --port 8095 &
+BENCH_DB=moa_bench_sse python -m scripts.bench.live_sse run --url http://127.0.0.1:8095 --room room.json \
+    --mode sse --clients 2000 --procs 4 --actions 10 --gap 2 --quiet 15 --server-pid <pid> --label ... --out live_sse.json
+#   ... --mode poll --actions 6 --gap 7 for the polls; a fresh server for each run
+dropdb moa_bench_sse
+```
+
+Raw results: `results/live/live_sse.json`.

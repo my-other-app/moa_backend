@@ -49,6 +49,9 @@ RULES = {
     "ask": Rule("20/hour", "2000/hour"),
     "vote": Rule("120/minute", "30000/minute"),
     "respond": Rule("60/minute", "20000/minute"),
+    # Opening a stream (stream.py): a phone reconnects every ten minutes, or
+    # after a drop; a whole hall reconnects at once after a deploy.
+    "stream": Rule("20/minute", "6000/minute"),
 }
 
 

@@ -11,7 +11,6 @@ from starlette import status
 from sqlalchemy.exc import IntegrityError, StatementError
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIMiddleware
 
 # Error tracking starts before any route is built: Sentry's integrations wrap
 # routes as they are made. Off, and sentry_sdk never imported, unless
@@ -27,6 +26,7 @@ from app.response import ErrorResponse, CustomHTTPException
 from app.core.utils.discord import report_error
 from app.core.middlewares.process_time_middleware import ProcessingTimeMiddleware
 from app.core.middlewares.security_headers_middleware import SecurityHeadersMiddleware
+from app.core.middlewares.rate_limit_middleware import RateLimitMiddleware
 from app.core.rate_limit import limiter
 from app.core import redact
 # Tells the public site when an event's or a club's page changes (inert without APP_SITE_REVALIDATE_SECRET).
@@ -156,6 +156,15 @@ async def shutdown(loops: list, budget: float = SHUTDOWN_BUDGET, runner=None) ->
         await asyncio.wait_for(background.drain(), timeout=left())
     except asyncio.TimeoutError:
         print("Warning: background fan-outs did not finish before shutdown")
+    # The live room: what it gathered to tell, then its feeds (their streams
+    # ended with their requests).
+    from app.api.live import bus as live_bus, stream as live_stream
+
+    try:
+        await asyncio.wait_for(live_bus.drain(), timeout=min(0.5, left()))
+    except asyncio.TimeoutError:
+        pass
+    await live_stream.hub.close()
     await redis.close()
 
 
@@ -205,7 +214,8 @@ application.add_middleware(
 )
 application.add_middleware(ProcessingTimeMiddleware)
 application.add_middleware(SecurityHeadersMiddleware)
-application.add_middleware(SlowAPIMiddleware)
+# slowapi's checks, as plain ASGI (app/core/middlewares/rate_limit_middleware.py).
+application.add_middleware(RateLimitMiddleware)
 # Outermost, so the rate limiter and everything after it see the caller
 # rather than Docker's bridge address (app.core.net).
 from app.core.net import ClientAddressMiddleware  # noqa: E402

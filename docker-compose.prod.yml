@@ -128,11 +128,23 @@ services:
     # 2.25 GB: 1.43 GB in use on 2026-10-18 (APP_WORKERS uvicorn workers,
     # each about 0.35-0.4 GB once the app is imported), plus the render
     # pool's peaks: wkhtmltopdf, and the ticket, certificate and wallet
-    # renders, run inside this container. A leak here is killed and
-    # restarted here, not in Postgres. CPU: the whole box.
+    # renders, run inside this container; with APP_LIVE_SSE, about 40 KB an
+    # open stream besides (3,000 phones: some 120 MB). A leak here is killed
+    # and restarted here, not in Postgres. CPU: the whole box.
     mem_limit: 2304m
     cpus: 2
     logging: *logging
+    # Open files: every client connection is one, and with the live room's
+    # streams (APP_LIVE_SSE) a phone holds one for as long as it watches.
+    # Docker's default soft limit (1,024 on current engines) would cap a
+    # room at about a thousand phones with nothing said; this lets a worker
+    # reach APP_LIVE_SSE_MAX_STREAMS and the pool and files besides. Applied
+    # when the backend is next recreated (install_requirements or
+    # recreate_backend; a restart keeps the container's old limits).
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     ports:
       # Two host ports for one container port, deliberately. nginx on this box
       # proxies api.myotherapp.com to 8001 and api.myotherapp.in (plus the

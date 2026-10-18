@@ -32,10 +32,16 @@ poll launched) forgets the snapshot at once; what the audience does (votes,
 answers) shows within the second. With more than one worker, another
 worker's snapshot is at most a second old.
 
-Server-sent events would go further: one connection per phone, the snapshot
-pushed when it changes instead of a request per phone per poll. Each poll
-still costs a request's parsing, routing and response here (a few hundred
-microseconds of Python at best), which is what bounds one worker now.
+Server-sent events go further (stream.py, behind APP_LIVE_SSE): one
+connection per phone, the same bodies pushed when they change instead of a
+request per phone per poll. Every change here is also told on the event's
+channel (bus.py): `room_changed` and `quiz_changed` at once, what the
+audience does folded into a message a third of a second.
+
+With Redis the quiz's scores also live in a sorted set per run (board.py):
+a rank and the top ten come from it, and the snapshot no longer reads and
+sorts every player each second -- it keeps the players it has met (a
+roster, per run, in this process) and asks the set for their standing.
 """
 from __future__ import annotations
 
@@ -45,12 +51,13 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import orjson
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 from app.api.closeout.models import EventStatus
 from app.api.clubs.models import Clubs
 from app.api.discover.cache import _MISSING, TTLCache
 from app.api.events.models import Events
+from app.api.live import board, bus
 from app.api.live.models import (
     LivePollResponses,
     LivePolls,
@@ -78,9 +85,13 @@ BANNER_FOR = timedelta(hours=3)
 #: The words a word cloud shows.
 CLOUD_WORDS = 40
 
+#: How long the players of a quiz run met by this process are kept (board mode).
+ROSTER_SECONDS = 3 * 3600.0
+
 rooms = TTLCache(ttl=SNAPSHOT_SECONDS, maxsize=4096)
 quizzes = TTLCache(ttl=SNAPSHOT_SECONDS, maxsize=1024)
 voters = TTLCache(ttl=VOTER_SECONDS, maxsize=200_000)
+rosters = TTLCache(ttl=ROSTER_SECONDS, maxsize=1024)
 
 _NONE = "none"  # a snapshot of "there is nothing here", kept like any other
 
@@ -241,9 +252,16 @@ async def room_of(session, event_id: int) -> Room:
     return room
 
 
-def room_changed(event_id: int) -> None:
-    """Something everyone sees changed: the next poll rebuilds the room."""
+def forget_room(event_id: int) -> None:
+    """The next read rebuilds the room (this process only; nothing is told)."""
     rooms.forget(("room", event_id))
+
+
+def room_changed(event_id: int) -> None:
+    """Something everyone sees changed (after its commit): the next poll
+    rebuilds the room, and every stream of it is told at once."""
+    forget_room(event_id)
+    bus.changed(event_id, "room", now=True)
 
 
 # ─── One browser in the room ──────────────────────────────────────────────
@@ -291,12 +309,30 @@ async def feed_body(session, event_id: int, key: Optional[str]) -> bytes:
     key = valid_key(key)
     if key is None:
         return room.body
-    voter = await voter_of(session, event_id, key)
-    voted = voter.voted & room.question_ids
-    mine = set(room.asked_by.get(key, ()))
+    return body_for(room, key, await voter_of(session, event_id, key))
+
+
+def flags_of(room: Room, key: Optional[str], voter: Optional[Voter]) -> Optional[tuple]:
+    """What sets one browser's body apart from the room's: (the questions on
+    the feed it voted for, those it asked, its answer to the poll up), or
+    None when nothing does. Browsers with the same flags see the same body."""
+    if key is None or voter is None:
+        return None
+    voted = frozenset(voter.voted & room.question_ids)
+    mine = frozenset(room.asked_by.get(key, ()))
     answer = voter.answers.get(room.poll_id) if room.poll_id else None
     if not voted and not mine and answer is None:
+        return None
+    return voted, mine, answer
+
+
+def body_for(room: Room, key: Optional[str], voter: Optional[Voter], flags: Optional[tuple] = None) -> bytes:
+    """The room's body as one browser sees it: as it stands, or a copy with
+    its own flags (what it voted for, what it asked, its answer to the poll)."""
+    flags = flags if flags is not None else flags_of(room, key, voter)
+    if flags is None:
         return room.body
+    voted, mine, answer = flags
     data = dict(room.data)
     if voted or mine:
         data["questions"] = [
@@ -316,6 +352,10 @@ class Player:
     id: object
     name: str
     score: int
+    created_at: Optional[datetime] = None
+
+    def member(self) -> str:
+        return board.member(self.id, self.created_at, self.name)
 
 
 @dataclass
@@ -327,10 +367,13 @@ class QuizView:
     current_index: int
     opened_at: Optional[datetime]
     questions: list
-    players: dict  # player key -> Player
-    scores: list   # every player's score, ascending
+    players: dict  # player key -> Player (with the board in Redis: those this process has met)
+    scores: Optional[list]  # every player's score, ascending; None when the board is in Redis
     board: list    # the top ten, as the board shows them
     answers: dict  # player id -> (option key, points), for the open question
+    #: The run's sorted set (board.py), when ranks come from Redis.
+    board_key: Optional[str] = None
+    player_count: int = 0
 
     def current(self) -> Optional[dict]:
         if self.status is QuizStatus.live and 0 <= self.current_index < len(self.questions):
@@ -338,7 +381,7 @@ class QuizView:
         return None
 
     def rank_of(self, score: int) -> int:
-        """1 + how many players scored more."""
+        """1 + how many players scored more (the snapshot's own scores)."""
         return 1 + len(self.scores) - bisect.bisect_right(self.scores, score)
 
 
@@ -355,26 +398,48 @@ async def _build_quiz(session, event_id: int):
         return _NONE
     quiz = found
     questions = [_question(q) for q in quiz.questions]
-    # Every player, best first (ix_live_quiz_players_board): the board is the
-    # first ten, the rank a search in the scores.
-    rows = (await session.execute(
-        select(LiveQuizPlayers.id, LiveQuizPlayers.player_key, LiveQuizPlayers.name, LiveQuizPlayers.score)
-        .where(LiveQuizPlayers.quiz_id == quiz.id)
-        .order_by(LiveQuizPlayers.score.desc(), LiveQuizPlayers.created_at)
-    )).all()
-    players = {key: Player(id=pid, name=name, score=score) for pid, key, name, score in rows}
-    board = [{"rank": i + 1, "name": name, "score": score} for i, (_, _, name, score) in enumerate(rows[:10])]
-    view = QuizView(
+    common = dict(
         event_id=event_id, quiz_id=quiz.id, title=quiz.title, status=quiz.status, current_index=quiz.current_index,
-        opened_at=quiz.question_opened_at, questions=questions, players=players,
-        scores=sorted(score for *_, score in rows), board=board, answers={},
+        opened_at=quiz.question_opened_at, questions=questions, answers={},
     )
+    run = board.token(quiz.status, quiz.join_code, quiz.ended_at)
+    view = None
+    if run is not None and await board.ensure(session, quiz.id, run):
+        # The board is in Redis: no player is read or sorted here. The
+        # players this process has met stay in its roster across snapshots.
+        k = board.key(quiz.id, run)
+        top = await board.top(k)
+        if top is not None:
+            count = await session.scalar(select(func.count()).select_from(LiveQuizPlayers).where(LiveQuizPlayers.quiz_id == quiz.id)) or 0
+            view = QuizView(**common, players=roster_of(quiz.id, run), scores=None, board=top, board_key=k, player_count=int(count))
+    if view is None:
+        # Every player, best first (ix_live_quiz_players_board): the board is
+        # the first ten, the rank a search in the scores.
+        rows = (await session.execute(
+            select(LiveQuizPlayers.id, LiveQuizPlayers.player_key, LiveQuizPlayers.name, LiveQuizPlayers.score, LiveQuizPlayers.created_at)
+            .where(LiveQuizPlayers.quiz_id == quiz.id)
+            .order_by(LiveQuizPlayers.score.desc(), LiveQuizPlayers.created_at)
+        )).all()
+        players = {key: Player(id=pid, name=name, score=score, created_at=at) for pid, key, name, score, at in rows}
+        top = [{"rank": i + 1, "name": name, "score": score} for i, (_, _, name, score, _) in enumerate(rows[:10])]
+        view = QuizView(**common, players=players, scores=sorted(score for _, _, _, score, _ in rows), board=top, player_count=len(rows))
     current = view.current()
     if current is not None:
         view.answers = {pid: (opt, pts) for pid, opt, pts in (await session.execute(
             select(LiveQuizAnswers.player_id, LiveQuizAnswers.option_key, LiveQuizAnswers.points).where(LiveQuizAnswers.question_id == current["id"])
         )).all()}
     return view
+
+
+def roster_of(quiz_id, run: str) -> dict:
+    """The players of a quiz run this process has met, by key: kept across
+    snapshots (board mode), filled as they join or first poll."""
+    k = ("roster", quiz_id, run)
+    got = rosters.get(k)
+    if got is _MISSING:
+        got = {}
+        rosters.put(k, got)
+    return got
 
 
 async def quiz_view(session, event_id: int) -> Optional[QuizView]:
@@ -384,10 +449,53 @@ async def quiz_view(session, event_id: int) -> Optional[QuizView]:
 
 
 def quiz_changed(event_id: int) -> None:
-    """The host moved the quiz on: the next poll reads it afresh."""
+    """The host moved the quiz on (after the commit): the next poll reads it
+    afresh, and every stream of it is told at once."""
     quizzes.forget(("quiz", event_id))
+    bus.changed(event_id, "quiz", now=True)
 
 
 def quiz_kept(event_id: int) -> Optional[QuizView]:
     got = quizzes.get(("quiz", event_id))
     return None if got is _MISSING or got is _NONE else got
+
+
+#: For each score, how many players of the quiz scored more.
+_ABOVE = text(
+    "SELECT s, (SELECT count(*) FROM live_quiz_players p WHERE p.quiz_id = :quiz AND p.score > s) "
+    "FROM unnest(CAST(:scores AS int[])) AS s"
+)
+
+
+async def standings(session, view: QuizView, players: list) -> dict:
+    """Each player's (score, rank), by player id: from the snapshot's own
+    scores, or with the board in Redis from the set (one round trip for them
+    all), or -- Redis away, or a player missing from the set -- from Postgres
+    (two statements, counted on ix_live_quiz_players_board)."""
+    if view.board_key is None:
+        return {p.id: (p.score, view.rank_of(p.score)) for p in players}
+    out: dict = {}
+    missing = list(players)
+    got = await board.standings(view.board_key, [p.member() for p in players])
+    if got is not None:
+        missing = []
+        for p in players:
+            score, rank = got.get(p.member(), (None, None))
+            if rank is None:
+                missing.append(p)
+            else:
+                p.score = score
+                out[p.id] = (score, rank)
+    if missing:
+        scores = dict((await session.execute(
+            select(LiveQuizPlayers.id, LiveQuizPlayers.score).where(LiveQuizPlayers.id.in_([p.id for p in missing]))
+        )).all())
+        wanted = sorted({int(scores.get(p.id, p.score)) for p in missing})
+        above = dict((await session.execute(_ABOVE, {"quiz": view.quiz_id, "scores": wanted})).all())
+        for p in missing:
+            p.score = int(scores.get(p.id, p.score))
+            out[p.id] = (p.score, 1 + int(above.get(p.score, 0)))
+            if got is not None:
+                # Joined while Redis was away: back into the set.
+                await board.scored(view.board_key, p.member(), p.score)
+    return out
