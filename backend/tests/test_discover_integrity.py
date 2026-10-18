@@ -421,10 +421,16 @@ async def test_popular_reads_the_stored_number_on_its_index(client, session, wor
     assert got.index(new.id) < got.index(old.id)
     v_old = await session.scalar(select(Events.popularity).where(Events.id == old.id))
     assert v_old == pytest.approx(popularity.value(0, 400, old.created_at))
+    # The order can be read off the index, no sort (on a table this small the
+    # planner may prefer a sort, so the choice is taken from it here).
+    await session.execute(text("SET LOCAL enable_sort = off"))
+    await session.execute(text("SET LOCAL enable_seqscan = off"))
     plan = "\n".join(r[0] for r in (await session.execute(text(
         "EXPLAIN SELECT id FROM events WHERE NOT is_deleted AND status IN ('published', 'live') ORDER BY popularity DESC, event_datetime, id LIMIT 24"
     ))).all())
-    assert "ix_events_shown_popular" in plan or "Seq Scan" in plan  # the tiny table may be read whole; the index exists to be walked
+    await session.execute(text("RESET enable_sort"))
+    await session.execute(text("RESET enable_seqscan"))
+    assert "ix_events_shown_popular" in plan and "Sort" not in plan, plan
 
 
 async def test_for_you_shows_at_most_three_of_one_club_in_the_first_twenty(client, session, world, make_club, mint_token):
