@@ -115,6 +115,14 @@ class AppConfig(BaseSettings):
     # A club's published website at its own address (served by the club-sites Cloudflare Worker).
     # PUBLIC_CLUB_URL stays the public site's page tracking links land on; it frames the same site.
     PUBLIC_CLUB_SITE_URL: str = "https://{slug}.myotherapp.in"
+    # A club's own domain for its website (app/api/club_domains): a Cloudflare
+    # for SaaS custom hostname on the myotherapp.in zone. The token needs
+    # Zone > SSL and Certificates > Edit on that zone and nothing else. Either
+    # unset: the feature is "unavailable" and nothing calls Cloudflare.
+    CLOUDFLARE_API_TOKEN: str = ""
+    CLOUDFLARE_ZONE_ID: str = ""
+    # What a club's CNAME points at: the zone's fallback origin for custom hostnames.
+    SITES_CNAME_TARGET: str = "sites.myotherapp.in"
 
     # Club plans (app/api/subscriptions/gates.py). PLAN_ENFORCEMENT=false is
     # the kill switch: every plan gate lets everything through, as before the

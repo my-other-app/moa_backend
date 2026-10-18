@@ -52,6 +52,7 @@ KINDS: dict[str, str] = {
     "payment_gateway_connected": "A club connected its own Razorpay account",
     "payment_gateway_failed": "A club's own Razorpay account stopped working, or a webhook for it had a bad signature",
     "payment_gateway_disconnected": "A club's own Razorpay account was disconnected or disabled",
+    "club_domain_active": "A club's own domain was verified and its website is live there",
 }
 
 DEDUPE_WINDOW = timedelta(minutes=10)

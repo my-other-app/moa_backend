@@ -40,6 +40,9 @@ _OWNER_WRITES = _rx(r"^/api/v1/clubs/subscription")
 # by the owner alone (OWNER_ONLY). Read like the rest of the money: admins
 # only, and never with the webhook secret (payment_gateways.router).
 _GATEWAY = _rx(r"^/api/v1/clubs/payments/gateway(?:/|$)")
+# The club's own domain for its website: DNS records, a paid feature, and the
+# address every visitor sees. Admins, read and write; nobody else, not even to look.
+_SITE_DOMAIN = _rx(r"^/api/v1/clubs/site/domain(?:/|$)")
 
 # Money: figures, statements, the ledger, refunds.
 _MONEY = _rx(
@@ -84,6 +87,8 @@ def allows(role: str, method: str, path: str) -> bool:
         return role == "admin" and method == "GET" and bool(_ACCESS_LIST.search(path))
     if method in WRITES and _OWNER_WRITES.search(path):
         return False
+    if _SITE_DOMAIN.search(path):
+        return role == "admin"
     if role == "admin":
         return True
     if _MONEY.search(path):
@@ -116,4 +121,5 @@ def can(role: str) -> dict:
         "delete_events": admin,
         "door": True,
         "payment_gateway": owner,
+        "site_domain": admin,
     }

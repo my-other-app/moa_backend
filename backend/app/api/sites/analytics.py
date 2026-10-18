@@ -12,6 +12,7 @@ from typing import Optional
 
 from sqlalchemy import select
 
+from app.api.club_domains.lookup import active_host
 from app.api.clubs.models import Clubs, ClubUsersLink
 from app.api.events.models import EventRegistrationsLink, Events
 from app.api.links import service as links
@@ -100,7 +101,7 @@ async def site_analytics(session, club: Clubs, days: int = 30, now: Optional[dat
     visits, signups = len(cur), len(regs_cur)
     return dict(
         published=published, days=days,
-        link=dict(id=str(own.id), code=own.code, short_url=links.short_url(own), destination=links.destination(own, club.slug)) if own else None,
+        link=dict(id=str(own.id), code=own.code, short_url=links.short_url(own), destination=links.destination(own, club.slug, site_host=await active_host(session, club.id))) if own else None,
         visits=visits, visitors=len({c.visitor or str(c.id) for c in cur}), signups=signups,
         came=sum(1 for r, _ in regs_cur if r.is_attended), follows=len(follows), rate=_pct(signups, visits),
         deltas=dict(visits=_delta(visits, len(prev)), signups=_delta(signups, len(regs_prev))),

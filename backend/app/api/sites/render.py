@@ -296,6 +296,7 @@ def render(data: dict) -> str:
     return (
         '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
         f'<title>{esc(title)}</title><meta name="description" content="{esc(desc)}"><meta property="og:title" content="{esc(title)}"><meta property="og:description" content="{esc(desc)}">{og}'
+        f'<meta property="og:url" content="{esc(site_url)}"><meta property="og:type" content="website">'
         f'<link rel="canonical" href="{esc(site_url)}">{icon}'
         f'<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family={font_query}&display=swap" rel="stylesheet">'
         f"<style>{css}</style></head><body data-visit=\"{esc(data.get('visit_url') or '')}\">{''.join(parts)}<script>{_JS}</script>"

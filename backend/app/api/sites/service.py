@@ -47,6 +47,16 @@ def public_url(club: Clubs) -> str:
     return settings.PUBLIC_CLUB_URL.format(slug=club.slug)
 
 
+async def site_address(session: AsyncSession, club: Clubs) -> str:
+    """Where the site is seen: the club's own domain while it is active
+    (app/api/club_domains), else `public_url`. The page's canonical address,
+    og:url and the dashboard's "Open site" all follow it."""
+    from app.api.club_domains.lookup import active_host
+
+    host = await active_host(session, club.id)
+    return f"https://{host}" if host else public_url(club)
+
+
 def _site_api_url(club: Clubs) -> str:
     return f"{settings.PUBLIC_API_URL}/api/v1/sites/{club.slug}"
 
@@ -124,7 +134,7 @@ async def site_data(session: AsyncSession, club: Clubs, choices: dict, ref_code:
     default_headline = club.tagline or club.name
     default_subline = _first_sentence(club.about) if club.tagline else (_first_sentence(club.about) or None)
     return dict(
-        site=choices, site_url=public_url(club),
+        site=choices, site_url=await site_address(session, club),
         club=dict(name=club.name, about=club.about, tagline=club.tagline, location_name=club.location_name, contact_email=club.contact_email, brand_primary=club.brand_primary, logo_url=image_url(base, club.logo, "medium"), cover_url=image_url(base, club.cover, "original")),
         default_headline=default_headline, default_subline=default_subline,
         upcoming=upcoming, past=past, team=team, partners=partners, socials=social_links,
@@ -169,7 +179,7 @@ async def out(session: AsyncSession, club: Clubs, s: ClubSites) -> dict:
     data = await site_data(session, club, _choices(s), link.code if link else None)
     tracking = dict(link_id=str(link.id), code=link.code, short_url=links.short_url(link)) if link else None
     stale = s.published_at is not None and s.settings_at is not None and s.settings_at > s.published_at
-    return dict(**_choices(s), default_headline=data["default_headline"], default_subline=data["default_subline"], available=available_sections(data), published_at=s.published_at, stale=stale, url=public_url(club), slug=club.slug, templates=TEMPLATE_META, fonts=FONT_META, tracking=tracking)
+    return dict(**_choices(s), default_headline=data["default_headline"], default_subline=data["default_subline"], available=available_sections(data), published_at=s.published_at, stale=stale, url=data["site_url"], slug=club.slug, templates=TEMPLATE_META, fonts=FONT_META, tracking=tracking)
 
 
 async def published_html(session: AsyncSession, slug: str) -> str | None:
