@@ -1,5 +1,5 @@
 """Discover at scale: each club's place kept on the club, a table for the
-front page's slow numbers, and three small indexes (docs/SCALING.md, fixes 1,
+front page's slow numbers, and six indexes (docs/SCALING.md, fixes 1,
 4 and 12; app/api/discover/places.py, stats.py and upcoming.py).
 
 - clubs.place_lat / place_lng: the club's own point, else the middle of its
@@ -12,6 +12,11 @@ front page's slow numbers, and three small indexes (docs/SCALING.md, fixes 1,
   "clubs near" as a box on an index.
 - ix_clubs_user_id: the club an account owns, which every signed-in request
   loads with the user (app/core/auth); without it, a read of every club.
+- ix_events_shown_created: what can be shown, by when it was made, for
+  sort=newest (the site's feeds) to walk instead of sorting every event on.
+- ix_events_shown_name_trgm, ix_events_shown_location_trgm: trigram indexes
+  over what can be shown (the status clock moves what is over out of them),
+  so the search's typo fallback rechecks those and not every event ever held.
 - ix_events_long_ends_at: the events longer than 72 hours (the new limit on
   an event's length; any saved before it), by when they end, so "what is on"
   knows how far back to look while one of them still runs.
@@ -148,6 +153,11 @@ INDEXES = (
     ("ix_clubs_user_id", "clubs (user_id)"),
     ("ix_clubs_place", "clubs (place_lat, place_lng) WHERE is_verified AND NOT is_deleted AND place_lat IS NOT NULL AND place_lng IS NOT NULL"),
     ("ix_events_long_ends_at", f"events ({ENDS_AT}) WHERE NOT is_deleted AND duration > 72"),
+    # sort=newest on the public lists (the feeds): what can be shown, the latest made first.
+    ("ix_events_shown_created", "events (created_at, id) WHERE NOT is_deleted AND status IN ('published', 'live')"),
+    # The search's typo fallback looks among what can be shown, not every event ever held.
+    ("ix_events_shown_name_trgm", "events USING gin (name gin_trgm_ops) WHERE NOT is_deleted AND status IN ('published', 'live')"),
+    ("ix_events_shown_location_trgm", "events USING gin (location_name gin_trgm_ops) WHERE NOT is_deleted AND status IN ('published', 'live')"),
 )
 
 
@@ -165,7 +175,9 @@ def upgrade() -> None:
 
     with op.get_context().autocommit_block():
         op.execute(BACKFILL)
-        op.execute("ANALYZE clubs")
+        # The backfill rewrote most clubs' rows: clear the old versions now
+        # rather than leave every read of clubs twice the pages until autovacuum.
+        op.execute("VACUUM (ANALYZE) clubs")
         op.execute(CITIES)
         for name, definition in INDEXES:
             op.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {name}")

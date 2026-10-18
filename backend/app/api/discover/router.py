@@ -82,7 +82,9 @@ async def events(
     lat: Optional[float] = Lat,
     lng: Optional[float] = Lng,
     radius_km: float = Radius,
-    sort: Literal["date", "distance", "popular", "relevance"] = Query("date", description="relevance: best match for `q` first (date without `q`)"),
+    sort: Literal["date", "distance", "popular", "relevance", "newest"] = Query(
+        "date", description="relevance: best match for `q` first (date without `q`); newest: the latest made first (the feeds)",
+    ),
     offset: int = Query(0, ge=0),
     limit: int = Query(24, ge=1, le=60),
 ) -> EventSearch:

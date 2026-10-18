@@ -36,6 +36,8 @@ events and clubs:
 from __future__ import annotations
 
 import heapq
+import html
+import re
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -132,6 +134,40 @@ def _img(value, *keys) -> Optional[str]:
         if v:
             return v
     return None
+
+
+#: How long a card's summary may be, in characters.
+SUMMARY_MAX = 200
+_TAGS = re.compile(r"<[^>]{0,500}>")
+_MD_LINK = re.compile(r"!?\[([^\]]*)\]\([^)]*\)")
+# Paired emphasis at word edges (**bold**, _it_, `code`), never inside a word (snake_case, 3*4).
+_MD_EMPHASIS = re.compile(r"(?<!\w)(\*\*|__|~~|\*|_|`)(?=\S)(.+?)(?<=\S)\1(?!\w)")
+# Line starts: headings, quotes, list bullets.
+_MD_LINE = re.compile(r"^[ \t]*(?:#{1,6}[ \t]+|>[ \t]?|[-+*][ \t]+)", re.MULTILINE)
+
+
+def summary_of(text: Optional[str], limit: int = SUMMARY_MAX) -> Optional[str]:
+    """An event's description as a line of plain text, at most `limit`
+    characters: tags and Markdown marks dropped (a link keeps its words),
+    entities read, spaces collapsed; a longer one is cut at a word boundary
+    (when one falls in its last 40%) and ends in an ellipsis. As the site's
+    own clip() does, so a feed can show it as it is. None for nothing."""
+    if not text or not isinstance(text, str):
+        return None
+    s = _TAGS.sub(" ", text)
+    s = _MD_LINK.sub(r"\1", s)
+    s = _MD_LINE.sub("", s)
+    s = _MD_EMPHASIS.sub(r"\2", s)
+    s = re.sub(r"\s+", " ", html.unescape(s)).strip()
+    if not s:
+        return None
+    if len(s) <= limit:
+        return s
+    cut = s[: limit - 1]
+    space = cut.rfind(" ")
+    if space > limit * 0.6:
+        cut = cut[:space]
+    return cut.rstrip(" ,.;:!?-") + "…"
 
 
 def _here(where: dict) -> Optional[tuple[float, float]]:
@@ -260,14 +296,16 @@ def _matching(event_match, club_match, category_match, since: Optional[datetime]
     name, or whose category's name matches. One arm per table, each through
     that table's trigram index, and a semi-join the planner can drive from
     the matches. With `since` (the search: only what is on), each arm keeps
-    only events starting from then, so what it hands on is what can be on and
-    not every event ever held; without it (the calendar), any date."""
+    only events that can be shown starting from then, so what it hands on is
+    what can be on and not every event ever held, and the event arm finds its
+    candidates through the trigram indexes over shown events
+    (ix_events_shown_*_trgm); without it (the calendar), any date and status."""
     e1, e2, e3 = (aliased(Events, name=f"words_e{i}") for i in (1, 2, 3))
     club = aliased(Clubs, name="words_club")
     cat = aliased(EventCategories, name="words_category")
 
     def on(e) -> list:
-        return [e.is_deleted == False] + ([e.event_datetime >= since] if since is not None else [])  # noqa: E712
+        return [e.is_deleted == False] + ([_in(e.lifecycle, SHOWN), e.event_datetime >= since] if since is not None else [])  # noqa: E712
 
     return Events.id.in_(union(
         select(e1.id).where(event_match(e1), *on(e1)),
@@ -462,6 +500,10 @@ def card(e: Events, now: datetime, going: int, distance: Optional[float] = None)
         capacity=e.max_participants,
         status=status_of(e, now, going),
         url=public_urls.event_url(e.slug),
+        summary=summary_of(e.about),
+        # No publish time is kept; when the event was made stands in for it (sort=newest).
+        created_at=_iso(e.created_at),
+        updated_at=_iso(e.updated_at),
     )
 
 
@@ -625,6 +667,9 @@ async def search_events(
         page = await _page(session, conds, [(_popularity(), True), *by_date], offset, limit)
     elif sort == "relevance" and words:
         page = await _page(session, conds, [(_relevance(q), True), *by_date], offset, limit, with_category=True)
+    elif sort == "newest":
+        # The latest made first (the feeds): walks ix_events_shown_created backwards.
+        page = await _page(session, conds, [(Events.created_at, True), (Events.id, True)], offset, limit)
     else:
         page = await _page(session, conds, by_date, offset, limit)
     going = await going_counts(session, [e.id for e in page])
@@ -1056,6 +1101,9 @@ async def event_page(session, ref: str, now: Optional[datetime] = None) -> dict:
         guidelines=e.event_guidelines,
         contact=dict(name=e.contact_name, email=e.contact_email, phone=e.contact_phone),
         url=public_urls.event_url(e.slug),
+        summary=summary_of(e.about),
+        created_at=_iso(e.created_at),
+        updated_at=_iso(e.updated_at),
     )
     speakers = [
         dict(id=s.id, name=s.name, designation=s.designation, photo=_img(s.photo, "medium", "thumbnail", "original"), bio=s.bio, link=s.link)
@@ -1126,8 +1174,9 @@ async def sitemap_json(session, now: Optional[datetime] = None) -> bytes:
     return await cache.shared.remember(("sitemap-json", cache.minute(now)), build)
 
 
-# The paged sitemap: every public event and club, in pages of SITEMAP_PAGE in
-# id order. One statement numbers the rows and gives each page its first id,
+# The paged sitemap: every public event (held ones of any age included) and
+# every listed club, in pages of SITEMAP_PAGE in id order, so a page holds the
+# same entries from one crawl to the next. One statement numbers the rows and gives each page its first id,
 # its size and its newest change; a page is then a range of ids, read through
 # the primary key. The page boundaries are kept for SITEMAP_BOUNDS_TTL: a page
 # may meanwhile lose a few entries or (the last one) gain some, and is never
@@ -1136,21 +1185,36 @@ async def sitemap_json(session, now: Optional[datetime] = None) -> bytes:
 SITEMAP_KINDS = ("events", "clubs")
 
 
-def _sitemap_rows(kind: str, now: datetime):
-    """(model, conditions) of a sitemap kind."""
+def _sitemap_rows(kind: str, now: datetime, *, every: bool = False):
+    """(model, conditions, join the clubs) of a sitemap kind: every public
+    event (on, to come or held, of any age: an event's page stays up once it
+    is over) or every listed club.
+
+    `every`, for the boundaries, which read every event: the events' club
+    rule becomes "not one of the unlisted clubs" (unverified or deleted: a
+    few percent), which Postgres keeps as a hashed list while it reads the
+    events once; joined (or as IN, which it turns into a join) it probed the
+    clubs once an event, 600,000 pages for a million events. For one page of
+    a few thousand events the join is cheaper than reading every club. The
+    columns are NOT NULL, so the two say the same."""
+    if kind == "events" and not every:
+        return Events, _public_where(now), True
     if kind == "events":
-        return Events, _sitemap_events_where(now)
-    return Clubs, list(_club_visible())
+        end = _end_expr()
+        return Events, [
+            Events.is_deleted == False,  # noqa: E712
+            Events.club_id.isnot(None),
+            Events.club_id.notin_(select(Clubs.id).where(or_(Clubs.is_verified == False, Clubs.is_deleted == True))),  # noqa: E712
+            or_(and_(_in(Events.lifecycle, SHOWN), end >= now), and_(_in(Events.lifecycle, HELD), end < now)),
+        ], False
+    return Clubs, list(_club_visible()), False
 
 
 async def _sitemap_bounds(session, kind: str, now: datetime) -> list[dict]:
-    model, conds = _sitemap_rows(kind, now)
+    model, conds, _ = _sitemap_rows(kind, now, every=True)
     numbered = select(
         model.id.label("id"), model.updated_at.label("at"), func.row_number().over(order_by=model.id).label("n"),
-    ).where(*conds)
-    if model is Events:
-        numbered = numbered.join(Clubs, Clubs.id == Events.club_id)
-    numbered = numbered.subquery("numbered")
+    ).where(*conds).subquery("numbered")
     page = ((numbered.c.n - 1) // SITEMAP_PAGE).label("page")
     rows = await session.execute(
         select(page, func.min(numbered.c.id), func.count(), func.max(numbered.c.at)).group_by(page).order_by(page)
@@ -1179,12 +1243,12 @@ async def sitemap_page(session, kind: str, page: int, now: Optional[datetime] = 
     bounds = await _sitemap_bounds_kept(session, kind, now)
     if not 1 <= page <= len(bounds):
         raise CustomHTTPException(404, message="No such sitemap page")
-    model, conds = _sitemap_rows(kind, now)
+    model, conds, join_clubs = _sitemap_rows(kind, now)
     conds = conds + [model.id >= bounds[page - 1]["first"]]
     if page < len(bounds):
         conds.append(model.id < bounds[page]["first"])
     stmt = select(model.slug, model.updated_at).where(*conds).order_by(model.id).limit(SITEMAP_PAGE)
-    if model is Events:
+    if join_clubs:
         stmt = stmt.join(Clubs, Clubs.id == Events.club_id)
     rows = (await session.execute(stmt)).all()
     return dict(kind=kind, page=page, pages=len(bounds), items=[dict(slug=slug, updated_at=_iso(at)) for slug, at in rows])

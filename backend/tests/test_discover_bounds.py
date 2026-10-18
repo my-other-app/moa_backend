@@ -527,9 +527,20 @@ async def test_the_sitemap_index_lists_every_page_and_each_page_its_entries(clie
                            club_id=club.id, category_id=tech.id, lifecycle=EventStatus.published))
     for i in range(2):
         session.add(Clubs(slug=f"sm-club-{uuid.uuid4().hex[:6]}", name=f"Mapped Club {i}", is_verified=True))
-    session.add(Clubs(slug=f"sm-ghost-{uuid.uuid4().hex[:6]}", name="Unlisted Club", is_verified=False))
+    ghost = Clubs(slug=f"sm-ghost-{uuid.uuid4().hex[:6]}", name="Unlisted Club", is_verified=False)
+    session.add(ghost)
+    await session.flush()
+    session.add(Events(slug=f"sm-ghost-ev-{uuid.uuid4().hex[:8]}", name="Unlisted Night", images=[], event_datetime=now + timedelta(days=4), duration=2.0,
+                       club_id=ghost.id, category_id=tech.id, lifecycle=EventStatus.published))
+    # Held two years ago: past the one-page sitemap's year, still a public page.
+    ancient = Events(slug=f"sm-old-{uuid.uuid4().hex[:8]}", name="Founding Meetup", images=[], event_datetime=now - timedelta(days=730), duration=2.0,
+                     club_id=club.id, category_id=tech.id, lifecycle=EventStatus.archived)
+    session.add(ancient)
+    session.add(Events(slug=f"sm-draft-{uuid.uuid4().hex[:8]}", name="Never Published", images=[], event_datetime=now - timedelta(days=30), duration=2.0,
+                       club_id=club.id, category_id=tech.id, lifecycle=EventStatus.draft))
     await session.commit()
     old = (await client.get(f"{API}/sitemap")).json()
+    assert ancient.slug not in {x["slug"] for x in old["events"]}
     monkeypatch.setattr(service, "SITEMAP_PAGE", 2)
 
     index = (await client.get(f"{API}/sitemap/index")).json()
@@ -542,10 +553,15 @@ async def test_the_sitemap_index_lists_every_page_and_each_page_its_entries(clie
         assert body["pages"] == sum(1 for k, _ in pages if k == kind)
         assert p["updated_at"] == max(x["updated_at"] for x in body["items"])
         seen[kind] += [x["slug"] for x in body["items"]]
-    # Every page together is what the one-page sitemap lists (it has room for all of them here).
-    assert sorted(seen["events"]) == sorted(x["slug"] for x in old["events"])
+    # Every page together is what the one-page sitemap lists (it has room for
+    # all of them here), and the event held two years ago; never a draft.
+    assert sorted(seen["events"]) == sorted([x["slug"] for x in old["events"]] + [ancient.slug])
     assert sorted(seen["clubs"]) == sorted(x["slug"] for x in old["clubs"])
-    assert len(seen["events"]) == len(set(seen["events"])) == 8  # the scene's four (held, on, to come) and four more
+    assert len(seen["events"]) == len(set(seen["events"])) == 9  # the scene's four (held, on, to come), four more, the old one
+    assert not any(slug.startswith(("sm-draft-", "sm-ghost-ev-")) for slug in seen["events"])
+    # In id order, so a page keeps its entries from one crawl to the next.
+    ids = {e.slug: e.id for e in (await session.scalars(select(Events).where(Events.slug.in_(seen["events"])))).all()}
+    assert [ids[x] for x in seen["events"]] == sorted(ids[x] for x in seen["events"])
     assert "Unlisted" not in " ".join(seen["clubs"])
     last = max(n for k, n in pages if k == "events")
     assert (await client.get(f"{API}/sitemap/events/{last + 1}")).status_code == 404
@@ -576,3 +592,46 @@ async def test_for_you_with_nothing_on_and_nothing_known_is_empty(client, make_u
     # No interests, no clubs, nothing popular or online: one arm left, and no rows.
     h = auth_header(await mint_token(await make_user(email="feed-empty@example.com")))
     assert await _feed(client, h) == []
+
+
+# ─── 8. What the feeds read off a card ────────────────────────────────────
+
+
+def test_a_summary_is_one_plain_line_cut_at_a_word():
+    assert service.summary_of(None) is None and service.summary_of("  \n ") is None
+    assert service.summary_of("<p>Build <b>robots</b> &amp; drones.</p>\n\n## Bring\n- **a laptop** and [a friend](https://x.example)") == (
+        "Build robots & drones. Bring a laptop and a friend"
+    )
+    assert service.summary_of("snake_case names and 3*4 stay as written") == "snake_case names and 3*4 stay as written"
+    long = "Robots " * 60
+    got = service.summary_of(long)
+    assert len(got) <= service.SUMMARY_MAX and got.endswith("Robots…") and "  " not in got
+    assert service.summary_of("x" * 300) == "x" * (service.SUMMARY_MAX - 1) + "…"  # no word to cut at
+
+
+async def test_cards_carry_a_summary_and_their_dates_and_newest_comes_first(client, session, scene):
+    now, club, tech = scene["now"], scene["club"], scene["tech"]
+    made = []
+    for i, days_ago in enumerate((30, 2, 10)):
+        e = Events(slug=f"nw-{uuid.uuid4().hex[:8]}", name=f"Newest Night {i}", images=[], event_datetime=now + timedelta(days=5 + i), duration=2.0,
+                   club_id=club.id, category_id=tech.id, lifecycle=EventStatus.published, about=f"<p>Night {i}: <b>talks</b> and demos.</p>",
+                   created_at=now - timedelta(days=days_ago))
+        session.add(e)
+        made.append(e)
+    await session.commit()
+
+    body = (await client.get(f"{API}/events", params={"q": "newest night", "sort": "newest"})).json()
+    assert _ids(body["items"]) == [made[1].id, made[2].id, made[0].id]
+    card = body["items"][0]
+    assert card["summary"] == "Night 1: talks and demos."
+    assert datetime.fromisoformat(card["created_at"]) == made[1].created_at
+    assert datetime.fromisoformat(card["updated_at"]) == made[1].updated_at
+    # Without words: everything on, the latest made first.
+    newest = (await client.get(f"{API}/events", params={"sort": "newest"})).json()["items"]
+    made_at = [datetime.fromisoformat(x["created_at"]) for x in newest]
+    assert made_at == sorted(made_at, reverse=True)
+    # The front page's cards and the event's own page carry them too.
+    home = (await client.get(f"{API}/home")).json()
+    assert all("summary" in x and x["created_at"] and x["updated_at"] for x in home["this_week"])
+    page = (await client.get(f"{API}/events/{made[1].slug}")).json()["event"]
+    assert page["updated_at"] == card["updated_at"] and page["created_at"] == card["created_at"] and page["summary"] == card["summary"]

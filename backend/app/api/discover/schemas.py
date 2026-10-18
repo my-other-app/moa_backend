@@ -48,6 +48,13 @@ class EventCard(BaseModel):
     capacity: Optional[int] = None
     status: Literal["upcoming", "closing_soon", "full", "live", "ended"]
     url: str
+    # The description as one line of plain text, at most 200 characters (cut
+    # at a word, with an ellipsis): enough for a feed without the event page.
+    summary: Optional[str] = None
+    # When the event was made (no publish time is kept; sort=newest orders
+    # by this) and last changed, ISO 8601.
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
 
 class ClubCard(BaseModel):
@@ -222,6 +229,9 @@ class PageEvent(BaseModel):
     guidelines: Optional[str] = None
     contact: EventContact
     url: str
+    summary: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
 
 class PageClub(BaseModel):
