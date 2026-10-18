@@ -168,12 +168,20 @@ def _block_html(b, inp: RenderInput) -> str:
                 return ""
             return f'<div style="font-size:12px;letter-spacing:1px;text-transform:uppercase;color:{theme.muted};margin-top:10px">{_esc(label)}</div><div style="font-size:15px;color:{color}">{_esc(value)}</div>'
 
-        # Rows chosen in the designer, or the four this card always showed.
+        # Rows chosen in the designer, or the card's own: the event, when,
+        # where, and the ticket code the door types when the QR will not
+        # scan -- with the admission number small beneath it, for the
+        # organisers' records (it no longer lets anyone in).
         when = v.get("event_start") or f'{v.get("event_date", "")} · {v.get("event_time", "")}'
+        admission = _secondary_admission(v)
         body = (
             "".join(line(r.label, plain(r.value, v)) for r in b.rows)
             if b.rows
-            else f'{line("Event", v.get("event_name", ""))}{line("When", when)}{line("Where", v.get("venue", "")) if b.show_venue else ""}{line("Admission", v.get("admission_no", ""))}'
+            else (
+                f'{line("Event", v.get("event_name", ""))}{line("When", when)}{line("Where", v.get("venue", "")) if b.show_venue else ""}'
+                f'{line("Ticket code", v.get("ticket_code", ""))}'
+                + (f'<div style="font-size:12px;color:{theme.muted};margin-top:4px">Admission no. {_esc(admission)}</div>' if admission else "")
+            )
         )
         eyebrow = plain(b.eyebrow, v)
         title = plain(b.title, v)
@@ -213,13 +221,24 @@ def _block_text(b, inp: RenderInput) -> str:
         # The plain-text copy says the same as the card, chosen rows included --
         # a guest whose client shows no HTML reads this one.
         when = v.get("event_start") or f'{v.get("event_date", "")} · {v.get("event_time", "")}'
+        admission = _secondary_admission(v)
         rows = (
             [f"{r.label}: {plain(r.value, v)}" for r in b.rows]
             if b.rows
-            else [v.get("event_name", ""), when, v.get("venue", "") if b.show_venue else "", f"Admission {v['admission_no']}" if v.get("admission_no") else ""]
+            else [
+                v.get("event_name", ""), when, v.get("venue", "") if b.show_venue else "",
+                f"Ticket code: {v['ticket_code']}" if v.get("ticket_code") else "",
+                f"(Admission no. {admission})" if admission else "",
+            ]
         )
         return "\n".join(x for x in [plain(b.eyebrow, v), plain(b.title, v), *rows, plain(b.note, v) if b.note else ""] if x)
     return ""
+
+
+def _secondary_admission(v: dict) -> str:
+    """The admission number, when there is one apart from the ticket code."""
+    admission = (v.get("admission_no") or "").strip()
+    return "" if not admission or admission == (v.get("ticket_code") or "").strip() else admission
 
 
 def render_email(inp: RenderInput) -> RenderedEmail:
