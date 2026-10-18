@@ -70,14 +70,16 @@ async def per_event(session, event_ids: list[int]) -> dict[int, dict]:
     if not event_ids:
         return out
     # Counts of registrations, from the event's own counters.
-    for eid, going, paid in (await session.execute(
-        select(Events.id, Events.going_count, Events.paid_count).where(Events.id.in_(event_ids))
+    clubs = set()
+    for eid, club_id, going, paid in (await session.execute(
+        select(Events.id, Events.club_id, Events.going_count, Events.paid_count).where(Events.id.in_(event_ids))
     )).all():
         out[eid].update(regs=int(going or 0), paying=int(paid or 0))
-    # The money, from the sums.
+        clubs.add(club_id or 0)
+    # The money, from the sums: by the key's own (club, event) prefix.
     for eid, account, kind, paise, units in (await session.execute(
         select(LM.event_id, LM.account, LM.kind, func.sum(LM.amount_paise), func.sum(LM.units))
-        .where(LM.event_id.in_(event_ids))
+        .where(LM.club_id.in_(sorted(clubs)), LM.event_id.in_(event_ids))
         .group_by(LM.event_id, LM.account, LM.kind)
     )).all():
         m = out.get(eid)
