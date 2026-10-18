@@ -7,7 +7,6 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
-    UniqueConstraint,
 )
 from app.db.mixins import SoftDeleteMixin, TimestampsMixin
 from sqlalchemy.orm import relationship
@@ -104,7 +103,11 @@ class Users(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     # demoted everyone would lock the platform out of itself.
     # Two-factor, for admins. A stolen admin password is otherwise the whole
     # chain: impersonation, refunds and deletion all sit behind it.
-    totp_secret = Column(String(64), nullable=True)
+    # Encrypted (app.api.auth.totp) when APP_PAYMENT_KEYS_SECRET is set; a
+    # secret saved before that, or without it, is the plain base32.
+    totp_secret = Column(String(255), nullable=True)
+    # The last 30-second step a code was accepted for: a code is good once.
+    totp_last_step = Column(sa.BigInteger, nullable=True)
     totp_enabled = Column(
         Boolean, nullable=False, default=False, server_default=sa.text("false")
     )
@@ -139,27 +142,41 @@ class Users(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         return getattr(self.provider, "value", self.provider) in ADDRESS_CHECKING_PROVIDERS
 
     __table_args__ = (
-        # One account per address, and per phone, for each kind of account --
-        # except guests. The public form makes a fresh guest for every sign-up
-        # without a sign-in, so one address can stand behind several guests
-        # until they are merged into the app account it belongs to.
+        # One live account per address, and per phone, for each kind of
+        # account -- except guests. The public form makes a fresh guest for
+        # every sign-up without a sign-in, so one address can stand behind
+        # several guests until they are merged into the app account it
+        # belongs to. Deleted accounts are left out: they held the address for
+        # ever, so a person who deleted their account could never sign up
+        # again (a 500 from /user/register and /auth/google).
         sa.Index(
             "uq_users_email_user_type",
             "email",
             "user_type",
             unique=True,
-            postgresql_where=sa.text("user_type <> 'guest'"),
+            postgresql_where=sa.text("user_type <> 'guest' AND NOT is_deleted"),
         ),
         sa.Index(
             "uq_users_phone_user_type",
             "phone",
             "user_type",
             unique=True,
-            postgresql_where=sa.text("user_type <> 'guest'"),
+            postgresql_where=sa.text("user_type <> 'guest' AND NOT is_deleted"),
         ),
         # Addresses are matched trimmed and case-blind, and the merge looks
         # for guests this way on every app launch.
         sa.Index("ix_users_email_normalised", sa.func.lower(sa.func.btrim(email))),
+        # The admin's user list: newest first, a page at a time by keyset.
+        sa.Index(
+            "ix_users_created_id",
+            sa.text("created_at DESC"),
+            sa.text("id DESC"),
+            postgresql_where=sa.text("NOT is_deleted"),
+        ),
+        # The admin's search, "contains" on each of these.
+        sa.Index("ix_users_full_name_trgm", "full_name", postgresql_using="gin", postgresql_ops={"full_name": "gin_trgm_ops"}, postgresql_where=sa.text("NOT is_deleted")),
+        sa.Index("ix_users_email_trgm", "email", postgresql_using="gin", postgresql_ops={"email": "gin_trgm_ops"}, postgresql_where=sa.text("NOT is_deleted")),
+        sa.Index("ix_users_username_trgm", "username", postgresql_using="gin", postgresql_ops={"username": "gin_trgm_ops"}, postgresql_where=sa.text("NOT is_deleted")),
     )
 
 
@@ -188,7 +205,13 @@ class UserProfiles(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     org = relationship("Organizations")
     avatar = relationship("UserAvatars")
 
-    __table_args__ = (sa.Index("ix_user_profiles_user", "user_id"),)
+    __table_args__ = (
+        sa.Index("ix_user_profiles_user", "user_id"),
+        # One live profile per account. Two requests making the first one at
+        # once used to make two, and which one an account showed was then
+        # whichever Postgres returned first.
+        sa.Index("ux_user_profiles_user_live", "user_id", unique=True, postgresql_where=sa.text("NOT is_deleted")),
+    )
 
     def __repr__(self):
         return self.username
@@ -204,11 +227,24 @@ class UserInterests(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     # user = relationship("Users")
     interest = relationship("Interests")
 
-    __table_args__ = (sa.Index("ix_user_interests_user", "user_id"),)
+    __table_args__ = (
+        sa.Index("ix_user_interests_user", "user_id"),
+        # One row per interest a person picked: selecting is one INSERT ...
+        # ON CONFLICT DO NOTHING against this.
+        sa.Index("ux_user_interests_user_interest", "user_id", "interest_id", unique=True),
+        # Who picked an interest: the new-event push to people whose
+        # interests match reads it this way round.
+        sa.Index("ix_user_interests_interest", "interest_id", "user_id"),
+    )
 
 
 class UserDeviceTokens(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
-    """Store FCM tokens for push notifications per user/device."""
+    """FCM tokens for push notifications: one row per device.
+
+    A token names one install of the app, so it is unique, and belongs to
+    whichever account last signed in there. It used to be unique per (user,
+    platform), so a second Android phone replaced the first and only one of a
+    person's devices ever got their pushes."""
     __tablename__ = "user_device_tokens"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -217,8 +253,8 @@ class UserDeviceTokens(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     platform = Column(String(20), nullable=False)  # ios / android
 
     user = relationship("Users")
-    
-    __table_args__ = (
-        UniqueConstraint("user_id", "platform", name="uq_user_platform"),
-    )
 
+    __table_args__ = (
+        sa.Index("ux_user_device_tokens_token", "fcm_token", unique=True),
+        sa.Index("ix_user_device_tokens_user_id", "user_id"),
+    )

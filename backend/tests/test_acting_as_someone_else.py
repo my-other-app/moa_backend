@@ -49,7 +49,7 @@ async def test_apple_sign_in_trusts_only_the_address_apple_signed(client, sessio
     real_decode = jwt.decode
 
     class Keys:
-        def __init__(self, url):
+        def __init__(self, url, **kwargs):
             pass
 
         def get_signing_key_from_jwt(self, token):

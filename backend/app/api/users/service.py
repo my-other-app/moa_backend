@@ -3,8 +3,11 @@ import io
 import logging
 import re
 import secrets
+import sqlalchemy as sa
 from fastapi import File, UploadFile
 from sqlalchemy import case, delete, exists, func, or_, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
 
@@ -19,10 +22,11 @@ from app.api.users.models import (
     Users,
 )
 from app.api.users.schemas import UserCreate
-from app.core.auth.authentication import get_password_hash
+from app.core.auth.authentication import get_password_hash_async
 from app.api.clubs.models import ClubUsersLink, Clubs
 from app.api.orgs.models import Organizations
 from app.core.validations.schema import validate_relations, validate_unique
+from app.db.errors import constraint_of
 from app.api.interests.models import Interests
 from app.api.events.models import EventInterestsLink, EventRegistrationsLink, Events
 from app.api.badges.models import UserBadges
@@ -30,26 +34,25 @@ from app.api.badges.models import UserBadges
 logger = logging.getLogger(__name__)
 
 
+def _username_base(full_name: str | None, is_guest: bool = False) -> str:
+    base = re.sub(r"[^a-zA-Z0-9_-]", "", (full_name or "").lower().replace(" ", "_"))[:60] or "user"
+    return f"guest_{base}" if is_guest else base
+
+
 async def generate_username(user: Users, session: AsyncSession, is_guest: bool = False):
-    base_username = re.sub(
-        r"[^a-zA-Z0-9_-]", "", user.full_name.lower().replace(" ", "_")
+    """The name itself when it is free, else the name and a random tail.
+
+    It used to count up -- rahul, rahul_1, rahul_2, ... -- one query per
+    Rahul already signed up, and two sign-ups at once could pick the same
+    one. Now it is at most one indexed probe; create_user retries with a
+    fresh tail if the insert still finds the name taken. Deleted accounts
+    count: their usernames are still in the table, and still unique."""
+    base = _username_base(user.full_name, is_guest)
+    taken = await session.scalar(
+        select(exists().where(Users.username == base)).execution_options(include_deleted=True)
     )
-    if is_guest:
-        base_username = f"guest_{base_username}"
-
-    if not base_username:
-        base_username = "user"
-
-    username = base_username
-    count = 1
-
-    while (
-        await session.execute(select(exists().where(Users.username == username)))
-    ).scalar():
-        username = f"{base_username}_{count}"
-        count += 1
-    user.username = username
-    return username
+    user.username = f"{base}_{secrets.token_hex(3)}" if taken else base
+    return user.username
 
 
 def same_email(column, email: str):
@@ -176,15 +179,31 @@ async def create_user(
     if user_type != UserTypes.guest and provider == "email":
         if not password:
             raise CustomHTTPException(400, "Password is required")
-        hashed_password = get_password_hash(user_obj.password)
-        user_obj.password = hashed_password
+        user_obj.password = await get_password_hash_async(user_obj.password)
 
-    username = await generate_username(
-        user_obj, session, is_guest=user_type == UserTypes.guest
-    )
-    user_obj.username = username
-
-    session.add(user_obj)
+    is_guest = user_type == UserTypes.guest
+    username = await generate_username(user_obj, session, is_guest=is_guest)
+    # The probe and the insert are not one step: two sign-ups can still pick
+    # one name, or one address. The insert decides, in a SAVEPOINT, so the
+    # loser retries with a fresh tail (a name) or gets the answer the check
+    # above gives (an address), never a 500.
+    for attempt in range(5):
+        user_obj.username = username
+        try:
+            async with session.begin_nested():
+                session.add(user_obj)
+                await session.flush()
+            break
+        except IntegrityError as exc:
+            name = constraint_of(exc) or ""
+            if "username" in name and attempt < 4:
+                username = f"{_username_base(full_name, is_guest)}_{secrets.token_hex(3)}"
+                continue
+            if "email" in name:
+                raise CustomHTTPException(status_code=400, message="Invalid Request", errors={"email": "email already exists"})
+            if "phone" in name:
+                raise CustomHTTPException(status_code=400, message="Invalid Request", errors={"phone": "phone already exists"})
+            raise
     await session.commit()
 
     query = await session.execute(
@@ -619,18 +638,46 @@ async def create_user_profile(
     )
     if profile:
         raise CustomHTTPException(400, "Profile already exists", error_code="PROFILE_EXISTS")
-    else:
-        await validate_unique(
-            session,
-            unique_together=[{"whatsapp": (UserProfiles, whatsapp)}],
-        )
-        profile = UserProfiles(
-            user_id=user_id, org_id=org_id, whatsapp=whatsapp, full_name=full_name
-        )
-        session.add(profile)
+    await validate_unique(
+        session,
+        unique_together=[{"whatsapp": (UserProfiles, whatsapp)}],
+    )
+    profile = UserProfiles(
+        user_id=user_id, org_id=org_id, whatsapp=whatsapp, full_name=full_name
+    )
+    # Two of these at once both found no profile; one live profile per
+    # account (ux_user_profiles_user_live) now decides, and the second hears
+    # what it would have heard a moment later.
+    try:
+        async with session.begin_nested():
+            session.add(profile)
+            await session.flush()
+    except IntegrityError as exc:
+        if "user_profiles_user" in (constraint_of(exc) or ""):
+            raise CustomHTTPException(400, "Profile already exists", error_code="PROFILE_EXISTS")
+        raise
     await session.commit()
     await session.refresh(profile)
     return profile
+
+
+async def _ensure_profile(session: AsyncSession, user_id: int, full_name: str | None = None) -> UserProfiles:
+    """The account's live profile, made first if it has none: an INSERT ...
+    ON CONFLICT DO NOTHING, so two requests making it at once make one."""
+    profile = await session.scalar(select(UserProfiles).where(UserProfiles.user_id == user_id))
+    if profile is not None:
+        return profile
+    if not full_name:
+        full_name = await session.scalar(select(Users.full_name).where(Users.id == user_id)) or ""
+    now = datetime.now(timezone.utc)
+    await session.execute(
+        pg_insert(UserProfiles)
+        .values(user_id=user_id, full_name=full_name, is_deleted=False, created_at=now, updated_at=now)
+        .on_conflict_do_nothing(index_elements=["user_id"], index_where=sa.text("NOT is_deleted"))
+    )
+    return await session.scalar(
+        select(UserProfiles).where(UserProfiles.user_id == user_id).execution_options(populate_existing=True)
+    )
 
 
 async def update_user_profile(
@@ -651,32 +698,21 @@ async def update_user_profile(
     profile = await session.scalar(
         select(UserProfiles).where(UserProfiles.user_id == user_id)
     )
-    
-    if not profile:
-        # Create profile if it doesn't exist (e.g., for email login users)
+    if profile is None or profile.whatsapp != whatsapp:
         await validate_unique(
             session,
             unique_together=[{"whatsapp": (UserProfiles, whatsapp)}],
         )
-        profile = UserProfiles(
-            user_id=user_id, org_id=org_id, whatsapp=whatsapp, full_name=full_name
-        )
-        session.add(profile)
-    else:
-        # Update existing profile
-        if profile.whatsapp != whatsapp:
-            await validate_unique(
-                session,
-                unique_together=[{"whatsapp": (UserProfiles, whatsapp)}],
-            )
-        profile.whatsapp = whatsapp
-        profile.org_id = org_id
-        profile.full_name = full_name
+    if profile is None:
+        # Made here if missing (e.g. for email login users), race-free.
+        profile = await _ensure_profile(session, user_id, full_name)
+    profile.whatsapp = whatsapp
+    profile.org_id = org_id
+    profile.full_name = full_name
 
     await session.commit()
     await session.refresh(profile)
     return profile
-
 
 
 async def list_interests(session: AsyncSession, user_id: int):
@@ -692,12 +728,31 @@ async def list_interests(session: AsyncSession, user_id: int):
 async def select_interests(
     session: AsyncSession, user_id: int, interest_ids: list[int]
 ):
-    delete_exisisting = delete(UserInterests).where(UserInterests.user_id == user_id)
-    await session.execute(delete_exisisting)
-    for id in interest_ids:
-        if await session.scalar(select(exists().where(Interests.id == id))):
-            link = UserInterests(user_id=user_id, interest_id=id)
-            session.add(link)
+    """Replace the account's interests with these: one DELETE and one INSERT
+    ... SELECT ... ON CONFLICT DO NOTHING, whatever the list's length. It was
+    a query per interest, and two saves at once could leave duplicates. Ids
+    that are not live interests are left out, as before."""
+    from app.core.notifications.service import int_array
+
+    await session.execute(
+        delete(UserInterests)
+        .where(UserInterests.user_id == user_id)
+        .execution_options(include_deleted=True, synchronize_session=False)
+    )
+    if interest_ids:
+        now = datetime.now(timezone.utc)
+        live = select(
+            sa.literal(user_id, sa.Integer),
+            Interests.id,
+            sa.literal(now, UserInterests.__table__.c.created_at.type),
+            sa.literal(now, UserInterests.__table__.c.updated_at.type),
+            sa.false(),
+        ).where(Interests.id == sa.any_(int_array(interest_ids)), Interests.is_deleted == False)  # noqa: E712
+        await session.execute(
+            pg_insert(UserInterests)
+            .from_select(["user_id", "interest_id", "created_at", "updated_at", "is_deleted"], live)
+            .on_conflict_do_nothing(index_elements=["user_id", "interest_id"])
+        )
     await session.commit()
     _forget_for_you(user_id)
     return None
@@ -987,12 +1042,9 @@ async def update_profile_picture(
     profile_picture: UploadFile,
 ) -> dict:
     """Update user's profile picture."""
-    profile = await session.scalar(
-        select(UserProfiles).where(UserProfiles.user_id == user_id)
-    )
-    if not profile:
-        profile = UserProfiles(user_id=user_id)
-        session.add(profile)
+    # Made first if missing -- with the account's name, which a profile
+    # cannot be saved without (it was made without one, and failed).
+    profile = await _ensure_profile(session, user_id)
 
     if profile.profile_pic:
         profile.profile_pic.delete()
@@ -1049,10 +1101,40 @@ async def list_avatars(session: AsyncSession):
     return await session.scalars(query)
 
 
+#: The address a deleted account is left holding: no mail goes there, and
+#: no two are alike.
+DELETED_EMAIL_DOMAIN = "deleted.invalid"
+
+
 async def delete_user(session: AsyncSession, user_id: int):
+    """The account's own deletion (DELETE /user/delete).
+
+    Soft-deleted, as before, with its follows, registrations, interests and
+    profile -- and what identifies the person is scrubbed: the address, the
+    phone, the name, the username, the password and the second factor (the
+    DPDP Act's erasure; nothing restores an account its owner deleted). The
+    address is free for a new sign-up at once. Every session ends and every
+    device stops getting pushes.
+
+    An admin's deletion (admin_delete_user) keeps the details: a club's
+    account comes back with the club when it is restored from the Trash.
+    """
+    from app.api.auth.sessions import UserSessions
+    from app.api.users.models import UserDeviceTokens
+
     await validate_relations(session, {"user_id": (Users, user_id)})
     user = await session.scalar(select(Users).where(Users.id == user_id))
     user.soft_delete()
+    user.email = f"deleted-{user.id}-{secrets.token_hex(4)}@{DELETED_EMAIL_DOMAIN}"
+    user.phone = None
+    user.full_name = "Deleted user"
+    user.username = f"deleted_{user.id}_{secrets.token_hex(3)}"
+    user.password = None
+    user.email_verified_at = None
+    user.totp_secret = None
+    user.totp_enabled = False
+    user.totp_recovery_codes = None
+    user.token_version = (user.token_version or 0) + 1
     # delete user registrations
     follows = select(ClubUsersLink).where(ClubUsersLink.user_id == user_id)
     for follow in await session.scalars(follows):
@@ -1062,14 +1144,30 @@ async def delete_user(session: AsyncSession, user_id: int):
     )
     for registration in await session.scalars(registrations):
         registration.soft_delete()
-    interests = select(UserInterests).where(UserInterests.user_id == user_id)
-    for interest in await session.scalars(interests):
-        interest.soft_delete()
+    await session.execute(
+        update(UserInterests)
+        .where(UserInterests.user_id == user_id, UserInterests.is_deleted == False)  # noqa: E712
+        .values(is_deleted=True, deleted_at=datetime.now(timezone.utc))
+        .execution_options(synchronize_session=False)
+    )
     profile = await session.scalar(
         select(UserProfiles).where(UserProfiles.user_id == user_id)
     )
     if profile:
         profile.soft_delete()
+        profile.full_name = "Deleted user"
+        profile.whatsapp = None
+    await session.execute(
+        delete(UserDeviceTokens)
+        .where(UserDeviceTokens.user_id == user_id)
+        .execution_options(include_deleted=True, synchronize_session=False)
+    )
+    await session.execute(
+        update(UserSessions)
+        .where(UserSessions.user_id == user_id, UserSessions.revoked == False)  # noqa: E712
+        .values(revoked=True)
+        .execution_options(synchronize_session=False)
+    )
     await session.commit()
     return None
 
@@ -1094,6 +1192,9 @@ async def list_registered_events(
                 joinedload(Events.club), joinedload(Events.category)
             )
         )
+        # Newest registration first. With no order at all, a page was
+        # whatever Postgres returned, and paging could repeat or skip rows.
+        .order_by(EventRegistrationsLink.created_at.desc(), EventRegistrationsLink.id.desc())
         .limit(limit)
         .offset(offset)
     )
@@ -1120,42 +1221,48 @@ async def remove_fcm_token(session: AsyncSession, user_id: int, fcm_token: str) 
     return int(result.rowcount or 0)
 
 
+#: Devices one account keeps getting pushes on. Past it the least recently
+#: registered go: a token the app stopped sending is a phone long gone.
+MAX_DEVICES_PER_USER = 10
+
+
 async def update_fcm_token(
     session: AsyncSession,
     user_id: int,
     fcm_token: str,
     platform: str,
 ):
-    """Store or update the user's FCM token for push notifications."""
+    """Store the device's FCM token for push notifications: one upsert.
+
+    One install, one account: a token signed in to here stops being anyone
+    else's, so a phone handed from one person to the next (or signed out
+    without reaching DELETE /user/fcm-token) stops getting the first one's
+    pushes. Each of a person's devices keeps its own row."""
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
     from app.api.users.models import UserDeviceTokens
 
-    # One install, one account: a token signed in to here stops being anyone
-    # else's, so a phone handed from one person to the next (or signed out
-    # without reaching DELETE /user/fcm-token) stops getting the first one's pushes.
+    now = datetime.now(timezone.utc)
+    stmt = pg_insert(UserDeviceTokens).values(
+        user_id=user_id, fcm_token=fcm_token, platform=platform, is_deleted=False, created_at=now, updated_at=now,
+    )
+    await session.execute(
+        stmt.on_conflict_do_update(
+            index_elements=[UserDeviceTokens.fcm_token],
+            set_={"user_id": user_id, "platform": platform, "is_deleted": False, "deleted_at": None, "updated_at": now},
+        )
+    )
+    # Beyond MAX_DEVICES_PER_USER, the ones registered longest ago go.
+    keep = (
+        select(UserDeviceTokens.id)
+        .where(UserDeviceTokens.user_id == user_id)
+        .order_by(UserDeviceTokens.updated_at.desc(), UserDeviceTokens.id.desc())
+        .limit(MAX_DEVICES_PER_USER)
+        .execution_options(include_deleted=True)
+    )
     await session.execute(
         delete(UserDeviceTokens)
-        .where(UserDeviceTokens.fcm_token == fcm_token, UserDeviceTokens.user_id != user_id)
+        .where(UserDeviceTokens.user_id == user_id, UserDeviceTokens.id.not_in(keep))
         .execution_options(include_deleted=True, synchronize_session=False)
     )
-    # Check if token already exists for this user/platform -- a removed row
-    # included: (user, platform) is unique whether or not it is deleted.
-    existing = await session.scalar(
-        select(UserDeviceTokens).where(
-            UserDeviceTokens.user_id == user_id,
-            UserDeviceTokens.platform == platform,
-        ).execution_options(include_deleted=True)
-    )
-    
-    if existing:
-        existing.fcm_token = fcm_token
-        existing.is_deleted = False
-    else:
-        device_token = UserDeviceTokens(
-            user_id=user_id,
-            fcm_token=fcm_token,
-            platform=platform,
-        )
-        session.add(device_token)
-    
     await session.commit()
-
