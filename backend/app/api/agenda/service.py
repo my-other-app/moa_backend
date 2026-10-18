@@ -43,7 +43,7 @@ def item_out(r: AgendaItems, parallel: set) -> dict:
     return {
         "id": r.id, "event_id": r.event_id, "starts_at": r.starts_at, "ends_at": r.ends_at, "title": r.title, "description": r.description,
         "speaker": r.speaker, "speaker_photo_key": r.speaker_photo_key,
-        "speaker_photo_url": objects.presigned_url(r.speaker_photo_key) if r.speaker_photo_key else None,
+        "speaker_photo_url": objects.public_url(r.speaker_photo_key) if r.speaker_photo_key else None,
         "location": r.location, "sort_order": r.sort_order, "parallel": r.id in parallel,
     }
 

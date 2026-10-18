@@ -42,6 +42,15 @@ def presigned_url(key: str, expires: int = 3600) -> str:
     )
 
 
+def public_url(key: str) -> str:
+    """A link to a picture anyone may see (an agenda's speaker photo): signed
+    for PUBLIC_IMAGE_URL_TTL and the same link for half of that, like the
+    public image columns (app.core.storage.fields.signed_url)."""
+    from app.core.storage.fields import signed_url
+
+    return signed_url(key, public=True)
+
+
 @lru_cache(maxsize=64)
 def get_bytes(key: str) -> Optional[bytes]:
     """The object, or None when it is gone. Cached per process: keys are

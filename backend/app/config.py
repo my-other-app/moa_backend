@@ -130,6 +130,19 @@ class AppConfig(BaseSettings):
     # `Authorization: Bearer <SITE_REVALIDATE_SECRET>`. Empty secret: never told.
     SITE_REVALIDATE_URL: str = "https://myotherapp.in/api/revalidate"
     SITE_REVALIDATE_SECRET: str = ""
+    # How long a signed link to a public picture stays valid, in seconds: an
+    # event's poster, a club's logo and cover, a speaker's, team member's or
+    # partner's picture, a post's photo (app/core/storage/fields.py). A week,
+    # the most a SigV4 link allows. Private files -- tickets, certificates,
+    # template art and signatures, profile pictures, event files -- keep an hour.
+    PUBLIC_IMAGE_URL_TTL: int = 7 * 24 * 3600
+
+    @field_validator("PUBLIC_IMAGE_URL_TTL")
+    @classmethod
+    def _signable_ttl(cls, value: int) -> int:
+        """Between an hour and SigV4's ceiling of a week: S3 refuses a link
+        signed for longer, which would break every picture at once."""
+        return max(3600, min(int(value), 7 * 24 * 3600))
 
     @property
     def site_tokens(self) -> list[str]:
