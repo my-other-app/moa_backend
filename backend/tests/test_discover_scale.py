@@ -23,7 +23,7 @@ from sqlalchemy import Float, event as sa_event, literal, select, text, update
 from app.api.closeout import service as closeout
 from app.api.closeout.models import EventStatus, RetentionJobs, RetentionMode, RetentionState
 from app.api.clubs.models import ClubInterestsLink, Clubs, ClubUsersLink
-from app.api.discover import cache, counters, geo, service
+from app.api.discover import cache, counters, geo, popularity, service
 from app.api.events import recommendations
 from app.api.events.models import EventCategories, EventInterestsLink, EventRegistrationsLink, Events
 from app.api.interests.models import InterestCategory, Interests
@@ -212,6 +212,7 @@ async def _big_world(session) -> World:
     await w.events_for(hidden[0], BLR, 3)
     await w.activity()
     await session.commit()
+    await popularity.refresh(session)  # as the counter loop does every few minutes
     return w
 
 
@@ -296,6 +297,8 @@ async def test_event_search_answers_as_before(client, session):
     cat = w.categories[0].id
     answered = 0
     for params in SEARCHES + [{"category": cat}, {"category": cat, "sort": "popular"}]:
+        if params.get("q") and "sort" not in params:
+            params = {**params, "sort": "date"}  # with words the default is relevance, compared on its own below
         r = await client.get(f"{API}/events", params=params)
         assert r.status_code == 200, (params, r.text)
         body = r.json()
@@ -472,9 +475,10 @@ async def test_words_match_as_substrings_and_a_typo_is_forgiven(client, session)
     assert await ids(q="circut society") == [robots.id, corner.id, jazz.id, quiz.id]
     # Not for two letters, and never when the substring already found something.
     assert await ids(q="zq") == []
-    assert await ids(q="jazz") == [corner.id, jazz.id]  # soonest first, as always
-    # Best match first, when asked: the name before the place.
+    assert await ids(q="jazz", sort="date") == [corner.id, jazz.id]  # soonest first, when asked
+    # Best match first, and that is the default with words: the name before the place.
     assert await ids(q="jazz", sort="relevance") == [jazz.id, corner.id]
+    assert await ids(q="jazz") == [jazz.id, corner.id]
     clubs = (await client.get(f"{API}/clubs", params={"q": "circit"})).json()
     assert _ids(clubs["items"]) == [club.id] and clubs["total"] == 1
 
@@ -681,10 +685,10 @@ async def test_a_counter_put_out_by_hand_is_found_and_recounted(client, session,
     admin = await make_admin(email="drift-admin@example.com")
     r = await client.post("/api/v1/admin/discover/reconcile-counters", headers=auth_header(await mint_token(admin)))
     assert r.status_code == 200, r.text
-    assert r.json() == {"events": 1, "clubs": 1}
+    assert r.json() == {"events": 1, "clubs": 1, "posts": 0, "poll_options": 0, "questions": 0}
     assert await session.scalar(select(Events.going_count).where(Events.id == event.id)) == 1
     assert await session.scalar(select(Clubs.follower_count).where(Clubs.id == club.id)) == 1
-    assert (await client.post("/api/v1/admin/discover/reconcile-counters", headers=auth_header(await mint_token(admin)))).json() == {"events": 0, "clubs": 0}
+    assert (await client.post("/api/v1/admin/discover/reconcile-counters", headers=auth_header(await mint_token(admin)))).json() == {"events": 0, "clubs": 0, "posts": 0, "poll_options": 0, "questions": 0}
     # When it runs on its own (every six hours, one process): tests/test_write_path.py.
 
 
@@ -732,15 +736,33 @@ async def test_the_minute_cache_expires_and_a_new_event_shows_within_the_minute(
                   club_id=club.id, category_id=w.categories[0].id, lifecycle=EventStatus.published)
     session.add(late)
     await session.commit()
-    # Within the same minute the page is the one already made...
+    # Within the minute the page is the one already made...
     assert (await service.home(session, {"lat": None, "lng": None}, None, now=now))["this_week"] == []
-    # ...and the next minute is a new key.
-    later = await service.home(session, {"lat": None, "lng": None}, None, now=now + timedelta(seconds=61))
-    assert _ids(later["this_week"]) == [late.id]
-    # Entries also expire by age, and the cache holds no more than its cap.
-    small = cache.TTLCache(ttl=10, maxsize=3)
-    clock = [100.0]
+    # ...and past it, the first request still gets that page at once while one
+    # task makes it again in the background (on a session of its own: here, the test's).
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def scope():
+        yield session
+
+    monkeypatch.setattr(geo, "session_scope", scope)
+    clock = [cache.time.monotonic()]
     monkeypatch.setattr(cache.time, "monotonic", lambda: clock[0])
+    clock[0] += 61
+    stale = await service.home(session, {"lat": None, "lng": None}, None, now=now + timedelta(seconds=61))
+    assert stale["this_week"] == [] and cache.shared.stale_hits >= 1
+    await cache.shared.settle()
+    later = await service.home(session, {"lat": None, "lng": None}, None, now=now + timedelta(seconds=62))
+    assert _ids(later["this_week"]) == [late.id]
+    # Left unread past its stale window too, it is made while the request waits.
+    clock[0] += 3 * 60
+    session.add(Events(slug=f"later-{uuid.uuid4().hex[:6]}", name="Later Still", images=[], event_datetime=now + timedelta(days=2), duration=2.0,
+                       club_id=club.id, category_id=w.categories[0].id, lifecycle=EventStatus.published))
+    await session.commit()
+    assert len((await service.home(session, {"lat": None, "lng": None}, None, now=now + timedelta(minutes=4)))["this_week"]) == 2
+    # Entries also expire by age, and the cache holds no more than its cap, family by family.
+    small = cache.TTLCache(ttl=10, maxsize=3, families={"big": 5}, register_it=False)
     small.put("a", 1)
     assert small.get("a") == 1
     clock[0] += 11
@@ -748,6 +770,9 @@ async def test_the_minute_cache_expires_and_a_new_event_shows_within_the_minute(
     for k in "bcde":
         small.put(k, k)
     assert len(small) == 3 and small.get("b") is cache._MISSING and small.get("e") == "e"
+    for i in range(7):
+        small.put(("big", i), i)
+    assert small.get(("big", 0)) is cache._MISSING and small.get(("big", 6)) == 6 and small.get("e") == "e"  # the other family kept its own
 
 
 async def test_concurrent_misses_build_once(shared_cache):

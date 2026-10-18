@@ -104,6 +104,13 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     # list can sort by popularity without counting registrations.
     # Reconciled from the rows by app.api.discover.counters.reconcile.
     going_count = Column(Integer, nullable=False, default=0, server_default="0")
+    # Attention decayed by age, for "popular" (app.api.discover.popularity):
+    # rewritten every few minutes, not by each registration, and indexed over
+    # what can be shown so a popular list reads a page, not every event on.
+    popularity = Column(Float, nullable=False, default=0.0, server_default="0")
+    # When the map link was last followed for a point (geo.missing), so a
+    # link that leads nowhere is not followed again for a while, by any process.
+    link_checked_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     event_tag = Column(String(50), nullable=True)  # Tag like "Free", "Paid", "Featured", etc.
 
     category_id = Column(Integer, ForeignKey("event_categories.id"), nullable=False)
@@ -188,6 +195,13 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         # "Near you": a latitude/longitude box first, the exact distance after.
         # sort=newest on the public lists (the feeds): what can be shown, the latest made first.
         sa.Index("ix_events_shown_created", "created_at", "id", postgresql_where=sa.text("NOT is_deleted AND status IN ('published', 'live')")),
+        # sort=popular: what can be shown, the most popular first (discover.popularity).
+        sa.Index("ix_events_shown_popular", sa.text("popularity DESC"), "event_datetime", "id", postgresql_where=sa.text("NOT is_deleted AND status IN ('published', 'live')")),
+        # The rows whose map link may still give a point, least recently tried first (geo.missing).
+        sa.Index(
+            "ix_events_link_unchecked", sa.text("link_checked_at NULLS FIRST"), "id",
+            postgresql_where=sa.text("location_link IS NOT NULL AND location_link <> '' AND NOT is_deleted AND (lat IS NULL OR geo_source = 'geocoded')"),
+        ),
         sa.Index("ix_events_shown_point", "lat", "lng", postgresql_where=sa.text("NOT is_deleted AND status IN ('published', 'live') AND lat IS NOT NULL AND lng IS NOT NULL")),
         # Words anywhere in the name or the place: trigram indexes serve ILIKE '%…%' and similarity.
         # What overlaps a stretch of time, held events included: the calendar

@@ -403,6 +403,19 @@ async def _store(kind: str, obj_id: int, point: Point, source: str, *, link: Opt
     return True
 
 
+async def _checked(kind: str, obj_id: int) -> None:
+    """Note on the row that its link was just followed (geo.missing waits RETRY_AFTER before trying it again)."""
+    from datetime import datetime, timezone
+
+    model = _model(kind)
+    try:
+        async with session_scope() as session:
+            await session.execute(model.__table__.update().where(model.id == obj_id).values(link_checked_at=datetime.now(timezone.utc)))
+            await session.commit()
+    except Exception:  # noqa: BLE001 — at worst it is tried again sooner
+        logger.info("could not note the link check of %s %s", kind, obj_id, exc_info=True)
+
+
 async def resolve_and_store(kind: str, obj_id: int) -> bool:
     """Follow one row's link and keep the point it lands on. Never raises."""
     try:
@@ -413,7 +426,7 @@ async def resolve_and_store(kind: str, obj_id: int) -> bool:
                 return False
             venue = obj.location_name
         found = await resolve_link(link)
-        _tried[(kind, obj_id)] = time.monotonic()
+        await _checked(kind, obj_id)
         if not found:
             return False
         return await _store(kind, obj_id, found, LINK, link=link, venue=venue)
@@ -437,7 +450,7 @@ async def locate_and_store(kind: str, obj_id: int) -> Optional[str]:
             link, venue, geocodable = obj.location_link, obj.location_name, _geocodable(obj)
         if link and is_short_link(link):
             found = await resolve_link(link)
-            _tried[(kind, obj_id)] = time.monotonic()
+            await _checked(kind, obj_id)
             if found:
                 return LINK if await _store(kind, obj_id, found, LINK, link=link, venue=venue) else None
         if not geocodable or not settings.GEOCODER_ENABLED:
@@ -453,8 +466,7 @@ async def locate_and_store(kind: str, obj_id: int) -> Optional[str]:
 
 # ─── Backfill ──────────────────────────────────────────────────────────────
 
-# When each row's link was last followed, so a link that leads nowhere is not followed on every page view.
-_tried: dict[tuple[str, int], float] = {}
+# A link that led nowhere is followed again after this long (events.link_checked_at, clubs.link_checked_at).
 RETRY_AFTER = 6 * 3600
 _backfilling = False
 # How often a page view may look for rows still without a point. The look is
@@ -476,8 +488,11 @@ def scan_due() -> bool:
 
 
 def reset_scan() -> None:
-    global _last_scan
+    """Forget this process's schedules: the backfill's minute, and a pause the
+    address lookup took after a refusal (tests start each case without them)."""
+    global _last_scan, _ip_paused_until
     _last_scan = -SCAN_EVERY
+    _ip_paused_until = 0.0
 
 
 def _wants_link_where(model):
@@ -490,24 +505,44 @@ def _wants_link_where(model):
     ]
 
 
+#: How many rows one look reads at most, per kind, before the ones it can use are picked.
+MISSING_SCAN = 500
+
+
 async def missing(session, limit: Optional[int] = None, *, skip_recent: bool = True) -> list[tuple[str, int]]:
     """Rows whose link may still give their point, events first: no point
-    yet, or a geocoded one under a link that holds or leads to a better one."""
+    yet, or a geocoded one under a link that holds or leads to a better one.
+
+    Read through the partial indexes ix_events_link_unchecked and
+    ix_clubs_link_unchecked (the rows that want a link's point, never tried
+    first, then the longest ago), skipping what was tried within
+    RETRY_AFTER, and at most `limit` (else MISSING_SCAN) rows a kind: the
+    look a page view schedules every minute used to read every such row
+    there was, with no LIMIT."""
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import or_
+
     from app.api.clubs.models import Clubs
     from app.api.events.models import Events
 
-    now = time.monotonic()
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=RETRY_AFTER)
+    take = limit or MISSING_SCAN
     out: list[tuple[str, int]] = []
     for kind, model in (("event", Events), ("club", Clubs)):
+        conds = list(_wants_link_where(model))
+        if skip_recent:
+            conds.append(or_(model.link_checked_at.is_(None), model.link_checked_at < cutoff))
         rows = (await session.execute(
-            select(model.id, model.location_link, model.lat, model.geo_source).where(*_wants_link_where(model)).order_by(model.id.desc())
+            select(model.id, model.location_link, model.lat, model.geo_source).where(*conds)
+            .order_by(model.link_checked_at.asc().nulls_first(), model.id).limit(take * 4)
         )).all()
         for i, link, lat, source in rows:
             if lat is not None and not _upgradable(SimpleNamespace(location_link=link, geo_source=source)):
                 continue
-            if skip_recent and now - _tried.get((kind, i), -RETRY_AFTER * 2) < RETRY_AFTER:
-                continue
             out.append((kind, i))
+            if len(out) >= take:
+                return out
     return out[:limit] if limit else out
 
 
@@ -776,15 +811,30 @@ IP_TTL = 24 * 3600
 IP_MISS_TTL = 15 * 60  # a refusal (the provider's rate limit, say) is tried again soon, not tomorrow
 _IP_CACHE_MAX = 20000
 _ip_cache: dict[str, tuple[float, Optional[dict]]] = {}
+#: After the provider refuses (429, 403), no lookup is sent for this long.
+IP_PAUSE = 10 * 60
+_ip_paused_until = 0.0
+#: Lookups in flight, by address: a second request for one waits for the first.
+_ip_lookups: dict[str, asyncio.Future] = {}
+#: Lookups started in the background, held so they are not collected mid-run.
+_ip_background: set = set()
+
+
+class _Refused(Exception):
+    pass
 
 
 async def _fetch_ip(ip: str) -> Optional[dict]:
     async with _http(timeout=2.5) as http:
         r = await http.get(settings.GEOIP_URL.format(ip=ip))
+    if r.status_code in (403, 429):
+        raise _Refused(r.status_code)
     if r.status_code != 200:
         return None
     d = r.json()
     if not isinstance(d, dict) or d.get("error"):
+        if isinstance(d, dict) and "ratelimit" in str(d.get("reason", "")).replace(" ", "").lower():
+            raise _Refused(429)
         return None
     lat, lng = d.get("latitude", d.get("lat")), d.get("longitude", d.get("lon"))
     if lat is None or lng is None:
@@ -801,22 +851,133 @@ async def _fetch_ip(ip: str) -> Optional[dict]:
     )
 
 
+# ─── A local GeoLite2 database, when there is one ─────────────────────────
+
+_mmdb = None
+_mmdb_failed = False
+
+
+def _mmdb_reader():
+    """The GeoLite2 (or GeoIP2) City reader for settings.GEOIP_MMDB_PATH, opened
+    once; None without a path, or when it cannot be opened (logged once)."""
+    global _mmdb, _mmdb_failed
+    path = settings.GEOIP_MMDB_PATH
+    if not path or _mmdb_failed:
+        return None
+    if _mmdb is None:
+        try:
+            import maxminddb  # noqa: PLC0415 — optional: only with a database to read
+
+            _mmdb = maxminddb.open_database(path)
+        except Exception:  # noqa: BLE001
+            logger.warning("GEOIP_MMDB_PATH %r could not be opened; looking addresses up with GEOIP_URL instead", path, exc_info=True)
+            _mmdb_failed = True
+            return None
+    return _mmdb
+
+
+def _from_mmdb(reader, ip: str) -> Optional[dict]:
+    rec = reader.get(ip)
+    if not isinstance(rec, dict):
+        return None
+    loc = rec.get("location") or {}
+    lat, lng = loc.get("latitude"), loc.get("longitude")
+    if lat is None or lng is None:
+        return None
+    point = _valid(float(lat), float(lng))
+    if point is None:
+        return None
+
+    def name(part) -> Optional[str]:
+        return ((part or {}).get("names") or {}).get("en") or None
+
+    return dict(
+        city=name(rec.get("city")), region=name((rec.get("subdivisions") or [None])[0]), country=name(rec.get("country")),
+        lat=point[0], lng=point[1],
+    )
+
+
+def _keep_ip(ip: str, place: Optional[dict], now: float) -> None:
+    if len(_ip_cache) >= _IP_CACHE_MAX:
+        _ip_cache.clear()
+    _ip_cache[ip] = (now + (IP_TTL if place else IP_MISS_TTL), place)
+
+
+async def _lookup(ip: str) -> Optional[dict]:
+    global _ip_paused_until
+    now = time.monotonic()
+    try:
+        place = await _fetch_ip(ip)
+    except _Refused as refused:
+        _ip_paused_until = now + IP_PAUSE
+        logger.warning("the address lookup refused us (%s); no lookups for %d s", refused, IP_PAUSE)
+        place = None
+    except Exception:  # noqa: BLE001
+        place = None
+    _keep_ip(ip, place, now)
+    return place
+
+
 async def locate_ip(ip: Optional[str]) -> Optional[dict]:
-    """Roughly where an address is — {city, region, country, lat, lng} — cached for a day. Never raises."""
-    if not ip or not settings.GEOIP_URL or not _is_public(ip):
+    """Roughly where an address is — {city, region, country, lat, lng} — cached
+    for a day (a miss for 15 minutes). Never raises.
+
+    From the local GeoLite2 database when settings.GEOIP_MMDB_PATH names one
+    (no request, nothing waited for); else from GEOIP_URL, one request per
+    address at a time (another asking meanwhile waits for it), and none at
+    all for IP_PAUSE after the provider refuses one: its free tier is about a
+    thousand a day, and every refusal used to cost a visitor 2.5 seconds."""
+    if not ip or not _is_public(ip):
         return None
     now = time.monotonic()
     hit = _ip_cache.get(ip)
     if hit and hit[0] > now:
         return hit[1]
+    reader = _mmdb_reader()
+    if reader is not None:
+        try:
+            place = _from_mmdb(reader, ip)
+        except Exception:  # noqa: BLE001
+            place = None
+        _keep_ip(ip, place, now)
+        return place
+    if not settings.GEOIP_URL or now < _ip_paused_until:
+        return None
+    pending = _ip_lookups.get(ip)
+    if pending is not None:
+        return await asyncio.shield(pending)
+    future = asyncio.get_running_loop().create_future()
+    _ip_lookups[ip] = future
     try:
-        place = await _fetch_ip(ip)
-    except Exception:  # noqa: BLE001
-        place = None
-    if len(_ip_cache) >= _IP_CACHE_MAX:
-        _ip_cache.clear()
-    _ip_cache[ip] = (now + (IP_TTL if place else IP_MISS_TTL), place)
+        place = await _lookup(ip)
+    finally:
+        _ip_lookups.pop(ip, None)
+    if not future.done():
+        future.set_result(place)
     return place
+
+
+def locate_soon(ip: Optional[str]) -> None:
+    """Look the address up in the background, unless it is known, already
+    being looked up, or not worth asking about: the next request has it."""
+    if not ip or not _is_public(ip) or ip in _ip_lookups or known_place(ip)[0]:
+        return
+    task = asyncio.get_running_loop().create_task(locate_ip(ip))
+    _ip_background.add(task)
+    task.add_done_callback(_ip_background.discard)
+
+
+async def settle_lookups() -> None:
+    """Wait for the background lookups started so far (tests)."""
+    while _ip_background:
+        await asyncio.gather(*list(_ip_background), return_exceptions=True)
+
+
+def reset_ip() -> None:
+    """Forget every address and any pause (tests)."""
+    global _ip_paused_until
+    _ip_cache.clear()
+    _ip_paused_until = 0.0
 
 
 def known_place(ip: Optional[str]) -> tuple[bool, Optional[dict]]:
@@ -829,14 +990,22 @@ def known_place(ip: Optional[str]) -> tuple[bool, Optional[dict]]:
 
 
 async def where(request, lat: Optional[float], lng: Optional[float]) -> dict:
-    """The visitor's place for a request: the browser's point when given, else the address's."""
-    ip_place = await locate_ip(client_ip(request))
+    """The visitor's place for a request: the browser's point when given, else the address's.
+
+    With the browser's point, the address is only used to name the place,
+    and only if it is already known: an unknown one is looked up in the
+    background for next time, never waited for."""
+    ip = client_ip(request)
     if lat is not None and lng is not None and _valid(lat, lng):
+        known, ip_place = known_place(ip)
+        if not known:
+            locate_soon(ip)
         city = region = None
         # Name the place only when the address agrees with the browser.
         if ip_place and km(lat, lng, ip_place["lat"], ip_place["lng"]) <= 75:
             city, region = ip_place["city"], ip_place["region"]
         return dict(city=city, region=region, lat=lat, lng=lng, source="browser")
+    ip_place = await locate_ip(ip)
     if ip_place:
         return dict(city=ip_place["city"], region=ip_place["region"], lat=ip_place["lat"], lng=ip_place["lng"], source="ip")
     return dict(city=None, region=None, lat=None, lng=None, source="none")
