@@ -676,30 +676,64 @@ async def test_each_refresh_hands_back_a_new_refresh_token(client, make_user):
     assert decode_jwt_token(r2.json()["refresh_token"])["exp"] <= decode_jwt_token(first["refresh_token"])["exp"] + 1
 
 
-async def test_the_token_just_replaced_is_answered_within_the_grace(client, make_user):
+async def test_a_lost_answer_is_given_again_even_an_hour_later(client, session, make_user):
+    """The app was killed while its refresh was in flight: the new token
+    never arrived. The next launch, whenever it is, presents the old one
+    and gets the same new refresh token again; nothing is revoked."""
     from app.core.auth.jwt import decode_jwt_token
 
-    first = await _signed_in(client, make_user, "grace@example.com")
-    a = await client.post(f"{API}/auth/refresh", data={"token": first["refresh_token"]})
+    first = await _signed_in(client, make_user, "lost-answer@example.com")
+    lost = await client.post(f"{API}/auth/refresh", data={"token": first["refresh_token"]})
+    assert lost.status_code == 200
+    sid = decode_jwt_token(first["refresh_token"])["sid"]
+    # Nothing depends on the clock: the rotation might as well be an hour old.
+    await session.execute(update(UserSessions).where(UserSessions.id == uuid.UUID(sid)).values(rotated_at=datetime.now(timezone.utc) - timedelta(hours=1)))
+    await session.commit()
     client.cookies.clear()
-    b = await client.post(f"{API}/auth/refresh", data={"token": first["refresh_token"]})
-    assert a.status_code == 200 and b.status_code == 200
-    # Both answers carry the same generation: two tabs end up with one token's worth.
-    assert decode_jwt_token(a.json()["refresh_token"])["gen"] == decode_jwt_token(b.json()["refresh_token"])["gen"] == 1
+
+    again = await client.post(f"{API}/auth/refresh", data={"token": first["refresh_token"]})
+    assert again.status_code == 200, again.text
+    assert again.json()["refresh_token"] == lost.json()["refresh_token"]
+    assert decode_jwt_token(again.json()["refresh_token"])["gen"] == 1
+    # And the token it was given works as the newest.
+    client.cookies.clear()
+    onward = await client.post(f"{API}/auth/refresh", data={"token": again.json()["refresh_token"]})
+    assert onward.status_code == 200 and decode_jwt_token(onward.json()["refresh_token"])["gen"] == 2
 
 
-async def test_a_spent_refresh_token_presented_later_ends_the_session(client, session, make_user, monkeypatch):
-    monkeypatch.setattr(settings, "REFRESH_REUSE_GRACE_SECONDS", 0)
+async def test_once_the_new_token_is_used_the_old_one_ends_the_session(client, session, make_user):
     first = await _signed_in(client, make_user, "stolen@example.com")
-    legit = await client.post(f"{API}/auth/refresh", data={"token": first["refresh_token"]})
-    assert legit.status_code == 200
+    new = await client.post(f"{API}/auth/refresh", data={"token": first["refresh_token"]})
+    assert new.status_code == 200
     client.cookies.clear()
+    newer = await client.post(f"{API}/auth/refresh", data={"token": new.json()["refresh_token"]})
+    assert newer.status_code == 200
+    client.cookies.clear()
+
     thief = await client.post(f"{API}/auth/refresh", data={"token": first["refresh_token"]})
     assert thief.status_code == 401 and thief.json()["error_code"] == "SESSION_REUSED"
     # Everyone holding the session is out: the newest refresh token and the access token too.
-    assert (await client.post(f"{API}/auth/refresh", data={"token": legit.json()["refresh_token"]})).status_code == 401
-    assert (await client.get(f"{API}/auth/me", headers=auth_header(legit.json()["access_token"]))).status_code == 401
+    assert (await client.post(f"{API}/auth/refresh", data={"token": newer.json()["refresh_token"]})).status_code == 401
+    assert (await client.get(f"{API}/auth/me", headers=auth_header(newer.json()["access_token"]))).status_code == 401
     assert await session.scalar(select(func.count()).select_from(SignInAttempts).where(SignInAttempts.result == "refresh_reused")) == 1
+
+
+async def test_a_token_two_generations_back_is_reuse_at_once(client, session, make_user):
+    from app.api.auth.schemas import AuthTokenData
+    from app.core.auth.jwt import create_access_token, decode_jwt_token
+
+    first = await _signed_in(client, make_user, "twoback@example.com")
+    claims = decode_jwt_token(first["refresh_token"])
+    # The session is at generation 5; a token of generation 3 turns up a moment later.
+    await session.execute(update(UserSessions).where(UserSessions.id == uuid.UUID(claims["sid"])).values(refresh_generation=5, rotated_at=datetime.now(timezone.utc)))
+    await session.commit()
+    old = create_access_token(
+        AuthTokenData(user_id=claims["user_id"], token_type="refresh_token", token_version=claims["token_version"], sid=claims["sid"], gen=3).model_dump(),
+        timedelta(days=1),
+    )
+    r = await client.post(f"{API}/auth/refresh", data={"token": old})
+    assert r.status_code == 401 and r.json()["error_code"] == "SESSION_REUSED"
+    assert await session.scalar(select(UserSessions.revoked).where(UserSessions.id == uuid.UUID(claims["sid"])).execution_options(populate_existing=True)) is True
 
 
 # ─── 8. Impersonation ──────────────────────────────────────────────────────

@@ -196,11 +196,6 @@ class AppConfig(BaseSettings):
     # workers or hosts point it at Redis (redis://host:6379/0) so they share
     # one budget. A redis:// URI needs the `redis` package installed.
     RATE_LIMIT_STORAGE: str = "memory://"
-    # A refresh token is good once: each refresh hands back a new one. The one
-    # it replaced is still answered (with the same new token) for this many
-    # seconds -- a reply lost on a bad network, two tabs refreshing together
-    # -- and after that, presenting it ends the whole session as stolen.
-    REFRESH_REUSE_GRACE_SECONDS: int = 30
     # An admin's session as someone else ends this many minutes after it
     # starts, with no refresh (30 to 60).
     IMPERSONATION_SESSION_MINUTES: int = 30

@@ -10,19 +10,27 @@ sets a flag on that row, which every request and refresh checks -- so the
 session dies at once rather than surviving until the token expires.
 
 Refresh tokens rotate. Each carries the session's generation (`gen`); a
-refresh hands back a token for the next one, and the one it replaced is
-spent. A spent token presented again means two parties hold the session --
-one of them stole it -- so the session ends (`rotate` says "reused"). The
-token just replaced is still answered for REFRESH_REUSE_GRACE_SECONDS, with
-the same generation the first answer gave: a reply lost on a bad network, or
-two tabs refreshing together, is not a theft.
+refresh hands back a token for the next one. The rule is the standard one
+for lost responses: the token just replaced stays good until its successor
+is first used. Until then, presenting it again answers with the successor's
+generation again (the same refresh token, byte for byte) -- the reply was
+lost on a bad network, the app was killed mid-refresh, or two tabs
+refreshed at once, and none of those is a theft, however long after. Once
+the successor has been used the session has moved on two generations, and
+anything older than the generation just before the live one is a spent
+token presented again: two parties hold the session, one of them stole it,
+and the session ends (`rotate` says "reused").
+
+No clock and no extra column is needed: using the successor is what moves
+the live generation on, so "the successor was used" is exactly "the
+presented token is two or more generations old".
 
 An admin's session as someone else (`impersonated_by`) has a row too, with
 a hard `expires_at` and no refresh token at all.
 """
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from sqlalchemy import BigInteger, Boolean, Column, ForeignKey, Index, Integer, String, select, text, update
 from sqlalchemy.dialects.postgresql import UUID as PGUUID, insert as pg_insert
@@ -130,15 +138,19 @@ def _ended(row) -> bool:
     return bool(row.revoked) or (expires is not None and expires <= _now())
 
 
-async def rotate(session: AsyncSession, session_id, presented: int, *, grace_seconds: int) -> tuple[str, int | None]:
+async def rotate(session: AsyncSession, session_id, presented: int) -> tuple[str, int | None]:
     """Spend the refresh token of generation `presented` for this session.
 
-    Returns (outcome, generation for the new token):
-      ("rotated", n)  -- it was the live one; the session is now at n.
-      ("grace", n)    -- it was replaced under grace_seconds ago: answered
-                         with the generation that replaced it.
-      ("reused", None) -- an older one: the session is revoked now.
-      ("ended", None) -- the session is signed out, expired or gone.
+    The session's refresh_generation G is the newest token handed out.
+    Returns (outcome, generation for the token to hand back):
+      ("rotated", G+1) -- `presented` is G, the newest: used for the first
+                          time, so the session moves on to G+1.
+      ("resent", G)    -- `presented` is G-1 and G has never been used (if it
+                          had, the session would be at G+1): the answer to it
+                          was lost, so it is given again.
+      ("reused", None) -- older than that (or a generation never issued):
+                          the session is revoked now.
+      ("ended", None)  -- the session is signed out, expired or gone.
     The caller commits."""
     try:
         key = uuid.UUID(str(session_id))
@@ -159,16 +171,13 @@ async def rotate(session: AsyncSession, session_id, presented: int, *, grace_sec
     )
     if moved is not None:
         return "rotated", int(moved)
+    # Not the newest: read the session as it is now (a concurrent rotation
+    # by the same token lands here too, and is answered as a resend).
     row = await session.get(UserSessions, key, populate_existing=True)
     if row is None or _ended(row):
         return "ended", None
-    rotated = _aware(row.rotated_at)
-    if (
-        presented == row.refresh_generation - 1
-        and rotated is not None
-        and (now - rotated) <= timedelta(seconds=max(0, grace_seconds))
-    ):
-        return "grace", int(row.refresh_generation)
+    if presented == row.refresh_generation - 1:
+        return "resent", int(row.refresh_generation)
     row.revoked = True
     await session.flush()
     return "reused", None
