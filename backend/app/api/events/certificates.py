@@ -30,7 +30,7 @@ CERTIFICATE_PREFIX = "CERT"
 
 def certificate_number(ticket_id: str) -> str:
     """The certificate's number, in the shape of the ticket's and never
-    readable as one: MOA-2BCEBA8-PFZG3 certifies as CERT-2BCEBA8-PFZG3."""
+    readable as one: MOA-7K3QF-X9PWM certifies as CERT-7K3QF-X9PWM."""
     body = ticket_id.split("-", 1)[1] if "-" in ticket_id else ticket_id
     return f"{CERTIFICATE_PREFIX}-{body}"
 

@@ -33,7 +33,7 @@ TICKET_TOKENS: list[dict] = [
     # when the QR will not scan. The ticket's own id -- the gate does not take
     # an admission number (it answers INVALID and asks staff to check the
     # guest in by hand), so a ticket must never print one there.
-    {"key": "ticket_code", "group": "Ticket", "label": "Ticket code", "sample": "MOA-2BCEBA8-PFZG3",
+    {"key": "ticket_code", "group": "Ticket", "label": "Ticket code", "sample": "MOA-7K3QF-X9PWM",
      "aliases": ["ticket_id", "ticket_number", "invite_code"],
      "note": "Typed at the gate or the kiosk when a QR will not scan."},
     {"key": "admission_no", "group": "Ticket", "label": "Admission number", "sample": "MOA-0041-KF26",
