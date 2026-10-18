@@ -87,7 +87,11 @@ LINGER_SECONDS = 20.0
 #: How long a stream is served before it is ended (and reconnected).
 LIFETIME = 600.0
 CLUB_LIFETIME = 300.0
-SEND_TIMEOUT = 30.0
+#: A write held this long (the phone stopped reading) ends the stream. Above
+#: nginx's send_timeout (60 s), which lets such a phone go first and so ends
+#: the stream as a disconnect; this only bounds a stream with nothing in
+#: front, whose end uvicorn then logs as an incomplete response.
+SEND_TIMEOUT = 90.0
 #: The least time between two frames of a stream of this view, unless the
 #: newer is the host's (told at once). The room's feed is 30 KB a frame and a
 #: phone polled it every 5 s: a busy hall voting would otherwise send every
