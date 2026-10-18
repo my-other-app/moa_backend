@@ -1665,32 +1665,64 @@ async def _near_pool(session, now: datetime, since: datetime, centre: tuple[floa
     # near. Where the cover is too wide to list (by a pole), the whole date
     # order, boxed, as before.
     near_cells = cells.listed(cells.cover(centre[0], centre[1], far))
+    pool: list[tuple[int, float, float]] = []
     if near_cells is None:
         conds.append(geo.in_box_sql(geo.bbox(centre[0], centre[1], far), Events.lat, Events.lng))
-    pool: list[tuple[int, float, float]] = []
+        return await _near_walk(session, lambda last, n: (
+            select(Events.id, Events.lat, Events.lng, Events.event_datetime, true().label("keep"))
+            .where(*conds, *([cursors.after(order, last)] if last is not None else []))
+            .order_by(Events.event_datetime, Events.id).limit(n)
+        ), centre, far, sure, pool)
+
+    # Each cell's walk asks what its index answers (the cell, shown, the
+    # lower bound, the cursor) and the distance, so the planner reads it in
+    # order and stops at the chunk; asked the rest too, it could not see how
+    # few rows fail them and fetched every row of every cell to sort (1,318
+    # a cell, 18,643 heap pages, at a lakh of clubs). The rest -- not over, a
+    # listed club's -- is `keep`, worked out on the rows read, and the walk
+    # goes on past the few that fail it. (A row with a cell is held in
+    # person with a point.)
+    each = select(func.unnest(bindparam("near_cells", near_cells, type_=ARRAY(Integer))).label("cell")).subquery("near_cells")
+    unlisted = select(Clubs.id).where(Clubs.listed == False)  # noqa: E712
+
+    def chunk_of(last, n: int):
+        per_cell = (
+            select(Events.id, Events.lat, Events.lng, Events.event_datetime, Events.duration, Events.club_id)
+            .where(
+                Events.geocell.isnot(None), Events.geocell == each.c.cell, Events.is_deleted == False,  # noqa: E712
+                _in(Events.lifecycle, SHOWN), Events.event_datetime >= since,
+                geo.km_sql(centre[0], centre[1], Events.lat, Events.lng) <= far,
+                *([cursors.after(order, last)] if last is not None else []),
+            )
+            .order_by(Events.event_datetime, Events.id).limit(n)
+            .lateral("per_cell")
+        )
+        c = per_cell.c
+        utc = literal_column("'UTC'")
+        ends = func.timezone(utc, func.timezone(utc, c.event_datetime) + c.duration * text("INTERVAL '1 hour'"))
+        keep = and_(ends >= _instant(now), c.club_id.isnot(None), c.club_id.notin_(unlisted))
+        return (
+            select(c.id, c.lat, c.lng, c.event_datetime, keep.label("keep")).select_from(each).join(per_cell, true())
+            .order_by(c.event_datetime, c.id).limit(n)
+        )
+
+    return await _near_walk(session, chunk_of, centre, far, sure, pool)
+
+
+async def _near_walk(session, chunk_of, centre, far, sure, pool) -> dict:
+    """_near_pool's chunks, in date order, until the list is settled: each a
+    range of the date order after the last row read, growing. `chunk_of(last,
+    n)` is the select of the next n rows (id, lat, lng, start, keep) after
+    the cursor `last`."""
     certain = 0
     last = None
     chunk = NEAR_CHUNK
     while True:
-        after_last = [cursors.after(order, last)] if last is not None else []
-        if near_cells is None:
-            stmt = select(Events.id, Events.lat, Events.lng, Events.event_datetime).where(*conds, *after_last).order_by(Events.event_datetime, Events.id).limit(chunk)
-        else:
-            each = select(func.unnest(bindparam("near_cells", near_cells, type_=ARRAY(Integer))).label("cell")).subquery("near_cells")
-            per_cell = (
-                select(Events.id, Events.lat, Events.lng, Events.event_datetime)
-                .where(Events.geocell.isnot(None), Events.geocell == each.c.cell, *conds, *after_last)
-                .order_by(Events.event_datetime, Events.id).limit(chunk)
-                .lateral("per_cell")
-            )
-            stmt = (
-                select(per_cell.c.id, per_cell.c.lat, per_cell.c.lng, per_cell.c.event_datetime)
-                .select_from(each).join(per_cell, true())
-                .order_by(per_cell.c.event_datetime, per_cell.c.id).limit(chunk)
-            )
-        rows = (await session.execute(stmt)).all()
-        for event_id, lat, lng, starts in rows:
+        rows = (await session.execute(chunk_of(last, chunk))).all()
+        for event_id, lat, lng, starts, keep in rows:
             last = [starts, event_id]
+            if not keep:
+                continue
             d = geo.km(centre[0], centre[1], lat, lng)
             if d > far:
                 continue

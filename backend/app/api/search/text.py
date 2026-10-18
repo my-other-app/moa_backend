@@ -275,8 +275,11 @@ KEPT = (("events", "e", _EVENT_TRUE), ("clubs", "c", _CLUB_TRUE), ("users", "u",
 SLICE = 5000
 
 
-async def drift(session, *, slice_: int = SLICE) -> dict[str, list[int]]:
-    """Per table, the ids whose search_text is not what their rows make it."""
+async def drift(session, *, slice_: int = SLICE, pause: float = 0.0) -> dict[str, list[int]]:
+    """Per table, the ids whose search_text is not what their rows make it.
+    `pause` seconds between slices, so a check never holds the database busy."""
+    import asyncio
+
     out: dict[str, list[int]] = {}
     for table, a, true_text in KEPT:
         found: list[int] = []
@@ -292,14 +295,17 @@ async def drift(session, *, slice_: int = SLICE) -> dict[str, list[int]]:
                 {"ids": ids},
             )).scalars().all())
             last = ids[-1]
+            await session.commit()
+            if pause:
+                await asyncio.sleep(pause)
         out[table] = found
     return out
 
 
-async def recompute(session, found: Optional[dict[str, list[int]]] = None) -> dict[str, int]:
+async def recompute(session, found: Optional[dict[str, list[int]]] = None, *, pause: float = 0.0) -> dict[str, int]:
     """Write the text again where `drift` (or `found`) says it is wrong; how many per table.
     Each table's rows in their own statement, committed."""
-    found = found if found is not None else await drift(session)
+    found = found if found is not None else await drift(session, pause=pause)
     fixed: dict[str, int] = {}
     for table, a, true_text in KEPT:
         ids = found.get(table) or []

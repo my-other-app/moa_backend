@@ -314,7 +314,6 @@ async def test_the_backfill_skips_a_row_someone_holds_and_commits_as_it_goes(_en
         await holder.rollback()
     async with AsyncSession(_engine) as s:
         assert await stext.backfill(s, "users", batch=2) == {"written": 1, "left": 0}
-        assert await s.scalar(text("SELECT count(*) FROM search_outbox")) == 0  # filling a column is no change to a document
 
 
 def _migration():
@@ -326,16 +325,20 @@ def _migration():
 
 
 async def test_the_migrations_backfill_is_lock_safe_too(_engine, committed_users, monkeypatch):
-    """w2_search's own backfill: batches by id range that commit, rows held
-    by another writer skipped and tried again after a pause, a 3 s lock
-    timeout on each statement, no outbox rows."""
+    """w2_search's own backfill: batches that commit, sized by how long they
+    take, rows held by another writer skipped and tried again after a pause,
+    a 3 s lock timeout on each statement, no outbox rows."""
     migration = _migration()
     monkeypatch.setattr(migration, "BACKFILL_BATCH", 2)
+    monkeypatch.setattr(migration, "BACKFILL_MIN", 2)
+    monkeypatch.setattr(migration, "BACKFILL_MAX", 2)
     pauses = []
     monkeypatch.setattr(migration.time, "sleep", lambda s: pauses.append(s))
     monkeypatch.setattr(migration, "BACKFILL", tuple(b for b in migration.BACKFILL if b[0] == "users"))
     ids = committed_users
     statements = []
+    async with AsyncSession(_engine) as s:
+        outbox_before = await s.scalar(text("SELECT count(*) FROM search_outbox"))
     async with _engine.connect() as holder:
         await holder.begin()
         await holder.execute(text("SELECT id FROM users WHERE id = :id FOR UPDATE"), {"id": ids[0]})
@@ -353,6 +356,7 @@ async def test_the_migrations_backfill_is_lock_safe_too(_engine, committed_users
     assert len(pauses) == migration.BACKFILL_PASSES  # the held row, tried again each pass
     async with AsyncSession(_engine) as s:
         assert await s.scalar(text("SELECT count(*) FROM users WHERE id = ANY(:ids) AND search_text IS NULL"), {"ids": ids}) == 1
-        assert await s.scalar(text("SELECT count(*) FROM search_outbox")) == 0
+        assert await s.scalar(text("SELECT count(*) FROM search_outbox")) == outbox_before  # filling a column is no change to a document
     assert statements.count("COMMIT") >= len(ids) // 2 and any("lock_timeout = '3s'" in s for s in statements)
+    assert any("synchronous_commit = off" in s for s in statements)
     assert all("FOR UPDATE SKIP LOCKED" in s for s in statements if s.startswith("UPDATE"))

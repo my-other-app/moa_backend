@@ -329,7 +329,7 @@ async def check_if_due(session, now: Optional[datetime] = None) -> Optional[dict
     if run is not None and run.started_at is not None and now - run.started_at < timedelta(hours=settings.SEARCH_RECONCILE_HOURS):
         return None
     await _record(session, RECONCILE_JOB, started_at=now)
-    fixed = await stext.recompute(session)
+    fixed = await stext.recompute(session, pause=0.01)
     if any(fixed.values()):
         logger.warning("search_text disagreed with its rows and was written again: %s", fixed)
     placed = await cells.recompute(session)

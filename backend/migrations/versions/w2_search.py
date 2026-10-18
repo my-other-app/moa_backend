@@ -26,9 +26,10 @@ migration locks):
   Each ALTER and CREATE TRIGGER runs under lock_timeout 3s, so a long query
   on the table makes this fail fast (run it again) rather than queue every
   request behind it.
-- The backfill runs outside any long transaction: a few thousand rows a
-  statement, each committed, rows another writer holds skipped (SKIP
-  LOCKED) and taken on a later pass. The triggers keep every row written
+- The backfill runs outside any long transaction: a statement a batch,
+  each committed, each batch sized to take about 0.2 s (a writer that wants
+  one of its rows waits no longer than that), rows another writer holds
+  skipped (SKIP LOCKED) and taken on a later pass. The triggers keep every row written
   meanwhile right. It writes no outbox rows (moa.quiet_outbox): the indexes
   are built from the rows when search is switched on.
 - Indexes are built and dropped CONCURRENTLY, in an autocommit block; one a
@@ -51,8 +52,14 @@ branch_labels = None
 depends_on = None
 
 LOCK_TIMEOUT = "SET LOCAL lock_timeout = '3s'"
-#: Rows per backfill statement, and passes over the rows locked meanwhile.
-BACKFILL_BATCH = 2000
+#: Rows per backfill statement to start with, its bounds, and how long a
+#: statement should take: the batch is resized after each so a statement
+#: holds its rows about this long -- a writer that wants one of them waits
+#: no longer -- however fast or loaded the database is.
+BACKFILL_BATCH = 500
+BACKFILL_MIN, BACKFILL_MAX = 20, 5000
+BACKFILL_SECONDS = 0.2
+#: Passes over the rows other writers held meanwhile.
 BACKFILL_PASSES = 5
 
 COLUMNS = (
@@ -430,32 +437,43 @@ def _sql(statement: str) -> str:
 
 
 def _backfill(bind) -> None:
-    """Every row's new columns, a batch of ids per statement, each committed;
-    rows held by another writer skipped and tried again on a later pass."""
+    """Every row's new columns, a batch of rows per statement, each committed
+    (with synchronous_commit off: a batch lost to a crash is simply done
+    again, its rows still need it), each sized to take about
+    BACKFILL_SECONDS; rows held by another writer skipped and tried again
+    on a later pass."""
     for table, assign, needs in BACKFILL:
-        top = bind.execute(sa.text(f"SELECT max(id) FROM {table}")).scalar()
+        batch = BACKFILL_BATCH
+        left = 0
         for attempt in range(BACKFILL_PASSES):
-            if top is None:
-                break
-            lo = 0
-            while lo <= top:
+            last = 0
+            while True:
+                ids = [r[0] for r in bind.execute(
+                    sa.text(f"SELECT id FROM {table} WHERE id > :last AND ({needs}) ORDER BY id LIMIT :n"), {"last": last, "n": batch},
+                )]
+                if not ids:
+                    break
+                last = ids[-1]
+                started = time.monotonic()
                 bind.execute(sa.text("BEGIN"))
                 bind.execute(sa.text(LOCK_TIMEOUT))
+                bind.execute(sa.text("SET LOCAL synchronous_commit = off"))
                 bind.execute(sa.text("SET LOCAL moa.quiet_outbox = 'on'"))
                 bind.execute(
                     sa.text(
                         f"UPDATE {table} t SET {assign} WHERE t.id IN ("
-                        f"SELECT id FROM {table} WHERE id >= :lo AND id < :hi AND ({needs}) FOR UPDATE SKIP LOCKED)"
+                        f"SELECT id FROM {table} WHERE id = ANY(:ids) AND ({needs}) FOR UPDATE SKIP LOCKED)"
                     ),
-                    {"lo": lo, "hi": lo + BACKFILL_BATCH},
+                    {"ids": ids},
                 )
                 bind.execute(sa.text("COMMIT"))
-                lo += BACKFILL_BATCH
+                took = max(time.monotonic() - started, 0.001)
+                batch = int(min(max(batch * BACKFILL_SECONDS / took, batch / 2, BACKFILL_MIN), batch * 2, BACKFILL_MAX))
             left = bind.execute(sa.text(f"SELECT count(*) FROM {table} WHERE {needs}")).scalar()
             if not left:
                 break
             time.sleep(1.0 * (attempt + 1))
-        else:
+        if left:
             print(f"w2_search: {left} {table} rows were held by other writers throughout; the six-hourly search check fills them")
 
 
@@ -479,6 +497,10 @@ def upgrade() -> None:
     with op.get_context().autocommit_block():
         bind = op.get_bind()
         _backfill(bind)
+        # The planner's statistics for the new columns, so the new indexes are
+        # chosen from the first request (ANALYZE samples, and blocks no one).
+        for table, columns in (("events", "search_text, geocell"), ("clubs", "search_text, geocell"), ("users", "search_text")):
+            op.execute(f"ANALYZE {table} ({columns})")
         for name, definition in INDEXES:
             _build(name, definition)
         for name, _definition in DROPPED:
