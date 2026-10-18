@@ -2,7 +2,7 @@
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Query, Response
+from fastapi import APIRouter, Query, Response
 
 from app.api.deliveries import service
 from app.api.deliveries.models import DeliveryChannel, DeliveryKind
@@ -26,7 +26,6 @@ async def send_tickets(
     user: ClubAuth,
     event_id: int,
     body: SendTicketsRequest,
-    background_tasks: BackgroundTasks,
 ) -> SendResponse:
     """Never re-sends a channel already sent unless `only` is `all`. A guest
     with no address on a channel is skipped, not failed. The sending happens
@@ -39,8 +38,8 @@ async def send_tickets(
         registration_ids=body.registration_ids,
         only=body.only,
         force=body.only == "all",
+        send=True,
     )
-    background_tasks.add_task(service.run, result["ids"])
     return SendResponse(**{k: v for k, v in result.items() if k != "ids"})
 
 
@@ -50,15 +49,13 @@ async def send_one(
     user: ClubAuth,
     event_id: int,
     registration_id: UUID,
-    background_tasks: BackgroundTasks,
 ) -> SendResponse:
     """A guest who lost the email, or a corrected address. Earlier deliveries
     do not stop it."""
     event = await service.event_for_club(session, user, event_id)
     result = await service.queue(
-        session, event, DeliveryKind.ticket, registration_ids=[registration_id], only="all", force=True
+        session, event, DeliveryKind.ticket, registration_ids=[registration_id], only="all", force=True, send=True
     )
-    background_tasks.add_task(service.run, result["ids"])
     return SendResponse(**{k: v for k, v in result.items() if k != "ids"})
 
 

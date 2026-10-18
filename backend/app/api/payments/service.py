@@ -23,6 +23,7 @@ The rules every path here keeps:
   sweep keeps asking until Razorpay has done it (`settle_refund`).
 """
 from datetime import datetime, timedelta, timezone
+import asyncio
 import logging
 import time
 import uuid
@@ -48,7 +49,7 @@ from app.api.payments.models import (
     PaymentStatus,
     RazorpayWebhookLogs,
 )
-from app.core import money
+from app.core import jobs, money
 from app.core.validations.exceptions import CodedRequestError, RequestValidationError
 from app.response import CustomHTTPException
 from app.config import settings
@@ -416,31 +417,46 @@ async def apply_payment(
 
 
 async def _send_receipt(session, order_id, payment_id: str, background_tasks) -> None:
+    """The receipt -- a PDF drawn by wkhtmltopdf, then a mail -- as a job after
+    the payment's commit (`payments.receipt`): it used to be drawn in the
+    request's background, or on the event loop itself when there was no
+    request (a webhook), and was lost with the process. One waiting per payment."""
     try:
-        order = await session.scalar(
-            select(PaymentOrders).where(PaymentOrders.id == order_id).options(joinedload(PaymentOrders.user))
-        )
-        log = await _log_with_order(session, payment_id)
-        if order.user:
-            send_payment_confirmation_email(
-                subject="Payment Receipt",
-                payload={
-                    "payer_name": order.user.full_name,
-                    "payer_email": order.user.email,
-                    "payer_phone": order.user.phone or "N/A",
-                    "amount": f"₹{order.amount}",
-                    "receipt_id": order.receipt,
-                    "payment_method": log.payment_method,
-                    "timestamp": log.created_at,
-                    "purpose": "Event Registration",
-                    "notes": "N/A",
-                    "current_year": datetime.now().year,
-                },
-                recipients=[order.user.email],
-                background_tasks=background_tasks,
-            )
+        await jobs.enqueue(session, "payments.receipt", {"order_id": str(order_id), "payment_id": payment_id}, dedupe_key=f"payments:receipt:{payment_id}")
+        await session.commit()
     except Exception:
-        logger.exception("Error sending payment confirmation email")
+        # The payment stands either way; the caller reads on after this.
+        await session.rollback()
+        logger.exception("Error queueing the payment confirmation email")
+
+
+@jobs.handler("payments.receipt", max_attempts=4, timeout=180.0)
+async def _receipt_job(p: dict) -> None:
+    async with jobs.scope() as session:
+        order = await session.scalar(
+            select(PaymentOrders).where(PaymentOrders.id == uuid.UUID(str(p["order_id"]))).options(joinedload(PaymentOrders.user))
+        )
+        if order is None or not order.user:
+            return
+        log = await _log_with_order(session, p["payment_id"])
+        await session.commit()
+        await asyncio.to_thread(
+            send_payment_confirmation_email,
+            subject="Payment Receipt",
+            payload={
+                "payer_name": order.user.full_name,
+                "payer_email": order.user.email,
+                "payer_phone": order.user.phone or "N/A",
+                "amount": f"₹{order.amount}",
+                "receipt_id": order.receipt,
+                "payment_method": log.payment_method if log is not None else None,
+                "timestamp": log.created_at if log is not None else None,
+                "purpose": "Event Registration",
+                "notes": "N/A",
+                "current_year": datetime.now().year,
+            },
+            recipients=[order.user.email],
+        )
 
 
 async def ensure_applied(session: AsyncSession, order_id, *, background_tasks: BackgroundTasks | None = None) -> Applied | None:

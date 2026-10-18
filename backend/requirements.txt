@@ -25,6 +25,11 @@ python-dotenv==1.2.2
 python-multipart==0.0.32
 qrcode==7.4.2
 razorpay==1.4.2
+# Redis when APP_REDIS_URL is set (app/core/redis.py, asyncio), and the shared
+# rate limits (limits' Redis storage, sync); unused otherwise. Small, and
+# depends on nothing pinned in requirements-base.txt (async-timeout only
+# before Python 3.11.3), so it lives in this layer.
+redis==5.2.1
 slowapi==0.1.9
 # Error tracking, used only when APP_SENTRY_DSN is set (app/core/observability.py).
 sentry-sdk==2.71.0

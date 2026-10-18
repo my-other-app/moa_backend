@@ -59,6 +59,7 @@ echo "compose $args [buildkit=${{DOCKER_BUILDKIT:-}}]" >> "{log}"
 case "$args" in
   "config --services") printf 'postgres\\nbackend\\nredis\\nworker\\nmeilisearch\\n' ;;
   *"alembic current"*) echo "topics (head)" ;;
+  "ps -q worker") if [ -n "${{FAKE_WORKER:-}}" ]; then echo c0ffee; fi ;;
 esac
 exit 0
 ''')
@@ -80,8 +81,9 @@ def _deploy(tmp_path, fakes, **inputs) -> tuple[subprocess.CompletedProcess, lis
     assert rendered.returncode == 0, rendered.stdout + rendered.stderr
     (tmp_path / "project").mkdir(exist_ok=True)
     env = {"PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", **{k: v for k, v in os.environ.items() if k == "HOME"}}
-    if "FAKE_DOCKER_STATUS" in inputs:
-        env["FAKE_DOCKER_STATUS"] = inputs["FAKE_DOCKER_STATUS"]
+    for fake in ("FAKE_DOCKER_STATUS", "FAKE_WORKER"):
+        if fake in inputs:
+            env[fake] = inputs[fake]
     run = subprocess.run(["bash", str(tmp_path / "runner" / "deploy-remote.sh")], env=env, capture_output=True, text=True)
     calls = log.read_text().splitlines() if log.exists() else []
     return run, calls
@@ -161,6 +163,7 @@ def test_install_requirements_builds_migrates_then_recreates(tmp_path, fakes):
         "compose exec -T backend alembic upgrade head [buildkit=]",
         "compose up -d --no-deps --force-recreate backend [buildkit=]",
         "compose exec -T backend alembic current [buildkit=]",
+        "compose ps -q worker [buildkit=]",
     ]
     assert calls[0] == "docker buildx version"  # BuildKit checked before anything
     assert run.stdout.rstrip().endswith("MOA_DEPLOY_COMPLETE")
@@ -180,13 +183,14 @@ def test_recreate_after_an_env_change_migrates_first_and_builds_nothing(tmp_path
         "compose exec -T backend alembic upgrade head [buildkit=]",
         "compose up -d --no-deps --force-recreate backend [buildkit=]",
         "compose exec -T backend alembic current [buildkit=]",
+        "compose ps -q worker [buildkit=]",
     ]
 
 
 def test_sync_and_restart_restarts_once(tmp_path, fakes):
     run, calls = _deploy(tmp_path, fakes, sync_code=True, restart_backend=True)
     assert run.returncode == 0
-    assert calls == ["compose restart backend [buildkit=]"]
+    assert calls == ["compose ps -q worker [buildkit=]", "compose restart backend [buildkit=]"]
 
 
 def test_services_start_after_the_migration_one_at_a_time(tmp_path, fakes):
@@ -195,11 +199,63 @@ def test_services_start_after_the_migration_one_at_a_time(tmp_path, fakes):
     assert calls == [
         "compose exec -T backend alembic upgrade head [buildkit=]",
         "compose exec -T backend alembic current [buildkit=]",
+        "compose ps -q worker [buildkit=]",
         "compose config --services [buildkit=]",
         "compose up -d --no-deps redis [buildkit=1]",
         "compose up -d --no-deps worker [buildkit=1]",
         "compose restart backend [buildkit=]",
     ]
+
+
+# The worker (docker-compose.prod.yml) goes with the backend once it runs:
+# never older code than the API that enqueues for it, and never started
+# twice in one deploy.
+
+
+def test_a_running_worker_is_recreated_after_the_backend_from_the_new_image(tmp_path, fakes):
+    run, calls = _deploy(tmp_path, fakes, sync_code=True, install_requirements=True, migrate=True, FAKE_WORKER="1")
+    assert run.returncode == 0, run.stdout + run.stderr
+    order = [c for c in calls if not c.startswith("docker buildx")]
+    assert order == [
+        "compose build backend [buildkit=1]",
+        "compose exec -T backend alembic upgrade head [buildkit=]",
+        "compose up -d --no-deps --force-recreate backend [buildkit=]",
+        "compose exec -T backend alembic current [buildkit=]",
+        "compose ps -q worker [buildkit=]",
+        "compose up -d --no-deps --force-recreate worker [buildkit=]",
+    ]
+
+
+def test_a_running_worker_restarts_with_new_code(tmp_path, fakes):
+    run, calls = _deploy(tmp_path, fakes, sync_code=True, migrate=True, FAKE_WORKER="1")
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert calls == [
+        "compose exec -T backend alembic upgrade head [buildkit=]",
+        "compose exec -T backend alembic current [buildkit=]",
+        "compose ps -q worker [buildkit=]",
+        "compose restart worker [buildkit=]",
+        "compose restart backend [buildkit=]",
+    ]
+
+
+def test_a_running_worker_recreated_here_is_left_to_up_by_the_services_input(tmp_path, fakes):
+    """Recreated with the backend before the extra services run, so their
+    `up -d` finds it current: one recreate, never a recreate and a restart."""
+    run, calls = _deploy(tmp_path, fakes, sync_code=True, install_requirements=True, migrate=True,
+                         services="redis worker", FAKE_WORKER="1")
+    assert run.returncode == 0, run.stdout + run.stderr
+    order = [c for c in calls if not c.startswith("docker buildx")]
+    assert order.index("compose up -d --no-deps --force-recreate worker [buildkit=]") < order.index(
+        "compose up -d --no-deps worker [buildkit=1]")
+    assert not [c for c in order if c.startswith("compose restart")]
+
+
+def test_an_env_change_alone_leaves_a_running_worker_alone(tmp_path, fakes):
+    """No new code and no new image: the worker keeps running (its own .env
+    change reaches it with services: worker, or a recreate_backend run)."""
+    run, calls = _deploy(tmp_path, fakes, restart_backend=False, FAKE_WORKER="1")
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert calls == ["compose ps -q worker [buildkit=]"]
 
 
 def test_an_unknown_service_fails_before_any_is_started(tmp_path, fakes):

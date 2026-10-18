@@ -192,8 +192,9 @@ async def admit(session, event: Events, reg: EventRegistrationsLink, *, actor: G
     reg.attended_on = when
     if actor.volunteer is not None:
         reg.volunteer_id = actor.volunteer.id
+    # The guest's note, push and badges: a job committed with the check-in.
+    await after.enqueue(session, after.Admitted(user_id=reg.user_id, event_id=event.id, event_name=event.name, club_id=event.club_id))
     await session.commit()
-    after.schedule(background, after.Admitted(user_id=reg.user_id, event_id=event.id, event_name=event.name, club_id=event.club_id))
     return await check_in_of(session, reg.id)
 
 

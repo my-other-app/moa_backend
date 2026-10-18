@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload, aliased, joinedload
 import secrets
 
 
+from app.core import jobs
 from app.core.utils.keys import generate_slug
 from app.response import CustomHTTPException
 from app.core.response.sorting import apply_sort
@@ -237,6 +238,13 @@ async def approve_club(session: AsyncSession, club_id: int) -> Clubs:
     # serialization (outside the session's async context) would raise
     # MissingGreenlet, since Pydantic can't await it.
     return await club_for_answer(session, club.id)
+
+
+@jobs.handler("clubs.approved_email", max_attempts=4, timeout=60.0)
+async def _approved_email_job(p: dict) -> None:
+    import asyncio
+
+    await asyncio.to_thread(send_approved_email, p["to"], club_name=p["club_name"])
 
 
 def send_approved_email(to: str, *, club_name: str) -> None:

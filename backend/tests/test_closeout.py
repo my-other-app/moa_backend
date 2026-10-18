@@ -8,6 +8,7 @@ from app.api.checkins.models import CheckIns, CheckInVia
 from app.api.closeout import service
 from app.api.closeout.models import ArchivedContacts, EventStatus, RetentionJobs
 from app.api.events.models import EventRegistrationsLink
+from app.core import jobs
 from app.core.email import email as email_mod
 from tests.conftest import auth_header
 
@@ -181,7 +182,9 @@ async def test_a_scheduled_run_waits_for_the_event_to_end(client, session, world
     event = world["event"]
     await client.patch(_url(world, "/settings"), json={"retention_mode": "delete", "retention_hours": 1}, headers=world["club"])
     done = await service.sweep(session)
-    assert done["ran"] == 1
+    # Queued as a job, run after the sweep's commit (the suite runs it when waited for).
+    assert done["queued"] == 1
+    await jobs.settle()
     assert outbox["sent"] == []
     reg = await session.get(EventRegistrationsLink, world["a"].id)
     await session.refresh(reg)

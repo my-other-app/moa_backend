@@ -30,15 +30,32 @@ second-long snapshots); every store, and anything else that defers work in
 this process (`register`: the view buffers), is switched off and emptied
 together by `reset` -- the suite starts each test from nothing that way.
 All are reached only through `remember`, `forget` and `reset`, so a store
-kept elsewhere (Redis, once there is one) can take their place without
-touching their callers.
+kept elsewhere can take their place without touching their callers.
+
+A shared second level (APP_REDIS_URL). Each process kept its own copy, so
+with four workers every key was built four times a minute, and a cold start
+waited on the database while a sibling had the answer. `shared` now also
+keeps each value in Redis (`Shared`), with the same fresh and stale times on
+the wall clock: a miss here asks Redis before building, a build takes a lock
+there first (SET NX) so one process builds a cold key while the others wait
+a moment for its answer, and a background revalidation picks up a sibling's
+fresher value rather than rebuilding it. `clear` moves the namespace to a new
+generation, so nothing kept before it is read again. Redis down or slow: the
+local level alone, as before (app/core/redis.py). Values are pickled and the
+keys carry a hash of the app's code, so a process from another release never
+reads a value of a shape it does not know.
 """
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+import pickle
+import secrets
 import time
 from collections import OrderedDict
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Hashable, Optional
 
 logger = logging.getLogger(__name__)
@@ -71,8 +88,12 @@ def family_of(key: Hashable) -> Optional[str]:
 
 
 class TTLCache:
-    def __init__(self, ttl: float = TTL_SECONDS, maxsize: int = MAX_ENTRIES, *, families: Optional[dict[str, int]] = None, register_it: bool = True):
-        """`maxsize` is each family's capacity unless `families` names its own."""
+    def __init__(
+        self, ttl: float = TTL_SECONDS, maxsize: int = MAX_ENTRIES, *, families: Optional[dict[str, int]] = None,
+        register_it: bool = True, shared_as: Optional[str] = None,
+    ):
+        """`maxsize` is each family's capacity unless `families` names its own.
+        `shared_as`: the namespace of its second level in Redis, when there is one."""
         self.ttl = ttl
         self.maxsize = maxsize
         self.families = dict(families or {})
@@ -80,6 +101,8 @@ class TTLCache:
         self.hits = 0
         self.stale_hits = 0
         self.misses = 0
+        self.shared_hits = 0
+        self.l2 = Shared(shared_as) if shared_as else None
         # family -> key -> (fresh until, stale until, value), oldest use first.
         self._items: dict[Optional[str], OrderedDict[Hashable, tuple[float, float, Any]]] = {}
         self._building: dict[Hashable, asyncio.Future] = {}
@@ -135,11 +158,28 @@ class TTLCache:
         self._drop(key)
         if key in self._building:
             self._stale.add(key)
+        if self.enabled and self._l2() is not None:
+            self._later(self.l2.forget(key))
 
     def clear(self) -> None:
         self._items.clear()
         self._stale.clear()
-        self.hits = self.stale_hits = self.misses = 0
+        self.hits = self.stale_hits = self.misses = self.shared_hits = 0
+        if self.enabled and self._l2() is not None:
+            self._later(self.l2.clear())
+
+    def _later(self, coro) -> None:
+        """Run `coro` in the background when there is a loop; drop it when not."""
+        try:
+            task = asyncio.get_running_loop().create_task(coro)
+        except RuntimeError:
+            coro.close()
+            return
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    def _l2(self) -> Optional["Shared"]:
+        return self.l2 if self.l2 is not None and self.l2.on() else None
 
     async def remember(
         self, key: Hashable, build: Callable[[], Awaitable[Any]], ttl: Optional[float] = None, *,
@@ -176,8 +216,13 @@ class TTLCache:
                 return await build()
         future = asyncio.get_running_loop().create_future()
         self._building[key] = future
+        keep_ttl, keep_stale = ttl, stale
         try:
-            value = await build()
+            l2 = self._l2()
+            if l2 is None:
+                value = await build()
+            else:
+                value, keep_ttl, keep_stale, revalidate = await self._miss_shared(l2, key, build, ttl, stale, refresh is not None)
         except BaseException as exc:
             if not future.done():
                 future.set_exception(exc if isinstance(exc, Exception) else RuntimeError("cancelled"))
@@ -188,10 +233,36 @@ class TTLCache:
             forgotten = key in self._stale
             self._stale.discard(key)
         if not forgotten:  # forgotten while it was being worked out: answer with it, keep nothing
-            self.put(key, value, ttl, stale)
+            self.put(key, value, keep_ttl, keep_stale)
+            if l2 is not None and revalidate:
+                # A sibling's value just past its time: answered, and rebuilt behind.
+                self._revalidate(key, refresh, ttl, stale)
         if not future.done():
             future.set_result(value)
         return value
+
+    async def _miss_shared(self, l2: "Shared", key: Hashable, build, ttl: Optional[float], stale: float, can_refresh: bool):
+        """A cold key with Redis: a sibling's value if it has one; else built
+        here under the shared lock, or a sibling's build waited for. Returns
+        (value, ttl, stale to keep it for, whether to revalidate it now)."""
+        ttl = self.ttl if ttl is None else ttl
+        gen, got = await l2.get(key)
+        if got is not None and (got.fresh > 0 or can_refresh):
+            self.shared_hits += 1
+            return (got.value, *got.left(), got.fresh <= 0)
+        token = await l2.lock(key)
+        if token is False:  # a sibling is building it: wait a moment for its answer
+            gen, got = await l2.wait(key)
+            if got is not None:
+                self.shared_hits += 1
+                return (got.value, *got.left(), False)
+        try:
+            value = await build()
+        finally:
+            if token:
+                await l2.unlock(key, token)
+        await l2.put(key, gen, value, ttl, stale)
+        return value, ttl, stale, False
 
     def _revalidate(self, key: Hashable, refresh: Callable[[], Awaitable[Any]], ttl: Optional[float], stale: float) -> None:
         """Rebuild `key` in the background unless that is under way already."""
@@ -202,8 +273,19 @@ class TTLCache:
         self._building[key] = future
 
         async def run() -> None:
+            keep_ttl, keep_stale = ttl, stale
             try:
-                value = await refresh()
+                l2 = self._l2()
+                if l2 is None:
+                    value = await refresh()
+                else:
+                    got = await self._refresh_shared(l2, key, refresh, ttl, stale)
+                    if got is None:  # a sibling is rebuilding it; the stale value stays meanwhile
+                        self._building.pop(key, None)
+                        self._stale.discard(key)
+                        future.set_result(None)
+                        return
+                    value, keep_ttl, keep_stale = got
             except Exception as exc:  # noqa: BLE001 — the stale value stays until its window closes
                 logger.warning("refreshing %r in the background failed", key, exc_info=True)
                 self._building.pop(key, None)
@@ -215,12 +297,31 @@ class TTLCache:
             forgotten = key in self._stale
             self._stale.discard(key)
             if not forgotten:
-                self.put(key, value, ttl, stale)
+                self.put(key, value, keep_ttl, keep_stale)
             future.set_result(value)
 
         task = loop.create_task(run())
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
+
+    async def _refresh_shared(self, l2: "Shared", key: Hashable, refresh, ttl: Optional[float], stale: float):
+        """A background rebuild with Redis: a sibling's fresher value if there
+        is one; else rebuilt here, unless a sibling holds the lock (None)."""
+        ttl = self.ttl if ttl is None else ttl
+        gen, got = await l2.get(key)
+        if got is not None and got.fresh > 0:
+            self.shared_hits += 1
+            return (got.value, *got.left())
+        token = await l2.lock(key)
+        if token is False:
+            return None
+        try:
+            value = await refresh()
+        finally:
+            if token:
+                await l2.unlock(key, token)
+        await l2.put(key, gen, value, ttl, stale)
+        return value, ttl, stale
 
     async def settle(self) -> None:
         """Wait for the background rebuilds started so far (tests, shutdown)."""
@@ -228,9 +329,168 @@ class TTLCache:
             await asyncio.gather(*list(self._tasks), return_exceptions=True)
 
 
+# ─── The shared second level ─────────────────────────────────────────────
+
+
+def _code_version() -> str:
+    """A hash of the app's source. In the shared keys, so values kept by
+    other code -- a process not yet restarted in a deploy -- are never read
+    as this code's: their shape may differ."""
+    root = Path(__file__).resolve().parents[2]
+    digest = hashlib.sha1()
+    try:
+        for path in sorted(root.rglob("*.py")):
+            digest.update(str(path.relative_to(root)).encode())
+            digest.update(path.read_bytes())
+    except OSError:  # pragma: no cover - unreadable source: a fixed namespace
+        return "0"
+    return digest.hexdigest()[:12]
+
+
+_code: Optional[str] = None
+
+
+def code_version() -> str:
+    global _code
+    if _code is None:
+        _code = _code_version()
+    return _code
+
+
+@dataclass
+class Got:
+    value: Any
+    #: Seconds it is still fresh for (<= 0: past its time), and its stale window.
+    fresh: float
+    stale: float
+
+    def left(self) -> tuple[float, float]:
+        """(fresh, stale) seconds from now, as `put` takes them."""
+        fresh = max(0.0, self.fresh)
+        return fresh, max(0.0, self.fresh + self.stale - fresh)
+
+
+_UNLOCK = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end"
+
+
+class Shared:
+    """One store's level in Redis. Every method falls back quietly: None,
+    no lock, nothing kept, when Redis is unset, down or slow."""
+
+    #: How long a process waits for a sibling's build of a cold key, and how
+    #: often it looks; how long a build may hold the lock.
+    WAIT = 2.0
+    STEP = 0.05
+    LOCK_MS = 15_000
+    #: A value larger than this, pickled, is kept here only.
+    MAX_BYTES = 2 * 1024 * 1024
+
+    def __init__(self, namespace: str):
+        self.namespace = namespace
+
+    def on(self) -> bool:
+        from app.core import redis
+
+        return redis.available() is not None
+
+    def _base(self) -> str:
+        from app.core import redis
+
+        return f"{redis.PREFIX}cache:{code_version()}:{self.namespace}"
+
+    def _keys(self, key: Hashable) -> tuple[str, str, str]:
+        h = hashlib.sha1(repr(key).encode()).hexdigest()[:32]
+        base = self._base()
+        return f"{base}:v:{h}", f"{base}:gen", f"{base}:lock:{h}"
+
+    async def get(self, key: Hashable) -> tuple[Optional[int], Optional[Got]]:
+        """(the namespace's generation, the value when it is of that generation
+        and not past its stale window). The generation goes with a later put."""
+        from app.core import redis
+
+        value_key, gen_key, _ = self._keys(key)
+        raw = await redis.run(lambda c: c.mget(value_key, gen_key), None, what="cache get")
+        if raw is None:
+            return None, None
+        gen = int(raw[1] or 0)
+        if raw[0] is None:
+            return gen, None
+        try:
+            seen, fresh_until, stale_until, value = pickle.loads(raw[0])
+        except Exception:  # noqa: BLE001 - unreadable: a miss
+            return gen, None
+        now = time.time()
+        if seen != gen or stale_until <= now:
+            return gen, None
+        return gen, Got(value, fresh_until - now, stale_until - fresh_until)
+
+    async def put(self, key: Hashable, gen: Optional[int], value: Any, ttl: float, stale: float) -> None:
+        from app.core import redis
+
+        if gen is None:
+            return
+        now = time.time()
+        fresh_until = now + ttl
+        stale_until = fresh_until + max(0.0, stale)
+        try:
+            data = pickle.dumps((gen, fresh_until, stale_until, value), protocol=pickle.HIGHEST_PROTOCOL)
+        except Exception:  # noqa: BLE001 - not picklable: kept here only
+            logger.warning("discover cache value for %r cannot be shared", key, exc_info=True)
+            return
+        if len(data) > self.MAX_BYTES:
+            return
+        value_key, _, _ = self._keys(key)
+        await redis.run(lambda c: c.set(value_key, data, px=max(1, int((stale_until - now) * 1000))), None, what="cache put")
+
+    async def lock(self, key: Hashable):
+        """A token when this process may build `key`; False when a sibling
+        holds the lock; None when there is no Redis to ask (build anyway)."""
+        from app.core import redis
+
+        _, _, lock_key = self._keys(key)
+        token = secrets.token_hex(8)
+        got = await redis.run(lambda c: c.set(lock_key, token, nx=True, px=self.LOCK_MS), "down", what="cache lock")
+        if got == "down":
+            return None
+        return token if got else False
+
+    async def unlock(self, key: Hashable, token: str) -> None:
+        from app.core import redis
+
+        _, _, lock_key = self._keys(key)
+        await redis.run(lambda c: c.eval(_UNLOCK, 1, lock_key, token), None, what="cache unlock")
+
+    async def wait(self, key: Hashable) -> tuple[Optional[int], Optional[Got]]:
+        """A sibling's fresh value, once it has put it, for up to WAIT seconds."""
+        deadline = time.monotonic() + self.WAIT
+        gen: Optional[int] = None
+        while time.monotonic() < deadline:
+            await asyncio.sleep(self.STEP)
+            gen, got = await self.get(key)
+            if gen is None:
+                return None, None
+            if got is not None and got.fresh > 0:
+                return gen, got
+        return gen, None
+
+    async def forget(self, key: Hashable) -> None:
+        from app.core import redis
+
+        value_key, _, _ = self._keys(key)
+        await redis.run(lambda c: c.delete(value_key), None, what="cache forget")
+
+    async def clear(self) -> None:
+        """Every value kept so far is of an old generation now: never read again."""
+        from app.core import redis
+
+        _, gen_key, _ = self._keys(())
+        await redis.run(lambda c: c.incr(gen_key), None, what="cache clear")
+
+
 #: The same for everyone. Each family keeps its own few: a page of calendar
-#: or "near you" keys never pushes out the front page.
-shared = TTLCache(families={
+#: or "near you" keys never pushes out the front page. Shared between
+#: processes through Redis when there is one.
+shared = TTLCache(shared_as="discover", families={
     "home": 4, "categories": 8, "category-counts": 4, "interests": 16, "topics": 4, "on-floor": 4,
     "calendar": 1024, "near": 4096, "home-clubs": 4096,
     "for-you-popular": 2048, "for-you-online": 4,

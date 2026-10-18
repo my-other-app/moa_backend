@@ -4,7 +4,7 @@ import asyncio
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Body, File, Query, Response, UploadFile
+from fastapi import APIRouter, Body, File, Query, Response, UploadFile
 
 from app.api.deliveries import service as deliveries
 from app.api.emails import library_overview, service
@@ -147,7 +147,7 @@ async def reset_template(session: SessionDep, user: ClubAuth, event_id: int, tem
 
 @router.post("/{template_id}/send", summary="Send this email to its audience now")
 async def send_template(
-    session: SessionDep, user: ClubAuth, event_id: int, template_id: UUID, background_tasks: BackgroundTasks,
+    session: SessionDep, user: ClubAuth, event_id: int, template_id: UUID,
     body: Optional[TemplateSendRequest] = Body(None),
 ) -> MessageOut:
     """The design is frozen into a message; sending happens after this
@@ -157,7 +157,6 @@ async def send_template(
     event = await deliveries.event_for_club(session, user, event_id)
     tpl = await service.template_of(session, template_id, event=event)
     msg = await service.send_template(session, event, tpl, created_by=user.id, client_ref=body.client_ref if body else None)
-    background_tasks.add_task(service.run_message, msg.id)
     return MessageOut(**service.message_out(msg, user.full_name))
 
 
@@ -172,7 +171,7 @@ async def list_messages(session: SessionDep, user: ClubAuth, event_id: int, page
 
 
 @messages_router.post("", summary="Email the guests something now")
-async def create_message(session: SessionDep, user: ClubAuth, event_id: int, body: MessageCreate, background_tasks: BackgroundTasks) -> MessageOut:
+async def create_message(session: SessionDep, user: ClubAuth, event_id: int, body: MessageCreate) -> MessageOut:
     event = await deliveries.event_for_club(session, user, event_id)
     if body.client_ref is not None:
         # The composer's second click: the first send is the answer.
@@ -183,7 +182,6 @@ async def create_message(session: SessionDep, user: ClubAuth, event_id: int, bod
         session, event, subject=body.subject, body=body.body, design=body.design, attachments=body.attachments, audience=body.audience,
         client_ref=body.client_ref, created_by=user.id,
     )
-    background_tasks.add_task(service.run_message, msg.id)
     return MessageOut(**service.message_out(msg, user.full_name))
 
 

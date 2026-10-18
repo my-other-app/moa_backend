@@ -30,7 +30,9 @@ from app.api.discover import cursor as cursors, visitors
 from app.api.reports import service as reports
 from app.api.threads.models import ClubThreads, ThreadComments, ThreadLikes, ThreadPollOptions, ThreadVotes
 from app.api.threads.schemas import MAX_BODY, MAX_OPTION, MAX_OPTIONS
+from app.api.notifications.models import Notifications
 from app.api.users.models import Users
+from app.core import jobs
 from app.response import CustomHTTPException
 
 logger = logging.getLogger(__name__)
@@ -168,9 +170,9 @@ def parse_options(raw: str | None) -> list[str]:
 
 
 async def create(session, club: Clubs, user, *, body: str, notify_followers: bool, poll_options: list[str], image) -> dict:
-    """The post. Telling the followers is the caller's to schedule after the
-    answer (tell_followers), so a club with a lakh of followers posts as fast
-    as one with ten."""
+    """The post, and -- when the followers are to be told -- the job that
+    tells them (`threads.tell_followers`), committed with it: a club with a
+    lakh of followers posts as fast as one with ten."""
     body = (body or "").strip()
     if not body:
         raise CustomHTTPException(422, message="Write something first")
@@ -185,17 +187,26 @@ async def create(session, club: Clubs, user, *, body: str, notify_followers: boo
     await session.flush()
     for i, label in enumerate(poll_options):
         session.add(ThreadPollOptions(thread_id=t.id, label=label, sort_order=i))
+    if notify_followers:
+        await jobs.enqueue(session, "threads.tell_followers", {"club_id": club.id, "thread_id": str(t.id)}, dedupe_key=f"threads:tell:{t.id}")
     await session.commit()
     await session.refresh(t)
     options = (await _options_for(session, [t.id]))[t.id]
     return _out(t, club, options, False, None)
 
 
+@jobs.handler("threads.tell_followers", max_attempts=4, timeout=1800.0)
+async def _tell_job(p: dict) -> None:
+    await tell_followers(int(p["club_id"]), uuid.UUID(str(p["thread_id"])))
+
+
 async def tell_followers(club_id: int, thread_id) -> int:
     """A push to every follower, and a line in each inbox: after the post was
     answered, on a session of its own, TELL_BATCH followers at a time (read
     in id order through the club's follower index, never all at once).
-    Returns how many were told. Never raises."""
+    Followers who already have the post's line are skipped, so a run cut off
+    by a deploy and run again goes on from where it stopped rather than
+    telling anyone twice. Returns how many were told. Never raises."""
     from app.api.notifications.service import create_notifications_batch
     from app.core.notifications.service import send_notification_to_users
 
@@ -220,6 +231,15 @@ async def tell_followers(club_id: int, thread_id) -> int:
                 if not ids:
                     break
                 last = ids[-1]
+                already = set((await session.scalars(
+                    select(Notifications.user_id).where(
+                        Notifications.user_id.in_(ids), Notifications.type == "club_thread", Notifications.from_club_id == club.id,
+                        Notifications.data["thread_id"].as_string() == str(t.id),
+                    )
+                )).all())
+                ids = [i for i in ids if i not in already]
+                if not ids:
+                    continue
                 await create_notifications_batch(session, user_ids=ids, title=title, description=preview, type="club_thread", data=data, from_club_id=club.id)
                 await session.commit()
                 await send_notification_to_users(session, ids, title, preview, data=data)

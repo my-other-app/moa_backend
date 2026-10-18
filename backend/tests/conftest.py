@@ -216,19 +216,51 @@ async def _after_commit_finished(_quiet_email):
     admin_alerts.reset_for_tests()
 
 
+@pytest.fixture(autouse=True)
+def _jobs_inline(request, monkeypatch):
+    """Jobs (app/core/jobs.py) run when the test waits for them -- `await
+    jobs.settle()`, or `after_commit.drain()` -- one at a time, and, in a
+    test that has a session, on that session: they see its rows and are
+    rolled back with them. The client below waits for them after every
+    request, as the API's own runner runs them right after the response."""
+    from contextlib import asynccontextmanager
+
+    from app.core import jobs
+
+    runner = jobs.InlineRunner()
+    before = jobs.use(runner)
+    if "session" in request.fixturenames:
+        test_session = request.getfixturevalue("session")
+
+        @asynccontextmanager
+        async def scope():
+            yield test_session
+
+        monkeypatch.setattr(jobs, "session_scope", scope)
+    yield runner
+    jobs.use(before)
+
+
 @pytest_asyncio.fixture
 async def client(session):
     """An httpx client wired to the real FastAPI app, with get_session overridden
     to hand out the per-test rolled-back session so requests and test setup
-    share the same transaction."""
+    share the same transaction. The jobs a request's commits set off have run
+    by the time it answers (app.core.jobs, run inline in the suite)."""
     from doth import application
+    from app.core import jobs
     from app.db.core import get_session
 
     async def _get_test_session():
         yield session
 
+    async def app_then_jobs(scope, receive, send):
+        await application(scope, receive, send)
+        if scope["type"] == "http":
+            await jobs.settle()
+
     application.dependency_overrides[get_session] = _get_test_session
-    transport = ASGITransport(app=application)
+    transport = ASGITransport(app=app_then_jobs)
     async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
         yield ac
     application.dependency_overrides.clear()

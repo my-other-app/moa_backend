@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.clubs.models import ClubUsersLink
 from app.api.events.models import Events, EventRegistrationsLink
 from app.api.notifications import service as db_notification_service
+from app.core import jobs
 from app.core.notifications import fanout
 from app.core.notifications.service import (
     send_notification_to_user,
@@ -33,18 +34,29 @@ async def notify_followers_of_new_event(
     club_name: str,
     event_id: int,
     event_name: str,
-) -> Optional[int]:
+) -> None:
     """
     Notify all followers of a club about a new event.
 
     Trigger 1: When a club posts a new event, notify all users following the club.
 
-    The inbox rows are one INSERT ... SELECT over the followers and the pushes
-    go in batches, after the response (app.core.notifications.fanout). Returns
-    the devices reached when it ran inline (the tests), None when scheduled.
+    A job (`notifications.new_event`), written and committed here -- the
+    event is committed by then -- and run after: the inbox rows are one
+    INSERT ... SELECT over the followers, and the pushes go in batches
+    (app.core.notifications.fanout). Once per event: a second call while the
+    first is waiting adds nothing, and a run again tells nobody twice.
     """
-    title = f"🎉 New from {club_name}!"
-    body = f"Check out: {event_name}"
+    await jobs.enqueue(
+        session, "notifications.new_event",
+        {"club_id": club_id, "club_name": club_name, "event_id": event_id, "event_name": event_name},
+        dedupe_key=f"notify:new_event:{event_id}",
+    )
+    await session.commit()
+
+
+@jobs.handler("notifications.new_event", max_attempts=6, timeout=600.0)
+async def _new_event_job(p: dict) -> None:
+    club_id, event_id = int(p["club_id"]), int(p["event_id"])
     audience = (
         select(ClubUsersLink.user_id)
         .where(
@@ -54,15 +66,13 @@ async def notify_followers_of_new_event(
         )
         .distinct()
     )
-
-    async def job(s: AsyncSession) -> int:
-        return await _tell(
-            s, audience, title=title, body=body, type="new_event", from_club_id=club_id, event_id=event_id,
-            data={"club_name": club_name, "event_name": event_name},
+    async with jobs.scope() as s:
+        await _tell(
+            s, audience, title=f"🎉 New from {p['club_name']}!", body=f"Check out: {p['event_name']}", type="new_event",
+            from_club_id=club_id, event_id=event_id,
+            data={"club_name": p["club_name"], "event_name": p["event_name"]},
             push_data={"type": "new_event", "event_id": str(event_id), "club_id": str(club_id)},
         )
-
-    return await fanout.dispatch(session, job, name=f"new_event:{event_id}")
 
 
 async def notify_users_by_interest(
@@ -84,9 +94,30 @@ async def notify_users_by_interest(
     INTEREST_PUSH_MAX_PER_EVENT people (the newest accounts first: index
     order, and the people most likely still finding their way in), and
     nobody who has already had INTEREST_PUSH_MAX_PER_USER_PER_DAY of these in
-    the last day. Followers are never capped: they asked. Runs after the
-    response, as notify_followers_of_new_event does.
+    the last day. Followers are never capped: they asked. A job, written and
+    committed here and run after, as notify_followers_of_new_event's is.
     """
+    from app.config import settings
+
+    per_event = max(0, int(settings.INTEREST_PUSH_MAX_PER_EVENT))
+    per_day = max(0, int(settings.INTEREST_PUSH_MAX_PER_USER_PER_DAY))
+    if per_event == 0 or per_day == 0:
+        return 0
+
+    topic_ids = [category_id] if isinstance(category_id, int) else list(category_id)
+    if not topic_ids:
+        return 0
+    await jobs.enqueue(
+        session, "notifications.interest",
+        {"topic_ids": topic_ids, "category_name": category_name, "club_id": club_id, "event_id": event_id, "event_name": event_name},
+        dedupe_key=f"notify:interest:{event_id}",
+    )
+    await session.commit()
+    return None
+
+
+@jobs.handler("notifications.interest", max_attempts=6, timeout=600.0)
+async def _interest_job(p: dict) -> None:
     from app.api.interests.models import Interests
     from app.api.notifications.models import Notifications
     from app.api.users.models import UserInterests
@@ -95,14 +126,12 @@ async def notify_users_by_interest(
     per_event = max(0, int(settings.INTEREST_PUSH_MAX_PER_EVENT))
     per_day = max(0, int(settings.INTEREST_PUSH_MAX_PER_USER_PER_DAY))
     if per_event == 0 or per_day == 0:
-        return 0
-
+        return
+    topic_ids = [int(t) for t in p["topic_ids"]]
+    club_id, event_id, category_name, event_name = int(p["club_id"]), int(p["event_id"]), p["category_name"], p["event_name"]
     title = f"📌 Event in {category_name}"
     body = f"New event matching your interests: {event_name}"
     day_ago = datetime.now(timezone.utc) - timedelta(days=1)
-    topic_ids = [category_id] if isinstance(category_id, int) else list(category_id)
-    if not topic_ids:
-        return 0
     in_category = select(Interests.id).where(Interests.category_id.in_(topic_ids), Interests.is_deleted == False)  # noqa: E712
     follows = (
         select(ClubUsersLink.id)
@@ -138,14 +167,12 @@ async def notify_users_by_interest(
         .limit(per_event)
     )
 
-    async def job(s: AsyncSession) -> int:
-        return await _tell(
+    async with jobs.scope() as s:
+        await _tell(
             s, audience, title=title, body=body, type="nearby_event", from_club_id=club_id, event_id=event_id,
             data={"category_name": category_name, "event_name": event_name},
             push_data={"type": "interest_match", "event_id": str(event_id), "category_id": str(topic_ids[0])},
         )
-
-    return await fanout.dispatch(session, job, name=f"interest:{event_id}")
 
 
 async def _tell(
@@ -160,17 +187,23 @@ async def _tell(
     from_club_id: Optional[int] = None,
     event_id: Optional[int] = None,
 ) -> int:
-    """The inbox rows in one statement, kept; then the pushes in batches."""
+    """The inbox rows in one statement, kept, with the job that pushes to
+    everyone holding one (`notifications.push`), committed together. The
+    rows skip anyone already told about this event (`once`), so the job run
+    again adds none; the push job, run again, pushes again -- a second
+    buzz rather than none."""
     reached = await fanout.insert_for_audience(
         session, audience, title=title, description=body, type=type, data=data,
-        from_club_id=from_club_id, event_id=event_id,
+        from_club_id=from_club_id, event_id=event_id, once=True,
     )
+    if reached:
+        await fanout.enqueue_push(session, type=type, event_id=event_id, title=title, body=body, data=push_data)
     await session.commit()
     if not reached:
-        logger.debug("Nobody to tell about %s for event %s", type, event_id)
+        logger.debug("Nobody new to tell about %s for event %s", type, event_id)
         return 0
     logger.info("Told %d people about %s for event %s; pushing", len(reached), type, event_id)
-    return await send_notification_to_users(session=session, user_ids=reached, title=title, body=body, data=push_data)
+    return len(reached)
 
 
 async def notify_user_check_in(

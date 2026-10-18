@@ -63,6 +63,7 @@ KINDS: dict[str, str] = {
     "payment_unapplied": "A captured payment had not been applied to its registration; the repair sweep applied it, or could not (data.repaired)",
     "subscription_orphan_charged": "Razorpay charged a subscription no club row holds (a second checkout, or one made elsewhere); it was cancelled at Razorpay",
     "backup_failed": "The daily database backup (scripts/backup.py) could not dump the database or copy the dump off-site",
+    "job_dead": "A background job (a mail, a fan-out, a retention run) failed on every try and was given up on (data: job_id, name, attempts, error)",
 }
 
 DEDUPE_WINDOW = timedelta(minutes=10)

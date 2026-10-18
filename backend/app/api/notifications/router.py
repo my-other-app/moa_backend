@@ -125,9 +125,13 @@ async def send_push_to_all_devices(
     written to the audit log.
 
     It answers at once with how many devices there are; the sends go after the
-    response, FCM_BATCH devices at a time read in key order, so a crore of
-    devices is never one list in memory nor one request held open.
+    response as jobs, FCM_BATCH devices a job read in key order, each job
+    writing the next (app.core.notifications.fanout): a crore of devices is
+    never one list in memory, one request held open, nor one long run that a
+    deploy cuts off and starts again.
     """
+    import uuid
+
     from sqlalchemy import func, select
 
     from app.api.audit import service as audit
@@ -144,19 +148,10 @@ async def send_push_to_all_devices(
         session, actor=user, action="notifications.broadcast", entity_type="notification",
         summary=f"Pushed to every device: {body.title}"[:255], details={"title": body.title, "devices": devices}, request=request,
     )
+    # The first batch's job, committed with the audit line.
+    await fanout.enqueue_broadcast(session, uuid.uuid4().hex, body.title, body.body, body.image_url)
     await session.commit()
-    title, text, image_url = body.title, body.body, body.image_url
-
-    async def job(s) -> int:
-        return await push_service.send_to_every_device(s, title, text, image_url=image_url)
-
-    sent = await fanout.dispatch(session, job, name="broadcast")
-    return SendPushResponse(
-        success=True,
-        tokens_count=devices,
-        sent_count=int(sent or 0),
-        message=f"Sending to {devices} devices" if sent is None else f"Sent to {sent} of {devices} devices",
-    )
+    return SendPushResponse(success=True, tokens_count=devices, sent_count=0, message=f"Sending to {devices} devices")
 
 
 @router.get("/test/tokens", response_model=ListTokensResponse, summary="The newest registered FCM tokens")

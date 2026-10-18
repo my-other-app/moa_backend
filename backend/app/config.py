@@ -287,8 +287,9 @@ class AppConfig(BaseSettings):
     # ─── Accounts, sign-in and push (fix/accounts-integrity) ───────────────
     # Where the rate limiter keeps its counts (slowapi/limits storage URI).
     # memory:// is per process, which is exact while WORKERS=1; with more
-    # workers or hosts point it at Redis (redis://host:6379/0) so they share
-    # one budget. A redis:// URI needs the `redis` package installed.
+    # workers or hosts they need one shared store. Left at memory:// with
+    # REDIS_URL set, the limits use REDIS_URL (app/core/rate_limit.py); a
+    # URI here other than memory:// wins over that.
     RATE_LIMIT_STORAGE: str = "memory://"
     # An admin's session as someone else ends this many minutes after it
     # starts, with no refresh (30 to 60).
@@ -304,6 +305,44 @@ class AppConfig(BaseSettings):
     # sweep removes those and the sessions that can never be used again.
     SIGN_IN_ATTEMPTS_KEEP_DAYS: int = 180
     ACCOUNT_SWEEP_SECONDS: int = 3600
+
+    # ─── Platform: jobs, the worker, Redis (feat/w2-platform) ──────────────
+    # The job queue (app/core/jobs.py) is always on: work after a request is
+    # a row in `jobs`, written with the change it is about. Unset, each API
+    # process runs the jobs it wrote as soon as its transaction commits (and
+    # picks up retries and what a stopped process left). True: the API only
+    # writes them, and the worker (`python -m app.worker`) runs them. Turn it
+    # on only once the worker is running.
+    JOBS_WORKER: bool = False
+    # Jobs one process runs at once, all names together; a handler can ask
+    # for fewer of its own at a time. JOBS_LIMITS overrides that per name:
+    # "deliveries.send=2,notifications.followers=1".
+    JOBS_CONCURRENCY: int = 4
+    JOBS_LIMITS: str = ""
+    # How long a runner with nothing to do waits before looking again (a
+    # commit in the same process, or a finished job, wakes it sooner).
+    JOBS_POLL_SECONDS: float = 1.0
+    # Finished jobs are kept this many days (0: deleted as they finish), and
+    # dead ones -- tried max_attempts times -- this many.
+    JOBS_KEEP_DAYS: int = 3
+    JOBS_DEAD_KEEP_DAYS: int = 30
+    # On SIGTERM the worker stops taking jobs and gives the ones in hand this
+    # long to finish; the rest go back to the queue. Under the stop_grace_period
+    # docker-compose.prod.yml gives the worker.
+    JOBS_DRAIN_SECONDS: float = 25.0
+    # The leader-only loops (the email, closeout, billing, payments... sweeps
+    # started in doth.py's lifespan) run in the worker instead of the API.
+    # Each still takes its advisory lock, so one process runs each either way.
+    # Turn it on only with the worker running: with it on, the API runs none.
+    SWEEPS_IN_WORKER: bool = False
+    # Redis (app/core/redis.py), e.g. redis://redis:6379/0. Unset: no Redis
+    # anywhere, and everything works as before, per process. Set: the rate
+    # limits are shared (RATE_LIMIT_STORAGE above), the discover cache has a
+    # shared second level, and publish/subscribe crosses processes. Every
+    # call has a short timeout and falls back to the per-process way.
+    REDIS_URL: str = ""
+    # How long one Redis call may take before it is given up on, in seconds.
+    REDIS_TIMEOUT: float = 0.25
 
     @field_validator("PLAN_ENFORCEMENT_FROM")
     @classmethod

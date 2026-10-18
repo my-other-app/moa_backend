@@ -1,6 +1,6 @@
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, File, Form, Query, Request, Response, UploadFile
+from fastapi import APIRouter, File, Form, Query, Request, Response, UploadFile
 from sqlalchemy import select
 
 from app.api.clubs.models import Clubs
@@ -50,18 +50,16 @@ async def create_thread(
     request: Request,
     session: SessionDep,
     user: ClubAuth,
-    background_tasks: BackgroundTasks,
     body: str = Form(..., max_length=2000),
     notify_followers: bool = Form(True),
     poll_options: Optional[str] = Form(None),
     image: Optional[UploadFile] = File(None),
 ) -> ThreadOut:
-    """The followers are told after the post is answered (service.tell_followers)."""
+    """The followers are told after the post is answered: a job written with
+    the post (service.tell_followers)."""
     club = await _club_for(session, user)
     options = service.parse_options(poll_options)
     out = await service.create(session, club, user, body=body, notify_followers=notify_followers, poll_options=options, image=image)
-    if notify_followers:
-        background_tasks.add_task(service.tell_followers, club.id, out["id"])
     return ThreadOut(**out)
 
 

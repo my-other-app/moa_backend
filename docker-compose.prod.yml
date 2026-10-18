@@ -32,8 +32,11 @@ services:
 
   backend:
     build: backend/
+    # Named, so the worker below runs the very image the backend was built
+    # into (an install_requirements deploy rebuilds it for both).
+    image: moa-backend:live
     container_name: doth-live-backend
-    volumes:
+    volumes: &backend-volumes
       - ./backend:/backend
       # Backups, on the host and outside /var/www/myotherapp-production.
       #
@@ -50,7 +53,7 @@ services:
       - /var/backups/myotherapp:/backups
     env_file:
       - .env
-    environment:
+    environment: &backend-environment
       # Rebuilt from the parts rather than taken from .env, because the .env
       # copy hardcodes an IP: it said 192.168.1.101 while postgres sits on
       # 192.168.5.101. A packet to a dead address on an unrouted subnet is
@@ -94,6 +97,61 @@ services:
       doth_network:
         ipv4_address: 192.168.5.100
 
+  # The job queue's worker (backend/app/worker.py): the same image, code, env
+  # and mounts as the backend, running jobs instead of serving requests. Not
+  # started by a normal deploy: once, by hand, `up -d worker` -- then the API
+  # is told to leave its jobs to it with APP_JOBS_WORKER=true (and, if
+  # wanted, its sweeps with APP_SWEEPS_IN_WORKER=true). The deploy restarts it
+  # with the backend from then on. On SIGTERM it finishes what it has in
+  # hand for up to APP_JOBS_DRAIN_SECONDS (25 s) and hands the rest back; the
+  # grace period below is longer than that, so Docker never kills it mid-job.
+  worker:
+    build: backend/
+    image: moa-backend:live
+    container_name: doth-live-worker
+    volumes: *backend-volumes
+    env_file:
+      - .env
+    environment:
+      <<: *backend-environment
+      # Its own, smaller pool: at most APP_JOBS_CONCURRENCY jobs at once, a
+      # mail send using a few short transactions at a time. Counted on top
+      # of the backend's against Postgres's max_connections.
+      APP_DB_POOL_SIZE: "5"
+      APP_DB_MAX_OVERFLOW: "15"
+    depends_on:
+      - postgres
+    command: >
+      python -m app.worker
+    restart: unless-stopped
+    stop_grace_period: 35s
+    networks:
+      doth_network:
+        ipv4_address: 192.168.5.103
+
+  # Shared state for several API processes (backend/app/core/redis.py): the
+  # rate limits' counts, the discover cache's second level, publish/subscribe
+  # across processes. Nothing in it is the only copy of anything: Postgres is
+  # the truth, and with Redis gone everything falls back to per process. So
+  # no published port (the backend and worker reach it as redis:6379 on this
+  # network), append-only persistence only so a restart keeps the counts,
+  # and a memory cap with least-recently-used eviction rather than errors.
+  # Started once by hand (`up -d redis`), then APP_REDIS_URL=redis://redis:6379/0.
+  redis:
+    image: redis:7-alpine
+    container_name: doth-live-redis
+    command: ["redis-server", "--appendonly", "yes", "--save", "", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      retries: 5
+    networks:
+      doth_network:
+        ipv4_address: 192.168.5.102
+
   # nginx:
   #   container_name: bcards-nginx
   #   build: nginx
@@ -112,3 +170,4 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:

@@ -289,6 +289,28 @@ jobs:
             echo "::endgroup::"
           fi
 
+          # The job worker runs the same code as the backend and must never
+          # run older code than the API that enqueues for it (a job name it
+          # does not know waits; a payload it does not expect fails). It is
+          # started once by hand (docker-compose.prod.yml); from then on it
+          # goes with the backend here: recreated from the new image when the
+          # backend was, else restarted. On SIGTERM it hands its jobs back.
+          # After the migration, and before the extra services below: a
+          # worker that was not running is left to them (one start, not a
+          # start and then a recreate), and one this step just recreated is
+          # up to date, so their up -d leaves it alone.
+          if [ -n "\$($COMPOSE ps -q worker 2>/dev/null)" ]; then
+            if [ -n "\$RECREATED" ]; then
+              echo "::group::Recreating worker from the new image"
+              $COMPOSE up -d --no-deps --force-recreate worker
+              echo "::endgroup::"
+            elif [ "$SYNC_CODE" = "true" ] || [ "$RESTART_BACKEND" = "true" ]; then
+              echo "::group::Restarting worker"
+              $COMPOSE restart worker
+              echo "::endgroup::"
+            fi
+          fi
+
           # After the migration, so a worker starts on the schema it expects.
           # --no-deps: this service only, never postgres or backend with it.
           # A service whose config and image are unchanged is left running;

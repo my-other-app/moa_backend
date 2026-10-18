@@ -2,11 +2,14 @@
 
 `dispatch(session, job)` runs `job(session)` as a background task with a
 fresh session on the caller's engine, so the request answers without waiting
-for it: a push to a lakh of followers, a place looked up for a sign-in. It
-never raises into the caller, and what goes wrong is logged.
+for it: a place looked up for a sign-in. It never raises into the caller,
+and what goes wrong is logged.
 
-Not durable: a job in flight when the process stops is lost. There is no job
-queue in this stack yet; when there is one, this is the place to change.
+Not durable: a job in flight when the process stops is lost. Work that must
+happen -- mails, renders, push fan-outs -- is a job in the queue instead
+(app/core/jobs.py: written with the change, retried, run by the worker when
+there is one); this is left for cheap, best-effort work whose loss costs
+nothing but a moment's information.
 
 In the test suite the session is bound to one connection inside a
 transaction that is rolled back (tests/conftest.py). There the job runs
