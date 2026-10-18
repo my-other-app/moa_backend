@@ -32,6 +32,11 @@ from app.api.reports.router import (
 from app.api.live.router import public_router as live_public_router, router as live_router
 from app.api.competitions.router import public_router as competition_public_router, router as competition_router
 from app.api.sites.router import public_router as sites_public_router, router as sites_router
+from app.api.club_domains.router import (
+    admin_router as club_domains_admin_router,
+    public_router as club_domains_public_router,
+    router as club_domains_router,
+)
 from app.api.club_access.router import router as club_access_router
 from app.api.store.router import public_router as store_public_router, router as store_router
 from app.api.links.router import router as links_router
@@ -92,6 +97,10 @@ api_router.include_router(router=live_router, tags=["live"])
 api_router.include_router(router=live_public_router, tags=["live"])
 api_router.include_router(router=competition_router, tags=["competition"])
 api_router.include_router(router=competition_public_router, tags=["competition"])
+# Before the site's public router: /sites/resolve would otherwise be read as /sites/{slug}.
+api_router.include_router(router=club_domains_router)
+api_router.include_router(router=club_domains_public_router)
+api_router.include_router(router=club_domains_admin_router)
 api_router.include_router(router=sites_router, tags=["site"])
 api_router.include_router(router=sites_public_router, tags=["site"])
 # Before club_router: /clubs/access would otherwise be read as /clubs/{club_id}.
