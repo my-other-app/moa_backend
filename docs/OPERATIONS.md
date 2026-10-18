@@ -925,7 +925,7 @@ sudo resize2fs /dev/nvme0n1p1               # ext4; xfs_growfs / for xfs
 
 With `APP_LIVE_SSE=true` the live room is pushed over server-sent events:
 `GET /api/v1/events/{id}/live/stream`, one long response per phone or console
-(the client contract is the branch's LIVE_SSE.md). Unset (the default), the
+(the client contract is docs/LIVE_SSE.md). Unset (the default), the
 stream answers 404 and every client keeps polling. A stream is a socket held
 for as long as someone watches, so three things on the box must allow for
 thousands of them before it is turned on.
@@ -933,9 +933,19 @@ thousands of them before it is turned on.
 **1. nginx: a location for the stream.** `nginx.conf` in the repository has
 it in each API server block, before `location /`; the host's nginx needs the
 same in the server block(s) for `api.myotherapp.in` (and any other name
-pointing at the API), with the upstream port that block's `location /` uses:
+pointing at the API), with the upstream port that block's `location /` uses.
+The stream's URL carries the browser's key and the player's key in its query
+string (EventSource cannot send headers), and a player key is enough to
+answer as that player, so its access line is written without the query:
+`log_format moa_stream` once, in the http context (the top of the sites file
+does it: a sites file is included inside `http {}`), and `access_log ...
+moa_stream` in the location:
 
 ```nginx
+# Once, outside any server block.
+log_format moa_stream '$remote_addr - $remote_user [$time_local] "$request_method $uri $server_protocol" '
+                      '$status $body_bytes_sent "$http_referer" "$http_user_agent" $request_time';
+
 location ~ ^/api/v1/events/\d+/live/stream$ {
     proxy_pass http://localhost:8000;          # the port this server block's location / uses
     proxy_http_version 1.1;
@@ -949,12 +959,22 @@ location ~ ^/api/v1/events/\d+/live/stream$ {
     gzip off;
     proxy_read_timeout 120s;                   # the stream pings every 15 s
     send_timeout 60s;                          # a phone that stops reading is let go
+    access_log /var/log/nginx/access.log moa_stream;   # $uri: the path, never the keys in the query
 }
 ```
 
-Without it a stream still works (the app sends `X-Accel-Buffering: no`, so
-nginx passes frames through unbuffered), but the default 60 s
-`proxy_read_timeout` cuts it, and a stalled phone is held longer.
+Without the location a stream still works (the app sends
+`X-Accel-Buffering: no`, so nginx passes frames through unbuffered), but the
+default 60 s `proxy_read_timeout` cuts it, a stalled phone is held longer,
+and the access log keeps the query.
+
+nginx's error log still quotes a request line whole when it logs an error
+about one (an upstream that failed or timed out), query included: rare for a
+stream that pings every 15 s, and the error log is root's to read. The
+backend's own logs never carry those values: its access line (plain or
+`APP_LOG_JSON`) and Sentry's events write `key`, `player`, `last_event_id`
+and any `...token...` query value as `[Filtered]` (app/core/redact.py,
+app/core/observability.py).
 
 **2. nginx: connections and open files.** Each open stream holds two
 connections in nginx (the phone's and the one to the backend), and each is
@@ -991,7 +1011,9 @@ backend`); a restart keeps the old limit. Read-only check:
 backend about 40 KB (scripts/bench/RESULTS.md, "The live room pushed"): a
 hall of 3,000 phones some 120 MB, inside its 2304m (section 10). Each API
 process holds at most `APP_LIVE_SSE_MAX_STREAMS` (5,000), 4,000 per event
-and 3,000 per address; past them a phone is told 503 and polls.
+and 3,000 per address; past them a phone is told 503 `LIVE_STREAM_FULL`
+with `Retry-After` (exposed by CORS, so the site's page can read it) and
+polls.
 
 **Turning it on**, in order:
 

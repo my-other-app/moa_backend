@@ -211,6 +211,10 @@ application.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # A browser lets a page read only the simple response headers unless
+    # told: the live stream's 503 LIVE_STREAM_FULL says when to try again in
+    # Retry-After, and the site waits by it.
+    expose_headers=["Retry-After"],
 )
 application.add_middleware(ProcessingTimeMiddleware)
 application.add_middleware(SecurityHeadersMiddleware)

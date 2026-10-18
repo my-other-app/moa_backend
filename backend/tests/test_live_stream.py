@@ -206,6 +206,61 @@ async def test_the_room_stream_sends_the_polls_body_with_this_browsers_flags(cli
         await s.close()
 
 
+async def test_the_keys_in_a_streams_query_reach_no_log_line(client, world, streams, monkeypatch):
+    """EventSource sends the browser's key, the player's key and the resume
+    point in the query string, and a player key is enough to answer as that
+    player: no log line carries them, nor a token -- not the access line
+    (plain or JSON, as uvicorn writes it for this very request), not what
+    the app logs while the stream runs, not Sentry's event or breadcrumb."""
+    import logging
+
+    from uvicorn.protocols.utils import get_path_with_query_string
+
+    from app.core import observability
+
+    code = await _quiz(client, world)
+    player = (await _join(client, code, 1))["player_key"]
+    secrets = {"key": "browser-00000001", "player": player, "last_event_id": "1760793812345678", "token": "tok-0123456789abcdef"}
+    lines: list[logging.LogRecord] = []
+
+    class Keep(logging.Handler):
+        def emit(self, record):
+            lines.append(record)
+
+    keep = Keep(level=logging.DEBUG)
+    root, access = logging.getLogger(), logging.getLogger("uvicorn.access")
+    monkeypatch.setattr(root, "level", logging.DEBUG)
+    root.addHandler(keep)
+    try:
+        for view in ("room", "quiz"):
+            s = await SSE(_s(world), {}, {"view": view, **secrets}).open()
+            assert s.status == 200
+            await streams.step()
+            await s.next_of("snapshot")
+            await s.close()
+            # The access line uvicorn writes for it, with uvicorn's own helper
+            # (the path argument carries the query string).
+            scope = {"path": _s(world), "query_string": s.query.encode(), "method": "GET", "http_version": "1.1"}
+            assert all(v in s.query for v in ("browser-00000001", "1760793812345678"))
+            access.info('%s - "%s %s HTTP/%s" %d', f"{HALL}:50000", "GET", get_path_with_query_string(scope), "1.1", 200)
+    finally:
+        root.removeHandler(keep)
+
+    written = [logging.Formatter("%(name)s %(message)s").format(r) for r in lines]
+    written += [observability.JsonFormatter().format(r) for r in lines]
+    assert any("live/stream?" in w and "view=quiz" in w for w in written)  # the access lines are there
+    for value in secrets.values():
+        assert not [w for w in written if value in w], value
+    assert any("player=[Filtered]" in w for w in written)
+
+    # Sentry's request and a breadcrumb, as its integrations make them.
+    url = f"http://testserver{_s(world)}?{s.query}"
+    event = observability.scrub_event({"request": {"url": url, "query_string": s.query, "method": "GET"}, "breadcrumbs": {"values": [{"category": "httplib", "data": {"url": url}}]}})
+    crumb = observability.scrub_breadcrumb({"category": "httplib", "message": f"GET {url}", "data": {"url": url}})
+    for value in secrets.values():
+        assert value not in json.dumps(event) and value not in json.dumps(crumb), value
+
+
 async def test_the_room_is_built_once_per_change_however_many_listen(client, world, streams):
     mine, other, poll = await _busy_room(client, world)
     subs = [await SSE(_s(world), _key(100 + i), {"view": "room"}).open() for i in range(20)]

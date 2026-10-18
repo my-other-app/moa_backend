@@ -193,7 +193,9 @@ _TEXT_RULES = (
     # called re_send_tickets in a traceback is left alone.
     (re.compile(r"\bre_(?=[A-Za-z0-9_]*\d)(?=[A-Za-z0-9_]*[A-Z])[A-Za-z0-9_]{16,}"), "[key]"),
     (re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"), "[key]"),
-    (re.compile(r"(?i)([?&;\s](?:token|access_token|refresh_token|code|key|signature|password|secret|otp|email|phone)=)[^&\s#]+"), r"\1" + FILTERED),
+    # Query values: the live stream's keys (key, player, last_event_id; see
+    # app.core.redact), any ...token..., and the usual credentials.
+    (re.compile(r"(?i)([?&;\s](?:\w*token\w*|code|key|player|last_event_id|signature|password|secret|otp|email|phone)=)[^&\s#]+"), r"\1" + FILTERED),
     (re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+"), "[email]"),
     (re.compile(r"(?<![\w+])(?:\+91[\s-]?|0)?[6-9]\d{9}(?!\d)"), "[phone]"),
     (re.compile(r"(?<![\w+])\+\d{1,3}[\s-]?\d{6,12}(?!\d)"), "[phone]"),

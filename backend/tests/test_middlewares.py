@@ -128,3 +128,37 @@ async def test_with_request_ids_on_a_stream_is_still_unbuffered_and_carries_its_
     finally:
         application.router.routes = [r for r in application.router.routes if getattr(r, "path", None) not in (path, boom)]
         application.middleware_stack = None  # and again without them, for the tests after
+
+
+async def test_a_browser_may_read_retry_after_and_cors_is_otherwise_as_it_was(client, monkeypatch):
+    """The live stream's 503 LIVE_STREAM_FULL carries Retry-After, which a
+    page on another origin can read only when CORS exposes it; the rest of
+    CORS (the origins, credentials, methods and headers) is unchanged."""
+    from app.api.live import stream
+    from app.config import settings
+
+    origin = settings.cors_origins[0]
+    r = await client.get("/api/v1/interests/topics", headers={"Origin": origin})
+    assert r.headers["access-control-allow-origin"] == origin
+    assert r.headers["access-control-allow-credentials"] == "true"
+    assert r.headers["access-control-expose-headers"] == "Retry-After"
+    pre = await client.options(
+        "/api/v1/interests/topics",
+        headers={"Origin": origin, "Access-Control-Request-Method": "PATCH", "Access-Control-Request-Headers": "x-live-key, authorization"},
+    )
+    assert pre.status_code == 200 and pre.headers["access-control-allow-origin"] == origin
+    assert "PATCH" in pre.headers["access-control-allow-methods"]
+    assert pre.headers["access-control-allow-headers"].lower() == "x-live-key, authorization"
+    # Not for an origin it does not know.
+    assert "access-control-allow-origin" not in (await client.get("/api/v1/interests/topics", headers={"Origin": "https://elsewhere.example"})).headers
+
+    # The 503 itself, readable from the page.
+    monkeypatch.setattr(settings, "LIVE_SSE", True)
+
+    def full(*_a, **_k):
+        raise stream.Full("this server")
+
+    monkeypatch.setattr(stream.hub, "admit", full)
+    r = await client.get("/api/v1/events/1/live/stream", params={"view": "room"}, headers={"Origin": origin})
+    assert r.status_code == 503 and r.json()["error_code"] == "LIVE_STREAM_FULL"
+    assert r.headers["retry-after"] == "60" and r.headers["access-control-expose-headers"] == "Retry-After"
