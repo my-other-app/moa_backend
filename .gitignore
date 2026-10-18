@@ -14,3 +14,7 @@ backend/walletethings/*.csr
 backend/wallet_certs/*.pem
 backend/wallet_certs/*.cer
 backend/wallet_certs/*.csr
+.DS_Store
+.ruff_cache
+# Query plans the benchmark writes with --explain: large, and made again on demand.
+backend/scripts/bench/results/**/*.txt
