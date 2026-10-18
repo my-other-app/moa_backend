@@ -555,7 +555,8 @@ async def test_the_websites_own_link_and_the_directory_follow_the_active_domain(
     assert (await client.post(f"{API}/clubs/site/publish", headers=world.h)).status_code == 200
     link = (await client.get(f"{API}/clubs/site/analytics", headers=world.h)).json()["link"]
     assert link["destination"].startswith(f"https://myotherapp.in/clubs/{world.slug}?")
-    cards = await club_cards(session, [world.club], datetime.now(timezone.utc))
+    now = datetime.now(timezone.utc)
+    cards = await club_cards(session, [world.club], now, since=now - timedelta(hours=72))
     assert cards[0]["website_url"] == f"https://{world.slug}.myotherapp.in"
 
     await connect(client, world.h, "www.circuitsociety.org")
@@ -567,7 +568,8 @@ async def test_the_websites_own_link_and_the_directory_follow_the_active_domain(
     r = await client.get(f"/l/{link['code']}", follow_redirects=False)
     assert r.status_code == 302
     assert r.headers["location"] == f"https://www.circuitsociety.org/?utm_source=website&utm_medium=club_site&ref={link['code']}&via=l"
-    cards = await club_cards(session, [world.club], datetime.now(timezone.utc))
+    now = datetime.now(timezone.utc)
+    cards = await club_cards(session, [world.club], now, since=now - timedelta(hours=72))
     assert cards[0]["website_url"] == "https://www.circuitsociety.org"
     # The club's other links still land on its page on the public site.
     made = await client.post(f"{API}/clubs/links", json={"name": "Bio", "utm_source": "insta", "utm_medium": "bio"}, headers=world.h)
