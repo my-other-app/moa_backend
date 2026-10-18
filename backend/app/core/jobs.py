@@ -16,11 +16,13 @@ loop from the requests. Now each is a row in `jobs`:
 - A runner claims due rows in batches: `SELECT ... FOR UPDATE SKIP LOCKED`
   over the claim index (name, priority DESC, run_at, id) among unfinished
   rows, so two runners -- two processes, or the API and the worker -- never
-  take one row. A claim is a lease: `run_at` and `locked_until` move to the
-  end of the handler's timeout plus a grace, and `attempts` goes up. A
-  runner that dies mid-job (a deploy, an OOM) simply never settles it; when
-  the lease runs out the row is due again and another runner takes it --
-  the visibility timeout, with no sweeper.
+  take one row. A claim is a lease: `run_at` and `locked_until` move LEASE
+  seconds ahead (less for a handler with a shorter timeout), and `attempts`
+  goes up. While the job runs, its runner renews the lease every
+  HEARTBEAT_SECONDS. A runner that dies mid-job (a deploy, an OOM) stops
+  renewing; when the lease runs out the row is due again and another runner
+  takes it -- the visibility timeout, with no sweeper, and within two
+  minutes even for a job allowed an hour.
 - A job that raises is retried after an exponential backoff with jitter;
   after `max_attempts` it is dead (kept, with its last error) and the admins
   are told once per name in ten minutes (admin alert `job_dead`).
@@ -85,8 +87,10 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_ATTEMPTS = 6
 DEFAULT_TIMEOUT = 120.0
-#: A claim's lease is the handler's timeout plus this: a live runner always
-#: finishes or gives up on a job before another may take it.
+#: A claim's lease: renewed every HEARTBEAT_SECONDS while the job runs, so
+#: this is how long a dead runner's job waits before another takes it. A
+#: handler whose timeout (plus LEASE_GRACE) is shorter gets that instead.
+LEASE = 120.0
 LEASE_GRACE = 30.0
 #: The wait before try n+1 is about BACKOFF_BASE * 2^(n-1) seconds, half of
 #: it random, at most BACKOFF_CAP: 30 s, 1, 2, 4, 8 minutes for the default six.
@@ -219,6 +223,11 @@ def _limits_setting() -> dict[str, int]:
         if name.strip() and n.strip().isdigit():
             out[name.strip()] = int(n)
     return out
+
+
+def lease_for(h: Handler) -> float:
+    """Seconds a claim of this name holds before it must be renewed."""
+    return min(LEASE, h.timeout + LEASE_GRACE)
 
 
 def limit_for(h: Handler, total: int) -> int:
@@ -451,6 +460,12 @@ UPDATE jobs SET
 WHERE id = :id AND attempts = :attempts AND finished_at IS NULL AND NOT dead
 RETURNING dead
 """)
+_RENEW = sa.text("""
+UPDATE jobs SET locked_until = statement_timestamp() + make_interval(secs => w.lease),
+    run_at = statement_timestamp() + make_interval(secs => w.lease)
+FROM unnest(CAST(:ids AS bigint[]), CAST(:leases AS float8[])) AS w(id, lease)
+WHERE jobs.id = w.id AND jobs.locked_by = :me AND jobs.finished_at IS NULL AND NOT jobs.dead
+""")
 _RELEASE = sa.text("""
 UPDATE jobs SET attempts = GREATEST(attempts - 1, 0), run_at = statement_timestamp(), locked_by = NULL, locked_until = NULL,
     updated_at = statement_timestamp()
@@ -560,7 +575,7 @@ async def run_due(*, ids: Optional[list[int]] = None, limit: Optional[int] = Non
     the queue by hand. `ids`: only these. Returns how many ran."""
     ran = 0
     while limit is None or ran < limit:
-        want = [(h.name, 1, h.timeout + LEASE_GRACE) for h in _handlers.values()]
+        want = [(h.name, 1, lease_for(h)) for h in _handlers.values()]
         got = await claim(me, want, 1, ids=ids)
         if not got:
             break
@@ -617,7 +632,7 @@ class Runner:
         for h in _handlers.values():
             room = min(free, limit_for(h, self.concurrency) - busy[h.name])
             if room > 0:
-                want.append((h.name, room, h.timeout + LEASE_GRACE))
+                want.append((h.name, room, lease_for(h)))
         return want, free
 
     async def _main(self) -> None:
@@ -663,10 +678,21 @@ class Runner:
         if self._wake is not None:
             self._wake.set()  # a slot is free
 
+    async def renew(self) -> None:
+        """Push the leases of the jobs in hand ahead: they are alive."""
+        held = list(self._running.values())
+        if not held:
+            return
+        leases = [lease_for(_handlers[j.name]) if j.name in _handlers else LEASE for j in held]
+        async with session_scope() as s:
+            await s.execute(_RENEW, {"ids": [j.id for j in held], "leases": leases, "me": self.id})
+            await s.commit()
+
     async def _housekeeping(self) -> None:
         next_maintenance = time.monotonic() + (5.0 if self.maintenance else float("inf"))
         while not self._stopping:
             try:
+                await self.renew()
                 await self.beat()
                 if time.monotonic() >= next_maintenance:
                     next_maintenance = time.monotonic() + MAINTENANCE_SECONDS

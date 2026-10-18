@@ -240,6 +240,30 @@ async def test_a_job_whose_runner_died_is_taken_again_when_its_lease_ends(queue)
     assert row.finished_at is not None and not row.dead and row.last_error is None
 
 
+async def test_a_long_job_keeps_its_lease_while_it_runs(queue, monkeypatch):
+    """The lease is short (a dead runner's job is taken again within two
+    minutes) and renewed while the job runs, so a job allowed an hour is
+    never taken by a second runner while the first is alive."""
+    monkeypatch.setattr(jobs, "LEASE", 0.6)
+    monkeypatch.setattr(jobs, "HEARTBEAT_SECONDS", 0.1)
+    async with queue.make() as s:
+        await jobs.enqueue(s, "test.record", {"n": 1})
+        await s.commit()
+    STATE["delay"] = 2.0
+    a = queue.runner(concurrency=1)
+    assert await _until(lambda: _in_hand(a))
+    b = queue.runner(concurrency=1)  # polls every 0.05 s through the run
+
+    async def settled():
+        return a.handled + b.handled >= 1
+
+    assert await _until(settled, timeout=10)
+    await asyncio.sleep(0.3)
+    assert SEEN["test.record"] == [{"n": 1}] and a.handled == 1 and b.handled == 0
+    [row] = await _rows(queue.make)
+    assert row.attempts == 1 and row.finished_at is not None
+
+
 async def test_a_failing_job_backs_off_then_dies_and_the_admins_are_told(queue):
     async with queue.make() as s:
         await jobs.enqueue(s, "test.record", {"n": 1})
