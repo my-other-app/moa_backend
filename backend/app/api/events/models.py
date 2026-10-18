@@ -127,8 +127,11 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     self_check_in_enabled = Column(Boolean, nullable=False, default=False)
     self_check_in_verify = Column(Enum(SelfCheckInVerify), nullable=False, default=SelfCheckInVerify.email)
     self_check_in_print = Column(Boolean, nullable=False, default=True)
-    # Staff mode on a kiosk; checked on the server, never shipped to the tablet.
-    kiosk_pin = Column(String(12), nullable=True)
+    # Staff mode on a kiosk; checked on the server, never shipped to the
+    # tablet. A salted hash (app/api/kiosk/pins.py). The plain `kiosk_pin`
+    # column it replaced is emptied by the migration attendance_integrity
+    # and is no longer mapped; a later migration drops it.
+    kiosk_pin_hash = Column(String(160), nullable=True)
 
     # The status clock: published → live at the start, → closed after the
     # end, → archived once retention has run. Stored as "status"; read
@@ -425,7 +428,25 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
     volunteer = relationship("Volunteer")
 
     __table_args__ = (
-        UniqueConstraint("event_id", "user_id", "is_deleted"),
+        # One live registration per account per event. Only the live one:
+        # the old UNIQUE(event_id, user_id, is_deleted) allowed a single
+        # retired row too, so a second removal of the same guest was a 500.
+        sa.Index(
+            "uq_registrations_event_user_live", "event_id", "user_id",
+            unique=True, postgresql_where=sa.text("NOT is_deleted"),
+        ),
+        # An admission number is one guest's on its event, whatever the case
+        # it is typed in: staff search finds a guest by it.
+        sa.Index(
+            "uq_registrations_event_admission", "event_id", sa.func.upper(admission_no),
+            unique=True, postgresql_where=sa.text("NOT is_deleted AND admission_no IS NOT NULL"),
+        ),
+        # The attendee list, by name: a page walks this in order instead of
+        # sorting the whole event (registration.service.list_event_registrations).
+        sa.Index(
+            "ix_registrations_event_name", "event_id", sa.func.lower(full_name), "id",
+            postgresql_where=sa.text("NOT is_deleted"),
+        ),
         # One person's registrations: the app's ticket lists and the For You feed.
         sa.Index("ix_registrations_user", "user_id", postgresql_where=sa.text("NOT is_deleted")),
         # An address already on an event's list (registration's duplicate
