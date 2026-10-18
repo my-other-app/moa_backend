@@ -118,6 +118,12 @@ class MessageCreate(Wire):
     client_ref: Optional[UUID] = None
 
 
+class TemplateSendRequest(Wire):
+    """Optional. From the page, so a double click sends once."""
+
+    client_ref: Optional[UUID] = None
+
+
 class MessageDeliveryOut(Wire):
     registration_id: UUID
     name: str

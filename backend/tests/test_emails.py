@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 
 import pytest
 
+from app.api.deliveries import pipeline
 from app.api.deliveries import service as deliveries
 from app.api.emails import service
 from app.core.email import email as email_mod
@@ -50,6 +51,15 @@ def background(monkeypatch, session):
         yield session
 
     monkeypatch.setattr(deliveries, "session_scope", scope)
+
+
+@pytest.fixture(autouse=True)
+async def jobs_finished(session):
+    """Sends the sweep starts run beside it, on the test's session: every one
+    is finished before that session goes."""
+    pipeline.reset_for_tests()
+    yield
+    await pipeline.drain(timeout=30)
 
 
 @pytest.fixture
@@ -243,6 +253,9 @@ async def test_a_timed_email_goes_out_once_when_due(client, session, world, outb
 
     assert await service.sweep(session, now=START - timedelta(hours=25)) == 0
     assert await service.sweep(session, now=START - timedelta(hours=23)) == 1
+    # The sweep only queues: the sending is a job beside it.
+    assert outbox["sent"] == []
+    await pipeline.drain()
     assert await service.sweep(session, now=START - timedelta(hours=22)) == 0
     assert len(outbox["sent"]) == 3
 
@@ -261,6 +274,7 @@ async def test_a_timed_email_goes_out_once_when_due(client, session, world, outb
     # Five hours after the start, two have come due: this one and the
     # reminder the starter times for just before the doors open.
     assert await service.sweep(session, now=START + timedelta(hours=5)) == 2
+    await pipeline.drain()
     assert await service.sweep(session, now=START + timedelta(hours=6)) == 0
 
 

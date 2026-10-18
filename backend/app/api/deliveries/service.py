@@ -3,8 +3,11 @@
 Every channel honours one contract: never re-send a channel already SENT
 unless asked to, record a result for every attempt, and treat "no address
 on this channel" as SKIPPED -- never as an error.
+
+How a send runs -- the claim, the workers, the pace, the resumer -- is in
+app/api/deliveries/pipeline.py; this module says what a ticket or
+certificate send is.
 """
-import asyncio
 import html
 import io
 import logging
@@ -12,15 +15,21 @@ import re
 import uuid
 import zipfile
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import String, cast, func, literal, select, union_all
+import sqlalchemy as sa
+from sqlalchemy import String, and_, case, cast, func, literal, select, union_all, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import joinedload
 
+from app.api.deliveries import pipeline
 from app.api.deliveries.models import (
+    UNFINISHED,
     Deliveries,
+    DeliveryAttempts,
     DeliveryChannel,
     DeliveryKind,
     DeliveryOutcome,
@@ -30,10 +39,13 @@ from app.api.events.access import ensure_event_access, is_admin_user
 from app.api.events.documents import EVENT_TIMEZONE
 from app.api.events.models import EventRegistrationsLink, Events
 from app.api.events.tickets import ticket_document
+from app.core import providers as providers_mod
 from app.core.email import email as email_mod
+from app.core.email import transport
+from app.core.mail import suppression
+from app.core.utils.db_fields import TZAwareDateTime
 from app.db.core import AsyncSessionLocal
 from app.db.listeners import add_loader_criteria
-from app.core import providers as providers_mod
 from app.response import CustomHTTPException
 
 logger = logging.getLogger(__name__)
@@ -45,6 +57,15 @@ CHANNELS = [DeliveryChannel.email]
 
 PROBLEM_OUTCOMES = (DeliveryOutcome.bounced, DeliveryOutcome.complained, DeliveryOutcome.undelivered)
 
+#: A row queued longer ago than this and never sent is not sent by the
+#: resumer: a ticket from yesterday's queue may be for an event now over.
+RESUME_WINDOW = timedelta(hours=24)
+
+# What a send may put back in the queue. In flight (pending, sending) is left
+# alone: a second click must not reset what a worker is sending right now.
+AGAIN = (DeliveryStatus.failed, DeliveryStatus.skipped, DeliveryStatus.dead)
+AGAIN_FORCED = (DeliveryStatus.sent, *AGAIN)
+
 
 @asynccontextmanager
 async def session_scope():
@@ -53,6 +74,11 @@ async def session_scope():
     async with AsyncSessionLocal() as session:
         add_loader_criteria(session)
         yield session
+
+
+def _db(session=None) -> pipeline.Db:
+    # session_scope is looked up at each call, so a test's stand-in is used.
+    return pipeline.Db(lambda: session_scope(), session=session)
 
 
 async def event_for_club(session, user, event_id: int) -> Events:
@@ -88,6 +114,14 @@ async def _registration(session, event_id: int, registration_id) -> EventRegistr
     return reg
 
 
+def _eligible(kind: DeliveryKind):
+    """The registrations this kind of document can be sent to."""
+    if kind is DeliveryKind.ticket:
+        return EventRegistrationsLink.ticket_revoked_at.is_(None)
+    # Not issued one, or had it taken back: nothing to send.
+    return and_(EventRegistrationsLink.certificate_issued_at.isnot(None), EventRegistrationsLink.certificate_revoked_at.is_(None))
+
+
 # --- queueing ---------------------------------------------------------------
 
 
@@ -102,56 +136,73 @@ async def queue(
 ) -> dict:
     """Put a pending row in place for every guest and channel that should be
     sent, and answer with what was queued and why the rest was not. Nothing is
-    sent here; `run` does that after the response."""
-    q = _active(event.id)
-    if registration_ids:
-        q = q.where(EventRegistrationsLink.id.in_(list(registration_ids)))
-    regs = list(await session.scalars(q.order_by(EventRegistrationsLink.created_at)))
+    sent here; `run` does that after the response.
 
-    # What was sent before, for these guests only when the send names them:
-    # a registration's own ticket (send_ticket) read every delivery the event
-    # ever made -- some 3,700 rows a registration on a 7,600-guest event,
-    # about a third of a second of the worker's time each.
-    sent_before = select(Deliveries).where(Deliveries.event_id == event.id, Deliveries.kind == kind)
+    One statement per channel: INSERT ... ON CONFLICT DO UPDATE ... WHERE the
+    row may be queued again. Two clicks at once both succeed and queue each
+    guest once; a row a worker holds (pending, sending) is never reset under
+    it -- it counts as queued, since it is."""
+    scope = [EventRegistrationsLink.event_id == event.id, EventRegistrationsLink.is_deleted == False]  # noqa: E712
     if registration_ids:
-        sent_before = sent_before.where(Deliveries.registration_id.in_(list(registration_ids)))
-    existing = {(d.registration_id, d.channel): d for d in await session.scalars(sent_before)}
+        scope.append(EventRegistrationsLink.id.in_(list(registration_ids)))
+    eligible_ids = select(EventRegistrationsLink.id).where(*scope, _eligible(kind))
+
+    revoked = await session.scalar(
+        select(func.count()).select_from(EventRegistrationsLink).where(*scope, sa.not_(_eligible(kind)))
+    ) or 0
+    # What was sent before, for these guests only when the send names them:
+    # a registration's own ticket (send_ticket) once read every delivery the
+    # event ever made -- some 3,700 rows a registration on a 7,600-guest event.
+    before = (
+        await session.execute(
+            select(Deliveries.status, func.count())
+            .where(Deliveries.event_id == event.id, Deliveries.kind == kind, Deliveries.registration_id.in_(eligible_ids))
+            .group_by(Deliveries.status)
+        )
+    ).all()
+    before = {status: n for status, n in before}
+    already_sent = 0 if force else before.get(DeliveryStatus.sent, 0)
+    in_flight = sum(before.get(s, 0) for s in UNFINISHED)
+
+    now = pipeline.now()
+    again = AGAIN_FORCED if force else AGAIN
+    reset = dict(
+        status=DeliveryStatus.pending, error=None, outcome=None, outcome_at=None, reason=None, reason_code=None,
+        tries=0, queued_at=now, claimed_at=None, next_attempt_at=None, updated_at=now,
+    )
+    table = Deliveries.__table__
     ids: list[uuid.UUID] = []
-    already_sent = 0
-    revoked = 0
-    for reg in regs:
-        if kind is DeliveryKind.ticket and reg.ticket_revoked_at is not None:
-            revoked += 1
-            continue
-        if kind is DeliveryKind.certificate and (reg.certificate_issued_at is None or reg.certificate_revoked_at is not None):
-            # Not issued one, or had it taken back: nothing to send.
-            revoked += 1
-            continue
-        for channel in CHANNELS:
-            prior = existing.get((reg.id, channel))
-            if prior is not None and prior.status is DeliveryStatus.sent and not force:
-                already_sent += 1
-                continue
-            if only == "failed" and (
-                prior is None or prior.status not in (DeliveryStatus.failed, DeliveryStatus.skipped)
-            ):
-                continue
-            if prior is None:
-                prior = Deliveries(
-                    id=uuid.uuid4(), event_id=event.id, registration_id=reg.id, kind=kind, channel=channel
+    for channel in CHANNELS:
+        if only == "failed":
+            # Retry what failed, was skipped or was given up on; nothing new.
+            stmt = (
+                update(table)
+                .where(table.c.event_id == event.id, table.c.kind == kind, table.c.channel == channel,
+                       table.c.status.in_(AGAIN), table.c.registration_id.in_(eligible_ids))
+                .values(**reset)
+                .returning(table.c.id)
+            )
+        else:
+            source = select(
+                func.gen_random_uuid(), literal(event.id), EventRegistrationsLink.id,
+                cast(literal(kind.name), table.c.kind.type), cast(literal(channel.name), table.c.channel.type),
+                cast(literal(DeliveryStatus.pending.name), table.c.status.type),
+                literal(0), literal(0), literal(0), literal(now, TZAwareDateTime()), literal(now, TZAwareDateTime()), literal(now, TZAwareDateTime()),
+            ).where(*scope, _eligible(kind))
+            stmt = (
+                pg_insert(table)
+                .from_select(
+                    ["id", "event_id", "registration_id", "kind", "channel", "status", "attempts", "tries", "design_version",
+                     "queued_at", "created_at", "updated_at"],
+                    source,
                 )
-                session.add(prior)
-                existing[(reg.id, channel)] = prior
-            prior.status = DeliveryStatus.pending
-            prior.error = None
-            prior.outcome = None
-            prior.outcome_at = None
-            prior.reason = None
-            prior.reason_code = None
-            ids.append(prior.id)
+                .on_conflict_do_update(constraint="uq_deliveries_registration_kind_channel", set_=reset, where=table.c.status.in_(again))
+                .returning(table.c.id)
+            )
+        ids.extend((await session.execute(stmt)).scalars().all())
     await session.commit()
     return {
-        "queued": len(ids),
+        "queued": len(ids) + in_flight,
         "already_sent": already_sent,
         "revoked": revoked,
         "channels": [c.value for c in CHANNELS],
@@ -159,7 +210,7 @@ async def queue(
     }
 
 
-# --- sending ----------------------------------------------------------------
+# --- what a send says --------------------------------------------------------
 
 
 def _when(event: Events) -> str:
@@ -208,103 +259,323 @@ async def _document(session, kind: DeliveryKind, reg: EventRegistrationsLink):
     return await certificate_document(session, reg)
 
 
-async def _designed(session, kind: DeliveryKind, reg: EventRegistrationsLink, event: Events):
-    if kind is not DeliveryKind.ticket:
-        return None
+# --- one row: claim, read, render, send, record -------------------------------
+
+
+@dataclass
+class _Claim:
+    id: uuid.UUID
+    claimed_at: datetime
+    tries: int
+
+
+@dataclass
+class _Ready:
+    """What reading the row found: enough to render and send without the database."""
+
+    d: Deliveries
+    reg: EventRegistrationsLink
+    event: Events
+    org_name: str
+    skip: Optional[str] = None
+    # The event's designed invite (subject, design, attachments, brand), or
+    # None for the plain words.
+    invite: Optional[dict] = None
+
+
+@dataclass
+class _Run:
+    """What one job keeps between rows: each event's invite and brand, and
+    the pictures its emails carry, read or fetched once."""
+
+    invites: dict = field(default_factory=dict)
+    assets: dict = field(default_factory=dict)
+
+
+def _claim_stmt(where: list, n: int, at: datetime):
+    picked = (
+        select(Deliveries.id)
+        .where(*where, Deliveries.status == DeliveryStatus.pending)
+        .limit(n)
+        .with_for_update(skip_locked=True)
+        .scalar_subquery()
+    )
+    return (
+        update(Deliveries)
+        .where(Deliveries.id.in_(picked), Deliveries.status == DeliveryStatus.pending)
+        .values(
+            status=DeliveryStatus.sending, claimed_at=at, attempts=Deliveries.attempts + 1, tries=Deliveries.tries + 1, updated_at=at,
+        )
+        .returning(Deliveries.id, Deliveries.tries)
+        .execution_options(synchronize_session=False)
+    )
+
+
+async def _claim(db: pipeline.Db, where: list, n: int) -> list[_Claim]:
+    """Up to n pending rows, each taken by this worker alone."""
+    at = pipeline.now()
+    rows = (await db.execute(_claim_stmt(where, n, at))).all()
+    return [_Claim(id=r[0], claimed_at=at, tries=r[1]) for r in rows]
+
+
+async def _release(db: pipeline.Db, claims: list[_Claim]) -> None:
+    """Claimed and never started (shutdown): back in the queue, the try not counted."""
+    if not claims:
+        return
+    at = pipeline.now()
+    await db.execute(
+        update(Deliveries)
+        .where(Deliveries.id.in_([c.id for c in claims]), Deliveries.status == DeliveryStatus.sending)
+        .values(status=DeliveryStatus.pending, claimed_at=None, attempts=Deliveries.attempts - 1, tries=Deliveries.tries - 1, updated_at=at)
+        .execution_options(synchronize_session=False)
+    )
+
+
+async def _read(db: pipeline.Db, c: _Claim, run: _Run) -> Optional[_Ready]:
+    """One short transaction: the row, the guest, the event, and whether to send at all."""
     from app.api.emails import service as emails
 
-    return await emails.invite_email(session, reg, event)
+    async with db.tx() as s:
+        d = await s.scalar(
+            select(Deliveries)
+            .options(
+                joinedload(Deliveries.registration).options(
+                    joinedload(EventRegistrationsLink.event).options(joinedload(Events.club)),
+                    joinedload(EventRegistrationsLink.user),
+                )
+            )
+            .where(Deliveries.id == c.id)
+        )
+        if d is None:
+            return None
+        reg = d.registration
+        event = reg.event
+        ready = _Ready(d=d, reg=reg, event=event, org_name=event.club.name if event.club else "")
+        if d.kind is DeliveryKind.ticket and reg.ticket_revoked_at is not None:
+            ready.skip = "ticket revoked — reinstate it to send again"
+        elif d.kind is DeliveryKind.certificate and (reg.certificate_issued_at is None or reg.certificate_revoked_at is not None):
+            ready.skip = "no valid certificate — issue or reinstate it to send"
+        elif d.channel is DeliveryChannel.whatsapp:
+            ready.skip = providers_mod.NO_WHATSAPP
+        elif not reg.email:
+            ready.skip = "no email address"
+        elif reg.email_bounced_at is not None:
+            # A dead mailbox is not worth another try, and trying costs the sending domain's name.
+            ready.skip = providers_mod.BOUNCED
+        else:
+            suppressed = (await suppression.reasons(s, [reg.email])).get(suppression.normal(reg.email))
+            if suppressed is not None:
+                # Bounced or complained at another event or club: the same address, the same answer.
+                ready.skip = suppression.why(suppressed)
+        if ready.skip is None and d.kind is DeliveryKind.ticket:
+            # A ticket goes out in the event's designed invite when there is
+            # one switched on; otherwise in the plain words.
+            if event.id not in run.invites:
+                run.invites[event.id] = await emails.invite_for(s, event)
+            ready.invite = run.invites[event.id]
+        return ready
+
+
+async def _send(db: pipeline.Db, c: _Claim, ready: _Ready, run: _Run) -> tuple[dict, int]:
+    """Render and send, with no transaction open. The provider's answer and the design version."""
+    from app.api.emails import service as emails
+
+    d, reg, event = ready.d, ready.reg, ready.event
+    key = f"delivery-{d.id}-{int((d.queued_at or d.created_at).timestamp())}"
+    if ready.invite is not None:
+        out = await emails.compose_invite(db, event, reg, ready.invite, cache=run.assets)
+        response = await pipeline.send_with_backoff(
+            email_mod.send_email, recipients=[reg.email], subject=out.subject, text=out.text, html=out.html,
+            attachments=out.attachments, sender_name=ready.org_name or None, idempotency_key=key, check_suppression=False,
+        )
+        return response or {}, out.design_version
+    doc = await _document(db, d.kind, reg)
+    copy = copy_for(d.kind, reg, event, ready.org_name)
+    response = await pipeline.send_with_backoff(
+        email_mod.send_email_with_attachment, recipients=[reg.email], subject=copy["subject"], body_text=copy["text"],
+        body_html=copy["html"], attachment_bytes=doc.content, attachment_filename=doc.filename,
+        sender_name=ready.org_name or None, idempotency_key=key, check_suppression=False,
+    )
+    return response or {}, doc.design_version
+
+
+async def _record(db: pipeline.Db, c: _Claim, ready: Optional[_Ready], values: dict, *, attempt: Optional[dict] = None, dead: bool = False) -> None:
+    """One short transaction: the result on the row (if this worker still
+    holds it), the attempt the provider took, and the admins told of a dead one."""
+    async with db.tx() as s:
+        res = await s.execute(
+            update(Deliveries)
+            .where(Deliveries.id == c.id, Deliveries.status == DeliveryStatus.sending, Deliveries.claimed_at == c.claimed_at)
+            .values(claimed_at=None, updated_at=pipeline.now(), **values)
+            .execution_options(synchronize_session=False)
+        )
+        if not res.rowcount:
+            logger.warning("delivery %s: the result came after its claim was given up; recorded the attempt only", c.id)
+        if attempt and attempt.get("provider_id"):
+            await s.execute(
+                pg_insert(DeliveryAttempts.__table__)
+                .values(id=uuid.uuid4(), delivery_id=c.id, created_at=pipeline.now(), **attempt)
+                .on_conflict_do_nothing(index_elements=["provider_id"])
+            )
+        if dead and res.rowcount and ready is not None:
+            await pipeline.alert_dead(
+                s, event_id=ready.event.id, club_id=ready.event.club_id, event_name=ready.event.name,
+                what=ready.d.kind.value, error=values.get("error") or "",
+            )
+
+
+async def _handle(db: pipeline.Db, c: _Claim, run: _Run) -> None:
+    """Worker: one guest, one channel. Records whatever happened."""
+    ready = await _read(db, c, run)
+    if ready is None:
+        return
+    if ready.skip is not None:
+        await _record(db, c, ready, dict(status=DeliveryStatus.skipped, error=ready.skip, provider_id=None, sent_at=None, next_attempt_at=None))
+        return
+    try:
+        response, version = await _send(db, c, ready, run)
+    except transport.MailDeferred as exc:
+        error = (str(exc) or exc.__class__.__name__)[:300]
+        if c.tries >= pipeline.max_tries():
+            await _record(db, c, ready, dict(status=DeliveryStatus.dead, error=f"gave up after {c.tries} tries: {error}"[:400], next_attempt_at=None), dead=True)
+        else:
+            await _record(db, c, ready, dict(status=DeliveryStatus.pending, error=f"will try again: {error}"[:400], next_attempt_at=pipeline.now() + pipeline.backoff(c.tries)))
+        logger.warning("delivery %s deferred (try %d): %s", c.id, c.tries, error)
+        return
+    except Exception as exc:  # the row is the record; the reason goes in it
+        error = (str(exc) or exc.__class__.__name__)[:400]
+        logger.warning("delivery %s failed: %s", c.id, error)
+        await _record(db, c, ready, dict(status=DeliveryStatus.failed, error=error, provider_id=None, sent_at=None, next_attempt_at=None))
+        return
+    provider_id = response.get("MessageId")
+    await _record(
+        db, c, ready,
+        dict(status=DeliveryStatus.sent, error=None, provider_id=provider_id, sent_at=pipeline.now(), design_version=version, next_attempt_at=None),
+        attempt={"provider": response.get("Provider"), "provider_id": provider_id, "address": suppression.normal(ready.reg.email)},
+    )
+
+
 
 
 async def deliver(session, delivery_id: uuid.UUID) -> Optional[Deliveries]:
-    """Worker: one guest, one channel. Records whatever happened."""
-    d = await session.scalar(
-        select(Deliveries)
-        .options(
-            joinedload(Deliveries.registration).options(
-                joinedload(EventRegistrationsLink.event).options(joinedload(Events.club)),
-                joinedload(EventRegistrationsLink.user),
-            )
-        )
-        .where(Deliveries.id == delivery_id)
-    )
-    if d is None or d.status is DeliveryStatus.sent:
-        return d
-    reg = d.registration
-    event = reg.event
-    org_name = event.club.name if event.club else ""
-
-    status, provider_id, error, version = DeliveryStatus.skipped, None, None, 0
-    if d.kind is DeliveryKind.ticket and reg.ticket_revoked_at is not None:
-        error = "ticket revoked — reinstate it to send again"
-    elif d.kind is DeliveryKind.certificate and (reg.certificate_issued_at is None or reg.certificate_revoked_at is not None):
-        error = "no valid certificate — issue or reinstate it to send"
-    elif d.channel is DeliveryChannel.whatsapp:
-        error = providers_mod.NO_WHATSAPP
-    elif not reg.email:
-        error = "no email address"
-    elif reg.email_bounced_at is not None:
-        # A dead mailbox is not worth another try, and trying costs the sending domain's name.
-        error = providers_mod.BOUNCED
-    else:
-        try:
-            # A ticket goes out in the event's designed invite when there is
-            # one switched on; otherwise in the plain words below.
-            designed = await _designed(session, d.kind, reg, event)
-            if designed is not None:
-                version = designed.design_version
-                response = await asyncio.to_thread(
-                    email_mod.send_email,
-                    recipients=[reg.email],
-                    subject=designed.subject,
-                    text=designed.text,
-                    html=designed.html,
-                    attachments=designed.attachments,
-                    sender_name=org_name or None,
-                )
-            else:
-                doc = await _document(session, d.kind, reg)
-                version = doc.design_version
-                copy = copy_for(d.kind, reg, event, org_name)
-                # boto3 is synchronous; the send must not hold the event loop.
-                response = await asyncio.to_thread(
-                    email_mod.send_email_with_attachment,
-                    recipients=[reg.email],
-                    subject=copy["subject"],
-                    body_text=copy["text"],
-                    body_html=copy["html"],
-                    attachment_bytes=doc.content,
-                    attachment_filename=doc.filename,
-                    sender_name=org_name or None,
-                )
-            status = DeliveryStatus.sent
-            provider_id = (response or {}).get("MessageId")
-        except Exception as exc:  # the row is the record; the reason goes in it
-            status = DeliveryStatus.failed
-            error = (str(exc) or exc.__class__.__name__)[:400]
-            logger.warning("delivery %s failed: %s", d.id, error)
-
-    d.status = status
-    d.provider_id = provider_id
-    d.error = error
-    d.attempts = (d.attempts or 0) + 1
-    d.sent_at = datetime.now(timezone.utc) if status is DeliveryStatus.sent else None
-    d.design_version = version
-    await session.commit()
-    return d
+    """One row, now, on the caller's session (committed as it goes, so no
+    connection is held while it renders or sends). Nothing happens unless the
+    row is pending -- a row another worker holds, or one already sent, is
+    left alone. Returns the row as it stands after."""
+    db = _db(session)
+    claims = await _claim(db, [Deliveries.id == delivery_id], 1)
+    if claims:
+        await _handle(db, claims[0], _Run())
+    return await session.get(Deliveries, delivery_id, populate_existing=True)
 
 
 async def run(delivery_ids: list) -> None:
-    """The background entry point: every queued row, one after another."""
+    """The background entry point: the queued rows, a few at a time, each
+    claimed before it is sent."""
     if not delivery_ids:
         return
-    async with session_scope() as session:
-        for did in delivery_ids:
-            try:
-                await deliver(session, did)
-            except Exception:
-                logger.exception("delivery %s could not be processed", did)
-                await session.rollback()
+    ids = list(delivery_ids)
+    db = _db()
+    left = list(ids)
+
+    async def claim(n: int) -> list[_Claim]:
+        # Through the given ids a chunk at a time; a chunk whose rows another
+        # worker holds (or already sent) yields nothing, and the next is tried.
+        while left:
+            chunk, left[:] = left[:n], left[n:]
+            got = await _claim(db, [Deliveries.id.in_(chunk)], n)
+            if got:
+                return got
+        return []
+
+    run_state = _Run()
+    await pipeline.run(
+        ("delivery-ids", uuid.uuid4()),
+        lambda: pipeline.pump(claim, lambda c: _handle(db, c, run_state), release=lambda claims: _release(db, claims)),
+    )
+
+
+async def _run_due(event_id: int, kind: DeliveryKind) -> int:
+    """The resumer's job: whatever of this event's kind is pending and due."""
+    db = _db()
+    run_state = _Run()
+
+    def due() -> list:
+        return [
+            Deliveries.event_id == event_id,
+            Deliveries.kind == kind,
+            sa.or_(Deliveries.next_attempt_at.is_(None), Deliveries.next_attempt_at <= pipeline.now()),
+        ]
+
+    return await pipeline.pump(
+        lambda n: _claim(db, due(), n),
+        lambda c: _handle(db, c, run_state),
+        release=lambda claims: _release(db, claims),
+    )
+
+
+async def resume(session, now: Optional[datetime] = None) -> dict:
+    """The minute sweep's look at deliveries: put back the claims of workers
+    that died, give up on what waited too long or failed too often, and start
+    a job for each event with something due. Starts jobs; sends nothing here."""
+    now = now or pipeline.now()
+    db = _db(session)
+    stale = (
+        await db.execute(
+            update(Deliveries)
+            .where(Deliveries.status == DeliveryStatus.sending, Deliveries.claimed_at < now - pipeline.STALE_CLAIM)
+            .values(status=DeliveryStatus.pending, claimed_at=None, next_attempt_at=now, updated_at=now)
+            .returning(Deliveries.id)
+            .execution_options(synchronize_session=False)
+        )
+    ).all()
+    too_old = (
+        await db.execute(
+            update(Deliveries)
+            .where(Deliveries.status == DeliveryStatus.pending, sa.func.coalesce(Deliveries.queued_at, Deliveries.created_at) < now - RESUME_WINDOW)
+            .values(status=DeliveryStatus.failed, error="not sent: queued over a day ago and never finished — send it again if it still matters", updated_at=now)
+            .returning(Deliveries.id)
+            .execution_options(synchronize_session=False)
+        )
+    ).all()
+    # A row back from a dead worker as often as it may be tried is given up on.
+    gave_up = (
+        await db.execute(
+            update(Deliveries)
+            .where(Deliveries.status == DeliveryStatus.pending, Deliveries.tries >= pipeline.max_tries())
+            .values(status=DeliveryStatus.dead, error=f"gave up after {pipeline.max_tries()} tries", updated_at=now)
+            .returning(Deliveries.event_id, Deliveries.kind)
+            .execution_options(synchronize_session=False)
+        )
+    ).all()
+    if gave_up:
+        async with db.tx() as s:
+            for event_id in sorted({e for e, _k in gave_up}):
+                event = await s.get(Events, event_id)
+                await pipeline.alert_dead(
+                    s, event_id=event_id, club_id=getattr(event, "club_id", None), event_name=getattr(event, "name", ""),
+                    what="ticket or certificate", error="its worker stopped every time it was tried",
+                )
+    due = (
+        await db.execute(
+            select(Deliveries.event_id, Deliveries.kind)
+            .where(
+                Deliveries.status == DeliveryStatus.pending,
+                sa.or_(
+                    Deliveries.next_attempt_at <= now,
+                    and_(Deliveries.next_attempt_at.is_(None), Deliveries.updated_at < now - pipeline.ABANDONED),
+                ),
+            )
+            .distinct()
+        )
+    ).all()
+    started = 0
+    for event_id, kind in due:
+        key = ("deliveries", event_id, kind.value)
+        if not pipeline.running(key):
+            pipeline.spawn(key, lambda e=event_id, k=kind: _run_due(e, k))
+            started += 1
+    return {"stale": len(stale), "too_old": len(too_old), "dead": len(gave_up), "started": started}
 
 
 async def send_ticket(session, event: Events, registration: EventRegistrationsLink, background_tasks=None) -> None:
@@ -395,6 +666,23 @@ async def bundle_zip(session, event: Events) -> bytes:
 
 # --- reading back -------------------------------------------------------------
 
+#: How a status reads outside: a row being sent is still pending to the
+#: desk, and one given up on has failed (its error says it was given up on).
+SHOWN = {DeliveryStatus.sending: DeliveryStatus.pending, DeliveryStatus.dead: DeliveryStatus.failed}
+
+
+def shown(status: DeliveryStatus) -> DeliveryStatus:
+    return SHOWN.get(status, status)
+
+
+def shown_sql(column):
+    """`shown`, in SQL, as text."""
+    return case(
+        (column == DeliveryStatus.sending, literal(DeliveryStatus.pending.value)),
+        (column == DeliveryStatus.dead, literal(DeliveryStatus.failed.value)),
+        else_=cast(column, String),
+    )
+
 
 async def summary(session, event: Events, kind: DeliveryKind) -> dict:
     rows = (
@@ -404,7 +692,9 @@ async def summary(session, event: Events, kind: DeliveryKind) -> dict:
             .group_by(Deliveries.channel, Deliveries.status)
         )
     ).all()
-    counts = {(c, s): n for c, s, n in rows}
+    counts: dict = {}
+    for c, s, n in rows:
+        counts[(c, shown(s))] = counts.get((c, shown(s)), 0) + n
     registrations = await session.scalar(
         select(func.count()).select_from(_active(event.id).subquery())
     ) or 0
@@ -442,7 +732,7 @@ def _sends(event_id: int):
         cast(Deliveries.kind, String).label("kind"),
         literal(None, type_=String).label("what"),
         cast(Deliveries.channel, String).label("channel"),
-        cast(Deliveries.status, String).label("status"),
+        shown_sql(Deliveries.status).label("status"),
         cast(Deliveries.outcome, String).label("outcome"),
         Deliveries.reason.label("reason"),
         Deliveries.error.label("error"),
@@ -458,11 +748,11 @@ def _sends(event_id: int):
             literal("message", type_=String).label("kind"),
             Messages.subject.label("what"),
             cast(MessageDeliveries.channel, String).label("channel"),
-            cast(MessageDeliveries.status, String).label("status"),
+            shown_sql(MessageDeliveries.status).label("status"),
             cast(MessageDeliveries.outcome, String).label("outcome"),
             MessageDeliveries.reason.label("reason"),
             MessageDeliveries.error.label("error"),
-            literal(1).label("attempts"),
+            MessageDeliveries.attempts.label("attempts"),
             MessageDeliveries.sent_at.label("sent_at"),
             MessageDeliveries.outcome_at.label("outcome_at"),
             MessageDeliveries.created_at.label("created_at"),
@@ -567,7 +857,7 @@ async def by_registration(session, event_id: int, kind: DeliveryKind, registrati
     ):
         out.setdefault(d.registration_id, []).append({
             "channel": d.channel.value,
-            "status": d.status.value,
+            "status": shown(d.status).value,
             "error": d.error,
             "outcome": d.outcome.value if d.outcome else None,
             "reason": d.reason,
