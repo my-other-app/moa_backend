@@ -88,15 +88,42 @@ async def lifespan(app: FastAPI):
     gc.collect()
     gc.freeze()
     yield
-    sweeper.cancel()
-    closer.cancel()
-    feedback.cancel()
-    billing.cancel()
-    counters.cancel()
-    domains.cancel()
-    store_holds.cancel()
-    payments_sweep.cancel()
-    accounts.cancel()
+    await shutdown([sweeper, closer, feedback, billing, counters, domains, store_holds, payments_sweep, accounts])
+
+
+#: Seconds shutdown may take, in all. Docker kills the container ten seconds
+#: after asking it to stop, and uvicorn has used up to four of those waiting
+#: for requests (main.py), so this has what is left, with a margin.
+SHUTDOWN_BUDGET = 5.0
+
+
+async def shutdown(loops: list, budget: float = SHUTDOWN_BUDGET) -> None:
+    """Stop the background loops and wait for them to stop; give the mail
+    jobs in hand time to finish (new ones are not started); then wait for
+    the after-commit mails. Each wait is bounded, together within `budget`:
+    what is cut off -- a mail job, a durable after-commit mail -- is in the
+    database and the next process's resumer finishes it."""
+    from app.api.deliveries import pipeline
+    from app.core import after_commit, background
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + budget
+
+    def left() -> float:
+        return max(0.1, deadline - loop.time())
+
+    for task in loops:
+        task.cancel()
+    _, stuck = await asyncio.wait(loops, timeout=min(1.0, left()))
+    if stuck:
+        print(f"Warning: {len(stuck)} background loop(s) did not stop in time")
+    await pipeline.shutdown(timeout=left() * 0.6)
+    await after_commit.drain(timeout=left())
+    # Fan-outs started after a response (app/core/background.py): bounded too.
+    try:
+        await asyncio.wait_for(background.drain(), timeout=left())
+    except asyncio.TimeoutError:
+        print("Warning: background fan-outs did not finish before shutdown")
 
 
 # No default_response_class: FastAPI's own JSON response is the default. It

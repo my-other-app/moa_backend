@@ -4,27 +4,33 @@ message sent from one.
 An event starts with the four journey emails copied from the club's
 library (itself seeded from the starters the first time it is asked for),
 so a club that designs once sends the same emails at every event. A send
-freezes the design into a message with one delivery per guest; the worker
-then renders and sends each one and records what happened.
+freezes the design into a message with one delivery per guest; workers then
+claim, render and send them, a few at a time, and record what happened
+(app/api/deliveries/pipeline.py). The minute sweep only queues: a timed
+email becomes a message and a job, and a 10,000-guest reminder takes its
+turn at the provider beside everyone else's instead of in front of them.
 """
 import asyncio
 import base64
 import logging
+import time
 import uuid
+import zlib
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select, text
+from sqlalchemy import cast, func, literal, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 
 from app.api.clubs.models import Clubs
+from app.api.deliveries import pipeline
 from app.api.deliveries import service as deliveries
-from app.api.deliveries.models import DeliveryChannel, DeliveryStatus
+from app.api.deliveries.models import UNFINISHED, DeliveryAttempts, DeliveryChannel, DeliveryStatus
 from app.api.emails.models import EmailStage, EmailTemplates, MessageDeliveries, MessageKind, MessageStatus, Messages
 from app.api.events.documents import (
     EVENT_TIMEZONE,
@@ -39,8 +45,10 @@ from app.api.events.models import EventRegistrationsLink, Events
 from app.api.events.tickets import poster_url, ticket_document
 from app.api.templates_audience import RegistrationRole
 from app.config import settings
+from app.core import after_commit
 from app.core.email import email as email_mod
-from app.core.mail import links
+from app.core.email import transport
+from app.core.mail import links, suppression
 from app.core.mail.render import RenderInput, parse_email_template, render_email, sample_email_values, uses_qr
 from app.core.mail.schema import (
     EMAIL_BLOCK_META,
@@ -56,6 +64,7 @@ from app.core.mail.schema import (
 from app.core.mail.starters import email_starter
 from app.core.storage import objects
 from app.core.storage.images import image_ext
+from app.core.utils.db_fields import TZAwareDateTime
 from app.db.locks import singleton
 from app.response import CustomHTTPException
 
@@ -66,6 +75,13 @@ STAGE_ORDER[EmailStage.CUSTOM] = len(JOURNEY_STAGES)
 # Keeps a timer from sending an old event's reminder on the day it is deployed.
 SWEEP_GRACE = timedelta(days=2)
 SWEEP_LOCK = 773101
+#: First key of the lock a template's send takes, so two clicks queue one message.
+SEND_LOCK = 773102
+#: A second click on Send while the first message is still going returns it.
+DOUBLE_CLICK = timedelta(seconds=60)
+#: A message still unfinished this long after it was made is not resumed:
+#: "doors open in an hour" is worse than nothing five hours late.
+RESUME_WINDOW = timedelta(hours=6)
 
 
 # --- scope ----------------------------------------------------------------------
@@ -425,6 +441,8 @@ def guest_values(event: Events, reg: EventRegistrationsLink) -> dict:
     v["organiser_email"] = organiser_email(event)
     v["event_start"] = f"{v['event_day'][:3]} {v['event_date']} · {v['event_time']}"
     v["doors_in"] = doors_in(event.event_datetime)
+    # The code the door types when the QR will not scan (app.core.mail.schema).
+    v.setdefault("ticket_code", reg.ticket_id or "")
     return v
 
 
@@ -464,9 +482,14 @@ async def compose(
     brand: str,
     logo_url: Optional[str],
     values: Optional[dict] = None,
+    cache: Optional[dict] = None,
 ) -> Outgoing:
     """The email as it will be sent: pictures inline by Content-ID so the
-    message carries them, the guest's files attached when asked for."""
+    message carries them, the guest's files attached when asked for.
+
+    `cache` is a send's own: the pictures every guest's copy carries are
+    fetched for the first guest and reused for the rest, rather than read
+    from storage once a guest."""
     values = values if values is not None else (guest_values(event, reg) if reg is not None else sample_values(event))
     parts: list[dict] = []
     images: dict = {}
@@ -477,17 +500,26 @@ async def compose(
         parts.append({"filename": f"{cid}.{image_ext(data)}", "content": data, "content_id": cid})
         return f"cid:{cid}"
 
+    async def fetched(fn, arg):
+        key = (getattr(fn, "__name__", "fetch"), arg)
+        if cache is not None and key in cache:
+            return cache[key]
+        data = await asyncio.to_thread(fn, arg)
+        if cache is not None:
+            cache[key] = data
+        return data
+
     # Storage reads, image downloads, the QR and the render all block: they
     # run in a worker thread, so a send (the minute sweep's included) never
     # holds the event loop that every other request on this worker needs.
     blocks = _image_blocks(design)
     for b in blocks:
         if b.source == "upload" and b.image_key and b.image_key not in images:
-            src = inline(await asyncio.to_thread(objects.get_bytes, b.image_key), f"img-{len(images) + 1}")
+            src = inline(await fetched(objects.get_bytes, b.image_key), f"img-{len(images) + 1}")
             if src:
                 images[b.image_key] = src
-    logo = inline(await asyncio.to_thread(fetch_bytes, logo_url), "org-logo") if design.theme.logo == "org_logo" and logo_url else None
-    icon = inline(await asyncio.to_thread(fetch_bytes, poster_url(event) or ""), "event-icon") if any(b.source == "event_icon" for b in blocks) else None
+    logo = inline(await fetched(fetch_bytes, logo_url), "org-logo") if design.theme.logo == "org_logo" and logo_url else None
+    icon = inline(await fetched(fetch_bytes, poster_url(event) or ""), "event-icon") if any(b.source == "event_icon" for b in blocks) else None
     qr = None
     if uses_qr(design):
         png = await asyncio.to_thread(qr_png_base64, reg.ticket_id if reg is not None else "SAMPLE")
@@ -542,7 +574,9 @@ async def send_test(session, event: Events, *, to: str, subject: str, design: Em
     reg = await loaded_registration(session, event.id, registration_id) if registration_id is not None else None
     out = await compose(session, event, reg, subject, design, attachments, brand=await brand_primary(session, event), logo_url=logo_url_of(event))
     club = getattr(event, "club", None)
-    await asyncio.to_thread(
+    # Nothing to write: the request's connection goes back before SES answers.
+    await session.commit()
+    await pipeline.send_with_backoff(
         email_mod.send_email, recipients=[to], subject=f"[Test] {out.subject}", text=out.text, html=out.html,
         attachments=out.attachments, sender_name=(club.name if club else None) or None,
     )
@@ -553,8 +587,12 @@ async def send_test(session, event: Events, *, to: str, subject: str, design: Em
 
 
 def audience_query(event_id: int, audience: EmailAudience):
-    # An address that bounced is left alone until it is corrected.
-    q = deliveries._active(event_id).where(EventRegistrationsLink.email_bounced_at.is_(None))
+    # An address that bounced is left alone until it is corrected, and one
+    # that bounced or complained anywhere on the platform is left alone too.
+    q = deliveries._active(event_id).where(
+        EventRegistrationsLink.email_bounced_at.is_(None),
+        suppression.not_suppressed(EventRegistrationsLink.email),
+    )
     if audience.who == "CHECKED_IN":
         q = q.where(EventRegistrationsLink.is_attended == True)
     elif audience.who == "NOT_CHECKED_IN":
@@ -569,9 +607,12 @@ def audience_query(event_id: int, audience: EmailAudience):
 
 
 async def audience_count(session, event: Events, audience: EmailAudience) -> dict:
-    regs = list(await session.scalars(audience_query(event.id, audience)))
-    without = sum(1 for r in regs if not r.email)
-    return {"recipients": len(regs) - without, "without_email": without}
+    """Counted by the database: it used to load every guest of the audience to count them."""
+    no_email = or_(EventRegistrationsLink.email.is_(None), EventRegistrationsLink.email == "")
+    total, without = (
+        await session.execute(audience_query(event.id, audience).with_only_columns(func.count(), func.count().filter(no_email)))
+    ).one()
+    return {"recipients": (total or 0) - (without or 0), "without_email": without or 0}
 
 
 # --- messages -------------------------------------------------------------------
@@ -597,26 +638,70 @@ async def start_message(
     created_by=None,
 ) -> Messages:
     """The message and one pending delivery per guest. Nothing is sent here;
-    `run_message` does that after the response (or inline, for the timer)."""
+    `run_message` does that after the response, or a job the timer starts.
+
+    Sent once however it is asked: a `client_ref` the event has seen returns
+    that message (two at once: the unique index decides, and the second
+    returns the first's), and a template sent again while its last manual
+    send is still going returns that one -- the double click of a page that
+    sends no client_ref."""
     if client_ref is not None:
-        existing = await session.scalar(select(Messages).where(Messages.event_id == event.id, Messages.client_ref == client_ref))
+        existing = await existing_message(session, event, client_ref)
         if existing is not None:
             return existing
-    regs = list(await session.scalars(audience_query(event.id, audience).order_by(EventRegistrationsLink.created_at)))
+    if template is not None and not scheduled and client_ref is None:
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(:ns, :key)"),
+            {"ns": SEND_LOCK, "key": zlib.crc32(str(template.id).encode()) - 2**31},
+        )
+        recent = await session.scalar(
+            select(Messages)
+            .where(
+                Messages.template_id == template.id, Messages.scheduled == False,  # noqa: E712
+                Messages.status == MessageStatus.SENDING, Messages.created_at >= datetime.now(timezone.utc) - DOUBLE_CLICK,
+            )
+            .order_by(Messages.created_at.desc())
+            .limit(1)
+        )
+        if recent is not None:
+            await session.commit()
+            return recent
+    now = datetime.now(timezone.utc)
     msg = Messages(
         id=uuid.uuid4(), event_id=event.id, client_ref=client_ref, kind=kind, template_id=template.id if template else None,
         design=design.model_dump(by_alias=True), attachments=attachments.model_dump(by_alias=True), scheduled=scheduled,
         subject=subject, body=body, audience=audience.who, roles=list(audience.roles), channels=["email"],
-        status=MessageStatus.SENDING, recipients=len(regs), sent_count=0, failed_count=0, skipped_count=0, created_by=created_by,
+        status=MessageStatus.SENDING, recipients=0, sent_count=0, failed_count=0, skipped_count=0, created_by=created_by,
+        created_at=now, updated_at=now,
     )
     session.add(msg)
-    for reg in regs:
-        session.add(MessageDeliveries(id=uuid.uuid4(), message_id=msg.id, registration_id=reg.id, channel=DeliveryChannel.email, status=DeliveryStatus.pending))
-    await session.commit()
+    try:
+        await session.flush()
+        # One statement for the whole audience, rather than an object a guest.
+        table = MessageDeliveries.__table__
+        rows = audience_query(event.id, audience).with_only_columns(
+            func.gen_random_uuid(), literal(msg.id), EventRegistrationsLink.id,
+            cast(literal(DeliveryChannel.email.name), table.c.channel.type), cast(literal(DeliveryStatus.pending.name), table.c.status.type),
+            literal(0), literal(now, TZAwareDateTime()), literal(now, TZAwareDateTime()),
+        )
+        inserted = await session.execute(
+            pg_insert(table).from_select(
+                ["id", "message_id", "registration_id", "channel", "status", "attempts", "created_at", "updated_at"], rows,
+            )
+        )
+        msg.recipients = inserted.rowcount or 0
+        await session.commit()
+    except IntegrityError:
+        # The same client_ref, committed a moment ago by the other click.
+        await session.rollback()
+        existing = await existing_message(session, event, client_ref) if client_ref is not None else None
+        if existing is None:
+            raise
+        return existing
     return msg
 
 
-async def send_template(session, event: Events, tpl: EmailTemplates, *, scheduled: bool = False, created_by=None) -> Messages:
+async def send_template(session, event: Events, tpl: EmailTemplates, *, scheduled: bool = False, created_by=None, client_ref=None) -> Messages:
     if tpl.stage is EmailStage.INVITE:
         raise CustomHTTPException(
             422, message="The invite goes out with the tickets. Use Send tickets on the attendees page."
@@ -624,7 +709,7 @@ async def send_template(session, event: Events, tpl: EmailTemplates, *, schedule
     fields = fields_of(tpl)
     return await start_message(
         session, event, kind=MessageKind.TEMPLATE, subject=fields.subject, design=fields.design, attachments=fields.attachments,
-        audience=fields.audience, template=tpl, scheduled=scheduled, created_by=created_by,
+        audience=fields.audience, template=tpl, scheduled=scheduled, created_by=created_by, client_ref=client_ref,
     )
 
 
@@ -657,76 +742,251 @@ async def send_broadcast(session, event: Events, *, subject: str, body: str, des
     )
 
 
-async def deliver_message(session, msg: Messages, d: MessageDeliveries, design: EmailDesign, attachments: EmailAttachments, *, brand: str, logo_url: Optional[str]) -> None:
-    """Worker: one guest. Records whatever happened."""
-    reg = d.registration
-    event = reg.event
-    club = getattr(event, "club", None)
-    if not reg.email:
-        d.status = DeliveryStatus.skipped
-        d.error = "no email address"
-    elif reg.email_bounced_at is not None:
-        d.status = DeliveryStatus.skipped
-        d.error = "that address bounced — correct it to send again"
-    else:
-        try:
-            out = await compose(session, event, reg, msg.subject or "", design, attachments, brand=brand, logo_url=logo_url)
-            response = await asyncio.to_thread(
-                email_mod.send_email, recipients=[reg.email], subject=out.subject, text=out.text, html=out.html,
-                attachments=out.attachments, sender_name=(club.name if club else None) or None,
+@dataclass
+class _MessageRun:
+    """What every guest's copy of one message shares, read once."""
+
+    message_id: uuid.UUID
+    event_id: int
+    event_name: str
+    club_id: Optional[int]
+    org_name: str
+    subject: str
+    design: EmailDesign
+    attachments: EmailAttachments
+    brand: str
+    logo_url: Optional[str]
+    assets: dict = field(default_factory=dict)
+
+
+@dataclass
+class _MessageClaim:
+    id: uuid.UUID
+    claimed_at: datetime
+    attempts: int
+
+
+async def _message_run(db: pipeline.Db, message_id) -> Optional[_MessageRun]:
+    async with db.tx() as s:
+        msg = await s.scalar(select(Messages).options(joinedload(Messages.event).joinedload(Events.club)).where(Messages.id == message_id))
+        if msg is None:
+            return None
+        event = msg.event
+        club = getattr(event, "club", None)
+        return _MessageRun(
+            message_id=msg.id, event_id=event.id, event_name=event.name, club_id=event.club_id, org_name=(club.name if club else "") or "",
+            subject=msg.subject or "", design=EmailDesign.model_validate(msg.design or {}),
+            attachments=EmailAttachments.model_validate(msg.attachments or {}), brand=await brand_primary(s, event), logo_url=logo_url_of(event),
+        )
+
+
+async def _claim_message_rows(db: pipeline.Db, message_id, n: int) -> list[_MessageClaim]:
+    """Up to n of the message's pending, due rows, each taken by this worker alone."""
+    at = pipeline.now()
+    picked = (
+        select(MessageDeliveries.id)
+        .where(
+            MessageDeliveries.message_id == message_id, MessageDeliveries.status == DeliveryStatus.pending,
+            or_(MessageDeliveries.next_attempt_at.is_(None), MessageDeliveries.next_attempt_at <= at),
+        )
+        .limit(n)
+        .with_for_update(skip_locked=True)
+        .scalar_subquery()
+    )
+    rows = (
+        await db.execute(
+            update(MessageDeliveries)
+            .where(MessageDeliveries.id.in_(picked), MessageDeliveries.status == DeliveryStatus.pending)
+            .values(status=DeliveryStatus.sending, claimed_at=at, attempts=MessageDeliveries.attempts + 1, updated_at=at)
+            .returning(MessageDeliveries.id, MessageDeliveries.attempts)
+            .execution_options(synchronize_session=False)
+        )
+    ).all()
+    return [_MessageClaim(id=r[0], claimed_at=at, attempts=r[1]) for r in rows]
+
+
+async def _release_message_rows(db: pipeline.Db, claims: list) -> None:
+    if not claims:
+        return
+    await db.execute(
+        update(MessageDeliveries)
+        .where(MessageDeliveries.id.in_([c.id for c in claims]), MessageDeliveries.status == DeliveryStatus.sending)
+        .values(status=DeliveryStatus.pending, claimed_at=None, attempts=MessageDeliveries.attempts - 1, updated_at=pipeline.now())
+        .execution_options(synchronize_session=False)
+    )
+
+
+async def _record_message_row(db: pipeline.Db, run: _MessageRun, c: _MessageClaim, values: dict, *, attempt: Optional[dict] = None, dead: bool = False) -> None:
+    async with db.tx() as s:
+        res = await s.execute(
+            update(MessageDeliveries)
+            .where(MessageDeliveries.id == c.id, MessageDeliveries.status == DeliveryStatus.sending, MessageDeliveries.claimed_at == c.claimed_at)
+            .values(claimed_at=None, updated_at=pipeline.now(), **values)
+            .execution_options(synchronize_session=False)
+        )
+        if not res.rowcount:
+            logger.warning("message delivery %s: the result came after its claim was given up; recorded the attempt only", c.id)
+        if attempt and attempt.get("provider_id"):
+            await s.execute(
+                pg_insert(DeliveryAttempts.__table__)
+                .values(id=uuid.uuid4(), message_delivery_id=c.id, created_at=pipeline.now(), **attempt)
+                .on_conflict_do_nothing(index_elements=["provider_id"])
             )
-            d.status = DeliveryStatus.sent
-            d.provider_id = (response or {}).get("MessageId")
-            d.sent_at = datetime.now(timezone.utc)
-            d.error = None
-        except Exception as exc:
-            d.status = DeliveryStatus.failed
-            d.error = (str(exc) or exc.__class__.__name__)[:400]
-            logger.warning("message %s to %s failed: %s", msg.id, reg.id, d.error)
-    await session.commit()
+        if dead and res.rowcount:
+            await pipeline.alert_dead(s, event_id=run.event_id, club_id=run.club_id, event_name=run.event_name, what="message", error=values.get("error") or "")
+
+
+async def _handle_message_row(db: pipeline.Db, run: _MessageRun, c: _MessageClaim) -> None:
+    """Worker: one guest. Records whatever happened."""
+    async with db.tx() as s:
+        d = await s.scalar(
+            select(MessageDeliveries)
+            .options(joinedload(MessageDeliveries.registration).options(joinedload(EventRegistrationsLink.event).joinedload(Events.club), joinedload(EventRegistrationsLink.user)))
+            .where(MessageDeliveries.id == c.id)
+        )
+        if d is None:
+            return
+        reg = d.registration
+        skip = None
+        if not reg.email:
+            skip = "no email address"
+        elif reg.email_bounced_at is not None:
+            skip = "that address bounced — correct it to send again"
+        else:
+            # It may have bounced elsewhere since the message was queued.
+            found = (await suppression.reasons(s, [reg.email])).get(suppression.normal(reg.email))
+            skip = suppression.why(found) if found is not None else None
+    if skip is not None:
+        await _record_message_row(db, run, c, dict(status=DeliveryStatus.skipped, error=skip, next_attempt_at=None))
+        return
+    try:
+        out = await compose(db, reg.event, reg, run.subject, run.design, run.attachments, brand=run.brand, logo_url=run.logo_url, cache=run.assets)
+        response = await pipeline.send_with_backoff(
+            email_mod.send_email, recipients=[reg.email], subject=out.subject, text=out.text, html=out.html,
+            attachments=out.attachments, sender_name=run.org_name or None, idempotency_key=f"message-{c.id}", check_suppression=False,
+        )
+    except transport.MailDeferred as exc:
+        error = (str(exc) or exc.__class__.__name__)[:300]
+        if c.attempts >= pipeline.max_tries():
+            await _record_message_row(db, run, c, dict(status=DeliveryStatus.dead, error=f"gave up after {c.attempts} tries: {error}"[:400], next_attempt_at=None), dead=True)
+        else:
+            await _record_message_row(db, run, c, dict(status=DeliveryStatus.pending, error=f"will try again: {error}"[:400], next_attempt_at=pipeline.now() + pipeline.backoff(c.attempts)))
+        logger.warning("message %s to %s deferred (try %d): %s", run.message_id, reg.id, c.attempts, error)
+        return
+    except Exception as exc:
+        error = (str(exc) or exc.__class__.__name__)[:400]
+        logger.warning("message %s to %s failed: %s", run.message_id, reg.id, error)
+        await _record_message_row(db, run, c, dict(status=DeliveryStatus.failed, error=error, next_attempt_at=None))
+        return
+    response = response or {}
+    await _record_message_row(
+        db, run, c,
+        dict(status=DeliveryStatus.sent, provider_id=response.get("MessageId"), sent_at=pipeline.now(), error=None, next_attempt_at=None),
+        attempt={"provider": response.get("Provider"), "provider_id": response.get("MessageId"), "address": suppression.normal(reg.email)},
+    )
+
+
+async def finish_message(db: pipeline.Db, message_id) -> Optional[Messages]:
+    """The message's counts as they stand, and SENT once nothing is left to send."""
+    async with db.tx() as s:
+        counts = dict(
+            (await s.execute(select(MessageDeliveries.status, func.count()).where(MessageDeliveries.message_id == message_id).group_by(MessageDeliveries.status))).all()
+        )
+        values = dict(
+            sent_count=counts.get(DeliveryStatus.sent, 0),
+            failed_count=counts.get(DeliveryStatus.failed, 0) + counts.get(DeliveryStatus.dead, 0),
+            skipped_count=counts.get(DeliveryStatus.skipped, 0),
+        )
+        if not any(counts.get(st, 0) for st in UNFINISHED):
+            values["status"] = MessageStatus.SENT
+        await s.execute(update(Messages).where(Messages.id == message_id).values(**values).execution_options(synchronize_session=False))
+        return await s.get(Messages, message_id, populate_existing=True)
+
+
+#: How often a long send writes its counts back, for the messages page.
+PROGRESS_EVERY = 3.0
+
+
+async def _run_message(message_id, session=None) -> Optional[Messages]:
+    db = deliveries._db(session)
+    run = await _message_run(db, message_id)
+    if run is None:
+        return None
+    last = time.monotonic()
+
+    async def claim(n: int):
+        nonlocal last
+        if time.monotonic() - last >= PROGRESS_EVERY:
+            last = time.monotonic()
+            await finish_message(db, message_id)
+        return await _claim_message_rows(db, message_id, n)
+
+    await pipeline.pump(claim, lambda c: _handle_message_row(db, run, c), release=lambda claims: _release_message_rows(db, claims))
+    return await finish_message(db, message_id)
 
 
 async def process_message(session, message_id) -> Optional[Messages]:
-    msg = await session.scalar(select(Messages).options(joinedload(Messages.event).joinedload(Events.club)).where(Messages.id == message_id))
-    if msg is None:
-        return None
-    event = msg.event
-    design = EmailDesign.model_validate(msg.design or {})
-    attachments = EmailAttachments.model_validate(msg.attachments or {})
-    brand = await brand_primary(session, event)
-    logo_url = logo_url_of(event)
-    rows = list(
-        await session.scalars(
-            select(MessageDeliveries)
-            .options(joinedload(MessageDeliveries.registration).options(joinedload(EventRegistrationsLink.event).joinedload(Events.club), joinedload(EventRegistrationsLink.user)))
-            .where(MessageDeliveries.message_id == msg.id, MessageDeliveries.status == DeliveryStatus.pending)
-        )
-    )
-    for d in rows:
-        try:
-            await deliver_message(session, msg, d, design, attachments, brand=brand, logo_url=logo_url)
-        except Exception:
-            logger.exception("message delivery %s could not be processed", d.id)
-            await session.rollback()
-    counts = dict(
-        (await session.execute(select(MessageDeliveries.status, func.count()).where(MessageDeliveries.message_id == msg.id).group_by(MessageDeliveries.status))).all()
-    )
-    msg.sent_count = counts.get(DeliveryStatus.sent, 0)
-    msg.failed_count = counts.get(DeliveryStatus.failed, 0)
-    msg.skipped_count = counts.get(DeliveryStatus.skipped, 0)
-    msg.status = MessageStatus.SENT
-    await session.commit()
-    return msg
+    """Send what is left of a message now, on the caller's session."""
+    return await _run_message(message_id, session=session)
 
 
 async def run_message(message_id) -> None:
-    """The background entry point for one message."""
-    async with deliveries.session_scope() as session:
-        try:
-            await process_message(session, message_id)
-        except Exception:
-            logger.exception("message %s could not be processed", message_id)
-            await session.rollback()
+    """The background entry point for one message. A message already being
+    sent in this process is waited for, not sent again."""
+    await pipeline.run(("message", message_id), lambda: _run_message(message_id))
+
+
+def start_job(message_id) -> None:
+    """Send the message in the background, without waiting for it."""
+    pipeline.spawn(("message", message_id), lambda: _run_message(message_id))
+
+
+async def resume_messages(session, now: Optional[datetime] = None) -> dict:
+    """The minute sweep's look at messages: put back the claims of workers
+    that died, give up on rows tried too often, finish what was cut off --
+    a timed reminder stopped by a deploy among them -- and leave alone what
+    is now too late to be worth sending. Starts jobs; sends nothing here."""
+    now = now or pipeline.now()
+    db = deliveries._db(session)
+    stale = (
+        await db.execute(
+            update(MessageDeliveries)
+            .where(MessageDeliveries.status == DeliveryStatus.sending, MessageDeliveries.claimed_at < now - pipeline.STALE_CLAIM)
+            .values(status=DeliveryStatus.pending, claimed_at=None, next_attempt_at=now, updated_at=now)
+            .returning(MessageDeliveries.id)
+            .execution_options(synchronize_session=False)
+        )
+    ).all()
+    gave_up = (
+        await db.execute(
+            update(MessageDeliveries)
+            .where(MessageDeliveries.status == DeliveryStatus.pending, MessageDeliveries.attempts >= pipeline.max_tries())
+            .values(status=DeliveryStatus.dead, error=f"gave up after {pipeline.max_tries()} tries", updated_at=now)
+            .returning(MessageDeliveries.message_id)
+            .execution_options(synchronize_session=False)
+        )
+    ).all()
+    if gave_up:
+        async with db.tx() as s:
+            events = (await s.execute(select(Events).join(Messages, Messages.event_id == Events.id).where(Messages.id.in_({m for (m,) in gave_up})))).scalars().unique().all()
+            for event in events:
+                await pipeline.alert_dead(s, event_id=event.id, club_id=event.club_id, event_name=event.name, what="message", error="its worker stopped every time it was tried")
+    unfinished = (await db.execute(select(Messages.id, Messages.created_at).where(Messages.status == MessageStatus.SENDING))).all()
+    started = late = 0
+    for message_id, created_at in unfinished:
+        if created_at < now - RESUME_WINDOW:
+            await db.execute(
+                update(MessageDeliveries)
+                .where(MessageDeliveries.message_id == message_id, MessageDeliveries.status.in_(UNFINISHED))
+                .values(status=DeliveryStatus.failed, error="not sent: too late to send by the time it could be — send it again if it still matters", claimed_at=None, updated_at=now)
+                .execution_options(synchronize_session=False)
+            )
+            await finish_message(db, message_id)
+            late += 1
+        elif not pipeline.running(("message", message_id)):
+            start_job(message_id)
+            started += 1
+    return {"stale": len(stale), "dead": len(gave_up), "started": started, "late": late}
 
 
 async def list_messages(session, event: Events, *, page: int = 1, page_size: int = 20) -> dict:
@@ -752,7 +1012,7 @@ async def message_deliveries(session, msg: Messages, *, problem: bool = False, s
         .where(MessageDeliveries.message_id == msg.id)
     )
     if problem:
-        base = base.where(MessageDeliveries.status.in_((DeliveryStatus.failed, DeliveryStatus.skipped)))
+        base = base.where(MessageDeliveries.status.in_((DeliveryStatus.failed, DeliveryStatus.dead, DeliveryStatus.skipped)))
     if search:
         pat = f"%{search}%"
         base = base.where(EventRegistrationsLink.full_name.ilike(pat) | EventRegistrationsLink.email.ilike(pat) | EventRegistrationsLink.ticket_id.ilike(pat))
@@ -763,7 +1023,7 @@ async def message_deliveries(session, msg: Messages, *, problem: bool = False, s
     items = [
         {
             "registration_id": reg.id, "name": reg.full_name or "", "email": reg.email or None, "ticket_id": reg.ticket_id,
-            "channel": d.channel.value, "status": d.status.value, "error": d.error, "sent_at": d.sent_at,
+            "channel": d.channel.value, "status": deliveries.shown(d.status).value, "error": d.error, "sent_at": d.sent_at,
         }
         for d, reg in rows
     ]
@@ -789,11 +1049,12 @@ def template_out(tpl: EmailTemplates) -> dict:
 # --- the ticket email -------------------------------------------------------------
 
 
-async def invite_email(session, reg: EventRegistrationsLink, event: Events) -> Optional[Outgoing]:
-    """The designed ticket email. Every event has one -- copied from the
-    club's library the first time it is needed -- unless the club switched it
-    off, in which case the plain ticket email goes. The ticket itself is
-    always attached: that is what the email is for."""
+async def invite_for(session, event: Events) -> Optional[dict]:
+    """The event's designed ticket email as a send needs it -- subject,
+    design, files, brand -- or None when the club switched it off (the plain
+    ticket email goes then). Every event has one, copied from the club's
+    library the first time it is needed. The ticket itself is always
+    attached: that is what the email is for."""
     if event.club_id is None:
         return None
     tpl = await session.scalar(select(EmailTemplates).where(EmailTemplates.event_id == event.id, EmailTemplates.stage == EmailStage.INVITE))
@@ -803,10 +1064,25 @@ async def invite_email(session, reg: EventRegistrationsLink, event: Events) -> O
     if tpl is None or not tpl.enabled:
         return None
     fields = fields_of(tpl)
+    return {
+        "subject": fields.subject,
+        "design": fields.design,
+        "attachments": EmailAttachments(ticket_pdf=True, certificate_pdf=fields.attachments.certificate_pdf),
+        "brand": await brand_primary(session, event),
+        "logo_url": logo_url_of(event),
+    }
+
+
+async def compose_invite(session, event: Events, reg: EventRegistrationsLink, invite: dict, *, cache: Optional[dict] = None) -> Outgoing:
     return await compose(
-        session, event, reg, fields.subject, fields.design, EmailAttachments(ticket_pdf=True, certificate_pdf=fields.attachments.certificate_pdf),
-        brand=await brand_primary(session, event), logo_url=logo_url_of(event),
+        session, event, reg, invite["subject"], invite["design"], invite["attachments"], brand=invite["brand"], logo_url=invite["logo_url"], cache=cache,
     )
+
+
+async def invite_email(session, reg: EventRegistrationsLink, event: Events) -> Optional[Outgoing]:
+    """The designed ticket email for one guest, or None when it is switched off."""
+    invite = await invite_for(session, event)
+    return None if invite is None else await compose_invite(session, event, reg, invite)
 
 
 # --- timers -----------------------------------------------------------------------
@@ -835,34 +1111,59 @@ def due_query(now: datetime):
 
 
 async def sweep(session, now: Optional[datetime] = None) -> int:
-    """Send every timed journey email that has come due and not yet gone.
-    Once per template, ever: the message row is the record."""
+    """Queue every timed journey email that has come due and not yet gone,
+    and start its job. Once per template, ever: the message row is the
+    record -- and a message cut off half-sent is finished by the resumer,
+    not sent again. Sends nothing itself, so one big reminder never holds up
+    the sweep (or anyone else's reminder) while it goes. Returns how many it queued."""
     now = now or datetime.now(timezone.utc)
-    rows = (await session.execute(due_query(now))).unique().all()
-    sent = 0
-    for tpl, event in rows:
+    queued: list = []
+    # The session is the sweep's until it is done with it; the jobs start after.
+    async with pipeline.session_lock(session):
+        rows = (await session.execute(due_query(now))).unique().all()
+        for tpl, event in rows:
+            try:
+                # The stored instant chose the row; the rule itself still decides.
+                due = due_at(event, fields_of(tpl).trigger)
+                if due is None or due > now or due < now - SWEEP_GRACE:
+                    continue
+                already = await session.scalar(select(func.count()).select_from(Messages).where(Messages.template_id == tpl.id, Messages.scheduled == True))  # noqa: E712
+                if already:
+                    continue
+                msg = await send_template(session, event, tpl, scheduled=True)
+                queued.append(msg.id)
+            except Exception:  # noqa: BLE001
+                # One email that cannot go must not hold up the others.
+                logger.exception("timed email %s could not be queued", tpl.id)
+                await session.rollback()
+    for message_id in queued:
+        start_job(message_id)
+    return len(queued)
+
+
+async def resume(session, now: Optional[datetime] = None) -> dict:
+    """Everything left half-done by a process that stopped: deliveries,
+    messages, and the after-commit mails that must go. Each part on its own,
+    so one that fails does not keep the others from running."""
+    out: dict = {}
+    for name, part in (
+        ("deliveries", lambda: deliveries.resume(session, now)),
+        ("messages", lambda: resume_messages(session, now)),
+        ("after_commit", lambda: after_commit.resume(session, now)),
+    ):
         try:
-            # The stored instant chose the row; the rule itself still decides.
-            due = due_at(event, fields_of(tpl).trigger)
-            if due is None or due > now or due < now - SWEEP_GRACE:
-                continue
-            already = await session.scalar(select(func.count()).select_from(Messages).where(Messages.template_id == tpl.id, Messages.scheduled == True))  # noqa: E712
-            if already:
-                continue
-            msg = await send_template(session, event, tpl, scheduled=True)
-            await process_message(session, msg.id)
-            sent += 1
+            out[name] = await part()
         except Exception:  # noqa: BLE001
-            # One email that cannot go must not hold up the others.
-            logger.exception("timed email %s could not be sent", tpl.id)
+            logger.exception("resuming %s failed", name)
             await session.rollback()
-    return sent
+    return out
 
 
 async def sweep_loop(interval: int = 60) -> None:
-    """Runs for the life of the process. One worker at a time does the
-    sending: the one holding the sweep's advisory lock, taken on a
-    connection of its own (app.db.locks)."""
+    """Runs for the life of the process. One worker at a time queues the
+    timed emails and resumes what was left half-done: the one holding the
+    sweep's advisory lock, taken on a connection of its own (app.db.locks).
+    The sending itself happens in jobs, beside the loop."""
     await asyncio.sleep(5)
     while True:
         try:
@@ -871,7 +1172,10 @@ async def sweep_loop(interval: int = 60) -> None:
                     if mine:
                         n = await sweep(session)
                         if n:
-                            logger.info("email sweep sent %d timed email(s)", n)
+                            logger.info("email sweep queued %d timed email(s)", n)
+                        resumed = await resume(session)
+                        if any(v for part in resumed.values() for v in (part.values() if isinstance(part, dict) else [part])):
+                            logger.info("email sweep resumed %s", resumed)
         except asyncio.CancelledError:
             raise
         except Exception:

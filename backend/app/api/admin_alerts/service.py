@@ -57,6 +57,7 @@ KINDS: dict[str, str] = {
     "club_domain_active": "A club's own domain was verified and its website is live there",
     "content_reported": "Someone reported a thread, a comment, a user or a club (data: target_type, target_id, reason, report_count)",
     "store_oversold": "A guest paid for store pieces that had sold out; the organiser hands something over anyway or refunds",
+    "email_dead_letter": "Emails to guests failed on every retry and were given up (data: event, kind, count)",
     "payment_auto_refunded": "A payment was refunded on its own: the event filled while it was paid (data.reason event_full), or it paid an order twice (duplicate)",
     "payment_refund_failed": "Razorpay did not take an automatic refund; the sweep keeps trying",
     "payment_unapplied": "A captured payment had not been applied to its registration; the repair sweep applied it, or could not (data.repaired)",

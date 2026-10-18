@@ -84,7 +84,11 @@ class MessageStatus(enum.Enum):
 
 class Messages(AbstractSQLModel, TimestampsMixin):
     __tablename__ = "messages"
-    __table_args__ = (UniqueConstraint("event_id", "client_ref", name="uq_messages_event_client_ref"),)
+    __table_args__ = (
+        UniqueConstraint("event_id", "client_ref", name="uq_messages_event_client_ref"),
+        # The resumer's minute look for messages not yet finished.
+        sa.Index("ix_messages_sending", "created_at", postgresql_where=sa.text("status = 'SENDING'")),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()"), default=uuid.uuid4)
     event_id = Column(Integer, ForeignKey("events.id"), nullable=False, index=True)
@@ -117,6 +121,10 @@ class MessageDeliveries(AbstractSQLModel, TimestampsMixin):
     __tablename__ = "message_deliveries"
     __table_args__ = (
         UniqueConstraint("message_id", "registration_id", "channel", name="uq_message_deliveries_message_registration_channel"),
+        # Every SES or Resend notification looks its send up by this.
+        sa.Index("ix_message_deliveries_provider_id", "provider_id", postgresql_where=sa.text("provider_id IS NOT NULL")),
+        # A message's workers claim from what is left of it, not from all of it.
+        sa.Index("ix_message_deliveries_unfinished", "message_id", postgresql_where=sa.text("status IN ('pending', 'sending')")),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()"), default=uuid.uuid4)
@@ -130,6 +138,12 @@ class MessageDeliveries(AbstractSQLModel, TimestampsMixin):
     outcome_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     reason = Column(String(400), nullable=True)
     sent_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    # Times a worker took it; backoff and giving up count these.
+    attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    # When a worker took it (status sending); see Deliveries.claimed_at.
+    claimed_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    # Not before this: the backoff after the provider said "not now".
+    next_attempt_at = Column(TZAwareDateTime(timezone=True), nullable=True)
 
     message = relationship("Messages", back_populates="deliveries")
     registration = relationship("EventRegistrationsLink")

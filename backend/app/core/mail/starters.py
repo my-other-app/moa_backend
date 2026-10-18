@@ -34,8 +34,11 @@ def _details(rows: list[dict]) -> dict:
 
 
 def _ticket_card(show_venue: bool = True) -> dict:
-    # rows empty: the card's own four lines, which is what every starter wants.
-    return {"kind": "ticket_card", "id": _id("t"), "showQr": True, "showVenue": show_venue, "eyebrow": "{{ticket_type}}", "title": "{{attendee_name}}", "rows": [], "note": "Show this code at the door, on your phone or printed.", "style": _style(paddingBottom=16)}
+    # rows empty: the card's own lines (event, when, where, ticket code), which is what every starter wants.
+    return {
+        "kind": "ticket_card", "id": _id("t"), "showQr": True, "showVenue": show_venue, "eyebrow": "{{ticket_type}}", "title": "{{attendee_name}}", "rows": [],
+        "note": "Show this code at the door, on your phone or printed. If it will not scan, give the ticket code.", "style": _style(paddingBottom=16),
+    }
 
 
 def _qr() -> dict:
@@ -63,7 +66,7 @@ def email_starter(stage: str) -> EmailTemplateFields:
                 _heading("You’re in, {{first_name}}."),
                 _paragraph("Your ticket for **{{event_name}}** is attached and shown below. Keep this email: the QR code is what gets you through the door, on your phone or printed."),
                 _ticket_card(True),
-                _details([{"label": "When", "value": "{{event_start}}"}, {"label": "Where", "value": "{{venue}}"}, {"label": "Ticket", "value": "{{ticket_type}} · {{admission_no}}"}]),
+                _details([{"label": "When", "value": "{{event_start}}"}, {"label": "Where", "value": "{{venue}}"}, {"label": "Ticket", "value": "{{ticket_type}} · {{ticket_code}}"}]),
                 _button("Download your ticket", "{{ticket_url}}"),
                 _paragraph(CONTACT, **_QUIET),
             ]},
@@ -99,7 +102,7 @@ def email_starter(stage: str) -> EmailTemplateFields:
                 _heading("Doors are open."),
                 _paragraph("**{{event_name}}** begins in about {{doors_in}} minutes{% if venue %} at {{venue}}{% endif %}. Have your QR code ready at the door — it takes a second to scan.", align="center"),
                 _qr(),
-                _paragraph("{{attendee_name}} · {{ticket_type}} · {{admission_no}}", align="center", **_QUIET),
+                _paragraph("{{attendee_name}} · {{ticket_type}} · {{ticket_code}}", align="center", **_QUIET),
                 _button("Open your ticket", "{{ticket_url}}", "secondary"),
             ]},
             "attachments": {"ticketPdf": False, "certificatePdf": False},

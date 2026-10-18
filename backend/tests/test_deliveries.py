@@ -91,8 +91,9 @@ async def test_send_emails_everyone_with_an_address_and_records_each_one(client,
 
     assert r.status_code == 200, r.text
     assert r.json() == {"queued": 3, "already_sent": 0, "revoked": 0, "channels": ["email"]}
-    assert [m["recipients"] for m in outbox["sent"]] == [["ananya@example.com"], ["bala@example.com"]]
-    mail = outbox["sent"][0]
+    # A few go at once now, so in no particular order.
+    assert sorted(m["recipients"] for m in outbox["sent"]) == [["ananya@example.com"], ["bala@example.com"]]
+    mail = next(m for m in outbox["sent"] if m["recipients"] == ["ananya@example.com"])
     assert mail["subject"] == "Your ticket for Build Night"
     # The designed invite carries the ticket PDF and the guest's QR inline.
     ticket = next(a for a in mail["attachments"] if a["filename"] == f"ticket-{world['a'].ticket_id}.pdf")
