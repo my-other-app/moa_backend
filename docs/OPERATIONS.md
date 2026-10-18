@@ -1,15 +1,18 @@
 # Operations runbook
 
 How to deploy, roll back, unstick a migration, restore a backup, rotate a
-secret, turn on the new services and size the server. Every command is
-meant to be copied. Commands under **Read-only** change nothing; anything
+secret, turn on the new services, size the server and every service on it,
+and keep its disk from filling. Every command is meant to be copied. Commands under **Read-only** change nothing; anything
 that changes something says so.
 
 The production box runs `docker-compose.prod.yml` from
 `/var/www/myotherapp-production` (the `PROD_PROJECT_PATH` secret): `postgres`
 (17.4, data in the `postgres_data` volume) and `backend` (code bind-mounted
-from `./backend`, published on 8000 and 8001 behind the host's nginx).
-Backups live outside the project directory, in `/var/backups/myotherapp`.
+from `./backend`, published on 8000 and 8001 behind the host's nginx). The
+file also defines `worker`, `redis` and `meilisearch`, which run only once
+started on purpose (section 6), and gives every service a memory and CPU
+limit (section 10). Backups live outside the project directory, in
+`/var/backups/myotherapp`.
 
 On the server, everything below starts with:
 
@@ -46,7 +49,7 @@ hand from the Actions tab). Its inputs:
 | `restart_backend` | `restart backend` (new code, same environment), skipped when the backend was recreated |
 | `build_backend`, `up_backend` | build the image / `up backend` (without `--no-deps`, which can also recreate postgres after an `.env` change: prefer `recreate_backend`) |
 | `restart_database` | `up -d postgres` |
-| `restart_all` | `up --build -d` for everything (old order: recreate, then migrate) |
+| `restart_all` | `up --build -d postgres backend` (old order: recreate, then migrate), and recreates a running worker. Never the other services: a bare `up -d` would start them all |
 | `services` | starts or refreshes extra services after the migration, e.g. `redis worker meilisearch`: `up -d --no-deps <svc>` each. Not `backend` or `postgres` |
 | `smoke_timeout` | seconds the API has to answer 200 three times running after the deploy (default 180) |
 
@@ -58,7 +61,7 @@ Common runs:
 | Code + migration | `sync_code`, `migrate`, `restart_backend` |
 | New or changed requirements | `sync_code`, `install_requirements`, `migrate` |
 | `.env` change only | `sync_env`, `recreate_backend` |
-| Turn on a new service | `sync_env` (its settings), `services: redis`, then `recreate_backend` (section 6) |
+| Turn on a new service | `services: redis` first, then `sync_env` (its settings) with `install_requirements` (section 6) |
 
 What the job guarantees:
 
@@ -69,6 +72,11 @@ What the job guarantees:
   building and stops with nothing changed if it is missing (section 9).
 - Migrations run in the container that is serving, before any recreate: a
   failed migration leaves the old container serving.
+- A running worker goes with the backend: recreated from the new image when
+  the backend was (or `restart_all` rebuilt it), restarted when only the
+  code changed. It is never started by the deploy except by `services`.
+- After a build, unused images and day-old build cache are pruned (section
+  11); a failed prune only warns.
 - **Smoke check**: after the deploy the job asks
   `https://api.myotherapp.in/api/v1/plans` (or the repository variable
   `PROD_SMOKE_URL`; set it to `https://api.myotherapp.in/readyz` once that
@@ -149,7 +157,9 @@ merge on `master`), with `sync_code` and `restart_backend`. Do not include
 `migrate` unless the old code needs a downgrade (below).
 
 **Image** (a bad requirements change). The build replaced the image, so tag
-the running one before any `install_requirements` you are unsure of:
+the running one before any `install_requirements` you are unsure of (the
+deploy prunes untagged images no container runs once the new one is up, so
+an untagged old image is gone after it; a tagged one is kept):
 
 ```bash
 IMG=$(sudo docker inspect --format '{{.Config.Image}}' doth-live-backend)    # read-only
@@ -471,32 +481,59 @@ NEW=$(openssl rand -base64 32 | tr -d '/+=' | cut -c1-32)   # on your machine; k
 
 ## 6. Starting the new services
 
-Wave 2 adds services to `docker-compose.prod.yml` that the normal deploy
-never starts (it recreates only `backend`). The names and addresses below are
-the ones the platform work gives them; check `$DC config --services`. Each is off until its setting is
-set, and the app runs as before without it. Order for each: deploy the code
-(with `migrate`), start the service, then set the setting and recreate the
-backend.
+`docker-compose.prod.yml` defines three services the normal deploy never
+starts: `redis`, `worker` and `meilisearch`. Each is off until its setting is
+set, and the app runs as before without it.
 
-| Service | Start | Then set (`PROD_ENV_VARIABLES`) | Turn off |
+**Not on today's box.** The t2.medium (4 GB, about 195 MB free on
+2026-10-18, no swap) cannot hold any of them: a new container there risks
+the kernel's OOM killer taking the backend or Postgres. Resize first
+(section 10, *Resizing*), then start them one at a time, watching
+`free -m` and `sudo docker stats --no-stream` after each.
+
+Order for each: deploy the code (with `migrate`), start the service, then
+set its setting and recreate what reads it.
+
+| Service | 1. Start (workflow input) | 2. Set (`PROD_ENV_VARIABLES`), then recreate | Turn off |
 |---|---|---|---|
-| Redis | `services: redis` | `APP_REDIS_URL=redis://redis:6379/0` (rate limits, caches and live fan-out use it) | unset, `recreate_backend` |
-| Job worker | `services: worker` (after the migration that makes `jobs`) | `APP_JOBS_WORKER=true` on the API: it then only enqueues | unset first, `recreate_backend`, wait for the queue to drain, `$DC stop worker` |
-| Meilisearch | `services: meilisearch` | `APP_SEARCH_URL=http://meilisearch:7700`, `APP_SEARCH_KEY=<master key>` | unset (Postgres search again) |
+| Redis | `services: redis` | `APP_REDIS_URL=redis://redis:6379/0` (rate limits, the discover cache's second level and live fan-out use it) | unset it, recreate, then `$DC stop redis` |
+| Job worker | `services: worker` (after the migration that makes `jobs`) | `APP_JOBS_WORKER=true` on the API: it then only enqueues. Optionally `APP_SWEEPS_IN_WORKER=true`: the sweeps move too | unset first, recreate, wait for the queue to drain (`GET /api/v1/admin/jobs`), then `$DC stop worker` |
+| Meilisearch | `MEILI_MASTER_KEY` (16+ bytes) in `PROD_ENV_VARIABLES` and `sync_env` first, then `services: meilisearch` | `APP_SEARCH_URL=http://meilisearch:7700`, `APP_SEARCH_KEY=<the master key>`; the backend builds the indexes itself | unset (Postgres search again), recreate, then `$DC stop meilisearch` |
+
+**Recreate means a fresh build.** A `restart` keeps the environment the
+container was made with, so a new setting needs a recreate, and every
+recreate builds: from the workflow, `sync_env` + `install_requirements`
+(it builds, recreates the backend and takes a running worker along); by hand:
+
+```bash
+# Changes things: rebuilds the image if anything changed, recreates both.
+sudo docker-compose -f docker-compose.prod.yml up -d --build --no-deps backend worker < /dev/null
+```
+
+Leave `worker` out while the worker is not running. Never a plain `up -d`
+without `--build`: on 2026-10-17 one recreated the backend from an image that
+lacked packages installed by hand, and production was down for 20 minutes.
+Never `up -d` with no service named: it would start every service in the
+file, whether the box can hold them or not. `--no-deps` keeps Postgres out
+of it (its config, the shared `.env`, changes with every setting), and
+`< /dev/null` keeps the command from reading the rest of a script it is run
+from. (`recreate_backend` recreates from the image already built, without
+building: right for an `.env` change when the last requirements change went
+out with `install_requirements`.)
 
 By hand on the server, the same as the `services` input (changes things):
 
 ```bash
 $DC config --services                         # read-only: what the file defines
-$DC up -d --no-deps redis                     # start or refresh one service
+$DC up -d --no-deps redis < /dev/null         # start or refresh one service
 $DC ps
 $DC logs --tail=100 worker
 ```
 
-A service built from `backend/` (the worker) is rebuilt only when its image
-is missing; after `install_requirements`, refresh it with
-`$DC up -d --no-deps --build worker` (or `--force-recreate`) so it runs the
-new image and code too.
+The worker runs the backend's image (`moa-backend:live`) and code: every
+deploy that rebuilds or recreates the backend recreates a running worker
+too, and one that only syncs code restarts it (section 1). Its own sizing
+(two jobs at once, its own small database pool) is in section 10.
 
 ---
 
@@ -556,7 +593,10 @@ Measured on a laptop (Docker Desktop, arm64) for a one-line change to
 | Image size | 2.95 GB | 2.95 GB |
 
 The server took 25 minutes for the old kind of build on 2026-10-18; the
-new one skips the same parts there.
+new one skips the same parts there, as long as the build cache holds the
+base layer: the deploy's prune (section 11) keeps what the last day's builds
+used, so it does; a `docker builder prune -a` or `docker system prune -a` by
+hand drops it, and the next build installs the base layer again.
 
 **BuildKit is required.** Read-only check on the server:
 
@@ -667,3 +707,200 @@ What to move to:
 - **Both, and for good**: stop building on this box (section 8), and move
   Postgres off it (RDS, docs/SCALING.md Phase 0), so a build or a dump never
   competes with the database for the same CPU and disk.
+
+What the box was on 2026-10-18 (read-only output, run by the user): a
+t2.medium, 2 burstable vCPUs with CPU pressure around 60% (throttled), 3.8 GB
+of memory with about 195 MB available, no swap, 5 GB of disk free (83%
+used), and two other projects on it. Section 10 sizes every service against
+that and against the 8 GB it is being resized to.
+
+---
+
+## 10. One box: memory and CPU for every service
+
+Redis, Meilisearch and the worker run on the same box as the backend and
+Postgres (the user's decision), so every service has a memory limit and a
+CPU limit in `docker-compose.prod.yml` (`mem_limit`, `cpus`). A leak or a
+spike is then killed and restarted inside its own container, instead of the
+kernel's OOM killer choosing a victim on the whole box -- possibly
+Postgres. The background services get less than the box's two vCPUs, so a
+render, an index build or a big send never takes the API's CPU; the API and
+Postgres may use the whole box.
+
+The server runs docker-compose v2 (2.33.1), which reads `mem_limit` and
+`cpus` whatever the file's `version` key says (v2 ignores it, and warns that
+it is obsolete); `deploy.resources` would need `--compatibility` under v1,
+and v2 refuses both at once. `restart: unless-stopped` everywhere: with
+`on-failure`, which postgres and backend had, a container stopped cleanly
+(Docker or the host restarting, as a resize does) exits 0 and stays down.
+
+**The numbers live in `docker-compose.prod.yml`** (and the worker's database
+pool in `backend/app/config.py`); this is why each is what it is. Change
+them there and here together (`tests/test_one_box.py` checks the file).
+
+What the box ran on 2026-10-18 (`docker stats`, read-only):
+
+| Container | Memory |
+|---|---|
+| doth-live-backend | 1.43 GB |
+| doth-live-postgres | 155 MB |
+| letmego-backend-prod | 514 MB |
+| letmego-postgres | 42 MB |
+| bcards-backend | 243 MB |
+| bcards-mongo | 120 MB |
+| bcards-nginx | -- |
+
+The limits (1 GB = 1,024 MB here):
+
+| Service | `mem_limit` | `cpus` | Uses | Why this much |
+|---|---|---|---|---|
+| postgres | 1280m | 2 | 155 MB | The image's defaults, which nothing here changes: `shared_buffers` 128 MB, `work_mem` 4 MB, `maintenance_work_mem` 64 MB, `max_connections` 100. They fit with room: 128 MB shared, a few MB a connection (under 500 MB with all 100 open), a sort or hash of 4-8 MB in the few running at once, autovacuum's 64 MB times 3 workers. The rest is page cache, which the kernel charges to the container and reclaims under the limit (it does not kill for it). Raise `shared_buffers` and this together |
+| backend | 2304m | 2 | 1.43 GB | `APP_WORKERS` uvicorn workers at 0.35-0.4 GB each once the app is imported, plus the render pool's peaks (wkhtmltopdf, ticket, certificate and wallet renders run in this container) |
+| worker | 768m | 1 | ~0.4 GB | One process of the app, and two jobs' renders, PDFs or sheet imports. `APP_JOBS_CONCURRENCY=2` (set on the service, so the API's value never reaches it) |
+| redis | 256m | 0.5 | <= 192 MB | `maxmemory 192mb`, `allkeys-lru` (when full it drops the least recently used keys, never refuses a write), `appendonly no` and no snapshots (it holds no data of record, so it never forks to write a file and never needs twice its memory); the rest is Redis's own overhead |
+| meilisearch | 768m | 1 | indexing <= 256 MiB | `MEILI_MAX_INDEXING_MEMORY=256MiB` (unset, Meilisearch takes up to two thirds of the memory it sees, which in a container can be the host's) and one indexing thread; the indexes are memory-mapped files whose pages the kernel drops under the limit. Lakhs of events and clubs fit |
+| **All five** | **5376m (5.25 GB)** | | | |
+
+Every container's log is also capped (`json-file`, 5 x 20 MB), since Docker
+never trims one by itself (section 11).
+
+Against the box (GB; "usable" is what `free -m` calls total):
+
+| | 2 GB box | 4 GB box (today's t2.medium) | 8 GB box (the resize) |
+|---|---|---|---|
+| Usable | ~1.9 | 3.8 | ~7.6 |
+| The two other projects (measured 0.95) | 1.0 | 1.0 | 1.0 |
+| OS, Docker, the host's nginx | 0.5 | 0.5 | 0.5 |
+| Builds (BuildKit runs outside every limit) and the host's page cache | -- | -- | 0.85 |
+| **Left for this project** | ~0.4 | ~2.3 | **~5.25** |
+| backend + postgres (limits 3.5; using 1.6 today) | no: the backend alone uses 1.43 | runs today, with ~195 MB free; the limits are caps above what is used | yes |
+| + worker, redis, meilisearch (limits 1.75) | no | **no: do not start redis, meilisearch or the worker here** | yes: 5.25 of 5.25 |
+
+On the 8 GB box the limits add up to what is left for this project, so no
+combination of them can push the box into the OOM killer; they are caps,
+and what the services actually use (about 2.5 GB together, idle) leaves the
+rest to the page cache.
+
+**To check once the box is resized** (these assume a 2-vCPU, 8 GB instance):
+
+- `free -m`: if "total" is well under 7,600 MB, take the difference off the
+  backend first.
+- `APP_WORKERS` in the backend's `.env` and the backend's real use
+  (`sudo docker stats --no-stream`): 0.35-0.4 GB a worker plus about 0.6 GB
+  of render peaks should stay under its 2304m.
+- The database's size (read-only, in the psql session above:
+  `SELECT pg_size_pretty(pg_database_size(current_database()));`): past
+  about 1 GB, Postgres wants more page cache than its 1280m leaves; raise it
+  (and `shared_buffers` to about a quarter of it) before raising anything
+  else.
+- More vCPUs: raise `cpus` on backend and postgres to the new count (a
+  `cpus` above the box's count is refused when the container is created).
+
+**The connection budget.** Postgres takes `max_connections` 100, 3 kept for
+superusers: 97. Each API worker may open `APP_DB_POOL_SIZE` +
+`APP_DB_MAX_OVERFLOW` (10 + 20); the job worker its own
+`APP_WORKER_DB_POOL_SIZE` + `APP_WORKER_DB_MAX_OVERFLOW` (4 + 8: two jobs, and
+a mail send holds a connection only for each short transaction, so a burst
+waits briefly for one rather than failing). At startup the API (once
+`APP_JOBS_WORKER` or `APP_SWEEPS_IN_WORKER` says there is a worker) and the
+worker itself log `connection budget: ...` when `APP_WORKERS` x 30 + 12 is
+more than 97:
+
+| `APP_WORKERS` | API | + worker | Fits 97? |
+|---|---|---|---|
+| 1 | 30 | 42 | yes |
+| 2 | 60 | 72 | yes |
+| 3 | 90 | 102 | no: `APP_DB_MAX_OVERFLOW=10` (3 x 20 + 12 = 72), or PgBouncer |
+| 4 | 120 | 132 | no, even without the worker: `APP_DB_POOL_SIZE=5 APP_DB_MAX_OVERFLOW=10` (4 x 15 + 12 = 72) |
+
+A migration (one connection), a backup's `pg_dump` and a psql session come
+out of what is left. Memory: each connection is a process of a few MB,
+inside Postgres's 1280m.
+
+**Applying the limits.** Compose applies a service's limits, log options and
+restart policy when it next creates the container: the backend's on its next
+recreate, the worker's, Redis's and Meilisearch's when first started.
+Postgres is recreated only on purpose, so for it (and for the backend before
+its next recreate) apply them in place, which restarts nothing:
+
+```bash
+# Read-only: what each running container has now.
+sudo docker inspect --format '{{.Name}} memory={{.HostConfig.Memory}} cpus={{.HostConfig.NanoCpus}} restart={{.HostConfig.RestartPolicy.Name}}' $(sudo docker ps -q)
+
+# Changes the containers' settings in place (no restart).
+sudo docker update --restart unless-stopped doth-live-postgres doth-live-backend
+sudo docker update --memory 1280m --memory-swap 2560m --cpus 2 doth-live-postgres
+sudo docker update --memory 2304m --memory-swap 4608m --cpus 2 doth-live-backend
+```
+
+(`--memory-swap` at twice the memory is what Docker gives a container whose
+memory limit is set without one, as compose's `mem_limit` is; with no swap on
+the box it changes nothing.) The log options
+cannot be changed in place; they come with the next recreate.
+
+**Resizing** (the same instance, to 8 GB):
+
+1. Before stopping it: run the `docker update --restart unless-stopped`
+   line above (the containers come back when the host does; with
+   `on-failure` they would not). The other projects' containers are theirs
+   to decide. Take a backup (section 4). Check the instance has an Elastic
+   IP: a stop and start gives it a new public address otherwise, and
+   `api.myotherapp.in` points at the old one.
+2. EC2 -> the instance -> stop; *Actions -> Instance settings -> Change
+   instance type* (t3.large: 2 vCPU, 8 GiB, or a fixed-performance m7i.large,
+   section 9); turn on unlimited CPU credits for a burstable type; start.
+   Grow the volume while you are there (section 11).
+3. After: `free -m`, `sudo docker ps` (postgres and backend up), the smoke
+   URL answering 200. Then the services, one at a time (section 6).
+
+---
+
+## 11. Disk
+
+The root volume had 5 GB free on 2026-10-18 (83% used), and each backend
+image is about 3 GB. What fills it, read-only:
+
+```bash
+df -h /
+sudo docker system df                       # images, containers, volumes, build cache
+sudo du -sh /var/lib/docker/containers/*/*-json.log 2>/dev/null | sort -h | tail
+ls -la /var/backups/myotherapp | tail       # the database dumps (section 4)
+```
+
+- **Images.** A build moves the `moa-backend:live` tag to the new image and
+  leaves the old one untagged ("dangling"); the layers it shared with the new
+  one are kept either way, the rest (a changed requirements layer is hundreds
+  of MB) is garbage once no container runs it.
+- **Build cache.** BuildKit keeps every step's result, and pip's download
+  cache (section 8), until pruned.
+- **Container logs.** Each container's stdout is a JSON file Docker never
+  trims; the compose file now caps each at 5 x 20 MB (applied when the
+  container is next created).
+
+**The deploy prunes after every build** (`build_backend`,
+`install_requirements` or `restart_all`), last, once the new image runs:
+
+```bash
+# Changes things: deletes unused images and old build cache.
+sudo docker image prune -f                              # untagged images no container uses
+sudo docker builder prune -f --filter until=24h         # build cache unused for a day
+```
+
+Neither removes an image a container runs, nor one with a tag (tag an image
+you may roll back to: section 2), and the cache the build just used is less
+than a day old, so the base layer stays cached. Both act on the whole box,
+so they also clear the other projects' dangling images and old build cache,
+which nothing uses. A failed prune only warns. Run the same two by hand when
+`df` runs low between deploys. Not `docker system prune -a` or
+`docker builder prune -a`: they drop the base layer's cache, and the next
+build installs numpy, pandas and the rest again (section 8).
+
+**Room to grow.** Growing the EBS volume is online: EC2 -> Volumes ->
+Modify (size, and gp3, section 9), then on the server (changes the
+partition and the filesystem; check `lsblk` and `df -T /` first):
+
+```bash
+sudo growpart /dev/nvme0n1 1                # or /dev/xvda 1, as lsblk shows
+sudo resize2fs /dev/nvme0n1p1               # ext4; xfs_growfs / for xfs
+```
+
