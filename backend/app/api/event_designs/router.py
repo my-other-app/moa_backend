@@ -817,7 +817,7 @@ async def preview_layout(
         code = registration.ticket_id
     else:
         values = layout_sample_values(event, kind.value)
-        code = values["admission_no"]
+        code = values["ticket_code"]
     qr_text = f"certificate:{code}" if kind is DesignKind.certificate else code
 
     entries = await agenda_service.entries_for(session, event) if kind is DesignKind.agenda else None

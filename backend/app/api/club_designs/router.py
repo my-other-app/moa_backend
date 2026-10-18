@@ -154,7 +154,7 @@ async def preview_layout(session: SessionDep, user: ClubAuth, kind: DesignKind, 
     style = {**style, "layout": dump(layout)}
     sample = _sample_event(club)
     values = layout_sample_values(sample, kind.value)
-    code = values["admission_no"]
+    code = values["ticket_code"]
     qr_text = f"certificate:{code}" if kind is DesignKind.certificate else code
     entries = await agenda_service.entries_for(session, sample) if kind is DesignKind.agenda else None
     return Response(

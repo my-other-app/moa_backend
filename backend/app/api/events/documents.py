@@ -281,6 +281,9 @@ def layout_values(registration, event, kind: str) -> dict:
         ROLE_LABELS.get(str(role), str(role).title()),
         certificate=certificate,
         field_labels=field_labels_of(event),
+        # The code under the QR is the ticket's own: it is what the gate and
+        # the kiosk take when a guest types it.
+        ticket_code=registration.ticket_id or "",
     )
 
 
