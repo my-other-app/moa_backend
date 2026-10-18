@@ -81,58 +81,78 @@ async def _lock(session, value, *, wait: bool = True) -> bool:
 
 
 async def _club_of(session, event_id: int | None) -> int | None:
+    """The club an event's money is the club's of. Kept for the session (an
+    event does not change clubs): the backfill asks it for every posting."""
     if event_id is None:
         return None
-    from app.api.events.models import Events
+    known = session.info.setdefault("ledger_event_clubs", {})
+    if event_id not in known:
+        from app.api.events.models import Events
 
-    return await session.scalar(select(Events.club_id).where(Events.id == event_id))
+        known[event_id] = await session.scalar(
+            select(Events.club_id).where(Events.id == event_id).execution_options(include_deleted=True)
+        )
+    return known[event_id]
+
+
+async def _registration_of(session, order):
+    from app.api.payments.handlers import registration_for_order
+
+    return await registration_for_order(session, order, include_deleted=True)
 
 
 # ─── Payments: capture and refund ────────────────────────────────────────
 
 
-async def capture(session, log, order, *, registration=None) -> int:
-    """A captured payment: the gateway holds it, nothing has been bought
-    with it yet. Lines written (0: posted before)."""
-    from app.api.payments.handlers import registration_for_order
-
-    if registration is None:
-        registration = await registration_for_order(session, order)
+def capture_txn(log, order, registration, club_id: int | None) -> Txn:
+    """The posting of a captured payment (`capture`; the backfill builds the same)."""
     event_id = registration.event_id if registration is not None else None
     paise = money.to_paise(log.amount)
     at = log.created_at or book.now()
-    return await book.post(session, Txn(
+    return Txn(
         key=f"{book.CAPTURE}:{log.razorpay_payment_id}", kind=book.CAPTURE,
         lines=[Line(book.GATEWAY, paise, 1), Line(book.UNAPPLIED, -paise)],
         occurred_at=at, origin_at=at, source=book.SRC_PAYMENT, source_id=str(log.id),
-        club_id=await _club_of(session, event_id), event_id=event_id,
-        registration_id=registration.id if registration is not None else None,
+        club_id=club_id, event_id=event_id, registration_id=registration.id if registration is not None else None,
         gateway_id=order.payment_gateway_id, razorpay_payment_id=log.razorpay_payment_id,
         razorpay_order_id=order.razorpay_order_id, note=log.refund_reason,
-    ))
+    )
+
+
+def refund_txn(log, order, registration, club_id: int | None, *, refund_id: str | None = None,
+               at: datetime | None = None) -> Txn:
+    """The posting of a payment given back in full (`refund`)."""
+    event_id = registration.event_id if registration is not None else None
+    paise = money.to_paise(log.amount)
+    return Txn(
+        key=f"{book.REFUND}:{log.razorpay_payment_id}", kind=book.REFUND,
+        lines=[Line(book.UNAPPLIED, paise), Line(book.GATEWAY, -paise, 1)],
+        occurred_at=at or book.now(), origin_at=log.created_at or book.now(),
+        source=book.SRC_PAYMENT, source_id=str(log.id),
+        club_id=club_id, event_id=event_id, registration_id=registration.id if registration is not None else None,
+        gateway_id=order.payment_gateway_id, razorpay_payment_id=log.razorpay_payment_id,
+        razorpay_order_id=order.razorpay_order_id, razorpay_refund_id=refund_id, note=log.refund_reason,
+    )
+
+
+async def capture(session, log, order, *, registration=None) -> int:
+    """A captured payment: the gateway holds it, nothing has been bought
+    with it yet. Lines written (0: posted before)."""
+    if registration is None:
+        registration = await _registration_of(session, order)
+    club_id = await _club_of(session, registration.event_id if registration is not None else None)
+    return await book.post(session, capture_txn(log, order, registration, club_id))
 
 
 async def refund(session, log, order, *, registration=None, refund_id: str | None = None,
                  at: datetime | None = None) -> int:
     """A payment given back in full. Its capture first, if the ledger does
     not have it (refunded after the ledger began, taken before it)."""
-    from app.api.payments.handlers import registration_for_order
-
     if registration is None:
-        registration = await registration_for_order(session, order)
+        registration = await _registration_of(session, order)
     await capture(session, log, order, registration=registration)
-    event_id = registration.event_id if registration is not None else None
-    paise = money.to_paise(log.amount)
-    return await book.post(session, Txn(
-        key=f"{book.REFUND}:{log.razorpay_payment_id}", kind=book.REFUND,
-        lines=[Line(book.UNAPPLIED, paise), Line(book.GATEWAY, -paise, 1)],
-        occurred_at=at or book.now(), origin_at=log.created_at or book.now(),
-        source=book.SRC_PAYMENT, source_id=str(log.id),
-        club_id=await _club_of(session, event_id), event_id=event_id,
-        registration_id=registration.id if registration is not None else None,
-        gateway_id=order.payment_gateway_id, razorpay_payment_id=log.razorpay_payment_id,
-        razorpay_order_id=order.razorpay_order_id, razorpay_refund_id=refund_id, note=log.refund_reason,
-    ))
+    club_id = await _club_of(session, registration.event_id if registration is not None else None)
+    return await book.post(session, refund_txn(log, order, registration, club_id, refund_id=refund_id, at=at))
 
 
 # ─── A registration's ticket and store money ─────────────────────────────
@@ -172,22 +192,54 @@ def _ticket_account(have: dict, channel: str) -> str:
     return book.TICKETS_DESK if channel == DESK else book.TICKETS_ONLINE
 
 
-async def target(session, registration, *, channel: str, have: dict) -> dict[str, tuple[int, int]]:
-    """What the ledger should hold for the registration, from its rows: the
+def want_for(paid_amount, is_paid, orders: dict, *, channel: str, have: dict) -> dict[str, tuple[int, int]]:
+    """What the ledger should hold for a registration, from its rows: the
     ticket's paid amount (and whether it is paid), the store orders sold, and
-    those paid for when the pieces were gone (oversold)."""
-    from app.api.store.models import EventStoreOrders as Orders
-
+    those paid for when the pieces were gone (oversold). `orders`: {status:
+    (total, count)} of its paid and oversold orders."""
     want = {account: ZERO for account in book.REGISTRATION_ACCOUNTS}
-    want[_ticket_account(have, channel)] = (-money.to_paise(registration.paid_amount), 1 if registration.is_paid else 0)
-    rows = await session.execute(
-        select(Orders.status, func.coalesce(func.sum(Orders.total), 0), func.count())
-        .where(Orders.registration_id == registration.id, Orders.status.in_(("paid", "oversold")))
-        .group_by(Orders.status)
-    )
-    for status, total, n in rows.all():
+    want[_ticket_account(have, channel)] = (-money.to_paise(paid_amount), 1 if is_paid else 0)
+    for status, (total, n) in orders.items():
         want[book.STORE if status == "paid" else book.STORE_HELD] = (-money.to_paise(total), int(n))
     return want
+
+
+async def _orders_of(session, registration_id) -> dict:
+    from app.api.store.models import EventStoreOrders as Orders
+
+    rows = await session.execute(
+        select(Orders.status, func.coalesce(func.sum(Orders.total), 0), func.count())
+        .where(Orders.registration_id == registration_id, Orders.status.in_(("paid", "oversold")))
+        .group_by(Orders.status)
+    )
+    return {status: (total, int(n)) for status, total, n in rows.all()}
+
+
+def registration_txn(
+    registration_id, event_id, club_id, *, kind: str, channel: str, have: dict, seq: int, want: dict,
+    accounts: tuple, at: datetime, origin_at: datetime | None = None, balancing: str | None = None,
+    note: str | None = None,
+) -> Txn | None:
+    """The posting that brings the ledger's balances for a registration
+    (`have`, made of `seq` lines) to what its rows say (`want`), in
+    `accounts`, balanced against the kind's account; None when they agree.
+    Keyed by the transition, so the same change from the same balances is
+    the same posting."""
+    changed = sorted(
+        (account, have.get(account, ZERO), want[account])
+        for account in accounts if have.get(account, ZERO) != want[account]
+    )
+    if not changed:
+        return None
+    lines = [Line(account, w[0] - h[0], w[1] - h[1]) for account, h, w in changed]
+    if balancing is None:
+        balancing = _BALANCING.get(kind) or (book.DESK if channel == DESK else book.UNAPPLIED)
+    lines.append(Line(balancing, -sum(line.amount for line in lines)))
+    return Txn(
+        key=f"{kind}:{registration_id}:{book.digest(seq, changed)}", kind=kind, lines=lines,
+        occurred_at=at, origin_at=origin_at or at, source=book.SRC_REGISTRATION, source_id=str(registration_id),
+        club_id=club_id, event_id=event_id, registration_id=registration_id, note=note,
+    )
 
 
 def _channel_of(registration) -> str:
@@ -223,38 +275,17 @@ async def sync_registration(
     if not await _lock(session, registration.id, wait=wait):
         return None
     # As it stands now: another transaction may have changed it while this one waited.
-    paid_amount, is_paid, receipt = (await session.execute(
-        select(Reg.paid_amount, Reg.is_paid, Reg.payment_receipt).where(Reg.id == registration.id)
+    paid_amount, is_paid = (await session.execute(
+        select(Reg.paid_amount, Reg.is_paid).where(Reg.id == registration.id).execution_options(include_deleted=True)
     )).one()
     have, seq = await _balances(session, registration.id)
-    current = _Row(registration.id, registration.event_id, paid_amount, is_paid, receipt)
-    want = await target(session, current, channel=channel, have=have)
-    changed = sorted(
-        (account, have.get(account, ZERO), want[account])
-        for account in accounts if have.get(account, ZERO) != want[account]
+    want = want_for(paid_amount, is_paid, await _orders_of(session, registration.id), channel=channel, have=have)
+    txn = registration_txn(
+        registration.id, registration.event_id, await _club_of(session, registration.event_id), kind=kind,
+        channel=channel, have=have, seq=seq, want=want, accounts=accounts, at=at or book.now(),
+        origin_at=origin_at, balancing=balancing, note=note,
     )
-    if not changed:
-        return 0
-    lines = [Line(account, w[0] - h[0], w[1] - h[1]) for account, h, w in changed]
-    if balancing is None:
-        balancing = _BALANCING.get(kind) or (book.DESK if channel == DESK else book.UNAPPLIED)
-    lines.append(Line(balancing, -sum(line.amount for line in lines)))
-    when = at or book.now()
-    event_id = registration.event_id
-    return await book.post(session, Txn(
-        key=f"{kind}:{registration.id}:{book.digest(seq, changed)}", kind=kind, lines=lines,
-        occurred_at=when, origin_at=origin_at or when, source=book.SRC_REGISTRATION,
-        source_id=str(registration.id), club_id=await _club_of(session, event_id), event_id=event_id,
-        registration_id=registration.id, note=note,
-    ))
-
-
-class _Row:
-    """The registration's money columns as read under the lock."""
-
-    def __init__(self, id, event_id, paid_amount, is_paid, payment_receipt):
-        self.id, self.event_id = id, event_id
-        self.paid_amount, self.is_paid, self.payment_receipt = paid_amount, is_paid, payment_receipt
+    return 0 if txn is None else await book.post(session, txn)
 
 
 async def _payments_of(session, registration):
@@ -305,8 +336,10 @@ async def post_as_it_stands(session, registration, *, kind: str = book.BACKFILL,
     paid_at = await session.scalar(
         select(func.max(Orders.paid_at)).where(Orders.registration_id == registration.id, Orders.status.in_(("paid", "oversold")))
     )
-    store = await sync_registration(session, registration, kind=kind, channel=channel, at=paid_at or created,
-                                    accounts=(book.STORE, book.STORE_HELD))
+    store = 0
+    if paid_at is not None or set(await balances(session, registration.id)) & {book.STORE, book.STORE_HELD}:
+        store = await sync_registration(session, registration, kind=kind, channel=channel, at=paid_at or created,
+                                        accounts=(book.STORE, book.STORE_HELD))
     return written + (tickets or 0) + (store or 0)
 
 
@@ -340,16 +373,54 @@ def _first_group(charge) -> str:
     return charge.razorpay_payment_id
 
 
-async def _post_charge(session, charge_row) -> int:
+def charge_txn(charge_row) -> Txn:
+    """The posting of a subscription charge taken."""
     paise = int(charge_row.amount_paise)
     at = charge_row.charged_at
-    return await book.post(session, Txn(
+    return Txn(
         key=f"{book.SUB_CHARGE}:{charge_row.razorpay_payment_id}", kind=book.SUB_CHARGE,
         lines=[Line(book.GATEWAY, paise, 1), Line(book.SUBSCRIPTIONS, -paise)],
         occurred_at=at, origin_at=at, source=book.SRC_CHARGE, source_id=str(charge_row.id),
         club_id=charge_row.club_id, razorpay_payment_id=charge_row.razorpay_payment_id,
         razorpay_subscription_id=charge_row.razorpay_subscription_id,
-    ))
+    )
+
+
+def charge_refund_txn(charge_row, posted: int, *, at: datetime | None = None) -> Txn | None:
+    """The posting that brings what the ledger has given back on a charge
+    (`posted`) to what Razorpay says is refunded; None when they agree."""
+    total = int(charge_row.refunded_paise or 0)
+    delta = total - posted
+    if delta == 0:
+        return None
+    return Txn(
+        key=f"{book.SUB_REFUND}:{charge_row.razorpay_payment_id}:{total}", kind=book.SUB_REFUND,
+        lines=[Line(book.SUBSCRIPTIONS, delta), Line(book.GATEWAY, -delta, 1 if posted == 0 else 0)],
+        occurred_at=at or book.now(), origin_at=charge_row.charged_at,
+        source=book.SRC_CHARGE, source_id=str(charge_row.id), club_id=charge_row.club_id,
+        razorpay_payment_id=charge_row.razorpay_payment_id, razorpay_subscription_id=charge_row.razorpay_subscription_id,
+    )
+
+
+def first_charge_txns(group: str, charge_row, current: datetime | None) -> list[Txn]:
+    """The first-charge marker for `charge_row`, when it is earlier than the
+    group's `current` first (or there is none): plus one in its month, and
+    minus one in the old first's."""
+    at = charge_row.charged_at
+    if current is not None and current <= at:
+        return []
+    common = dict(kind=book.FIRST_CHARGE, source=book.SRC_SUBSCRIPTION, source_id=group, club_id=charge_row.club_id,
+                  razorpay_subscription_id=charge_row.razorpay_subscription_id)
+    out = [Txn(key=f"{book.FIRST_CHARGE}:{group}:{at.isoformat()}", lines=[Line(book.SUBSCRIBERS, 0, 1)],
+               occurred_at=at, origin_at=at, razorpay_payment_id=charge_row.razorpay_payment_id, **common)]
+    if current is not None:
+        out.append(Txn(key=f"{book.FIRST_CHARGE}:{group}:{current.isoformat()}:moved", lines=[Line(book.SUBSCRIBERS, 0, -1)],
+                       occurred_at=current, origin_at=current, **common))
+    return out
+
+
+async def _post_charge(session, charge_row) -> int:
+    return await book.post(session, charge_txn(charge_row))
 
 
 async def charge(session, charge_row, *, refunded_at: datetime | None = None) -> int:
@@ -378,19 +449,11 @@ async def charge_refunds(session, charge_row, *, at: datetime | None = None) -> 
     first, if it is not there."""
     if charge_row.status == "failed":
         return 0
-    total = int(charge_row.refunded_paise or 0)
-    posted = await _refunded_in_ledger(session, charge_row.razorpay_payment_id)
-    delta = total - posted
-    if delta == 0:
+    txn = charge_refund_txn(charge_row, await _refunded_in_ledger(session, charge_row.razorpay_payment_id), at=at)
+    if txn is None:
         return 0
     await _post_charge(session, charge_row)
-    return await book.post(session, Txn(
-        key=f"{book.SUB_REFUND}:{charge_row.razorpay_payment_id}:{total}", kind=book.SUB_REFUND,
-        lines=[Line(book.SUBSCRIPTIONS, delta), Line(book.GATEWAY, -delta, 1 if posted == 0 else 0)],
-        occurred_at=at or book.now(), origin_at=charge_row.charged_at,
-        source=book.SRC_CHARGE, source_id=str(charge_row.id), club_id=charge_row.club_id,
-        razorpay_payment_id=charge_row.razorpay_payment_id, razorpay_subscription_id=charge_row.razorpay_subscription_id,
-    ))
+    return await book.post(session, txn)
 
 
 async def first_charge(session, charge_row) -> int:
@@ -406,20 +469,9 @@ async def first_charge(session, charge_row) -> int:
         .group_by(E.origin_at).having(func.sum(E.units) > 0)
         .order_by(E.origin_at).limit(1)
     )).scalar()
-    at = charge_row.charged_at
-    if current is not None and current <= at:
-        return 0
-    common = dict(kind=book.FIRST_CHARGE, source=book.SRC_SUBSCRIPTION, source_id=group, club_id=charge_row.club_id,
-                  razorpay_subscription_id=charge_row.razorpay_subscription_id)
-    written = await book.post(session, Txn(
-        key=f"{book.FIRST_CHARGE}:{group}:{at.isoformat()}", lines=[Line(book.SUBSCRIBERS, 0, 1)],
-        occurred_at=at, origin_at=at, razorpay_payment_id=charge_row.razorpay_payment_id, **common,
-    ))
-    if current is not None and written:
-        written += await book.post(session, Txn(
-            key=f"{book.FIRST_CHARGE}:{group}:{current.isoformat()}:moved", lines=[Line(book.SUBSCRIBERS, 0, -1)],
-            occurred_at=current, origin_at=current, **common,
-        ))
+    written = 0
+    for txn in first_charge_txns(group, charge_row, current):
+        written += await book.post(session, txn)
     return written
 
 

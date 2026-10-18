@@ -148,20 +148,20 @@ class Unbalanced(ValueError):
     """A posting whose lines do not sum to zero: a bug in the caller."""
 
 
+def _row(txn: Txn, i: int, line: Line) -> dict:
+    return dict(
+        txn_key=txn.key[:200], line=i, kind=txn.kind, account=line.account, amount_paise=int(line.amount),
+        units=int(line.units), currency="INR", club_id=txn.club_id, event_id=txn.event_id,
+        registration_id=txn.registration_id, gateway_id=txn.gateway_id, source=txn.source,
+        source_id=str(txn.source_id)[:80], razorpay_payment_id=txn.razorpay_payment_id,
+        razorpay_order_id=txn.razorpay_order_id, razorpay_refund_id=txn.razorpay_refund_id,
+        razorpay_subscription_id=txn.razorpay_subscription_id, occurred_at=txn.occurred_at,
+        origin_at=txn.origin_at or txn.occurred_at, note=(txn.note or None) and txn.note[:200],
+    )
+
+
 def _rows(txn: Txn, lines: list[Line]) -> list[dict]:
-    origin = txn.origin_at or txn.occurred_at
-    return [
-        dict(
-            txn_key=txn.key[:200], line=i, kind=txn.kind, account=line.account, amount_paise=int(line.amount),
-            units=int(line.units), currency="INR", club_id=txn.club_id, event_id=txn.event_id,
-            registration_id=txn.registration_id, gateway_id=txn.gateway_id, source=txn.source,
-            source_id=str(txn.source_id)[:80], razorpay_payment_id=txn.razorpay_payment_id,
-            razorpay_order_id=txn.razorpay_order_id, razorpay_refund_id=txn.razorpay_refund_id,
-            razorpay_subscription_id=txn.razorpay_subscription_id, occurred_at=txn.occurred_at, origin_at=origin,
-            note=(txn.note or None) and txn.note[:200],
-        )
-        for i, line in enumerate(lines)
-    ]
+    return [_row(txn, i, line) for i, line in enumerate(lines)]
 
 
 async def post(session, txn: Txn) -> int:
@@ -201,12 +201,14 @@ async def post(session, txn: Txn) -> int:
         return 0
 
 
-def _sum_keys(txn: Txn, lines: list[Line]):
+def _sums() -> tuple[dict, dict]:
+    return defaultdict(lambda: [0, 0, 0]), defaultdict(lambda: [0, 0, 0])
+
+
+def _accumulate(monthly: dict, platform: dict, txn: Txn, lines: list[Line]) -> None:
     month = month_of(txn.occurred_at)
     origin = month_of(txn.origin_at or txn.occurred_at)
     shard = zlib.crc32(txn.key.encode()) % SHARDS
-    monthly: dict[tuple, list[int]] = defaultdict(lambda: [0, 0, 0])
-    platform: dict[tuple, list[int]] = defaultdict(lambda: [0, 0, 0])
     for line in lines:
         for sums, key in (
             (monthly, (txn.club_id or 0, txn.event_id or 0, txn.gateway_id or 0, month, origin, line.account, txn.kind)),
@@ -216,7 +218,6 @@ def _sum_keys(txn: Txn, lines: list[Line]):
             row[0] += int(line.amount)
             row[1] += int(line.units)
             row[2] += 1
-    return monthly, platform
 
 
 MONTHLY_KEY = ("club_id", "event_id", "gateway_id", "month", "origin_month", "account", "kind")
@@ -247,9 +248,63 @@ async def add_to(session, model, key_names: tuple, sums: dict[tuple, list[int]])
 
 
 async def _add_to_sums(session, txn: Txn, lines: list[Line]) -> None:
-    monthly, platform = _sum_keys(txn, lines)
+    monthly, platform = _sums()
+    _accumulate(monthly, platform, txn, lines)
     await add_to(session, LedgerMonthly, MONTHLY_KEY, monthly)
     await add_to(session, LedgerPlatformMonthly, PLATFORM_KEY, platform)
+
+
+#: Lines one INSERT carries in post_many (22 columns a line, under asyncpg's 32,767 parameters).
+CHUNK = 1000
+
+
+async def post_many(session, txns: list[Txn]) -> int:
+    """
+    Many postings at once, for the backfill: their lines in a few INSERTs and
+    their sums in one UPSERT a table, in one SAVEPOINT. The same keys and the
+    same lines as `post` (a posting made either way is the same posting), so
+    what is there already writes nothing. Should the batch fail, each posting
+    is tried on its own (`post`): one bad posting never costs the rest.
+    Returns the lines written. Never raises.
+    """
+    good: list[tuple[Txn, list[Line]]] = []
+    seen: set[str] = set()
+    for txn in txns:
+        lines = txn.kept()
+        if not lines or txn.key in seen:
+            continue
+        seen.add(txn.key)
+        if sum(line.amount for line in lines) != 0:
+            await _failed(session, txn, Unbalanced(f"{txn.key}: lines sum to {sum(x.amount for x in lines)} paise, not 0"))
+            continue
+        good.append((txn, lines))
+    if not good:
+        return 0
+    rows, index = [], {}
+    for txn, lines in good:
+        for i, line in enumerate(lines):
+            rows.append(_row(txn, i, line))
+            index[(txn.key[:200], i)] = (txn, line)
+    table = LedgerEntries.__table__
+    try:
+        async with session.begin_nested():
+            written = []
+            for start in range(0, len(rows), CHUNK):
+                written += (await session.execute(
+                    pg_insert(table).values(rows[start:start + CHUNK])
+                    .on_conflict_do_nothing(index_elements=["txn_key", "line"])
+                    .returning(table.c.txn_key, table.c.line)
+                )).all()
+            monthly, platform = _sums()
+            for key, line in written:
+                txn, kept = index[(key, line)]
+                _accumulate(monthly, platform, txn, [kept])
+            await add_to(session, LedgerMonthly, MONTHLY_KEY, monthly)
+            await add_to(session, LedgerPlatformMonthly, PLATFORM_KEY, platform)
+        return len(written)
+    except Exception:  # noqa: BLE001
+        logger.warning("ledger: a batch of %s postings failed; posting each on its own", len(good), exc_info=True)
+        return sum([await post(session, txn) for txn, _ in good])
 
 
 _failures = 0

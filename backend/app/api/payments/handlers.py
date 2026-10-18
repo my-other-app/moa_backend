@@ -101,12 +101,17 @@ async def validate_event_registration_payload(session: AsyncSession, payload: di
     return (amount_to_pay, receipt)
 
 
-async def registration_for_order(session: AsyncSession, order: PaymentOrders, *, lock: bool = False) -> EventRegistrationsLink | None:
+async def registration_for_order(
+    session: AsyncSession, order: PaymentOrders, *, lock: bool = False, include_deleted: bool = False,
+) -> EventRegistrationsLink | None:
     """The registration an order pays for: by the id the order was made
     with (its primary key), checked against the receipt; by the receipt when
-    the order carries no usable id. `lock` takes its row."""
+    the order carries no usable id. `lock` takes its row; `include_deleted`
+    finds one deleted since (the ledger: its money was still taken)."""
     def query():
         q = select(EventRegistrationsLink)
+        if include_deleted:
+            q = q.execution_options(include_deleted=True)
         return q.with_for_update().execution_options(populate_existing=True) if lock else q
 
     raw = (order.payload or {}).get("event_registration_id")
