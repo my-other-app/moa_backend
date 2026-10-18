@@ -335,7 +335,7 @@ async def _club_user(request: Request, session):
 
 @public_router.get(
     "/events/{event_id}/live/stream",
-    summary="The room's polls as server-sent events: room, quiz, host, screen, questions, polls",
+    summary="The room's polls as server-sent events: room, banner, quiz, host, screen, questions, polls",
     response_class=Response,
     responses={200: {"content": {"text/event-stream": {}}}},
 )
@@ -349,8 +349,10 @@ async def live_stream(
     client, with the version as its `id`; a `ping` every quiet 15 s; `gone`
     when the room (or this player) is not there any more. The same
     credentials as the poll: X-Live-Key (room), X-Live-Player (quiz), the
-    club's session (host, screen, questions, polls). 404 while
-    APP_LIVE_SSE is off: the client polls."""
+    club's session (host, screen, questions, polls). `banner` is the event
+    page's strip, open to whoever may see the room: the event's status,
+    start and end and the banner (BannerFeed), sent when one of them
+    changes. 404 while APP_LIVE_SSE is off: the client polls."""
     from app.core.net import client_address
 
     if not stream.on():
@@ -370,7 +372,7 @@ async def live_stream(
         return JSONResponse(refusal.to_dict(), status_code=503, headers={"Retry-After": "60"})
     voter = found = None
     try:
-        if view == "room":
+        if view in ("room", "banner"):
             await room.room_of(session, event_id)
             if voter_key is not None:
                 voter = await room.voter_of(session, event_id, voter_key)

@@ -106,9 +106,12 @@ FIRST_BUILD_WAIT = 10.0
 PER_EVENT = 4000
 PER_ADDRESS = 3000
 
-#: What each view shows, by the topics it is made from.
+#: What each view shows, by the topics it is made from. `banner` is the
+#: room's strip for the event page (BannerFeed): built with the room, sent
+#: only when what it shows changes.
 VIEWS: dict[str, tuple[str, ...]] = {
     "room": ("room",),
+    "banner": ("room",),
     "quiz": ("quiz",),
     "host": ("quiz",),
     "screen": ("room", "quiz"),
@@ -203,6 +206,9 @@ class Feed:
         #: sent it), and per set of flags (a poll's answerers share theirs).
         self._frames: dict = {}
         self._frames_for: Optional[tuple] = None
+        #: The strip's frame for this version (view=banner), made once.
+        self._strip: bytes = b""
+        self._strip_for: Optional[tuple] = None
         self.inbox: asyncio.Queue = asyncio.Queue()
         self.sub = None
         self.reader: Optional[asyncio.Task] = None
@@ -244,9 +250,9 @@ class Feed:
         return {listener.view for listener in self.listeners}
 
     def has(self, view: str) -> bool:
-        if view in self.gone:
+        if _made_of_room(view) in self.gone:
             return True
-        if view == "room":
+        if view in ("room", "banner"):
             return self.room is not None
         if view == "quiz":
             return self.quiz is not None
@@ -257,7 +263,7 @@ class Feed:
 
     def gone_for(self, listener: Listener) -> Optional[tuple[int, str]]:
         """(status, message) when what the stream shows is gone, else None."""
-        return self.gone.get(listener.view) or (
+        return self.gone.get(_made_of_room(listener.view)) or (
             self.gone_players.get(listener.key) if listener.view == "quiz" and listener.key else None
         )
 
@@ -381,7 +387,7 @@ class Feed:
         if not (topics or attach or resync or reread):
             return
         views = self.views()
-        told = {v for v in views if set(VIEWS[v]) & topics} | ({"room"} & views if reread else set())
+        told = {v for v in views if set(VIEWS[v]) & topics} | ({"room", "banner"} & views if reread else set())
         wanted = told | (attach & views) | (views if resync else set())
         before = self._fingerprint() if resync else None
         await self._build(wanted, reread)
@@ -399,7 +405,7 @@ class Feed:
         for view, made_of in VIEWS.items():
             if set(made_of) & topics:
                 self.gone.pop(view, None)
-                if view == "room":
+                if view in ("room", "banner"):
                     self.room = None
                 elif view == "quiz":
                     self.quiz, self.standing = None, {}
@@ -438,7 +444,7 @@ class Feed:
 
         self.builds += 1
         async with session_scope() as s:
-            if "room" in views:
+            if views & {"room", "banner"}:
                 built = await room._build_room(s, self.event_id)
                 if built is room._NONE:
                     self.gone["room"] = (404, "Event not found")
@@ -523,6 +529,11 @@ class Feed:
                 body = room.body_for(self.room, listener.key, None, flags)
                 made = self._frames[flags] = (body, frame("snapshot", body, v))
             return v, made[0], made[1]
+        if view == "banner":
+            data = self.room.strip
+            if self._strip_for != (v, id(self.room)):
+                self._strip, self._strip_for = frame("snapshot", orjson.dumps(data), v), (v, id(self.room))
+            return v, data, self._strip
         if view == "quiz":
             from app.api.live import service
 
@@ -535,6 +546,11 @@ class Feed:
             return v, shows, frame("snapshot", orjson.dumps(data, default=str), v)
         data = self.club[view]
         return v, data, frame("snapshot", orjson.dumps(_with_clock(view, data, _now()), default=str), v)
+
+
+def _made_of_room(view: str) -> str:
+    """The view whose gone a view shares: the strip is the room's."""
+    return "room" if view == "banner" else view
 
 
 def _question_of(view: str, data):

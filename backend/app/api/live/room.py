@@ -188,6 +188,8 @@ class Room:
     poll_id: Optional[str] = None
     poll_kind: Optional[PollKind] = None
     poll_options: tuple = ()
+    #: The event page's strip (BannerFeed, view=banner), JSON-safe.
+    strip: Optional[dict] = None
 
 
 def update_out(u: LiveUpdates) -> dict:
@@ -202,7 +204,7 @@ def question_out(r, voted: bool = False, mine: bool = False) -> dict:
 
 
 async def _build_room(session, event_id: int):
-    from app.api.live.schemas import Feed
+    from app.api.live.schemas import BannerFeed, Feed
     from app.api.subscriptions import gates
 
     event = await session.scalar(select(Events).join(Clubs, Clubs.id == Events.club_id).where(Events.id == event_id, *visible()))
@@ -234,6 +236,10 @@ async def _build_room(session, event_id: int):
         "quiz": {"live": bool(quiz and quiz[0] is QuizStatus.live), "title": quiz[1] if quiz else None},
     }
     data = Feed(**public).model_dump(mode="json")
+    strip = BannerFeed(
+        event={**public["event"], "starts_at": event.event_datetime, "ends_at": event.event_datetime + timedelta(hours=event.duration or 0)},
+        banner=public["banner"],
+    ).model_dump(mode="json")
     asked_by: dict[str, list[str]] = {}
     for q, author in rows:
         asked_by.setdefault(author, []).append(str(q.id))
@@ -241,6 +247,7 @@ async def _build_room(session, event_id: int):
         event_id=event.id, club_id=event.club_id, lifecycle=event.lifecycle, approve_first=bool(event.qa_approve_first),
         body=orjson.dumps(data), data=data, question_ids=frozenset(str(q.id) for q, _ in rows), asked_by=asked_by,
         poll_id=str(poll.id) if poll else None, poll_kind=poll.kind if poll else None, poll_options=tuple(poll.options or ()) if poll else (),
+        strip=strip,
     )
 
 

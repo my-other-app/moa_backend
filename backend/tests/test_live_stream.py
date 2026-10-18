@@ -294,6 +294,54 @@ async def test_the_room_stream_is_a_404_where_the_poll_is(client, session, world
     assert bad.status == 422
 
 
+async def test_the_banner_view_is_the_rooms_strip_sent_only_when_it_changes(client, session, world, streams):
+    """The event page's live strip: the room feed's event and banner, with
+    the event's start and end, a few hundred bytes; open to whoever may see
+    the room; an audience's change (it shows the strip nothing new) is not
+    sent, an update pushed is."""
+    from app.api.closeout.models import EventStatus
+
+    await client.patch(_u(world, "/questions/settings"), json={"approve_first": False}, headers=world["h"])
+    s = await SSE(_s(world), {}, {"view": "banner"}).open()
+    assert s.status == 200 and s.response_headers["content-type"].startswith("text/event-stream")
+    await streams.step()
+    snap = await s.next_of("snapshot")
+    feed = (await client.get(_u(world))).json()
+    event = world["event"]
+    assert set(snap["json"]) == {"event", "banner"} and snap["json"]["banner"] is None and feed["banner"] is None
+    strip_event = snap["json"]["event"]
+    assert {k: strip_event[k] for k in feed["event"]} == feed["event"] and set(strip_event) == set(feed["event"]) | {"starts_at", "ends_at"}
+    assert datetime.fromisoformat(strip_event["starts_at"].replace("Z", "+00:00")) == event.event_datetime
+    assert datetime.fromisoformat(strip_event["ends_at"].replace("Z", "+00:00")) == event.event_datetime + timedelta(hours=event.duration)
+    assert len(snap["data"]) < 400
+
+    # The audience asks and votes: the room moves on, the strip does not.
+    asked = (await client.post(_u(world, "/questions"), json={"text": "Is there a break?"}, headers=_key(7))).json()
+    await client.post(_u(world, f"/questions/{asked['id']}/vote"), headers=_key(8))
+    await bus.drain()
+    await streams.step()
+    await s.nothing()
+
+    # The host pushes an update: the banner shows it, the same as the room's.
+    sent = await client.post(_u(world, "/updates"), json={"kind": "general", "text": "Doors open at seven", "audience": "registered"}, headers=world["h"])
+    assert sent.status_code == 201
+    await bus.drain()
+    await streams.step()
+    snap = await s.next_of("snapshot")
+    feed = (await client.get(_u(world))).json()
+    assert snap["json"]["banner"] == feed["banner"] and feed["banner"]["text"] == "Doors open at seven"
+    assert len(snap["data"]) < 600 and len(snap["data"]) * 2 < len(json.dumps(feed))
+
+    # Gone where the room is.
+    event.lifecycle = EventStatus.draft
+    await session.commit()
+    await streams.step(resync=True)
+    await streams.step()
+    assert (await s.next_of("gone"))["json"]["status"] == 404
+    await asyncio.wait_for(s.task, 2)
+    assert (await SSE(_s(world), {}, {"view": "banner"}).open()).status == 404
+
+
 async def test_the_quiz_stream_is_a_players_and_sends_their_poll(client, world, streams):
     code = await _quiz(client, world, questions=2)
     players = [await _join(client, code, i) for i in range(3)]
