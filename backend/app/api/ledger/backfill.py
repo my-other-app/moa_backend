@@ -233,7 +233,8 @@ async def _registration_ids(session, *, batch: int, since: datetime | None):
     """The registrations holding money, a batch of ids at a time: event by
     event for the live ones (an event's registrations sit together on disk,
     and the walk reads them through the event's index, where a walk in id
-    order -- random uuids -- read a page for every row), then the deleted ones."""
+    order -- random uuids -- read a page for every row), then the deleted
+    ones, found in one pass."""
     from app.api.events.models import EventRegistrationsLink as Reg
     from app.api.events.models import Events
 
@@ -252,19 +253,15 @@ async def _registration_ids(session, *, batch: int, since: datetime | None):
         for start in range(0, len(ids), batch):
             yield ids[start:start + batch]
         last_event = events[-1]
-    last = None
-    while True:
-        q = (select(Reg.id).where(Reg.is_deleted == True, _holds_money())  # noqa: E712
-             .order_by(Reg.id).limit(batch).execution_options(include_deleted=True))
-        if last is not None:
-            q = q.where(Reg.id > last)
-        if since is not None:
-            q = q.where(Reg.updated_at >= since)
-        ids = list((await session.scalars(q)).all())
-        if not ids:
-            return
-        yield ids
-        last = ids[-1]
+    # The deleted ones are few: one pass over the table finds them all (a
+    # walk in id order would read a page for every row it skipped).
+    q = select(Reg.id).where(Reg.is_deleted == True, _holds_money()).execution_options(include_deleted=True)  # noqa: E712
+    if since is not None:
+        q = q.where(Reg.updated_at >= since)
+    deleted = list((await session.scalars(q)).all())
+    await session.commit()
+    for start in range(0, len(deleted), batch):
+        yield deleted[start:start + batch]
 
 
 async def _registrations(session, done: dict, *, batch: int, since: datetime | None) -> None:
