@@ -394,7 +394,13 @@ async def place_order(session, event: Events, reg: Reg, picks, role: str = "atte
     order.held_until = _now() + HOLD_FOR
     await session.flush()
     if total == 0:
+        # Given free (a role's free pick): sold at nothing, and in the
+        # ledger as a zero-rupee comp, so the pieces are still counted.
+        from app.api.ledger import book as ledger_book
+        from app.api.ledger import service as ledger
+
         await mark_paid(session, order)
+        await ledger.sync_registration(session, reg, kind=ledger_book.COMP, accounts=(ledger_book.STORE, ledger_book.STORE_HELD))
     return order
 
 
@@ -467,13 +473,25 @@ async def mark_paid(session, order: EventStoreOrders) -> str:
 async def fulfil(session, order: EventStoreOrders) -> dict:
     """An oversold order the organiser has found the pieces for (stock
     raised): taken from the shelf now, and paid. SOLD_OUT while the pieces
-    still are not there."""
+    still are not there. In the ledger, its money moves from held to sold,
+    dated when it was paid (the finance page's month for it)."""
+    from app.api.ledger import book as ledger_book
+    from app.api.ledger import service as ledger
+
+    # The registration before the order, as a refund takes them: two that
+    # meet wait for one another rather than deadlock.
+    reg = await session.scalar(select(Reg).where(Reg.id == order.registration_id).with_for_update())
     o = await _locked(session, order)
     if o is None or o.status != "oversold":
         raise CustomHTTPException(409, message="Only an oversold order is fulfilled", error_code="NOT_OVERSOLD")
     if not await _take_all(session, o, _sell_fresh):
         raise CustomHTTPException(409, message="The pieces are still not in stock. Raise the stock first, or refund.", error_code="SOLD_OUT")
+    if reg is not None:
+        await ledger.ensure_history(session, reg)
     o.status = "paid"
+    if reg is not None:
+        await ledger.sync_registration(session, reg, kind=ledger_book.FULFIL, at=_now(), origin_at=o.paid_at,
+                                       accounts=(ledger_book.STORE, ledger_book.STORE_HELD))
     await session.commit()
     reg = await session.get(Reg, o.registration_id)
     return order_out(o, reg)

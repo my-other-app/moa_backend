@@ -57,12 +57,18 @@ def start_loops() -> list[asyncio.Task]:
     from app.api.payments.sweep import sweep_loop as payments_sweep_loop
     # Spent sessions and old sign-in attempts out, hourly, on one process.
     from app.api.auth.retention import sweep_loop as account_sweep_loop
+    # The money ledger, once a day on one process: failed postings retried,
+    # the monthly sums checked against the entries, and yesterday's payments
+    # and refunds at Razorpay against the ledger. Its postings are made in
+    # each money transition's own transaction, never here or in a job: this
+    # only repairs and checks them.
+    from app.api.ledger.jobs import daily_loop as ledger_daily_loop
 
     return [
         asyncio.create_task(loop())
         for loop in (
             sweep_loop, closeout_sweep_loop, feedback_sweep_loop, billing_sweep_loop, counter_check_loop,
-            domains_sweep_loop, store_sweep_loop, payments_sweep_loop, account_sweep_loop,
+            domains_sweep_loop, store_sweep_loop, payments_sweep_loop, account_sweep_loop, ledger_daily_loop,
         )
     ]
 

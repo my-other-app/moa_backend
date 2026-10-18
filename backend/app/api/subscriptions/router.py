@@ -671,7 +671,7 @@ async def _grant_complimentary(session, user, club, plan, cycle, payload, reques
         granted_by=getattr(user, "id", None), now=now,
     )
     until = f"until {notices.day(ends_at)}" if ends_at else "with no end date"
-    await audit.record(
+    entry = await audit.record(
         session,
         actor=user,
         action="subscription.comp_grant",
@@ -685,6 +685,13 @@ async def _grant_complimentary(session, user, club, plan, cycle, payload, reques
             "previous": was,
         },
         request=request,
+    )
+    # In the money ledger at zero, keyed by the audit entry the revenue page counts.
+    from app.api.ledger import service as money_ledger
+
+    await money_ledger.comp_granted(
+        session, audit_id=entry.id if entry is not None else None, club_id=club.id, subscription_id=subscription.id,
+        at=entry.created_at if entry is not None and entry.created_at else now,
     )
     await notify(
         session, "plan_assigned",

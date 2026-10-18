@@ -15,11 +15,17 @@ Two kinds of number, kept apart on purpose:
 
 Months are calendar months in India. Ticket money is shown for context and
 never added in: it is collected for clubs, not earned by the platform.
+
+With settings.LEDGER_READS the money (collected, refunded, the series'
+money, new paying and complimentary counts, ticket sales) is read from the
+money ledger's platform-wide monthly sums (app/api/ledger/reads.py): a few
+rows a month, however many charges. The run rate is the subscriptions as
+they stand, either way.
 """
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy import String, cast, func, select
@@ -252,6 +258,10 @@ async def run_rate(session, now: datetime) -> dict:
 
 
 async def collected(session, now: datetime) -> dict:
+    from app.api.ledger import reads as ledger_reads
+
+    if ledger_reads.enabled():
+        return await ledger_reads.collected(session, now)
     year, month = _this_month(now)
     this_start, next_start = month_bounds(year, month)
     last_start = month_start(*_shift(year, month, -1))
@@ -281,8 +291,7 @@ async def collected(session, now: datetime) -> dict:
 async def series(session, months: int, now: datetime) -> list[dict]:
     """The last `months` calendar months in India, oldest first, every month
     present (zero when nothing happened)."""
-    from app.api.admin_alerts.models import AdminNotifications
-    from app.api.audit.models import AdminAuditLogs
+    from app.api.ledger import reads as ledger_reads
 
     year, month = _this_month(now)
     keys = [f"{y:04d}-{m:02d}" for y, m in (_shift(year, month, -i) for i in range(months - 1, -1, -1))]
@@ -300,6 +309,23 @@ async def series(session, months: int, now: datetime) -> list[dict]:
         if bucket is not None:
             bucket[field] += value
 
+    from_ledger = ledger_reads.enabled()
+    if from_ledger:
+        first_month = date(*_shift(year, month, -(months - 1)), 1)
+        for key, money_row in (await ledger_reads.series_money(session, keys, first_month)).items():
+            out[key].update(money_row)
+    await _series_rows(session, since, add, from_ledger=from_ledger)
+    return [out[key] for key in keys]
+
+
+async def _series_rows(session, since: datetime, add, *, from_ledger: bool) -> None:
+    """The series' figures read from the rows: all of them, or (`from_ledger`)
+    only those that are not money -- trials started and cancellations."""
+    from app.api.audit.models import AdminAuditLogs
+
+    if from_ledger:
+        await _trials_and_cancellations(session, since, add)
+        return
     for charged_at, amount, refunded in (
         await session.execute(
             select(SubscriptionCharges.charged_at, SubscriptionCharges.amount_paise, SubscriptionCharges.refunded_paise)
@@ -326,6 +352,21 @@ async def series(session, months: int, now: datetime) -> list[dict]:
     for (first,) in (await session.execute(first_charges)).all():
         add(first, "new_paying")
 
+    await _trials_and_cancellations(session, since, add)
+
+    for (created_at,) in (
+        await session.execute(
+            select(AdminAuditLogs.created_at).where(
+                AdminAuditLogs.action == "subscription.comp_grant", AdminAuditLogs.created_at >= since
+            )
+        )
+    ).all():
+        add(created_at, "new_complimentary")
+
+
+async def _trials_and_cancellations(session, since: datetime, add) -> None:
+    from app.api.admin_alerts.models import AdminNotifications
+
     for (started,) in (
         await session.execute(
             select(ClubSubscriptions.trial_started_at)
@@ -349,24 +390,17 @@ async def series(session, months: int, now: datetime) -> list[dict]:
         if not (data or {}).get("complimentary"):
             add(created_at, "cancelled")
 
-    for (created_at,) in (
-        await session.execute(
-            select(AdminAuditLogs.created_at).where(
-                AdminAuditLogs.action == "subscription.comp_grant", AdminAuditLogs.created_at >= since
-            )
-        )
-    ).all():
-        add(created_at, "new_complimentary")
-
-    return [out[key] for key in keys]
-
 
 async def ticket_sales(session, now: datetime) -> dict:
     """Captured ticket (and shelf) payments on the platform's Razorpay
     account. A payment is captured when its log says `captured`; a refund
     flips it to `refunded`, so these are what was kept."""
+    from app.api.ledger import reads as ledger_reads
     from app.api.payments.models import PaymentLogs, PaymentOrders, PaymentStatus
 
+    if ledger_reads.enabled():
+        this_month, all_time = await ledger_reads.ticket_sales(session, now)
+        return {"this_month_paise": this_month, "all_time_paise": all_time, "note": TICKET_NOTE}
     year, month = _this_month(now)
     start, end = month_bounds(year, month)
     criteria = [PaymentLogs.status == PaymentStatus.captured, PaymentLogs.is_deleted == False]  # noqa: E712

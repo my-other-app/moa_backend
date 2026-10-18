@@ -364,10 +364,14 @@ async def walkup(session, event: Events, body, actor: GateActor, background_task
         store_picks=body.store or None, by_organiser=True,
     )
     reg = await registration_of(session, event, data["event_registration_id"])
+    from app.api.ledger import book as ledger_book
+    from app.api.ledger import service as ledger
+
     if event.has_fee and not reg.is_paid:
-        # Paid at the door; the desk takes the money.
+        # Paid at the door; the desk takes the money (and the ledger has it as cash).
         reg.is_paid = True
         reg.paid_amount = reg.actual_amount
+        await ledger.sync_registration(session, reg, kind=ledger_book.DESK_SALE, channel=ledger.DESK)
         await session.commit()
     # Whatever they took from the shelf is paid at the desk too.
     from app.api.store import service as store
@@ -375,6 +379,7 @@ async def walkup(session, event: Events, body, actor: GateActor, background_task
     pending = await store.pending_for(session, reg.id)
     if pending is not None:
         await store.mark_paid(session, pending)
+        await ledger.sync_registration(session, reg, kind=ledger_book.DESK_SALE, channel=ledger.DESK)
         await session.commit()
 
     via = CheckInVia.desk if actor.full and actor.door is None else CheckInVia.walkup

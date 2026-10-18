@@ -43,3 +43,4 @@ from app.api.discover import places as _club_places  # noqa: F401
 from app.api.reports import models as _report_models  # noqa: F401
 # The job queue and its runners' heartbeats (app/core/jobs.py).
 from app.core import jobs as _jobs  # noqa: F401
+from app.api.ledger import models as _ledger_models  # noqa: F401

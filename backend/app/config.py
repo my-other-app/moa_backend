@@ -368,6 +368,20 @@ class AppConfig(BaseSettings):
     # How long one Redis call may take before it is given up on, in seconds.
     REDIS_TIMEOUT: float = 0.25
 
+    # ─── The money ledger (app/api/ledger) ─────────────────────────────────
+    # Every money transition is posted to the append-only ledger_entries and
+    # summed into ledger_monthly as it happens, whatever this says. This picks
+    # what the club finance pages, statements and the admin revenue page READ:
+    # false (default) works their figures out from registrations, orders,
+    # payment logs and subscription charges as before; true reads the
+    # ledger's monthly sums. Turn on only after the backfill
+    # (scripts/ledger_backfill.py) and a clean compare (scripts/ledger_compare.py).
+    LEDGER_READS: bool = False
+    # When the daily ledger job runs (failed postings retried, drift put
+    # right, and -- once the history is backfilled -- Razorpay's payments and
+    # refunds of the day before checked), as HH:MM in India. Empty: never.
+    LEDGER_DAILY_AT: str = "02:30"
+
     @field_validator("PLAN_ENFORCEMENT_FROM")
     @classmethod
     def _aware_cutoff(cls, value: datetime) -> datetime:
