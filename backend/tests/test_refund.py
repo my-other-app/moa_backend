@@ -82,10 +82,15 @@ async def test_admin_refund_blocks_checkin(
 
 
 async def test_refund_via_webhook_reaches_same_state(
-    session, make_user, make_club, make_event, make_registration
+    session, monkeypatch, make_user, make_club, make_event, make_registration
 ):
     club_user, club, event, registration, order, payment = await _make_captured_payment(
         session, make_user, make_club, make_event, make_registration
+    )
+    # Razorpay is asked whether it was refunded, and says so.
+    monkeypatch.setattr(
+        razorpay_client.payment, "fetch",
+        lambda payment_id, *a, **kw: {"id": payment_id, "order_id": order.razorpay_order_id, "status": "refunded", "amount": 10000, "amount_refunded": 10000},
     )
 
     webhook_data = {

@@ -18,6 +18,7 @@ import hmac
 import logging
 import re
 import secrets
+from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -127,10 +128,41 @@ def make_client(key_id: str, key_secret: str):
     return rzp.new_client(key_id, key_secret)
 
 
+#: Clients on clubs' accounts, kept so each keeps its HTTPS connections to
+#: Razorpay open between calls (a new client was built, and a new TLS
+#: connection made, for every order, verify, refund and webhook).
+_CLIENTS: "OrderedDict[tuple, Any]" = OrderedDict()
+CLIENT_CACHE_SIZE = 64
+
+
+def _client_key(gateway: ClubPaymentGateways) -> tuple:
+    """What a cached client stands for: the gateway and the keys it holds
+    (as stored, encrypted: new keys are a new key), the key that decrypts
+    them, and the factory (the suite swaps it). Not `updated_at`, which every
+    webhook delivery moves (last_webhook_at) without the keys changing."""
+    secret = hashlib.sha256((gateway.key_secret_enc or "").encode()).hexdigest()
+    unlock = hashlib.sha256((settings.PAYMENT_KEYS_SECRET or "").encode()).hexdigest()
+    return (gateway.id, gateway.key_id, secret, unlock, id(make_client))
+
+
 def client_for(gateway: ClubPaymentGateways):
     if gateway.mode != MODE_KEYS:
         raise crypto.Unavailable(f"{gateway.mode} gateways are not supported yet")
-    return make_client(gateway.key_id, crypto.decrypt(gateway.key_secret_enc))
+    key = _client_key(gateway)
+    client = _CLIENTS.get(key)
+    if client is not None:
+        _CLIENTS.move_to_end(key)
+        return client
+    client = make_client(gateway.key_id, crypto.decrypt(gateway.key_secret_enc))
+    _CLIENTS[key] = client
+    while len(_CLIENTS) > CLIENT_CACHE_SIZE:
+        _CLIENTS.popitem(last=False)
+    return client
+
+
+def forget_clients() -> None:
+    """Drop every cached client (tests)."""
+    _CLIENTS.clear()
 
 
 async def live_gateway(session, club_id: int) -> ClubPaymentGateways | None:
@@ -315,6 +347,8 @@ async def connect(session, club, user, key_id: str, key_secret: str, *, request=
     key_id = (key_id or "").strip()
     key_secret = (key_secret or "").strip()
     _check_format(key_id, key_secret)
+    # Nothing held while Razorpay answers.
+    await session.commit()
     try:
         await check_keys(key_id, key_secret)
     except KeysRefused as exc:
@@ -408,6 +442,8 @@ async def verify(session, club, user, *, request=None) -> ClubPaymentGateways:
     if not crypto.available():
         raise unavailable_error()
     was = gateway.status
+    # Nothing held while Razorpay answers.
+    await session.commit()
     result = await _recheck(session, gateway)
     await audit.record(
         session,
@@ -430,6 +466,9 @@ async def disconnect(session, club, user, *, request=None) -> ClubPaymentGateway
     from app.api.audit import service as audit
 
     await _refuse_if_disabled(session, club.id)
+    # The same lock as connect: a disconnect racing a connect must not end
+    # the gateway the connect is replacing, or the new one it just made.
+    await session.execute(select(func.pg_advisory_xact_lock(_CONNECT_LOCK, club.id)))
     gateway = await live_gateway(session, club.id)
     if gateway is None:
         return None
@@ -463,6 +502,7 @@ async def disable(session, club_id: int, admin, *, request=None) -> ClubPaymentG
     from app.api.admin_alerts import notify
     from app.api.audit import service as audit
 
+    await session.execute(select(func.pg_advisory_xact_lock(_CONNECT_LOCK, club_id)))
     gateway = await live_gateway(session, club_id)
     if gateway is None:
         raise _refuse(404, "This club has no Razorpay account connected.", "NO_GATEWAY")

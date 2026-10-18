@@ -104,6 +104,11 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     # list can sort by popularity without counting registrations.
     # Reconciled from the rows by app.api.discover.counters.reconcile.
     going_count = Column(Integer, nullable=False, default=0, server_default="0")
+    # How many registrations are paid and not cancelled: what a paid event's
+    # capacity counts. Kept by a trigger the same way (PAID_COUNT_SQL below);
+    # a capture takes a place against it with one conditional UPDATE of this
+    # row (payments.capacity.take_paid_place).
+    paid_count = Column(Integer, nullable=False, default=0, server_default="0")
     event_tag = Column(String(50), nullable=True)  # Tag like "Free", "Paid", "Featured", etc.
 
     category_id = Column(Integer, ForeignKey("event_categories.id"), nullable=False)
@@ -449,6 +454,12 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
             "ix_event_registrations_link_tracking_link_id", "tracking_link_id",
             postgresql_where=sa.text("tracking_link_id IS NOT NULL"),
         ),
+        # The registration a payment order is for, by the receipt it carries
+        # (capture, refund, finance's refunds). Only the ones paid online have one.
+        sa.Index(
+            "ix_registrations_payment_receipt", "payment_receipt",
+            postgresql_where=sa.text("payment_receipt IS NOT NULL"),
+        ),
     )
 
     @property
@@ -519,4 +530,39 @@ GOING_COUNT_SQL = (
 )
 
 for _sql in GOING_COUNT_SQL:
+    sa_event.listen(EventRegistrationsLink.__table__, "after_create", DDL(_sql).execute_if(dialect="postgresql"))
+
+
+# ─── events.paid_count, kept by the database ──────────────────────────────
+#
+# The paid places a paid event's capacity counts, kept like going_count and
+# for the same reason: is_paid is set by captures, the desk, the organiser
+# marking someone paid, refunds and merges, and a trigger sees every one.
+# The migration money_integrity installs the same function and trigger.
+
+PAID_COUNT_SQL = (
+    """
+    CREATE OR REPLACE FUNCTION moa_paid_count() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF TG_OP = 'UPDATE' AND OLD.event_id = NEW.event_id AND OLD.is_deleted = NEW.is_deleted
+         AND OLD.is_paid = NEW.is_paid THEN
+        RETURN NULL;
+      END IF;
+      IF TG_OP IN ('UPDATE', 'DELETE') AND NOT OLD.is_deleted AND OLD.is_paid THEN
+        UPDATE events SET paid_count = paid_count - 1 WHERE id = OLD.event_id;
+      END IF;
+      IF TG_OP IN ('UPDATE', 'INSERT') AND NOT NEW.is_deleted AND NEW.is_paid THEN
+        UPDATE events SET paid_count = paid_count + 1 WHERE id = NEW.event_id;
+      END IF;
+      RETURN NULL;
+    END $$
+    """,
+    """
+    CREATE TRIGGER trg_registrations_paid_count
+    AFTER INSERT OR DELETE OR UPDATE OF event_id, is_deleted, is_paid ON event_registrations_link
+    FOR EACH ROW EXECUTE FUNCTION moa_paid_count()
+    """,
+)
+
+for _sql in PAID_COUNT_SQL:
     sa_event.listen(EventRegistrationsLink.__table__, "after_create", DDL(_sql).execute_if(dialect="postgresql"))

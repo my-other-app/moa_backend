@@ -65,6 +65,15 @@ async def lifespan(app: FastAPI):
     from app.api.club_domains.sweep import sweep_loop as domains_sweep_loop
 
     domains = asyncio.create_task(domains_sweep_loop())
+    # Store holds that ran out given back, every minute.
+    from app.api.store.sweep import sweep_loop as store_sweep_loop
+
+    store_holds = asyncio.create_task(store_sweep_loop())
+    # Payments: open orders reconciled with Razorpay, unapplied captures
+    # repaired, automatic refunds retried -- every ten minutes, one worker.
+    from app.api.payments.sweep import sweep_loop as payments_sweep_loop
+
+    payments_sweep = asyncio.create_task(payments_sweep_loop())
     # What import and startup built (models, routes, schemas, the S3 service
     # model: some 740,000 objects) lives as long as the process. Frozen out
     # of the collector's reach, a full collection no longer walks all of it:
@@ -79,6 +88,8 @@ async def lifespan(app: FastAPI):
     billing.cancel()
     counters.cancel()
     domains.cancel()
+    store_holds.cancel()
+    payments_sweep.cancel()
 
 
 # No default_response_class: FastAPI's own JSON response is the default. It
