@@ -34,8 +34,10 @@ from app.api.live import models as _live_models  # noqa: F401
 from app.api.competitions import models as _competition_models  # noqa: F401
 from app.api.sites import models as _site_models  # noqa: F401
 from app.api.club_access import models as _club_access_models  # noqa: F401
+from app.api.club_domains import models as _club_domain_models  # noqa: F401
 from app.api.organisers import models as _organiser_models  # noqa: F401
 from app.api.discover.geocode import GeocodeCache  # noqa: F401
 from app.api.discover.stats import DiscoverStats  # noqa: F401
 # The triggers that keep clubs.place_lat/place_lng, installed with the events table.
 from app.api.discover import places as _club_places  # noqa: F401
+from app.api.reports import models as _report_models  # noqa: F401

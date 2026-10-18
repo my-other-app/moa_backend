@@ -4,12 +4,12 @@ import hmac
 import time
 import traceback
 from fastapi import BackgroundTasks
-import razorpay
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
+from app.api.payments import rzp
 from app.api.payments.handlers import handle_post_payment, validate_payload
 from app.api.payments.models import (
     OrderStatus,
@@ -19,16 +19,16 @@ from app.api.payments.models import (
     RazorpayWebhookLogs,
 )
 from app.api.events.models import EventRegistrationsLink
-from app.core.validations.exceptions import RequestValidationError
+from app.core.validations.exceptions import CodedRequestError, RequestValidationError
 from app.response import CustomHTTPException
 from app.config import settings
 from app.api.payments.background_tasks import send_payment_confirmation_email
 
 import logging
 
-razorpay_client = razorpay.Client(
-    auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
-)
+# The platform's account. Called only through rzp.call: the SDK is
+# synchronous, and the event loop must not wait on Razorpay.
+razorpay_client = rzp.new_client(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +113,7 @@ async def create_razorpay_order(
             return existing_order
 
         try:
-            razorpay_order = checkout.client.order.create(data=order_data)
+            razorpay_order = await rzp.call(checkout.client.order.create, data=order_data)
         except Exception as exc:
             if checkout.kind == gateways.CLUB and attempt == 0 and gateways.is_auth_error(exc):
                 await gateways.mark_failed(
@@ -160,7 +160,7 @@ async def verify_razorpay_payment(
     )
 
     if not order:
-        raise CustomHTTPException(404, "Payment order not found")
+        raise CustomHTTPException(404, "Payment order not found", error_code="ORDER_NOT_FOUND")
 
     db_payment = await session.scalar(
         select(PaymentLogs)
@@ -172,7 +172,7 @@ async def verify_razorpay_payment(
         return db_payment
 
     if order.status == OrderStatus.paid:
-        raise RequestValidationError(razorpay_order_id="Order already paid")
+        raise CodedRequestError(409, "This order is already paid.", "ALREADY_PAID", razorpay_order_id="Order already paid")
 
     # The account the order was made on -- the club's own, or the platform's --
     # whatever the club has connected since.
@@ -187,14 +187,15 @@ async def verify_razorpay_payment(
         return account.client
 
     if not payment_details:
-        payment_details = (await client()).payment.fetch(razorpay_payment_id)
+        payment_details = await rzp.call((await client()).payment.fetch, razorpay_payment_id)
 
     # Make sure the payment being verified was actually made against this
     # order, not a different one — otherwise a real captured payment for
     # order A could be used to mark an unrelated order B as paid.
     if payment_details.get("order_id") != razorpay_order_id:
-        raise RequestValidationError(
-            razorpay_order_id="This payment does not belong to the specified order."
+        raise CodedRequestError(
+            400, "This payment does not belong to the specified order.", "PAYMENT_ORDER_MISMATCH",
+            razorpay_order_id="This payment does not belong to the specified order.",
         )
 
     if not db_payment:
@@ -214,8 +215,8 @@ async def verify_razorpay_payment(
 
     if expand_payment_details:
         if payment_method in ("card"):
-            payment_details = (await client()).payment.fetch(
-                razorpay_payment_id, {"expand[]": payment_method}
+            payment_details = await rzp.call(
+                (await client()).payment.fetch, razorpay_payment_id, {"expand[]": payment_method}
             )
 
     if payment_method == "upi":
@@ -240,7 +241,7 @@ async def verify_razorpay_payment(
 
     else:
 
-        raise RequestValidationError(payment_method="Invalid payment method")
+        raise CodedRequestError(400, "This payment method is not supported.", "UNSUPPORTED_PAYMENT_METHOD", payment_method="Invalid payment method")
 
     if payment_status == "captured":
         db_payment.status = PaymentStatus.captured
@@ -459,7 +460,7 @@ async def refund_payment(session: AsyncSession, payment_log_id) -> PaymentLogs:
 
     account = await gateways.for_order(session, db_payment.order)
     # No `amount` param — Razorpay refunds the full captured amount.
-    account.client.payment.refund(db_payment.razorpay_payment_id)
+    await rzp.call(account.client.payment.refund, db_payment.razorpay_payment_id)
 
     await _apply_refund(session, db_payment)
     # Read back with its order: the caller reports both, and a refresh alone
@@ -640,7 +641,7 @@ async def _fetch_payment(session, gateway, client, payment_id: str) -> dict | No
     from app.api.payment_gateways import service as gateways
 
     try:
-        return client.payment.fetch(payment_id) or {}
+        return await rzp.call(client.payment.fetch, payment_id) or {}
     except Exception as exc:  # noqa: BLE001
         if isinstance(exc, BadRequestError) and not gateways.is_auth_error(exc):
             logger.warning("Club gateway %s: Razorpay has no payment %s", gateway.id, payment_id)
@@ -855,7 +856,7 @@ async def _handle_subscription_payment_failure(session: AsyncSession, data: dict
     from app.api.subscriptions import billing as subscription_billing
     from app.api.subscriptions.models import ClubSubscriptions
 
-    razorpay_id = subscription_billing.subscription_id_for_payment(data)
+    razorpay_id = await subscription_billing.subscription_id_for_payment(data)
     if not razorpay_id:
         return False
     subscription = await session.scalar(

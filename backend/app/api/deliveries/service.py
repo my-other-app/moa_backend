@@ -108,12 +108,14 @@ async def queue(
         q = q.where(EventRegistrationsLink.id.in_(list(registration_ids)))
     regs = list(await session.scalars(q.order_by(EventRegistrationsLink.created_at)))
 
-    existing = {
-        (d.registration_id, d.channel): d
-        for d in await session.scalars(
-            select(Deliveries).where(Deliveries.event_id == event.id, Deliveries.kind == kind)
-        )
-    }
+    # What was sent before, for these guests only when the send names them:
+    # a registration's own ticket (send_ticket) read every delivery the event
+    # ever made -- some 3,700 rows a registration on a 7,600-guest event,
+    # about a third of a second of the worker's time each.
+    sent_before = select(Deliveries).where(Deliveries.event_id == event.id, Deliveries.kind == kind)
+    if registration_ids:
+        sent_before = sent_before.where(Deliveries.registration_id.in_(list(registration_ids)))
+    existing = {(d.registration_id, d.channel): d for d in await session.scalars(sent_before)}
     ids: list[uuid.UUID] = []
     already_sent = 0
     revoked = 0

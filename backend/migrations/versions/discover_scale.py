@@ -37,13 +37,13 @@ Downgrade drops the indexes (concurrently), the triggers and functions, the
 table and the columns.
 
 Revision ID: discover_scale
-Revises: admin_revenue
+Revises: write_path
 """
 import sqlalchemy as sa
 from alembic import op
 
 revision = "discover_scale"
-down_revision = "admin_revenue"
+down_revision = "write_path"
 branch_labels = None
 depends_on = None
 

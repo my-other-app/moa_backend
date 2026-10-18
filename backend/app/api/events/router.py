@@ -800,21 +800,6 @@ async def get_certificate_pdf(
     )
 
 
-@router.get("/wallet/debug", summary="Debug wallet certificate status")
-async def debug_wallet_certs() -> dict:
-    """Debug endpoint to check wallet certificate configuration."""
-    return {
-        "certs_dir": str(wallet_service.CERTS_DIR),
-        "certs_dir_exists": wallet_service.CERTS_DIR.exists(),
-        "pass_certificate_exists": wallet_service.CERT_PATH.exists(),
-        "pass_key_exists": wallet_service.KEY_PATH.exists(),
-        "wwdr_exists": wallet_service.WWDR_PATH.exists(),
-        "pass_type_id": wallet_service.PASS_TYPE_ID,
-        "team_id": wallet_service.TEAM_ID or "(not set)",
-        "org_name": wallet_service.ORG_NAME,
-    }
-
-
 # ─── Networking Discovery ─────────────────────────────────────────────
 
 from app.api.events.schemas import (

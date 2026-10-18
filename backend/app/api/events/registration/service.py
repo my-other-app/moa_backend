@@ -3,9 +3,10 @@ import logging
 import uuid
 from fastapi import BackgroundTasks
 from pandas import DataFrame
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
+from sqlalchemy.orm.attributes import set_committed_value
 
 logger = logging.getLogger(__name__)
 
@@ -107,22 +108,129 @@ async def live_registration_for_email(
     session: AsyncSession, event_id: int, email: str
 ) -> EventRegistrationsLink | None:
     """A live registration for this event under this address: made with it,
-    or held by any account that has it. Case and stray spaces are ignored."""
+    or held by any account that has it. Case and stray spaces are ignored.
+
+    Two lookups, each on its own index (ix_registrations_event_email; the
+    holders by ix_users_email_normalised, then the event's unique (event,
+    user) key), the earlier of the two answers kept. As one OR, Postgres read
+    every registration of the event."""
     holders = select(Users.id).where(
         user_service.same_email(Users.email, email), Users.is_deleted == False
     )
-    return await session.scalar(
+    live = (
         select(EventRegistrationsLink)
         .where(
             EventRegistrationsLink.event_id == event_id,
             EventRegistrationsLink.is_deleted == False,
-            or_(
-                user_service.same_email(EventRegistrationsLink.email, email),
-                EventRegistrationsLink.user_id.in_(holders),
-            ),
         )
         .order_by(EventRegistrationsLink.created_at)
         .limit(1)
+    )
+    found = [
+        reg
+        for reg in (
+            await session.scalar(live.where(user_service.same_email(EventRegistrationsLink.email, email))),
+            await session.scalar(live.where(EventRegistrationsLink.user_id.in_(holders))),
+        )
+        if reg is not None
+    ]
+    return min(found, key=lambda r: r.created_at) if found else None
+
+
+async def existing_registration(
+    session: AsyncSession, event_id: int, user_id: int, email: str
+) -> EventRegistrationsLink | None:
+    """This user's live registration for the event, else one made with this
+    exact address: two lookups, each an index probe (the event's unique
+    (event, user) key; ix_registrations_event_email, which the exact match
+    is checked against). As one `user_id = ? OR email = ?` it read every
+    registration of the event, inside the event's lock."""
+    live = select(EventRegistrationsLink).where(
+        EventRegistrationsLink.event_id == event_id,
+        EventRegistrationsLink.is_deleted == False,
+    )
+    mine = await session.scalar(live.where(EventRegistrationsLink.user_id == user_id).limit(1))
+    if mine is not None:
+        return mine
+    return await session.scalar(
+        live.where(
+            user_service.same_email(EventRegistrationsLink.email, email),
+            EventRegistrationsLink.email == email,
+        ).limit(1)
+    )
+
+
+async def places_taken(session: AsyncSession, event: Events) -> int:
+    """What the organiser's `max_participants` counts: on a paid event the
+    paid registrations (from ix_registrations_event_created alone), on a free
+    one all of them -- its going_count, which the database keeps equal to
+    that count in the writer's own transaction."""
+    if event.has_fee:
+        # Soft deletes spelled out, the session's `IS false` form switched
+        # off: Postgres cannot match it to the partial index (gates.count).
+        return int(await session.scalar(
+            select(func.count()).select_from(EventRegistrationsLink).where(
+                EventRegistrationsLink.event_id == event.id,
+                EventRegistrationsLink.is_deleted == False,
+                EventRegistrationsLink.is_paid == True,
+            ).execution_options(include_deleted=True)
+        ) or 0)
+    return int(event.going_count or 0)
+
+
+async def take_place(session: AsyncSession, event: Events, cap: int | None):
+    """The registration takes the event's row: one UPDATE that bumps the
+    admission sequence and, on a free event with a cap, only does so while
+    there is room (`going_count < cap`). Postgres re-reads the row after any
+    registration ahead of this one commits, so two can never both take the
+    last place. Returns (admission number's sequence, going_count before
+    this registration), or None when the event is full or gone.
+
+    The row stays held until the transaction ends: the insert's own trigger
+    updates going_count on it anyway. So this comes last, just before the
+    insert, and everything that can be checked first is."""
+    table = Events.__table__
+    stmt = (
+        update(table)
+        .where(table.c.id == event.id, table.c.is_deleted == False)
+        .values(admission_seq=func.coalesce(table.c.admission_seq, 0) + 1)
+        .returning(table.c.admission_seq, table.c.going_count)
+    )
+    if cap is not None:
+        stmt = stmt.where(table.c.going_count < cap)
+    row = (await session.execute(stmt)).first()
+    if row is None:
+        return None
+    # The event in this session says what the row says now (as the ORM
+    # update this replaces did), without writing it again at the commit.
+    set_committed_value(event, "admission_seq", int(row[0]))
+    return int(row[0]), int(row[1] or 0)
+
+
+async def _hold_address(session: AsyncSession, event_id: int, email: str) -> None:
+    """A transaction-scoped advisory lock on this event and address (case and
+    spaces ignored), held to the commit."""
+    await session.execute(
+        select(func.pg_advisory_xact_lock(func.hashtextextended(f"registration:{event_id}:{(email or '').strip().lower()}", 0)))
+    )
+
+
+async def _no_place(session: AsyncSession, event: Events, room, *, organiser: bool) -> CustomHTTPException:
+    """Why take_place found no room: the event gone, the organiser's own cap
+    (checked first, with its own answer), or the plan's per-event cap."""
+    going = await session.scalar(
+        select(Events.going_count).where(Events.id == event.id, Events.is_deleted == False)
+    )
+    if going is None:
+        return CustomHTTPException(404, message="Event not found")
+    if room is None or room.event_cap is None or (event.max_participants and going >= event.max_participants):
+        return CustomHTTPException(
+            400, message="Event is full", error_code="EVENT_FULL", errors={"max_participants": event.max_participants}
+        )
+    from app.api.subscriptions import gates
+
+    return await gates.refuse_registration(
+        session, event, room.ent, "registrations_per_event", cap=room.event_cap, used=int(going), organiser=organiser
     )
 
 
@@ -191,17 +299,19 @@ async def register_event(
             }
         ),
     )
+    # The event is read without a lock, and every check below is made before
+    # the registration takes the event's row (take_place, just before the
+    # insert). The row used to be locked here (SELECT ... FOR UPDATE) and held
+    # through the checks, the duplicate lookup and the plan's counts, so one
+    # event took its registrations one at a time for as long as all of that
+    # took, and longer the bigger the event (docs/SCALING.md). The one check
+    # that must be exact -- room left -- is made again by take_place itself.
     if is_event_id:
         event_id = int(event_id)
-        db_event = await session.execute(
-            select(Events).filter(Events.id == event_id).with_for_update()
-        )
+        db_event = await session.scalar(select(Events).filter(Events.id == event_id))
     else:
-        db_event = await session.execute(
-            select(Events).filter(Events.slug == event_id).with_for_update()
-        )
+        db_event = await session.scalar(select(Events).filter(Events.slug == event_id))
 
-    db_event = db_event.scalar()
     if not db_event:
         raise CustomHTTPException(404, message="Event not found")
     
@@ -213,25 +323,18 @@ async def register_event(
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
     if db_event.reg_enddate and db_event.reg_enddate < now:
-        raise CustomHTTPException(400, message="Registration deadline has passed")
+        raise CustomHTTPException(400, message="Registration deadline has passed", error_code="REGISTRATIONS_CLOSED", errors={"closed_reason": "deadline_passed", "closed_at": db_event.reg_enddate.isoformat()})
     
     # Check if registration hasn't started yet
     if db_event.reg_startdate and db_event.reg_startdate > now:
-        raise CustomHTTPException(400, message="Registration has not started yet")
+        raise CustomHTTPException(400, message="Registration has not started yet", error_code="REGISTRATIONS_CLOSED", errors={"closed_reason": "not_started", "opens_at": db_event.reg_startdate.isoformat()})
 
-    # Check max participants (using FOR UPDATE lock to prevent race condition)
+    # Room left, as max_participants counts it: on a paid event the paid
+    # registrations, on a free one all of them. An early answer; on a free
+    # event take_place makes it exact.
     if db_event.max_participants:
-        registered_count = await session.scalar(
-            select(func.count()).where(
-                EventRegistrationsLink.event_id == db_event.id,
-                EventRegistrationsLink.is_deleted == False,
-                # For paid events, count only paid registrations
-                # For free events, count all registrations
-                EventRegistrationsLink.is_paid == True if db_event.has_fee else True,
-            )
-        )
-        if registered_count >= db_event.max_participants:
-            raise CustomHTTPException(400, message="Event is full")
+        if await places_taken(session, db_event) >= db_event.max_participants:
+            raise CustomHTTPException(400, message="Event is full", error_code="EVENT_FULL", errors={"max_participants": db_event.max_participants})
 
     if relaxed_fields:
         additional_details = {k: v for k, v in (additional_details or {}).items() if v not in (None, "")}
@@ -265,28 +368,32 @@ async def register_event(
                     errors[field.key] = "Invalid option selected"
             validated_additional_details[field.key] = value
         if errors:
-            raise CustomHTTPException(400, message=errors)
+            # A string message naming the questions by label, and each
+            # answer's problem by question key in `errors` -- where the public
+            # site's form reads them.
+            labels = [f.label for f in db_additional_details if f.key in errors]
+            raise CustomHTTPException(400, message=f"Check your answers: {', '.join(labels)}.", error_code="INVALID_ANSWERS", errors=errors)
         additional_details = validated_additional_details
 
-    # Check for existing registration by user_id OR email
-    registration = await session.scalar(
-        select(EventRegistrationsLink).where(
-            EventRegistrationsLink.event_id == db_event.id,
-            EventRegistrationsLink.is_deleted == False,
-            # Check both user_id and email to prevent duplicates
-            (EventRegistrationsLink.user_id == user_id) | (EventRegistrationsLink.email == email),
-        )
-    )
+    # An existing registration: this user's, or one made with this address.
+    # Two requests with the same address (a double submit) are taken one
+    # after the other from here, so the second finds the first's; nobody
+    # else waits on it, as everyone waited on the event's row before.
+    await _hold_address(session, db_event.id, email)
+    registration = await existing_registration(session, db_event.id, user_id, email)
     if registration:
         if not claim_existing and registration.user_id != user_id:
             raise CustomHTTPException(409, message=ALREADY_REGISTERED, error_code="ALREADY_REGISTERED")
         if not db_event.has_fee or registration.is_paid:
             # Still a 400, as the app expects; the code lets every client tell it apart.
             raise CustomHTTPException(400, message="Already registered for this event", error_code="ALREADY_REGISTERED")
-        # Back for the payment: the shelf picks are taken fresh.
+        # Back for the payment: the shelf picks are taken fresh, under the
+        # event's row as a new registration's are (free picks count against
+        # the stock at once).
         if store_picks is not None:
             from app.api.store import service as store
 
+            await session.execute(select(Events.id).where(Events.id == db_event.id).with_for_update())
             await store.place_order(session, db_event, registration, store_picks, role=(registration.role.value if getattr(registration, "role", None) else "attendee"))
             await session.commit()
 
@@ -299,7 +406,7 @@ async def register_event(
         # made before the caps began).
         from app.api.subscriptions import gates
 
-        await gates.check_registration(session, db_event, organiser=by_organiser)
+        room = await gates.check_registration(session, db_event, organiser=by_organiser)
 
         ticket_id = generate_ticket_id()
 
@@ -317,13 +424,25 @@ async def register_event(
             # None explicitly would violate the not-null constraint.
             **({"role": role} if role is not None else {}),
         )
-        session.add(registration)
-        # Its admission number, from the event's own counter, before the row is kept.
-        await admission.assign(session, db_event, registration)
         # Credited to the tracking link the page carried, if it carried one of this club's.
         from app.api.links import service as links
 
         await links.attribute_registration(session, registration, db_event, tracking_ref)
+
+        # Now the event's row, and the place, in one statement. On a free
+        # event the cap is the lower of the organiser's and the plan's; a paid
+        # event's places are its paid registrations, which no registration
+        # changes, so the checks above stand.
+        caps = [] if db_event.has_fee else [c for c in (db_event.max_participants, room.event_cap if room else None) if c]
+        taken = await take_place(session, db_event, min(caps) if caps else None)
+        if taken is None:
+            # Nothing was updated, so nothing is held.
+            raise await _no_place(session, db_event, room, organiser=by_organiser)
+        seq, going_now = taken
+        await gates.recheck_month(session, db_event, room, going_now=going_now, organiser=by_organiser)
+        # Its admission number, from the event's own counter, before the row is kept.
+        registration.admission_no = admission.number_for(db_event, seq)
+        session.add(registration)
 
         if store_picks:
             from app.api.store import service as store

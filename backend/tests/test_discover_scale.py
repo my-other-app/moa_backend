@@ -685,7 +685,7 @@ async def test_a_counter_put_out_by_hand_is_found_and_recounted(client, session,
     assert await session.scalar(select(Events.going_count).where(Events.id == event.id)) == 1
     assert await session.scalar(select(Clubs.follower_count).where(Clubs.id == club.id)) == 1
     assert (await client.post("/api/v1/admin/discover/reconcile-counters", headers=auth_header(await mint_token(admin)))).json() == {"events": 0, "clubs": 0}
-    assert counters.due(now=0.0) and not counters.due(now=1.0) and counters.due(now=counters.EVERY_SECONDS + 1.0)
+    # When it runs on its own (every six hours, one process): tests/test_write_path.py.
 
 
 # ─── The front page's minute cache ───────────────────────────────────────

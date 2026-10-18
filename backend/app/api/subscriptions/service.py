@@ -907,7 +907,9 @@ async def usage(session, club_id: int, now: datetime | None = None) -> dict:
     from app.api.notifications.models import Notifications
 
     since = month_start(now)
-    club_events = select(Events.id).where(Events.club_id == club_id)
+    # Deleted events spelled out (the soft-delete filter's `IS false` form
+    # cannot use ix_events_club_start; gates.count says more).
+    club_events = select(Events.id).where(Events.club_id == club_id, Events.is_deleted == False)
 
     events = await session.scalar(
         select(func.count(Events.id)).where(
@@ -915,11 +917,11 @@ async def usage(session, club_id: int, now: datetime | None = None) -> dict:
         )
     )
     registrations = await session.scalar(
-        select(func.count(EventRegistrationsLink.id)).where(
+        select(func.count()).select_from(EventRegistrationsLink).where(
             EventRegistrationsLink.event_id.in_(club_events),
             EventRegistrationsLink.is_deleted == False,
             EventRegistrationsLink.created_at >= since,
-        )
+        ).execution_options(include_deleted=True)
     )
     seats = await session.scalar(
         select(func.count(ClubMembers.id)).where(

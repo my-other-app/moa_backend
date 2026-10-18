@@ -10,6 +10,7 @@ from uuid import UUID
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import joinedload
 
+from app.api.club_domains.lookup import active_host
 from app.api.clubs.models import Clubs, ClubUsersLink
 from app.api.events.models import EventRegistrationsLink, Events
 from app.api.links.models import TrackingClicks, TrackingLinks
@@ -39,10 +40,20 @@ def short_url(link: TrackingLinks) -> str:
     return f"{settings.PUBLIC_API_URL}/l/{link.code}"
 
 
-def destination(link: TrackingLinks, club_slug: Optional[str] = None, event_slug: Optional[str] = None) -> str:
+def destination(link: TrackingLinks, club_slug: Optional[str] = None, event_slug: Optional[str] = None, site_host: Optional[str] = None) -> str:
     """Where the link lands, tagged: the event's page or the club's. Every caller
-    passes the event's slug; the page answers to the bare id too, should one not."""
-    base = public_urls.event_url(event_slug or link.event_id) if link.event_id else settings.PUBLIC_CLUB_URL.format(slug=club_slug or link.club_id)
+    passes the event's slug; the page answers to the bare id too, should one not.
+
+    The website's own link lands on the website itself at the club's own
+    domain while that is active (`site_host`, from club_domains.lookup):
+    the site counts the visit there with `ref` and `via=l`, as it does on
+    any address."""
+    if link.event_id:
+        base = public_urls.event_url(event_slug or link.event_id)
+    elif site_host and link.kind == WEBSITE:
+        base = f"https://{site_host}/"
+    else:
+        base = settings.PUBLIC_CLUB_URL.format(slug=club_slug or link.club_id)
     params = {"utm_source": link.utm_source, "utm_medium": link.utm_medium}
     if link.utm_campaign:
         params["utm_campaign"] = link.utm_campaign
@@ -259,6 +270,7 @@ async def summary(session, club, event, days: int = 30, now: Optional[datetime] 
     scope.append(TrackingLinks.event_id == event.id if event is not None else TrackingLinks.event_id.is_(None))
     links = list((await session.scalars(select(TrackingLinks).where(*scope).order_by(TrackingLinks.created_at.desc()))).all())
     ids = [l.id for l in links]
+    site_host = await active_host(session, club.id) if event is None else None
 
     clicks: dict = {}
     if ids:
@@ -347,7 +359,7 @@ async def summary(session, club, event, days: int = 30, now: Optional[datetime] 
         agg[0] += n
         agg[1] += c
         out_links.append({
-            "id": link.id, "name": link.name, "code": link.code, "url": short_url(link), "destination": destination(link, getattr(club, "slug", None), getattr(event, "slug", None)),
+            "id": link.id, "name": link.name, "code": link.code, "url": short_url(link), "destination": destination(link, getattr(club, "slug", None), getattr(event, "slug", None), site_host),
             "utm_source": link.utm_source, "utm_medium": link.utm_medium, "utm_campaign": link.utm_campaign, "utm_content": link.utm_content,
             "clicks": n, "uniques": u, "conversions": c, "rate": _pct(c, n), "second": s, "created_at": link.created_at.isoformat(),
         })

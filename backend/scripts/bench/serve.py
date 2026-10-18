@@ -16,8 +16,11 @@ What differs from production, and why:
   see what a registration spike does to everyone else.
 - Each worker writes its own numbers to --stats-dir every second: how late
   the event loop wakes (a 50 ms sleep, measured), the connection pool's
-  checked-out and overflow counts, and how long each `SELECT … FOR UPDATE`
-  took (the wait for the row lock is inside it).
+  checked-out and overflow counts, how long the statement that takes an
+  event's row took (the wait for the lock is inside it: `SELECT … FOR
+  UPDATE` before write_path, the `UPDATE events SET admission_seq … RETURNING
+  … going_count` of registration.take_place since), and how long the row was
+  then held, to the commit.
 
 The app itself is imported unchanged.
 """
@@ -64,6 +67,7 @@ from app.db.core import engine  # noqa: E402
 
 _lags: list[float] = []
 _locks: list[float] = []
+_holds: list[float] = []
 _state = dict(requests=0, inflight=0, max_inflight=0, started=False)
 
 
@@ -72,17 +76,33 @@ def _listen() -> None:
 
     # Per copy of this module: run as __main__ with one worker, uvicorn imports it a second time.
     key = f"_bench_lock_t0_{id(_locks)}"
+    held = f"_bench_held_{id(_locks)}"
+
+    def takes_event_row(statement: str) -> bool:
+        return "FOR UPDATE" in statement or (statement.startswith("UPDATE events SET admission_seq") and "going_count" in statement)
 
     @event.listens_for(engine.sync_engine, "before_cursor_execute")
     def _before(conn, cursor, statement, parameters, context, executemany):
-        if "FOR UPDATE" in statement:
+        if takes_event_row(statement):
             conn.info[key] = time.perf_counter()
 
     @event.listens_for(engine.sync_engine, "after_cursor_execute")
     def _after(conn, cursor, statement, parameters, context, executemany):
         t0 = conn.info.pop(key, None)
         if t0 is not None:
-            _locks.append(time.perf_counter() - t0)
+            now = time.perf_counter()
+            _locks.append(now - t0)
+            conn.info.setdefault(held, now)
+
+    @event.listens_for(engine.sync_engine, "commit")
+    def _commit(conn):
+        t0 = conn.info.pop(held, None)
+        if t0 is not None:
+            _holds.append(time.perf_counter() - t0)
+
+    @event.listens_for(engine.sync_engine, "rollback")
+    def _rollback(conn):
+        conn.info.pop(held, None)
 
 
 _listen()
@@ -105,7 +125,7 @@ def _dump() -> None:
     data = dict(
         pid=os.getpid(), at=time.time(), requests=_state["requests"], inflight=_state["inflight"], max_inflight=_state["max_inflight"],
         pool_checked_out=pool.checkedout(), pool_overflow=pool.overflow(), pool_size=pool.size(),
-        lags=_lags[-2000:], locks=_locks[-5000:],
+        lags=_lags[-2000:], locks=_locks[-5000:], holds=_holds[-5000:],
     )
     tmp = os.path.join(STATS_DIR, f".{os.getpid()}.json")
     with open(tmp, "w") as f:
@@ -121,6 +141,7 @@ async def application(scope, receive, send):
         if scope["path"] == "/__bench/reset":
             _lags.clear()
             _locks.clear()
+            _holds.clear()
             _state["requests"] = 0
             _state["max_inflight"] = 0
             await send({"type": "http.response.start", "status": 204, "headers": []})

@@ -276,8 +276,17 @@ async def reject_club(session: AsyncSession, club_id: int) -> Clubs:
     """
     club = await get_club(club_id, session)
     club.soft_delete()
+    await _stop_billing(session, club)
     await session.commit()
     return await club_for_answer(session, club.id)
+
+
+async def _stop_billing(session: AsyncSession, club: Clubs) -> None:
+    """A deleted club's Razorpay subscription is cancelled with it
+    (subscriptions.club_deleted); restoring the club does not restore it."""
+    from app.api.subscriptions.club_deleted import end_for_deleted_club
+
+    await end_for_deleted_club(session, club)
 
 
 async def club_for_answer(session: AsyncSession, club_id: int) -> Clubs:
@@ -373,6 +382,7 @@ async def delete_club(session: AsyncSession, club_id: int) -> Clubs:
     """
     club = await get_club(club_id, session)
     club.soft_delete()
+    await _stop_billing(session, club)
     await session.commit()
     return await club_for_answer(session, club.id)
 
@@ -468,6 +478,11 @@ async def restore_club(session: AsyncSession, club_id: int) -> Clubs:
     admin deleting a club's account deletes the club: users.service), or the
     restored club could never sign in. Read with `include_deleted`, as in
     `list_deleted_clubs`: without it the deleted club is never found.
+
+    Its subscription does not come back. Deleting the club cancelled any
+    Razorpay subscription it had (subscriptions.club_deleted), and Razorpay
+    cannot un-cancel one: the restored club is on Free until it subscribes
+    again.
     """
     club = await session.scalar(
         select(Clubs)

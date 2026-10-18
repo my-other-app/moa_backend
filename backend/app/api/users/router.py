@@ -4,13 +4,14 @@ import logging
 from datetime import datetime
 from typing import AsyncIterator, List
 
-from fastapi import APIRouter, BackgroundTasks, File, Form, Query, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, Query, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.api.users.schemas import (
     AdminUserDetailResponse,
     AdminUserListResponse,
     AdminUserStats,
+    FCMTokenDelete,
     FCMTokenRequest,
     FCMTokenResponse,
     UserAvatarDetail,
@@ -520,6 +521,18 @@ async def register_fcm_token(
         platform=body.platform,
     )
     return FCMTokenResponse(success=True, message="FCM token registered successfully")
+
+
+@router.delete("/fcm-token", summary="Stop push notifications to this device (sign-out)", status_code=204)
+async def remove_fcm_token(
+    session: SessionDep,
+    user: DependsAuth,
+    body: FCMTokenDelete,
+) -> Response:
+    """Removes the token from this account, so the device signing out stops
+    getting its pushes. 204 whether or not the account had the token."""
+    await service.remove_fcm_token(session, user_id=user.id, fcm_token=body.token)
+    return Response(status_code=204)
 
 
 # ---------------------------------------------------------------------------

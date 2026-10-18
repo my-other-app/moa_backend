@@ -14,10 +14,15 @@ Razorpay's model:
 
 We mirror Razorpay's state rather than own it. Where the two disagree,
 Razorpay is right -- it is the one that moved the money.
+
+Every call to Razorpay here is awaited through `rzp.call`: the SDK is
+synchronous, and called directly it held the worker's event loop (every
+request on it) for as long as Razorpay took to answer.
 """
 
 import logging
 
+from app.api.payments import rzp
 from app.api.payments.service import razorpay_client
 from app.api.subscriptions.models import (
     BillingCycle,
@@ -45,7 +50,7 @@ def _razorpay_plan_field(cycle: BillingCycle) -> str:
     )
 
 
-def sync_plan(plan: Plans, cycle: BillingCycle) -> str:
+async def sync_plan(plan: Plans, cycle: BillingCycle) -> str:
     """
     Ensure a Razorpay plan exists for this plan and cycle, and return its id.
 
@@ -65,7 +70,8 @@ def sync_plan(plan: Plans, cycle: BillingCycle) -> str:
             message="A free plan has no Razorpay plan; subscribe to it directly.",
         )
 
-    created = razorpay_client.plan.create(
+    created = await rzp.call(
+        razorpay_client.plan.create,
         {
             "period": _PERIOD[cycle],
             "interval": 1,
@@ -84,7 +90,7 @@ def sync_plan(plan: Plans, cycle: BillingCycle) -> str:
     return created["id"]
 
 
-def start_subscription(
+async def start_subscription(
     *,
     plan: Plans,
     cycle: BillingCycle,
@@ -109,7 +115,7 @@ def start_subscription(
     """
     if trial_days is None:
         trial_days = plan.trial_days
-    razorpay_plan_id = sync_plan(plan, cycle)
+    razorpay_plan_id = await sync_plan(plan, cycle)
 
     payload = {
         "plan_id": razorpay_plan_id,
@@ -137,7 +143,7 @@ def start_subscription(
     if notify:
         payload["notify_info"] = notify
 
-    subscription = razorpay_client.subscription.create(payload)
+    subscription = await rzp.call(razorpay_client.subscription.create, payload)
     return {
         "razorpay_subscription_id": subscription["id"],
         "checkout_url": subscription.get("short_url"),
@@ -152,7 +158,7 @@ def _trial_start(trial_days: int) -> int:
     return int((datetime.now(timezone.utc) + timedelta(days=trial_days)).timestamp())
 
 
-def cancel_subscription(subscription_id: str, *, at_period_end: bool = True) -> None:
+async def cancel_subscription(subscription_id: str, *, at_period_end: bool = True) -> None:
     """
     Stop a subscription at Razorpay.
 
@@ -160,8 +166,8 @@ def cancel_subscription(subscription_id: str, *, at_period_end: bool = True) -> 
     paid for that month and keeps it. Cancelling immediately would be taking
     away something already bought.
     """
-    razorpay_client.subscription.cancel(
-        subscription_id, {"cancel_at_cycle_end": 1 if at_period_end else 0}
+    await rzp.call(
+        razorpay_client.subscription.cancel, subscription_id, {"cancel_at_cycle_end": 1 if at_period_end else 0}
     )
 
 
@@ -169,7 +175,7 @@ def cancel_subscription(subscription_id: str, *, at_period_end: bool = True) -> 
 _FINISHED = {"cancelled", "completed", "expired"}
 
 
-def close_unpaid_checkout(subscription_id: str) -> None:
+async def close_unpaid_checkout(subscription_id: str) -> None:
     """
     Make sure a checkout nobody paid for can never be paid: cancel it now.
 
@@ -179,12 +185,12 @@ def close_unpaid_checkout(subscription_id: str) -> None:
     up billed twice.
     """
     try:
-        cancel_subscription(subscription_id, at_period_end=False)
+        await cancel_subscription(subscription_id, at_period_end=False)
         return
     except Exception:
         logger.info("Razorpay refused to cancel %s; checking whether it is over", subscription_id, exc_info=True)
     try:
-        state = (razorpay_client.subscription.fetch(subscription_id) or {}).get("status")
+        state = (await rzp.call(razorpay_client.subscription.fetch, subscription_id) or {}).get("status")
     except Exception:
         state = None
     if state in _FINISHED:
@@ -196,7 +202,7 @@ def close_unpaid_checkout(subscription_id: str) -> None:
     )
 
 
-def stop_now(subscription_id: str) -> str:
+async def stop_now(subscription_id: str) -> str:
     """
     Cancel a Razorpay subscription at once: the club is about to be given a
     plan for nothing, and must never be billed while it has it.
@@ -208,13 +214,13 @@ def stop_now(subscription_id: str) -> str:
     charge is exactly what this is here to prevent.
     """
     try:
-        cancel_subscription(subscription_id, at_period_end=False)
+        await cancel_subscription(subscription_id, at_period_end=False)
         return "cancelled"
     except Exception as exc:  # noqa: BLE001
         refused = str(exc)[:200]
         logger.info("Razorpay refused to cancel %s; checking whether it is over", subscription_id, exc_info=True)
     try:
-        state = (razorpay_client.subscription.fetch(subscription_id) or {}).get("status")
+        state = (await rzp.call(razorpay_client.subscription.fetch, subscription_id) or {}).get("status")
     except Exception:  # noqa: BLE001
         state = None
     if state in _FINISHED:
@@ -226,7 +232,7 @@ def stop_now(subscription_id: str) -> str:
     )
 
 
-def retry_charge(subscription_id: str) -> None:
+async def retry_charge(subscription_id: str) -> None:
     """
     Ask Razorpay to retry a failed charge now.
 
@@ -236,9 +242,7 @@ def retry_charge(subscription_id: str) -> None:
     """
     # `pending_update` is not a retry; the documented way to re-attempt a
     # halted subscription is to resume it, which re-queues the charge.
-    razorpay_client.subscription.resume(
-        subscription_id, {"resume_at": "now"}
-    )
+    await rzp.call(razorpay_client.subscription.resume, subscription_id, {"resume_at": "now"})
 
 
 # ---------------------------------------------------------------------------
@@ -455,7 +459,7 @@ def apply_payment_failure(subscription: ClubSubscriptions, payload: dict) -> boo
     return True
 
 
-def subscription_id_for_payment(payload: dict) -> str | None:
+async def subscription_id_for_payment(payload: dict) -> str | None:
     """The Razorpay subscription a payment event belongs to, if any: on the
     payment itself, alongside it, or on the invoice it paid."""
     payment = payload.get("payload", {}).get("payment", {}).get("entity", {}) or {}
@@ -468,7 +472,7 @@ def subscription_id_for_payment(payload: dict) -> str | None:
     if not invoice_id:
         return None
     try:
-        return (razorpay_client.invoice.fetch(invoice_id) or {}).get("subscription_id")
+        return (await rzp.call(razorpay_client.invoice.fetch, invoice_id) or {}).get("subscription_id")
     except Exception:
         logger.warning("Could not read Razorpay invoice %s for a failed payment", invoice_id, exc_info=True)
         return None

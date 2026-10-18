@@ -549,6 +549,13 @@ async def get_event(session: AsyncSession, event_id: str | int, user_id: int | N
         )
         if registration:
             data["is_registered"] = True
+            # What the door checks: a ticket for a paid event is refused
+            # (FEE_UNPAID) until it is paid. Null for someone not registered.
+            data["is_paid"] = (not event.has_fee) or bool(registration.is_paid)
+            # The registration to pay for when it is not paid yet
+            # (POST /payments/orders), so the app can finish a payment
+            # without sending the form again.
+            data["registration_id"] = str(registration.id)
             data["is_attended"] = registration.is_attended
             data["ticket_id"] = registration.ticket_id
             data["user_position"] = registration.position

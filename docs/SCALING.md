@@ -404,12 +404,27 @@ the background at most every 30 minutes.
    "already sent" check (the message row) for the few rows that returns. Run
    it in the job worker, not a web worker. Expected 72 s at 40,000 events →
    milliseconds at any size.
+   **Done (`write_path`):** `email_templates.due_at`, kept by triggers on the
+   template and on the event's start and length (`EMAIL_DUE_AT_SQL`),
+   backfilled by the migration; `ix_email_templates_due (due_at) WHERE
+   enabled AND due_at IS NOT NULL`; `emails.due_query`. One process runs it
+   (`app.db.locks.singleton`: the advisory lock now on a connection of its
+   own -- taken through the session it stayed with whichever pooled
+   connection the first commit returned, and the unlock released nothing).
+   Storage reads, image downloads, the QR and the render of a send run in
+   threads. Still in a web worker until Phase 1's job queue. Measured: 40,000
+   events with journey emails, 60–84 s → 1–14 ms a sweep.
 6. **Journey-email race** (`ensure_event_templates`, `:198`; `ensure_library`,
    `:182`): add unique indexes on `email_templates (event_id, stage) WHERE stage <> 'CUSTOM'`
    and `(club_id, stage) WHERE event_id IS NULL AND stage <> 'CUSTOM'`, and
    insert with `ON CONFLICT DO NOTHING` then re-read. Clean up existing
    duplicates in the migration. Consider copy-on-write: an event points at
    the club's template until the organiser edits it (≈ 8 KB less per event).
+   **Done (`write_path`):** `uq_email_templates_event_stage`,
+   `uq_email_templates_library_stage`; copies go in with `ON CONFLICT DO
+   NOTHING` and are read back. The advisory locks that stood in for them are
+   gone (neither is needed). The migration keeps the oldest copy of each
+   stage and re-points messages and `source_id` to it. Copy-on-write not done.
 7. **Ticket PDF off the event loop.** `ticket_document` (`app/api/events/tickets.py:137`)
    calls `render_ticket_pdf` (wkhtmltopdf in a subprocess) synchronously;
    wrap it in `await asyncio.to_thread(...)` now (one line), and move ticket
@@ -436,10 +451,33 @@ the background at most every 30 minutes.
    milliseconds) and no longer grows with the event, so one event's ceiling
    moves from 30–45 a second to what the workers can process (on the order of
    100–300 a second across a few workers; not measured).
+   **Done (`write_path`):** `existing_registration` (two probes; the index is
+   on `lower(btrim(email))`, what `same_email` compares, so the public form's
+   check uses it too); every check before the row; `take_place`: one
+   `UPDATE … SET admission_seq = admission_seq + 1 WHERE … AND going_count <
+   cap RETURNING …` just before the insert, the cap being the lower of
+   `max_participants` and the plan's per-event cap on a free event (a paid
+   event's places are its paid registrations, counted from
+   `ix_registrations_event_created` alone, which no registration changes).
+   A double submit is serialised by an advisory lock on (event, address)
+   only. The plan's monthly count is index-backed (below) and counted again
+   under the row only near the cap. Badge metrics: one statement. Found on
+   the way: each registration's ticket email (`deliveries.queue`) read every
+   delivery the event had ever made; now the guest's own. Measured (S1, a
+   loaded laptop, before and after interleaved): the row is held 8–13 ms at
+   p50 whatever the event's size (was 70–105 ms on a 12,000-guest event);
+   one worker takes 17–18 registrations a second on that event with no
+   failures (was 6–7 with half of 500 failing), four workers with
+   `APP_DB_POOL_SIZE=5 APP_DB_MAX_OVERFLOW=15` 26 a second (was 8, half
+   failing). `backend/scripts/bench/RESULTS.md`, "The write path".
 9. **Connection budget** (`app/db/core.py:24–25`): make `pool_size` and
    `max_overflow` settings, and check `WORKERS × (pool_size + max_overflow)`
    against the server's `max_connections` at startup. With PgBouncer, 5 + 5
    per worker.
+   **Done (`write_path`):** `APP_DB_POOL_SIZE`, `APP_DB_MAX_OVERFLOW`
+   (10 and 20 by default); `check_connection_budget` logs a warning at
+   startup when `WORKERS × (pool + overflow)` exceeds `max_connections`
+   less the superuser reserve.
 10. **Shared state in Redis**: the discover cache (`discover/cache.py`, keep the
     same keys and the single-flight build, with a Redis lock), the rate limiter
     (`Limiter(storage_uri=…)`), and `counters._last_run` (or just move the
@@ -449,6 +487,12 @@ the background at most every 30 minutes.
 11. **Counter check**: run it in the job worker once every 6 hours across all
     processes, not at every worker's first sweep; and compare in slices
     (`event_id` ranges) so it never holds a 19-second full scan.
+    **Done (`write_path`):** `counters.check_loop` on every worker, the check
+    itself on the one holding `COUNTERS_LOCK` when `scheduled_runs` says six
+    hours have passed (first look five minutes after a start); `drift`
+    compares 20,000 events or 2,000 clubs per statement, with a pause between.
+    Measured at S1: 3.2–7.5 s in one statement → 0.9–1.9 s in 29, the longest
+    59–280 ms warm.
 12. **The cities statistic** (`_cities`, `service.py:919`): `count(DISTINCT lower(trim(location_name)))`
     over every event ever held sorts on disk (`external merge`, 393 ms at S1).
     Store a city on events/clubs or keep the number in a small table updated
@@ -466,15 +510,46 @@ the background at most every 30 minutes.
     build), and `ix_event_registrations_link_tracking_link_id` on a mostly null
     column (also 99 MB; make it partial: `WHERE tracking_link_id IS NOT NULL`).
     Check `pg_stat_user_indexes.idx_scan` in production before dropping.
+    **Done (`write_path`):** the tracking link index is partial. Nothing is
+    dropped: `backend/scripts/index_usage.py` prints the candidates' use in
+    production (`docker-compose -f docker-compose.prod.yml exec -T backend
+    python scripts/index_usage.py`). The candidates, largest first at S1:
+    `ix_event_registrations_link_is_deleted` (26 MB at S1, 99 MB at S2),
+    `ix_user_interests_is_deleted` (12 MB), `ix_club_users_link_is_deleted`
+    (10 MB), `ix_event_interests_link_is_deleted` (5 MB),
+    `ix_users_is_deleted`, `ix_user_profiles_is_deleted`,
+    `ix_thread_comments_is_deleted`, `ix_events_is_deleted`,
+    `ix_club_threads_is_deleted` (1–4 MB each), and the 24 smaller ones on
+    other tables; `ix_club_users_link_tracking_link_id` (10 MB, mostly
+    null: make it partial like the registrations' one). A query reading
+    deleted rows on purpose (the Trash) filters on more than the flag, so a
+    boolean index on its own is rarely what serves it.
+    Found while doing this: the session's soft-delete filter adds
+    `is_deleted IS false`, which Postgres cannot match to a partial index
+    `WHERE NOT is_deleted`. A query that leaves the filter to the listener
+    cannot use those indexes (the plan's monthly count read the whole events
+    table per registration for this reason); spell out `is_deleted ==
+    False` where a partial index should serve.
 16. **Migrations at size**: index builds on registrations took 10–22 s each at
     S2; plain `CREATE INDEX` blocks writes for that long. Use
     `CREATE INDEX CONCURRENTLY` (outside a transaction in Alembic) for any
     index on events, registrations, follows or users from now on.
+    **Done (`write_path`):** its seven indexes are built concurrently; a
+    build left INVALID is dropped and built again on the next run.
 17. **Small ones**: `FastAPIDeprecationWarning` for `ORJSONResponse` is printed
     to the log repeatedly (drop `default_response_class` or filter it); add
     `httptools` (uvicorn uses the pure-Python h11 parser without it); the
     uvicorn access log is extra work on every request and nginx already logs
     them (not measured).
+    **Done (`write_path`):** no `default_response_class` (FastAPI's own JSON
+    response, which with a response model writes the bytes through Pydantic
+    and skips `jsonable_encoder`); `httptools` in requirements;
+    `APP_ACCESS_LOG` (default true).
+18. **Razorpay on the event loop** (found after the study). The SDK is
+    synchronous and was called from async code (orders, payment fetches,
+    refunds, subscriptions, a club gateway's key check and webhook fetch,
+    the revenue backfill). **Done:** `app/api/payments/rzp.py`: every call
+    in a thread, `APP_RAZORPAY_TIMEOUT` (20 s), the clients' requests time out.
 
 ## (e) Monitoring and SLOs to add
 

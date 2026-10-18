@@ -1,0 +1,324 @@
+[
+ {
+  "kind": "event",
+  "mode": "app",
+  "event": "empty",
+  "event_id": 46,
+  "registered_before": 0,
+  "n": 500,
+  "seconds": 10.0,
+  "wall_s": 25.14,
+  "throughput_per_s": 19.9,
+  "answered": 500,
+  "p50_ms": 7140.3,
+  "p95_ms": 15557.7,
+  "p99_ms": 16863.6,
+  "max_ms": 19241.8,
+  "codes": {
+   "200": 500
+  },
+  "going_count_after": 500,
+  "rows_after": 500,
+  "counter_matches": true,
+  "journey_templates_on_event": 4,
+  "max_lock_waiters": 28,
+  "share_of_time_someone_waited_on_a_lock": 0.59,
+  "server": {
+   "workers": [
+    {
+     "pid": 5586,
+     "requests": 500,
+     "max_inflight": 362,
+     "pool_checked_out": 0,
+     "pool_overflow": 0,
+     "loop_lag_p99_ms": 112.0,
+     "loop_lag_max_ms": 121.3
+    }
+   ],
+   "loop_lag_ms": {
+    "p50": 9.24,
+    "p99": 112.0,
+    "max": 121.3
+   },
+   "for_update_ms": {
+    "n": 500,
+    "p50": 558.79,
+    "p95": 947.5,
+    "p99": 1085.2,
+    "max": 1427.8
+   }
+  },
+  "label": "before-w1-empty"
+ },
+ {
+  "kind": "event",
+  "mode": "app",
+  "event": "big",
+  "event_id": 8066,
+  "registered_before": 7600,
+  "n": 500,
+  "seconds": 10.0,
+  "wall_s": 26.23,
+  "throughput_per_s": 19.1,
+  "answered": 500,
+  "p50_ms": 7876.0,
+  "p95_ms": 16189.9,
+  "p99_ms": 18527.7,
+  "max_ms": 19477.8,
+  "codes": {
+   "200": 500
+  },
+  "going_count_after": 8100,
+  "rows_after": 8100,
+  "counter_matches": true,
+  "journey_templates_on_event": 4,
+  "max_lock_waiters": 29,
+  "share_of_time_someone_waited_on_a_lock": 0.61,
+  "server": {
+   "workers": [
+    {
+     "pid": 5586,
+     "requests": 500,
+     "max_inflight": 378,
+     "pool_checked_out": 0,
+     "pool_overflow": 0,
+     "loop_lag_p99_ms": 121.5,
+     "loop_lag_max_ms": 894.8
+    }
+   ],
+   "loop_lag_ms": {
+    "p50": 7.85,
+    "p99": 121.5,
+    "max": 894.8
+   },
+   "for_update_ms": {
+    "n": 500,
+    "p50": 589.5,
+    "p95": 1048.6,
+    "p99": 1166.2,
+    "max": 1242.9
+   }
+  },
+  "label": "before-w1-big"
+ },
+ {
+  "kind": "event",
+  "mode": "app",
+  "event": "empty",
+  "event_id": 53,
+  "registered_before": 0,
+  "n": 500,
+  "seconds": 10.0,
+  "wall_s": 20.14,
+  "throughput_per_s": 24.8,
+  "answered": 500,
+  "p50_ms": 5108.0,
+  "p95_ms": 12445.1,
+  "p99_ms": 15164.0,
+  "max_ms": 15979.5,
+  "codes": {
+   "200": 488,
+   "500": 12
+  },
+  "going_count_after": 488,
+  "rows_after": 488,
+  "counter_matches": true,
+  "journey_templates_on_event": 4,
+  "max_lock_waiters": 92,
+  "share_of_time_someone_waited_on_a_lock": 0.68,
+  "server": {
+   "workers": [
+    {
+     "pid": 7902,
+     "requests": 36,
+     "max_inflight": 12,
+     "pool_checked_out": 0,
+     "pool_overflow": 0,
+     "loop_lag_p99_ms": 13.1,
+     "loop_lag_max_ms": 814.0
+    },
+    {
+     "pid": 7899,
+     "requests": 112,
+     "max_inflight": 32,
+     "pool_checked_out": 0,
+     "pool_overflow": 0,
+     "loop_lag_p99_ms": 36.0,
+     "loop_lag_max_ms": 767.6
+    },
+    {
+     "pid": 7900,
+     "requests": 194,
+     "max_inflight": 184,
+     "pool_checked_out": 0,
+     "pool_overflow": 0,
+     "loop_lag_p99_ms": 87.4,
+     "loop_lag_max_ms": 783.2
+    },
+    {
+     "pid": 7901,
+     "requests": 159,
+     "max_inflight": 97,
+     "pool_checked_out": 0,
+     "pool_overflow": 0,
+     "loop_lag_p99_ms": 54.0,
+     "loop_lag_max_ms": 806.0
+    }
+   ],
+   "loop_lag_ms": {
+    "p50": 1.04,
+    "p99": 60.5,
+    "max": 814.0
+   },
+   "for_update_ms": {
+    "n": 488,
+    "p50": 1408.23,
+    "p95": 5353.3,
+    "p99": 7624.7,
+    "max": 9856.9
+   }
+  },
+  "label": "before-w4-empty"
+ },
+ {
+  "kind": "event",
+  "mode": "app",
+  "event": "big",
+  "event_id": 8066,
+  "registered_before": 8100,
+  "n": 500,
+  "seconds": 10.0,
+  "wall_s": 56.5,
+  "throughput_per_s": 8.8,
+  "answered": 500,
+  "p50_ms": 35952.0,
+  "p95_ms": 48055.0,
+  "p99_ms": 50462.0,
+  "max_ms": 52234.0,
+  "codes": {
+   "200": 487,
+   "500": 13
+  },
+  "going_count_after": 8590,
+  "rows_after": 8590,
+  "counter_matches": true,
+  "journey_templates_on_event": 4,
+  "max_lock_waiters": 97,
+  "share_of_time_someone_waited_on_a_lock": 0.67,
+  "server": {
+   "workers": [
+    {
+     "pid": 7902,
+     "requests": 54,
+     "max_inflight": 12,
+     "pool_checked_out": 0,
+     "pool_overflow": 0,
+     "loop_lag_p99_ms": 13.8,
+     "loop_lag_max_ms": 912.3
+    },
+    {
+     "pid": 7899,
+     "requests": 170,
+     "max_inflight": 33,
+     "pool_checked_out": 0,
+     "pool_overflow": 0,
+     "loop_lag_p99_ms": 38.1,
+     "loop_lag_max_ms": 808.1
+    },
+    {
+     "pid": 7900,
+     "requests": 519,
+     "max_inflight": 325,
+     "pool_checked_out": 0,
+     "pool_overflow": 0,
+     "loop_lag_p99_ms": 181.9,
+     "loop_lag_max_ms": 914.0
+    },
+    {
+     "pid": 7901,
+     "requests": 99,
+     "max_inflight": 94,
+     "pool_checked_out": 0,
+     "pool_overflow": 0,
+     "loop_lag_p99_ms": 170.2,
+     "loop_lag_max_ms": 741.1
+    }
+   ],
+   "loop_lag_ms": {
+    "p50": 1.04,
+    "p99": 116.8,
+    "max": 914.0
+   },
+   "for_update_ms": {
+    "n": 819,
+    "p50": 1941.77,
+    "p95": 8053.4,
+    "p99": 10429.5,
+    "max": 14447.9
+   }
+  },
+  "label": "before-w4-big"
+ },
+ {
+  "kind": "event",
+  "mode": "app",
+  "event": "big",
+  "plan": "campus",
+  "event_id": 8066,
+  "registered_before": 8590,
+  "n": 500,
+  "seconds": 10.0,
+  "wall_s": 59.29,
+  "throughput_per_s": 8.4,
+  "answered": 500,
+  "p50_ms": 38642.2,
+  "p95_ms": 49177.1,
+  "p99_ms": 52445.8,
+  "max_ms": 55240.0,
+  "codes": {
+   "200": 444,
+   "500": 56
+  },
+  "going_count_after": 9071,
+  "rows_after": 9071,
+  "counter_matches": true,
+  "journey_templates_on_event": 4,
+  "max_lock_waiters": 29,
+  "share_of_time_someone_waited_on_a_lock": 0.63,
+  "server": {
+   "workers": [
+    {
+     "pid": 5586,
+     "requests": 500,
+     "max_inflight": 378,
+     "pool_checked_out": 0,
+     "pool_overflow": 0,
+     "loop_lag_p99_ms": 112.1,
+     "loop_lag_max_ms": 894.8
+    },
+    {
+     "pid": 10135,
+     "requests": 500,
+     "max_inflight": 500,
+     "pool_checked_out": 0,
+     "pool_overflow": 0,
+     "loop_lag_p99_ms": 190.1,
+     "loop_lag_max_ms": 882.8
+    }
+   ],
+   "loop_lag_ms": {
+    "p50": 1.15,
+    "p99": 178.1,
+    "max": 894.8
+   },
+   "for_update_ms": {
+    "n": 981,
+    "p50": 1087.17,
+    "p95": 2163.4,
+    "p99": 2526.7,
+    "max": 2935.2
+   }
+  },
+  "label": "before-w1-big-campus"
+ }
+]

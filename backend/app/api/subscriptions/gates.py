@@ -33,7 +33,7 @@ Nothing here is enforced when:
   they were -- paid tickets, both registration caps, the live room,
   networking, its links, report, store and swag, ID cards, competitions --
   so nothing breaks mid-event at the switch-on. Club-wide gates (website and
-  its templates, roles and seats, finance, the club's own links and card
+  its templates and its own domain, roles and seats, finance, the club's own links and card
   design, events and announcements per month) hold for every club. The
   scope rule lives in `_exempt`; call sites only pass `event=`.
 
@@ -80,12 +80,12 @@ EVENT_SCOPED_FEATURES = frozenset({
     "merch", "swag", "badges", "teams", "judging", "rounds",
 })
 EVENT_SCOPED_LIMITS = frozenset({"registrations_per_event", "merch_items_per_event"})
-#: Gates about the whole club, enforced whatever its events: website,
-#: roles, finance, and the per-club limits (events and announcements per
-#: month, committee seats, website templates, registrations per month --
-#: though a registration to a grandfathered event is never refused, it still
-#: counts in `usage`).
-CLUB_WIDE_FEATURES = frozenset({"website", "roles", "finance"})
+#: Gates about the whole club, enforced whatever its events: website and
+#: its own domain, roles, finance, and the per-club limits (events and
+#: announcements per month, committee seats, website templates,
+#: registrations per month -- though a registration to a grandfathered event
+#: is never refused, it still counts in `usage`).
+CLUB_WIDE_FEATURES = frozenset({"website", "custom_domain", "roles", "finance"})
 
 #: The limits nothing enforces, and why (see the module docstring).
 NOT_ENFORCED = {
@@ -109,6 +109,7 @@ LABELS = dict(FEATURE_CATALOG)
 _SUBJECTS = {
     "tickets": ("Paid tickets", "are"),
     "website": ("A club website", "is"),
+    "custom_domain": ("Your own domain for the club website", "is"),
     "quiz": ("The live quiz", "is"),
     "polls": ("Live polls", "are"),
     "qa": ("Live Q&A", "is"),
@@ -535,13 +536,22 @@ async def count(session, club_id: int, limit_key: str, now: Optional[datetime] =
             or 0
         )
     if limit_key == "registrations_per_month":
+        # Runs on every registration to a capped club. Each of the club's
+        # events is one probe of ix_registrations_event_created for this
+        # month's rows, read from the index alone. Both soft deletes are
+        # spelled out and the session's own filter is switched off for the
+        # statement: it adds `is_deleted IS false`, which Postgres cannot
+        # match to a partial index `WHERE NOT is_deleted` -- with it every
+        # count read the whole events table, and every registration's row.
         return int(
             await session.scalar(
-                select(func.count(EventRegistrationsLink.id)).where(
-                    EventRegistrationsLink.event_id.in_(select(Events.id).where(Events.club_id == club_id)),
+                select(func.count()).select_from(EventRegistrationsLink).where(
+                    EventRegistrationsLink.event_id.in_(
+                        select(Events.id).where(Events.club_id == club_id, Events.is_deleted == False)  # noqa: E712
+                    ),
                     EventRegistrationsLink.is_deleted == False,  # noqa: E712
                     EventRegistrationsLink.created_at >= since,
-                )
+                ).execution_options(include_deleted=True)
             )
             or 0
         )
@@ -559,16 +569,20 @@ async def count(session, club_id: int, limit_key: str, now: Optional[datetime] =
 
 async def event_registrations(session, event) -> int:
     """An event's registrations as its own capacity counts them: on a paid
-    event the paid ones, on a free event all of them."""
+    event the paid ones (read from ix_registrations_event_created alone), on
+    a free event all of them -- its going_count, which the database keeps
+    equal to that count in every writer's transaction (events.models)."""
     from sqlalchemy import func, select
 
-    from app.api.events.models import EventRegistrationsLink
+    from app.api.events.models import EventRegistrationsLink, Events
 
-    query = select(func.count(EventRegistrationsLink.id)).where(
-        EventRegistrationsLink.event_id == event.id, EventRegistrationsLink.is_deleted == False  # noqa: E712
-    )
-    if event.has_fee:
-        query = query.where(EventRegistrationsLink.is_paid == True)  # noqa: E712
+    if not event.has_fee:
+        return int(await session.scalar(select(Events.going_count).where(Events.id == event.id)) or 0)
+    query = select(func.count()).select_from(EventRegistrationsLink).where(
+        EventRegistrationsLink.event_id == event.id,
+        EventRegistrationsLink.is_deleted == False,  # noqa: E712
+        EventRegistrationsLink.is_paid == True,  # noqa: E712
+    ).execution_options(include_deleted=True)  # spelled out above, in the form the index can serve (see count)
     return int(await session.scalar(query) or 0)
 
 
@@ -656,7 +670,47 @@ async def check_template(session, club_id: int, template: Optional[str], *, acto
     )
 
 
-async def check_registration(session, event, *, organiser: bool = False, actor=None) -> None:
+@dataclass
+class RegistrationRoom:
+    """What a registration's plan check found, for the steps that follow it
+    once the registration holds the event's row (registration.service).
+
+    `event_cap`: the plan's per-event cap, when one applies. On a free event
+    the registration's own atomic UPDATE of the event row enforces it
+    exactly, against `going_count` (on a paid event it counts paid places,
+    which a registration does not change).
+    `month_cap` / `month_used`: the club's monthly cap and what it had used
+    when checked; `going_seen`: the event's going_count then. See
+    `recheck_month`."""
+
+    ent: object
+    event_cap: Optional[int] = None
+    month_cap: Optional[int] = None
+    month_used: int = 0
+    going_seen: int = 0
+
+
+#: How close to the monthly cap a registration has to be (allowing for the
+#: ones made to the same event since it was checked) to be counted again
+#: under the event's lock.
+MONTH_RECOUNT_MARGIN = 20
+
+
+async def refuse_registration(session, event, ent, limit_key: str, *, cap: int, used: int, organiser: bool) -> CustomHTTPException:
+    """The refusal for a registration past `limit_key`, the owner told."""
+    refusal = await limit_reached(session, ent, limit_key, cap=cap, used=used)
+    notify_paused(
+        club_id=event.club_id,
+        limit_key=limit_key,
+        event_name=event.name,
+        message=refusal.message,
+        plan_name=ent.plan.name if ent.plan is not None else None,
+        required_plan_name=refusal.errors.get("required_plan_name"),
+    )
+    return refusal if organiser else registrations_closed()
+
+
+async def check_registration(session, event, *, organiser: bool = False, actor=None) -> Optional[RegistrationRoom]:
     """A new registration, from any path. The plan's per-event cap stacks on
     the organiser's own `max_participants` (whichever is lower holds; theirs
     is checked first and keeps its own answer), and the club-wide monthly cap
@@ -666,31 +720,52 @@ async def check_registration(session, event, *, organiser: bool = False, actor=N
 
     An attendee is told only that registrations are closed (409); the
     organiser adding someone by hand, importing or at the door gets the
-    plan's reason (403). Either way the club's owner is emailed."""
+    plan's reason (403). Either way the club's owner is emailed.
+
+    Made before the registration takes the event's row, so the row is held
+    only for the insert. Returns what the steps after need to keep the caps
+    exact under concurrency (RegistrationRoom), or None when no cap applies."""
     if not enforcing() or event.club_id is None or bypassed(actor) or grandfathered(event):
-        return
+        return None
     ent = await entitlements(session, event.club_id)
+    room = RegistrationRoom(ent=ent, going_seen=int(event.going_count or 0))
     for limit_key in ("registrations_per_event", "registrations_per_month"):
         limit = ent.limit(limit_key)
         if limit is None:
             continue
-        used = (
-            await event_registrations(session, event)
-            if limit_key == "registrations_per_event"
-            else await count(session, event.club_id, limit_key)
-        )
+        if limit_key == "registrations_per_event":
+            used = await event_registrations(session, event)
+            room.event_cap = limit
+        else:
+            used = await count(session, event.club_id, limit_key)
+            room.month_cap, room.month_used = limit, used
         if used + 1 <= limit:
             continue
-        refusal = await limit_reached(session, ent, limit_key, cap=limit, used=used)
-        notify_paused(
-            club_id=event.club_id,
-            limit_key=limit_key,
-            event_name=event.name,
-            message=refusal.message,
-            plan_name=ent.plan.name if ent.plan is not None else None,
-            required_plan_name=refusal.errors.get("required_plan_name"),
-        )
-        raise refusal if organiser else registrations_closed()
+        raise await refuse_registration(session, event, ent, limit_key, cap=limit, used=used, organiser=organiser)
+    return room
+
+
+async def recheck_month(session, event, room: Optional[RegistrationRoom], *, going_now: int, organiser: bool) -> None:
+    """The monthly cap again, now the registration holds the event's row,
+    when the room left could have gone since `check_registration`: only near
+    the cap, so the count stays off the lock the rest of the time.
+
+    Registrations to this event since then are the ones the check could not
+    see (`going_now - going_seen`); each holds the row in turn, so the count
+    made here sees every one of them, as the check made under the lock did
+    before. Registrations to the club's other events meanwhile were never
+    serialised with this one and still are not."""
+    if room is None or room.month_cap is None:
+        return
+    since_check = max(0, going_now - room.going_seen)
+    if room.month_cap - room.month_used > since_check + MONTH_RECOUNT_MARGIN:
+        return
+    used = await count(session, event.club_id, "registrations_per_month")
+    if used + 1 <= room.month_cap:
+        return
+    # The caller's transaction ends with the refusal (the request's session
+    # rolls back as it closes), and with it the hold on the event's row.
+    raise await refuse_registration(session, event, room.ent, "registrations_per_month", cap=room.month_cap, used=used, organiser=organiser)
 
 
 # ---------------------------------------------------------------------------

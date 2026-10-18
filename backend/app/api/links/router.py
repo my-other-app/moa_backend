@@ -4,6 +4,7 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 
+from app.api.club_domains.lookup import active_host
 from app.api.clubs.models import Clubs
 from app.api.deliveries import service as deliveries
 from app.api.links import overview as overview_mod
@@ -134,5 +135,6 @@ async def open_link(request: Request, session: SessionDep, code: str) -> Redirec
         return RedirectResponse(settings.PUBLIC_SITE_URL, status_code=302)
     await service.record_click(session, link, request)
     # `via=l`: this opening is counted already, so the club's site does not count it again.
-    to = service.destination(link, link.club.slug if link.club else None, link.event.slug if link.event else None) + "&via=l"
+    site_host = await active_host(session, link.club_id) if link.kind == service.WEBSITE and link.club_id else None
+    to = service.destination(link, link.club.slug if link.club else None, link.event.slug if link.event else None, site_host) + "&via=l"
     return RedirectResponse(to, status_code=302, headers={"Cache-Control": "no-store"})

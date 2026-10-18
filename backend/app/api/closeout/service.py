@@ -31,6 +31,7 @@ from app.api.merch.models import MerchItems
 from app.config import settings
 from app.core.email import email as email_mod
 from app.core.storage import objects
+from app.db.locks import singleton
 from app.response import CustomHTTPException
 
 logger = logging.getLogger(__name__)
@@ -430,35 +431,20 @@ async def sweep(session, now: Optional[datetime] = None) -> dict:
     return {"moved": moved, "ran": ran}
 
 
-async def _check_counters(session) -> None:
-    """Every few hours, recount any going/follower counter that disagrees with its rows."""
-    from app.api.discover import counters
-
-    if not counters.due():
-        return
-    try:
-        fixed = await counters.reconcile(session)
-        if fixed["events"] or fixed["clubs"]:
-            logger.warning("recounted %d going count(s) and %d follower count(s) that disagreed with their rows", fixed["events"], fixed["clubs"])
-    except Exception:  # noqa: BLE001
-        logger.exception("counter reconcile failed")
-        await session.rollback()
-
-
 async def sweep_loop(interval: int = 60) -> None:
-    """Runs for the life of the process; one worker at a time."""
+    """Runs for the life of the process; one worker at a time, the one
+    holding the sweep's advisory lock, taken on a connection of its own
+    (app.db.locks). The counter check has a loop of its own
+    (discover.counters.check_loop)."""
     await asyncio.sleep(7)
     while True:
         try:
             async with deliveries.session_scope() as session:
-                if await session.scalar(text(f"SELECT pg_try_advisory_lock({SWEEP_LOCK})")):
-                    try:
+                async with singleton(session, SWEEP_LOCK) as mine:
+                    if mine:
                         r = await sweep(session)
                         if r["moved"] or r["ran"]:
                             logger.info("closeout sweep moved %d status(es), ran %d retention job(s)", r["moved"], r["ran"])
-                        await _check_counters(session)
-                    finally:
-                        await session.execute(text(f"SELECT pg_advisory_unlock({SWEEP_LOCK})"))
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001

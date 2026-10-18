@@ -407,7 +407,7 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
     # The admission number the ticket prints beside the scan code.
     admission_no = Column(String(40), nullable=True)
     # The tracking link whose code this sign-up carried, when it came through one.
-    tracking_link_id = Column(UUID(as_uuid=True), ForeignKey("tracking_links.id", ondelete="SET NULL"), nullable=True, index=True)
+    tracking_link_id = Column(UUID(as_uuid=True), ForeignKey("tracking_links.id", ondelete="SET NULL"), nullable=True)
     volunteer_id = Column(Integer, ForeignKey("volunteers.id"), nullable=True)
 
     is_won = Column(Boolean, nullable=False, default=False)
@@ -428,6 +428,27 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
         UniqueConstraint("event_id", "user_id", "is_deleted"),
         # One person's registrations: the app's ticket lists and the For You feed.
         sa.Index("ix_registrations_user", "user_id", postgresql_where=sa.text("NOT is_deleted")),
+        # An address already on an event's list (registration's duplicate
+        # check, the public form's): lower(btrim(email)) is what
+        # users.service.same_email compares.
+        sa.Index(
+            "ix_registrations_event_email", "event_id", sa.func.lower(sa.func.btrim(email)),
+            postgresql_where=sa.text("NOT is_deleted"),
+        ),
+        # An event's registrations by when they came, with whether each is
+        # paid: the plan's monthly count (this month's, event by event), a
+        # paid event's places, and the counter check's slices, all read from
+        # the index alone.
+        sa.Index(
+            "ix_registrations_event_created", "event_id", "created_at",
+            postgresql_include=["is_paid"], postgresql_where=sa.text("NOT is_deleted"),
+        ),
+        # The sign-ups a tracking link brought. Most registrations came
+        # through none, so only those that did are indexed.
+        sa.Index(
+            "ix_event_registrations_link_tracking_link_id", "tracking_link_id",
+            postgresql_where=sa.text("tracking_link_id IS NOT NULL"),
+        ),
     )
 
     @property

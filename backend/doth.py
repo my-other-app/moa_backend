@@ -5,7 +5,6 @@ import uuid
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import ORJSONResponse
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import HTMLResponse
 from starlette import status
@@ -38,6 +37,11 @@ async def lifespan(app: FastAPI):
             await seed_badges(session)
     except Exception as e:
         print(f"Warning: Badge seeding failed: {e}")
+    # Every worker's pool against the server's max_connections: a warning
+    # in the log when WORKERS x (pool + overflow) could ask for more.
+    from app.db.core import check_connection_budget
+
+    await check_connection_budget()
     # Timed journey emails: one sweep a minute, one worker at a time.
     from app.api.emails.service import sweep_loop
 
@@ -52,6 +56,15 @@ async def lifespan(app: FastAPI):
     from app.api.subscriptions.sweep import sweep_loop as billing_sweep_loop
 
     billing = asyncio.create_task(billing_sweep_loop())
+    # The going/follower counter check: every six hours, on one process.
+    from app.api.discover.counters import check_loop as counter_check_loop
+
+    counters = asyncio.create_task(counter_check_loop())
+
+    # Clubs' own domains: pending ones polled at Cloudflare, plans followed, every five minutes.
+    from app.api.club_domains.sweep import sweep_loop as domains_sweep_loop
+
+    domains = asyncio.create_task(domains_sweep_loop())
     # What import and startup built (models, routes, schemas, the S3 service
     # model: some 740,000 objects) lives as long as the process. Frozen out
     # of the collector's reach, a full collection no longer walks all of it:
@@ -64,9 +77,16 @@ async def lifespan(app: FastAPI):
     closer.cancel()
     feedback.cancel()
     billing.cancel()
+    counters.cancel()
+    domains.cancel()
 
 
-application = FastAPI(default_response_class=ORJSONResponse, lifespan=lifespan)
+# No default_response_class: FastAPI's own JSON response is the default. It
+# was ORJSONResponse, which FastAPI now deprecates -- it warned in the log on
+# every response -- because with a response model or a return type FastAPI
+# writes the JSON bytes itself through Pydantic, faster than orjson after
+# jsonable_encoder, and a custom class turned that path off.
+application = FastAPI(lifespan=lifespan)
 
 application.state.limiter = limiter
 application.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)

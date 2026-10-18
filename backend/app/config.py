@@ -20,6 +20,9 @@ class AppConfig(BaseSettings):
     WORKERS: int = 1
     PORT: int = 8000
     DEBUG: bool = False
+    # uvicorn's line per request. nginx in front already logs every request,
+    # so this is a second copy, written on every request; false drops it.
+    ACCESS_LOG: bool = True
     # Log every SQL statement with its parameters (app/db/core.py). Off by
     # default: the parameters are personal data.
     SQL_LOG: bool = False
@@ -28,6 +31,13 @@ class AppConfig(BaseSettings):
 
     DATABASE_URL: str
     DATABASE_URL_SYNC: str
+    # Connections each worker process may hold: DB_POOL_SIZE kept open, up to
+    # DB_MAX_OVERFLOW more under load. Every worker has its own pool, so
+    # WORKERS x (DB_POOL_SIZE + DB_MAX_OVERFLOW) must fit in Postgres's
+    # max_connections; startup logs a warning when it does not
+    # (app.db.core.check_connection_budget). Behind PgBouncer: 5 and 5.
+    DB_POOL_SIZE: int = 10
+    DB_MAX_OVERFLOW: int = 20
     # Mounted from the host, deliberately outside the directory the deploy
     # rsyncs with --delete -- a backup inside it would be erased by the next
     # deploy, which is the opposite of the point.
@@ -76,6 +86,10 @@ class AppConfig(BaseSettings):
     RAZORPAY_KEY_ID: str
     RAZORPAY_KEY_SECRET: str
     RAZORPAY_WEBHOOK_SECRET: str
+    # How long one call to Razorpay may take, in seconds, before it is given
+    # up on (app/api/payments/rzp.py). The SDK is synchronous: every call
+    # runs in a worker thread, so the event loop keeps serving meanwhile.
+    RAZORPAY_TIMEOUT: float = 20.0
     # A club's own Razorpay account (app/api/payment_gateways): the Fernet key
     # its saved key secret and webhook secret are encrypted with. A
     # comma-separated list rotates: the first encrypts, every one decrypts.
@@ -115,6 +129,14 @@ class AppConfig(BaseSettings):
     # A club's published website at its own address (served by the club-sites Cloudflare Worker).
     # PUBLIC_CLUB_URL stays the public site's page tracking links land on; it frames the same site.
     PUBLIC_CLUB_SITE_URL: str = "https://{slug}.myotherapp.in"
+    # A club's own domain for its website (app/api/club_domains): a Cloudflare
+    # for SaaS custom hostname on the myotherapp.in zone. The token needs
+    # Zone > SSL and Certificates > Edit on that zone and nothing else. Either
+    # unset: the feature is "unavailable" and nothing calls Cloudflare.
+    CLOUDFLARE_API_TOKEN: str = ""
+    CLOUDFLARE_ZONE_ID: str = ""
+    # What a club's CNAME points at: the zone's fallback origin for custom hostnames.
+    SITES_CNAME_TARGET: str = "sites.myotherapp.in"
 
     # Club plans (app/api/subscriptions/gates.py). PLAN_ENFORCEMENT=false is
     # the kill switch: every plan gate lets everything through, as before the

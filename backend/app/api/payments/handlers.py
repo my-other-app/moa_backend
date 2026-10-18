@@ -1,8 +1,8 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 from fastapi import BackgroundTasks
 from sqlalchemy import exists, func, select
-from app.core.validations.exceptions import RequestValidationError
+from app.core.validations.exceptions import CodedRequestError, RequestValidationError
 from app.api.events.models import Events, EventRegistrationsLink
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
@@ -12,6 +12,31 @@ from app.api.store.models import EventStoreOrders as StoreOrders
 from decimal import Decimal
 
 logger = logging.getLogger(__name__)
+
+
+async def _check_still_payable(session: AsyncSession, registration: EventRegistrationsLink, *, ticket_unpaid: bool) -> None:
+    """An existing registration may be paid for until its event is over --
+    the registration deadline stops new sign-ups, not someone who signed up
+    in time finishing their payment -- and, while its ticket is unpaid, only
+    while the event has room: a paid event counts its paid registrations
+    against max_participants, as registering does."""
+    event = await session.get(Events, registration.event_id)
+    if event is None or event.is_deleted:
+        raise CodedRequestError(404, "Event not found", "EVENT_NOT_FOUND", event_id="event_id is invalid")
+    now = datetime.now(timezone.utc)
+    lifecycle = getattr(event.lifecycle, "value", event.lifecycle)
+    if event.event_datetime + timedelta(hours=event.duration or 0) <= now or lifecycle in ("closed", "archived"):
+        raise CodedRequestError(409, "This event is over; it can no longer be paid for.", "EVENT_ENDED")
+    if ticket_unpaid and event.has_fee and event.max_participants:
+        paid = await session.scalar(
+            select(func.count()).where(
+                EventRegistrationsLink.event_id == event.id,
+                EventRegistrationsLink.is_deleted == False,  # noqa: E712
+                EventRegistrationsLink.is_paid == True,  # noqa: E712
+            )
+        )
+        if (paid or 0) >= event.max_participants:
+            raise CodedRequestError(400, "Event is full", "EVENT_FULL", max_participants=event.max_participants)
 
 
 async def validate_event_registration_payload(session: AsyncSession, payload: dict):
@@ -32,7 +57,7 @@ async def validate_event_registration_payload(session: AsyncSession, payload: di
             select(exists().where(Events.id == payload["event_id"]))
         )
         if not event_exists:
-            raise RequestValidationError(event_id="event_id is invalid")
+            raise CodedRequestError(404, "Event not found", "EVENT_NOT_FOUND", event_id="event_id is invalid")
 
         event_registration = await session.scalar(
             select(EventRegistrationsLink).where(
@@ -41,8 +66,9 @@ async def validate_event_registration_payload(session: AsyncSession, payload: di
         )
 
         if not event_registration:
-            raise RequestValidationError(
-                event_registration_id="event_registration_id is invalid"
+            raise CodedRequestError(
+                404, "Registration not found", "REGISTRATION_NOT_FOUND",
+                event_registration_id="event_registration_id is invalid",
             )
 
         from app.api.store import service as store
@@ -53,10 +79,17 @@ async def validate_event_registration_payload(session: AsyncSession, payload: di
         # What they picked from the shelf rides on the same payment as the ticket.
         store_due = await store.pending_total(session, event_registration.id)
         if event_registration.is_paid and store_due == 0:
-            raise RequestValidationError(event_registration_id="already paid")
+            raise CodedRequestError(
+                409, "This registration is already paid for.", "ALREADY_PAID",
+                event_registration_id="already paid",
+            )
         amount_to_pay = ticket_due + store_due
         if amount_to_pay <= 0:
-            raise RequestValidationError(event_registration_id="nothing to pay")
+            raise CodedRequestError(
+                422, "There is nothing to pay for this registration.", "NOTHING_TO_PAY",
+                event_registration_id="nothing to pay",
+            )
+        await _check_still_payable(session, event_registration, ticket_unpaid=not event_registration.is_paid and ticket_due > 0)
         receipt = f"er_{event_registration.ticket_id}"
         event_registration.payment_receipt = receipt
         await session.commit()
