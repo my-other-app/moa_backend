@@ -190,6 +190,14 @@ class AppConfig(BaseSettings):
 
     # Where a link in an email points: the API as the public reaches it.
     PUBLIC_API_URL: str = "https://api.myotherapp.in"
+    # What the links in emails are signed with (app/core/mail/links.py): a
+    # guest's ticket and certificate links, the feedback survey's. They never
+    # expire, so they must outlive a change of key: a comma-separated list,
+    # the first signs and every one verifies (docs/OPERATIONS.md, section 5:
+    # add the new key first, drop the old after 90 days). Unset: SECRET_KEY
+    # signs them, as before this setting. Each at least 32 characters
+    # (`openssl rand -hex 32`); a shorter one stops the app at startup.
+    LINK_SIGNING_KEYS: str = ""
     # The clubs dashboard, for links a volunteer opens on a phone.
     PUBLIC_WEB_URL: str = "https://clubs-next.myotherapp.in"
     # The public site: an event's page is /events/{slug}, a club's /clubs/{slug}. Tracking links land here.
@@ -327,6 +335,22 @@ class AppConfig(BaseSettings):
     @property
     def site_tokens(self) -> list[str]:
         return [t.strip() for t in (self.SITE_TOKENS or "").split(",") if t.strip()]
+
+    @field_validator("LINK_SIGNING_KEYS")
+    @classmethod
+    def _link_keys_long_enough(cls, value: str) -> str:
+        """A short key is a guessable one, and with it every emailed ticket:
+        refused at startup rather than signing with it."""
+        keys = [k.strip() for k in (value or "").split(",") if k.strip()]
+        if any(len(k) < 32 for k in keys):
+            raise ValueError("every key in APP_LINK_SIGNING_KEYS must be at least 32 characters (openssl rand -hex 32)")
+        return ",".join(keys)
+
+    @property
+    def link_signing_keys(self) -> list[str]:
+        """The emailed links' keys, the one that signs first; SECRET_KEY alone when none is set."""
+        keys = [k for k in (self.LINK_SIGNING_KEYS or "").split(",") if k]
+        return keys or [self.SECRET_KEY]
 
     # Club plans (app/api/subscriptions/gates.py). PLAN_ENFORCEMENT=false is
     # the kill switch: every plan gate lets everything through, as before the

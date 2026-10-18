@@ -455,7 +455,8 @@ the hash of what you set.
 | Secret | Issued by | Notes |
 |---|---|---|
 | `POSTGRES_PASSWORD` | you | see below: the database must change first |
-| `APP_SECRET_KEY` | `openssl rand -hex 32` | signs every token: everyone is signed out |
+| `APP_SECRET_KEY` | `openssl rand -hex 32` | signs every token: everyone is signed out. While `APP_LINK_SIGNING_KEYS` is unset it also signs the links in emails, and rotating it breaks every one already sent: set the link keys first (below) |
+| `APP_LINK_SIGNING_KEYS` | `openssl rand -hex 32` (each) | a list: the new key **first**, the old kept after it for 90 days; see below |
 | `APP_RAZORPAY_KEY_ID` / `_SECRET` | Razorpay dashboard -> API keys | regenerate, update, recreate |
 | `APP_RAZORPAY_WEBHOOK_SECRET` | Razorpay dashboard -> Webhooks | set the same value in both, then recreate at once: webhooks fail in between (Razorpay retries) |
 | `APP_PAYMENT_KEYS_SECRET` | `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` | a comma-separated list: put the new key **first**, keep the old after it; drop the old once every saved club key has been re-saved |
@@ -469,6 +470,41 @@ the hash of what you set.
 | Wallet pass signing key and certificate | Apple developer -> Pass Type IDs | replace the files in `backend/wallet_certs`, not in git |
 | `PROD_SSH_PRIVATE_KEY` | `ssh-keygen -t ed25519` | add the new public key to the server's `authorized_keys`, update the secret, deploy once, remove the old key |
 | `APP_SENTRY_DSN` | Sentry -> project -> Client Keys | not really secret (it can only send events); revoke the old key there |
+
+**The links in emails (`APP_LINK_SIGNING_KEYS`).** A guest's ticket and
+certificate links (`/api/v1/files/{tickets|certificates}/<code>.pdf?s=...`)
+and the feedback survey's (`/feedback/<event>/<registration>?k=...`) never
+expire. Each carries an HMAC under the first key in the list; any key in the
+list verifies one. Unset, `APP_SECRET_KEY` signs and verifies them, as it
+always did -- which is why rotating that secret on 2026-10 broke every link
+sent before. A link whose key is no longer listed gets, in a browser, a page
+saying the link no longer works, pointing at the app and My tickets, with a
+form that sends a fresh link to the address the guest registered with (an
+app or a script still gets the 403 JSON). **Never list a key that leaked**,
+however many old links it would bring back: anyone holding it could sign a
+link to any ticket.
+
+Moving off `APP_SECRET_KEY` (once):
+
+1. `openssl rand -hex 32`: the new link key.
+2. `APP_LINK_SIGNING_KEYS=<new key>,<the current APP_SECRET_KEY>`: new links
+   are signed with the new key, and those sent since `APP_SECRET_KEY` last
+   changed keep working. Update `PROD_ENV_VARIABLES`; deploy with `sync_env`
+   and `recreate_backend`.
+3. Check: a link from a ticket email sent before the deploy still opens the
+   PDF, and a new registration's email carries a link that does too.
+4. After 90 days, drop the second key (`APP_LINK_SIGNING_KEYS=<new key>`).
+   From then on, rotating `APP_SECRET_KEY` signs everyone out and leaves the
+   emailed links alone.
+
+Rotating the link key later: put a new key first (`<newer>,<new>`), deploy;
+after 90 days drop the old one. If a link key leaks, drop it at once, not
+after 90 days: the links it signed then show the page, and their holders ask
+for a fresh one. Why 90 days: most links are for an event weeks away at
+most, and a certificate is downloaded within days of being sent; whoever
+comes later uses the form. Each key must be at least 32 characters; a
+shorter one stops the backend at startup, so check the smoke URL after the
+recreate.
 
 **The database password** (changes the database; the backend reconnects on
 recreate):
