@@ -150,9 +150,10 @@ jobs:
           trap '' HUP
           cd "$PROJECT_PATH"
 
-          # Build, then recreate, then migrate. The container install_requirements
-          # recreates starts with the new code, image and dependencies, so the
-          # restart at the end is skipped after it (RECREATED).
+          # Build, migrate with the new image, then recreate. The container
+          # install_requirements recreates starts with the new code, image and
+          # dependencies, so the restart at the end is skipped after it
+          # (RECREATED).
           if [ "$RESTART_ALL" = "true" ]; then
             echo "::group::Restarting all services"
             $COMPOSE up --build -d
@@ -163,6 +164,21 @@ jobs:
             echo "::group::Building backend"
             $COMPOSE build backend
             echo "::endgroup::"
+          fi
+
+          # With a new image, migrate before it takes traffic: a one-off
+          # container from it (the same env and the synced code, which is
+          # bind-mounted) runs the migration while the old container still
+          # serves. If it fails -- a migration error, or a setting the new
+          # code refuses to start without -- set -e stops the deploy here and
+          # the old container goes on serving. Recreating first meant a new
+          # image that could not boot took the site down and left no running
+          # container to migrate with.
+          if [ "$MIGRATE" = "true" ] && [ "$RECREATE_BACKEND" = "true" ]; then
+            echo "::group::Migrating database with the new image"
+            $COMPOSE run --rm --no-deps -T backend alembic upgrade head
+            echo "::endgroup::"
+            MIGRATED=1
           fi
 
           if [ "$RECREATE_BACKEND" = "true" ]; then
@@ -191,7 +207,9 @@ jobs:
 
           if [ "$MIGRATE" = "true" ]; then
             echo "::group::Migrating database"
-            $COMPOSE exec -T backend alembic upgrade head
+            if [ -z "\$MIGRATED" ]; then
+              $COMPOSE exec -T backend alembic upgrade head
+            fi
             echo "Applied revision:"
             $COMPOSE exec -T backend alembic current
             echo "::endgroup::"
