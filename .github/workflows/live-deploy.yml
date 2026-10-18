@@ -223,9 +223,14 @@ jobs:
           # install_requirements recreates starts with the new code, image and
           # dependencies, so the restart at the end is skipped after it
           # (RECREATED).
+          #
+          # restart_all names postgres and backend: a bare up would also start
+          # redis, worker and meilisearch, which run only once started on
+          # purpose (a box too small for them is OOM-killed otherwise). A
+          # running worker is recreated below; the others build nothing.
           if [ "$RESTART_ALL" = "true" ]; then
             echo "::group::Restarting all services"
-            $BUILD up --build -d
+            $BUILD up --build -d postgres backend
             echo "::endgroup::"
           fi
 
@@ -294,13 +299,13 @@ jobs:
           # does not know waits; a payload it does not expect fails). It is
           # started once by hand (docker-compose.prod.yml); from then on it
           # goes with the backend here: recreated from the new image when the
-          # backend was, else restarted. On SIGTERM it hands its jobs back.
-          # After the migration, and before the extra services below: a
-          # worker that was not running is left to them (one start, not a
-          # start and then a recreate), and one this step just recreated is
-          # up to date, so their up -d leaves it alone.
+          # backend was (or restart_all rebuilt it), else restarted. On
+          # SIGTERM it hands its jobs back. After the migration, and before
+          # the extra services below: a worker that was not running is left
+          # to them (one start, not a start and then a recreate), and one this
+          # step just recreated is up to date, so their up -d leaves it alone.
           if [ -n "\$($COMPOSE ps -q worker 2>/dev/null)" ]; then
-            if [ -n "\$RECREATED" ]; then
+            if [ -n "\$RECREATED" ] || [ "$RESTART_ALL" = "true" ]; then
               echo "::group::Recreating worker from the new image"
               $COMPOSE up -d --no-deps --force-recreate worker
               echo "::endgroup::"
@@ -337,6 +342,20 @@ jobs:
           if [ -z "\$RECREATED" ] && { [ "$SYNC_CODE" = "true" ] || [ "$RESTART_BACKEND" = "true" ]; }; then
             echo "::group::Restarting backend"
             $COMPOSE restart backend
+            echo "::endgroup::"
+          fi
+
+          # Disk: a build leaves the image it replaced behind, untagged, and
+          # the box had 5 GB free on 2026-10-18 with each image about 3 GB.
+          # Once the new one runs (backend and worker recreated above), drop
+          # images no container uses and build cache unused for a day. Neither
+          # touches an image a container runs or one with a tag (the rollback
+          # tag in docs/OPERATIONS.md), and the cache the build just used is
+          # kept. A failure here only warns: the deploy itself is done.
+          if [ "$BUILD_BACKEND" = "true" ] || [ "$RESTART_ALL" = "true" ]; then
+            echo "::group::Pruning unused images and day-old build cache"
+            sudo docker image prune -f || echo "::warning::docker image prune failed: prune by hand (docs/OPERATIONS.md, Disk)"
+            sudo docker builder prune -f --filter until=24h || echo "::warning::docker builder prune failed: prune by hand (docs/OPERATIONS.md, Disk)"
             echo "::endgroup::"
           fi
 

@@ -21,6 +21,9 @@ WORKFLOW = REPO / ".github" / "workflows" / "live-deploy.yml"
 
 pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
 
+#: What a deploy that built runs last: unused images and day-old build cache.
+PRUNE = ["docker image prune -f", "docker builder prune -f --filter until=24h"]
+
 FLAGS = ("SYNC_CODE", "RESTART_BACKEND", "INSTALL_REQUIREMENTS", "RESTART_DATABASE", "RESTART_ALL",
          "MIGRATE", "UP_BACKEND", "BUILD_BACKEND", "RECREATE_BACKEND")
 
@@ -51,7 +54,13 @@ def fakes(tmp_path):
     bin_dir.mkdir()
     log = tmp_path / "calls.log"
     _executable(bin_dir / "sudo", 'exec "$@"\n')
-    _executable(bin_dir / "docker", f'echo "docker $*" >> "{log}"\nexit "${{FAKE_DOCKER_STATUS:-0}}"\n')
+    _executable(bin_dir / "docker", f'''
+echo "docker $*" >> "{log}"
+case "$1" in
+  image|builder) exit "${{FAKE_PRUNE_STATUS:-0}}" ;;
+esac
+exit "${{FAKE_DOCKER_STATUS:-0}}"
+''')
     _executable(bin_dir / "docker-compose", f'''
 args="$*"
 args="${{args#-f docker-compose.prod.yml }}"
@@ -81,7 +90,7 @@ def _deploy(tmp_path, fakes, **inputs) -> tuple[subprocess.CompletedProcess, lis
     assert rendered.returncode == 0, rendered.stdout + rendered.stderr
     (tmp_path / "project").mkdir(exist_ok=True)
     env = {"PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", **{k: v for k, v in os.environ.items() if k == "HOME"}}
-    for fake in ("FAKE_DOCKER_STATUS", "FAKE_WORKER"):
+    for fake in ("FAKE_DOCKER_STATUS", "FAKE_WORKER", "FAKE_PRUNE_STATUS"):
         if fake in inputs:
             env[fake] = inputs[fake]
     run = subprocess.run(["bash", str(tmp_path / "runner" / "deploy-remote.sh")], env=env, capture_output=True, text=True)
@@ -164,6 +173,7 @@ def test_install_requirements_builds_migrates_then_recreates(tmp_path, fakes):
         "compose up -d --no-deps --force-recreate backend [buildkit=]",
         "compose exec -T backend alembic current [buildkit=]",
         "compose ps -q worker [buildkit=]",
+        *PRUNE,
     ]
     assert calls[0] == "docker buildx version"  # BuildKit checked before anything
     assert run.stdout.rstrip().endswith("MOA_DEPLOY_COMPLETE")
@@ -223,6 +233,7 @@ def test_a_running_worker_is_recreated_after_the_backend_from_the_new_image(tmp_
         "compose exec -T backend alembic current [buildkit=]",
         "compose ps -q worker [buildkit=]",
         "compose up -d --no-deps --force-recreate worker [buildkit=]",
+        *PRUNE,
     ]
 
 
@@ -248,6 +259,37 @@ def test_a_running_worker_recreated_here_is_left_to_up_by_the_services_input(tmp
     assert order.index("compose up -d --no-deps --force-recreate worker [buildkit=]") < order.index(
         "compose up -d --no-deps worker [buildkit=1]")
     assert not [c for c in order if c.startswith("compose restart")]
+
+
+def test_restart_all_starts_only_postgres_and_backend_and_recreates_a_running_worker(tmp_path, fakes):
+    """A bare `up --build -d` would start redis, worker and meilisearch too,
+    on a box that may not hold them."""
+    run, calls = _deploy(tmp_path, fakes, restart_all=True, FAKE_WORKER="1")
+    assert run.returncode == 0, run.stdout + run.stderr
+    order = [c for c in calls if not c.startswith("docker buildx")]
+    assert order == [
+        "compose up --build -d postgres backend [buildkit=1]",
+        "compose ps -q worker [buildkit=]",
+        "compose up -d --no-deps --force-recreate worker [buildkit=]",
+        *PRUNE,
+    ]
+    assert " up --build -d\n" not in (tmp_path / "runner" / "deploy-remote.sh").read_text()
+
+
+def test_nothing_is_pruned_without_a_build(tmp_path, fakes):
+    for inputs in ({"sync_code": True, "migrate": True}, {"recreate_backend": True}, {"services": "redis"}):
+        run, calls = _deploy(tmp_path, fakes, **inputs)
+        assert run.returncode == 0, run.stdout + run.stderr
+        assert not [c for c in calls if "prune" in c], inputs
+
+
+def test_a_failed_prune_warns_and_the_deploy_still_completes(tmp_path, fakes):
+    run, calls = _deploy(tmp_path, fakes, build_backend=True, FAKE_PRUNE_STATUS="1")
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert [c for c in calls if "prune" in c] == PRUNE
+    assert "::warning::docker image prune failed" in run.stdout
+    assert "::warning::docker builder prune failed" in run.stdout
+    assert run.stdout.rstrip().endswith("MOA_DEPLOY_COMPLETE")
 
 
 def test_an_env_change_alone_leaves_a_running_worker_alone(tmp_path, fakes):
