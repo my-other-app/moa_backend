@@ -18,7 +18,7 @@ from app.api.checkins import service as checkins
 from app.api.checkins.models import CheckIns, CheckInVia, Doors
 from app.api.checkins.service import WALKUP_DOMAIN
 from app.api.closeout.models import DOOR_OPEN_STATUSES, CloseoutReports, EventStatus, RetentionJobs, RetentionMode, RetentionState
-from app.api.deliveries.models import Deliveries, DeliveryChannel, DeliveryKind, DeliveryStatus
+from app.api.deliveries.models import SHOWN, SHOWN_STATUSES, UNFINISHED, Deliveries, DeliveryChannel, DeliveryKind, DeliveryStatus
 from app.api.events.documents import EVENT_TIMEZONE, ROLE_LABELS
 from app.api.events.models import EventRegistrationsLink, Events
 from app.api.events.tickets import design_version_of
@@ -200,11 +200,14 @@ async def figures(session, event: Events, now: Optional[datetime] = None) -> dic
         for key, label in ROLE_LABELS.items()
         if key in typed
     ]
-    counted = {(c, s): int(n) for c, s, n in sends}
+    # Read as the desk reads them: being sent is pending, given up on is failed.
+    counted: dict = {}
+    for c, s, n in sends:
+        counted[(c, SHOWN.get(s, s))] = counted.get((c, SHOWN.get(s, s)), 0) + int(n)
     deliveries = []
     for channel in DeliveryChannel:
-        row = {"channel": channel.value, **{s.value: counted.get((channel, s), 0) for s in DeliveryStatus}}
-        if sum(counted.get((channel, s), 0) for s in DeliveryStatus):
+        row = {"channel": channel.value, **{s.value: counted.get((channel, s), 0) for s in SHOWN_STATUSES}}
+        if sum(counted.get((channel, s), 0) for s in SHOWN_STATUSES):
             deliveries.append(row)
     via_counts = {v.value: int(n) for v, n in vias}
     half_minutes = round((half_at - int(event.event_datetime.timestamp())) / 60) if half_at is not None else None
@@ -246,7 +249,7 @@ async def tickets(session, event: Events, registered: Optional[int] = None) -> d
     revoked = await session.scalar(select(func.count()).select_from(_regs(event.id).where(EventRegistrationsLink.ticket_revoked_at.isnot(None)).subquery())) or 0
     sent = Deliveries.kind == DeliveryKind.ticket
     issued = await session.scalar(select(func.count(func.distinct(Deliveries.registration_id))).where(Deliveries.event_id == event.id, sent, Deliveries.status == DeliveryStatus.sent)) or 0
-    pending = await session.scalar(select(func.count()).where(Deliveries.event_id == event.id, sent, Deliveries.status == DeliveryStatus.pending)) or 0
+    pending = await session.scalar(select(func.count()).where(Deliveries.event_id == event.id, sent, Deliveries.status.in_(UNFINISHED))) or 0
     version = await _ticket_version(session, event.id)
     older = 0
     if version > 0:

@@ -440,16 +440,27 @@ async def list_club_followers_endpoint(
     pagination: PaginationParams,
     session: SessionDep,
     user: DependsAuth,
+    after: Optional[str] = Query(None, max_length=200, description="From `next`: the page after a follower (offset is then ignored)"),
 ) -> PaginatedResponse[ClubFollowersListResponse]:
-    """List followers of a club, with how many there are in all."""
-    followers = await service.list_club_followers(
-        session=session,
-        club_id=club_id,
-        limit=pagination.limit,
-        offset=pagination.offset,
-    )
+    """List followers of a club, newest first, with how many there are in
+    all. `next` carries `after=` (a keyset cursor), so a deep page is a range
+    of the club's follower index rather than a walk past every follower
+    before it."""
+    from urllib.parse import urlencode
+
+    limit = pagination.limit - 1  # PaginationParams asks for one more than the page
+    rows, _ = await service.list_club_followers(session=session, club_id=club_id, limit=limit + 1, offset=pagination.offset, after=after)
     total = await service.count_club_followers(session=session, club_id=club_id)
-    return paginated_response(followers, request, schema=ClubFollowersListResponse, total=total)
+    page = rows[:limit]
+    next_url = None
+    if len(rows) > limit and page:
+        cursor = service.followers_cursor(page[-1])
+        params = {k: v for k, v in request.query_params.items() if k not in ("offset", "after")}
+        next_url = f"{request.url.path}?{urlencode({**params, 'after': cursor})}"
+    return PaginatedResponse[ClubFollowersListResponse](
+        limit=limit, offset=pagination.offset if after is None else 0, total=total, next=next_url,
+        items=[ClubFollowersListResponse.model_validate(r) for r in page],
+    )
 
 
 @router.get("/followers/{club_id}/{user_id}", summary="One follower: who they are and what they did with the club")

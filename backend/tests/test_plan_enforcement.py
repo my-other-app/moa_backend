@@ -726,11 +726,12 @@ async def test_a_paid_event_made_before_the_cutoff_still_registers_and_pays(clie
         headers=auth_header(token),
     )
     assert order.status_code == 200, order.text
+    payment = {"id": "pay_grandfathered", "order_id": "order_grandfathered", "status": "captured", "method": "upi", "amount": 10000, "upi": {}}
+    # The webhook is a hint; Razorpay is asked, and says the same.
+    monkeypatch.setattr(razorpay_client.payment, "fetch", lambda payment_id, *a, **kw: dict(payment))
     await handle_razorpay_webhook(
         session,
-        {"entity": "event", "event": "payment.captured", "payload": {"payment": {"entity": {
-            "id": "pay_grandfathered", "order_id": "order_grandfathered", "status": "captured", "method": "upi", "amount": 10000, "upi": {},
-        }}}},
+        {"entity": "event", "event": "payment.captured", "payload": {"payment": {"entity": dict(payment)}}},
         event_id="evt_grandfathered", signature="sig",
     )
     reg = await session.scalar(select(EventRegistrationsLink).where(EventRegistrationsLink.event_id == paid.id))

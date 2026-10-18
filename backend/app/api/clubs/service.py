@@ -3,7 +3,8 @@ import io
 import re
 from fastapi import UploadFile
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import and_, delete, exists, or_, select, func
+from sqlalchemy import and_, delete, exists, false as sa_false, or_, select, func, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, aliased, joinedload
 import secrets
@@ -506,6 +507,38 @@ async def restore_club(session: AsyncSession, club_id: int) -> Clubs:
     return await club_for_answer(session, club.id)
 
 
+#: The public list's total counts at most this many (exact below it).
+LIST_COUNT_CAP = 1000
+
+
+def _clubs_filters(
+    query, *, user_id, org_id, is_following, is_pinned, is_hidden, interest_ids, search,
+):
+    """The list's filters, each an EXISTS on the person's own link row (the
+    unique (club_id, user_id, is_deleted) index) or on the club's interests,
+    so no join can repeat a club."""
+    if search and search.strip():
+        query = query.where(Clubs.name.ilike(f"%{search.strip()}%"))
+    if org_id:
+        query = query.where(Clubs.org_id == org_id)
+    if interest_ids:
+        query = query.where(exists().where(
+            ClubInterestsLink.club_id == Clubs.id, ClubInterestsLink.interest_id.in_(interest_ids), ClubInterestsLink.is_deleted == False,  # noqa: E712
+        ))
+
+    def mine(*conds):
+        return exists().where(ClubUsersLink.club_id == Clubs.id, ClubUsersLink.user_id == user_id, ClubUsersLink.is_deleted == False, *conds)  # noqa: E712
+
+    if is_following is not None and user_id:
+        following = mine(ClubUsersLink.is_following == True)  # noqa: E712
+        query = query.where(following if is_following else ~following)
+    if is_pinned is not None and user_id:
+        query = query.where(mine(ClubUsersLink.is_pinned == is_pinned))
+    if is_hidden is not None and user_id:
+        query = query.where(mine(ClubUsersLink.is_hidden == is_hidden))
+    return query
+
+
 async def get_all_clubs(
     session: AsyncSession,
     user_id: int | None = None,
@@ -523,140 +556,73 @@ async def get_all_clubs(
     order: str | None = None,
     with_admin_fields: bool = False,
 ):
-    """Get all clubs with optional filters, search, and followers count.
+    """Clubs with optional filters and search, each with its followers and
+    whether this person follows it.
 
     `include_unverified` should only be set by admin-facing callers — the
-    public listing must never surface clubs pending approval.
+    public listing shows listed clubs only (clubs.listed: verified, not
+    deleted, its organisation not blocked).
+
+    The followers are clubs.follower_count, which a trigger keeps exact; "is
+    following" is a probe of the person's own row. This used to join every
+    follow of every club and count them per club, with a DISTINCT total over
+    the same join: the whole follow table per request. The public total
+    counts at most LIST_COUNT_CAP clubs; past that it says at least one more
+    than this page reaches, so the next page is always offered.
 
     `with_admin_fields` adds the organisation, the login email and an event
     count to each row. It is off by default so the public listing, which is
     the hot path, does not pay for three things it never shows.
     """
-    ClubUsersLinkPinned = aliased(ClubUsersLink)
-    ClubUsersLinkHidden = aliased(ClubUsersLink)
-    ClubUsersLinkFollowers = aliased(ClubUsersLink)
-    ClubUsersLinkFollowing = aliased(ClubUsersLink)
-
-    query = (
-        select(
-            Clubs,
-            func.count(func.distinct(ClubUsersLinkFollowers.id)).label(
-                "followers_count"
-            ),
-            func.bool_or(ClubUsersLinkFollowing.id.isnot(None)).label("is_following"),
+    followers = Clubs.follower_count
+    if user_id:
+        following = exists().where(
+            ClubUsersLink.club_id == Clubs.id, ClubUsersLink.user_id == user_id,
+            ClubUsersLink.is_following == True, ClubUsersLink.is_deleted == False,  # noqa: E712
         )
-        .outerjoin(
-            ClubUsersLinkFollowers,
-            and_(
-                ClubUsersLinkFollowers.club_id == Clubs.id,
-                ClubUsersLinkFollowers.is_following == True,
-                ClubUsersLinkFollowers.is_deleted == False,
-            ),
-        )
-        .outerjoin(
-            ClubUsersLinkFollowing,
-            and_(
-                ClubUsersLinkFollowing.club_id == Clubs.id,
-                ClubUsersLinkFollowing.user_id == user_id,
-                ClubUsersLinkFollowing.is_following == True,
-                ClubUsersLinkFollowing.is_deleted == False,
-            ),
-        )
-        .where(Clubs.is_deleted == False)
-        .options(selectinload(Clubs.interests))
-    )
+    else:
+        following = sa_false()
+    # The counter as a column of the row read now: a club this session already
+    # holds would otherwise answer with the count it was loaded with.
+    query = select(Clubs, followers.label("followers_count"), following.label("is_following")).where(Clubs.is_deleted == False).options(selectinload(Clubs.interests))  # noqa: E712
 
     if with_admin_fields:
-        # selectinload, not joinedload: these would fan out against the
-        # follower join above and inflate the aggregate it computes.
         query = query.options(selectinload(Clubs.org), selectinload(Clubs.user))
 
     # `include_unverified` is the admin gate; `is_verified` is the caller's
     # own filter on top of it, so an admin can ask for pending clubs only.
     if is_verified is not None:
         query = query.where(Clubs.is_verified == is_verified)
-
     if not include_unverified:
-        query = query.where(Clubs.is_verified == True)
-        query = query.outerjoin(
-            Organizations, Organizations.id == Clubs.org_id
-        ).where(or_(Clubs.org_id.is_(None), Organizations.is_blocked == False))
+        query = query.where(Clubs.listed == True)  # noqa: E712
 
-    # Search filter - use ILIKE for case-insensitive pattern matching on club name
-    if search and search.strip():
-        search_pattern = f"%{search.strip()}%"
-        query = query.filter(Clubs.name.ilike(search_pattern))
-
-    if org_id:
-        query = query.filter(Clubs.org_id == org_id)
-
-    if interest_ids:
-        query = query.join(ClubInterestsLink).filter(
-            ClubInterestsLink.interest_id.in_(interest_ids)
-        )
-
-    if is_following is not None and user_id:
-        if is_following:
-            query = query.join(ClubUsersLink).filter(
-                ClubUsersLink.user_id == user_id,
-                ClubUsersLink.is_following == True,
-                ClubUsersLink.is_deleted == False,
-            )
-        else:
-            query = query.outerjoin(
-                ClubUsersLink,
-                and_(
-                    ClubUsersLink.club_id == Clubs.id,
-                    ClubUsersLink.user_id == user_id,
-                    ClubUsersLink.is_following == True,
-                    ClubUsersLink.is_deleted == False,
-                ),
-            ).filter(ClubUsersLink.id == None)
-
-    if is_pinned is not None and user_id:
-        query = query.join(ClubUsersLinkPinned).filter(
-            ClubUsersLinkPinned.user_id == user_id,
-            ClubUsersLinkPinned.is_pinned == is_pinned,
-            ClubUsersLinkPinned.is_deleted == False,
-        )
-
-    if is_hidden is not None and user_id:
-        query = query.join(ClubUsersLinkHidden).filter(
-            ClubUsersLinkHidden.user_id == user_id,
-            ClubUsersLinkHidden.is_hidden == is_hidden,
-            ClubUsersLinkHidden.is_deleted == False,
-        )
-
-    # The total matching the same filters, taken from this very query rather
-    # than a hand-written copy of its WHERE clause -- the two cannot drift.
-    # with_only_columns keeps the FROM and joins and swaps the selected
-    # columns; DISTINCT collapses the fan-out from the follower joins.
-    total = await session.scalar(
-        select(func.count()).select_from(
-            query.with_only_columns(Clubs.id).order_by(None).distinct().subquery()
-        )
+    query = _clubs_filters(
+        query, user_id=user_id, org_id=org_id, is_following=is_following, is_pinned=is_pinned,
+        is_hidden=is_hidden, interest_ids=interest_ids, search=search,
     )
 
-    query = query.group_by(Clubs.id).limit(limit).offset(offset)
+    ids = query.with_only_columns(Clubs.id).order_by(None)
+    if include_unverified:
+        total = int(await session.scalar(select(func.count()).select_from(ids.subquery())) or 0)
+    else:
+        total = int(await session.scalar(select(func.count()).select_from(ids.limit(LIST_COUNT_CAP + 1).subquery())) or 0)
+
     query = apply_sort(
         query,
-        columns={
-            "created": Clubs.created_at,
-            "name": Clubs.name,
-            # The aggregate is already selected and labelled, so sorting on it
-            # costs nothing extra.
-            "followers": func.count(func.distinct(ClubUsersLinkFollowers.id)),
-        },
+        columns={"created": Clubs.created_at, "name": Clubs.name, "followers": followers},
         default=Clubs.created_at,
         sort=sort,
         order=order,
-    )
+    ).order_by(Clubs.id.desc()).limit(limit).offset(offset)
 
-    results = await session.execute(query)
+    results = (await session.execute(query)).all()
+    if not include_unverified and total > LIST_COUNT_CAP:
+        # Past the cap: at least one more than this page reaches when there is a next page.
+        total = max(LIST_COUNT_CAP, offset + len(results))
 
     clubs_response = []
     results_clubs = []
-    for club, followers_count, is_following in results:
+    for club, followers_count, is_following_ in results:
         results_clubs.append(club)
         club_dict = {
             "id": club.id,
@@ -672,10 +638,10 @@ async def get_all_clubs(
             "brand_secondary": club.brand_secondary,
             "created_at": club.created_at,
             "is_verified": club.is_verified,
-            "followers_count": followers_count,
-            "is_following": is_following,
+            "followers_count": int(followers_count or 0),
+            "is_following": bool(is_following_),
         }
-        
+
         # Serialize interests
         if club.interests:
             club_dict["interests"] = [
@@ -689,7 +655,7 @@ async def get_all_clubs(
             ]
         else:
             club_dict["interests"] = []
-            
+
         clubs_response.append(club_dict)
 
     if with_admin_fields:
@@ -699,7 +665,7 @@ async def get_all_clubs(
     # paginated_response falls back to "is there an extra row", which reports
     # no page count at all -- every club list was therefore stuck on its first
     # page, including the club list on an organisation's page.
-    return clubs_response, total or 0
+    return clubs_response, total
 
 
 async def _attach_admin_fields(session: AsyncSession, clubs, rows: list[dict]) -> None:
@@ -735,35 +701,48 @@ async def _attach_admin_fields(session: AsyncSession, clubs, rows: list[dict]) -
         row["requested_cycle"] = club.requested_cycle
 
 
-async def follow_club(session: AsyncSession, club_id: int, user_id: int, tracking_ref: str | None = None):
-    user_exists = await session.scalar(select(exists().where(Users.id == user_id)))
-    club_exists = await session.scalar(select(exists().where(Clubs.id == club_id)))
-
-    if not user_exists:
+async def _club_exists(session: AsyncSession, club_id: int, user_id: int) -> None:
+    if not await session.scalar(select(exists().where(Users.id == user_id))):
         raise CustomHTTPException(status_code=401, message="Unauthorized")
-    if not club_exists:
+    if not await session.scalar(select(exists().where(Clubs.id == club_id))):
         raise CustomHTTPException(status_code=400, message="Invalid club")
 
-    follow = await session.scalar(
-        select(ClubUsersLink).where(
-            ClubUsersLink.user_id == user_id, ClubUsersLink.club_id == club_id
-        )
-    )
-    if follow:
-        if follow.is_following:
-            raise CustomHTTPException(409, "already following")
-        follow.is_following = True
-    else:
-        follow = ClubUsersLink(user_id=user_id, club_id=club_id, is_following=True)
-        session.add(follow)
+
+def _link_upsert(club_id: int, user_id: int, **values):
+    """INSERT the person's live row for the club, or, when there is one
+    (the unique (club_id, user_id, is_deleted)), the caller's ON CONFLICT."""
+    now = datetime.now(timezone.utc)
+    row = dict(club_id=club_id, user_id=user_id, is_following=False, is_pinned=False, is_hidden=False, is_deleted=False, created_at=now, updated_at=now)
+    return pg_insert(ClubUsersLink).values({**row, **values})
+
+
+async def _link_row(session: AsyncSession, link_id: int) -> ClubUsersLink:
+    """The row as the database has it now (a trigger or an upsert wrote it, not this session)."""
+    return await session.scalar(select(ClubUsersLink).where(ClubUsersLink.id == link_id).execution_options(populate_existing=True))
+
+
+async def follow_club(session: AsyncSession, club_id: int, user_id: int, tracking_ref: str | None = None):
+    """Follow: one upsert of the person's row. Two taps at once are one
+    follow and a 409 for the other, not a 500 on the unique key; the
+    follower count moves by trigger."""
+    await _club_exists(session, club_id, user_id)
     # Credited to the tracking link the page carried, if it carried one of this club's.
     from app.api.links import service as links
 
-    await links.attribute_follow(session, follow, club_id, tracking_ref)
+    link = await links.by_code(session, tracking_ref) if tracking_ref else None
+    link_id = link.id if link is not None and link.club_id == club_id else None
+    stmt = _link_upsert(club_id, user_id, is_following=True, tracking_link_id=link_id)
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["club_id", "user_id", "is_deleted"],
+        set_={"is_following": True, "updated_at": stmt.excluded.updated_at, "tracking_link_id": func.coalesce(stmt.excluded.tracking_link_id, ClubUsersLink.tracking_link_id)},
+        where=ClubUsersLink.is_following == False,  # noqa: E712
+    ).returning(ClubUsersLink.id)
+    row_id = await session.scalar(stmt)
+    if row_id is None:
+        raise CustomHTTPException(409, "already following")
     await session.commit()
     _forget_for_you(user_id)
-    await session.refresh(follow)
-    return follow
+    return await _link_row(session, row_id)
 
 
 def _forget_for_you(user_id: int) -> None:
@@ -774,29 +753,18 @@ def _forget_for_you(user_id: int) -> None:
 
 
 async def unfollow_club(session: AsyncSession, club_id: int, user_id: int):
-    user_exists = await session.scalar(select(exists().where(Users.id == user_id)))
-    club_exists = await session.scalar(select(exists().where(Clubs.id == club_id)))
-
-    if not user_exists:
-        raise CustomHTTPException(status_code=401, message="Unauthorized")
-    if not club_exists:
-        raise CustomHTTPException(status_code=400, message="Invalid club")
-
-    follow = await session.scalar(
-        select(ClubUsersLink).where(
-            ClubUsersLink.user_id == user_id, ClubUsersLink.club_id == club_id
-        )
+    await _club_exists(session, club_id, user_id)
+    row_id = await session.scalar(
+        update(ClubUsersLink)
+        .where(ClubUsersLink.club_id == club_id, ClubUsersLink.user_id == user_id, ClubUsersLink.is_deleted == False, ClubUsersLink.is_following == True)  # noqa: E712
+        .values(is_following=False, updated_at=datetime.now(timezone.utc))
+        .returning(ClubUsersLink.id)
     )
-
-    if not follow or not follow.is_following:
+    if row_id is None:
         raise CustomHTTPException(409, "not following the club")
-
-    follow.is_following = False
-
     await session.commit()
     _forget_for_you(user_id)
-    await session.refresh(follow)
-    return follow
+    return await _link_row(session, row_id)
 
 
 async def create_note(
@@ -835,86 +803,83 @@ async def list_notes(
     return list(await session.scalars(query))
 
 
+async def _toggle(session: AsyncSession, club_id: int, user_id: int, column: str) -> ClubUsersLink:
+    """Flip `column` on the person's row, making the row (with it on) when
+    there is none: one statement, so two taps at once are two flips."""
+    await _club_exists(session, club_id, user_id)
+    stmt = _link_upsert(club_id, user_id, **{column: True})
+    flag = getattr(ClubUsersLink, column)
+    row_id = await session.scalar(
+        stmt.on_conflict_do_update(
+            index_elements=["club_id", "user_id", "is_deleted"],
+            set_={column: ~flag, "updated_at": stmt.excluded.updated_at},
+        ).returning(ClubUsersLink.id)
+    )
+    await session.commit()
+    _forget_for_you(user_id)
+    return await _link_row(session, row_id)
+
+
 async def toggle_pin_club(
     session: AsyncSession, club_id: int, user_id: int
 ) -> ClubUsersLink:
     """Toggle pin status for a club."""
-    link = await session.scalar(
-        select(ClubUsersLink).where(
-            ClubUsersLink.club_id == club_id,
-            ClubUsersLink.user_id == user_id,
-            ClubUsersLink.is_deleted == False,
-        )
-    )
-    if not link:
-        link = ClubUsersLink(club_id=club_id, user_id=user_id)
-        session.add(link)
-
-    link.is_pinned = not link.is_pinned
-    await session.commit()
-    _forget_for_you(user_id)
-    await session.refresh(link)
-    return link
+    return await _toggle(session, club_id, user_id, "is_pinned")
 
 
 async def toggle_hide_club(
     session: AsyncSession, club_id: int, user_id: int
 ) -> ClubUsersLink:
     """Toggle hide status for a club."""
-    link = await session.scalar(
-        select(ClubUsersLink).where(
-            ClubUsersLink.club_id == club_id,
-            ClubUsersLink.user_id == user_id,
-            ClubUsersLink.is_deleted == False,
-        )
-    )
-    if not link:
-        link = ClubUsersLink(club_id=club_id, user_id=user_id)
-        session.add(link)
+    return await _toggle(session, club_id, user_id, "is_hidden")
 
-    link.is_hidden = not link.is_hidden
-    await session.commit()
-    _forget_for_you(user_id)
-    await session.refresh(link)
-    return link
+
+FOLLOWERS_ORDER = "followers"
 
 
 async def list_club_followers(
-    session: AsyncSession, club_id: int, limit: int = 10, offset: int = 0
+    session: AsyncSession, club_id: int, limit: int = 10, offset: int = 0, after: str | None = None,
 ):
-    """List followers of a club."""
+    """A club's followers, newest first: a range of ix_club_users_followers
+    (club_id, created_at DESC, id DESC). `after` (a cursor from the page
+    before) starts after a follower; `offset` is for the first pages only.
+    Returns (rows, the next page's cursor or None)."""
+    from app.api.discover import cursor as cursors
+
+    start = cursors.decode(after, FOLLOWERS_ORDER, ["dt", "int"])
     query = (
         select(ClubUsersLink)
         .where(
             ClubUsersLink.club_id == club_id,
-            ClubUsersLink.is_following == True,
-            ClubUsersLink.is_deleted == False,
+            ClubUsersLink.is_following == True,  # noqa: E712
+            ClubUsersLink.is_deleted == False,  # noqa: E712
         )
         .options(
             joinedload(ClubUsersLink.user).options(
                 joinedload(Users.profile).options(joinedload(UserProfiles.avatar))
             )
         )
-        .order_by(ClubUsersLink.created_at.desc())
+        .order_by(ClubUsersLink.created_at.desc(), ClubUsersLink.id.desc())
         .limit(limit)
-        .offset(offset)
     )
-    result = await session.execute(query)
-    return result.scalars().all()
+    if start is not None:
+        query = query.where(cursors.after([(ClubUsersLink.created_at, True), (ClubUsersLink.id, True)], start))
+    else:
+        query = query.offset(offset)
+    rows = list((await session.execute(query)).unique().scalars().all())
+    return rows, (followers_cursor(rows[-1]) if rows else None)
+
+
+def followers_cursor(row: ClubUsersLink) -> str:
+    """The cursor that starts the page after this follower."""
+    from app.api.discover import cursor as cursors
+
+    return cursors.encode(FOLLOWERS_ORDER, [row.created_at, row.id])
 
 
 async def count_club_followers(session: AsyncSession, club_id: int) -> int:
-    """How many follow the club, so a page of them can say where it stands."""
-    return int(
-        await session.scalar(
-            select(func.count()).select_from(ClubUsersLink).where(
-                ClubUsersLink.club_id == club_id,
-                ClubUsersLink.is_following == True,
-                ClubUsersLink.is_deleted == False,
-            )
-        )
-        or 0
-    )
+    """How many follow the club: the trigger-kept counter, read as it stands now."""
+    return int(await session.scalar(select(Clubs.follower_count).where(Clubs.id == club_id)) or 0)
 
 
 async def get_club_details(
@@ -938,49 +903,24 @@ async def get_club_details(
         )
     )
     if enforce_visibility:
-        query = query.where(Clubs.is_verified == True, Clubs.is_deleted == False)
+        query = query.where(Clubs.listed == True)  # noqa: E712
     club = await session.scalar(query)
     if not club:
         raise CustomHTTPException(404, "Club not found")
 
-    # Get followers count
-    followers_count = await session.scalar(
-        select(func.count()).where(
-            ClubUsersLink.club_id == club_id,
-            ClubUsersLink.is_following == True,
-            ClubUsersLink.is_deleted == False,
-        )
-    )
+    # The trigger-kept counter, read as it stands now.
+    followers_count = int(await session.scalar(select(Clubs.follower_count).where(Clubs.id == club_id)) or 0)
 
-    # Get events statistics
-    from datetime import datetime, timezone
+    # The club's events, counted once: all, to come (by start) and past,
+    # through ix_events_club_start (is_deleted spelled out for its predicate).
     now = datetime.now(timezone.utc)
-    
-    # Total events
-    total_events = await session.scalar(
-        select(func.count()).where(
-            Events.club_id == club_id,
-            Events.is_deleted == False,
-        )
-    )
-
-    # Live/Upcoming events
-    live_events = await session.scalar(
-        select(func.count()).where(
-            Events.club_id == club_id,
-            Events.is_deleted == False,
-            Events.event_datetime >= now,
-        )
-    )
-
-    # Past events
-    past_events = await session.scalar(
-        select(func.count()).where(
-            Events.club_id == club_id,
-            Events.is_deleted == False,
-            Events.event_datetime < now,
-        )
-    )
+    total_events, live_events, past_events = (await session.execute(
+        select(
+            func.count(),
+            func.count().filter(Events.event_datetime >= now),
+            func.count().filter(Events.event_datetime < now),
+        ).where(Events.club_id == club_id, Events.is_deleted == False)  # noqa: E712
+    )).one()
     # Get user specific data
     user_data = None
     if user_id:
@@ -1004,30 +944,13 @@ async def get_club_details(
                 "is_hidden": False,
             }
 
-    # Calculate average rating
-    # Calculate rating dynamically from EventRatingsLink
-    total_ratings = await session.scalar(
-        select(func.count()).where(
-            EventRatingsLink.event_id.in_(
-                select(Events.id).where(
-                    Events.club_id == club_id,
-                    Events.is_deleted == False
-                )
-            ),
-            EventRatingsLink.is_deleted == False,
+    # The rating from the club's events' ratings, in one statement.
+    total_ratings, avg_rating = (await session.execute(
+        select(func.count(), func.avg(EventRatingsLink.rating)).where(
+            EventRatingsLink.event_id.in_(select(Events.id).where(Events.club_id == club_id, Events.is_deleted == False)),  # noqa: E712
+            EventRatingsLink.is_deleted == False,  # noqa: E712
         )
-    )
-    avg_rating = await session.scalar(
-        select(func.avg(EventRatingsLink.rating)).where(
-            EventRatingsLink.event_id.in_(
-                select(Events.id).where(
-                    Events.club_id == club_id,
-                    Events.is_deleted == False
-                )
-            ),
-            EventRatingsLink.is_deleted == False,
-        )
-    )
+    )).one()
 
     rating = avg_rating if avg_rating else 0.0
     total_ratings_count = total_ratings if total_ratings else 0

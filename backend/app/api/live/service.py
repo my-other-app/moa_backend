@@ -13,30 +13,38 @@ Five things happen while an event runs, and one just after:
 
 Nobody in the room needs an account. A browser makes itself a key and sends
 it on every call; that key is the voter, the asker and the player.
+
+What the room polls is read from second-long snapshots (room.py). Counters
+on a row (a question's votes, a player's score) move by one atomic UPDATE;
+a vote, an answer and a poll response are an INSERT ... ON CONFLICT, so a
+double tap is answered rather than a 500.
 """
 import asyncio
 import hashlib
 import hmac
 import logging
 import secrets
-from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select, text
+from sqlalchemy import delete, func, literal, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import joinedload
 
 from app.api.agenda.models import AgendaItems
 from app.api.checkins.models import CheckIns
 from app.api.closeout.models import EventStatus
+from app.api.clubs.models import Clubs
 from app.api.deliveries import service as deliveries
 from app.api.events.documents import EVENT_TIMEZONE
 from app.api.events.models import EventRegistrationsLink, Events
+from app.api.live import room
 from app.api.live.models import (
     Audience,
     FeedbackResponses,
+    FeedbackSends,
     FeedbackSurveys,
     LivePollResponses,
     LivePolls,
@@ -54,6 +62,7 @@ from app.api.live.models import (
     UpdateKind,
 )
 from app.config import settings
+from app.core import after_commit
 from app.core.email import email as email_mod
 from app.response import CustomHTTPException
 
@@ -66,7 +75,9 @@ SWEEP_LOCK = 7_301_010
 ANSWER_GRACE = 2
 UPDATE_TYPE = "event_live_update"
 # A banner is the latest update, as long as it is this fresh.
-BANNER_FOR = timedelta(hours=3)
+BANNER_FOR = room.BANNER_FOR
+#: Surveys one sweep sends at most; the rest wait a minute.
+SWEEP_BATCH = 50
 
 DEFAULT_SURVEY = [
     {"key": "overall", "kind": "rating", "label": "How was the event overall?"},
@@ -83,14 +94,17 @@ def now_utc() -> datetime:
 
 
 def voter_key_of(request) -> str:
-    key = (request.headers.get(VOTER_HEADER) or "").strip()
-    if not (8 <= len(key) <= 64) or not key.replace("-", "").replace("_", "").isalnum():
+    key = room.valid_key(request.headers.get(VOTER_HEADER))
+    if key is None:
         raise CustomHTTPException(422, message="This browser has no key for the room yet. Reload the page and try again.")
     return key
 
 
 def _clock(dt: datetime) -> str:
     return dt.astimezone(_tz).strftime("%-I:%M %p")
+
+
+public_event = room.public_event
 
 
 # --- the audience ----------------------------------------------------------------------
@@ -128,10 +142,11 @@ async def quiz_of(session, event: Events, create: bool = True) -> Optional[LiveQ
     return quiz
 
 
-def _question_out(q: LiveQuizQuestions, with_answer: bool) -> dict:
-    out = {"id": q.id, "prompt": q.prompt, "options": list(q.options or []), "seconds": q.seconds, "sort_order": q.sort_order}
+def _question_out(q, with_answer: bool) -> dict:
+    get = q.get if isinstance(q, dict) else (lambda k: getattr(q, k))
+    out = {"id": get("id"), "prompt": get("prompt"), "options": list(get("options") or []), "seconds": get("seconds"), "sort_order": get("sort_order")}
     if with_answer:
-        out["correct_key"] = q.correct_key
+        out["correct_key"] = get("correct_key")
     return out
 
 
@@ -162,6 +177,8 @@ async def update_quiz(session, quiz: LiveQuizzes, body) -> dict:
     if "intro" in data:
         quiz.intro = (data["intro"] or "").strip() or None
     await session.commit()
+    room.quiz_changed(quiz.event_id)
+    room.room_changed(quiz.event_id)
     return await quiz_out(session, quiz)
 
 
@@ -173,6 +190,7 @@ async def add_question(session, quiz: LiveQuizzes, body) -> dict:
     session.add(row)
     await session.commit()
     await session.refresh(quiz)
+    room.quiz_changed(quiz.event_id)
     return _question_out(row, True)
 
 
@@ -196,6 +214,7 @@ async def update_question(session, quiz: LiveQuizzes, question_id: UUID, body) -
         row.seconds = data["seconds"]
     await session.commit()
     await session.refresh(quiz)
+    room.quiz_changed(quiz.event_id)
     return _question_out(row, True)
 
 
@@ -204,6 +223,7 @@ async def delete_question(session, quiz: LiveQuizzes, question_id: UUID) -> None
     await session.delete(row)
     await session.commit()
     await session.refresh(quiz)
+    room.quiz_changed(quiz.event_id)
 
 
 async def _fresh_code(session) -> str:
@@ -214,16 +234,22 @@ async def _fresh_code(session) -> str:
     raise CustomHTTPException(500, message="Could not make a join code; try again.")
 
 
+async def _moved(session, quiz: LiveQuizzes) -> dict:
+    """After the host moved the quiz: the room's snapshots are forgotten, and the host sees it as it is now."""
+    room.quiz_changed(quiz.event_id)
+    room.room_changed(quiz.event_id)
+    return await host_state(session, quiz)
+
+
 async def start_quiz(session, quiz: LiveQuizzes) -> dict:
     """Opens the lobby. A quiz run before starts clean: last time's players and answers go."""
     if not quiz.questions:
         raise CustomHTTPException(422, message="Add at least one question before hosting.")
-    for p in list((await session.scalars(select(LiveQuizPlayers).where(LiveQuizPlayers.quiz_id == quiz.id))).all()):
-        await session.delete(p)
+    await session.execute(delete(LiveQuizPlayers).where(LiveQuizPlayers.quiz_id == quiz.id))
     quiz.status, quiz.current_index, quiz.question_opened_at, quiz.ended_at = QuizStatus.live, -1, None, None
     quiz.join_code = await _fresh_code(session)
     await session.commit()
-    return await host_state(session, quiz)
+    return await _moved(session, quiz)
 
 
 async def next_question(session, quiz: LiveQuizzes) -> dict:
@@ -234,34 +260,28 @@ async def next_question(session, quiz: LiveQuizzes) -> dict:
     quiz.current_index += 1
     quiz.question_opened_at = now_utc()
     await session.commit()
-    return await host_state(session, quiz)
+    return await _moved(session, quiz)
 
 
 async def end_quiz(session, quiz: LiveQuizzes) -> dict:
     quiz.status, quiz.ended_at, quiz.question_opened_at = QuizStatus.ended, now_utc(), None
     quiz.join_code = None
     await session.commit()
-    return await host_state(session, quiz)
+    return await _moved(session, quiz)
 
 
 async def reset_quiz(session, quiz: LiveQuizzes) -> dict:
     """Back to a draft: questions stay, the run is forgotten."""
-    for p in list((await session.scalars(select(LiveQuizPlayers).where(LiveQuizPlayers.quiz_id == quiz.id))).all()):
-        await session.delete(p)
+    await session.execute(delete(LiveQuizPlayers).where(LiveQuizPlayers.quiz_id == quiz.id))
     quiz.status, quiz.current_index, quiz.question_opened_at, quiz.ended_at, quiz.join_code = QuizStatus.draft, -1, None, None, None
     await session.commit()
-    return await host_state(session, quiz)
+    return await _moved(session, quiz)
 
 
-def _time_left(quiz: LiveQuizzes, q: LiveQuizQuestions, now: datetime) -> int:
-    if quiz.question_opened_at is None:
-        return q.seconds
-    return max(0, int(q.seconds - (now - quiz.question_opened_at).total_seconds()))
-
-
-async def _leaderboard(session, quiz: LiveQuizzes, limit: int = 10) -> list:
-    rows = list((await session.scalars(select(LiveQuizPlayers).where(LiveQuizPlayers.quiz_id == quiz.id).order_by(LiveQuizPlayers.score.desc(), LiveQuizPlayers.created_at).limit(limit))).all())
-    return [{"rank": i + 1, "name": p.name, "score": p.score} for i, p in enumerate(rows)]
+def _time_left(opened_at: Optional[datetime], seconds: int, now: datetime) -> int:
+    if opened_at is None:
+        return seconds
+    return max(0, int(seconds - (now - opened_at).total_seconds()))
 
 
 async def _tally(session, q: LiveQuizQuestions) -> dict:
@@ -270,93 +290,135 @@ async def _tally(session, q: LiveQuizQuestions) -> dict:
     return {"answered": sum(by.values()), "counts": [{"key": o["key"], "label": o["label"], "count": by.get(o["key"], 0), "correct": o["key"] == q.correct_key} for o in q.options]}
 
 
+async def _leaderboard(session, quiz: LiveQuizzes, limit: int = 10) -> list:
+    """The top of the board, read through ix_live_quiz_players_board (for a quiz the room cannot see, a draft's)."""
+    rows = (await session.execute(
+        select(LiveQuizPlayers.name, LiveQuizPlayers.score).where(LiveQuizPlayers.quiz_id == quiz.id)
+        .order_by(LiveQuizPlayers.score.desc(), LiveQuizPlayers.created_at).limit(limit)
+    )).all()
+    return [{"rank": i + 1, "name": name, "score": score} for i, (name, score) in enumerate(rows)]
+
+
 async def host_state(session, quiz: LiveQuizzes, now: Optional[datetime] = None) -> dict:
+    """What the host (and the big screen) sees: players and the board from
+    the room's quiz snapshot, the open question's tally counted afresh."""
     now = now or now_utc()
     current = quiz.questions[quiz.current_index] if quiz.status is QuizStatus.live and 0 <= quiz.current_index < len(quiz.questions) else None
+    view = await room.quiz_view(session, quiz.event_id)
     out = {
-        "status": quiz.status.value, "join_code": quiz.join_code, "title": quiz.title, "players": await _player_count(session, quiz.id),
-        "current_index": quiz.current_index, "total": len(quiz.questions), "question": None, "leaderboard": await _leaderboard(session, quiz),
+        "status": quiz.status.value, "join_code": quiz.join_code, "title": quiz.title,
+        "players": len(view.players) if view is not None else await _player_count(session, quiz.id),
+        "current_index": quiz.current_index, "total": len(quiz.questions), "question": None,
+        "leaderboard": list(view.board) if view is not None else await _leaderboard(session, quiz),
     }
     if current is not None:
-        out["question"] = {**_question_out(current, True), "time_left": _time_left(quiz, current, now), "opened_at": quiz.question_opened_at, **(await _tally(session, current))}
+        out["question"] = {**_question_out(current, True), "time_left": _time_left(quiz.question_opened_at, current.seconds, now), "opened_at": quiz.question_opened_at, **(await _tally(session, current))}
     return out
 
 
 async def join_quiz(session, code: str, name: str, registration_id=None) -> dict:
-    quiz = await session.scalar(select(LiveQuizzes).where(LiveQuizzes.join_code == code.strip(), LiveQuizzes.status == QuizStatus.live))
+    quiz = await session.scalar(
+        select(LiveQuizzes).join(Events, Events.id == LiveQuizzes.event_id).join(Clubs, Clubs.id == Events.club_id)
+        .where(LiveQuizzes.join_code == code.strip(), LiveQuizzes.status == QuizStatus.live, *room.visible())
+    )
     if quiz is None:
         raise CustomHTTPException(404, message="No quiz is running with that code. Check the screen and try again.")
     name = " ".join(name.split())[:60]
     if not name:
         raise CustomHTTPException(422, message="Tell the room your name.")
-    player = LiveQuizPlayers(quiz_id=quiz.id, name=name, player_key=secrets.token_urlsafe(24), registration_id=registration_id)
+    player = LiveQuizPlayers(quiz_id=quiz.id, name=name, player_key=secrets.token_urlsafe(24), registration_id=registration_id, score=0)
     session.add(player)
     await session.commit()
+    # In the snapshot at once, so the new player's first poll finds them.
+    view = room.quiz_kept(quiz.event_id)
+    if view is not None and view.quiz_id == quiz.id:
+        view.players[player.player_key] = room.Player(id=player.id, name=player.name, score=0)
     return {"event_id": quiz.event_id, "quiz_id": quiz.id, "title": quiz.title, "player_id": player.id, "player_key": player.player_key, "name": player.name}
 
 
-async def _player(session, quiz: LiveQuizzes, player_key: str) -> LiveQuizPlayers:
-    p = await session.scalar(select(LiveQuizPlayers).where(LiveQuizPlayers.quiz_id == quiz.id, LiveQuizPlayers.player_key == (player_key or "")))
-    if p is None:
+async def _player(session, view: "room.QuizView", player_key: str) -> "room.Player":
+    """The player behind a key: from the snapshot, or (joined since it was
+    made, or on another worker) one probe of the unique key."""
+    p = view.players.get(player_key or "")
+    if p is not None:
+        return p
+    row = (await session.execute(
+        select(LiveQuizPlayers.id, LiveQuizPlayers.name, LiveQuizPlayers.score)
+        .where(LiveQuizPlayers.quiz_id == view.quiz_id, LiveQuizPlayers.player_key == (player_key or ""))
+    )).first()
+    if row is None:
         raise CustomHTTPException(401, message="You are not in this quiz. Join again with the code on the screen.")
+    p = room.Player(id=row[0], name=row[1], score=row[2])
+    view.players[player_key] = p
     return p
 
 
-async def player_state(session, event: Events, player_key: str, now: Optional[datetime] = None) -> dict:
-    now = now or now_utc()
-    quiz = await quiz_of(session, event, create=False)
-    if quiz is None:
+async def _view_for(session, event_id: int) -> "room.QuizView":
+    view = await room.quiz_view(session, event_id)
+    if view is None:
         raise CustomHTTPException(404, message="This event has no quiz.")
-    player = await _player(session, quiz, player_key)
-    out = {"status": quiz.status.value, "title": quiz.title, "name": player.name, "score": player.score, "current_index": quiz.current_index, "total": len(quiz.questions), "question": None, "leaderboard": [], "rank": None}
-    if quiz.status is QuizStatus.live and 0 <= quiz.current_index < len(quiz.questions):
-        q = quiz.questions[quiz.current_index]
-        left = _time_left(quiz, q, now)
-        mine = await session.scalar(select(LiveQuizAnswers).where(LiveQuizAnswers.question_id == q.id, LiveQuizAnswers.player_id == player.id))
+    return view
+
+
+async def player_state(session, event_id: int, player_key: str, now: Optional[datetime] = None) -> dict:
+    """A player's poll: read from the quiz snapshot, no statement unless the
+    player is new to it."""
+    now = now or now_utc()
+    view = await _view_for(session, event_id)
+    player = await _player(session, view, player_key)
+    out = {"status": view.status.value, "title": view.title, "name": player.name, "score": player.score, "current_index": view.current_index, "total": len(view.questions), "question": None, "leaderboard": [], "rank": None}
+    q = view.current()
+    if q is not None:
+        left = _time_left(view.opened_at, q["seconds"], now)
+        mine = view.answers.get(player.id)
         out["question"] = {
-            **_question_out(q, False), "time_left": left, "my_answer": mine.option_key if mine else None, "my_points": mine.points if mine else None,
+            **_question_out(q, False), "time_left": left, "my_answer": mine[0] if mine else None, "my_points": mine[1] if mine else None,
             # The right answer is shown once the clock is out, or once this player has answered.
-            "correct_key": q.correct_key if (left == 0 or mine is not None) else None,
+            "correct_key": q["correct_key"] if (left == 0 or mine is not None) else None,
         }
-    if quiz.status is QuizStatus.ended or (quiz.status is QuizStatus.live and quiz.current_index >= 0):
-        board = await _leaderboard(session, quiz, 10)
-        out["leaderboard"] = board
-        above = await session.scalar(select(func.count()).select_from(LiveQuizPlayers).where(LiveQuizPlayers.quiz_id == quiz.id, LiveQuizPlayers.score > player.score)) or 0
-        out["rank"] = above + 1
+    if view.status is QuizStatus.ended or (view.status is QuizStatus.live and view.current_index >= 0):
+        out["leaderboard"] = list(view.board)
+        out["rank"] = view.rank_of(player.score)
     return out
 
 
-async def answer(session, event: Events, player_key: str, option_key: str, now: Optional[datetime] = None) -> dict:
+async def answer(session, event_id: int, player_key: str, option_key: str, now: Optional[datetime] = None) -> dict:
     now = now or now_utc()
-    quiz = await quiz_of(session, event, create=False)
-    if quiz is None or quiz.status is not QuizStatus.live or not (0 <= quiz.current_index < len(quiz.questions)):
+    view = await room.quiz_view(session, event_id)
+    q = view.current() if view is not None else None
+    if q is None:
         raise CustomHTTPException(409, message="No question is open right now.")
-    player = await _player(session, quiz, player_key)
-    q = quiz.questions[quiz.current_index]
-    if option_key not in [o["key"] for o in q.options]:
+    player = await _player(session, view, player_key)
+    if option_key not in [o["key"] for o in q["options"]]:
         raise CustomHTTPException(422, message="That is not one of the answers.")
-    elapsed = (now - quiz.question_opened_at).total_seconds() if quiz.question_opened_at else 0.0
-    if elapsed > q.seconds + ANSWER_GRACE:
+    elapsed = (now - view.opened_at).total_seconds() if view.opened_at else 0.0
+    if elapsed > q["seconds"] + ANSWER_GRACE:
         raise CustomHTTPException(409, message="Time is up for this one.")
-    if await session.scalar(select(LiveQuizAnswers.id).where(LiveQuizAnswers.question_id == q.id, LiveQuizAnswers.player_id == player.id)) is not None:
+    if player.id in view.answers:
         raise CustomHTTPException(409, message="You already answered this one.")
-    correct = option_key == q.correct_key
+    correct = option_key == q["correct_key"]
     # Half the points for being right, the other half for being quick about it.
-    points = int(500 + 500 * max(0.0, 1 - min(elapsed, q.seconds) / q.seconds)) if correct else 0
-    session.add(LiveQuizAnswers(question_id=q.id, player_id=player.id, option_key=option_key, correct=correct, points=points, answered_at=now))
-    player.score += points
+    points = int(500 + 500 * max(0.0, 1 - min(elapsed, q["seconds"]) / q["seconds"])) if correct else 0
+    # Once per player and question, whatever arrives at once: the second of a double tap is told so.
+    took = await session.scalar(
+        pg_insert(LiveQuizAnswers)
+        .values(question_id=q["id"], player_id=player.id, option_key=option_key, correct=correct, points=points, answered_at=now)
+        .on_conflict_do_nothing(index_elements=["question_id", "player_id"])
+        .returning(LiveQuizAnswers.id)
+    )
+    if took is None:
+        raise CustomHTTPException(409, message="You already answered this one.")
+    score = await session.scalar(update(LiveQuizPlayers).where(LiveQuizPlayers.id == player.id).values(score=LiveQuizPlayers.score + points).returning(LiveQuizPlayers.score))
     await session.commit()
-    return {"correct": correct, "points": points, "score": player.score, "correct_key": q.correct_key}
+    view.answers[player.id] = (option_key, points)
+    player.score = int(score)
+    return {"correct": correct, "points": points, "score": player.score, "correct_key": q["correct_key"]}
 
 
 # --- Q&A ----------------------------------------------------------------------
 
 
-def _question_row_out(r: LiveQuestions, voted: bool = False, mine: bool = False) -> dict:
-    return {
-        "id": r.id, "text": r.text, "author_name": r.author_name, "status": r.status.value, "pinned": r.pinned, "votes": r.votes,
-        "created_at": r.created_at, "answered_at": r.answered_at, "voted": voted, "mine": mine,
-    }
+_question_row_out = room.question_out
 
 
 async def ask(session, event: Events, text_: str, author_name: Optional[str], voter_key: str, registration_id=None) -> dict:
@@ -367,7 +429,7 @@ async def ask(session, event: Events, text_: str, author_name: Optional[str], vo
         raise CustomHTTPException(409, message="This event is over; the floor is closed.")
     row = LiveQuestions(
         event_id=event.id, text=body[:500], author_name=(" ".join((author_name or "").split())[:60] or None), author_key=voter_key, registration_id=registration_id,
-        status=QuestionStatus.pending if event.qa_approve_first else QuestionStatus.approved,
+        status=QuestionStatus.pending if event.qa_approve_first else QuestionStatus.approved, votes=0, pinned=False,
     )
     session.add(row)
     await session.commit()
@@ -391,6 +453,7 @@ async def questions_for_club(session, event: Events) -> dict:
 async def set_qa(session, event: Events, approve_first: bool) -> dict:
     event.qa_approve_first = approve_first
     await session.commit()
+    room.room_changed(event.id)
     return await questions_for_club(session, event)
 
 
@@ -413,65 +476,60 @@ async def moderate(session, event: Events, question_id: UUID, action: str) -> di
         row.status, row.answered_at = QuestionStatus.approved, None
     elif action == "pin":
         # One on the screen at a time.
-        for other in await _questions(session, event):
-            other.pinned = False
+        await session.execute(update(LiveQuestions).where(LiveQuestions.event_id == event.id, LiveQuestions.pinned == True, LiveQuestions.id != row.id).values(pinned=False))  # noqa: E712
         row.pinned, row.status = True, QuestionStatus.approved
     elif action == "unpin":
         row.pinned = False
     else:
         raise CustomHTTPException(422, message="Unknown action.")
     await session.commit()
+    room.room_changed(event.id)
     return _question_row_out(row)
 
 
-async def vote(session, event: Events, question_id: UUID, voter_key: str) -> dict:
-    row = await _question_in(session, event, question_id)
-    existing = await session.scalar(select(LiveQuestionVotes).where(LiveQuestionVotes.question_id == row.id, LiveQuestionVotes.voter_key == voter_key))
-    if existing is not None:
-        await session.delete(existing)
-        row.votes = max(0, row.votes - 1)
-        voted = False
-    else:
-        session.add(LiveQuestionVotes(question_id=row.id, voter_key=voter_key))
-        row.votes += 1
+async def vote(session, event_id: int, question_id: UUID, voter_key: str) -> dict:
+    """Vote a question up, or take the vote back: a toggle. The vote row is
+    claimed or released by one statement and the count moves by one in the
+    same transaction, so two taps at once are a vote and its withdrawal,
+    never a 500 or a count off by one."""
+    await room.room_of(session, event_id)
+    owned = select(LiveQuestions.id).where(LiveQuestions.id == question_id, LiveQuestions.event_id == event_id)
+    added = await session.scalar(
+        pg_insert(LiveQuestionVotes)
+        .from_select(
+            ["question_id", "voter_key"],
+            select(LiveQuestions.id, literal(voter_key)).where(LiveQuestions.id == question_id, LiveQuestions.event_id == event_id),
+            include_defaults=False,
+        )
+        .on_conflict_do_nothing(index_elements=["question_id", "voter_key"])
+        .returning(LiveQuestionVotes.question_id)
+    )
+    if added is not None:
+        votes = await session.scalar(update(LiveQuestions).where(LiveQuestions.id == question_id).values(votes=LiveQuestions.votes + 1).returning(LiveQuestions.votes))
         voted = True
+    else:
+        if await session.scalar(owned) is None:
+            raise CustomHTTPException(404, message="That question could not be found.")
+        gone = await session.scalar(delete(LiveQuestionVotes).where(LiveQuestionVotes.question_id == question_id, LiveQuestionVotes.voter_key == voter_key).returning(LiveQuestionVotes.id))
+        if gone is not None:
+            votes = await session.scalar(update(LiveQuestions).where(LiveQuestions.id == question_id).values(votes=func.greatest(LiveQuestions.votes - 1, 0)).returning(LiveQuestions.votes))
+        else:
+            votes = await session.scalar(select(LiveQuestions.votes).where(LiveQuestions.id == question_id))
+        voted = False
     await session.commit()
-    return {"id": row.id, "votes": row.votes, "voted": voted}
+    kept = room.voter_kept(event_id, voter_key)
+    if kept is not None:
+        (kept.voted.add if voted else kept.voted.discard)(str(question_id))
+    return {"id": question_id, "votes": int(votes or 0), "voted": voted}
 
 
 # --- polls ----------------------------------------------------------------------
 
 
-async def _responses(session, poll_id) -> list:
-    return list((await session.scalars(select(LivePollResponses).where(LivePollResponses.poll_id == poll_id))).all())
-
-
-def results_of(poll: LivePolls, responses: list) -> dict:
-    n = len(responses)
-    out: dict = {"responses": n}
-    values = [r.value for r in responses]
-    if poll.kind is PollKind.choice:
-        c = Counter(values)
-        out["choices"] = [{"label": o, "count": c.get(o, 0), "pct": round(100 * c.get(o, 0) / n) if n else 0} for o in poll.options]
-    elif poll.kind is PollKind.words:
-        c = Counter(values)
-        out["words"] = [{"word": w, "count": k} for w, k in c.most_common(40)]
-    else:
-        nums = [int(v) for v in values if v.isdigit()]
-        c = Counter(nums)
-        out["rating"] = {"average": round(sum(nums) / len(nums), 2) if nums else None, "histogram": [{"value": v, "count": c.get(v, 0), "pct": round(100 * c.get(v, 0) / n) if n else 0} for v in range(1, 6)]}
-    return out
-
-
 async def poll_out(session, poll: LivePolls, voter_key: Optional[str] = None) -> dict:
-    responses = await _responses(session, poll.id)
-    out = {
-        "id": poll.id, "kind": poll.kind.value, "prompt": poll.prompt, "options": list(poll.options or []), "status": poll.status.value,
-        "launched_at": poll.launched_at, "closed_at": poll.closed_at, "sort_order": poll.sort_order, "results": results_of(poll, responses),
-    }
+    out = await room.poll_public(session, poll)
     if voter_key is not None:
-        mine = next((r.value for r in responses if r.voter_key == voter_key), None)
-        out["my_response"] = mine
+        out["my_response"] = await session.scalar(select(LivePollResponses.value).where(LivePollResponses.poll_id == poll.id, LivePollResponses.voter_key == voter_key))
     return out
 
 
@@ -500,15 +558,15 @@ async def create_poll(session, event: Events, body) -> dict:
     return await poll_out(session, row)
 
 
-async def _poll_in(session, event: Events, poll_id: UUID) -> LivePolls:
+async def _poll_in(session, event_id: int, poll_id: UUID) -> LivePolls:
     row = await session.get(LivePolls, poll_id)
-    if row is None or row.event_id != event.id:
+    if row is None or row.event_id != event_id:
         raise CustomHTTPException(404, message="That poll could not be found.")
     return row
 
 
 async def update_poll(session, event: Events, poll_id: UUID, body) -> dict:
-    row = await _poll_in(session, event, poll_id)
+    row = await _poll_in(session, event.id, poll_id)
     data = body.model_dump(exclude_unset=True)
     if row.status is not PollStatus.draft and ("options" in data or "kind" in data):
         raise CustomHTTPException(409, message="A poll that has run keeps its answers; make a new one.")
@@ -519,11 +577,12 @@ async def update_poll(session, event: Events, poll_id: UUID, body) -> dict:
     if "prompt" in data and data["prompt"]:
         row.prompt = " ".join(data["prompt"].split())[:300]
     await session.commit()
+    room.room_changed(event.id)
     return await poll_out(session, row)
 
 
 async def set_poll_status(session, event: Events, poll_id: UUID, status: str) -> dict:
-    row = await _poll_in(session, event, poll_id)
+    row = await _poll_in(session, event.id, poll_id)
     new = PollStatus(status)
     now = now_utc()
     if new is PollStatus.live:
@@ -537,37 +596,58 @@ async def set_poll_status(session, event: Events, poll_id: UUID, status: str) ->
     else:
         raise CustomHTTPException(422, message="A poll is launched or closed; it does not go back to a draft.")
     await session.commit()
+    room.room_changed(event.id)
     return await poll_out(session, row)
 
 
 async def delete_poll(session, event: Events, poll_id: UUID) -> None:
-    row = await _poll_in(session, event, poll_id)
+    row = await _poll_in(session, event.id, poll_id)
     await session.delete(row)
     await session.commit()
+    room.room_changed(event.id)
 
 
-async def respond(session, event: Events, poll_id: UUID, voter_key: str, value: str) -> dict:
-    row = await _poll_in(session, event, poll_id)
-    if row.status is not PollStatus.live:
-        raise CustomHTTPException(409, message="This poll is not open.")
+def _clean_value(kind: PollKind, options, value: str) -> str:
     v = " ".join((value or "").split())
-    if row.kind is PollKind.choice:
-        if v not in row.options:
+    if kind is PollKind.choice:
+        if v not in options:
             raise CustomHTTPException(422, message="Pick one of the answers.")
-    elif row.kind is PollKind.rating:
+    elif kind is PollKind.rating:
         if v not in {"1", "2", "3", "4", "5"}:
             raise CustomHTTPException(422, message="A rating is 1 to 5.")
     else:
         v = v.lower()[:40]
         if len(v) < 2:
             raise CustomHTTPException(422, message="A word or two.")
-    existing = await session.scalar(select(LivePollResponses).where(LivePollResponses.poll_id == row.id, LivePollResponses.voter_key == voter_key))
-    if existing is not None:
-        existing.value = v
-    else:
-        session.add(LivePollResponses(poll_id=row.id, voter_key=voter_key, value=v))
+    return v
+
+
+async def respond(session, event_id: int, poll_id: UUID, voter_key: str, value: str) -> dict:
+    """Answer the poll that is up, or change the answer: one upsert. What
+    comes back is the room's view of the poll (its counts at most a second
+    old) with this browser's answer on it."""
+    snap = await room.room_of(session, event_id)
+    if snap.poll_id == str(poll_id):
+        kind, options = snap.poll_kind, snap.poll_options
+    else:  # launched since the snapshot, or not up at all
+        row = await _poll_in(session, event_id, poll_id)
+        if row.status is not PollStatus.live:
+            raise CustomHTTPException(409, message="This poll is not open.")
+        room.room_changed(event_id)
+        kind, options = row.kind, tuple(row.options or ())
+    v = _clean_value(kind, options, value)
+    # created_at from the clock, not the transaction: a word cloud's ties go to the word given first.
+    stmt = pg_insert(LivePollResponses).values(poll_id=poll_id, voter_key=voter_key, value=v, created_at=now_utc())
+    await session.execute(stmt.on_conflict_do_update(index_elements=["poll_id", "voter_key"], set_={"value": stmt.excluded.value}))
     await session.commit()
-    return await poll_out(session, row, voter_key)
+    kept = room.voter_kept(event_id, voter_key)
+    if kept is not None:
+        kept.answers[str(poll_id)] = v
+    snap = await room.room_of(session, event_id)
+    poll = snap.data.get("poll")
+    if poll is None or snap.poll_id != str(poll_id):
+        return {**await poll_out(session, await _poll_in(session, event_id, poll_id)), "my_response": v}
+    return {**poll, "my_response": v}
 
 
 # --- feedback ----------------------------------------------------------------------
@@ -621,7 +701,7 @@ async def update_survey(session, event: Events, body) -> dict:
     return survey_out(survey)
 
 
-def _survey_email(event: Events, reg: EventRegistrationsLink, org: str) -> dict:
+def _survey_email(event: Events, reg, org: str) -> dict:
     link = survey_link(event, reg)
     first = (reg.full_name or "").split(" ")[0] or "there"
     text_ = f"Hi {first},\n\nThanks for coming to {event.name}. Two minutes of your thoughts would help the next one:\n\n{link}\n\n{org}"
@@ -633,25 +713,40 @@ def _survey_email(event: Events, reg: EventRegistrationsLink, org: str) -> dict:
     return {"subject": f"How was {event.name}?", "text": text_, "html": html}
 
 
-async def send_survey(session, event: Events, now: Optional[datetime] = None) -> dict:
-    """To everyone who was checked in; each gets a link only they hold. Sending again reaches only people not yet sent."""
-    survey = await survey_of(session, event)
-    regs = await audience_regs(session, event, Audience.checked_in)
-    org = (event.club.name if getattr(event, "club", None) else None) or "The organisers"
-    sent = 0
-    for reg in regs:
-        if not reg.email:
-            continue
-        mail = _survey_email(event, reg, org)
+def _send_mails(mails: list[tuple], org: str) -> None:
+    """On a worker thread, after the commit that claimed the recipients."""
+    for reg_id, address, mail in mails:
         try:
-            await asyncio.to_thread(email_mod.send_email, recipients=[reg.email], subject=mail["subject"], text=mail["text"], html=mail["html"], sender_name=org)
-            sent += 1
+            email_mod.send_email(recipients=[address], subject=mail["subject"], text=mail["text"], html=mail["html"], sender_name=org)
         except Exception:  # noqa: BLE001
-            logger.exception("feedback survey email failed for registration %s", reg.id)
+            logger.exception("feedback survey email failed for registration %s", reg_id)
+
+
+async def send_survey(session, event: Events, now: Optional[datetime] = None) -> dict:
+    """To everyone who was checked in and has not been sent it yet; each gets
+    a link only they hold. The recipients are claimed (feedback_sends) in the
+    same transaction that marks the survey sent, so sending again, or the
+    sweep and a send at once, reaches only the people not sent yet; the mails
+    go after the commit, off the request."""
+    survey = await survey_of(session, event)
+    everyone = await audience_regs(session, event, Audience.checked_in)
+    regs = [r for r in everyone if r.email]
+    claimed: set = set()
+    if regs:
+        claimed = set((await session.scalars(
+            pg_insert(FeedbackSends)
+            .values([{"survey_id": survey.id, "registration_id": r.id} for r in regs])
+            .on_conflict_do_nothing(index_elements=["survey_id", "registration_id"])
+            .returning(FeedbackSends.registration_id)
+        )).all())
+    org = (event.club.name if getattr(event, "club", None) else None) or "The organisers"
+    mails = [(r.id, r.email, _survey_email(event, r, org)) for r in regs if r.id in claimed]
     survey.sent_at = now or now_utc()
-    survey.sent_count = (survey.sent_count or 0) + sent
+    survey.sent_count = (survey.sent_count or 0) + len(mails)
+    if mails:
+        after_commit.run_after_commit(session, _send_mails, mails, org)
     await session.commit()
-    return {"sent": sent, "invited": len(regs), **survey_out(survey)}
+    return {"sent": len(mails), "invited": len(everyone), **survey_out(survey)}
 
 
 async def _results(session, survey: FeedbackSurveys, invited: int) -> dict:
@@ -731,26 +826,32 @@ async def submit_survey(session, event: Events, reg_id: UUID, token: str, answer
             clean[q["key"]] = " ".join(str(v).split())[:1000]
     if not clean:
         raise CustomHTTPException(422, message="Answer at least one question.")
-    row = await session.scalar(select(FeedbackResponses).where(FeedbackResponses.survey_id == survey.id, FeedbackResponses.registration_id == reg.id))
-    if row is None:
-        session.add(FeedbackResponses(survey_id=survey.id, registration_id=reg.id, answers=clean))
-    else:
-        row.answers = clean
+    stmt = pg_insert(FeedbackResponses).values(survey_id=survey.id, registration_id=reg.id, answers=clean)
+    await session.execute(stmt.on_conflict_do_update(index_elements=["survey_id", "registration_id"], set_={"answers": stmt.excluded.answers}))
     await session.commit()
     return {"submitted": True}
+
+
+def due_query(now: datetime, limit: int = SWEEP_BATCH):
+    """The surveys whose moment has come and that have not gone out: a range
+    of ix_feedback_surveys_due, oldest first."""
+    return (
+        select(FeedbackSurveys, Events).join(Events, Events.id == FeedbackSurveys.event_id).options(joinedload(Events.club))
+        .where(
+            FeedbackSurveys.auto_send == True, FeedbackSurveys.sent_at.is_(None),  # noqa: E712
+            FeedbackSurveys.due_at.isnot(None), FeedbackSurveys.due_at <= now,
+            Events.is_deleted == False, Events.lifecycle != EventStatus.draft,  # noqa: E712
+        )
+        .order_by(FeedbackSurveys.due_at).limit(limit)
+    )
 
 
 async def sweep(session, now: Optional[datetime] = None) -> int:
     """Every minute: surveys whose moment has come go out."""
     now = now or now_utc()
-    due = (await session.execute(
-        select(FeedbackSurveys, Events).join(Events, Events.id == FeedbackSurveys.event_id).options(joinedload(Events.club))
-        .where(FeedbackSurveys.auto_send == True, FeedbackSurveys.sent_at.is_(None), Events.is_deleted == False, Events.lifecycle != EventStatus.draft)  # noqa: E712
-    )).all()
+    due = (await session.execute(due_query(now))).all()
     sent = 0
-    for survey, event in due:
-        if _ends_at(event) + timedelta(minutes=survey.delay_minutes or 0) > now:
-            continue
+    for _survey, event in due:
         try:
             await send_survey(session, event, now)
             sent += 1
@@ -785,8 +886,7 @@ async def sweep_loop(interval: int = 60) -> None:
 # --- live updates ----------------------------------------------------------------------
 
 
-def update_out(u: LiveUpdates) -> dict:
-    return {"id": u.id, "kind": u.kind.value, "text": u.text, "audience": u.audience.value, "recipients": u.recipients, "pushed": u.pushed, "sent_at": u.sent_at}
+update_out = room.update_out
 
 
 async def push_update(session, event: Events, kind: str, text_: str, audience: str, by=None) -> dict:
@@ -799,6 +899,7 @@ async def push_update(session, event: Events, kind: str, text_: str, audience: s
     row = LiveUpdates(event_id=event.id, kind=UpdateKind(kind), text=body[:500], audience=aud, recipients=len(regs), sent_by=getattr(by, "id", None), sent_at=now_utc())
     session.add(row)
     await session.commit()
+    room.room_changed(event.id)
     pushed = 0
     if user_ids:
         from app.api.notifications.service import create_notifications_batch
@@ -841,41 +942,23 @@ async def shift_schedule(session, event: Events, item_id: UUID, minutes: int, by
     first = rows[idx]
     later = len(rows) - idx - 1
     text_ = f"{first.title} now starts at {_clock(first.starts_at)}" + (f" ({'+' if minutes > 0 else ''}{minutes} min); everything after moves with it." if later else f" ({'+' if minutes > 0 else ''}{minutes} min).")
-    update = await push_update(session, event, "schedule", text_, "checked_in", by)
-    return {"update": update, "items": [{"id": r.id, "title": r.title, "starts_at": r.starts_at, "ends_at": r.ends_at} for r in rows]}
+    update_ = await push_update(session, event, "schedule", text_, "checked_in", by)
+    return {"update": update_, "items": [{"id": r.id, "title": r.title, "starts_at": r.starts_at, "ends_at": r.ends_at} for r in rows]}
 
 
 # --- what the room sees ----------------------------------------------------------------------
 
 
-async def feed(session, event: Events, voter_key: Optional[str], now: Optional[datetime] = None) -> dict:
-    now = now or now_utc()
-    updates = (await session.scalars(select(LiveUpdates).where(LiveUpdates.event_id == event.id).order_by(LiveUpdates.sent_at.desc()).limit(10))).all()
-    banner = updates[0] if updates and now - updates[0].sent_at <= BANNER_FOR else None
-    live_poll = await session.scalar(select(LivePolls).where(LivePolls.event_id == event.id, LivePolls.status == PollStatus.live))
-    questions = [r for r in await _questions(session, event) if r.status in (QuestionStatus.approved, QuestionStatus.answered)]
-    voted: set = set()
-    if voter_key and questions:
-        voted = set((await session.scalars(select(LiveQuestionVotes.question_id).where(LiveQuestionVotes.voter_key == voter_key, LiveQuestionVotes.question_id.in_([q.id for q in questions])))).all())
-    quiz = await quiz_of(session, event, create=False)
-    return {
-        "event": {"id": event.id, "name": event.name, "status": (event.lifecycle or EventStatus.published).value},
-        "banner": update_out(banner) if banner else None,
-        "updates": [update_out(u) for u in updates],
-        "poll": await poll_out(session, live_poll, voter_key) if live_poll else None,
-        "questions": [_question_row_out(q, voted=q.id in voted, mine=bool(voter_key) and q.author_key == voter_key) for q in questions],
-        "qa": {"approve_first": bool(event.qa_approve_first), "open": event.lifecycle not in (EventStatus.closed, EventStatus.archived)},
-        "quiz": {"live": bool(quiz and quiz.status is QuizStatus.live), "title": quiz.title if quiz else None},
-    }
-
-
 async def screen(session, event: Events, now: Optional[datetime] = None) -> dict:
     """The big screen: the pinned question, the board, the poll up now, the quiz if it runs, the last update."""
     now = now or now_utc()
-    rows = await _questions(session, event)
+    rows = list((await session.scalars(
+        select(LiveQuestions).where(LiveQuestions.event_id == event.id, LiveQuestions.status == QuestionStatus.approved)
+        .order_by(LiveQuestions.pinned.desc(), LiveQuestions.votes.desc(), LiveQuestions.created_at).limit(6)
+    )).all())
     pinned = next((r for r in rows if r.pinned), None)
-    board = [r for r in rows if r.status is QuestionStatus.approved and not r.pinned][:5]
-    live_poll = await session.scalar(select(LivePolls).where(LivePolls.event_id == event.id, LivePolls.status == PollStatus.live))
+    board = [r for r in rows if not r.pinned][:5]
+    live_poll = await session.scalar(select(LivePolls).where(LivePolls.event_id == event.id, LivePolls.status == PollStatus.live).limit(1))
     quiz = await quiz_of(session, event, create=False)
     latest = await session.scalar(select(LiveUpdates).where(LiveUpdates.event_id == event.id).order_by(LiveUpdates.sent_at.desc()).limit(1))
     return {

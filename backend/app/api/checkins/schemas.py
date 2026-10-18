@@ -161,6 +161,10 @@ class ScanResult(BaseModel):
     replayed: bool = False
     # What the console should do about the ID card.
     badge: dict = Field(default_factory=dict)
+    # "ADMISSION_NUMBER": the code was the admission number printed under the
+    # QR, not a ticket. Nobody was admitted; `attendee` is who holds it, for
+    # staff to confirm and check in by hand.
+    hint: Optional[str] = None
 
 
 class ScanBatchBody(BaseModel):

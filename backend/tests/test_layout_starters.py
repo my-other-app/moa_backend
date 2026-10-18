@@ -8,7 +8,8 @@ from app.core.layout.starters import CERTIFICATE_STARTERS, TICKET_STARTERS, cert
 COLORS = {"primary": "#1db9a0", "secondary": "#aaaaaa", "ticketType": "#ff5a1f"}
 VALUES = {"attendee_name": "Ananya Iyer", "event_name": "Builders Day", "event_date": "16 Sept 2026",
           "event_time": "09:00", "venue": "KTPO", "org_name": "Yukthi", "ticket_type": "VIP",
-          "admission_no": "MOA-0041-KF26", "certificate_no": "CERT-0041-KF26", "issued_date": "18 Sept 2026",
+          "admission_no": "MOA-0041-KF26", "ticket_code": "MOA-7K3QF-X9PWM",
+          "certificate_no": "CERT-0041-KF26", "issued_date": "18 Sept 2026",
           "event_day": "Wednesday", "event_end_time": "18:00", "seat": ""}
 
 
@@ -28,10 +29,11 @@ def test_every_certificate_starter_is_valid_as_it_comes(kind):
 def test_every_ticket_starter_prints_the_guests_name(kind):
     s = ticket_starter(kind)
     pdf = render_pdf(RenderInput(title="t", canvas=s["canvas"], layers=s["layers"], page=s["page"],
-                                 values=VALUES, qr_value="MOA-0041-KF26", colors=COLORS))
+                                 values=VALUES, qr_value="MOA-7K3QF-X9PWM", colors=COLORS))
     text = pdf_text(pdf)
     assert "Ananya Iyer" in text
-    assert "MOA-0041-KF26" in text
+    # The code under the QR is the ticket code the gate takes, not the admission number.
+    assert "MOA-7K3QF-X9PWM" in text and "MOA-0041-KF26" not in text
 
 
 def test_the_seats_variant_shows_the_seat_instead_of_a_name():

@@ -33,7 +33,9 @@ def statements(session):
     conn = session.bind.sync_connection
 
     def before(_conn, _cursor, statement, parameters, *_args):
-        seen.append((statement, parameters))
+        # The test session's own SAVEPOINTs (conftest) are not the code's statements.
+        if "SAVEPOINT" not in statement:
+            seen.append((statement, parameters))
 
     sa_event.listen(conn, "before_cursor_execute", before)
     yield seen

@@ -218,13 +218,14 @@ async def list_volunteers(
 
 
 async def checkin_user(
-    session: AsyncSession, event_id: int, ticker_id: str, volunteer_id: int
+    session: AsyncSession, event_id: int, ticker_id: str, volunteer_id: int, background=None
 ) -> None:
     """Check-in a participant for an event, from the volunteer app.
 
-    Accepts a ticket id (MOA-XXXXX-XXXXX) or a registration UUID. Goes
-    through the same admission as every door, so the check-in is recorded
-    with who did it; the app's error codes are kept.
+    Accepts a ticket id (MOA-XXXXX-XXXXX) or a registration UUID -- not an
+    admission number, which is not a scan code. Goes through the same
+    admission as every door, so the check-in is recorded with who did it;
+    the app's error codes are kept.
     """
     from app.api.checkins import service as checkins
     from app.api.checkins.gate_auth import GateActor
@@ -237,7 +238,7 @@ async def checkin_user(
     user = await session.scalar(select(Users).where(Users.id == volunteer.user_id)) if volunteer and volunteer.user_id else None
     actor = GateActor(kind="user", name=(user.full_name if user else None) or "Volunteer", user=user, volunteer=volunteer, can_check_in=True)
     result = await checkins.scan(
-        session, event, code=ticker_id.strip(), door_label=None, client_ref=None, scanned_at=None, actor=actor, via=CheckInVia.app
+        session, event, code=ticker_id.strip(), door_label=None, client_ref=None, scanned_at=None, actor=actor, via=CheckInVia.app, background=background
     )
     outcome = result["outcome"]
     if outcome == "CHECKED_IN":
@@ -265,121 +266,47 @@ async def validate_ticket(
     Accepts either:
     - ticket_id format: MOA-XXXXX-XXXXX
     - registration UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+
+    The door's own lookup (checkins.service): the code on this event off the
+    ticket id's unique index, and only on a miss the same code anywhere, to
+    tell a ticket for another event from one that does not exist. It used to
+    read, and log, the ticket ids of the event on every miss.
     """
-    import logging
-    import uuid
+    from app.api.checkins import service as checkins
     from app.api.users.models import UserProfiles
-    
-    logger = logging.getLogger(__name__)
-    
-    # Normalize ticket_id - strip whitespace and handle URL encoding
+
     ticket_id = ticket_id.strip()
-    
-    # Log in hex to catch invisible characters
-    logger.info(f"Validating ticket: event_id={event_id}, ticket_id='{ticket_id}', bytes={ticket_id.encode().hex()}")
-    
-    # Build query based on ticket_id format (matches mark_attendance logic)
-    query = (
-        select(EventRegistrationsLink)
-        .where(
-            EventRegistrationsLink.event_id == event_id,
-            EventRegistrationsLink.is_deleted == False,
-        )
-        .options(joinedload(EventRegistrationsLink.event))
-    )
-    
-    # Check if it's a MOA ticket_id or a UUID
-    if ticket_id.upper().startswith("MOA"):
-        # Use case-insensitive matching for ticket_id
-        from sqlalchemy import func
-        query = query.where(func.upper(EventRegistrationsLink.ticket_id) == ticket_id.upper())
-        logger.info(f"Searching by ticket_id format (case-insensitive): {ticket_id}")
-    else:
-        # Try to parse as UUID
-        try:
-            uuid_obj = uuid.UUID(ticket_id)
-            query = query.where(EventRegistrationsLink.id == uuid_obj)
-            logger.info(f"Searching by UUID format: {ticket_id}")
-        except ValueError:
-            # Not a valid UUID, try as ticket_id anyway
-            query = query.where(EventRegistrationsLink.ticket_id == ticket_id)
-            logger.info(f"Unknown format, trying as ticket_id: {ticket_id}")
-    
-    registration = await session.scalar(query)
-    
+    registration = await checkins.lookup(session, event_id, ticket_id)
     if not registration:
-        logger.warning(f"Registration not found for event_id={event_id}, ticket_id='{ticket_id}'")
-        
-        # Debug: List all ticket_ids for this event to help troubleshoot
-        all_regs = await session.execute(
-            select(EventRegistrationsLink.ticket_id, EventRegistrationsLink.is_deleted)
-            .where(EventRegistrationsLink.event_id == event_id)
-        )
-        all_ticket_ids = [(r.ticket_id, r.is_deleted) for r in all_regs.fetchall()]
-        logger.warning(f"All registrations for event {event_id}: {all_ticket_ids[:10]}...")  # Show first 10
-        
-        # Check if ticket exists but is deleted
-        deleted_check = await session.scalar(
-            select(EventRegistrationsLink)
-            .where(
-                EventRegistrationsLink.event_id == event_id,
-                EventRegistrationsLink.ticket_id == ticket_id,
-            )
-        )
-        if deleted_check:
-            logger.error(f"Ticket found but is_deleted={deleted_check.is_deleted}!")
-        
-        # Check if the ticket exists for ANY event (wrong event case)
-        any_query = (
-            select(EventRegistrationsLink)
-            .where(EventRegistrationsLink.is_deleted == False)
-            .options(joinedload(EventRegistrationsLink.event))
-        )
-        
-        if ticket_id.startswith("MOA"):
-            any_query = any_query.where(EventRegistrationsLink.ticket_id == ticket_id)
-        else:
-            try:
-                uuid_obj = uuid.UUID(ticket_id)
-                any_query = any_query.where(EventRegistrationsLink.id == uuid_obj)
-            except ValueError:
-                any_query = any_query.where(EventRegistrationsLink.ticket_id == ticket_id)
-        
-        any_registration = await session.scalar(any_query)
-        
-        if any_registration:
-            # Ticket exists but for a different event
-            event_name = any_registration.event.name if any_registration.event else "another event"
-            logger.warning(f"Ticket belongs to different event: '{event_name}'")
+        other = await checkins.elsewhere(session, ticket_id)
+        if other is not None and other.event_id != event_id:
+            event_name = other.event.name if other.event else "another event"
             raise CustomHTTPException(
                 400,
                 f"Incorrect event: This ticket belongs to '{event_name}'",
                 error_code="TICKET_WRONG_EVENT",
             )
-        else:
-            # Ticket doesn't exist at all
-            logger.error(f"Ticket not found: '{ticket_id}'")
-            raise CustomHTTPException(
-                400, "Registration not found", error_code="REGISTRATION_NOT_FOUND"
-            )
-    
+        raise CustomHTTPException(
+            400, "Registration not found", error_code="REGISTRATION_NOT_FOUND"
+        )
+
     if registration.is_attended:
         raise CustomHTTPException(
             400, "User already checked-in", error_code="TICKET_ALREADY_USED"
         )
-    
+
     if registration.event.has_fee and not registration.is_paid:
         raise CustomHTTPException(
             400,
             "User has not paid the fee, Please verify the payment details.",
             error_code="FEE_UNPAID",
         )
-    
+
     # Get user profile for ticket holder name
     profile = await session.scalar(
         select(UserProfiles).where(UserProfiles.user_id == registration.user_id)
     )
-    
+
     # Return ticket details without marking as attended
     return {
         "valid": True,
@@ -392,7 +319,6 @@ async def validate_ticket(
         "is_paid": registration.is_paid,
         "has_fee": registration.event.has_fee,
     }
-
 
 
 async def is_volunteer(session: AsyncSession, user_id: int, event_id: int):

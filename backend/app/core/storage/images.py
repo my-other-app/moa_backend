@@ -1,42 +1,74 @@
 """An uploaded picture, checked and sized for where it will be shown."""
+import asyncio
 import io
 from uuid import uuid4
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 from app.core.storage import objects
 from app.response import CustomHTTPException
 
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
-_EXT = {"PNG": "png", "JPEG": "jpg", "WEBP": "webp"}
+MAX_IMAGE_PIXELS = 40_000_000
+_EXT = {"PNG": "png", "JPEG": "jpg", "MPO": "jpg", "WEBP": "webp"}
+
+
+def checked_image(raw: bytes, *, max_bytes: int = MAX_IMAGE_BYTES) -> Image.Image:
+    """The picture in `raw`, opened, counted and upright -- or the 413/422
+    that says why not. The bytes are counted before anything decodes them
+    and the pixels from the header before the decoder runs."""
+    if len(raw) > max_bytes:
+        raise CustomHTTPException(413, message=f"That image is over {max_bytes // (1024 * 1024)} MB. Export it smaller and try again.")
+    try:
+        image = Image.open(io.BytesIO(raw))
+    except Exception:
+        raise CustomHTTPException(422, message="That file is not an image we can read. Use PNG, JPEG or WebP.")
+    if image.width * image.height > MAX_IMAGE_PIXELS:
+        raise CustomHTTPException(422, message=f"That image is {image.width} x {image.height} pixels. Use one under {MAX_IMAGE_PIXELS // 1_000_000} megapixels.")
+    try:
+        image.load()
+    except Exception:
+        raise CustomHTTPException(422, message="That file is not an image we can read. Use PNG, JPEG or WebP.")
+    return image
 
 
 def store_image(raw: bytes, key_prefix: str, *, max_width: int, name: str = "image") -> dict:
     """Validate, shrink to `max_width`, store under the prefix; answer with
-    the key a design saves and a URL to show it now."""
-    if len(raw) > MAX_IMAGE_BYTES:
-        raise CustomHTTPException(413, message="That image is over 5 MB. Export it smaller and try again.")
-    try:
-        image = Image.open(io.BytesIO(raw))
-        image.load()
-    except Exception:
-        raise CustomHTTPException(422, message="That file is not an image we can read. Use PNG, JPEG or WebP.")
+    the key a design saves and a URL to show it now.
+
+    Blocking (a decode, a resize, a PUT): async code calls `store_image_async`."""
+    image = checked_image(raw)
     fmt = (image.format or "").upper()
     if fmt not in _EXT:
         raise CustomHTTPException(422, message="Use PNG, JPEG or WebP.")
-    if image.width > max_width:
-        image = image.resize((max_width, round(image.height * max_width / image.width)), Image.Resampling.LANCZOS)
+    try:
+        rotate = (image.getexif().get(0x0112, 1) or 1) != 1
+    except Exception:
+        rotate = False
+    upright = ImageOps.exif_transpose(image) if rotate else image
+    if upright.width > max_width or rotate:
+        # Shrunk, or turned the way the camera held it: either way new bytes.
+        if upright.width > max_width:
+            upright = upright.resize((max_width, round(upright.height * max_width / upright.width)), Image.Resampling.LANCZOS)
         out = io.BytesIO()
-        if fmt == "JPEG":
-            image.convert("RGB").save(out, "JPEG", quality=88)
+        if _EXT[fmt] == "jpg":
+            upright.convert("RGB").save(out, "JPEG", quality=88)
+            fmt = "JPEG"
+        elif fmt == "WEBP":
+            upright.save(out, "WEBP", quality=88)
         else:
-            image.save(out, "PNG")
+            upright.save(out, "PNG")
             fmt = "PNG"
         raw = out.getvalue()
     ext = _EXT[fmt]
     key = f"{key_prefix}{name}-{uuid4().hex}.{ext}"
     objects.put_bytes(key, raw, "image/jpeg" if ext == "jpg" else f"image/{ext}")
-    return {"key": key, "url": objects.presigned_url(key), "width": image.width, "height": image.height}
+    return {"key": key, "url": objects.presigned_url(key), "width": upright.width, "height": upright.height}
+
+
+async def store_image_async(raw: bytes, key_prefix: str, *, max_width: int, name: str = "image") -> dict:
+    """`store_image` on a worker thread, so the event loop is not held."""
+    return await asyncio.to_thread(store_image, raw, key_prefix, max_width=max_width, name=name)
 
 
 def image_ext(data: bytes) -> str:

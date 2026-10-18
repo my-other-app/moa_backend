@@ -1,9 +1,10 @@
 """Designed emails for an event, the club's library of them, every message
 sent, and the public file links those emails carry."""
+import asyncio
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, File, Query, Response, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Body, File, Query, Response, UploadFile
 
 from app.api.deliveries import service as deliveries
 from app.api.emails import library_overview, service
@@ -22,6 +23,7 @@ from app.api.emails.schemas import (
     MessagePage,
     PreviewRequest,
     PreviewResponse,
+    TemplateSendRequest,
     TemplatesOut,
     TestSendRequest,
     TestSendResponse,
@@ -97,7 +99,9 @@ async def audience(session: SessionDep, user: ClubAuth, event_id: int, body: Aud
 @router.post("/images", summary="A picture for an email")
 async def upload_image(session: SessionDep, user: ClubAuth, event_id: int, file: UploadFile = File(...)) -> ImageUpload:
     event = await deliveries.event_for_club(session, user, event_id)
-    return ImageUpload(**store_image(await file.read(), service.image_prefix(event_id=event.id), max_width=EMAIL_IMAGE_WIDTH, name="email"))
+    # Decoding, shrinking and the S3 upload block: off the event loop.
+    raw = await file.read()
+    return ImageUpload(**await asyncio.to_thread(store_image, raw, service.image_prefix(event_id=event.id), max_width=EMAIL_IMAGE_WIDTH, name="email"))
 
 
 @router.get("/{template_id}", summary="One email")
@@ -142,12 +146,17 @@ async def reset_template(session: SessionDep, user: ClubAuth, event_id: int, tem
 
 
 @router.post("/{template_id}/send", summary="Send this email to its audience now")
-async def send_template(session: SessionDep, user: ClubAuth, event_id: int, template_id: UUID, background_tasks: BackgroundTasks) -> MessageOut:
+async def send_template(
+    session: SessionDep, user: ClubAuth, event_id: int, template_id: UUID, background_tasks: BackgroundTasks,
+    body: Optional[TemplateSendRequest] = Body(None),
+) -> MessageOut:
     """The design is frozen into a message; sending happens after this
-    answers. The message's counts say how it went."""
+    answers. The message's counts say how it went. A `clientRef` the event
+    has seen answers with that message and sends nothing again; without one,
+    a second click while the first send is still going does the same."""
     event = await deliveries.event_for_club(session, user, event_id)
     tpl = await service.template_of(session, template_id, event=event)
-    msg = await service.send_template(session, event, tpl, created_by=user.id)
+    msg = await service.send_template(session, event, tpl, created_by=user.id, client_ref=body.client_ref if body else None)
     background_tasks.add_task(service.run_message, msg.id)
     return MessageOut(**service.message_out(msg, user.full_name))
 
@@ -221,7 +230,8 @@ async def library_context(session: SessionDep, user: ClubAuth) -> EmailContext:
 @library_router.post("/images", summary="A picture for a library email")
 async def upload_library_image(session: SessionDep, user: ClubAuth, file: UploadFile = File(...)) -> ImageUpload:
     club = await service.club_of(session, user)
-    return ImageUpload(**store_image(await file.read(), service.image_prefix(club_id=club.id), max_width=EMAIL_IMAGE_WIDTH, name="email"))
+    raw = await file.read()
+    return ImageUpload(**await asyncio.to_thread(store_image, raw, service.image_prefix(club_id=club.id), max_width=EMAIL_IMAGE_WIDTH, name="email"))
 
 
 @library_router.get("/overview", summary="The library with how each email is used and what it did, the month in figures, and what goes out next")

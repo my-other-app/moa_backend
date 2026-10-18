@@ -4,8 +4,13 @@ from app.core.auth.authentication import ALGORITHM
 import jwt
 
 
+#: Claims left out when they are None: JWT registers them, and a decoder
+#: refuses a null one ("jti" must be a string).
+_OMIT_WHEN_NONE = ("jti", "gen")
+
+
 def create_access_token(data: dict, expires_delta: timedelta | None = None):
-    to_encode = data.copy()
+    to_encode = {k: v for k, v in data.items() if not (k in _OMIT_WHEN_NONE and v is None)}
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
     else:

@@ -1,17 +1,29 @@
 """The page itself: one HTML file with its CSS and a little JS inline, in
 one of four templates, light or dark, in the club's colour and font.
 
-Every string from the database goes through `esc`. Images go through the
-site's own image route, because the bucket's URLs are signed and expire;
-the page must outlive them. The JS is small on purpose: the menu on a
-phone, a countdown on the Arena template, the year in the footer.
+Every string from the database goes through `esc` (or, inside the JSON-LD
+script, `ld_json`). Images go through the site's own image route, because
+the bucket's URLs are signed and expire; the page must outlive them. The JS
+is small on purpose: the menu on a phone, a countdown on the Arena template,
+the year in the footer.
+
+The inline script and the inline stylesheet are the same bytes on every
+club's page -- one stylesheet per template and look, eight in all -- so the
+Content-Security-Policy can name them by hash (`SITE_CSP`) instead of
+allowing any inline script with 'unsafe-inline'. The club's colour and font
+are the only parts that differ; they are CSS custom properties on the
+<html> element's style attribute, from a validated hex colour and a fixed
+list of fonts.
 """
+import base64
+import hashlib
 import html
 import json
+import re
 from datetime import datetime
 from urllib.parse import quote
 
-from app.api.sites.models import FONTS
+from app.api.sites.models import FONTS, TEMPLATES, THEMES
 
 
 
@@ -19,9 +31,14 @@ def esc(v) -> str:
     return html.escape(str(v or ""), quote=True)
 
 
+_HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
 def _hex(v: str | None, fallback: str) -> str:
+    """A colour the page may print: six hex digits, or the fallback. It goes
+    into the <html> style attribute, so nothing else may get through."""
     v = (v or "").strip()
-    return v if len(v) == 7 and v.startswith("#") else fallback
+    return v if _HEX.match(v) else fallback
 
 
 def _mix(hex_: str, alpha: float) -> str:
@@ -58,7 +75,22 @@ def _when(dt: datetime) -> str:
 # ─── The CSS ─────────────────────────────────────────────────────────────
 
 
-def _css(template: str, theme: str, brand: str, font_family: str) -> str:
+DEFAULT_BRAND = "#17a58f"
+
+
+def _brand_vars(brand: str, font_family: str) -> str:
+    """The club's own colour and font, as the custom properties the
+    stylesheet reads. Set on <html>, so the stylesheet itself is the same
+    for every club and can be named in the CSP by its hash."""
+    on_brand = "#ffffff" if _dark_enough(brand) else "#0b1f1a"
+    return (
+        f"--brand:{brand};--brand-soft:{_mix(brand, 0.14)};--on-brand:{on_brand};"
+        f"--font:'{font_family}',system-ui,-apple-system,Segoe UI,sans-serif"
+    )
+
+
+def _css(template: str, theme: str) -> str:
+    """The stylesheet for one template and look; nothing in it varies by club."""
     dark = theme == "dark"
     bg = "#0b0e0d" if dark else "#f7f8f6"
     surface = "#151918" if dark else "#ffffff"
@@ -67,10 +99,12 @@ def _css(template: str, theme: str, brand: str, font_family: str) -> str:
     ink = "#eef1ee" if dark else "#151918"
     ink2 = "#c5cbc7" if dark else "#4b524e"
     ink3 = "#8f9793" if dark else "#7b827e"
-    on_brand = "#ffffff" if _dark_enough(brand) else "#0b1f1a"
     radius = {"launchpad": "18px", "chapter": "6px", "campus": "14px", "arena": "10px"}[template]
+    # The defaults behind the club's own colour and font (set on <html>), for
+    # a browser that refuses the style attribute.
+    defaults = _brand_vars(DEFAULT_BRAND, FONTS["dm_sans"][0])
     base = f"""
-:root{{--bg:{bg};--surface:{surface};--sunken:{sunken};--line:{line};--ink:{ink};--ink2:{ink2};--ink3:{ink3};--brand:{brand};--brand-soft:{_mix(brand, 0.14)};--on-brand:{on_brand};--r:{radius};--font:'{font_family}',system-ui,-apple-system,Segoe UI,sans-serif}}
+:root{{--bg:{bg};--surface:{surface};--sunken:{sunken};--line:{line};--ink:{ink};--ink2:{ink2};--ink3:{ink3};{defaults};--r:{radius}}}
 *{{box-sizing:border-box}}html{{scroll-behavior:smooth}}
 body{{margin:0;font-family:var(--font);color:var(--ink);background:var(--bg);line-height:1.5;-webkit-font-smoothing:antialiased}}
 a{{color:inherit;text-decoration:none}}img{{display:block;max-width:100%}}
@@ -118,7 +152,7 @@ h2{{font-size:28px;letter-spacing:-.02em;margin:0 0 18px;font-weight:700}}
 .band h2{{margin:0 0 4px}}.band p{{margin:0;opacity:.85}}
 .band .btn{{background:var(--on-brand);color:var(--brand)}}
 footer{{border-top:1px solid var(--line);padding:28px 0;color:var(--ink3);font-size:13px}}
-footer .wrap{{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:center}}footer a{{color:var(--ink2)}}
+footer .wrap{{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:center}}footer a{{color:var(--ink2)}}footer .made{{margin-left:auto}}
 .empty{{color:var(--ink3);font-size:14px}}
 @media (max-width:720px){{.links{{display:none;position:absolute;left:0;right:0;top:64px;background:var(--bg);border-bottom:1px solid var(--line);padding:10px 20px 16px;flex-direction:column;align-items:stretch}}.links.open{{display:flex}}.menu{{display:block}}section{{padding:40px 0}}}}
 """
@@ -164,6 +198,14 @@ try{var v=document.body.getAttribute('data-visit');if(v&&window.top===window){va
 # ─── The page ────────────────────────────────────────────────────────────
 
 
+def _href(url) -> str:
+    """A link the page may carry: http(s) or mail, else nowhere. The data
+    is built that way (service._social_href); this holds whatever it is
+    handed."""
+    u = str(url or "").strip()
+    return esc(u) if u.lower().startswith(("https://", "http://", "mailto:")) else "#"
+
+
 def _mark(name: str) -> str:
     parts = [p for p in (name or "").split() if p]
     return esc("".join(p[0] for p in parts[:2]).upper() or "C")
@@ -197,8 +239,8 @@ def render(data: dict) -> str:
     template = s["template"]
     on = s["sections"]
     font_family, font_query = FONTS.get(s["font"], FONTS["dm_sans"])
-    brand = _hex(club.get("brand_primary"), "#17a58f")
-    css = _css(template, s["theme"], brand, font_family)
+    brand = _hex(club.get("brand_primary"), DEFAULT_BRAND)
+    css = _css(template, s["theme"] if s["theme"] in THEMES else "light")
     name = club["name"]
     headline = s["headline"] or data["default_headline"]
     subline = s["subline"] or data["default_subline"] or ""
@@ -267,7 +309,7 @@ def render(data: dict) -> str:
     if on.get("team", True) and data["team"]:
         people = []
         for m in data["team"]:
-            so = "".join(f'<a href="{esc(u)}" target="_blank" rel="noreferrer">{esc(k)}</a>' for k, u in m["links"])
+            so = "".join(f'<a href="{_href(u)}" target="_blank" rel="noreferrer">{esc(k)}</a>' for k, u in m["links"])
             so_html = f'<div class="so">{so}</div>' if so else ""
             people.append(f'<div class="person">{_img(m.get("photo"), m["name"])}<b>{esc(m["name"])}</b><span>{esc(m.get("role") or "")}</span>{so_html}</div>')
         parts.append(f'<section id="team"><div class="wrap"><h2>The team</h2><div class="people">{"".join(people)}</div></div></section>')
@@ -283,22 +325,94 @@ def render(data: dict) -> str:
         parts.append(f'<section><div class="wrap"><div class="band"><div><h2>Follow {esc(name)}</h2><p>Hear first about every event, in the app.</p></div><a class="btn" href="{esc(follow_url)}" target="_top">Follow in the app</a></div></div></section>')
 
     if on.get("contact", True):
-        links = "".join(f'<a href="{esc(u)}" target="_blank" rel="noreferrer">{esc(k)}</a>' for k, u in data["socials"])
+        links = "".join(f'<a href="{_href(u)}" target="_blank" rel="noreferrer">{esc(k)}</a>' for k, u in data["socials"])
         contact = " · ".join(esc(x) for x in (club.get("contact_email"), club.get("location_name")) if x)
         contact_html = f"<span>{contact}</span>" if contact else ""
-        parts.append(f'<footer id="contact"><div class="wrap"><span>© <span id="y"></span> {esc(name)}</span>{contact_html}{links}<span style="margin-left:auto">Made with MyOtherApp</span></div></footer>')
+        parts.append(f'<footer id="contact"><div class="wrap"><span>© <span id="y"></span> {esc(name)}</span>{contact_html}{links}<span class="made">Made with MyOtherApp</span></div></footer>')
 
     title = f"{name} · {headline}"
     desc = subline or f"{name} on MyOtherApp."
     og = f'<meta property="og:image" content="{esc(cover or logo)}">' if (cover or logo) else ""
     icon = f'<link rel="icon" href="{esc(logo)}">' if logo else ""
-    ld = json.dumps({"@context": "https://schema.org", "@type": "Organization", "name": name, "url": site_url, "description": desc})
+    ld = ld_json({"@context": "https://schema.org", "@type": "Organization", "name": name, "url": site_url, "description": desc})
+    fonts_href = f"https://fonts.googleapis.com/css2?family={font_query}&display=swap"
     return (
-        '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+        f'<!doctype html><html lang="en" style="{esc(_brand_vars(brand, font_family))}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
         f'<title>{esc(title)}</title><meta name="description" content="{esc(desc)}"><meta property="og:title" content="{esc(title)}"><meta property="og:description" content="{esc(desc)}">{og}'
         f'<meta property="og:url" content="{esc(site_url)}"><meta property="og:type" content="website">'
         f'<link rel="canonical" href="{esc(site_url)}">{icon}'
-        f'<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family={font_query}&display=swap" rel="stylesheet">'
+        f'<link rel="preconnect" href="https://fonts.googleapis.com"><link href="{esc(fonts_href)}" rel="stylesheet">'
         f"<style>{css}</style></head><body data-visit=\"{esc(data.get('visit_url') or '')}\">{''.join(parts)}<script>{_JS}</script>"
         f'<script type="application/ld+json">{ld}</script></body></html>'
     )
+
+
+def ld_json(value) -> str:
+    """JSON for inside a <script> element. `json.dumps` leaves `<`, `>` and
+    `&` as they are, so a club named `</script><script>...` closed the
+    element and ran its own script on the club's page. As \\u escapes they
+    are the same JSON to any parser, and never markup."""
+    return (
+        json.dumps(value)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+    )
+
+
+# ─── The Content-Security-Policy ─────────────────────────────────────────
+#
+# The pages' inline script and stylesheets, by hash, for the CSP the
+# club-sites Worker (infra/cloudflare/club-sites) and the API send. A change
+# to `_JS` or `_css` changes a hash here: tests/test_sites_security.py
+# recomputes them and fails until these -- and the Worker -- are updated.
+
+
+def csp_hash(text: str) -> str:
+    return "'sha256-" + base64.b64encode(hashlib.sha256(text.encode("utf-8")).digest()).decode("ascii") + "'"
+
+
+def inline_scripts() -> list[str]:
+    return [_JS]
+
+
+def inline_styles() -> list[str]:
+    return [_css(t, th) for t in TEMPLATES for th in THEMES]
+
+
+SITE_SCRIPT_HASHES: tuple = (
+    "'sha256-swis8fs/eRtw6T6o+nS85xTSH7Ylty5NMLKG5zERxEk='",
+)
+# One per template and look, in TEMPLATES x THEMES order.
+SITE_STYLE_HASHES: tuple = (
+    "'sha256-GBBvFLvHlVpk4y5HawA437l+MFNckS35/X5GiPYE2qc='",
+    "'sha256-3KJYC2Prrnnq2kxrxjDQrBSFfeBOZPuA4/VNNdXVP0c='",
+    "'sha256-0n8OIRBFch+kRnbsdNfVBu8XMzcvq3kFJQWvL/jnB4Q='",
+    "'sha256-1d1LLH3Yq6EHPQphmeJFZW5NzmxdR8UA1Z+/W4gScks='",
+    "'sha256-5FAM0jLJxVYkw7pB0jKRrRxaBMtJAYC0zDE4Re2rQak='",
+    "'sha256-wWCraX8POyWjliccgx4kFoXge5Jjtm/vUlQN3OKthwg='",
+    "'sha256-obi4wHve0AlUv9FsY4OFgC0l/1BGLzv2cIg94RAY75M='",
+    "'sha256-7y3wJmhKX5qKXeR0hpfQWxIYr9OwlhN9TMRF2OIqpts='",
+)
+
+
+def site_csp(api_origin: str = "https://api.myotherapp.in", *, frame_ancestors: str = "'none'") -> str:
+    """The policy for a club's page: its own inline script and stylesheets
+    by hash, Google Fonts, images from anywhere on https (the image route
+    redirects to the bucket), the visit beacon to the API."""
+    parts = [
+        "default-src 'none'",
+        f"script-src {' '.join(SITE_SCRIPT_HASHES)}",
+        f"style-src {' '.join(SITE_STYLE_HASHES)} https://fonts.googleapis.com",
+        f"style-src-elem {' '.join(SITE_STYLE_HASHES)} https://fonts.googleapis.com",
+        # The club's colour and font, as custom properties on <html>.
+        "style-src-attr 'unsafe-inline'",
+        "font-src https://fonts.gstatic.com",
+        "img-src https: data:",
+        f"connect-src {api_origin}",
+        "base-uri 'none'",
+        "form-action 'none'",
+    ]
+    if frame_ancestors:
+        parts.append(f"frame-ancestors {frame_ancestors}")
+    return "; ".join(parts)

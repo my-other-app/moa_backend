@@ -2,7 +2,8 @@
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Query, Response
+from fastapi import APIRouter, BackgroundTasks, Query, Request
+from fastapi.responses import StreamingResponse
 
 from app.api.certificates import service
 from app.api.certificates.schemas import (
@@ -19,6 +20,8 @@ from app.api.deliveries.models import DeliveryKind
 from app.api.deliveries.schemas import SendResponse, SendTicketsRequest
 from app.api.events.certificates import certificate_number
 from app.core.auth.dependencies import ClubAuth
+from app.core.net import client_address
+from app.core.rate_limit import limiter
 from app.db.core import SessionDep
 
 router = APIRouter(prefix="/events/{event_id}/certificates")
@@ -84,11 +87,14 @@ async def reinstate(session: SessionDep, user: ClubAuth, event_id: int, registra
 
 
 @router.get("/bundle.zip", summary="Every issued certificate, one PDF per guest")
-async def bundle(session: SessionDep, user: ClubAuth, event_id: int) -> Response:
+async def bundle(session: SessionDep, user: ClubAuth, event_id: int) -> StreamingResponse:
+    """Streamed: each certificate is sent as soon as it is read from the
+    bucket or drawn, so the archive is never held whole in memory and the
+    download starts at once. Everything is read from the database first."""
     event = await deliveries.event_for_club(session, user, event_id)
-    content = await service.bundle_zip(session, event)
-    return Response(
-        content=content,
+    jobs = await service.bundle_jobs(session, event)
+    return StreamingResponse(
+        service.bundle_chunks(jobs),
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{event.slug}-certificates.zip"'},
     )
@@ -108,8 +114,13 @@ async def list_certificates(
     return CertificatePage(**await service.list_certificates(session, event, status=status, search=search, page=page, page_size=page_size))
 
 
+def _visitor(request: Request) -> str:
+    return client_address(request) or "unknown"
+
+
 @public_router.get("/certificates/{code}", summary="What a scanned certificate code says")
-async def verify(session: SessionDep, code: str) -> Verification:
+@limiter.limit("60/minute", key_func=_visitor)
+async def verify(request: Request, session: SessionDep, code: str) -> Verification:
     """Public: no session needed. Says whether the certificate is genuine and
     still valid, whose it is, for what, and when -- nothing more."""
     return Verification(**await service.verify(session, code))

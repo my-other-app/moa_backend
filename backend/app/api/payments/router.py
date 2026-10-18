@@ -175,9 +175,13 @@ async def razorpay_webhook(request: Request, session: SessionDep):
             status_code=400, detail=f"Invalid webhook signature: {str(e)}"
         )
 
-    return await service.handle_razorpay_webhook(
-        session, event_id=event_id, data=payload, signature=webhook_signature
-    )
+    try:
+        return await service.handle_razorpay_webhook(
+            session, event_id=event_id, data=payload, signature=webhook_signature
+        )
+    except service.WebhookBusy:
+        # Another delivery of this event is being applied: Razorpay tries again later.
+        raise CustomHTTPException(status_code=409, message="This event is being applied; deliver it again.", error_code="WEBHOOK_BUSY")
 
 
 @router.post("/webhook/club/{webhook_token}", summary="Razorpay webhook for a club's own account")
@@ -226,6 +230,8 @@ async def club_razorpay_webhook(webhook_token: str, request: Request, session: S
             status_code=502, message="Couldn't confirm the payment with Razorpay; deliver it again.",
             error_code="RAZORPAY_UNREACHABLE",
         )
+    except service.WebhookBusy:
+        raise CustomHTTPException(status_code=409, message="This event is being applied; deliver it again.", error_code="WEBHOOK_BUSY")
     return {"status": outcome}
 
 

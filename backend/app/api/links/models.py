@@ -59,3 +59,9 @@ class TrackingClicks(AbstractSQLModel, TimestampsMixin):
     visitor = Column(String(64), nullable=True)
     referrer = Column(String(300), nullable=True)
     user_agent = Column(String(200), nullable=True)
+
+    __table_args__ = (
+        # A link's clicks in a period, counted by day (links.overview); made by
+        # the migration add_tracking_links, declared here so the suite has it too.
+        Index("ix_tracking_clicks_link_created", "link_id", "created_at"),
+    )

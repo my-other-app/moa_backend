@@ -6,7 +6,8 @@ import enum
 import uuid
 
 import sqlalchemy as sa
-from sqlalchemy import JSON, Boolean, Column, Enum, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import DDL, JSON, Boolean, Column, Enum, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import event as sa_event
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -63,7 +64,11 @@ class LiveQuizQuestions(AbstractSQLModel, TimestampsMixin):
 
 class LiveQuizPlayers(AbstractSQLModel, TimestampsMixin):
     __tablename__ = "live_quiz_players"
-    __table_args__ = (UniqueConstraint("quiz_id", "player_key", name="uq_live_quiz_players_key"),)
+    __table_args__ = (
+        UniqueConstraint("quiz_id", "player_key", name="uq_live_quiz_players_key"),
+        # The board: a quiz's players, best first (the room's quiz snapshot reads it in this order).
+        sa.Index("ix_live_quiz_players_board", "quiz_id", sa.text("score DESC"), "created_at"),
+    )
 
     id = _uuid_pk()
     quiz_id = Column(UUID(as_uuid=True), ForeignKey("live_quizzes.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -114,7 +119,11 @@ class LiveQuestions(AbstractSQLModel, TimestampsMixin):
 
 class LiveQuestionVotes(AbstractSQLModel):
     __tablename__ = "live_question_votes"
-    __table_args__ = (UniqueConstraint("question_id", "voter_key", name="uq_live_question_votes_once"),)
+    __table_args__ = (
+        UniqueConstraint("question_id", "voter_key", name="uq_live_question_votes_once"),
+        # What one browser voted for: read once per browser, not once per question per poll.
+        sa.Index("ix_live_question_votes_voter", "voter_key", "question_id"),
+    )
 
     id = _uuid_pk()
     question_id = Column(UUID(as_uuid=True), ForeignKey("live_questions.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -154,7 +163,13 @@ class LivePolls(AbstractSQLModel, TimestampsMixin):
 
 class LivePollResponses(AbstractSQLModel):
     __tablename__ = "live_poll_responses"
-    __table_args__ = (UniqueConstraint("poll_id", "voter_key", name="uq_live_poll_responses_once"),)
+    __table_args__ = (
+        UniqueConstraint("poll_id", "voter_key", name="uq_live_poll_responses_once"),
+        # A poll's results by GROUP BY value, read from the index alone.
+        sa.Index("ix_live_poll_responses_counts", "poll_id", "value", "created_at"),
+        # What one browser answered.
+        sa.Index("ix_live_poll_responses_voter", "voter_key", "poll_id"),
+    )
 
     id = _uuid_pk()
     poll_id = Column(UUID(as_uuid=True), ForeignKey("live_polls.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -179,6 +194,28 @@ class FeedbackSurveys(AbstractSQLModel, TimestampsMixin):
     questions = Column(JSON, nullable=False, default=list)
     sent_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     sent_count = Column(Integer, nullable=False, default=0)
+    # When it goes out by itself: the event's end plus the delay. Written by
+    # the database (FEEDBACK_DUE_SQL below) on every insert, every change of
+    # the delay and every change of the event's start or length, so the
+    # minute sweep reads only the surveys whose time has come
+    # (ix_feedback_surveys_due) instead of every survey never sent.
+    due_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        sa.Index("ix_feedback_surveys_due", "due_at", postgresql_where=sa.text("auto_send AND sent_at IS NULL AND due_at IS NOT NULL")),
+    )
+
+
+class FeedbackSends(AbstractSQLModel):
+    """Who the survey went to: one row per guest, claimed before the mail goes,
+    so sending again (or the sweep and a send at once) reaches only those not
+    sent yet."""
+
+    __tablename__ = "feedback_sends"
+
+    survey_id = Column(UUID(as_uuid=True), ForeignKey("feedback_surveys.id", ondelete="CASCADE"), primary_key=True)
+    registration_id = Column(UUID(as_uuid=True), ForeignKey("event_registrations_link.id", ondelete="CASCADE"), primary_key=True)
+    sent_at = Column(TZAwareDateTime(timezone=True), server_default=sa.func.now(), nullable=False)
 
 
 class FeedbackResponses(AbstractSQLModel):
@@ -220,3 +257,44 @@ class LiveUpdates(AbstractSQLModel):
     pushed = Column(Integer, nullable=False, default=0)
     sent_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     sent_at = Column(TZAwareDateTime(timezone=True), server_default=sa.func.now(), nullable=False)
+
+
+# ─── feedback_surveys.due_at, kept by the database ───────────────────────
+#
+# The event's end (start plus `duration` hours, as events.ends_at_sql) plus
+# the survey's delay. On the survey, a BEFORE trigger works it out on insert
+# and when the delay, the event or due_at itself changes; on events, a change
+# of start or length clears the survey's due_at so its own trigger works it
+# out again. The migration discover_integrity installs the same and fills it.
+
+FEEDBACK_DUE_SQL = (
+    """
+    CREATE OR REPLACE FUNCTION moa_feedback_due() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      SELECT timezone('UTC', timezone('UTC', e.event_datetime) + coalesce(e.duration, 0) * interval '1 hour')
+             + make_interval(mins => coalesce(NEW.delay_minutes, 0))
+      INTO NEW.due_at FROM events e WHERE e.id = NEW.event_id;
+      RETURN NEW;
+    END $$
+    """,
+    """
+    CREATE OR REPLACE FUNCTION moa_feedback_due_from_event() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      UPDATE feedback_surveys SET due_at = NULL WHERE event_id = NEW.id;
+      RETURN NULL;
+    END $$
+    """,
+    """
+    CREATE TRIGGER trg_feedback_surveys_due BEFORE INSERT OR UPDATE OF delay_minutes, event_id, due_at ON feedback_surveys
+    FOR EACH ROW EXECUTE FUNCTION moa_feedback_due()
+    """,
+    """
+    CREATE TRIGGER trg_events_feedback_due AFTER UPDATE OF event_datetime, duration ON events
+    FOR EACH ROW WHEN (OLD.event_datetime IS DISTINCT FROM NEW.event_datetime OR OLD.duration IS DISTINCT FROM NEW.duration)
+    EXECUTE FUNCTION moa_feedback_due_from_event()
+    """,
+)
+
+# feedback_surveys is made after events (its event_id refers to them).
+for _sql in FEEDBACK_DUE_SQL:
+    sa_event.listen(FeedbackSurveys.__table__, "after_create", DDL(_sql).execute_if(dialect="postgresql"))

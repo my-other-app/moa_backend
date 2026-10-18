@@ -2,13 +2,12 @@
 anyone with the browser key (and a player key, for the quiz)."""
 from uuid import UUID
 
-from fastapi import APIRouter, Query, Request
-from sqlalchemy import select
-from sqlalchemy.orm import joinedload
+import orjson
+
+from fastapi import APIRouter, Query, Request, Response
 
 from app.api.deliveries import service as deliveries
-from app.api.events.models import Events
-from app.api.live import service
+from app.api.live import limits, room, service
 from app.api.live.schemas import (
     AnswerIn,
     AnswerOut,
@@ -48,19 +47,21 @@ from app.api.live.schemas import (
 )
 from app.core.auth.dependencies import ClubAuth, OptionalAuth
 from app.api.subscriptions import gates
-from app.core.rate_limit import limiter
+from app.core.rate_limit import account_or_address, limiter
 from app.db.core import SessionDep
 from app.response import CustomHTTPException
 
 router = APIRouter(prefix="/events/{event_id}/live")
 public_router = APIRouter()
 
+# The room's public side sees an event that is shown or held (not a draft,
+# not deleted) of a listed club; anything else is a 404, as on the site.
+_public_event = service.public_event
 
-async def _public_event(session, event_id: int) -> Events:
-    event = await session.scalar(select(Events).options(joinedload(Events.club)).where(Events.id == event_id, Events.is_deleted == False))  # noqa: E712
-    if event is None:
-        raise CustomHTTPException(404, message="Event not found")
-    return event
+
+def _registration_key(request: Request) -> str:
+    """A survey link belongs to one guest: its limit is theirs, not their network's."""
+    return f"survey:{request.path_params.get('registration_id', '')}"
 
 
 # --- quiz: the host ----------------------------------------------------------------------
@@ -121,8 +122,9 @@ async def host_action(session: SessionDep, user: ClubAuth, event_id: int, action
 
 
 @public_router.post("/live/quiz/join", summary="Join the quiz on the screen with its code", status_code=201)
-@limiter.limit("30/minute")
 async def join_quiz(request: Request, session: SessionDep, body: JoinIn, user: OptionalAuth = None) -> JoinOut:
+    """Limited per browser (X-Live-Key, when sent) and, generously, per address."""
+    limits.check(request, "join", room.valid_key(request.headers.get(service.VOTER_HEADER)))
     out = await service.join_quiz(session, body.code, body.name)
     if user is not None:
         event = await _public_event(session, out["event_id"])
@@ -134,17 +136,21 @@ async def join_quiz(request: Request, session: SessionDep, body: JoinIn, user: O
     return JoinOut(**out)
 
 
-@public_router.get("/events/{event_id}/live/quiz/play", summary="The player's view of the quiz right now")
-async def play_state(request: Request, session: SessionDep, event_id: int) -> PlayerState:
-    event = await _public_event(session, event_id)
-    return PlayerState(**await service.player_state(session, event, request.headers.get(service.PLAYER_HEADER, "")))
+@public_router.get("/events/{event_id}/live/quiz/play", response_model=PlayerState, summary="The player's view of the quiz right now")
+async def play_state(request: Request, session: SessionDep, event_id: int) -> Response:
+    """Polled every two seconds by every player: read from the quiz snapshot
+    and written straight out (the shape is PlayerState's), with no model
+    built per poll."""
+    out = await service.player_state(session, event_id, request.headers.get(service.PLAYER_HEADER, ""))
+    # default=str: ids come back from asyncpg as its own UUID type, which orjson does not know.
+    return Response(content=orjson.dumps(out, default=str), media_type="application/json")
 
 
 @public_router.post("/events/{event_id}/live/quiz/answer", summary="Answer the open question")
-@limiter.limit("120/minute")
 async def play_answer(request: Request, session: SessionDep, event_id: int, body: AnswerIn) -> AnswerOut:
-    event = await _public_event(session, event_id)
-    return AnswerOut(**await service.answer(session, event, request.headers.get(service.PLAYER_HEADER, ""), body.option_key))
+    player = request.headers.get(service.PLAYER_HEADER, "")
+    limits.check(request, "answer", player or None)
+    return AnswerOut(**await service.answer(session, event_id, player, body.option_key))
 
 
 # --- Q&A ----------------------------------------------------------------------
@@ -170,22 +176,22 @@ async def moderate(session: SessionDep, user: ClubAuth, event_id: int, question_
 
 
 @public_router.post("/events/{event_id}/live/questions", summary="Ask the room a question", status_code=201)
-@limiter.limit("20/hour")
 async def ask(request: Request, session: SessionDep, event_id: int, body: AskIn, user: OptionalAuth = None) -> QuestionOut:
+    key = service.voter_key_of(request)
+    limits.check(request, "ask", key)
     event = await _public_event(session, event_id)
     # The floor is open only on a plan with Q&A; the guest is not told why.
     if not await gates.allows(session, event.club_id, "qa", actor=user, event=event):
         raise CustomHTTPException(409, message="Questions aren't open for this event right now.", error_code="QA_CLOSED")
-    key = service.voter_key_of(request)
     reg = await service._registration_of(session, event, user)
     return QuestionOut(**await service.ask(session, event, body.text, body.author_name, key, reg.id if reg else None))
 
 
 @public_router.post("/events/{event_id}/live/questions/{question_id}/vote", summary="Vote a question up, or take the vote back")
-@limiter.limit("120/minute")
 async def vote(request: Request, session: SessionDep, event_id: int, question_id: UUID) -> VoteOut:
-    event = await _public_event(session, event_id)
-    return VoteOut(**await service.vote(session, event, question_id, service.voter_key_of(request)))
+    key = service.voter_key_of(request)
+    limits.check(request, "vote", key)
+    return VoteOut(**await service.vote(session, event_id, question_id, key))
 
 
 # --- polls ----------------------------------------------------------------------
@@ -227,10 +233,10 @@ async def delete_poll(session: SessionDep, user: ClubAuth, event_id: int, poll_i
 
 
 @public_router.post("/events/{event_id}/live/polls/{poll_id}/respond", summary="Answer the poll that is up")
-@limiter.limit("120/minute")
 async def respond(request: Request, session: SessionDep, event_id: int, poll_id: UUID, body: RespondIn) -> PollOut:
-    event = await _public_event(session, event_id)
-    return PollOut(**await service.respond(session, event, poll_id, service.voter_key_of(request), body.value))
+    key = service.voter_key_of(request)
+    limits.check(request, "respond", key)
+    return PollOut(**await service.respond(session, event_id, poll_id, key, body.value))
 
 
 # --- feedback ----------------------------------------------------------------------
@@ -248,8 +254,8 @@ async def put_feedback(session: SessionDep, user: ClubAuth, event_id: int, body:
     return SurveyOut(**await service.update_survey(session, event, body))
 
 
-@router.post("/feedback/send", summary="Send the survey now to everyone checked in")
-@limiter.limit("6/hour")
+@router.post("/feedback/send", summary="Send the survey now to everyone checked in not sent it yet")
+@limiter.limit("6/hour", key_func=account_or_address)
 async def send_feedback(request: Request, session: SessionDep, user: ClubAuth, event_id: int) -> SendOut:
     event = await deliveries.event_for_club(session, user, event_id)
     return SendOut(**await service.send_survey(session, event))
@@ -262,7 +268,7 @@ async def public_survey(session: SessionDep, event_id: int, registration_id: UUI
 
 
 @public_router.post("/events/{event_id}/feedback/{registration_id}", summary="The guest's answers")
-@limiter.limit("20/hour")
+@limiter.limit("20/hour", key_func=_registration_key)
 async def submit_survey(request: Request, session: SessionDep, event_id: int, registration_id: UUID, body: SubmitIn, k: str = Query("")) -> dict:
     event = await _public_event(session, event_id)
     return await service.submit_survey(session, event, registration_id, k, body.answers)
@@ -278,7 +284,7 @@ async def list_updates(session: SessionDep, user: ClubAuth, event_id: int) -> Up
 
 
 @router.post("/updates", summary="Push an update: a banner on the event page and a phone notification", status_code=201)
-@limiter.limit("60/hour")
+@limiter.limit("60/hour", key_func=account_or_address)
 async def push_update(request: Request, session: SessionDep, user: ClubAuth, event_id: int, body: UpdateIn) -> UpdateOut:
     event = await deliveries.event_for_club(session, user, event_id)
     return UpdateOut(**await service.push_update(session, event, body.kind, body.text, body.audience, user))
@@ -293,16 +299,17 @@ async def shift(session: SessionDep, user: ClubAuth, event_id: int, body: ShiftI
 # --- the room and the screen ----------------------------------------------------------------------
 
 
-@public_router.get("/events/{event_id}/live", summary="What the room sees: the banner, the poll up, the questions, whether a quiz runs")
-async def feed(request: Request, session: SessionDep, event_id: int) -> Feed:
-    event = await _public_event(session, event_id)
-    key = (request.headers.get(service.VOTER_HEADER) or "").strip() or None
-    out = await service.feed(session, event, key)
-    # The floor shows as closed when the club's plan has no Q&A (and the event
-    # is not grandfathered), so the ask box never appears only to refuse.
-    if out["qa"]["open"] and not await gates.allows_for_feed(session, event.club_id, "qa", event=event):
-        out["qa"]["open"] = False
-    return Feed(**out)
+@public_router.get(
+    "/events/{event_id}/live", response_model=Feed,
+    summary="What the room sees: the banner, the poll up, the questions, whether a quiz runs",
+)
+async def feed(request: Request, session: SessionDep, event_id: int) -> Response:
+    """Read from the room's snapshot (at most a second old); the browser's
+    own flags (voted, mine, my_response) from what it did. The floor shows as
+    closed when the club's plan has no Q&A (and the event is not
+    grandfathered), so the ask box never appears only to refuse."""
+    body = await room.feed_body(session, event_id, request.headers.get(service.VOTER_HEADER))
+    return Response(content=body, media_type="application/json")
 
 
 @router.get("/screen", summary="The big screen")

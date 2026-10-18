@@ -363,6 +363,17 @@ per user in the process (`cache.personal`, the same interface a Redis store
 would take); the cities number lives in `discover_stats`, counted again in
 the background at most every 30 minutes.
 
+*Also, 18 October 2026 (branch `fix/discover-integrity`, migration
+`discover_integrity`):* the live room's limits per person with a ceiling per
+address, its feed and quiz read from second-long snapshots; counters moved
+by triggers or atomic updates, views written in batches; `clubs.listed` in
+every public rule; the app's club list on `follower_count`; the follower's
+feed and comments by cursor; `offset` capped at 1,000 with `after=` cursors;
+per-word search; "popular" on a stored, decayed `events.popularity`; the
+discover caches serve stale while one task rebuilds (fix 10's single-flight,
+still per process). Measured in `backend/scripts/bench/RESULTS.md` under
+"Integrity and the live room".
+
 1. **Bound every "what is on" query from below.** In `app/api/discover/service.py`,
    `_visible_where` / `_conditions` (and `_public_where` for upcoming), add
    `Events.event_datetime >= now - timedelta(hours=MAX_EVENT_HOURS)` (72 today;

@@ -10,6 +10,7 @@ silently rewrote the design of every event that had already used it,
 including events whose tickets were already in people's hands.
 """
 
+import asyncio
 import enum
 import io
 import os
@@ -47,6 +48,9 @@ from app.api.events.documents import (
     render_layout_document,
     sample_values,
 )
+from app.api.templates_images import CERTIFICATE_FIELDS, TICKET_FIELDS, embedded, key_of, shown, stored
+from app.core.layout import pool
+from app.core.storage.fields import upload
 from app.core.layout.engine import layout_problems, problems_as_fields
 from app.core.layout.model import PageSpec, TicketLayoutFields, dump
 from app.core.layout.starters import agenda_starter, badge_starter, certificate_starter, ticket_starter, AGENDA_STARTERS, BADGE_STARTERS, CERTIFICATE_STARTERS, TICKET_STARTERS
@@ -63,6 +67,7 @@ from app.api.ticket_templates.service import _default_config as ticket_default_c
 from app.config import settings
 from app.core.auth.dependencies import ClubAuth
 from app.core.storage import objects
+from app.core.storage.images import checked_image
 from app.db.core import SessionDep
 from app.response import CustomHTTPException
 
@@ -162,7 +167,7 @@ def _describe(template, event_id: int, audience: TemplateAudience) -> DesignResp
         source = "club_default"
 
     return DesignResponse(
-        config=template.config or {},
+        config=shown(template.config or {}, template, fields=_fields_of(template)),
         audience=audience.value,
         source=source,
         is_own=template.event_id == event_id and template.audience is audience,
@@ -229,7 +234,8 @@ async def save_design(
         audience=audience,
         name=payload.name or f"{event.name} {kind.value}",
     )
-    template.config = payload.config
+    # Kept with keys, not the links the editor was shown (they last an hour).
+    template.config = stored(payload.config, template, fields=_fields_of(template))
     if payload.name:
         template.name = payload.name
 
@@ -287,7 +293,7 @@ async def reset_design(
 
 
 def _extract_url(value) -> Optional[str]:
-    """The stored URL for an image field, whatever shape it is in."""
+    """The URL an image field shows, whatever shape it is in."""
     if isinstance(value, str):
         return value
     if isinstance(value, dict) and "original" in value:
@@ -309,17 +315,25 @@ _IMAGE_FIELDS = {
 }
 
 
-def _sync_urls(template, kind: DesignKind) -> None:
-    """Copy the stored image URLs into the config the renderer reads.
+def _fields_of(template) -> tuple:
+    """The image fields a design row's config names."""
+    if isinstance(template, CertificateTemplates):
+        return CERTIFICATE_FIELDS
+    if isinstance(template, TicketTemplates):
+        return TICKET_FIELDS
+    return ()
 
-    The templates read `background_image_url` out of the config rather than
-    the column, so an upload that skips this step stores the file and
-    changes nothing on the document.
+
+def _sync_urls(template, kind: DesignKind, touched=()) -> None:
+    """Copy the stored images' keys into the config the renderer reads.
+
+    The templates read the images out of the config rather than the column,
+    so an upload that skips this step stores the file and changes nothing on
+    the document. Keys, not links: a link lasts an hour (templates_images).
+    `touched` are the fields this request uploaded or removed; the rest keep
+    what the config already says (a fork's signatures have no column).
     """
-    config = dict(template.config) if template.config else {}
-    for field in _IMAGE_FIELDS[kind]:
-        config[f"{field}_url"] = _extract_url(getattr(template, field, None))
-    template.config = config
+    template.config = stored(template.config, template, fields=_IMAGE_FIELDS[kind], touched=touched)
 
 
 @router.put("/{kind}/artwork", summary="Replace this event's artwork")
@@ -379,22 +393,22 @@ async def save_artwork(
         "signature_2": remove_signature_2,
     }
 
+    touched = []
     for field in allowed:
         if removals[field]:
             setattr(template, field, None)
-        upload = uploads[field]
-        if upload is not None and upload.filename:
+            touched.append(field)
+        sent = uploads[field]
+        if sent is not None and sent.filename:
+            # Checked, sized and stored off the event loop; the column gets the key.
             setattr(
                 template,
                 field,
-                {"bytes": io.BytesIO(await upload.read()), "filename": upload.filename},
+                await upload(getattr(model, field), {"bytes": await sent.read(), "filename": sent.filename}),
             )
+            touched.append(field)
 
-    await session.commit()
-    await session.refresh(template)
-
-    # After the commit, so the stored URLs exist to copy.
-    _sync_urls(template, kind)
+    _sync_urls(template, kind, touched)
     await session.commit()
     await session.refresh(template)
 
@@ -515,16 +529,21 @@ async def preview_design(
     except Exception as exc:
         raise CustomHTTPException(422, message=f"Invalid design: {exc}")
 
-    # Artwork URLs live on the stored row, not in what the editor sends.
+    # Artwork lives on the stored row, not in what the editor sends: an image
+    # the editor's config does not name is the saved design's.
+    fields = CERTIFICATE_FIELDS if kind is DesignKind.certificate else TICKET_FIELDS
     current = await resolve_template(
         session, _MODELS[kind], event_id=event_id, club_id=event.club_id,
         role=_role_for(audience),
     )
-    if current is not None and current.config:
-        for key in ("logo_url", "secondary_logo_url", "background_image_url",
-                    "signature_1_url", "signature_2_url"):
-            if not style.get(key) and current.config.get(key):
-                style[key] = current.config[key]
+    sent = payload.config or {}
+    for field in fields:
+        named = {k: sent[k] for k in (f"{field}_key", f"{field}_url") if sent.get(k)}
+        key = key_of(named, field) if named else None
+        if key is None and current is not None:
+            key = key_of(current.config or {}, field, current)
+        style[f"{field}_key"] = key
+        style.pop(f"{field}_url", None)
 
     values, qr_text = _values_and_qr(event, kind, registration)
     style = apply_layers(style, values)
@@ -558,17 +577,23 @@ async def preview_design(
             "qr_code": qr_png_base64(qr_text),
         }
 
-    image_bytes = generate_image_bytes(
-        template_path=template,
-        context={
-            "email_payload": email_payload,
-            "style": style,
-            "qr_code_url": qr_data_url(qr_text),
-        },
-        width=image_width(style, default=default_width),
-    )
+    width = image_width(style, default=default_width)
+    qr_url = qr_data_url(qr_text)
+
+    def draw() -> bytes:
+        inline, _ = embedded(style, fields=fields)
+        return generate_image_bytes(
+            template_path=template,
+            context={
+                "email_payload": email_payload,
+                "style": inline,
+                "qr_code_url": qr_url,
+            },
+            width=width,
+        ).getvalue()
+
     return Response(
-        content=image_bytes.getvalue(),
+        content=await pool.run(draw),
         media_type="image/png",
         headers={"Cache-Control": "no-store"},
     )
@@ -678,7 +703,7 @@ async def _current(session, event, kind: DesignKind, audience: TemplateAudience)
     template = await resolve_template(
         session, _MODELS[kind], event_id=event.id, club_id=event.club_id, role=_role_for(audience),
     )
-    style = dict(template.config or {}) if template is not None else _DEFAULTS[kind]()
+    style = shown(template.config or {}, template, fields=_fields_of(template)) if template is not None else _DEFAULTS[kind]()
     return template, style
 
 
@@ -764,7 +789,7 @@ async def save_layout(
     template.config = config
     await session.commit()
     await session.refresh(template)
-    return _layout_dto(event, kind, audience, template, dict(template.config), await _agenda_for(session, event, kind))
+    return _layout_dto(event, kind, audience, template, shown(template.config, template, fields=_fields_of(template)), await _agenda_for(session, event, kind))
 
 
 @router.post("/{kind}/layout/preview", summary="The layered design rendered exactly, as a PNG")
@@ -792,12 +817,21 @@ async def preview_layout(
         code = registration.ticket_id
     else:
         values = layout_sample_values(event, kind.value)
-        code = values["admission_no"]
+        code = values["ticket_code"]
     qr_text = f"certificate:{code}" if kind is DesignKind.certificate else code
 
     entries = await agenda_service.entries_for(session, event) if kind is DesignKind.agenda else None
-    pdf = render_layout_document(style, values, qr_text, title=f"{kind.value} preview", agenda=entries, club=getattr(event, "club", None))
-    return Response(content=layout_png(style, pdf), media_type="image/png", headers={"Cache-Control": "no-store"})
+    club = getattr(event, "club", None)
+    return Response(
+        content=await pool.run(_preview_png, style, values, qr_text, f"{kind.value} preview", entries, club),
+        media_type="image/png", headers={"Cache-Control": "no-store"},
+    )
+
+
+def _preview_png(style: dict, values: dict, qr_text: str, title: str, entries, club) -> bytes:
+    """A layered design drawn and turned into a PNG, on the render pool."""
+    pdf = render_layout_document(style, values, qr_text, title=title, agenda=entries, club=club)
+    return layout_png(style, pdf)
 
 
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
@@ -819,18 +853,13 @@ async def upload_layout_image(
     a URL to show it now. Nothing is written to the design: the editor holds
     the key until the person saves."""
     await _event_for_editing(session, user, event_id)
-    return _store_layout_image(await file.read(), _layout_prefix(event_id), purpose)
+    # Decoded, resized and stored on a worker thread, not on the event loop.
+    return await asyncio.to_thread(_store_layout_image, await file.read(), _layout_prefix(event_id), purpose)
 
 
 def _store_layout_image(raw: bytes, prefix: str, purpose: str) -> dict:
     """Check, shrink and store one upload under a designer's folder."""
-    if len(raw) > MAX_IMAGE_BYTES:
-        raise CustomHTTPException(413, message="That image is over 5 MB. Export it smaller and try again.")
-    try:
-        image = Image.open(io.BytesIO(raw))
-        image.load()
-    except Exception:
-        raise CustomHTTPException(422, message="That file is not an image we can read. Use PNG, JPEG or WebP.")
+    image = checked_image(raw, max_bytes=MAX_IMAGE_BYTES)
     fmt = (image.format or "").upper()
     if fmt not in _EXT:
         raise CustomHTTPException(422, message="Use PNG, JPEG or WebP.")

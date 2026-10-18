@@ -21,7 +21,6 @@ from app.api.events.models import (
     EventCategories,
     EventFiles,
     EventInterestsLink,
-    EventPageViews,
     EventRegistrationsLink,
     Events,
     EventRatingsLink,
@@ -1056,45 +1055,10 @@ async def increment_event_page_view(
     event_id: int | str,
     user_id: int | None = None,
 ):
-    is_event_id = (isinstance(event_id, str) and event_id.isdigit()) or isinstance(
-        event_id, int
-    )
-    if is_event_id:
-        event_id = int(event_id)
+    """Count a look at the event's page: once per visitor a day, the club's
+    own looks not at all, written in batches (app/api/events/views.py).
+    404 for no such event."""
+    from app.api.events import views
 
-    db_event = await session.execute(
-        select(Events)
-        .filter(
-            Events.id == event_id
-            if is_event_id
-            else Events.slug == event_id
-        )
-        .options(joinedload(Events.club))
-    )
-    db_event = db_event.scalar()
-    if db_event is None:
-        raise CustomHTTPException(404, message="Event not found")
-    
-    # Always increment page views
-    # db_event.page_views += 1
-    if not user_id or (user_id and user_id != db_event.club.user_id):
-        db_event.page_views += 1
-        # await session.commit()
-
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        client_ip = forwarded_for.split(",")[0].strip()
-    else:
-        client_ip = request.client.host
-
-    event_view = EventPageViews(
-        event_id=db_event.id, # Use the integer ID from the fetched event
-        user_agent=request.headers.get("User-Agent"),
-        ip_address=client_ip,
-        user_id=user_id,
-    )
-    session.add(event_view)
-
-    await session.commit()
-
+    await views.record(session, request, event_id, user_id)
     return None

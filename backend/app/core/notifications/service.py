@@ -1,21 +1,42 @@
 """
-Firebase Cloud Messaging notification service.
+Firebase Cloud Messaging: sending pushes to people's devices.
 
-This module provides functionality to send push notifications to users
-via Firebase Cloud Messaging (FCM).
+Sends go out in batches of at most FCM_BATCH tokens. firebase-admin refuses
+more than 500 in one `send_each_for_multicast` (a ValueError, before anything
+is sent), and this module used to catch that and return 0 -- so no club with
+more than about 500 follower devices ever had a push delivered. Each batch is
+sent on a worker thread: the SDK is synchronous and opens a thread per token,
+and on the event loop it stopped every other request until FCM answered.
+
+Tokens are looked up with one array parameter (`user_id = ANY(:ids)`), never
+one bind per user: Postgres takes at most 32,767 binds in a statement, so a
+list of followers past that failed outright.
+
+A person can have several devices; each has its own row (one per token), and
+every one of them is sent to.
 """
 
+import asyncio
 import logging
-from typing import Optional
+from typing import Iterable, Optional
+
 import firebase_admin
+import sqlalchemy as sa
 from firebase_admin import credentials, exceptions as firebase_exceptions, messaging
 from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.users.models import UserDeviceTokens
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+#: The most tokens firebase-admin takes in one multicast.
+FCM_BATCH = 500
+#: User ids per token lookup: one array bind each, so this only bounds how
+#: much one round trip carries.
+LOOKUP_BATCH = 5000
 
 # Initialize Firebase Admin SDK
 _firebase_app = None
@@ -24,23 +45,23 @@ _firebase_app = None
 def initialize_firebase():
     """Initialize Firebase Admin SDK with service account credentials."""
     global _firebase_app
-    
+
     if _firebase_app is not None:
         return _firebase_app
-    
+
     try:
         cred = None
-        
+
         # Option 1: Path to service account JSON file
         if settings.FIREBASE_SERVICE_ACCOUNT_PATH:
             import os
             if not os.path.exists(settings.FIREBASE_SERVICE_ACCOUNT_PATH):
                 logger.error(f"Firebase service account file not found at: {settings.FIREBASE_SERVICE_ACCOUNT_PATH}")
                 return None
-                
+
             logger.info(f"Using Firebase credentials from file: {settings.FIREBASE_SERVICE_ACCOUNT_PATH}")
             cred = credentials.Certificate(settings.FIREBASE_SERVICE_ACCOUNT_PATH)
-        
+
         # Option 2: Base64 encoded service account JSON
         elif settings.FIREBASE_SERVICE_ACCOUNT_BASE64:
             import base64
@@ -49,7 +70,7 @@ def initialize_firebase():
             decoded = base64.b64decode(settings.FIREBASE_SERVICE_ACCOUNT_BASE64)
             service_account_info = json.loads(decoded)
             cred = credentials.Certificate(service_account_info)
-        
+
         if cred:
             _firebase_app = firebase_admin.initialize_app(cred)
             logger.info("Firebase Admin SDK initialized successfully")
@@ -59,37 +80,47 @@ def initialize_firebase():
                 "Set APP_FIREBASE_SERVICE_ACCOUNT_PATH or APP_FIREBASE_SERVICE_ACCOUNT_BASE64"
             )
             return None
-        
+
         return _firebase_app
     except Exception as e:
         logger.error(f"Failed to initialize Firebase Admin SDK: {e}")
         return None
 
 
+def int_array(ids: Iterable[int]):
+    """One bind for a whole list of ids, for `column == sa.any_(int_array(ids))`."""
+    return sa.literal(sorted({int(i) for i in ids}), ARRAY(sa.Integer))
+
+
+def _chunks(items: list, size: int):
+    for start in range(0, len(items), size):
+        yield items[start:start + size]
+
+
 async def get_fcm_tokens_for_users(
-    session: AsyncSession, 
-    user_ids: list[int]
+    session: AsyncSession,
+    user_ids: list[int],
 ) -> list[str]:
-    """
-    Get FCM tokens for a list of users.
-    
-    Args:
-        session: Database session
-        user_ids: List of user IDs
-        
-    Returns:
-        List of FCM tokens
-    """
+    """Every live device token of these users, each once, oldest first."""
     if not user_ids:
         return []
-    
-    query = select(UserDeviceTokens.fcm_token).where(
-        UserDeviceTokens.user_id.in_(user_ids),
-        UserDeviceTokens.is_deleted == False,
-    )
-    result = await session.execute(query)
-    tokens = [row[0] for row in result.fetchall()]
-    logger.info(f"Found {len(tokens)} FCM tokens for {len(user_ids)} users. User IDs: {user_ids}")
+    ids = sorted({int(u) for u in user_ids})
+    tokens: list[str] = []
+    seen: set[str] = set()
+    for part in _chunks(ids, LOOKUP_BATCH):
+        rows = await session.scalars(
+            select(UserDeviceTokens.fcm_token)
+            .where(
+                UserDeviceTokens.user_id == sa.any_(int_array(part)),
+                UserDeviceTokens.is_deleted == False,  # noqa: E712
+            )
+            .order_by(UserDeviceTokens.id)
+        )
+        for token in rows:
+            if token and token not in seen:
+                seen.add(token)
+                tokens.append(token)
+    logger.info("Found %d FCM tokens for %d users", len(tokens), len(ids))
     return tokens
 
 
@@ -97,23 +128,10 @@ async def get_fcm_token_for_user(
     session: AsyncSession,
     user_id: int
 ) -> Optional[str]:
-    """
-    Get FCM token for a single user.
-    
-    Args:
-        session: Database session
-        user_id: User ID
-        
-    Returns:
-        FCM token or None
-    """
-    query = select(UserDeviceTokens.fcm_token).where(
-        UserDeviceTokens.user_id == user_id,
-        UserDeviceTokens.is_deleted == False,
-    )
-    result = await session.execute(query)
-    row = result.first()
-    return row[0] if row else None
+    """One of the user's tokens (the newest), or None. Sends go to every
+    device: see get_fcm_tokens_for_users."""
+    tokens = await get_fcm_tokens_for_users(session, [user_id])
+    return tokens[-1] if tokens else None
 
 
 def is_dead_token(exc: BaseException | None) -> bool:
@@ -132,9 +150,10 @@ def is_dead_token(exc: BaseException | None) -> bool:
 
 async def prune_tokens(session: AsyncSession, tokens: list[str]) -> int:
     """Delete the rows for tokens FCM said are dead, for every account that
-    has them. Never raises: a push must not fail what it was telling about.
-    Commits, so the rows stay gone even when the caller has nothing left to
-    commit (a push is sent after the change it announces is kept)."""
+    has them, in one statement however many there are. Never raises: a push
+    must not fail what it was telling about. Commits, so the rows stay gone
+    even when the caller has nothing left to commit (a push is sent after the
+    change it announces is kept)."""
     tokens = sorted(set(t for t in tokens if t))
     if not tokens:
         return 0
@@ -142,7 +161,7 @@ async def prune_tokens(session: AsyncSession, tokens: list[str]) -> int:
         async with session.begin_nested():
             result = await session.execute(
                 delete(UserDeviceTokens)
-                .where(UserDeviceTokens.fcm_token.in_(tokens))
+                .where(UserDeviceTokens.fcm_token == sa.any_(sa.literal(tokens, ARRAY(sa.String))))
                 .execution_options(include_deleted=True, synchronize_session=False)
             )
         await session.commit()
@@ -161,28 +180,20 @@ async def send_notification_to_user(
     body: str,
     data: Optional[dict] = None,
 ) -> bool:
-    """
-    Send push notification to a single user.
-    
-    Args:
-        session: Database session
-        user_id: Target user ID
-        title: Notification title
-        body: Notification body
-        data: Optional data payload
-        
-    Returns:
-        True if sent successfully, False otherwise
-    """
-    token = await get_fcm_token_for_user(session, user_id)
-    if not token:
-        logger.debug(f"No FCM token found for user {user_id}")
+    """A push to every device the user is signed in on. True when at least
+    one took it."""
+    tokens = await get_fcm_tokens_for_users(session, [user_id])
+    if not tokens:
+        logger.debug("No FCM token found for user %s", user_id)
         return False
-    
+
     dead: list[str] = []
-    sent = await _send_to_token(token, title, body, data, dead=dead)
+    if len(tokens) == 1:
+        sent = 1 if await _send_to_token(tokens[0], title, body, data, dead=dead) else 0
+    else:
+        sent = await _send_to_tokens(tokens, title, body, data, dead=dead)
     await prune_tokens(session, dead)
-    return sent
+    return sent > 0
 
 
 async def send_notification_to_users(
@@ -193,32 +204,85 @@ async def send_notification_to_users(
     data: Optional[dict] = None,
     image_url: Optional[str] = None,
 ) -> int:
-    """
-    Send push notification to multiple users.
-    
-    Args:
-        session: Database session
-        user_ids: List of target user IDs
-        title: Notification title
-        body: Notification body
-        data: Optional data payload
-        image_url: Optional image URL to display in notification
-        
-    Returns:
-        Number of successfully sent notifications
-    """
+    """A push to every device of these users. Returns how many devices took it.
+
+    The token lookups and the sends go in batches, however many users there
+    are; a batch that fails is logged and the rest still go."""
     if not user_ids:
         return 0
-    
-    tokens = await get_fcm_tokens_for_users(session, user_ids)
-    if not tokens:
-        logger.debug(f"No FCM tokens found for users {user_ids}")
-        return 0
-    
+    ids = sorted({int(u) for u in user_ids})
+    sent = tried = 0
     dead: list[str] = []
-    sent = await _send_to_tokens(tokens, title, body, data, image_url, dead=dead)
+    for part in _chunks(ids, LOOKUP_BATCH):
+        tokens = await get_fcm_tokens_for_users(session, part)
+        tried += len(tokens)
+        if tokens:
+            sent += await _send_to_tokens(tokens, title, body, data, image_url, dead=dead)
+    if not tried:
+        logger.debug("No FCM tokens found for %d users", len(ids))
+        return 0
     await prune_tokens(session, dead)
+    report_outcome(tried, sent, what=title)
     return sent
+
+
+async def send_to_every_device(
+    session: AsyncSession,
+    title: str,
+    body: str,
+    data: Optional[dict] = None,
+    image_url: Optional[str] = None,
+) -> int:
+    """A push to every live device token, FCM_BATCH at a time, read in key
+    order so no more than one batch is ever held. Each read is its own short
+    transaction: the connection goes back to the pool while FCM answers."""
+    last_id, sent, tried = 0, 0, 0
+    dead: list[str] = []
+    while True:
+        rows = (await session.execute(
+            select(UserDeviceTokens.id, UserDeviceTokens.fcm_token)
+            .where(UserDeviceTokens.is_deleted == False, UserDeviceTokens.id > last_id)  # noqa: E712
+            .order_by(UserDeviceTokens.id)
+            .limit(FCM_BATCH)
+        )).all()
+        await session.commit()
+        if not rows:
+            break
+        last_id = rows[-1].id
+        tried += len(rows)
+        sent += await _send_to_tokens([r.fcm_token for r in rows], title, body, data, image_url, dead=dead)
+        if len(rows) < FCM_BATCH:
+            break
+    await prune_tokens(session, dead)
+    report_outcome(tried, sent, what=title)
+    return sent
+
+
+def report_outcome(tried: int, sent: int, *, what: str) -> None:
+    """Says, at a level someone will see, when devices were there and nothing
+    reached any of them -- the failure that went unnoticed for months."""
+    if tried and not sent:
+        logger.error("PUSH FAILED: none of %d devices took %r (the warnings above say why)", tried, what)
+    else:
+        logger.info("Push %r: %d of %d devices", what, sent, tried)
+
+
+def _message(token: str, title: str, body: str, data: Optional[dict]) -> messaging.Message:
+    return messaging.Message(
+        notification=messaging.Notification(title=title, body=body),
+        data=data or {},
+        token=token,
+        android=messaging.AndroidConfig(
+            priority="high",
+            notification=messaging.AndroidNotification(
+                sound="default",
+                click_action="FLUTTER_NOTIFICATION_CLICK",
+            ),
+        ),
+        apns=messaging.APNSConfig(
+            payload=messaging.APNSPayload(aps=messaging.Aps(sound="default", badge=1)),
+        ),
+    )
 
 
 async def _send_to_token(
@@ -228,41 +292,17 @@ async def _send_to_token(
     data: Optional[dict] = None,
     dead: Optional[list] = None,
 ) -> bool:
-    """Send notification to a single FCM token. A token FCM says is dead is
-    added to `dead`, for the caller to remove (prune_tokens)."""
+    """Send notification to a single FCM token, on a worker thread. A token
+    FCM says is dead is added to `dead`, for the caller to remove
+    (prune_tokens)."""
     if not initialize_firebase():
         logger.error("Firebase not initialized, cannot send notification")
         return False
-    
+
     try:
-        message = messaging.Message(
-            notification=messaging.Notification(
-                title=title,
-                body=body,
-            ),
-            data=data or {},
-            token=token,
-            android=messaging.AndroidConfig(
-                priority="high",
-                notification=messaging.AndroidNotification(
-                    sound="default",
-                    click_action="FLUTTER_NOTIFICATION_CLICK",
-                ),
-            ),
-            apns=messaging.APNSConfig(
-                payload=messaging.APNSPayload(
-                    aps=messaging.Aps(
-                        sound="default",
-                        badge=1,
-                    ),
-                ),
-            ),
-        )
-        
-        response = messaging.send(message)
+        response = await asyncio.to_thread(messaging.send, _message(token, title, body, data))
         logger.info(f"Successfully sent notification: {response}")
         return True
-        
     except Exception as e:
         if is_dead_token(e):
             logger.warning(f"Token is dead ({type(e).__name__}), removing it: {token[:20]}...")
@@ -273,6 +313,26 @@ async def _send_to_token(
         return False
 
 
+def _multicast(tokens: list[str], title: str, body: str, data: Optional[dict], image_url: Optional[str]) -> messaging.MulticastMessage:
+    return messaging.MulticastMessage(
+        notification=messaging.Notification(title=title, body=body, image=image_url),
+        data=data or {},
+        tokens=tokens,
+        android=messaging.AndroidConfig(
+            priority="high",
+            notification=messaging.AndroidNotification(
+                sound="default",
+                click_action="FLUTTER_NOTIFICATION_CLICK",
+                image=image_url,
+            ),
+        ),
+        apns=messaging.APNSConfig(
+            payload=messaging.APNSPayload(aps=messaging.Aps(sound="default", badge=1)),
+            fcm_options=messaging.APNSFCMOptions(image=image_url) if image_url else None,
+        ),
+    )
+
+
 async def _send_to_tokens(
     tokens: list[str],
     title: str,
@@ -281,69 +341,31 @@ async def _send_to_tokens(
     image_url: Optional[str] = None,
     dead: Optional[list] = None,
 ) -> int:
-    """Send notification to multiple FCM tokens using batch send. Tokens FCM
-    says are dead are added to `dead`, for the caller to remove."""
+    """Send to any number of tokens, FCM_BATCH at a time, each batch on a
+    worker thread. Returns how many devices took it. Tokens FCM says are dead
+    are added to `dead`, for the caller to remove."""
     if not tokens:
         return 0
-    
+
     if not initialize_firebase():
-        logger.error("Firebase not initialized, cannot send notifications")
+        logger.error("Firebase not initialized, cannot send notifications to %d devices", len(tokens))
         return 0
-    
-    try:
-        # Build notification with optional image
-        notification = messaging.Notification(
-            title=title,
-            body=body,
-            image=image_url,  # FCM supports image in notification
-        )
-        
-        # Build Android config with optional image
-        android_notification = messaging.AndroidNotification(
-            sound="default",
-            click_action="FLUTTER_NOTIFICATION_CLICK",
-            image=image_url,
-        )
-        
-        message = messaging.MulticastMessage(
-            notification=notification,
-            data=data or {},
-            tokens=tokens,
-            android=messaging.AndroidConfig(
-                priority="high",
-                notification=android_notification,
-            ),
-            apns=messaging.APNSConfig(
-                payload=messaging.APNSPayload(
-                    aps=messaging.Aps(
-                        sound="default",
-                        badge=1,
-                    ),
-                ),
-                fcm_options=messaging.APNSFCMOptions(
-                    image=image_url,
-                ) if image_url else None,
-            ),
-        )
-        
-        response = messaging.send_each_for_multicast(message)
-        logger.info(
-            f"Batch send complete: {response.success_count} success, "
-            f"{response.failure_count} failures"
-        )
-        
-        # Log failed tokens for debugging; collect the dead ones.
+
+    sent = 0
+    for batch in _chunks(list(tokens), FCM_BATCH):
+        try:
+            response = await asyncio.to_thread(
+                messaging.send_each_for_multicast, _multicast(batch, title, body, data, image_url)
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("A batch of %d pushes could not be sent", len(batch))
+            continue
+        sent += response.success_count
         if response.failure_count > 0:
             for idx, send_response in enumerate(response.responses):
                 if not send_response.success:
-                    logger.warning(
-                        f"Failed to send to token {idx}: {send_response.exception}"
-                    )
+                    logger.warning("Failed to send to token %d: %s", idx, send_response.exception)
                     if dead is not None and is_dead_token(send_response.exception):
-                        dead.append(tokens[idx])
-        
-        return response.success_count
-        
-    except Exception as e:
-        logger.error(f"Failed to send batch notifications: {e}")
-        return 0
+                        dead.append(batch[idx])
+    logger.info("Batch send complete: %d of %d", sent, len(tokens))
+    return sent

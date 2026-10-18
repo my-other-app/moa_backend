@@ -143,13 +143,40 @@ def _image_reader(data: Optional[bytes]) -> Optional[ImageReader]:
 def render_pdf(inp: RenderInput) -> bytes:
     """A font file that trips the PDF library must never cost a guest their
     ticket: the render is retried with every line in Inter."""
+    return render_pdf_pages([inp], title=inp.title)
+
+
+def render_pdf_pages(pages: list, *, title: Optional[str] = None) -> bytes:
+    """Several designs, a page each, as one PDF -- a batch of ID cards.
+
+    One document drawn page by page: the batch used to be a PDF per card,
+    each read back by pdfium and copied into a merged one, which held the
+    pdfium lock for the whole batch and drew every card twice over. A font
+    that trips the PDF library (on any page) has the whole document drawn
+    again in Inter, as a single ticket is."""
     try:
-        return _draw(inp, safe_fonts=False)
+        return _draw_pages(pages, title, safe_fonts=False)
     except Exception:
-        return _draw(inp, safe_fonts=True)
+        return _draw_pages(pages, title, safe_fonts=True)
+
+
+def _draw_pages(pages: list, title: Optional[str], safe_fonts: bool) -> bytes:
+    buf = io.BytesIO()
+    c = rl_canvas.Canvas(buf)
+    c.setTitle(title or (pages[0].title if pages else ""))
+    c.setCreator("My Other App")
+    for inp in pages:
+        _draw_page(c, inp, safe_fonts)
+    c.save()
+    return buf.getvalue()
 
 
 def _draw(inp: RenderInput, safe_fonts: bool) -> bytes:
+    return _draw_pages([inp], inp.title, safe_fonts)
+
+
+def _draw_page(c, inp: RenderInput, safe_fonts: bool) -> None:
+    """One design on the canvas's next page, sized to it."""
     cv = inp.canvas
     area = ticket_area(cv)
     page_w, page_h = page_size_pt(inp.page, area)
@@ -159,10 +186,7 @@ def _draw(inp: RenderInput, safe_fonts: bool) -> bytes:
     ox = (page_w - area.width * k) / 2 if contain else 0
     oy = (page_h - area.height * k) / 2 if contain else 0
 
-    buf = io.BytesIO()
-    c = rl_canvas.Canvas(buf, pagesize=(page_w, page_h))
-    c.setTitle(inp.title)
-    c.setCreator("My Other App")
+    c.setPageSize((page_w, page_h))
     mono = inp.monochrome
 
     def color(ref: str) -> tuple:
@@ -320,8 +344,6 @@ def _draw(inp: RenderInput, safe_fonts: bool) -> bytes:
     if rounded:
         c.restoreState()
     c.showPage()
-    c.save()
-    return buf.getvalue()
 
 
 def _draw_qr(c, value: str, x: float, top: float, size: float, quiet: int, dark: tuple, light: Optional[tuple]):
@@ -351,14 +373,26 @@ def _draw_qr(c, value: str, x: float, top: float, size: float, quiet: int, dark:
 
 
 def pdf_to_png(pdf: bytes, *, width_px: int) -> bytes:
-    """The first page as a PNG, `width_px` wide -- the preview the designer shows."""
+    """The first page as a PNG, `width_px` wide -- the preview the designer shows.
+
+    pdfium is not thread-safe, and renders run on several threads at once:
+    everything that touches it holds `pool.PDFIUM`. The PNG is encoded after
+    the lock is let go, since Pillow needs no lock."""
     import pypdfium2 as pdfium
 
-    doc = pdfium.PdfDocument(pdf)
-    page = doc[0]
-    scale = width_px / page.get_width()
-    bitmap = page.render(scale=scale)
-    image = bitmap.to_pil()
+    from app.core.layout.pool import PDFIUM
+
+    with PDFIUM:
+        doc = pdfium.PdfDocument(pdf)
+        try:
+            page = doc[0]
+            scale = width_px / page.get_width()
+            bitmap = page.render(scale=scale)
+            image = bitmap.to_pil().copy()
+            bitmap.close()
+            page.close()
+        finally:
+            doc.close()
     out = io.BytesIO()
     image.save(out, format="PNG", optimize=True)
     return out.getvalue()
@@ -368,8 +402,14 @@ def pdf_text(pdf: bytes) -> str:
     """Every string the first page draws, for tests that check what printed."""
     import pypdfium2 as pdfium
 
-    doc = pdfium.PdfDocument(pdf)
-    return doc[0].get_textpage().get_text_range()
+    from app.core.layout.pool import PDFIUM
+
+    with PDFIUM:
+        doc = pdfium.PdfDocument(pdf)
+        try:
+            return doc[0].get_textpage().get_text_range()
+        finally:
+            doc.close()
 
 
 def blank_page_pdf(message: str) -> bytes:

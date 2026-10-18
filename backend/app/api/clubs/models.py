@@ -14,6 +14,7 @@ from sqlalchemy import event as sa_event
 from sqlmodel import Field, SQLModel
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
+from app.core.utils.db_fields import TZAwareDateTime
 from app.db.base import AbstractSQLModel
 from app.db.mixins import SoftDeleteMixin, TimestampsMixin
 from sqlalchemy.orm import relationship
@@ -64,6 +65,8 @@ class Clubs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     lng = Column(Float, nullable=True)
     # 'manual' > 'link' > 'geocoded' (app.api.discover.geo.apply_place).
     geo_source = Column(String(10), nullable=True)
+    # When the map link was last followed for a point (discover.geo.missing).
+    link_checked_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     rating = Column(Float, nullable=False, default=0)
     total_ratings = Column(Integer, nullable=False, default=0)
     user_id = Column(
@@ -93,6 +96,16 @@ class Clubs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     # near a point without averaging every club's events.
     place_lat = Column(Float, nullable=True)
     place_lng = Column(Float, nullable=True)
+    # Whether the public may see the club and what it runs: verified, not
+    # deleted, and its organisation (if any) not blocked. Kept by triggers on
+    # clubs and organizations in the writer's transaction (LISTED_SQL below),
+    # so every public rule is one column and a block on an organisation
+    # reaches each of its clubs at once. The database writes it; an insert or
+    # update through the ORM reads it back (eager_defaults, RETURNING), but a
+    # block on the organisation changes it behind any loaded copy, so the
+    # rules ask for it in a WHERE rather than off an object.
+    listed = Column(Boolean, nullable=False, server_default=sa.false(), server_onupdate=sa.FetchedValue())
+    __mapper_args__ = {"eager_defaults": True}
 
     user = relationship("Users", back_populates="club")
     org = relationship("Organizations", back_populates="clubs")
@@ -118,6 +131,23 @@ class Clubs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
             "ix_clubs_place", "place_lat", "place_lng",
             postgresql_where=sa.text("is_verified AND NOT is_deleted AND place_lat IS NOT NULL AND place_lng IS NOT NULL"),
         ),
+        # The listed clubs, most followed first, then by name as Python
+        # orders it, then id: the app's club list and discover's "popular"
+        # walk it and stop at the page instead of sorting every club.
+        # The clubs whose map link may still give a point, least recently tried first (geo.missing).
+        sa.Index(
+            "ix_clubs_link_unchecked", sa.text("link_checked_at NULLS FIRST"), "id",
+            postgresql_where=sa.text("location_link IS NOT NULL AND location_link <> '' AND NOT is_deleted AND (lat IS NULL OR geo_source = 'geocoded')"),
+        ),
+        sa.Index(
+            "ix_clubs_listed_popular", sa.text("follower_count DESC"), sa.text('lower(name) COLLATE "C"'), "id",
+            postgresql_where=sa.text("listed"),
+        ),
+        # The listed clubs, newest first: the app's club list (its default order) and discover's sort=newest.
+        sa.Index("ix_clubs_listed_newest", sa.text("created_at DESC"), sa.text("id DESC"), postgresql_where=sa.text("listed")),
+        # The few clubs that are not listed: "not one of these" is a hashed
+        # list read from this index, where a join would look up each event's club.
+        sa.Index("ix_clubs_unlisted", "id", postgresql_where=sa.text("NOT listed")),
     )
 
 
@@ -153,9 +183,17 @@ class ClubUsersLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     user = relationship("Users")
 
     __table_args__ = (
+        # One live row per person and club: follow, pin and hide write it with
+        # ON CONFLICT (club_id, user_id, is_deleted), and "is following" is a
+        # probe of it.
         UniqueConstraint("club_id", "user_id", "is_deleted"),
         # One person's clubs: following, pinned, hidden (the app's feeds).
         sa.Index("ix_club_users_user", "user_id", postgresql_where=sa.text("NOT is_deleted")),
+        # A club's followers, newest first, a page at a time (keyset on created_at, id).
+        sa.Index(
+            "ix_club_users_followers", "club_id", sa.text("created_at DESC"), sa.text("id DESC"),
+            postgresql_where=sa.text("is_following AND NOT is_deleted"),
+        ),
     )
 
 
@@ -256,3 +294,44 @@ FOLLOWER_COUNT_SQL = (
 
 for _sql in FOLLOWER_COUNT_SQL:
     sa_event.listen(ClubUsersLink.__table__, "after_create", DDL(_sql).execute_if(dialect="postgresql"))
+
+
+# ─── clubs.listed, kept by the database ───────────────────────────────────
+#
+# Verified, not deleted, and not under a blocked organisation. On clubs, a
+# BEFORE trigger works it out on every insert and on every change to what it
+# rests on (or to `listed` itself, so a hand edit is put right); on
+# organizations, a change of `is_blocked` touches the organisation's clubs so
+# their own trigger works it out again. The migration discover_integrity
+# installs the same functions and triggers, and fills the column.
+
+LISTED_SQL = (
+    """
+    CREATE OR REPLACE FUNCTION moa_club_listed() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      NEW.listed := coalesce(NEW.is_verified, false) AND NOT coalesce(NEW.is_deleted, false)
+        AND (NEW.org_id IS NULL OR NOT EXISTS (SELECT 1 FROM organizations o WHERE o.id = NEW.org_id AND o.is_blocked));
+      RETURN NEW;
+    END $$
+    """,
+    """
+    CREATE OR REPLACE FUNCTION moa_org_listed() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      UPDATE clubs SET listed = listed WHERE org_id = NEW.id;
+      RETURN NULL;
+    END $$
+    """,
+    """
+    CREATE TRIGGER trg_clubs_listed BEFORE INSERT OR UPDATE OF is_verified, is_deleted, org_id, listed ON clubs
+    FOR EACH ROW EXECUTE FUNCTION moa_club_listed()
+    """,
+    """
+    CREATE TRIGGER trg_organizations_listed AFTER UPDATE OF is_blocked ON organizations
+    FOR EACH ROW WHEN (OLD.is_blocked IS DISTINCT FROM NEW.is_blocked)
+    EXECUTE FUNCTION moa_org_listed()
+    """,
+)
+
+# The organizations table is created before clubs (clubs.org_id refers to it).
+for _sql in LISTED_SQL:
+    sa_event.listen(Clubs.__table__, "after_create", DDL(_sql).execute_if(dialect="postgresql"))

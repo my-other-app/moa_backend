@@ -44,7 +44,7 @@ async def create_certificate_template(
         background_image=background_image,
         signature_1=signature_1, signature_2=signature_2,
     )
-    return template
+    return service.response_of(template)
 
 
 @router.get("/list", summary="List certificate templates")
@@ -54,7 +54,7 @@ async def list_certificate_templates(
 ) -> List[CertificateTemplateResponse]:
     """List all certificate templates for your club."""
     club_id = await _get_club_id(session, user.id)
-    return await service.list_certificate_templates(session, club_id)
+    return [service.response_of(t) for t in await service.list_certificate_templates(session, club_id)]
 
 
 @router.put("/{template_id}", summary="Update a certificate template")
@@ -78,7 +78,7 @@ async def update_certificate_template(
 ) -> CertificateTemplateResponse:
     """Update your certificate template with optional file uploads."""
     club_id = await _get_club_id(session, user.id)
-    return await service.update_certificate_template(
+    template = await service.update_certificate_template(
         session, template_id, club_id, name, is_default, config,
         logo=logo, secondary_logo=secondary_logo,
         background_image=background_image,
@@ -87,6 +87,7 @@ async def update_certificate_template(
         remove_background_image=remove_background_image,
         remove_signature_1=remove_signature_1, remove_signature_2=remove_signature_2,
     )
+    return service.response_of(template)
 
 
 @router.delete("/{template_id}", summary="Delete a certificate template")

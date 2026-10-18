@@ -3,11 +3,17 @@ moved into the database (origin/master, 2026-10-17): every candidate read,
 distances, counts and order worked out in Python. Kept here as the yardstick
 the new queries are held to: same rows, same order, same numbers.
 
+With the rules changed since on purpose (discover_integrity): every word of
+a query must match (a word under three letters as a whole word), "popular"
+is popularity.value (attention decayed by age), and For You spreads its
+first cards over clubs.
+
 Only what the comparisons need: ids, totals, distances and counts, not the
 cards' presentation, which the new code still builds with the same functions.
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -16,8 +22,8 @@ from sqlalchemy.orm import contains_eager, joinedload
 
 from app.api.closeout.models import EventStatus, RetentionMode, RetentionState
 from app.api.clubs.models import ClubInterestsLink, Clubs, ClubUsersLink
-from app.api.discover import geo
-from app.api.discover.service import window
+from app.api.discover import geo, popularity
+from app.api.discover.service import WHOLE_WORD_BELOW, window, words_of
 from app.api.events.models import EventCategories, EventInterestsLink, EventRegistrationsLink, Events
 from app.api.events import recommendations as rec
 from app.api.users.models import UserInterests, UserProfiles
@@ -64,13 +70,32 @@ def _filtered(now, *, when="any", category=None, type_="any", price="any", q=Non
         stmt = stmt.where(func.coalesce(Events.has_fee, False) == False)  # noqa: E712
     elif price == "paid":
         stmt = stmt.where(Events.has_fee == True)  # noqa: E712
-    if q and q.strip():
-        p = _like(q)
-        stmt = stmt.where(or_(
-            Events.name.ilike(p, escape="\\"), Clubs.name.ilike(p, escape="\\"),
-            Events.location_name.ilike(p, escape="\\"), EventCategories.name.ilike(p, escape="\\"),
-        ))
     return stmt.order_by(Events.event_datetime, Events.id)
+
+
+def has_word(texts, word: str) -> bool:
+    """`word` in any of `texts`: a substring from three letters, else a whole word."""
+    for t in texts:
+        if not t:
+            continue
+        if len(word) >= WHOLE_WORD_BELOW:
+            if word in t.lower():
+                return True
+        elif re.search(r"(?<!\w)" + re.escape(word) + r"(?!\w)", t, re.I):
+            return True
+    return False
+
+
+def words_match(q, texts) -> bool:
+    return all(has_word(texts, w) for w in words_of(q))
+
+
+def _event_texts(e):
+    return [e.name, e.club.name if e.club else None, e.location_name, e.category.name if e.category else None]
+
+
+def popular_key(e, going):
+    return (-popularity.value(going, e.page_views or 0, _aware(e.created_at)), _aware(e.event_datetime), e.id)
 
 
 async def going_counts(session, ids):
@@ -103,6 +128,8 @@ def _km(e, here):
 
 async def search_events(session, here, *, q=None, when="any", category=None, type_="any", price="any", radius_km=50.0, sort="date", offset=0, limit=24, now) -> dict:
     rows = list((await session.scalars(_filtered(now, when=when, category=category, type_=type_, price=price, q=q))).unique().all())
+    if words_of(q):
+        rows = [e for e in rows if words_match(q, _event_texts(e))]
     dist = {e.id: _km(e, here) for e in rows}
     if here is not None and type_ != "online" and radius_km > 0:
         rows = [e for e in rows if e.is_online or dist[e.id] is None or dist[e.id] <= radius_km]
@@ -110,7 +137,7 @@ async def search_events(session, here, *, q=None, when="any", category=None, typ
     if sort == "distance" and here is not None:
         rows.sort(key=lambda e: (dist[e.id] is None, dist[e.id] or 0.0, _aware(e.event_datetime), e.id))
     elif sort == "popular":
-        rows.sort(key=lambda e: (-(going.get(e.id, 0) + (e.page_views or 0)), _aware(e.event_datetime), e.id))
+        rows.sort(key=lambda e: popular_key(e, going.get(e.id, 0)))
     page = rows[offset:offset + limit]
     return dict(
         ids=[e.id for e in page], total=len(rows),
@@ -139,14 +166,14 @@ async def club_points(session, clubs):
 
 async def _club_rows(session, *, q=None, interest=None):
     stmt = select(Clubs).where(Clubs.is_verified == True, Clubs.is_deleted == False)  # noqa: E712
-    if q and q.strip():
-        p = _like(q)
-        stmt = stmt.where(or_(Clubs.name.ilike(p, escape="\\"), Clubs.tagline.ilike(p, escape="\\"), Clubs.location_name.ilike(p, escape="\\")))
     if interest:
         stmt = stmt.where(exists(select(ClubInterestsLink.id).where(
             ClubInterestsLink.club_id == Clubs.id, ClubInterestsLink.interest_id == interest, ClubInterestsLink.is_deleted == False,  # noqa: E712
         )))
-    return list((await session.scalars(stmt.order_by(Clubs.id))).all())
+    rows = list((await session.scalars(stmt.order_by(Clubs.id))).all())
+    if words_of(q):
+        rows = [c for c in rows if words_match(q, [c.name, c.tagline, c.location_name])]
+    return rows
 
 
 def _club_distances(clubs, points, here):
@@ -184,7 +211,7 @@ async def home(session, here, *, now) -> dict:
     week_end = now + timedelta(days=7)
     this_week = [e for e in rows if _aware(e.event_datetime) < week_end][:8]
     online = [e for e in rows if e.is_online][:8]
-    popular = sorted(rows, key=lambda e: (-(going.get(e.id, 0) + (e.page_views or 0)), _aware(e.event_datetime), e.id))[:8]
+    popular = sorted(rows, key=lambda e: popular_key(e, going.get(e.id, 0)))[:8]
 
     club_rows = await _club_rows(session)
     followers = await follower_counts(session, [c.id for c in club_rows])
@@ -262,7 +289,7 @@ async def for_you(session, user_id: int, limit: int = 10, offset: int = 0):
         ClubUsersLink.club_id == Events.club_id, ClubUsersLink.user_id == user_id, ClubUsersLink.is_hidden == True, ClubUsersLink.is_deleted == False,  # noqa: E712
     ).exists()
     query = (
-        select(Events, score)
+        select(Events, score, Events.club_id)
         .outerjoin(Clubs, Clubs.id == Events.club_id)
         .where(Events.is_deleted == False, event_end >= now, (Events.reg_enddate.is_(None)) | (Events.reg_enddate >= now), ~already_registered, ~club_hidden)  # noqa: E712
         # The one deliberate change: only what the public can see (the old
@@ -270,10 +297,11 @@ async def for_you(session, user_id: int, limit: int = 10, offset: int = 0):
         .where(Events.lifecycle.in_(SHOWN), Clubs.is_verified == True, Clubs.is_deleted == False)  # noqa: E712
         .options(joinedload(Events.category), joinedload(Events.club))
         .order_by(score.desc(), Events.event_datetime.asc(), Events.id.asc())
-        .limit(limit).offset(offset)
     )
     rows = (await session.execute(query)).unique().all()
-    return [row[0].id for row in rows], [float(row[1]) for row in rows]
+    # At most three of the first twenty from one club (recommendations._spread).
+    ranked = rec._spread([(row[0].id, float(row[1]), row[2]) for row in rows])[offset:offset + limit]
+    return [i for i, _, _ in ranked], [s for _, s, _ in ranked]
 
 
 def clock_outcome(e: Events, job_state: Optional[RetentionState], now: datetime) -> EventStatus:

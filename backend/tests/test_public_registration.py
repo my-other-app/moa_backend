@@ -132,7 +132,7 @@ async def _walked_away(session, make_user, make_registration, event, email, *, u
     holder = await make_user(email=email, user_type=user_type)
     reg = await make_registration(event=event, user=holder, actual_amount=200)
     reg.payment_receipt = f"er_{reg.ticket_id}"
-    reg.created_at = NOW - timedelta(hours=1)
+    reg.created_at = datetime.now(timezone.utc) - timedelta(hours=1)
     await session.commit()
     return reg
 
@@ -144,7 +144,7 @@ def _order(reg, *, status, age):
         receipt=reg.payment_receipt, razorpay_order_id=f"order_{reg.ticket_id}", amount=200,
         status=status, user_id=reg.user_id, source="event_registration", payload={},
     )
-    order.created_at = NOW - age
+    order.created_at = datetime.now(timezone.utc) - age  # ages count from now, not from when the module was collected
     return order
 
 

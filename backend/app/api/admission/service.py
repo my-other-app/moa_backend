@@ -2,7 +2,6 @@
 event code that keeps two events apart. Numbers already given out are never
 rewritten; the format applies to the next ticket minted."""
 import re
-from typing import Optional
 
 from sqlalchemy import func, select, text, update
 
@@ -65,24 +64,54 @@ async def update_settings(session, event: Events, body) -> dict:
     return await settings(session, event)
 
 
+#: admission_number() (app/core/layout/admission.py) as SQL, for a sequence
+#: computed in the statement: PREFIX-0042[-E123]. lpad() would cut a
+#: sequence longer than the digits, so a long one is left whole, as zfill
+#: leaves it.
+SQL_NUMBER = """
+  coalesce(nullif(:prefix, ''), :default_prefix) || '-' ||
+  CASE WHEN length(s.seq::text) >= :digits THEN s.seq::text ELSE lpad(s.seq::text, :digits, '0') END ||
+  CASE WHEN :include_code THEN '-' || :code ELSE '' END
+"""
+
+#: Everyone unnumbered, in the order they came; the event's sequence moved
+#: once by how many that is; each row its number from its place in line.
+NUMBER_ALL = f"""
+WITH todo AS (
+  SELECT id, row_number() OVER (ORDER BY created_at, id) AS n
+  FROM event_registrations_link
+  WHERE event_id = :event_id AND NOT is_deleted AND admission_no IS NULL
+), bump AS (
+  UPDATE events SET admission_seq = coalesce(admission_seq, 0) + (SELECT count(*) FROM todo)
+  WHERE id = :event_id
+  RETURNING admission_seq - (SELECT count(*) FROM todo) AS before
+), s AS (
+  SELECT todo.id, todo.n, bump.before + todo.n AS seq FROM todo, bump
+)
+UPDATE event_registrations_link r SET admission_no = {SQL_NUMBER}
+FROM s WHERE r.id = s.id
+RETURNING s.n, r.admission_no
+"""
+
+
 async def number_all(session, event: Events) -> dict:
-    """Everyone registered so far who has no number yet, in the order they came."""
-    regs = list((await session.scalars(
-        select(EventRegistrationsLink).where(EventRegistrationsLink.event_id == event.id, EventRegistrationsLink.is_deleted == False, EventRegistrationsLink.admission_no.is_(None)).order_by(EventRegistrationsLink.created_at, EventRegistrationsLink.id)  # noqa: E712
-    )).all())
-    first: Optional[str] = None
-    last: Optional[str] = None
-    for r in regs:
-        n = await assign(session, event, r)
-        first = first or n
-        last = n
+    """Everyone registered so far who has no number yet, in the order they
+    came: one statement. The event's sequence moves once, by however many
+    there are, and every row takes its place from row_number() -- where
+    this used to hold the event's row through an UPDATE per registration.
+
+    Registrations arriving meanwhile wait on the event's row as they would
+    for any other registration, then number after these."""
+    fmt = format_of(event)
+    rows = sorted((await session.execute(text(NUMBER_ALL), {
+        "event_id": event.id, "prefix": fmt["prefix"] or "", "default_prefix": ADMISSION_PREFIX_DEFAULT,
+        "digits": int(fmt["digits"]), "include_code": bool(fmt["includeCode"]), "code": event_code(event),
+    })).all())
     await session.commit()
     await session.refresh(event)
-    return {"numbered": len(regs), "first": first, "last": last}
+    return {"numbered": len(rows), "first": rows[0][1] if rows else None, "last": rows[-1][1] if rows else None}
 
 
 def default_prefix() -> str:
     return ADMISSION_PREFIX_DEFAULT
 
-
-__all__ = ["text"]

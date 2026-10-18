@@ -15,6 +15,7 @@ from typing import Annotated, Literal, Optional, Union
 from pydantic import Field, StringConstraints, field_validator, model_validator
 
 from app.core.layout.model import Wire
+from app.core.layout.tokens import TOKEN_BY_KEY
 
 Hex = Annotated[str, StringConstraints(pattern=r"^#[0-9A-Fa-f]{6}$")]
 
@@ -235,11 +236,22 @@ class EmailTemplateFields(Wire):
 
 
 # Tokens only an email has, beside every ticket token.
+# The code the door types when a QR will not scan: the ticket's own id. The
+# admission number no longer checks anyone in, so an email names this one.
+# An email-only token while the ticket catalogue still reads {{ticket_code}}
+# as an alias of the admission number; once the catalogue has it as a token
+# of its own, that one is used and this steps aside.
+_TICKET_CODE = {
+    "key": "ticket_code", "group": "Ticket", "label": "Ticket code", "sample": "MOA-1K2F9-QX7RT",
+    "note": "What the door types when the QR will not scan.",
+}
+
 EMAIL_ONLY_TOKENS: list[dict] = [
     {"key": "ticket_url", "group": "Links", "label": "Ticket PDF link", "sample": "https://api.myotherapp.in/api/v1/files/…"},
     {"key": "certificate_url", "group": "Links", "label": "Certificate PDF link", "sample": "https://api.myotherapp.in/api/v1/files/…"},
     {"key": "organiser_email", "group": "Club", "label": "Organiser contact email", "sample": "hello@yukthi.example"},
     {"key": "event_start", "group": "Event", "label": "Start, date and time", "sample": "Wed 16 Sept 2026 · 09:00"},
     {"key": "doors_in", "group": "Event", "label": "Minutes until the doors open", "sample": "30"},
+    *([] if "ticket_code" in TOKEN_BY_KEY else [_TICKET_CODE]),
 ]
 EMAIL_TOKEN_KEYS: frozenset = frozenset(t["key"] for t in EMAIL_ONLY_TOKENS)

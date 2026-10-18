@@ -1,0 +1,158 @@
+{
+ "label": "before",
+ "targets": {
+  "club": "club-9680-devops",
+  "event": "e37678-cloud-expo",
+  "event_big_category": "e72151-fashion-fest",
+  "interest": 51,
+  "category": 6,
+  "user_id": 1
+ },
+ "results": [
+  {
+   "name": "home (cold)",
+   "path": "/discover/home",
+   "params": {},
+   "n": 30,
+   "p50": 191.57958350115223,
+   "p95": 232.48471874867386,
+   "p99": 244.87024017937077,
+   "mean": 195.0037236327868,
+   "statements_min": 18,
+   "statements_max": 18,
+   "sql_ms": 171.6947670012208,
+   "bytes": 44241,
+   "pages": 25663,
+   "pages_hit": 25663,
+   "pages_read": 0
+  },
+  {
+   "name": "home lat/lng (cold)",
+   "path": "/discover/home",
+   "params": {
+    "lat": 12.9716,
+    "lng": 77.5946
+   },
+   "n": 29,
+   "p50": 199.94099999894388,
+   "p95": 298.74783319828555,
+   "p99": 317.7988464821828,
+   "mean": 208.95659203484556,
+   "statements_min": 29,
+   "statements_max": 29,
+   "sql_ms": 170.4076932766274,
+   "bytes": 59058,
+   "pages": 36098,
+   "pages_hit": 36098,
+   "pages_read": 0
+  },
+  {
+   "name": "events q",
+   "path": "/discover/events",
+   "params": {
+    "q": "robotics"
+   },
+   "n": 30,
+   "p50": 38.975520998064894,
+   "p95": 56.552939403263736,
+   "p99": 57.06609193381155,
+   "mean": 42.5867820008231,
+   "statements_min": 6,
+   "statements_max": 6,
+   "sql_ms": 35.38804040266162,
+   "bytes": 30823,
+   "pages": 7361,
+   "pages_hit": 7361,
+   "pages_read": 0
+  },
+  {
+   "name": "events popular",
+   "path": "/discover/events",
+   "params": {
+    "sort": "popular"
+   },
+   "n": 30,
+   "p50": 59.738957999798004,
+   "p95": 83.36302104871719,
+   "p99": 90.18474221942597,
+   "mean": 63.865061032993246,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 57.12051950079815,
+   "bytes": 31050,
+   "pages": 12542,
+   "pages_hit": 12542,
+   "pages_read": 0
+  },
+  {
+   "name": "events offset=480",
+   "path": "/discover/events",
+   "params": {
+    "offset": 480
+   },
+   "n": 30,
+   "p50": 9.491395503573585,
+   "p95": 15.941351751098399,
+   "p99": 24.68262888920436,
+   "mean": 10.702518000228642,
+   "statements_min": 3,
+   "statements_max": 3,
+   "sql_ms": 5.163350066868588,
+   "bytes": 31514,
+   "pages": 5592,
+   "pages_hit": 5592,
+   "pages_read": 0
+  },
+  {
+   "name": "clubs",
+   "path": "/discover/clubs",
+   "params": {},
+   "n": 30,
+   "p50": 16.973062502074754,
+   "p95": 18.830810296640266,
+   "p99": 24.83769824852062,
+   "mean": 17.58828063296581,
+   "statements_min": 7,
+   "statements_max": 7,
+   "sql_ms": 13.098246031828847,
+   "bytes": 12829,
+   "pages": 3458,
+   "pages_hit": 3458,
+   "pages_read": 0
+  },
+  {
+   "name": "app for-you (cold)",
+   "path": "/events/for-you",
+   "params": {},
+   "n": 30,
+   "p50": 184.3029170013324,
+   "p95": 233.5837106013059,
+   "p99": 246.99671325164672,
+   "mean": 183.6860556997029,
+   "statements_min": 7,
+   "statements_max": 7,
+   "sql_ms": 161.53483610153972,
+   "bytes": 19219,
+   "pages": 36950,
+   "pages_hit": 36950,
+   "pages_read": 0
+  },
+  {
+   "name": "app for-you (user cold)",
+   "path": "/events/for-you",
+   "params": {},
+   "n": 30,
+   "p50": 53.159979499469046,
+   "p95": 64.49586280323273,
+   "p99": 67.66145088906342,
+   "mean": 53.020329399441835,
+   "statements_min": 4,
+   "statements_max": 4,
+   "sql_ms": 31.3941709677844,
+   "bytes": 19219,
+   "pages": 16713,
+   "pages_hit": 16713,
+   "pages_read": 0
+  }
+ ]
+}

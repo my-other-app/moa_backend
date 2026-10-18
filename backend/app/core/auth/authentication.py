@@ -1,3 +1,5 @@
+import asyncio
+
 import bcrypt
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import func, select
@@ -13,15 +15,51 @@ ALGORITHM = "HS256"
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/token", auto_error=False)
 
 
+#: A bcrypt hash of nothing anyone types, at the same cost as real ones. A
+#: sign-in for an address with no account checks the password against it, so
+#: "no such account" takes as long as "wrong password" and the time a refusal
+#: takes does not say which addresses have accounts.
+DUMMY_HASH = "$2b$12$snJQCZ8V0OinZhBeTfmb3OrHhYv7gdBpzrGI6sswwR2XPKWvsFQm2"
+
+
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
+    """Blocking (about a quarter of a second of CPU): request code awaits
+    verify_password_async instead. Kept for scripts and tests."""
+    try:
+        return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
+    except ValueError:
+        # Not a bcrypt hash at all: no password matches it.
+        return False
 
 
 def get_password_hash(password: str) -> str:
+    """Blocking: request code awaits get_password_hash_async instead."""
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
-async def get_user(session: AsyncSession, username_or_id: str, *, password_holders: bool = False, exclude_type: UserTypes | None = None):
+async def verify_password_async(plain_password: str, hashed_password: str | None) -> bool:
+    """verify_password on a worker thread. bcrypt holds the CPU for about a
+    quarter of a second, and on the event loop -- the only one, with one
+    worker -- nothing else was answered meanwhile: four password sign-ins a
+    second was the platform's ceiling. With no hash (no such account, or one
+    without a password) the dummy is checked, so the answer takes as long."""
+    if not hashed_password:
+        await asyncio.to_thread(verify_password, plain_password or "", DUMMY_HASH)
+        return False
+    return await asyncio.to_thread(verify_password, plain_password or "", hashed_password)
+
+
+async def get_password_hash_async(password: str) -> str:
+    """get_password_hash on a worker thread."""
+    return await asyncio.to_thread(get_password_hash, password)
+
+
+async def get_user(session: AsyncSession, username_or_id: str, *, password_holders: bool = False, exclude_type: UserTypes | None = None, allow_unverified_club: bool = False):
+    """The live account by id, address or username.
+
+    A club account whose club is not approved is None, unless
+    `allow_unverified_club`: the auth dependency asks for it so it can answer
+    403 CLUB_NOT_VERIFIED rather than a 401 that reads as a dead session."""
     query = select(Users).options(
         joinedload(Users.club), joinedload(Users.profile)
     ).where(Users.is_deleted == False)
@@ -51,7 +89,7 @@ async def get_user(session: AsyncSession, username_or_id: str, *, password_holde
     else:  # If searching by username
         result = (await session.execute(query.where(Users.username == username_or_id))).scalars().first()
 
-    if result and result.user_type == UserTypes.club:
+    if result and result.user_type == UserTypes.club and not allow_unverified_club:
         if not result.club or not result.club.is_verified:
             return None
     return result
@@ -104,16 +142,16 @@ async def authenticate_club_account(session: AsyncSession, username: str, passwo
         user = (await session.execute(query.where(Users.username == username))).scalars().first()
 
     if user is None or user.club is None or user.club.is_deleted:
+        # No dummy check here: the caller goes on to authenticate_user, which
+        # makes one when there is no account at all.
         return None
-    if not verify_password(password, user.password):
+    if not await verify_password_async(password, user.password):
         return None
     return user
 
 
 async def authenticate_user(session: AsyncSession, username: str, password: str, *, exclude_type: UserTypes | None = None):
     user = await get_user(session, username, password_holders=True, exclude_type=exclude_type)
-    if not user or not user.password:
-        return False
-    if not verify_password(password, user.password):
+    if not await verify_password_async(password, user.password if user else None):
         return False
     return user

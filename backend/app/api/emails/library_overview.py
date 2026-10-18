@@ -44,7 +44,7 @@ async def _outcomes(session, message_ids: list) -> dict:
         o = out[mid]
         if status == DeliveryStatus.sent:
             o["sent"] += n
-        elif status == DeliveryStatus.failed:
+        elif status in (DeliveryStatus.failed, DeliveryStatus.dead):
             o["failed"] += n
         if outcome in (DeliveryOutcome.delivered, DeliveryOutcome.read):
             o["delivered"] += n

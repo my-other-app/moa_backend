@@ -105,6 +105,18 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     # list can sort by popularity without counting registrations.
     # Reconciled from the rows by app.api.discover.counters.reconcile.
     going_count = Column(Integer, nullable=False, default=0, server_default="0")
+    # How many registrations are paid and not cancelled: what a paid event's
+    # capacity counts. Kept by a trigger the same way (PAID_COUNT_SQL below);
+    # a capture takes a place against it with one conditional UPDATE of this
+    # row (payments.capacity.take_paid_place).
+    paid_count = Column(Integer, nullable=False, default=0, server_default="0")
+    # Attention decayed by age, for "popular" (app.api.discover.popularity):
+    # rewritten every few minutes, not by each registration, and indexed over
+    # what can be shown so a popular list reads a page, not every event on.
+    popularity = Column(Float, nullable=False, default=0.0, server_default="0")
+    # When the map link was last followed for a point (geo.missing), so a
+    # link that leads nowhere is not followed again for a while, by any process.
+    link_checked_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     event_tag = Column(String(50), nullable=True)  # Tag like "Free", "Paid", "Featured", etc.
 
     category_id = Column(Integer, ForeignKey("event_categories.id"), nullable=False)
@@ -128,8 +140,11 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     self_check_in_enabled = Column(Boolean, nullable=False, default=False)
     self_check_in_verify = Column(Enum(SelfCheckInVerify), nullable=False, default=SelfCheckInVerify.email)
     self_check_in_print = Column(Boolean, nullable=False, default=True)
-    # Staff mode on a kiosk; checked on the server, never shipped to the tablet.
-    kiosk_pin = Column(String(12), nullable=True)
+    # Staff mode on a kiosk; checked on the server, never shipped to the
+    # tablet. A salted hash (app/api/kiosk/pins.py). The plain `kiosk_pin`
+    # column it replaced is emptied by the migration attendance_integrity
+    # and is no longer mapped; a later migration drops it.
+    kiosk_pin_hash = Column(String(160), nullable=True)
 
     # The status clock: published → live at the start, → closed after the
     # end, → archived once retention has run. Stored as "status"; read
@@ -189,6 +204,13 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         # "Near you": a latitude/longitude box first, the exact distance after.
         # sort=newest on the public lists (the feeds): what can be shown, the latest made first.
         sa.Index("ix_events_shown_created", "created_at", "id", postgresql_where=sa.text("NOT is_deleted AND status IN ('published', 'live')")),
+        # sort=popular: what can be shown, the most popular first (discover.popularity).
+        sa.Index("ix_events_shown_popular", sa.text("popularity DESC"), "event_datetime", "id", postgresql_where=sa.text("NOT is_deleted AND status IN ('published', 'live')")),
+        # The rows whose map link may still give a point, least recently tried first (geo.missing).
+        sa.Index(
+            "ix_events_link_unchecked", sa.text("link_checked_at NULLS FIRST"), "id",
+            postgresql_where=sa.text("location_link IS NOT NULL AND location_link <> '' AND NOT is_deleted AND (lat IS NULL OR geo_source = 'geocoded')"),
+        ),
         sa.Index("ix_events_shown_point", "lat", "lng", postgresql_where=sa.text("NOT is_deleted AND status IN ('published', 'live') AND lat IS NOT NULL AND lng IS NOT NULL")),
         # Words anywhere in the name or the place: trigram indexes serve ILIKE '%…%' and similarity.
         # What overlaps a stretch of time, held events included: the calendar
@@ -427,7 +449,25 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
     volunteer = relationship("Volunteer")
 
     __table_args__ = (
-        UniqueConstraint("event_id", "user_id", "is_deleted"),
+        # One live registration per account per event. Only the live one:
+        # the old UNIQUE(event_id, user_id, is_deleted) allowed a single
+        # retired row too, so a second removal of the same guest was a 500.
+        sa.Index(
+            "uq_registrations_event_user_live", "event_id", "user_id",
+            unique=True, postgresql_where=sa.text("NOT is_deleted"),
+        ),
+        # An admission number is one guest's on its event, whatever the case
+        # it is typed in: staff search finds a guest by it.
+        sa.Index(
+            "uq_registrations_event_admission", "event_id", sa.func.upper(admission_no),
+            unique=True, postgresql_where=sa.text("NOT is_deleted AND admission_no IS NOT NULL"),
+        ),
+        # The attendee list, by name: a page walks this in order instead of
+        # sorting the whole event (registration.service.list_event_registrations).
+        sa.Index(
+            "ix_registrations_event_name", "event_id", sa.func.lower(full_name), "id",
+            postgresql_where=sa.text("NOT is_deleted"),
+        ),
         # One person's registrations: the app's ticket lists and the For You feed.
         sa.Index("ix_registrations_user", "user_id", postgresql_where=sa.text("NOT is_deleted")),
         # An address already on an event's list (registration's duplicate
@@ -450,6 +490,12 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
         sa.Index(
             "ix_event_registrations_link_tracking_link_id", "tracking_link_id",
             postgresql_where=sa.text("tracking_link_id IS NOT NULL"),
+        ),
+        # The registration a payment order is for, by the receipt it carries
+        # (capture, refund, finance's refunds). Only the ones paid online have one.
+        sa.Index(
+            "ix_registrations_payment_receipt", "payment_receipt",
+            postgresql_where=sa.text("payment_receipt IS NOT NULL"),
         ),
     )
 
@@ -521,4 +567,39 @@ GOING_COUNT_SQL = (
 )
 
 for _sql in GOING_COUNT_SQL:
+    sa_event.listen(EventRegistrationsLink.__table__, "after_create", DDL(_sql).execute_if(dialect="postgresql"))
+
+
+# ─── events.paid_count, kept by the database ──────────────────────────────
+#
+# The paid places a paid event's capacity counts, kept like going_count and
+# for the same reason: is_paid is set by captures, the desk, the organiser
+# marking someone paid, refunds and merges, and a trigger sees every one.
+# The migration money_integrity installs the same function and trigger.
+
+PAID_COUNT_SQL = (
+    """
+    CREATE OR REPLACE FUNCTION moa_paid_count() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF TG_OP = 'UPDATE' AND OLD.event_id = NEW.event_id AND OLD.is_deleted = NEW.is_deleted
+         AND OLD.is_paid = NEW.is_paid THEN
+        RETURN NULL;
+      END IF;
+      IF TG_OP IN ('UPDATE', 'DELETE') AND NOT OLD.is_deleted AND OLD.is_paid THEN
+        UPDATE events SET paid_count = paid_count - 1 WHERE id = OLD.event_id;
+      END IF;
+      IF TG_OP IN ('UPDATE', 'INSERT') AND NOT NEW.is_deleted AND NEW.is_paid THEN
+        UPDATE events SET paid_count = paid_count + 1 WHERE id = NEW.event_id;
+      END IF;
+      RETURN NULL;
+    END $$
+    """,
+    """
+    CREATE TRIGGER trg_registrations_paid_count
+    AFTER INSERT OR DELETE OR UPDATE OF event_id, is_deleted, is_paid ON event_registrations_link
+    FOR EACH ROW EXECUTE FUNCTION moa_paid_count()
+    """,
+)
+
+for _sql in PAID_COUNT_SQL:
     sa_event.listen(EventRegistrationsLink.__table__, "after_create", DDL(_sql).execute_if(dialect="postgresql"))

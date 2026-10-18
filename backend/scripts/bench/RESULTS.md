@@ -1031,3 +1031,221 @@ dropdb moa_bench_sw
 `serve.py` now also records how long the event's row is held, to the commit
 (`row_held_ms` in the results), and `hot.py --plan KEY` puts the event under
 a plan's caps.
+
+
+## Integrity and the live room (`fix/discover-integrity`, 18 October 2026)
+
+An audit of discover, threads, the app's club lists, the live room and
+tracking links found counters that lost writes, things the public could see
+that it should not, and reads that grew with the room or the platform.
+Migration `discover_integrity` (revises `discover_scale`).
+
+### What changed
+
+- **The live room** (`app/api/live/room.py`, `limits.py`). Limits are per
+  person in the room (the browser's `X-Live-Key`, the player's
+  `X-Live-Player`) with a ceiling per address sized for a hall (join 10 a
+  minute a phone and 3,000 an address; answers 30 / 20,000; asks 20 an hour /
+  2,000; votes 120 / 30,000; poll answers 60 / 20,000); they were per address
+  only, so a venue's Wi-Fi was one person (about 30 joins a minute for the
+  whole hall). The dashboard's "send survey" and "push update" are limited per
+  account (through the clubs gateway every club shared Vercel's addresses).
+  The room's feed is one snapshot per event made at most once a second
+  (single-flight, discover.cache's store), kept with its JSON made; a browser
+  that voted for nothing, asked nothing and answered no poll gets that body
+  as it is, one that did gets a copy with its flags, from what it did (read
+  once, kept 30 s, kept current by its own taps). Poll results are a GROUP
+  BY (index-only on `ix_live_poll_responses_counts`); they were every
+  response read as rows. The quiz is one snapshot per quiz a second: every
+  player by key with their score, the scores in order (rank by binary
+  search), the top ten (read through `ix_live_quiz_players_board`), the open
+  question's answers; an answer or a join updates it in place. A player's
+  poll runs no statement. The host's actions forget the snapshots at once.
+  The room is closed (404) for a draft, a deleted event or one of a club that
+  is not listed; it served them by id.
+- **Counters.** A post's likes, comments and poll votes are kept by triggers
+  on their rows (`THREAD_COUNTS_SQL`), a live question's votes and a quiz
+  score by one `UPDATE … SET x = x + n`, and the rows are written `INSERT … ON
+  CONFLICT`: a double tap is answered (a toggle, a 409 for a second quiz
+  answer or follow), never a 500, and never a count off by one. Views are
+  recorded in the process and written in batches (`discover/visitors.py`):
+  one statement inserts the batch's rows and moves each counter by the rows
+  it inserted, at most every 5 s or 500 views; reading a post or an event
+  page no longer writes. A post counts a person once (an anonymous one once a
+  day); an event page counts a visitor once a day. `counters.reconcile_more`
+  checks posts, poll options and live questions every six hours (its own
+  `scheduled_runs` row), and the admin's reconcile reports them.
+- **What the public sees.** `clubs.listed` (verified, not deleted, not under a
+  blocked organisation), kept by triggers on clubs and organizations, is in
+  every public rule: discover's lists, pages and sitemap, For You, threads,
+  the live room, the app's club list and club page. A blocked organisation's
+  clubs and events were public everywhere but the app's club list and home.
+- **Addresses.** Thread views, link visitors and event page views take the
+  address the proxy saw (`app.core.net.client_address`), not the first
+  `X-Forwarded-For` hop; anonymous visitors are an HMAC of address and browser
+  under a key that changes daily, not `sha256(ip|ua)`.
+- **The app's club list** reads `clubs.follower_count` and an EXISTS on the
+  person's own row (it joined every follow of every club and counted them,
+  with a DISTINCT total over the join); its total stops at 1,000 ("1,000+",
+  the next page always offered). `/clubs/info` counts events once and reads
+  the counter. Follow, pin and hide are upserts on the unique (club, user,
+  deleted). A club's followers page by cursor on `ix_club_users_followers`.
+  New: `ix_clubs_listed_popular`, `ix_clubs_listed_newest`.
+- **Threads.** The follower's feed is a LATERAL top-k per followed club on
+  `ix_club_threads_club_newest`, merged, with a cursor and a capped total;
+  comments page by cursor on `ix_thread_comments_thread_created` (200 a page,
+  `X-Next-Cursor`); insights count reactions by week in SQL; followers are
+  told after the post is answered, 1,000 at a time; a comment is hidden when
+  its open reports weigh `REPORTS_TO_HIDE` (3), a report from an account under
+  a week old weighing half.
+- **Discover.** `offset` stops at 1,000; `after=` (each list's `next_cursor`)
+  pages events (every sort, distance included), clubs and threads as ranges
+  of their indexes. Every word of a query must match (an AND of per-word
+  ORs; the typo fallback too, per word); a word of two letters matches a
+  whole word, a single character is ignored; with words the default order is
+  relevance. `events.popularity` (attention decayed by age: `ln(1 + going +
+  views) + day_made / 30`, the ranking of attention × e^(−age/30 days)),
+  rewritten every three minutes for what changed and indexed over what can be
+  shown (`ix_events_shown_popular`), is what "popular" sorts by, on the site
+  and in For You's candidates. The caches serve a value for a minute past its
+  time while one task rebuilds it (stale while revalidate), each family has
+  its own capacity, the calendar is kept per quarter-degree cell. "Near you"
+  reads its box in date order in growing chunks and stops when settled. The
+  map-link scan reads `link_checked_at` through a partial index with a LIMIT
+  (it read every row wanting a link every minute). The address lookup is
+  never waited for when the browser gave a point, one request per address at
+  a time, ten minutes of none after the provider refuses one, and a local
+  GeoLite2 database when `GEOIP_MMDB_PATH` names one. "Cities" counts places
+  on the map within 25 km of each other as one city (it counted venue
+  strings). For You shows at most three of one club in its first twenty.
+- **The survey's "send now"** claims its recipients in `feedback_sends`, so
+  sending again reaches only the guests not sent it yet (it re-sent to
+  everyone, its docstring notwithstanding), and the mails go after the
+  commit; the minute sweep reads due surveys by `feedback_surveys.due_at`
+  (kept by triggers) on `ix_feedback_surveys_due`.
+- **Tracking links.** The dashboard's figures are counted by the database,
+  grouped by link and by day in India from the period's start (it loaded
+  every click, follow and registration); link previews, crawlers and HEAD
+  requests are not clicks; `/l/{code}` is limited per address (1,200 a
+  minute); `ix_tracking_clicks_link_created` is declared on the model.
+
+### The measurements
+
+**Data**: `seed.py --clubs 15000 --upcoming 120000 --past 60000 --users 60000
+--registrations 600000 --follows 300000 --threads 20000` (0.68 GB), seeded
+with the code before (`perf/discover-scale-2` at c146433, schema
+`discover_scale`), measured, then `alembic upgrade head` with this branch and
+measured again. The room: `live.py setup --voters 5000 --players 2000` on one
+of its events (120 questions on the board with 9,881 votes, a live poll with
+2,500 answers, ten updates, a running quiz of 2,000 players with the open
+question half answered). **Machine**: the M2 laptop, shared again (load
+average 6–8 throughout: three other engineers' test suites). Before and
+after ran back to back; the server is `serve.py`, one worker, access log on,
+as production.
+
+**The live room**, closed loop, 20 s per level after 3 s of warm-up, the
+load spread over 3–4 client processes. "Serves" is what that rate sustains
+at the clients' own polling: a phone every 5 s (the event site's live.jsx),
+a player every 2 s (play.jsx).
+
+| | clients | req/s | p50 / p95 ms | serves | statements a poll |
+|---|---:|---:|---|---:|---:|
+| room feed, before | 32 | 44.8 | 663 / 1,553 | 224 phones | 7–8 (one reads all 2,500 poll answers as rows) |
+| | 128 | 30.9 | 3,921 / 7,847 | 154 phones | |
+| room feed, after | 32 | 538 | 48 / 123 | 2,690 phones | 0 |
+| | 64 | 545–558 | 92 / 230–241 | 2,720–2,790 phones | |
+| | 128 | 446 | 180 / 768 | 2,230 phones | |
+| quiz poll, before | 32 | 261 | 117 / 156 | 522 players | 7 (board sorted, rank counted) |
+| | 128 | 274 | 456 / 1,123 | 548 players | |
+| quiz poll, after | 32 | 661 | 44 / 72 | 1,320 players | 0 |
+| | 64 | 688 | 86 / 145 | 1,376 players | |
+
+Both before and after, the worker's one core is the limit (21–23 s of CPU in
+20 s); Postgres used 1–4 s. Before, that core went to building each feed
+(2,500 ORM rows of poll answers and 120 question rows, a model, the JSON) and
+to the quiz's seven statements; after, it goes to the request itself: the
+middleware stack, routing, the access log, about 1.5–1.8 ms a poll. So one
+worker now holds a room of about 2,700 phones (was about 220) and a quiz of
+about 1,350 players (was about 520). A 5,000-person room or a 2,000-player
+quiz needs a second worker (each keeps its own second-long snapshots) or a
+slower poll: what is left per poll is the HTTP request.
+
+**What server-sent events would add** (not built): one connection per
+phone, with the snapshot pushed when it changes (the room) or once a second
+(the quiz board), instead of a request per phone per poll. The per-poll
+request cost above, the part one worker cannot get under, goes; a room is
+then bounded by sockets held open and bytes sent (34 KB a room snapshot;
+diffs would cut it). It needs the snapshot published across workers (Redis
+pub/sub, or one process owning the room) and proxies that keep the stream
+open (nginx's `proxy_buffering off`, the gateway's timeouts).
+
+**"Popular" and the front page**, in process (`run.py --buffers`), p50 / p95
+over 30 requests and the pages (buffers) one request touches:
+
+| endpoint | before ms | pages | after ms | pages |
+|---|---|---:|---|---:|
+| `/discover/events?sort=popular` | 59.7 / 83.4 | 12,542 | 9.0–21.6 / 13.1–29.1 | 2,852–2,955 |
+| the front page's "popular" section (one statement, EXPLAIN) | 78.0 | 22,827 | 0.18 | 113 |
+| `/discover/clubs` (most followed) | 17.0 / 18.8 | 3,458 | 7.9–14.6 / 11.8–20.1 | 807 |
+| For You, cold (the minute's popular lists made) | 184 / 234 | 36,950 | 31.8–65.8 / 46.7–87.6 | 18,575–18,623 |
+| front page with a point, cold: "near you" (one statement, EXPLAIN) | 21.4 | 8,197 | 8.2 | 5,341 |
+| `/discover/events?q=ai` | 20.3 / 27.6 | 6,874 | 142 / 170 | 27,896 |
+
+The popular sort walks `ix_events_shown_popular` and stops at the page; it
+sorted every event on (U of them) for each page. Its cost no longer grows
+with U. "Near you" drops the per-event club lookup (the rule is "not one of
+the unlisted clubs", a hashed list from `ix_clubs_unlisted`); in this world
+the planner still reads the whole box in the first chunk, so the chunked,
+date-ordered read only stops early where the planner walks the date order.
+`q=ai` costs more on purpose: a two-letter word is now a whole word, so it
+no longer matches "Chair" or "Mumbai", and the rarer match reads further
+into what is on (the capped count and, with words, the relevance order
+that is now the default). `sort=relevance` itself is unchanged (29,083 →
+29,093 pages).
+
+### The migration
+
+`discover_integrity` on this data (15,000 clubs, 180,000 events, 600,000
+registrations, 300,000 follows, 20,000 posts with 120,000 likes and 40,000
+comments): **21.6 s**, of which the backfills (listed for every club and a
+vacuum, every post's counters recounted, popularity for 114,691 shown
+events) and fourteen concurrent index builds are nearly all. Locks: the
+first transaction (columns without a rewrite, the table, functions and
+triggers) is catalogue-only and short; each backfill holds the rows it
+rewrites until it commits; the indexes block nothing. At a lakh of clubs
+the popularity backfill and the index builds on events scale with the shown
+events (about a minute at S2's 300,000 upcoming, by the per-row cost here).
+
+### What is left
+
+- The live room's snapshots, the discover caches and the view buffers are
+  per process: with more workers, each makes its own (once a second for a
+  room, once a minute for a front page). Redis would make them once.
+- Server-sent events for the room (above).
+- A rare word, and now a two-letter one, still reads every event on in the
+  substring pass; a search engine (SCALING.md, Phase 2) bounds it.
+- Views are lost if a process dies with up to 5 s of them unwritten.
+
+### Reproduce
+
+```
+cd backend
+git archive c146433 backend | tar -x -C /tmp/before                  # the code before
+createdb moa_bench_live
+(cd /tmp/before/backend && BENCH_DB=moa_bench_live python -m scripts.bench.seed --clubs 15000 --upcoming 120000 \
+    --past 60000 --users 60000 --registrations 600000 --follows 300000 --threads 20000)
+BENCH_DB=moa_bench_live python -m scripts.bench.live setup --voters 5000 --players 2000 --out room.json
+(cd /tmp/before/backend && BENCH_DB=moa_bench_live python -m scripts.bench.serve --workers 1 --port 8093 --stats-dir /tmp/sb &)
+BENCH_DB=moa_bench_live python -m scripts.bench.live room --url http://127.0.0.1:8093 --room room.json \
+    --concurrency 32,64,128 --duration 20 --procs 4 --stats-dir /tmp/sb --server-pid <pid> --label before --out live.json
+#   ... quiz the same; then kill -9 whatever listens on 8093
+KEYS="events popular,home (cold),home lat/lng (cold),clubs,events q,events q short,events q relevance,app for-you (cold)"
+(cd /tmp/before/backend && BENCH_DB=moa_bench_live python -m scripts.bench.run --label before --freeze --n 30 \
+    --budget 6 --min 3 --warmup 1 --exact "$KEYS" --buffers --out before.json)
+BENCH_DB=moa_bench_live python -c "from scripts.bench import _env; from alembic.config import Config; \
+    from alembic import command; command.upgrade(Config('alembic.ini'), 'head')"
+#   ... the same runs with this branch's serve.py and run.py
+dropdb moa_bench_live
+```
+
+Raw results: `results/integrity/` (the live runs, both read runs, the seed's sizes).

@@ -68,10 +68,21 @@ def test_which_pictures_are_public():
 
 @pytest.mark.parametrize("model, column", PUBLIC)
 def test_a_public_picture_is_signed_for_a_week_every_size_of_it(signer, model, column):
-    image = _type(model, column).process_result_value("media/x/abc.png", None)
+    # An upload in the column's own folder, where its sizes were made.
+    field = _type(model, column)
+    image = field.process_result_value(f"{field.base_path.rstrip('/')}/abc.png", None)
     assert image["original"]
     assert signer and {seconds for _, seconds in signer} == {WEEK}
     assert len(signer) == len(image)  # each size signed once
+
+
+@pytest.mark.parametrize("model, column", PUBLIC)
+def test_a_picture_from_elsewhere_signs_only_what_exists(signer, model, column):
+    """A key outside the column's folder has no sizes made; the original's
+    link stands in for each (app.core.storage.fields.has_variants)."""
+    image = _type(model, column).process_result_value("media/x/abc.png", None)
+    assert signer == [("media/x/abc.png", WEEK)]
+    assert set(image.values()) == {image["original"]}
 
 
 @pytest.mark.parametrize("model, column", PRIVATE)

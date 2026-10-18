@@ -1,10 +1,10 @@
-from io import BytesIO
 import logging
+import os
 from fastapi import APIRouter, BackgroundTasks, Form, Query, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse, StreamingResponse
-import pandas as pd
+from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import select
+from starlette.background import BackgroundTask
 
 from app.api.events.registration.schemas import (
     AddAttendeeRequest,
@@ -24,7 +24,7 @@ from app.api.users.models import UserTypes
 from app.api.users import service as user_service
 from app.response import CustomHTTPException, ErrorResponse
 from app.api.auth import service as auth_service
-from app.api.events.registration import service
+from app.api.events.registration import export, service
 from app.api.events.access import is_admin_user
 from app.api.templates_audience import RegistrationRole
 from app.api.events.models import Events
@@ -81,6 +81,11 @@ async def register_event(
                 "This email belongs to a club's account. Register with your own email.",
                 error_code="CLUB_EMAIL",
             )
+        # The address's lock first, as every registration takes it: retiring
+        # an abandoned registration writes the event's row (going_count), and
+        # taking that before the lock, while a double submit holds the lock
+        # and waits for the row, was a deadlock.
+        await service.hold_address(session, event.id, registration.email)
         existing = await service.live_registration_for_email(session, event.id, registration.email)
         if existing is not None and not await service.retire_if_abandoned(session, event, existing):
             return await _already_registered(session, background_tasks, event, existing)
@@ -212,65 +217,18 @@ async def export_event_registrations(
     user: ClubAuth,
     event_id: int,
     is_attended: bool | None = Query(None),
-    is_paid: bool = Query(True),
+    is_paid: bool = Query(True, description="Accepted and ignored, as it always was: every registration is exported"),
     session: SessionDep = SessionDep,
-) -> list[dict]:
-    result, _ = await service.list_event_registrations(
-        session,
-        user_id=user.id,
-        event_id=event_id,
-        is_attended=is_attended,
-        is_paid=is_paid,
-        limit=None,
-        offset=None,
-        as_admin=is_admin_user(user),
-    )
-
-    # list_event_registrations returns plain dicts, not ORM rows, so every
-    # field here is looked up by key. Attribute access raised
-    # AttributeError: 'dict' object has no attribute 'ticket_id' and made this
-    # endpoint return 500 for every export.
-    data = [
-        {
-            "Ticket ID": row.get("ticket_id"),
-            "Full Name": row.get("full_name"),
-            "Email": row.get("email"),
-            "Phone": row.get("phone"),
-            # Answers to the event's custom registration questions, spread into
-            # their own columns.
-            **(
-                row["additional_details"]
-                if isinstance(row.get("additional_details"), dict)
-                else {}
-            ),
-            "Is Paid": row.get("is_paid"),
-            "Actual Amount": row.get("actual_amount"),
-            "Paid Amount": row.get("paid_amount"),
-            "Is Attended": row.get("is_attended"),
-            "Checked In By": (row.get("volunteer") or {}).get("email"),
-            "Registered At": (
-                row["created_at"].strftime("%Y-%m-%d %H:%M:%S")
-                if row.get("created_at")
-                else None
-            ),
-        }
-        for row in result
-    ]
-
-    df = pd.DataFrame(data)
-
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="Event Registrations")
-
-    output.seek(0)
-
-    return StreamingResponse(
-        output,
+) -> FileResponse:
+    """The guest list as an .xlsx: a column per answer to the event's own
+    questions. Written from a server-side cursor on a worker thread, and
+    streamed from disk (export.py)."""
+    path = await export.write_export(session, user.id, event_id, is_attended=is_attended, as_admin=is_admin_user(user))
+    return FileResponse(
+        path,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={
-            "Content-Disposition": f'attachment; filename="event_{event_id}_registrations.xlsx"'
-        },
+        filename=f"event_{event_id}_registrations.xlsx",
+        background=BackgroundTask(os.remove, path),
     )
 
 
@@ -450,6 +408,7 @@ async def mark_attendance(
     event_id: int,
     registration_id: str,
     attendance: EventAttendanceUpdate,
+    background_tasks: BackgroundTasks,
     session: SessionDep = SessionDep,
 ) -> EventRegistrationDetailResponse:
     result = await service.mark_attendance(
@@ -459,6 +418,7 @@ async def mark_attendance(
         registration_id=registration_id,
         is_attended=attendance.is_attended,
         as_admin=is_admin_user(user),
+        background=background_tasks,
     )
     return jsonable_encoder(result)
 

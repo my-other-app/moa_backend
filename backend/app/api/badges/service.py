@@ -99,65 +99,58 @@ async def check_and_award_user_badges(session: AsyncSession, user_id: int) -> li
 
 # ─── Club badge checks ───────────────────────────────────────────────
 
-async def _get_club_metrics(session: AsyncSession, club_id: int) -> dict:
-    """Compute all metrics needed for club badge checks."""
+async def _capped_count(session: AsyncSession, stmt, cap: int) -> int:
+    """How many rows `stmt` finds, counting no further than `cap`: enough to
+    say whether a threshold is met without reading every row there is."""
+    return int(await session.scalar(select(func.count()).select_from(stmt.limit(cap).subquery())) or 0)
 
-    # events_hosted
-    events_hosted = await session.scalar(
-        select(func.count()).where(
-            Events.club_id == club_id,
-            Events.is_deleted == False,
+
+async def _get_club_metrics(session: AsyncSession, club_id: int, wanted: dict | None = None) -> dict:
+    """The metrics the club's badges are earned on.
+
+    `wanted` is {metric: the highest threshold still to earn}: only those
+    are read, and a count stops at its threshold. A club's followers come
+    from clubs.follower_count, which a trigger keeps; attended registrations
+    of its events are counted up to the threshold and no further. This runs after
+    every check-in, so it used to count the club's followers one row at a
+    time, and every attended registration of every event the club ever
+    held. Without `wanted`, everything is read in full."""
+    club = await session.scalar(select(Clubs).where(Clubs.id == club_id))
+    need = wanted if wanted is not None else {k: None for k in CLUB_METRICS}
+    out: dict = {}
+    if "events_hosted" in need:
+        hosted = select(Events.id).where(Events.club_id == club_id, Events.is_deleted == False)  # noqa: E712
+        cap = need["events_hosted"]
+        out["events_hosted"] = await _capped_count(session, hosted, cap) if cap else int(await session.scalar(select(func.count()).select_from(hosted.subquery())) or 0)
+    if "follower_count" in need:
+        out["follower_count"] = int(club.follower_count or 0) if club else 0
+    if "avg_rating" in need:
+        out["avg_rating"] = float(club.rating) if club and club.rating is not None else 0.0
+    if "total_attendees" in need:
+        R = EventRegistrationsLink
+        attended = (
+            select(R.id)
+            .join(Events, Events.id == R.event_id)
+            .where(Events.club_id == club_id, Events.is_deleted == False, R.is_attended == True, R.is_deleted == False)  # noqa: E712
         )
-    ) or 0
+        cap = need["total_attendees"]
+        out["total_attendees"] = await _capped_count(session, attended, cap) if cap else int(await session.scalar(select(func.count()).select_from(attended.subquery())) or 0)
+    if "is_verified" in need:
+        out["is_verified"] = 1 if (club and club.is_verified) else 0
+    return out
 
-    # follower_count
-    follower_count = await session.scalar(
-        select(func.count()).where(
-            ClubUsersLink.club_id == club_id,
-            ClubUsersLink.is_following == True,
-            ClubUsersLink.is_deleted == False,
-        )
-    ) or 0
 
-    # avg_rating
-    club = await session.scalar(
-        select(Clubs).where(Clubs.id == club_id)
-    )
-    avg_rating = float(club.rating) if club else 0.0
-
-    # total_attendees across all events
-    total_attendees = await session.scalar(
-        select(func.count()).where(
-            EventRegistrationsLink.event_id.in_(
-                select(Events.id).where(
-                    Events.club_id == club_id,
-                    Events.is_deleted == False,
-                )
-            ),
-            EventRegistrationsLink.is_attended == True,
-            EventRegistrationsLink.is_deleted == False,
-        )
-    ) or 0
-
-    # is_verified
-    is_verified = 1 if (club and club.is_verified) else 0
-
-    return {
-        "events_hosted": events_hosted,
-        "follower_count": follower_count,
-        "avg_rating": avg_rating,
-        "total_attendees": total_attendees,
-        "is_verified": is_verified,
-    }
+CLUB_METRICS = ("events_hosted", "follower_count", "avg_rating", "total_attendees", "is_verified")
 
 
 async def check_and_award_club_badges(session: AsyncSession, club_id: int) -> list[str]:
     """
     Check all club-type badge definitions and award any newly earned badges.
     Returns list of newly awarded badge slugs.
-    """
-    metrics = await _get_club_metrics(session, club_id)
 
+    Only the badges the club has yet to earn are looked at, and only their
+    metrics read, each no further than the highest threshold left.
+    """
     result = await session.execute(
         select(BadgeDefinitions).where(BadgeDefinitions.badge_type == BadgeType.club)
     )
@@ -167,13 +160,19 @@ async def check_and_award_club_badges(session: AsyncSession, club_id: int) -> li
         select(ClubBadges.badge_id).where(ClubBadges.club_id == club_id)
     )
     awarded_ids = set(result.scalars().all())
+    pending = [d for d in definitions if d.id not in awarded_ids]
+    if not pending:
+        return []
+
+    wanted: dict = {}
+    for d in pending:
+        threshold = int(-(-float(d.threshold or 0) // 1))  # a count meets t once it reaches ceil(t)
+        wanted[d.trigger_metric] = max(wanted.get(d.trigger_metric) or 0, threshold, 1)
+    metrics = await _get_club_metrics(session, club_id, wanted)
 
     newly_awarded = []
 
-    for badge_def in definitions:
-        if badge_def.id in awarded_ids:
-            continue
-
+    for badge_def in pending:
         metric_value = metrics.get(badge_def.trigger_metric, 0)
         if metric_value >= badge_def.threshold:
             session.add(ClubBadges(

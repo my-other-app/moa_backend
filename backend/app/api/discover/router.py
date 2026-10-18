@@ -64,6 +64,8 @@ Category = Query(None, description="An event category id")
 Kind = Query("any", alias="type")
 Price = Query("any")
 Radius = Query(50, ge=0, le=20000, description="Only with a known place, for in-person events; 0 for anywhere")
+Offset = Query(0, ge=0, le=service.MAX_OFFSET, description="At most 1,000: deeper, pass `after`")
+After = Query(None, max_length=300, description="The `next_cursor` of the page before: this page starts after it (offset is then ignored)")
 
 
 @router.get("/events", summary="Events to find: by words, when, category, in person or online, price, and distance")
@@ -82,11 +84,13 @@ async def events(
     lat: Optional[float] = Lat,
     lng: Optional[float] = Lng,
     radius_km: float = Radius,
-    sort: Literal["date", "distance", "popular", "relevance", "newest"] = Query(
-        "date", description="relevance: best match for `q` first (date without `q`); newest: the latest made first (the feeds)",
+    sort: Optional[Literal["date", "distance", "popular", "relevance", "newest"]] = Query(
+        None, description="relevance: best match for `q` first (date without `q`); newest: the latest made first (the feeds). "
+        "Left out: relevance with `q`, else date",
     ),
-    offset: int = Query(0, ge=0),
+    offset: int = Offset,
     limit: int = Query(24, ge=1, le=60),
+    after: Optional[str] = After,
 ) -> EventSearch:
     """`from`/`to`: an event matches if it touches [from 00:00, to + 1 day
     00:00) in India. 422 when `from` is after `to` or the range covers more
@@ -95,7 +99,7 @@ async def events(
     where = await geo.where(request, lat, lng)
     return EventSearch(**await service.search_events(
         session, where, q=q, when=when, category=category, type_=type_, price=price,
-        radius_km=radius_km, sort=sort, offset=offset, limit=limit, from_=from_, to=to,
+        radius_km=radius_km, sort=sort, offset=offset, limit=limit, from_=from_, to=to, after=after,
     ))
 
 
@@ -142,12 +146,13 @@ async def clubs(
     lng: Optional[float] = Lng,
     radius_km: float = Query(50, ge=0, le=20000, description="Only with a known place; 0 for anywhere"),
     sort: Literal["popular", "nearby", "newest"] = Query("popular"),
-    offset: int = Query(0, ge=0),
+    offset: int = Offset,
     limit: int = Query(24, ge=1, le=60),
+    after: Optional[str] = After,
 ) -> ClubSearch:
     where = await geo.where(request, lat, lng)
     return ClubSearch(**await service.search_clubs(
-        session, where, q=q, interest=interest, radius_km=radius_km, sort=sort, offset=offset, limit=limit,
+        session, where, q=q, interest=interest, radius_km=radius_km, sort=sort, offset=offset, limit=limit, after=after,
     ))
 
 
@@ -159,7 +164,7 @@ async def club_events(
     user: OptionalAuth,
     slug: str = Path(..., max_length=120),
     when: Literal["past", "upcoming"] = Query("upcoming"),
-    offset: int = Query(0, ge=0),
+    offset: int = Offset,
     limit: int = Query(12, ge=1, le=48),
 ) -> ClubEvents:
     """`past` is the club page's past list in full; `upcoming` what the
@@ -175,8 +180,11 @@ async def club(request: Request, session: SessionDep, user: OptionalAuth, slug: 
 
 @router.get("/threads", summary="The newest posts from every club")
 @limiter.limit(LIMIT, key_func=_visitor)
-async def thread_feed(request: Request, session: SessionDep, user: OptionalAuth, offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=50)) -> ThreadPage:
-    return ThreadPage(**await service.threads_feed(session, _viewer(user), offset, limit))
+async def thread_feed(
+    request: Request, session: SessionDep, user: OptionalAuth,
+    offset: int = Offset, limit: int = Query(20, ge=1, le=50), after: Optional[str] = After,
+) -> ThreadPage:
+    return ThreadPage(**await service.threads_feed(session, _viewer(user), offset, limit, after))
 
 
 @router.get("/categories", summary="Event categories, with how many upcoming events each has")
@@ -243,9 +251,9 @@ async def recompute_club_places(session: SessionDep, user: AdminAuth) -> ClubPla
     return ClubPlaceFixes(clubs=await places.recompute(session))
 
 
-@admin_router.post("/reconcile-counters", summary="Recount any event's going count or club's follower count that disagrees with its rows")
+@admin_router.post("/reconcile-counters", summary="Recount any counter that disagrees with its rows: going, followers, a post's likes, comments, views and votes, a live question's votes")
 async def reconcile_counters(session: SessionDep, user: AdminAuth) -> CounterFixes:
-    """Triggers keep both counts exact; this finds and puts right any that a
-    write with triggers switched off (a restore, say) left behind. Returns how
-    many were wrong: normally none."""
-    return CounterFixes(**await counters.reconcile(session))
+    """Triggers and atomic updates keep the counts exact; this finds and puts
+    right any that a write with triggers switched off (a restore, say) left
+    behind. Returns how many were wrong: normally none."""
+    return CounterFixes(**await counters.reconcile_all(session))

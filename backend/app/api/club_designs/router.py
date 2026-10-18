@@ -9,6 +9,7 @@ keeps its copy; one that has not follows this.
 The editor previews the club's design on a stand-in event with the club's
 real name and colours, because there is no event to borrow dates from.
 """
+import asyncio
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -23,14 +24,18 @@ from app.api.event_designs.router import (
     _MODELS,
     DesignKind,
     _club_layout_prefix,
+    _fields_of,
     _layout_dto,
     _plan_allows,
+    _preview_png,
     _starter_of,
     _store_layout_image,
     _validate_layout,
 )
-from app.api.events.documents import in_layout_mode, layout_png, layout_sample_values, render_layout_document
+from app.api.events.documents import in_layout_mode, layout_sample_values
 from app.api.templates_audience import TemplateAudience
+from app.api.templates_images import shown
+from app.core.layout import pool
 from app.core.auth.dependencies import ClubAuth
 from app.core.layout.model import PageSpec, TicketLayoutFields, dump
 from app.db.core import SessionDep
@@ -64,7 +69,7 @@ async def _default_row(session, club_id: int, kind: DesignKind):
 
 async def _current(session, club, kind: DesignKind):
     template = await _default_row(session, club.id, kind)
-    style = dict(template.config or {}) if template is not None else _DEFAULTS[kind]()
+    style = shown(template.config or {}, template, fields=_fields_of(template)) if template is not None else _DEFAULTS[kind]()
     return template, style
 
 
@@ -125,7 +130,7 @@ async def save_layout(session: SessionDep, user: ClubAuth, kind: DesignKind, bod
     template.config = config
     await session.commit()
     await session.refresh(template)
-    return _dto(club, kind, template, dict(template.config), await _agenda(session, club, kind))
+    return _dto(club, kind, template, shown(template.config, template, fields=_fields_of(template)), await _agenda(session, club, kind))
 
 
 @router.delete("/{kind}/layout", summary="Drop the club's default; events without their own follow the system design")
@@ -149,11 +154,13 @@ async def preview_layout(session: SessionDep, user: ClubAuth, kind: DesignKind, 
     style = {**style, "layout": dump(layout)}
     sample = _sample_event(club)
     values = layout_sample_values(sample, kind.value)
-    code = values["admission_no"]
+    code = values["ticket_code"]
     qr_text = f"certificate:{code}" if kind is DesignKind.certificate else code
     entries = await agenda_service.entries_for(session, sample) if kind is DesignKind.agenda else None
-    pdf = render_layout_document(style, values, qr_text, title=f"{kind.value} preview", agenda=entries, club=club)
-    return Response(content=layout_png(style, pdf), media_type="image/png", headers={"Cache-Control": "no-store"})
+    return Response(
+        content=await pool.run(_preview_png, style, values, qr_text, f"{kind.value} preview", entries, club),
+        media_type="image/png", headers={"Cache-Control": "no-store"},
+    )
 
 
 @router.post("/{kind}/layout/images", summary="A template or a picture for the club's design")
@@ -161,4 +168,4 @@ async def upload_layout_image(
     session: SessionDep, user: ClubAuth, kind: DesignKind, file: UploadFile = File(...), purpose: str = Query("image", pattern="^(template|image)$")
 ) -> dict:
     club = await _club_for(session, user)
-    return _store_layout_image(await file.read(), _club_layout_prefix(club.id), purpose)
+    return await asyncio.to_thread(_store_layout_image, await file.read(), _club_layout_prefix(club.id), purpose)

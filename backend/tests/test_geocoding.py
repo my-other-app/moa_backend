@@ -75,9 +75,7 @@ def nominatim(monkeypatch, session):
             yield session
 
     monkeypatch.setattr(geo, "session_scope", scope)
-    geo._tried.clear()
     yield state
-    geo._tried.clear()
 
 
 @pytest.fixture

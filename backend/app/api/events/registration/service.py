@@ -1,9 +1,10 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 import logging
 import uuid
 from fastapi import BackgroundTasks
 from pandas import DataFrame
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import DateTime, Interval, Time, and_, cast, func, literal_column, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy.orm.attributes import set_committed_value
@@ -12,11 +13,11 @@ logger = logging.getLogger(__name__)
 
 from app.api.users.models import Users
 from app.api.events.models import EventRegistrationsLink, Events
-from app.api.events.schemas import EventAdditionalDetail
+from app.api.events.registration import answers
 from app.api.service import update_background_task_log
 from app.api.users.models import UserProfiles, UserTypes, Users
 from app.api.admission import service as admission
-from app.core.utils.keys import generate_ticket_id
+from app.core.utils.keys import TICKET_ID_INDEX, generate_ticket_id, violated_constraint
 from app.core.validations.schema import validate_relations
 from app.response import CustomHTTPException
 from app.api.events.access import ensure_event_access
@@ -72,22 +73,18 @@ async def retire_if_abandoned(session: AsyncSession, event: Events, reg: EventRe
         )
         if money_or_recent is not None:
             return False
-    # (event, user, is_deleted) is unique, and the session hides retired rows
-    # (app.db.listeners), so look on the connection.
-    table = EventRegistrationsLink.__table__
-    connection = await session.connection()
-    clash = (
-        await connection.execute(
-            select(table.c.id).where(
-                table.c.event_id == reg.event_id,
-                table.c.user_id == reg.user_id,
-                table.c.is_deleted.is_(True),
-            ).limit(1)
-        )
-    ).first()
-    if clash is not None:
-        return False
+    # Only a live registration is unique per (event, user)
+    # (uq_registrations_event_user_live), so any number may be retired.
+    # The caller holds the address's lock already (hold_address): this
+    # flush takes the event's row (the going_count trigger), and every
+    # registration takes the address first and the event's row second.
     reg.is_deleted = True
+    # What they picked from the shelf goes back on it.
+    from app.api.store import service as store
+
+    pending = await store.pending_for(session, reg.id)
+    if pending is not None:
+        await store.release(session, pending, status="cancelled")
     await session.flush()
     return True
 
@@ -141,10 +138,11 @@ async def existing_registration(
     session: AsyncSession, event_id: int, user_id: int, email: str
 ) -> EventRegistrationsLink | None:
     """This user's live registration for the event, else one made with this
-    exact address: two lookups, each an index probe (the event's unique
-    (event, user) key; ix_registrations_event_email, which the exact match
-    is checked against). As one `user_id = ? OR email = ?` it read every
-    registration of the event, inside the event's lock."""
+    address, case and stray spaces ignored -- as the address's lock is
+    taken (hold_address), so "A@x.com" and "a@x.com" sent together are one
+    sign-up, not two. Two lookups, each an index probe (the event's unique
+    (event, user) key; ix_registrations_event_email). As one
+    `user_id = ? OR email = ?` it read every registration of the event."""
     live = select(EventRegistrationsLink).where(
         EventRegistrationsLink.event_id == event_id,
         EventRegistrationsLink.is_deleted == False,
@@ -153,10 +151,9 @@ async def existing_registration(
     if mine is not None:
         return mine
     return await session.scalar(
-        live.where(
-            user_service.same_email(EventRegistrationsLink.email, email),
-            EventRegistrationsLink.email == email,
-        ).limit(1)
+        live.where(user_service.same_email(EventRegistrationsLink.email, email))
+        .order_by(EventRegistrationsLink.created_at)
+        .limit(1)
     )
 
 
@@ -207,12 +204,54 @@ async def take_place(session: AsyncSession, event: Events, cap: int | None):
     return int(row[0]), int(row[1] or 0)
 
 
-async def _hold_address(session: AsyncSession, event_id: int, email: str) -> None:
+async def hold_address(session: AsyncSession, event_id: int, email: str) -> None:
     """A transaction-scoped advisory lock on this event and address (case and
-    spaces ignored), held to the commit."""
+    spaces ignored), held to the commit. Taken first, before anything that
+    writes the event's row (take_place, or a retired registration's
+    going_count), so every registration takes the two in one order.
+    Re-entrant: the same transaction may take it again."""
     await session.execute(
         select(func.pg_advisory_xact_lock(func.hashtextextended(f"registration:{event_id}:{(email or '').strip().lower()}", 0)))
     )
+
+
+#: Fresh ticket ids tried before a registration gives up. One retry is
+#: already a one-in-millions event (keys.py).
+TICKET_ATTEMPTS = 5
+#: The partial unique index on a live registration's (event, user).
+LIVE_REGISTRATION_INDEX = "uq_registrations_event_user_live"
+#: An admission number is one live guest's on its event.
+ADMISSION_INDEX = "uq_registrations_event_admission"
+
+
+async def insert_registration(session: AsyncSession, registration: EventRegistrationsLink) -> None:
+    """INSERT the registration in a SAVEPOINT, so a ticket id that is
+    already taken costs a fresh id and another try, not the registration
+    (the event's place and the address's lock stay held); so does an
+    admission number someone else already holds. A second live
+    registration for the same account -- two requests racing past the
+    checks with different addresses -- is the 400 a repeat always got."""
+    for attempt in range(TICKET_ATTEMPTS):
+        try:
+            async with session.begin_nested():
+                session.add(registration)
+                await session.flush()
+            return
+        except IntegrityError as exc:
+            name = violated_constraint(exc)
+            if name == LIVE_REGISTRATION_INDEX:
+                raise CustomHTTPException(400, message="Already registered for this event", error_code="ALREADY_REGISTERED")
+            if attempt == TICKET_ATTEMPTS - 1 or name not in (TICKET_ID_INDEX, ADMISSION_INDEX):
+                raise
+            if name == ADMISSION_INDEX:
+                # A number given out by hand or by an import sat where the
+                # sequence was going: the next one in the sequence instead.
+                logger.warning("admission number %s was taken; numbering again", registration.admission_no)
+                event = await session.get(Events, registration.event_id)
+                registration.admission_no = admission.number_for(event, await admission.next_seq(session, registration.event_id))
+            else:
+                logger.warning("ticket id %s was taken; minting another", registration.ticket_id)
+                registration.ticket_id = generate_ticket_id()
 
 
 async def _no_place(session: AsyncSession, event: Events, room, *, organiser: bool) -> CustomHTTPException:
@@ -232,20 +271,6 @@ async def _no_place(session: AsyncSession, event: Events, room, *, organiser: bo
     return await gates.refuse_registration(
         session, event, room.ent, "registrations_per_event", cap=room.event_cap, used=int(going), organiser=organiser
     )
-
-
-def _field_type(field) -> str:
-    """The field's type as a plain string.
-
-    CustomBaseModel sets use_enum_values=True, so a FieldTypes annotation
-    validates to the string rather than the enum member. Reading
-    `.field_type.value` therefore raised AttributeError on every registration
-    for an event with custom fields -- a 500, with the app only able to report
-    that something went wrong. Accepting either form keeps this working if
-    that config is ever changed back.
-    """
-    field_type = field.field_type
-    return getattr(field_type, "value", field_type)
 
 
 async def register_event(
@@ -336,50 +361,15 @@ async def register_event(
         if await places_taken(session, db_event) >= db_event.max_participants:
             raise CustomHTTPException(400, message="Event is full", error_code="EVENT_FULL", errors={"max_participants": db_event.max_participants})
 
-    if relaxed_fields:
-        additional_details = {k: v for k, v in (additional_details or {}).items() if v not in (None, "")}
-    elif db_event.additional_details:
-        # No answers at all is fine when every question is optional; a
-        # required one missing is reported by name below. This used to refuse
-        # any registration that sent no answers, optional questions or not.
-        additional_details = additional_details or {}
-        errors = {}
-        db_additional_details = [
-            EventAdditionalDetail.model_validate(additional)
-            for additional in db_event.additional_details
-        ]
-        validated_additional_details = {}
-        for field in db_additional_details:
-            value = additional_details.get(field.key)
-            missing = value is None or (isinstance(value, str) and not value.strip())
-
-            if missing:
-                # Only a required field is an error when absent. This used to
-                # reject any missing key without consulting field.required, so
-                # `required: False` meant nothing and every custom field was
-                # mandatory -- a client that correctly omits a blank optional
-                # field had its registration refused.
-                if field.required:
-                    errors[field.key] = "This field is required"
-                continue
-
-            if _field_type(field) in ("select", "radio", "checkbox"):
-                if value not in (field.options or []):
-                    errors[field.key] = "Invalid option selected"
-            validated_additional_details[field.key] = value
-        if errors:
-            # A string message naming the questions by label, and each
-            # answer's problem by question key in `errors` -- where the public
-            # site's form reads them.
-            labels = [f.label for f in db_additional_details if f.key in errors]
-            raise CustomHTTPException(400, message=f"Check your answers: {', '.join(labels)}.", error_code="INVALID_ANSWERS", errors=errors)
-        additional_details = validated_additional_details
+    # The answers: bounded always, and checked against the event's own
+    # questions when it asks any (answers.py). Before any lock is taken.
+    additional_details = answers.check(db_event.additional_details, additional_details, relaxed=relaxed_fields)
 
     # An existing registration: this user's, or one made with this address.
     # Two requests with the same address (a double submit) are taken one
     # after the other from here, so the second finds the first's; nobody
     # else waits on it, as everyone waited on the event's row before.
-    await _hold_address(session, db_event.id, email)
+    await hold_address(session, db_event.id, email)
     registration = await existing_registration(session, db_event.id, user_id, email)
     if registration:
         if not claim_existing and registration.user_id != user_id:
@@ -442,7 +432,7 @@ async def register_event(
         await gates.recheck_month(session, db_event, room, going_now=going_now, organiser=by_organiser)
         # Its admission number, from the event's own counter, before the row is kept.
         registration.admission_no = admission.number_for(db_event, seq)
-        session.add(registration)
+        await insert_registration(session, registration)
 
         if store_picks:
             from app.api.store import service as store
@@ -451,7 +441,6 @@ async def register_event(
             # (sold out, no size) must leave nothing behind, or the guest
             # could not try again from the public form, which refuses an
             # address already on the list.
-            await session.flush()
             await store.place_order(session, db_event, registration, store_picks, role=(role.value if role is not None else "attendee"))
         await session.commit()
         await session.refresh(registration)
@@ -590,8 +579,10 @@ async def list_event_registrations(
 
     for condition in conditions:
         query = query.where(condition)
-    # By name, as a list somebody reads from top to bottom.
-    query = query.order_by(EventRegistrationsLink.full_name, EventRegistrationsLink.created_at)
+    # By name, as a list somebody reads from top to bottom: lower(name), id,
+    # which ix_registrations_event_name walks in order, so a page reads its
+    # rows rather than sorting the whole event first.
+    query = query.order_by(func.lower(EventRegistrationsLink.full_name), EventRegistrationsLink.id)
 
     # Get total count before pagination
     # Use a separate count query to avoid issues with joinedload in subqueries
@@ -764,6 +755,19 @@ async def get_registration(
     return scalar_result
 
 
+def _cell(value):
+    """A spreadsheet cell as an answer: numpy's numbers as Python's, a date
+    as its ISO text, a blank cell (NaN) as nothing -- what the answers'
+    bounds (answers.py) and the JSON column take."""
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    if hasattr(value, "item"):
+        value = value.item()
+    if isinstance(value, float) and value != value:
+        return None
+    return value
+
+
 async def bulk_import_event_registrations(
     session: AsyncSession,
     event_id: Events,
@@ -787,7 +791,7 @@ async def bulk_import_event_registrations(
                 new_logs=[
                     {
                         "level": "ERROR",
-                        "message": f"Event with ID {event.id} not found",
+                        "message": f"Event with ID {event_id} not found",
                     }
                 ],
                 new_status="FAILED",
@@ -821,7 +825,9 @@ async def bulk_import_event_registrations(
                 if additional_details_fields:
                     for key in str(additional_details_fields).split(","):
                         if key in row:
-                            additional_details[key] = row[key]
+                            value = _cell(row[key])
+                            if value is not None:
+                                additional_details[key] = value
 
                 # Find or create user
                 user = await user_service.get_non_club_user_by_email(session, email)
@@ -933,115 +939,50 @@ async def get_event_analytics(
 
     ensure_event_access(event, user_id, as_admin)
 
-    # 2. Fetch all active registrations
-    query = select(EventRegistrationsLink).where(
-        EventRegistrationsLink.event_id == event_id,
-        EventRegistrationsLink.is_deleted == False,
-    )
-    result = await session.scalars(query)
-    registrations = result.all()
-
-    total_registrations = len(registrations)
-    
-    # 3. Calculate Stats
-    paid_count = sum(1 for r in registrations if r.is_paid)
+    # 2. Counted by the database: it used to load every registration of the
+    # event as an object to count them in Python.
+    R = EventRegistrationsLink
+    live = (R.event_id == event_id, R.is_deleted == False)  # noqa: E712
+    total_registrations, paid_count, attended_count, total_revenue, morning, afternoon, evening, night = (
+        await session.execute(
+            select(
+                func.count(),
+                func.count().filter(R.is_paid == True),  # noqa: E712
+                func.count().filter(R.is_attended == True),  # noqa: E712
+                func.coalesce(func.sum(R.paid_amount), 0),
+                *(func.count().filter(cond) for cond in _time_of_day(R.created_at)),
+            ).where(*live)
+        )
+    ).one()
     unpaid_count = total_registrations - paid_count
-    
-    attended_count = sum(1 for r in registrations if r.is_attended)
     absent_count = total_registrations - attended_count
-    
-    total_revenue = sum(r.actual_amount for r in registrations if r.is_paid) # Or use paid_amount?
-    # Usually revenue is based on actual fee if paid, or paid_amount. Let's use paid_amount for accuracy.
-    total_revenue = sum(r.paid_amount for r in registrations)
 
     page_views = event.page_views or 0
     conversion_rate = (total_registrations / page_views * 100) if page_views > 0 else 0.0
     attendance_rate = (attended_count / total_registrations * 100) if total_registrations > 0 else 0.0
 
-    # 4. Institution Distribution
-    institutions = {}
-    for r in registrations:
-        # Assuming institution is stored in additional_details or we need to fetch user profile?
-        # The frontend uses `reg.institution || reg.profile`.
-        # In `EventRegistrationsLink`, we don't have institution directly.
-        # It might be in `additional_details` OR we need to join User profile.
-        # For now, let's check `additional_details` for "College Name" or "Institution".
-        inst = "Unknown"
-        if r.additional_details and isinstance(r.additional_details, dict):
-             inst = r.additional_details.get("College Name") or r.additional_details.get("Institution") or r.additional_details.get("college") or "Unknown"
-        
-        institutions[inst] = institutions.get(inst, 0) + 1
+    # 3. Institutions: the college question's answer, else "Unknown".
+    institution = func.coalesce(
+        *(func.nullif(R.additional_details[key].as_string(), "") for key in ("College Name", "Institution", "college")),
+        "Unknown",
+    ).label("institution")
+    by_institution = (
+        await session.execute(select(institution, func.count()).where(*live).group_by(institution).order_by(func.count().desc(), institution))
+    ).all()
+    top_institutions = [{"name": name, "value": n} for name, n in by_institution[:5]]
+    # Distinct institutions that turned up, not the top five; "Unknown" is
+    # the bucket for no answer, not an institution.
+    total_institutions = len([name for name, _ in by_institution if name != "Unknown"])
 
-    top_institutions = [
-        {"name": k, "value": v}
-        for k, v in sorted(institutions.items(), key=lambda item: item[1], reverse=True)[:5]
-    ]
-
-    # How many distinct institutions actually turned up, as opposed to the five
-    # largest. The dashboard shows this as a headline count, and deriving it
-    # from len(top_institutions) would silently cap at 5. "Unknown" is the
-    # bucket for registrations that answered no college question, so it is not
-    # an institution and is not counted.
-    total_institutions = len([k for k in institutions if k != "Unknown"])
-
-    # 5. Registration Time Distribution
-    # Morning: 6-12, Afternoon: 12-17, Evening: 17-21, Night: 21-6
-    morning = 0
-    afternoon = 0
-    evening = 0
-    night = 0
-
-    from datetime import time
-
-    for r in registrations:
-        # created_at is UTC. We should probably convert to local time (IST) or just use UTC?
-        # User is likely in IST (GMT+5:30).
-        # Let's assume server time is UTC and convert to IST for analytics.
-        created_at = r.created_at
-        if not created_at:
-            continue
-            
-        # Add 5 hours 30 minutes for IST
-        local_time = created_at + timedelta(hours=5, minutes=30)
-        t = local_time.time()
-
-        if time(6, 0) <= t < time(12, 0):
-            morning += 1
-        elif time(12, 0) <= t < time(17, 0):
-            afternoon += 1
-        elif time(17, 0) <= t < time(21, 0):
-            evening += 1
-        else:
-            night += 1
-
-    # 6. Attendance Over Time (Recent Check-ins)
-    # Group by hour? Or just list recent check-ins?
-    # User asked for "how many when recent attended".
-    # Let's group by hour for the last 24 hours or just all time if event is short.
-    # Assuming event is 1-2 days.
-    attendance_trend = {}
-    for r in registrations:
-        if r.is_attended and r.attended_on:
-            # Convert to local time (IST)
-            local_time = r.attended_on + timedelta(hours=5, minutes=30)
-            # Group by hour: "10:00 AM", "11:00 AM"
-            hour_key = local_time.strftime("%I:00 %p")
-            # We need to sort by time, so maybe store as tuple (datetime, label) first?
-            # Or just use a dict and sort keys later?
-            # Better: Group by hour and sort by hour.
-            
-            # Use a sortable key like "YYYY-MM-DD HH"
-            sort_key = local_time.strftime("%Y-%m-%d %H")
-            label = local_time.strftime("%I %p") # "10 AM"
-            
-            if sort_key not in attendance_trend:
-                attendance_trend[sort_key] = {"label": label, "count": 0, "sort": sort_key}
-            attendance_trend[sort_key]["count"] += 1
-            
-    # Sort by time
+    # 4. Check-ins by the hour, in IST.
+    hour = func.date_trunc("hour", func.timezone("UTC", R.attended_on, type_=DateTime) + IST)
     attendance_over_time = [
-        {"time": v["label"], "count": v["count"]}
-        for k, v in sorted(attendance_trend.items())
+        {"time": h.strftime("%I %p"), "count": n}
+        for h, n in (
+            await session.execute(
+                select(hour, func.count()).where(*live, R.is_attended == True, R.attended_on.isnot(None)).group_by(hour).order_by(hour)  # noqa: E712
+            )
+        ).all()
     ]
 
     return {
@@ -1061,6 +1002,21 @@ async def get_event_analytics(
         },
         "attendance_over_time": attendance_over_time,
     }
+
+
+#: The analytics read times in IST, as the organisers do.
+IST = literal_column("interval '5 hours 30 minutes'", type_=Interval)
+
+
+def _time_of_day(column):
+    """Morning 6-12, afternoon 12-17, evening 17-21, night the rest, in IST."""
+    t = cast(func.timezone("UTC", column, type_=DateTime) + IST, Time)
+    return (
+        and_(t >= time(6), t < time(12)),
+        and_(t >= time(12), t < time(17)),
+        and_(t >= time(17), t < time(21)),
+        and_(column.isnot(None), or_(t < time(6), t >= time(21))),
+    )
 
 
 async def _load_registration_for_event(
@@ -1199,6 +1155,7 @@ async def mark_attendance(
     registration_id: str,
     is_attended: bool,
     as_admin: bool = False,
+    background=None,
 ):
     """Check a guest in by hand from the attendees page, or take it back.
     Recorded as an admission at the desk, like every other way in."""
@@ -1239,7 +1196,7 @@ async def mark_attendance(
                 409, message="This ticket was revoked. Reinstate it before checking them in."
             )
         if not registration.is_attended:
-            result = await checkins.check_in_by_hand(session, event, registration.id, "Desk", actor)
+            result = await checkins.check_in_by_hand(session, event, registration.id, "Desk", actor, background=background)
             if result["outcome"] == "UNPAID":
                 raise CustomHTTPException(409, message="This guest has not paid. Record the payment first.")
             if result["outcome"] == "EVENT_NOT_OPEN":
@@ -1352,7 +1309,7 @@ async def update_registration(
             select(EventRegistrationsLink).where(
                 EventRegistrationsLink.event_id == event_id,
                 EventRegistrationsLink.is_deleted == False,
-                EventRegistrationsLink.email == email,
+                user_service.same_email(EventRegistrationsLink.email, email),
                 EventRegistrationsLink.id != registration.id,
             )
         )
@@ -1367,7 +1324,8 @@ async def update_registration(
     if role is not None:
         registration.role = role
     if additional_details is not None:
-        registration.additional_details = {**(registration.additional_details or {}), **additional_details}
+        current = registration.additional_details if isinstance(registration.additional_details, dict) else {}
+        registration.additional_details = answers.bound({**current, **additional_details})
     await session.commit()
     await session.refresh(registration, attribute_names=["full_name", "email", "phone", "role", "additional_details", "updated_at", "user"])
     return registration

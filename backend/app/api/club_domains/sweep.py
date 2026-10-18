@@ -61,10 +61,35 @@ def _paused_over(now):
     return (ClubDomains.status == PAUSED, ClubDomains.paused_at <= now - service.PAUSED_FOR)
 
 
-async def _ids(session, *criteria) -> list[int]:
-    return list(
-        (await session.execute(select(ClubDomains.id).where(*criteria).order_by(ClubDomains.id).limit(BATCH))).scalars()
-    )
+# Where the jobs that leave a row as it was (the entitlement sync, mostly)
+# stopped last run. Their rows never drop out of the criteria, so a plain
+# "first BATCH by id" took the same rows on every run and the ones after the
+# hundredth were never looked at. Per process; a restart starts over from
+# the beginning, which only delays a row by a run.
+_cursors: dict[str, int] = {}
+
+
+async def _ids(session, *criteria, job: str | None = None) -> list[int]:
+    """Up to BATCH rows for a job.
+
+    The Cloudflare jobs go least recently asked first (`checked_at`, never
+    asked before all): a poll stamps the row, so it goes to the back. The
+    others go round by id from where the last run stopped, wrapping to the
+    start, so every row is reached however many there are."""
+    if job in ("polled", "rechecked"):
+        q = select(ClubDomains.id).where(*criteria).order_by(ClubDomains.checked_at.asc().nulls_first(), ClubDomains.id)
+        return list((await session.execute(q.limit(BATCH))).scalars())
+    after = _cursors.get(job or "", 0)
+    ids = list((await session.execute(
+        select(ClubDomains.id).where(*criteria, ClubDomains.id > after).order_by(ClubDomains.id).limit(BATCH)
+    )).scalars())
+    if len(ids) < BATCH and after:
+        ids += list((await session.execute(
+            select(ClubDomains.id).where(*criteria, ClubDomains.id <= after).order_by(ClubDomains.id).limit(BATCH - len(ids))
+        )).scalars())
+    if job:
+        _cursors[job] = ids[-1] if ids else 0
+    return ids
 
 
 async def _lock_row(session, domain_id: int, *criteria) -> ClubDomains | None:
@@ -101,7 +126,7 @@ async def sweep(session, now: datetime | None = None) -> dict:
     if cf.available():
         jobs = [("polled", _pending(now), _poll), ("rechecked", _active_due(now), _poll), *jobs]
     for key, criteria, job in jobs:
-        for domain_id in await _ids(session, *criteria):
+        for domain_id in await _ids(session, *criteria, job=key):
             try:
                 row = await _lock_row(session, domain_id, *criteria)
                 if row is None:
@@ -142,8 +167,10 @@ async def _locked(conn, session, now) -> dict | None:
 
 
 async def sweep_loop(interval: int = SWEEP_INTERVAL) -> None:
-    """Runs for the life of the process."""
+    """Runs for the life of the process. Each run also keeps the published
+    club sites current (app/api/sites/sweep.py), under a lock of its own."""
     from app.api.deliveries import service as deliveries
+    from app.api.sites import sweep as sites_sweep
 
     await asyncio.sleep(17)
     while True:
@@ -156,4 +183,13 @@ async def sweep_loop(interval: int = SWEEP_INTERVAL) -> None:
             raise
         except Exception:  # noqa: BLE001
             logger.exception("domains sweep failed")
+        try:
+            async with deliveries.session_scope() as session:
+                made = await sites_sweep.run_refresh(session)
+                if made:
+                    logger.info("sites sweep: %d page(s) made again", made)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            logger.exception("sites sweep failed")
         await asyncio.sleep(interval)

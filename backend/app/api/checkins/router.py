@@ -119,17 +119,19 @@ async def gate_context(request: Request, session: SessionDep, actor: GateAuth, e
 
 
 @router.post("/gate/scan", summary="A ticket at the door. Six outcomes, all 200.")
-async def gate_scan(request: Request, session: SessionDep, actor: GateAuth, event_id: int, body: ScanBody) -> ScanResult:
+async def gate_scan(request: Request, session: SessionDep, actor: GateAuth, event_id: int, body: ScanBody, background_tasks: BackgroundTasks) -> ScanResult:
+    """The ticket's scan code (or the registration's id). An admission number
+    is not a scan code: find the guest by it in the search instead."""
     if not actor.permissions["check_in"]:
         raise CustomHTTPException(403, message="You may not check guests in at this door.")
-    return ScanResult(**await service.scan(session, _event(request), code=body.code, door_label=body.door, client_ref=body.client_ref, scanned_at=body.scanned_at, actor=actor, via=CheckInVia.gate))
+    return ScanResult(**await service.scan(session, _event(request), code=body.code, door_label=body.door, client_ref=body.client_ref, scanned_at=body.scanned_at, actor=actor, via=CheckInVia.gate, background=background_tasks))
 
 
 @router.post("/gate/scan-batch", summary="The offline queue, drained")
-async def gate_scan_batch(request: Request, session: SessionDep, actor: GateAuth, event_id: int, body: ScanBatchBody) -> ScanBatchResult:
+async def gate_scan_batch(request: Request, session: SessionDep, actor: GateAuth, event_id: int, body: ScanBatchBody, background_tasks: BackgroundTasks) -> ScanBatchResult:
     if not actor.permissions["check_in"]:
         raise CustomHTTPException(403, message="You may not check guests in at this door.")
-    return ScanBatchResult(results=await service.scan_batch(session, _event(request), [s.model_dump() for s in body.scans], actor))
+    return ScanBatchResult(results=await service.scan_batch(session, _event(request), [s.model_dump() for s in body.scans], actor, background=background_tasks))
 
 
 @router.get("/gate/search", summary="Find a guest by name, email or ticket")
@@ -140,11 +142,11 @@ async def gate_search(request: Request, session: SessionDep, actor: GateAuth, ev
 
 
 @router.post("/gate/check-in/{registration_id}", summary="Check a guest in by hand")
-async def gate_check_in(request: Request, session: SessionDep, actor: GateAuth, event_id: int, registration_id: UUID, body: ByHandBody) -> ScanResult:
+async def gate_check_in(request: Request, session: SessionDep, actor: GateAuth, event_id: int, registration_id: UUID, body: ByHandBody, background_tasks: BackgroundTasks) -> ScanResult:
     """A dead phone, a ticket left at home, a name read off a list."""
     if not actor.permissions["check_in"]:
         raise CustomHTTPException(403, message="You may not check guests in at this door.")
-    return ScanResult(**await service.check_in_by_hand(session, _event(request), registration_id, body.door, actor))
+    return ScanResult(**await service.check_in_by_hand(session, _event(request), registration_id, body.door, actor, background=background_tasks))
 
 
 @router.delete("/gate/check-in/{registration_id}", summary="Take a check-in back")

@@ -10,14 +10,15 @@ Each trigger:
 """
 
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Optional
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.clubs.models import ClubUsersLink
-from app.api.users.models import Users
 from app.api.events.models import Events, EventRegistrationsLink
 from app.api.notifications import service as db_notification_service
+from app.core.notifications import fanout
 from app.core.notifications.service import (
     send_notification_to_user,
     send_notification_to_users,
@@ -32,54 +33,36 @@ async def notify_followers_of_new_event(
     club_name: str,
     event_id: int,
     event_name: str,
-) -> int:
+) -> Optional[int]:
     """
     Notify all followers of a club about a new event.
-    
+
     Trigger 1: When a club posts a new event, notify all users following the club.
+
+    The inbox rows are one INSERT ... SELECT over the followers and the pushes
+    go in batches, after the response (app.core.notifications.fanout). Returns
+    the devices reached when it ran inline (the tests), None when scheduled.
     """
-    # Get all followers of this club
-    query = select(ClubUsersLink.user_id).where(
-        ClubUsersLink.club_id == club_id,
-        ClubUsersLink.is_following == True,
-        ClubUsersLink.is_deleted == False,
-    )
-    result = await session.execute(query)
-    follower_ids = [row[0] for row in result.fetchall()]
-    
-    if not follower_ids:
-        logger.debug(f"No followers for club {club_id}")
-        return 0
-    
-    logger.info(f"Notifying {len(follower_ids)} followers of new event from club {club_id}")
-    
     title = f"🎉 New from {club_name}!"
     body = f"Check out: {event_name}"
-    
-    # Save to database for in-app notification history
-    await db_notification_service.create_notifications_batch(
-        session=session,
-        user_ids=follower_ids,
-        title=title,
-        description=body,
-        type="new_event",
-        from_club_id=club_id,
-        event_id=event_id,
-        data={"club_name": club_name, "event_name": event_name},
+    audience = (
+        select(ClubUsersLink.user_id)
+        .where(
+            ClubUsersLink.club_id == club_id,
+            ClubUsersLink.is_following == True,  # noqa: E712
+            ClubUsersLink.is_deleted == False,  # noqa: E712
+        )
+        .distinct()
     )
-    
-    # Send push notification
-    return await send_notification_to_users(
-        session=session,
-        user_ids=follower_ids,
-        title=title,
-        body=body,
-        data={
-            "type": "new_event",
-            "event_id": str(event_id),
-            "club_id": str(club_id),
-        },
-    )
+
+    async def job(s: AsyncSession) -> int:
+        return await _tell(
+            s, audience, title=title, body=body, type="new_event", from_club_id=club_id, event_id=event_id,
+            data={"club_name": club_name, "event_name": event_name},
+            push_data={"type": "new_event", "event_id": str(event_id), "club_id": str(club_id)},
+        )
+
+    return await fanout.dispatch(session, job, name=f"new_event:{event_id}")
 
 
 async def notify_users_by_interest(
@@ -89,84 +72,101 @@ async def notify_users_by_interest(
     club_id: int,
     event_id: int,
     event_name: str,
-) -> int:
+) -> Optional[int]:
     """
     Notify users whose interests match the event category.
-    
+
     Trigger 2: Notify users whose interests match the event category.
     Excludes users who are already followers (they got Trigger 1).
+
+    Capped, so one event cannot push to every user on the platform: at most
+    INTEREST_PUSH_MAX_PER_EVENT people (the newest accounts first: index
+    order, and the people most likely still finding their way in), and
+    nobody who has already had INTEREST_PUSH_MAX_PER_USER_PER_DAY of these in
+    the last day. Followers are never capped: they asked. Runs after the
+    response, as notify_followers_of_new_event does.
     """
     from app.api.interests.models import Interests
+    from app.api.notifications.models import Notifications
     from app.api.users.models import UserInterests
-    
-    # Get interest IDs that belong to this category
-    interest_query = select(Interests.id).where(
-        Interests.category_id == category_id,
-        Interests.is_deleted == False,
-    )
-    interest_result = await session.execute(interest_query)
-    interest_ids = [row[0] for row in interest_result.fetchall()]
-    
-    if not interest_ids:
-        logger.debug(f"No interests found for category {category_id}")
+    from app.config import settings
+
+    per_event = max(0, int(settings.INTEREST_PUSH_MAX_PER_EVENT))
+    per_day = max(0, int(settings.INTEREST_PUSH_MAX_PER_USER_PER_DAY))
+    if per_event == 0 or per_day == 0:
         return 0
-    
-    # Get users with these interests
-    users_query = select(UserInterests.user_id).where(
-        UserInterests.interest_id.in_(interest_ids),
-    ).distinct()
-    users_result = await session.execute(users_query)
-    interested_user_ids = set(row[0] for row in users_result.fetchall())
-    
-    if not interested_user_ids:
-        logger.debug(f"No users found with interests in category {category_id}")
-        return 0
-    
-    # Get followers of this club to exclude them
-    followers_query = select(ClubUsersLink.user_id).where(
-        ClubUsersLink.club_id == club_id,
-        ClubUsersLink.is_following == True,
-        ClubUsersLink.is_deleted == False,
-    )
-    followers_result = await session.execute(followers_query)
-    follower_ids = set(row[0] for row in followers_result.fetchall())
-    
-    # Calculate users to notify (interested but not following)
-    user_ids_to_notify = list(interested_user_ids - follower_ids)
-    
-    if not user_ids_to_notify:
-        logger.debug(f"All interested users are already followers of club {club_id}")
-        return 0
-    
-    logger.info(f"Notifying {len(user_ids_to_notify)} users with matching interests")
-    
+
     title = f"📌 Event in {category_name}"
     body = f"New event matching your interests: {event_name}"
-    
-    # Save to database
-    await db_notification_service.create_notifications_batch(
-        session=session,
-        user_ids=user_ids_to_notify,
-        title=title,
-        description=body,
-        type="nearby_event",
-        from_club_id=club_id,
-        event_id=event_id,
-        data={"category_name": category_name, "event_name": event_name},
+    day_ago = datetime.now(timezone.utc) - timedelta(days=1)
+    in_category = select(Interests.id).where(Interests.category_id == category_id, Interests.is_deleted == False)  # noqa: E712
+    follows = (
+        select(ClubUsersLink.id)
+        .where(
+            ClubUsersLink.user_id == UserInterests.user_id,
+            ClubUsersLink.club_id == club_id,
+            ClubUsersLink.is_following == True,  # noqa: E712
+            ClubUsersLink.is_deleted == False,  # noqa: E712
+        )
+        .exists()
     )
-    
-    # Send push notification
-    return await send_notification_to_users(
-        session=session,
-        user_ids=user_ids_to_notify,
-        title=title,
-        body=body,
-        data={
-            "type": "interest_match",
-            "event_id": str(event_id),
-            "category_id": str(category_id),
-        },
+    told_today = (
+        select(func.count())
+        .select_from(Notifications)
+        .where(
+            Notifications.user_id == UserInterests.user_id,
+            Notifications.type == "nearby_event",
+            Notifications.is_deleted == False,  # noqa: E712
+            Notifications.created_at >= day_ago,
+        )
+        .scalar_subquery()
     )
+    audience = (
+        select(UserInterests.user_id)
+        .where(
+            UserInterests.interest_id.in_(in_category),
+            UserInterests.is_deleted == False,  # noqa: E712
+            ~follows,
+            told_today < per_day,
+        )
+        .group_by(UserInterests.user_id)
+        .order_by(UserInterests.user_id.desc())
+        .limit(per_event)
+    )
+
+    async def job(s: AsyncSession) -> int:
+        return await _tell(
+            s, audience, title=title, body=body, type="nearby_event", from_club_id=club_id, event_id=event_id,
+            data={"category_name": category_name, "event_name": event_name},
+            push_data={"type": "interest_match", "event_id": str(event_id), "category_id": str(category_id)},
+        )
+
+    return await fanout.dispatch(session, job, name=f"interest:{event_id}")
+
+
+async def _tell(
+    session: AsyncSession,
+    audience,
+    *,
+    title: str,
+    body: str,
+    type: str,
+    data: dict,
+    push_data: dict,
+    from_club_id: Optional[int] = None,
+    event_id: Optional[int] = None,
+) -> int:
+    """The inbox rows in one statement, kept; then the pushes in batches."""
+    reached = await fanout.insert_for_audience(
+        session, audience, title=title, description=body, type=type, data=data,
+        from_club_id=from_club_id, event_id=event_id,
+    )
+    await session.commit()
+    if not reached:
+        logger.debug("Nobody to tell about %s for event %s", type, event_id)
+        return 0
+    logger.info("Told %d people about %s for event %s; pushing", len(reached), type, event_id)
+    return await send_notification_to_users(session=session, user_ids=reached, title=title, body=body, data=push_data)
 
 
 async def notify_user_check_in(

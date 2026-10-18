@@ -16,6 +16,7 @@ Environment variables:
    - WALLET_ORGANIZATION_NAME: e.g., "Finnet"
 """
 
+import asyncio
 import os
 import io
 import hashlib
@@ -25,12 +26,13 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
-import requests
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config import settings
+from app.core.layout import pool
 from app.response import CustomHTTPException
 from app.api.events.models import Events, EventRegistrationsLink
 
@@ -232,7 +234,8 @@ def sign_manifest(manifest_bytes: bytes) -> bytes:
         ]
         
         logger.info(f"Running OpenSSL command: {' '.join(cmd)}")
-        result = subprocess.run(cmd, capture_output=True)
+        # A time limit, like every other subprocess a render starts.
+        result = subprocess.run(cmd, capture_output=True, timeout=settings.RENDER_TIMEOUT)
         
         if result.returncode != 0:
             logger.error(f"OpenSSL signing failed with code {result.returncode}")
@@ -289,14 +292,38 @@ def get_default_icon() -> bytes:
 
 
 def download_image(url: str) -> Optional[bytes]:
-    """Download image from URL."""
+    """The image at one of our bucket's links, read by its key (and cached).
+
+    It was a `requests.get` of the presigned URL on the event loop: a slow
+    answer from S3 held every request in the process for up to ten seconds.
+    """
+    from app.api.events.documents import fetch_bytes
+
     try:
-        response = requests.get(url, timeout=10)
-        if response.status_code == 200:
-            return response.content
+        return fetch_bytes(url)
     except Exception as e:
         logger.error(f"Failed to download image from {url}: {e}")
     return None
+
+
+def strip_png(data: Optional[bytes]) -> Optional[bytes]:
+    """The poster as Wallet's strip image: a PNG (a JPEG named strip.png is
+    not shown), 1125 pixels wide at most."""
+    if not data:
+        return None
+    from PIL import Image
+
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            image = image.convert("RGBA")
+            if image.width > 1125:
+                image = image.resize((1125, round(image.height * 1125 / image.width)), Image.Resampling.LANCZOS)
+            out = io.BytesIO()
+            image.save(out, format="PNG", optimize=True)
+            return out.getvalue()
+    except Exception as e:
+        logger.warning(f"Wallet strip image could not be made: {e}")
+        return None
 
 
 def create_pkpass(pass_json: dict, poster_bytes: Optional[bytes] = None) -> bytes:
@@ -369,16 +396,14 @@ async def generate_wallet_pass(
         holder_name=registration.full_name,
     )
     
-    # Fetch poster image if available
-    poster_bytes = None
+    # Everything above read the database here, on the loop. The poster is
+    # read (by key, cached) on a worker thread, and the zip is signed --
+    # openssl, a subprocess -- on the render pool.
+    poster_url = None
     if event.poster:
         # event.poster is an S3Image (dict-like) with variations
         # Try to get medium, then large, then original
         poster_url = event.poster.get("medium") or event.poster.get("large") or event.poster.get("original")
-        if poster_url:
-            poster_bytes = download_image(poster_url)
+    poster_bytes = await asyncio.to_thread(download_image, poster_url) if poster_url else None
 
-    # Create the .pkpass file
-    pkpass_bytes = create_pkpass(pass_json, poster_bytes=poster_bytes)
-    
-    return pkpass_bytes
+    return await pool.run(lambda: create_pkpass(pass_json, poster_bytes=strip_png(poster_bytes)))

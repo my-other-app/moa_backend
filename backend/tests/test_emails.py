@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 
 import pytest
 
+from app.api.deliveries import pipeline
 from app.api.deliveries import service as deliveries
 from app.api.emails import service
 from app.core.email import email as email_mod
@@ -50,6 +51,15 @@ def background(monkeypatch, session):
         yield session
 
     monkeypatch.setattr(deliveries, "session_scope", scope)
+
+
+@pytest.fixture(autouse=True)
+async def jobs_finished(session):
+    """Sends the sweep starts run beside it, on the test's session: every one
+    is finished before that session goes."""
+    pipeline.reset_for_tests()
+    yield
+    await pipeline.drain(timeout=30)
 
 
 @pytest.fixture
@@ -243,6 +253,9 @@ async def test_a_timed_email_goes_out_once_when_due(client, session, world, outb
 
     assert await service.sweep(session, now=START - timedelta(hours=25)) == 0
     assert await service.sweep(session, now=START - timedelta(hours=23)) == 1
+    # The sweep only queues: the sending is a job beside it.
+    assert outbox["sent"] == []
+    await pipeline.drain()
     assert await service.sweep(session, now=START - timedelta(hours=22)) == 0
     assert len(outbox["sent"]) == 3
 
@@ -261,6 +274,7 @@ async def test_a_timed_email_goes_out_once_when_due(client, session, world, outb
     # Five hours after the start, two have come due: this one and the
     # reminder the starter times for just before the doors open.
     assert await service.sweep(session, now=START + timedelta(hours=5)) == 2
+    await pipeline.drain()
     assert await service.sweep(session, now=START + timedelta(hours=6)) == 0
 
 
@@ -440,3 +454,42 @@ async def test_the_library_overview_knows_use_results_and_what_goes_out_next(cli
     assert o["recent"][0]["stage"] == "REMINDER" and o["recent"][0]["recipients"] >= 1
     assert o["attention"]["disabled_stages"] == [] and o["delta"]["messages"] == 1
     assert (await client.get("/api/v1/clubs/me/emails/overview", headers=world["other"])).json()["templates"][0]["usage"]["events"] == 0
+
+
+async def test_the_invite_names_the_ticket_code_and_keeps_the_admission_number_small(client, session, world, outbox, background):
+    """Only the ticket code checks anyone in at the gate now; the admission
+    number stays on the card, as a line for the organisers' records."""
+    a = world["a"]
+    a.admission_no = "ADM-0007"
+    await session.commit()
+    r = await client.post(f"/api/v1/events/{world['event'].id}/tickets/{a.id}/send", headers=world["club"])
+    assert r.status_code == 200, r.text
+    (mail,) = outbox["sent"]
+    assert f"Ticket code: {a.ticket_id}" in mail["text"] and "(Admission no. ADM-0007)" in mail["text"]
+    assert "Ticket code" in mail["html"] and a.ticket_id in mail["html"] and "Admission no. ADM-0007" in mail["html"]
+    # The starter's details row names the ticket code too; the admission
+    # number appears once, as the card's small line.
+    assert f"Ticket: Attendee · {a.ticket_id}" in mail["text"]
+    assert mail["text"].count("ADM-0007") == 1
+    ctx = (await client.get(_url(world, "/context"), headers=world["club"])).json()
+    assert any(t["key"] == "ticket_code" for t in ctx["tokens"])
+
+
+async def test_an_email_picture_is_stored_off_the_event_loop(client, world, monkeypatch):
+    """Decoding, shrinking and the S3 upload block; on the loop they held
+    every other request of the worker until they were done."""
+    import threading
+
+    from app.api.emails import router as emails_router
+
+    threads: list = []
+
+    def store(raw, prefix, *, max_width, name="image"):
+        threads.append(threading.current_thread())
+        return {"key": f"{prefix}email.png", "url": "https://example.test/email.png", "width": 10, "height": 10}
+
+    monkeypatch.setattr(emails_router, "store_image", store)
+    png = {"file": ("a.png", b"\x89PNG\r\n\x1a\n", "image/png")}
+    assert (await client.post(_url(world, "/images"), files=png, headers=world["club"])).status_code == 200
+    assert (await client.post("/api/v1/clubs/me/emails/images", files=png, headers=world["club"])).status_code == 200
+    assert len(threads) == 2 and all(t is not threading.main_thread() for t in threads)

@@ -29,9 +29,16 @@ TICKET_TOKENS: list[dict] = [
      "aliases": ["company", "organisation", "institution", "college"]},
     {"key": "email", "group": "Guest", "label": "Email", "sample": "ananya@sahyadrisystems.in"},
     {"key": "seat", "group": "Guest", "label": "Seat label", "sample": "A-014", "aliases": ["seat_label", "seat_number"]},
+    # The code under the QR: what the gate and the kiosk ask a guest to type
+    # when the QR will not scan. The ticket's own id -- the gate does not take
+    # an admission number (it answers INVALID and asks staff to check the
+    # guest in by hand), so a ticket must never print one there.
+    {"key": "ticket_code", "group": "Ticket", "label": "Ticket code", "sample": "MOA-7K3QF-X9PWM",
+     "aliases": ["ticket_id", "ticket_number", "invite_code"],
+     "note": "Typed at the gate or the kiosk when a QR will not scan."},
     {"key": "admission_no", "group": "Ticket", "label": "Admission number", "sample": "MOA-0041-KF26",
-     "aliases": ["ticket_code", "ticket_id", "ticket_number", "invite_code"],
-     "note": "Typed at the gate when a QR will not scan."},
+     "aliases": ["admission_number"],
+     "note": "The guest's number in this event's sequence, for a smaller line of its own. Not accepted at the gate: the ticket code is."},
     {"key": "ticket_type", "group": "Ticket", "label": "Ticket type", "sample": "VIP",
      "aliases": ["ticket_name", "ticket_type_name", "pass_type", "role"]},
     {"key": "event_name", "group": "Event", "label": "Event name", "sample": "Builders Day", "aliases": ["event_title", "event"]},
@@ -224,7 +231,7 @@ def render_ticket_template(src: str, values: dict, extra: Optional[set] = None) 
     return render_template_nodes(parse_ticket_template(src, extra).nodes, values)
 
 
-PER_GUEST_TOKENS = {t["key"] for t in TICKET_TOKENS if t["group"] in ("Guest", "Certificate")} | {"admission_no"}
+PER_GUEST_TOKENS = {t["key"] for t in TICKET_TOKENS if t["group"] in ("Guest", "Certificate")} | {"admission_no", "ticket_code"}
 
 
 def carries_per_guest_token(src: str) -> bool:
@@ -319,8 +326,12 @@ def ticket_token_values(
     ticket_type_name: str,
     certificate: Optional[TokenCertificate] = None,
     field_labels: Optional[dict] = None,
+    ticket_code: Optional[str] = None,
 ) -> dict:
     """Every token's value for one ticket, formatted in the venue's time zone.
+
+    `ticket_code` is the ticket's id, the code printed under the QR; without
+    one (an older caller) it is the admission number, as it used to be.
 
     `field_labels` maps a custom field's stored key to its label, so an
     answer stored under "tshirt_size" is reachable as both field.tshirt_size
@@ -338,6 +349,7 @@ def ticket_token_values(
         "email": attendee.email or "",
         "seat": attendee.seat_label or "",
         "admission_no": admission_no,
+        "ticket_code": ticket_code or admission_no,
         "ticket_type": ticket_type_name,
         "event_name": event.name,
         "event_date": format_date(event.starts_at, tz),
@@ -378,6 +390,7 @@ def sample_token_values(event: TokenEvent, org_name: str, kind: str = "ticket",
             checked_in_at=event.starts_at,
             placing="First" if kind == "certificate" else "",
         ),
+        ticket_code=TOKEN_BY_KEY["ticket_code"]["sample"],
     )
     for f in fields or []:
         values.setdefault(field_token(f), f"‹{f}›")

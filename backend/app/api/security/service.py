@@ -3,7 +3,12 @@
 Devices are read from the user agent, places from the address through a
 cached lookup, and the lockout from the attempts themselves: five wrong
 passwords from one address at one account in fifteen minutes shut that
-door for fifteen minutes.
+door for fifteen minutes; twenty at one account in an hour, from anywhere,
+shut it for every address that has not signed in to it before, until the
+hour has fewer than twenty.
+
+A place is never looked up inside a sign-in: the attempt is kept with what
+the cache knows, and the lookup runs after the commit (place_later).
 """
 from __future__ import annotations
 
@@ -15,7 +20,8 @@ from datetime import datetime, timedelta, timezone
 import logging
 
 import httpx
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.api.auth import sessions as session_store
 from app.api.security.models import IpPlaces, SignInAttempts
@@ -26,6 +32,10 @@ logger = logging.getLogger(__name__)
 
 MAX_FAILED = 5
 LOCK_WINDOW = timedelta(minutes=15)
+# Across every address: a botnet trying one account from a thousand
+# addresses never trips the per-address lock.
+ACCOUNT_MAX_FAILED = 20
+ACCOUNT_WINDOW = timedelta(hours=1)
 FAILED_RESULTS = ("wrong_password", "totp_invalid")
 NEW_DEVICE_MEMORY = timedelta(days=90)
 PLACE_TTL = timedelta(days=30)
@@ -144,12 +154,46 @@ async def place_for(session, ip: str | None, *, resolve: bool = True) -> str | N
     if not resolve:
         return row.place if row else None
     place = await lookup_place(ip)
-    if row is None:
-        session.add(IpPlaces(ip_address=ip, place=place, looked_up_at=_now()))
-    else:
-        row.place, row.looked_up_at = place, _now()
-    await session.flush()
+    now = _now()
+    # One statement whoever got here first: two sign-ins from one new
+    # address used to both insert, and the second was a 500.
+    await session.execute(
+        pg_insert(IpPlaces)
+        .values(ip_address=ip, place=place, looked_up_at=now)
+        .on_conflict_do_update(index_elements=[IpPlaces.ip_address], set_={"place": place, "looked_up_at": now})
+    )
+    if row is not None:
+        row.place, row.looked_up_at = place, now
     return place
+
+
+async def place_later(session, ip: str | None, *, new_device_mail: dict | None = None) -> None:
+    """After the sign-in has committed: look the address up (once, cached),
+    put the place on the attempts from it that have none, and send the
+    new-device email -- which names the place -- if there is one to send.
+    In the background (app.core.background), so neither the lookup nor the
+    mail is part of the request."""
+    from app.core.background import dispatch
+
+    if not ip and not new_device_mail:
+        return
+
+    async def job(s) -> None:
+        place = await place_for(s, ip) if ip else None
+        if place:
+            await s.execute(
+                update(SignInAttempts)
+                .where(SignInAttempts.ip_address == ip, SignInAttempts.place.is_(None), SignInAttempts.created_at >= _now() - timedelta(hours=1))
+                .values(place=place)
+                .execution_options(synchronize_session=False)
+            )
+        await s.commit()
+        if new_device_mail:
+            import asyncio
+
+            await asyncio.to_thread(send_new_device_email, **new_device_mail, place=place, ip=ip)
+
+    await dispatch(session, job, name="sign-in place")
 
 
 # ─── The door ───────────────────────────────────────────────────────────
@@ -165,7 +209,8 @@ async def record(session, *, request, identifier: str | None, user, method: str,
         method=method,
         result=result,
         session_id=session_id,
-        place=await place_for(session, ip),
+        # What the cache already knows; place_later fills it in otherwise.
+        place=await place_for(session, ip, resolve=False),
     )
     session.add(row)
     await session.flush()
@@ -175,21 +220,58 @@ async def record(session, *, request, identifier: str | None, user, method: str,
 async def lockout_remaining(session, identifier: str | None, ip: str | None) -> int:
     """Seconds this address must wait at this account, or 0."""
     ident = (identifier or "").strip().lower()[:120]
-    if not ident or not ip:
+    if not ident:
         return 0
-    since = _now() - LOCK_WINDOW
+    now = _now()
+    wait = 0
+    if ip:
+        rows = list(
+            (await session.scalars(
+                select(SignInAttempts.created_at)
+                .where(SignInAttempts.identifier == ident, SignInAttempts.ip_address == ip, SignInAttempts.result.in_(FAILED_RESULTS), SignInAttempts.created_at >= now - LOCK_WINDOW)
+                .order_by(SignInAttempts.created_at.desc())
+                .limit(MAX_FAILED)
+            )).all()
+        )
+        if len(rows) >= MAX_FAILED:
+            latest = _aware(rows[0])
+            wait = max(1, int((latest + LOCK_WINDOW - now).total_seconds()))
+    return max(wait, await account_lockout_remaining(session, ident, ip))
+
+
+def _aware(dt: datetime) -> datetime:
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+async def account_lockout_remaining(session, identifier: str | None, ip: str | None) -> int:
+    """Seconds before this account takes another password try from this
+    address, counting wrong tries from every address in the last hour, or 0.
+    An address the account has signed in from before is let through: the
+    owner at home is not locked out by someone else's guessing."""
+    ident = (identifier or "").strip().lower()[:120]
+    if not ident:
+        return 0
+    now = _now()
     rows = list(
         (await session.scalars(
             select(SignInAttempts.created_at)
-            .where(SignInAttempts.identifier == ident, SignInAttempts.ip_address == ip, SignInAttempts.result.in_(FAILED_RESULTS), SignInAttempts.created_at >= since)
+            .where(SignInAttempts.identifier == ident, SignInAttempts.result.in_(FAILED_RESULTS), SignInAttempts.created_at >= now - ACCOUNT_WINDOW)
             .order_by(SignInAttempts.created_at.desc())
-            .limit(MAX_FAILED)
+            .limit(ACCOUNT_MAX_FAILED)
         )).all()
     )
-    if len(rows) < MAX_FAILED:
+    if len(rows) < ACCOUNT_MAX_FAILED:
         return 0
-    latest = rows[0] if rows[0].tzinfo else rows[0].replace(tzinfo=timezone.utc)
-    return max(1, int((latest + LOCK_WINDOW - _now()).total_seconds()))
+    if ip and await session.scalar(
+        select(
+            select(SignInAttempts.id)
+            .where(SignInAttempts.identifier == ident, SignInAttempts.ip_address == ip, SignInAttempts.result == "signed_in", SignInAttempts.created_at >= now - NEW_DEVICE_MEMORY)
+            .exists()
+        )
+    ):
+        return 0
+    # Open again once the oldest of these leaves the hour.
+    return max(1, int((_aware(rows[-1]) + ACCOUNT_WINDOW - now).total_seconds()))
 
 
 async def is_new_device(session, user_id: int, request) -> bool:

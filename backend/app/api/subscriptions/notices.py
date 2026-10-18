@@ -66,8 +66,10 @@ def day(value: datetime | None) -> str:
 
 
 def rupees(paise: int | None) -> str:
-    amount = (paise or 0) / 100
-    return f"₹{amount:,.0f}" if amount == int(amount) else f"₹{amount:,.2f}"
+    from app.core.money import from_paise
+
+    amount = from_paise(paise)
+    return f"₹{amount:,.0f}" if amount == amount.to_integral_value() else f"₹{amount:,.2f}"
 
 
 def billing_url() -> str:
@@ -91,12 +93,12 @@ def _cycle_word(subscription) -> str:
 
 
 def _price(subscription) -> str | None:
-    from app.api.subscriptions.service import price_for
+    """What the club pays a cycle: the price it signed up at."""
+    from app.api.subscriptions.service import price_of
 
-    plan = getattr(subscription, "plan", None)
-    if plan is None:
+    if getattr(subscription, "plan", None) is None and getattr(subscription, "price_paise", None) is None:
         return None
-    return f"{rupees(price_for(plan, subscription.cycle))} a {_cycle_word(subscription)}"
+    return f"{rupees(price_of(subscription))} a {_cycle_word(subscription)}"
 
 
 def _data(subscription, **extra) -> dict:

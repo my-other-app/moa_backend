@@ -83,7 +83,9 @@ def _this_month(now: datetime) -> tuple[int, int]:
 
 
 def _paise(rupees) -> int:
-    return int((Decimal(rupees or 0) * 100).quantize(Decimal(1)))
+    from app.core.money import to_paise
+
+    return to_paise(rupees or 0)
 
 
 # ─── Run rate ────────────────────────────────────────────────────────────
@@ -224,7 +226,8 @@ async def run_rate(session, now: datetime) -> dict:
     last = await _last_charges(session, [row.razorpay_subscription_id for row in renewals])
     upcoming = 0
     for row in renewals:
-        guess = int(row.mrr_paise or 0) * (12 if _cycle(row) == BillingCycle.yearly.value else 1)
+        # What it pays a cycle, when Razorpay has not charged it before.
+        guess = service.price_of(row)
         upcoming += last.get(row.razorpay_subscription_id, guess)
 
     by_plan = []

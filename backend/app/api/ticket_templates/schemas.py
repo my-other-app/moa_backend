@@ -44,6 +44,12 @@ class TicketTemplateConfig(BaseModel):
     secondary_logo_url: Optional[str] = Field(default=None, description="Auto-populated from secondary_logo upload")
     background_image_url: Optional[str] = Field(default=None, description="Auto-populated from background_image upload")
 
+    # The bucket keys behind those links. The config keeps these; the links
+    # above are signed afresh whenever it is read (app/api/templates_images).
+    logo_key: Optional[str] = Field(default=None, description="The logo upload's key; set by the server")
+    secondary_logo_key: Optional[str] = Field(default=None, description="The secondary_logo upload's key; set by the server")
+    background_image_key: Optional[str] = Field(default=None, description="The background_image upload's key; set by the server")
+
 
 class TicketTemplateCreate(BaseModel):
     name: str = Field(..., max_length=100)
