@@ -11,7 +11,6 @@ from starlette import status
 from sqlalchemy.exc import IntegrityError, StatementError
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIMiddleware
 
 from app.api.router import api_router
 from app.config import settings
@@ -20,6 +19,7 @@ from app.response import ErrorResponse, CustomHTTPException
 from app.core.utils.discord import report_error
 from app.core.middlewares.process_time_middleware import ProcessingTimeMiddleware
 from app.core.middlewares.security_headers_middleware import SecurityHeadersMiddleware
+from app.core.middlewares.rate_limit_middleware import RateLimitMiddleware
 from app.core.rate_limit import limiter
 from app.core import redact
 # Tells the public site when an event's or a club's page changes (inert without APP_SITE_REVALIDATE_SECRET).
@@ -177,7 +177,8 @@ application.add_middleware(
 )
 application.add_middleware(ProcessingTimeMiddleware)
 application.add_middleware(SecurityHeadersMiddleware)
-application.add_middleware(SlowAPIMiddleware)
+# slowapi's checks, as plain ASGI (app/core/middlewares/rate_limit_middleware.py).
+application.add_middleware(RateLimitMiddleware)
 # Outermost, so the rate limiter and everything after it see the caller
 # rather than Docker's bridge address (app.core.net).
 from app.core.net import ClientAddressMiddleware  # noqa: E402
