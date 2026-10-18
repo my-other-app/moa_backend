@@ -26,6 +26,7 @@ from app.api.clubs.schemas import ClubSocialsCreate, CreateClub
 from app.api.users.models import UserProfiles, UserTypes, Users
 from app.api.users.service import create_user
 from app.api.interests.models import Interests
+from app.api.interests.topics import interest_out, topics_of
 from app.core.validations.schema import validate_relations
 from app.api.orgs.models import Organizations
 from app.api.events.models import Events, EventRegistrationsLink, EventRatingsLink
@@ -305,7 +306,7 @@ async def club_for_answer(session: AsyncSession, club_id: int) -> Clubs:
     return await session.scalar(
         select(Clubs)
         .where(Clubs.id == club_id)
-        .options(selectinload(Clubs.interests), selectinload(Clubs.org))
+        .options(selectinload(Clubs.interests).joinedload(Interests.category), selectinload(Clubs.org))
         .execution_options(include_deleted=True, populate_existing=True)
     )
 
@@ -411,7 +412,7 @@ async def list_deleted_clubs(session: AsyncSession, limit: int = 20, offset: int
         await session.scalars(
             select(Clubs)
             .where(Clubs.is_deleted == True)
-            .options(selectinload(Clubs.interests))
+            .options(selectinload(Clubs.interests).joinedload(Interests.category))
             .order_by(Clubs.deleted_at.desc().nulls_last(), Clubs.id.desc())
             .limit(limit)
             .offset(offset)
@@ -453,11 +454,8 @@ async def list_deleted_clubs(session: AsyncSession, limit: int = 20, offset: int
                 "created_at": club.created_at,
                 "deleted_at": club.deleted_at,
                 "is_verified": club.is_verified,
-                "interests": [
-                    {"id": i.id, "name": i.name, "icon": i.icon,
-                     "icon_type": getattr(i.icon_type, "value", i.icon_type)}
-                    for i in (club.interests or [])
-                ],
+                "interests": [interest_out(i) for i in (club.interests or [])],
+                "topics": topics_of(club.interests),
                 "org": {"id": club.org_id, "name": orgs[club.org_id]} if club.org_id in orgs else None,
                 "owner_email": owners.get(club.user_id),
                 "requested_plan": club.requested_plan,
@@ -584,7 +582,7 @@ async def get_all_clubs(
         following = sa_false()
     # The counter as a column of the row read now: a club this session already
     # holds would otherwise answer with the count it was loaded with.
-    query = select(Clubs, followers.label("followers_count"), following.label("is_following")).where(Clubs.is_deleted == False).options(selectinload(Clubs.interests))  # noqa: E712
+    query = select(Clubs, followers.label("followers_count"), following.label("is_following")).where(Clubs.is_deleted == False).options(selectinload(Clubs.interests).joinedload(Interests.category))  # noqa: E712
 
     if with_admin_fields:
         query = query.options(selectinload(Clubs.org), selectinload(Clubs.user))
@@ -642,19 +640,8 @@ async def get_all_clubs(
             "is_following": bool(is_following_),
         }
 
-        # Serialize interests
-        if club.interests:
-            club_dict["interests"] = [
-                {
-                    "id": i.id,
-                    "name": i.name,
-                    "icon": i.icon,
-                    "icon_type": i.icon_type.value if hasattr(i.icon_type, "value") else str(i.icon_type) if i.icon_type else None,
-                }
-                for i in club.interests
-            ]
-        else:
-            club_dict["interests"] = []
+        club_dict["interests"] = [interest_out(i) for i in club.interests or []]
+        club_dict["topics"] = topics_of(club.interests)
 
         clubs_response.append(club_dict)
 
@@ -897,7 +884,7 @@ async def get_club_details(
         select(Clubs)
         .where(Clubs.id == club_id)
         .options(
-            selectinload(Clubs.interests),
+            selectinload(Clubs.interests).joinedload(Interests.category),
             joinedload(Clubs.socials),
             joinedload(Clubs.org),
         )
@@ -1007,18 +994,8 @@ async def get_club_details(
     else:
         club_dict["socials"] = None
 
-    if club.interests:
-        club_dict["interests"] = [
-            {
-                "id": i.id,
-                "name": i.name,
-                "icon": i.icon,
-                "icon_type": i.icon_type.value if hasattr(i.icon_type, "value") else str(i.icon_type) if i.icon_type else None,
-            }
-            for i in club.interests
-        ]
-    else:
-        club_dict["interests"] = []
+    club_dict["interests"] = [interest_out(i) for i in club.interests or []]
+    club_dict["topics"] = topics_of(club.interests)
 
     return club_dict
 

@@ -437,6 +437,7 @@ async def test_clubs_search(client, world):
         "id": a.id, "name": "Circuit Society", "slug": a.slug, "logo": None, "cover": None, "tagline": "Build things that think.",
         "location_name": "Bengaluru", "followers": 1, "upcoming_events": 3, "interests": ["Robotics", "AI", "IoT"],
         "distance_km": None, "website_url": None,
+        "topics": [{"id": world["interests"]["AI"].category_id, "slug": "discover-interests", "name": "Discover interests", "color": None}],
     }
     assert cards[b.id]["followers"] == 3 and cards[b.id]["upcoming_events"] == 2 and sorted(cards[b.id]["interests"]) == ["AI", "Music"]
     top = {i["name"]: i["clubs"] for i in body["interests"]}

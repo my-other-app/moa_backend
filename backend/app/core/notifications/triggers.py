@@ -11,7 +11,7 @@ Each trigger:
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Optional, Sequence
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -67,16 +67,17 @@ async def notify_followers_of_new_event(
 
 async def notify_users_by_interest(
     session: AsyncSession,
-    category_id: int,
+    category_id: int | Sequence[int],
     category_name: str,
     club_id: int,
     event_id: int,
     event_name: str,
 ) -> Optional[int]:
     """
-    Notify users whose interests match the event category.
+    Notify users who picked an interest under the event's topics.
 
-    Trigger 2: Notify users whose interests match the event category.
+    Trigger 2. `category_id`: a topic (interest category) id, or the
+    event's topics' ids; `category_name` names the first in the push.
     Excludes users who are already followers (they got Trigger 1).
 
     Capped, so one event cannot push to every user on the platform: at most
@@ -99,7 +100,10 @@ async def notify_users_by_interest(
     title = f"📌 Event in {category_name}"
     body = f"New event matching your interests: {event_name}"
     day_ago = datetime.now(timezone.utc) - timedelta(days=1)
-    in_category = select(Interests.id).where(Interests.category_id == category_id, Interests.is_deleted == False)  # noqa: E712
+    topic_ids = [category_id] if isinstance(category_id, int) else list(category_id)
+    if not topic_ids:
+        return 0
+    in_category = select(Interests.id).where(Interests.category_id.in_(topic_ids), Interests.is_deleted == False)  # noqa: E712
     follows = (
         select(ClubUsersLink.id)
         .where(
@@ -138,7 +142,7 @@ async def notify_users_by_interest(
         return await _tell(
             s, audience, title=title, body=body, type="nearby_event", from_club_id=club_id, event_id=event_id,
             data={"category_name": category_name, "event_name": event_name},
-            push_data={"type": "interest_match", "event_id": str(event_id), "category_id": str(category_id)},
+            push_data={"type": "interest_match", "event_id": str(event_id), "category_id": str(topic_ids[0])},
         )
 
     return await fanout.dispatch(session, job, name=f"interest:{event_id}")

@@ -6,7 +6,8 @@ the new queries are held to: same rows, same order, same numbers.
 With the rules changed since on purpose (discover_integrity): every word of
 a query must match (a word under three letters as a whole word), "popular"
 is popularity.value (attention decayed by age), and For You spreads its
-first cards over clubs.
+first cards over clubs and counts an interest the user did not pick, under
+one of their topics, for W_SIBLING_INTEREST (topics).
 
 Only what the comparisons need: ids, totals, distances and counts, not the
 cards' presentation, which the new code still builds with the same functions.
@@ -18,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import Float, and_, case, cast, exists, func, literal, or_, select, text
-from sqlalchemy.orm import contains_eager, joinedload
+from sqlalchemy.orm import aliased, contains_eager, joinedload
 
 from app.api.closeout.models import EventStatus, RetentionMode, RetentionState
 from app.api.clubs.models import ClubInterestsLink, Clubs, ClubUsersLink
@@ -26,6 +27,7 @@ from app.api.discover import geo, popularity
 from app.api.discover.service import WHOLE_WORD_BELOW, window, words_of
 from app.api.events.models import EventCategories, EventInterestsLink, EventRegistrationsLink, Events
 from app.api.events import recommendations as rec
+from app.api.interests.models import Interests
 from app.api.users.models import UserInterests, UserProfiles
 
 SHOWN = (EventStatus.published, EventStatus.live)
@@ -270,7 +272,17 @@ async def for_you(session, user_id: int, limit: int = 10, offset: int = 0):
         .where(EventRegistrationsLink.event_id == Events.id, EventRegistrationsLink.is_deleted == False)  # noqa: E712
         .scalar_subquery()
     )
-    interest_score = rec.W_INTEREST * func.least(shared_interests, rec.INTEREST_CAP)
+    mine = aliased(Interests, name="ref_mine")
+    my_topics = select(mine.category_id).where(mine.id.in_(user_interest_ids), mine.is_deleted == False)  # noqa: E712
+    sibling_interests = (
+        select(func.count()).select_from(EventInterestsLink).join(Interests, Interests.id == EventInterestsLink.interest_id)
+        .where(
+            EventInterestsLink.event_id == Events.id, EventInterestsLink.is_deleted == False,  # noqa: E712
+            EventInterestsLink.interest_id.notin_(user_interest_ids), Interests.is_deleted == False, Interests.category_id.in_(my_topics),  # noqa: E712
+        )
+        .scalar_subquery()
+    )
+    interest_score = rec.W_INTEREST * func.least(shared_interests, rec.INTEREST_CAP) + rec.W_SIBLING_INTEREST * func.least(sibling_interests, 1)
     club_score = rec.W_PINNED * func.least(is_pinned, 1) + rec.W_FOLLOWING * func.least(is_following, 1)
     org_score = rec.W_SAME_ORG * case((and_(Clubs.org_id.isnot(None), Clubs.org_id == user_org_id), 1), else_=0)
     history_score = rec.W_CLUB_HISTORY * func.least(club_history, 1) + (rec.W_CATEGORY_HISTORY * func.least(category_history, 1))

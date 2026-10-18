@@ -10,7 +10,7 @@ from fastapi.exceptions import RequestValidationError
 
 from app.api.clubs.schemas import ClubPublic, ClubPublicMin
 from app.api.users.schemas import UserPublic
-from app.api.interests.schemas import InterestPublic
+from app.api.interests.schemas import InterestPublic, TopicRef
 from app.response import CustomHTTPException
 from app.core.response.base_model import CustomBaseModel
 from app.api.auth.schemas import Token
@@ -414,6 +414,9 @@ class EventInterestDetail(CustomBaseModel):
     name: str = Field(...)
     icon: str | None = Field(None)
     icon_type: str | None = Field(None)
+    # Its topic (GET /interests/list has the tree), and its address.
+    category_id: int | None = Field(None)
+    slug: str | None = Field(None)
 
     @field_validator("icon_type", mode="before")
     @classmethod
@@ -460,6 +463,8 @@ class EventCreateUpdateResponse(CustomBaseModel):
     club: EventClubDetail | None = Field(None)
     category: EventCategoryDetail = Field(...)
     interests: list[EventInterestDetail] | None = Field(None)
+    # The distinct topics of its interests, in topic order.
+    topics: list[TopicRef] = Field(default_factory=list)
     additional_details: list[EventAdditionalDetail] | None = Field(None)
     event_guidelines: str | None = Field(None)
     max_participants: int | None = Field(None)
@@ -543,6 +548,7 @@ class EventAdminListResponse(CustomBaseModel):
     category: EventCategoryDetail | None = Field(None)
     club: EventClubDetail | None = Field(None)
     interests: list[EventInterestDetail] | None = Field(None)
+    topics: list[TopicRef] = Field(default_factory=list)
 
     #: How many people registered, and how many were marked present.
     #:
@@ -587,6 +593,8 @@ class EventDetailResponse(CustomBaseModel):
     club: EventClubDetail | None = Field(None)
     category: EventCategoryDetail = Field(...)
     interests: list[EventInterestDetail] | None = Field(None)
+    # The distinct topics of its interests, in topic order.
+    topics: list[TopicRef] = Field(default_factory=list)
     additional_details: list[EventAdditionalDetail] | None = Field(None)
     rating: float = Field(...)
     total_rating: int = Field(...)

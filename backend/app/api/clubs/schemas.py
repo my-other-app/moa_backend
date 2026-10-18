@@ -4,7 +4,7 @@ from fastapi import File, Form, UploadFile
 from pydantic import BaseModel, EmailStr, Field, HttpUrl, field_validator
 from app.api.users.schemas import UserPublic
 from app.core.storage.fields import S3Image
-from app.api.interests.schemas import InterestPublic
+from app.api.interests.schemas import InterestPublic, TopicRef
 from app.core.response.base_model import CustomBaseModel
 from app.api.discover.geo import pin_from_form
 
@@ -304,6 +304,14 @@ class ClubInterestDetailMin(CustomBaseModel):
     name: str = Field(..., min_length=2)
     icon: str | None = Field(None)
     icon_type: str | None = Field(None)
+    # Its topic (GET /interests/list has the tree), and its address.
+    category_id: int | None = Field(None)
+    slug: str | None = Field(None)
+
+    @field_validator("icon_type", mode="before")
+    @classmethod
+    def _icon_type_value(cls, value):
+        return getattr(value, "value", value)
 
 
 class ClubOrgDetail(CustomBaseModel):
@@ -341,6 +349,8 @@ class ClubPublicDetailResponse(CustomBaseModel):
     past_events: int = Field(0)
     socials: ClubSocials | None = Field(None)
     interests: List[ClubInterestDetailMin] | None = Field(None)
+    # The distinct topics of its interests, in topic order.
+    topics: list[TopicRef] = Field(default_factory=list)
     followers_count: int = Field(...)
     contact_phone: str | None = Field(None)
     contact_email: str | None = Field(None)
@@ -400,6 +410,7 @@ class ClubAdminDetailResponse(CustomBaseModel):
     created_at: datetime = Field(...)
     is_verified: bool = Field(...)
     interests: List[ClubInterestDetailMin] | None = Field(None)
+    topics: list[TopicRef] = Field(default_factory=list)
 
     # The four the admin list shows per row. All default, because the same
     # schema also serialises approve/reject, which return one club built
@@ -474,6 +485,8 @@ class ClubListResponse(CustomBaseModel):
     followers_count: int = Field(...)
     is_following: bool = Field(...)
     interests: List[ClubInterestDetailMin] | None = Field(None)
+    # The distinct topics of its interests, in topic order.
+    topics: list[TopicRef] = Field(default_factory=list)
     # org_id: int | None = Field(None)
 
 

@@ -133,8 +133,11 @@ def test_only_the_public_reads_are_the_sites():
     assert {
         "app.api.discover.router.locate", "app.api.discover.router.event_page", "app.api.discover.router.sitemap",
         "app.api.subscriptions.router.pricing", "app.api.interests.router.list_interests",
+        "app.api.interests.router.list_topics", "app.api.interests.router.get_topic",
     } <= names
-    assert not any(n.startswith("app.api.interests.") and n != "app.api.interests.router.list_interests" for n in names)
+    # The tree and the topics are the site's reads; the admin's changes to them are not.
+    public_interests = {"app.api.interests.router.list_interests", "app.api.interests.router.list_topics", "app.api.interests.router.get_topic"}
+    assert not any(n.startswith("app.api.interests.") and n not in public_interests for n in names)
     assert not any(n.startswith(("app.api.auth.", "app.api.club_access.", "app.api.threads.", "app.api.live.")) for n in names)
     assert not any("geo_backfill" in n or "reconcile" in n for n in names)  # the admin's discover routes are not reads
     # The hook the bucket hangs on: slowapi's every @limit-ed route goes through it.

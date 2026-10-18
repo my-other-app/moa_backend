@@ -63,7 +63,8 @@ from app.api.clubs.models import ClubInterestsLink, Clubs, ClubSocials, ClubTeam
 from app.api.discover import cache, cursor as cursors, geo, places, stats as site_stats, upcoming
 from app.api.events.documents import EVENT_TIMEZONE
 from app.api.events.models import EventCategories, EventInterestsLink, Events, ends_at_sql, span_sql
-from app.api.interests.models import Interests
+from app.api.interests import topics as topic_refs
+from app.api.interests.models import InterestCategory, Interests
 from app.api.organisers import service as organisers
 from app.api.sites import service as sites
 from app.api.sites.models import ClubSites
@@ -448,11 +449,48 @@ def _popularity():
     return Events.popularity
 
 
-def _filters(*, category: Optional[int] = None, type_: str = "any", price: str = "any", club_id: Optional[int] = None) -> list:
+def _topic_id(topic: str):
+    """The topic a `topic` parameter names, as SQL: its id when it is a
+    number, else the live topic with that slug, in any case (none: nothing
+    matches)."""
+    ref = topic.strip().lower()
+    if ref.isascii() and ref.isdigit() and int(ref) < 2**31:
+        return int(ref)
+    return select(InterestCategory.id).where(InterestCategory.slug == ref, InterestCategory.is_deleted == False).scalar_subquery()  # noqa: E712
+
+
+def picks(link, link_owner, owner, *, topic: Optional[str] = None, interest: Optional[int] = None):
+    """`owner` (Events.id, Clubs.id) picked `interest`, or any interest under
+    `topic` (a slug or an id), through its `link` table (whose `link_owner`
+    column holds the owner); None for neither.
+    `interest` wins when both are given (it is the narrower, and when the two
+    disagree, the one the visitor chose last).
+
+    An EXISTS per row on the link's (owner) index, or, where the planner
+    prefers, a semi-join from the topic's interests through the link's
+    (interest_id, owner) index: either way the event or club's own walk
+    (its date or popularity order) stays the plan's spine."""
+    if interest is not None:
+        return exists(select(link.id).where(link_owner == owner, link.interest_id == interest, link.is_deleted == False))  # noqa: E712
+    if topic and topic.strip():
+        return exists(
+            select(link.id).join(Interests, Interests.id == link.interest_id)
+            .where(link_owner == owner, link.is_deleted == False, Interests.is_deleted == False, Interests.category_id == _topic_id(topic))  # noqa: E712
+        )
+    return None
+
+
+def _filters(
+    *, category: Optional[int] = None, type_: str = "any", price: str = "any", club_id: Optional[int] = None,
+    topic: Optional[str] = None, interest: Optional[int] = None,
+) -> list:
     """What a visitor narrows a list by, beside when and where."""
     conds: list = []
     if category:
         conds.append(Events.category_id == category)
+    picked = picks(EventInterestsLink, EventInterestsLink.event_id, Events.id, topic=topic, interest=interest)
+    if picked is not None:
+        conds.append(picked)
     if type_ == "online":
         conds.append(Events.is_online == True)  # noqa: E712
     elif type_ == "in_person":
@@ -469,6 +507,7 @@ def _filters(*, category: Optional[int] = None, type_: str = "any", price: str =
 def _conditions(
     now: datetime, since: datetime, *, when: str = "any", category: Optional[int] = None, type_: str = "any", price: str = "any",
     club_id: Optional[int] = None, days: Optional[tuple[Optional[datetime], Optional[datetime]]] = None,
+    topic: Optional[str] = None, interest: Optional[int] = None,
 ) -> list:
     """What is on, narrowed. `days`, a (start, end) from date_range, replaces `when`."""
     conds = _visible_where(now, since)
@@ -480,7 +519,7 @@ def _conditions(
             conds.append(_end_expr() >= start)
         if end is not None:
             conds.append(Events.event_datetime < end)
-    return conds + _filters(category=category, type_=type_, price=price, club_id=club_id)
+    return conds + _filters(category=category, type_=type_, price=price, club_id=club_id, topic=topic, interest=interest)
 
 
 def filtered(now: datetime, since: datetime, *, when: str = "any", category: Optional[int] = None, type_: str = "any", price: str = "any", q: Optional[str] = None, club_id: Optional[int] = None):
@@ -504,6 +543,40 @@ async def going_counts(session, ids: list[int]) -> dict[int, int]:
         return {}
     rows = await session.execute(select(Events.id, Events.going_count).where(Events.id.in_(ids)))
     return {k: int(v) for k, v in rows.all() if v}
+
+
+async def card_extras(session, ids: list[int]) -> tuple[dict[int, int], dict[int, list[dict]]]:
+    """What a page of cards needs beside their rows, in one statement: how
+    many are going to each (the counter, read as going_counts reads it) and
+    each event's topics (its interests' topics, in topic order). An event's
+    row comes back once per interest it picked: a few at most."""
+    if not ids:
+        return {}, {}
+    link = EventInterestsLink
+    rows = await session.execute(
+        select(
+            Events.id, Events.going_count,
+            InterestCategory.id, InterestCategory.slug, InterestCategory.name, InterestCategory.color, InterestCategory.sort_order,
+        )
+        .select_from(Events)
+        .outerjoin(link, and_(link.event_id == Events.id, link.is_deleted == False))  # noqa: E712
+        .outerjoin(Interests, and_(Interests.id == link.interest_id, Interests.is_deleted == False))  # noqa: E712
+        .outerjoin(InterestCategory, and_(InterestCategory.id == Interests.category_id, InterestCategory.is_deleted == False))  # noqa: E712
+        .where(Events.id.in_(ids))
+    )
+    going: dict[int, int] = {}
+    topics: dict[int, dict[int, tuple]] = {}
+    for event_id, count, *topic in rows.all():
+        if count:
+            going[event_id] = int(count)
+        if topic[0] is not None:
+            topics.setdefault(event_id, {}).setdefault(topic[0], tuple(topic))
+    return going, {k: _topic_list(v.values()) for k, v in topics.items()}
+
+
+def _topic_list(rows) -> list[dict]:
+    """(id, slug, name, color, sort_order) rows as topic refs, in topic order."""
+    return [dict(id=t[0], slug=t[1], name=t[2], color=t[3]) for t in sorted(rows, key=lambda t: (t[4] or 0, (t[2] or "").lower(), t[0]))]
 
 
 def _event_km(e: Events, here) -> Optional[float]:
@@ -543,7 +616,8 @@ def status_of(e: Events, now: datetime, going: int) -> str:
     return "upcoming"
 
 
-def card(e: Events, now: datetime, going: int, distance: Optional[float] = None) -> dict:
+def card(e: Events, now: datetime, going: int, distance: Optional[float] = None, topics: Optional[list] = None) -> dict:
+    """`going` and `topics` as card_extras reads them for the whole page."""
     club = e.club
     cat = e.category
     return dict(
@@ -570,6 +644,7 @@ def card(e: Events, now: datetime, going: int, distance: Optional[float] = None)
         # No publish time is kept; when the event was made stands in for it (sort=newest).
         created_at=_iso(e.created_at),
         updated_at=_iso(e.updated_at),
+        topics=[dict(t) for t in topics or ()],
     )
 
 
@@ -585,10 +660,10 @@ def _placed(cards_: list[dict], here) -> list[dict]:
     return [dict(c, distance_km=_card_km(c, here)) for c in cards_]
 
 
-async def cards(session, rows: list[Events], now: datetime, here=None, going: Optional[dict] = None) -> list[dict]:
-    if going is None:
-        going = await going_counts(session, [e.id for e in rows])
-    return [card(e, now, going.get(e.id, 0), _event_km(e, here)) for e in rows]
+async def cards(session, rows: list[Events], now: datetime, here=None, extras: Optional[tuple] = None) -> list[dict]:
+    """`extras`: card_extras for these rows (or more), when the caller has it."""
+    going, topics = extras if extras is not None else await card_extras(session, [e.id for e in rows])
+    return [card(e, now, going.get(e.id, 0), _event_km(e, here), topics.get(e.id)) for e in rows]
 
 
 async def category_counts(session, now: datetime, since: Optional[datetime] = None) -> dict[int, int]:
@@ -602,6 +677,41 @@ async def category_counts(session, now: datetime, since: Optional[datetime] = No
         .group_by(Events.category_id)
     )
     return {k: int(v) for k, v in rows.all()}
+
+
+async def topic_counts(session, now: datetime, since: Optional[datetime] = None) -> dict[str, dict[int, int]]:
+    """What is on in each topic and interest, and the listed clubs that pick
+    each topic, in three grouped statements: {"topic_events", "interest_events",
+    "topic_clubs"}, each {id: count}. An event with two interests in one
+    topic counts once for it. topic_refs.with_counts keeps the answer."""
+    since = since or await upcoming.since(session, now)
+    link = EventInterestsLink
+    events = func.count(func.distinct(Events.id))
+
+    def on(key):
+        return (
+            select(key, events).select_from(Events).join(Clubs, Clubs.id == Events.club_id)
+            .join(link, and_(link.event_id == Events.id, link.is_deleted == False))  # noqa: E712
+            .join(Interests, and_(Interests.id == link.interest_id, Interests.is_deleted == False))  # noqa: E712
+            .where(*_visible_where(now, since))
+            .group_by(key)
+        )
+
+    by_topic = await session.execute(on(Interests.category_id))
+    by_interest = await session.execute(on(Interests.id))
+    clubs = await session.execute(
+        select(Interests.category_id, func.count(func.distinct(Clubs.id)))
+        .select_from(Clubs)
+        .join(ClubInterestsLink, and_(ClubInterestsLink.club_id == Clubs.id, ClubInterestsLink.is_deleted == False))  # noqa: E712
+        .join(Interests, and_(Interests.id == ClubInterestsLink.interest_id, Interests.is_deleted == False))  # noqa: E712
+        .where(*_club_visible())
+        .group_by(Interests.category_id)
+    )
+    return dict(
+        topic_events={k: int(v) for k, v in by_topic.all()},
+        interest_events={k: int(v) for k, v in by_interest.all()},
+        topic_clubs={k: int(v) for k, v in clubs.all()},
+    )
 
 
 async def _counts_kept(session, now: datetime, since: Optional[datetime] = None) -> dict[int, int]:
@@ -706,9 +816,12 @@ async def search_events(
     session, where: dict, *, q: Optional[str], when: str, category: Optional[int], type_: str, price: str,
     radius_km: float, sort: Optional[str], offset: int, limit: int, now: Optional[datetime] = None,
     from_: Optional[date] = None, to: Optional[date] = None, after: Optional[str] = None,
+    topic: Optional[str] = None, interest: Optional[int] = None,
 ) -> dict:
     """`from_`/`to` (calendar days in India, both ends counted), when either
     is given, replace `when`: an event matches if it touches that stretch.
+    `topic` (a slug or an id) and `interest`: events with that interest, or
+    any interest under that topic (`interest` wins when both are given).
 
     `sort` left out is relevance with words, else date. `total` is exact up
     to COUNT_CAP; past it, COUNT_CAP with `total_capped` (the pages go on
@@ -720,7 +833,7 @@ async def search_events(
     here = _here(where)
     days = date_range(from_, to) if (from_ is not None or to is not None) else None
     since = await upcoming.since(session, now)
-    conds = _conditions(now, since, when=when, category=category, type_=type_, price=price, days=days)
+    conds = _conditions(now, since, when=when, category=category, type_=type_, price=price, days=days, topic=topic, interest=interest)
     radius = here is not None and type_ != "online" and radius_km > 0
     if radius:
         conds.append(_within(here, radius_km))
@@ -760,11 +873,12 @@ async def search_events(
             if len(page) > limit:
                 page = page[:limit]
                 next_cursor = cursors.encode(f"events:{sort}", keyed[limit - 1])
-    going = await going_counts(session, [e.id for e in page])
+    going, topics = await card_extras(session, [e.id for e in page])
     cats = [dict(id=c["id"], name=c["name"], upcoming=c["upcoming"]) for c in await categories(session, now, only_upcoming=True, since=since)]
     return dict(
-        items=[card(e, now, going.get(e.id, 0), _event_km(e, here)) for e in page],
-        total=total, total_capped=capped, offset=offset, limit=limit, where=where, categories=cats, next_cursor=next_cursor,
+        items=[card(e, now, going.get(e.id, 0), _event_km(e, here), topics.get(e.id)) for e in page],
+        total=total, total_capped=capped, offset=offset, limit=limit, where=where, categories=cats,
+        topics=await topic_refs.facet(session, now), next_cursor=next_cursor,
     )
 
 
@@ -861,8 +975,11 @@ async def _day_counts(session, first: date, after: date, conds: list) -> dict[st
     return {d.date().isoformat(): int(n) for d, n in rows.all() if n}
 
 
-async def _calendar(session, now: datetime, first: date, after: date, *, words: Optional[str], category, type_: str, price: str, here, radius_km: float) -> dict[str, int]:
-    conds = _public_where(now) + [_in(Events.lifecycle, HELD)] + _filters(category=category, type_=type_, price=price)
+async def _calendar(
+    session, now: datetime, first: date, after: date, *, words: Optional[str], category, type_: str, price: str, here, radius_km: float,
+    topic: Optional[str] = None, interest: Optional[int] = None,
+) -> dict[str, int]:
+    conds = _public_where(now) + [_in(Events.lifecycle, HELD)] + _filters(category=category, type_=type_, price=price, topic=topic, interest=interest)
     if here is not None:
         conds.append(_within(here, radius_km))
     counts = await _day_counts(session, first, after, conds + ([_event_words(words)] if words else []))
@@ -875,7 +992,7 @@ async def _calendar(session, now: datetime, first: date, after: date, *, words: 
 
 async def calendar(
     session, where: dict, *, month: str, q: Optional[str], category: Optional[int], type_: str, price: str,
-    radius_km: float, now: Optional[datetime] = None,
+    radius_km: float, now: Optional[datetime] = None, topic: Optional[str] = None, interest: Optional[int] = None,
 ) -> dict:
     """How many public events touch each day of `month` (days in India), with
     the search's filters: what is on or to come as the search shows it, and
@@ -900,9 +1017,12 @@ async def calendar(
         c = geo.cell(*here)
         centre = geo.cell_centre(c) if geo.cell_is_cacheable(c) else here
     place = (centre, radius_km) if radius else (None, None)
-    key = ("calendar", month, words, category, type_, price, place)
+    # `interest` wins over `topic` (picks), so a topic beside an interest is no part of the answer or its key.
+    topic = None if interest is not None else ((topic or "").strip() or None)
+    key = ("calendar", month, words, category, type_, price, place, topic, interest)
     days = await cache.kept(cache.shared, key, lambda s, n: _calendar(
         s, n, first, after, words=words, category=category, type_=type_, price=price, here=centre, radius_km=radius_km,
+        topic=topic, interest=interest,
     ), session, now)
     return dict(month=month, days=dict(days))
 
@@ -938,19 +1058,28 @@ async def _upcoming_counts(session, ids: list[int], now: datetime, since: dateti
     return {k: int(v) for k, v in rows.all()}
 
 
-async def _interest_names(session, ids: list[int]) -> dict[int, list[str]]:
-    out: dict[int, list[str]] = {i: [] for i in ids}
+async def _club_interests(session, ids: list[int]) -> tuple[dict[int, list[str]], dict[int, list[dict]]]:
+    """Each club's first three interests' names, and the topics of all of
+    them (in topic order), from one statement."""
+    names: dict[int, list[str]] = {i: [] for i in ids}
+    topics: dict[int, dict[int, tuple]] = {i: {} for i in ids}
     if ids:
         rows = await session.execute(
-            select(ClubInterestsLink.club_id, Interests.name)
+            select(
+                ClubInterestsLink.club_id, Interests.name,
+                InterestCategory.id, InterestCategory.slug, InterestCategory.name, InterestCategory.color, InterestCategory.sort_order,
+            )
             .join(Interests, Interests.id == ClubInterestsLink.interest_id)
+            .outerjoin(InterestCategory, and_(InterestCategory.id == Interests.category_id, InterestCategory.is_deleted == False))  # noqa: E712
             .where(ClubInterestsLink.club_id.in_(ids), ClubInterestsLink.is_deleted == False, Interests.is_deleted == False)  # noqa: E712
             .order_by(ClubInterestsLink.id)
         )
-        for club_id, name in rows.all():
-            if len(out[club_id]) < 3 and name not in out[club_id]:
-                out[club_id].append(name)
-    return out
+        for club_id, name, *topic in rows.all():
+            if len(names[club_id]) < 3 and name not in names[club_id]:
+                names[club_id].append(name)
+            if topic[0] is not None:
+                topics[club_id].setdefault(topic[0], tuple(topic))
+    return names, {k: _topic_list(v.values()) for k, v in topics.items()}
 
 
 async def _published(session, ids: list[int]) -> set[int]:
@@ -965,7 +1094,7 @@ async def club_cards(session, clubs: list[Clubs], now: datetime, *, since: datet
     if followers is None:
         followers = await follower_counts(session, ids)
     upcoming = await _upcoming_counts(session, ids, now, since)
-    interests = await _interest_names(session, ids)
+    interests, topics = await _club_interests(session, ids)
     published = await _published(session, ids)
     # A club's own domain, while it is active, is where its website is.
     own = await active_hosts(session, published)
@@ -977,6 +1106,7 @@ async def club_cards(session, clubs: list[Clubs], now: datetime, *, since: datet
             tagline=c.tagline, location_name=c.location_name,
             followers=followers.get(c.id, 0), upcoming_events=upcoming.get(c.id, 0),
             interests=interests.get(c.id, []),
+            topics=topics.get(c.id, []),
             distance_km=round(distances[c.id], 1) if distances.get(c.id) is not None else None,
             website_url=(f"https://{own[c.id]}" if c.id in own else sites.public_url(c)) if c.id in published else None,
         )
@@ -1001,14 +1131,6 @@ def _club_words_fuzzy(q: str):
         else:
             arms.append(or_(Clubs.name.op("%>")(w), Clubs.tagline.op("%>")(w), Clubs.location_name.op("%>")(w)))
     return and_(*arms) if arms else true()
-
-
-def _club_interest(interest: int):
-    return exists(
-        select(ClubInterestsLink.id).where(
-            ClubInterestsLink.club_id == Clubs.id, ClubInterestsLink.interest_id == interest, ClubInterestsLink.is_deleted == False,  # noqa: E712
-        )
-    )
 
 
 def _popular_clubs_order():
@@ -1038,19 +1160,22 @@ async def top_interests(session, limit: int = 16, now: Optional[datetime] = None
 
 async def search_clubs(
     session, where: dict, *, q: Optional[str], interest: Optional[int], radius_km: float, sort: str,
-    offset: int, limit: int, now: Optional[datetime] = None, after: Optional[str] = None,
+    offset: int, limit: int, now: Optional[datetime] = None, after: Optional[str] = None, topic: Optional[str] = None,
 ) -> dict:
     """Clubs by words, interest and distance. A club's distance is from its
     place (places.py: its own point, else the middle of its in-person
     events); a club with no place at all is never ruled out by a radius and
     comes after every club with one when sorted by distance. `total` as in
     search_events: exact up to COUNT_CAP, else COUNT_CAP with `total_capped`;
-    `after` as there too (the popular order walks ix_clubs_listed_popular)."""
+    `after` as there too (the popular order walks ix_clubs_listed_popular).
+    `topic` (a slug or an id): clubs that pick any interest under it;
+    `interest` wins when both are given."""
     now = now or now_utc()
     here = _here(where)
     conds = list(_club_visible())
-    if interest:
-        conds.append(_club_interest(interest))
+    picked = picks(ClubInterestsLink, ClubInterestsLink.club_id, Clubs.id, topic=topic, interest=interest or None)
+    if picked is not None:
+        conds.append(picked)
     lat, lng = Clubs.place_lat, Clubs.place_lng
     dist = None
     if here is not None:
@@ -1134,7 +1259,7 @@ async def club_events(session, slug: str, when: str, offset: int, limit: int, no
 
     Four statements whatever the club holds: the club, the count, the page
     (chosen on narrow rows by ix_events_club_start, then read in full) and the
-    page's going counters (going_counts)."""
+    page's going counters and topics (card_extras)."""
     now = now or now_utc()
     club_id = await session.scalar(select(Clubs.id).where(Clubs.slug == slug, *_club_visible()))
     if club_id is None:
@@ -1145,9 +1270,8 @@ async def club_events(session, slug: str, when: str, offset: int, limit: int, no
         conds, keys = _conditions(now, await upcoming.since(session, now), club_id=club_id), [(Events.event_datetime, False), (Events.id, False)]
     total = await _count(session, _event_count(conds))
     page = await _page(session, conds, keys, offset, limit) if total > offset else []
-    going = await going_counts(session, [e.id for e in page])
     return dict(
-        items=[card(e, now, going.get(e.id, 0)) for e in page],
+        items=await cards(session, page, now),
         total=total, offset=offset, limit=limit,
     )
 
@@ -1169,7 +1293,7 @@ async def club_page(session, slug: str, viewer_id: Optional[int], now: Optional[
     past_where = _club_past_where(club.id, now)
     past = await _rows(session, _event_select().where(*past_where).order_by(*_CLUB_PAST_ORDER).limit(CLUB_PAST_ON_PAGE))
     detail["events_held"] = int(await session.scalar(select(func.count(Events.id)).where(*past_where)) or 0)
-    going = await going_counts(session, [e.id for e in coming + past])
+    extras = await card_extras(session, [e.id for e in coming + past])
 
     posts = list((await session.scalars(
         select(ClubThreads).where(ClubThreads.club_id == club.id, ClubThreads.is_deleted == False)  # noqa: E712
@@ -1180,8 +1304,8 @@ async def club_page(session, slug: str, viewer_id: Optional[int], now: Optional[
     partners = [dict(name=p.name, role=p.role, logo=_img(p.logo, "medium", "thumbnail", "original")) for p in await clubs_service.list_partners(session, club.id)]
     return dict(
         club=detail,
-        upcoming=await cards(session, coming, now, going=going),
-        past=await cards(session, past, now, going=going),
+        upcoming=await cards(session, coming, now, extras=extras),
+        past=await cards(session, past, now, extras=extras),
         threads=await threads._shape(session, posts, {club.id: club}, viewer_id),
         team=team, partners=partners,
     )
@@ -1217,18 +1341,23 @@ def _iso(dt: Optional[datetime]) -> Optional[str]:
     return _aware(dt).isoformat() if dt is not None else None
 
 
-async def _interest_names_of(session, event_id: int) -> list[str]:
-    rows = await session.scalars(
-        select(Interests.name)
+async def _interests_of(session, event_id: int) -> tuple[list[str], list[dict]]:
+    """The event's interests' names, in the order it picked them, and their topics, in topic order."""
+    rows = await session.execute(
+        select(Interests.name, InterestCategory.id, InterestCategory.slug, InterestCategory.name, InterestCategory.color, InterestCategory.sort_order)
         .join(EventInterestsLink, EventInterestsLink.interest_id == Interests.id)
+        .outerjoin(InterestCategory, and_(InterestCategory.id == Interests.category_id, InterestCategory.is_deleted == False))  # noqa: E712
         .where(EventInterestsLink.event_id == event_id, EventInterestsLink.is_deleted == False, Interests.is_deleted == False)  # noqa: E712
         .order_by(EventInterestsLink.id)
     )
-    out: list[str] = []
-    for name in rows.all():
-        if name not in out:
-            out.append(name)
-    return out
+    names: list[str] = []
+    topics: dict[int, tuple] = {}
+    for name, *topic in rows.all():
+        if name not in names:
+            names.append(name)
+        if topic[0] is not None:
+            topics.setdefault(topic[0], tuple(topic))
+    return names, _topic_list(topics.values())
 
 
 async def _event_team(session, e: Events) -> tuple[list[dict], str]:
@@ -1256,6 +1385,7 @@ async def event_page(session, ref: str, now: Optional[datetime] = None) -> dict:
     poster = _img(e.poster, "original", "large", "medium", "thumbnail")
     # An online event has no venue to show; a link left in the map field may well be the meeting itself.
     venue = (None, None, None) if e.is_online else (e.location_link, e.lat, e.lng)
+    interest_names, topics = await _interests_of(session, e.id)
     event = dict(
         id=e.id, slug=e.slug, name=e.name, about=e.about,
         poster=poster, poster_thumb=_img(e.poster, "medium", "thumbnail") or poster,
@@ -1270,7 +1400,8 @@ async def event_page(session, ref: str, now: Optional[datetime] = None) -> dict:
         reg_opens_at=_iso(e.reg_startdate), reg_closes_at=_iso(e.reg_enddate),
         status=status_of(e, now, going), registration_open=registration_open(e, going, now),
         category=dict(id=cat.id, name=cat.name) if cat is not None else None,
-        interests=await _interest_names_of(session, e.id),
+        interests=interest_names,
+        topics=topics,
         guidelines=e.event_guidelines,
         contact=dict(name=e.contact_name, email=e.contact_email, phone=e.contact_phone),
         url=public_urls.event_url(e.slug),
@@ -1285,7 +1416,7 @@ async def event_page(session, ref: str, now: Optional[datetime] = None) -> dict:
     team, team_source = await _event_team(session, e)
     more = await _rows(session, filtered(now, since, club_id=club.id).where(Events.id != e.id).limit(ALSO_ON))
     similar = await _rows(session, filtered(now, since, category=e.category_id).where(Events.club_id != club.id).limit(ALSO_ON))
-    shown_going = await going_counts(session, [x.id for x in more + similar])
+    shown = await card_extras(session, [x.id for x in more + similar])
     return dict(
         event=event,
         club=dict(
@@ -1295,8 +1426,8 @@ async def event_page(session, ref: str, now: Optional[datetime] = None) -> dict:
         speakers=speakers,
         agenda=dict(timezone=EVENT_TIMEZONE, items=await agenda.list_items(session, e.id)),
         team=team, team_source=team_source,
-        more_from_club=await cards(session, more, now, going=shown_going),
-        similar=await cards(session, similar, now, going=shown_going),
+        more_from_club=await cards(session, more, now, extras=shown),
+        similar=await cards(session, similar, now, extras=shown),
     )
 
 
@@ -1494,7 +1625,7 @@ async def _home_shared(session, now: datetime, since: datetime) -> dict:
     this_week = await _page(session, visible + [Events.event_datetime < now + timedelta(days=7)], by_date, 0, HOME_LIST)
     online = await _page(session, visible + [Events.is_online == True], by_date, 0, HOME_LIST)  # noqa: E712
     popular = await _page(session, visible, [(_popularity(), True), *by_date], 0, HOME_LIST)
-    going = await going_counts(session, list({e.id for e in this_week + online + popular}))
+    going, topics = await card_extras(session, list({e.id for e in this_week + online + popular}))
 
     top_clubs = list((await session.scalars(select(Clubs).where(*_club_visible()).order_by(*_popular_clubs_order()).limit(HOME_CLUBS))).all())
 
@@ -1502,7 +1633,7 @@ async def _home_shared(session, now: datetime, since: datetime) -> dict:
     by_id = await threads._clubs_by_id(session, {t.club_id for t in posts})
 
     def out(es):
-        return [card(e, now, going.get(e.id, 0), None) for e in es]
+        return [card(e, now, going.get(e.id, 0), None, topics.get(e.id)) for e in es]
 
     # Every event has a category: the per-category counts add up to every
     # event on or to come, so the front page's number needs no count of its own.
@@ -1570,9 +1701,9 @@ async def _near(session, now: datetime, pool: dict, here: tuple[float, float]) -
     missing = [i for i in picked if i not in pool["cards"]]
     if missing:
         rows = await _rows(session, _event_select().where(Events.id.in_(missing)))
-        going = await going_counts(session, missing)
+        going, topics = await card_extras(session, missing)
         for e in rows:
-            pool["cards"][e.id] = card(e, now, going.get(e.id, 0), None)
+            pool["cards"][e.id] = card(e, now, going.get(e.id, 0), None, topics.get(e.id))
     return _placed([pool["cards"][i] for i in picked if i in pool["cards"]], here)
 
 

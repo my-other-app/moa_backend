@@ -238,13 +238,14 @@ async def list_all_events_admin(
     from sqlalchemy import select, func, or_
     from sqlalchemy.orm import selectinload
     from app.api.events.models import Events, EventCategories
+    from app.api.interests.models import Interests
 
     query = (
         select(Events)
         .options(
             selectinload(Events.category),
             selectinload(Events.club),
-            selectinload(Events.interests),
+            selectinload(Events.interests).joinedload(Interests.category),
         )
     )
     count_query = select(func.count(Events.id))
