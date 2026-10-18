@@ -121,11 +121,17 @@ async def test_an_unpaid_registration_is_finished_from_the_event_page(client, se
 
     # Paid now: another order is refused plainly, not as a 500.
     _envelope(await _order(client, paid.id, info["registration_id"], h), 409, "ALREADY_PAID")
-    # Verifying a payment for the paid order again is idempotent; a different one is refused with a code.
+    # Verifying a payment for the paid order again is idempotent. A second
+    # payment on it bought nothing: it is recorded and refunded in full, and
+    # the ticket stands on the first.
     again = await client.post(f"{API}/payments/verify", json={"razorpay_order_id": o["razorpay_order_id"], "razorpay_payment_id": "pay_finish_1"})
     assert again.status_code == 200
-    body = _envelope(await client.post(f"{API}/payments/verify", json={"razorpay_order_id": o["razorpay_order_id"], "razorpay_payment_id": "pay_finish_2"}), 409, "ALREADY_PAID")
-    assert body["errors"] == {"razorpay_order_id": "Order already paid"}
+    refunds = []
+    monkeypatch.setattr(payments.razorpay_client.payment, "refund", lambda payment_id, *a, **kw: refunds.append(payment_id) or {"id": "rfnd_1"})
+    second = await client.post(f"{API}/payments/verify", json={"razorpay_order_id": o["razorpay_order_id"], "razorpay_payment_id": "pay_finish_2"})
+    assert second.status_code == 200 and second.json()["payment_status"] == "refunded", second.text
+    assert refunds == ["pay_finish_2"]
+    assert (await client.get(f"{API}/events/info/{paid.id}", headers=h)).json()["is_paid"] is True
 
 
 async def test_an_unpaid_registration_is_paid_after_the_deadline_until_the_event_is_over(client, session, world, make_event, make_registration, make_user):
@@ -197,11 +203,13 @@ async def test_verify_answers_in_the_envelope(client, session, world, make_regis
     monkeypatch.setattr(payments.razorpay_client.payment, "fetch", other_order)
     _envelope(await client.post(f"{API}/payments/verify", json={"razorpay_order_id": o["razorpay_order_id"], "razorpay_payment_id": "pay_y"}), 400, "PAYMENT_ORDER_MISMATCH")
 
-    def odd_method(payment_id, *args, **kwargs):
+    # Whatever it was paid with, a captured payment is applied (EMI used to be refused, after Razorpay had the money).
+    def emi(payment_id, *args, **kwargs):
         return {"id": payment_id, "order_id": o["razorpay_order_id"], "status": "captured", "method": "emi", "amount": 25000}
 
-    monkeypatch.setattr(payments.razorpay_client.payment, "fetch", odd_method)
-    _envelope(await client.post(f"{API}/payments/verify", json={"razorpay_order_id": o["razorpay_order_id"], "razorpay_payment_id": "pay_z"}), 400, "UNSUPPORTED_PAYMENT_METHOD")
+    monkeypatch.setattr(payments.razorpay_client.payment, "fetch", emi)
+    applied = await client.post(f"{API}/payments/verify", json={"razorpay_order_id": o["razorpay_order_id"], "razorpay_payment_id": "pay_z"})
+    assert applied.status_code == 200 and applied.json()["payment_method"] == "emi", applied.text
 
     from razorpay.errors import BadRequestError
 

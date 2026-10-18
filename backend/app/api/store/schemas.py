@@ -80,6 +80,8 @@ class VariantOut(BaseModel):
     label: str
     stock: int
     sold: int
+    #: Held for checkouts not paid yet (they come back if the hold runs out).
+    held: int = 0
     left: int
 
 
@@ -93,6 +95,7 @@ class StoreItemOut(BaseModel):
     price: float
     stock: Optional[int]
     sold: int
+    held: int = 0
     total: int
     left: int
     earned: float
@@ -132,6 +135,8 @@ class OrderOut(BaseModel):
     summary: str
     paid_at: Optional[str]
     handed_over_at: Optional[str]
+    #: Who handed it over, when it has been.
+    handed_over_by: Optional[int] = None
     created_at: str
 
 
@@ -157,6 +162,9 @@ class StoreSummary(BaseModel):
     revenue: float
     ticket_revenue: float
     to_hand_over: int
+    #: Paid for when the pieces had gone: the organiser hands something over
+    #: anyway (fulfil) or refunds.
+    oversold: int = 0
     sizes: list[SizeRow]
     sizes_item: Optional[str]
     latest_orders: list[OrderOut]

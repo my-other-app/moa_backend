@@ -181,6 +181,15 @@ class AppConfig(BaseSettings):
     PLAN_ENFORCEMENT_FROM: datetime = datetime(2026, 10, 18, 0, 0, tzinfo=_IST)
     PLAN_GRANDFATHER_DAYS: int = 90
 
+    @field_validator("RAZORPAY_WEBHOOK_SECRET")
+    @classmethod
+    def _webhook_secret_set(cls, value: str) -> str:
+        """No webhook secret, no start: with an empty one, any body signed
+        with an empty key would pass as Razorpay's."""
+        if not (value or "").strip():
+            raise ValueError("APP_RAZORPAY_WEBHOOK_SECRET is empty; set it to the webhook secret in Razorpay's dashboard")
+        return value
+
     @field_validator("PLAN_ENFORCEMENT_FROM")
     @classmethod
     def _aware_cutoff(cls, value: datetime) -> datetime:

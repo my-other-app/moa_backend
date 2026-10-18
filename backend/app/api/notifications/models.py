@@ -48,7 +48,8 @@ class Notifications(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     type = Column(String(50), nullable=False)
     from_club_id = Column(Integer, ForeignKey("clubs.id"), nullable=True)
     from_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    event_id = Column(Integer, ForeignKey("events.id"), nullable=True)  # Link to relevant event
+    # Indexed since add_event_id_notifications (ix_notifications_event_id); declared here too.
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=True, index=True)  # Link to relevant event
     status = Column(
         Enum(NotificationStatus), nullable=False, default=NotificationStatus.unread
     )

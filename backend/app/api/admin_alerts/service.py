@@ -56,6 +56,11 @@ KINDS: dict[str, str] = {
     "payment_gateway_disconnected": "A club's own Razorpay account was disconnected or disabled",
     "club_domain_active": "A club's own domain was verified and its website is live there",
     "content_reported": "Someone reported a thread, a comment, a user or a club (data: target_type, target_id, reason, report_count)",
+    "store_oversold": "A guest paid for store pieces that had sold out; the organiser hands something over anyway or refunds",
+    "payment_auto_refunded": "A payment was refunded on its own: the event filled while it was paid (data.reason event_full), or it paid an order twice (duplicate)",
+    "payment_refund_failed": "Razorpay did not take an automatic refund; the sweep keeps trying",
+    "payment_unapplied": "A captured payment had not been applied to its registration; the repair sweep applied it, or could not (data.repaired)",
+    "subscription_orphan_charged": "Razorpay charged a subscription no club row holds (a second checkout, or one made elsewhere); it was cancelled at Razorpay",
 }
 
 DEDUPE_WINDOW = timedelta(minutes=10)

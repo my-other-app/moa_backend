@@ -88,6 +88,12 @@ async def retire_if_abandoned(session: AsyncSession, event: Events, reg: EventRe
     if clash is not None:
         return False
     reg.is_deleted = True
+    # What they picked from the shelf goes back on it.
+    from app.api.store import service as store
+
+    pending = await store.pending_for(session, reg.id)
+    if pending is not None:
+        await store.release(session, pending, status="cancelled")
     await session.flush()
     return True
 

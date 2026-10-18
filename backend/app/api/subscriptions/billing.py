@@ -29,7 +29,7 @@ from app.api.subscriptions.models import (
     ClubSubscriptions,
     Plans,
 )
-from app.api.subscriptions.service import mrr_for, price_for
+from app.api.subscriptions.service import mrr_of, price_for
 from app.response import CustomHTTPException
 
 logger = logging.getLogger(__name__)
@@ -287,6 +287,63 @@ def club_id_from_payload(payload: dict) -> int | None:
         return None
 
 
+def event_time(payload: dict):
+    """When Razorpay made the event (its top-level `created_at`), as an
+    aware datetime, or None when it does not say."""
+    from datetime import datetime, timezone
+
+    raw = payload.get("created_at")
+    try:
+        return datetime.fromtimestamp(int(raw), tz=timezone.utc) if raw is not None else None
+    except (TypeError, ValueError, OSError):
+        return None
+
+
+def entity_status(payload: dict) -> str | None:
+    """The subscription's status as Razorpay's entity on the event has it."""
+    entity = payload.get("payload", {}).get("subscription", {}).get("entity", {}) or {}
+    status = entity.get("status")
+    return status if isinstance(status, str) else None
+
+
+#: The event each Razorpay status means for our row.
+_STATUS_EVENT = {
+    "authenticated": "subscription.authenticated",
+    "active": "subscription.activated",
+    "pending": "subscription.pending",
+    "halted": "subscription.halted",
+    "paused": "subscription.paused",
+    "cancelled": "subscription.cancelled",
+    "completed": "subscription.completed",
+    "expired": "subscription.completed",
+}
+
+#: The statuses Razorpay's entity carries on each event when nothing else
+#: has happened to the subscription since.
+_EXPECTED_STATUS = {
+    "subscription.authenticated": {"authenticated"},
+    "subscription.activated": {"active"},
+    "subscription.charged": {"active"},
+    "subscription.resumed": {"active"},
+    "subscription.pending": {"pending"},
+    "subscription.halted": {"halted"},
+    "subscription.paused": {"paused"},
+    "subscription.cancelled": {"cancelled"},
+    "subscription.completed": {"completed", "expired"},
+}
+
+
+def effective_event(event: str, payload: dict) -> str:
+    """The event to apply: the one Razorpay named, unless the subscription's
+    own status on it says otherwise -- then the status wins. A `charged`
+    whose entity is already `cancelled` cancels; a `pending` whose entity is
+    `active` again activates. `updated` is about the plan and keeps its name."""
+    status = entity_status(payload)
+    if event == "subscription.updated" or status is None or status in _EXPECTED_STATUS.get(event, {status}):
+        return event
+    return _STATUS_EVENT.get(status, event)
+
+
 def subscription_id_from_payload(payload: dict) -> str | None:
     entity = payload.get("payload", {}).get("subscription", {}).get("entity", {})
     return entity.get("id")
@@ -381,6 +438,9 @@ def apply_event(
 
     now = now or datetime.now(timezone.utc)
     status = subscription.status
+    # What Razorpay says the subscription is now, over what the event's name
+    # suggests (see effective_event).
+    event = effective_event(event, payload)
 
     if event == "subscription.authenticated":
         subscription.authenticated_at = subscription.authenticated_at or now
@@ -395,10 +455,10 @@ def apply_event(
         period_end = period_end_from_payload(payload)
         service.mark_charged(subscription, period_end=period_end)
         service.clear_grace(subscription)
-        # A plan change at Razorpay's end (an upgrade mid-cycle) is reflected
-        # in MRR here, where the plan row is to hand.
-        if subscription.plan:
-            subscription.mrr_paise = mrr_for(subscription.plan, subscription.cycle)
+        # Counted at the price this subscriber pays (kept on the row at
+        # checkout), not the plan's price today: an admin editing the price
+        # does not change what Razorpay charges existing subscribers.
+        subscription.mrr_paise = mrr_of(subscription)
         return True
 
     if event in ("subscription.pending", "subscription.halted"):
@@ -420,8 +480,10 @@ def apply_event(
             subscription.last_failure_reason = None
             subscription.activated_at = subscription.activated_at or now
             service.clear_grace(subscription)
-            if subscription.plan:
-                subscription.mrr_paise = mrr_for(subscription.plan, subscription.cycle)
+            period_end = period_end_from_payload(payload)
+            if period_end is not None:
+                subscription.current_period_end = period_end
+            subscription.mrr_paise = mrr_of(subscription)
             return True
         return False
 
@@ -433,8 +495,11 @@ def apply_event(
         subscription.plan = new_plan
         if new_cycle is not None:
             subscription.cycle = new_cycle
+        # The Razorpay plan it moved to is the new plan's current one (a
+        # price edit makes a new Razorpay plan), so its price is the plan's now.
+        subscription.price_paise = price_for(new_plan, subscription.cycle)
         if subscription.status == SubscriptionStatus.active:
-            subscription.mrr_paise = mrr_for(new_plan, subscription.cycle)
+            subscription.mrr_paise = mrr_of(subscription)
         return True
 
     if event in ("subscription.cancelled", "subscription.completed"):
