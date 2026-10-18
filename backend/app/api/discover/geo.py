@@ -759,9 +759,13 @@ def cell_is_cacheable(c: tuple[int, int]) -> bool:
 
 
 def client_ip(request) -> str:
+    """The visitor's address: the connection's (app.core.net), or, for a page
+    the site's own server renders, the visitor it names in X-Visitor-IP --
+    believed only behind a valid X-Site-Token (app.core.site)."""
+    from app.core import site
     from app.core.net import client_address
 
-    return client_address(request)
+    return site.visitor_ip(request) or client_address(request)
 
 
 def _is_public(ip: str) -> bool:

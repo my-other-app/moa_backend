@@ -116,6 +116,20 @@ class AppConfig(BaseSettings):
     # PUBLIC_CLUB_URL stays the public site's page tracking links land on; it frames the same site.
     PUBLIC_CLUB_SITE_URL: str = "https://{slug}.myotherapp.in"
 
+    # The public site's own server (app/core/site.py). It reads the API from
+    # a few of Vercel's shared addresses; a request carrying
+    # `X-Site-Token: <one of these>` is the site, counted in a bucket of its
+    # own (SITE_RATE_LIMIT, over the public reads only) and allowed to say
+    # whose page it is rendering with `X-Visitor-IP`. A comma-separated list,
+    # so a token can be rotated without a gap; each at least 32 characters
+    # (`openssl rand -hex 32`). Empty: no request is the site.
+    SITE_TOKENS: str = ""
+    SITE_RATE_LIMIT: str = "3000/minute"
+
+    @property
+    def site_tokens(self) -> list[str]:
+        return [t.strip() for t in (self.SITE_TOKENS or "").split(",") if t.strip()]
+
     # Club plans (app/api/subscriptions/gates.py). PLAN_ENFORCEMENT=false is
     # the kill switch: every plan gate lets everything through, as before the
     # plans existed. An event created before PLAN_ENFORCEMENT_FROM and held
