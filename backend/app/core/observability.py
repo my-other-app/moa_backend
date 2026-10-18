@@ -328,10 +328,12 @@ def _rate(value: float) -> float:
     return min(1.0, max(0.0, float(value)))
 
 
-def init_sentry(component: str = "api") -> bool:
+def init_sentry(component: Optional[str] = None) -> bool:
     """Start Sentry when APP_SENTRY_DSN is set; False (and nothing imported)
     when not. Call before the app's routes are built (doth.py does, at the
-    top), so the integrations see every route."""
+    top), so the integrations see every route. Events are tagged with the
+    component: this process's APP_PROCESS (api, or worker for the job
+    worker, which imports doth too) unless one is given."""
     if not sentry_enabled():
         return False
     try:
@@ -366,7 +368,7 @@ def init_sentry(component: str = "api") -> bool:
             LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
         ],
     )
-    sentry_sdk.set_tag("component", component)
+    sentry_sdk.set_tag("component", component or settings.PROCESS)
     global _sentry_started
     _sentry_started = True
     logger.info("Sentry is on (%s, release %s)", settings.SENTRY_ENVIRONMENT, release())

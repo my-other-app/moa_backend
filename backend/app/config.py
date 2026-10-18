@@ -53,6 +53,21 @@ class AppConfig(BaseSettings):
     # (app.db.core.check_connection_budget). Behind PgBouncer: 5 and 5.
     DB_POOL_SIZE: int = 10
     DB_MAX_OVERFLOW: int = 20
+    # Which process this is: "api" (main.py, uvicorn's workers) or "worker"
+    # (`python -m app.worker` sets it before the settings are read). It picks
+    # the pool (app.db.core.pool_for) and tags Sentry's events.
+    PROCESS: str = "api"
+    # The job worker's own pool (the `worker` service in
+    # docker-compose.prod.yml). It runs at most JOBS_CONCURRENCY jobs (2
+    # there), and a mail send holds a connection only for each short
+    # transaction, never while rendering or waiting on the provider, so it
+    # needs far fewer than an API worker; a burst waits for a connection
+    # rather than failing. Every process reads both pools, so the budget
+    # check counts the worker on top of WORKERS x the API's pool wherever it
+    # runs: in the worker, and in the API once APP_JOBS_WORKER or
+    # APP_SWEEPS_IN_WORKER says there is one. docs/OPERATIONS.md, section 10.
+    WORKER_DB_POOL_SIZE: int = 4
+    WORKER_DB_MAX_OVERFLOW: int = 8
     # `alembic upgrade` runs beside the live API (app/db/migration_session.py
     # says why each exists). Postgres durations; "0" turns one off. A DDL
     # statement waits at most MIGRATION_LOCK_TIMEOUT for its lock, then the

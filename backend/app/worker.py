@@ -79,7 +79,19 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    import os
+
+    # Before anything reads the settings: this process takes the worker's
+    # own pool (APP_WORKER_DB_POOL_SIZE / _MAX_OVERFLOW, app.db.core.pool_for)
+    # and is counted as the job worker in the connection budget.
+    os.environ["APP_PROCESS"] = "worker"
+    from app.core import observability
+
+    # APP_LOG_JSON: JSON lines, as the API's (uvicorn is not here to set them up).
+    if observability.configure_logging():
+        logger.setLevel(logging.INFO)
+    else:
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     try:
         import uvloop
     except ImportError:  # pragma: no cover - in requirements.txt, as uvicorn uses it
