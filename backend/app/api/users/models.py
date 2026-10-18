@@ -9,7 +9,7 @@ from sqlalchemy import (
     String,
 )
 from app.db.mixins import SoftDeleteMixin, TimestampsMixin
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import deferred, relationship
 from app.db.base import AbstractSQLModel
 from app.core.storage.fields import S3ImageField
 from app.core.utils.db_fields import TZAwareDateTime
@@ -120,6 +120,9 @@ class Users(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         Enum(AdminRoles), nullable=False, default=AdminRoles.owner,
         server_default="owner",
     )
+    # The name, username and address, lowercased and unaccented, for the
+    # admin's search (app.api.search.text). Kept by a trigger; only SQL reads it.
+    search_text = deferred(Column(sa.Text, nullable=True))
 
     profile = relationship("UserProfiles", uselist=False)
     club = relationship("Clubs", uselist=False)
@@ -173,10 +176,9 @@ class Users(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
             sa.text("id DESC"),
             postgresql_where=sa.text("NOT is_deleted"),
         ),
-        # The admin's search, "contains" on each of these.
-        sa.Index("ix_users_full_name_trgm", "full_name", postgresql_using="gin", postgresql_ops={"full_name": "gin_trgm_ops"}, postgresql_where=sa.text("NOT is_deleted")),
-        sa.Index("ix_users_email_trgm", "email", postgresql_using="gin", postgresql_ops={"email": "gin_trgm_ops"}, postgresql_where=sa.text("NOT is_deleted")),
-        sa.Index("ix_users_username_trgm", "username", postgresql_using="gin", postgresql_ops={"username": "gin_trgm_ops"}, postgresql_where=sa.text("NOT is_deleted")),
+        # The admin's search: "contains" on the name, username and address,
+        # all three in search_text (app.api.search.text), one trigram index.
+        sa.Index("ix_users_search_trgm", "search_text", postgresql_using="gin", postgresql_ops={"search_text": "gin_trgm_ops"}, postgresql_where=sa.text("NOT is_deleted")),
     )
 
 
