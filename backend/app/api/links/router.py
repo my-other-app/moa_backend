@@ -13,6 +13,7 @@ from app.api.links.schemas import LinkCreate, LinkDetail, LinkOut, LinkPatch, Li
 from app.api.subscriptions import gates
 from app.config import settings
 from app.core.auth.dependencies import ClubAuth
+from app.core.rate_limit import limiter
 from app.db.core import SessionDep
 from app.response import CustomHTTPException
 
@@ -127,8 +128,12 @@ async def delete_club_link(session: SessionDep, user: ClubAuth, link_id: UUID) -
 # ─── The short link itself ────────────────────────────────────────────────
 
 
-@public_router.get("/l/{code}", summary="Open a tracking link: the click is counted, then on to the page")
+@public_router.api_route("/l/{code}", methods=["GET", "HEAD"], summary="Open a tracking link: the click is counted, then on to the page")
+@limiter.limit("1200/minute")
 async def open_link(request: Request, session: SessionDep, code: str) -> RedirectResponse:
+    """A link preview, a crawler or a HEAD is sent on without a click being
+    counted. Limited per address, generously: a poster's QR in a hall is
+    many phones on one address."""
     link = await service.by_code(session, code)
     if link is None:
         # A retired or mistyped code still lands somewhere sensible.

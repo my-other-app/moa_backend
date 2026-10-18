@@ -94,6 +94,8 @@ class InterestCount(BaseModel):
 class Stats(BaseModel):
     upcoming_events: int
     clubs: int
+    # Places events were held, a venue within 25 km of another counted as the
+    # same city (stats.py); events with no point on the map are not counted.
     cities: int
 
 
@@ -119,6 +121,8 @@ class EventSearch(BaseModel):
     limit: int
     where: Where
     categories: list[SearchCategory]
+    # Pass as `after` for the next page (offset stops at 1,000); null on the last page.
+    next_cursor: Optional[str] = None
 
 
 class ClubEvents(BaseModel):
@@ -145,6 +149,7 @@ class ClubSearch(BaseModel):
     limit: int
     where: Where
     interests: list[InterestCount]
+    next_cursor: Optional[str] = None
 
 
 class Socials(BaseModel):
@@ -339,6 +344,11 @@ class ClubPlaceFixes(BaseModel):
 
 
 class CounterFixes(BaseModel):
-    """How many events' going counts and clubs' follower counts had to be recounted."""
+    """How many counters had to be recounted: events' going counts, clubs'
+    follower counts, posts' likes, comments and views, poll options' votes,
+    live questions' votes."""
     events: int
     clubs: int
+    posts: int = 0
+    poll_options: int = 0
+    questions: int = 0

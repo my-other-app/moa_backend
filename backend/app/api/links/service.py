@@ -1,5 +1,4 @@
 """Tracking links: made, opened, and reconciled with the sign-ups they brought."""
-import hashlib
 import re
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -13,6 +12,7 @@ from sqlalchemy.orm import joinedload
 from app.api.club_domains.lookup import active_host
 from app.api.clubs.models import Clubs, ClubUsersLink
 from app.api.events.models import EventRegistrationsLink, Events
+from app.api.discover import visitors
 from app.api.links.models import TrackingClicks, TrackingLinks
 from app.config import settings
 from app.core import public_urls
@@ -72,15 +72,38 @@ async def by_code(session, code: str) -> Optional[TrackingLinks]:
 
 
 def visitor_of(request) -> Optional[str]:
-    forwarded = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
-    ip = forwarded or (request.client.host if request.client else "")
+    """Today's salted hash of the opener's address (as the proxy saw it, not
+    the first X-Forwarded-For entry, which the client writes) and browser
+    (discover.visitors): a person opening a link twice in a day counts once
+    among the uniques, and no stored hash can be turned back into an address.
+    Uniques over a period are therefore visitor-days."""
+    return visitors.anonymous(request, length=64)
+
+
+# Link previews and crawlers: they open the link to draw a card, not because a person did.
+_BOT = re.compile(
+    r"facebookexternalhit|facebot|whatsapp|slackbot|slack-imgproxy|linkedinbot|twitterbot|discordbot|telegrambot|"
+    r"skypeuripreview|googlebot|google-inspectiontool|bingbot|applebot|duckduckbot|yandex|baiduspider|embedly|"
+    r"pinterestbot|redditbot|iframely|vkshare|bitlybot|[a-z]+bot/|\b(?:bot|crawler|spider|preview)\b|"
+    r"headlesschrome|python-requests|curl/|wget/|go-http-client|axios/",
+    re.I,
+)
+
+
+def is_person(request) -> bool:
+    """An opening worth a click: a GET from something that is not a link
+    preview or a crawler (a HEAD, or a WhatsApp, Slack, LinkedIn, X, Discord,
+    Telegram or search engine fetch, is not)."""
+    if request.method != "GET":
+        return False
     ua = request.headers.get("user-agent") or ""
-    if not ip and not ua:
-        return None
-    return hashlib.sha256(f"{ip}|{ua}".encode()).hexdigest()[:64]
+    return bool(ua) and not _BOT.search(ua)
 
 
 async def record_click(session, link: TrackingLinks, request) -> None:
+    """Count an opening, unless it was a preview, a crawler or a HEAD."""
+    if not is_person(request):
+        return
     session.add(TrackingClicks(
         link_id=link.id, visitor=visitor_of(request),
         referrer=(request.headers.get("referer") or None) and request.headers.get("referer")[:300],

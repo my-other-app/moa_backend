@@ -16,7 +16,7 @@ from sqlalchemy import func, select
 
 from app.api.closeout.models import EventStatus
 from app.api.clubs.models import ClubInterestsLink, ClubPartners, ClubSocials, ClubTeamMembers, ClubUsersLink
-from app.api.discover import geo, service
+from app.api.discover import geo, popularity, service
 from app.api.events.models import EventCategories, Events
 from app.api.interests.models import InterestCategory, Interests
 from app.api.sites import service as sites
@@ -36,7 +36,6 @@ IST = ZoneInfo("Asia/Kolkata")
 def net(monkeypatch):
     """The only internet there is: `routes` maps a URL prefix to a response. A request nothing answers is recorded as a stray."""
     geo._ip_cache.clear()
-    geo._tried.clear()
     state = {"routes": {}, "calls": [], "strays": []}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -54,7 +53,6 @@ def net(monkeypatch):
     monkeypatch.setattr(geo, "_http", fake_http)
     yield state
     geo._ip_cache.clear()
-    geo._tried.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -157,6 +155,8 @@ async def world(session, make_club, make_event, make_user, make_registration, mi
     session.add(ClubTeamMembers(club_id=a.id, name="Left Already", role="Ex", sort_order=1, is_deleted=True))
     session.add(ClubPartners(club_id=a.id, name="Acme Labs", role="Title partner"))
     await session.commit()
+    # "Popular" reads events.popularity, which the counter loop writes every few minutes.
+    await popularity.refresh(session)
     return dict(now=now, a=a, b=b, c=c, gone=gone, owner_a=owner_a, owner_b=owner_b, e=e, tech=tech, music=music, dance=dance,
                 users=(u1, u2, u3), interests=interests, h_a=auth_header(await mint_token(owner_a)))
 
@@ -380,7 +380,10 @@ async def test_home_from_a_place(client, session, world):
     assert _ids(home["clubs"]) == [a.id, b.id]
     assert home["clubs"][0]["distance_km"] == 0.0 and 125 < home["clubs"][1]["distance_km"] < 130
     assert [t["body"] for t in home["threads"]] == [f"Post {i}" for i in range(6)]
-    assert home["stats"] == {"upcoming_events": 5, "clubs": 2, "cities": 6}
+    # Cities are places on the map, not venue names: Koramangala's hub is in
+    # Bengaluru and the palace grounds in Mysuru; "Lab 1", "Lab 2", "Lab 3" and
+    # "Town Hall" have no point and are no city (they were four of six before).
+    assert home["stats"] == {"upcoming_events": 5, "clubs": 2, "cities": 2}
 
 
 async def test_home_without_a_place(client, world):

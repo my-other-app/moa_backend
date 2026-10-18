@@ -183,7 +183,8 @@ async def recompute(session) -> int:
 
 
 def _listed() -> list:
-    return [Clubs.is_verified == True, Clubs.is_deleted == False]  # noqa: E712
+    """Listed clubs; verified and not deleted spelled out too, for ix_clubs_place's predicate."""
+    return [Clubs.listed == True, Clubs.is_verified == True, Clubs.is_deleted == False]  # noqa: E712
 
 
 def placed():

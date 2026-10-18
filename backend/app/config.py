@@ -133,6 +133,20 @@ class AppConfig(BaseSettings):
     PUBLIC_SITE_URL: str = "https://myotherapp.in"
     # Where an address is turned into a place for the Security page; {ip} is filled in. Empty disables it.
     GEOIP_URL: str = "https://ipapi.co/{ip}/json/"
+    # A local MaxMind GeoLite2-City (or City) database, read in place of
+    # GEOIP_URL for the discover site's "roughly where" (app/api/discover/geo.py):
+    # no request leaves the box and nothing is waited for. Unset, or a file
+    # that cannot be read: GEOIP_URL as before. Not shipped; download it under
+    # MaxMind's licence and point this at the .mmdb.
+    GEOIP_MMDB_PATH: str = ""
+    # A comment is hidden from everyone but its writer once the open reports
+    # on it weigh this much (app/api/reports): a report counts 1, or
+    # REPORT_NEW_ACCOUNT_WEIGHT from an account younger than
+    # REPORT_NEW_ACCOUNT_DAYS, so a handful of fresh accounts cannot hide
+    # what they like.
+    REPORTS_TO_HIDE: float = 3.0
+    REPORT_NEW_ACCOUNT_DAYS: int = 7
+    REPORT_NEW_ACCOUNT_WEIGHT: float = 0.5
     # Placing a venue typed without a map link (app/api/discover/geocode.py):
     # OpenStreetMap's Nominatim, at most one request a second, every answer and
     # every miss kept in geocode_cache. The address goes in the User-Agent, as

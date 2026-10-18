@@ -51,6 +51,9 @@ class ThreadPage(BaseModel):
     # True when `total` stopped counting at its cap (the public feed counts at
     # most 1,000): there are more than `total`, and the pages go on.
     total_capped: bool = False
+    # Pass as `after` for the next page (the follower's feed and the public
+    # feed); null on the last page, and on lists that page by offset only.
+    next_cursor: Optional[str] = None
 
 
 class Author(BaseModel):

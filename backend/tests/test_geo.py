@@ -13,10 +13,8 @@ from app.api.discover import geo
 @pytest.fixture(autouse=True)
 def _fresh():
     geo._ip_cache.clear()
-    geo._tried.clear()
     yield
     geo._ip_cache.clear()
-    geo._tried.clear()
 
 
 @pytest.fixture
@@ -225,6 +223,13 @@ async def test_a_lookup_that_fails_is_no_place_and_never_raises(net):
 
 async def test_the_browser_point_wins_and_is_named_when_the_address_agrees(net):
     net["routes"]["https://ipapi.co/49.37.10.1/json/"] = httpx.Response(200, json=IPAPI_BLR)
+    # With the browser's point, the address is never waited for: the first
+    # request is answered unnamed and the lookup runs in the background...
+    first = await geo.where(_request("10.0.0.1", "49.37.10.1"), 12.97, 77.59)
+    assert first == {"city": None, "region": None, "lat": 12.97, "lng": 77.59, "source": "browser"}
+    await geo.settle_lookups()
+    assert len(net["calls"]) == 1
+    # ...and the next is named from what it found.
     near = await geo.where(_request("10.0.0.1", "49.37.10.1"), 12.97, 77.59)
     assert near == {"city": "Bengaluru", "region": "Karnataka", "lat": 12.97, "lng": 77.59, "source": "browser"}
     far = await geo.where(_request("10.0.0.1", "49.37.10.1"), 28.61, 77.21)  # the browser says Delhi
@@ -235,3 +240,61 @@ async def test_the_browser_point_wins_and_is_named_when_the_address_agrees(net):
     assert (await geo.where(_request("10.0.0.1", "49.37.10.1"), 12.97, None))["source"] == "ip"
     nowhere = await geo.where(_request("127.0.0.1"), None, None)
     assert nowhere == {"city": None, "region": None, "lat": None, "lng": None, "source": "none"}
+
+
+async def test_a_refusal_pauses_lookups_and_one_address_is_asked_once_at_a_time(net, monkeypatch):
+    import asyncio
+
+    calls = []
+    gate = asyncio.Event()
+
+    async def slow_fetch(ip):
+        calls.append(ip)
+        await gate.wait()
+        return {"city": "Bengaluru", "region": "Karnataka", "country": "India", "lat": 12.96, "lng": 77.58}
+
+    monkeypatch.setattr(geo, "_fetch_ip", slow_fetch)
+    waiting = [asyncio.ensure_future(geo.locate_ip("49.37.10.9")) for _ in range(5)]
+    await asyncio.sleep(0)
+    gate.set()
+    got = await asyncio.gather(*waiting)
+    assert calls == ["49.37.10.9"] and all(g["city"] == "Bengaluru" for g in got)  # five asked, one request
+
+    async def refused(ip):
+        calls.append(ip)
+        raise geo._Refused(429)
+
+    monkeypatch.setattr(geo, "_fetch_ip", refused)
+    assert await geo.locate_ip("49.37.10.10") is None
+    # Paused: the next address is not asked about at all, and costs nothing to wait for.
+    assert await geo.locate_ip("49.37.10.11") is None
+    assert calls == ["49.37.10.9", "49.37.10.10"]
+    # A miss is kept too (for 15 minutes), so the refused address is not asked again either.
+    assert geo.known_place("49.37.10.10") == (True, None)
+    geo.reset_scan()
+
+
+async def test_a_local_geolite_database_answers_without_a_request(net, monkeypatch):
+    """settings.GEOIP_MMDB_PATH: the address is read from the database, nothing is asked over the network."""
+    from app.config import settings
+
+    record = {
+        "city": {"names": {"en": "Kochi"}}, "subdivisions": [{"names": {"en": "Kerala"}}],
+        "country": {"names": {"en": "India"}}, "location": {"latitude": 9.9312, "longitude": 76.2673},
+    }
+
+    class Reader:
+        def get(self, ip):
+            return record if ip == "49.37.20.1" else None
+
+    monkeypatch.setattr(settings, "GEOIP_MMDB_PATH", "/nowhere/GeoLite2-City.mmdb")
+    monkeypatch.setattr(geo, "_mmdb", Reader())
+    assert await geo.locate_ip("49.37.20.1") == {"city": "Kochi", "region": "Kerala", "country": "India", "lat": 9.9312, "lng": 76.2673}
+    assert await geo.locate_ip("49.37.20.2") is None
+    assert net["calls"] == []
+    # A path that cannot be opened falls back to the URL lookup, once logged.
+    monkeypatch.setattr(geo, "_mmdb", None)
+    monkeypatch.setattr(geo, "_mmdb_failed", False)
+    net["routes"]["https://ipapi.co/49.37.10.1/json/"] = httpx.Response(200, json=IPAPI_BLR)
+    assert (await geo.locate_ip("49.37.10.1"))["city"] == "Bengaluru"
+    assert geo._mmdb_failed is True

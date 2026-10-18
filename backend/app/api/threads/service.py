@@ -1,31 +1,46 @@
 """Threads: a club's posts, with the likes, comments, votes and views they earn.
 
 A post is text, maybe a photo, maybe a poll. Followers are told when the
-club asks. The club's page lists its posts pinned-first; a follower's feed
-lists every followed club's posts newest-first. Counts live on the post so
-a page of feed is one query; the rows behind them keep one-per-person
-honest.
+club asks, after the post is answered. The club's page lists its posts
+pinned-first; a follower's feed lists every followed club's posts
+newest-first. Counts live on the post so a page of feed is one query; the
+rows behind them keep one-per-person honest, and the database moves the
+counts with the rows (threads.models.THREAD_COUNTS_SQL): a like, a vote and a
+comment are written with ON CONFLICT, so two taps at once are answered,
+never a 500 or a count off by one. Views are counted in batches
+(discover.visitors).
+
+Only a listed club's posts are anyone's to read (clubs.listed: verified, not
+deleted, not under a blocked organisation).
 """
 from __future__ import annotations
 
-import hashlib
 import io
 import json
 import logging
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import delete as sa_delete, func, select, text, true, tuple_, update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.api.clubs.models import Clubs, ClubUsersLink
+from app.api.discover import cursor as cursors, visitors
 from app.api.reports import service as reports
-from app.api.threads.models import ClubThreads, ThreadComments, ThreadLikes, ThreadPollOptions, ThreadViews, ThreadVotes
+from app.api.threads.models import ClubThreads, ThreadComments, ThreadLikes, ThreadPollOptions, ThreadVotes
 from app.api.threads.schemas import MAX_BODY, MAX_OPTION, MAX_OPTIONS
 from app.api.users.models import Users
 from app.response import CustomHTTPException
 
 logger = logging.getLogger(__name__)
+
+#: A list's total counts at most this many (past it: total_capped).
+COUNT_CAP = 1000
+#: Comments in one page under a post.
+COMMENTS_PAGE = 200
+#: Followers told about a post per batch of notifications and pushes.
+TELL_BATCH = 1000
 
 
 def _now() -> datetime:
@@ -45,13 +60,27 @@ def _uuid(value) -> uuid.UUID:
         raise CustomHTTPException(404, message="Not found")
 
 
+@asynccontextmanager
+async def session_scope():
+    """A session for work after the response (telling followers). Tests swap this for their own."""
+    from app.api.deliveries import service as deliveries
+
+    async with deliveries.session_scope() as session:
+        yield session
+
+
 # ─── Shaping ─────────────────────────────────────────────────────────────
 
 
-async def _options_for(session, thread_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[ThreadPollOptions]]:
+async def _options_for(session, thread_ids: list[uuid.UUID], fresh: bool = False) -> dict[uuid.UUID, list[ThreadPollOptions]]:
+    """Each post's poll options. `fresh`: re-read rows this session already
+    holds (a trigger moved their counts)."""
     out: dict[uuid.UUID, list[ThreadPollOptions]] = {i: [] for i in thread_ids}
     if thread_ids:
-        for o in (await session.scalars(select(ThreadPollOptions).where(ThreadPollOptions.thread_id.in_(thread_ids)).order_by(ThreadPollOptions.sort_order, ThreadPollOptions.id))).all():
+        stmt = select(ThreadPollOptions).where(ThreadPollOptions.thread_id.in_(thread_ids)).order_by(ThreadPollOptions.sort_order, ThreadPollOptions.id)
+        if fresh:
+            stmt = stmt.execution_options(populate_existing=True)
+        for o in (await session.scalars(stmt)).all():
             out[o.thread_id].append(o)
     return out
 
@@ -101,6 +130,12 @@ async def _clubs_by_id(session, ids: set[int]) -> dict[int, Clubs]:
     return {c.id: c for c in (await session.scalars(select(Clubs).where(Clubs.id.in_(ids)))).all()}
 
 
+async def _fresh_counts(session, threads: list[ClubThreads]) -> None:
+    """Read the posts' counters again: the database moved them, not this session."""
+    if threads:
+        await session.scalars(select(ClubThreads).where(ClubThreads.id.in_([t.id for t in threads])).execution_options(populate_existing=True))
+
+
 # ─── The club's own posts ────────────────────────────────────────────────
 
 
@@ -133,6 +168,9 @@ def parse_options(raw: str | None) -> list[str]:
 
 
 async def create(session, club: Clubs, user, *, body: str, notify_followers: bool, poll_options: list[str], image) -> dict:
+    """The post. Telling the followers is the caller's to schedule after the
+    answer (tell_followers), so a club with a lakh of followers posts as fast
+    as one with ten."""
     body = (body or "").strip()
     if not body:
         raise CustomHTTPException(422, message="Write something first")
@@ -149,28 +187,48 @@ async def create(session, club: Clubs, user, *, body: str, notify_followers: boo
         session.add(ThreadPollOptions(thread_id=t.id, label=label, sort_order=i))
     await session.commit()
     await session.refresh(t)
-    if notify_followers:
-        await _tell_followers(session, club, t)
     options = (await _options_for(session, [t.id]))[t.id]
     return _out(t, club, options, False, None)
 
 
-async def _tell_followers(session, club: Clubs, t: ClubThreads) -> None:
-    """A push to every follower, and a line in each inbox. Never blocks the post."""
-    try:
-        from app.api.notifications.service import create_notifications_batch
-        from app.core.notifications.service import send_notification_to_users
+async def tell_followers(club_id: int, thread_id) -> int:
+    """A push to every follower, and a line in each inbox: after the post was
+    answered, on a session of its own, TELL_BATCH followers at a time (read
+    in id order through the club's follower index, never all at once).
+    Returns how many were told. Never raises."""
+    from app.api.notifications.service import create_notifications_batch
+    from app.core.notifications.service import send_notification_to_users
 
-        ids = list((await session.scalars(select(ClubUsersLink.user_id).where(ClubUsersLink.club_id == club.id, ClubUsersLink.is_following == True, ClubUsersLink.is_deleted == False))).all())  # noqa: E712
-        if not ids:
-            return
-        preview = t.body if len(t.body) <= 140 else t.body[:137].rstrip() + "…"
-        title = f"{club.name} asked a question" if t.kind == "poll" else f"{club.name} posted"
-        data = {"type": "club_thread", "thread_id": str(t.id), "club_id": str(club.id)}
-        await create_notifications_batch(session, user_ids=ids, title=title, description=preview, type="club_thread", data=data, from_club_id=club.id)
-        await send_notification_to_users(session, ids, title, preview, data=data)
-    except Exception:
-        logger.warning("followers of club %s could not be told about thread %s", club.id, t.id, exc_info=True)
+    told = 0
+    try:
+        async with session_scope() as session:
+            club = await session.scalar(select(Clubs).where(Clubs.id == club_id))
+            t = await session.scalar(select(ClubThreads).where(ClubThreads.id == thread_id, ClubThreads.is_deleted == False))  # noqa: E712
+            if club is None or t is None:
+                return 0
+            preview = t.body if len(t.body) <= 140 else t.body[:137].rstrip() + "…"
+            title = f"{club.name} asked a question" if t.kind == "poll" else f"{club.name} posted"
+            data = {"type": "club_thread", "thread_id": str(t.id), "club_id": str(club.id)}
+            last = 0
+            while True:
+                ids = list((await session.scalars(
+                    select(ClubUsersLink.user_id).where(
+                        ClubUsersLink.club_id == club.id, ClubUsersLink.is_following == True, ClubUsersLink.is_deleted == False,  # noqa: E712
+                        ClubUsersLink.user_id > last,
+                    ).order_by(ClubUsersLink.user_id).limit(TELL_BATCH)
+                )).all())
+                if not ids:
+                    break
+                last = ids[-1]
+                await create_notifications_batch(session, user_ids=ids, title=title, description=preview, type="club_thread", data=data, from_club_id=club.id)
+                await session.commit()
+                await send_notification_to_users(session, ids, title, preview, data=data)
+                told += len(ids)
+                if len(ids) < TELL_BATCH:
+                    break
+    except Exception:  # noqa: BLE001 — a post is never undone by a failed push
+        logger.warning("followers of club %s could not all be told about thread %s (%d told)", club_id, thread_id, told, exc_info=True)
+    return told
 
 
 async def thread_for_club(session, club: Clubs, thread_id) -> ClubThreads:
@@ -205,28 +263,54 @@ async def delete(session, t: ClubThreads) -> None:
 # ─── Readers: the public page and the followers' feed ───────────────────
 
 
-def _visitor(user, request) -> str:
+def _visitor(user, request) -> str | None:
+    """Who is reading: their account, or today's hash of where they are and
+    what they read with (discover.visitors). None with neither."""
     if user is not None:
         return f"u:{user.id}"
-    ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() or (request.client.host if request.client else "")
-    ua = request.headers.get("user-agent") or ""
-    return "a:" + hashlib.sha256(f"{ip}|{ua}".encode()).hexdigest()[:40]
+    anon = visitors.anonymous(request)
+    return f"a:{anon}" if anon else None
 
 
-async def _count_views(session, threads: list[ClubThreads], visitor: str) -> None:
-    """One view per person per post, however many times the page is opened."""
-    if not threads:
+async def _write_views(session, items: list[tuple]) -> None:
+    """One statement for a batch of (post id, visitor): the rows a post does
+    not have yet go in, and each post's views_count moves by how many did."""
+    if not items:
         return
-    stmt = pg_insert(ThreadViews).values([dict(thread_id=t.id, visitor=visitor) for t in threads]).on_conflict_do_nothing(index_elements=["thread_id", "visitor"]).returning(ThreadViews.thread_id)
-    fresh = set((await session.scalars(stmt)).all())
-    for t in threads:
-        if t.id in fresh:
-            t.views_count += 1
+    await session.execute(
+        text(
+            """
+            WITH v AS (SELECT * FROM unnest(CAST(:ids AS uuid[]), CAST(:who AS varchar[])) AS v(thread_id, visitor)),
+            fresh AS (
+              INSERT INTO thread_views (thread_id, visitor)
+              SELECT v.thread_id, v.visitor FROM v JOIN club_threads t ON t.id = v.thread_id
+              ON CONFLICT DO NOTHING
+              RETURNING thread_id
+            ),
+            counted AS (SELECT thread_id, count(*) AS n FROM fresh GROUP BY thread_id)
+            UPDATE club_threads t SET views_count = t.views_count + c.n FROM counted c WHERE t.id = c.thread_id
+            """
+        ),
+        {"ids": [t for t, _ in items], "who": [v for _, v in items]},
+    )
+
+
+VIEWS = visitors.ViewBuffer("thread", _write_views)
+
+
+async def _count_views(session, threads: list[ClubThreads], visitor: str | None) -> None:
+    """One view per person per post (an anonymous reader: per day), however
+    many times the page is opened: recorded, and written in a batch."""
+    if not threads or visitor is None:
+        return
+    await VIEWS.record(session, [((t.id, visitor), (t.id, visitor)) for t in threads])
     await session.commit()
+    if not VIEWS.enabled:
+        await _fresh_counts(session, threads)
 
 
 async def public_club(session, club_id: int) -> Clubs:
-    club = await session.scalar(select(Clubs).where(Clubs.id == club_id, Clubs.is_deleted == False, Clubs.is_verified == True))  # noqa: E712
+    club = await session.scalar(select(Clubs).where(Clubs.id == club_id, Clubs.listed == True))  # noqa: E712
     if club is None:
         raise CustomHTTPException(404, message="Club not found")
     return club
@@ -244,13 +328,57 @@ async def list_public(session, club: Clubs, user, request, offset: int, limit: i
     return page
 
 
-async def feed(session, user, offset: int, limit: int) -> dict:
-    followed = select(ClubUsersLink.club_id).where(ClubUsersLink.user_id == user.id, ClubUsersLink.is_following == True, ClubUsersLink.is_deleted == False, ClubUsersLink.is_hidden == False)  # noqa: E712
-    base = select(ClubThreads).join(Clubs, Clubs.id == ClubThreads.club_id).where(ClubThreads.club_id.in_(followed), ClubThreads.is_deleted == False, Clubs.is_deleted == False, Clubs.is_verified == True)  # noqa: E712
-    total = await session.scalar(select(func.count()).select_from(base.subquery()))
-    rows = list((await session.scalars(base.order_by(ClubThreads.created_at.desc(), ClubThreads.id).offset(offset).limit(limit))).all())
+FEED_ORDER = "feed"
+
+
+async def feed(session, user, offset: int, limit: int, after: str | None = None) -> dict:
+    """The newest posts of the clubs this person follows (and has not
+    hidden), newest first.
+
+    Each followed club gives at most the page's worth of its own newest posts,
+    read through ix_club_threads_club_newest (a LATERAL top-k per club), and
+    those are merged: the work is the followed clubs times the page, never
+    every post they ever made. `after` (the `next_cursor` of the page before)
+    starts after a post; `total` counts at most COUNT_CAP."""
+    start = cursors.decode(after, FEED_ORDER, ["dt", "uuid"])
+    followed = (
+        select(ClubUsersLink.club_id.label("club_id"))
+        .join(Clubs, Clubs.id == ClubUsersLink.club_id)
+        .where(
+            ClubUsersLink.user_id == user.id, ClubUsersLink.is_following == True, ClubUsersLink.is_deleted == False,  # noqa: E712
+            ClubUsersLink.is_hidden == False, Clubs.listed == True,  # noqa: E712
+        )
+        .subquery("followed")
+    )
+    conds = [ClubThreads.club_id == followed.c.club_id, ClubThreads.is_deleted == False]  # noqa: E712
+    if start is not None:
+        offset = 0
+        conds.append(cursors.after([(ClubThreads.created_at, True), (ClubThreads.id, False)], start))
+    k = offset + limit + 1
+    top = (
+        select(ClubThreads.id.label("id"), ClubThreads.created_at.label("created_at"))
+        .where(*conds).order_by(ClubThreads.created_at.desc(), ClubThreads.id).limit(k)
+        .lateral("top")
+    )
+    page_rows = (await session.execute(
+        select(top.c.id, top.c.created_at).select_from(followed).join(top, true())
+        .order_by(top.c.created_at.desc(), top.c.id).offset(offset).limit(limit + 1)
+    )).all()
+    more = len(page_rows) > limit
+    page_rows = page_rows[:limit]
+    ids = [i for i, _ in page_rows]
+    by_id = {t.id: t for t in (await session.scalars(select(ClubThreads).where(ClubThreads.id.in_(ids)))).all()} if ids else {}
+    rows = [by_id[i] for i in ids if i in by_id]
+    every = select(ClubThreads.id).where(
+        ClubThreads.club_id.in_(select(followed.c.club_id)), ClubThreads.is_deleted == False,  # noqa: E712
+    ).limit(COUNT_CAP + 1)
+    total = int(await session.scalar(select(func.count()).select_from(every.subquery())) or 0)
     clubs = await _clubs_by_id(session, {t.club_id for t in rows})
-    return dict(items=await _shape(session, rows, clubs, user.id), total=total or 0, limit=limit, offset=offset)
+    return dict(
+        items=await _shape(session, rows, clubs, user.id),
+        total=min(total, COUNT_CAP), total_capped=total > COUNT_CAP, limit=limit, offset=offset,
+        next_cursor=cursors.encode(FEED_ORDER, [rows[-1].created_at, rows[-1].id]) if more and rows else None,
+    )
 
 
 async def one_public(session, thread_id, user, request) -> dict:
@@ -267,43 +395,46 @@ async def live_thread(session, thread_id) -> tuple[ClubThreads, Clubs]:
     t = await session.scalar(select(ClubThreads).where(ClubThreads.id == _uuid(thread_id), ClubThreads.is_deleted == False))  # noqa: E712
     if t is None:
         raise CustomHTTPException(404, message="Post not found")
-    club = await session.get(Clubs, t.club_id)
-    if club is None or club.is_deleted or not club.is_verified:
+    # Asked of the database: a block on the club's organisation changes `listed` behind any copy held here.
+    club = await session.scalar(select(Clubs).where(Clubs.id == t.club_id, Clubs.listed == True))  # noqa: E712
+    if club is None:
         raise CustomHTTPException(404, message="Post not found")
     return t, club
 
 
 async def toggle_like(session, t: ClubThreads, user) -> dict:
-    row = await session.scalar(select(ThreadLikes).where(ThreadLikes.thread_id == t.id, ThreadLikes.user_id == user.id))
-    if row is None:
-        session.add(ThreadLikes(thread_id=t.id, user_id=user.id))
-        t.likes_count += 1
-        liked = True
-    else:
-        await session.delete(row)
-        t.likes_count = max(0, t.likes_count - 1)
-        liked = False
+    """Like, or take it back: the like's row is claimed or released in one
+    statement each, and the trigger moves the count with it."""
+    added = await session.scalar(
+        pg_insert(ThreadLikes).values(thread_id=t.id, user_id=user.id)
+        .on_conflict_do_nothing(index_elements=["thread_id", "user_id"]).returning(ThreadLikes.id)
+    )
+    if added is None:
+        await session.execute(sa_delete(ThreadLikes).where(ThreadLikes.thread_id == t.id, ThreadLikes.user_id == user.id))
+    likes = await session.scalar(select(ClubThreads.likes_count).where(ClubThreads.id == t.id))
     await session.commit()
-    return dict(liked=liked, likes=t.likes_count)
+    return dict(liked=added is not None, likes=int(likes or 0))
 
 
 async def vote(session, t: ClubThreads, user, option_id) -> dict:
+    """One vote per person; voting again moves it. The first vote is an
+    insert ON CONFLICT; a change locks the person's vote row first, so two
+    taps at once never count twice. The trigger moves the options' counts."""
     option = await session.scalar(select(ThreadPollOptions).where(ThreadPollOptions.id == _uuid(option_id), ThreadPollOptions.thread_id == t.id))
     if option is None:
         raise CustomHTTPException(404, message="That option is not on this poll")
-    existing = await session.scalar(select(ThreadVotes).where(ThreadVotes.thread_id == t.id, ThreadVotes.user_id == user.id))
-    if existing is None:
-        session.add(ThreadVotes(thread_id=t.id, option_id=option.id, user_id=user.id))
-        option.votes_count += 1
-    elif existing.option_id != option.id:
+    added = await session.scalar(
+        pg_insert(ThreadVotes).values(thread_id=t.id, option_id=option.id, user_id=user.id)
+        .on_conflict_do_nothing(index_elements=["thread_id", "user_id"]).returning(ThreadVotes.id)
+    )
+    if added is None:
         # Changing one's mind moves the vote; it never adds a second one.
-        old = await session.get(ThreadPollOptions, existing.option_id)
-        if old is not None:
-            old.votes_count = max(0, old.votes_count - 1)
-        existing.option_id = option.id
-        option.votes_count += 1
+        await session.execute(
+            sa_update(ThreadVotes).where(ThreadVotes.thread_id == t.id, ThreadVotes.user_id == user.id, ThreadVotes.option_id != option.id)
+            .values(option_id=option.id, updated_at=_now())
+        )
     await session.commit()
-    options = (await _options_for(session, [t.id]))[t.id]
+    options = (await _options_for(session, [t.id], fresh=True))[t.id]
     return _poll(options, option.id)
 
 
@@ -319,22 +450,38 @@ async def _comment_out(c: ThreadComments, club: Clubs, users: dict[int, Users]) 
     return dict(id=str(c.id), body=c.body, author=author, created_at=_iso(c.created_at))
 
 
-async def comments(session, t: ClubThreads, club: Clubs, viewer_id: int | None = None) -> list[dict]:
-    """The comments under a post, oldest first, as this viewer may see them:
-    without anyone they have blocked, and without a comment enough people
-    have reported (app/api/reports) unless they wrote it."""
-    rows = list((await session.scalars(select(ThreadComments).where(ThreadComments.thread_id == t.id, ThreadComments.is_deleted == False).order_by(ThreadComments.created_at, ThreadComments.id))).all())  # noqa: E712
+COMMENTS_ORDER = "comments"
+
+
+async def comment_page(session, t: ClubThreads, club: Clubs, viewer_id: int | None = None, *, limit: int = COMMENTS_PAGE, after: str | None = None) -> tuple[list[dict], str | None]:
+    """A page of the comments under a post, oldest first, as this viewer may
+    see them: without anyone they have blocked, and without a comment whose
+    reports weigh enough (app/api/reports) unless they wrote it. A page is a
+    range of ix_thread_comments_thread_created after the cursor; returns the
+    page and the next page's cursor (None at the end)."""
+    start = cursors.decode(after, COMMENTS_ORDER, ["dt", "uuid"])
+    stmt = select(ThreadComments).where(ThreadComments.thread_id == t.id, ThreadComments.is_deleted == False)  # noqa: E712
+    if start is not None:
+        stmt = stmt.where(tuple_(ThreadComments.created_at, ThreadComments.id) > tuple_(start[0], start[1]))
+    rows = list((await session.scalars(stmt.order_by(ThreadComments.created_at, ThreadComments.id).limit(limit + 1))).all())
+    more = len(rows) > limit
+    rows = rows[:limit]
+    nxt = cursors.encode(COMMENTS_ORDER, [rows[-1].created_at, rows[-1].id]) if more and rows else None
     blocked = await reports.blocked_by(session, viewer_id)
     hidden = await reports.hidden_comments(session, [c.id for c in rows])
     rows = [c for c in rows if c.user_id not in blocked and (c.id not in hidden or (viewer_id is not None and c.user_id == viewer_id))]
     users = await reports.people(session, {c.user_id for c in rows})
-    return [await _comment_out(c, club, users) for c in rows]
+    return [await _comment_out(c, club, users) for c in rows], nxt
+
+
+async def comments(session, t: ClubThreads, club: Clubs, viewer_id: int | None = None) -> list[dict]:
+    """The first page of comments (comment_page)."""
+    return (await comment_page(session, t, club, viewer_id))[0]
 
 
 async def add_comment(session, t: ClubThreads, club: Clubs, user, body: str) -> dict:
     c = ThreadComments(thread_id=t.id, user_id=user.id, body=body.strip())
     session.add(c)
-    t.comments_count += 1
     await session.commit()
     await session.refresh(c)
     return await _comment_out(c, club, await reports.people(session, [user.id]))
@@ -346,8 +493,7 @@ async def remove_comment(session, t: ClubThreads, club: Clubs, comment_id, *, by
         raise CustomHTTPException(404, message="Comment not found")
     if not as_club and c.user_id != by_user.id:
         raise CustomHTTPException(403, message="Only the person who wrote it, or the club, can remove a comment")
+    # The post's count follows by trigger, once, however many removals race.
     c.is_deleted = True
     c.deleted_at = _now()
-    t.comments_count = max(0, t.comments_count - 1)
     await session.commit()
-

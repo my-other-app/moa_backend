@@ -1,10 +1,14 @@
 """Front-page numbers that move slowly and cost a read of every event to count.
 
-"Cities" is how many different places events have been held in: a distinct
-count of every in-person event's venue ever held. At a lakh of clubs that is
-a million rows sorted on disk (1.7 s, docs/SCALING.md fix 12), and it was
-done by every worker each time its front page was rebuilt. Nothing about it
-can be bounded without changing what it counts, so it is counted rarely and
+"Cities" is how many cities events have been held in: the points of every
+in-person event a listed club held, rounded to about 5 km, grouped so that
+places within CITY_KM of a busier place count as its city (the busiest
+places lead; each other place joins the first leader within CITY_KM, else
+leads a city of its own). It used to count distinct venue strings, so
+"Main Auditorium, CET" and "CET main auditorium" were two "cities" and a
+city with a hundred venues was a hundred; the site shows it as cities. An
+event with no point on the map is not counted. At a lakh of clubs it reads
+every such event once (docs/SCALING.md fix 12), so it is counted rarely and
 kept in a one-row-per-number table, discover_stats:
 
 - the front page reads the row (a primary-key lookup);
@@ -21,6 +25,7 @@ is counted each time, as the minute cache does.
 from __future__ import annotations
 
 import logging
+import math
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -38,6 +43,10 @@ from app.db.base import AbstractSQLModel
 logger = logging.getLogger(__name__)
 
 CITIES = "cities"
+#: Places closer than this to a busier one are in its city.
+CITY_KM = 25.0
+#: Points are rounded to this many degrees first (about 5.5 km).
+GRID_DEG = 0.05
 #: How old the stored number may get before a refresh counts again.
 EVERY = timedelta(minutes=30)
 #: How often one process looks (seconds).
@@ -57,20 +66,50 @@ class DiscoverStats(AbstractSQLModel):
 
 
 async def count_cities(session) -> int:
-    """Every place an in-person event was held, by a verified club: distinct venue words."""
-    place = func.lower(func.trim(Events.location_name))
-    n = await session.scalar(
-        select(func.count(func.distinct(place)))
+    """How many cities in-person events of listed clubs were held in (see the module's docstring)."""
+    lat = func.round(Events.lat / GRID_DEG) * GRID_DEG
+    lng = func.round(Events.lng / GRID_DEG) * GRID_DEG
+    n = func.count()
+    rows = (await session.execute(
+        select(lat, lng, n)
         .join(Clubs, Clubs.id == Events.club_id)
         .where(
             Events.is_deleted == False,  # noqa: E712
             Events.lifecycle.in_(bindparam(None, list(_HELD), expanding=True, literal_execute=True)),
-            Clubs.is_verified == True, Clubs.is_deleted == False,  # noqa: E712
+            Clubs.listed == True,  # noqa: E712
             func.coalesce(Events.is_online, False) == False,  # noqa: E712
-            place.isnot(None), place != "",
+            Events.lat.isnot(None), Events.lng.isnot(None),
         )
-    )
-    return int(n or 0)
+        .group_by(lat, lng)
+    )).all()
+    return len(cities_of([(float(la), float(ln), int(k)) for la, ln, k in rows]))
+
+
+def cities_of(places: list[tuple[float, float, int]], km: float = CITY_KM) -> list[tuple[float, float]]:
+    """The leaders of `places` ((lat, lng, events)): the busiest first, each
+    other place joining the first leader within `km`, else leading its own.
+    Leaders are looked up in a grid of cells about `km` wide, so each place
+    is compared with the leaders around it only."""
+    cell_deg = km / 111.0
+    grid: dict[tuple[int, int], list[tuple[float, float]]] = {}
+    leaders: list[tuple[float, float]] = []
+    for la, ln, _ in sorted(places, key=lambda p: (-p[2], p[0], p[1])):
+        cy, cx = int(la // cell_deg), int(ln // (cell_deg / max(0.1, math.cos(math.radians(la)))))
+        near = False
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                for l_la, l_ln in grid.get((cy + dy, cx + dx), ()):
+                    if geo.km(la, ln, l_la, l_ln) <= km:
+                        near = True
+                        break
+                if near:
+                    break
+            if near:
+                break
+        if not near:
+            leaders.append((la, ln))
+            grid.setdefault((cy, cx), []).append((la, ln))
+    return leaders
 
 
 async def cities(session, now: datetime) -> int:

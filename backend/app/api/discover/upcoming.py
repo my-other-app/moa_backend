@@ -39,7 +39,7 @@ async def _longest_running(session, now: datetime) -> float:
 
 async def hours(session, now: datetime) -> float:
     """How many hours before `now` an event still on at `now` can have started."""
-    return await cache.shared.remember(("on-floor", cache.minute(now)), lambda: _longest_running(session, now))
+    return await cache.kept(cache.shared, ("on-floor",), _longest_running, session, now)
 
 
 async def since(session, now: datetime) -> datetime:

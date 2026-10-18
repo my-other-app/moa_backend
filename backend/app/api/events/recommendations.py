@@ -39,6 +39,15 @@ cache.personal, and dropped when they follow, unfollow, pin or hide a club or
 change their interests (`forget`). A kept ranking is checked against the rows
 before it is served: an event since registered for, hidden, closed or over is
 left out.
+
+Variety: of the first SPREAD_OVER cards, at most PER_CLUB are one club's; a
+club's further events wait until after them, in their order (`_spread`). A
+club with forty events this month that a user follows would otherwise fill
+the whole first screen.
+
+The popular candidates are read off events.popularity (attention decayed by
+age, discover.popularity) through its index, a page of the order rather than
+a sort of everything on in the region.
 """
 
 from array import array
@@ -98,6 +107,9 @@ REGION_KM = 150.0
 # How much of each user's ranking is kept, and for how long.
 KEEP = 200
 KEEP_SECONDS = 300.0
+# At most PER_CLUB of the first SPREAD_OVER cards come from one club.
+PER_CLUB = 3
+SPREAD_OVER = 20
 
 
 def region_of(where: Optional[dict]) -> Optional[tuple[int, int]]:
@@ -109,14 +121,16 @@ def region_of(where: Optional[dict]) -> Optional[tuple[int, int]]:
 
 def _actionable() -> list:
     """What the feed can show at all: what the public sees (published or
-    live, not deleted, a verified club's, not over: the discover pages'
-    rule; drafts and unverified clubs' events used to reach the feed), with
-    registration still open. The statuses are written into the SQL so the
-    partial indexes on them still apply."""
+    live, not deleted, a listed club's -- verified, not deleted, not under a
+    blocked organisation -- not over: the discover pages' rule; drafts and
+    unverified clubs' events used to reach the feed), with registration
+    still open. The statuses are written into the SQL so the partial indexes
+    on them still apply."""
     now = func.now()
     return [
         Events.is_deleted == False,  # noqa: E712
         Events.lifecycle.in_(bindparam(None, [EventStatus.published, EventStatus.live], expanding=True, literal_execute=True)),
+        Clubs.listed == True,  # noqa: E712
         Clubs.is_verified == True,  # noqa: E712
         Clubs.is_deleted == False,  # noqa: E712
         # Not finished. `duration` is hours after event_datetime.
@@ -139,32 +153,37 @@ def _attention():
 
 
 async def _most_attended(session, floor_hours: float, *extra, limit: int) -> list[int]:
+    """The most popular events (events.popularity, on ix_events_shown_popular)."""
     rows = await session.scalars(
         select(Events.id).join(Clubs, Clubs.id == Events.club_id)
         .where(*_shown(floor_hours), *extra)
-        .order_by(_attention().desc(), Events.event_datetime, Events.id)
+        .order_by(Events.popularity.desc(), Events.event_datetime, Events.id)
         .limit(limit)
     )
     return list(rows.all())
 
 
-async def _popular_ids(session, region: Optional[tuple[int, int]], floor_hours: float, minute: int) -> list[int]:
+async def _popular_ids(session, region: Optional[tuple[int, int]], floor_hours: float, now: datetime) -> list[int]:
     """The POPULAR_LIMIT most popular events in the region (everywhere when
-    None): the same for everyone, so kept for the minute."""
+    None): the same for everyone, so kept for the minute (and for one more
+    while it is worked out again in the background)."""
     extra = []
     if region is not None:
         centre = ((region[0] + 0.5) * REGION_DEG, (region[1] + 0.5) * REGION_DEG)
         extra = [Events.lat.isnot(None), Events.lng.isnot(None), geo.in_box_sql(geo.bbox(centre[0], centre[1], REGION_KM), Events.lat, Events.lng)]
-    return await cache.shared.remember(
-        ("for-you-popular", region, minute), lambda: _most_attended(session, floor_hours, *extra, limit=POPULAR_LIMIT),
-    )
+
+    async def build(s, n):
+        return await _most_attended(s, floor_hours if n is now else await upcoming.hours(s, n), *extra, limit=POPULAR_LIMIT)
+
+    return await cache.kept(cache.shared, ("for-you-popular", region), build, session, now)
 
 
-async def _online_ids(session, floor_hours: float, minute: int) -> list[int]:
-    """The ONLINE_LIMIT most popular online events, kept for the minute."""
-    return await cache.shared.remember(
-        ("for-you-online", minute), lambda: _most_attended(session, floor_hours, Events.is_online == True, limit=ONLINE_LIMIT),  # noqa: E712
-    )
+async def _online_ids(session, floor_hours: float, now: datetime) -> list[int]:
+    """The ONLINE_LIMIT most popular online events, kept as the popular ones are."""
+    async def build(s, n):
+        return await _most_attended(s, floor_hours if n is now else await upcoming.hours(s, n), Events.is_online == True, limit=ONLINE_LIMIT)  # noqa: E712
+
+    return await cache.kept(cache.shared, ("for-you-online",), build, session, now)
 
 
 def _candidates(user_id: int, interests: list[int], floor_hours: float, listed: list[int]):
@@ -225,7 +244,7 @@ async def for_you_events(
     region = region_of(where)
     if offset + limit > KEEP:
         # Past what is kept: worked out for this page alone.
-        ids, scores = await _ranked(session, user_id, region, offset + limit)
+        ids, scores, _ = await _ranked(session, user_id, region, offset + limit)
     else:
         made = []
 
@@ -238,9 +257,12 @@ async def for_you_events(
         if got[0] != region:  # moved since: rank for where they are now
             got = await build()
             cache.personal.put(key, got, ttl=KEEP_SECONDS)
-        ids, scores = got[1], got[2]
+        ids, scores, clubs = got[1], got[2], got[3]
         if not made:
-            ids, scores = await _still_for(session, user_id, ids, scores)
+            ids, scores, clubs = await _still_for(session, user_id, ids, scores, clubs)
+            # What dropped out may have moved a club's next event up into the first places.
+            spread = _spread(list(zip(ids, scores, clubs)))
+            ids, scores = [i for i, _, _ in spread], [s for _, s, _ in spread]
     ids, scores = list(ids[offset:offset + limit]), list(scores[offset:offset + limit])
     if not ids:
         return [], []
@@ -259,12 +281,12 @@ def forget(user_id: int) -> None:
     cache.personal.forget(("for-you", user_id))
 
 
-async def _still_for(session, user_id: int, ids, scores):
+async def _still_for(session, user_id: int, ids, scores, clubs):
     """A kept ranking without what can no longer be shown or acted on: the
     events of it that are over, closed, gone, registered for since, or from a
     club since hidden. Primary-key reads of at most KEEP events."""
     if not ids:
-        return ids, scores
+        return ids, scores, clubs
     registered = select(EventRegistrationsLink.id).where(
         EventRegistrationsLink.event_id == Events.id, EventRegistrationsLink.user_id == user_id, EventRegistrationsLink.is_deleted == False,  # noqa: E712
     ).exists()
@@ -276,29 +298,48 @@ async def _still_for(session, user_id: int, ids, scores):
         select(Events.id).join(Clubs, Clubs.id == Events.club_id)
         .where(Events.id.in_(list(ids)), *_actionable(), ~registered, ~hidden)
     )).all())
-    kept = [(i, s) for i, s in zip(ids, scores) if i in alive]
-    return [i for i, _ in kept], [s for _, s in kept]
+    kept = [(i, s, c) for i, s, c in zip(ids, scores, clubs) if i in alive]
+    return [i for i, _, _ in kept], [s for _, s, _ in kept], [c for _, _, c in kept]
 
 
 async def _ranked(session, user_id: int, region, n: int, keep: bool = False):
-    """The user's first `n` candidates by score: (ids, scores), or
-    (region, ids, scores) as arrays when `keep` (what cache.personal holds)."""
+    """The user's first `n` candidates by score, spread across clubs: (ids,
+    scores, club ids), or (region, ids, scores, club ids) as arrays when
+    `keep` (what cache.personal holds; a club id of 0 for none)."""
     py_now = datetime.now(timezone.utc)
     floor_hours = await upcoming.hours(session, py_now)
-    minute = cache.minute(py_now)
-    listed = await _popular_ids(session, region, floor_hours, minute) + await _online_ids(session, floor_hours, minute)
+    listed = await _popular_ids(session, region, floor_hours, py_now) + await _online_ids(session, floor_hours, py_now)
     interests = list((await session.scalars(
         select(UserInterests.interest_id).where(UserInterests.user_id == user_id, UserInterests.is_deleted == False)  # noqa: E712
     )).all())
-    ranked = await _score(session, user_id, floor_hours, listed, interests, n)
-    ids, scores = [i for i, _ in ranked], [float(s) for _, s in ranked]
+    ranked = _spread(await _score(session, user_id, floor_hours, listed, interests, n))
+    ids, scores, clubs = [i for i, _, _ in ranked], [float(s) for _, s, _ in ranked], [c or 0 for _, _, c in ranked]
     if keep:
-        return (region, array("q", ids), array("d", scores))
-    return ids, scores
+        return (region, array("q", ids), array("d", scores), array("q", clubs))
+    return ids, scores, clubs
+
+
+def _spread(ranked: list) -> list:
+    """The ranking with no club holding more than PER_CLUB of the first
+    SPREAD_OVER places: a club's events past its share there wait, in their
+    order, and come right after them. Rows are (id, score, club id)."""
+    head: list = []
+    held: list = []
+    per: dict = {}
+    rest = list(ranked)
+    while rest and len(head) < SPREAD_OVER:
+        row = rest.pop(0)
+        club = row[2]
+        if club is not None and per.get(club, 0) >= PER_CLUB:
+            held.append(row)
+            continue
+        per[club] = per.get(club, 0) + 1
+        head.append(row)
+    return head + held + rest
 
 
 async def _score(session, user_id: int, floor_hours: float, listed: list[int], interests: list[int], n: int):
-    """[(event id, score)] of the user's candidates, best first, at most `n`."""
+    """[(event id, score, club id)] of the user's candidates, best first, at most `n`."""
     now = func.now()
 
     # --- The user's own context, each read once ------------------------------
@@ -464,7 +505,7 @@ async def _score(session, user_id: int, floor_hours: float, listed: list[int], i
     # Ranked on narrow rows (the id and the score); only the page's events
     # are then read in full.
     query = (
-        select(Events.id, score)
+        select(Events.id, score, Events.club_id)
         .outerjoin(Clubs, Clubs.id == Events.club_id)
         .outerjoin(shared, shared.c.event_id == Events.id)
         .outerjoin(clubs_of_mine, clubs_of_mine.c.club_id == Events.club_id)

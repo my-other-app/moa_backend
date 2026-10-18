@@ -576,7 +576,8 @@ async def test_cities_are_kept_in_a_table_and_counted_again_when_stale(client, s
     stored = await session.scalar(select(stats.DiscoverStats.value).where(stats.DiscoverStats.name == stats.CITIES))
     assert stored == 0  # the request's refresh stored it
     e = scene["e"]["soon"]
-    e.location_name = "Koramangala Hub"
+    # A city is a place on the map: words alone are no city.
+    e.location_name, e.lat, e.lng = "Koramangala Hub", 12.9352, 77.6245
     await session.commit()
     cache.shared.clear()
     # Read from the table: not counted again until it is stale.

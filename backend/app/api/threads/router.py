@@ -1,6 +1,6 @@
 from typing import Optional
 
-from fastapi import APIRouter, File, Form, Query, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, Query, Request, Response, UploadFile
 from sqlalchemy import select
 
 from app.api.clubs.models import Clubs
@@ -50,14 +50,19 @@ async def create_thread(
     request: Request,
     session: SessionDep,
     user: ClubAuth,
+    background_tasks: BackgroundTasks,
     body: str = Form(..., max_length=2000),
     notify_followers: bool = Form(True),
     poll_options: Optional[str] = Form(None),
     image: Optional[UploadFile] = File(None),
 ) -> ThreadOut:
+    """The followers are told after the post is answered (service.tell_followers)."""
     club = await _club_for(session, user)
     options = service.parse_options(poll_options)
-    return ThreadOut(**await service.create(session, club, user, body=body, notify_followers=notify_followers, poll_options=options, image=image))
+    out = await service.create(session, club, user, body=body, notify_followers=notify_followers, poll_options=options, image=image)
+    if notify_followers:
+        background_tasks.add_task(service.tell_followers, club.id, out["id"])
+    return ThreadOut(**out)
 
 
 @router.patch("/{thread_id}", summary="Pin or unpin; fix the text")
@@ -100,14 +105,19 @@ async def club_remove_comment(session: SessionDep, user: ClubAuth, thread_id: st
 
 
 @public_router.get("/clubs/{club_id}/threads", summary="A club's posts, as its page shows them")
-async def club_page_threads(request: Request, session: SessionDep, user: OptionalAuth, club_id: int, offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=50)) -> ThreadPage:
+async def club_page_threads(request: Request, session: SessionDep, user: OptionalAuth, club_id: int, offset: int = Query(0, ge=0, le=1000), limit: int = Query(20, ge=1, le=50)) -> ThreadPage:
     club = await service.public_club(session, club_id)
     return ThreadPage(**await service.list_public(session, club, user, request, offset, limit))
 
 
 @public_router.get("/threads/feed", summary="Posts from the clubs you follow, newest first")
-async def my_feed(session: SessionDep, user: UserAuth, offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=50)) -> ThreadPage:
-    return ThreadPage(**await service.feed(session, user, offset, limit))
+async def my_feed(
+    session: SessionDep, user: UserAuth,
+    offset: int = Query(0, ge=0, le=1000), limit: int = Query(20, ge=1, le=50),
+    after: Optional[str] = Query(None, max_length=200, description="The `next_cursor` of the page before: the page after it (offset is then ignored)"),
+) -> ThreadPage:
+    """`total` counts at most 1,000 (`total_capped` past it)."""
+    return ThreadPage(**await service.feed(session, user, offset, limit, after))
 
 
 # After /threads/feed, so "feed" is never read as a post id.
@@ -132,10 +142,19 @@ async def cast_vote(request: Request, session: SessionDep, user: UserAuth, threa
     return PollOut(**await service.vote(session, t, user, body.option_id))
 
 
-@public_router.get("/threads/{thread_id}/comments", summary="The comments under a post")
-async def read_comments(session: SessionDep, user: OptionalAuth, thread_id: str) -> list[CommentOut]:
+@public_router.get("/threads/{thread_id}/comments", summary="The comments under a post, oldest first, a page at a time")
+async def read_comments(
+    response: Response, session: SessionDep, user: OptionalAuth, thread_id: str,
+    limit: int = Query(service.COMMENTS_PAGE, ge=1, le=service.COMMENTS_PAGE),
+    after: Optional[str] = Query(None, max_length=200, description="The X-Next-Cursor of the page before"),
+) -> list[CommentOut]:
+    """At most `limit` comments; when there are more, the X-Next-Cursor
+    header is the `after` that reads the next page."""
     t, club = await service.live_thread(session, thread_id)
-    return [CommentOut(**c) for c in await service.comments(session, t, club, viewer_id=user.id if user else None)]
+    items, nxt = await service.comment_page(session, t, club, viewer_id=user.id if user else None, limit=limit, after=after)
+    if nxt:
+        response.headers["X-Next-Cursor"] = nxt
+    return [CommentOut(**c) for c in items]
 
 
 @public_router.post("/threads/{thread_id}/comments", summary="Comment on a post", status_code=201)

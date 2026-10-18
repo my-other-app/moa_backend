@@ -8,6 +8,7 @@ import pytest
 from app.api.checkins.models import CheckInVia, CheckIns
 from app.api.live import service
 from app.config import settings
+from app.core import after_commit
 from tests.conftest import auth_header
 
 START = datetime.now(timezone.utc) + timedelta(hours=1)
@@ -251,6 +252,7 @@ async def test_the_survey_goes_to_whoever_was_there_and_each_link_is_theirs(clie
     go = await client.post(_u(world, "/feedback/send"), headers=h)
     assert go.status_code == 200, go.text
     assert go.json()["sent"] == 2 and go.json()["invited"] == 2 and go.json()["sent_at"]
+    await after_commit.drain()  # the mails go after the commit, off the request
     assert {m["recipients"][0] for m in sent} == {"sneha-l@example.com", "rohan-l@example.com"}
     link = next(line for line in sent[0]["text"].splitlines() if line.startswith("http"))
     assert link.startswith(f"{settings.PUBLIC_SITE_URL}/feedback/{world['event'].id}/")
@@ -296,6 +298,7 @@ async def test_the_survey_sends_itself_after_the_event_and_last_time_shows_besid
     ends = START + timedelta(hours=3)
     assert await service.sweep(session, now=ends + timedelta(minutes=59)) == 0
     assert await service.sweep(session, now=ends + timedelta(minutes=61)) == 1
+    await after_commit.drain()
     assert len(sent) == 2
     assert await service.sweep(session, now=ends + timedelta(minutes=62)) == 0  # once
 
