@@ -57,6 +57,7 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
                 "medium": {"width": 500, "height": 500},
                 "large": {"width": 800, "height": 800},
             },
+            public=True,
         ),
         nullable=True,
     )
@@ -252,6 +253,7 @@ class EventSpeakers(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
                 "thumbnail": {"width": 100, "height": 100},
                 "medium": {"width": 200, "height": 200},
             },
+            public=True,
         ),
         nullable=True,
     )

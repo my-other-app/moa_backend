@@ -23,6 +23,8 @@ from app.core.middlewares.process_time_middleware import ProcessingTimeMiddlewar
 from app.core.middlewares.security_headers_middleware import SecurityHeadersMiddleware
 from app.core.rate_limit import limiter
 from app.core import redact
+# Tells the public site when an event's or a club's page changes (inert without APP_SITE_REVALIDATE_SECRET).
+from app.core import site_revalidate  # noqa: F401
 
 # A club webhook's token never reaches the access log whole.
 redact.install()
