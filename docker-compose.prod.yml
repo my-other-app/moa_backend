@@ -112,7 +112,13 @@ services:
     volumes: *backend-volumes
     env_file:
       - .env
-    environment: *backend-environment
+    environment:
+      <<: *backend-environment
+      # Its own, smaller pool: at most APP_JOBS_CONCURRENCY jobs at once, a
+      # mail send using a few short transactions at a time. Counted on top
+      # of the backend's against Postgres's max_connections.
+      APP_DB_POOL_SIZE: "5"
+      APP_DB_MAX_OVERFLOW: "15"
     depends_on:
       - postgres
     command: >
