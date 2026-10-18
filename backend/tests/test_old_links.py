@@ -137,7 +137,7 @@ async def test_a_browser_gets_a_page_and_an_app_the_json_it_always_had(client, w
     assert (await client.get(_path(links.file_url("ticket", gone)))).json()["message"] == "No such ticket"
     await client.post(f"/api/v1/events/{world['event'].id}/tickets/{world['a'].id}/revoke", json={}, headers=world["club"])
     r = await client.get(_path(links.file_url("ticket", code)), headers=BROWSER)
-    assert r.status_code == 410 and "This ticket is no longer valid" in r.text and "<form" not in r.text
+    assert r.status_code == 410 and "This ticket is no longer valid" in r.text and "<form" not in r.text and "/me/tickets" not in r.text
     # A certificate link: the page speaks of the certificate.
     r = await client.get(f"/api/v1/files/certificates/{code}.pdf?s=nope", headers=BROWSER)
     assert r.status_code == 403 and 'name="kind" value="certificate"' in r.text and "your certificate" in r.text

@@ -117,7 +117,10 @@ def _csp() -> str:
 class Copy:
     title: str
     body: str
+    #: The form for a fresh link.
     form: bool
+    #: Where the ticket still is: the app, My tickets. Not for a cancelled one.
+    where: bool = True
 
 
 _COPY = {
@@ -130,6 +133,7 @@ _COPY = {
         "This ticket is no longer valid",
         "The organiser has cancelled it. If you think that is a mistake, reply to the organiser's email.",
         False,
+        where=False,
     ),
     "unavailable": Copy(
         "This certificate is not available",
@@ -157,7 +161,7 @@ def page(
         f'<p>If you registered, your {thing} is in the <strong>MyOtherApp</strong> app, and at '
         f'<a href="{e(site_url("/me/tickets"))}">{e(_site_name())}</a> under My tickets once you sign in '
         f"with the email you registered with.</p>"
-    )
+    ) if copy.where else ""
     form = ""
     if copy.form:
         form = (
