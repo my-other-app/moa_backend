@@ -132,7 +132,8 @@ async def test_with_request_ids_on_a_stream_is_still_unbuffered_and_carries_its_
 
 async def test_a_browser_may_read_retry_after_and_cors_is_otherwise_as_it_was(client, monkeypatch):
     """The live stream's 503 LIVE_STREAM_FULL carries Retry-After, which a
-    page on another origin can read only when CORS exposes it; the rest of
+    page on another origin can read only when CORS exposes it, and so does
+    an answer's ETag (app/core/middlewares/etag_middleware.py); the rest of
     CORS (the origins, credentials, methods and headers) is unchanged."""
     from app.api.live import stream
     from app.config import settings
@@ -141,7 +142,7 @@ async def test_a_browser_may_read_retry_after_and_cors_is_otherwise_as_it_was(cl
     r = await client.get("/api/v1/interests/topics", headers={"Origin": origin})
     assert r.headers["access-control-allow-origin"] == origin
     assert r.headers["access-control-allow-credentials"] == "true"
-    assert r.headers["access-control-expose-headers"] == "Retry-After"
+    assert r.headers["access-control-expose-headers"] == "Retry-After, ETag"
     pre = await client.options(
         "/api/v1/interests/topics",
         headers={"Origin": origin, "Access-Control-Request-Method": "PATCH", "Access-Control-Request-Headers": "x-live-key, authorization"},
@@ -161,4 +162,4 @@ async def test_a_browser_may_read_retry_after_and_cors_is_otherwise_as_it_was(cl
     monkeypatch.setattr(stream.hub, "admit", full)
     r = await client.get("/api/v1/events/1/live/stream", params={"view": "room"}, headers={"Origin": origin})
     assert r.status_code == 503 and r.json()["error_code"] == "LIVE_STREAM_FULL"
-    assert r.headers["retry-after"] == "60" and r.headers["access-control-expose-headers"] == "Retry-After"
+    assert r.headers["retry-after"] == "60" and r.headers["access-control-expose-headers"] == "Retry-After, ETag"
