@@ -21,6 +21,7 @@ from app.api.events.documents import (
 )
 from app.api.templates_images import CERTIFICATE_FIELDS, TICKET_FIELDS, embedded
 from app.core.layout import pool
+from app.core.middlewares.etag_middleware import matches
 from app.core.net import client_address
 from app.core.rate_limit import limiter
 from fastapi.encoders import jsonable_encoder
@@ -37,11 +38,10 @@ from app.api.events import wallet_service
 from app.api.subscriptions import gates
 from app.api.users.models import UserTypes
 from app.api.templates_audience import RegistrationRole
-from app.api.events.tickets import role_of, ticket_document, ticket_payload, ticket_style
+from app.api.events.tickets import role_of, ticket_job, ticket_payload, ticket_style
 from app.api.events.certificates import (
     availability,
     certificate_context,
-    certificate_document,
     certificate_job,
     certificate_style,
     qr_text as certificate_qr_text,
@@ -406,6 +406,9 @@ async def list_events(
                 event_dict["is_paid"] = bool(reg.is_paid)
                 event_dict["ticket_id"] = reg.ticket_id
                 event_dict["ticket_url"] = public_urls.ticket_url(reg.ticket_id)
+                # Revoked by the organiser: the door refuses it by name, so
+                # a ticket kept for offline use drops it on the next refresh.
+                event_dict["ticket_revoked"] = reg.ticket_revoked_at is not None
                 if reg.is_attended:
                     event_dict["certificate_url"] = public_urls.certificate_url(reg.ticket_id)
             enhanced_events.append(event_dict)
@@ -537,6 +540,7 @@ async def get_ticket(
 
 @router.get("/tickets/{ticket_id}/image", summary="Get ticket as an image")
 async def get_ticket_image(
+    request: Request,
     ticket_id: str,
     session: SessionDep = SessionDep,
     user: DependsAuth = None,
@@ -551,33 +555,46 @@ async def get_ticket_image(
 
     Same access rule as the PDF: the ticket's owner, the owning club, or an
     admin. A QR is an entry pass, not a public image.
+
+    Tagged like the PDF, from the same fingerprint (_document_etag, with
+    "-png"): a 304 without drawing when If-None-Match names it.
     """
     registration = await service.get_ticket_details(session, ticket_id=ticket_id)
     _assert_can_access_ticket(user, registration)
 
     style = await ticket_style(session, registration)
+    job = ticket_job(registration, style)
+    etag = _document_etag(job, "png")
     headers = {"Cache-Control": "private, max-age=300"}
+    if matches(_if_none_match(request), etag):
+        return Response(status_code=304, headers={**headers, "ETag": etag})
+
+    def tagged(whole: bool) -> dict:
+        return {**headers, "ETag": etag} if whole else headers
+
     if in_layout_mode(style):
         # The PDF the download is (kept in the bucket once drawn), as a PNG.
-        doc = await ticket_document(session, registration, style)
-        png = await pool.run(layout_png, style, doc.content)
-        return Response(content=png, media_type="image/png", headers=headers)
+        pdf, whole = await _drawn(job, job.cache_key("ticket", registration.id))
+        png = await pool.run(layout_png, style, pdf)
+        return Response(content=png, media_type="image/png", headers=tagged(whole))
 
     payload = ticket_payload(registration)
     styled = apply_layers(style, document_values(registration, registration.event))
     # The built-in card is 600px wide; a layered design is its artwork.
     width = image_width(styled, default=600)
     qr_url = qr_data_url(registration.ticket_id)
+    complete = [True]
 
     def draw() -> bytes:
-        inline, _ = embedded(styled, fields=TICKET_FIELDS)
+        inline, complete[0] = embedded(styled, fields=TICKET_FIELDS)
         return generate_image_bytes(
             template_path="events/ticket.html",
             context={"email_payload": payload, "style": inline, "qr_code_url": qr_url},
             width=width,
         ).getvalue()
 
-    return Response(content=await pool.run(draw), media_type="image/png", headers=headers)
+    png = await pool.run(draw)
+    return Response(content=png, media_type="image/png", headers=tagged(complete[0]))
 
 
 @router.get("/count-view/{event_id}", summary="Increment event view count")
@@ -597,24 +614,62 @@ async def increment_view_count(
 
 
 
+def _document_etag(job, kind: str = "") -> str:
+    """A ticket's or certificate's PDF tag: the name it is kept under in the
+    bucket, `{design version}-{fingerprint}` (app.api.events.doc_cache.key_for),
+    where the fingerprint hashes everything the document prints. Worked out
+    without drawing anything or reading the bucket. Another rendering of the
+    same document (the ticket's PNG) adds its kind, "-png"."""
+    suffix = f"-{kind}" if kind else ""
+    return f'"{int(job.design_version or 0)}-{job.fingerprint}{suffix}"'
+
+
+def _if_none_match(request: Request) -> str:
+    return ", ".join(request.headers.getlist("if-none-match"))
+
+
+async def _drawn(job, key: Optional[str]) -> tuple[bytes, bool]:
+    """The document's bytes, kept or drawn (doc_cache.cached), and whether
+    they are whole. A render that could not read one of its images goes out
+    but is not kept. It gets no tag either: a phone holding the copy without
+    its logo would be told it is current until the design changed. A kept
+    one is always whole."""
+    whole = [True]
+
+    def draw() -> tuple[bytes, bool]:
+        pdf, complete = job.draw()
+        whole[0] = complete
+        return pdf, complete
+
+    return await doc_cache.cached(key, draw), whole[0]
+
+
 @router.get("/tickets/{ticket_id}/pdf", summary="Get ticket PDF")
 async def get_ticket_pdf(
+    request: Request,
     ticket_id: str,
     session: SessionDep = SessionDep,
     user: DependsAuth = None,
 ) -> Response:
     """
     Generate and download a PDF for the ticket.
+
+    Its ETag names this ticket as drawn (_document_etag). Asked again with
+    that tag in If-None-Match, an unchanged ticket is a 304, decided without
+    drawing it or reading the bucket. The access check comes first.
     """
     registration = await service.get_ticket_details(session, ticket_id=ticket_id)
     _assert_can_access_ticket(user, registration)
 
-    doc = await ticket_document(session, registration)
-    return Response(
-        content=doc.content,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{doc.filename}"'},
-    )
+    job = ticket_job(registration, await ticket_style(session, registration))
+    etag = _document_etag(job)
+    if matches(_if_none_match(request), etag):
+        return Response(status_code=304, headers={"ETag": etag})
+    content, whole = await _drawn(job, job.cache_key("ticket", registration.id))
+    headers = {"Content-Disposition": f'attachment; filename="ticket-{registration.ticket_id}.pdf"'}
+    if whole:
+        headers["ETag"] = etag
+    return Response(content=content, media_type="application/pdf", headers=headers)
 
 
 @router.get("/tickets/{ticket_id}/wallet.pkpass", summary="Get Apple Wallet pass")
@@ -711,8 +766,7 @@ def _certificate_headers(registration, job, kind: str) -> dict:
 
 
 def _not_modified(request: Request, headers: dict) -> Optional[Response]:
-    sent = request.headers.get("if-none-match") or ""
-    if headers["ETag"] in [t.strip() for t in sent.split(",")]:
+    if matches(_if_none_match(request), headers["ETag"]):
         return Response(status_code=304, headers=headers)
     return None
 
@@ -769,18 +823,23 @@ async def get_certificate_pdf(
     """
     Generate and download a PDF certificate of participation.
     Only available for attendees who have checked in (is_attended=True).
+
+    Tagged like the ticket (_document_etag): a 304 without drawing it when
+    the caller's If-None-Match names it. A revoked one is refused first.
     """
     registration, style = await _certificate_for(session, ticket_id)
     job = certificate_job(registration, style)
-    headers = _certificate_headers(registration, job, "pdf")
+    headers = {"Cache-Control": "public, max-age=300", "ETag": _document_etag(job)}
     if (unchanged := _not_modified(request, headers)) is not None:
         return unchanged
 
-    doc = await certificate_document(session, registration, style)
+    content, whole = await _drawn(job, job.cache_key("certificate", registration.id))
+    if not whole:
+        del headers["ETag"]
     return Response(
-        content=doc.content,
+        content=content,
         media_type="application/pdf",
-        headers={**headers, "Content-Disposition": f'attachment; filename="{doc.filename}"'},
+        headers={**headers, "Content-Disposition": f'attachment; filename="certificate-{registration.ticket_id}.pdf"'},
     )
 
 

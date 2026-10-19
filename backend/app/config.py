@@ -23,6 +23,12 @@ class AppConfig(BaseSettings):
     # uvicorn's line per request. nginx in front already logs every request,
     # so this is a second copy, written on every request; false drops it.
     ACCESS_LOG: bool = True
+    # A weak ETag on each 200 JSON answer to a GET or HEAD under /api/v1/,
+    # and a 304 with no body when the caller's If-None-Match already names
+    # it (app/core/middlewares/etag_middleware.py). The app keeps what it
+    # read and asks again with the tag, so a list that has not changed costs
+    # a few hundred bytes. False: no tags and no 304s, every answer as before.
+    ETAGS: bool = True
     # One JSON object per log line (app/core/observability.py): time, level,
     # logger, message and the request id, for a log shipper. Off: uvicorn's
     # own format, as before. On (or SENTRY_DSN set), each request carries an

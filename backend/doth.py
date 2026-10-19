@@ -24,6 +24,8 @@ from app.config import settings
 from app.db.listeners import *
 from app.response import ErrorResponse, CustomHTTPException
 from app.core.utils.discord import report_error
+from app.core.middlewares.etag_middleware import ETagMiddleware
+from app.core.middlewares.private_cache_middleware import PrivateCacheMiddleware
 from app.core.middlewares.process_time_middleware import ProcessingTimeMiddleware
 from app.core.middlewares.security_headers_middleware import SecurityHeadersMiddleware
 from app.core.middlewares.rate_limit_middleware import RateLimitMiddleware
@@ -206,6 +208,14 @@ application.include_router(router=health_router)
 from app.api.subscriptions.gates import RequestScope as PlanGateScope  # noqa: E402
 
 application.add_middleware(PlanGateScope)
+# A weak ETag on the API's JSON, and a 304 when the caller already has it
+# (APP_ETAGS; app/core/middlewares/etag_middleware.py). Inside CORS, so a
+# 304 to another origin carries the CORS headers too.
+application.add_middleware(ETagMiddleware)
+# `Cache-Control: private` on an answer to a signed-in caller that set none
+# (app/core/middlewares/private_cache_middleware.py): a CDN in front of the
+# API must never keep one person's data. Outside the tags, so a 304 has it too.
+application.add_middleware(PrivateCacheMiddleware)
 # print(settings.cors_origins)
 # if settings.DEBUG:
 application.add_middleware(
@@ -216,8 +226,9 @@ application.add_middleware(
     allow_headers=["*"],
     # A browser lets a page read only the simple response headers unless
     # told: the live stream's 503 LIVE_STREAM_FULL says when to try again in
-    # Retry-After, and the site waits by it.
-    expose_headers=["Retry-After"],
+    # Retry-After, and the site waits by it. ETag, so a page can keep an
+    # answer's tag and send it back in If-None-Match.
+    expose_headers=["Retry-After", "ETag"],
 )
 application.add_middleware(ProcessingTimeMiddleware)
 application.add_middleware(SecurityHeadersMiddleware)
