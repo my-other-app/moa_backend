@@ -618,7 +618,7 @@ async def test_every_tool_through_the_protocol(client, session, world, era, monk
                                                                          "venue": "Lab 2", "capacity": 80, "about": "Talks and demos",
                                                                          "questions": [{"label": "Year of study", "type": "select", "options": ["1", "2", "3", "4"]}]}, era=era)
     assert created["status"] == "draft" and created["dashboard_url"].endswith(f"/events/{created['event_id']}")
-    updated = await call(client, c.access_token, "update_event_draft", {"event_id": created["event_id"], "capacity": 120, "about": None}, era=era)
+    updated = await call(client, c.access_token, "update_event_draft", {"event_id": created["event_id"], "capacity": 120, "clear": ["about"]}, era=era)
     assert updated["changed"] == ["about", "capacity"] and updated["status"] == "draft"
 
     drafted = await call(client, c.access_token, "draft_announcement", {"event_id": world.ids.upcoming, "title": "Room change", "body": "We're in Lab 3 now.", "audience": "all"}, era=era)

@@ -149,11 +149,6 @@ def obj(properties: dict, required: tuple = ()) -> dict:
     return {"type": "object", "properties": properties, "required": list(required), "additionalProperties": False}
 
 
-def nullable(schema: dict) -> dict:
-    kind = schema.get("type")
-    return {**schema, "type": [kind, "null"]} if isinstance(kind, str) else schema
-
-
 EVENT_ID = {"type": "integer", "minimum": 1, "description": "The event's id, from list_events."}
 LIMIT = {"type": "integer", "minimum": 1, "maximum": _MAX_PAGE, "default": 20, "description": f"How many to return (at most {_MAX_PAGE})."}
 OFFSET = {"type": "integer", "minimum": 0, "default": 0, "description": "How many to skip, for the next page (next_offset of the last answer)."}
@@ -593,21 +588,25 @@ EVENT_FIELDS = {
     "starts_at": WHEN,
     "duration_hours": {"type": "number", "exclusiveMinimum": 0, "maximum": MAX_EVENT_HOURS},
     "category": {"type": "string", "maxLength": 50, "description": "The event's type, by name (e.g. Workshop). Left out: the first type."},
-    "about": nullable({"type": "string", "maxLength": 5000, "description": "The description guests read."}),
-    "venue": nullable({"type": "string", "maxLength": 200}),
-    "map_link": nullable({"type": "string", "maxLength": 500, "description": "A maps link to the venue."}),
+    "about": {"type": "string", "maxLength": 5000, "description": "The description guests read."},
+    "venue": {"type": "string", "maxLength": 200},
+    "map_link": {"type": "string", "maxLength": 500, "description": "A maps link to the venue."},
     "online": {"type": "boolean"},
-    "online_url": nullable({"type": "string", "maxLength": 500}),
-    "capacity": nullable({"type": "integer", "minimum": 1, "maximum": 1000000}),
+    "online_url": {"type": "string", "maxLength": 500},
+    "capacity": {"type": "integer", "minimum": 1, "maximum": 1000000},
     "fee": {"type": "number", "minimum": 0, "maximum": 1000000, "description": "Ticket price in rupees; 0 for free. Paid tickets need the plan's paid tickets."},
-    "registration_opens_at": nullable(WHEN),
-    "registration_closes_at": nullable(WHEN),
-    "contact_name": nullable({"type": "string", "maxLength": 100}),
-    "contact_email": nullable({"type": "string", "maxLength": 100}),
-    "contact_phone": nullable({"type": "string", "maxLength": 20}),
-    "guidelines": nullable({"type": "string", "maxLength": 5000}),
+    "registration_opens_at": WHEN,
+    "registration_closes_at": WHEN,
+    "contact_name": {"type": "string", "maxLength": 100},
+    "contact_email": {"type": "string", "maxLength": 100},
+    "contact_phone": {"type": "string", "maxLength": 20},
+    "guidelines": {"type": "string", "maxLength": 5000},
     "questions": {"type": "array", "items": QUESTION, "maxItems": 20, "description": "The registration form's questions (replaces all of them)."},
 }
+#: What update_event_draft may empty. A list rather than nulls: one `type`
+#: per property keeps the schemas portable to clients that allow no unions.
+CLEARABLE = ("about", "venue", "map_link", "online_url", "capacity", "registration_opens_at", "registration_closes_at",
+             "contact_name", "contact_email", "contact_phone", "guidelines")
 
 
 async def _category(call: Call, name: str | None) -> EventCategories:
@@ -645,13 +644,15 @@ def _apply(event: Events, args: dict) -> list[str]:
     from app.api.discover import geo
 
     changed = []
+    for name in args.get("clear") or []:
+        args = {**args, name: None}
     simple = {
         "name": "name", "about": "about", "venue": "location_name", "online": "is_online", "online_url": "url",
         "capacity": "max_participants", "contact_name": "contact_name", "contact_email": "contact_email",
         "contact_phone": "contact_phone", "guidelines": "event_guidelines",
     }
     for arg, column in simple.items():
-        if arg in args:
+        if arg in args and arg != "clear":
             value = args[arg]
             setattr(event, column, value.strip() if isinstance(value, str) else value)
             changed.append(arg)
@@ -735,10 +736,14 @@ async def create_event_draft(call: Call, args: dict) -> dict:
     title="Edit a draft event",
     scope="events:write",
     description=(
-        "Change fields of a DRAFT event (only the fields given change; null clears a field). An event that is already "
-        "published can't be changed here: the answer says to edit it in the dashboard, with the link."
+        "Change fields of a DRAFT event: only the fields given change, and those named in `clear` are emptied. An event "
+        "that is already published can't be changed here: the answer says to edit it in the dashboard, with the link."
     ),
-    schema=obj({"event_id": EVENT_ID, **EVENT_FIELDS}, ("event_id",)),
+    schema=obj({
+        "event_id": EVENT_ID, **EVENT_FIELDS,
+        "clear": {"type": "array", "items": {"type": "string", "enum": list(CLEARABLE)}, "maxItems": len(CLEARABLE), "uniqueItems": True,
+                  "description": "Fields to empty."},
+    }, ("event_id",)),
     read_only=False,
 )
 async def update_event_draft(call: Call, args: dict) -> dict:

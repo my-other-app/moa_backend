@@ -43,7 +43,8 @@ button.primary{background:var(--brand);border-color:var(--brand);color:var(--bra
 .who{background:var(--sunken);border-radius:10px;padding:10px 12px;font-size:14px;margin:0 0 16px;color:var(--ink-2)}
 .who b{color:var(--ink)}
 ul.scopes{list-style:none;padding:0;margin:8px 0 0}
-ul.scopes li{display:flex;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
+ul.scopes li{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-top:1px solid var(--line)}
+ul.scopes input{margin-top:4px}
 ul.scopes li:first-child{border-top:0}
 ul.scopes small{display:block;color:var(--ink-3);font-size:13px}
 ul.scopes li.off{opacity:.55}
