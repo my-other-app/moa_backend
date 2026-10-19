@@ -56,6 +56,7 @@ from app.api.payment_gateways.router import (
     club_router as payment_gateways_club_router,
 )
 from app.api.ticket_templates.router import router as ticket_templates_router
+from app.api.ai.router import club_router as ai_club_router, event_router as ai_event_router
 from app.api.badges.router import router as badges_router
 from app.api.audit.router import router as audit_router
 from app.api.admin_alerts.router import router as admin_alerts_router
@@ -108,6 +109,9 @@ api_router.include_router(router=sites_public_router, tags=["site"])
 api_router.include_router(router=club_access_router, tags=["club-access"])
 # Before club_router too: /clubs/payments/gateway is a literal path.
 api_router.include_router(router=payment_gateways_club_router)
+# AI assist (app/api/ai): /clubs/ai/... before club_router, /events/{id}/ai/... before the events router.
+api_router.include_router(router=ai_club_router)
+api_router.include_router(router=ai_event_router)
 api_router.include_router(router=payment_gateways_admin_router)
 api_router.include_router(router=store_router, tags=["store"])
 # Before club_router: /clubs/store would otherwise be read as /clubs/{club_id}.
