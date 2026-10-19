@@ -25,6 +25,7 @@ from app.db.listeners import *
 from app.response import ErrorResponse, CustomHTTPException
 from app.core.utils.discord import report_error
 from app.core.middlewares.etag_middleware import ETagMiddleware
+from app.core.middlewares.private_cache_middleware import PrivateCacheMiddleware
 from app.core.middlewares.process_time_middleware import ProcessingTimeMiddleware
 from app.core.middlewares.security_headers_middleware import SecurityHeadersMiddleware
 from app.core.middlewares.rate_limit_middleware import RateLimitMiddleware
@@ -208,6 +209,10 @@ application.add_middleware(PlanGateScope)
 # (APP_ETAGS; app/core/middlewares/etag_middleware.py). Inside CORS, so a
 # 304 to another origin carries the CORS headers too.
 application.add_middleware(ETagMiddleware)
+# `Cache-Control: private` on an answer to a signed-in caller that set none
+# (app/core/middlewares/private_cache_middleware.py): a CDN in front of the
+# API must never keep one person's data. Outside the tags, so a 304 has it too.
+application.add_middleware(PrivateCacheMiddleware)
 # print(settings.cors_origins)
 # if settings.DEBUG:
 application.add_middleware(

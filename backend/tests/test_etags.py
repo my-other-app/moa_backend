@@ -5,9 +5,11 @@ asks again with that answer's ETag in If-None-Match. An unchanged answer is
 then a 304 with no body instead of the whole list again. These pin what
 gets a tag: a GET or HEAD under /api/v1/ answered 200 with JSON. They pin
 what never does: the live stream, files, PDFs, redirects, errors and other
-types. The Cache-Control a route set goes out unchanged, and the flag off
-is exactly the old behaviour. The ticket and certificate PDFs are tagged
-with the name they are kept under, and a 304 for one draws nothing.
+types. The Cache-Control a route set goes out unchanged, an answer to a
+signed-in caller that set none is `private` (private_cache_middleware.py),
+and the flag off is exactly the old behaviour. The ticket and certificate
+PDFs are tagged with the name they are kept under, and a 304 for one
+draws nothing.
 """
 import asyncio
 import io
@@ -309,12 +311,12 @@ async def test_the_apps_tickets_list_is_tagged_and_revalidated_until_it_changes(
     assert first.status_code == 200 and first.json()["items"][0]["ticket_id"] == world["a"].ticket_id
     tag = first.headers["etag"]
     assert WEAK.fullmatch(tag)
-    # A personal answer: no Cache-Control before, none now (none is added).
-    assert "cache-control" not in first.headers
+    # A personal answer, which set no Cache-Control: private, never shared.
+    assert first.headers["cache-control"] == "private"
 
     again = await client.get(url, headers={**world["a_user"], "If-None-Match": tag})
     assert again.status_code == 304 and again.content == b"" and again.headers["etag"] == tag
-    assert "cache-control" not in again.headers
+    assert again.headers["cache-control"] == "private"
     # Another person's list is their own body, and their own tag.
     theirs = await client.get(url, headers={**world["b_user"], "If-None-Match": tag})
     assert theirs.status_code == 200 and theirs.headers["etag"] != tag
@@ -464,14 +466,15 @@ async def test_the_ticket_pdf_is_tagged_with_its_kept_name_and_a_304_draws_nothi
     # The tag is the name the PDF is kept under: docs/ticket/<id>/<version>-<fingerprint>.pdf.
     (key,) = bucket["held"]
     assert key.endswith(f"/docs/ticket/{world['a'].id}/{tag.strip(chr(34))}.pdf")
-    # No Cache-Control before this change, and none now.
-    assert "cache-control" not in first.headers
+    # The route sets no Cache-Control; to its signed-in caller it is private.
+    assert first.headers["cache-control"] == "private"
     assert drawn["calls"] == ["Ananya Iyer"]
 
     reads, trips = len(bucket["reads"]), len(drawn["trips"])
     for sent in (tag, f"W/{tag}", f'"other", {tag}'):
         again = await client.get(url, headers={**world["a_user"], "If-None-Match": sent})
         assert again.status_code == 304 and again.content == b"" and again.headers["etag"] == tag
+        assert again.headers["cache-control"] == "private"
     # Decided from the fingerprint alone: nothing drawn, the bucket not read.
     assert drawn["calls"] == ["Ananya Iyer"]
     assert len(bucket["reads"]) == reads and len(drawn["trips"]) == trips
@@ -541,3 +544,73 @@ async def test_a_certificate_drawn_without_one_of_its_images_goes_out_untagged(c
     r = await client.get(f"/api/v1/events/certificates/{world['a'].ticket_id}/pdf")
     assert r.status_code == 200 and "etag" not in r.headers and r.headers["cache-control"] == "public, max-age=300"
     assert bucket["held"] == {}
+
+
+# ─── The reads the app revalidates, and whose they are ───────────────────
+
+
+APP_READS = (
+    "/api/v1/events/list?is_registered=true&offset=0&limit=100",
+    "/api/v1/events/for-you?offset=0&limit=10",
+    "/api/v1/events/info/{event}",
+    "/api/v1/events/{event}/agenda",
+    "/api/v1/events/{event}/store/catalog",
+    "/api/v1/clubs/list",
+    "/api/v1/clubs/info/{club}",
+    "/api/v1/clubs/{club}/events",
+    "/api/v1/interests/list",
+    "/api/v1/interests/topics",
+    "/api/v1/user/profile/me",
+    "/api/v1/notifications/fetch-list",
+)
+#: Set by the route itself: the same answer for everyone.
+PUBLIC_READS = {"/api/v1/interests/list": "public, max-age=300", "/api/v1/interests/topics": "public, max-age=300"}
+
+
+async def test_each_read_the_app_revalidates_is_tagged_answers_304_and_is_private(client, world):
+    for template in APP_READS:
+        path = template.format(event=world["event"].id, club=world["event"].club_id)
+        first = await client.get(path, headers=world["a_user"])
+        assert first.status_code == 200 and first.headers["content-type"] == "application/json", (path, first.text)
+        assert WEAK.fullmatch(first.headers["etag"]), path
+        again = await client.get(path, headers={**world["a_user"], "If-None-Match": first.headers["etag"]})
+        assert again.status_code == 304 and again.content == b"", path
+        assert again.headers["etag"] == first.headers["etag"], path
+        # The signed-in caller's answers never go to a shared cache; the
+        # public ones keep the policy their route set.
+        expected = PUBLIC_READS.get(template, "private")
+        assert first.headers["cache-control"] == again.headers["cache-control"] == expected, path
+
+
+async def test_answers_to_a_signed_in_caller_are_private_and_public_ones_stay_public(client, world):
+    from app.core.middlewares.private_cache_middleware import carries_credentials
+
+    def asks(*headers) -> bool:
+        return carries_credentials({"headers": list(headers)})
+
+    assert asks((b"authorization", b"Bearer x")) and asks((b"x-live-key", b"browser-00000001"))
+    assert asks((b"x-live-player", b"p")) and asks((b"x-kiosk-token", b"k"))
+    assert asks((b"cookie", b"theme=dark; access_token=abc"))
+    assert not asks() and not asks((b"authorization", b" ")) and not asks((b"cookie", b"x_access_token=abc; access_token="))
+
+    event = world["event"].id
+    token = world["a_user"]["Authorization"].split(" ", 1)[1]
+    info = f"/api/v1/events/info/{event}"
+    # Nobody in particular: unchanged, no Cache-Control.
+    assert "cache-control" not in (await client.get(info)).headers
+    # The same page for someone signed in, by header or by the web's cookie.
+    for headers in (world["a_user"], {"Cookie": f"access_token={token}"}):
+        r = await client.get(info, headers=headers)
+        assert r.status_code == 200 and r.json()["is_registered"] is True
+        assert r.headers["cache-control"] == "private"
+    # A live room's browser key: its own flags in the poll.
+    poll = await client.get(f"/api/v1/events/{event}/live", headers={"X-Live-Key": "browser-00000001"})
+    assert poll.status_code == 200 and poll.headers["cache-control"] == "private"
+    # Whatever a route set itself stays, signed in or not.
+    signed_in = world["a_user"]
+    assert (await client.get("/api/v1/interests/topics", headers=signed_in)).headers["cache-control"] == "public, max-age=300"
+    cert = await client.get(f"/api/v1/events/certificates/{world['a'].ticket_id}/style", headers=signed_in)
+    assert cert.status_code == 200 and cert.headers["cache-control"] == "private"
+    # Not the API's own routes: nothing written.
+    healthz = await client.get("/healthz", headers=signed_in)
+    assert healthz.status_code == 200 and "cache-control" not in healthz.headers and "etag" not in healthz.headers
