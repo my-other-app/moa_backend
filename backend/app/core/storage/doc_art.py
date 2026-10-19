@@ -27,9 +27,15 @@ same to what was stored before:
   what an untagged picture is read as; then EXIF, the profile, text chunks
   and the rest are left behind.
 - **A photo becomes a JPEG**, quality JPEG_QUALITY (85), progressive and
-  optimised: what the renderer embeds without decoding.
+  optimised: what the renderer embeds without decoding. One that came as a
+  PNG or WebP was made, not photographed, and keeps its colour at full
+  resolution (4:4:4) for its type and hairlines; a JPEG's is halved (4:2:0).
 - **A picture with transparency stays a PNG**, compressed losslessly. One
   whose alpha is opaque everywhere has none, and is treated as a photo.
+- **Never larger.** A picture already upright, at its size and in sRGB may
+  be smallest as it came (a JPEG saved at quality 60 grows saved again at
+  85): its own bytes, with every metadata segment taken out, are kept when
+  they are the smallest and decode to exactly the same pixels.
 - **Quantised only when that loses nothing.** A PNG goes to a 256-colour
   palette only when converting back gives every pixel exactly as it was (a
   flat logo, a signature in one ink, a design with a few colours). A lossy

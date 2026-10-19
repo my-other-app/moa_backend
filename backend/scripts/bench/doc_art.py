@@ -11,9 +11,11 @@ app/core/storage/doc_art.py stores it now. Per artwork: the file, the time
 
 The artworks are made here, from a fixed seed, so a run is repeatable:
 
-- `audit-54k`, `audit-1.4m`: 2000 x 1100 JPEGs, the two sizes
-  docs/stage0/AUDIT.md (2.3) measured: a smooth one, and noise at high
-  quality (the worst case: nothing in it compresses).
+- `smooth-jpeg`, `noise-jpeg`: 2000 x 1100 JPEGs of about the two sizes
+  docs/stage0/AUDIT.md (2.3) measured, 54 KB and 1.36 MB: a smooth one, and
+  noise (the worst case: nothing in it compresses, so it stays as it came).
+- `photo-jpeg`: 2000 x 1100 at JPEG quality 98, already at its size: the
+  same sort of file as the 1.36 MB one, with a photo's detail in it.
 - `poster-png`: an A4 portrait export at 300 dpi (2480 x 3508) as a PNG,
   the way Figma or Canva hands a designer's poster over: gradients, shapes,
   a grain.
@@ -79,10 +81,11 @@ def artworks() -> dict[str, bytes]:
     d = ImageDraw.Draw(img)
     d.ellipse((1300, 200, 1800, 700), fill=(250, 200, 80))
     d.rectangle((120, 700, 900, 980), fill=(20, 30, 60))
-    out["audit-54k"] = _encode(img.filter(ImageFilter.GaussianBlur(2)), "JPEG", quality=80)
+    out["smooth-jpeg"] = _encode(img.filter(ImageFilter.GaussianBlur(2)), "JPEG", quality=80)
 
     noise = (rng.random((h, w, 3)) * 255).astype(np.uint8)
-    out["audit-1.4m"] = _encode(Image.fromarray(noise, "RGB"), "JPEG", quality=60)
+    out["noise-jpeg"] = _encode(Image.fromarray(noise, "RGB"), "JPEG", quality=78)
+    out["photo-jpeg"] = _encode(Image.fromarray((_texture(w, h, rng, octaves=8) * 255).astype(np.uint8), "RGB"), "JPEG", quality=98)
 
     # A poster: gradient, texture, panels, a grain. A4 at 300 dpi, PNG.
     w, h = 2480, 3508
