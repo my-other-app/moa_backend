@@ -172,6 +172,20 @@ limiter = SharedLimiter(
 )
 
 
+def signed_in_key(request) -> Optional[str]:
+    """`user:<id>` when the request's access token was found valid on the
+    way in (app.core.auth.dependencies.get_current_user notes the account
+    on request.state), else None: no token, a dead one, or a route that
+    never asked who is calling.
+
+    Read rather than decoded again. A route's own limit is checked inside
+    slowapi's wrapper of the endpoint, which FastAPI calls only once the
+    route's dependencies are solved, so its auth dependency has run by then.
+    """
+    user_id = getattr(request.state, "user_id", None)
+    return f"user:{user_id}" if user_id else None
+
+
 def account_or_address(request) -> str:
     """The limiter's key for an endpoint only a signed-in account calls: that
     account, from its own (verified) token; the address when there is none.

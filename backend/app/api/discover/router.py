@@ -14,7 +14,7 @@ from app.api.discover.schemas import (
 )
 from app.api.threads.schemas import ThreadPage
 from app.core.auth.dependencies import AdminAuth, OptionalAuth
-from app.core.rate_limit import limiter
+from app.core.rate_limit import limiter, signed_in_key
 from app.db.core import SessionDep
 
 logger = logging.getLogger(__name__)
@@ -27,7 +27,12 @@ LAZY_BACKFILL = 25
 
 
 def _visitor(request: Request) -> str:
-    return geo.client_ip(request) or "unknown"
+    """Whose budget a read spends: a signed-in reader's own
+    (rate_limit.signed_in_key, from the OptionalAuth every route here
+    takes), else the visitor's address, shared by everyone signed out
+    behind it. A phone network puts many people behind one address, where
+    one busy reader spent the limit for all of them."""
+    return signed_in_key(request) or geo.client_ip(request) or "unknown"
 
 
 Lat = Query(None, ge=-90, le=90, description="The browser's latitude; without it the visitor is placed by address")
