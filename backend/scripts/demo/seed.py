@@ -228,7 +228,7 @@ class Seeder:
 
     def __init__(self, session, clubs: list[Club], people: People, *, main_email: str, main_password: str,
                  club_password: str, force: bool = False, now: Optional[datetime] = None, out=print, seed: str = "moa-demo",
-                 showcase: Optional[str] = None):
+                 showcase: Optional[str] = None, open_registration: bool = False):
         self.s = session
         self.clubs = clubs
         self.people = people
@@ -253,6 +253,9 @@ class Seeder:
         self.hidden_stores: list[str] = []
         self.design_keys: dict[int, dict] = {}
         self.showcase_slug: Optional[str] = showcase
+        #: Off (the default): every upcoming demo event is full, so nobody from
+        #: the public can register for something that is not happening.
+        self.open_registration = open_registration
         self.showcase = None
         self.skipped: Counter = Counter()
         for c in clubs:
@@ -629,10 +632,10 @@ class Seeder:
         start, end = self.when(e)
         made = min(self.now - timedelta(days=self.rnd.randint(2, 9)), start - timedelta(days=self.rnd.randint(18, 40)))
         made = max(made, ctx["founded"] + timedelta(days=3))
-        # The store only where nobody can register any more (past, or sold
-        # out): a pick at registration is paid online, and no member of the
-        # public may pay for something from a club that is not real.
-        store_open = bool(e.merch) and (e.past or e.sold_out)
+        # The store only on events that are over: a pick at registration is
+        # paid online, and no member of the public may pay for something from
+        # a club that is not real.
+        store_open = bool(e.merch) and e.past
         if e.merch and not store_open:
             self.hidden_stores.append(e.slug)
         venue = venue_line(e.venue.name, e.venue.address) if e.venue else None
@@ -1198,6 +1201,11 @@ class Seeder:
                         await sc.quiz(e, ev_ctx)
                     await sc.live_updates(e, ev_ctx)
                     await sc.closeout(e, ev_ctx)
+                if not e.past and not self.open_registration:
+                    # Full: the capacity is what was taken, so the public form
+                    # answers "Event is full" (a paid event already is).
+                    ev_ctx["event"].max_participants = max(1, len(regs))
+                    await self.commit()
                 await self._close_registration(ev_ctx)
                 runs.append((e, ev_ctx))
             followers = await self.follow(ctx, c, registrants)
@@ -1220,8 +1228,11 @@ class Seeder:
 
         if self.hidden_stores:
             self.report.notes.append(
-                f"the store is hidden on {len(self.hidden_stores)} upcoming event(s) open for registration "
-                f"(a pick there is paid online, and nobody may pay a club that is not real): {', '.join(self.hidden_stores)}")
+                f"the store is off on {len(self.hidden_stores)} upcoming event(s) (a pick at registration is paid online, "
+                f"and nobody may pay a club that is not real): {', '.join(self.hidden_stores)}")
+        self.report.notes.append(
+            "registration is OPEN on the upcoming demo events (--open-registration): anyone can register" if self.open_registration
+            else "every upcoming demo event is full: nobody from the public can register (--open-registration to change)")
         for what, n in sorted(self.skipped.items()):
             self.report.notes.append(f"not stored, no home in the backend: {what} ({n})")
         moved = await advance_clock(self.s, self.now)
@@ -1232,12 +1243,17 @@ class Seeder:
         return self.report
 
     async def _close_registration(self, ev_ctx: dict) -> None:
-        """Registration closes at the start, as the dashboard sets it."""
+        """Registration closes at the start, as the dashboard sets it; an
+        upcoming event nobody registered for, with registration not open,
+        closed already (a capacity of nothing would mean no limit)."""
         from sqlalchemy import update
 
         from app.api.events.models import Events
 
-        await self.s.execute(update(Events).where(Events.id == ev_ctx["event"].id).values(reg_enddate=ev_ctx["start"]))
+        closes = ev_ctx["start"]
+        if not self.open_registration and ev_ctx["start"] > self.now and not ev_ctx.get("regs"):
+            closes = ev_ctx["made"]
+        await self.s.execute(update(Events).where(Events.id == ev_ctx["event"].id).values(reg_enddate=closes))
         await self.commit()
 
     async def safety_checks(self, jobs_before: int) -> None:
@@ -1287,6 +1303,19 @@ class Seeder:
         n = await self.s.scalar(select(func.count()).select_from(EventStoreOrders).where(EventStoreOrders.event_id.in_(ids), EventStoreOrders.status == "pending"))
         if n:
             problems.append(f"{n} store order(s) are still pending (a hold, or an online payment to come)")
+        if not self.open_registration:
+            # Every upcoming event full (or its registration closed), as the
+            # registration service counts it: paid places on a paid event,
+            # everyone on a free one.
+            open_free = (await self.s.execute(select(Events.slug).where(
+                Events.id.in_(ids), Events.event_datetime > self.now,
+                ~((Events.reg_enddate.isnot(None)) & (Events.reg_enddate <= self.now)),
+                ~(func.coalesce(Events.max_participants, 0) > 0)
+                | ((Events.has_fee == False) & (Events.going_count < Events.max_participants))  # noqa: E712
+                | ((Events.has_fee == True) & (Events.paid_count < Events.max_participants)),  # noqa: E712
+            ))).scalars().all()
+            if open_free:
+                problems.append(f"upcoming events the public could still register for: {', '.join(open_free)}")
         open_paid = (await self.s.execute(select(Events.slug, Events.paid_count, Events.max_participants).where(
             Events.id.in_(ids), Events.has_fee == True, Events.event_datetime > self.now,  # noqa: E712
             Events.paid_count < Events.max_participants))).all()
@@ -1325,7 +1354,8 @@ def render(report: Report, quiet_summary: dict, *, main_password: str, club_pass
 
 
 async def seed(*, main_email: str, main_password: str, club_password: str, data_dir: Optional[Path], force: bool,
-               include_example: bool = False, bucket: Optional[Path] = None, showcase: Optional[str] = "respawn-room", out=print) -> int:
+               include_example: bool = False, bucket: Optional[Path] = None, showcase: Optional[str] = "respawn-room",
+               open_registration: bool = False, out=print) -> int:
     from app.db.core import AsyncSessionLocal
     from app.db.listeners import add_loader_criteria
     from scripts.demo.quiet import quiet
@@ -1346,7 +1376,8 @@ async def seed(*, main_email: str, main_password: str, club_password: str, data_
             await session.execute(text("SELECT pg_advisory_lock(:k)"), {"k": 0x6D6F615F64656D6F})
             try:
                 seeder = Seeder(session, clubs, people, main_email=main_email, main_password=main_password,
-                                club_password=club_password, force=force, out=out, showcase=showcase)
+                                club_password=club_password, force=force, out=out, showcase=showcase,
+                                open_registration=open_registration)
                 try:
                     report = await seeder.run()
                 except Refused as e:
@@ -1385,11 +1416,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--include-example", action="store_true", help="seed data/clubs/_example.json too (for a rehearsal)")
     parser.add_argument("--local-bucket", type=Path, default=None, help="a folder instead of S3 -- for a rehearsal on a laptop, never on the server")
     parser.add_argument("--showcase", default="respawn-room", help="the club that gets every dashboard section filled ('' for none)")
+    parser.add_argument("--open-registration", action="store_true",
+                        help="leave the free upcoming events open to the public (off: every upcoming event is full)")
     args = parser.parse_args(argv)
     return asyncio.run(seed(
         main_email=args.main_email, main_password=args.main_password, club_password=args.club_password,
         data_dir=args.data_dir, force=args.force, include_example=args.include_example, bucket=args.local_bucket,
-        showcase=args.showcase or None,
+        showcase=args.showcase or None, open_registration=args.open_registration,
     ))
 
 

@@ -341,6 +341,40 @@ async def test_main_user_has_tickets_and_certificates_in_the_club_design(seeded,
     assert (await certificate_style(session, full))["layout"]["canvas"]["templateKey"]
 
 
+async def test_upcoming_demo_events_are_full_and_refuse_the_public(seeded, session, client):
+    """Registration not open (the default): nobody from the public form gets
+    a ticket to an event that is not happening."""
+    upcoming = await session.scalar(select(Events).where(Events.slug == "example-open-source-saturday"))
+    await session.refresh(upcoming)
+    assert upcoming.max_participants == upcoming.going_count == 8
+    r = await client.post(f"/api/v1/events/registration/{upcoming.id}/register",
+                          json={"full_name": "Real Student", "email": "real.student@example.com"})
+    assert r.status_code == 400 and r.json().get("error_code") == "EVENT_FULL", r.text
+    assert "every upcoming demo event is full" in " ".join(seeded.report.notes)
+
+
+async def _sign_in(client, username, password, scope=""):
+    r = await client.post("/api/v1/auth/token", data={"username": username, "password": password, "scope": scope})
+    assert r.status_code == 200, (username, r.text[:200])
+    body = r.json()
+    token = (body.get("data") or body)["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+async def test_demo_logins_need_no_email_verification(seeded, client):
+    """The main user and the club logins sign in at once and count as
+    verified: their mail is suppressed, so a code would never arrive."""
+    h = await _sign_in(client, f"demo.user@{DEMO_DOMAIN}", "DemoPass123!")
+    me = (await client.get("/api/v1/auth/me", headers=h)).json()
+    assert (me.get("data") or me)["email_verified"] is True
+    profile = (await client.get("/api/v1/user/profile/me", headers=h)).json()
+    assert (profile.get("data") or profile).get("email_verified", True) is True
+    h = await _sign_in(client, f"example-chai-coders@{DEMO_DOMAIN}", "ClubPass123!", scope="club")
+    me = (await client.get("/api/v1/auth/me", headers=h)).json()
+    assert (me.get("data") or me)["email_verified"] is True
+    assert (await client.get("/api/v1/clubs/info", headers=h)).status_code == 200
+
+
 async def test_seed_refuses_when_clubs_exist(session, reference, make_club, tmp_path):
     await make_club(name="Already Here", email="here@example.com")
     clubs, people = load(_data_dir(tmp_path), include_example=True)
@@ -382,7 +416,7 @@ async def test_showcase_fills_every_dashboard_section(session, reference, tmp_pa
     clubs, people = load(_data_dir(tmp_path), include_example=True)
     with local_bucket(tmp_path / "bucket"), quiet() as q:
         seeder = Seeder(session, clubs, people, main_email=f"demo.user@{DEMO_DOMAIN}", main_password="DemoPass123!",
-                        club_password="ClubPass123!", out=lambda *_: None, showcase="example-chai-coders")
+                        club_password="ClubPass123!", out=lambda *_: None, showcase="example-chai-coders", open_registration=True)
         report = await seeder.run()
     c = report.counts
     assert c["showcase_access_members"] == 3 and len(report.logins) == 3
@@ -403,6 +437,13 @@ async def test_showcase_fills_every_dashboard_section(session, reference, tmp_pa
         assert r.status_code == 200, (path, r.text[:200])
     orders = (await client.get(f"/api/v1/events/{past.id}/store/orders", headers=h)).text
     assert "oversold" in orders
+    # --open-registration: the free event to come keeps its own capacity.
+    upcoming = await session.scalar(select(Events).where(Events.slug == "example-open-source-saturday"))
+    assert upcoming.max_participants == 30 and upcoming.merch_enabled is False
+    # The committee signs in to the dashboard straight away.
+    for _name, _role, email in report.logins:
+        member = await _sign_in(client, email, "ClubPass123!", scope="club")
+        assert (await client.get("/api/v1/clubs/access/me", headers=member)).status_code == 200
     # No queued work and nothing waiting to be sent for the sweeps to pick up.
     assert await _count(session, "jobs") == 0
     assert await _count(session, "deliveries", "status IN ('pending', 'sending')") == 0

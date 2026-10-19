@@ -28,7 +28,8 @@ Always use `$DC exec -T backend ...`. Never `docker-compose run`: it starts a se
 - **Fake people stay unreachable afterwards.** Every invented person is at `demo.myotherapp.in`. The mailer and the push sender skip that domain permanently (`APP_MAIL_SUPPRESS_DOMAINS`), so reminders, surveys and billing mails never reach them.
 - **No real money.** The seed makes no Razorpay order. Paid tickets and store orders are recorded as paid at the desk, in cash, as the walk-up desk records them, with the ledger lines the desk writes.
   - An upcoming paid event is always sold out, so nobody can buy a ticket.
-  - The store is shown only on events nobody can register for any more.
+  - The store is shown only on past events.
+- **Nobody from the public can register for a demo event.** By default every upcoming demo event is full: its capacity is set to the registrations the seed made, the main user's included. A real student who found one would otherwise register, get a ticket email and turn up at a venue where nothing is happening. The post-seed checks fail if any upcoming demo event still has a place. Pass `--open-registration` only for a private rehearsal where you want to show the registration flow on a free event.
 - **The bucket (S3) is never touched** by reset or remove.
 
 ## Before you start
@@ -112,6 +113,7 @@ Notes:
 - It takes about 5 minutes. It prints a line per club, then a summary and a **CREDENTIALS** block. Copy that block somewhere safe: it is not written anywhere.
 - It refuses to run if any club exists. Reset first, or pass `--force` to seed beside real clubs.
 - `--showcase <slug>` picks a different showcase club. `--showcase ''` seeds none.
+- `--open-registration` leaves the free upcoming events open to anyone. It is off by default, for the reason under "Safety, in short"; don't use it on production.
 - The summary ends with `safety checks passed`. If a safety check fails, the data is already written. Remove it (section 6), fix the cause, and seed again.
 
 ### What you get
@@ -123,6 +125,7 @@ Notes:
   - posts with polls, likes and comments, and 860 to 2,560 followers;
   - a ticket and a certificate in its own brand.
 - **The main user.** Registered for each club's next event, plus its latest past event (attended, with certificate). Follows every club and has an order handed over.
+- **Logins that work at once.** The main user, every club owner and the showcase's committee sign in straight away with no email-verification step: the accounts are marked verified, because their mail is suppressed and a code would never arrive.
 - **The showcase (Respawn Room).** Everything above, plus:
   - committee logins with roles: admin, editor, door, and one invite still pending;
   - sign-ins and sessions on Security;
