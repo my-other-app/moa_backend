@@ -243,7 +243,28 @@ async def test_the_owner_sees_who_is_signed_in_on_each_device(client, world):
     ("door", "POST", "/api/v1/events/7/gate/check-in/44", True),
     ("door", "DELETE", "/api/v1/events/7/gate/check-in/44", True),
     ("door", "POST", "/api/v1/events/registration/7/attendance/44", True),
-    ("door", "POST", "/api/v1/events/7/merch/3/handout", True),
+    # Handout items are uuids: a number never named one, and door staff could not hand swag out by hand.
+    ("door", "POST", "/api/v1/events/7/merch/5b0c1f2e-8a43-4f0e-9d3c-2b7f6a1e9c40/handout", True),
+    ("door", "POST", "/api/v1/events/7/merch/5b0c1f2e-8a43-4f0e-9d3c-2b7f6a1e9c40/handout/undo", True),
+    ("door", "PATCH", "/api/v1/events/7/merch/5b0c1f2e-8a43-4f0e-9d3c-2b7f6a1e9c40", False),
+    ("door", "POST", "/api/v1/events/7/merch/5b0c1f2e-8a43-4f0e-9d3c-2b7f6a1e9c40/handout/../../x", False),
+    # The club's store: editors and admins run it, door staff only read it.
+    ("editor", "GET", "/api/v1/clubs/store", True),
+    ("editor", "POST", "/api/v1/clubs/store", True),
+    ("editor", "POST", "/api/v1/clubs/store/photo", True),
+    ("editor", "PATCH", "/api/v1/clubs/store/5b0c1f2e-8a43-4f0e-9d3c-2b7f6a1e9c40", True),
+    ("editor", "DELETE", "/api/v1/clubs/store/5b0c1f2e-8a43-4f0e-9d3c-2b7f6a1e9c40", True),
+    ("admin", "DELETE", "/api/v1/clubs/store/5b0c1f2e-8a43-4f0e-9d3c-2b7f6a1e9c40", True),
+    ("door", "GET", "/api/v1/clubs/store", True),
+    ("door", "POST", "/api/v1/clubs/store", False),
+    ("door", "POST", "/api/v1/clubs/store/photo", False),
+    ("door", "PATCH", "/api/v1/clubs/store/5b0c1f2e-8a43-4f0e-9d3c-2b7f6a1e9c40", False),
+    ("door", "DELETE", "/api/v1/clubs/store/5b0c1f2e-8a43-4f0e-9d3c-2b7f6a1e9c40", False),
+    ("nobody", "GET", "/api/v1/clubs/store", False),
+    ("editor", "GET", "/api/v1/events/7/store/offers", True),
+    ("editor", "PUT", "/api/v1/events/7/store/offers", True),
+    ("door", "GET", "/api/v1/events/7/store/offers", True),
+    ("door", "PUT", "/api/v1/events/7/store/offers", False),
     ("door", "POST", "/api/v1/events/7/store/orders/ab-12/handover/undo", True),
     ("door", "POST", "/api/v1/events/7/tickets/44/send", True),
     ("door", "POST", "/api/v1/events/7/tickets/send", False),
@@ -263,6 +284,7 @@ def test_what_the_dashboard_offers_matches_the_rules():
         assert can["money"] == policy.allows(role, "GET", "/api/v1/clubs/finance")
         assert can["club_profile"] == policy.allows(role, "PUT", "/api/v1/clubs/update")
         assert can["edit_events"] == policy.allows(role, "PUT", "/api/v1/events/update/1")
+        assert can["club_store"] == can["edit_events"] == policy.allows(role, "POST", "/api/v1/clubs/store")
         assert can["delete_events"] == policy.allows(role, "DELETE", "/api/v1/events/delete/1")
         assert can["see_access"] == policy.allows(role, "GET", "/api/v1/clubs/access")
         assert can["manage_access"] == policy.allows(role, "POST", "/api/v1/clubs/access/invite")
