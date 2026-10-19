@@ -493,6 +493,9 @@ class EventListResponse(CustomBaseModel):
     is_paid: bool | None = Field(None)
     ticket_id: str | None = Field(None)
     ticket_url: str | None = Field(None)
+    # The organiser revoked this ticket: the door refuses it. Null when the
+    # caller has no registration for the event.
+    ticket_revoked: bool | None = Field(None)
     certificate_url: str | None = Field(None)
 
 

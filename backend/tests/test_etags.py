@@ -635,6 +635,52 @@ async def test_each_read_the_app_revalidates_is_tagged_answers_304_and_is_privat
         assert first.headers["cache-control"] == again.headers["cache-control"] == expected, path
 
 
+async def test_a_viewers_own_fields_change_the_tag(client, session, world, make_user, make_registration, mint_token):
+    """The tag is a hash of the body sent, so what is the viewer's own
+    (is_registered, is_paid, ticket_id, ticket_revoked) moves it."""
+    c = await make_user(email="etags-c@example.com")
+    h = auth_header(await mint_token(c))
+    world["event"].has_fee = True
+    await session.commit()
+
+    info = f"/api/v1/events/info/{world['event'].id}"
+    before = await client.get(info, headers=h)
+    assert before.status_code == 200 and not before.json().get("is_registered")
+    reg = await make_registration(event=world["event"], user=c, full_name="Chitra Nair")
+    await session.commit()
+    registered = await client.get(info, headers={**h, "If-None-Match": before.headers["etag"]})
+    assert registered.status_code == 200 and registered.json()["is_registered"] is True
+    assert registered.json()["is_paid"] is False and registered.headers["etag"] != before.headers["etag"]
+
+    reg.is_paid = True
+    await session.commit()
+    paid = await client.get(info, headers={**h, "If-None-Match": registered.headers["etag"]})
+    assert paid.status_code == 200 and paid.json()["is_paid"] is True and paid.headers["etag"] != registered.headers["etag"]
+
+    url = "/api/v1/events/list?is_registered=true&offset=0&limit=100"
+    listed = await client.get(url, headers=h)
+    (item,) = listed.json()["items"]
+    assert item["ticket_id"] == reg.ticket_id and item["is_paid"] is True and item["ticket_revoked"] is False
+    reg.ticket_id = "MOA-ETAGS-NEW01"
+    await session.commit()
+    moved = await client.get(url, headers={**h, "If-None-Match": listed.headers["etag"]})
+    assert moved.status_code == 200 and moved.json()["items"][0]["ticket_id"] == "MOA-ETAGS-NEW01"
+    assert moved.headers["etag"] != listed.headers["etag"]
+
+
+async def test_a_ticket_revoked_at_the_door_is_flagged_in_the_list(client, session, world):
+    url = "/api/v1/events/list?is_registered=true&offset=0&limit=100"
+    first = await client.get(url, headers=world["a_user"])
+    assert first.json()["items"][0]["ticket_revoked"] is False
+
+    world["a"].ticket_revoked_at = datetime.now(timezone.utc)
+    await session.commit()
+    revoked = await client.get(url, headers={**world["a_user"], "If-None-Match": first.headers["etag"]})
+    assert revoked.status_code == 200 and revoked.headers["etag"] != first.headers["etag"]
+    (item,) = revoked.json()["items"]
+    assert item["ticket_id"] == world["a"].ticket_id and item["ticket_revoked"] is True
+
+
 async def test_answers_to_a_signed_in_caller_are_private_and_public_ones_stay_public(client, world):
     from app.core.middlewares.private_cache_middleware import carries_credentials
 

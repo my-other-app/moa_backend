@@ -406,6 +406,9 @@ async def list_events(
                 event_dict["is_paid"] = bool(reg.is_paid)
                 event_dict["ticket_id"] = reg.ticket_id
                 event_dict["ticket_url"] = public_urls.ticket_url(reg.ticket_id)
+                # Revoked by the organiser: the door refuses it by name, so
+                # a ticket kept for offline use drops it on the next refresh.
+                event_dict["ticket_revoked"] = reg.ticket_revoked_at is not None
                 if reg.is_attended:
                     event_dict["certificate_url"] = public_urls.certificate_url(reg.ticket_id)
             enhanced_events.append(event_dict)
