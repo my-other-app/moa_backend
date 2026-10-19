@@ -63,6 +63,30 @@ class HostState(BaseModel):
     leaderboard: list[dict]
 
 
+class Notified(BaseModel):
+    """Whether the room was told (app/api/live/notify.py). `sent`: the people
+    the push and the inbox line went to. When it was not: why, and for
+    `rate_limited` when the last one went and how many seconds until the
+    next may."""
+
+    sent: int
+    skipped_reason: Optional[Literal["rate_limited", "nobody_checked_in", "all_muted", "disabled", "failed"]] = None
+    last_sent_at: Optional[datetime] = None
+    retry_after: Optional[int] = None
+
+
+class HostActionIn(BaseModel):
+    """The host's action's body, all of it optional: a console that sends
+    none (or `{}`) gets the defaults."""
+
+    notify: Optional[bool] = Field(None, description="start only: tell everyone checked in. Not given: yes.")
+
+
+class HostActionOut(HostState):
+    #: For `start`, what telling the room came to; null when it was not asked (and for next, end, reset).
+    notified: Optional[Notified] = None
+
+
 class JoinIn(BaseModel):
     code: str = Field(..., min_length=4, max_length=8)
     name: str = Field(..., min_length=1, max_length=60)
@@ -160,6 +184,7 @@ class PollPatch(BaseModel):
 
 class PollStatusIn(BaseModel):
     status: Literal["live", "closed"]
+    notify: Optional[bool] = Field(None, description="Launching (live) only: tell everyone checked in. Not given: no.")
 
 
 class PollOut(BaseModel):
@@ -173,6 +198,11 @@ class PollOut(BaseModel):
     sort_order: int
     results: dict
     my_response: Optional[str] = None
+
+
+class PollStatusOut(PollOut):
+    #: For a launch, what telling the room came to; null when it was not asked (and for a close).
+    notified: Optional[Notified] = None
 
 
 class RespondIn(BaseModel):

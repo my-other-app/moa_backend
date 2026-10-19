@@ -2,6 +2,7 @@
 anyone with the browser key (and a player key, for the quiz). Each of the
 room's polls can also be had as a stream of server-sent events (stream.py,
 behind APP_LIVE_SSE)."""
+from typing import Optional
 from uuid import UUID
 
 import orjson
@@ -10,13 +11,15 @@ from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import JSONResponse
 
 from app.api.deliveries import service as deliveries
-from app.api.live import limits, room, service, stream
+from app.api.live import limits, notify, room, service, stream
 from app.api.live.schemas import (
     AnswerIn,
     AnswerOut,
     AskIn,
     Feed,
     FeedbackOut,
+    HostActionIn,
+    HostActionOut,
     HostState,
     JoinIn,
     JoinOut,
@@ -26,6 +29,7 @@ from app.api.live.schemas import (
     PollOut,
     PollPatch,
     PollStatusIn,
+    PollStatusOut,
     PublicSurvey,
     QABoard,
     QASettings,
@@ -109,7 +113,14 @@ async def host_state(session: SessionDep, user: ClubAuth, event_id: int) -> Host
 
 
 @router.post("/quiz/host/{action}", summary="start · next · end · reset")
-async def host_action(session: SessionDep, user: ClubAuth, event_id: int, action: str) -> HostState:
+async def host_action(
+    request: Request, session: SessionDep, user: ClubAuth, event_id: int, action: str, body: Optional[HostActionIn] = None,
+) -> HostActionOut:
+    """`start` tells everyone checked in that the quiz is starting (a push
+    and an inbox line, at most one per event every three minutes and ten a
+    day) unless the body says `{"notify": false}`; with no body it does.
+    What came of it is `notified` -- the quiz starts whatever it says. The
+    other actions take no body and answer `notified: null`."""
     event = await deliveries.event_for_club(session, user, event_id)
     fn = {"start": service.start_quiz, "next": service.next_question, "end": service.end_quiz, "reset": service.reset_quiz}.get(action)
     if fn is None:
@@ -118,7 +129,12 @@ async def host_action(session: SessionDep, user: ClubAuth, event_id: int, action
         # Starting is the plan's; a quiz already running can always be moved on or ended.
         await gates.require_feature(session, event.club_id, "quiz", actor=user, event=event)
     quiz = await service.quiz_of(session, event)
-    return HostState(**await fn(session, quiz))
+    quiz_id = quiz.id
+    out = await fn(session, quiz)
+    notified = None
+    if action == "start" and (body is None or body.notify is not False):
+        notified = await notify.tell_room(session, event, "quiz", actor=user, ref=quiz_id, request=request)
+    return HostActionOut(**out, notified=notified)
 
 
 # --- quiz: the players ----------------------------------------------------------------------
@@ -220,12 +236,20 @@ async def patch_poll(session: SessionDep, user: ClubAuth, event_id: int, poll_id
 
 
 @router.post("/polls/{poll_id}/status", summary="Launch or close a poll; launching closes the one that was up")
-async def poll_status(session: SessionDep, user: ClubAuth, event_id: int, poll_id: UUID, body: PollStatusIn) -> PollOut:
+async def poll_status(request: Request, session: SessionDep, user: ClubAuth, event_id: int, poll_id: UUID, body: PollStatusIn) -> PollStatusOut:
+    """Launching with `"notify": true` also tells everyone checked in that a
+    poll is live (as starting the quiz does, under the same limit); without
+    it, nobody is told. What came of it is `notified` (null when not asked,
+    and for a close) -- the poll is launched whatever it says."""
     event = await deliveries.event_for_club(session, user, event_id)
     if body.status == "live":
         # Launching is the plan's; closing a poll that is up never is.
         await gates.require_feature(session, event.club_id, "polls", actor=user, event=event)
-    return PollOut(**await service.set_poll_status(session, event, poll_id, body.status))
+    out = await service.set_poll_status(session, event, poll_id, body.status)
+    notified = None
+    if body.status == "live" and body.notify:
+        notified = await notify.tell_room(session, event, "poll", actor=user, ref=poll_id, request=request)
+    return PollStatusOut(**out, notified=notified)
 
 
 @router.delete("/polls/{poll_id}", summary="Remove a poll")
