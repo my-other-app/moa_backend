@@ -6,7 +6,8 @@ then a 304 with no body instead of the whole list again. These pin what
 gets a tag: a GET or HEAD under /api/v1/ answered 200 with JSON. They pin
 what never does: the live stream, files, PDFs, redirects, errors and other
 types. The Cache-Control a route set goes out unchanged, and the flag off
-is exactly the old behaviour.
+is exactly the old behaviour. The ticket and certificate PDFs are tagged
+with the name they are kept under, and a 304 for one draws nothing.
 """
 import asyncio
 import io
@@ -402,6 +403,24 @@ async def test_the_live_stream_is_untouched_and_the_rooms_poll_is_tagged(client,
 
 
 @pytest.fixture
+def bucket(monkeypatch):
+    """The bucket as a dict, the cache on, and its reads counted."""
+    from app.core.storage import objects
+
+    held: dict = {}
+    reads: list = []
+
+    def fetch(key, quiet_if_missing=False):
+        reads.append(key)
+        return held.get(key)
+
+    monkeypatch.setattr(settings, "RENDER_DOC_CACHE", True)
+    monkeypatch.setattr(objects, "fetch", fetch)
+    monkeypatch.setattr(objects, "put_bytes", lambda key, data, content_type: held.__setitem__(key, data))
+    return {"held": held, "reads": reads}
+
+
+@pytest.fixture
 def drawn(monkeypatch):
     """The HTML renders stubbed and counted, and every trip to the cache counted."""
     from app.api.events import certificates, doc_cache, tickets
@@ -434,3 +453,91 @@ async def test_the_emailed_file_link_is_untouched(client, world, drawn):
     r = await client.get(f"{parts.path}?{parts.query}", headers={"If-None-Match": "*"})
     assert r.status_code == 200 and r.headers["content-type"] == "application/pdf"
     assert r.content == b"%PDF-1.4 Ananya Iyer" and "etag" not in r.headers
+
+
+async def test_the_ticket_pdf_is_tagged_with_its_kept_name_and_a_304_draws_nothing(client, session, world, bucket, drawn):
+    url = f"/api/v1/events/tickets/{world['a'].ticket_id}/pdf"
+    first = await client.get(url, headers=world["a_user"])
+    assert first.status_code == 200 and first.content == b"%PDF-1.4 Ananya Iyer"
+    tag = first.headers["etag"]
+    assert DOCUMENT.fullmatch(tag)
+    # The tag is the name the PDF is kept under: docs/ticket/<id>/<version>-<fingerprint>.pdf.
+    (key,) = bucket["held"]
+    assert key.endswith(f"/docs/ticket/{world['a'].id}/{tag.strip(chr(34))}.pdf")
+    # No Cache-Control before this change, and none now.
+    assert "cache-control" not in first.headers
+    assert drawn["calls"] == ["Ananya Iyer"]
+
+    reads, trips = len(bucket["reads"]), len(drawn["trips"])
+    for sent in (tag, f"W/{tag}", f'"other", {tag}'):
+        again = await client.get(url, headers={**world["a_user"], "If-None-Match": sent})
+        assert again.status_code == 304 and again.content == b"" and again.headers["etag"] == tag
+    # Decided from the fingerprint alone: nothing drawn, the bucket not read.
+    assert drawn["calls"] == ["Ananya Iyer"]
+    assert len(bucket["reads"]) == reads and len(drawn["trips"]) == trips
+
+    # Only the ticket's holder (or its club, or an admin) is answered at all.
+    assert (await client.get(url, headers={**world["b_user"], "If-None-Match": tag})).status_code == 403
+
+    # Anything printed changing changes the tag; the old one gets the new PDF.
+    world["a"].full_name = "Ananya R. Iyer"
+    await session.commit()
+    changed = await client.get(url, headers={**world["a_user"], "If-None-Match": tag})
+    assert changed.status_code == 200 and changed.content == b"%PDF-1.4 Ananya R. Iyer"
+    assert DOCUMENT.fullmatch(changed.headers["etag"]) and changed.headers["etag"] != tag
+
+    # A kept one read back from the bucket is tagged too.
+    del drawn["calls"][:]
+    kept = await client.get(url, headers=world["a_user"])
+    assert kept.status_code == 200 and kept.headers["etag"] == changed.headers["etag"] and drawn["calls"] == []
+
+
+async def test_a_ticket_drawn_without_one_of_its_images_goes_out_untagged(client, session, world, bucket, drawn, monkeypatch):
+    """Handed out but not kept (app.api.events.doc_cache), and not tagged:
+    a phone holding the copy without its logo is never told it is current."""
+    from app.api.templates_audience import TemplateAudience
+    from app.api.ticket_templates.models import TicketTemplates
+    from app.core.storage import objects
+
+    logo = f"{settings.S3_BASE_PATH}/templates/tickets/logos/0b6f2d6e-4a51-4b0e-9a2b-1f7c4b9d2e11.png"
+    session.add(TicketTemplates(event_id=world["event"].id, audience=TemplateAudience.event_default, name="T", config={"logo_key": logo}))
+    await session.commit()
+    monkeypatch.setattr(objects, "get_bytes", lambda key: None)  # the bucket did not answer
+
+    r = await client.get(f"/api/v1/events/tickets/{world['a'].ticket_id}/pdf", headers=world["a_user"])
+    assert r.status_code == 200 and r.content.startswith(b"%PDF") and "etag" not in r.headers
+    assert bucket["held"] == {}
+
+
+async def test_the_certificate_pdf_is_tagged_the_same_way_and_a_revoked_one_is_refused_first(client, world, bucket, drawn):
+    url = f"/api/v1/events/certificates/{world['a'].ticket_id}/pdf"
+    first = await client.get(url)
+    assert first.status_code == 200 and DOCUMENT.fullmatch(first.headers["etag"])
+    (key,) = bucket["held"]
+    assert key.endswith(f"/docs/certificate/{world['a'].id}/{first.headers['etag'].strip(chr(34))}.pdf")
+
+    again = await client.get(url, headers={"If-None-Match": first.headers["etag"]})
+    assert again.status_code == 304 and again.headers["etag"] == first.headers["etag"]
+    # Its Cache-Control is what it was, on both.
+    assert first.headers["cache-control"] == again.headers["cache-control"] == "public, max-age=300"
+    assert drawn["calls"] == ["Ananya Iyer"] and len(drawn["trips"]) == 1
+
+    base = f"/api/v1/events/{world['event'].id}/certificates"
+    await client.post(f"{base}/issue", json={"audience": "checked_in"}, headers=world["club"])
+    await client.post(f"{base}/{world['a'].id}/revoke", headers=world["club"])
+    assert (await client.get(url, headers={"If-None-Match": first.headers["etag"]})).status_code == 403
+
+
+async def test_a_certificate_drawn_without_one_of_its_images_goes_out_untagged(client, session, world, bucket, drawn, monkeypatch):
+    from app.api.certificate_templates.models import CertificateTemplates
+    from app.api.templates_audience import TemplateAudience
+    from app.core.storage import objects
+
+    logo = f"{settings.S3_BASE_PATH}/templates/certificates/logos/0b6f2d6e-4a51-4b0e-9a2b-1f7c4b9d2e11.png"
+    session.add(CertificateTemplates(event_id=world["event"].id, audience=TemplateAudience.event_default, name="C", config={"logo_key": logo}))
+    await session.commit()
+    monkeypatch.setattr(objects, "get_bytes", lambda key: None)
+
+    r = await client.get(f"/api/v1/events/certificates/{world['a'].ticket_id}/pdf")
+    assert r.status_code == 200 and "etag" not in r.headers and r.headers["cache-control"] == "public, max-age=300"
+    assert bucket["held"] == {}

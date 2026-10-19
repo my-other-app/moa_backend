@@ -21,6 +21,7 @@ from app.api.events.documents import (
 )
 from app.api.templates_images import CERTIFICATE_FIELDS, TICKET_FIELDS, embedded
 from app.core.layout import pool
+from app.core.middlewares.etag_middleware import matches
 from app.core.net import client_address
 from app.core.rate_limit import limiter
 from fastapi.encoders import jsonable_encoder
@@ -37,11 +38,10 @@ from app.api.events import wallet_service
 from app.api.subscriptions import gates
 from app.api.users.models import UserTypes
 from app.api.templates_audience import RegistrationRole
-from app.api.events.tickets import role_of, ticket_document, ticket_payload, ticket_style
+from app.api.events.tickets import role_of, ticket_document, ticket_job, ticket_payload, ticket_style
 from app.api.events.certificates import (
     availability,
     certificate_context,
-    certificate_document,
     certificate_job,
     certificate_style,
     qr_text as certificate_qr_text,
@@ -597,24 +597,60 @@ async def increment_view_count(
 
 
 
+def _document_etag(job) -> str:
+    """A ticket's or certificate's PDF tag: the name it is kept under in the
+    bucket, `{design version}-{fingerprint}` (app.api.events.doc_cache.key_for),
+    where the fingerprint hashes everything the document prints. Worked out
+    without drawing anything or reading the bucket."""
+    return f'"{int(job.design_version or 0)}-{job.fingerprint}"'
+
+
+def _if_none_match(request: Request) -> str:
+    return ", ".join(request.headers.getlist("if-none-match"))
+
+
+async def _drawn(job, key: Optional[str]) -> tuple[bytes, bool]:
+    """The document's bytes, kept or drawn (doc_cache.cached), and whether
+    they are whole. A render that could not read one of its images goes out
+    but is not kept. It gets no tag either: a phone holding the copy without
+    its logo would be told it is current until the design changed. A kept
+    one is always whole."""
+    whole = [True]
+
+    def draw() -> tuple[bytes, bool]:
+        pdf, complete = job.draw()
+        whole[0] = complete
+        return pdf, complete
+
+    return await doc_cache.cached(key, draw), whole[0]
+
+
 @router.get("/tickets/{ticket_id}/pdf", summary="Get ticket PDF")
 async def get_ticket_pdf(
+    request: Request,
     ticket_id: str,
     session: SessionDep = SessionDep,
     user: DependsAuth = None,
 ) -> Response:
     """
     Generate and download a PDF for the ticket.
+
+    Its ETag names this ticket as drawn (_document_etag). Asked again with
+    that tag in If-None-Match, an unchanged ticket is a 304, decided without
+    drawing it or reading the bucket. The access check comes first.
     """
     registration = await service.get_ticket_details(session, ticket_id=ticket_id)
     _assert_can_access_ticket(user, registration)
 
-    doc = await ticket_document(session, registration)
-    return Response(
-        content=doc.content,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{doc.filename}"'},
-    )
+    job = ticket_job(registration, await ticket_style(session, registration))
+    etag = _document_etag(job)
+    if matches(_if_none_match(request), etag):
+        return Response(status_code=304, headers={"ETag": etag})
+    content, whole = await _drawn(job, job.cache_key("ticket", registration.id))
+    headers = {"Content-Disposition": f'attachment; filename="ticket-{registration.ticket_id}.pdf"'}
+    if whole:
+        headers["ETag"] = etag
+    return Response(content=content, media_type="application/pdf", headers=headers)
 
 
 @router.get("/tickets/{ticket_id}/wallet.pkpass", summary="Get Apple Wallet pass")
@@ -711,8 +747,7 @@ def _certificate_headers(registration, job, kind: str) -> dict:
 
 
 def _not_modified(request: Request, headers: dict) -> Optional[Response]:
-    sent = request.headers.get("if-none-match") or ""
-    if headers["ETag"] in [t.strip() for t in sent.split(",")]:
+    if matches(_if_none_match(request), headers["ETag"]):
         return Response(status_code=304, headers=headers)
     return None
 
@@ -769,18 +804,23 @@ async def get_certificate_pdf(
     """
     Generate and download a PDF certificate of participation.
     Only available for attendees who have checked in (is_attended=True).
+
+    Tagged like the ticket (_document_etag): a 304 without drawing it when
+    the caller's If-None-Match names it. A revoked one is refused first.
     """
     registration, style = await _certificate_for(session, ticket_id)
     job = certificate_job(registration, style)
-    headers = _certificate_headers(registration, job, "pdf")
+    headers = {"Cache-Control": "public, max-age=300", "ETag": _document_etag(job)}
     if (unchanged := _not_modified(request, headers)) is not None:
         return unchanged
 
-    doc = await certificate_document(session, registration, style)
+    content, whole = await _drawn(job, job.cache_key("certificate", registration.id))
+    if not whole:
+        del headers["ETag"]
     return Response(
-        content=doc.content,
+        content=content,
         media_type="application/pdf",
-        headers={**headers, "Content-Disposition": f'attachment; filename="{doc.filename}"'},
+        headers={**headers, "Content-Disposition": f'attachment; filename="certificate-{registration.ticket_id}.pdf"'},
     )
 
 
