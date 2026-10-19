@@ -2,8 +2,8 @@
 
 How to deploy, roll back, unstick a migration, restore a backup, rotate a
 secret, turn on the new services, size the server and every service on it,
-keep its disk from filling, open the live room's streams, and look after the
-rendered documents in the bucket. Every command is meant to be copied.
+keep its disk from filling, open the live room's streams, look after the
+rendered documents in the bucket, and run AI assist. Every command is meant to be copied.
 Commands under **Read-only** change nothing; anything that changes something
 says so.
 
@@ -471,6 +471,8 @@ the hash of what you set.
 | Wallet pass signing key and certificate | Apple developer -> Pass Type IDs | replace the files in `backend/wallet_certs`, not in git |
 | `PROD_SSH_PRIVATE_KEY` | `ssh-keygen -t ed25519` | add the new public key to the server's `authorized_keys`, update the secret, deploy once, remove the old key |
 | `APP_SENTRY_DSN` | Sentry -> project -> Client Keys | not really secret (it can only send events); revoke the old key there |
+| `APP_GEMINI_API_KEY` | Google AI Studio -> API keys, on the paid project | one key, never a list (section 14); make the new one, switch, recreate, delete the old |
+| `APP_AI_KEYS_SECRET` | the same Fernet command as `APP_PAYMENT_KEYS_SECRET` | a list: the new key **first**, the old after it; drop the old once every club's own AI key has been saved again |
 
 **The links in emails (`APP_LINK_SIGNING_KEYS`).** A guest's ticket and
 certificate links (`/api/v1/files/{tickets|certificates}/<code>.pdf?s=...`)
@@ -1287,3 +1289,153 @@ aws s3api put-bucket-lifecycle-configuration --bucket <bucket> --lifecycle-confi
    rule. Not both.
 5. The next day: the `doc cache sweep:` line in the backend's log, and no
    `doc_cache_unknown` alert. To stop: unset it the same way.
+
+---
+
+## 14. AI assist
+
+What the clubs dashboard calls (`app/api/ai`, on the layer in `app/core/ai`):
+a draft event from notes, a poster or a PDF (`POST /clubs/ai/event-draft`);
+writing -- an event description, an announcement, an email, a sponsor
+thank-you, a caption, in English, Malayalam or both (`POST /clubs/ai/write`);
+an event's survey comments summed up (`GET /events/{id}/ai/feedback-summary`,
+and `.../refresh`); the status (`GET /clubs/ai/status`); and a club's own AI
+key (`GET/PUT/DELETE /clubs/ai/key`). Nothing is saved from a draft or a
+piece of writing; the organiser reviews it in the form.
+
+### Settings
+
+| Setting (`.env`) | Default | Meaning |
+|---|---|---|
+| `APP_AI_ENABLED` | `false` | the switch. Off: every AI action answers 403 `AI_DISABLED` and no provider is called, a club's own key included. The status still answers (`enabled: false`) |
+| `APP_GEMINI_API_KEY` | empty | the platform's one Gemini key. Empty with the switch on: 503 `AI_UNAVAILABLE` for clubs without their own key |
+| `APP_AI_MODELS` | `gemini-3.8-flash,gemini-3.5-flash-lite` | tried in this order: on a 429, a 5xx, a timeout, an unknown model or a refusal, the next, after `APP_AI_FALLBACK_BACKOFF_SECONDS` (0.5). All failing: 503 `AI_UNAVAILABLE` |
+| `APP_AI_VISION_MODELS` | the same two | the list for a request with a poster or PDF |
+| `APP_AI_GEMINI_THINKING` | `low` | Gemini's thinking level for these calls (`low`, `medium`, `high`; empty: the model's default) |
+| `APP_AI_TIMEOUT_SECONDS` / `APP_AI_VISION_TIMEOUT_SECONDS` | `30` / `60` | one call, without and with a file |
+| `APP_AI_DEADLINE_SECONDS` | `100` | the whole request with every fallback; keep it under nginx's `proxy_read_timeout` (120 s) |
+| `APP_AI_FALLBACK_PROVIDER`, `_API_KEY`, `_MODELS` | empty | an optional second provider for the platform (`anthropic`), tried after every Gemini model; its own key, and its models (empty: `claude-opus-5-5,claude-sonnet-5-5,claude-haiku-5-5`). A different service, never a second Gemini key |
+| `APP_AI_KEYS_SECRET` | empty | the Fernet key clubs' own AI keys are encrypted with (a list rotates, as for `APP_PAYMENT_KEYS_SECRET`). Empty: no club can connect its own key, and one already saved answers 503 rather than falling back to ours |
+
+The model ids are Google's, from https://ai.google.dev/gemini-api/docs/models
+(checked 2026-10-20; both stable, both read images and PDFs). When Google
+retires one, change `APP_AI_MODELS` (`sync_env`, `recreate_backend`); no code
+changes. The SDKs are `google-genai` and `anthropic` (requirements.txt).
+
+**One key, always.** Exactly one Gemini key is configured. Never spread
+calls over several keys, accounts or projects to get past Gemini's rate
+limits: that is against Google's terms. The fallback is between models,
+each with its own limits; past them, clubs get 503 and try again.
+
+### The plans and their monthly actions
+
+Each successful draft, piece of writing or new summary is one action; a
+failed call is never counted. On the platform's key a club needs the plan
+flag `ai_assist`, and has `ai_actions_per_month` of them (null: no cap),
+counted per club per calendar month in India. Seeded by the `ai_assist`
+migration:
+
+| Plan | `ai_assist` | `ai_actions_per_month` |
+|---|---|---|
+| Free | off | 0 |
+| Starter | on | 20 |
+| Growth | on | 150 |
+| Pro | on | 500 |
+| Campus, Enterprise | on | unlimited |
+
+Past the cap: 429 `AI_QUOTA_REACHED` ("You've used 20 of 20 AI actions this
+month on Starter. They reset on 1 November."), with the next plan up in
+`errors`. Admins edit both in Admin -> Subscriptions like every flag and
+limit; until the admin app lists `ai_actions_per_month` among its limit
+fields, saving a plan there keeps the value it has. As with every plan gate,
+an admin (or an admin acting as a club) is never gated or counted, and
+`APP_PLAN_ENFORCEMENT=false` lifts the flag and the cap too: `APP_AI_ENABLED`
+is the switch that stops spending.
+
+### A club's own key
+
+The owner or an admin member pastes a Gemini or Anthropic key and picks a
+model (Anthropic: `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`;
+Gemini: the models above). It is tested with one tiny call before it is
+saved (422 `AI_KEY_INVALID`, saying why, when it fails), encrypted, and
+shown only as its last four characters; it is never returned, logged or
+audited. Then every AI action of the club runs on it: its provider, its
+model and the lighter ones after it, never counted against the plan (plan
+flag `ai_byok`, on every plan). A failing club key is 401 `AI_KEY_INVALID`
+or 402 `AI_KEY_QUOTA`, never quietly swapped for the platform's.
+`APP_AI_ENABLED` still has to be on.
+
+### What is sent, and what is kept
+
+Only what a feature needs: the club's notes or file, an event's public facts
+(name, date, venue, about, the club's name), survey comments and ratings
+without names or registrations. Email addresses and phone numbers are
+scrubbed out of everything sent. What people wrote is sent in data blocks
+the model is told never to take instructions from, and every answer is
+checked against a schema (one retry, then 503). No prompt and no answer is
+logged or stored, except the last feedback summary of each event
+(`ai_feedback_summaries`).
+
+### Reading `ai_usage`
+
+One row per action: `club_id`, `user_id` (the club's account, or an admin's),
+`member_id` (the team member, if one), `action` (`event_draft`, `write`,
+`feedback_summary`, `key_check`), `provider`, `model` (the one that answered,
+or the last tried), `byok`, `input_tokens`, `output_tokens`, `latency_ms`,
+`ok` (null while under way; true counts; false never does) and `error`
+(`rate_limited`, `server`, `timeout`, `auth`, `billing`, `refused`,
+`invalid_output`...). Read-only, in the psql session from the top of this
+runbook:
+
+```sql
+-- This month (India) per club: actions on our key, on their own, failures.
+SELECT club_id,
+       count(*) FILTER (WHERE ok AND NOT byok) AS counted,
+       count(*) FILTER (WHERE ok AND byok)     AS own_key,
+       count(*) FILTER (WHERE ok IS FALSE)     AS failed
+FROM ai_usage
+WHERE created_at >= date_trunc('month', now() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata'
+GROUP BY club_id ORDER BY counted DESC LIMIT 20;
+
+-- Tokens and latency per model over the last week (our key only: what we pay for).
+SELECT model, count(*), sum(input_tokens) AS input, sum(output_tokens) AS output,
+       percentile_disc(0.95) WITHIN GROUP (ORDER BY latency_ms) AS p95_ms
+FROM ai_usage
+WHERE NOT byok AND ok AND created_at > now() - interval '7 days'
+GROUP BY model ORDER BY count(*) DESC;
+
+-- What is failing, and on which model.
+SELECT error, model, count(*) FROM ai_usage
+WHERE ok IS FALSE AND created_at > now() - interval '1 day'
+GROUP BY error, model ORDER BY count(*) DESC;
+```
+
+Many `rate_limited` on the first model: its quota (AI Studio -> the
+project's rate limits) is too small for the traffic; raise the project's
+tier, never add a second key. Many `invalid_output`: a model that has
+stopped following the schema; move another first in `APP_AI_MODELS`.
+
+### Turning it on
+
+1. **A paid key.** In Google AI Studio, make the key on a Google Cloud
+   project with billing enabled (the paid tier). On the free tier, Google
+   may use what is sent -- clubs' notes, posters, attendees' comments -- to
+   improve its products, and people may read it; production must never use
+   a free-tier key. Set a budget alert on the project's billing.
+2. `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`:
+   the value for `APP_AI_KEYS_SECRET`.
+3. Deploy the code and the new requirements, with the migration:
+   `sync_code`, `install_requirements`, `migrate` (section 1). The base
+   layer changes (pydantic, google-auth, typing_extensions), so the build
+   installs it again: expect the long build (section 8), off-peak.
+4. In `PROD_ENV_VARIABLES`: `APP_GEMINI_API_KEY`, `APP_AI_KEYS_SECRET` and
+   `APP_AI_ENABLED=true`. Deploy with `sync_env`, `recreate_backend`.
+5. Check, as a club on Starter or up: `GET /api/v1/clubs/ai/status` says
+   `enabled: true`; one draft from a line of notes works; its row is in
+   `ai_usage` with `ok` true and a model.
+6. To stop at once: `APP_AI_ENABLED=false`, `sync_env`, `recreate_backend`.
+   Clubs see 403 `AI_DISABLED`; nothing is called.
+
+A poster near 10 MB, with the form around it, is a little over 10 MB: an
+nginx in front with `client_max_body_size 10M` refuses it (413) before the
+API sees it. Give that location 12M if large posters matter.
