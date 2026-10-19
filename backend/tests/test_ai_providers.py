@@ -478,3 +478,87 @@ def test_the_draft_schema_is_one_both_providers_take():
     for schema in (draft.SCHEMA, write.SCHEMA, feedback.SCHEMA):
         assert len(walk(schema, [])) <= 4
         json.dumps(schema)
+
+
+# ─── On the wire (the real SDKs, a mock transport: still no network) ─────
+
+
+async def test_gemini_on_the_wire_sends_the_key_in_a_header_and_reads_a_429(caplog):
+    import httpx
+    from google import genai
+    from google.genai import types
+
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        if len(seen) == 1:
+            return httpx.Response(200, json={
+                "candidates": [{"content": {"role": "model", "parts": [{"text": '{"ok": true}'}]}, "finishReason": "STOP"}],
+                "usageMetadata": {"promptTokenCount": 12, "candidatesTokenCount": 4, "thoughtsTokenCount": 2},
+            })
+        return httpx.Response(429, json={"error": {"code": 429, "message": "Quota exceeded", "status": "RESOURCE_EXHAUSTED"}})
+
+    provider = GeminiProvider(KEY)
+    provider._client = genai.Client(
+        vertexai=False, api_key=KEY,
+        http_options=types.HttpOptions(httpx_async_client=httpx.AsyncClient(transport=httpx.MockTransport(handler))),
+    )
+    pdf = Attachment(mime_type="application/pdf", data=b"%PDF-1.7 tiny")
+    result = await provider.generate(AIRequest(system="Be brief.", text="Hello", attachments=(pdf,), schema=SCHEMA), model="gemini-3.8-flash", timeout=30)
+    assert (result.text, result.input_tokens, result.output_tokens) == ('{"ok": true}', 12, 6)
+    sent = seen[0]
+    assert sent.url.path.endswith("/models/gemini-3.8-flash:generateContent")
+    assert sent.headers["x-goog-api-key"] == KEY and KEY not in str(sent.url)
+    body = json.loads(sent.content)
+    config = body["generationConfig"]
+    assert config["responseMimeType"] == "application/json" and config["responseJsonSchema"] == SCHEMA
+    # The SDK writes this one field by its proto name; the API takes either spelling.
+    assert config["thinkingConfig"] in ({"thinkingLevel": "LOW"}, {"thinking_level": "LOW"})
+    assert body["systemInstruction"]["parts"][0]["text"] == "Be brief."
+    parts = body["contents"][0]["parts"]
+    inline = parts[0]["inlineData"]
+    assert inline.get("mimeType", inline.get("mime_type")) == "application/pdf" and base64.b64decode(inline["data"]) == pdf.data
+    assert parts[1]["text"] == "Hello"
+
+    with pytest.raises(ProviderError) as caught:
+        await provider.generate(AIRequest(system="s", text="t"), model="gemini-3.8-flash", timeout=30)
+    assert caught.value.kind == RATE_LIMITED and len(seen) == 2, "one attempt: the SDK does not retry"
+    await provider.aclose()
+    assert "automatic function calling" not in caplog.text
+
+
+async def test_claude_on_the_wire_asks_for_structured_output_and_reads_a_refusal():
+    seen = []
+    answers = [
+        {"id": "msg_1", "type": "message", "role": "assistant", "model": "claude-haiku-5-5", "stop_reason": "end_turn",
+         "content": [{"type": "text", "text": '{"ok": true}'}], "usage": {"input_tokens": 30, "output_tokens": 5}},
+        {"id": "msg_2", "type": "message", "role": "assistant", "model": "claude-haiku-5-5", "stop_reason": "refusal",
+         "stop_details": {"type": "refusal", "category": "cyber", "explanation": None},
+         "content": [], "usage": {"input_tokens": 30, "output_tokens": 0}},
+    ]
+
+    def handler(request):
+        seen.append(request)
+        if len(seen) <= len(answers):
+            return httpx2.Response(200, json=answers[len(seen) - 1])
+        return httpx2.Response(401, json={"type": "error", "error": {"type": "authentication_error", "message": "invalid x-api-key"}})
+
+    provider = ClaudeProvider(KEY)
+    provider._client = anthropic.AsyncAnthropic(api_key=KEY, max_retries=0, http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(handler)))
+    result = await provider.generate(AIRequest(system="Be brief.", text="Hello", schema=SCHEMA), model="claude-haiku-5-5", timeout=30)
+    assert (result.text, result.input_tokens, result.output_tokens) == ('{"ok": true}', 30, 5)
+    sent = seen[0]
+    assert sent.url.path == "/v1/messages" and sent.headers["x-api-key"] == KEY
+    body = json.loads(sent.content)
+    assert body["model"] == "claude-haiku-5-5" and body["system"] == "Be brief."
+    assert body["output_config"] == {"effort": "low", "format": {"type": "json_schema", "schema": SCHEMA}}
+    assert body["messages"] == [{"role": "user", "content": [{"type": "text", "text": "Hello"}]}]
+
+    with pytest.raises(ProviderError) as caught:
+        await provider.generate(AIRequest(system="s", text="t"), model="claude-haiku-5-5", timeout=30)
+    assert caught.value.kind == REFUSED
+    with pytest.raises(ProviderError) as caught:
+        await provider.generate(AIRequest(system="s", text="t"), model="claude-haiku-5-5", timeout=30)
+    assert caught.value.kind == AUTH and len(seen) == 3
+    await provider.aclose()

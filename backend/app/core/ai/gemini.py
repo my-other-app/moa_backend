@@ -56,7 +56,10 @@ class GeminiProvider(AIProvider):
             from google import genai
             from google.genai import types
 
+            # vertexai=False: the Gemini API with this key, whatever the
+            # environment says (GOOGLE_GENAI_USE_VERTEXAI, application credentials).
             self._client = genai.Client(
+                vertexai=False,
                 api_key=self._api_key,
                 http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=1)),
             )
@@ -68,6 +71,8 @@ class GeminiProvider(AIProvider):
         config = types.GenerateContentConfig(
             system_instruction=request.system,
             max_output_tokens=request.max_output_tokens,
+            # No tools are ever given; off, the SDK does not warn about it on every call.
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
             http_options=types.HttpOptions(
                 timeout=int(timeout * 1000), retry_options=types.HttpRetryOptions(attempts=1)
             ),
