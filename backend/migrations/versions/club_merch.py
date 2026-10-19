@@ -37,7 +37,7 @@ and club_id; an item offered on events other than its own is then sold on
 its own event only.
 
 Revision ID: club_merch
-Revises: w2_live
+Revises: interest_emoji
 """
 import logging
 
@@ -45,7 +45,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "club_merch"
-down_revision = "w2_live"
+down_revision = "interest_emoji"
 branch_labels = None
 depends_on = None
 
