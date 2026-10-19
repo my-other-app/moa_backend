@@ -1319,8 +1319,8 @@ piece of writing; the organiser reviews it in the form.
 
 The model ids are Google's, from https://ai.google.dev/gemini-api/docs/models
 (checked 2026-10-20; both stable, both read images and PDFs). When Google
-retires one, change `APP_AI_MODELS` (`sync_env`, `recreate_backend`); no code
-changes. The SDKs are `google-genai` and `anthropic` (requirements.txt).
+retires one, change `APP_AI_MODELS` in the server's `.env` and recreate the
+backend (step 4 below); no code changes. The SDKs are `google-genai` and `anthropic` (requirements.txt).
 
 **One key, always.** Exactly one Gemini key is configured. Never spread
 calls over several keys, accounts or projects to get past Gemini's rate
@@ -1429,12 +1429,18 @@ stopped following the schema; move another first in `APP_AI_MODELS`.
    `sync_code`, `install_requirements`, `migrate` (section 1). The base
    layer changes (pydantic, google-auth, typing_extensions), so the build
    installs it again: expect the long build (section 8), off-peak.
-4. In `PROD_ENV_VARIABLES`: `APP_GEMINI_API_KEY`, `APP_AI_KEYS_SECRET` and
-   `APP_AI_ENABLED=true`. Deploy with `sync_env`, `recreate_backend`.
+4. On the server, add `APP_GEMINI_API_KEY`, `APP_AI_KEYS_SECRET` and
+   `APP_AI_ENABLED=true` to `/var/www/myotherapp-production/.env` by hand
+   (`sudo nano .env`), then recreate the backend so it reads them:
+   `$DC up -d --build --no-deps backend < /dev/null`. Do NOT use the
+   workflow's `sync_env` here: it writes the whole `.env` from the
+   `PROD_ENV_VARIABLES` secret, which is older than the server's file and
+   would put retired keys back.
 5. Check, as a club on Starter or up: `GET /api/v1/clubs/ai/status` says
    `enabled: true`; one draft from a line of notes works; its row is in
    `ai_usage` with `ok` true and a model.
-6. To stop at once: `APP_AI_ENABLED=false`, `sync_env`, `recreate_backend`.
+6. To stop at once: set `APP_AI_ENABLED=false` in the server's `.env` and
+   recreate as in step 4.
    Clubs see 403 `AI_DISABLED`; nothing is called.
 
 A poster near 10 MB, with the form around it, is a little over 10 MB: an
