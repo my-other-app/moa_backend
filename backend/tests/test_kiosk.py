@@ -47,7 +47,7 @@ def _url(world, path=""):
 
 async def test_pairing_rotating_and_unpairing(client, world):
     h = world["club"]
-    assert world["pair"]["url"].startswith("https://clubs-next.myotherapp.in/kiosk?token=kiosk_")
+    assert world["pair"]["url"].startswith("https://club-dashboard.myotherapp.in/kiosk?token=kiosk_")
     assert world["device"]["door_label"] == "Lobby kiosk" and world["device"]["active"] is True
     doors = await client.get(f"/api/v1/events/{world['event'].id}/doors", headers=h)
     assert [(d["name"], d["kind"]) for d in doors.json()] == [("Lobby kiosk", "kiosk")]

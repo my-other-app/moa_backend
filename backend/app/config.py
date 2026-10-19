@@ -205,7 +205,7 @@ class AppConfig(BaseSettings):
     # (`openssl rand -hex 32`); a shorter one stops the app at startup.
     LINK_SIGNING_KEYS: str = ""
     # The clubs dashboard, for links a volunteer opens on a phone.
-    PUBLIC_WEB_URL: str = "https://clubs-next.myotherapp.in"
+    PUBLIC_WEB_URL: str = "https://club-dashboard.myotherapp.in"
     # The public site: an event's page is /events/{slug}, a club's /clubs/{slug}. Tracking links land here.
     PUBLIC_SITE_URL: str = "https://myotherapp.in"
     # Where an address is turned into a place for the Security page; {ip} is filled in. Empty disables it.
