@@ -300,6 +300,10 @@ def with_redis(monkeypatch):
     from app.core import redis
 
     monkeypatch.setattr(settings, "REDIS_URL", REDIS_URL)
+    # What is tested is the claim, not Redis's latency: on a loaded machine a
+    # first call past the 0.25 s default is a fall back to Postgres (as it
+    # should be), which these tests would read as a failure.
+    monkeypatch.setattr(settings, "REDIS_TIMEOUT", 2.0)
     redis.reset_for_tests()
     yield
     redis.reset_for_tests()
