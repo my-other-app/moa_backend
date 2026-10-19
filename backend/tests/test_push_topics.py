@@ -602,13 +602,13 @@ async def test_the_shared_inbox_reads_one_index_range_per_target(session, scene,
 
 
 async def test_every_kind_is_decided_and_only_broadcasts_go_by_topic():
-    kinds = {k.value for k in NotificationType} | {"event_live_update", "platform"}
+    kinds = {k.value for k in NotificationType} | {"event_live_update", "event_live_join", "platform"}
     decided = set(delivery.BROADCASTS) | set(delivery.PERSONAL)
     assert kinds <= decided, kinds - decided
     assert not set(delivery.BROADCASTS) & set(delivery.PERSONAL)
     assert {k for k in kinds if delivery.delivery_for(k) is delivery.Delivery.TOPIC} == {"club_thread", "new_event", "nearby_event", "platform"}
     # Tickets, payments, reminders, check-ins, guests, and anything new: device by device.
-    for personal in ("event_registered", "event_reminder", "event_checkin", "certificate_generated", "club_announcement", "event_live_update", "payment_captured", "guest_ticket", None):
+    for personal in ("event_registered", "event_reminder", "event_checkin", "certificate_generated", "club_announcement", "event_live_update", "event_live_join", "payment_captured", "guest_ticket", None):
         assert delivery.delivery_for(personal) is delivery.Delivery.DEVICE
 
 

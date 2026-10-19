@@ -64,6 +64,9 @@ PERSONAL: dict[str, str] = {
     # server holds, and the app subscribes to nothing per registration.
     "club_announcement": "an event's registrants",
     "event_live_update": "an event's registrants",
+    # The quiz starting or a poll going live, to whoever is checked in: a
+    # list only the server holds (app/api/live/notify.py).
+    "event_live_join": "an event you are checked in to",
 }
 
 ALL_TOPIC = "all"

@@ -483,6 +483,15 @@ class AppConfig(BaseSettings):
     # Open streams one API process holds at most (each is a socket and a few
     # tens of KB); past it a new one is told 503 and polls instead.
     LIVE_SSE_MAX_STREAMS: int = 5000
+    # Telling the room (app/api/live/notify.py): when the host starts the
+    # quiz or launches a poll and asks for it, a push to every device of
+    # everyone checked in, and a line in their inbox. Off: the quiz and the
+    # poll still start, and the console is told `skipped_reason: disabled`.
+    LIVE_NOTIFY: bool = True
+    # At most one such push per event in this many seconds...
+    LIVE_NOTIFY_GAP_SECONDS: int = 180
+    # ...and this many per event per day, midnight to midnight in India.
+    LIVE_NOTIFY_PER_DAY: int = 10
 
     @field_validator("PLAN_ENFORCEMENT_FROM")
     @classmethod

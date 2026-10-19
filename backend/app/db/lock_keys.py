@@ -93,6 +93,9 @@ GATEWAY_CONNECT = 7_420_377
 PLAN_CHECKOUT = 7_420_388
 #: A registration's or a subscription's ledger lines (app/api/ledger/service.py, backfill.py).
 LEDGER = 7_420_455
+#: One "tell the room" at a time per event, so two hosts pressing at once send
+#: one push (app/api/live/notify.py).
+LIVE_NOTIFY = 7_301_011
 
 
 def all_keys() -> dict[str, int]:
