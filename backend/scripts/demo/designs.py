@@ -211,7 +211,7 @@ def _from_starter(starter: dict, brand, *, mark_key: str, ground: str | None = N
             if isinstance(out.get(key), str) and out[key] in refs:
                 out[key] = refs[out[key]]
         if out.get("kind") == "image" and out.get("source") == "org_logo":
-            side = min(out["width"], out["height"]) * 1.3
+            side = min(out["width"], out["height"])
             out.update(source="upload", imageKey=mark_key, width=side, height=side, align="left")
         if out.get("kind") == "text" and out.get("id") in ("event", "title", "first"):
             out.update(font=font, weight=weight)
