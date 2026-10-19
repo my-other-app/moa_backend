@@ -543,14 +543,21 @@ async def get_event(session: AsyncSession, event_id: str | int, user_id: int | N
 
     # User-specific data (only if user is authenticated)
     if user_id:
-        # Check registration status
-        registration = await session.scalar(
-            select(EventRegistrationsLink).where(
+        from app.api.live import service as live
+        from app.api.live.models import FeedbackSurveys
+
+        # Check registration status, and the event's feedback survey in the
+        # same statement (live.SURVEY_STATE): null columns when it has none.
+        row = (await session.execute(
+            select(EventRegistrationsLink, *live.SURVEY_STATE)
+            .outerjoin(FeedbackSurveys, FeedbackSurveys.event_id == EventRegistrationsLink.event_id)
+            .where(
                 EventRegistrationsLink.event_id == event.id,
                 EventRegistrationsLink.user_id == user_id,
                 EventRegistrationsLink.is_deleted == False,
             )
-        )
+        )).first()
+        registration = row[0] if row else None
         if registration:
             data["is_registered"] = True
             # What the door checks: a ticket for a paid event is refused
@@ -567,6 +574,10 @@ async def get_event(session: AsyncSession, event_id: str | int, user_id: int | N
             data["ticket_url"] = public_urls.ticket_url(registration.ticket_id)
             if registration.is_attended:
                 data["certificate_url"] = public_urls.certificate_url(registration.ticket_id)
+            # The feedback survey, as emailed to whoever was there, for the
+            # app's own survey screen: this registration's link only, and
+            # only while the survey is open to it (live.feedback_url).
+            data["feedback_url"] = live.feedback_url(event, registration, row if row.survey_id is not None else None)
             # Position label based on position
             if registration.position:
                 if registration.position == 1:

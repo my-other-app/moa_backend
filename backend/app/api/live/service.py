@@ -692,6 +692,44 @@ def survey_link(event: Events, reg: EventRegistrationsLink) -> str:
     return f"{settings.PUBLIC_SITE_URL.rstrip('/')}/feedback/{event.id}/{reg.id}?k={_survey_token(reg.id)}"
 
 
+#: What feedback_url reads of the survey, selected beside the guest's own
+#: registration through an outer join on feedback_surveys.event_id (its
+#: unique index), so the event page reads both in the statement it already
+#: makes: no query more, survey or none. All null when there is no survey.
+SURVEY_STATE = (FeedbackSurveys.id.label("survey_id"), FeedbackSurveys.auto_send, FeedbackSurveys.sent_at, FeedbackSurveys.delay_minutes)
+
+
+def survey_open(event: Events, survey, now: Optional[datetime] = None) -> bool:
+    """Whether the survey has opened, by the emails' rules: it went out
+    (the club's Send now, or the sweep), or it is switched on and the event's
+    end plus its delay has passed, which is when the sweep sends it (within
+    the minute). It does not close: the links mailed never expire
+    (docs/OPERATIONS.md, the links in emails), and the survey takes answers
+    as long as they do. `survey` is a FeedbackSurveys or a SURVEY_STATE row."""
+    if survey.sent_at is not None:
+        return True
+    if not survey.auto_send:
+        return False
+    return (now or now_utc()) >= _ends_at(event) + timedelta(minutes=survey.delay_minutes or 0)
+
+
+def feedback_url(event: Events, reg: Optional[EventRegistrationsLink], survey, now: Optional[datetime] = None) -> Optional[str]:
+    """The guest's own survey link, the one the email sends (survey_link),
+    while it is theirs to use: they were checked in, the event has a survey
+    and it is open (survey_open), and the survey's page would show it (as
+    room.visible: not a draft, its club listed). None otherwise.
+
+    The link is all it takes to answer as the guest, so `reg` must be the
+    caller's own registration; `survey` is None when the event has none."""
+    if reg is None or survey is None or not reg.is_attended:
+        return None
+    if event.is_deleted or event.lifecycle is EventStatus.draft or event.club is None or not event.club.listed:
+        return None
+    if not survey_open(event, survey, now):
+        return None
+    return survey_link(event, reg)
+
+
 async def survey_of(session, event: Events) -> FeedbackSurveys:
     row = await session.scalar(select(FeedbackSurveys).where(FeedbackSurveys.event_id == event.id))
     if row is None:
