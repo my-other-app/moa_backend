@@ -1348,7 +1348,8 @@ month on Starter. They reset on 1 November."), with the next plan up in
 `errors`. Admins edit both in Admin -> Subscriptions like every flag and
 limit; until the admin app lists `ai_actions_per_month` among its limit
 fields, saving a plan there keeps the value it has. As with every plan gate,
-an admin (or an admin acting as a club) is never gated or counted, and
+an admin (or an admin acting as a club) is never gated or capped (their
+actions still show in the club's count), and
 `APP_PLAN_ENFORCEMENT=false` lifts the flag and the cap too: `APP_AI_ENABLED`
 is the switch that stops spending.
 
