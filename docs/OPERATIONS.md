@@ -2,9 +2,10 @@
 
 How to deploy, roll back, unstick a migration, restore a backup, rotate a
 secret, turn on the new services, size the server and every service on it,
-keep its disk from filling, and open the live room's streams. Every command
-is meant to be copied. Commands under **Read-only** change nothing; anything
-that changes something says so.
+keep its disk from filling, open the live room's streams, and look after the
+rendered documents in the bucket. Every command is meant to be copied.
+Commands under **Read-only** change nothing; anything that changes something
+says so.
 
 The production box runs `docker-compose.prod.yml` from
 `/var/www/myotherapp-production` (the `PROD_PROJECT_PATH` secret): `postgres`
@@ -1110,3 +1111,179 @@ polls.
 5. `APP_LIVE_SSE=true` in `PROD_ENV_VARIABLES`, then `sync_env` +
    `recreate_backend` (a recreate, which builds; section 6). Unset it the
    same way to put every client back on the poll.
+
+---
+
+## 13. Rendered documents: artwork, one render each, and expiry
+
+Tickets and certificates are drawn when first asked for (a download, an
+emailed link, an email's attachment, a bundle) and kept in the bucket, so
+the next ask is a read (app/api/events/doc_cache.py):
+
+```
+{APP_S3_BASE_PATH}/docs/{ticket|certificate}/{registration uuid}/{design version}-{24 hex}.pdf
+```
+
+Production's base path is, by every sign, empty, so that is `docs/...`;
+`scripts/doc_cache_report.py` prints the exact prefix (`prefix`). The 24 hex are a
+hash of everything the document prints, its design (image keys included)
+and the renderer's version: change any of them and the document gets a new
+key, so a kept file is never stale and nothing has to be invalidated. ID
+cards and wallet passes are drawn per request and not kept.
+
+### Artwork is stored ready for print
+
+What a document costs follows its artwork: the renderer copies a JPEG into
+the PDF as it is and re-compresses anything else, for every guest. Uploads
+used to be stored as sent. Now every picture uploaded for a printed design
+(the designer's templates and pictures, club's and event's, every kind; the
+ticket and certificate templates' logos, backgrounds and signatures) goes
+through app/core/storage/doc_art.py: the camera's orientation applied, the
+longest side at most `APP_DOC_ART_MAX_PX` (2400, about 200 dpi across an A4
+certificate), converted to sRGB, metadata stripped, a photo as a progressive
+JPEG at quality 85, transparency as a lossless PNG. Keys and answers keep
+their shape. `python -m scripts.bench.doc_art` measures it (Apple M2, warm
+p50 of 15 renders, about the same for a ticket, a certificate and an ID card;
+taken while other test suites ran, so the times are high and the ratios are
+what counts; scripts/bench/RESULTS.md has the whole table):
+
+| Artwork as uploaded | Stored now | Render before -> after | PDF before -> after |
+|---|---|---|---|
+| A4 poster, PNG 2480 x 3508, 10.8 MB | JPEG 1697 x 2400, 244 KB | 3.5 s -> 0.1 s | 18.9 MB -> 0.36 MB |
+| Phone photo, JPEG 4032 x 3024, sideways, 779 KB | JPEG 1800 x 2400, upright, 235 KB | 240 ms -> 90 ms | 1.03 MB -> 0.35 MB |
+| Photo JPEG 2000 x 1100 at quality 98, 455 KB | JPEG, 147 KB | 113 ms -> 56 ms | 626 KB -> 241 KB |
+| Smooth JPEG 2000 x 1100, 50 KB | JPEG, 34 KB | 35 ms -> 33 ms | 120 KB -> 99 KB |
+| Noise JPEG 2000 x 1100, 1.35 MB (nothing compresses) | JPEG, 1.34 MB | about the same | about the same |
+| Logo PNG with transparency, 2000 x 800, 54 KB | lossless PNG, 54 KB | the same | the same |
+
+**Artwork stored before** stays as it was until `scripts/optimize_doc_art.py`
+is run. It finds every picture a design names (template columns, their
+configs, legacy links, layered designs' template and pictures; deleted
+designs too), and for each object of at least `--min-kb` (300) writes the
+normalised file under a **new** key in the same folder and points every
+design at it. It never deletes or overwrites the old object; the report
+lists them (`old_keys`). Documents already kept follow on their own: a
+repointed design hashes to new document keys, so the next download draws on
+the new artwork, and the old documents are no longer asked for (the expiry
+below removes them).
+
+```bash
+# Read-only: what it would do (reads each object, writes nothing).
+$DC exec -T backend python scripts/optimize_doc_art.py > ~/doc-art-dry-run-$(date +%F).json
+# Changes things: writes the new files, repoints the designs. Keep the report: it names the old keys.
+$DC exec -T backend python scripts/optimize_doc_art.py --apply > ~/doc-art-apply-$(date +%F).json
+```
+
+Read `failed` (an object that could not be read or decoded is left as it
+was), `optimised`, `bytes_before` and `bytes_after`. Safe to run again: a
+repointed design names a small file. The old objects can go once nothing
+will be rolled back (a month, say): one `aws s3 rm s3://<bucket>/<key>` per
+key in `old_keys`.
+
+### One render per document
+
+Two first asks for the same document at the same moment drew it twice. Now
+one process draws it and the others wait for it and read what it kept: in a
+process, callers share one drawing; across processes, the drawing claims the
+document first with a Postgres advisory lock (`lock_keys.DOC_RENDER`, a hash
+of the key; session-level, on its own autocommit connection, no transaction
+open), or with a Redis key when `APP_REDIS_URL` is set. A waiter asks again
+every 50 ms to 1 s and, after `APP_DOC_RENDER_WAIT_SECONDS` (20), draws the
+document itself rather than fail. A claim that cannot be had (the database
+unreachable) never fails a download.
+
+A Postgres claim holds one pooled connection while its holder looks in the
+bucket, draws and keeps the document: tens of milliseconds for a layered
+design, up to `RENDER_TIMEOUT` for an HTML one. At most twice
+`APP_RENDER_THREADS` documents per process are drawn under a claim at once
+(4 by default), so a burst of first downloads holds at most that many of the
+pool's connections; waiters hold none. With Redis on, the claim holds no
+database connection at all. Behind a transaction-mode PgBouncer the claim,
+like the other session locks, needs Redis or a direct connection.
+
+### Expiry: the sweep, or a lifecycle rule (one of them)
+
+Nothing else deletes a kept document, so `docs/` grows by every document
+drawn. Two ways to expire them; use **one**. With both on at different day
+counts, the shorter decides and the other only adds confusion (a rule at 30
+days under a sweep at 90 deletes what the sweep's report says it keeps).
+Switching: turn one off before the other on.
+
+**The sweep** (app/api/events/doc_cache_sweep.py), off by default. Once a day
+on one process it pages through `docs/` (ListObjectsV2) and deletes, 1,000 a
+call with a pause between (DeleteObjects), each kept document last written
+more than `APP_DOC_CACHE_DAYS` ago.
+
+| Setting | Default | |
+|---|---|---|
+| `APP_DOC_CACHE_DAYS` | `0` (off) | days since a kept document was last written; production: e.g. `90` |
+| `APP_DOC_CACHE_MAX_DELETE_PER_RUN` | `50000` | the rest wait for the next day |
+| `APP_DOC_CACHE_SKIP_ALERT_PERCENT` | `5` | an admin alert (`doc_cache_unknown`) above this share of `docs/` that is not kept documents |
+
+It touches only keys of the exact shape above (kinds and extensions the code
+writes); anything else under `docs/` is counted, named in the log and left,
+and nothing outside `docs/` is ever listed. "Last written", as S3 keeps no
+read time: a document downloaded every day is deleted at the same age as any
+other and drawn again, once, when next asked for. Each run logs one line,
+`doc cache sweep: N deleted (B bytes) of M kept documents over D days old;
+...`, and keeps its counts in `scheduled_runs` (`name = 'doc-cache-sweep'`,
+`result`).
+
+The media bucket's key needs, besides what it has, `s3:ListBucket` on the
+bucket for the `docs/` prefix and `s3:DeleteObject` on `docs/*` (the app
+never listed or deleted there before):
+
+```json
+{"Effect": "Allow", "Action": "s3:ListBucket", "Resource": "arn:aws:s3:::<bucket>",
+ "Condition": {"StringLike": {"s3:prefix": ["docs/*"]}}},
+{"Effect": "Allow", "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"], "Resource": "arn:aws:s3:::<bucket>/docs/*"}
+```
+
+Without them each run logs `doc cache sweep failed` with AccessDenied and
+deletes nothing.
+
+**A lifecycle rule** does the same inside the bucket, with no code, no
+listing and no permissions: S3 (or R2, *Object lifecycle rules* in its
+dashboard, or the same API) expires objects by age under a prefix. It checks
+no key's shape, has no cap and raises no alert: anything put under `docs/`
+goes at that age.
+
+```json
+{"Rules": [{"ID": "docs-90-days", "Status": "Enabled", "Filter": {"Prefix": "docs/"},
+            "Expiration": {"Days": 90}, "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 2}}]}
+```
+
+The rule's prefix is the report's `prefix`.
+`put-bucket-lifecycle-configuration` **replaces** the bucket's whole
+configuration: read it first and add this rule to what is there.
+
+```bash
+# Read-only.
+aws s3api get-bucket-lifecycle-configuration --bucket <bucket>
+# Changes things: the bucket's lifecycle rules, all of them.
+aws s3api put-bucket-lifecycle-configuration --bucket <bucket> --lifecycle-configuration file://lifecycle.json
+```
+
+### Turning it on in production
+
+1. Deploy the code (`sync_code`, `restart_backend`; no migration, no new
+   requirement). New uploads are stored ready for print from then on.
+2. `optimize_doc_art.py` dry run, then `--apply` (above). Keep the apply
+   report.
+3. Read-only, what is there and what an expiry would take:
+
+   ```bash
+   $DC exec -T backend python scripts/doc_cache_report.py --days 90
+   ```
+
+   Counts and bytes per kind (and "not a kept document") under 30, 30 to 90
+   and over 90 days; `would_delete` at `--days`, with the daily runs it
+   needs at the cap; and the share of `docs/` that is not kept documents.
+   If that share is above 5%, find what writes there before going on. An
+   AccessDenied here means the key cannot list `docs/` yet (the policy
+   above).
+4. Either `APP_DOC_CACHE_DAYS=90` in `PROD_ENV_VARIABLES`, then `sync_env`
+   and `recreate_backend` (section 6: a recreate builds), or the lifecycle
+   rule. Not both.
+5. The next day: the `doc cache sweep:` line in the backend's log, and no
+   `doc_cache_unknown` alert. To stop: unset it the same way.

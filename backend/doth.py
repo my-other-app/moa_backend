@@ -67,13 +67,16 @@ def start_loops() -> list[asyncio.Task]:
     # taxonomy renames into search_text always), the indexes built and
     # checked -- every second or five, on one process (app.api.search.sync).
     from app.api.search.sync import loop as search_sync_loop
+    # Kept documents past APP_DOC_CACHE_DAYS deleted from docs/, once a day on one
+    # process (off unless that is set).
+    from app.api.events.doc_cache_sweep import sweep_loop as doc_cache_sweep_loop
 
     return [
         asyncio.create_task(loop())
         for loop in (
             sweep_loop, closeout_sweep_loop, feedback_sweep_loop, billing_sweep_loop, counter_check_loop,
             domains_sweep_loop, store_sweep_loop, payments_sweep_loop, account_sweep_loop, ledger_daily_loop,
-            search_sync_loop,
+            search_sync_loop, doc_cache_sweep_loop,
         )
     ]
 

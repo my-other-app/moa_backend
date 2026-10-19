@@ -1548,3 +1548,44 @@ dropdb moa_bench_sse
 ```
 
 Raw results: `results/live/live_sse.json`.
+
+## A design's artwork, ready for print (`fix/doc-storage`, 19 October 2026)
+
+Uploaded artwork was stored as sent and copied into every PDF drawn on it
+(docs/stage0/AUDIT.md, 2.3). It is now normalised on upload
+(app/core/storage/doc_art.py: upright, longest side at most
+`APP_DOC_ART_MAX_PX` 2400, sRGB, no metadata, a photo a JPEG at quality 85,
+transparency a lossless PNG, never larger than it came), and
+`scripts/optimize_doc_art.py` does the same to what is stored.
+
+`python -m scripts.bench.doc_art --runs 15`, Apple M2, warm p50, the
+`classic` starters with the artwork as the canvas's template, a logo and an
+icon. Measured while two other test suites ran on the machine (load 6-9 on
+8 cores): absolute times are high, the ratios are the point.
+
+| Artwork | As uploaded | Stored now | normalise | Ticket render | Certificate render | ID card render | PDF (ticket) |
+|---|---|---|---:|---|---|---|---|
+| smooth-jpeg | JPEG 2000x1100, 50 KB | JPEG 2000x1100, 34 KB | 30 ms | 37.0 -> 30.4 ms | 34.1 -> 34.4 ms | 34.7 -> 35.6 ms | 120 -> 99 KB |
+| noise-jpeg | JPEG 2000x1100, 1,380 KB | JPEG 2000x1100, 1,368 KB | 115 ms | 292 -> 297 ms | 297 -> 313 ms | 288 -> 311 ms | 1,783 -> 1,767 KB |
+| photo-jpeg | JPEG 2000x1100 q98, 455 KB | JPEG 2000x1100, 147 KB | 65 ms | 113 -> 56 ms | 113 -> 58 ms | 111 -> 57 ms | 626 -> 241 KB |
+| poster-png | PNG 2480x3508, 11,048 KB | JPEG 1697x2400, 244 KB | 238 ms | 3,686 -> 106 ms | 3,516 -> 95 ms | 3,307 -> 95 ms | 18,905 -> 357 KB |
+| phone-photo | JPEG 4032x3024 (EXIF 6), 779 KB | JPEG 1800x2400 upright, 235 KB | 200 ms | 240 -> 91 ms | 246 -> 94 ms | 242 -> 89 ms | 1,032 -> 351 KB |
+| logo-alpha | PNG 2000x800 RGBA, 54 KB | PNG 2000x800 RGBA, 54 KB | 127 ms | 53 -> 53 ms | 56 -> 56 ms | 58 -> 58 ms | 121 -> 121 KB |
+
+What the numbers say:
+
+- A PNG export is the expensive case: the renderer decodes it and
+  compresses its pixels again for every PDF. As a JPEG at print size the
+  poster draws 35 times faster into a PDF 50 times smaller.
+- Noise does not compress (`noise-jpeg`, the audit's 1.36 MB case): it
+  stays about as it is. A real photo of that size is `photo-jpeg`.
+- What is left of a render with a big JPEG is mostly reportlab writing the
+  image stream as ASCII85 (`rl_config.useA85`, on by default): about 170 ms
+  and a quarter more bytes per MB of image. Measured with it off: the
+  1.0 MB noise JPEG 211 -> 38 ms and 1,336 -> 1,081 KB; a 182 KB poster
+  JPEG 76 -> 45 ms and 290 -> 245 KB (a certificate). Not changed here (it changes every PDF's
+  bytes); a one-line follow-up in app/core/layout/renderer.py.
+
+```sh
+python -m scripts.bench.doc_art --runs 15
+```

@@ -386,6 +386,12 @@ class S3ImageField(TypeDecorator):
     Every upload is stored under a versioned name (`v-<uuid4 hex>.<ext>`,
     media.versioned_name): a key is written once and never again, so the
     CDN may keep it for a year.
+
+    `print_art=True` for a picture drawn into documents (a ticket's or
+    certificate's logo, background or signature): the upload is stored
+    ready for print instead of as sent (app/core/storage/doc_art.py), a JPEG
+    or a PNG, upright, sized and without metadata. Such a column has no
+    variants.
     """
 
     impl = String
@@ -398,9 +404,11 @@ class S3ImageField(TypeDecorator):
         allowed_extensions: list[str] = ["jpg", "jpeg", "png", "gif", "webp"],
         variations: dict = {},
         public: bool = False,
+        print_art: bool = False,
     ):
         super().__init__()
         self.public = public
+        self.print_art = print_art
         self.max_size = max_size
         self.allowed_extensions = allowed_extensions
         self.bucket_name = settings.S3_BUCKET
@@ -419,6 +427,11 @@ class S3ImageField(TypeDecorator):
     # the PUTs. `upload` is both, for a caller already off the loop.
 
     def prepare(self, raw: bytes) -> Prepared:
+        if getattr(self, "print_art", False):
+            from app.core.storage import doc_art
+
+            art = doc_art.normalise(raw, max_bytes=self.max_size)
+            return Prepared(ext=art.ext(jpeg="jpeg"), original=art.data)
         return prepare_image(raw, max_size=self.max_size, allowed=self.allowed_extensions, variations=self.variations)
 
     def store(self, prepared: Prepared) -> str:

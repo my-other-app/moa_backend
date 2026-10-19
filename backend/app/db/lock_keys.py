@@ -51,6 +51,8 @@ SITES_SWEEP = 773_123
 AUTH_RETENTION = 773_130
 #: The search outbox's drainer (app/api/search/sync.py, scripts/search_reindex.py).
 SEARCH_SYNC = 773_140
+#: The kept documents' daily expiry (app/api/events/doc_cache_sweep.py).
+DOC_CACHE_SWEEP = 773_151
 #: The job queue's maintenance pass (app/core/jobs.py).
 JOBS_MAINTENANCE = 774_501
 #: The live room's sweep (app/api/live/service.py).
@@ -58,10 +60,13 @@ LIVE_SWEEP = 7_301_010
 #: Discover's popularity scores (app/api/discover/popularity.py).
 DISCOVER_POPULARITY = 7_731_402
 
-# ─── Session lock, two ints: (this, an event id) ─────────────────────────────
+# ─── Session locks, two ints: (this, the thing it is for) ────────────────────
 
 #: One retention run per event (app/api/closeout/service.py).
 CLOSEOUT_RETENTION = 773_103
+#: One process draws a document not kept yet: (this, a 32-bit hash of its
+#: cache key) (app/api/events/doc_cache.py). Held while it is drawn and kept.
+DOC_RENDER = 773_150
 
 # ─── Transaction locks, one bigint: whose turn a scheduled run is ────────────
 

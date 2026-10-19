@@ -48,23 +48,23 @@ class CertificateTemplates(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
 
     # Uploaded images (S3)
     logo = Column(
-        S3ImageField(upload_to="templates/certificates/logos/"),
+        S3ImageField(upload_to="templates/certificates/logos/", print_art=True),
         nullable=True,
     )
     secondary_logo = Column(
-        S3ImageField(upload_to="templates/certificates/logos/"),
+        S3ImageField(upload_to="templates/certificates/logos/", print_art=True),
         nullable=True,
     )
     background_image = Column(
-        S3ImageField(upload_to="templates/certificates/backgrounds/"),
+        S3ImageField(upload_to="templates/certificates/backgrounds/", print_art=True),
         nullable=True,
     )
     signature_1 = Column(
-        S3ImageField(upload_to="templates/certificates/signatures/"),
+        S3ImageField(upload_to="templates/certificates/signatures/", print_art=True),
         nullable=True,
     )
     signature_2 = Column(
-        S3ImageField(upload_to="templates/certificates/signatures/"),
+        S3ImageField(upload_to="templates/certificates/signatures/", print_art=True),
         nullable=True,
     )
 

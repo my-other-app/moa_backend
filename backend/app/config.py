@@ -279,6 +279,26 @@ class AppConfig(BaseSettings):
     # docs/{kind}/{registration}/{design version}-{hash}.pdf, so a download,
     # a resend or a bundle reuses it instead of drawing it again.
     RENDER_DOC_CACHE: bool = True
+    # One process draws a document nobody has kept yet; the others asking
+    # for it at the same moment wait for it (app/api/events/doc_cache.py), at
+    # most this many seconds, then draw it themselves rather than fail.
+    DOC_RENDER_WAIT_SECONDS: float = 20.0
+    # Artwork, logos, signatures and pictures uploaded for a printed design
+    # are stored with their longest side at most this many pixels (about 200
+    # dpi across an A4 certificate), as a JPEG or, with transparency, a PNG
+    # (app/core/storage/doc_art.py).
+    DOC_ART_MAX_PX: int = 2400
+    # Kept documents older than this many days are deleted, once a day
+    # (app/api/events/doc_cache_sweep.py); a later download draws it again.
+    # 0 (the default): never. Production turns it on on purpose (e.g. 90),
+    # and not beside a bucket lifecycle rule on docs/ with another day count
+    # (docs/OPERATIONS.md, section 13).
+    DOC_CACHE_DAYS: int = 0
+    # At most this many kept documents deleted in one day's run.
+    DOC_CACHE_MAX_DELETE_PER_RUN: int = 50000
+    # An admin alert when more than this percentage of what the sweep finds
+    # under docs/ is not a kept document (and so is left alone).
+    DOC_CACHE_SKIP_ALERT_PERCENT: float = 5.0
 
     # The public site's own server (app/core/site.py). It reads the API from
     # a few of Vercel's shared addresses; a request carrying
