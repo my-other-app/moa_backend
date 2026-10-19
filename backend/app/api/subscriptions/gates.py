@@ -587,20 +587,30 @@ async def event_registrations(session, event) -> int:
 
 
 async def merch_items(session, event_id: int) -> int:
-    """Items an event offers: the store's (for sale) and the handouts' (swag),
-    together. `merch_items_per_event` caps the two as one number."""
+    """Items an event offers: the club's store items it offers (for sale) and
+    its handouts (swag), together. `merch_items_per_event` caps the two as one
+    number."""
+    from sqlalchemy import func, select
+
+    from app.api.store.models import EventStoreItems, EventStoreOffers
+
+    store = await session.scalar(
+        select(func.count()).select_from(EventStoreOffers)
+        .join(EventStoreItems, EventStoreItems.id == EventStoreOffers.item_id)
+        .where(EventStoreOffers.event_id == event_id, EventStoreItems.is_deleted == False)  # noqa: E712
+    )
+    return int(store or 0) + await swag_items(session, event_id)
+
+
+async def swag_items(session, event_id: Optional[int]) -> int:
+    """An event's handout items (none for an event not saved yet)."""
+    if event_id is None:
+        return 0
     from sqlalchemy import func, select
 
     from app.api.merch.models import MerchItems
-    from app.api.store.models import EventStoreItems
 
-    store = await session.scalar(
-        select(func.count(EventStoreItems.id)).where(
-            EventStoreItems.event_id == event_id, EventStoreItems.is_deleted == False  # noqa: E712
-        )
-    )
-    swag = await session.scalar(select(func.count(MerchItems.id)).where(MerchItems.event_id == event_id))
-    return int(store or 0) + int(swag or 0)
+    return int(await session.scalar(select(func.count(MerchItems.id)).where(MerchItems.event_id == event_id)) or 0)
 
 
 # ---------------------------------------------------------------------------
@@ -646,12 +656,32 @@ async def check_merch_item(session, event, feature: str, *, actor=None) -> None:
     )
 
 
+async def check_store_offers(session, event, *, keeping: int, adding: int, actor=None) -> None:
+    """An event offering `adding` more of its club's store items, beside the
+    `keeping` it already offers: the store (`merch`), and room for them with
+    the event's handouts under `merch_items_per_event`, counted as
+    check_merch_item counts. Taking offers away, or reordering them, is never
+    refused. `event` may be one not saved yet (no id: no handouts), or one as
+    it will be after an edit (its new date decides the grandfathering)."""
+    if adding <= 0:
+        return
+    await require_feature(session, event.club_id, "merch", actor=actor, event=event)
+    if not enforcing() or bypassed(actor) or _exempt("merch_items_per_event", event):
+        return
+    await require_within(
+        session, event.club_id, "merch_items_per_event",
+        used=await swag_items(session, getattr(event, "id", None)) + keeping, adding=adding, actor=actor, feature="merch",
+    )
+
+
 async def duplicate_allowances(session, club_id: Optional[int], *, actor=None) -> dict:
     """What a copy of an event may carry over. The copy is a new event, never
-    grandfathered, so it gets only what the plan allows: the handouts with
-    `swag`, at most `merch_items_per_event` of them, the ID card designs with
-    `badges`, the report's recipients with `report`."""
+    grandfathered, so it gets only what the plan allows: the store switched
+    on and its items offered with `merch`, the handouts (and their switch)
+    with `swag`, at most `merch_items_per_event` of the two together, the ID
+    card designs with `badges`, the report's recipients with `report`."""
     return {
+        "merch": await allows(session, club_id, "merch", actor=actor),
         "swag": await allows(session, club_id, "swag", actor=actor),
         "badges": await allows(session, club_id, "badges", actor=actor),
         "report": await allows(session, club_id, "report", actor=actor),

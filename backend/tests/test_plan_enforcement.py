@@ -542,6 +542,71 @@ async def test_merch_items_per_event_counts_the_store_and_the_handouts_together(
     assert r.json()["errors"]["required_plan"] == "campus"
 
 
+# ─── The club's store: its items, and the events offering them ──────────
+
+
+async def _club_items(session, w, n: int, *, offered_on=None) -> list[str]:
+    """`n` items in the club's store, straight in the database (offered on
+    `offered_on` when given)."""
+    from app.api.store.models import EventStoreItems
+    from tests.store_items import shelf_item
+
+    ids = []
+    for i in range(n):
+        if offered_on is not None:
+            item = shelf_item(session, offered_on, name=f"Item {i}", price=100, stock=5)
+        else:
+            item = EventStoreItems(id=uuid.uuid4(), club_id=w.club.id, name=f"Item {i}", price=100, stock=5)
+            session.add(item)
+        ids.append(str(item.id))
+    await session.commit()
+    return ids
+
+
+def _offers(client, w, ids, event=None):
+    return client.put(f"{API}/events/{(event or w.event).id}/store/offers", json={"item_ids": ids}, headers=w.h)
+
+
+async def test_offering_store_items_needs_the_store_and_room_with_the_handouts(client, session, world):
+    from app.api.merch.models import MerchItems
+
+    ids = await _club_items(session, world, 3)
+    r = await _offers(client, world, ids[:1])
+    assert r.status_code == 403 and r.json()["errors"]["feature"] == "merch"
+    # Making one in the club's store needs the store too.
+    r = await client.post(f"{API}/clubs/store", json={"name": "Tee", "price": 299, "stock": 10}, headers=world.h)
+    assert r.status_code == 403 and r.json()["errors"]["feature"] == "merch"
+
+    await on_plan(session, world, "pro")
+    await set_limit(session, world, "pro", merch_items_per_event=2)
+    session.add(MerchItems(event_id=world.event.id, name="Sticker", stock=50))
+    await session.commit()
+    r = await _offers(client, world, ids[:2])
+    assert r.status_code == 403 and r.json()["errors"]["limit"] == "merch_items_per_event", r.text
+    assert r.json()["errors"]["used"] == 1 and r.json()["errors"]["limit_value"] == 2
+    assert (await _offers(client, world, ids[:1])).status_code == 200
+    # Swapping one for another fits; adding one more does not.
+    assert (await _offers(client, world, ids[1:2])).status_code == 200
+    assert (await _offers(client, world, ids[:2])).status_code == 403
+    # And the event's own store counts its offers: no room for a new item there either.
+    r = await ACTIONS["merch"][1](client, world, world.h)
+    assert r.status_code == 403 and r.json()["errors"]["used"] == 2
+
+    # Fallen to Free: taking items off, or reordering, is never refused.
+    await on_plan(session, world, "free")
+    await set_limit(session, world, "pro", merch_items_per_event=None)
+    assert (await _offers(client, world, ids[1:2])).status_code == 200
+    assert (await _offers(client, world, [])).json()["item_ids"] == []
+    assert (await _offers(client, world, ids[:1])).status_code == 403
+
+
+async def test_a_grandfathered_event_offers_the_clubs_items_on_free(client, session, world, monkeypatch):
+    ids = await _club_items(session, world, 2)
+    await grandfather(session, monkeypatch, world.event)
+    r = await _offers(client, world, ids)
+    assert r.status_code == 200 and r.json()["item_ids"] == ids
+
+
 async def test_website_templates_are_the_first_n_in_catalogue_order(client, session, world):
     from app.api.sites import service as sites
 

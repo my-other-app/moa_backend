@@ -74,17 +74,22 @@ MONEY_SQL = [
     """UPDATE event_registrations_link r SET is_paid = true, paid_amount = m.actual_amount, payment_receipt = 'er_' || m.ticket_id
        FROM money m WHERE r.id = m.id AND m.bucket >= 15""",
     # A tenth of the online ones bought a ₹350 tee with the ticket (and the refunded ones gave theirs back).
-    """INSERT INTO event_store_items (id, event_id, name, price, stock, sold_count, reserved_count, free_roles, on_sale, sort_order,
+    """INSERT INTO event_store_items (id, club_id, event_id, name, price, stock, sold_count, reserved_count, free_roles, on_sale, sort_order,
                                        created_at, updated_at, is_deleted)
-       SELECT gen_random_uuid(), e.id, 'Tee', 350, 100000, 0, 0, '[]', true, 0, now(), now(), false
-       FROM events e WHERE e.id IN (SELECT DISTINCT event_id FROM money WHERE bucket >= 90 OR bucket = 2)""",
+       SELECT gen_random_uuid(), e.club_id, e.id, 'Tee', 350, 100000, 0, 0, '[]', true, 0, now(), now(), false
+       FROM events e WHERE e.club_id IS NOT NULL AND e.id IN (SELECT DISTINCT event_id FROM money WHERE bucket >= 90 OR bucket = 2)""",
+    # Each event offers its tee (items are the club's; an event sells those it offers).
+    """INSERT INTO event_store_offers (event_id, item_id, sort_order)
+       SELECT i.event_id, i.id, 0 FROM event_store_items i WHERE i.name = 'Tee' AND i.event_id IS NOT NULL
+       ON CONFLICT DO NOTHING""",
     """INSERT INTO event_store_orders (id, event_id, registration_id, status, total, paid_at, created_at, updated_at)
        SELECT gen_random_uuid(), m.event_id, m.id, CASE WHEN m.bucket = 2 THEN 'refunded' ELSE 'paid' END, 350,
               m.created_at + interval '1 minute', m.created_at, m.created_at + interval '1 minute'
        FROM money m WHERE m.bucket >= 90 OR m.bucket = 2""",
     """INSERT INTO event_store_order_lines (id, order_id, item_id, item_name, qty, unit_price, line_total, is_free)
        SELECT gen_random_uuid(), o.id, i.id, 'Tee', 1, 350, 350, false
-       FROM event_store_orders o JOIN money m ON m.id = o.registration_id JOIN event_store_items i ON i.event_id = o.event_id""",
+       FROM event_store_orders o JOIN money m ON m.id = o.registration_id
+       JOIN event_store_offers so ON so.event_id = o.event_id JOIN event_store_items i ON i.id = so.item_id""",
     # An order and a captured (or refunded) payment for each paid online.
     """INSERT INTO payment_orders (id, receipt, razorpay_receipt, razorpay_order_id, amount, currency, status, source, payload,
                                    created_at, updated_at, is_deleted)
