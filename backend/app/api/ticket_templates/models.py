@@ -48,15 +48,15 @@ class TicketTemplates(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
 
     # Uploaded images (S3)
     logo = Column(
-        S3ImageField(upload_to="templates/tickets/logos/"),
+        S3ImageField(upload_to="templates/tickets/logos/", print_art=True),
         nullable=True,
     )
     secondary_logo = Column(
-        S3ImageField(upload_to="templates/tickets/logos/"),
+        S3ImageField(upload_to="templates/tickets/logos/", print_art=True),
         nullable=True,
     )
     background_image = Column(
-        S3ImageField(upload_to="templates/tickets/backgrounds/"),
+        S3ImageField(upload_to="templates/tickets/backgrounds/", print_art=True),
         nullable=True,
     )
 

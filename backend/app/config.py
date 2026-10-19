@@ -279,6 +279,11 @@ class AppConfig(BaseSettings):
     # docs/{kind}/{registration}/{design version}-{hash}.pdf, so a download,
     # a resend or a bundle reuses it instead of drawing it again.
     RENDER_DOC_CACHE: bool = True
+    # Artwork, logos, signatures and pictures uploaded for a printed design
+    # are stored with their longest side at most this many pixels (about 200
+    # dpi across an A4 certificate), as a JPEG or, with transparency, a PNG
+    # (app/core/storage/doc_art.py).
+    DOC_ART_MAX_PX: int = 2400
 
     # The public site's own server (app/core/site.py). It reads the API from
     # a few of Vercel's shared addresses; a request carrying

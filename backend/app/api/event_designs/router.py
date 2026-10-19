@@ -12,13 +12,11 @@ including events whose tickets were already in people's hands.
 
 import asyncio
 import enum
-import io
 import os
 from uuid import uuid4
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, Query, Response, UploadFile
-from PIL import Image
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
@@ -66,8 +64,7 @@ from app.core.utils.pdf import generate_image_bytes
 from app.api.ticket_templates.service import _default_config as ticket_default_config
 from app.config import settings
 from app.core.auth.dependencies import ClubAuth
-from app.core.storage import objects
-from app.core.storage.images import checked_image
+from app.core.storage import doc_art, objects
 from app.db.core import SessionDep
 from app.response import CustomHTTPException
 
@@ -834,10 +831,7 @@ def _preview_png(style: dict, values: dict, qr_text: str, title: str, entries, c
     return layout_png(style, pdf)
 
 
-MAX_IMAGE_BYTES = 5 * 1024 * 1024
-# Templates are stored at this width so files stay light; the editor's X and Y read in the stored size.
-STORED_MAX_WIDTH = 2400
-_EXT = {"PNG": "png", "JPEG": "jpg", "WEBP": "webp"}
+MAX_IMAGE_BYTES = doc_art.MAX_IMAGE_BYTES
 
 
 @router.post("/{kind}/layout/images", summary="A template or a picture for the layered design")
@@ -858,21 +852,11 @@ async def upload_layout_image(
 
 
 def _store_layout_image(raw: bytes, prefix: str, purpose: str) -> dict:
-    """Check, shrink and store one upload under a designer's folder."""
-    image = checked_image(raw, max_bytes=MAX_IMAGE_BYTES)
-    fmt = (image.format or "").upper()
-    if fmt not in _EXT:
-        raise CustomHTTPException(422, message="Use PNG, JPEG or WebP.")
-    if image.width > STORED_MAX_WIDTH:
-        image = image.resize((STORED_MAX_WIDTH, round(image.height * STORED_MAX_WIDTH / image.width)), Image.Resampling.LANCZOS)
-        out = io.BytesIO()
-        if fmt == "JPEG":
-            image.convert("RGB").save(out, "JPEG", quality=90)
-        else:
-            image.save(out, "PNG")
-            fmt = "PNG"
-        raw = out.getvalue()
-    ext = _EXT[fmt]
-    key = f"{prefix}{purpose}-{uuid4().hex}.{ext}"
-    objects.put_bytes(key, raw, "image/jpeg" if ext == "jpg" else f"image/{ext}")
-    return {"key": key, "url": objects.presigned_url(key), "width": image.width, "height": image.height}
+    """Check, ready for print (upright, at most APP_DOC_ART_MAX_PX on its
+    longest side, a JPEG or a PNG with no metadata: app/core/storage/doc_art.py)
+    and store one upload under a designer's folder. The width and height
+    answered are the stored file's: the editor's X and Y read in them."""
+    art = doc_art.normalise(raw, max_bytes=MAX_IMAGE_BYTES)
+    key = f"{prefix}{purpose}-{uuid4().hex}.{art.ext()}"
+    objects.put_bytes(key, art.data, art.content_type)
+    return {"key": key, "url": objects.presigned_url(key), "width": art.width, "height": art.height}
