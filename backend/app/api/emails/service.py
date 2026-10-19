@@ -67,6 +67,7 @@ from app.core.storage.images import image_ext
 from app.core.utils.db_fields import TZAwareDateTime
 from app.db.locks import singleton
 from app.response import CustomHTTPException
+from app.db import lock_keys
 
 logger = logging.getLogger(__name__)
 
@@ -74,9 +75,9 @@ STAGE_ORDER = {EmailStage(s): i for i, s in enumerate(JOURNEY_STAGES)}
 STAGE_ORDER[EmailStage.CUSTOM] = len(JOURNEY_STAGES)
 # Keeps a timer from sending an old event's reminder on the day it is deployed.
 SWEEP_GRACE = timedelta(days=2)
-SWEEP_LOCK = 773101
+SWEEP_LOCK = lock_keys.EMAIL_SWEEP
 #: First key of the lock a template's send takes, so two clicks queue one message.
-SEND_LOCK = 773102
+SEND_LOCK = lock_keys.EMAIL_SEND
 #: A second click on Send while the first message is still going returns it.
 DOUBLE_CLICK = timedelta(seconds=60)
 #: A message still unfinished this long after it was made is not resumed:

@@ -46,6 +46,7 @@ from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db.locks import singleton
+from app.db import lock_keys
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +91,7 @@ CLUB_SLICE = 2_000
 PAUSE = 0.05
 
 EVERY_SECONDS = 6 * 3600
-COUNTERS_LOCK = 773_104
+COUNTERS_LOCK = lock_keys.DISCOVER_COUNTERS
 JOB = "counters"
 #: The first look after a worker starts: never in the rush of a deploy.
 FIRST_LOOK_SECONDS = 300

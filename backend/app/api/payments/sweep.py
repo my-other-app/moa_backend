@@ -34,10 +34,11 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.api.events.models import EventRegistrationsLink as Reg
 from app.api.payments.models import OrderStatus, PaymentLogs, PaymentOrders, PaymentStatus
+from app.db import lock_keys
 
 logger = logging.getLogger(__name__)
 
-SWEEP_LOCK = 773_122
+SWEEP_LOCK = lock_keys.PAYMENTS_SWEEP
 JOB = "payments"
 EVERY_SECONDS = 600
 #: How long one run may take before it stops where it is.

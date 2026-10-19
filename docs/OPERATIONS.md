@@ -455,7 +455,8 @@ the hash of what you set.
 | Secret | Issued by | Notes |
 |---|---|---|
 | `POSTGRES_PASSWORD` | you | see below: the database must change first |
-| `APP_SECRET_KEY` | `openssl rand -hex 32` | signs every token: everyone is signed out |
+| `APP_SECRET_KEY` | `openssl rand -hex 32` | signs every token: everyone is signed out. While `APP_LINK_SIGNING_KEYS` is unset it also signs the links in emails, and rotating it breaks every one already sent: set the link keys first (below) |
+| `APP_LINK_SIGNING_KEYS` | `openssl rand -hex 32` (each) | a list: the new key **first**, the old kept after it for 90 days; see below |
 | `APP_RAZORPAY_KEY_ID` / `_SECRET` | Razorpay dashboard -> API keys | regenerate, update, recreate |
 | `APP_RAZORPAY_WEBHOOK_SECRET` | Razorpay dashboard -> Webhooks | set the same value in both, then recreate at once: webhooks fail in between (Razorpay retries) |
 | `APP_PAYMENT_KEYS_SECRET` | `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` | a comma-separated list: put the new key **first**, keep the old after it; drop the old once every saved club key has been re-saved |
@@ -469,6 +470,41 @@ the hash of what you set.
 | Wallet pass signing key and certificate | Apple developer -> Pass Type IDs | replace the files in `backend/wallet_certs`, not in git |
 | `PROD_SSH_PRIVATE_KEY` | `ssh-keygen -t ed25519` | add the new public key to the server's `authorized_keys`, update the secret, deploy once, remove the old key |
 | `APP_SENTRY_DSN` | Sentry -> project -> Client Keys | not really secret (it can only send events); revoke the old key there |
+
+**The links in emails (`APP_LINK_SIGNING_KEYS`).** A guest's ticket and
+certificate links (`/api/v1/files/{tickets|certificates}/<code>.pdf?s=...`)
+and the feedback survey's (`/feedback/<event>/<registration>?k=...`) never
+expire. Each carries an HMAC under the first key in the list; any key in the
+list verifies one. Unset, `APP_SECRET_KEY` signs and verifies them, as it
+always did -- which is why rotating that secret on 2026-10 broke every link
+sent before. A link whose key is no longer listed gets, in a browser, a page
+saying the link no longer works, pointing at the app and My tickets, with a
+form that sends a fresh link to the address the guest registered with (an
+app or a script still gets the 403 JSON). **Never list a key that leaked**,
+however many old links it would bring back: anyone holding it could sign a
+link to any ticket.
+
+Moving off `APP_SECRET_KEY` (once):
+
+1. `openssl rand -hex 32`: the new link key.
+2. `APP_LINK_SIGNING_KEYS=<new key>,<the current APP_SECRET_KEY>`: new links
+   are signed with the new key, and those sent since `APP_SECRET_KEY` last
+   changed keep working. Update `PROD_ENV_VARIABLES`; deploy with `sync_env`
+   and `recreate_backend`.
+3. Check: a link from a ticket email sent before the deploy still opens the
+   PDF, and a new registration's email carries a link that does too.
+4. After 90 days, drop the second key (`APP_LINK_SIGNING_KEYS=<new key>`).
+   From then on, rotating `APP_SECRET_KEY` signs everyone out and leaves the
+   emailed links alone.
+
+Rotating the link key later: put a new key first (`<newer>,<new>`), deploy;
+after 90 days drop the old one. If a link key leaks, drop it at once, not
+after 90 days: the links it signed then show the page, and their holders ask
+for a fresh one. Why 90 days: most links are for an event weeks away at
+most, and a certificate is downloaded within days of being sent; whoever
+comes later uses the form. Each key must be at least 32 characters; a
+shorter one stops the backend at startup, so check the smoke URL after the
+recreate.
 
 **The database password** (changes the database; the backend reconnects on
 recreate):
@@ -831,6 +867,53 @@ more than 97:
 A migration (one connection), a backup's `pg_dump` and a psql session come
 out of what is left. Memory: each connection is a process of a few MB,
 inside Postgres's 1280m.
+
+**Renders.** Tickets, certificates, ID cards, previews and wallet passes are
+drawn on `APP_RENDER_THREADS` threads per process (default **2**, was 3), so
+the box draws at most `APP_WORKERS` x that at once (6 with three workers),
+plus the worker's own when it runs. reportlab draws under the GIL: more
+threads in one process mostly take turns, and every turn is time the
+process's event loop -- its requests -- does not get. Measured with
+`python -m scripts.bench.render_threads --renders 240 --threads 1 2 3`
+(an Apple M2, idle cores, one process; medians of three rounds; the loop
+asks to wake every 5 ms):
+
+| Threads | Renders a second | Loop late by, p50 / p95 / p99 |
+|---|---|---|
+| 1 | 28.5 | 2.6 / 13.2 / 14.0 ms |
+| 2 | 37.3 | 7.2 / 19.0 / 19.5 ms |
+| 3 | 40.9 | 8.5 / 26.3 / 40.1 ms |
+
+The third thread bought a tenth more throughput from a spare core the
+2-vCPU box does not have (three API processes and Postgres share two), and
+doubled the loop's p99. HTML designs and receipts are a wkhtmltopdf process
+per render besides, outside the GIL but not outside the backend's 2304m
+(1.43 GB in use with nothing rendering). Nothing caps renders across
+processes: that needs a shared counter (Redis or Postgres) on every render,
+and the per-process cap times `APP_WORKERS` already bounds the box.
+
+**The job queue's slots.** Each runner (one per API process, unless
+`APP_JOBS_WORKER`) holds `APP_JOBS_CONCURRENCY` jobs (4; the worker 2). A
+job's priority picks which due job takes a free slot first, whatever its
+name; a name's cap keeps the heavy ones to a few slots. The handler sets
+both (`app/core/jobs.py`; `tests/test_jobs.py` lists them all);
+`APP_JOBS_LIMITS="name=n,..."` overrides a cap without a deploy.
+
+| Priority | Jobs | Cap per runner |
+|---|---|---|
+| HIGH (1): someone is waiting | `payments.receipt` | 2 (a wkhtmltopdf each) |
+| | `deliveries.send` for one guest's ticket or certificate (registration, payment, sent again) | 2, shared with the event-wide sends below (one name) |
+| | `clubs.approved_email`, `mail.billing_notice`, `mail.club_domain_notice`, `admin_alerts.deliver`, `checkins.after` | -- |
+| NORMAL (0): a send to many | `deliveries.send` for a whole event, `emails.send_message` | 2 (renders) |
+| | `notifications.new_event`, `notifications.interest`, `notifications.push`, `threads.tell_followers` | 2 (minutes-long fan-outs) |
+| | `notifications.broadcast`, `push.topic`, `push.devices`, `push.unsubscribe`, `live.survey_mail` | -- (short) |
+| LOW (-1): nobody watches | `closeout.retention`, `registrations.import` | 1 |
+
+Priorities order the claims; they do not take a slot back. A runner whose
+four slots all hold long jobs (two event-wide sends and two announcements,
+say) makes the next ticket wait for one of them, or for another runner. With
+three API runners that takes a dozen long jobs at once; if it ever happens,
+lower those caps with `APP_JOBS_LIMITS`.
 
 **Applying the limits.** Compose applies a service's limits, log options and
 restart policy when it next creates the container: the backend's on its next

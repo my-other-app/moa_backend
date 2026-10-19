@@ -9,10 +9,11 @@ from datetime import datetime
 from typing import Optional
 
 from app.db.locks import singleton
+from app.db import lock_keys
 
 logger = logging.getLogger(__name__)
 
-SWEEP_LOCK = 773_121
+SWEEP_LOCK = lock_keys.STORE_SWEEP
 SWEEP_INTERVAL = 60
 
 

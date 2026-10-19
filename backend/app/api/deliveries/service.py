@@ -142,7 +142,9 @@ async def queue(
     sent, and answer with what was queued and why the rest was not. Nothing is
     sent here. With `send`, the job that sends them (`start`) is written in
     the same transaction as the rows, so the rows cannot be committed without
-    it; otherwise the caller sends them (`run`, `deliver`).
+    it; otherwise the caller sends them (`run`, `deliver`). A send for one
+    guest -- their ticket at registration or payment, one sent again -- is
+    someone waiting, and goes before a send to the whole event (HIGH).
 
     One statement per channel: INSERT ... ON CONFLICT DO UPDATE ... WHERE the
     row may be queued again. Two clicks at once both succeed and queue each
@@ -207,7 +209,8 @@ async def queue(
             )
         ids.extend((await session.execute(stmt)).scalars().all())
     if send and ids:
-        await start(session, event.id, kind)
+        one_guest = registration_ids is not None and len(registration_ids) == 1
+        await start(session, event.id, kind, priority=jobs.HIGH if one_guest else None)
     await session.commit()
     return {
         "queued": len(ids) + in_flight,
@@ -536,13 +539,14 @@ async def _send_job(payload: dict) -> None:
     await pipeline.run(("delivery-job", uuid.uuid4()), lambda: _run_due(event_id, kind))
 
 
-async def start(session, event_id: int, kind: DeliveryKind, *, dedupe: bool = False) -> None:
+async def start(session, event_id: int, kind: DeliveryKind, *, dedupe: bool = False, priority: Optional[int] = None) -> None:
     """Have the event's pending sends of this kind sent after the caller's
     commit -- by this process's job runner, or the worker's. `dedupe`: not
-    if a job for them is already waiting or running (the resumer's minute)."""
+    if a job for them is already waiting or running (the resumer's minute).
+    `priority`: the job's, NORMAL unless said (jobs.HIGH for one guest's)."""
     await jobs.enqueue(
         session, "deliveries.send", {"event_id": int(event_id), "kind": kind.value},
-        dedupe_key=f"deliveries:{int(event_id)}:{kind.value}" if dedupe else None,
+        dedupe_key=f"deliveries:{int(event_id)}:{kind.value}" if dedupe else None, priority=priority,
     )
 
 
@@ -633,10 +637,22 @@ async def resend_ticket(session, event: Events, registration: EventRegistrations
 
     Anyone can type an address into the public form, so this goes only to
     the registration's own address, and at most once every ten minutes."""
+    return await resend_document(session, event, registration, DeliveryKind.ticket, inline=background_tasks is None)
+
+
+async def resend_document(session, event: Events, registration: EventRegistrationsLink, kind: DeliveryKind, *, inline: bool = False) -> bool:
+    """A ticket or certificate once more, to the registration's own address,
+    for someone the public asked on behalf of: the registration form, a
+    stale link's "send me a fresh one" (app/api/emails/old_links.py).
+
+    At most once every RESEND_GAP per registration and kind; nothing when
+    there is nothing to send (a revoked ticket, no certificate issued).
+    Sent by a job after the caller's commit (HIGH: one guest's); `inline`
+    sends it now, on this session. True when it was queued."""
     prior = await session.scalar(
         select(Deliveries).where(
             Deliveries.registration_id == registration.id,
-            Deliveries.kind == DeliveryKind.ticket,
+            Deliveries.kind == kind,
             Deliveries.channel == DeliveryChannel.email,
         )
     )
@@ -644,10 +660,10 @@ async def resend_ticket(session, event: Events, registration: EventRegistrations
         last = prior.sent_at if prior.status is DeliveryStatus.sent else prior.updated_at
         if last is not None and datetime.now(timezone.utc) - last < RESEND_GAP:
             return False
-    result = await queue(session, event, DeliveryKind.ticket, registration_ids=[registration.id], force=True, send=background_tasks is not None)
+    result = await queue(session, event, kind, registration_ids=[registration.id], force=True, send=not inline)
     if not result["ids"]:
         return False
-    if background_tasks is None:
+    if inline:
         for did in result["ids"]:
             await deliver(session, did)
     return True

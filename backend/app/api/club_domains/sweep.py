@@ -29,10 +29,11 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from app.api.club_domains import cloudflare as cf
 from app.api.club_domains import service
 from app.api.club_domains.models import ACTIVE, PAUSED, PENDING, ClubDomains
+from app.db import lock_keys
 
 logger = logging.getLogger(__name__)
 
-SWEEP_LOCK = 773_120
+SWEEP_LOCK = lock_keys.CLUB_DOMAINS_SWEEP
 SWEEP_INTERVAL = 300
 #: Rows per job per run; anything left waits for the next run.
 BATCH = 100

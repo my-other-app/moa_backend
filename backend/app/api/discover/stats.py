@@ -39,6 +39,7 @@ from app.api.discover import cache, geo
 from app.api.events.models import Events
 from app.core.utils.db_fields import TZAwareDateTime
 from app.db.base import AbstractSQLModel
+from app.db import lock_keys
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,7 @@ GRID_DEG = 0.05
 EVERY = timedelta(minutes=30)
 #: How often one process looks (seconds).
 CHECK_EVERY = 60.0
-_LOCK = 7_420_401
+_LOCK = lock_keys.DISCOVER_STATS
 _HELD = (EventStatus.published, EventStatus.live, EventStatus.closed, EventStatus.archived)
 
 

@@ -8,6 +8,7 @@ test's rolled-back session, as the rest of the suite's jobs do.
 """
 import asyncio
 import uuid
+from collections import Counter
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -26,10 +27,18 @@ from app.db.listeners import add_loader_criteria
 #: What the test handlers saw: job name -> list of payloads, in order.
 SEEN: dict[str, list] = {}
 STATE = {"fail": 0, "delay": 0.0, "in_flight": 0, "most": 0}
+#: Every job's name as it started, all names together, in order.
+ORDER: list[str] = []
+#: Per name: how many run right now, and the most that ever ran at once.
+LIVE: Counter = Counter()
+PEAK: Counter = Counter()
 
 
 def _record(name):
     async def fn(payload: dict) -> None:
+        ORDER.append(name)
+        LIVE[name] += 1
+        PEAK[name] = max(PEAK[name], LIVE[name])
         STATE["in_flight"] += 1
         STATE["most"] = max(STATE["most"], STATE["in_flight"])
         try:
@@ -41,6 +50,7 @@ def _record(name):
             SEEN.setdefault(name, []).append(payload)
         finally:
             STATE["in_flight"] -= 1
+            LIVE[name] -= 1
 
     fn.__qualname__ = f"record_{name.replace('.', '_')}"
     return fn
@@ -49,11 +59,17 @@ def _record(name):
 jobs.handler("test.record", max_attempts=3, timeout=5.0)(_record("test.record"))
 jobs.handler("test.single", max_attempts=3, timeout=5.0, concurrency=1)(_record("test.single"))
 jobs.handler("test.slow", max_attempts=3, timeout=0.2)(_record("test.slow"))
+# As the real ones are: a mail someone waits for, and a close-out nobody watches (one at a time).
+jobs.handler("test.urgent", max_attempts=3, timeout=5.0, priority=jobs.HIGH)(_record("test.urgent"))
+jobs.handler("test.later", max_attempts=3, timeout=5.0, concurrency=1, priority=jobs.LOW)(_record("test.later"))
 
 
 @pytest.fixture(autouse=True)
 def _fresh():
     SEEN.clear()
+    ORDER.clear()
+    LIVE.clear()
+    PEAK.clear()
     STATE.update(fail=0, delay=0.0, in_flight=0, most=0)
     yield
     SEEN.clear()
@@ -172,6 +188,88 @@ async def test_run_at_and_priority(session):
     await session.commit()
     await jobs.run_due(ids=await _ids(session))
     assert [p["n"] for p in SEEN["test.record"]] == ["urgent", "normal", "low"]
+
+
+async def test_a_handler_gives_its_jobs_their_priority_and_a_caller_may_say_otherwise(session):
+    await jobs.enqueue(session, "test.later", {"n": 1})
+    await jobs.enqueue(session, "test.urgent", {"n": 2})
+    await jobs.enqueue(session, "test.urgent", {"n": 3}, priority=jobs.LOW)
+    await jobs.enqueue(session, "test.record", {"n": 4})
+    await jobs.enqueue_many(session, "test.urgent", [({"n": 5}, None)])
+    jobs.add(session, "test.later", {"n": 6})
+    await jobs.enqueue(session, "test.nobody.handles", {"n": 7})
+    await session.flush()
+    rows = (await session.scalars(select(jobs.Jobs))).all()
+    assert {r.payload["n"]: r.priority for r in rows} == {1: -1, 2: 1, 3: -1, 4: 0, 5: 1, 6: -1, 7: 0}
+    await session.execute(delete(jobs.Jobs).where(jobs.Jobs.name == "test.nobody.handles"))
+
+
+async def test_a_high_job_is_claimed_before_low_ones_queued_earlier(queue):
+    """One slot, three close-outs and a broadcast waiting: the ticket that
+    came last goes first, then the broadcast, then the close-outs."""
+    async with queue.make() as s:
+        for i in range(3):
+            await jobs.enqueue(s, "test.later", {"n": i})
+        await jobs.enqueue(s, "test.record", {"n": "broadcast"})
+        await jobs.enqueue(s, "test.urgent", {"n": "ticket"})
+        await s.commit()
+    r = queue.runner(concurrency=1)
+
+    async def settled():
+        return r.handled >= 5
+
+    assert await _until(settled)
+    assert ORDER == ["test.urgent", "test.record", "test.later", "test.later", "test.later"]
+
+
+async def test_per_name_limits_hold_while_other_names_run(queue):
+    """A name capped at one keeps to one however much of it waits, and
+    leaves the runner's other slots to the rest."""
+    async with queue.make() as s:
+        for i in range(4):
+            await jobs.enqueue(s, "test.later", {"n": i})
+        for i in range(6):
+            await jobs.enqueue(s, "test.record", {"n": i})
+        await s.commit()
+    STATE["delay"] = 0.05
+    r = queue.runner(concurrency=4)
+
+    async def settled():
+        return r.handled >= 10
+
+    assert await _until(settled)
+    # The capped one held one slot; the rest went to the others at once.
+    assert PEAK["test.later"] == 1 and PEAK["test.record"] >= 3 and STATE["most"] <= 4
+
+
+def test_the_platforms_jobs_have_the_priorities_and_limits_chosen(monkeypatch):
+    """Every job the app registers, with the urgency and the per-runner cap
+    chosen for it (on the API's four slots). A new job must be placed here:
+    left NORMAL and uncapped by default, it would queue beside broadcasts."""
+    import doth  # noqa: F401
+
+    H, N, L = jobs.HIGH, jobs.NORMAL, jobs.LOW
+    chosen = {
+        # A mail or push someone is waiting for.
+        "admin_alerts.deliver": (H, 4), "mail.billing_notice": (H, 4), "mail.club_domain_notice": (H, 4),
+        "clubs.approved_email": (H, 4), "checkins.after": (H, 4),
+        "payments.receipt": (H, 2),  # a wkhtmltopdf process each
+        # Sends to many. deliveries.send is HIGH for one guest's ticket or certificate (its caller says).
+        "deliveries.send": (N, 2), "emails.send_message": (N, 2),
+        "notifications.new_event": (N, 2), "notifications.interest": (N, 2), "notifications.push": (N, 2),
+        "threads.tell_followers": (N, 2),
+        "notifications.broadcast": (N, 4), "push.topic": (N, 4), "push.devices": (N, 4), "push.unsubscribe": (N, 4),
+        "live.survey_mail": (N, 4),
+        # Nobody watches these happen.
+        "closeout.retention": (L, 1), "registrations.import": (L, 1),
+    }
+    monkeypatch.setattr(settings, "JOBS_LIMITS", "")
+    found = {n: (h.priority, jobs.limit_for(h, 4)) for n, h in jobs.handlers().items() if not n.startswith("test.")}
+    assert found == chosen
+    # APP_JOBS_LIMITS still has the last word, within the runner's own slots.
+    monkeypatch.setattr(settings, "JOBS_LIMITS", "closeout.retention=3,deliveries.send=9")
+    h = jobs.handlers()
+    assert jobs.limit_for(h["closeout.retention"], 4) == 3 and jobs.limit_for(h["deliveries.send"], 4) == 4
 
 
 # ─── Two runners, one job ────────────────────────────────────────────────

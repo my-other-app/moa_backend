@@ -34,11 +34,12 @@ from app.core.email import email as email_mod
 from app.core.storage import objects
 from app.db.locks import singleton
 from app.response import CustomHTTPException
+from app.db import lock_keys
 
 logger = logging.getLogger(__name__)
 
-SWEEP_LOCK = 773102
-RETENTION_LOCK = 773103
+SWEEP_LOCK = lock_keys.CLOSEOUT_SWEEP
+RETENTION_LOCK = lock_keys.CLOSEOUT_RETENTION
 # A closed event with nothing to scrub is archived this long after it ends.
 ARCHIVE_AFTER = timedelta(days=30)
 
@@ -444,7 +445,7 @@ async def sweep(session, now: Optional[datetime] = None) -> dict:
     return {"moved": moved, "queued": len(due)}
 
 
-@jobs.handler("closeout.retention", max_attempts=3, timeout=900.0)
+@jobs.handler("closeout.retention", max_attempts=3, timeout=900.0, concurrency=1, priority=jobs.LOW)
 async def _retention_job(p: dict) -> None:
     """Forward only, under the event's lock, so it is safe run twice: a run
     that already reported goes on to the scrub; one already scrubbed stops."""

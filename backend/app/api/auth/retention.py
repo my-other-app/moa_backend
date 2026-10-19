@@ -25,10 +25,11 @@ from app.api.auth.sessions import UserSessions
 from app.api.security.models import SignInAttempts
 from app.config import settings
 from app.db.locks import singleton
+from app.db import lock_keys
 
 logger = logging.getLogger(__name__)
 
-SWEEP_LOCK = 773_130
+SWEEP_LOCK = lock_keys.AUTH_RETENTION
 BATCH = 5000
 #: How long a signed-out session is kept before it goes.
 REVOKED_KEEP = timedelta(days=1)

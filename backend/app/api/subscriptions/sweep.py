@@ -37,10 +37,11 @@ from sqlalchemy.orm import selectinload
 from app.api.admin_alerts import notify
 from app.api.subscriptions import billing, notices, service
 from app.api.subscriptions.models import ClubSubscriptions, Plans, SubscriptionStatus
+from app.db import lock_keys
 
 logger = logging.getLogger(__name__)
 
-SWEEP_LOCK = 773_110
+SWEEP_LOCK = lock_keys.SUBSCRIPTIONS_SWEEP
 SWEEP_INTERVAL = 3600
 #: Rows per job per run; anything left waits an hour.
 BATCH = 200

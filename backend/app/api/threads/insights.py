@@ -1,11 +1,20 @@
 """The club's posts as the Threads page needs them: which ones wait for a
 reply, the page's scopes and sorts, and the figures above the list — reach,
-engagement, what kind of post works."""
+engagement, what kind of post works.
+
+Weeks are India's: Monday 00:00 to Sunday 23:59 in Asia/Kolkata, where the
+clubs are. They used to be half UTC and half IST -- the series' keys and the
+reactions in UTC, the posts by the IST timestamps the database hands back
+(TZAwareDateTime) -- so from Monday 00:00 to 05:30 IST a post made that
+morning sat in a week the chart did not show yet, and the latest week read
+no posts beside its reactions.
+"""
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
+from sqlalchemy import func, literal_column, select
 
 from app.api.clubs.models import Clubs
 from app.api.threads.models import ClubThreads, ThreadComments, ThreadLikes, ThreadVotes
@@ -14,6 +23,11 @@ from app.api.threads.service import _options_for, _out
 SCOPES = ("all", "pinned", "polls", "photos", "awaiting")
 SORTS = ("newest", "seen", "engaged")
 WINDOW = timedelta(days=30)
+#: Where a week starts and ends.
+IST = ZoneInfo("Asia/Kolkata")
+# Inline, not a bind parameter: Postgres matches the GROUP BY to the SELECT
+# by its text (app/core/utils/time_buckets.py).
+_IST_NAME = literal_column("'Asia/Kolkata'")
 
 
 def _now() -> datetime:
@@ -83,9 +97,15 @@ async def list_for_page(session, club: Clubs, *, scope: str = "all", sort: str =
     return dict(items=items, total=len(rows), limit=limit, offset=offset, counts=counts)
 
 
+def _week(at: datetime) -> tuple[int, int]:
+    """(ISO year, ISO week) of an instant, on Indian time."""
+    return tuple(at.astimezone(IST).isocalendar()[:2])
+
+
 async def _by_week(session, model, club: Clubs, since: datetime, *extra) -> dict:
-    """{(ISO year, ISO week): how many} of `model`'s rows on the club's posts since `since`."""
-    week = func.date_trunc("week", func.timezone("UTC", model.created_at))
+    """{(ISO year, ISO week): how many} of `model`'s rows on the club's posts
+    since `since`, the weeks cut on Indian time as `_week` cuts them."""
+    week = func.date_trunc("week", func.timezone(_IST_NAME, model.created_at))
     rows = (await session.execute(
         select(week, func.count())
         .join(ClubThreads, ClubThreads.id == model.thread_id)
@@ -125,10 +145,11 @@ async def insights(session, club: Clubs) -> dict:
     comments_by_week = await _by_week(session, ThreadComments, club, since, ThreadComments.is_deleted == False)  # noqa: E712
     votes_by_week = await _by_week(session, ThreadVotes, club, since)
     weeks = []
+    today = now.astimezone(IST)
     for k in range(11, -1, -1):
-        day = now - timedelta(weeks=k)
-        key = day.isocalendar()[:2]
-        posted = [t for t in rows if t.created_at.isocalendar()[:2] == key]
+        day = today - timedelta(weeks=k)
+        key = _week(day)
+        posted = [t for t in rows if _week(t.created_at) == key]
         weeks.append(dict(week=day.strftime("%Y-%m-%d"), posts=len(posted), reach=reach(posted), reactions=likes_by_week[key] + comments_by_week[key] + votes_by_week[key]))
 
     # What works: average reach by kind of post, and whether telling followers moved it.

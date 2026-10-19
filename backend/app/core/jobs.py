@@ -33,7 +33,14 @@ loop from the requests. Now each is a row in `jobs`:
 - Settling is fenced by the attempt: a runner whose lease ran out and whose
   job was taken again cannot mark the newer attempt done.
 - Each runner keeps at most JOBS_CONCURRENCY jobs in hand, and a handler's
-  `concurrency` (or JOBS_LIMITS) caps how many of one name run at once.
+  `concurrency` (or JOBS_LIMITS) caps how many of one name run at once: the
+  ones that draw documents, close events out or read a sheet take one or two
+  of a runner's slots at most, never all of them.
+- A handler says how urgent its jobs are (`priority`: HIGH for the mail or
+  push someone is waiting for, NORMAL for a send to many, LOW for work
+  nobody watches), and a caller may say otherwise for one job. When a runner
+  has room, the most urgent due job of any name goes first, so a ticket is
+  not queued behind a hall's survey mails or a close-out report.
 - On SIGTERM a runner stops claiming, gives the jobs in hand a while to
   finish, and hands back the rest with the attempt not counted.
 - Finished rows are kept JOBS_KEEP_DAYS, dead ones JOBS_DEAD_KEEP_DAYS, then
@@ -86,6 +93,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.config import settings
 from app.core.utils.db_fields import TZAwareDateTime
 from app.db.base import AbstractSQLModel
+from app.db import lock_keys
 
 logger = logging.getLogger(__name__)
 
@@ -108,10 +116,17 @@ ALIVE_WITHIN = timedelta(seconds=60)
 MAINTENANCE_SECONDS = 300.0
 CLEANUP_BATCH = 5000
 #: Advisory lock: one runner at a time does the maintenance pass.
-MAINTENANCE_LOCK = 774_501
+MAINTENANCE_LOCK = lock_keys.JOBS_MAINTENANCE
 #: The priorities a job may have, highest first. Higher goes first among the
 #: jobs due of a name; a value outside is taken as the nearest of these.
 PRIORITIES = (2, 1, 0, -1, -2)
+#: What handlers and callers use. HIGH: a mail or push someone is waiting
+#: for -- their ticket, their receipt, an approval, an admin's alert. NORMAL:
+#: a send to many (a broadcast, a club's announcement, the certificates of
+#: a whole event). LOW: work nobody watches happen -- an event's close-out,
+#: a sheet of registrations imported. 2 and -2 are left for a one-off job
+#: that must go before, or after, all of these.
+HIGH, NORMAL, LOW = 1, 0, -1
 
 UNFINISHED = "finished_at IS NULL AND NOT dead"
 DEDUPE_WHERE = f"dedupe_key IS NOT NULL AND {UNFINISHED}"
@@ -197,6 +212,7 @@ class Handler:
     timeout: float
     concurrency: Optional[int]
     alert_dead: bool
+    priority: int = NORMAL
 
 
 _handlers: dict[str, Handler] = {}
@@ -208,14 +224,16 @@ def _qualname(fn) -> str:
 
 def handler(
     name: str, *, max_attempts: int = DEFAULT_MAX_ATTEMPTS, timeout: float = DEFAULT_TIMEOUT,
-    concurrency: Optional[int] = None, alert_dead: bool = True,
+    concurrency: Optional[int] = None, alert_dead: bool = True, priority: int = NORMAL,
 ):
     """Register `async def fn(payload: dict) -> None` as the job `name`.
 
     `max_attempts` tries, each given `timeout` seconds; `concurrency` caps
     how many of this name one runner has in hand at once (JOBS_LIMITS
-    overrides it). `alert_dead=False` only logs a dead job -- for the job
-    that delivers admin alerts itself, which must not alert about itself."""
+    overrides it). `priority`: what its jobs are enqueued with unless the
+    caller says (HIGH, NORMAL or LOW). `alert_dead=False` only logs a dead
+    job -- for the job that delivers admin alerts itself, which must not
+    alert about itself."""
 
     def register(fn):
         if not asyncio.iscoroutinefunction(fn):
@@ -223,7 +241,7 @@ def handler(
         known = _handlers.get(name)
         if known is not None and _qualname(known.fn) != _qualname(fn):
             raise ValueError(f"job {name} has two handlers: {_qualname(known.fn)} and {_qualname(fn)}")
-        _handlers[name] = Handler(name, fn, max(1, int(max_attempts)), float(timeout), concurrency, alert_dead)
+        _handlers[name] = Handler(name, fn, max(1, int(max_attempts)), float(timeout), concurrency, alert_dead, clamp_priority(priority))
         return fn
 
     return register
@@ -275,6 +293,13 @@ def clamp_priority(priority: int) -> int:
     return max(min(PRIORITIES), min(max(PRIORITIES), int(priority)))
 
 
+def priority_for(h: Optional[Handler], priority: Optional[int]) -> int:
+    """The caller's priority when it gave one, else the handler's."""
+    if priority is None:
+        priority = h.priority if h is not None else NORMAL
+    return clamp_priority(priority)
+
+
 def as_json(payload: Optional[dict]) -> dict:
     """The payload as the handler will see it: JSON, round-tripped now so a
     value that cannot be stored fails the enqueue, not the job."""
@@ -283,17 +308,17 @@ def as_json(payload: Optional[dict]) -> dict:
 
 async def enqueue(
     session, name: str, payload: dict, *, run_at: Optional[datetime] = None,
-    dedupe_key: Optional[str] = None, priority: int = 0,
+    dedupe_key: Optional[str] = None, priority: Optional[int] = None,
 ) -> None:
     """Write job `name` in the caller's transaction; it runs once that
     commits. With `dedupe_key`, nothing is written while an unfinished job
     has the same key. `run_at`: not before then. Higher `priority` goes first
-    (one of PRIORITIES, -2 to 2; the nearest is taken)."""
+    (one of PRIORITIES, -2 to 2; the nearest is taken); unset, the handler's."""
     h = _handlers.get(name)
     if h is None:
         logger.warning("job %s is enqueued but no handler is registered in this process", name)
     values: dict[str, Any] = dict(
-        name=name, payload=as_json(payload), priority=clamp_priority(priority),
+        name=name, payload=as_json(payload), priority=priority_for(h, priority),
         max_attempts=h.max_attempts if h else DEFAULT_MAX_ATTEMPTS, dedupe_key=dedupe_key,
     )
     if run_at is not None:
@@ -308,7 +333,7 @@ async def enqueue(
 
 
 async def enqueue_many(
-    session, name: str, items: Iterable[tuple[dict, Optional[str]]], *, priority: int = 0, chunk: int = 1000,
+    session, name: str, items: Iterable[tuple[dict, Optional[str]]], *, priority: Optional[int] = None, chunk: int = 1000,
 ) -> int:
     """`enqueue` for many jobs of one name -- (payload, dedupe_key) each -- in
     a statement per `chunk` rather than one each: a survey to a hall is a job
@@ -317,7 +342,7 @@ async def enqueue_many(
     if h is None:
         logger.warning("job %s is enqueued but no handler is registered in this process", name)
     rows = [
-        dict(name=name, payload=as_json(payload), priority=clamp_priority(priority),
+        dict(name=name, payload=as_json(payload), priority=priority_for(h, priority),
              max_attempts=h.max_attempts if h else DEFAULT_MAX_ATTEMPTS, dedupe_key=dedupe_key)
         for payload, dedupe_key in items
     ]
@@ -335,11 +360,11 @@ async def enqueue_many(
     return written
 
 
-def add(session, name: str, payload: dict, *, priority: int = 0) -> Jobs:
+def add(session, name: str, payload: dict, *, priority: Optional[int] = None) -> Jobs:
     """`enqueue` for code that cannot await (app.core.after_commit): the row
     is added to the session and written with its next flush. No dedupe."""
     h = _handlers.get(name)
-    row = Jobs(name=name, payload=as_json(payload), priority=clamp_priority(priority), max_attempts=h.max_attempts if h else DEFAULT_MAX_ATTEMPTS)
+    row = Jobs(name=name, payload=as_json(payload), priority=priority_for(h, priority), max_attempts=h.max_attempts if h else DEFAULT_MAX_ATTEMPTS)
     sync = getattr(session, "sync_session", session)
     sync.add(row)
     _after_commit(session, row)

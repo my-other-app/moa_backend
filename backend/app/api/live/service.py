@@ -24,8 +24,6 @@ room's streams (stream.py): the host's at once (room.room_changed and
 quiz_changed), the audience's folded a third of a second.
 """
 import asyncio
-import hashlib
-import hmac
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -67,14 +65,16 @@ from app.api.live.models import (
 )
 from app.config import settings
 from app.core import jobs
+from app.core.mail import links
 from app.core.email import email as email_mod
 from app.response import CustomHTTPException
+from app.db import lock_keys
 
 logger = logging.getLogger(__name__)
 
 VOTER_HEADER = "X-Live-Key"
 PLAYER_HEADER = "X-Live-Player"
-SWEEP_LOCK = 7_301_010
+SWEEP_LOCK = lock_keys.LIVE_SWEEP
 # Answers after the clock plus this grace still count, for a slow phone.
 ANSWER_GRACE = 2
 UPDATE_TYPE = "event_live_update"
@@ -680,7 +680,12 @@ async def respond(session, event_id: int, poll_id: UUID, voter_key: str, value: 
 
 
 def _survey_token(reg_id) -> str:
-    return hmac.new(settings.SECRET_KEY.encode(), f"feedback:{reg_id}".encode(), hashlib.sha256).hexdigest()[:32]
+    """The survey link's proof: signed like every emailed link (app.core.mail.links)."""
+    return links.sign(f"feedback:{reg_id}")
+
+
+def _survey_token_ok(reg_id, token: str) -> bool:
+    return links.verify(f"feedback:{reg_id}", token or "")
 
 
 def survey_link(event: Events, reg: EventRegistrationsLink) -> str:
@@ -870,7 +875,7 @@ def _auto_send_at(event: Events, survey: FeedbackSurveys) -> Optional[datetime]:
 
 async def public_survey(session, event: Events, reg_id: UUID, token: str) -> dict:
     reg = await session.get(EventRegistrationsLink, reg_id)
-    if reg is None or reg.event_id != event.id or not hmac.compare_digest(token or "", _survey_token(reg.id)):
+    if reg is None or reg.event_id != event.id or not _survey_token_ok(reg.id, token):
         raise CustomHTTPException(404, message="This feedback link is not valid.")
     survey = await survey_of(session, event)
     done = await session.scalar(select(FeedbackResponses).where(FeedbackResponses.survey_id == survey.id, FeedbackResponses.registration_id == reg.id))
@@ -879,7 +884,7 @@ async def public_survey(session, event: Events, reg_id: UUID, token: str) -> dic
 
 async def submit_survey(session, event: Events, reg_id: UUID, token: str, answers: dict) -> dict:
     reg = await session.get(EventRegistrationsLink, reg_id)
-    if reg is None or reg.event_id != event.id or not hmac.compare_digest(token or "", _survey_token(reg.id)):
+    if reg is None or reg.event_id != event.id or not _survey_token_ok(reg.id, token):
         raise CustomHTTPException(404, message="This feedback link is not valid.")
     survey = await survey_of(session, event)
     clean: dict = {}

@@ -47,6 +47,7 @@ from app.core.email import email as email_mod
 from app.core.utils.db_fields import TZAwareDateTime
 from app.db.base import AbstractSQLModel
 from app.response import CustomHTTPException
+from app.db import lock_keys
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ DAY = verification.DAY
 EMAIL_MAX = 254
 
 #: First key of the advisory lock that keeps two requests for one address apart.
-_RESET_LOCK = 7_316_205
+_RESET_LOCK = lock_keys.PASSWORD_RESET
 
 
 class PasswordResetCodes(AbstractSQLModel):

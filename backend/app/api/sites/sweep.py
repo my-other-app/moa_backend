@@ -36,10 +36,11 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from app.api.clubs.models import ClubPartners, Clubs, ClubTeamMembers
 from app.api.events.models import Events
 from app.api.sites.models import ClubSites
+from app.db import lock_keys
 
 logger = logging.getLogger(__name__)
 
-SITES_LOCK = 773_121
+SITES_LOCK = lock_keys.SITES_SWEEP
 #: Pages made again per run, at most; the rest wait for the next run.
 BATCH = 20
 #: A page older than this is made again overnight even with nothing changed.

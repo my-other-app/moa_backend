@@ -46,11 +46,12 @@ from app.api.ledger import book
 from app.api.ledger.models import LedgerEntries as E
 from app.api.ledger.models import LedgerMonthly as LM
 from app.api.ledger.models import LedgerPlatformMonthly as LP
+from app.db import lock_keys
 
 logger = logging.getLogger(__name__)
 
 JOB = "ledger_daily"
-LOCK = 773_131
+LOCK = lock_keys.LEDGER_DAILY
 #: How often each worker looks whether the job is due.
 LOOK_EVERY_SECONDS = 300
 FIRST_LOOK_SECONDS = 180

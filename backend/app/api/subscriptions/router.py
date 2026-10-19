@@ -63,6 +63,7 @@ from app.core.response.pagination import (
 )
 from app.db.core import SessionDep
 from app.response import CustomHTTPException
+from app.db import lock_keys
 
 admin_router = APIRouter(prefix="/admin", tags=["subscriptions"])
 club_router = APIRouter(prefix="/clubs", tags=["subscriptions"])
@@ -996,7 +997,7 @@ async def _settled_subscription(session, club_id: int):
 
 
 #: First key of the advisory lock a club's checkout takes.
-_CHECKOUT_LOCK = 7_420_388
+_CHECKOUT_LOCK = lock_keys.PLAN_CHECKOUT
 
 
 def _complimentary_refusal() -> CustomHTTPException:

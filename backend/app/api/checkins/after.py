@@ -48,7 +48,7 @@ async def enqueue(session, admitted: Admitted) -> None:
     })
 
 
-@jobs.handler("checkins.after", max_attempts=4, timeout=120.0)
+@jobs.handler("checkins.after", max_attempts=4, timeout=120.0, priority=jobs.HIGH)
 async def _after_job(p: dict) -> None:
     await run(Admitted(user_id=int(p["user_id"]), event_id=int(p["event_id"]), event_name=p["event_name"], club_id=p.get("club_id")))
 

@@ -4,10 +4,11 @@ import asyncio
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Body, File, Query, Response, UploadFile
+from fastapi import APIRouter, Body, File, Query, Request, Response, UploadFile
+from fastapi.responses import JSONResponse
 
 from app.api.deliveries import service as deliveries
-from app.api.emails import library_overview, service
+from app.api.emails import library_overview, old_links, service
 from app.api.emails.models import EmailStage
 from app.api.emails.schemas import (
     LibraryOverview,
@@ -266,39 +267,119 @@ async def duplicate_library_template(session: SessionDep, user: ClubAuth, templa
 
 
 # --- files a guest opens from an email ---------------------------------------------------
+#
+# The JSON errors are what they always were (403 a bad signature, 404 no such
+# ticket, 410 revoked or not available). A browser following the link gets
+# the same status with a page instead (app/api/emails/old_links.py): what to
+# do now, and a form for a fresh link (POST /files/resend).
 
 
-async def _registration_by_ticket(session, ticket_id: str) -> EventRegistrationsLink:
-    reg = await session.scalar(
+async def _registration_by_ticket(session, ticket_id: str) -> Optional[EventRegistrationsLink]:
+    return await session.scalar(
         select(EventRegistrationsLink)
         .options(joinedload(EventRegistrationsLink.event).joinedload(Events.club), joinedload(EventRegistrationsLink.user))
         .where(EventRegistrationsLink.ticket_id == ticket_id, EventRegistrationsLink.is_deleted == False)
     )
-    if reg is None:
-        raise CustomHTTPException(404, message="No such ticket")
-    return reg
 
 
-def _check(kind: str, ticket_id: str, s: str) -> None:
-    if not links.file_token_ok(kind, ticket_id, s):
-        raise CustomHTTPException(403, message="This link is not valid.")
+def _refused(request: Request, kind: str, ticket_id: str, status: int, message: str, reason: str) -> Response:
+    """The JSON error an app has always had, or for a browser the page."""
+    if not old_links.wants_html(request):
+        raise CustomHTTPException(status, message=message)
+    return old_links.page(reason=reason, kind=kind, code=ticket_id[: old_links.CODE_MAX], action=old_links.resend_action(request), status=status)
 
 
 @public_router.get("/tickets/{ticket_id}.pdf", summary="A guest's ticket, from the link in their email")
-async def ticket_file(session: SessionDep, ticket_id: str, s: str = Query("")) -> Response:
-    _check("ticket", ticket_id, s)
+async def ticket_file(request: Request, session: SessionDep, ticket_id: str, s: str = Query("")) -> Response:
+    if not links.file_token_ok("ticket", ticket_id, s):
+        return _refused(request, "ticket", ticket_id, 403, "This link is not valid.", "invalid")
     reg = await _registration_by_ticket(session, ticket_id)
+    if reg is None:
+        return _refused(request, "ticket", ticket_id, 404, "No such ticket", "invalid")
     if reg.ticket_revoked_at is not None:
-        raise CustomHTTPException(410, message="This ticket has been revoked.")
+        return _refused(request, "ticket", ticket_id, 410, "This ticket has been revoked.", "revoked")
     doc = await ticket_document(session, reg)
     return Response(content=doc.content, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{doc.filename}"'})
 
 
 @public_router.get("/certificates/{ticket_id}.pdf", summary="A guest's certificate, from the link in their email")
-async def certificate_file(session: SessionDep, ticket_id: str, s: str = Query("")) -> Response:
-    _check("certificate", ticket_id, s)
+async def certificate_file(request: Request, session: SessionDep, ticket_id: str, s: str = Query("")) -> Response:
+    if not links.file_token_ok("certificate", ticket_id, s):
+        return _refused(request, "certificate", ticket_id, 403, "This link is not valid.", "invalid")
     reg = await _registration_by_ticket(session, ticket_id)
+    if reg is None:
+        return _refused(request, "certificate", ticket_id, 404, "No such ticket", "invalid")
     if not availability(reg).available:
-        raise CustomHTTPException(410, message="This certificate is not available.")
+        return _refused(request, "certificate", ticket_id, 410, "This certificate is not available.", "unavailable")
     doc = await certificate_document(session, reg)
     return Response(content=doc.content, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{doc.filename}"'})
+
+
+async def _resend_fields(request: Request) -> dict:
+    """kind, code and email from the page's form, or from JSON."""
+    ctype = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+    try:
+        if ctype == "application/json":
+            data = await request.json()
+        elif ctype in ("application/x-www-form-urlencoded", "multipart/form-data"):
+            data = dict(await request.form())
+        else:
+            data = {}
+    except Exception:  # noqa: BLE001 - a body that does not parse asks for nothing
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    return {k: (data.get(k) if isinstance(data.get(k), str) else "") for k in ("kind", "code", "email")}
+
+
+def _looks_like_email(email: str) -> bool:
+    local, at, domain = email.rpartition("@")
+    return bool(at and local and "." in domain and len(email) <= old_links.EMAIL_MAX and not any(c.isspace() for c in email))
+
+
+@public_router.post("/resend", summary="A fresh ticket or certificate link, sent to the address the guest registered with")
+async def resend_file_link(request: Request, session: SessionDep) -> Response:
+    """
+    For an emailed link that no longer works. Takes `kind` (`ticket` or
+    `certificate`), `code` (the ticket code from the old link) and `email`,
+    as a form (the page's) or JSON.
+
+    Always 200 `{"message": "If that email has a ticket for this event,
+    we've sent a fresh link."}`, whatever matched: nothing here says whether
+    a ticket or an address exists. When the code and the address are a live
+    registration's, its ticket (or certificate) email goes again to that
+    registration's own address, through the delivery queue, at most once in
+    ten minutes. 429 RATE_LIMITED past five tries a minute or twenty an hour
+    from one address, or three an hour for one code; 422 when a field is
+    missing or malformed. A browser gets each of these as a page.
+    """
+    as_page = old_links.wants_html(request)
+    fields = await _resend_fields(request)
+    kind = fields["kind"].strip().lower() or "ticket"
+    code, email = fields["code"].strip(), fields["email"].strip()
+    shown_kind = kind if kind in links.FILE_KINDS else "ticket"
+    action = request.url.path
+
+    if old_links.over_limit(request, code[: old_links.CODE_MAX]):
+        if as_page:
+            return old_links.page(reason="limited", kind=shown_kind, code=code[: old_links.CODE_MAX], action=action, status=429)
+        raise CustomHTTPException(429, message="Too many tries in a short time. Wait a while and try again.", error_code="RATE_LIMITED")
+    problem = None
+    if kind not in links.FILE_KINDS:
+        problem = "That is not a ticket or certificate link."
+    elif not code or len(code) > old_links.CODE_MAX:
+        problem = "The link's ticket code is missing."
+    elif not _looks_like_email(email):
+        problem = "Enter the email address you registered with."
+    if problem is not None:
+        if as_page:
+            return old_links.page(
+                reason="invalid", kind=shown_kind, code=code[: old_links.CODE_MAX], action=action, status=422,
+                error=problem, email=email[: old_links.EMAIL_MAX],
+            )
+        raise CustomHTTPException(422, message=problem)
+
+    await old_links.resend(session, request, kind=kind, code=code, email=email)
+    if as_page:
+        return old_links.page(reason="sent", kind=kind, code=code, action=action, status=200)
+    return JSONResponse({"message": old_links.GENERIC})
