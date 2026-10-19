@@ -8,9 +8,15 @@ the agenda. What is never the same is left out: the venue, the
 registrations, every handover, every report. The copy starts as a draft on
 the clock.
 
+The merchandise: the store and handout switches, the handout items (copied:
+they are the event's own), and the club's store items the event offers
+(the offers, not new items: the copy sells from the same shelf).
+
 The copy is a new event, so it carries only what the club's plan allows
-(`allowed`, from subscriptions.gates.duplicate_allowances): without `swag` no
-handout items, never more than `merch_items_per_event` of them, without
+(`allowed`, from subscriptions.gates.duplicate_allowances): without `merch`
+neither the store switched on nor its offers, without `swag` neither the
+handouts switched on nor their items, never more than
+`merch_items_per_event` items of the two together (handouts first), without
 `badges` no ID card designs, without `report` no report recipients. What was
 left behind is named in `skipped`, by flag or limit key, rather than refused.
 """
@@ -31,6 +37,7 @@ from app.api.events.volunteer.models import Volunteer
 from app.api.idcards.models import BadgeTemplates
 from app.api.merch.models import MerchItems, MerchVariants
 from app.api.organisers.models import EventTeamMembers
+from app.api.store.models import EventStoreItems, EventStoreOffers
 from app.api.ticket_templates.models import TicketTemplates
 from app.core.utils.keys import generate_slug
 
@@ -58,8 +65,13 @@ async def duplicate_event(
     copy_doors: bool = False, copy_team: bool = False, copy_agenda: bool = False, copy_merch: bool = True,
     allowed: Optional[dict] = None,
 ) -> dict:
-    allowed = {"swag": True, "badges": True, "report": True, "merch_items_per_event": None, **(allowed or {})}
+    allowed = {"merch": True, "swag": True, "badges": True, "report": True, "merch_items_per_event": None, **(allowed or {})}
     skipped: list[str] = []
+
+    def skip(what: str) -> None:
+        if what not in skipped:
+            skipped.append(what)
+
     new = Events(name=name.strip(), slug=generate_slug(name), event_datetime=event_datetime, duration=duration or source.duration, club_id=source.club_id, images=[], reg_startdate=datetime.now(timezone.utc))
     for key in SETTINGS:
         setattr(new, key, getattr(source, key))
@@ -68,9 +80,20 @@ async def duplicate_event(
         skipped.append("report")
     new.lifecycle = EventStatus.draft
     new.status_clock = True
+    # The store's and the handouts' switches, as the plan allows them.
+    if source.merch_enabled:
+        if allowed["merch"]:
+            new.merch_enabled = True
+        else:
+            skip("merch")
+    if source.swag_enabled:
+        if allowed["swag"]:
+            new.swag_enabled = True
+        else:
+            skip("swag")
     session.add(new)
     await session.flush()
-    copied = {"interests": 0, "designs": 0, "emails": 0, "merch": 0, "doors": 0, "team": 0, "agenda": 0, "organisers": 0}
+    copied = {"interests": 0, "designs": 0, "emails": 0, "merch": 0, "store": 0, "doors": 0, "team": 0, "agenda": 0, "organisers": 0}
 
     for link in await _event_rows(session, EventInterestsLink, source.id):
         session.add(EventInterestsLink(event_id=new.id, interest_id=link.interest_id))
@@ -101,16 +124,35 @@ async def duplicate_event(
         items = list((await session.scalars(select(MerchItems).options(selectinload(MerchItems.variants)).where(MerchItems.event_id == source.id).order_by(MerchItems.created_at))).all())
         cap = allowed["merch_items_per_event"]
         if items and not allowed["swag"]:
-            skipped.append("swag")
+            skip("swag")
             items = []
         elif cap is not None and len(items) > cap:
-            skipped.append("merch_items_per_event")
+            skip("merch_items_per_event")
             items = items[:cap]
         for m in items:
             item = MerchItems(event_id=new.id, name=m.name, photo_key=m.photo_key, stock=m.stock, eligibility_field=m.eligibility_field, eligibility_value=m.eligibility_value, variant_field=m.variant_field)
             item.variants = [MerchVariants(label=v.label, stock=v.stock) for v in m.variants]
             session.add(item)
             copied["merch"] += 1
+
+        # The club's store items the source offers: the same items, offered on
+        # the copy in the same order, in whatever room the handouts left.
+        offers = list((await session.execute(
+            select(EventStoreOffers.item_id, EventStoreOffers.sort_order)
+            .join(EventStoreItems, EventStoreItems.id == EventStoreOffers.item_id)
+            .where(EventStoreOffers.event_id == source.id, EventStoreItems.club_id == source.club_id, EventStoreItems.is_deleted == False)  # noqa: E712
+            .order_by(EventStoreOffers.sort_order, EventStoreItems.sort_order)
+        )).all())
+        room = None if cap is None else max(0, cap - copied["merch"])
+        if offers and not allowed["merch"]:
+            skip("merch")
+            offers = []
+        elif room is not None and len(offers) > room:
+            skip("merch_items_per_event")
+            offers = offers[:room]
+        for item_id, sort_order in offers:
+            session.add(EventStoreOffers(event_id=new.id, item_id=item_id, sort_order=sort_order))
+            copied["store"] += 1
 
     door_ids: dict = {}
     if copy_doors:

@@ -1025,6 +1025,37 @@ async def test_a_copy_carries_at_most_the_plans_items(client, session, world):
     assert copy.report_recipients == ["boss@example.com"]
 
 
+async def test_a_copy_on_free_offers_nothing_and_leaves_the_store_off(client, session, world):
+    from app.api.store.models import EventStoreOffers
+
+    await _club_items(session, world, 2, offered_on=world.event)
+    world.event.merch_enabled = True
+    world.event.swag_enabled = True
+    await session.commit()
+    body = (await _copy(client, world)).json()
+    assert body["skipped"] == ["merch", "swag"] and body["copied"]["store"] == 0
+    copy = await session.get(Events, body["id"])
+    assert copy.merch_enabled is False and copy.swag_enabled is False
+    assert await session.scalar(select(EventStoreOffers.item_id).where(EventStoreOffers.event_id == copy.id)) is None
+
+
+async def test_a_copy_offers_what_room_the_handouts_leave(client, session, world):
+    from app.api.store.models import EventStoreOffers
+
+    await _stocked(session, world)  # three handout items
+    ids = await _club_items(session, world, 2, offered_on=world.event)
+    world.event.merch_enabled = True
+    await session.commit()
+    await on_plan(session, world, "pro")
+    await set_limit(session, world, "pro", merch_items_per_event=4)
+    body = (await _copy(client, world)).json()
+    assert body["skipped"] == ["merch_items_per_event"]
+    assert body["copied"]["merch"] == 3 and body["copied"]["store"] == 1
+    copy = await session.get(Events, body["id"])
+    assert copy.merch_enabled is True
+    assert [str(i) for i in (await session.scalars(select(EventStoreOffers.item_id).where(EventStoreOffers.event_id == copy.id))).all()] == ids[:1]
+
+
 async def test_a_copy_with_nothing_to_leave_says_so(client, session, world):
     body = (await _copy(client, world)).json()
     assert body["skipped"] == []

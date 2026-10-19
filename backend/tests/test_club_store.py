@@ -439,3 +439,27 @@ async def test_an_edit_sets_the_offers_only_when_it_sends_them(client, session, 
     assert w["friday"].name == "Friday Build" and await _offers_of(session, w["friday"].id) == [cap["id"], tee["id"]]
     r = await client.put(url, data={**form, "store_item_ids": "[]"}, headers=w["h"])
     assert r.status_code == 200 and await _offers_of(session, w["friday"].id) == []
+
+
+async def test_a_copy_offers_the_same_items_and_keeps_the_switches(client, session, club_shop):
+    w = club_shop
+    w["friday"].swag_enabled = True
+    await session.commit()
+    tee, cap = await _make(client, w["h"], name="Tee", stock=5), await _make(client, w["h"], name="Cap", stock=5)
+    await _offer(client, w["h"], w["friday"].id, [cap["id"], tee["id"]])
+    items_before = await session.scalar(select(func.count(EventStoreItems.id)))
+    r = await client.post(f"{API}/events/{w['friday'].id}/duplicate", json={"name": "Friday Build II", "event_datetime": (NOW + timedelta(days=10)).isoformat()}, headers=w["h"])
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["copied"]["store"] == 2 and body["skipped"] == []
+    copy = await session.get(Events, body["id"])
+    await session.refresh(copy)
+    assert copy.merch_enabled is True and copy.swag_enabled is True
+    assert await _offers_of(session, copy.id) == [cap["id"], tee["id"]]
+    # The same items: one shelf for the original and its copy.
+    assert await session.scalar(select(func.count(EventStoreItems.id))) == items_before
+    assert [e["id"] for e in (await _club_item(client, w["h"], tee["id"]))["events"]] == [w["friday"].id, copy.id]
+    # Without the merchandise, the offers stay behind; the switches still come.
+    r = await client.post(f"{API}/events/{w['friday'].id}/duplicate", json={"name": "Friday Build III", "event_datetime": (NOW + timedelta(days=11)).isoformat(), "copy_merch": False}, headers=w["h"])
+    third = await session.get(Events, r.json()["id"])
+    assert await _offers_of(session, third.id) == [] and third.merch_enabled is True
