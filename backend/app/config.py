@@ -288,6 +288,17 @@ class AppConfig(BaseSettings):
     # dpi across an A4 certificate), as a JPEG or, with transparency, a PNG
     # (app/core/storage/doc_art.py).
     DOC_ART_MAX_PX: int = 2400
+    # Kept documents older than this many days are deleted, once a day
+    # (app/api/events/doc_cache_sweep.py); a later download draws it again.
+    # 0 (the default): never. Production turns it on on purpose (e.g. 90),
+    # and not beside a bucket lifecycle rule on docs/ with another day count
+    # (docs/OPERATIONS.md, section 13).
+    DOC_CACHE_DAYS: int = 0
+    # At most this many kept documents deleted in one day's run.
+    DOC_CACHE_MAX_DELETE_PER_RUN: int = 50000
+    # An admin alert when more than this percentage of what the sweep finds
+    # under docs/ is not a kept document (and so is left alone).
+    DOC_CACHE_SKIP_ALERT_PERCENT: float = 5.0
 
     # The public site's own server (app/core/site.py). It reads the API from
     # a few of Vercel's shared addresses; a request carrying

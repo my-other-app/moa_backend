@@ -51,6 +51,8 @@ SITES_SWEEP = 773_123
 AUTH_RETENTION = 773_130
 #: The search outbox's drainer (app/api/search/sync.py, scripts/search_reindex.py).
 SEARCH_SYNC = 773_140
+#: The kept documents' daily expiry (app/api/events/doc_cache_sweep.py).
+DOC_CACHE_SWEEP = 773_151
 #: The job queue's maintenance pass (app/core/jobs.py).
 JOBS_MAINTENANCE = 774_501
 #: The live room's sweep (app/api/live/service.py).

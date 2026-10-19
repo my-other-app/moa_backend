@@ -69,6 +69,7 @@ KINDS: dict[str, str] = {
     "ledger_drift": "The ledger's monthly sums had drifted from its entries; the daily reconcile put them right (data: rows, clubs)",
     "ledger_unbalanced": "Ledger postings whose lines do not sum to zero (data: keys)",
     "ledger_mismatch": "Razorpay's payments or refunds for a day disagree with the ledger (data: day, gateway, and each mismatch)",
+    "doc_cache_unknown": "The kept-documents sweep found objects under docs/ that are not kept documents, and left them alone (data: unknown, listed, percent, samples)",
 }
 
 DEDUPE_WINDOW = timedelta(minutes=10)
