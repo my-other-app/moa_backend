@@ -221,6 +221,12 @@ GUARD_TRIGGERS: dict[str, tuple[str, ...]] = {
     "ledger_entries": ("trg_ledger_entries_no_truncate", "trg_ledger_entries_append_only"),
 }
 
+#: Wiped tables that triggers on other tables write to while the rest is
+#: deleted (the search outbox hears about every club row that goes): emptied
+#: once more at the end. The search index is rebuilt after a reset anyway
+#: (scripts/search_reindex.py, in the runbook).
+TRIGGER_FED = ("search_outbox",)
+
 #: Internal queues whose ids nothing outside the database holds: started from 1 again.
 RESTART_SEQUENCES = ("jobs", "search_outbox", "background_task_logs", "notification_logs")
 
@@ -252,6 +258,8 @@ class Plan:
     detach: list[tuple[ForeignKey, int]] = field(default_factory=list)
     truncate: list[str] = field(default_factory=list)
     delete_order: list[str] = field(default_factory=list)
+    #: The public pages that go: event slugs and ids, club slugs.
+    pages: tuple[list[str], list[str]] = (list(), list())
 
     def removes(self, table: str) -> int:
         return self.counts[table] - self.kept.get(table, 0)
@@ -376,6 +384,10 @@ async def make_plan(conn) -> Plan:
                 by_delete.add(fk.parent)
                 grew = True
     plan.truncate = sorted(wiped - by_delete)
+    if "events" in tables and "clubs" in tables:
+        events = [str(x) for r in (await conn.execute(text("SELECT id, slug FROM events"))).all() for x in r]
+        clubs = [r[0] for r in (await conn.execute(text("SELECT slug FROM clubs"))).all()]
+        plan.pages = (events, clubs)
     plan.delete_order = order_children_first(by_delete | {t for t, c in classes.items() if c == FILTERED}, fks)
     return plan
 
@@ -407,6 +419,10 @@ async def execute_plan(conn, plan: Plan) -> None:
             await conn.execute(text(f'DELETE FROM "{t}"'))
         else:
             await conn.execute(text(f'DELETE FROM "{t}" WHERE NOT ({FILTERS[t]})'))
+
+    for t in TRIGGER_FED:
+        if classes.get(t) == WIPE:
+            await conn.execute(text(f'DELETE FROM "{t}"'))
 
     for t in guarded:
         for trigger in await _existing_triggers(conn, t, GUARD_TRIGGERS[t]):
@@ -449,7 +465,7 @@ async def verify(conn, plan: Plan) -> None:
     for t, names in GUARD_TRIGGERS.items():
         if t in plan.classes:
             rows = await conn.execute(text(
-                "SELECT tgname, tgenabled FROM pg_trigger WHERE tgrelid = CAST(:t AS regclass) AND NOT tgisinternal"
+                "SELECT tgname, CAST(tgenabled AS text) FROM pg_trigger WHERE tgrelid = CAST(:t AS regclass) AND NOT tgisinternal"
             ), {"t": t})
             for name, enabled in rows:
                 if name in names and enabled != "O":
@@ -540,9 +556,19 @@ async def run(*, execute: bool, confirm: str | None, env: dict | None = None, ou
                     return 2
             out(f"\nDone: {sum(plan.removes(t) for t in plan.tables)} rows removed in one transaction, checked and committed. "
                 f"{await admins_left(conn)} admin account(s) kept.")
-            return 0
+        revalidate(*plan.pages)
+        return 0
     finally:
         await engine.dispose()
+
+
+def revalidate(events: list[str], clubs: list[str]) -> None:
+    """Tell the public site its pages for what went are gone, and its topic
+    and front pages changed (when it is set up to be told: APP_SITE_REVALIDATE_SECRET)."""
+    from app.core import site_revalidate
+
+    if site_revalidate.enabled():
+        site_revalidate._queue(None, frozenset(events), frozenset(clubs), True)
 
 
 def main(argv: list[str] | None = None) -> int:
