@@ -192,3 +192,57 @@ async def save_designs(session, *, club, owner, brand, signers: list[tuple[str, 
         body=certificate_layout(brand, art_key=keys["certificate"], mark_key=keys["mark"], signers=signers),
     )
     return {"ticket": ticket, "certificate": certificate, "keys": keys}
+
+
+def _from_starter(starter: dict, brand, *, mark_key: str, ground: str | None = None) -> dict:
+    """A starter design (app/core/layout/starters.py) in the club's brand:
+    its colour references written out as the brand's hex, its logo drawn
+    from the club's mark, its display type in the club's face."""
+    from app.core.layout.model import dump
+
+    b = images.Brand.of(brand)
+    font, weight = _display(b)
+    accent = b.a if images.contrast(b.p, b.a) >= 1.8 else images.mix(b.a, (255, 255, 255), 0.4)
+    refs = {"brand.primary": _hex(b.p), "brand.secondary": _hex(accent), "ticket_type": _hex(b.p)}
+    layers = []
+    for layer in starter["layers"]:
+        out = dump(layer)
+        for key in ("color", "fill", "stroke", "accent", "muted"):
+            if isinstance(out.get(key), str) and out[key] in refs:
+                out[key] = refs[out[key]]
+        if out.get("kind") == "image" and out.get("source") == "org_logo":
+            side = min(out["width"], out["height"]) * 1.3
+            out.update(source="upload", imageKey=mark_key, width=side, height=side, align="left")
+        if out.get("kind") == "text" and out.get("id") in ("event", "title", "first"):
+            out.update(font=font, weight=weight)
+            if font == "bebas" and "upper" not in out["text"]:
+                out["text"] = out["text"].replace("}}", " | upper}}", 1) if out["text"].count("{{") == 1 else out["text"]
+        layers.append(out)
+    canvas = dump(starter["canvas"])
+    if ground:
+        canvas["background"] = ground
+    return {"canvas": canvas, "page": dump(starter["page"]), "layers": layers}
+
+
+def badge_layout(brand, *, mark_key: str) -> dict:
+    """The ID card (CR80 portrait), from the conference starter, in the brand."""
+    from app.core.layout.starters import badge_starter
+
+    return _from_starter(badge_starter("classic"), brand, mark_key=mark_key)
+
+
+def agenda_layout(brand, *, mark_key: str) -> dict:
+    """The run of show for a screen, from the screen starter, on the brand's ink."""
+    from app.core.layout.starters import agenda_starter
+
+    b = images.Brand.of(brand)
+    return _from_starter(agenda_starter("screen"), brand, mark_key=mark_key, ground=_hex(images.mix(b.i, b.p, 0.15)))
+
+
+async def save_more_designs(session, *, club, owner, brand, mark_key: str) -> None:
+    """The ID card and the programme screen, for a club that shows every design."""
+    from app.api.club_designs import router as club_designs
+    from app.api.event_designs.router import DesignKind
+
+    await club_designs.save_layout(session=session, user=owner, kind=DesignKind.badge, body=badge_layout(brand, mark_key=mark_key))
+    await club_designs.save_layout(session=session, user=owner, kind=DesignKind.agenda, body=agenda_layout(brand, mark_key=mark_key))

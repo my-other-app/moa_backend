@@ -166,6 +166,10 @@ def quiet():
         p.set(jobs, "enqueue_many", enqueue_many)
         p.set(jobs, "add", add)
         p.set(admin_alerts, "notify", notify)
+        # Callers import it from the package (`from app.api.admin_alerts import notify`) at call time.
+        import app.api.admin_alerts as admin_alerts_package
+
+        p.set(admin_alerts_package, "notify", notify)
         p.set(discord, "send_discord_notification", send_discord)
         p.set(after_commit, "_dispatch", dispatch)
         p.set(geo, "resolve_link", no_link)

@@ -61,6 +61,7 @@ sys.path.insert(0, ".")
 
 from scripts.demo import images  # noqa: E402
 from scripts.demo.schema import DEMO_DOMAIN, Club, DataError, Event, People, load  # noqa: E402
+from scripts.demo.showcase import Showcase, page_views  # noqa: E402
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -85,6 +86,7 @@ class Person:
     full_name: str
     email: str
     username: str
+    college: Optional[str] = None
 
 
 @dataclass
@@ -93,6 +95,8 @@ class Report:
     counts: Counter = field(default_factory=Counter)
     notes: list[str] = field(default_factory=list)
     main_user: Optional[dict] = None
+    logins: list = field(default_factory=list)
+    showcase: Optional[dict] = None
 
 
 def ascii_slug(text: str) -> str:
@@ -180,6 +184,17 @@ def venue_line(name: str, address: str) -> str:
     return ", ".join(kept + [address.strip()]) if kept else address.strip()
 
 
+def social_url(network: str, handle: Optional[str]) -> Optional[str]:
+    """A handle as the profile's link: the club's socials are links (the club page's schema checks)."""
+    if not handle:
+        return None
+    if handle.startswith("http"):
+        return handle
+    handle = handle.lstrip("@").strip("/")
+    return {"instagram": f"https://www.instagram.com/{handle}/", "linkedin": f"https://www.linkedin.com/company/{handle}/",
+            "x": f"https://x.com/{handle}"}[network]
+
+
 def maps_link(lat: float, lng: float) -> str:
     return f"https://www.google.com/maps/search/?api=1&query={lat:.6f},{lng:.6f}"
 
@@ -212,7 +227,8 @@ class Seeder:
     """One run of the seed, on one session. `run()` does it all."""
 
     def __init__(self, session, clubs: list[Club], people: People, *, main_email: str, main_password: str,
-                 club_password: str, force: bool = False, now: Optional[datetime] = None, out=print, seed: str = "moa-demo"):
+                 club_password: str, force: bool = False, now: Optional[datetime] = None, out=print, seed: str = "moa-demo",
+                 showcase: Optional[str] = None):
         self.s = session
         self.clubs = clubs
         self.people = people
@@ -235,6 +251,9 @@ class Seeder:
         self.created: dict[str, list] = {"clubs": [], "events": [], "users": []}
         self.days: dict[str, int] = {}
         self.hidden_stores: list[str] = []
+        self.design_keys: dict[int, dict] = {}
+        self.showcase_slug: Optional[str] = showcase
+        self.showcase = None
         self.skipped: Counter = Counter()
         for c in clubs:
             for e in c.events:
@@ -395,6 +414,8 @@ class Seeder:
         named = len(self.people.attendee_names)
         taken = set((await self.s.scalars(select(Users.username))).all())
 
+        college_names = dict(zip(college_ids, colleges))
+
         def extras_of(user_id: int, name: str, joined: datetime) -> tuple[dict, list[dict]]:
             profile = dict(user_id=user_id, full_name=name, org_id=self.rnd.choice(college_ids),
                            avatar_id=self.rnd.choice(self.avatars) if self.avatars and self.rnd.random() < 0.55 else None,
@@ -410,7 +431,7 @@ class Seeder:
             await self.s.execute(insert(UserProfiles), [profile])
             await self.s.execute(insert(UserInterests), interests)
             await self.s.execute(update(Users).where(Users.id == user.id).values(created_at=joined, updated_at=joined))
-            self.pool.append(Person(user.id, name, user.email, user.username))
+            self.pool.append(Person(user.id, name, user.email, user.username, college_names[profile["org_id"]]))
             taken.add(user.username)
             if n % 50 == 0:
                 await self.commit()
@@ -438,7 +459,7 @@ class Seeder:
                     profile, chosen = extras_of(uid, nm, joined)
                     profiles.append(profile)
                     interests.extend(chosen)
-                    self.pool.append(Person(uid, nm, email, username))
+                    self.pool.append(Person(uid, nm, email, username, college_names[profile["org_id"]]))
                 await self.s.execute(insert(UserProfiles), profiles)
                 await self.s.execute(insert(UserInterests), interests)
                 await self.commit()
@@ -464,7 +485,7 @@ class Seeder:
         for slug in m.interests:
             self.s.add(UserInterests(user_id=user.id, interest_id=self.interests[slug], created_at=joined, updated_at=joined))
         await self.commit()
-        self.main = Person(user.id, m.name, self.main_email, values.get("username", user.username))
+        self.main = Person(user.id, m.name, self.main_email, values.get("username", user.username), m.college)
         if m.bio:
             self.skipped["main_user.bio (no bio on users or profiles)"] += 1
         self.report.main_user = {"email": self.main_email, "username": self.main.username, "user_id": user.id}
@@ -489,7 +510,7 @@ class Seeder:
             self.s, name=c.name, email=c.owner_email, about=c.about, org_id=org_id, location_name=c.location.name,
             interest_ids=[self.interests[s] for s in c.interests], is_admin_created=True,
             location_link=maps_link(c.location.lat, c.location.lng), contact_phone=c.contact.phone, contact_email=c.contact.email,
-            socials={"instagram": c.socials.instagram, "linkedin": c.socials.linkedin},
+            socials={"instagram": social_url("instagram", c.socials.instagram), "linkedin": social_url("linkedin", c.socials.linkedin)},
         )
         owner = await self.s.get(Users, club.user_id)
         owner.password = await get_password_hash_async(self.club_password)
@@ -555,7 +576,8 @@ class Seeder:
         from scripts.demo import designs
 
         signers = [(m.name, f"{m.role}, {c.name}" if len(m.role) + len(c.name) < 44 else m.role) for m in c.team[:2]]
-        await designs.save_designs(self.s, club=club, owner=owner, brand=c.brand, signers=signers, store=_store_layout_image)
+        saved = await designs.save_designs(self.s, club=club, owner=owner, brand=c.brand, signers=signers, store=_store_layout_image)
+        self.design_keys[club.id] = saved["keys"]
         self.report.counts["designs"] += 2
 
     async def make_store(self, club, c: Club) -> dict[str, object]:
@@ -643,6 +665,8 @@ class Seeder:
         )
         ev = await self.s.get(Events, event.id)
         ev.slug = e.slug
+        # Tickets numbered under the club's own prefix (RR-0042-E7), as an organiser sets it.
+        ev.admission_prefix = (images.initials(c.name, most=3) or "MOA")[:12]
         await self.commit()
         await self.s.execute(update(Events).where(Events.id == ev.id).values(created_at=made, updated_at=made))
         await self.commit()
@@ -669,7 +693,15 @@ class Seeder:
                 kind = "tee"
             shot = images.product(brand, kind=kind, colour=c.brand.primary if kind != "sticker" else c.brand.accent, name=c.name, slug=c.slug)
             photo = merch.store_photo(ev.id, shot)
-            item = await merch.create_item(self.s, ev, MerchItemIn(name=sw.name, photo_key=photo["key"], stock=e.seats + 20, sponsor=sw.sponsor))
+            if kind in ("tee", "hoodie") or "jersey" in sw.name.lower():
+                # Sizes, chosen at the door (the guest's size goes on their record).
+                total = e.seats + 20
+                split = {"S": 0.18, "M": 0.32, "L": 0.28, "XL": 0.16, "XXL": 0.06}
+                body = MerchItemIn(name=sw.name, photo_key=photo["key"], variant_field="size", sponsor=sw.sponsor,
+                                   variants=[{"label": k, "stock": max(2, round(total * v))} for k, v in split.items()])
+            else:
+                body = MerchItemIn(name=sw.name, photo_key=photo["key"], stock=e.seats + 20, sponsor=sw.sponsor)
+            item = await merch.create_item(self.s, ev, body)
             swag.append(item)
             self.report.counts["swag_items"] += 1
         self.created["events"].append(ev.id)
@@ -695,7 +727,7 @@ class Seeder:
                 out[q.key] = date(rnd.randint(1998, 2006), rnd.randint(1, 12), rnd.randint(1, 28)).isoformat()
             else:
                 if "college" in label or "institution" in label:
-                    out[q.key] = rnd.choice(self.people.colleges or ["Government Engineering College"])
+                    out[q.key] = person.college or rnd.choice(self.people.colleges or ["Government Engineering College"])
                 elif "team" in label:
                     out[q.key] = f"Team {rnd.choice(['Nova', 'Orbit', 'Banyan', 'Monsoon', 'Kayal', 'Spark'])}"
                 elif "phone" in label or "whatsapp" in label:
@@ -754,6 +786,9 @@ class Seeder:
                 else:
                     raise
             reg = await self.s.get(Reg, out["event_registration_id"])
+            if person.college:
+                # Where they study, as the attendee list's institution column reads it.
+                reg.additional_details = {**(reg.additional_details or {}), "college": person.college}
             at = between(rnd, made + timedelta(hours=2), last, late=0.62)
             if e.fee > 0:
                 # Paid at the desk: the walk-up desk's own record of cash.
@@ -797,6 +832,12 @@ class Seeder:
         ev, start, end = ev_ctx["event"], ev_ctx["start"], ev_ctx["end"]
         rnd = random.Random(f"day:{e.slug}")
         actor = GateActor(kind="user", name=owner.full_name, user=owner, full=True)
+        # Who checks people in, and at which door: the club's owner, or (on
+        # the showcase club) its volunteers at their doors.
+        crew = ev_ctx.get("crew") or [(actor, None)]
+
+        def gate(reg):
+            return crew[hash(reg.id) % len(crew)]
         main_reg = [r for r in regs if self.main and r.user_id == self.main.user_id]
         others = [r for r in regs if r not in main_reg]
         count = max(len(main_reg), round(len(regs) * (e.attended_ratio or 0)))
@@ -804,7 +845,9 @@ class Seeder:
         times = {}
         for reg in attended:
             at = start - timedelta(minutes=25) + timedelta(minutes=rnd.triangular(0, 70, 15))
-            await checkins.admit(self.s, ev, reg, actor=actor, via=rnd.choice([CheckInVia.gate, CheckInVia.gate, CheckInVia.app, CheckInVia.desk]), checked_in_at=at)
+            who, door = gate(reg)
+            await checkins.admit(self.s, ev, reg, actor=who, via=rnd.choice([CheckInVia.gate, CheckInVia.gate, CheckInVia.app, CheckInVia.desk]),
+                                 door_label=door, checked_in_at=at)
             await self.s.execute(update(CheckIns).where(CheckIns.registration_id == reg.id).values(created_at=at, updated_at=at))
             times[reg.id] = at
         await self.commit()
@@ -824,7 +867,8 @@ class Seeder:
         for item in ev_ctx["swag"]:
             for reg in attended:
                 if rnd.random() < 0.9 or reg in main_reg:
-                    result = await merch.collect(self.s, ev, item["id"], reg.id, actor)
+                    size = rnd.choices(["S", "M", "L", "XL", "XXL"], weights=[18, 32, 28, 16, 6])[0] if item.get("variant_field") else None
+                    result = await merch.collect(self.s, ev, item["id"], reg.id, gate(reg)[0], variant_label=size, door_label=gate(reg)[1])
                     if result.get("collected"):
                         await self.s.execute(update(MerchCollections).where(
                             MerchCollections.registration_id == reg.id, MerchCollections.item_id == item["id"]).values(
@@ -1050,7 +1094,7 @@ class Seeder:
             self.report.counts["post_comments"] += len(t.comments)
         await self.commit()
 
-    async def publish_site(self, ctx: dict, c: Club) -> None:
+    async def publish_site(self, ctx: dict, c: Club, template: Optional[str] = None) -> None:
         from app.api.sites import service as sites
         from app.api.sites.models import FONTS, TEMPLATES
 
@@ -1059,7 +1103,7 @@ class Seeder:
         s = await sites.get_or_create(self.s, club)
         font = {"bebas": "space_grotesk", "dm-serif": "fraunces", "inter": "inter"}.get(c.brand.display_font, "inter")
         await sites.patch(self.s, s, {
-            "template": TEMPLATES[sum(map(ord, c.slug)) % len(TEMPLATES)],
+            "template": template or TEMPLATES[sum(map(ord, c.slug)) % len(TEMPLATES)],
             "theme": "light" if images.luminance(brand.w) > 0.6 else "dark",
             "font": font if font in FONTS else None,
             "headline": c.tagline, "subline": None,
@@ -1110,9 +1154,16 @@ class Seeder:
         for c in self.clubs:
             t0 = clock.monotonic()
             ctx = await self.make_club(c)
+            sc = Showcase(self, c, ctx) if c.slug == self.showcase_slug else None
+            if sc:
+                await sc.access()
+                await sc.security()
+                await sc.designs()
             items = await self.make_store(ctx["club"], c)
             mine = self.main_events(c)
             registrants: set[int] = set()
+            runs = []
+            oversold_done = False
             for e in sorted(c.events, key=lambda e: e.when.days_from_now):
                 ev_ctx = await self.make_event(ctx, c, e, items)
                 ev_ctx["items"] = [items[k] for k in e.merch] if ev_ctx["store_open"] else []
@@ -1125,16 +1176,46 @@ class Seeder:
                     buyers.add(self.main.user_id)
                     buy_once = False
                 regs = await self.register(ev_ctx, e, people, buyers=buyers)
+                ev_ctx["regs"] = regs
+                ev_ctx["event"].page_views = page_views(len(regs), rnd)
+                await self.commit()
                 registrants |= {p.user_id for p in people}
-                if e.past and regs:
-                    await self.hold(ev_ctx, e, regs, ctx["owner"])
+                if sc:
+                    ev_ctx["crew"] = await sc.crew(e, ev_ctx)
+                ev_ctx["attended"] = await self.hold(ev_ctx, e, regs, ctx["owner"]) if e.past and regs else []
+                if sc and e.past:
+                    if await sc.walkups(e, ev_ctx, ev_ctx["crew"]) and e.certificates:
+                        from app.api.certificates import service as certificates
+
+                        await certificates.issue(self.s, ev_ctx["event"], "checked_in", [])
+                        await self.commit()
+                    if ev_ctx["store_open"] and not oversold_done:
+                        oversold_done = await sc.oversold(e, ev_ctx)
+                    await sc.print_cards(e, ev_ctx)
+                    if e.category == "Hackathon":
+                        await sc.competition(e, ev_ctx)
+                    if e.fee and e.when.duration_hours >= 6:
+                        await sc.quiz(e, ev_ctx)
+                    await sc.live_updates(e, ev_ctx)
+                    await sc.closeout(e, ev_ctx)
                 await self._close_registration(ev_ctx)
+                runs.append((e, ev_ctx))
             followers = await self.follow(ctx, c, registrants)
             await self.posts(ctx, c, followers)
-            await self.publish_site(ctx, c)
+            await self.publish_site(ctx, c, template="campus" if sc else None)
+            if sc:
+                for e, ev_ctx in runs:
+                    await sc.mail_history(e, ev_ctx)
+                await sc.links(followers, runs)
+                await sc.announcements(runs)
+                await sc.finance(runs)
+                self.report.logins = sc.logins
+                self.report.showcase = {"slug": c.slug, "name": c.name, "login": c.owner_email}
             self.report.clubs.append({"slug": c.slug, "name": c.name, "login": c.owner_email, "id": ctx["club"].id})
-            self.log(f"  {c.name}: {len(c.events)} events, {len(followers)} followers ({clock.monotonic() - t0:.0f}s)")
+            self.log(f"  {c.name}: {len(c.events)} events, {len(followers)} followers{' (showcase)' if sc else ''} ({clock.monotonic() - t0:.0f}s)")
 
+        if self.showcase_slug and not any(c.slug == self.showcase_slug for c in self.clubs):
+            self.report.notes.append(f"--showcase {self.showcase_slug}: no such club in the data; no showcase made")
         from app.api.closeout.service import advance_clock
 
         if self.hidden_stores:
@@ -1178,15 +1259,31 @@ class Seeder:
         jobs_now = int(await self.s.scalar(select(func.count()).select_from(jobs.Jobs)) or 0)
         if jobs_now != jobs_before:
             problems.append(f"{jobs_now - jobs_before} job row(s) were written")
-        n = await self.s.scalar(select(func.count()).select_from(EmailTemplates).where(EmailTemplates.event_id.in_(ids)))
+        # A journey email the sweep would still send (enabled, due from two
+        # days ago on) is allowed only where every registrant is at a domain
+        # no mail goes to.
+        from app.api.emails.models import MessageDeliveries, Messages, MessageStatus
+        from app.api.events.models import EventRegistrationsLink as Reg
+        from app.core.mail import suppression
+
+        outside = select(Reg.event_id).where(Reg.event_id.in_(ids), ~suppression.domain_suppressed(Reg.email))
+        n = await self.s.scalar(select(func.count()).select_from(EmailTemplates).where(
+            EmailTemplates.event_id.in_(ids), EmailTemplates.enabled == True,  # noqa: E712
+            EmailTemplates.due_at >= self.now - timedelta(days=2), EmailTemplates.event_id.in_(outside)))
         if n:
-            problems.append(f"{n} journey mail template(s) were made for demo events")
+            problems.append(f"{n} journey email(s) would still go to someone outside the demo domain")
         n = await self.s.scalar(select(func.count()).select_from(FeedbackSurveys).where(FeedbackSurveys.event_id.in_(ids), FeedbackSurveys.auto_send == True))  # noqa: E712
         if n:
             problems.append(f"{n} survey(s) would send themselves")
-        n = await self.s.scalar(select(func.count()).select_from(Deliveries).where(Deliveries.event_id.in_(ids)))
+        n = await self.s.scalar(select(func.count()).select_from(Deliveries).where(
+            Deliveries.event_id.in_(ids), Deliveries.status.in_(["pending", "sending"])))
         if n:
-            problems.append(f"{n} delivery row(s) were made")
+            problems.append(f"{n} delivery row(s) wait to be sent")
+        n = await self.s.scalar(select(func.count()).select_from(Messages).where(Messages.event_id.in_(ids), Messages.status == MessageStatus.SENDING))
+        n = (n or 0) + (await self.s.scalar(select(func.count()).select_from(MessageDeliveries).join(Messages, Messages.id == MessageDeliveries.message_id).where(
+            Messages.event_id.in_(ids), MessageDeliveries.status.in_(["pending", "sending"]))) or 0)
+        if n:
+            problems.append(f"{n} message(s) or message deliveries wait to be sent")
         n = await self.s.scalar(select(func.count()).select_from(EventStoreOrders).where(EventStoreOrders.event_id.in_(ids), EventStoreOrders.status == "pending"))
         if n:
             problems.append(f"{n} store order(s) are still pending (a hold, or an online payment to come)")
@@ -1212,7 +1309,13 @@ def render(report: Report, quiet_summary: dict, *, main_password: str, club_pass
     lines.append(f"  quiet mode: {quiet_summary}")
     for note in report.notes:
         lines.append(f"  note: {note}")
-    lines += ["", "CREDENTIALS (shown once; not written anywhere)", "  Clubs dashboard -- every demo club signs in with the same password:"]
+    lines += ["", "CREDENTIALS (shown once; not written anywhere)"]
+    if report.showcase:
+        lines += [f"  SHOWCASE -- every dashboard section has data: {report.showcase['name']}",
+                  f"    owner:  {report.showcase['login']}   password: {club_password}"]
+        for name, role, email in report.logins:
+            lines.append(f"    {role + ':':<7} {email}   ({name}; same password)")
+    lines.append("  Clubs dashboard -- every demo club signs in with the same password:")
     for c in report.clubs:
         lines.append(f"    {c['name']:<36} {c['login']}")
     lines.append(f"    password: {club_password}")
@@ -1222,7 +1325,7 @@ def render(report: Report, quiet_summary: dict, *, main_password: str, club_pass
 
 
 async def seed(*, main_email: str, main_password: str, club_password: str, data_dir: Optional[Path], force: bool,
-               include_example: bool = False, bucket: Optional[Path] = None, out=print) -> int:
+               include_example: bool = False, bucket: Optional[Path] = None, showcase: Optional[str] = "respawn-room", out=print) -> int:
     from app.db.core import AsyncSessionLocal
     from app.db.listeners import add_loader_criteria
     from scripts.demo.quiet import quiet
@@ -1243,7 +1346,7 @@ async def seed(*, main_email: str, main_password: str, club_password: str, data_
             await session.execute(text("SELECT pg_advisory_lock(:k)"), {"k": 0x6D6F615F64656D6F})
             try:
                 seeder = Seeder(session, clubs, people, main_email=main_email, main_password=main_password,
-                                club_password=club_password, force=force, out=out)
+                                club_password=club_password, force=force, out=out, showcase=showcase)
                 try:
                     report = await seeder.run()
                 except Refused as e:
@@ -1256,8 +1359,12 @@ async def seed(*, main_email: str, main_password: str, club_password: str, data_
         from app.core import site_revalidate
 
         await site_revalidate.flush()
-        if q.sent:
-            out(f"WARNING: quiet mode stopped {len(q.sent)} message(s) the seed tried to send: {q.sent[:5]}")
+        expected = [m for m in q.sent if "oversold" in str(m).lower() or m.get("kind") == "store_oversold"]
+        unexpected = [m for m in q.sent if m not in expected]
+        if expected:
+            out(f"Quiet mode stopped {len(expected)} message(s) about the showcase's oversold order (expected): nothing was sent.")
+        if unexpected:
+            out(f"WARNING: quiet mode stopped {len(unexpected)} message(s) the seed tried to send (nothing left the process): {unexpected[:5]}")
     out(render(report, q.summary(), main_password=main_password, club_password=club_password))
     return 0
 
@@ -1277,10 +1384,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--force", action="store_true", help="seed even though other clubs exist")
     parser.add_argument("--include-example", action="store_true", help="seed data/clubs/_example.json too (for a rehearsal)")
     parser.add_argument("--local-bucket", type=Path, default=None, help="a folder instead of S3 -- for a rehearsal on a laptop, never on the server")
+    parser.add_argument("--showcase", default="respawn-room", help="the club that gets every dashboard section filled ('' for none)")
     args = parser.parse_args(argv)
     return asyncio.run(seed(
         main_email=args.main_email, main_password=args.main_password, club_password=args.club_password,
         data_dir=args.data_dir, force=args.force, include_example=args.include_example, bucket=args.local_bucket,
+        showcase=args.showcase or None,
     ))
 
 
