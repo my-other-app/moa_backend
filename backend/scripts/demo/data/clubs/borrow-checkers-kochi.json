@@ -1,0 +1,335 @@
+{
+  "slug": "borrow-checkers-kochi",
+  "name": "Borrow Checkers Kochi",
+  "tagline": "Rust and systems programming in Kochi: small talks, real code, strong coffee.",
+  "about": "Borrow Checkers Kochi started in early 2023 as six people arguing about lifetimes over filter coffee at a bakery in Kadavanthra. We now meet once a month at a cowork in Panampilly Nagar, and the arguments have turned into talks, workshops and a fair amount of shared code.\n\nWe're for anyone who writes software close to the metal, or wants to: Rust beginners staring at their first ownership error, embedded tinkerers blinking LEDs on a microcontroller, backend engineers chasing tail latency, and the occasional C veteran who came to heckle and stayed. No talk is too small. The five-minute lightning slot is where most of our regulars gave their first talk.\n\nEvery meetup has a beginner track, one deep-dive talk and an hour of open hacking. Between meetups we run a Thursday-night study group and a mentoring programme that pairs first-time open-source contributors with someone who has shipped a crate.\n\nThe house rules are short. Be kind about other people's code, explain your acronyms, and wash your own cup.",
+  "org": null,
+  "location": {"name": "Panampilly Nagar, Kochi", "lat": 9.9589, "lng": 76.2961},
+  "contact": {"email": "hello@borrow-checkers-kochi.demo.myotherapp.in", "phone": "+91 90000 01101"},
+  "socials": {"instagram": "borrowcheckers.kochi", "linkedin": "borrow-checkers-kochi", "x": "borrowchk_kochi"},
+  "topics": ["development", "deep-tech"],
+  "interests": ["coding", "software-engineering", "open-source", "cloud-devops", "iot-hardware"],
+  "brand": {"primary": "#A8431A", "accent": "#F0B429", "ink": "#1D1916", "paper": "#FAF6F1", "display_font": "inter", "motif": "grid"},
+  "team": [
+    {"name": "Sreejith Balan", "role": "Organiser", "bio": "Backend engineer who rewrote his company's billing service in Rust and still brings it up at dinner."},
+    {"name": "Fathima Rizvana", "role": "Co-organiser, talks", "bio": "Writes firmware for medical devices and runs the lightning-talk slot with a kitchen timer."},
+    {"name": "Jacob Eapen", "role": "Study group lead", "bio": "Teaches the Rust book chapter by chapter on Thursday nights, homework included."},
+    {"name": "Anusree Mohanan", "role": "Mentorship lead", "bio": "Pairs first-time contributors with crate maintainers and follows up until the PR merges."},
+    {"name": "Kiran Pai", "role": "Venue and logistics", "bio": "Knows where every extension cord in the cowork lives, and who borrowed the HDMI adapter."},
+    {"name": "Shafeeq Moideen", "role": "Design and socials", "bio": "Frontend developer who draws the crab on every poster and writes our meetup recaps."}
+  ],
+  "partners": [
+    {"name": "Thuruthu Coworks", "role": "Venue partner", "since": 2023},
+    {"name": "Kaapi Kuthira Roasters", "role": "Coffee partner", "since": 2024},
+    {"name": "Thiramala Compute", "role": "Infrastructure partner", "since": 2024},
+    {"name": "Pattam Makerspace", "role": "Hardware partner", "since": 2025}
+  ],
+  "followers": 864,
+  "merch": [
+    {"key": "tee", "name": "Ownership Is Love tee", "description": "Heavyweight cotton tee in rust orange with a hand-drawn crab holding a borrow-checker stamp. Screen-printed in Ernakulam.", "price": 549, "kind": "tee", "color": "#A8431A", "sizes": {"S": 18, "M": 34, "L": 30, "XL": 14, "XXL": 6}, "stock": null},
+    {"key": "sticker", "name": "Lifetimes sticker sheet", "description": "Six vinyl stickers: a lifetime 'a, an unsafe block, a cargo crate, the crab, a filter coffee tumbler and the Kochi skyline in ASCII.", "price": 99, "kind": "sticker", "color": "#F0B429", "sizes": null, "stock": 240},
+    {"key": "mug", "name": "cargo build --release mug", "description": "Stoneware mug for the long compile. Holds exactly one strong filter coffee.", "price": 399, "kind": "mug", "color": "#1D1916", "sizes": null, "stock": 60}
+  ],
+  "events": [
+    {
+      "slug": "rust-from-zero-ownership-weekend",
+      "name": "Rust from Zero: Ownership Weekend",
+      "when": {"days_from_now": -96, "time": "10:00", "duration_hours": 7},
+      "format": "in_person",
+      "venue": {"name": "Thuruthu Coworks", "address": "2nd floor, 41/1180 Panampilly Avenue, Panampilly Nagar, Kochi 682036"},
+      "category": "Workshop",
+      "interests": ["coding", "software-engineering"],
+      "fee": 299,
+      "sold_out": false,
+      "capacity": 60,
+      "registrations": 58,
+      "attended_ratio": 0.91,
+      "certificates": true,
+      "about": "A full Saturday for people who have heard Rust is hard and would like to find out for themselves. We start from cargo new and finish with a small command-line tool that reads the ferry timetable between Fort Kochi and Vypin and tells you when the next boat leaves. Along the way: ownership, borrowing, enums, pattern matching and the compiler errors that teach you more than any slide.\n\nThe morning is explanation and live coding; the afternoon is pair programming with one mentor for every six people. The fee covers Kerala meals from the canteen downstairs, tea twice and a printed cheat sheet.\n\nYou don't need any systems programming background. You do need to have written a loop and a function in some language, and to be fine with being confused for about forty minutes before it clicks.",
+      "guidelines": "Bring a laptop with Rust installed through rustup (we email a setup checklist two days before) and your charger, because power strips are limited. Arrive by 9:45 so we can start on time. Pairs are mixed on purpose, so expect to sit with someone new. Photos are taken in the afternoon; tell the front desk if you'd rather not be in them.",
+      "speakers": [
+        {"name": "Sreejith Balan", "designation": "Organiser, Borrow Checkers Kochi; backend engineer", "bio": "Rewrote a billing service in Rust at a Kakkanad SaaS company and spent the following year explaining why. Has taught this workshop five times."},
+        {"name": "Deepthi Raghunath", "designation": "Staff engineer, payments infrastructure", "bio": "Moved a ledger service from Java to Rust in 2024 and explains the borrow checker with drawings of house keys and who is holding them."}
+      ],
+      "agenda": [
+        {"at": "10:00", "title": "Setup clinic and cargo new", "by": "Sreejith Balan"},
+        {"at": "10:30", "title": "Ownership and borrowing, with house keys", "by": "Deepthi Raghunath"},
+        {"at": "11:45", "title": "Enums, match and the Option you'll stop fearing", "by": "Sreejith Balan"},
+        {"at": "13:00", "title": "Lunch", "by": null},
+        {"at": "13:45", "title": "Pair programming: the ferry timetable tool", "by": null},
+        {"at": "15:45", "title": "Lifetimes, gently", "by": "Deepthi Raghunath"},
+        {"at": "16:30", "title": "Show and tell, certificates, group photo", "by": null}
+      ],
+      "questions": [
+        {"key": "experience", "label": "How much Rust have you written so far?", "type": "radio", "options": ["None yet", "A few exercises", "A small project", "I use it at work"], "required": true},
+        {"key": "home_language", "label": "Which language are you most comfortable in?", "type": "select", "options": ["Python", "JavaScript or TypeScript", "Java or Kotlin", "C or C++", "Go", "Something else"], "required": true},
+        {"key": "food", "label": "Anything we should know about your food?", "type": "text", "required": false}
+      ],
+      "merch": ["tee", "sticker"],
+      "swag": [
+        {"name": "Printed ownership cheat sheet", "sponsor": null},
+        {"name": "Coffee voucher", "sponsor": "Kaapi Kuthira Roasters"}
+      ],
+      "feedback": {
+        "responses": 41,
+        "avg_rating": 4.7,
+        "comments": [
+          "The house keys analogy finally made borrowing make sense. I'd been stuck on it for months.",
+          "Pairing with a stranger felt awkward for ten minutes and then became the best part of the day.",
+          "More time on lifetimes, please. The last session felt rushed.",
+          "The setup checklist meant nobody lost the first hour to installs. Thank you.",
+          "Lunch was excellent, and my ferry tool actually runs on my phone."
+        ]
+      },
+      "live": {
+        "poll": {"question": "Which compiler error scared you most today?", "options": ["borrowed value does not live long enough", "cannot move out of a shared reference", "mismatched types", "use of moved value"]},
+        "qna": [
+          "Is it worth learning Rust before C?",
+          "How do you choose between String and &str in a function signature?",
+          "Do companies in Kochi actually hire for Rust?"
+        ]
+      },
+      "poster": {"headline": "Rust from Zero", "sub": "An ownership weekend. One Saturday, one tool, no Rust needed going in."}
+    },
+    {
+      "slug": "meetup-27-async-without-tears",
+      "name": "Meetup #27: Async Without Tears",
+      "when": {"days_from_now": -55, "time": "18:30", "duration_hours": 3},
+      "format": "in_person",
+      "venue": {"name": "Thuruthu Coworks", "address": "2nd floor, 41/1180 Panampilly Avenue, Panampilly Nagar, Kochi 682036"},
+      "category": "Meetup",
+      "interests": ["software-engineering", "cloud-devops"],
+      "fee": 0,
+      "sold_out": false,
+      "capacity": 90,
+      "registrations": 84,
+      "attended_ratio": 0.74,
+      "certificates": false,
+      "about": "Our monthly meetup, this time on async Rust: what an executor actually does, why your future isn't running, and how to stop holding a lock across an await. The main talk walks through a job runner that moves parcels for a logistics company, and the three outages that shaped it.\n\nBefore that, the beginner track spends twenty minutes explaining futures with a dosa counter: you hand over a token, go do something else, and someone shouts your number. After the talks we break into open hacking, and the study group will be at the back table for anyone stuck on the concurrency chapter.",
+      "guidelines": "Free, but please RSVP so we order enough snacks. Doors open at 6:15 and the first talk starts at 6:45 sharp. If you RSVP and can't make it, cancel from the app so someone on the waitlist gets your seat.",
+      "speakers": [
+        {"name": "Arun Thekkekara", "designation": "Senior engineer, logistics platform", "bio": "Maintains an async job runner that moves a few million parcels a week across South India. Collects outage stories the way other people collect stamps."},
+        {"name": "Meghna Iyer", "designation": "Software engineer; beginner track host", "bio": "Gave her first lightning talk here in 2024. Now runs the beginner track and explains concurrency with breakfast food."}
+      ],
+      "agenda": [
+        {"at": "18:30", "title": "Doors, chai and introductions", "by": null},
+        {"at": "18:45", "title": "Beginner track: futures at the dosa counter", "by": "Meghna Iyer"},
+        {"at": "19:10", "title": "Async without tears: three outages and a job runner", "by": "Arun Thekkekara"},
+        {"at": "20:00", "title": "Lightning talks, five minutes each", "by": null},
+        {"at": "20:20", "title": "Open hacking and study group", "by": null}
+      ],
+      "questions": [
+        {"key": "parts", "label": "Which parts are you coming for?", "type": "checkbox", "options": ["Beginner track", "Main talk", "Lightning talks", "Open hacking"], "required": false},
+        {"key": "lightning", "label": "Want a lightning slot? Give us a title.", "type": "text", "required": false}
+      ],
+      "merch": ["sticker", "mug"],
+      "swag": [{"name": "Crab sticker", "sponsor": null}],
+      "feedback": {
+        "responses": 38,
+        "avg_rating": 4.5,
+        "comments": [
+          "The dosa counter explanation of futures is going straight into my team's onboarding doc.",
+          "Arun's second outage story was painfully familiar. Great talk.",
+          "The room got very warm after eight. A second fan would help.",
+          "Loved the lightning talk on cancelling tasks safely. Short and sharp.",
+          "Please share the slides in the app afterwards."
+        ]
+      },
+      "live": {
+        "poll": {"question": "What runs your async code at work?", "options": ["A multi-threaded runtime", "A single-threaded runtime", "Something home-grown", "No async in production yet"]},
+        "qna": [
+          "How do you test cancellation behaviour?",
+          "When would you pick plain threads over async?",
+          "Would a linter have caught the lock-across-await bug?"
+        ]
+      },
+      "poster": {"headline": "Async Without Tears", "sub": "Meetup #27. Executors, futures and three outages, explained."}
+    },
+    {
+      "slug": "embedded-rust-night-blink-then-think",
+      "name": "Embedded Rust Night: Blink, Then Think",
+      "when": {"days_from_now": -19, "time": "17:30", "duration_hours": 4},
+      "format": "in_person",
+      "venue": {"name": "Pattam Makerspace", "address": "Ground floor, Kalamassery Startup Arcade, HMT Road, Kalamassery, Kochi 683503"},
+      "category": "Workshop",
+      "interests": ["iot-hardware", "coding"],
+      "fee": 499,
+      "sold_out": true,
+      "capacity": 30,
+      "registrations": 30,
+      "attended_ratio": 0.93,
+      "certificates": true,
+      "about": "A hands-on evening with a ₹450 microcontroller board, a breadboard and a bag of LEDs. We start by blinking an LED with no operating system underneath, then read a temperature sensor, then put the numbers on a tiny OLED screen. Everyone goes home with a board that shows the room temperature and their name.\n\nThe fee covers the kit, which is yours to keep. The talk portion is short: Fathima explains what no_std means and why the compiler suddenly cares about panics, and Vimal shows the soil moisture sensor he ships to spice farms in Wayanad, which runs on the same board.\n\nSeats were capped at thirty so every table had a mentor. If you missed it, we'll run it again early next year.",
+      "guidelines": "Bring a laptop that takes a USB cable (we have USB-C adapters). Install the toolchain from the emailed checklist the day before; flashing drivers on Windows take a while. Please don't connect anything to a powered board until a mentor has checked your wiring.",
+      "speakers": [
+        {"name": "Fathima Rizvana", "designation": "Co-organiser; embedded developer", "bio": "Writes firmware for medical devices and has a strong opinion about every pull-up resistor in the room."},
+        {"name": "Vimal Krishnadas", "designation": "Firmware engineer, agri-sensor start-up", "bio": "Builds soil moisture sensors for spice farms in Wayanad. Moved the firmware from C to Rust after a memory bug cost a whole monsoon of data."}
+      ],
+      "agenda": [
+        {"at": "17:30", "title": "Kit handout and toolchain check", "by": null},
+        {"at": "18:00", "title": "What no_std actually means", "by": "Fathima Rizvana"},
+        {"at": "18:30", "title": "Blink with no operating system", "by": "Fathima Rizvana"},
+        {"at": "19:15", "title": "Sensors, the I2C bus and a tiny screen", "by": "Vimal Krishnadas"},
+        {"at": "20:30", "title": "Field story: a monsoon of lost data", "by": "Vimal Krishnadas"},
+        {"at": "21:00", "title": "Wrap-up and photos", "by": null}
+      ],
+      "questions": [
+        {"key": "laptop_os", "label": "Which operating system is on your laptop?", "type": "radio", "options": ["Windows", "macOS", "Linux"], "required": true},
+        {"key": "soldered", "label": "Have you soldered before?", "type": "radio", "options": ["Yes", "No", "Once, badly"], "required": false}
+      ],
+      "merch": ["tee", "sticker"],
+      "swag": [
+        {"name": "Microcontroller kit with OLED screen", "sponsor": "Pattam Makerspace"},
+        {"name": "Anti-static pouch", "sponsor": null}
+      ],
+      "feedback": {
+        "responses": 24,
+        "avg_rating": 4.9,
+        "comments": [
+          "Seeing the temperature on that tiny screen with my name under it was genuinely thrilling.",
+          "One mentor per table made all the difference. Nobody got left behind.",
+          "The Windows driver step hurt even with the checklist. Maybe an install clinic the evening before?",
+          "Vimal's monsoon story is the best argument for Rust I've heard."
+        ]
+      },
+      "live": {
+        "poll": {"question": "What would you build next with the board?", "options": ["Plant watering alarm", "Room air quality monitor", "Bicycle speedometer", "A very small game"]},
+        "qna": [
+          "Can we use async on a microcontroller?",
+          "How much flash does a Rust binary need compared to C?",
+          "Where can we buy these boards in Kochi?"
+        ]
+      },
+      "poster": {"headline": "Blink, Then Think", "sub": "Embedded Rust night. A board, a sensor and a screen you take home."}
+    },
+    {
+      "slug": "meetup-29-profiling-in-production",
+      "name": "Meetup #29: Profiling in Production",
+      "when": {"days_from_now": 12, "time": "18:30", "duration_hours": 3},
+      "format": "in_person",
+      "venue": {"name": "Thuruthu Coworks", "address": "2nd floor, 41/1180 Panampilly Avenue, Panampilly Nagar, Kochi 682036"},
+      "category": "Meetup",
+      "interests": ["software-engineering", "cloud-devops"],
+      "fee": 0,
+      "sold_out": false,
+      "capacity": 100,
+      "registrations": 63,
+      "attended_ratio": null,
+      "certificates": null,
+      "about": "This month is about finding out where the time goes. Leena walks through flame graphs from a real service: an endpoint that took 900 milliseconds, the allocation storm behind it, and the three-line change that brought it down to 40. You'll see how to profile a release build without shipping debug symbols, and how to read a flame graph without squinting.\n\nThe beginner track covers benchmarking honestly: why your first benchmark lies to you, and how to write one that doesn't. Lightning talks are open as always; claim a slot in the RSVP form.",
+      "guidelines": "Free entry; please RSVP so we can plan chairs and snacks. Doors open at 6:15. The talks are recorded for the club page, so tell us at the door if you'd rather sit out of frame. Bring a laptop if you want to try the profiling exercise during open hacking.",
+      "speakers": [
+        {"name": "Leena Mathews", "designation": "Performance engineer", "bio": "Reads flame graphs for a living at a Kochi logistics company and once traced a two-second delay to a single misplaced clone."},
+        {"name": "Harish Gopal", "designation": "Backend developer; study group regular", "bio": "Lost a week to a benchmark that measured the wrong thing. Now teaches everyone else how not to."}
+      ],
+      "agenda": [
+        {"at": "18:30", "title": "Doors, chai and introductions", "by": null},
+        {"at": "18:45", "title": "Beginner track: benchmarks that don't lie", "by": "Harish Gopal"},
+        {"at": "19:10", "title": "Profiling in production: from 900 ms to 40", "by": "Leena Mathews"},
+        {"at": "20:00", "title": "Lightning talks", "by": null},
+        {"at": "20:20", "title": "Open hacking: profile something of yours", "by": null}
+      ],
+      "questions": [
+        {"key": "rust_months", "label": "How long have you been writing Rust?", "type": "select", "options": ["Not yet", "Under six months", "Six months to two years", "Over two years"], "required": true},
+        {"key": "lightning", "label": "Lightning talk title, if you'd like a slot", "type": "text", "required": false}
+      ],
+      "merch": ["sticker", "mug"],
+      "swag": [
+        {"name": "Crab sticker", "sponsor": null},
+        {"name": "Coffee on the house", "sponsor": "Kaapi Kuthira Roasters"}
+      ],
+      "feedback": null,
+      "live": null,
+      "poster": {"headline": "Profiling in Production", "sub": "Meetup #29. Flame graphs, honest benchmarks and one misplaced clone."}
+    },
+    {
+      "slug": "first-pr-saturday",
+      "name": "First PR Saturday",
+      "when": {"days_from_now": 33, "time": "10:00", "duration_hours": 7},
+      "format": "online",
+      "venue": null,
+      "category": "Hackathon",
+      "interests": ["open-source", "coding"],
+      "fee": 0,
+      "sold_out": false,
+      "capacity": 150,
+      "registrations": 71,
+      "attended_ratio": null,
+      "certificates": null,
+      "about": "A day for opening your first pull request to a Rust project. Beforehand, our mentors collect around forty beginner-friendly issues from crates they know well: documentation fixes, missing tests, small improvements to error messages. On the day you pick one, a mentor pairs with you on a call, and you push your PR before dinner.\n\nIt's online so people from Kozhikode, Thrissur and further away can join in. There's a shared voice room for questions and a progress board where every opened PR gets a crab next to it.",
+      "guidelines": "You'll need git, a working Rust setup and a GitHub account. Mentors send the issue list on the Thursday before; reply with your top three picks. Be gentle with maintainers: one issue per person until your first PR has been reviewed. Cameras are optional, microphones are encouraged.",
+      "speakers": [
+        {"name": "Anusree Mohanan", "designation": "Mentorship lead, Borrow Checkers Kochi", "bio": "Has shepherded about sixty first pull requests and remembers the name of every crate involved."},
+        {"name": "Rafeeq Usman", "designation": "Maintainer of a small date-time crate", "bio": "Answers issues from a houseboat office in Alappuzha and promises to review every PR from the day within a week."}
+      ],
+      "agenda": [
+        {"at": "10:00", "title": "Kick-off: how to read an issue", "by": "Anusree Mohanan"},
+        {"at": "10:30", "title": "Pick your issue, meet your mentor", "by": null},
+        {"at": "11:00", "title": "Hacking in pairs", "by": null},
+        {"at": "13:30", "title": "Lunch break", "by": null},
+        {"at": "14:15", "title": "Hacking, reviews and fixes", "by": null},
+        {"at": "16:30", "title": "Show and tell: what got opened today", "by": "Rafeeq Usman"}
+      ],
+      "questions": [
+        {"key": "github", "label": "Link to your GitHub profile", "type": "url", "required": true},
+        {"key": "issue_kind", "label": "What kind of issue would you enjoy?", "type": "checkbox", "options": ["Documentation", "Tests", "Command-line tools", "Web backends", "Embedded"], "required": true}
+      ],
+      "merch": ["sticker"],
+      "swag": [{"name": "First PR sticker, posted to you", "sponsor": null}],
+      "feedback": null,
+      "live": null,
+      "poster": {"headline": "First PR Saturday", "sub": "One day, one mentor, your first pull request to a Rust project."}
+    },
+    {
+      "slug": "systems-weekend-vagamon",
+      "name": "Systems Weekend at Vagamon",
+      "when": {"days_from_now": 52, "time": "06:00", "duration_hours": 38},
+      "format": "in_person",
+      "venue": {"name": "Ilaveyil Farmstay", "address": "Kolahalamedu Road, Vagamon, Idukki 685503"},
+      "category": "Workshop",
+      "interests": ["software-engineering", "coding"],
+      "fee": 2400,
+      "sold_out": true,
+      "capacity": 24,
+      "registrations": 24,
+      "attended_ratio": null,
+      "certificates": null,
+      "about": "Two days in the hills with twenty-four people and no slide on screen for longer than ten minutes. Together we build a tiny key-value store from scratch: a write-ahead log on Saturday, compaction and crash recovery on Sunday. Evenings are for a bonfire and the kind of conversations that never happen in a co-working space.\n\nThe fee covers a shared room for one night, four meals, the bus from Kaloor and back, and a great deal of tea. It sold out in two days; join the waitlist if you'd like a seat at the next one.",
+      "guidelines": "The bus leaves Kaloor at 6:00 on Saturday and is back by 8:00 on Sunday night. Pack warm clothes, because Vagamon gets cold after dark. Bring a laptop and charger; the power is reliable but the internet isn't, so download the crate docs before you leave.",
+      "speakers": [
+        {"name": "Jacob Eapen", "designation": "Study group lead, Borrow Checkers Kochi", "bio": "Has run the Thursday study group since its second week and keeps a spreadsheet of every question nobody could answer."},
+        {"name": "Dr. Suma Pillai", "designation": "Associate professor of computer science, Vellimegham College of Engineering", "bio": "Teaches operating systems and has written three toy databases, one of them on purpose."}
+      ],
+      "agenda": [
+        {"at": "06:00", "title": "Bus leaves Kaloor", "by": null},
+        {"at": "09:30", "title": "Breakfast and setup", "by": null},
+        {"at": "10:30", "title": "A write-ahead log in an afternoon", "by": "Dr. Suma Pillai"},
+        {"at": "14:00", "title": "Pair programming: append, fsync, repeat", "by": null},
+        {"at": "19:00", "title": "Bonfire and open questions", "by": "Jacob Eapen"},
+        {"at": "21:30", "title": "Lights out. Sunday brings compaction, crash tests and the bus home", "by": null}
+      ],
+      "questions": [
+        {"key": "room", "label": "Room preference", "type": "radio", "options": ["Happy to share with anyone", "Sharing with a friend (name below)", "Women's shared room"], "required": true},
+        {"key": "friend", "label": "Friend you'd like to share with", "type": "text", "required": false},
+        {"key": "diet", "label": "Food preference", "type": "select", "options": ["Vegetarian", "Non-vegetarian", "Vegan", "Jain"], "required": true}
+      ],
+      "merch": ["tee", "mug"],
+      "swag": [
+        {"name": "Retreat notebook", "sponsor": null},
+        {"name": "Hill tea sampler", "sponsor": null}
+      ],
+      "feedback": null,
+      "live": null,
+      "poster": {"headline": "Systems Weekend", "sub": "Vagamon. Two days, twenty-four people, one key-value store from scratch."}
+    }
+  ],
+  "threads": [
+    {"days_ago": 2, "kind": "announcement", "text": "RSVPs are open for Meetup #29: Profiling in Production. Leena Mathews brings flame graphs from a real service and the story of a 900 ms endpoint; Harish has the beginner track on benchmarks that don't lie. Lightning slots are in the form.", "likes": 52, "comments": [{"text": "Finally a profiling talk. Booked."}, {"text": "Will the recording go up on the club page?"}, {"text": "Sent in a lightning talk on cargo features, fingers crossed."}]},
+    {"days_ago": 6, "kind": "announcement", "text": "The Vagamon systems weekend is full. Twenty-four seats went in two days, which we honestly did not expect. There's a waitlist on the event page, and if a place frees up we'll message the next person in line. If enough of you want it, we'll run a second one in February.", "likes": 61, "comments": [{"text": "Two days! Missed it by an hour."}, {"text": "Please do February, I'll set an alarm this time."}, {"text": "Is there a women's shared room again? My friend is on the waitlist."}]},
+    {"days_ago": 10, "kind": "poll", "text": "The Thursday study group finishes the Rust book next week. What should we read together next?", "options": ["Build a tiny database", "Write an interpreter", "Embedded on a ₹450 board", "An async runtime from scratch"], "likes": 44, "comments": [{"text": "Interpreter! I've started three times on my own and never finished."}, {"text": "Database, please. It pairs well with Vagamon."}]},
+    {"days_ago": 17, "kind": "post", "text": "Embedded night recap: 28 boards flashed, 28 tiny screens showing the room temperature (31°C, the AC lost), and one board that showed its owner's name upside down until the very end. Thank you Vimal for the monsoon story and Pattam Makerspace for the space and the soldering irons. Photos are in the gallery.", "likes": 87, "comments": [{"text": "The upside-down name was mine and I stand by it."}, {"text": "Best ₹499 I've spent this year."}, {"text": "When's the next one? My cousin wants in."}]},
+    {"days_ago": 24, "kind": "post", "text": "A small win from the mentorship programme: four people from September's batch had their first pull requests merged this month, into a date-time crate, a CSV parser, a terminal colour library and a documentation site. Anusree has a fresh list of beginner-friendly issues if you'd like to be next.", "likes": 73, "comments": [{"text": "The CSV one was me! Still can't believe it got merged."}, {"text": "Anusree's review comments are kinder than my own inner voice."}]},
+    {"days_ago": 31, "kind": "poll", "text": "Meetups have started at 6:30 for two years. A few people coming from Kakkanad say the traffic makes that tough. Should we move it?", "options": ["Keep 6:30", "Move to 7:00", "Alternate between the two"], "likes": 39, "comments": [{"text": "7:00, please. Seaport-Airport Road at six is a punishment."}, {"text": "6:30 is fine as long as the talk starts at 6:45 like it does now."}]},
+    {"days_ago": 40, "kind": "post", "text": "Hiring and looking thread. If your team, in Kochi or remote, is hiring for Rust, C or C++, post it below with location and salary range. If you're looking, tell us what you'd like to work on. Posts without a salary range will be quietly removed.", "likes": 58, "comments": [{"text": "A logistics team in Infopark is hiring two backend engineers, Rust or Go, 18 to 28 LPA. Message me for details."}, {"text": "Final-year student, looking for an embedded internship from January."}, {"text": "Remote firmware role, 12 to 16 LPA, Kerala preferred. Happy to refer."}]}
+  ]
+}

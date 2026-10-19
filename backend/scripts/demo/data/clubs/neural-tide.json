@@ -1,0 +1,288 @@
+{
+  "slug": "neural-tide",
+  "name": "Neural Tide",
+  "tagline": "Kadalthira's AI and ML club. Read the paper, train the model, ship the demo.",
+  "about": "Neural Tide is the AI and machine learning club of Kadalthira Institute of Technology, a campus close enough to the sea at Vettucaud that you can hear the waves from the third-floor lab. Four second-year students started it in 2022 to read one paper a week together. It now has around two hundred active members from every department, and a GPU workstation we fought very hard for.\n\nOur year runs on three tracks. Foundations is for first-years and anyone switching in: Python, linear algebra without fear, and the first neural network you write by hand. Builders take on a semester-long project in small teams, and many of those projects are about Malayalam and Kerala: speech recognition for fishing-boat radio, a reader for handwritten ration-card forms, crop-disease detection from phone photos. Paper Club meets on Wednesday evenings to argue about whatever came out that week.\n\nWe're student-run and faculty-mentored, and nearly everything we do is open to students from other colleges. If you're not from Kadalthira, come to a Paper Club session anyway. Nobody will ask for your ID card.",
+  "org": {"name": "Kadalthira Institute of Technology", "city": "Thiruvananthapuram"},
+  "location": {"name": "Kadalthira Institute of Technology, Vettucaud, Thiruvananthapuram", "lat": 8.4931, "lng": 76.9037},
+  "contact": {"email": "hello@neural-tide.demo.myotherapp.in", "phone": "+91 90000 01202"},
+  "socials": {"instagram": "neuraltide.kit", "linkedin": "neural-tide-kit", "x": "neuraltide_kit"},
+  "topics": ["deep-tech", "development"],
+  "interests": ["artificial-intelligence", "data-science", "coding", "open-source"],
+  "brand": {"primary": "#2449B8", "accent": "#34D1BF", "ink": "#0F1733", "paper": "#F4F7FD", "display_font": "inter", "motif": "dots"},
+  "team": [
+    {"name": "Adithya Ramesh", "role": "President", "bio": "Final-year CSE who trains speech models on the club workstation at 2 a.m. and apologises to the lab assistant every morning."},
+    {"name": "Sana Fathima", "role": "Vice president", "bio": "Third-year ECE; built the ration-form reader and now mentors two Builders teams."},
+    {"name": "Govind Sunilkumar", "role": "Paper Club lead", "bio": "Picks the week's paper, prints six copies and always brings spare highlighters."},
+    {"name": "Mariya Johnson", "role": "Foundations lead", "bio": "Teaches first-years matrix multiplication with a chessboard and a great deal of patience."},
+    {"name": "Rohan Kalladi", "role": "Events and outreach", "bio": "Handles hall bookings, faculty permissions and the endless hunt for extension boards."},
+    {"name": "Ameen Haris", "role": "Infrastructure", "bio": "Keeps the GPU workstation alive, the job queue fair and the disk below ninety percent."},
+    {"name": "Prof. Deepa Narayanan", "role": "Faculty mentor", "bio": "Associate professor of computer science; signs every permission letter and reads every project report."}
+  ],
+  "partners": [
+    {"name": "Mazhanila Analytics", "role": "GPU credits partner", "since": 2024},
+    {"name": "Ezhuthani Language Labs", "role": "Malayalam data partner", "since": 2025},
+    {"name": "Kadalthira Alumni Association", "role": "Mentorship partner", "since": 2022}
+  ],
+  "followers": 1310,
+  "merch": [
+    {"key": "hoodie", "name": "Tide hoodie", "description": "Midweight navy hoodie with the club's wave of dots across the back. Because the lab air conditioning is no joke.", "price": 899, "kind": "hoodie", "color": "#1C2F6E", "sizes": {"S": 14, "M": 26, "L": 24, "XL": 12}, "stock": null},
+    {"key": "stickers", "name": "Loss-curve sticker pack", "description": "Five stickers: a loss curve that finally goes down, the club wave, 'works on my GPU', a Malayalam letter drawn in dots, and a small seashell.", "price": 79, "kind": "sticker", "color": "#34D1BF", "sizes": null, "stock": 300},
+    {"key": "notebook", "name": "Paper Club notebook", "description": "A5 dotted notebook with a back pocket for printed papers and a page-per-week reading log.", "price": 199, "kind": "notebook", "color": "#2449B8", "sizes": null, "stock": 120}
+  ],
+  "events": [
+    {
+      "slug": "neural-nets-by-hand",
+      "name": "Neural Nets by Hand",
+      "when": {"days_from_now": -104, "time": "14:00", "duration_hours": 4},
+      "format": "in_person",
+      "venue": {"name": "Seminar Hall 2, Kadalthira Institute of Technology", "address": "Beach Road, Vettucaud, Thiruvananthapuram"},
+      "category": "Workshop",
+      "interests": ["artificial-intelligence", "data-science"],
+      "fee": 0,
+      "sold_out": false,
+      "capacity": 120,
+      "registrations": 117,
+      "attended_ratio": 0.88,
+      "certificates": true,
+      "about": "Our Foundations opener for the new batch. Before anyone touches a framework, we build a tiny neural network with pen, paper and a calculator: three inputs, one hidden layer, and enough arithmetic to see exactly what a weight is and why it moves. Then we write the same network in thirty lines of Python and watch it learn to tell ripe bananas from raw ones in a dataset we photographed at the Chalai market.\n\nIt's designed for first-years and anyone from a non-CS branch who keeps hearing the word 'gradient' and nodding politely. By the end you'll have trained your first model and, more importantly, you'll know what happened inside it.",
+      "guidelines": "Bring a pen, a notebook and a calculator; a laptop helps for the second half but you can share. We'll send a notebook link the evening before, so you can run it on a free cloud notebook if your laptop is slow. Please be seated by 1:50; the hall doors close at 2:15 for the hand-calculation part.",
+      "speakers": [
+        {"name": "Mariya Johnson", "designation": "Foundations lead, Neural Tide", "bio": "Third-year CSE who failed her first ML quiz and then rebuilt the course from scratch for everyone after her."},
+        {"name": "Deepak Sasidharan", "designation": "Machine learning engineer, medical imaging start-up", "bio": "Kadalthira alumnus, 2019 batch. Came back to show first-years the backpropagation derivation he wishes someone had shown him."}
+      ],
+      "agenda": [
+        {"at": "14:00", "title": "What is a weight, really?", "by": "Mariya Johnson"},
+        {"at": "14:30", "title": "Forward pass with pen and paper", "by": "Mariya Johnson"},
+        {"at": "15:15", "title": "Backpropagation, one number at a time", "by": "Deepak Sasidharan"},
+        {"at": "16:00", "title": "Tea break", "by": null},
+        {"at": "16:20", "title": "Thirty lines of Python: ripe or raw?", "by": "Deepak Sasidharan"},
+        {"at": "17:30", "title": "How to join a Builders team", "by": null}
+      ],
+      "questions": [
+        {"key": "branch", "label": "Your branch", "type": "select", "options": ["CSE", "ECE", "EEE", "Mechanical", "Civil", "Other"], "required": true},
+        {"key": "year", "label": "Your year", "type": "radio", "options": ["First", "Second", "Third", "Fourth"], "required": true},
+        {"key": "python", "label": "Have you written Python before?", "type": "radio", "options": ["Never", "A little", "Comfortably"], "required": true}
+      ],
+      "merch": ["stickers", "notebook"],
+      "swag": [{"name": "Backpropagation cheat card", "sponsor": null}],
+      "feedback": {
+        "responses": 86,
+        "avg_rating": 4.8,
+        "comments": [
+          "Doing the forward pass by hand made everything after it make sense.",
+          "I'm from Civil and I followed every step. Didn't expect that.",
+          "The banana dataset is iconic. Please keep it.",
+          "Seminar Hall 2 was packed; a bigger hall next year?",
+          "Deepak sir explained backprop better than three online courses put together."
+        ]
+      },
+      "live": {
+        "poll": {"question": "Before today, how did 'neural network' feel?", "options": ["Magic", "Maths I'd never follow", "Roughly understood", "Already comfortable"]},
+        "qna": [
+          "Do I need to be good at calculus to do ML?",
+          "How do we get onto a Builders team as first-years?",
+          "Why does the learning rate matter so much?"
+        ]
+      },
+      "poster": {"headline": "Neural Nets by Hand", "sub": "Pen, paper, a calculator, then thirty lines of Python. First-years welcome."}
+    },
+    {
+      "slug": "tide-hack-2026",
+      "name": "Tide Hack 2026: Models for Malayalam",
+      "when": {"days_from_now": -62, "time": "09:00", "duration_hours": 26},
+      "format": "in_person",
+      "venue": {"name": "Main Block, Kadalthira Institute of Technology", "address": "Beach Road, Vettucaud, Thiruvananthapuram"},
+      "category": "Hackathon",
+      "interests": ["artificial-intelligence", "data-science", "coding"],
+      "fee": 199,
+      "sold_out": false,
+      "capacity": 150,
+      "registrations": 144,
+      "attended_ratio": 0.9,
+      "certificates": true,
+      "about": "Twenty-four hours to build something useful for people who speak Malayalam. Teams of two to four picked one of three tracks: speech (voice notes, radio, phone calls), text (forms, handwriting, news) or vision (signboards, labels, crops). Ezhuthani Language Labs opened up three cleaned datasets just for the weekend, and Mazhanila Analytics gave every team GPU credits.\n\nThirty-eight teams came from eleven colleges. The winning team built a tool that turns a fisherman's spoken catch report into the cooperative's daily register; second place read prices off handwritten vegetable-shop boards in Chalai and Palayam. The fee covered four meals, the night snacks and the T-shirt.",
+      "guidelines": "Teams of two to four; register each member separately and use the same team name. Bring your college ID and a laptop. Pre-trained models are allowed and encouraged, but the datasets released on the day must be part of your solution. Sleeping is permitted in the reading room after midnight. Judging is on usefulness first, then technical depth, then the demo.",
+      "speakers": [
+        {"name": "Dr. Revathi Subramaniam", "designation": "Computational linguist", "bio": "Has spent a decade building Malayalam spell-checkers and still finds new sandhi rules to be annoyed by."},
+        {"name": "Nithin Mammen", "designation": "Founder, voice-technology start-up", "bio": "Builds voice assistants for rural banking kiosks in Malayalam and Tamil, and judges hackathons on whether his mother could use the result."},
+        {"name": "Sana Fathima", "designation": "Vice president, Neural Tide; hackathon host", "bio": "Ran last year's hackathon from the help desk on four hours of sleep and volunteered to do it again."}
+      ],
+      "agenda": [
+        {"at": "09:00", "title": "Check-in, team tables and breakfast", "by": null},
+        {"at": "10:00", "title": "Opening and dataset release", "by": "Sana Fathima"},
+        {"at": "10:30", "title": "What makes Malayalam hard for machines", "by": "Dr. Revathi Subramaniam"},
+        {"at": "11:00", "title": "Hacking begins", "by": null},
+        {"at": "13:00", "title": "Lunch", "by": null},
+        {"at": "20:00", "title": "Mentor rounds and dinner", "by": "Nithin Mammen"},
+        {"at": "23:30", "title": "Midnight snacks. Day two: code freeze at 9, demos and judging, results by 11", "by": null}
+      ],
+      "questions": [
+        {"key": "team_name", "label": "Team name (same for every member)", "type": "text", "required": true},
+        {"key": "track", "label": "Track", "type": "radio", "options": ["Speech", "Text", "Vision"], "required": true},
+        {"key": "tshirt", "label": "T-shirt size", "type": "select", "options": ["S", "M", "L", "XL", "XXL"], "required": true},
+        {"key": "github", "label": "GitHub profile", "type": "url", "required": false}
+      ],
+      "merch": ["hoodie", "stickers"],
+      "swag": [
+        {"name": "Tide Hack T-shirt", "sponsor": "Mazhanila Analytics"},
+        {"name": "GPU credits for every team", "sponsor": "Mazhanila Analytics"},
+        {"name": "Dataset access for the weekend", "sponsor": "Ezhuthani Language Labs"}
+      ],
+      "feedback": {
+        "responses": 97,
+        "avg_rating": 4.6,
+        "comments": [
+          "The datasets were clean and actually useful. Rare for a hackathon.",
+          "Judges asked about real users, not just accuracy. Loved that.",
+          "Wi-Fi in the Main Block dropped twice around 3 a.m.; a backup hotspot plan would help.",
+          "The 2 a.m. kappa and chammanthi was a highlight.",
+          "Our team came from Kollam and felt completely at home."
+        ]
+      },
+      "live": {
+        "poll": {"question": "Which track will win?", "options": ["Speech", "Text", "Vision"]},
+        "qna": [
+          "Can we use a model fine-tuned before the event?",
+          "Will the datasets stay available after the weekend?",
+          "Is there a prize for the best first-year team?"
+        ]
+      },
+      "poster": {"headline": "Tide Hack 2026", "sub": "24 hours. Models for Malayalam. Speech, text and vision tracks."}
+    },
+    {
+      "slug": "paper-club-live-small-models",
+      "name": "Paper Club Live: Small Models, Big Ideas",
+      "when": {"days_from_now": -27, "time": "17:30", "duration_hours": 2},
+      "format": "in_person",
+      "venue": {"name": "Library Auditorium, Kadalthira Institute of Technology", "address": "Beach Road, Vettucaud, Thiruvananthapuram"},
+      "category": "Talk",
+      "interests": ["artificial-intelligence"],
+      "fee": 0,
+      "sold_out": false,
+      "capacity": 140,
+      "registrations": 103,
+      "attended_ratio": 0.71,
+      "certificates": false,
+      "about": "Once a semester, Paper Club leaves its usual classroom and invites someone who writes the papers we read. This time, Dr. Lekha Ramanathan talked about making language models small enough to run on a phone that costs under ₹8,000: distillation, quantisation, and the unglamorous work of deciding what a model is allowed to forget.\n\nShe walked through her group's recent work on a compact Malayalam-English model, including the results that didn't work, and then took questions for forty minutes. Students from four colleges came, and the discussion carried on at the tea shop outside the gate for a good while after the hall closed.",
+      "guidelines": "Open to everyone; outside students should carry any photo ID for the gate. The session is in English, with questions welcome in Malayalam. Please read the one-page summary we post two days before, so the Q&A goes deeper.",
+      "speakers": [
+        {"name": "Dr. Lekha Ramanathan", "designation": "Research scientist, language technology", "bio": "Works on compressing language models to run on low-cost phones. Taught at Kadalthira for six years before moving into research."},
+        {"name": "Govind Sunilkumar", "designation": "Paper Club lead, Neural Tide", "bio": "Third-year CSE who has read a paper a week for two years and keeps the annotated stack in his hostel cupboard."}
+      ],
+      "agenda": [
+        {"at": "17:30", "title": "Welcome and the one-page summary", "by": "Govind Sunilkumar"},
+        {"at": "17:40", "title": "Small models, big ideas", "by": "Dr. Lekha Ramanathan"},
+        {"at": "18:30", "title": "Open questions", "by": null},
+        {"at": "19:15", "title": "Tea outside the gate", "by": null}
+      ],
+      "questions": [
+        {"key": "college", "label": "Your college", "type": "text", "required": true},
+        {"key": "question", "label": "A question you'd like Dr. Lekha to answer", "type": "text", "required": false}
+      ],
+      "merch": ["notebook"],
+      "swag": [{"name": "Printed paper summary", "sponsor": null}],
+      "feedback": {
+        "responses": 52,
+        "avg_rating": 4.7,
+        "comments": [
+          "Hearing about the experiments that failed was the most useful part.",
+          "The one-page summary beforehand made the talk easy to follow.",
+          "Forty minutes of Q&A and it still felt too short.",
+          "Could we record these for people who can't travel to Vettucaud?"
+        ]
+      },
+      "live": {
+        "poll": {"question": "Would you trade accuracy for a model that runs offline on your phone?", "options": ["Yes, always", "Only a little accuracy", "No, accuracy first"]},
+        "qna": [
+          "How do you evaluate a Malayalam model when benchmarks are mostly English?",
+          "Does quantisation hurt rare words more than common ones?",
+          "What should a third-year student read to get into this area?"
+        ]
+      },
+      "poster": {"headline": "Small Models, Big Ideas", "sub": "Paper Club Live with Dr. Lekha Ramanathan. Language models that fit in your pocket."}
+    },
+    {
+      "slug": "datasets-from-home-sprint",
+      "name": "Datasets from Home: Malayalam Speech Sprint",
+      "when": {"days_from_now": 9, "time": "10:00", "duration_hours": 5},
+      "format": "in_person",
+      "venue": {"name": "Language Lab, Kadalthira Institute of Technology", "address": "Beach Road, Vettucaud, Thiruvananthapuram"},
+      "category": "Workshop",
+      "interests": ["data-science", "artificial-intelligence"],
+      "fee": 0,
+      "sold_out": false,
+      "capacity": 80,
+      "registrations": 46,
+      "attended_ratio": null,
+      "certificates": null,
+      "about": "Good Malayalam speech models need voices from Kasaragod to Parassala, and most open datasets sound like they were all recorded in one city. This Saturday we build a better one together. You'll record a few hundred short sentences in your own accent, then learn how to check and label other people's recordings so the data is actually usable.\n\nSruthi from Ezhuthani Language Labs will explain consent, licences and why every clip needs a speaker card, and Ameen will show how we store and version the data on the club workstation. Everything collected goes into an openly licensed dataset with every contributor credited.",
+      "guidelines": "Bring earphones with a microphone if you have them; we have twenty spare headsets. Recording is in quiet booths, ten minutes at a time. You'll sign a simple consent form, and you can withdraw your recordings later. Speakers of every dialect are welcome, including people who mix in English the way most of us do.",
+      "speakers": [
+        {"name": "Sruthi Gopakumar", "designation": "Data lead, Ezhuthani Language Labs", "bio": "Runs Malayalam speech collection drives across all fourteen districts and has heard 'ente peru' read aloud about forty thousand times."},
+        {"name": "Ameen Haris", "designation": "Infrastructure, Neural Tide", "bio": "Third-year IT who wrote the club's data versioning scripts after losing a week of labels to an accidental overwrite."}
+      ],
+      "agenda": [
+        {"at": "10:00", "title": "Why dialects matter", "by": "Sruthi Gopakumar"},
+        {"at": "10:30", "title": "Consent, licences and speaker cards", "by": "Sruthi Gopakumar"},
+        {"at": "11:00", "title": "Recording rounds in the booths", "by": null},
+        {"at": "13:00", "title": "Lunch", "by": null},
+        {"at": "13:45", "title": "Checking and labelling each other's clips", "by": "Ameen Haris"},
+        {"at": "14:45", "title": "How the dataset gets versioned and released", "by": "Ameen Haris"}
+      ],
+      "questions": [
+        {"key": "district", "label": "Which district's Malayalam do you speak?", "type": "select", "options": ["Thiruvananthapuram", "Kollam", "Kottayam", "Ernakulam", "Thrissur", "Malappuram", "Kozhikode", "Kannur", "Another district"], "required": true},
+        {"key": "headset", "label": "Will you bring your own headset?", "type": "radio", "options": ["Yes", "No, please keep one for me"], "required": true}
+      ],
+      "merch": ["stickers"],
+      "swag": [{"name": "Contributor badge and credit in the dataset", "sponsor": "Ezhuthani Language Labs"}],
+      "feedback": null,
+      "live": null,
+      "poster": {"headline": "Datasets from Home", "sub": "Lend your voice to an open Malayalam speech dataset. Every dialect counts."}
+    },
+    {
+      "slug": "neural-tide-demo-day",
+      "name": "Neural Tide Demo Day",
+      "when": {"days_from_now": 26, "time": "15:00", "duration_hours": 4},
+      "format": "in_person",
+      "venue": {"name": "Central Courtyard, Kadalthira Institute of Technology", "address": "Beach Road, Vettucaud, Thiruvananthapuram"},
+      "category": "Exhibition",
+      "interests": ["artificial-intelligence", "data-science"],
+      "fee": 0,
+      "sold_out": false,
+      "capacity": 150,
+      "registrations": 88,
+      "attended_ratio": null,
+      "certificates": null,
+      "about": "Eleven Builders teams show what they made this semester, on tables around the courtyard, to anyone who wants to try them. Talk to a model that understands fishing-boat radio chatter, photograph a diseased banana leaf and get a diagnosis, or watch a handwritten ration-card form turn into a spreadsheet row.\n\nA small jury of alumni and industry guests will pick two projects for a summer of mentoring, but the main audience is you: parents, juniors, faculty and anyone curious. Come with questions, and come with a phone so you can try the demos yourself.",
+      "guidelines": "Free and open to the public; outside visitors should carry a photo ID. Demos run from 3:30 to 6:00, so come and go as you like. Please don't upload photos of other people's screens before the teams publish their work.",
+      "speakers": [
+        {"name": "Prof. Deepa Narayanan", "designation": "Faculty mentor, Neural Tide", "bio": "Has guided Builders projects since the club's first year and insists every team writes down who their user is before any code."},
+        {"name": "Arjun Kesavan", "designation": "Product lead, agritech company", "bio": "Kadalthira alumnus who ships crop advisory tools to farmers in Palakkad and Wayanad, and judges demos by how fast they load on a bad network."}
+      ],
+      "agenda": [
+        {"at": "15:00", "title": "Welcome and how Builders works", "by": "Prof. Deepa Narayanan"},
+        {"at": "15:30", "title": "Demo tables open", "by": null},
+        {"at": "17:15", "title": "Jury walk-through", "by": "Arjun Kesavan"},
+        {"at": "18:15", "title": "Mentorship picks and closing", "by": null}
+      ],
+      "questions": [
+        {"key": "visitor_type", "label": "You are coming as", "type": "radio", "options": ["Student at Kadalthira", "Student elsewhere", "Parent or family", "Industry or alumni"], "required": true}
+      ],
+      "merch": ["hoodie", "stickers", "notebook"],
+      "swag": [{"name": "Demo Day programme card", "sponsor": null}],
+      "feedback": null,
+      "live": null,
+      "poster": {"headline": "Demo Day", "sub": "Eleven student AI projects, built for Kerala. Come try them yourself."}
+    }
+  ],
+  "threads": [
+    {"days_ago": 1, "kind": "announcement", "text": "Demo Day is on, in the Central Courtyard. Eleven Builders teams, real demos you can try on your phone, and two projects picked for a summer of alumni mentoring. Bring your juniors, your parents, your neighbour who keeps asking what AI actually is.", "likes": 96, "comments": [{"text": "Bringing my amma, she's been asking about the ration-card reader."}, {"text": "Is the banana leaf one going to be there? Our farm needs it."}]},
+    {"days_ago": 5, "kind": "poll", "text": "Paper Club this Wednesday. Pick the paper and Govind will print the copies.", "options": ["Speech recognition for low-resource languages", "Why models forget during fine-tuning", "Tiny vision models for phones"], "likes": 41, "comments": [{"text": "Low-resource speech please, it's literally our Builders project."}, {"text": "Forgetting during fine-tuning, I have questions."}, {"text": "Can outside students join? I'm at Kanikkonna in Kollam."}]},
+    {"days_ago": 12, "kind": "post", "text": "Builders update: the fishing-boat radio team retrained their speech model on the new recordings from Vizhinjam and word error rate dropped from 41% to 23%. Still a long way to go with wind noise, but the fishermen who tested it last week said it finally understood the boat names.", "likes": 118, "comments": [{"text": "23 is massive for that kind of audio. Well done."}, {"text": "What did you change apart from the data?"}, {"text": "Seriously proud of this team."}]},
+    {"days_ago": 19, "kind": "announcement", "text": "We're building an open Malayalam speech dataset and we need your voice, especially if you're from north Kerala. Datasets from Home runs on a Saturday in the Language Lab: ten-minute recording slots, lunch on us, credit in the dataset. Sign up from the event page.", "likes": 77, "comments": [{"text": "Kannur accent reporting for duty."}, {"text": "Can I record if I mostly speak Manglish?"}, {"text": "Yes! Manglish is exactly what real people speak, please come."}]},
+    {"days_ago": 26, "kind": "post", "text": "Thank you, Dr. Lekha, for Paper Club Live. Our favourite line: 'a small model is a model that has been told what it is allowed to forget.' The slides and the reading list are in the event page. The tea shop outside the gate ran out of parippu vada by 7:30.", "likes": 69, "comments": [{"text": "The bit on quantising rare words was eye-opening."}, {"text": "Please do one of these every month."}]},
+    {"days_ago": 34, "kind": "poll", "text": "Foundations sessions for first-years: when works best?", "options": ["Tuesday after classes", "Saturday morning", "Both, alternating weeks"], "likes": 36, "comments": [{"text": "Saturday, weekday labs run late for us in ECE."}, {"text": "Tuesday, the bus situation on Saturdays is bad."}]},
+    {"days_ago": 43, "kind": "post", "text": "Three weeks after Tide Hack, the winning team's catch-register tool is being tried by a fishermen's group in Poonthura. They've asked for a version that works without internet, so the team is back in the lab every evening. This is why we run hackathons.", "likes": 104, "comments": [{"text": "From hackathon demo to real users in three weeks. Wow."}, {"text": "Offline-first is the right call for the coast."}, {"text": "Need any help with testing? Happy to join."}]}
+  ]
+}
