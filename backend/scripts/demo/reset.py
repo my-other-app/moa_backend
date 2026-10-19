@@ -35,11 +35,13 @@ again and must have what it had; every FILTERED table must hold exactly
 the rows its filter kept; every WIPE table must be empty. If any of that
 is off, nothing is committed.
 
-Ids carry on from where they were (TRUNCATE ... CONTINUE IDENTITY): a user's,
-club's or event's id outlives the database row -- in a signed-in device's
-token, a push topic its phone joined (club_{id}), a cached page, a link in an
-old email -- and a new club given an old id would inherit all of them. Only
-the internal queues start again from 1 (RESTART_SEQUENCES).
+Ids carry on from where they were (TRUNCATE ... CONTINUE IDENTITY), every
+table's: a user's, club's or event's id outlives the database row -- in a
+signed-in device's token, a push topic its phone joined (club_{id}), a cached
+page, a link in an old email -- and a new club given an old id would inherit
+all of them. Not even the queues start again: the live API writes jobs and
+search-outbox rows while this runs, and a sequence change is not undone by a
+rollback, so restarting one could hand out an id already in use.
 
 The bucket (S3) is left alone: pictures of what was wiped stay where they
 are, unreferenced.
@@ -226,9 +228,6 @@ GUARD_TRIGGERS: dict[str, tuple[str, ...]] = {
 #: once more at the end. The search index is rebuilt after a reset anyway
 #: (scripts/search_reindex.py, in the runbook).
 TRIGGER_FED = ("search_outbox",)
-
-#: Internal queues whose ids nothing outside the database holds: started from 1 again.
-RESTART_SEQUENCES = ("jobs", "search_outbox", "background_task_logs", "notification_logs")
 
 #: Only one reset or seed at a time.
 LOCK_KEY = 0x6D6F615F64656D6F  # "moa_demo"
@@ -427,15 +426,6 @@ async def execute_plan(conn, plan: Plan) -> None:
     for t in guarded:
         for trigger in await _existing_triggers(conn, t, GUARD_TRIGGERS[t]):
             await conn.execute(text(f'ALTER TABLE "{t}" ENABLE TRIGGER "{trigger}"'))
-
-    for t in RESTART_SEQUENCES:
-        if classes.get(t) == WIPE:
-            for (seq,) in await conn.execute(text(
-                "SELECT pg_get_serial_sequence(:t, a.attname) FROM pg_attribute a "
-                "WHERE a.attrelid = CAST(:t AS regclass) AND a.attnum > 0 AND NOT a.attisdropped "
-                "AND pg_get_serial_sequence(:t, a.attname) IS NOT NULL"
-            ), {"t": t}):
-                await conn.execute(text("SELECT setval(CAST(:s AS regclass), 1, false)"), {"s": seq})
 
     await verify(conn, plan)
 
