@@ -610,7 +610,7 @@ def poster(
     stamp = f"{when.strftime('%A')} · {when.strftime('%I:%M %p').lstrip('0')}"
     d.text((tx, dy0 + dw * 0.06), stamp, font=tf, fill=with_alpha(pink, 255))
     pf = font("sans-500", int(W * 0.029))
-    prf = font("mono-700", int(W * 0.032))
+    prf = font("sans-700", int(W * 0.036))  # Roboto Mono has no rupee sign
     price_w = d.textlength(price.upper(), font=prf)
     room = W - pad - int(W * 0.05) - price_w - int(W * 0.03) - tx
     py = dy0 + dw * 0.06 + tf.size * 1.45

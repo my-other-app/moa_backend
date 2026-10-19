@@ -551,7 +551,8 @@ def main() -> int:
         return 1
     colleges = check_people(r, people)
 
-    paths = sorted((HERE / "clubs").glob("*.json"))
+    # A name starting with "_" is the seed's own test club (_example.json), not content.
+    paths = sorted(p for p in (HERE / "clubs").glob("*.json") if not p.name.startswith("_"))
     if len(paths) != 8:
         r.add("clubs", f"want 8 club files, have {len(paths)}")
     docs: dict[str, object] = {}
