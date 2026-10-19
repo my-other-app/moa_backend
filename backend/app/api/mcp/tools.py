@@ -200,10 +200,16 @@ def mask_phone(value: str | None) -> str | None:
     return "•••••" + digits[-3:] if len(digits) >= 3 else "•••"
 
 
+def _phone_or_not(match) -> str:
+    """A run of ten digits or more reads as a phone number; a date (eight) does not."""
+    found = match.group(0)
+    return mask_phone(found) if sum(c.isdigit() for c in found) >= 10 else found
+
+
 def _scrub(text: str) -> str:
     """Contacts typed into a free answer, masked like the contact fields."""
     text = _EMAILISH.sub(lambda m: mask_email(m.group(0)), text)
-    return _PHONEISH.sub(lambda m: mask_phone(m.group(0)), text)
+    return _PHONEISH.sub(_phone_or_not, text)
 
 
 async def _event(call: Call, event_id: int, *, load=()) -> Events:
