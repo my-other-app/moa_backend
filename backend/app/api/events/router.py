@@ -134,8 +134,23 @@ async def create_event(
     event: EventCreate = Depends(),
     speaker_photos: List[UploadFile] = File([]),
 ) -> EventCreateUpdateResponse:
+    store_item_ids = None
     if user.club is not None:
         await gates.check_event_create(session, user.club.id, has_fee=event.has_fee, actor=user)
+        # The store and the handouts switched on from the start need the
+        # plan's features (a new event is never grandfathered), and the items
+        # it offers must be the club's, within the plan's room.
+        if event.merch_enabled:
+            await gates.require_feature(session, user.club.id, "merch", actor=user)
+        if event.swag_enabled:
+            await gates.require_feature(session, user.club.id, "swag", actor=user)
+        if event.store_item_ids is not None:
+            from types import SimpleNamespace
+
+            from app.api.store import service as store
+
+            unsaved = SimpleNamespace(id=None, club_id=user.club.id, created_at=None, event_datetime=event.event_datetime)
+            store_item_ids = await store.check_offers(session, unsaved, event.store_item_ids, actor=user)
     created = await service.create_event(
         session,
         user_id=user.id,
@@ -151,6 +166,9 @@ async def create_event(
         has_prize=event.has_prize,
         prize_amount=event.prize_amount,
         is_online=event.is_online,
+        merch_enabled=bool(event.merch_enabled),
+        swag_enabled=bool(event.swag_enabled),
+        store_item_ids=store_item_ids,
         reg_startdate=event.reg_startdate,
         reg_enddate=event.reg_enddate,
         about=event.about,

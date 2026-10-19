@@ -607,6 +607,43 @@ async def test_a_grandfathered_event_offers_the_clubs_items_on_free(client, sess
     assert r.status_code == 200 and r.json()["item_ids"] == ids
 
 
+async def test_an_event_made_with_its_store_on_needs_the_plan(client, session, world):
+    import json
+
+    ids = await _club_items(session, world, 3)
+    for field, feature in (("merch_enabled", "merch"), ("swag_enabled", "swag")):
+        r = await client.post(f"{API}/events/create", data=event_form(world, **{field: "true"}), headers=world.h)
+        assert r.status_code == 403 and r.json()["errors"]["feature"] == feature, r.text
+    r = await client.post(f"{API}/events/create", data=event_form(world, store_item_ids=json.dumps(ids[:1])), headers=world.h)
+    assert r.status_code == 403 and r.json()["errors"]["feature"] == "merch"
+    # Nothing offered needs nothing.
+    assert (await client.post(f"{API}/events/create", data=event_form(world, store_item_ids="[]"), headers=world.h)).status_code == 200
+
+    await on_plan(session, world, "pro")
+    await set_limit(session, world, "pro", merch_items_per_event=2)
+    r = await client.post(f"{API}/events/create", data=event_form(world, merch_enabled="true", store_item_ids=json.dumps(ids)), headers=world.h)
+    assert r.status_code == 403 and r.json()["errors"]["limit"] == "merch_items_per_event"
+    r = await client.post(f"{API}/events/create", data=event_form(world, merch_enabled="true", swag_enabled="true", store_item_ids=json.dumps(ids[:2])), headers=world.h)
+    assert r.status_code == 200, r.text
+    made = await session.get(Events, r.json()["id"])
+    await session.refresh(made)
+    assert made.merch_enabled is True and made.swag_enabled is True
+
+
+async def test_an_edit_offering_items_is_gated_by_the_date_it_is_moved_to(client, session, world, monkeypatch):
+    import json
+
+    ids = await _club_items(session, world, 1)
+    await grandfather(session, monkeypatch, world.event)
+    # Moved past the window, it is a new event as far as the plan goes.
+    later = event_form(world, name="Gate Night", interest_ids="0", store_item_ids=json.dumps(ids))
+    later["event_datetime"] = (NOW + timedelta(days=400)).isoformat()
+    r = await client.put(f"{API}/events/update/{world.event.id}", data=later, headers=world.h)
+    assert r.status_code == 403 and r.json()["errors"]["feature"] == "merch"
+    r = await client.put(f"{API}/events/update/{world.event.id}", data=update_form(world, name="Gate Night", store_item_ids=json.dumps(ids)), headers=world.h)
+    assert r.status_code == 200, r.text
+
+
 async def test_website_templates_are_the_first_n_in_catalogue_order(client, session, world):
     from app.api.sites import service as sites
 

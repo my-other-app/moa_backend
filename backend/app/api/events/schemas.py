@@ -174,6 +174,25 @@ def _lng_form():
     return Form(None, ge=-180, le=180, description="The venue's longitude, from the dashboard's map; sent with lat")
 
 
+def parse_store_item_ids(raw: Optional[str]) -> Optional[list[str]]:
+    """The form's `store_item_ids`: a JSON array of item ids, or None when
+    the form did not send it (a form posts "" as omitted). Each id is checked
+    against the club's store when it is used (store.service.check_offers)."""
+    if raw is None or not raw.strip():
+        return None
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        value = None
+    if not isinstance(value, list) or not all(isinstance(v, str) for v in value) or len(value) > 200:
+        raise CustomHTTPException(
+            status_code=422,
+            message="store_item_ids must be a JSON array of item ids",
+            errors={"store_item_ids": "a JSON array of up to 200 item ids"},
+        )
+    return value
+
+
 class EventCreate:
     def __init__(
         self,
@@ -194,6 +213,9 @@ class EventCreate:
         is_online: bool = Form(False),
         merch_enabled: Optional[bool] = Form(None),
         swag_enabled: Optional[bool] = Form(None),
+        # The club's store items the event offers, in order: a JSON array of
+        # item ids ("[]" offers none). Omitted leaves the offers as they are.
+        store_item_ids: Optional[str] = Form(None),
         reg_startdate: str = Form(
             default_factory=lambda: datetime.now(timezone.utc).isoformat()
         ),  # ISO string
@@ -233,6 +255,7 @@ class EventCreate:
         self.is_online = is_online
         self.merch_enabled = merch_enabled
         self.swag_enabled = swag_enabled
+        self.store_item_ids = parse_store_item_ids(store_item_ids)
         self.reg_startdate = datetime.fromisoformat(reg_startdate)
         self.reg_enddate = datetime.fromisoformat(reg_enddate) if reg_enddate else None
         # self.images = json.loads(images)  # Convert JSON string to list
@@ -312,6 +335,9 @@ class EventEdit(EventCreate):
         is_online: bool = Form(False),
         merch_enabled: Optional[bool] = Form(None),
         swag_enabled: Optional[bool] = Form(None),
+        # The club's store items the event offers, in order: a JSON array of
+        # item ids ("[]" offers none). Omitted leaves the offers as they are.
+        store_item_ids: Optional[str] = Form(None),
         reg_startdate: str = Form(
             default_factory=lambda: datetime.now(timezone.utc).isoformat()
         ),  # ISO string
@@ -349,6 +375,7 @@ class EventEdit(EventCreate):
             is_online=is_online,
             merch_enabled=merch_enabled,
             swag_enabled=swag_enabled,
+            store_item_ids=store_item_ids,
             reg_startdate=reg_startdate,
             reg_enddate=reg_enddate,
             # images,

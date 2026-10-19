@@ -366,3 +366,76 @@ async def test_the_catalogue_answers_in_the_same_shape(client, session, club_sho
     # The switch off: the same empty answer as before.
     await client.patch(f"{API}/events/{w['friday'].id}/store/settings", json={"merch_enabled": False}, headers=w["h"])
     assert (await _catalog(client, w["friday"].id)).json() == {"enabled": False, "items": []}
+
+
+# ─── Creating, editing and copying an event ──────────────────────────────
+
+
+async def _category(session, owner) -> EventCategories:
+    category = EventCategories(name="Builds", created_by_id=owner.id)
+    session.add(category)
+    await session.commit()
+    return category
+
+
+def _form(category, **extra) -> dict:
+    return {
+        "name": extra.pop("name", "Sunday Hack"), "event_datetime": (NOW + timedelta(days=9)).isoformat(), "duration": "2",
+        "category_id": str(category.id), "location_name": "Lab 1", **extra,
+    }
+
+
+async def _offers_of(session, event_id) -> list[str]:
+    return [str(i) for i in (await session.scalars(select(EventStoreOffers.item_id).where(EventStoreOffers.event_id == event_id).order_by(EventStoreOffers.sort_order))).all()]
+
+
+async def test_an_event_is_created_with_its_store_switched_on_and_its_items(client, session, club_shop):
+    w = club_shop
+    category = await _category(session, w["owner"])
+    tee, cap = await _make(client, w["h"], name="Tee", stock=5), await _make(client, w["h"], name="Cap", stock=5)
+    import json
+
+    r = await client.post(f"{API}/events/create", data=_form(category, merch_enabled="true", swag_enabled="true", store_item_ids=json.dumps([cap["id"], tee["id"]])), headers=w["h"])
+    assert r.status_code == 200, r.text
+    event = await session.get(Events, r.json()["id"])
+    await session.refresh(event)
+    assert event.merch_enabled is True and event.swag_enabled is True
+    assert await _offers_of(session, event.id) == [cap["id"], tee["id"]]
+    assert [i["name"] for i in (await _catalog(client, event.id)).json()["items"]] == ["Cap", "Tee"]
+
+    # Without them, both switches stay off and nothing is offered.
+    plain = await client.post(f"{API}/events/create", data=_form(category, name="Plain Night"), headers=w["h"])
+    plain_event = await session.get(Events, plain.json()["id"])
+    assert plain_event.merch_enabled is False and plain_event.swag_enabled is False and await _offers_of(session, plain_event.id) == []
+
+    # Another club's item, or not a list: refused, and no event is made.
+    before = await session.scalar(select(func.count(Events.id)))
+    rival_item = await _make(client, w["rival_h"], name="Rival tee", stock=1)
+    for bad in (json.dumps([tee["id"], rival_item["id"]]), "not json", json.dumps({"id": tee["id"]})):
+        r = await client.post(f"{API}/events/create", data=_form(category, name="Bad Night", store_item_ids=bad), headers=w["h"])
+        assert r.status_code == 422, (bad, r.text)
+    assert await session.scalar(select(func.count(Events.id))) == before
+
+
+async def test_an_edit_sets_the_offers_only_when_it_sends_them(client, session, club_shop):
+    w = club_shop
+    import json
+
+    category = await _category(session, w["owner"])
+    w["friday"].category_id = category.id
+    await session.commit()
+    tee, cap = await _make(client, w["h"], name="Tee", stock=5), await _make(client, w["h"], name="Cap", stock=5)
+    await _offer(client, w["h"], w["friday"].id, [tee["id"]])
+    url = f"{API}/events/update/{w['friday'].id}"
+    form = _form(category, name="Friday Build", interest_ids="0", has_fee="true", reg_fee="100")
+    r = await client.put(url, data=form, headers=w["h"])
+    assert r.status_code == 200, r.text
+    assert await _offers_of(session, w["friday"].id) == [tee["id"]]
+    r = await client.put(url, data={**form, "store_item_ids": json.dumps([cap["id"], tee["id"]])}, headers=w["h"])
+    assert r.status_code == 200 and await _offers_of(session, w["friday"].id) == [cap["id"], tee["id"]]
+    r = await client.put(url, data={**form, "store_item_ids": json.dumps([str(uuid.uuid4())]), "name": "Renamed Build"}, headers=w["h"])
+    assert r.status_code == 422 and r.json()["error_code"] == "ITEM_UNAVAILABLE"
+    await session.refresh(w["friday"])
+    assert w["friday"].name == "Friday Build" and await _offers_of(session, w["friday"].id) == [cap["id"], tee["id"]]
+    r = await client.put(url, data={**form, "store_item_ids": "[]"}, headers=w["h"])
+    assert r.status_code == 200 and await _offers_of(session, w["friday"].id) == []
