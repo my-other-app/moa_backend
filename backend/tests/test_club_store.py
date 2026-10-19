@@ -368,6 +368,58 @@ async def test_the_catalogue_answers_in_the_same_shape(client, session, club_sho
     assert (await _catalog(client, w["friday"].id)).json() == {"enabled": False, "items": []}
 
 
+# ─── Changing the picks: store: [] drops them ────────────────────────────
+
+
+async def _order_of(session, registration_id) -> EventStoreOrders:
+    return await session.scalar(
+        select(EventStoreOrders).where(EventStoreOrders.registration_id == uuid.UUID(registration_id))
+        .order_by(EventStoreOrders.created_at.desc()).execution_options(populate_existing=True)
+    )
+
+
+async def _counts(session, item_id):
+    return tuple((await session.execute(select(EventStoreItems.stock, EventStoreItems.sold_count, EventStoreItems.reserved_count).where(EventStoreItems.id == uuid.UUID(item_id)))).one())
+
+
+async def test_no_picks_drops_the_pending_order_on_a_paid_event(client, session, club_shop):
+    w = club_shop
+    tee = await _make(client, w["h"], name="Dropped tee", stock=3)
+    await _offer(client, w["h"], w["friday"].id, [tee["id"]])
+    first = (await _register(client, w["friday"].id, "dropper@example.com", [{"item_id": tee["id"], "qty": 2}])).json()
+    assert first["pay_amount"] == 100 + 900 and await _counts(session, tee["id"]) == (3, 0, 2)
+    token = auth_header(first["auth_token"]["access_token"])
+    again = await _register(client, w["friday"].id, "dropper@example.com", [], headers=token)
+    assert again.status_code == 200, again.text
+    assert again.json()["pay_amount"] == 100 and again.json()["store_total"] == 0 and again.json()["store_order_id"] is None
+    assert (await _order_of(session, first["event_registration_id"])).status == "cancelled"
+    assert await _counts(session, tee["id"]) == (3, 0, 0)
+    order = await client.post(f"{API}/payments/orders", json={"source": "event_registration", "payload": {"event_id": w["friday"].id, "event_registration_id": first["event_registration_id"]}}, headers=token)
+    assert order.status_code == 200 and float(order.json()["amount"]) == 100.0
+    # Omitting `store` leaves the picks alone (none now).
+    assert (await _register(client, w["friday"].id, "dropper@example.com", headers=token)).json()["pay_amount"] == 100
+
+
+async def test_no_picks_drops_the_pending_order_on_a_free_event(client, session, club_shop):
+    """A free event's guest is registered (and has their ticket) at once; a
+    paid pick waits for its own payment. Coming back with `store: []` drops
+    it: it used to be refused as already registered."""
+    w = club_shop
+    tee = await _make(client, w["h"], name="Meetup tee", stock=3)
+    await _offer(client, w["h"], w["meetup"].id, [tee["id"]])
+    first = (await _register(client, w["meetup"].id, "free-dropper@example.com", [{"item_id": tee["id"], "qty": 1}])).json()
+    assert first["pay_amount"] == 450
+    token = auth_header(first["auth_token"]["access_token"])
+    again = await _register(client, w["meetup"].id, "free-dropper@example.com", [], headers=token)
+    assert again.status_code == 200, again.text
+    assert again.json()["pay_amount"] == 0 and (await _order_of(session, first["event_registration_id"])).status == "cancelled"
+    assert await _counts(session, tee["id"]) == (3, 0, 0)
+    # Nothing waiting now: back again is "already registered", as it always was.
+    for picks in ([], None):
+        r = await _register(client, w["meetup"].id, "free-dropper@example.com", picks, headers=token)
+        assert r.status_code == 400 and r.json()["error_code"] == "ALREADY_REGISTERED"
+
+
 # ─── Creating, editing and copying an event ──────────────────────────────
 
 
