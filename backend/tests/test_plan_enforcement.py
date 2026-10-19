@@ -211,8 +211,10 @@ ACTIONS = {
 
 
 def test_every_built_paid_feature_has_a_gate_here():
-    """Free's five are never gated; every other flag on the pricing page is."""
-    gated = set(ACTIONS) | {"networking"}
+    """Free's five are never gated; every other flag on the pricing page is.
+    AI assist's two (its own plan flag, and the club's own key) are gated in
+    app/api/ai/access.py and tested in tests/test_ai_assist.py."""
+    gated = set(ACTIONS) | {"networking", "ai_assist", "ai_byok"}
     assert gated | gates.ALWAYS_ALLOWED == set(LABELS)
 
 

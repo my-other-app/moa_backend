@@ -123,7 +123,7 @@ class Plans(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     )
 
 
-#: The ten limit columns, NULL meaning unlimited. Named here as well as on the
+#: The limit columns, NULL meaning unlimited. Named here as well as on the
 #: model so the API, the resolver and the admin form all iterate one list.
 LIMIT_KEYS = (
     "events_per_month",
@@ -136,6 +136,7 @@ LIMIT_KEYS = (
     "storage_gb",
     "announcements_per_month",
     "website_templates",
+    "ai_actions_per_month",
 )
 
 
@@ -160,6 +161,9 @@ class PlanLimits(AbstractSQLModel, TimestampsMixin):
     storage_gb = Column(Integer, nullable=True)
     announcements_per_month = Column(Integer, nullable=True)
     website_templates = Column(Integer, nullable=True)
+    #: AI assist's actions a month on the platform's key (a draft, a piece of
+    #: writing, a feedback summary each). A club's own key is not counted.
+    ai_actions_per_month = Column(Integer, nullable=True)
 
     plan = relationship("Plans", back_populates="limits")
 
@@ -205,6 +209,8 @@ FEATURE_GROUPS: dict[str, tuple[str, ...]] = {
         "payouts",
         "sso",
         "api",
+        "ai_assist",
+        "ai_byok",
     ),
 }
 
@@ -240,6 +246,8 @@ FEATURE_CATALOG: tuple[tuple[str, str], ...] = (
     ("judging", "Competitions: judging"),
     ("rounds", "Competitions: rounds and leaderboard"),
     ("finance", "Finance and expenses"),
+    ("ai_assist", "AI assist: event drafts, writing and feedback summaries"),
+    ("ai_byok", "AI assist with your own AI key"),
 )
 
 #: Flags in the editor with no feature behind them yet: waitlist, coupons,
@@ -301,6 +309,10 @@ class PlanFeatures(AbstractSQLModel, TimestampsMixin):
     payouts = _flag()
     sso = _flag()
     api = _flag()
+    #: AI assist on the platform's key, up to `ai_actions_per_month`.
+    ai_assist = _flag()
+    #: AI assist on the club's own key (it pays its provider): every plan has it.
+    ai_byok = _flag()
 
     plan = relationship("Plans", back_populates="features")
 

@@ -124,6 +124,8 @@ _SUBJECTS = {
     "judging": ("Judging", "is"),
     "rounds": ("Competition rounds", "are"),
     "finance": ("Finance and expenses", "are"),
+    "ai_assist": ("AI assist", "is"),
+    "ai_byok": ("AI assist with your own key", "is"),
 }
 
 #: A limit's unit, singular and plural, and whether it is counted per month.
@@ -135,6 +137,7 @@ _UNITS = {
     "announcements_per_month": ("announcement", "announcements", True),
     "merch_items_per_event": ("item", "items", False),
     "website_templates": ("website template", "website templates", False),
+    "ai_actions_per_month": ("AI action", "AI actions", True),
 }
 
 #: An owner is told registrations are paused at most this often, per club and limit.

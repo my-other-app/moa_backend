@@ -185,7 +185,9 @@ def test_the_catalog_and_the_seed_only_name_flags_that_exist():
     }
 
     module = _migration()
-    assert set(module.LIMIT_COLUMNS) == set(LIMIT_KEYS)
+    # Every limit is club_plans' but the one ai_assist added with its own seed
+    # (tests/test_ai_assist.py).
+    assert set(module.LIMIT_COLUMNS) | {"ai_actions_per_month"} == set(LIMIT_KEYS)
     for key, flags in module.FEATURES.items():
         # Nothing seeded on that the page would not show.
         assert set(flags) <= set(keys), key
@@ -246,7 +248,8 @@ async def test_the_seeded_catalogue_as_the_pricing_page_reads_it(client, session
     assert [k for k, p in plans.items() if p["featured"]] == ["growth"]
     assert [k for k, p in plans.items() if p["contact_sales"]] == ["enterprise"]
     for key, plan in plans.items():
-        assert plan["limits"] == dict(zip(LIMIT_ORDER, EXPECTED_LIMITS[key])), key
+        # ai_actions_per_month is the ai_assist migration's to seed (tests/test_ai_assist.py).
+        assert plan["limits"] == {**dict(zip(LIMIT_ORDER, EXPECTED_LIMITS[key])), "ai_actions_per_month": None}, key
         assert {f["key"] for f in plan["features"] if f["included"]} == EXPECTED_FEATURES[key], key
         # Every plan lists the same rows, so the comparison table lines up.
         assert [f["key"] for f in plan["features"]] == [f["key"] for f in plans["free"]["features"]]
