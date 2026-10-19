@@ -193,6 +193,12 @@ class AppConfig(BaseSettings):
     ADMIN_ALERT_EMAILS: str = "support@myotherapp.in"
     # The same alerts posted to a Discord channel. Unset: no post.
     ADMIN_ALERT_DISCORD_WEBHOOK: str | None = None
+    # Addresses at these domains are never mailed and their accounts' devices
+    # never pushed: the demo's invented people (scripts/demo) live at
+    # demo.myotherapp.in, and the reminders, surveys and sweeps that run long
+    # after a seed must not write to them. A JSON list or a comma-separated
+    # string; see `mail_suppress_domains`.
+    MAIL_SUPPRESS_DOMAINS: list[str] | str = ["demo.myotherapp.in"]
 
     # Where a link in an email points: the API as the public reaches it.
     PUBLIC_API_URL: str = "https://api.myotherapp.in"
@@ -357,6 +363,13 @@ class AppConfig(BaseSettings):
         if parts.scheme not in ("https", "http") or not parts.hostname or parts.path.rstrip("/") or parts.query or parts.fragment:
             raise ValueError("APP_MEDIA_CDN_URL must be an origin like https://media.myotherapp.in (no path)")
         return f"{parts.scheme}://{parts.netloc.lower()}"
+
+    @property
+    def mail_suppress_domains(self) -> frozenset[str]:
+        """MAIL_SUPPRESS_DOMAINS, lower case, without a leading @ or spaces."""
+        raw = self.MAIL_SUPPRESS_DOMAINS
+        listed = raw.split(",") if isinstance(raw, str) else raw
+        return frozenset(d.strip().lstrip("@").lower() for d in listed if d and d.strip().lstrip("@"))
 
     @property
     def site_tokens(self) -> list[str]:

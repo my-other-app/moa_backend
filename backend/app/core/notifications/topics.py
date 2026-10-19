@@ -119,7 +119,15 @@ async def interest_topics(session: AsyncSession, user_id: int) -> list[str]:
 
 
 async def topics_for(session: AsyncSession, user_id: int) -> list[str]:
-    """The topics this person's devices are to be subscribed to, sorted."""
+    """The topics this person's devices are to be subscribed to, sorted. None
+    for an account at a suppressed domain (the demo's invented people): a
+    topic send cannot be filtered on our side, so its devices never join one."""
+    from app.api.users.models import Users
+    from app.core.mail import suppression
+
+    email = await session.scalar(select(Users.email).where(Users.id == user_id))
+    if suppression.at_suppressed_domain(email):
+        return []
     on = await switches(session, user_id)
     out: list[str] = []
     if on["platform"]:

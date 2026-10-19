@@ -154,7 +154,7 @@ async def _broadcast_job(p: dict) -> None:
     async with jobs.scope() as s:
         rows = (await s.execute(
             select(UserDeviceTokens.id, UserDeviceTokens.fcm_token)
-            .where(UserDeviceTokens.is_deleted == False, UserDeviceTokens.id > int(p.get("after") or 0))  # noqa: E712
+            .where(UserDeviceTokens.is_deleted == False, UserDeviceTokens.id > int(p.get("after") or 0), push.reachable(UserDeviceTokens.user_id))  # noqa: E712
             .order_by(UserDeviceTokens.id)
             .limit(push.FCM_BATCH)
         )).all()
@@ -337,7 +337,7 @@ async def _devices_job(p: dict) -> None:
     from app.core.notifications.topics import settings_off
 
     audience, after, legacy_only = p["audience"], int(p.get("after") or 0), bool(p.get("legacy_only"))
-    live = [UserDeviceTokens.is_deleted == False]  # noqa: E712
+    live = [UserDeviceTokens.is_deleted == False, push.reachable(UserDeviceTokens.user_id)]  # noqa: E712
     if legacy_only:
         live.append(UserDeviceTokens.supports_topics == False)  # noqa: E712
     async with jobs.scope() as s:
