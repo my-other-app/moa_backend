@@ -38,7 +38,7 @@ from app.api.events import wallet_service
 from app.api.subscriptions import gates
 from app.api.users.models import UserTypes
 from app.api.templates_audience import RegistrationRole
-from app.api.events.tickets import role_of, ticket_document, ticket_job, ticket_payload, ticket_style
+from app.api.events.tickets import role_of, ticket_job, ticket_payload, ticket_style
 from app.api.events.certificates import (
     availability,
     certificate_context,
@@ -537,6 +537,7 @@ async def get_ticket(
 
 @router.get("/tickets/{ticket_id}/image", summary="Get ticket as an image")
 async def get_ticket_image(
+    request: Request,
     ticket_id: str,
     session: SessionDep = SessionDep,
     user: DependsAuth = None,
@@ -551,33 +552,46 @@ async def get_ticket_image(
 
     Same access rule as the PDF: the ticket's owner, the owning club, or an
     admin. A QR is an entry pass, not a public image.
+
+    Tagged like the PDF, from the same fingerprint (_document_etag, with
+    "-png"): a 304 without drawing when If-None-Match names it.
     """
     registration = await service.get_ticket_details(session, ticket_id=ticket_id)
     _assert_can_access_ticket(user, registration)
 
     style = await ticket_style(session, registration)
+    job = ticket_job(registration, style)
+    etag = _document_etag(job, "png")
     headers = {"Cache-Control": "private, max-age=300"}
+    if matches(_if_none_match(request), etag):
+        return Response(status_code=304, headers={**headers, "ETag": etag})
+
+    def tagged(whole: bool) -> dict:
+        return {**headers, "ETag": etag} if whole else headers
+
     if in_layout_mode(style):
         # The PDF the download is (kept in the bucket once drawn), as a PNG.
-        doc = await ticket_document(session, registration, style)
-        png = await pool.run(layout_png, style, doc.content)
-        return Response(content=png, media_type="image/png", headers=headers)
+        pdf, whole = await _drawn(job, job.cache_key("ticket", registration.id))
+        png = await pool.run(layout_png, style, pdf)
+        return Response(content=png, media_type="image/png", headers=tagged(whole))
 
     payload = ticket_payload(registration)
     styled = apply_layers(style, document_values(registration, registration.event))
     # The built-in card is 600px wide; a layered design is its artwork.
     width = image_width(styled, default=600)
     qr_url = qr_data_url(registration.ticket_id)
+    complete = [True]
 
     def draw() -> bytes:
-        inline, _ = embedded(styled, fields=TICKET_FIELDS)
+        inline, complete[0] = embedded(styled, fields=TICKET_FIELDS)
         return generate_image_bytes(
             template_path="events/ticket.html",
             context={"email_payload": payload, "style": inline, "qr_code_url": qr_url},
             width=width,
         ).getvalue()
 
-    return Response(content=await pool.run(draw), media_type="image/png", headers=headers)
+    png = await pool.run(draw)
+    return Response(content=png, media_type="image/png", headers=tagged(complete[0]))
 
 
 @router.get("/count-view/{event_id}", summary="Increment event view count")
@@ -597,12 +611,14 @@ async def increment_view_count(
 
 
 
-def _document_etag(job) -> str:
+def _document_etag(job, kind: str = "") -> str:
     """A ticket's or certificate's PDF tag: the name it is kept under in the
     bucket, `{design version}-{fingerprint}` (app.api.events.doc_cache.key_for),
     where the fingerprint hashes everything the document prints. Worked out
-    without drawing anything or reading the bucket."""
-    return f'"{int(job.design_version or 0)}-{job.fingerprint}"'
+    without drawing anything or reading the bucket. Another rendering of the
+    same document (the ticket's PNG) adds its kind, "-png"."""
+    suffix = f"-{kind}" if kind else ""
+    return f'"{int(job.design_version or 0)}-{job.fingerprint}{suffix}"'
 
 
 def _if_none_match(request: Request) -> str:

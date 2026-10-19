@@ -8,8 +8,8 @@ what never does: the live stream, files, PDFs, redirects, errors and other
 types. The Cache-Control a route set goes out unchanged, an answer to a
 signed-in caller that set none is `private` (private_cache_middleware.py),
 and the flag off is exactly the old behaviour. The ticket and certificate
-PDFs are tagged with the name they are kept under, and a 304 for one
-draws nothing.
+PDFs, and the ticket's PNG, are tagged with the name they are kept under,
+and a 304 for one draws nothing.
 """
 import asyncio
 import io
@@ -544,6 +544,59 @@ async def test_a_certificate_drawn_without_one_of_its_images_goes_out_untagged(c
     r = await client.get(f"/api/v1/events/certificates/{world['a'].ticket_id}/pdf")
     assert r.status_code == 200 and "etag" not in r.headers and r.headers["cache-control"] == "public, max-age=300"
     assert bucket["held"] == {}
+
+
+# ─── The ticket's picture ────────────────────────────────────────────────
+
+
+@pytest.fixture
+def pictured(monkeypatch):
+    """The ticket's PNG (an HTML design) stubbed and counted."""
+    from app.api.events import router as events_router
+
+    calls: list = []
+
+    def png(template_path, context, width=1400, template_dir=None):
+        calls.append(context["email_payload"]["participant_name"])
+        return io.BytesIO(b"\x89PNG " + context["email_payload"]["participant_name"].encode())
+
+    monkeypatch.setattr(events_router, "generate_image_bytes", png)
+    return calls
+
+
+async def test_the_ticket_image_is_tagged_from_the_same_fingerprint_and_a_304_draws_nothing(client, session, world, drawn, pictured):
+    base = f"/api/v1/events/tickets/{world['a'].ticket_id}"
+    pdf = await client.get(f"{base}/pdf", headers=world["a_user"])
+    first = await client.get(f"{base}/image", headers=world["a_user"])
+    assert first.status_code == 200 and first.content == b"\x89PNG Ananya Iyer"
+    tag = first.headers["etag"]
+    assert tag == pdf.headers["etag"][:-1] + '-png"'
+    assert first.headers["cache-control"] == "private, max-age=300"  # the route's own, as it was
+
+    again = await client.get(f"{base}/image", headers={**world["a_user"], "If-None-Match": tag})
+    assert again.status_code == 304 and again.content == b"" and again.headers["etag"] == tag
+    assert again.headers["cache-control"] == "private, max-age=300"
+    assert pictured == ["Ananya Iyer"]
+    assert (await client.get(f"{base}/image", headers={**world["b_user"], "If-None-Match": tag})).status_code == 403
+
+    world["a"].full_name = "Ananya R. Iyer"
+    await session.commit()
+    changed = await client.get(f"{base}/image", headers={**world["a_user"], "If-None-Match": tag})
+    assert changed.status_code == 200 and changed.content == b"\x89PNG Ananya R. Iyer" and changed.headers["etag"] != tag
+
+
+async def test_a_ticket_image_drawn_without_one_of_its_images_goes_out_untagged(client, session, world, pictured, monkeypatch):
+    from app.api.templates_audience import TemplateAudience
+    from app.api.ticket_templates.models import TicketTemplates
+    from app.core.storage import objects
+
+    logo = f"{settings.S3_BASE_PATH}/templates/tickets/logos/0b6f2d6e-4a51-4b0e-9a2b-1f7c4b9d2e11.png"
+    session.add(TicketTemplates(event_id=world["event"].id, audience=TemplateAudience.event_default, name="T", config={"logo_key": logo}))
+    await session.commit()
+    monkeypatch.setattr(objects, "get_bytes", lambda key: None)
+
+    r = await client.get(f"/api/v1/events/tickets/{world['a'].ticket_id}/image", headers=world["a_user"])
+    assert r.status_code == 200 and "etag" not in r.headers and r.headers["cache-control"] == "private, max-age=300"
 
 
 # ─── The reads the app revalidates, and whose they are ───────────────────
