@@ -205,6 +205,7 @@ FEATURE_GROUPS: dict[str, tuple[str, ...]] = {
         "payouts",
         "sso",
         "api",
+        "mcp",
     ),
 }
 
@@ -240,6 +241,7 @@ FEATURE_CATALOG: tuple[tuple[str, str], ...] = (
     ("judging", "Competitions: judging"),
     ("rounds", "Competitions: rounds and leaderboard"),
     ("finance", "Finance and expenses"),
+    ("mcp", "Connect AI assistants (Claude, ChatGPT) to your club"),
 )
 
 #: Flags in the editor with no feature behind them yet: waitlist, coupons,
@@ -301,6 +303,8 @@ class PlanFeatures(AbstractSQLModel, TimestampsMixin):
     payouts = _flag()
     sso = _flag()
     api = _flag()
+    # A club's team connecting AI assistants over MCP (app/api/mcp), from migration mcp_server.
+    mcp = _flag()
 
     plan = relationship("Plans", back_populates="features")
 

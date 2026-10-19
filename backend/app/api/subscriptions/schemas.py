@@ -39,7 +39,7 @@ def _feature_fields() -> dict:
 
 
 class PlanFeaturesIn(CustomBaseModel):
-    """The thirty flags, all defaulting off.
+    """The thirty-one flags, all defaulting off.
 
     Declared explicitly rather than generated, because a generated model gives
     no autocomplete, no mypy and an OpenAPI schema nobody can read -- and this
@@ -80,6 +80,7 @@ class PlanFeaturesIn(CustomBaseModel):
     payouts: bool = False
     sso: bool = False
     api: bool = False
+    mcp: bool = False
 
 
 class PlanIn(CustomBaseModel):
