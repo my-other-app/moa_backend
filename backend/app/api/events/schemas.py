@@ -636,6 +636,11 @@ class EventDetailResponse(CustomBaseModel):
     ticket_id: str | None = Field(None)
     ticket_url: str | None = Field(None)
     certificate_url: str | None = Field(None)
+    #: The viewer's own link to the event's feedback survey, the one its
+    #: email sends (`/feedback/{event}/{registration}?k=...`, the app's survey
+    #: screen): set once they were checked in and the survey is open (sent,
+    #: or its time after the end has come). Null otherwise, and when signed out.
+    feedback_url: str | None = Field(None)
     user_rating: float | None = Field(None)
     user_position: int | None = Field(None)
     position_label: str | None = Field(None)

@@ -637,3 +637,30 @@ async def test_the_api_is_rate_limited_per_visitor(client):
         assert (await client.get(f"{API}/locate", headers=h)).status_code == 200
     assert (await client.get(f"{API}/locate", headers=h)).status_code == 429
     assert (await client.get(f"{API}/locate", headers={"X-Forwarded-For": "203.0.113.8"})).status_code == 200
+
+
+async def test_a_signed_in_reader_has_a_budget_of_their_own_behind_a_shared_address(client, make_user, mint_token):
+    """A phone network puts many people behind one address. Signed in, each
+    spends their own limit; signed out, they share the address's; a token
+    that does not verify is nobody's, and spends the address's."""
+    ip = {"X-Forwarded-For": "203.0.113.9"}
+    asha = {**ip, **auth_header(await mint_token(await make_user(email="limit-asha@example.com")))}
+    ravi = {**ip, **auth_header(await mint_token(await make_user(email="limit-ravi@example.com")))}
+
+    for _ in range(120):
+        assert (await client.get(f"{API}/locate", headers=asha)).status_code == 200
+    assert (await client.get(f"{API}/locate", headers=asha)).status_code == 429
+    # Ravi, at the same address, has all of his; so have those signed out there.
+    assert (await client.get(f"{API}/locate", headers=ravi)).status_code == 200
+    for _ in range(120):
+        assert (await client.get(f"{API}/locate", headers=ip)).status_code == 200
+    assert (await client.get(f"{API}/locate", headers=ip)).status_code == 429
+    # An invalid token falls back to the address, whose budget is spent ...
+    assert (await client.get(f"{API}/locate", headers={**ip, **auth_header("not-a-real-token")})).status_code == 429
+    # ... and elsewhere counts there: the address's, not some token's of its own.
+    other = {"X-Forwarded-For": "203.0.113.10"}
+    for _ in range(120):
+        assert (await client.get(f"{API}/locate", headers={**other, **auth_header("not-a-real-token")})).status_code == 200
+    assert (await client.get(f"{API}/locate", headers=other)).status_code == 429
+    # Ravi still has his own.
+    assert (await client.get(f"{API}/locate", headers=ravi)).status_code == 200

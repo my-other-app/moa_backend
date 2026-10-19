@@ -81,6 +81,10 @@ async def get_current_user(
     from app.api.subscriptions import gates
 
     gates.note_actor(user, token_data.impersonated_by)
+    # The account a valid token named, for the limits keyed by account
+    # (app.core.rate_limit.signed_in_key): read there, not decoded again.
+    # Set only here, once every check above has passed.
+    request.state.user_id = user.id
     return user
 
 
