@@ -70,6 +70,12 @@ def _json(body: dict, status: int = 200, headers: dict | None = None) -> JSONRes
     return JSONResponse(body, status_code=status, headers={**_NO_STORE, **(headers or {})})
 
 
+async def _discard(session) -> None:
+    """Whatever a refused request had begun to write, dropped (what it meant to keep, it committed)."""
+    if session.new or session.dirty or session.deleted:
+        await session.rollback()
+
+
 def _oauth_error(e: oauth.OAuthError) -> JSONResponse:
     headers = {"WWW-Authenticate": 'Basic realm="oauth"'} if e.status == 401 else None
     return _json(e.body(), e.status, headers)
@@ -106,7 +112,7 @@ async def register(request: Request, session: SessionDep):
     try:
         out = await oauth.register_client(session, body)
     except oauth.OAuthError as e:
-        await session.rollback()
+        await _discard(session)
         return _oauth_error(e)
     await session.commit()
     return _json(out, 201)
@@ -133,7 +139,7 @@ async def token(request: Request, session: SessionDep):
         else:
             raise oauth.OAuthError("unsupported_grant_type", "grant_type must be authorization_code or refresh_token.")
     except oauth.OAuthError as e:
-        await session.rollback()
+        await _discard(session)
         return _oauth_error(e)
     return _json(out)
 
@@ -147,7 +153,7 @@ async def revoke(request: Request, session: SessionDep):
         client = await oauth.authenticate_client(session, form, request.headers.get("authorization"))
         await oauth.revoke_token(session, client, form.get("token"))
     except oauth.OAuthError as e:
-        await session.rollback()
+        await _discard(session)
         return _oauth_error(e)
     return _json({})
 
@@ -399,3 +405,59 @@ async def _step_consent(session, request: Request, form: dict, ticked: set, choi
     return RedirectResponse(oauth.with_params(req.redirect_uri, {"code": code, "state": req.state}), status_code=303)
 
 
+
+# ─── The club dashboard's side ───────────────────────────────────────────
+
+club_router = APIRouter(prefix="/clubs", tags=["mcp"])
+
+
+@club_router.get("/connected-apps", summary="AI assistants connected to the club")
+async def connected_apps(request: Request, session: SessionDep, user: ClubAuth) -> dict:
+    """Every app connected to the club (owners and admins), or the ones the
+    signed-in member connected. docs/MCP.md has the shape."""
+    from app.api.mcp import connected
+
+    club = await club_access.club_of(session, user)
+    return await connected.apps(session, club.id, role=club_access.role_of(request), member=club_access.current_member(request))
+
+
+@club_router.delete("/connected-apps/{grant_id}", summary="Disconnect an AI assistant")
+async def disconnect_app(request: Request, grant_id: str, session: SessionDep, user: ClubAuth) -> dict:
+    """Ends the connection and every token it holds, now; its waiting requests are rejected."""
+    from app.api.mcp import connected
+
+    club = await club_access.club_of(session, user)
+    await connected.disconnect(
+        session, club.id, grant_id, user=user, role=club_access.role_of(request), member=club_access.current_member(request), request=request,
+    )
+    return {"disconnected": True, "id": grant_id}
+
+
+@club_router.get("/pending-actions/{token}", summary="What an assistant asked for, before approving it")
+@limiter.limit("60/minute", key_func=account_or_address)
+async def pending_action(request: Request, token: str, session: SessionDep, user: ClubAuth) -> dict:
+    from app.api.mcp import actions
+
+    club = await club_access.club_of(session, user)
+    row = await actions.by_token(session, club.id, token)
+    return await actions.describe(session, row, role=club_access.role_of(request))
+
+
+@club_router.post("/pending-actions/{token}/confirm", summary="Approve what an assistant asked for")
+@limiter.limit("30/minute", key_func=account_or_address)
+async def confirm_pending_action(request: Request, token: str, session: SessionDep, user: ClubAuth) -> dict:
+    from app.api.mcp import actions
+
+    club = await club_access.club_of(session, user)
+    row = await actions.by_token(session, club.id, token)
+    return await actions.confirm(session, row, user=user, member=club_access.current_member(request), request=request)
+
+
+@club_router.post("/pending-actions/{token}/reject", summary="Turn down what an assistant asked for")
+@limiter.limit("30/minute", key_func=account_or_address)
+async def reject_pending_action(request: Request, token: str, session: SessionDep, user: ClubAuth) -> dict:
+    from app.api.mcp import actions
+
+    club = await club_access.club_of(session, user)
+    row = await actions.by_token(session, club.id, token)
+    return await actions.reject(session, row, user=user, member=club_access.current_member(request), request=request)

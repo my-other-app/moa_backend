@@ -38,6 +38,7 @@ from app.api.club_domains.router import (
     router as club_domains_router,
 )
 from app.api.club_access.router import router as club_access_router
+from app.api.mcp.router import club_router as mcp_club_router
 from app.api.store.router import club_router as store_club_router, public_router as store_public_router, router as store_router
 from app.api.links.router import router as links_router
 from app.api.discover.router import admin_router as discover_admin_router, router as discover_router
@@ -106,6 +107,8 @@ api_router.include_router(router=sites_router, tags=["site"])
 api_router.include_router(router=sites_public_router, tags=["site"])
 # Before club_router: /clubs/access would otherwise be read as /clubs/{club_id}.
 api_router.include_router(router=club_access_router, tags=["club-access"])
+# Before club_router too: /clubs/connected-apps and /clubs/pending-actions are literal paths.
+api_router.include_router(router=mcp_club_router)
 # Before club_router too: /clubs/payments/gateway is a literal path.
 api_router.include_router(router=payment_gateways_club_router)
 api_router.include_router(router=payment_gateways_admin_router)
