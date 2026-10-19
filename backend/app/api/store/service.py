@@ -277,7 +277,9 @@ def _soft_delete(m: EventStoreItems) -> None:
 
 
 async def delete_item(session, m: EventStoreItems) -> None:
-    """Out of the club's catalogue, and so off every event offering it."""
+    """Out of the club's catalogue and off every event offering it (its
+    offers go). Orders already placed for it stand: their lines name it."""
+    await session.execute(delete(EventStoreOffers).where(EventStoreOffers.item_id == m.id))
     _soft_delete(m)
     await session.commit()
 

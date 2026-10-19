@@ -174,8 +174,11 @@ async def club_update(session: SessionDep, user: ClubAuth, item_id: str, body: S
     return ClubStoreItem(**await service.club_item(session, club.id, m))
 
 
-@club_router.delete("/{item_id}", summary="Take an item out of the club's store, and so off every event (off sale too when any was sold or is held)")
+@club_router.delete("/{item_id}", summary="Take an item out of the club's store and off every event offering it; orders already placed for it stand")
 async def club_delete(session: SessionDep, user: ClubAuth, item_id: str, club_id: Optional[int] = Query(None, description="Admin only: the club")) -> dict:
+    """Removes the item's offers on every event and soft-deletes it (off sale
+    too when any was sold or is held). Paid and pending orders keep their
+    lines; a pending one is still paid and sold as it was placed."""
     club = await _club(session, user, club_id)
     await service.delete_item(session, await service.club_item_for(session, club.id, item_id))
     return {"deleted": True}

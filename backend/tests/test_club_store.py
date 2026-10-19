@@ -343,6 +343,51 @@ async def test_the_clubs_store_lists_makes_edits_and_photographs(client, session
     assert len((await client.get(f"{API}/clubs/store", params={"club_id": w["rival"].id}, headers=w["h"])).json()["items"]) == 2
 
 
+async def test_the_clubs_edit_works_as_the_events_did(client, session, club_shop):
+    """Sizes matched by label; [] sizes and a stock make one stock; null
+    clears the description and the photo; null roles means everyone."""
+    w = club_shop
+    tee = await _make(client, w["h"], name="Edit tee", description="Soft", photo_key="clubs/1/merch/v-x.png", available_roles=["staff"], variants=[{"label": "S", "stock": 2}, {"label": "M", "stock": 2}])
+    url = f"{API}/clubs/store/{tee['id']}"
+    r = await client.patch(url, json={"variants": [{"label": "m", "stock": 5}, {"label": "L", "stock": 1}]}, headers=w["h"])
+    assert r.status_code == 200, r.text
+    assert [(v["label"], v["stock"]) for v in r.json()["variants"]] == [("M", 5), ("L", 1)]
+    assert r.json()["variants"][0]["id"] == tee["variants"][1]["id"]  # the same M, matched by label
+    r = await client.patch(url, json={"variants": [], "stock": 7, "description": None, "photo_key": None, "available_roles": None}, headers=w["h"])
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert (body["variants"], body["stock"], body["left"], body["description"], body["photo_key"], body["photo_url"], body["available_roles"]) == ([], 7, 7, None, None, None, None)
+    # Below what is sold or held: refused, as on the event's route.
+    await _offer(client, w["h"], w["friday"].id, [tee["id"]])
+    assert (await _register(client, w["friday"].id, "edit-holder@example.com", [{"item_id": tee["id"], "qty": 3}])).status_code == 200
+    r = await client.patch(url, json={"stock": 2}, headers=w["h"])
+    assert r.status_code == 422 and "held" in r.json()["message"]
+
+
+async def test_deleting_from_the_clubs_store_takes_it_off_every_event_and_keeps_its_orders(client, session, club_shop):
+    w = club_shop
+    tee = await _make(client, w["h"], name="Gone tee", stock=5)
+    for e in (w["friday"], w["saturday"]):
+        await _offer(client, w["h"], e.id, [tee["id"]])
+    paid = (await _register(client, w["friday"].id, "paid-before@example.com", [{"item_id": tee["id"], "qty": 1}])).json()
+    await _pay(client, session, w["friday"].id, paid, 550)
+    pending = (await _register(client, w["saturday"].id, "pending-at-delete@example.com", [{"item_id": tee["id"], "qty": 1}])).json()
+
+    assert (await client.delete(f"{API}/clubs/store/{tee['id']}", headers=w["h"])).json() == {"deleted": True}
+    assert await session.scalar(select(func.count()).select_from(EventStoreOffers).where(EventStoreOffers.item_id == uuid.UUID(tee["id"]))) == 0
+    for e in (w["friday"], w["saturday"]):
+        assert (await _catalog(client, e.id)).json()["items"] == []
+        assert (await client.get(f"{API}/events/{e.id}/store/offers", headers=w["h"])).json()["item_ids"] == []
+    row = await _item_row(session, tee["id"])
+    assert row.is_deleted is True and row.on_sale is False
+    # The paid order stands, and the pending one is still paid and sold as placed.
+    assert (await _order_of(session, paid["event_registration_id"])).status == "paid"
+    await _pay(client, session, w["saturday"].id, pending, 550)
+    assert (await _order_of(session, pending["event_registration_id"])).status == "paid"
+    assert await _counts(session, tee["id"]) == (5, 2, 0)
+    assert (await client.get(f"{API}/events/{w['friday'].id}/store/orders", headers=w["h"])).json()["total"] == 1
+
+
 # ─── The guest's catalogue keeps its shape ───────────────────────────────
 
 
@@ -379,7 +424,10 @@ async def _order_of(session, registration_id) -> EventStoreOrders:
 
 
 async def _counts(session, item_id):
-    return tuple((await session.execute(select(EventStoreItems.stock, EventStoreItems.sold_count, EventStoreItems.reserved_count).where(EventStoreItems.id == uuid.UUID(item_id)))).one())
+    return tuple((await session.execute(
+        select(EventStoreItems.stock, EventStoreItems.sold_count, EventStoreItems.reserved_count)
+        .where(EventStoreItems.id == uuid.UUID(item_id)).execution_options(include_deleted=True)
+    )).one())
 
 
 async def test_no_picks_drops_the_pending_order_on_a_paid_event(client, session, club_shop):
