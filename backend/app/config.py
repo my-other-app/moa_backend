@@ -279,6 +279,10 @@ class AppConfig(BaseSettings):
     # docs/{kind}/{registration}/{design version}-{hash}.pdf, so a download,
     # a resend or a bundle reuses it instead of drawing it again.
     RENDER_DOC_CACHE: bool = True
+    # One process draws a document nobody has kept yet; the others asking
+    # for it at the same moment wait for it (app/api/events/doc_cache.py), at
+    # most this many seconds, then draw it themselves rather than fail.
+    DOC_RENDER_WAIT_SECONDS: float = 20.0
     # Artwork, logos, signatures and pictures uploaded for a printed design
     # are stored with their longest side at most this many pixels (about 200
     # dpi across an A4 certificate), as a JPEG or, with transparency, a PNG

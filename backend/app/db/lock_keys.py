@@ -58,10 +58,13 @@ LIVE_SWEEP = 7_301_010
 #: Discover's popularity scores (app/api/discover/popularity.py).
 DISCOVER_POPULARITY = 7_731_402
 
-# ─── Session lock, two ints: (this, an event id) ─────────────────────────────
+# ─── Session locks, two ints: (this, the thing it is for) ────────────────────
 
 #: One retention run per event (app/api/closeout/service.py).
 CLOSEOUT_RETENTION = 773_103
+#: One process draws a document not kept yet: (this, a 32-bit hash of its
+#: cache key) (app/api/events/doc_cache.py). Held while it is drawn and kept.
+DOC_RENDER = 773_150
 
 # ─── Transaction locks, one bigint: whose turn a scheduled run is ────────────
 
