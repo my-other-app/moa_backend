@@ -147,6 +147,10 @@ CLASSIFICATION: dict[str, str] = {
     "competitions": WIPE,
     "content_reports": WIPE,
     "deliveries": WIPE,
+    # AI assist (backend #91): what clubs used, clubs' own keys, cached feedback summaries.
+    "ai_feedback_summaries": WIPE,
+    "ai_usage": WIPE,
+    "club_ai_keys": WIPE,
     "delivery_attempts": WIPE,
     "doors": WIPE,
     "email_templates": WIPE,
