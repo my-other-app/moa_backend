@@ -1,0 +1,266 @@
+{
+  "slug": "kandal-kootam",
+  "name": "Kandal Kootam",
+  "tagline": "Beach clean-ups and mangrove planting on the Kannur coast, every second Sunday.",
+  "about": "Kandal Kootam means 'the mangrove gathering', and that is how we began. In 2021, eleven people from Kannur and Payyannur met on the banks of the Pazhayangadi river with a sack of mangrove propagules and no idea how to plant them. A retired fisherman showed us. More than nine thousand of those saplings are standing in the mud today, and many are taller than we are.\n\nEvery second Sunday we're on a beach: Payyambalam, Meenkunnu, Muzhappilangad, Ezhara. We clean, sort and weigh what we find, and every quarter we send the numbers to the panchayats and the fisheries office, because data is harder to ignore than photos. In the planting season, from June to September, Sundays move to the river banks.\n\nWe're students, fisherfolk, retired teachers, engineers working from home, and a lot of children who are better at spotting microplastics than any adult. You don't need experience or equipment. You need old clothes, a water bottle and a willingness to get your feet muddy.\n\nWe don't do photo-op clean-ups. Every bag is sorted, every kilo is recorded, and the recyclables go to a women-run collection unit that pays fair rates.",
+  "org": null,
+  "location": {"name": "Payyambalam, Kannur", "lat": 11.8848, "lng": 75.3577},
+  "contact": {"email": "hello@kandal-kootam.demo.myotherapp.in", "phone": "+91 90000 01707"},
+  "socials": {"instagram": "kandalkootam", "linkedin": "kandal-kootam", "x": "kandalkootam"},
+  "topics": ["community", "sports-fitness"],
+  "interests": ["sustainability", "volunteering", "outdoors-adventure"],
+  "brand": {"primary": "#2E6B3A", "accent": "#9BC53D", "ink": "#12261A", "paper": "#F1F6EC", "display_font": "inter", "motif": "waves"},
+  "team": [
+    {"name": "Sreedevi Panoli", "role": "Coordinator", "bio": "Retired biology teacher who can name every mangrove species on the river and the child who planted it."},
+    {"name": "Ashraf Kuniyil", "role": "Beach clean-up lead", "bio": "A fisherman's son from Ayikkara who plans every clean-up by the tide table, not the calendar."},
+    {"name": "Neenu Rajeevan", "role": "Data and reports", "bio": "Software engineer on remote work who turned our sorting sheets into reports the panchayat actually reads."},
+    {"name": "Vineetha Kumari", "role": "Schools programme", "bio": "Runs our school visits and has taught eight hundred children to tell a propagule from a twig."},
+    {"name": "Ajith Kunnumpuram", "role": "Nursery keeper", "bio": "Looks after the mangrove nursery behind his house and waters three thousand saplings by hand through the summer."},
+    {"name": "Riyas Kottayil", "role": "Volunteers and safety", "bio": "Briefs every new volunteer, checks the tide twice and never forgets the first-aid box."}
+  ],
+  "partners": [
+    {"name": "Veendum Recycling Collective", "role": "Recycling partner", "since": 2022},
+    {"name": "Azhimukham Field Station", "role": "Science partner", "since": 2023},
+    {"name": "Thari & Thread", "role": "Handloom merch partner", "since": 2024}
+  ],
+  "followers": 1890,
+  "merch": [
+    {"key": "tote", "name": "Handloom clean-up tote", "description": "Woven on a Kannur handloom by Thari & Thread. Sturdy enough to replace every plastic bag you'll ever be offered.", "price": 399, "kind": "tote", "color": "#E9E2CF", "sizes": null, "stock": 120},
+    {"key": "tee", "name": "Mangrove roots tee", "description": "Organic cotton tee, dyed leaf green, with mangrove roots drawn as a wave across the front.", "price": 549, "kind": "tee", "color": "#2E6B3A", "sizes": {"S": 20, "M": 30, "L": 28, "XL": 12}, "stock": null},
+    {"key": "cap", "name": "Field cap", "description": "Wide-peak cotton cap for long mornings on open beaches. The peak is stiff enough to fan yourself with.", "price": 299, "kind": "cap", "color": "#9BC53D", "sizes": null, "stock": 80}
+  ],
+  "events": [
+    {
+      "slug": "planting-day-pazhayangadi-river",
+      "name": "Planting Day: A Thousand Propagules on the Pazhayangadi River",
+      "when": {"days_from_now": -112, "time": "07:00", "duration_hours": 4},
+      "format": "in_person",
+      "venue": {"name": "Pazhayangadi river bank, near the old ferry point", "address": "Ferry Road, Pazhayangadi, Kannur 670303"},
+      "category": "Meetup",
+      "interests": ["sustainability", "volunteering"],
+      "fee": 0,
+      "sold_out": false,
+      "capacity": 150,
+      "registrations": 146,
+      "attended_ratio": 0.84,
+      "certificates": true,
+      "about": "Our biggest planting morning of the season. One thousand propagules from Ajith's nursery, a stretch of eroded river bank, low tide at 7:40, and a hundred and twenty pairs of hands. Kunhiraman, who first taught us to plant in 2021, showed every group how deep to push a propagule, how far apart to space them, and why you plant from the water side first.\n\nWe planted all one thousand before the tide came back in at eleven. Each group adopted a numbered patch and will come back in December to count how many survived. Last year's survival rate on this bank was 71 percent, and we'd like to beat it.",
+      "guidelines": "Wear clothes you're happy to ruin; the mud is knee-deep in places. Bare feet or old sandals that strap on. Bring water, a hat and a change of clothes. Children under 12 must stay with an adult on the upper bank. Follow your group leader in and out of the water; the river bed drops suddenly in some spots.",
+      "speakers": [
+        {"name": "Sreedevi Panoli", "designation": "Coordinator, Kandal Kootam", "bio": "Has planted on this bank every season since 2021 and keeps a survival count for every patch in a school exercise book."},
+        {"name": "Kunhiraman Edakkad", "designation": "Retired fisherman, Pazhayangadi", "bio": "Fished this river for fifty years and showed our first eleven volunteers how deep to push a propagule."},
+        {"name": "Ajith Kunnumpuram", "designation": "Nursery keeper, Kandal Kootam", "bio": "Raised every one of the morning's thousand propagules in the nursery behind his house."}
+      ],
+      "agenda": [
+        {"at": "07:00", "title": "Groups, patches and a safety briefing", "by": "Sreedevi Panoli"},
+        {"at": "07:25", "title": "How to plant, from the water side first", "by": "Kunhiraman Edakkad"},
+        {"at": "07:40", "title": "Planting at low tide", "by": null},
+        {"at": "10:30", "title": "Kanji, pickle and patch adoption", "by": "Ajith Kunnumpuram"}
+      ],
+      "questions": [
+        {"key": "group_size", "label": "How many people are coming with you, including you?", "type": "number", "required": true},
+        {"key": "children", "label": "Are any children under 12 coming?", "type": "radio", "options": ["Yes", "No"], "required": true},
+        {"key": "first_time", "label": "Is this your first planting day?", "type": "radio", "options": ["Yes", "No, I've planted before"], "required": false}
+      ],
+      "merch": ["tee", "cap"],
+      "swag": [{"name": "Patch adoption card", "sponsor": null}, {"name": "Kanji breakfast", "sponsor": null}],
+      "feedback": {
+        "responses": 71,
+        "avg_rating": 4.9,
+        "comments": [
+          "My daughter talks about 'her patch' every day now. We're going back in December to count.",
+          "Kunhiraman chettan explaining the river was worth the trip from Thalassery on its own.",
+          "Hot kanji after three hours in the mud is the best breakfast in Kerala.",
+          "Toilets near the site would help, especially for families with kids.",
+          "Very well organised. Every group knew exactly where to go."
+        ]
+      },
+      "live": null,
+      "poster": {"headline": "Planting Day", "sub": "A thousand mangrove propagules, one low tide, the Pazhayangadi river."}
+    },
+    {
+      "slug": "payyambalam-clean-up-58",
+      "name": "Payyambalam Beach Clean-up #58",
+      "when": {"days_from_now": -69, "time": "06:30", "duration_hours": 3},
+      "format": "in_person",
+      "venue": {"name": "Payyambalam Beach, north end", "address": "Payyambalam Beach Road, Kannur 670001"},
+      "category": "Meetup",
+      "interests": ["sustainability", "volunteering"],
+      "fee": 0,
+      "sold_out": false,
+      "capacity": 120,
+      "registrations": 98,
+      "attended_ratio": 0.81,
+      "certificates": true,
+      "about": "Our fifty-eighth Sunday on a Kannur beach, and the first after the monsoon washed up everything the rivers had been carrying since June. We split the beach into six zones, gave each group a team leader and a set of sorting sacks, and picked until the sun got serious.\n\nThen came the part that makes us different: sorting and weighing. Plastics into five types, glass, footwear, fishing nets, cloth and 'other'. Neenu read the weights aloud as each sack hit the scale. The morning's total was 486 kilograms, and the single most common item was the multilayer snack packet, which no recycler will take.",
+      "guidelines": "Wear closed shoes; there is broken glass. We provide gloves, sacks and water. Never pick up syringes or anything medical; call a team leader, who has a sharps box. Leave shells, crabs and anything alive where you found it. Photos are welcome, but the sorting comes first.",
+      "speakers": [
+        {"name": "Ashraf Kuniyil", "designation": "Beach clean-up lead, Kandal Kootam", "bio": "Planned the morning around a 7:10 low tide and knows which end of Payyambalam the currents fill first."},
+        {"name": "Neenu Rajeevan", "designation": "Data and reports, Kandal Kootam", "bio": "Has read out the weight of more than two thousand sacks and logs every one in the same spreadsheet."}
+      ],
+      "agenda": [
+        {"at": "06:30", "title": "Zones, gloves and the safety talk", "by": "Ashraf Kuniyil"},
+        {"at": "06:50", "title": "Clean-up in six zones", "by": null},
+        {"at": "08:15", "title": "Sorting and weighing", "by": "Neenu Rajeevan"},
+        {"at": "09:00", "title": "Black tea, banana and the morning's total", "by": null}
+      ],
+      "questions": [
+        {"key": "how_heard", "label": "How did you hear about us?", "type": "select", "options": ["A friend", "School or college", "Instagram", "Saw you on the beach", "Other"], "required": false},
+        {"key": "volunteer_hours", "label": "Do you need a certificate of volunteer hours?", "type": "radio", "options": ["Yes", "No"], "required": true}
+      ],
+      "merch": ["tote", "cap"],
+      "swag": [{"name": "Reusable gloves to keep", "sponsor": null}],
+      "feedback": {
+        "responses": 52,
+        "avg_rating": 4.6,
+        "comments": [
+          "Weighing every sack made it feel like real work, not a photo op.",
+          "486 kilos. I can't stop thinking about that number.",
+          "Could we have a few more gloves in small sizes for the kids?",
+          "Learnt more about plastics in one morning than in a whole semester of EVS."
+        ]
+      },
+      "live": {
+        "poll": {"question": "Guess the most common item found today", "options": ["Plastic bottles", "Multilayer snack packets", "Footwear", "Fishing nets"]},
+        "qna": [
+          "Why won't recyclers take multilayer packets?",
+          "Where do the fishing nets go after today?",
+          "Does the panchayat actually use the numbers you send?"
+        ]
+      },
+      "poster": {"headline": "Clean-up #58", "sub": "Payyambalam, after the monsoon. Pick, sort, weigh, repeat."}
+    },
+    {
+      "slug": "microplastics-detectives",
+      "name": "Microplastics Detectives: A Workshop for Kids and Parents",
+      "when": {"days_from_now": -34, "time": "15:30", "duration_hours": 2.5},
+      "format": "in_person",
+      "venue": {"name": "Azhimukham Field Station", "address": "Near Meenkunnu Beach, Azhikode, Kannur 670009"},
+      "category": "Workshop",
+      "interests": ["sustainability"],
+      "fee": 150,
+      "sold_out": false,
+      "capacity": 50,
+      "registrations": 44,
+      "attended_ratio": 0.9,
+      "certificates": true,
+      "about": "A Saturday afternoon for children aged eight to fourteen and the adults who bring them. Every family scooped a cup of sand from the tideline at Meenkunnu, sieved it, floated it in salt water, and counted the tiny coloured pieces under the field station's microscopes. One family found 214 pieces in a single cup.\n\nDr. Anjana explained where the pieces come from (mostly larger plastics breaking down in the sun) and what they do to the fish we eat. Then the children designed posters for their school notice boards, and the best three are now printed and up in schools in Azhikode and Valapattanam.",
+      "guidelines": "One adult per family must stay throughout. The fee covers the sieves, magnifiers and snacks, and is per family, not per person. Wear clothes that can get wet and sandy. Please don't take samples home; they go into the field station's records.",
+      "speakers": [
+        {"name": "Dr. Anjana Prabhakar", "designation": "Marine scientist, Azhimukham Field Station", "bio": "Counts microplastics in Kannur's sand for a living and lets children use the good microscope."},
+        {"name": "Vineetha Kumari", "designation": "Schools programme, Kandal Kootam", "bio": "Has turned the microplastics count into a lesson plan that six schools now use."}
+      ],
+      "agenda": [
+        {"at": "15:30", "title": "Scoop a cup of sand", "by": "Vineetha Kumari"},
+        {"at": "16:00", "title": "Sieve, float and count", "by": "Dr. Anjana Prabhakar"},
+        {"at": "16:45", "title": "Where the pieces come from", "by": "Dr. Anjana Prabhakar"},
+        {"at": "17:15", "title": "Poster-making and certificates", "by": null}
+      ],
+      "questions": [
+        {"key": "children_ages", "label": "Ages of the children coming", "type": "text", "required": true},
+        {"key": "school", "label": "Their school, if you'd like a poster sent there", "type": "text", "required": false}
+      ],
+      "merch": ["tote"],
+      "swag": [{"name": "Pocket magnifier for every child", "sponsor": "Azhimukham Field Station"}],
+      "feedback": {
+        "responses": 32,
+        "avg_rating": 4.9,
+        "comments": [
+          "My son has sieved sand on three beaches since. He wants to be a marine scientist now.",
+          "Dr. Anjana was wonderful with the kids. No question was too silly.",
+          "The poster being printed for his school made my daughter's year.",
+          "A bit crowded around the microscopes; maybe two sessions next time."
+        ]
+      },
+      "live": {
+        "poll": {"question": "How many pieces do you think are in one cup of sand?", "options": ["Under 10", "10 to 50", "50 to 200", "Over 200"]},
+        "qna": [
+          "Do fish really eat the tiny pieces?",
+          "Is it safe to eat fish from the Kannur coast?",
+          "Why are most of the pieces blue?"
+        ]
+      },
+      "poster": {"headline": "Microplastics Detectives", "sub": "Kids and parents. One cup of sand, a microscope, and a count you won't forget."}
+    },
+    {
+      "slug": "meenkunnu-clean-up-61",
+      "name": "Meenkunnu Beach Clean-up #61",
+      "when": {"days_from_now": 11, "time": "06:30", "duration_hours": 3},
+      "format": "in_person",
+      "venue": {"name": "Meenkunnu Beach, main access path", "address": "Meenkunnu Beach Road, Azhikode, Kannur 670009"},
+      "category": "Meetup",
+      "interests": ["sustainability", "volunteering"],
+      "fee": 0,
+      "sold_out": false,
+      "capacity": 120,
+      "registrations": 67,
+      "attended_ratio": null,
+      "certificates": null,
+      "about": "Clean-up number sixty-one takes us to Meenkunnu, a long, quiet beach that gets far fewer visitors than Payyambalam and far more fishing net. Low tide is at 7:05, which gives us about two hours on the wide, flat sand before the water returns.\n\nAs always, we'll pick in zones, then sort and weigh everything. This time the fishing nets go to a new partner: a group of women in Azhikode who weave old nets into floor mats. Bring a friend; Meenkunnu is long and we'll need every pair of hands.",
+      "guidelines": "Closed shoes, a hat and water. Gloves, sacks and snacks are provided. Never touch syringes or medical waste; call a team leader. Leave anything living where it is. Children are welcome with an adult. The nearest bus stop is Azhikode junction, about a kilometre away; we can arrange a lift from there if you message us.",
+      "speakers": [
+        {"name": "Ashraf Kuniyil", "designation": "Beach clean-up lead, Kandal Kootam", "bio": "Grew up on this stretch of coast and knows which corners of Meenkunnu the nets wash into."},
+        {"name": "Riyas Kottayil", "designation": "Volunteers and safety, Kandal Kootam", "bio": "Runs the safety briefing in Malayalam and English, and keeps a careful eye on the tide clock."}
+      ],
+      "agenda": [
+        {"at": "06:30", "title": "Briefing, gloves and zones", "by": "Riyas Kottayil"},
+        {"at": "06:50", "title": "Clean-up from low tide", "by": "Ashraf Kuniyil"},
+        {"at": "08:20", "title": "Sorting and weighing", "by": null},
+        {"at": "09:00", "title": "Tea and the morning's total", "by": null}
+      ],
+      "questions": [
+        {"key": "need_lift", "label": "Need a lift from Azhikode junction?", "type": "radio", "options": ["Yes", "No"], "required": true},
+        {"key": "volunteer_hours", "label": "Do you need a certificate of volunteer hours?", "type": "radio", "options": ["Yes", "No"], "required": true}
+      ],
+      "merch": ["tote", "cap"],
+      "swag": [{"name": "Reusable gloves to keep", "sponsor": null}, {"name": "Bottle refill station", "sponsor": "Veendum Recycling Collective"}],
+      "feedback": null,
+      "live": null,
+      "poster": {"headline": "Clean-up #61", "sub": "Meenkunnu beach, low tide at 7:05. Bring a friend and closed shoes."}
+    },
+    {
+      "slug": "kunhimangalam-mangrove-walk",
+      "name": "Mangrove Walk and Talk at Kunhimangalam",
+      "when": {"days_from_now": 25, "time": "06:30", "duration_hours": 3},
+      "format": "in_person",
+      "venue": {"name": "Kunhimangalam mangroves, boardwalk entrance", "address": "Kunhimangalam, Payyannur, Kannur 670309"},
+      "category": "Talk",
+      "interests": ["sustainability", "outdoors-adventure"],
+      "fee": 0,
+      "sold_out": false,
+      "capacity": 40,
+      "registrations": 33,
+      "attended_ratio": null,
+      "certificates": null,
+      "about": "A slow morning walk through one of the richest mangrove stretches in north Kerala, with two people who know it best. Sreedevi teacher will explain how mangroves hold the riverbank together, filter the water and shelter the fish that coastal families depend on. Haridas, who has logged 160 bird species here, will help you spot kingfishers, herons and, with luck, a white-bellied sea eagle.\n\nThis isn't a planting day. It's a chance to see what a healthy, mature mangrove forest looks like, and to understand what we're trying to grow back on the eroded banks further south.",
+      "guidelines": "Group size is kept small to avoid disturbing the birds. Wear muted colours and quiet footwear, and keep phones on silent. Binoculars help; we have six pairs to share. Stay on the path, and please don't break branches or collect propagules.",
+      "speakers": [
+        {"name": "Sreedevi Panoli", "designation": "Coordinator, Kandal Kootam", "bio": "Taught biology for thirty-two years and still treats every walk like a field trip with a test at the end, only kinder."},
+        {"name": "Haridas Mangad", "designation": "Birdwatcher and naturalist", "bio": "Has logged 160 bird species in the Kunhimangalam mangroves and can name a kingfisher by its call from a hundred metres."}
+      ],
+      "agenda": [
+        {"at": "06:30", "title": "Meet at the boardwalk entrance", "by": null},
+        {"at": "06:45", "title": "Birds of the mangrove at sunrise", "by": "Haridas Mangad"},
+        {"at": "08:00", "title": "How a mangrove holds a river together", "by": "Sreedevi Panoli"},
+        {"at": "09:00", "title": "Chai and questions", "by": null}
+      ],
+      "questions": [
+        {"key": "binoculars", "label": "Will you bring binoculars?", "type": "radio", "options": ["Yes", "No, I'd like to borrow a pair"], "required": true}
+      ],
+      "merch": ["cap", "tee"],
+      "swag": [{"name": "Illustrated bird checklist", "sponsor": "Azhimukham Field Station"}],
+      "feedback": null,
+      "live": null,
+      "poster": {"headline": "Mangrove Walk", "sub": "Kunhimangalam at sunrise. Birds, roots and why it all matters."}
+    }
+  ],
+  "threads": [
+    {"days_ago": 1, "kind": "announcement", "text": "Clean-up #61 is at Meenkunnu. Low tide is at 7:05, so we start at 6:30 sharp. The fishing nets we collect go to a group of women in Azhikode who weave them into floor mats. If you're coming by bus, tell us in the form and Riyas will arrange a lift from the junction.", "likes": 63, "comments": [{"text": "Coming with my NSS unit, 14 of us."}, {"text": "Love that the nets become mats. Can we buy them?"}, {"text": "Yes! We'll bring a few to the next clean-up."}]},
+    {"days_ago": 4, "kind": "post", "text": "Our July to September report is out and has gone to three panchayats and the fisheries office. 2,140 kg collected over six clean-ups, 61% of it plastic. The top item, again, was the multilayer snack packet: 9,800 of them. We've asked for a collection point for multilayer packaging in each ward. The full report is on the club page.", "likes": 97, "comments": [{"text": "9,800 snack packets. That number should be on a billboard."}, {"text": "This is how you do it. Data, not selfies."}, {"text": "Any response from the panchayat yet?"}]},
+    {"days_ago": 10, "kind": "poll", "text": "Vineetha is planning next term's school visits. Which topic should we take to classrooms?", "options": ["Microplastics in sand", "How mangroves protect the coast", "Sorting waste at home", "Life on a fishing boat"], "likes": 48, "comments": [{"text": "Mangroves. Most kids in Kannur have never been inside one."}, {"text": "Sorting at home, so the kids teach their parents."}]},
+    {"days_ago": 17, "kind": "post", "text": "Ajith's nursery update: 3,200 propagules are rooted and growing for next June's planting season. He watered them by hand through the hottest weeks of the year, at 5 a.m. and again at 6 p.m. If you'd like to help water on weekend mornings, he'd be very glad of the company.", "likes": 112, "comments": [{"text": "Ajith chettan is a hero. I'll come on Saturday."}, {"text": "Can schools visit the nursery?"}, {"text": "Yes, Vineetha can set it up."}]},
+    {"days_ago": 26, "kind": "poll", "text": "Lots of you work on Sundays. Should we add a monthly Saturday evening clean-up?", "options": ["Yes, Saturday evenings", "Keep Sundays only", "A weekday early morning instead"], "likes": 39, "comments": [{"text": "Saturday evening would let me finally come."}, {"text": "Evening tides permitting, of course."}]},
+    {"days_ago": 33, "kind": "post", "text": "Yesterday's Microplastics Detectives: 22 families, 22 cups of sand, and one family that counted 214 pieces in a single cup. The children's posters were so good that three are being printed for school notice boards in Azhikode and Valapattanam. Thank you, Dr. Anjana, for letting the kids use the good microscope.", "likes": 88, "comments": [{"text": "My son's poster got picked! He's unbearable now, in the best way."}, {"text": "Please run this again for the holidays."}]},
+    {"days_ago": 44, "kind": "announcement", "text": "We're looking for a volunteer photographer for the next season: someone who can come to two clean-ups a month and document the sorting, not just the smiling. Your photos go into the quarterly reports and get credited. Message us if that's you.", "likes": 41, "comments": [{"text": "I shoot for my college magazine. Can I try?"}, {"text": "Tagging my cousin, she's brilliant and lives in Thalassery."}]}
+  ]
+}

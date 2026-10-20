@@ -1,0 +1,315 @@
+{
+  "slug": "respawn-room",
+  "name": "Respawn Room",
+  "tagline": "Ponnila College's e-sports and gaming society. Queue up, play fair, say GG.",
+  "about": "Respawn Room is the e-sports and gaming society of Ponnila College of Engineering in Kottayam. It started in 2022 in a hostel room with one borrowed router and six people who were tired of losing to each other's lag. Today we have a gaming lab of twenty-four PCs donated by alumni, about 260 members, and a reputation across central Kerala for running the cleanest college tournaments around.\n\nWe play a bit of everything: tactical shooters, mobile battle royale, football sims, fighting games, rapid chess and a surprisingly fierce weekly card-game night. We field college teams in inter-college leagues, run our own tournaments twice a semester, and host a game jam every year where people make games instead of only playing them.\n\nBesides winning, we take two things seriously. The first is fair play: no smurfing, no cheats, no abuse on voice chat, and a code of conduct we actually enforce. The second is balance: the lab closes at 11 p.m. on weeknights, exam weeks are tournament-free, and there's a peer mentor for anyone whose gaming has started to hurt their grades.\n\nWomen gamers have their own Thursday lab slot and their own teams in two leagues, and this year they've won more trophies than the rest of us combined.",
+  "org": {"name": "Ponnila College of Engineering", "city": "Kottayam"},
+  "location": {"name": "Ponnila College of Engineering, Kodimatha, Kottayam", "lat": 9.5826, "lng": 76.5214},
+  "contact": {"email": "hello@respawn-room.demo.myotherapp.in", "phone": "+91 90000 01808"},
+  "socials": {"instagram": "respawnroom.pce", "linkedin": null, "x": "respawnroompce"},
+  "topics": ["gaming-media", "development"],
+  "interests": ["e-sports", "gaming", "content-creation", "coding"],
+  "brand": {"primary": "#6D28D9", "accent": "#FF3D7F", "ink": "#0E0B1F", "paper": "#F5F2FF", "display_font": "bebas", "motif": "grid"},
+  "team": [
+    {"name": "Athul Krishna", "role": "President", "bio": "Final-year Mechanical and the tactical shooter captain; drafts every tournament bracket on graph paper first."},
+    {"name": "Merlin Babu", "role": "Vice president; women's team captain", "bio": "Third-year CSE who captains the women's team that won two leagues this year."},
+    {"name": "Nabeel Ahammed", "role": "Tournament admin", "bio": "Runs every bracket, check-in and dispute with a calm voice and a rulebook he wrote himself."},
+    {"name": "Devanand Sajeevan", "role": "Lab and hardware", "bio": "Keeps twenty-four PCs alive and knows the exact sound a dying power supply makes."},
+    {"name": "Fidha Rahman", "role": "Streams and content", "bio": "Produces our tournament streams from one laptop and two phones, with live Malayalam commentary."},
+    {"name": "Sebin Kurian", "role": "Game jam lead", "bio": "Makes tiny games over a weekend and convinces everyone else that they can too."},
+    {"name": "Prof. Ranjith Mohan", "role": "Faculty advisor", "bio": "Assistant professor of computer science who ranks surprisingly high in rapid chess and won't say how high."}
+  ],
+  "partners": [
+    {"name": "Pixelpura Gaming Cafe", "role": "Venue and hardware partner", "since": 2023},
+    {"name": "Thoovanam Fibre", "role": "Network partner", "since": 2024},
+    {"name": "Kappa Corner, Kodimatha", "role": "Tournament food partner", "since": 2025}
+  ],
+  "followers": 2560,
+  "merch": [
+    {"key": "hoodie", "name": "Respawn player hoodie", "description": "Violet pullover hoodie with your player name printed across the back after you order.", "price": 999, "kind": "hoodie", "color": "#6D28D9", "sizes": {"S": 12, "M": 26, "L": 28, "XL": 14, "XXL": 6}, "stock": null},
+    {"key": "jersey", "name": "League jersey tee", "description": "Sublimated jersey in violet and pink, the same one our league teams wear. Breathable enough for a five-hour bracket.", "price": 649, "kind": "tee", "color": "#FF3D7F", "sizes": {"S": 14, "M": 30, "L": 30, "XL": 16}, "stock": null},
+    {"key": "stickers", "name": "GG sticker pack", "description": "Eight stickers: the respawn arrow, 'one more match', a Kottayam bus ticket and a very tired controller, among others.", "price": 69, "kind": "sticker", "color": "#0E0B1F", "sizes": null, "stock": 400},
+    {"key": "lanyard", "name": "Tournament lanyard", "description": "Woven violet lanyard with a badge holder, the same one our admins wear on match days.", "price": 149, "kind": "lanyard", "color": "#6D28D9", "sizes": null, "stock": 150}
+  ],
+  "events": [
+    {
+      "slug": "respawn-cup-season-3-finals",
+      "name": "Respawn Cup Season 3: LAN Finals",
+      "when": {"days_from_now": -100, "time": "10:00", "duration_hours": 10},
+      "format": "in_person",
+      "venue": {"name": "Respawn Room gaming lab, Ponnila College", "address": "Ponnila College of Engineering, Kodimatha, Kottayam"},
+      "category": "Tournament",
+      "interests": ["e-sports", "gaming"],
+      "fee": 250,
+      "sold_out": true,
+      "capacity": 80,
+      "registrations": 80,
+      "attended_ratio": 0.95,
+      "certificates": true,
+      "about": "Sixteen teams of five from nine colleges, one day, one lab, and a 5v5 tactical shooter bracket that went to a 13-11 decider in the grand final. Season 3 was our biggest LAN yet: every match was played on identical machines on a wired network, with admins at every row and a live stream in Malayalam and English that peaked at 1,900 viewers.\n\nThe winners, from Kodamanju Institute of Technology in Idukki, took home the trophy and a month of free hours at Pixelpura Gaming Cafe. Our own women's team made the semi-finals in the open bracket, the first time a women's team has gone that far in the Cup. The fee covered lab hire, food all day and the finalists' jerseys.",
+      "guidelines": "Teams check in by 9:30 with college IDs for all five players and one substitute. Bring your own mouse, keyboard and headset; monitors and PCs are provided and identical. Our code of conduct applies all day: no abuse on voice chat, no cheating software, no arguing with admins mid-round. Disputes go to Nabeel, whose decision is final.",
+      "speakers": [
+        {"name": "Nabeel Ahammed", "designation": "Tournament admin, Respawn Room", "bio": "Ran all thirty-one matches of the day without a single unresolved dispute, and only one raised voice, which was his own at the projector."},
+        {"name": "Abhay Varkey", "designation": "Shoutcaster", "bio": "Casts college tournaments across Kerala in Malayalam and English, sometimes inside the same sentence."},
+        {"name": "Fidha Rahman", "designation": "Streams and content, Respawn Room", "bio": "Produced the full ten-hour stream from the lab corner and edited the highlight reel by midnight."}
+      ],
+      "agenda": [
+        {"at": "10:00", "title": "Check-in and equipment setup", "by": "Nabeel Ahammed"},
+        {"at": "10:45", "title": "Round of sixteen", "by": null},
+        {"at": "13:00", "title": "Lunch from Kappa Corner", "by": null},
+        {"at": "13:45", "title": "Quarter-finals", "by": "Abhay Varkey"},
+        {"at": "16:15", "title": "Semi-finals", "by": "Abhay Varkey"},
+        {"at": "18:15", "title": "Grand final, best of three", "by": "Abhay Varkey"},
+        {"at": "19:40", "title": "Trophy and closing", "by": "Fidha Rahman"}
+      ],
+      "questions": [
+        {"key": "team_name", "label": "Team name", "type": "text", "required": true},
+        {"key": "in_game_name", "label": "Your in-game name", "type": "text", "required": true},
+        {"key": "role", "label": "Your role in the team", "type": "select", "options": ["Captain", "Player", "Substitute"], "required": true}
+      ],
+      "merch": ["jersey", "lanyard", "stickers"],
+      "swag": [{"name": "Finalist jerseys", "sponsor": null}, {"name": "A month of free hours for the winners", "sponsor": "Pixelpura Gaming Cafe"}],
+      "feedback": {
+        "responses": 58,
+        "avg_rating": 4.7,
+        "comments": [
+          "Best-run college LAN I've played. Identical machines, no ping excuses.",
+          "The 13-11 grand final will be talked about for years.",
+          "Admins were fair and fast. Nobody felt cheated.",
+          "The lab got hot by the afternoon; more fans for next season, please.",
+          "Watching the women's team reach the semis was the highlight of the day."
+        ]
+      },
+      "live": {
+        "poll": {"question": "Who takes the grand final?", "options": ["Kodamanju Tech", "Vellimegham Engineering", "Too close to call"]},
+        "qna": [
+          "Will Season 4 have a separate women's bracket?",
+          "Can teams from outside Kottayam district enter?",
+          "Will the VODs be uploaded?"
+        ]
+      },
+      "poster": {"headline": "Respawn Cup S3", "sub": "LAN finals. Sixteen teams, nine colleges, one trophy."}
+    },
+    {
+      "slug": "ponnila-game-jam-monsoon",
+      "name": "Ponnila Game Jam 2026: Monsoon",
+      "when": {"days_from_now": -60, "time": "18:00", "duration_hours": 48},
+      "format": "in_person",
+      "venue": {"name": "Respawn Room gaming lab and Seminar Hall 1", "address": "Ponnila College of Engineering, Kodimatha, Kottayam"},
+      "category": "Hackathon",
+      "interests": ["gaming", "coding"],
+      "fee": 0,
+      "sold_out": false,
+      "capacity": 90,
+      "registrations": 74,
+      "attended_ratio": 0.86,
+      "certificates": true,
+      "about": "Forty-eight hours to make a game, from Friday evening to Sunday evening, around one theme revealed at the opening: monsoon. Teams of one to four, any engine, any art style, and no experience needed. Several first-years made their first game ever.\n\nFourteen games were finished. Our favourites: a puzzle game about steering a paper boat through Kottayam's flooded streets, a rhythm game played on falling raindrops, and a very short horror game set on a night bus with a leaking roof. Gopika, an indie developer from Kochi, mentored teams all weekend and judged the final showcase.",
+      "guidelines": "Any engine or framework is allowed; you must start the project after the theme is revealed. Pre-made assets are fine if they are free to use and credited. The lab stays open overnight with admins on rotation; sleeping bags are allowed in Seminar Hall 1. All games are shown at the Sunday showcase, finished or not.",
+      "speakers": [
+        {"name": "Sebin Kurian", "designation": "Game jam lead, Respawn Room", "bio": "Has entered eleven game jams and finished nine games, two of which he admits were playable."},
+        {"name": "Gopika Raveendran", "designation": "Indie game developer, Kochi", "bio": "Has shipped two small mobile games about Kerala buses and one about a very determined crow."}
+      ],
+      "agenda": [
+        {"at": "18:00", "title": "Opening and theme reveal", "by": "Sebin Kurian"},
+        {"at": "18:30", "title": "Team formation for solo arrivals", "by": null},
+        {"at": "19:00", "title": "Jamming begins", "by": null},
+        {"at": "21:00", "title": "Scope it down: a talk on finishing games", "by": "Gopika Raveendran"},
+        {"at": "23:00", "title": "Late-night chai. Sunday 4 p.m.: showcase and judging", "by": null}
+      ],
+      "questions": [
+        {"key": "skills", "label": "What can you bring to a team?", "type": "checkbox", "options": ["Programming", "Art", "Music and sound", "Writing", "Game design", "Not sure yet"], "required": true},
+        {"key": "has_team", "label": "Do you already have a team?", "type": "radio", "options": ["Yes", "No, please match me"], "required": true}
+      ],
+      "merch": ["hoodie", "stickers"],
+      "swag": [{"name": "Jam badge and sticker pack", "sponsor": null}, {"name": "Overnight snacks", "sponsor": "Kappa Corner, Kodimatha"}],
+      "feedback": {
+        "responses": 44,
+        "avg_rating": 4.8,
+        "comments": [
+          "Made my first game ever. It's bad and I love it.",
+          "Gopika's talk on scoping down saved our team on Saturday night.",
+          "The paper-boat game deserved to win, honestly.",
+          "Seminar Hall 1 was freezing at 3 a.m. Bring blankets next time, people.",
+          "Being matched into a team as a solo arrival worked really well."
+        ]
+      },
+      "live": {
+        "poll": {"question": "Favourite game of the showcase?", "options": ["Paper boat puzzle", "Raindrop rhythm game", "Leaking bus horror", "Frog choir simulator"]},
+        "qna": [
+          "Which engine is best for a first game?",
+          "How do you make sound effects without equipment?",
+          "Can jam games be published afterwards?"
+        ]
+      },
+      "poster": {"headline": "Game Jam: Monsoon", "sub": "48 hours, any engine, no experience needed. Make a game with us."}
+    },
+    {
+      "slug": "rapid-chess-and-board-game-night",
+      "name": "Rapid Chess Open and Board Game Night",
+      "when": {"days_from_now": -20, "time": "17:00", "duration_hours": 5},
+      "format": "in_person",
+      "venue": {"name": "College Canteen Hall, Ponnila College", "address": "Ponnila College of Engineering, Kodimatha, Kottayam"},
+      "category": "Tournament",
+      "interests": ["gaming"],
+      "fee": 0,
+      "sold_out": false,
+      "capacity": 100,
+      "registrations": 92,
+      "attended_ratio": 0.8,
+      "certificates": true,
+      "about": "A break from screens. The first half of the evening was a seven-round rapid chess open, ten minutes plus five seconds a move, open to students, staff and anyone from Kottayam who turned up. The second half was board game night: Ludo, carrom, a Malayalam drawing-and-guessing game, and a strategy game a second-year brought back from Bengaluru that nobody fully understood but everyone enjoyed.\n\nForty-three players entered the chess open. Prof. Ranjith, our faculty advisor and the evening's favourite, lost in round two to a first-year from Civil, who went on to finish third. The canteen stayed open late and sold out of pazhampori by nine.",
+      "guidelines": "Chess: bring your own board if you have one; clocks are provided. Touch-move applies. Phones off at the board. Board games: just turn up; tables are first come, first served. Please return every carrom coin you find on the floor.",
+      "speakers": [
+        {"name": "Prof. Ranjith Mohan", "designation": "Faculty advisor, Respawn Room", "bio": "Organised the college's first chess club in 2015 and has been beaten by a first-year every year since."},
+        {"name": "Thomas Chummar", "designation": "Chess arbiter", "bio": "Has arbitrated district chess tournaments in Kottayam for ten years and can spot a touch-move dispute from across the hall."}
+      ],
+      "agenda": [
+        {"at": "17:00", "title": "Registration and pairings", "by": "Thomas Chummar"},
+        {"at": "17:20", "title": "Rapid chess, rounds one to four", "by": null},
+        {"at": "18:50", "title": "Pazhampori break", "by": null},
+        {"at": "19:10", "title": "Rapid chess, rounds five to seven", "by": "Thomas Chummar"},
+        {"at": "20:20", "title": "Prizes, then board game tables open", "by": "Prof. Ranjith Mohan"}
+      ],
+      "questions": [
+        {"key": "chess_or_games", "label": "What are you coming for?", "type": "radio", "options": ["The chess open", "Board games", "Both"], "required": true},
+        {"key": "chess_rating", "label": "Online rapid rating, if you have one", "type": "number", "required": false}
+      ],
+      "merch": ["stickers"],
+      "swag": [{"name": "Chess open medals for the top three", "sponsor": null}],
+      "feedback": {
+        "responses": 49,
+        "avg_rating": 4.6,
+        "comments": [
+          "Watching a first-year beat Ranjith sir was worth the whole semester.",
+          "The Malayalam drawing game got very loud and very funny.",
+          "Pairings for round one took a while; maybe print them in advance.",
+          "Lovely to have a gaming event without screens for once."
+        ]
+      },
+      "live": null,
+      "poster": {"headline": "Rapid Chess Open", "sub": "Seven rounds of rapid chess, then board games till late. Open to all."}
+    },
+    {
+      "slug": "womens-lab-night-open-scrims",
+      "name": "Women's Lab Night: Open Scrims",
+      "when": {"days_from_now": 7, "time": "18:00", "duration_hours": 3},
+      "format": "in_person",
+      "venue": {"name": "Respawn Room gaming lab, Ponnila College", "address": "Ponnila College of Engineering, Kodimatha, Kottayam"},
+      "category": "Meetup",
+      "interests": ["e-sports", "gaming"],
+      "fee": 0,
+      "sold_out": false,
+      "capacity": 40,
+      "registrations": 26,
+      "attended_ratio": null,
+      "certificates": null,
+      "about": "Our Thursday women's lab slot, opened up to women gamers from every college in Kottayam. The first hour is practice scrims in mixed-skill teams, so complete beginners play alongside league players. The second hour is a short session from Shilpa, who started on these exact lab PCs as a first-year and now plays semi-professionally.\n\nAfter that, the lab is yours: try any game installed, ask the women's team anything, or sign up for a spot on next semester's league roster. No experience needed and no judgement, ever.",
+      "guidelines": "Open to women and non-binary students from any college; bring a college ID. Headsets are available, but bring your own if you have one. The lab's code of conduct applies, and our women's team admins run the evening.",
+      "speakers": [
+        {"name": "Merlin Babu", "designation": "Women's team captain, Respawn Room", "bio": "Led the women's team to two league titles this year and still plays support because nobody else wants to."},
+        {"name": "Shilpa Narayan", "designation": "Semi-professional tactical shooter player", "bio": "Started on the Respawn Room lab PCs as a first-year and now plays for a women's team in a national league."}
+      ],
+      "agenda": [
+        {"at": "18:00", "title": "Mixed-skill practice scrims", "by": "Merlin Babu"},
+        {"at": "19:00", "title": "From the college lab to a national league", "by": "Shilpa Narayan"},
+        {"at": "19:40", "title": "Free play and league roster sign-ups", "by": null}
+      ],
+      "questions": [
+        {"key": "experience", "label": "How much do you play?", "type": "radio", "options": ["I'm new", "Casually", "Competitively"], "required": true},
+        {"key": "college", "label": "Your college", "type": "text", "required": true}
+      ],
+      "merch": ["jersey", "stickers"],
+      "swag": [{"name": "Sticker pack", "sponsor": null}],
+      "feedback": null,
+      "live": null,
+      "poster": {"headline": "Women's Lab Night", "sub": "Open scrims for women gamers from every Kottayam college. No experience needed."}
+    },
+    {
+      "slug": "royale-rumble-online-qualifiers",
+      "name": "Royale Rumble: Inter-College Mobile Battle Royale",
+      "when": {"days_from_now": 21, "time": "19:00", "duration_hours": 4},
+      "format": "online",
+      "venue": null,
+      "category": "Tournament",
+      "interests": ["e-sports", "gaming", "content-creation"],
+      "fee": 0,
+      "sold_out": false,
+      "capacity": 120,
+      "registrations": 96,
+      "attended_ratio": null,
+      "certificates": null,
+      "about": "Thirty squads of four from colleges across Kerala, four matches, one night, all on mobile. Points come from placement and eliminations, and the top eight squads go through to a LAN final at Pixelpura Gaming Cafe next semester.\n\nEvery match is streamed with Malayalam commentary by Fidha and Abhay. Squads play from wherever they are, with an admin in every lobby and a verified college ID for every player. Free to enter, because entry fees keep mobile players out more than anyone else.",
+      "guidelines": "Register each player separately with the same squad name. Every player needs a verified college ID uploaded before the day. Emulators are not allowed; phones and tablets only. Lobby codes are shared thirty minutes before each match in the event chat. Teaming with other squads means instant disqualification.",
+      "speakers": [
+        {"name": "Nabeel Ahammed", "designation": "Tournament admin, Respawn Room", "bio": "Will be in every lobby with a stopwatch and the rulebook, and has already written the tie-break rules twice."},
+        {"name": "Fidha Rahman", "designation": "Streams and content, Respawn Room", "bio": "Casts in Malayalam with a commentary style the chat describes as 'mother scolding her children, but proud'."}
+      ],
+      "agenda": [
+        {"at": "19:00", "title": "Lobby check-in and ID verification", "by": "Nabeel Ahammed"},
+        {"at": "19:30", "title": "Match one", "by": "Fidha Rahman"},
+        {"at": "20:10", "title": "Match two", "by": null},
+        {"at": "20:50", "title": "Match three", "by": null},
+        {"at": "21:30", "title": "Match four and final standings", "by": "Fidha Rahman"}
+      ],
+      "questions": [
+        {"key": "squad_name", "label": "Squad name (same for all four players)", "type": "text", "required": true},
+        {"key": "in_game_id", "label": "Your in-game ID", "type": "text", "required": true},
+        {"key": "device", "label": "Your device", "type": "radio", "options": ["Android phone", "iPhone", "Tablet"], "required": true}
+      ],
+      "merch": ["jersey", "hoodie"],
+      "swag": [{"name": "LAN final spots for the top eight squads", "sponsor": "Pixelpura Gaming Cafe"}],
+      "feedback": null,
+      "live": null,
+      "poster": {"headline": "Royale Rumble", "sub": "Thirty squads, four matches, one night. Inter-college mobile battle royale."}
+    },
+    {
+      "slug": "respawn-cup-season-4-finals",
+      "name": "Respawn Cup Season 4: LAN Finals",
+      "when": {"days_from_now": 44, "time": "10:00", "duration_hours": 10},
+      "format": "in_person",
+      "venue": {"name": "Respawn Room gaming lab, Ponnila College", "address": "Ponnila College of Engineering, Kodimatha, Kottayam"},
+      "category": "Tournament",
+      "interests": ["e-sports", "gaming"],
+      "fee": 300,
+      "sold_out": true,
+      "capacity": 80,
+      "registrations": 80,
+      "attended_ratio": null,
+      "certificates": null,
+      "about": "The Respawn Cup is back for Season 4, and for the first time there are two brackets: an open bracket of twelve teams and a women's bracket of four, played side by side in the same lab on the same day. All sixteen team slots filled within a week of opening.\n\nIf you didn't get a slot, come and watch. Spectator seating in Seminar Hall 1 is free, with the matches on the big screen and Abhay and Fidha on commentary. The stream runs all day for anyone who can't make it to Kodimatha.",
+      "guidelines": "Team registrations are closed. Registered teams check in by 9:30 with college IDs for every player. Bring your own peripherals; machines are identical and provided. Spectators: no registration needed, seating is first come, first served, and the code of conduct applies to the crowd too.",
+      "speakers": [
+        {"name": "Athul Krishna", "designation": "President, Respawn Room", "bio": "Has played in every Respawn Cup and is organising this one instead, which he says is harder than any grand final."},
+        {"name": "Abhay Varkey", "designation": "Shoutcaster", "bio": "Back on the desk after casting the Season 3 grand final, and still hoarse from it."}
+      ],
+      "agenda": [
+        {"at": "10:00", "title": "Check-in and setup", "by": null},
+        {"at": "10:45", "title": "Open bracket round one; women's semi-finals", "by": "Abhay Varkey"},
+        {"at": "13:00", "title": "Lunch", "by": null},
+        {"at": "14:00", "title": "Open bracket quarter-finals and semi-finals", "by": "Abhay Varkey"},
+        {"at": "17:15", "title": "Women's bracket final", "by": null},
+        {"at": "18:30", "title": "Open bracket grand final and trophies", "by": "Athul Krishna"}
+      ],
+      "questions": [
+        {"key": "team_name", "label": "Team name", "type": "text", "required": true},
+        {"key": "bracket", "label": "Bracket", "type": "radio", "options": ["Open", "Women's"], "required": true},
+        {"key": "in_game_name", "label": "Your in-game name", "type": "text", "required": true}
+      ],
+      "merch": ["jersey", "hoodie", "lanyard"],
+      "swag": [{"name": "Finalist jerseys", "sponsor": null}, {"name": "Free hours for the winning teams", "sponsor": "Pixelpura Gaming Cafe"}],
+      "feedback": null,
+      "live": null,
+      "poster": {"headline": "Respawn Cup S4", "sub": "LAN finals with an open and a women's bracket. Spectators free."}
+    }
+  ],
+  "threads": [
+    {"days_ago": 2, "kind": "announcement", "text": "Royale Rumble registrations are open: thirty squads of four, four matches in one night, all online, free to enter. Top eight squads go to a LAN final at Pixelpura next semester. Every player needs a verified college ID, so upload yours early.", "likes": 143, "comments": [{"text": "Free entry for mobile players. This is how it should be."}, {"text": "Can a squad mix players from two colleges?"}, {"text": "No, one college per squad this time, so it stays inter-college."}]},
+    {"days_ago": 4, "kind": "announcement", "text": "Respawn Cup Season 4 is full: twelve open teams and four in the first-ever women's bracket. Spectator seating in Seminar Hall 1 is free on the day, and the whole thing streams with Malayalam and English commentary.", "likes": 118, "comments": [{"text": "A women's bracket at last. Merlin, we're coming for it."}, {"text": "Missed the slot by a day. See you in the crowd."}]},
+    {"days_ago": 9, "kind": "poll", "text": "Next semester's internal league is adding one more game. Which should it be?", "options": ["A fighting game", "A racing game", "A card battler", "Rapid chess league"], "likes": 87, "comments": [{"text": "Fighting game. The lab needs more shouting."}, {"text": "Chess league, so Ranjith sir can get his revenge."}, {"text": "Racing, we've got the wheels gathering dust in the storeroom."}]},
+    {"days_ago": 15, "kind": "post", "text": "Chess night report: forty-three players, seven rounds, and one upset the whole canteen will remember. Prof. Ranjith lost in round two to a first-year from Civil, who went on to finish third. The canteen sold out of pazhampori by nine. Results and photos are on the event page.", "likes": 102, "comments": [{"text": "I was the first-year. Still shaking."}, {"text": "Sir took it so sportingly. Respect."}]},
+    {"days_ago": 22, "kind": "post", "text": "Gentle reminder about lab rules as exams get closer. The lab closes at 11 p.m. on weeknights, no exceptions. During exam weeks there are no tournaments and the lab opens only in the evenings. If gaming is eating into your studies, talk to any of the core team quietly; we have peer mentors who've been there.", "likes": 64, "comments": [{"text": "Respect for the peer mentor thing. Not many clubs would say this."}, {"text": "11 p.m. is fair. My parents thank you."}]},
+    {"days_ago": 30, "kind": "poll", "text": "Should the lab open on Sunday mornings for casual play?", "options": ["Yes, 9 to 1", "Yes, but only once a month", "No, keep Sundays free"], "likes": 55, "comments": [{"text": "Sunday mornings would be perfect for the day scholars."}, {"text": "Once a month so the admins get a break too."}]},
+    {"days_ago": 41, "kind": "post", "text": "All fourteen games from the Monsoon game jam are now playable from the club page. Our picks: the paper boat puzzle, the raindrop rhythm game, and the bus-leak horror game, which you should not play alone at night. Leave the teams some feedback; most of them made their first game ever.", "likes": 91, "comments": [{"text": "The bus horror game got me. I screamed in the hostel."}, {"text": "Paper boat game deserves a full release."}, {"text": "Already planning next year's jam team."}]}
+  ]
+}

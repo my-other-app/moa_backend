@@ -1,0 +1,203 @@
+# The demo: reset, seed, remove
+
+Three scripts for showing MyOtherApp to clubs with real-looking data:
+
+| Script | What it does |
+|---|---|
+| `python -m scripts.demo.reset` | Wipes the database except the admin accounts and the reference data. |
+| `python -m scripts.demo.seed` | Seeds the 8 demo clubs in `data/clubs/`, fully public, plus a main demo user. One club, Respawn Room, is the **showcase**: every section of the clubs dashboard has data. |
+| `python -m scripts.demo.remove` | Removes the demo and only the demo, when real clubs arrive. |
+
+They run on the server, inside the backend container. Every command below starts there:
+
+```sh
+cd /var/www/myotherapp-production
+DC="sudo docker-compose -f docker-compose.prod.yml"
+```
+
+Always use `$DC exec -T backend ...`. Never `docker-compose run`: it starts a second backend.
+
+## Safety, in short
+
+- **Reset and remove are dry runs by default.** They change something only when given all three of:
+  - `--execute`;
+  - `--confirm <database name>`, which must match the database exactly (the dry run prints the name);
+  - `APP_DEMO_RESET_ALLOWED=1` in the environment.
+- **Each runs in one transaction,** checked before the commit. If anything is off, nothing changes.
+- **The seed sends nothing.** No email, push, SMS, Discord post or admin alert goes out, and it writes no job for the workers to pick up (`quiet.py`).
+- **Fake people stay unreachable afterwards.** Every invented person is at `demo.myotherapp.in`. The mailer and the push sender skip that domain permanently (`APP_MAIL_SUPPRESS_DOMAINS`), so reminders, surveys and billing mails never reach them.
+- **No real money.** The seed makes no Razorpay order. Paid tickets and store orders are recorded as paid at the desk, in cash, as the walk-up desk records them, with the ledger lines the desk writes.
+  - An upcoming paid event is always sold out, so nobody can buy a ticket.
+  - The store is shown only on past events.
+- **Nobody from the public can register for a demo event.** By default every upcoming demo event is full: its capacity is set to the registrations the seed made, the main user's included. A real student who found one would otherwise register, get a ticket email and turn up at a venue where nothing is happening. The post-seed checks fail if any upcoming demo event still has a place. Pass `--open-registration` only for a private rehearsal where you want to show the registration flow on a free event.
+- **The bucket (S3) is never touched** by reset or remove.
+
+## Before you start
+
+1. Deploy this branch. The backend mounts `./backend`, so a `git pull` puts the scripts in the container. The mail guard (`APP_MAIL_SUPPRESS_DOMAINS`) needs the backend restarted to load, which any deploy does.
+2. Pick the main demo user's address. Use one at the demo domain, for example `demo@demo.myotherapp.in`. You sign in with its password; no mail is needed or sent.
+   - If you give a real address, it receives whatever a real user would: reminders for its tickets, and so on.
+   - The seed then also switches off the journey emails on the showcase's upcoming events.
+3. Choose two passwords: one for the main user, and one shared by every demo club's dashboard login.
+
+## 1. Back up
+
+Back up first. The reset cannot be undone except from a backup.
+
+```sh
+STAMP=$(date +%Y%m%d-%H%M)
+sudo mkdir -p /var/backups/myotherapp
+sudo docker exec doth-live-postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' \
+  | sudo tee /var/backups/myotherapp/before-demo-$STAMP.dump > /dev/null
+ls -lh /var/backups/myotherapp/before-demo-$STAMP.dump      # it should be several MB, not 0
+$DC exec -T backend python scripts/backup.py                # the daily backup too (copied off-site when that is set up)
+```
+
+### Restoring the backup
+
+Stop the API and the worker first so nothing writes during the restore, restore, then start them again:
+
+```sh
+$DC stop backend worker
+sudo docker exec -i doth-live-postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner' \
+  < /var/backups/myotherapp/before-demo-$STAMP.dump
+$DC start backend worker
+```
+
+The API returns 502 for about a minute while it starts.
+
+## 2. Reset: the dry run
+
+```sh
+$DC exec -T backend python -m scripts.demo.reset
+```
+
+It prints every table with its class and how many rows would go:
+
+- **KEEP:** `alembic_version`, the plans (`plans`, `plan_features`, `plan_limits`), the topics and interests (`interest_categories`, `interests`), the avatar choices (`user_avatars`), `badge_definitions`, `discover_stats`, `scheduled_runs` and `job_workers`.
+- **KEEP-FILTERED:**
+  - `users`: admin accounts only.
+  - What the admins sign in with: their profiles, interests, devices, sessions, notification settings, codes, sign-in attempts, and their audit trail.
+  - `event_categories`: the event types the product ships, plus any an admin added.
+- **WIPE:** everything else. That includes every club, every non-admin user, events, tickets, payments, the ledger, threads, organisations, notifications and queued jobs.
+
+Check the "would go" column. The last lines print the exact command to execute.
+
+If a table is not classified (one added by a newer migration), the reset refuses and names it. Classify it in `reset.py` first.
+
+## 3. Reset: execute
+
+```sh
+$DC exec -T -e APP_DEMO_RESET_ALLOWED=1 backend python -m scripts.demo.reset --execute --confirm <database name>
+```
+
+It ends with `Done: N rows removed ... 1 admin account(s) kept.`
+
+If it says `lock_timeout`, something held a table. Run it again.
+
+When search is set up (`APP_SEARCH_URL`), rebuild the index:
+
+```sh
+$DC exec -T backend python scripts/search_reindex.py
+```
+
+## 4. Seed
+
+```sh
+$DC exec -T backend python -m scripts.demo.seed \
+  --main-email demo@demo.myotherapp.in --main-password '<main password>' --club-password '<club password>'
+```
+
+Notes:
+
+- It takes about 5 minutes. It prints a line per club, then a summary and a **CREDENTIALS** block. Copy that block somewhere safe: it is not written anywhere.
+- It refuses to run if any club exists. Reset first, or pass `--force` to seed beside real clubs.
+- `--showcase <slug>` picks a different showcase club. `--showcase ''` seeds none.
+- `--open-registration` leaves the free upcoming events open to anyone. It is off by default, for the reason under "Safety, in short"; don't use it on production.
+- The summary ends with `safety checks passed`. If a safety check fails, the data is already written. Remove it (section 6), fix the cause, and seed again.
+
+### What you get
+
+- **8 clubs.** Each has:
+  - a public page, cover, logo, team, partners and site at `{slug}.myotherapp.in`;
+  - 5 or 6 events, past and upcoming, with posters, agenda, speakers and questions;
+  - registrations with answers, check-ins, certificates, feedback and ratings, a live room, a store and swag;
+  - posts with polls, likes and comments, and 860 to 2,560 followers;
+  - a ticket and a certificate in its own brand.
+- **The main user.** Registered for each club's next event, plus its latest past event (attended, with certificate). Follows every club and has an order handed over.
+- **Logins that work at once.** The main user, every club owner and the showcase's committee sign in straight away with no email-verification step: the accounts are marked verified, because their mail is suppressed and a code would never arrive.
+- **The showcase (Respawn Room).** Everything above, plus:
+  - committee logins with roles: admin, editor, door, and one invite still pending;
+  - sign-ins and sessions on Security;
+  - doors, a kiosk, volunteers checking people in, and ID cards printed;
+  - walk-ups paying cash, and one oversold store order;
+  - the game jam as a competition (tracks, teams, submissions, judges, finalists, mentor slots);
+  - a quiz and live updates;
+  - announcements, tracking links with clicks, journey emails, messages and the delivery log;
+  - expenses, sponsorship and grant income, the ID card and programme designs, and closeout reports.
+
+## 5. Verify
+
+Do these in a private window.
+
+1. **Public site:** `https://myotherapp.in`. The demo events show on the home page and under each topic.
+   - Open a club, for example `https://myotherapp.in/clubs/respawn-room`, and an event, for example `/events/respawn-cup-season-4-finals`.
+   - Open a club site: `https://respawn-room.myotherapp.in`.
+2. **API:**
+   ```sh
+   curl -s https://api.myotherapp.in/api/v1/discover/home | head -c 400
+   curl -s https://api.myotherapp.in/api/v1/discover/clubs/respawn-room | head -c 400
+   curl -s https://api.myotherapp.in/api/v1/discover/events/respawn-cup-season-4-finals | head -c 400
+   ```
+3. **Clubs dashboard:** `club-dashboard.myotherapp.in`. Sign in as `respawn-room@demo.myotherapp.in` with the club password and walk every section:
+   - Dashboard, Events (open a past one: attendees, check-ins, team and doors, store, swag, competition, live, emails, deliveries, ID cards, certificates, closeout);
+   - Finance, Followers, Announcements, Emails, Links, Website, Templates, Access, Security, Threads, Merchandise.
+   - Sign in as the admin or door member too: the dashboard shows only what their role allows.
+4. **App:** sign in as the main user. Check:
+   - My tickets: the upcoming ones, in each club's design;
+   - past events with certificates (open one: it renders in the club's design);
+   - followed clubs, and notifications.
+5. **Nothing was sent:** the summary's quiet-mode line shows no mail or push stopped (the oversold order's alert is expected and was stopped). The `jobs` table holds no demo jobs.
+
+## 6. Remove the demo later
+
+When real clubs are on the platform, remove the demo without touching them:
+
+```sh
+$DC exec -T backend python -m scripts.demo.remove                       # the dry run: what would go, table by table
+$DC exec -T -e APP_DEMO_RESET_ALLOWED=1 backend python -m scripts.demo.remove --execute --confirm <database name>
+```
+
+What counts as the demo:
+
+- **Clubs:** a club whose owner signs in as `<slug>@demo.myotherapp.in`.
+- **People:** any account (admins excepted) at `demo.myotherapp.in` or a subdomain.
+- **Events:** those clubs' events.
+- **Everything hanging off them,** found by following the database's foreign keys.
+- **The main demo user:** if its address is elsewhere, add `--main-email <address>`.
+
+The ledger's lines for those clubs go too, and the platform's monthly sums are recomputed. Real rows that merely pointed at a demo row (a report about a demo post) lose the pointer, not themselves. Afterwards, rebuild search as in step 3 if it is set up.
+
+## Rehearsing on a laptop
+
+```sh
+cd backend
+createdb moa_demo && APP_DATABASE_URL=postgresql+asyncpg://localhost/moa_demo APP_DATABASE_URL_SYNC=postgresql://localhost/moa_demo \
+  python -c 'import alembic.config; alembic.config.main(argv=["upgrade", "head"])'
+python -m scripts.demo.seed --main-email demo@demo.myotherapp.in --main-password DemoPass123! --club-password ClubPass123! \
+  --local-bucket /tmp/moa-bucket
+```
+
+`--local-bucket` keeps the pictures in a folder instead of S3. Never pass it on the server. `--include-example` also seeds `data/clubs/_example.json`, the tests' small club.
+
+## Files
+
+- `schema.py`: what a club file and `people.json` hold, and the rules (an upcoming paid event must be sold out; a contact address must be at the demo domain).
+- `seed.py`: the seed, its safety checks, and how dates snap to the weekday an event's words give it.
+- `showcase.py`: the extra data for the showcase club.
+- `designs.py`: the ticket, certificate, ID card and programme designs, in a club's brand.
+- `images.py`: the logos, covers, posters, product shots, portraits and artwork.
+- `quiet.py`: quiet mode.
+- `reset.py`, `remove.py`: the wipe and the removal.
+- `local_bucket.py`: a folder standing in for S3, for rehearsals and tests.
+- `data/`: the content (see `data/README.md`). Run `python3 data/check.py` after editing it.

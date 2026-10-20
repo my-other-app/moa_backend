@@ -1,0 +1,276 @@
+{
+  "slug": "thattukada-design-club",
+  "name": "Thattukada Design Club",
+  "tagline": "Honest design crits, served hot. Kochi's UI/UX and product design collective.",
+  "about": "Thattukada Design Club is named after the roadside food stalls that keep Kochi fed after dark: quick, hot, honest, and nobody cares what you're wearing. It began in 2021, when a handful of designers from agencies around MG Road started meeting at a thattukada near Kaloor to show each other work their bosses hadn't seen yet. The stall has gone. The habit stayed.\n\nToday we're a few hundred UI and UX designers, product designers, illustrators, researchers and developers who care about how things look and work. Our signature is the Friday Crit: three people put real work on the screen and the room gives ten minutes each of specific, kind, unsparing feedback. Around it we run portfolio reviews, research workshops, a yearly show of interfaces made in Kerala, and the occasional walk to look at signboards.\n\nWe care about design that works for the people around us: the auto driver on a cracked Android phone, the grandmother who reads in Malayalam, the shop owner who has never heard the word 'onboarding'. If that's your kind of problem, pull up a stool.",
+  "org": null,
+  "location": {"name": "Kaloor, Kochi", "lat": 9.9978, "lng": 76.2996},
+  "contact": {"email": "hello@thattukada-design-club.demo.myotherapp.in", "phone": "+91 90000 01303"},
+  "socials": {"instagram": "thattukada.design", "linkedin": "thattukada-design-club", "x": "thattukadadsgn"},
+  "topics": ["design"],
+  "interests": ["ui-ux", "product-design", "graphic-design"],
+  "brand": {"primary": "#E4572E", "accent": "#F3C63F", "ink": "#231F1A", "paper": "#FFF8EC", "display_font": "dm-serif", "motif": "blobs"},
+  "team": [
+    {"name": "Nimisha Paul", "role": "Founder and crit host", "bio": "Product designer for twelve years who started the club at a Kaloor tea stall and still times every crit on her phone."},
+    {"name": "Rahul Kesavadas", "role": "Co-host, research", "bio": "UX researcher who has interviewed more than four hundred shopkeepers and remembers most of their tea orders."},
+    {"name": "Aysha Nourin", "role": "Illustration and posters", "bio": "Draws every event poster by hand first, then argues with herself about the grid."},
+    {"name": "Sreeram Venkitachalam", "role": "Portfolio reviews", "bio": "Design manager who has hired thirty designers and reviews portfolios the way he wishes his had been reviewed."},
+    {"name": "Jincy Thomas", "role": "Community and partnerships", "bio": "Former agency producer who makes sure there are chairs, chai and a projector cable that works."},
+    {"name": "Arathi Vinod", "role": "Accessibility lead", "bio": "Front-end developer who tests every demo with a screen reader before anyone else sees it."}
+  ],
+  "partners": [
+    {"name": "Nilavelicham Studio", "role": "Venue partner", "since": 2022},
+    {"name": "Kozhukatta Type Foundry", "role": "Type partner", "since": 2024},
+    {"name": "Mashikuppi Press", "role": "Print partner", "since": 2023}
+  ],
+  "followers": 1680,
+  "merch": [
+    {"key": "tee", "name": "Be Kind, Be Specific tee", "description": "Off-white cotton tee with our crit rule set in a Malayalam-English display face drawn by Kozhukatta Type Foundry.", "price": 599, "kind": "tee", "color": "#FFF8EC", "sizes": {"S": 16, "M": 28, "L": 26, "XL": 12}, "stock": null},
+    {"key": "tote", "name": "Thattukada tote", "description": "Heavy canvas tote printed with our tea-glass blob. Fits a 16-inch laptop and a packet of banana chips.", "price": 449, "kind": "tote", "color": "#E4572E", "sizes": null, "stock": 80},
+    {"key": "notebook", "name": "Wireframe pad", "description": "A4 dot-grid pad with phone and desktop frames printed lightly in the margins. Eighty tear-off sheets.", "price": 249, "kind": "notebook", "color": "#F3C63F", "sizes": null, "stock": 150}
+  ],
+  "events": [
+    {
+      "slug": "signboard-safari-mattancherry",
+      "name": "Signboard Safari: A Type Walk Through Mattancherry",
+      "when": {"days_from_now": -88, "time": "07:00", "duration_hours": 3},
+      "format": "in_person",
+      "venue": {"name": "Start of Bazaar Road", "address": "Bazaar Road, Mattancherry, Kochi 682002"},
+      "category": "Meetup",
+      "interests": ["graphic-design"],
+      "fee": 0,
+      "sold_out": false,
+      "capacity": 40,
+      "registrations": 39,
+      "attended_ratio": 0.85,
+      "certificates": false,
+      "about": "A slow Sunday-morning walk through Mattancherry and Fort Kochi, looking at letters: hand-painted shop signs, enamel boards, Malayalam stencilled on spice-warehouse doors, Gujarati on old trading houses, and tea-shop menus with the same prices painted over for decades. Aysha leads with a sketchbook and stops every few hundred metres to explain why a letter is shaped the way it is.\n\nHalfway through, we visit a sign painter who has worked in Mattancherry since 1989. We end at Nilavelicham Studio with appam and stew, and a short session where everyone redraws one sign they saw as a digital wordmark.",
+      "guidelines": "Meet at 6:50 at the start of Bazaar Road; we leave at 7:00 sharp to beat the heat. The walk is about three kilometres on uneven pavements, so wear comfortable footwear. Ask before photographing people, and please don't touch or lean on old boards; some are held up by habit.",
+      "speakers": [
+        {"name": "Aysha Nourin", "designation": "Illustrator and letterer, Thattukada Design Club", "bio": "Has photographed more than two thousand Kerala shop signs and is writing a small book about the painters behind them."},
+        {"name": "Pradeep Chandrasekharan", "designation": "Sign painter, Mattancherry", "bio": "Has painted shop boards in Mattancherry since 1989 and still mixes his own enamel colours."}
+      ],
+      "agenda": [
+        {"at": "07:00", "title": "Bazaar Road: enamel boards and warehouse doors", "by": "Aysha Nourin"},
+        {"at": "07:45", "title": "Inside a working sign painter's studio", "by": "Pradeep Chandrasekharan"},
+        {"at": "08:30", "title": "Fort Kochi tea-shop menus", "by": "Aysha Nourin"},
+        {"at": "09:15", "title": "Breakfast and redraw-a-sign session", "by": null}
+      ],
+      "questions": [
+        {"key": "sketch_with", "label": "What do you usually sketch with?", "type": "select", "options": ["Pencil and paper", "A tablet", "Laptop only", "I don't sketch yet"], "required": false},
+        {"key": "breakfast", "label": "Staying for breakfast?", "type": "radio", "options": ["Yes", "No, I'll leave after the walk"], "required": true}
+      ],
+      "merch": ["tote", "notebook"],
+      "swag": [{"name": "Pocket sketchbook", "sponsor": "Mashikuppi Press"}],
+      "feedback": {
+        "responses": 28,
+        "avg_rating": 4.9,
+        "comments": [
+          "I've walked Bazaar Road a hundred times and never looked up. It changed how I see the city.",
+          "Watching Pradeep chettan mix enamel by hand was the highlight of my month.",
+          "A little early for those of us coming from Aluva, but worth every minute.",
+          "The redraw session was a lovely way to end. I made my first Malayalam wordmark."
+        ]
+      },
+      "live": null,
+      "poster": {"headline": "Signboard Safari", "sub": "A Sunday type walk through Mattancherry's hand-painted signs."}
+    },
+    {
+      "slug": "designing-for-the-cracked-screen",
+      "name": "Designing for the Cracked Screen",
+      "when": {"days_from_now": -47, "time": "10:00", "duration_hours": 6},
+      "format": "in_person",
+      "venue": {"name": "Nilavelicham Studio", "address": "1st floor, Princess Street, Fort Kochi, Kochi 682001"},
+      "category": "Workshop",
+      "interests": ["ui-ux", "product-design"],
+      "fee": 349,
+      "sold_out": false,
+      "capacity": 50,
+      "registrations": 47,
+      "attended_ratio": 0.89,
+      "certificates": true,
+      "about": "Most people using the apps we design aren't holding a new flagship. They're on a four-year-old phone with a cracked corner, brightness turned down to save battery, the font size set to large, and a network that drops in the lift. This workshop puts you in their shoes: we hand out a box of old phones with real cracks and ask you to finish five everyday tasks in apps you know.\n\nAfter a morning of frustration, Arathi takes you through practical fixes: touch targets, contrast, Malayalam text that doesn't clip, loading states, and screens that still make sense at double the font size. In the afternoon, teams redesign one painful flow and test it on the same phones.",
+      "guidelines": "Bring a laptop with your usual design tool. We provide the test phones; please return each one in the case it came in. Lunch, tea and snacks are covered by the fee. Certificates go to everyone who presents a redesign in the final session.",
+      "speakers": [
+        {"name": "Arathi Vinod", "designation": "Accessibility lead, Thattukada; front-end developer", "bio": "Tests every interface with a screen reader and a phone set to its largest font, and files the bugs nobody else finds."},
+        {"name": "Sajan Mukundan", "designation": "Product designer, rural lending app", "bio": "Designs a loan app used by self-help groups in Palakkad and Thrissur, and once watched a user tap a disabled button nineteen times."}
+      ],
+      "agenda": [
+        {"at": "10:00", "title": "The box of broken phones: five tasks", "by": null},
+        {"at": "11:00", "title": "What we saw, and why it happens", "by": "Sajan Mukundan"},
+        {"at": "11:30", "title": "Fixes that work: targets, contrast, script and scale", "by": "Arathi Vinod"},
+        {"at": "13:00", "title": "Lunch", "by": null},
+        {"at": "13:45", "title": "Team redesign of one painful flow", "by": null},
+        {"at": "15:15", "title": "Test it on the same phones", "by": null},
+        {"at": "15:45", "title": "Show, tell and certificates", "by": null}
+      ],
+      "questions": [
+        {"key": "role", "label": "What best describes your work?", "type": "select", "options": ["UI or UX designer", "Product designer", "Developer", "Researcher", "Student"], "required": true},
+        {"key": "design_tool", "label": "Which design tool will you bring?", "type": "text", "required": false}
+      ],
+      "merch": ["tee", "notebook"],
+      "swag": [
+        {"name": "Accessibility checklist card", "sponsor": null},
+        {"name": "Malayalam UI type specimen", "sponsor": "Kozhukatta Type Foundry"}
+      ],
+      "feedback": {
+        "responses": 37,
+        "avg_rating": 4.8,
+        "comments": [
+          "Paying a bill on a cracked phone at 30% brightness was humbling. No more grey-on-grey buttons from me.",
+          "The section on Malayalam text clipping was gold. Nobody talks about it.",
+          "The afternoon felt short for a full redesign plus testing.",
+          "Sajan's nineteen-taps story is now a sticky note on my monitor.",
+          "Great lunch, great room, great people."
+        ]
+      },
+      "live": {
+        "poll": {"question": "Which task was hardest on the old phones?", "options": ["Paying an electricity bill", "Booking a bus ticket", "Filling in a KYC form", "Finding a saved address"]},
+        "qna": [
+          "How do you convince a product manager to prioritise accessibility?",
+          "What's a safe minimum size for Malayalam body text?",
+          "Do skeleton screens actually help on slow networks?"
+        ]
+      },
+      "poster": {"headline": "Designing for the Cracked Screen", "sub": "A hands-on day with old phones, real tasks and fixes that work."}
+    },
+    {
+      "slug": "kerala-interface-show-2026",
+      "name": "The Kerala Interface Show 2026",
+      "when": {"days_from_now": -13, "time": "16:00", "duration_hours": 5},
+      "format": "in_person",
+      "venue": {"name": "Godown 7, Calvetty", "address": "Calvetty Road, Fort Kochi, Kochi 682001"},
+      "category": "Exhibition",
+      "interests": ["ui-ux", "product-design", "graphic-design"],
+      "fee": 0,
+      "sold_out": false,
+      "capacity": 150,
+      "registrations": 132,
+      "attended_ratio": 0.78,
+      "certificates": false,
+      "about": "Our yearly show of interfaces made in Kerala, printed big and pinned to the walls of an old godown in Calvetty. Twenty-six projects this year: a fish auction app used at Munambam harbour, a ticketing kiosk for a temple festival, the ordering system of a Kozhikode biryani chain, an attendance app for teachers who would rather not use apps, and many more. Every wall shows the before, the after and the messy middle.\n\nDesigners stood by their work all evening to walk anyone through it. At seven, three of them gave short talks on the one decision they'd most like to undo. People's Choice went to the school attendance app, by a margin of eleven votes.",
+      "guidelines": "Free and open to all. The godown is up one flight of stairs, with a ramp at the side entrance. Photography is welcome, but credit the designers when you post. People's Choice voting closes at 8:30.",
+      "speakers": [
+        {"name": "Nimisha Paul", "designation": "Founder, Thattukada Design Club", "bio": "Curates the show every year and personally pins up every print, usually with a crooked one she refuses to fix."},
+        {"name": "Hari Govindan", "designation": "Lead designer, school attendance app", "bio": "Spent a year in government school staff rooms in Kollam watching teachers take attendance before designing anything."},
+        {"name": "Faseela Kunhammed", "designation": "Designer, fish auction app", "bio": "Learned the hand signals of the Munambam auction floor before she drew a single screen."}
+      ],
+      "agenda": [
+        {"at": "16:00", "title": "Doors open, walls open", "by": null},
+        {"at": "17:30", "title": "Walk-throughs with the designers", "by": null},
+        {"at": "19:00", "title": "Talks: the decision I'd undo", "by": "Hari Govindan"},
+        {"at": "20:30", "title": "People's Choice voting closes", "by": null},
+        {"at": "20:45", "title": "Results and closing", "by": "Nimisha Paul"}
+      ],
+      "questions": [
+        {"key": "exhibiting", "label": "Are you showing work at the show?", "type": "radio", "options": ["Yes, I'm exhibiting", "No, I'm visiting"], "required": true}
+      ],
+      "merch": ["tee", "tote"],
+      "swag": [{"name": "Printed show catalogue", "sponsor": "Mashikuppi Press"}],
+      "feedback": {
+        "responses": 61,
+        "avg_rating": 4.6,
+        "comments": [
+          "Seeing the before and after side by side, at that size, is something no online case study gives you.",
+          "The fish auction app blew my mind. Hand signals as an input method!",
+          "Too crowded around seven. Maybe split the talks into two slots?",
+          "Lovely to see so much work from outside Kochi this year.",
+          "Please print the catalogue again; I'd happily buy one."
+        ]
+      },
+      "live": {
+        "poll": {"question": "People's Choice: which project changed your mind about something?", "options": ["School attendance app", "Fish auction app", "Temple festival kiosk", "Biryani ordering system"]},
+        "qna": [
+          "How did you test with teachers who didn't want an app at all?",
+          "How does the auction app handle two bids at the same moment?",
+          "How do you pitch design work to a family-run business?"
+        ]
+      },
+      "poster": {"headline": "The Kerala Interface Show", "sub": "Twenty-six interfaces made in Kerala, printed big, in a Calvetty godown."}
+    },
+    {
+      "slug": "friday-crit-87",
+      "name": "Friday Crit #87: Bring Your Messy Work",
+      "when": {"days_from_now": 5, "time": "18:30", "duration_hours": 2.5},
+      "format": "in_person",
+      "venue": {"name": "Nilavelicham Studio", "address": "1st floor, Princess Street, Fort Kochi, Kochi 682001"},
+      "category": "Meetup",
+      "interests": ["ui-ux", "product-design"],
+      "fee": 0,
+      "sold_out": false,
+      "capacity": 45,
+      "registrations": 31,
+      "attended_ratio": null,
+      "certificates": null,
+      "about": "Friday Crit is the oldest thing we do. Three people put real, unfinished work on the screen and get ten minutes each of specific, kind, unsparing feedback from the room. No polished case studies and no portfolio pieces. The messier the better: half-done flows, research you're unsure of, a logo you've stared at for too long.\n\nThis week's slots are open to anyone, first-timers included. If you'd rather just listen, come anyway. Most people do that for a few weeks before they present.",
+      "guidelines": "Want to present? Answer the slot question in the form and we'll confirm by Wednesday. Keep it to one problem and ten minutes. Feedback follows our rules: be specific, critique the work and not the person, and say one thing that works before one that doesn't.",
+      "speakers": [
+        {"name": "Nimisha Paul", "designation": "Founder and crit host", "bio": "Has hosted eighty-six Friday Crits and still writes each piece of feedback on an index card for the presenter to keep."},
+        {"name": "Rahul Kesavadas", "designation": "Co-host, research", "bio": "Brings the research questions to every crit, usually starting with 'who did you watch use this?'"}
+      ],
+      "agenda": [
+        {"at": "18:30", "title": "Chai and settling in", "by": null},
+        {"at": "18:45", "title": "Crit one", "by": null},
+        {"at": "19:05", "title": "Crit two", "by": null},
+        {"at": "19:25", "title": "Crit three", "by": null},
+        {"at": "19:45", "title": "Open floor: one question you're stuck on", "by": "Rahul Kesavadas"}
+      ],
+      "questions": [
+        {"key": "present", "label": "Would you like a presenting slot?", "type": "radio", "options": ["Yes, I have work to show", "Not this time"], "required": true},
+        {"key": "topic", "label": "If yes, what will you show, in one line?", "type": "text", "required": false}
+      ],
+      "merch": ["notebook"],
+      "swag": [{"name": "Your feedback, on index cards", "sponsor": null}],
+      "feedback": null,
+      "live": null,
+      "poster": {"headline": "Friday Crit #87", "sub": "Bring your messy work. Ten minutes of specific, kind, honest feedback."}
+    },
+    {
+      "slug": "research-in-the-wild-ernakulam-market",
+      "name": "Research in the Wild: Two Days at Ernakulam Market",
+      "when": {"days_from_now": 40, "time": "08:00", "duration_hours": 33},
+      "format": "in_person",
+      "venue": {"name": "Nilavelicham Studio", "address": "1st floor, Princess Street, Fort Kochi, Kochi 682001"},
+      "category": "Workshop",
+      "interests": ["ui-ux", "product-design"],
+      "fee": 1800,
+      "sold_out": true,
+      "capacity": 20,
+      "registrations": 20,
+      "attended_ratio": null,
+      "certificates": null,
+      "about": "A two-day research intensive for designers who have run plenty of surveys and very few real conversations. On Saturday morning, Rahul teaches the basics of contextual inquiry in the studio; then the group heads to Ernakulam Market in pairs to watch how vendors take orders, keep track of credit and deal with digital payments. On Sunday we turn the notes into findings and argue about what they mean.\n\nThere are only twenty seats, because each pair needs a mentor close by. The fee covers two lunches, travel between the studio and the market, a printed field kit, and a stipend paid to every vendor who gives us their time.",
+      "guidelines": "Wear light clothes and expect heat. Speak whichever language the vendor speaks; pairs are arranged so at least one person speaks Malayalam. Never record audio or take photos without asking, and never during a sale. Mentors hand out the vendor stipends, not participants.",
+      "speakers": [
+        {"name": "Rahul Kesavadas", "designation": "UX researcher; co-host, Thattukada", "bio": "Runs research for a Kochi health start-up and has spent more hours in Kerala markets than in meeting rooms."},
+        {"name": "Dr. Mini Abraham", "designation": "Anthropologist", "bio": "Has studied Kerala's wholesale markets for fifteen years and teaches designers how to listen without leading."}
+      ],
+      "agenda": [
+        {"at": "08:00", "title": "Field kits and pairing", "by": null},
+        {"at": "08:30", "title": "Contextual inquiry in two hours", "by": "Rahul Kesavadas"},
+        {"at": "10:30", "title": "To the market", "by": null},
+        {"at": "13:30", "title": "Lunch and first impressions", "by": null},
+        {"at": "15:00", "title": "Second round at the market", "by": null},
+        {"at": "18:00", "title": "Day one debrief. Sunday: synthesis, findings and a talk-back with vendors", "by": "Dr. Mini Abraham"}
+      ],
+      "questions": [
+        {"key": "languages", "label": "Which languages can you hold a conversation in?", "type": "checkbox", "options": ["Malayalam", "English", "Tamil", "Hindi", "Another language"], "required": true},
+        {"key": "field_experience", "label": "Have you done in-person research before?", "type": "radio", "options": ["Never", "Once or twice", "Regularly"], "required": true}
+      ],
+      "merch": ["tote", "notebook"],
+      "swag": [{"name": "Printed field kit", "sponsor": null}],
+      "feedback": null,
+      "live": null,
+      "poster": {"headline": "Research in the Wild", "sub": "Two days at Ernakulam Market. Learn to watch, listen and not lead."}
+    }
+  ],
+  "threads": [
+    {"days_ago": 3, "kind": "announcement", "text": "Friday Crit #87 is on at Nilavelicham Studio. Two of the three slots are taken: a bus-pass renewal flow and a logo for a Thrissur bakery that has had four rounds of 'make it pop'. One slot left. Answer the question in the form if you want it.", "likes": 47, "comments": [{"text": "Four rounds of 'make it pop'. I feel this in my bones."}, {"text": "Coming to listen. First crit for me!"}, {"text": "Can I bring a research plan instead of screens?"}]},
+    {"days_ago": 7, "kind": "announcement", "text": "Research in the Wild filled up in a day. We kept it at twenty because every pair needs a mentor nearby in the market. Join the waitlist on the event page; if enough people do, we'll run it again in January with a different market.", "likes": 58, "comments": [{"text": "January, please. Broadway market next time?"}, {"text": "On the waitlist. Fingers crossed."}]},
+    {"days_ago": 11, "kind": "post", "text": "The Kerala Interface Show, by the numbers: 26 projects, 103 visitors, three brave talks, 214 People's Choice votes, and one print that fell off the wall twice. People's Choice went to Hari Govindan's school attendance app. All the boards are now on the club page.", "likes": 132, "comments": [{"text": "The attendance app deserved it. That research was something else."}, {"text": "Will the show travel to Kozhikode next year?"}, {"text": "The crooked print is tradition now."}]},
+    {"days_ago": 16, "kind": "poll", "text": "What should our next workshop be about?", "options": ["Usability testing on a budget", "Design systems for small teams", "Writing UI copy in Malayalam", "Motion and micro-interactions"], "likes": 64, "comments": [{"text": "UI copy in Malayalam. Every app gets this wrong."}, {"text": "Design systems, we're a team of two and it's chaos."}]},
+    {"days_ago": 22, "kind": "post", "text": "Signboard of the week, found by Aysha in Thoppumpady: a tailoring shop board where the Malayalam and the English share one hand-painted baseline, and the scissors double as the letter 'ka'. Whoever painted this was a type designer and didn't know it.", "likes": 89, "comments": [{"text": "The scissors! Genius."}, {"text": "This is why I follow this club."}, {"text": "There's one like this near Vyttila junction. Will send a photo."}]},
+    {"days_ago": 29, "kind": "poll", "text": "Friday Crit is weekly and ninety minutes. Some of you have asked for a longer format. What would you prefer?", "options": ["Keep it weekly", "Fortnightly and longer", "Weekly, plus one online crit a month"], "likes": 38, "comments": [{"text": "An online one would help those of us in Thrissur."}, {"text": "Don't touch it, it's perfect."}]},
+    {"days_ago": 39, "kind": "post", "text": "Portfolio review slots for freshers are back. Sreeram and two other design managers will each take five thirty-minute reviews over video next month. Priority goes to people who have never had a portfolio review. Comment with your name and we'll send the form.", "likes": 76, "comments": [{"text": "Never had one. Would love a slot."}, {"text": "Is this only for UI portfolios or illustration too?"}, {"text": "Both are welcome, and research portfolios too."}]}
+  ]
+}

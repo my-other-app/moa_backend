@@ -1,0 +1,304 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "myotherapp-demo-content",
+  "title": "MyOtherApp demo content",
+  "description": "Validates clubs/<slug>.json (a club) and people.json (the people pool). Rules that compare two fields (registrations == capacity on a sold-out event, an event's merch keys existing in the club's merch, slugs unique across files, the email naming the club's own slug, no repeated sentences) are not expressible here; check.py enforces them.",
+  "oneOf": [
+    {"$ref": "#/$defs/club"},
+    {"$ref": "#/$defs/people"}
+  ],
+  "$defs": {
+    "slug": {"type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
+    "key": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+    "hex": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
+    "hhmm": {"type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"},
+    "text": {"type": "string", "minLength": 1},
+    "handle": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9._-]{2,40}$"},
+    "topic": {
+      "enum": ["development", "deep-tech", "design", "arts", "business", "gaming-media", "community", "sports-fitness"]
+    },
+    "interest": {
+      "enum": [
+        "web-development", "app-development", "software-engineering", "coding", "open-source", "cloud-devops", "cybersecurity", "data-science",
+        "artificial-intelligence", "robotics", "iot-hardware", "blockchain", "vr-ar", "quantum-computing", "space-exploration",
+        "ui-ux", "graphic-design", "product-design", "animation",
+        "drawing", "music", "singing", "dance", "theatre", "photography", "film", "writing", "fashion",
+        "entrepreneurship", "product-management", "marketing", "finance", "analytics",
+        "gaming", "e-sports", "content-creation", "memes-internet-culture",
+        "volunteering", "sustainability", "public-speaking", "debate-mun", "quizzing",
+        "sports", "fitness", "outdoors-adventure"
+      ]
+    },
+
+    "club": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slug", "name", "tagline", "about", "org", "location", "contact", "socials", "topics", "interests", "brand", "team", "partners", "followers", "merch", "events", "threads"],
+      "properties": {
+        "slug": {"$ref": "#/$defs/slug"},
+        "name": {"$ref": "#/$defs/text"},
+        "tagline": {"type": "string", "minLength": 1, "maxLength": 80},
+        "about": {"type": "string", "minLength": 1, "description": "2-4 paragraphs separated by a blank line (\\n\\n)."},
+        "org": {
+          "oneOf": [
+            {"type": "null"},
+            {"type": "object", "additionalProperties": false, "required": ["name", "city"], "properties": {"name": {"$ref": "#/$defs/text"}, "city": {"$ref": "#/$defs/text"}}}
+          ],
+          "description": "The college a college club belongs to (one of people.json colleges), or null for an independent club."
+        },
+        "location": {
+          "type": "object", "additionalProperties": false, "required": ["name", "lat", "lng"],
+          "properties": {
+            "name": {"$ref": "#/$defs/text"},
+            "lat": {"type": "number", "minimum": 8.0, "maximum": 12.9},
+            "lng": {"type": "number", "minimum": 74.8, "maximum": 77.5}
+          }
+        },
+        "contact": {
+          "type": "object", "additionalProperties": false, "required": ["email", "phone"],
+          "properties": {
+            "email": {"type": "string", "pattern": "^hello@[a-z0-9-]+\\.demo\\.myotherapp\\.in$"},
+            "phone": {"type": "string", "pattern": "^\\+91 90000 0[0-9]{4}$"}
+          }
+        },
+        "socials": {
+          "type": "object", "additionalProperties": false, "required": ["instagram", "linkedin", "x"],
+          "properties": {
+            "instagram": {"$ref": "#/$defs/handle"},
+            "linkedin": {"$ref": "#/$defs/handle"},
+            "x": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9_]{2,15}$"}
+          },
+          "description": "Bare, invented handles. Never URLs."
+        },
+        "topics": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/topic"}},
+        "interests": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/interest"}},
+        "brand": {
+          "type": "object", "additionalProperties": false,
+          "required": ["primary", "accent", "ink", "paper", "display_font", "motif"],
+          "properties": {
+            "primary": {"$ref": "#/$defs/hex"},
+            "accent": {"$ref": "#/$defs/hex"},
+            "ink": {"$ref": "#/$defs/hex"},
+            "paper": {"$ref": "#/$defs/hex"},
+            "display_font": {"enum": ["bebas", "dm-serif", "inter"]},
+            "motif": {"enum": ["waves", "grid", "circles", "stripes", "blobs", "triangles", "dots"]}
+          }
+        },
+        "team": {
+          "type": "array", "minItems": 4, "maxItems": 8,
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["name", "role", "bio"],
+            "properties": {"name": {"$ref": "#/$defs/text"}, "role": {"$ref": "#/$defs/text"}, "bio": {"$ref": "#/$defs/text"}}
+          }
+        },
+        "partners": {
+          "type": "array", "minItems": 2, "maxItems": 4,
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["name", "role", "since"],
+            "properties": {"name": {"$ref": "#/$defs/text"}, "role": {"$ref": "#/$defs/text"}, "since": {"type": "integer", "minimum": 2015, "maximum": 2026}}
+          }
+        },
+        "followers": {"type": "integer", "minimum": 1},
+        "merch": {"type": "array", "maxItems": 4, "items": {"$ref": "#/$defs/merch"}},
+        "events": {"type": "array", "minItems": 4, "maxItems": 6, "items": {"$ref": "#/$defs/event"}},
+        "threads": {"type": "array", "minItems": 5, "maxItems": 8, "items": {"$ref": "#/$defs/thread"}}
+      }
+    },
+
+    "merch": {
+      "type": "object", "additionalProperties": false,
+      "required": ["key", "name", "description", "price", "kind", "color", "sizes", "stock"],
+      "properties": {
+        "key": {"$ref": "#/$defs/key"},
+        "name": {"$ref": "#/$defs/text"},
+        "description": {"$ref": "#/$defs/text"},
+        "price": {"type": "integer", "minimum": 1, "maximum": 5000, "description": "Whole rupees."},
+        "kind": {"enum": ["tee", "hoodie", "cap", "tote", "sticker", "mug", "lanyard", "notebook"]},
+        "color": {"$ref": "#/$defs/hex"},
+        "sizes": {
+          "type": ["object", "null"],
+          "propertyNames": {"enum": ["XS", "S", "M", "L", "XL", "XXL"]},
+          "additionalProperties": {"type": "integer", "minimum": 0}
+        },
+        "stock": {"type": ["integer", "null"], "minimum": 0}
+      },
+      "oneOf": [
+        {"properties": {"sizes": {"type": "object"}, "stock": {"type": "null"}, "kind": {"enum": ["tee", "hoodie"]}}},
+        {"properties": {"sizes": {"type": "null"}, "stock": {"type": "integer"}}}
+      ],
+      "description": "Sized apparel (tee, hoodie) has sizes and a null stock; everything else has a stock and null sizes."
+    },
+
+    "question": {
+      "type": "object", "additionalProperties": false,
+      "required": ["key", "label", "type", "required"],
+      "properties": {
+        "key": {"$ref": "#/$defs/key"},
+        "label": {"$ref": "#/$defs/text"},
+        "type": {"enum": ["text", "select", "radio", "checkbox", "number", "url", "date"]},
+        "options": {"type": "array", "minItems": 2, "items": {"$ref": "#/$defs/text"}},
+        "required": {"type": "boolean"}
+      },
+      "if": {"properties": {"type": {"enum": ["select", "radio", "checkbox"]}}},
+      "then": {"required": ["options"]},
+      "else": {"not": {"required": ["options"]}}
+    },
+
+    "event": {
+      "type": "object", "additionalProperties": false,
+      "required": ["slug", "name", "when", "format", "venue", "category", "interests", "fee", "sold_out", "capacity", "registrations", "about", "guidelines", "speakers", "agenda", "questions", "merch", "swag", "poster"],
+      "properties": {
+        "slug": {"$ref": "#/$defs/slug"},
+        "name": {"$ref": "#/$defs/text"},
+        "when": {
+          "type": "object", "additionalProperties": false, "required": ["days_from_now", "time", "duration_hours"],
+          "properties": {
+            "days_from_now": {"type": "integer", "minimum": -120, "maximum": 60, "not": {"const": 0}, "description": "Negative: a past event (-120..-1). Positive: upcoming (1..60)."},
+            "time": {"$ref": "#/$defs/hhmm"},
+            "duration_hours": {"type": "number", "exclusiveMinimum": 0, "maximum": 72}
+          }
+        },
+        "format": {"enum": ["in_person", "online"]},
+        "venue": {
+          "oneOf": [
+            {"type": "null"},
+            {"type": "object", "additionalProperties": false, "required": ["name", "address"], "properties": {"name": {"$ref": "#/$defs/text"}, "address": {"$ref": "#/$defs/text"}}}
+          ]
+        },
+        "category": {"enum": ["Workshop", "Meetup", "Hackathon", "Talk", "Competition", "Festival", "Exhibition", "Tournament"]},
+        "interests": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/interest"}},
+        "fee": {"type": "integer", "minimum": 0, "description": "Whole rupees; 0 is free."},
+        "sold_out": {"type": "boolean"},
+        "capacity": {"type": "integer", "minimum": 1},
+        "registrations": {"type": "integer", "minimum": 20, "maximum": 150, "description": "At most capacity, and drawn from the 150-person pool."},
+        "attended_ratio": {"type": ["number", "null"], "minimum": 0.3, "maximum": 1},
+        "certificates": {"type": ["boolean", "null"]},
+        "about": {"type": "string", "minLength": 1, "description": "2-3 paragraphs separated by a blank line."},
+        "guidelines": {"$ref": "#/$defs/text"},
+        "speakers": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["name", "designation", "bio"],
+            "properties": {"name": {"$ref": "#/$defs/text"}, "designation": {"$ref": "#/$defs/text"}, "bio": {"$ref": "#/$defs/text"}}
+          }
+        },
+        "agenda": {
+          "type": "array", "minItems": 2,
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["at", "title", "by"],
+            "properties": {"at": {"$ref": "#/$defs/hhmm"}, "title": {"$ref": "#/$defs/text"}, "by": {"type": ["string", "null"], "minLength": 1}}
+          },
+          "description": "Times in order, on the event's first day."
+        },
+        "questions": {"type": "array", "minItems": 1, "maxItems": 4, "items": {"$ref": "#/$defs/question"}},
+        "merch": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/key"}, "description": "Keys of the club's merch."},
+        "swag": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["name", "sponsor"],
+            "properties": {"name": {"$ref": "#/$defs/text"}, "sponsor": {"type": ["string", "null"]}}
+          }
+        },
+        "feedback": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object", "additionalProperties": false, "required": ["responses", "avg_rating", "comments"],
+              "properties": {
+                "responses": {"type": "integer", "minimum": 1},
+                "avg_rating": {"type": "number", "minimum": 1, "maximum": 5},
+                "comments": {"type": "array", "minItems": 4, "maxItems": 6, "items": {"$ref": "#/$defs/text"}}
+              }
+            }
+          ]
+        },
+        "live": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object", "additionalProperties": false, "required": ["poll", "qna"],
+              "properties": {
+                "poll": {
+                  "oneOf": [
+                    {"type": "null"},
+                    {
+                      "type": "object", "additionalProperties": false, "required": ["question", "options"],
+                      "properties": {"question": {"$ref": "#/$defs/text"}, "options": {"type": "array", "minItems": 2, "maxItems": 4, "items": {"$ref": "#/$defs/text"}}}
+                    }
+                  ]
+                },
+                "qna": {"type": "array", "items": {"$ref": "#/$defs/text"}}
+              }
+            }
+          ]
+        },
+        "poster": {
+          "type": "object", "additionalProperties": false, "required": ["headline", "sub"],
+          "properties": {"headline": {"$ref": "#/$defs/text"}, "sub": {"$ref": "#/$defs/text"}}
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"format": {"const": "in_person"}}},
+          "then": {"properties": {"venue": {"type": "object"}}},
+          "else": {"properties": {"venue": {"type": "null"}}}
+        },
+        {
+          "if": {"properties": {"when": {"properties": {"days_from_now": {"maximum": -1}}}}},
+          "then": {
+            "required": ["attended_ratio", "certificates"],
+            "properties": {"attended_ratio": {"type": "number"}, "certificates": {"type": "boolean"}}
+          },
+          "else": {
+            "properties": {"attended_ratio": {"type": "null"}, "certificates": {"type": "null"}, "feedback": {"type": "null"}, "live": {"type": "null"}}
+          }
+        },
+        {
+          "description": "Money safety: an upcoming paid event is sold out (and check.py requires registrations == capacity), so nobody can pay for a demo.",
+          "if": {"properties": {"when": {"properties": {"days_from_now": {"minimum": 1}}}, "fee": {"minimum": 1}}},
+          "then": {"properties": {"sold_out": {"const": true}}}
+        }
+      ]
+    },
+
+    "thread": {
+      "type": "object", "additionalProperties": false,
+      "required": ["days_ago", "kind", "text", "likes", "comments"],
+      "properties": {
+        "days_ago": {"type": "integer", "minimum": 1, "maximum": 45},
+        "kind": {"enum": ["post", "poll", "announcement"]},
+        "text": {"$ref": "#/$defs/text"},
+        "options": {"type": "array", "minItems": 2, "maxItems": 4, "items": {"$ref": "#/$defs/text"}},
+        "likes": {"type": "integer", "minimum": 0},
+        "comments": {
+          "type": "array", "minItems": 1, "maxItems": 4,
+          "items": {"type": "object", "additionalProperties": false, "required": ["text"], "properties": {"text": {"$ref": "#/$defs/text"}}}
+        }
+      },
+      "if": {"properties": {"kind": {"const": "poll"}}},
+      "then": {"required": ["options"]},
+      "else": {"not": {"required": ["options"]}}
+    },
+
+    "people": {
+      "type": "object", "additionalProperties": false,
+      "required": ["main_user", "attendee_names", "colleges", "comment_snippets"],
+      "properties": {
+        "main_user": {
+          "type": "object", "additionalProperties": false,
+          "required": ["name", "username", "college", "interests", "bio"],
+          "properties": {
+            "name": {"$ref": "#/$defs/text"},
+            "username": {"type": "string", "pattern": "^[a-z0-9._]{3,30}$"},
+            "college": {"$ref": "#/$defs/text", "description": "One of colleges."},
+            "interests": {"type": "array", "minItems": 5, "maxItems": 5, "uniqueItems": true, "items": {"$ref": "#/$defs/interest"}},
+            "bio": {"$ref": "#/$defs/text"}
+          }
+        },
+        "attendee_names": {"type": "array", "minItems": 150, "maxItems": 150, "uniqueItems": true, "items": {"type": "string", "pattern": "^\\S+( \\S+)+$"}},
+        "colleges": {"type": "array", "minItems": 8, "maxItems": 12, "uniqueItems": true, "items": {"$ref": "#/$defs/text"}},
+        "comment_snippets": {"type": "array", "minItems": 60, "maxItems": 60, "uniqueItems": true, "items": {"$ref": "#/$defs/text"}}
+      }
+    }
+  }
+}
