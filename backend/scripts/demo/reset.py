@@ -365,7 +365,7 @@ async def make_plan(conn) -> Plan:
     for fk in fks:
         if fk.child not in kept_side or classes[fk.parent] == KEEP:
             continue
-        going = f'SELECT "{fk.parent_column}" FROM "{fk.parent}" WHERE NOT {keep_clause(fk.parent, classes)}'
+        going = f'SELECT "{fk.parent_column}" FROM "{fk.parent}" WHERE ({keep_clause(fk.parent, classes)}) IS NOT TRUE'
         n = int(await conn.scalar(text(
             f'SELECT count(*) FROM "{fk.child}" WHERE {keep_clause(fk.child, classes)} '
             f'AND "{fk.column}" IS NOT NULL AND "{fk.column}" IN ({going})'
@@ -403,7 +403,7 @@ async def execute_plan(conn, plan: Plan) -> None:
     classes = plan.classes
 
     for fk, _n in plan.detach:
-        going = f'SELECT "{fk.parent_column}" FROM "{fk.parent}" WHERE NOT {keep_clause(fk.parent, classes)}'
+        going = f'SELECT "{fk.parent_column}" FROM "{fk.parent}" WHERE ({keep_clause(fk.parent, classes)}) IS NOT TRUE'
         await conn.execute(text(
             f'UPDATE "{fk.child}" SET "{fk.column}" = NULL WHERE {keep_clause(fk.child, classes)} '
             f'AND "{fk.column}" IS NOT NULL AND "{fk.column}" IN ({going})'
@@ -421,7 +421,11 @@ async def execute_plan(conn, plan: Plan) -> None:
         if classes[t] == WIPE:
             await conn.execute(text(f'DELETE FROM "{t}"'))
         else:
-            await conn.execute(text(f'DELETE FROM "{t}" WHERE NOT ({FILTERS[t]})'))
+            # IS NOT TRUE, not NOT: a row the filter can't decide (a sign-in
+            # attempt for an unknown address has no user_id, so `NULL IN (...)`
+            # is NULL) goes too. NOT (NULL) is NULL and would leave it behind,
+            # neither kept nor removed -- the checks below then refuse.
+            await conn.execute(text(f'DELETE FROM "{t}" WHERE ({FILTERS[t]}) IS NOT TRUE'))
 
     for t in TRIGGER_FED:
         if classes.get(t) == WIPE:

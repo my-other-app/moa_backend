@@ -124,6 +124,13 @@ async def _populate(session, make_user, make_club, make_event, make_registration
     await make_registration(event=event, user=person)
     session.add(UserAvatars(name="Fox", image="avatars/fox.png"))
     session.add(EventCategories(name="Admin type", created_by_id=admin.id))
+    # Sign-in tries: the admin's (kept), and one at an address with no
+    # account, so no user_id (NULL): the filter can't say yes or no to it.
+    await session.execute(text(
+        "INSERT INTO sign_in_attempts (id, user_id, identifier, method, result, created_at, updated_at) VALUES "
+        "(gen_random_uuid(), :a, 'root@myotherapp.in', 'password', 'signed_in', now(), now()), "
+        "(gen_random_uuid(), NULL, 'nobody@example.com', 'password', 'wrong_password', now(), now())"
+    ), {"a": admin.id})
     # A ledger line: append-only in normal life.
     await session.execute(text(
         "INSERT INTO ledger_entries (txn_key, line, kind, account, amount_paise, units, currency, club_id, event_id, source, source_id, occurred_at, origin_at) "
@@ -157,8 +164,14 @@ async def test_reset_keeps_admins_and_reference_data_and_wipes_the_rest(session,
     conn = await session.connection()
     plan = await reset.make_plan(conn)
     await reset.execute_plan(conn, plan)
+    # The checks the CLI runs before committing pass: on the server they
+    # refused once, over a sign-in try with no user_id left neither kept
+    # nor removed.
+    await reset.verify(conn, plan)
 
     assert [u.id for u in (await session.execute(select(Users.id))).all()] == [w.admin.id]
+    assert await _count(session, "sign_in_attempts") == 1
+    assert await _count(session, "sign_in_attempts", f"user_id = {w.admin.id}") == 1
     for t, n in kept.items():
         assert await _count(session, t) == n, t
     assert await _count(session, "event_categories", "created_by_id IS NULL") == shipped_types
