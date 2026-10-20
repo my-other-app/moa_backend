@@ -15,7 +15,7 @@ from app.core.response.base_model import CustomBaseModel
 
 
 class PlanLimitsIn(CustomBaseModel):
-    """The ten caps. Absent or null means unlimited, zero means none allowed.
+    """The caps. Absent or null means unlimited, zero means none allowed.
 
     Every field is optional so a caller can send only what it changes, but the
     handler treats an omitted key as unlimited on create -- see the router,
@@ -32,6 +32,7 @@ class PlanLimitsIn(CustomBaseModel):
     storage_gb: int | None = Field(None, ge=0)
     announcements_per_month: int | None = Field(None, ge=0)
     website_templates: int | None = Field(None, ge=0)
+    ai_actions_per_month: int | None = Field(None, ge=0)
 
 
 def _feature_fields() -> dict:
@@ -39,7 +40,7 @@ def _feature_fields() -> dict:
 
 
 class PlanFeaturesIn(CustomBaseModel):
-    """The thirty flags, all defaulting off.
+    """The flags, all defaulting off.
 
     Declared explicitly rather than generated, because a generated model gives
     no autocomplete, no mypy and an OpenAPI schema nobody can read -- and this
@@ -80,6 +81,8 @@ class PlanFeaturesIn(CustomBaseModel):
     payouts: bool = False
     sso: bool = False
     api: bool = False
+    ai_assist: bool = False
+    ai_byok: bool = False
 
 
 class PlanIn(CustomBaseModel):

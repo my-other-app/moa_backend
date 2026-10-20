@@ -43,6 +43,11 @@ _GATEWAY = _rx(r"^/api/v1/clubs/payments/gateway(?:/|$)")
 # The club's own domain for its website: DNS records, a paid feature, and the
 # address every visitor sees. Admins, read and write; nobody else, not even to look.
 _SITE_DOMAIN = _rx(r"^/api/v1/clubs/site/domain(?:/|$)")
+# The club's own AI key: its provider account, which it pays for. The owner
+# and admins, read and write; nobody else. (AI assist itself falls to the
+# defaults: drafting and writing are changes, for editors and admins; the
+# status and an event's feedback summary are reads, door staff included.)
+_AI_KEY = _rx(r"^/api/v1/clubs/ai/key(?:/|$)")
 
 # Money: figures, statements, the ledger, refunds.
 _MONEY = _rx(
@@ -92,7 +97,7 @@ def allows(role: str, method: str, path: str) -> bool:
         return role == "admin" and method == "GET" and bool(_ACCESS_LIST.search(path))
     if method in WRITES and _OWNER_WRITES.search(path):
         return False
-    if _SITE_DOMAIN.search(path):
+    if _SITE_DOMAIN.search(path) or _AI_KEY.search(path):
         return role == "admin"
     if role == "admin":
         return True
@@ -130,4 +135,5 @@ def can(role: str) -> dict:
         "door": True,
         "payment_gateway": owner,
         "site_domain": admin,
+        "ai_key": admin,
     }

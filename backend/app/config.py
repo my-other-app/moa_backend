@@ -532,6 +532,43 @@ class AppConfig(BaseSettings):
     # ...and this many per event per day, midnight to midnight in India.
     LIVE_NOTIFY_PER_DAY: int = 10
 
+    # ─── AI assist (app/core/ai, app/api/ai; docs/OPERATIONS.md section 14) ─
+    # The switch. Off (the default): every AI endpoint answers 403
+    # AI_DISABLED and no provider is ever called, a club's own key included.
+    AI_ENABLED: bool = False
+    # The platform's one Gemini API key (Google AI Studio). One key, never a
+    # list: spreading calls over several keys or accounts to get past
+    # Gemini's rate limits is against its terms. Production uses a key on a
+    # PAID (billing-enabled) project: on the free tier Google may use what is
+    # sent to improve its products, and people may read it.
+    GEMINI_API_KEY: str = ""
+    # Model ids, comma-separated, in the order they are tried: on a 429, a
+    # 5xx or a timeout the next is asked after a short pause. The vision list
+    # is used when a poster or a PDF is sent. From
+    # https://ai.google.dev/gemini-api/docs/models (checked 2026-10-20).
+    AI_MODELS: str = "gemini-3.8-flash,gemini-3.5-flash-lite"
+    AI_VISION_MODELS: str = "gemini-3.8-flash,gemini-3.5-flash-lite"
+    # Gemini's thinking level for these calls (low, medium, high; empty: the
+    # model's own default). Low keeps a draft inside the timeout.
+    AI_GEMINI_THINKING: str = "low"
+    # A second provider for the platform, tried after every Gemini model has
+    # failed: "anthropic", with its own key and models (empty models: its
+    # default list). Unset: none. Never a second key for the same provider.
+    AI_FALLBACK_PROVIDER: str = ""
+    AI_FALLBACK_API_KEY: str = ""
+    AI_FALLBACK_MODELS: str = ""
+    # Seconds one call may take (a file makes it a vision call), and the
+    # whole request with every fallback at most (under nginx's 120).
+    AI_TIMEOUT_SECONDS: float = 30.0
+    AI_VISION_TIMEOUT_SECONDS: float = 60.0
+    AI_DEADLINE_SECONDS: float = 100.0
+    # The pause before the next model is asked.
+    AI_FALLBACK_BACKOFF_SECONDS: float = 0.5
+    # The Fernet key clubs' own AI keys are encrypted with (as
+    # PAYMENT_KEYS_SECRET is for their Razorpay secrets; a comma-separated
+    # list rotates). Unset: no club can connect its own key.
+    AI_KEYS_SECRET: str = ""
+
     @field_validator("PLAN_ENFORCEMENT_FROM")
     @classmethod
     def _aware_cutoff(cls, value: datetime) -> datetime:
