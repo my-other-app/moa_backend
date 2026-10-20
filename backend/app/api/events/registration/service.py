@@ -375,15 +375,20 @@ async def register_event(
     if registration:
         if not claim_existing and registration.user_id != user_id:
             raise CustomHTTPException(409, message=ALREADY_REGISTERED, error_code="ALREADY_REGISTERED")
-        if not db_event.has_fee or registration.is_paid:
+        from app.api.store import service as store
+
+        # A shelf order still waiting for its payment may be changed, or
+        # dropped with `store: []`, on a free event or a paid-for ticket too:
+        # the payment it waits for is the order's own.
+        changing_picks = store_picks is not None and await store.pending_for(session, registration.id) is not None
+        if (not db_event.has_fee or registration.is_paid) and not changing_picks:
             # Still a 400, as the app expects; the code lets every client tell it apart.
             raise CustomHTTPException(400, message="Already registered for this event", error_code="ALREADY_REGISTERED")
         # Back for the payment: the shelf picks are taken fresh, under the
         # event's row as a new registration's are (free picks count against
-        # the stock at once).
+        # the stock at once). `store: []` drops the earlier order and gives
+        # back what it held, so the payment is the ticket's alone.
         if store_picks is not None:
-            from app.api.store import service as store
-
             await session.execute(select(Events.id).where(Events.id == db_event.id).with_for_update())
             await store.place_order(session, db_event, registration, store_picks, role=(registration.role.value if getattr(registration, "role", None) else "attendee"))
             await session.commit()

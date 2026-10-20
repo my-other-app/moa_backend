@@ -31,7 +31,6 @@ from app.api.events.models import Events, EventSpeakers
 from app.api.events.tickets import poster_url
 from app.api.merch import service as merch
 from app.api.sites.render import image_srcset, image_url
-from app.api.store.models import EventStoreItems
 from app.api.threads import service as threads_service
 from app.api.threads.models import ClubThreads
 from app.api.users.models import UserAvatars
@@ -40,6 +39,7 @@ from app.core.storage import bucket, fields, media, objects
 from app.core.storage.fields import S3FileField, S3ImageField
 from app.db.base import AbstractSQLModel
 from tests.conftest import auth_header
+from tests.store_items import shelf_item
 
 CDN = "https://media.test"
 BASE = settings.S3_BASE_PATH.rstrip("/")
@@ -383,7 +383,7 @@ async def world(background, session, make_club, make_event, make_user, mint_toke
     session.add(ClubTeamMembers(club_id=club.id, name="Asha", role="Lead", photo=_in(ClubTeamMembers.__table__.c.photo.type, f"v-{'4' * 32}.png")))
     session.add(ClubThreads(id=uuid.uuid4(), club_id=club.id, body="Photos from last night", image=_in(ClubThreads.__table__.c.image.type, f"v-{'5' * 32}.png")))
     session.add(UserAvatars(name="Fox", image=_in(UserAvatars.__table__.c.image.type, f"v-{'6' * 32}.png")))
-    session.add(EventStoreItems(event_id=event.id, name="Tee", price=0, stock=10, photo_key=at(f"events/{event.id}/merch/v-{'7' * 32}.png")))
+    shelf_item(session, event, name="Tee", price=0, stock=10, photo_key=at(f"events/{event.id}/merch/v-{'7' * 32}.png"))
     await session.commit()
     # Keys were assigned as strings; read every row back as production would
     # (the test session does not expire on commit), pictures and all.

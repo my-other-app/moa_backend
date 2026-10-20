@@ -80,7 +80,7 @@ async def test_an_event_is_copied_onto_a_new_date_with_what_was_asked_for(client
     made = await client.post(f"/api/v1/events/{src.id}/duplicate", json={"name": "Build Day 2027", "event_datetime": "2027-11-20T03:30:00Z", "copy_doors": True, "copy_team": True, "copy_agenda": True}, headers=h)
     assert made.status_code == 201, made.text
     body = made.json()
-    assert body["name"] == "Build Day 2027" and body["copied"] == {"interests": 0, "designs": 1, "emails": 0, "merch": 1, "doors": 1, "team": 1, "agenda": 1, "organisers": 0}
+    assert body["name"] == "Build Day 2027" and body["copied"] == {"interests": 0, "designs": 1, "emails": 0, "merch": 1, "store": 0, "doors": 1, "team": 1, "agenda": 1, "organisers": 0}
     new = await session.get(Events, body["id"])
     assert new.additional_details == FIELDS and new.about == "A day of building." and new.location_name is None and new.status == "draft" and new.duration == 8.0
     layout = await client.get(f"/api/v1/events/{new.id}/designs/ticket/layout", headers=h)

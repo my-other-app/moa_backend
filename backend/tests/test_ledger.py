@@ -19,6 +19,7 @@ from app.api.ledger import service as ledger
 from app.api.ledger.models import LedgerEntries, LedgerMonthly, LedgerPlatformMonthly
 from app.api.payments import service as payments
 from app.api.payments.models import PaymentLogs, PaymentOrders, PaymentStatus
+from tests.store_items import shelf_item
 from tests.test_club_billing import shop  # noqa: F401  (a fixture: a club and its plans)
 from tests.test_money_integrity import FakeRazorpay, _guest, _order, _paid_event, _reg, _webhook
 
@@ -162,7 +163,7 @@ async def test_a_refund_takes_back_the_ticket_and_the_store_and_pays_out(session
     from app.api.store.models import EventStoreItems
 
     owner, club, event = await _paid_event(make_club, make_event, session, fee="300.00", merch_enabled=True)
-    tee = EventStoreItems(event_id=event.id, name="Tee", price=Decimal("450.00"), stock=5)
+    tee = shelf_item(session, event, name="Tee", price=Decimal("450.00"), stock=5)
     session.add(tee)
     await session.flush()
     payer, reg = await _guest(session, make_user, make_registration, event)
@@ -272,7 +273,7 @@ async def test_store_holds_post_nothing_until_the_money_lands(session, rzp, make
     from app.api.store.models import EventStoreItems, EventStoreOrders
 
     owner, club, event = await _paid_event(make_club, make_event, session, fee="100.00", merch_enabled=True)
-    kit = EventStoreItems(event_id=event.id, name="Kit", price=Decimal("450.00"), stock=1)
+    kit = shelf_item(session, event, name="Kit", price=Decimal("450.00"), stock=1)
     session.add(kit)
     await session.flush()
     late, late_reg = await _guest(session, make_user, make_registration, event)
@@ -327,7 +328,7 @@ async def test_free_picks_and_complimentary_plans_are_posted_at_zero(client, ses
     from tests.test_club_billing import make_plan
 
     owner, club, event = await _paid_event(make_club, make_event, session, fee="100.00", merch_enabled=True)
-    sticker = EventStoreItems(event_id=event.id, name="Stickers", price=Decimal("60.00"), stock=10, free_roles=["attendee"])
+    sticker = shelf_item(session, event, name="Stickers", price=Decimal("60.00"), stock=10, free_roles=["attendee"])
     session.add(sticker)
     await session.flush()
     payer, reg = await _guest(session, make_user, make_registration, event)
@@ -513,7 +514,7 @@ async def _world(session, client, rzp, make_club, make_event, make_user, make_re
 
     # A paid hackathon with a tee on the shelf.
     hack = await an_event(club, owner, "499.00", merch_enabled=True)
-    tee = EventStoreItems(event_id=hack.id, name="Tee", price=Decimal("350.00"), stock=20)
+    tee = shelf_item(session, hack, name="Tee", price=Decimal("350.00"), stock=20)
     session.add(tee)
     await session.commit()
     for i in range(6):
@@ -546,8 +547,8 @@ async def _world(session, client, rzp, make_club, make_event, make_user, make_re
 
     # A free meetup: free stickers, a cap paid for online.
     meet = await an_event(club, owner, "0", merch_enabled=True)
-    stickers = EventStoreItems(event_id=meet.id, name="Stickers", price=Decimal("40.00"), stock=50, free_roles=["attendee"])
-    cap = EventStoreItems(event_id=meet.id, name="Cap", price=Decimal("120.00"), stock=5)
+    stickers = shelf_item(session, meet, name="Stickers", price=Decimal("40.00"), stock=50, free_roles=["attendee"])
+    cap = shelf_item(session, meet, name="Cap", price=Decimal("120.00"), stock=5)
     session.add_all([stickers, cap])
     await session.commit()
     _, free_reg = await guest(meet)
@@ -561,7 +562,7 @@ async def _world(session, client, rzp, make_club, make_event, make_user, make_re
     # Walk-ups paying at the desk, one with a badge from the shelf.
     door = await an_event(club, owner, "350.00", merch_enabled=True)
     door.event_datetime = NOW + 2 * DAY
-    badge = EventStoreItems(event_id=door.id, name="Badge", price=Decimal("50.00"), stock=10)
+    badge = shelf_item(session, door, name="Badge", price=Decimal("50.00"), stock=10)
     session.add(badge)
     await session.commit()
     h = auth_header(await mint_token(owner))
@@ -572,7 +573,7 @@ async def _world(session, client, rzp, make_club, make_event, make_user, make_re
 
     # A kit oversold, handed over once stock came in.
     over = await an_event(club, owner, "100.00", merch_enabled=True)
-    kit = EventStoreItems(event_id=over.id, name="Kit", price=Decimal("450.00"), stock=1)
+    kit = shelf_item(session, over, name="Kit", price=Decimal("450.00"), stock=1)
     session.add(kit)
     await session.commit()
     slow, slow_reg = await guest(over)

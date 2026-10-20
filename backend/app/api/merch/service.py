@@ -176,6 +176,12 @@ _EXT = {"PNG": "png", "JPEG": "jpg", "WEBP": "webp"}
 
 def store_photo(event_id: int, raw: bytes) -> dict:
     """A product photo, stored under the event; answered with the key an item saves and a URL to show it now."""
+    return product_photo(os.path.join(settings.S3_BASE_PATH, "events", str(event_id), "merch"), raw)
+
+
+def product_photo(folder: str, raw: bytes) -> dict:
+    """A product photo, checked and sized, stored in `folder`: the event's
+    (store_photo) or the club's store catalogue's."""
     if len(raw) > MAX_PHOTO_BYTES:
         raise CustomHTTPException(413, message="That image is over 5 MB. Export it smaller and try again.")
     try:
@@ -197,7 +203,7 @@ def store_photo(event_id: int, raw: bytes) -> dict:
         raw = out.getvalue()
     ext = _EXT[fmt]
     # A versioned name, written once: the media CDN may keep it for a year.
-    key = os.path.join(settings.S3_BASE_PATH, "events", str(event_id), "merch") + f"/{media.versioned_name(ext)}"
+    key = folder + f"/{media.versioned_name(ext)}"
     objects.put_bytes(key, raw, "image/jpeg" if ext == "jpg" else f"image/{ext}")
     return {"key": key, "url": objects.photo_url(key)}
 

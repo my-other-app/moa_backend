@@ -86,7 +86,13 @@ class VariantOut(BaseModel):
 
 
 class StoreItemOut(BaseModel):
+    """An item as one event's store lists it. `sold` and `earned` (and each
+    size's `sold`) are this event's, from its paid orders; `stock`, `total`,
+    `held`, `left` and `sold_out` are the shelf's, shared by every event of
+    the club that offers the item."""
+
     id: str
+    #: The event whose store this is (the item may be offered on others too).
     event_id: int
     name: str
     description: Optional[str]
@@ -106,6 +112,50 @@ class StoreItemOut(BaseModel):
     sort_order: int
     variants: list[VariantOut]
     created_at: str
+
+
+class OfferedEvent(BaseModel):
+    id: int
+    name: str
+    slug: str
+    event_datetime: Optional[str]
+
+
+class ClubStoreItem(BaseModel):
+    """An item in the club's store. `sold`, `held`, `left` and `earned` are
+    across every event; `events` are the live events offering it."""
+
+    id: str
+    name: str
+    description: Optional[str]
+    photo_url: Optional[str]
+    photo_key: Optional[str]
+    price: float
+    stock: Optional[int]
+    variants: list[VariantOut]
+    available_roles: Optional[list[str]]
+    free_roles: list[str]
+    on_sale: bool
+    sort_order: int
+    sold: int
+    held: int
+    left: int
+    earned: float
+    events: list[OfferedEvent]
+
+
+class ClubStore(BaseModel):
+    items: list[ClubStoreItem]
+
+
+class OffersIn(BaseModel):
+    #: The club's items this event offers, in the order shown; [] offers none.
+    item_ids: list[UUID] = Field(..., max_length=200)
+
+
+class OffersOut(BaseModel):
+    merch_enabled: bool
+    item_ids: list[str]
 
 
 class StorePick(BaseModel):

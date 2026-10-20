@@ -77,6 +77,9 @@ async def create_event(
     has_prize: bool = False,
     prize_amount: Optional[float] = None,
     is_online: bool = False,
+    merch_enabled: bool = False,
+    swag_enabled: bool = False,
+    store_item_ids: Optional[list] = None,
     reg_startdate: datetime = datetime.now(timezone.utc),
     reg_enddate: Optional[datetime] = None,
     images: Optional[list[str]] = None,
@@ -137,6 +140,8 @@ async def create_event(
         has_prize=has_prize,
         prize_amount=prize_amount,
         is_online=is_online,
+        merch_enabled=bool(merch_enabled),
+        swag_enabled=bool(swag_enabled),
         reg_startdate=reg_startdate,
         reg_enddate=reg_enddate,
         images=images or [],
@@ -171,6 +176,13 @@ async def create_event(
     await session.commit()
     await session.refresh(db_event)
     event_id = db_event.id
+
+    if store_item_ids:
+        # Checked by the caller (store.service.check_offers): the club's items, within the plan.
+        from app.api.store import service as store
+
+        await store.write_offers(session, event_id, store_item_ids)
+        await session.commit()
 
     if interest_ids:
         for interest_id in interest_ids:
@@ -297,6 +309,18 @@ async def update_event(
         session, db_event, has_fee=event.has_fee, merch_enabled=getattr(event, "merch_enabled", None),
         swag_enabled=getattr(event, "swag_enabled", None), event_datetime=event.event_datetime, actor=actor,
     )
+    # The club's store items it offers, when the form sends them: checked
+    # before anything changes, against the event as it will be (its new date).
+    store_item_ids = None
+    if getattr(event, "store_item_ids", None) is not None:
+        from types import SimpleNamespace
+
+        from app.api.store import service as store
+
+        scope = SimpleNamespace(id=db_event.id, club_id=db_event.club_id, created_at=db_event.created_at, event_datetime=event.event_datetime)
+        store_item_ids = await store.check_offers(
+            session, scope, event.store_item_ids, actor=actor, current=await store.offered_ids(session, db_event),
+        )
 
     if event.poster:
         content = io.BytesIO(await event.poster.read())
@@ -432,6 +456,9 @@ async def update_event(
         for speaker_id, db_speaker in existing_speakers_map.items():
             if speaker_id not in keep_ids:
                 await session.delete(db_speaker)
+
+    if store_item_ids is not None:
+        await store.write_offers(session, event_id, store_item_ids)
 
     await session.commit()
     await _republish_site(session, event_id)

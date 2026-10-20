@@ -31,10 +31,12 @@ class Duplicated(BaseModel):
     slug: str
     name: str
     copied: dict
-    #: What the club's plan kept off the copy, by flag or limit key: "swag"
-    #: (the handout items), "merch_items_per_event" (items past the cap),
-    #: "badges" (the ID card designs), "report" (the report's recipients).
-    #: Always present; empty when everything came across.
+    #: What the club's plan kept off the copy, by flag or limit key: "merch"
+    #: (the store switched on, and the store items offered), "swag" (the
+    #: handouts switched on, and the handout items), "merch_items_per_event"
+    #: (items past the cap), "badges" (the ID card designs), "report" (the
+    #: report's recipients). Always present; empty when everything came across.
+    #: `copied` counts "merch" (handout items) and "store" (store offers) apart.
     skipped: list[str] = Field(default_factory=list)
 
 

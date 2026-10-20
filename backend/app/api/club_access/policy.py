@@ -62,12 +62,17 @@ _DESTRUCTIVE = _rx(
 )
 # An event's own setup that is not money or profile (its agenda, its organisers)
 # falls to the defaults: door staff may read it, editors and admins change it.
+# The club's store catalogue is the events' setup too (what they offer comes
+# from it), so it is the same, said here so no club-wide rule ever takes it:
+# editors and admins make, change, photograph and delete items; door staff read.
+_CLUB_STORE = _rx(r"^/api/v1/clubs/store(?:/|$)")
 
 # The only changes door staff make: letting people in and handing things over.
 _DOOR_WRITES = _rx(
     r"^/api/v1/events/\d+/gate/",
     r"^/api/v1/events/registration/\d+/attendance/",
-    r"^/api/v1/events/\d+/merch/\d+/handout(?:/undo)?$",
+    # A handout item's id is a uuid (merch_items.id), never a number.
+    r"^/api/v1/events/\d+/merch/[0-9A-Fa-f-]{1,36}/handout(?:/undo)?$",
     r"^/api/v1/events/\d+/store/orders/[^/]+/handover(?:/undo)?$",
     r"^/api/v1/events/volunteer/(?:checkin|validate)/",
     r"^/api/v1/events/\d+/tickets/\d+/send$",
@@ -91,6 +96,8 @@ def allows(role: str, method: str, path: str) -> bool:
         return role == "admin"
     if role == "admin":
         return True
+    if _CLUB_STORE.search(path):
+        return role == "editor" or (role == "door" and method not in WRITES)
     if _MONEY.search(path):
         return False
     if role == "editor":
@@ -118,6 +125,7 @@ def can(role: str) -> dict:
         "money": admin,
         "club_profile": admin,
         "edit_events": editor,
+        "club_store": editor,
         "delete_events": admin,
         "door": True,
         "payment_gateway": owner,

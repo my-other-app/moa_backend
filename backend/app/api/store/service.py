@@ -1,9 +1,16 @@
-"""The event store.
+"""The store: a club's merchandise, sold on the events that offer it.
 
-An item has a price and a stock (or sizes with a stock each), who may buy
-it and who gets it free. A guest picks at registration; the picks become
-an order that is pending until the same Razorpay payment as the ticket
-captures, then paid. At the door, a paid order is handed over once.
+An item belongs to the club's catalogue. It has a price and a stock (or
+sizes with a stock each), who may buy it and who gets it free. Each event
+offers the items it picks (EventStoreOffers), so events on at the same time
+sell from one shelf: the stock and its counts are the item's, shared by
+every event offering it, and what one event sold is read from its orders.
+Only an item offered on the event, of the event's own club, is ever listed
+or sold there.
+
+A guest picks at registration; the picks become an order that is pending
+until the same Razorpay payment as the ticket captures, then paid. At the
+door, a paid order is handed over once.
 
 Stock is held, then sold, each step one conditional UPDATE of the item's
 (or size's) row, so two guests can never both get the last piece:
@@ -35,14 +42,17 @@ late) -- which errs on the side of never selling a piece twice.
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.api.events.models import EventRegistrationsLink as Reg, Events
-from app.api.store.models import EventStoreItems, EventStoreOrderLines, EventStoreOrders, EventStoreVariants
+from app.api.store.models import EventStoreItems, EventStoreOffers, EventStoreOrderLines, EventStoreOrders, EventStoreVariants
+from app.config import settings
 from app.core.storage import objects
 from app.response import CustomHTTPException
 
@@ -100,56 +110,123 @@ def _left(stock, sold, held) -> int:
     return max(0, (stock or 0) - (sold or 0) - (held or 0))
 
 
-def item_out(m: EventStoreItems, earned: Decimal = Decimal(0)) -> dict:
-    total, sold, held = _total(m), _sold(m), _held(m)
+def _variants_out(m: EventStoreItems, sold_by_size: dict | None = None) -> list[dict]:
+    """Each size: its stock, held and left on the shelf; sold is the shelf's
+    unless `sold_by_size` (one event's) is given."""
+    return [
+        dict(
+            id=str(v.id), label=v.label, stock=v.stock, sold=sold_by_size.get(v.id, 0) if sold_by_size is not None else v.sold_count,
+            held=v.reserved_count or 0, left=_left(v.stock, v.sold_count, v.reserved_count),
+        )
+        for v in m.variants
+    ]
+
+
+def item_out(m: EventStoreItems, *, event_id: int, sales: dict | None = None) -> dict:
+    """An item as one event's store lists it. `sold` and `earned` (and each
+    size's sold) are this event's, from its paid orders (`sales`); the stock,
+    held, left and sold out are the shelf's, shared by every event that
+    offers the item."""
+    total, sold_all, held = _total(m), _sold(m), _held(m)
+    sales = sales or {}
     return dict(
-        id=str(m.id), event_id=m.event_id, name=m.name, description=m.description, photo_key=m.photo_key,
-        photo_url=objects.photo_url(m.photo_key), price=_f(m.price), stock=m.stock, sold=sold, held=held, total=total,
-        left=_left(total, sold, held), earned=_f(earned), available_roles=m.available_roles, free_roles=list(m.free_roles or []), on_sale=m.on_sale,
-        sold_out=total > 0 and sold + held >= total, sort_order=m.sort_order,
-        variants=[
-            dict(id=str(v.id), label=v.label, stock=v.stock, sold=v.sold_count, held=v.reserved_count or 0, left=_left(v.stock, v.sold_count, v.reserved_count))
-            for v in m.variants
-        ],
+        id=str(m.id), event_id=event_id, name=m.name, description=m.description, photo_key=m.photo_key,
+        photo_url=objects.photo_url(m.photo_key), price=_f(m.price), stock=m.stock, sold=int(sales.get("sold", 0)), held=held, total=total,
+        left=_left(total, sold_all, held), earned=_f(sales.get("earned", 0)), available_roles=m.available_roles, free_roles=list(m.free_roles or []), on_sale=m.on_sale,
+        sold_out=total > 0 and sold_all + held >= total, sort_order=m.sort_order,
+        variants=_variants_out(m, sales.get("sizes", {})),
         created_at=_iso(m.created_at),
     )
 
 
-async def _earned(session, event_id: int) -> dict[UUID, Decimal]:
+def club_item_out(m: EventStoreItems, *, earned=Decimal(0), events: list[dict] | None = None) -> dict:
+    """An item as the club's catalogue lists it: sold, held, left and earned
+    across every event, and the events offering it."""
+    total, sold, held = _total(m), _sold(m), _held(m)
+    return dict(
+        id=str(m.id), name=m.name, description=m.description, photo_url=objects.photo_url(m.photo_key), photo_key=m.photo_key,
+        price=_f(m.price), stock=m.stock, variants=_variants_out(m), available_roles=m.available_roles, free_roles=list(m.free_roles or []),
+        on_sale=m.on_sale, sort_order=m.sort_order, sold=sold, held=held, left=_left(total, sold, held), earned=_f(earned), events=events or [],
+    )
+
+
+async def _sales(session, event_id: int) -> dict[UUID, dict]:
+    """What one event's paid orders took of each item: pieces, money, and
+    pieces by size."""
     rows = (await session.execute(
-        select(EventStoreOrderLines.item_id, func.sum(EventStoreOrderLines.line_total))
+        select(EventStoreOrderLines.item_id, EventStoreOrderLines.variant_id, func.sum(EventStoreOrderLines.qty), func.sum(EventStoreOrderLines.line_total))
         .join(EventStoreOrders, EventStoreOrders.id == EventStoreOrderLines.order_id)
         .where(EventStoreOrders.event_id == event_id, EventStoreOrders.status == "paid")
-        .group_by(EventStoreOrderLines.item_id)
+        .group_by(EventStoreOrderLines.item_id, EventStoreOrderLines.variant_id)
     )).all()
-    return {i: Decimal(t or 0) for i, t in rows}
+    out: dict[UUID, dict] = {}
+    for item_id, variant_id, qty, money in rows:
+        s = out.setdefault(item_id, {"sold": 0, "earned": Decimal(0), "sizes": {}})
+        s["sold"] += int(qty or 0)
+        s["earned"] += Decimal(money or 0)
+        if variant_id is not None:
+            s["sizes"][variant_id] = s["sizes"].get(variant_id, 0) + int(qty or 0)
+    return out
+
+
+def _on_event(event: Events):
+    """The items an event offers: its own club's, not deleted, in the event's order."""
+    return (
+        select(EventStoreItems)
+        .join(EventStoreOffers, EventStoreOffers.item_id == EventStoreItems.id)
+        .where(EventStoreOffers.event_id == event.id, EventStoreItems.club_id == event.club_id, EventStoreItems.is_deleted == False)  # noqa: E712
+        .order_by(EventStoreOffers.sort_order, EventStoreItems.sort_order, EventStoreItems.created_at)
+        .execution_options(populate_existing=True)
+    )
 
 
 async def list_items(session, event: Events) -> list[dict]:
-    rows = list((await session.scalars(select(EventStoreItems).where(EventStoreItems.event_id == event.id, EventStoreItems.is_deleted == False).order_by(EventStoreItems.sort_order, EventStoreItems.created_at).execution_options(populate_existing=True))).all())  # noqa: E712
-    earned = await _earned(session, event.id)
-    return [item_out(m, earned.get(m.id, Decimal(0))) for m in rows]
+    rows = list((await session.scalars(_on_event(event))).all())
+    sales = await _sales(session, event.id)
+    return [item_out(m, event_id=event.id, sales=sales.get(m.id)) for m in rows]
+
+
+async def event_item_out(session, event: Events, m: EventStoreItems) -> dict:
+    return item_out(m, event_id=event.id, sales=(await _sales(session, event.id)).get(m.id))
 
 
 async def item_for(session, event: Events, item_id) -> EventStoreItems:
-    m = await session.scalar(select(EventStoreItems).where(EventStoreItems.id == _uuid(item_id), EventStoreItems.event_id == event.id, EventStoreItems.is_deleted == False).execution_options(populate_existing=True))  # noqa: E712
+    """An item this event offers (404 for any other, the club's own included)."""
+    m = await session.scalar(_on_event(event).where(EventStoreItems.id == _uuid(item_id)))
     if m is None:
         raise CustomHTTPException(404, message="Item not found")
     return m
 
 
-async def create_item(session, event: Events, body) -> dict:
-    last = await session.scalar(select(func.max(EventStoreItems.sort_order)).where(EventStoreItems.event_id == event.id))
+async def club_item_for(session, club_id: int, item_id) -> EventStoreItems:
+    m = await session.scalar(
+        select(EventStoreItems).where(EventStoreItems.id == _uuid(item_id), EventStoreItems.club_id == club_id, EventStoreItems.is_deleted == False)  # noqa: E712
+        .execution_options(populate_existing=True)
+    )
+    if m is None:
+        raise CustomHTTPException(404, message="Item not found")
+    return m
+
+
+async def create_item(session, club_id: int, body, *, event: Events | None = None) -> EventStoreItems:
+    """A new item in the club's catalogue, last in its order; made from an
+    event's store (`event`), that event offers it too, last in its order."""
+    last = await session.scalar(select(func.max(EventStoreItems.sort_order)).where(EventStoreItems.club_id == club_id))
     m = EventStoreItems(
-        event_id=event.id, name=body.name, description=(body.description or "").strip() or None, photo_key=body.photo_key, price=body.price, stock=body.stock,
-        available_roles=body.available_roles, free_roles=body.free_roles, on_sale=body.on_sale, sort_order=(last if last is not None else -1) + 1,
+        club_id=club_id, event_id=event.id if event is not None else None, name=body.name, description=(body.description or "").strip() or None,
+        photo_key=body.photo_key, price=body.price, stock=body.stock, available_roles=body.available_roles, free_roles=body.free_roles,
+        on_sale=body.on_sale, sort_order=(last if last is not None else -1) + 1,
     )
     for i, v in enumerate(body.variants):
         m.variants.append(EventStoreVariants(label=v.label.strip(), stock=v.stock, sort_order=i))
     session.add(m)
+    await session.flush()
+    if event is not None:
+        last_offer = await session.scalar(select(func.max(EventStoreOffers.sort_order)).where(EventStoreOffers.event_id == event.id))
+        session.add(EventStoreOffers(event_id=event.id, item_id=m.id, sort_order=(last_offer if last_offer is not None else -1) + 1))
     await session.commit()
     await session.refresh(m)
-    return item_out(m)
+    return m
 
 
 def _taken_message(label: str, sold: int, held: int) -> str:
@@ -158,7 +235,8 @@ def _taken_message(label: str, sold: int, held: int) -> str:
     return f"{label}: {sold} already sold; stock cannot go below that"
 
 
-async def update_item(session, event: Events, m: EventStoreItems, body) -> dict:
+async def update_item(session, m: EventStoreItems, body) -> EventStoreItems:
+    """The item changed for every event that offers it: one shelf, one price."""
     data = body.model_dump(exclude_unset=True)
     if "variants" in data and data["variants"] is not None:
         keep = {v.label.strip().lower(): v for v in body.variants}
@@ -187,16 +265,172 @@ async def update_item(session, event: Events, m: EventStoreItems, body) -> dict:
             setattr(m, k, data[k].strip() if k == "name" else data[k])
     await session.commit()
     await session.refresh(m)
-    return item_out(m, (await _earned(session, event.id)).get(m.id, Decimal(0)))
+    return m
 
 
-async def delete_item(session, m: EventStoreItems) -> None:
+def _soft_delete(m: EventStoreItems) -> None:
     if _sold(m) > 0 or _held(m) > 0:
         # Paid for (or being paid for) by someone: it stays on their order. It leaves the shelf instead.
         m.on_sale = False
     m.is_deleted = True
     m.deleted_at = _now()
+
+
+async def delete_item(session, m: EventStoreItems) -> None:
+    """Out of the club's catalogue and off every event offering it (its
+    offers go). Orders already placed for it stand: their lines name it."""
+    await session.execute(delete(EventStoreOffers).where(EventStoreOffers.item_id == m.id))
+    _soft_delete(m)
     await session.commit()
+
+
+async def _offered_anywhere(session, item_id) -> bool:
+    return (await session.scalar(
+        select(func.count()).select_from(EventStoreOffers).join(Events, Events.id == EventStoreOffers.event_id)
+        .where(EventStoreOffers.item_id == item_id, Events.is_deleted == False)  # noqa: E712
+    ) or 0) > 0
+
+
+async def remove_offer(session, event: Events, m: EventStoreItems) -> bool:
+    """This event stops offering the item; its orders for it stand. An item
+    then offered nowhere, that nobody has bought or is buying, leaves the
+    club's catalogue too. Whether it did."""
+    await session.execute(delete(EventStoreOffers).where(EventStoreOffers.event_id == event.id, EventStoreOffers.item_id == m.id))
+    gone = False
+    if not await _offered_anywhere(session, m.id) and _sold(m) == 0 and _held(m) == 0:
+        _soft_delete(m)
+        gone = True
+    await session.commit()
+    return gone
+
+
+# ─── The club's catalogue ────────────────────────────────────────────────
+
+
+def club_photo(club_id: int, raw: bytes) -> dict:
+    """A photo for an item in the club's catalogue, under the club, with the
+    rules every product photo has (merch.service.product_photo). Not one of
+    the media CDN's folders (media.PUBLIC_FOLDERS): shown by a signed link."""
+    from app.api.merch import service as merch
+
+    return merch.product_photo(os.path.join(settings.S3_BASE_PATH, "clubs", str(club_id), "merch"), raw)
+
+
+async def club_items(session, club_id: int) -> list[dict]:
+    """Every item in the club's catalogue: across all its events, what each
+    sold, holds, has left and earned, and the events offering it."""
+    rows = list((await session.scalars(
+        select(EventStoreItems).where(EventStoreItems.club_id == club_id, EventStoreItems.is_deleted == False)  # noqa: E712
+        .order_by(EventStoreItems.sort_order, EventStoreItems.created_at).execution_options(populate_existing=True)
+    )).all())
+    if not rows:
+        return []
+    earned = await _club_earned(session, club_id)
+    events = await _offering(session, [m.id for m in rows])
+    return [club_item_out(m, earned=earned.get(m.id, Decimal(0)), events=events.get(m.id, [])) for m in rows]
+
+
+async def club_item(session, club_id: int, m: EventStoreItems) -> dict:
+    return club_item_out(m, earned=(await _club_earned(session, club_id)).get(m.id, Decimal(0)), events=(await _offering(session, [m.id])).get(m.id, []))
+
+
+async def _club_earned(session, club_id: int) -> dict[UUID, Decimal]:
+    """Money taken for each item on the club's events' paid orders. Through
+    the club's events, by their orders' indexes: the lines have none by item."""
+    rows = (await session.execute(
+        select(EventStoreOrderLines.item_id, func.sum(EventStoreOrderLines.line_total))
+        .join(EventStoreOrders, EventStoreOrders.id == EventStoreOrderLines.order_id)
+        .where(EventStoreOrders.status == "paid", EventStoreOrders.event_id.in_(select(Events.id).where(Events.club_id == club_id)))
+        .group_by(EventStoreOrderLines.item_id)
+    )).all()
+    return {i: Decimal(t or 0) for i, t in rows}
+
+
+async def _offering(session, item_ids: list) -> dict[UUID, list[dict]]:
+    """The live events offering each item, soonest first."""
+    rows = (await session.execute(
+        select(EventStoreOffers.item_id, Events.id, Events.name, Events.slug, Events.event_datetime)
+        .join(Events, Events.id == EventStoreOffers.event_id)
+        .where(EventStoreOffers.item_id.in_(item_ids), Events.is_deleted == False)  # noqa: E712
+        .order_by(Events.event_datetime, Events.id)
+    )).all()
+    out: dict[UUID, list[dict]] = {}
+    for item_id, eid, name, slug, when in rows:
+        out.setdefault(item_id, []).append(dict(id=eid, name=name, slug=slug, event_datetime=_iso(when)))
+    return out
+
+
+# ─── Which items an event offers ─────────────────────────────────────────
+
+
+async def offered_ids(session, event: Events) -> list[UUID]:
+    """The items the event offers, in its order."""
+    return list((await session.scalars(
+        select(EventStoreItems.id).join(EventStoreOffers, EventStoreOffers.item_id == EventStoreItems.id)
+        .where(EventStoreOffers.event_id == event.id, EventStoreItems.club_id == event.club_id, EventStoreItems.is_deleted == False)  # noqa: E712
+        .order_by(EventStoreOffers.sort_order, EventStoreItems.sort_order, EventStoreItems.created_at)
+    )).all())
+
+
+async def club_item_ids(session, club_id, item_ids) -> list[UUID]:
+    """`item_ids` once each, in the order given, once every one is a live
+    item of the club's catalogue (422 ITEM_UNAVAILABLE naming the others).
+    An item of another club is refused like one that does not exist."""
+    ids: list[UUID] = []
+    for raw in item_ids:
+        try:
+            i = UUID(str(raw))
+        except (ValueError, TypeError):
+            raise CustomHTTPException(422, message="An item id is not valid", error_code="ITEM_UNAVAILABLE", errors={"item_ids": [str(raw)]})
+        if i not in ids:
+            ids.append(i)
+    if not ids:
+        return ids
+    found = set() if club_id is None else set((await session.scalars(
+        select(EventStoreItems.id).where(EventStoreItems.id.in_(ids), EventStoreItems.club_id == club_id, EventStoreItems.is_deleted == False)  # noqa: E712
+    )).all())
+    missing = [str(i) for i in ids if i not in found]
+    if missing:
+        raise CustomHTTPException(
+            422, message="Some of these items are not in this club's store", error_code="ITEM_UNAVAILABLE", errors={"item_ids": missing},
+        )
+    return ids
+
+
+async def check_offers(session, event, item_ids, *, actor=None, current: list[UUID] | None = None) -> list[UUID]:
+    """The ids an event may offer, checked: the club's live items (422 for
+    any other), and the plan's room for those it adds (gates.check_store_offers).
+    `event` may be one not saved yet, or one as it will be after an edit
+    (its new date decides whether it is grandfathered)."""
+    from app.api.subscriptions import gates
+
+    ids = await club_item_ids(session, event.club_id, item_ids)
+    current = current or []
+    adding = [i for i in ids if i not in current]
+    await gates.check_store_offers(session, event, keeping=len(ids) - len(adding), adding=len(adding), actor=actor)
+    return ids
+
+
+async def write_offers(session, event_id: int, ids: list[UUID]) -> None:
+    """The event offers exactly `ids`, in that order. Not committed."""
+    await session.execute(delete(EventStoreOffers).where(EventStoreOffers.event_id == event_id, EventStoreOffers.item_id.not_in(ids)))
+    for n, item_id in enumerate(ids):
+        await session.execute(
+            pg_insert(EventStoreOffers.__table__).values(event_id=event_id, item_id=item_id, sort_order=n, created_at=_now())
+            .on_conflict_do_update(index_elements=["event_id", "item_id"], set_={"sort_order": n})
+        )
+
+
+async def offers_out(session, event: Events) -> dict:
+    return dict(merch_enabled=bool(getattr(event, "merch_enabled", False)), item_ids=[str(i) for i in await offered_ids(session, event)])
+
+
+async def set_offers(session, event: Events, item_ids, *, actor=None) -> dict:
+    """Replace the event's offers with `item_ids`, in that order."""
+    ids = await check_offers(session, event, item_ids, actor=actor, current=await offered_ids(session, event))
+    await write_offers(session, event.id, ids)
+    await session.commit()
+    return await offers_out(session, event)
 
 
 # ─── The catalogue a guest sees ──────────────────────────────────────────
@@ -205,7 +439,7 @@ async def delete_item(session, m: EventStoreItems) -> None:
 async def catalog(session, event: Events) -> dict:
     if not getattr(event, "merch_enabled", False):
         return dict(enabled=False, items=[])
-    rows = list((await session.scalars(select(EventStoreItems).where(EventStoreItems.event_id == event.id, EventStoreItems.is_deleted == False, EventStoreItems.on_sale == True).order_by(EventStoreItems.sort_order).execution_options(populate_existing=True))).all())  # noqa: E712
+    rows = list((await session.scalars(_on_event(event).where(EventStoreItems.on_sale == True))).all())  # noqa: E712
     items = []
     for m in rows:
         if m.available_roles and "attendee" not in m.available_roles:
@@ -359,7 +593,9 @@ async def place_order(session, event: Events, reg: Reg, picks, role: str = "atte
     seen = set()
     found = {}
     for p in picks:
-        m = await session.scalar(select(EventStoreItems).where(EventStoreItems.id == p.item_id, EventStoreItems.event_id == event.id, EventStoreItems.is_deleted == False, EventStoreItems.on_sale == True))  # noqa: E712
+        # Only an item this event offers, of its own club: another event's
+        # (or another club's) item is not for sale here.
+        m = await session.scalar(_on_event(event).where(EventStoreItems.id == p.item_id, EventStoreItems.on_sale == True))  # noqa: E712
         if m is None:
             raise CustomHTTPException(422, message="One of the items is no longer on sale", error_code="ITEM_UNAVAILABLE", errors={"item_id": str(p.item_id)})
         if m.available_roles and role not in m.available_roles:

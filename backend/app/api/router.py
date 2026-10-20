@@ -38,7 +38,7 @@ from app.api.club_domains.router import (
     router as club_domains_router,
 )
 from app.api.club_access.router import router as club_access_router
-from app.api.store.router import public_router as store_public_router, router as store_router
+from app.api.store.router import club_router as store_club_router, public_router as store_public_router, router as store_router
 from app.api.links.router import router as links_router
 from app.api.discover.router import admin_router as discover_admin_router, router as discover_router
 from app.api.emails.router import (
@@ -110,6 +110,8 @@ api_router.include_router(router=club_access_router, tags=["club-access"])
 api_router.include_router(router=payment_gateways_club_router)
 api_router.include_router(router=payment_gateways_admin_router)
 api_router.include_router(router=store_router, tags=["store"])
+# Before club_router: /clubs/store would otherwise be read as /clubs/{club_id}.
+api_router.include_router(router=store_club_router, tags=["store"])
 api_router.include_router(router=store_public_router, tags=["store"])
 api_router.include_router(router=club_router, tags=["clubs"])
 # Before the events router: these sit under /events/{event_id} and the

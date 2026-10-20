@@ -1,5 +1,13 @@
-"""The event store: merchandise for sale, picked at registration and paid with the ticket."""
+"""The store: a club's merchandise for sale, offered on its events, picked at
+registration and paid with the ticket.
+
+An item belongs to the club (`club_id`). Each event offers the items it
+picks (`EventStoreOffers`), so three or four events on at once sell from one
+pile of t-shirts: the stock and its counts are on the item (or its sizes),
+shared by every event that offers it. What each event sold is in its orders,
+which keep their `event_id`."""
 import uuid
+from datetime import datetime, timezone
 
 import sqlalchemy as sa
 from sqlalchemy import JSON, Boolean, CheckConstraint, Column, ForeignKey, Integer, Numeric, String, UUID, UniqueConstraint
@@ -15,7 +23,11 @@ class EventStoreItems(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     __tablename__ = "event_store_items"
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()"), default=uuid.uuid4)
-    event_id = Column(Integer, ForeignKey("events.id", ondelete="CASCADE"), nullable=False, index=True)
+    #: The club whose catalogue it is in; only that club's events may offer it.
+    club_id = Column(Integer, ForeignKey("clubs.id", ondelete="CASCADE"), nullable=False, index=True)
+    #: The event it was first made for, if any. A record only: which events
+    #: sell it is EventStoreOffers, and nothing scopes by this.
+    event_id = Column(Integer, ForeignKey("events.id", ondelete="SET NULL"), nullable=True, index=True)
     name = Column(String(120), nullable=False)
     description = Column(String(300), nullable=True)
     photo_key = Column(String(300), nullable=True)
@@ -39,6 +51,19 @@ class EventStoreItems(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         CheckConstraint("stock IS NULL OR sold_count <= stock", name="ck_event_store_items_sold_within_stock"),
         CheckConstraint("sold_count >= 0 AND reserved_count >= 0", name="ck_event_store_items_counts_non_negative"),
     )
+
+
+class EventStoreOffers(AbstractSQLModel):
+    """An event offering one of its club's items, in the event's own order.
+    Taking an item off an event deletes the row; orders already placed for
+    it are not touched."""
+
+    __tablename__ = "event_store_offers"
+
+    event_id = Column(Integer, ForeignKey("events.id", ondelete="CASCADE"), primary_key=True)
+    item_id = Column(UUID(as_uuid=True), ForeignKey("event_store_items.id", ondelete="CASCADE"), primary_key=True, index=True)
+    sort_order = Column(Integer, nullable=False, default=0, server_default="0")
+    created_at = Column(TZAwareDateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), server_default=sa.func.now())
 
 
 class EventStoreVariants(AbstractSQLModel):
