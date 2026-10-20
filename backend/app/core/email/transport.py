@@ -31,7 +31,7 @@ import base64
 import io
 import logging
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from email.mime.application import MIMEApplication
 from email.mime.image import MIMEImage
@@ -135,6 +135,9 @@ def deliver(mail: Mail) -> dict:
     every provider refused it."""
     if not mail.to:
         raise ValueError("A mail needs at least one recipient")
+    mail = _without_suppressed_domains(mail)
+    if mail is None:
+        return {"MessageId": None, "Provider": "suppressed"}
     if mail.check_suppression:
         from app.core.mail import suppression
 
@@ -157,6 +160,29 @@ def deliver(mail: Mail) -> dict:
             # Sent, perhaps taken, and no answer.
             raise MailDeferred(f"Resend did not answer ({e.__class__.__name__}); it will be tried again") from e
     return {"MessageId": _send_ses(mail), "Provider": "ses"}
+
+
+def _without_suppressed_domains(mail: Mail) -> Optional[Mail]:
+    """The mail without its recipients at a suppressed domain
+    (settings.MAIL_SUPPRESS_DOMAINS: the demo's invented people), or None
+    when nobody is left to send it to. Every mail passes here -- account
+    mail, alerts, tickets, journeys, surveys -- so no path reaches them.
+    None is answered as sent, not refused: a refusal is retried, and a
+    failed delivery shows as an error to the organiser."""
+    from app.core.mail import suppression
+
+    to = [a for a in mail.to if not suppression.at_suppressed_domain(parseaddr(a)[1] or a)]
+    bcc = [a for a in mail.bcc if not suppression.at_suppressed_domain(parseaddr(a)[1] or a)]
+    if len(to) == len(mail.to) and len(bcc) == len(mail.bcc):
+        return mail
+    dropped = len(mail.to) + len(mail.bcc) - len(to) - len(bcc)
+    if not to and not bcc:
+        logger.info("Mail %r not sent: every recipient (%d) is at a suppressed domain", mail.subject, dropped)
+        return None
+    logger.info("Mail %r: %d recipient(s) at a suppressed domain left out", mail.subject, dropped)
+    if not to:
+        to, bcc = bcc[:1], bcc[1:]
+    return replace(mail, to=to, bcc=bcc)
 
 
 # ─── Resend ──────────────────────────────────────────────────────────────

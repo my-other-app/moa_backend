@@ -1,0 +1,278 @@
+{
+  "slug": "founders-verandah",
+  "name": "Founders' Verandah",
+  "tagline": "Where Technopark's early-stage founders swap honest numbers.",
+  "about": "Founders' Verandah began in 2023 on an actual verandah: the front porch of an old Kazhakkoottam house that one of us rented as an office because it was cheaper than a cowork. Eight people building companies around Technopark sat there on a Thursday night with black tea and banana chips and agreed on one rule. Say the real numbers: revenue, runway, churn, the month you couldn't pay yourself.\n\nWe're now about ninety founders and would-be founders: SaaS teams selling to the Gulf, a seaweed-snack brand from Vizhinjam, an ed-tech company run by two former teachers, hardware people, and services firms trying to become product firms. Most haven't raised a Series A. Some haven't quit their jobs yet, and they're the people we most want in the room.\n\nEvery month there's a Verandah Night, where two founders tell the story of one hard decision and everyone else asks questions. We also run office hours with operators who've done it before, a founder-only peer circle, and a yearly pitch practice day where the investors in the room are told to be kind first and honest second.\n\nNo pitching at Verandah Nights, no recruiting at the door, and what's said on the verandah stays there unless the founder says otherwise.",
+  "org": null,
+  "location": {"name": "Kazhakkoottam, Thiruvananthapuram", "lat": 8.5686, "lng": 76.8731},
+  "contact": {"email": "hello@founders-verandah.demo.myotherapp.in", "phone": "+91 90000 01505"},
+  "socials": {"instagram": "foundersverandah", "linkedin": "founders-verandah", "x": "fverandah"},
+  "topics": ["business"],
+  "interests": ["entrepreneurship", "product-management", "finance", "marketing"],
+  "brand": {"primary": "#1E3A5F", "accent": "#E08E45", "ink": "#141C28", "paper": "#F6F2EA", "display_font": "dm-serif", "motif": "triangles"},
+  "team": [
+    {"name": "Rajeev Thampy", "role": "Host", "bio": "Two-time founder who sold a small HR software company in 2022 and now asks the uncomfortable question at every Verandah Night."},
+    {"name": "Shalini Mathew", "role": "Co-host, peer circle", "bio": "Runs a twenty-person SaaS company selling clinic software to the Gulf and keeps the peer circle honest."},
+    {"name": "Farhan Latheef", "role": "Office hours", "bio": "Former product head at a fintech start-up who matches founders with operators for thirty-minute calls."},
+    {"name": "Lekshmi Prabhakaran", "role": "Community", "bio": "Left a bank job to build an ed-tech start-up and makes sure every first-timer is introduced to someone on night one."},
+    {"name": "Anil Kumar Vasudevan", "role": "Finance clinic", "bio": "Chartered accountant who has kept the books for forty start-ups and explains cap tables on the back of a bus ticket."},
+    {"name": "Gayatri Iyer", "role": "Events", "bio": "Product manager by day who runs Verandah Nights by evening, mostly with a clipboard."}
+  ],
+  "partners": [
+    {"name": "Charupadi Workspace", "role": "Venue partner", "since": 2023},
+    {"name": "Mookkuthi Ventures", "role": "Angel network partner", "since": 2024},
+    {"name": "Thengola Legal", "role": "Legal clinic partner", "since": 2024}
+  ],
+  "followers": 970,
+  "merch": [
+    {"key": "tee", "name": "Say the Real Numbers tee", "description": "Navy tee with the verandah roofline on the front and the club's only rule printed small on the back.", "price": 549, "kind": "tee", "color": "#1E3A5F", "sizes": {"S": 10, "M": 24, "L": 26, "XL": 14, "XXL": 6}, "stock": null},
+    {"key": "mug", "name": "Runway mug", "description": "Enamel camping mug with a hand-drawn runway chart that only goes down. Black tea recommended.", "price": 349, "kind": "mug", "color": "#E08E45", "sizes": null, "stock": 70},
+    {"key": "notebook", "name": "Board meeting notebook", "description": "A5 notebook with monthly pages for revenue, burn and runway, plus a box marked 'what I'm avoiding'.", "price": 299, "kind": "notebook", "color": "#F6F2EA", "sizes": null, "stock": 100}
+  ],
+  "events": [
+    {
+      "slug": "verandah-night-31-payroll",
+      "name": "Verandah Night #31: The Month We Couldn't Make Payroll",
+      "when": {"days_from_now": -90, "time": "19:00", "duration_hours": 3},
+      "format": "in_person",
+      "venue": {"name": "Charupadi Workspace", "address": "TC 92/1410, Kazhakkoottam-Kovalam Bypass, Kazhakkoottam, Thiruvananthapuram 695582"},
+      "category": "Talk",
+      "interests": ["entrepreneurship", "finance"],
+      "fee": 0,
+      "sold_out": false,
+      "capacity": 70,
+      "registrations": 66,
+      "attended_ratio": 0.86,
+      "certificates": false,
+      "about": "Two founders, one hard month each. Sreekanth ran out of money in March last year with eleven people on payroll and a cold-chain business that was two weeks from its next contract. Neethu paid salaries late twice in her school-software company's first year. Both told us exactly what happened: the numbers, the conversations with the team, the calls to family, and what they'd do differently.\n\nThe room asked questions for an hour. Nobody pitched, nobody took notes on their phones, and at least three people stayed back to talk to Sreekanth about their own runway. This was one of our most attended nights, and one of the quietest.",
+      "guidelines": "Verandah Nights are off the record unless a speaker says otherwise: no recording, no quoting names in posts. No pitching and no recruiting. Doors at 6:45, chai and snacks provided. If it's your first time, tell Lekshmi at the door and she'll introduce you around.",
+      "speakers": [
+        {"name": "Sreekanth Pillai", "designation": "Founder, cold-chain logistics start-up", "bio": "Ran out of money in March 2025 with eleven employees and a truck fleet. Survived, and tells the story in exact numbers."},
+        {"name": "Neethu Sasi", "designation": "Co-founder, school software start-up", "bio": "Paid salaries late twice in 2023 and wrote her team a letter both times. Every one of those employees is still with her."},
+        {"name": "Rajeev Thampy", "designation": "Host, Founders' Verandah", "bio": "Has run thirty-one Verandah Nights and keeps a notebook of the questions that made founders pause longest."}
+      ],
+      "agenda": [
+        {"at": "19:00", "title": "Chai, introductions and the house rules", "by": "Rajeev Thampy"},
+        {"at": "19:20", "title": "Eleven people, two weeks of cash", "by": "Sreekanth Pillai"},
+        {"at": "19:50", "title": "Two late salaries and two letters", "by": "Neethu Sasi"},
+        {"at": "20:20", "title": "Questions from the verandah", "by": null},
+        {"at": "21:20", "title": "Hang around and talk", "by": null}
+      ],
+      "questions": [
+        {"key": "stage", "label": "Where are you in your journey?", "type": "radio", "options": ["Thinking about starting", "Building, no revenue yet", "Earning revenue", "Raised funding"], "required": true},
+        {"key": "company", "label": "Your company, in one line (optional)", "type": "text", "required": false}
+      ],
+      "merch": ["mug"],
+      "swag": [{"name": "House-rules bookmark", "sponsor": null}],
+      "feedback": {
+        "responses": 44,
+        "avg_rating": 4.9,
+        "comments": [
+          "I've never heard founders talk about money this honestly in public. Thank you, both of you.",
+          "Neethu's letters to her team should be required reading.",
+          "The Q&A could have gone another hour. Nobody wanted to leave.",
+          "Parking on the bypass was tough; a note about the side lane would help newcomers.",
+          "I went home and recalculated my runway. Sobering, and useful."
+        ]
+      },
+      "live": {
+        "poll": {"question": "How many months of runway do you have right now?", "options": ["Under 3", "3 to 6", "6 to 12", "Over 12, or profitable"]},
+        "qna": [
+          "Did you consider taking a loan against personal assets?",
+          "How did you decide who to tell first, the team or the investors?",
+          "What would you tell a founder who has four months left today?"
+        ]
+      },
+      "poster": {"headline": "The Month We Couldn't Make Payroll", "sub": "Verandah Night #31. Two founders, two hard months, real numbers."}
+    },
+    {
+      "slug": "pitch-practice-day-2026",
+      "name": "Pitch Practice Day 2026",
+      "when": {"days_from_now": -51, "time": "09:30", "duration_hours": 7},
+      "format": "in_person",
+      "venue": {"name": "Charupadi Workspace", "address": "TC 92/1410, Kazhakkoottam-Kovalam Bypass, Kazhakkoottam, Thiruvananthapuram 695582"},
+      "category": "Workshop",
+      "interests": ["entrepreneurship", "finance", "marketing"],
+      "fee": 499,
+      "sold_out": false,
+      "capacity": 40,
+      "registrations": 38,
+      "attended_ratio": 0.92,
+      "certificates": true,
+      "about": "A full day for founders to pitch, get torn apart gently, fix the pitch and do it again. Each of the twelve presenting founders gave their pitch twice: once in the morning, and once in the afternoon after an hour of one-on-one work with a mentor. The investors in the room had one instruction: kind first, honest second, and always say the one thing that would make you take a second meeting.\n\nThe other founders in the room weren't spectators. Everyone scored every pitch on a simple sheet, and the scores were compared with the investors' at the end. The gap between what founders thought mattered and what the investors actually noticed was the most useful slide of the day.",
+      "guidelines": "Presenting founders: seven minutes, ten slides at most, no videos. Send your deck by Thursday night. Non-presenting founders: you're a scorer, so come ready to pay attention. The fee covers lunch, tea and the printed scoring kits. Decks are shared only with the panel and deleted after the event.",
+      "speakers": [
+        {"name": "Mohan Krishnan", "designation": "Angel investor, Mookkuthi Ventures", "bio": "Has written twenty-two cheques into Kerala start-ups and asks every founder the same first question: who pays?"},
+        {"name": "Reshma Haneef", "designation": "Partner, early-stage fund", "bio": "Built and sold a payments company in Kochi, and listens hardest for the number a founder says quickly before moving on."},
+        {"name": "Rajeev Thampy", "designation": "Host, Founders' Verandah", "bio": "Pitched forty-one times for his first company's seed round and remembers which slide lost him most of them."}
+      ],
+      "agenda": [
+        {"at": "09:30", "title": "Breakfast and the scoring sheet", "by": "Rajeev Thampy"},
+        {"at": "10:00", "title": "Round one: twelve pitches", "by": null},
+        {"at": "12:00", "title": "What the panel noticed", "by": "Reshma Haneef"},
+        {"at": "12:45", "title": "Lunch", "by": null},
+        {"at": "13:30", "title": "One-on-one fixes with mentors", "by": null},
+        {"at": "14:30", "title": "Round two: the same twelve, better", "by": null},
+        {"at": "16:00", "title": "Founders' scores versus investors' scores", "by": "Mohan Krishnan"}
+      ],
+      "questions": [
+        {"key": "role", "label": "Are you presenting or scoring?", "type": "radio", "options": ["Presenting my start-up", "Scoring and learning"], "required": true},
+        {"key": "sector", "label": "Your sector", "type": "select", "options": ["SaaS", "Consumer brand", "Ed-tech", "Health", "Hardware", "Services", "Other"], "required": true},
+        {"key": "monthly_revenue", "label": "Monthly revenue today, in lakhs (0 is fine)", "type": "number", "required": false}
+      ],
+      "merch": ["notebook", "tee"],
+      "swag": [{"name": "Printed scoring kit", "sponsor": null}, {"name": "One free legal consult", "sponsor": "Thengola Legal"}],
+      "feedback": {
+        "responses": 31,
+        "avg_rating": 4.6,
+        "comments": [
+          "Pitching twice in one day showed me exactly what an hour of focused feedback can do.",
+          "The founders-versus-investors score comparison was eye-opening. We all overrate the team slide.",
+          "Reshma's feedback was blunt and completely right.",
+          "Lunch ran long and round two felt rushed for the last three pitches.",
+          "Worth far more than ₹499."
+        ]
+      },
+      "live": {
+        "poll": {"question": "Which slide do founders get wrong most often?", "options": ["Market size", "Business model", "Traction", "The ask"]},
+        "qna": [
+          "Should a pre-revenue company show projections at all?",
+          "How much is too much to raise from angels in Kerala?",
+          "Do investors prefer a live demo or screenshots?"
+        ]
+      },
+      "poster": {"headline": "Pitch Practice Day", "sub": "Pitch, get feedback, fix it, pitch again. Investors told to be kind first."}
+    },
+    {
+      "slug": "selling-saas-to-the-gulf",
+      "name": "Selling SaaS to the Gulf: A Field Guide",
+      "when": {"days_from_now": -16, "time": "20:00", "duration_hours": 1.5},
+      "format": "online",
+      "venue": null,
+      "category": "Talk",
+      "interests": ["entrepreneurship", "marketing", "product-management"],
+      "fee": 0,
+      "sold_out": false,
+      "capacity": 150,
+      "registrations": 124,
+      "attended_ratio": 0.62,
+      "certificates": false,
+      "about": "Half the SaaS founders in our community sell, or want to sell, to customers in the UAE, Saudi Arabia, Qatar and Oman. Shalini has sold clinic software there for six years, and Firoz has had about six hundred procurement conversations with Gulf hospitals and clinics from his desk in Dubai. Together they walked through what actually works.\n\nTopics included: why your first customer will probably come through a Malayali relative of someone you know, pricing in dirhams versus dollars, Arabic in the interface, the procurement calendar around Ramadan, and why a trip to Dubai in month three is worth more than six months of cold email.",
+      "guidelines": "Online, on a video call; the link arrives an hour before. Cameras optional. Questions go in the chat and the hosts will pick them up in the last thirty minutes. The session is recorded for members who couldn't attend.",
+      "speakers": [
+        {"name": "Shalini Mathew", "designation": "Founder, clinic software company; co-host, Founders' Verandah", "bio": "Has sold clinic software to the Gulf for six years and still answers support tickets in Arabic with a phrasebook open."},
+        {"name": "Firoz Moosa", "designation": "Head of sales, health software company, Dubai", "bio": "Moved from Thiruvananthapuram to Dubai in 2019 and keeps a spreadsheet of every Gulf procurement conversation he has had since."}
+      ],
+      "agenda": [
+        {"at": "20:00", "title": "Who buys software in the Gulf, and how", "by": "Firoz Moosa"},
+        {"at": "20:25", "title": "Pricing, language and the first ten customers", "by": "Shalini Mathew"},
+        {"at": "20:55", "title": "Questions from the chat", "by": null}
+      ],
+      "questions": [
+        {"key": "selling_already", "label": "Are you already selling outside India?", "type": "radio", "options": ["Yes, to the Gulf", "Yes, elsewhere", "Not yet"], "required": true}
+      ],
+      "merch": ["notebook"],
+      "swag": [{"name": "Gulf pricing worksheet", "sponsor": null}],
+      "feedback": {
+        "responses": 48,
+        "avg_rating": 4.5,
+        "comments": [
+          "The Ramadan procurement calendar alone saved me a quarter of wasted outreach.",
+          "Concrete, specific, no fluff. More sessions like this, please.",
+          "Audio dropped for a couple of minutes in the middle. The recording helped.",
+          "Would love a follow-up just on pricing in dirhams."
+        ]
+      },
+      "live": {
+        "poll": {"question": "Which Gulf market are you most interested in?", "options": ["UAE", "Saudi Arabia", "Qatar", "Oman"]},
+        "qna": [
+          "Do we need a local entity before signing the first customer?",
+          "How do you handle Arabic right-to-left layouts on a small team?",
+          "Is it worth attending a big trade show in the first year?"
+        ]
+      },
+      "poster": {"headline": "Selling SaaS to the Gulf", "sub": "A field guide from two people who've done it. Online, Thursday night."}
+    },
+    {
+      "slug": "verandah-night-34-first-firing",
+      "name": "Verandah Night #34: Letting Go of Your First Hire",
+      "when": {"days_from_now": 8, "time": "19:00", "duration_hours": 3},
+      "format": "in_person",
+      "venue": {"name": "Charupadi Workspace", "address": "TC 92/1410, Kazhakkoottam-Kovalam Bypass, Kazhakkoottam, Thiruvananthapuram 695582"},
+      "category": "Talk",
+      "interests": ["entrepreneurship", "product-management"],
+      "fee": 0,
+      "sold_out": false,
+      "capacity": 70,
+      "registrations": 49,
+      "attended_ratio": null,
+      "certificates": null,
+      "about": "The first person you hire is often a friend, a cousin or the first person who believed in you. Letting them go is one of the hardest things a founder does, and almost nobody talks about it. This month, Prasanth tells the story of the six people he has had to let go and why he waited too long with the first one.\n\nDr. Sheeba Alexander, who advises founders on difficult conversations, will join him to talk about how to do it with dignity: what to say, what never to say, and how to look after the team who stays. As always, the questions afterwards are the main event.",
+      "guidelines": "Off the record, as every Verandah Night is. Please don't share names or details from the talk. No pitching, no recruiting. Doors at 6:45; chai and snacks provided. First-timers, say hello to Lekshmi at the door.",
+      "speakers": [
+        {"name": "Prasanth Nambiar", "designation": "Founder, design services firm", "bio": "Has hired forty people and let go of six, and says the first one should have happened a year earlier than it did."},
+        {"name": "Dr. Sheeba Alexander", "designation": "Organisational psychologist", "bio": "Advises founders on hard conversations and keeps a list of sentences you should never say in one."}
+      ],
+      "agenda": [
+        {"at": "19:00", "title": "Chai and the house rules", "by": null},
+        {"at": "19:20", "title": "Six goodbyes, and the one I delayed", "by": "Prasanth Nambiar"},
+        {"at": "19:50", "title": "Hard conversations, done with dignity", "by": "Dr. Sheeba Alexander"},
+        {"at": "20:20", "title": "Questions from the verandah", "by": null}
+      ],
+      "questions": [
+        {"key": "team_size", "label": "How big is your team right now?", "type": "select", "options": ["Just me", "2 to 5", "6 to 20", "More than 20"], "required": true},
+        {"key": "anonymous_question", "label": "A question you'd like asked anonymously", "type": "text", "required": false}
+      ],
+      "merch": ["mug", "notebook"],
+      "swag": [{"name": "Thirty-minute consult on employment contracts", "sponsor": "Thengola Legal"}],
+      "feedback": null,
+      "live": null,
+      "poster": {"headline": "Letting Go of Your First Hire", "sub": "Verandah Night #34. The hardest conversation, told honestly."}
+    },
+    {
+      "slug": "founders-dinner-bootstrapped",
+      "name": "Founders' Dinner: The Bootstrapped Edition",
+      "when": {"days_from_now": 30, "time": "19:30", "duration_hours": 3},
+      "format": "in_person",
+      "venue": {"name": "The courtyard at Charupadi Workspace", "address": "TC 92/1410, Kazhakkoottam-Kovalam Bypass, Kazhakkoottam, Thiruvananthapuram 695582"},
+      "category": "Meetup",
+      "interests": ["entrepreneurship", "finance"],
+      "fee": 1200,
+      "sold_out": true,
+      "capacity": 30,
+      "registrations": 30,
+      "attended_ratio": null,
+      "certificates": null,
+      "about": "Thirty founders, one long table in the courtyard, and a Kerala dinner cooked by the family who own the building. This edition is for founders who haven't raised money and don't plan to: people building profitable companies on revenue alone. Our guest, Unnikrishnan, has run an unfunded accounting software company from Kazhakkoottam for eleven years.\n\nThere are no talks. Every few courses, the seating changes so you sit next to someone new. Lekshmi will hand each table one question to start with, and after that the conversation is yours.",
+      "guidelines": "This dinner is full; join the waitlist on the event page if you'd like a seat at the next one. Please tell us about food allergies in your registration. The fee covers the dinner and is shared with the family who cooks it. Arrive by 7:15 so seating can start on time.",
+      "speakers": [
+        {"name": "Unnikrishnan Pothuval", "designation": "Founder, bootstrapped accounting software company", "bio": "Has run a profitable, unfunded software company for eleven years and has never once made a pitch deck."},
+        {"name": "Lekshmi Prabhakaran", "designation": "Community, Founders' Verandah", "bio": "Writes the table questions for every dinner and has been known to swap a card if a table gets too comfortable."}
+      ],
+      "agenda": [
+        {"at": "19:30", "title": "Welcome drink and seating cards", "by": "Lekshmi Prabhakaran"},
+        {"at": "19:50", "title": "First course and the first table question", "by": null},
+        {"at": "20:40", "title": "Seats change; a word from our guest", "by": "Unnikrishnan Pothuval"},
+        {"at": "21:30", "title": "Payasam and the last seat change", "by": null}
+      ],
+      "questions": [
+        {"key": "food_allergies", "label": "Any food allergies?", "type": "text", "required": true},
+        {"key": "revenue_years", "label": "How many years has your company been earning revenue?", "type": "number", "required": false}
+      ],
+      "merch": ["tee"],
+      "swag": [{"name": "Hand-written seating card", "sponsor": null}],
+      "feedback": null,
+      "live": null,
+      "poster": {"headline": "Founders' Dinner", "sub": "The bootstrapped edition. One long table, thirty founders, no pitch decks."}
+    }
+  ],
+  "threads": [
+    {"days_ago": 3, "kind": "announcement", "text": "Verandah Night #34 is open for RSVPs. Prasanth Nambiar on letting go of his first hire, with Dr. Sheeba Alexander on how to do hard conversations with dignity. If you have a question you'd rather ask anonymously, there's a box for it in the form.", "likes": 57, "comments": [{"text": "Very relevant for me right now. Registered."}, {"text": "Will there be a second Thursday this month? This one clashes with a client trip."}]},
+    {"days_ago": 7, "kind": "announcement", "text": "The bootstrapped founders' dinner filled all thirty seats in under a day. Thank you. We know a lot of you missed it, so we're planning two more dinners in the new year: one for solo founders and one for founders building hardware. Waitlist is open on the event page.", "likes": 71, "comments": [{"text": "Solo founders dinner, please! It's lonely out here."}, {"text": "Hardware dinner would be amazing. There are more of us than you think."}]},
+    {"days_ago": 13, "kind": "post", "text": "Three things we took away from Selling SaaS to the Gulf. One: your first customer will probably come through someone you already know, so make the list. Two: plan outreach around the Ramadan procurement calendar, not against it. Three: one trip to Dubai in month three beats six months of cold email. The recording is in the event page for members.", "likes": 64, "comments": [{"text": "The Ramadan point alone was worth the evening."}, {"text": "Shalini and Firoz should write a book."}, {"text": "Is the recording available to people who registered but missed it?"}]},
+    {"days_ago": 20, "kind": "poll", "text": "Quick pulse check. What's your biggest problem this quarter?", "options": ["Finding customers", "Hiring the right people", "Cash flow", "Staying focused"], "likes": 49, "comments": [{"text": "Focus. I'm building three products and I know it."}, {"text": "Cash flow, always cash flow."}, {"text": "Could we do a Verandah Night on staying focused?"}]},
+    {"days_ago": 27, "kind": "post", "text": "Office hours update: thirty-one founders had calls with operators this month, on pricing, hiring a first salesperson, GST registration and one memorable conversation about whether to rename a company. Book a slot from the club page; it's free and always will be.", "likes": 38, "comments": [{"text": "Farhan matched me with someone who solved my pricing problem in twenty minutes."}, {"text": "What did they decide about the rename?"}]},
+    {"days_ago": 35, "kind": "poll", "text": "Verandah Nights have always been on Thursdays. A few founders with young kids have asked about Saturday afternoons. What works for you?", "options": ["Thursday evening", "Saturday afternoon", "Alternate between them"], "likes": 33, "comments": [{"text": "Alternate, please. I'm a parent and I want to come to more of these."}, {"text": "Thursday. Saturdays are for customers."}]},
+    {"days_ago": 44, "kind": "announcement", "text": "Applications are open for the next founders' peer circle: eight founders, meeting every other Saturday morning for six months, same group throughout. It's free, but you have to commit to coming. Priority to founders who are working on their company full-time.", "likes": 45, "comments": [{"text": "The last peer circle was the most useful thing I did in my first year."}, {"text": "Can co-founders apply together?"}, {"text": "One per company, so the group stays balanced."}]}
+  ]
+}

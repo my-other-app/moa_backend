@@ -1,0 +1,306 @@
+{
+  "slug": "sulaimani-striders",
+  "name": "Sulaimani Striders",
+  "tagline": "Sunrise runs on Kozhikode beach, finished with a glass of sulaimani.",
+  "about": "Sulaimani Striders is Kozhikode's friendliest running club. We started in 2022 with four people who kept passing each other on Beach Road at 5:30 every morning and finally decided to run together. The deal was simple: whoever finished last bought the sulaimani at the tea stall near the lighthouse. We now have more than three hundred runners, and the tea stall has had to buy more glasses.\n\nWe run three times a week. Tuesdays and Thursdays are easy beach runs from the lighthouse towards the old pier and back, in pace groups from eight-minute kilometres down to sub-five. Saturday is the long run: sometimes up the coast to Kappad, sometimes through the city to Sarovaram Bio Park, and now and then into the hills at Kakkayam for a trail day. Every run ends at the same tea stall.\n\nWe're for people who have never run a kilometre and people training for their fifth marathon. Nobody gets left behind: every pace group has a sweeper, and the walk-run group for beginners is our biggest. Women runners have their own Wednesday group with a woman pacer, and we're mapping our first wheelchair-friendly route along the promenade.",
+  "org": null,
+  "location": {"name": "Kozhikode Beach, Kozhikode", "lat": 11.2588, "lng": 75.7704},
+  "contact": {"email": "hello@sulaimani-striders.demo.myotherapp.in", "phone": "+91 90000 01606"},
+  "socials": {"instagram": "sulaimanistriders", "linkedin": null, "x": "sulaimanirun"},
+  "topics": ["sports-fitness"],
+  "interests": ["fitness", "sports", "outdoors-adventure"],
+  "brand": {"primary": "#0E7C86", "accent": "#FF7A45", "ink": "#0A2A30", "paper": "#F2FAFA", "display_font": "bebas", "motif": "stripes"},
+  "team": [
+    {"name": "Shameer Kallayi", "role": "Founder and head coach", "bio": "Former state-level 1500 m runner who coaches the pace groups and won't let anyone sprint the first kilometre."},
+    {"name": "Anitha Gopalakrishnan", "role": "Women's group lead", "bio": "Started running at 41 after her daughter dared her; now paces the Wednesday women's run at 6:30 a kilometre."},
+    {"name": "Ridhin Raj", "role": "Long-run captain", "bio": "Maps every Saturday route, including the ones that end at a halwa shop on SM Street."},
+    {"name": "Dr. Nasreen Abdul Kader", "role": "Physio and injury clinic", "bio": "Sports physiotherapist who runs a free shin-splint clinic on the sand after every Saturday run."},
+    {"name": "Joseph Manjooran", "role": "Kit and logistics", "bio": "Carries the water, the first-aid kit and the pace flags, usually all at the same time."},
+    {"name": "Akshay Pramod", "role": "Beginners coach", "bio": "Coaches the walk-run group and celebrates every first continuous 5K as if it were his own."}
+  ],
+  "partners": [
+    {"name": "Kuthippu Sports", "role": "Shoe and kit partner", "since": 2023},
+    {"name": "Vilakkumaram Chaya", "role": "Post-run sulaimani partner", "since": 2022},
+    {"name": "Kadalkaatu Physiotherapy", "role": "Injury clinic partner", "since": 2024}
+  ],
+  "followers": 2380,
+  "merch": [
+    {"key": "tee", "name": "Striders quick-dry tee", "description": "Quick-dry running tee in sea teal with a sulaimani glass on the chest and a reflective strip across the back.", "price": 699, "kind": "tee", "color": "#0E7C86", "sizes": {"XS": 10, "S": 24, "M": 38, "L": 32, "XL": 16, "XXL": 8}, "stock": null},
+    {"key": "cap", "name": "Beach run cap", "description": "Lightweight running cap with a sweatband and an orange sunrise on the side. Survives salt and sweat.", "price": 399, "kind": "cap", "color": "#FF7A45", "sizes": null, "stock": 90},
+    {"key": "tote", "name": "Post-run tote", "description": "Canvas tote big enough for a change of clothes, a towel and a bunch of bananas.", "price": 299, "kind": "tote", "color": "#F2FAFA", "sizes": null, "stock": 70}
+  ],
+  "events": [
+    {
+      "slug": "monsoon-trail-day-kakkayam",
+      "name": "Monsoon Trail Day at Kakkayam",
+      "when": {"days_from_now": -82, "time": "05:00", "duration_hours": 9},
+      "format": "in_person",
+      "venue": {"name": "Kakkayam trailhead", "address": "Kakkayam Dam Road, Koorachundu, Kozhikode 673527"},
+      "category": "Meetup",
+      "interests": ["outdoors-adventure", "fitness"],
+      "fee": 650,
+      "sold_out": false,
+      "capacity": 60,
+      "registrations": 57,
+      "attended_ratio": 0.88,
+      "certificates": true,
+      "about": "Once each monsoon we trade the flat beach for mud, mist and leeches. We took the bus from Mananchira at five, reached the Kakkayam hills by half past six, and ran a 12-kilometre trail loop through forest and tea estate, with a shorter 6-kilometre option for anyone new to trails. A local guide led each group and knew exactly which streams were safe to cross after the night's rain.\n\nThe fee covered the bus both ways, forest entry, a guide for every group, breakfast of puttu and kadala at the trailhead, and a finisher certificate. Everyone came home muddy, and two people came home with a leech story they're still telling.",
+      "guidelines": "Trail shoes or old running shoes with good grip; road shoes will slide. Carry a small backpack with water, a light rain jacket and a change of clothes for the bus. Leech socks are handed out at the start; wear them. Stay with your group and your guide at all times; the forest department asked us to keep to the marked trail.",
+      "speakers": [
+        {"name": "Ridhin Raj", "designation": "Long-run captain, Sulaimani Striders", "bio": "Scouted the Kakkayam loop on three wet Sundays in July and came back with the route and nine leech bites."},
+        {"name": "Sajeesh Valappil", "designation": "Forest guide, Kakkayam", "bio": "Has guided trekkers through the Kakkayam hills for fourteen years and knows every stream crossing by sound."},
+        {"name": "Dr. Nasreen Abdul Kader", "designation": "Sports physiotherapist, Kadalkaatu Physiotherapy", "bio": "Ran the 6 km loop as sweeper with a first-aid kit and taped three ankles before breakfast."}
+      ],
+      "agenda": [
+        {"at": "05:00", "title": "Bus leaves Mananchira", "by": null},
+        {"at": "06:30", "title": "Trail briefing and leech socks", "by": "Sajeesh Valappil"},
+        {"at": "06:50", "title": "Start: 12 km and 6 km loops", "by": "Ridhin Raj"},
+        {"at": "09:30", "title": "Puttu, kadala and stretching", "by": "Dr. Nasreen Abdul Kader"},
+        {"at": "10:30", "title": "Certificates and the bus back", "by": null}
+      ],
+      "questions": [
+        {"key": "loop", "label": "Which loop will you run?", "type": "radio", "options": ["12 km", "6 km"], "required": true},
+        {"key": "trail_before", "label": "Have you run on trails before?", "type": "radio", "options": ["Never", "A few times", "Regularly"], "required": true},
+        {"key": "medical", "label": "Any medical conditions the sweepers should know about?", "type": "text", "required": false}
+      ],
+      "merch": ["tee", "cap"],
+      "swag": [{"name": "Leech socks", "sponsor": "Kuthippu Sports"}, {"name": "Finisher certificate", "sponsor": null}],
+      "feedback": {
+        "responses": 39,
+        "avg_rating": 4.8,
+        "comments": [
+          "Running through the mist with the dam below us felt like a film scene.",
+          "The guides made a first-timer like me feel completely safe on the stream crossings.",
+          "Breakfast at the trailhead was the best puttu of my life, possibly because of the 12 km.",
+          "The bus back was cramped; maybe a second vehicle if the group is this big again.",
+          "Leech socks worked for everyone except me. Respect to the leeches."
+        ]
+      },
+      "live": null,
+      "poster": {"headline": "Monsoon Trail Day", "sub": "Kakkayam hills. Mud, mist, a 12 km loop and puttu at the finish."}
+    },
+    {
+      "slug": "beach-road-10k-anniversary",
+      "name": "Beach Road 10K: Our Fourth Anniversary Run",
+      "when": {"days_from_now": -41, "time": "05:30", "duration_hours": 3.5},
+      "format": "in_person",
+      "venue": {"name": "Kozhikode Beach, near the lighthouse", "address": "Beach Road, Kozhikode 673032"},
+      "category": "Competition",
+      "interests": ["fitness", "sports"],
+      "fee": 350,
+      "sold_out": true,
+      "capacity": 150,
+      "registrations": 150,
+      "attended_ratio": 0.91,
+      "certificates": true,
+      "about": "Four years after four people started running together on Beach Road, we closed one side of it for an hour and ran a proper timed 10K, with a 5K for newer runners. The course went from the lighthouse past the old pier towards Kozhikode port, turned at the roundabout, and came back along the promenade with the sun coming up over the city behind us.\n\nThere were chip timers, three water stations, pacers for every five-minute band, and a finish line made of two bamboo poles and a banner one of our members painted by hand. Lalitha chechi, our oldest regular at 63, flagged off the start. The fee covered timing, the medal, the tee and, naturally, sulaimani for everyone at the finish.",
+      "guidelines": "Collect your bib and tee from Kuthippu Sports on the two days before. Reach the start by 5:10; the road closure begins at 5:25 and we can't hold it. Pin your bib to the front. Headphones on one ear only. If you feel unwell, step to the side and raise a hand; there are marshals every 500 metres.",
+      "speakers": [
+        {"name": "Shameer Kallayi", "designation": "Founder and head coach, Sulaimani Striders", "bio": "Race-directed the club's first timed run and spent the night before measuring the course with a wheel, twice."},
+        {"name": "Lalitha Ramachandran", "designation": "Club runner, 60+ age group", "bio": "Took up running at 52 and has finished nine half marathons since. Flagged off the start and then ran the 5K herself."}
+      ],
+      "agenda": [
+        {"at": "05:30", "title": "Warm-up on the sand", "by": "Shameer Kallayi"},
+        {"at": "05:50", "title": "10K flag-off", "by": "Lalitha Ramachandran"},
+        {"at": "06:00", "title": "5K flag-off", "by": null},
+        {"at": "07:30", "title": "Results, medals and sulaimani", "by": null},
+        {"at": "08:15", "title": "Anniversary photo by the lighthouse", "by": null}
+      ],
+      "questions": [
+        {"key": "distance", "label": "Distance", "type": "radio", "options": ["10K", "5K"], "required": true},
+        {"key": "dob", "label": "Date of birth, for age-group results", "type": "date", "required": true},
+        {"key": "tee_size", "label": "Tee size", "type": "select", "options": ["XS", "S", "M", "L", "XL", "XXL"], "required": true},
+        {"key": "emergency_contact", "label": "Emergency contact name and relationship", "type": "text", "required": true}
+      ],
+      "merch": ["tee", "cap"],
+      "swag": [{"name": "Finisher medal", "sponsor": null}, {"name": "Race tee", "sponsor": "Kuthippu Sports"}, {"name": "Sulaimani at the finish", "sponsor": "Vilakkumaram Chaya"}],
+      "feedback": {
+        "responses": 96,
+        "avg_rating": 4.7,
+        "comments": [
+          "Watching the sun come up on the way back along the promenade was magical.",
+          "Pacers were spot on. I got my first sub-60 10K thanks to the 6-minute group.",
+          "Water station two ran out of cups for a few minutes around 6:40.",
+          "Lalitha chechi flagging us off and then running the 5K herself was the best moment.",
+          "So well organised for a club's first timed race."
+        ]
+      },
+      "live": {
+        "poll": {"question": "Should the anniversary run become a half marathon next year?", "options": ["Yes, a half", "Keep the 10K", "Add a half alongside the 10K"]},
+        "qna": [
+          "Will the results include age-group rankings?",
+          "When does the next Couch to 5K batch start?",
+          "Can we buy the medal ribbon separately for kids?"
+        ]
+      },
+      "poster": {"headline": "Beach Road 10K", "sub": "Four years of Sulaimani Striders. Sunrise start, sulaimani finish."}
+    },
+    {
+      "slug": "couch-to-5k-graduation",
+      "name": "Couch to 5K: Graduation Run",
+      "when": {"days_from_now": -9, "time": "06:00", "duration_hours": 2},
+      "format": "in_person",
+      "venue": {"name": "Kozhikode Beach, near the lighthouse", "address": "Beach Road, Kozhikode 673032"},
+      "category": "Meetup",
+      "interests": ["fitness"],
+      "fee": 0,
+      "sold_out": false,
+      "capacity": 80,
+      "registrations": 64,
+      "attended_ratio": 0.92,
+      "certificates": true,
+      "about": "Nine weeks ago, sixty-four people who couldn't run for two minutes without stopping joined our walk-run programme. Three mornings a week, Akshay and his pacers took them through intervals on the beach: one minute running, ninety seconds walking, slowly turning into ten minutes, then twenty, then thirty.\n\nThis was the graduation: a full, unbroken 5K along the beach with the whole club lining the finish. Fifty-nine people finished without walking. The oldest graduate was 63 and the youngest was 15, and the one who cried at the finish line was Akshay.",
+      "guidelines": "Graduates, wear your programme bib so the club can cheer for you by name. Families are very welcome at the finish. Start at an easy pace; this isn't a race. Pacers will run at 7:30 and 8:30 per kilometre, and a sweeper will stay with the last runner.",
+      "speakers": [
+        {"name": "Akshay Pramod", "designation": "Beginners coach, Sulaimani Striders", "bio": "Has coached four Couch to 5K batches and keeps a list of every graduate's first finishing time."},
+        {"name": "Anitha Gopalakrishnan", "designation": "Women's group lead, Sulaimani Striders", "bio": "Paced the 8:30 group and talked the whole way so nobody noticed they were running for forty minutes."}
+      ],
+      "agenda": [
+        {"at": "06:00", "title": "Gentle warm-up", "by": "Akshay Pramod"},
+        {"at": "06:15", "title": "The graduation 5K", "by": null},
+        {"at": "07:00", "title": "Finish line, certificates and photos", "by": "Anitha Gopalakrishnan"},
+        {"at": "07:30", "title": "Sulaimani and next steps", "by": null}
+      ],
+      "questions": [
+        {"key": "graduate", "label": "Are you graduating from this batch?", "type": "radio", "options": ["Yes, I'm a graduate", "No, I'm here to cheer or pace"], "required": true}
+      ],
+      "merch": ["tee"],
+      "swag": [{"name": "Graduate certificate", "sponsor": null}, {"name": "Shoe fitting voucher", "sponsor": "Kuthippu Sports"}],
+      "feedback": {
+        "responses": 47,
+        "avg_rating": 5.0,
+        "comments": [
+          "Nine weeks ago I couldn't run to the bus stop. Today I ran 5K without stopping.",
+          "The whole club cheering at the finish made me feel like an Olympian.",
+          "Akshay sir's patience is endless. Thank you for not giving up on me in week three.",
+          "Can there be a Couch to 10K next? I don't want this to end."
+        ]
+      },
+      "live": null,
+      "poster": {"headline": "Graduation Run", "sub": "Couch to 5K, batch four. Nine weeks, one unbroken 5K, the whole club cheering."}
+    },
+    {
+      "slug": "long-run-to-kappad",
+      "name": "Saturday Long Run to Kappad",
+      "when": {"days_from_now": 4, "time": "05:15", "duration_hours": 4},
+      "format": "in_person",
+      "venue": {"name": "Kozhikode Beach, near the lighthouse", "address": "Beach Road, Kozhikode 673032"},
+      "category": "Meetup",
+      "interests": ["fitness", "outdoors-adventure"],
+      "fee": 0,
+      "sold_out": false,
+      "capacity": 120,
+      "registrations": 83,
+      "attended_ratio": null,
+      "certificates": null,
+      "about": "Our favourite long run of the season: north from the lighthouse along the coast road to Kappad beach. The full route is 18 kilometres, with turnaround points at 6 and 12 for anyone who wants a shorter morning, and a van that brings everyone back to the city.\n\nWe run in pace groups, each with a pacer and a sweeper, and stop together at the water points. The route passes fishing villages that are already busy at dawn, so expect boats coming in, gulls overhead and a lot of curious kids. Breakfast at Kappad is on the club this time.",
+      "guidelines": "Start at 5:15 sharp from the lighthouse. Wear something bright or reflective for the first half hour. Water points at 6, 12 and 15 km; carry a bottle if you drink more than most. The road has traffic from 6:30, so run single file on the left and listen to your pacer. Tell us at the start if you'd like a seat in the return van.",
+      "speakers": [
+        {"name": "Ridhin Raj", "designation": "Long-run captain, Sulaimani Striders", "bio": "Has run the Kappad route more than forty times and still stops to watch the boats come in."},
+        {"name": "Joseph Manjooran", "designation": "Kit and logistics, Sulaimani Striders", "bio": "Drives the support van, carries the water and keeps a spare pair of size 9 shoes for emergencies."}
+      ],
+      "agenda": [
+        {"at": "05:15", "title": "Pace groups and route briefing", "by": "Ridhin Raj"},
+        {"at": "05:25", "title": "Start, northbound on the coast road", "by": null},
+        {"at": "06:30", "title": "Turnaround for the 12 km group", "by": null},
+        {"at": "07:45", "title": "Kappad finish and breakfast", "by": null},
+        {"at": "08:45", "title": "Van back to the city", "by": "Joseph Manjooran"}
+      ],
+      "questions": [
+        {"key": "distance", "label": "How far will you run?", "type": "radio", "options": ["6 km", "12 km", "18 km to Kappad"], "required": true},
+        {"key": "pace", "label": "Your comfortable pace per kilometre", "type": "select", "options": ["Under 5:30", "5:30 to 6:30", "6:30 to 7:30", "Over 7:30"], "required": true},
+        {"key": "van_seat", "label": "Need a seat in the return van?", "type": "radio", "options": ["Yes", "No"], "required": true}
+      ],
+      "merch": ["tee", "cap", "tote"],
+      "swag": [{"name": "Breakfast at Kappad", "sponsor": null}],
+      "feedback": null,
+      "live": null,
+      "poster": {"headline": "Long Run to Kappad", "sub": "18 km up the coast at sunrise, with shorter options and breakfast at the end."}
+    },
+    {
+      "slug": "couch-to-5k-new-batch",
+      "name": "Couch to 5K: Batch Five Kick-off",
+      "when": {"days_from_now": 18, "time": "06:00", "duration_hours": 1.5},
+      "format": "in_person",
+      "venue": {"name": "Kozhikode Beach, near the lighthouse", "address": "Beach Road, Kozhikode 673032"},
+      "category": "Workshop",
+      "interests": ["fitness"],
+      "fee": 0,
+      "sold_out": false,
+      "capacity": 100,
+      "registrations": 71,
+      "attended_ratio": null,
+      "certificates": null,
+      "about": "If you've ever watched runners on the beach and thought 'not for me', this is for you. Batch five of our free walk-run programme starts here: nine weeks, three mornings a week, starting with one minute of running at a time. At the end, you'll run 5K without stopping, with the whole club at the finish line.\n\nThe kick-off is gentle. Dr. Nasreen explains how to avoid the shin and knee pain that make most beginners quit, Akshay explains the plan, and then we do the first session together: eight rounds of one minute running and ninety seconds walking.",
+      "guidelines": "Wear any comfortable shoes; you don't need expensive running shoes to start. Bring water. If you have a heart condition, diabetes or a recent injury, check with your doctor first and tell us in the form. Come as you are; there are people of every size, age and speed in every batch.",
+      "speakers": [
+        {"name": "Akshay Pramod", "designation": "Beginners coach, Sulaimani Striders", "bio": "Started as a batch-one beginner himself in 2024 and now coaches the programme he graduated from."},
+        {"name": "Dr. Nasreen Abdul Kader", "designation": "Sports physiotherapist, Kadalkaatu Physiotherapy", "bio": "Has treated more beginner shin splints than she can count and would like to prevent the next hundred."}
+      ],
+      "agenda": [
+        {"at": "06:00", "title": "Welcome and the nine-week plan", "by": "Akshay Pramod"},
+        {"at": "06:15", "title": "Avoiding shin and knee pain", "by": "Dr. Nasreen Abdul Kader"},
+        {"at": "06:35", "title": "First session: eight rounds of run-walk", "by": "Akshay Pramod"},
+        {"at": "07:15", "title": "Sulaimani and buddy pairing", "by": null}
+      ],
+      "questions": [
+        {"key": "current_activity", "label": "How active are you right now?", "type": "radio", "options": ["Not at all", "I walk sometimes", "I walk regularly", "I play a sport"], "required": true},
+        {"key": "health_notes", "label": "Anything about your health we should know?", "type": "text", "required": false},
+        {"key": "age", "label": "Your age", "type": "number", "required": true}
+      ],
+      "merch": ["tee", "tote"],
+      "swag": [{"name": "Printed nine-week plan", "sponsor": null}, {"name": "Free gait check", "sponsor": "Kadalkaatu Physiotherapy"}],
+      "feedback": null,
+      "live": null,
+      "poster": {"headline": "Couch to 5K", "sub": "Batch five starts on the beach. Nine weeks, one minute at a time, free."}
+    },
+    {
+      "slug": "sulaimani-half-marathon",
+      "name": "The Sulaimani Half: 21K Along the Malabar Coast",
+      "when": {"days_from_now": 55, "time": "05:00", "duration_hours": 4.5},
+      "format": "in_person",
+      "venue": {"name": "Kozhikode Beach, near the lighthouse", "address": "Beach Road, Kozhikode 673032"},
+      "category": "Competition",
+      "interests": ["fitness", "sports"],
+      "fee": 900,
+      "sold_out": true,
+      "capacity": 150,
+      "registrations": 150,
+      "attended_ratio": null,
+      "certificates": null,
+      "about": "Our first half marathon. After the anniversary 10K, the poll was clear, so here it is: 21.1 kilometres from the lighthouse, north along the coast road towards Kappad, and back along the beach as the sun comes up over the Western Ghats behind the city. A 10K runs alongside it for anyone not ready for the full distance.\n\nWe capped it at 150 runners for our first year so that every kilometre has a marshal and every water station is properly staffed. Bibs went in four days. The fee covers chip timing, a finisher medal designed by a Kozhikode artist, the race tee, breakfast, and sulaimani at the finish.",
+      "guidelines": "This race is full. If you registered, collect your bib from Kuthippu Sports in the week before the race. Start at 5:30; be in your corral by 5:15. Cut-off for the half is three hours. Headphones on one ear only. Medical teams are at the start, at 10.5 km and at the finish.",
+      "speakers": [
+        {"name": "Shameer Kallayi", "designation": "Race director, Sulaimani Striders", "bio": "Has measured this course three times with a wheel and once on a bicycle, and still isn't sure he trusts the bicycle."},
+        {"name": "Biju Ponnambath", "designation": "Race operations adviser", "bio": "Has organised road races across Malabar for eight years and has strong opinions about how far apart water stations should be."}
+      ],
+      "agenda": [
+        {"at": "05:00", "title": "Corrals open and warm-up", "by": null},
+        {"at": "05:30", "title": "Half marathon start", "by": "Shameer Kallayi"},
+        {"at": "05:45", "title": "10K start", "by": null},
+        {"at": "08:30", "title": "Half marathon cut-off", "by": "Biju Ponnambath"},
+        {"at": "08:45", "title": "Results, medals and breakfast", "by": null}
+      ],
+      "questions": [
+        {"key": "distance", "label": "Distance", "type": "radio", "options": ["21.1K", "10K"], "required": true},
+        {"key": "dob", "label": "Date of birth, for age-group results", "type": "date", "required": true},
+        {"key": "previous_half", "label": "Your best half marathon time, if you have one (hh:mm)", "type": "text", "required": false},
+        {"key": "tee_size", "label": "Tee size", "type": "select", "options": ["XS", "S", "M", "L", "XL", "XXL"], "required": true}
+      ],
+      "merch": ["tee", "cap"],
+      "swag": [{"name": "Finisher medal", "sponsor": null}, {"name": "Race tee", "sponsor": "Kuthippu Sports"}, {"name": "Post-race physio station", "sponsor": "Kadalkaatu Physiotherapy"}],
+      "feedback": null,
+      "live": null,
+      "poster": {"headline": "The Sulaimani Half", "sub": "21.1 km along the Malabar coast. Sunrise start, sulaimani finish."}
+    }
+  ],
+  "threads": [
+    {"days_ago": 2, "kind": "announcement", "text": "Saturday is the long run to Kappad. Start 5:15 at the lighthouse, water at 6, 12 and 15 km, turnaround options for 6 and 12. Breakfast at Kappad is on the club. Mark in the form if you need a seat in the return van so Joseph can plan the trips.", "likes": 68, "comments": [{"text": "Doing the full 18 for the first time. Nervous!"}, {"text": "Is the 7:30 pace group running all the way?"}, {"text": "Yes, Ridhin is pacing 7:30 to Kappad this time."}]},
+    {"days_ago": 5, "kind": "announcement", "text": "The Sulaimani Half sold out in four days. We kept it at 150 runners for our first year so it's safe and well marshalled. We need about forty volunteers for water stations, marshalling and the finish line. Volunteers get the race tee and breakfast. Comment below if you can help.", "likes": 121, "comments": [{"text": "Volunteering with my whole family. Put us at a water station."}, {"text": "Missed the bibs, so I'll marshal instead."}, {"text": "Can students volunteer for NSS hours?"}, {"text": "Yes, we'll sign the forms."}]},
+    {"days_ago": 8, "kind": "post", "text": "Couch to 5K batch four: 59 of 64 graduates ran 5K without walking last Sunday. Oldest 63, youngest 15. One graduate ran it in the same shoes she wore to her wedding twelve years ago. Batch five starts soon; send this to the friend who keeps saying they're not a runner.", "likes": 186, "comments": [{"text": "I was one of the 59. Still can't believe it."}, {"text": "Wedding shoes! Legend."}, {"text": "Signed up my father for batch five."}]},
+    {"days_ago": 14, "kind": "poll", "text": "The next trail day is after the rains. Where should we go?", "options": ["Kakkayam again", "Thusharagiri waterfalls", "Vellarimala foothills", "Kadalundi coast trail"], "likes": 74, "comments": [{"text": "Thusharagiri! Running to a waterfall sounds unreal."}, {"text": "Kakkayam again, I want my revenge on that last climb."}]},
+    {"days_ago": 23, "kind": "post", "text": "Tip from Dr. Nasreen's Saturday clinic: if your shins ache after running, don't push through it. Ice for ten minutes, skip the next speed session, and try shorter steps rather than longer ones. Most beginner shin pain is too much too soon, not bad shoes. She's on the sand after every long run if you want her to look.", "likes": 59, "comments": [{"text": "Shorter steps fixed my shin pain in two weeks. Thank you, doctor."}, {"text": "Does she see knee problems too?"}]},
+    {"days_ago": 31, "kind": "poll", "text": "Wednesday women's run starts at 5:45. Some of you have asked to push it a little later. What works best?", "options": ["Keep 5:45", "Move to 6:00", "Move to 6:15"], "likes": 46, "comments": [{"text": "6:00 so I can drop my son at the school bus first."}, {"text": "5:45, it gets hot fast after six."}]},
+    {"days_ago": 39, "kind": "post", "text": "Anniversary 10K, by the numbers: 137 finishers, 21 personal bests, 3 water stations, 1 hand-painted finish banner and about 300 glasses of sulaimani. Fastest 10K was 36:12. Most cheered was Lalitha chechi, 63, who flagged us off and then ran the 5K herself. Results and photos are on the club page.", "likes": 154, "comments": [{"text": "Lalitha chechi for president."}, {"text": "First sub-60 for me. This club changed my life, honestly."}, {"text": "Already training for the half."}]}
+  ]
+}

@@ -1,0 +1,273 @@
+{
+  "slug": "pooram-sound-society",
+  "name": "Pooram Sound Society",
+  "tagline": "Mayilpeeli College's music and band society, from chenda to distortion pedals.",
+  "about": "Pooram Sound Society is the music and band society of Mayilpeeli College of Arts and Science in Thrissur. We take our name from the city's great festival, where hundreds of percussionists and an ocean of people somehow land on the same beat. On a good day, that's what a college band rehearsal feels like too.\n\nWe have about 140 members: Carnatic violinists, a beatboxer from first-year Physics, three bands that rehearse in rotation in the old NCC room, a choir, and an increasingly serious chenda ensemble that practises behind the canteen at six in the morning so nobody can complain. Nobody auditions to join. You come to an open jam, you play or sing or just listen, and you keep coming back.\n\nOur year has three big moments: Sruthi Night in the open-air theatre, the inter-college Battle of the Bands, and a monsoon unplugged session on the library steps. In between, members teach each other: guitar basics on Mondays, Carnatic vocal on Wednesdays and home recording on Saturdays.\n\nAlumni bands still come back to play, and the canteen chechi can now tell a capo from a clothes peg. We consider both of these our greatest achievements.",
+  "org": {"name": "Mayilpeeli College of Arts and Science", "city": "Thrissur"},
+  "location": {"name": "Mayilpeeli College of Arts and Science, Ollur, Thrissur", "lat": 10.4757, "lng": 76.2393},
+  "contact": {"email": "hello@pooram-sound-society.demo.myotherapp.in", "phone": "+91 90000 01404"},
+  "socials": {"instagram": "pooramsound", "linkedin": null, "x": "pooramsound"},
+  "topics": ["arts"],
+  "interests": ["music", "singing"],
+  "brand": {"primary": "#7A1530", "accent": "#D9A441", "ink": "#1B0E12", "paper": "#FBF3E4", "display_font": "bebas", "motif": "circles"},
+  "team": [
+    {"name": "Abhirami Venugopal", "role": "Secretary", "bio": "Final-year English Literature; sings Carnatic in the morning and alt-rock in the evening."},
+    {"name": "Ashin Joseph", "role": "Band coordinator", "bio": "Bassist who keeps the rehearsal timetable for three bands and one very shared drum kit."},
+    {"name": "Haritha Unni", "role": "Choir lead", "bio": "Arranges four-part harmonies for old Malayalam film songs, to the delight of the retired music teacher who still drops by."},
+    {"name": "Muhammed Ashiq", "role": "Sound and stage", "bio": "Second-year Physics; owns more cables than shirts and runs the mixing desk at every show."},
+    {"name": "Krishnadas Marar", "role": "Chenda ensemble lead", "bio": "From a family of temple percussionists; teaches chenda to anyone who turns up behind the canteen at 6 a.m."},
+    {"name": "Dr. Susan Elavunkal", "role": "Staff advisor", "bio": "Associate professor of Music who quietly books the auditorium before any other club can."}
+  ],
+  "partners": [
+    {"name": "Kombu Kuzhal Music Store", "role": "Instrument partner", "since": 2023},
+    {"name": "Pathiramazha Studios", "role": "Recording partner", "since": 2024},
+    {"name": "Chakka Radio", "role": "Media partner", "since": 2025}
+  ],
+  "followers": 2140,
+  "merch": [
+    {"key": "tee", "name": "Sruthi Night 2026 tee", "description": "Black cotton tee with a gold chenda drawn as a speaker cone. Printed for Sruthi Night, worn all year.", "price": 449, "kind": "tee", "color": "#1B0E12", "sizes": {"S": 22, "M": 40, "L": 34, "XL": 16, "XXL": 6}, "stock": null},
+    {"key": "cap", "name": "Pooram cap", "description": "Maroon cotton cap with the society's circle mark stitched in gold thread.", "price": 349, "kind": "cap", "color": "#7A1530", "sizes": null, "stock": 60},
+    {"key": "stickers", "name": "Setlist stickers", "description": "A sheet for your guitar case: the chenda circle, a capo, a peacock feather and the words 'one more song'.", "price": 59, "kind": "sticker", "color": "#D9A441", "sizes": null, "stock": 200}
+  ],
+  "events": [
+    {
+      "slug": "monsoon-unplugged-library-steps",
+      "name": "Monsoon Unplugged on the Library Steps",
+      "when": {"days_from_now": -110, "time": "16:30", "duration_hours": 3},
+      "format": "in_person",
+      "venue": {"name": "Library steps, Mayilpeeli College", "address": "Mayilpeeli College of Arts and Science, Ollur, Thrissur"},
+      "category": "Festival",
+      "interests": ["music", "singing"],
+      "fee": 0,
+      "sold_out": false,
+      "capacity": 150,
+      "registrations": 141,
+      "attended_ratio": 0.82,
+      "certificates": false,
+      "about": "Every July, when the rain settles in for good, we carry two acoustic guitars, a cajón, a harmonium and the choir out to the library steps and play until the light goes. No amplifiers, no stage, no setlist printed in advance. People sit on the steps under umbrellas, someone always brings a flask of chukku kaapi, and the songs follow the mood of the rain.\n\nThis year eleven acts played: the choir's four-part version of a 1970s film melody, a first-year duo doing Tamil indie, the chenda ensemble playing softly for once, and an alumni band who drove down from Kochi in a borrowed car. When the downpour got serious at 6:15, everyone moved under the library portico and kept singing.",
+      "guidelines": "Free and open to everyone on campus and their friends. Bring an umbrella and something to sit on. If you'd like to play, sign up in the form; acoustic only, two songs per act. Please keep the steps clear for the library staff leaving at five.",
+      "speakers": [
+        {"name": "Haritha Unni", "designation": "Choir lead, Pooram Sound Society", "bio": "Third-year Music; arranges harmonies on the bus home and teaches them in the rehearsal room the next day."},
+        {"name": "Sachin Ravunni", "designation": "Guitarist, alumni band Paddy Field Radio", "bio": "Graduated in 2021 and has driven back for every monsoon session since, usually with a broken string."}
+      ],
+      "agenda": [
+        {"at": "16:30", "title": "Tuning up and chukku kaapi", "by": null},
+        {"at": "16:45", "title": "The choir opens", "by": "Haritha Unni"},
+        {"at": "17:15", "title": "Open acoustic sets, two songs each", "by": null},
+        {"at": "18:30", "title": "Alumni set", "by": "Sachin Ravunni"},
+        {"at": "19:15", "title": "Everyone sings the last song", "by": null}
+      ],
+      "questions": [
+        {"key": "perform", "label": "Would you like to perform?", "type": "radio", "options": ["Yes, solo", "Yes, with a group", "No, just listening"], "required": true},
+        {"key": "act_details", "label": "If performing, tell us your act and instrument", "type": "text", "required": false}
+      ],
+      "merch": ["stickers"],
+      "swag": [{"name": "Chukku kaapi", "sponsor": null}],
+      "feedback": {
+        "responses": 64,
+        "avg_rating": 4.8,
+        "comments": [
+          "Singing under the portico in that downpour is a memory I'll keep forever.",
+          "The first-year Tamil duo were incredible. Please give them a bigger stage.",
+          "Couldn't hear the soft acts at the back. A small acoustic amp next time?",
+          "Didn't expect the chenda to sound so gentle. Goosebumps.",
+          "Best evening of my first month at Mayilpeeli."
+        ]
+      },
+      "live": null,
+      "poster": {"headline": "Monsoon Unplugged", "sub": "Acoustic sets on the library steps. Bring an umbrella."}
+    },
+    {
+      "slug": "sruthi-night-2026",
+      "name": "Sruthi Night 2026",
+      "when": {"days_from_now": -58, "time": "18:00", "duration_hours": 4},
+      "format": "in_person",
+      "venue": {"name": "Open-air theatre, Mayilpeeli College", "address": "Mayilpeeli College of Arts and Science, Ollur, Thrissur"},
+      "category": "Festival",
+      "interests": ["music", "singing"],
+      "fee": 150,
+      "sold_out": true,
+      "capacity": 150,
+      "registrations": 150,
+      "attended_ratio": 0.94,
+      "certificates": false,
+      "about": "Our biggest night of the year. Sruthi Night opened with forty-two chenda players thundering through the open-air theatre, moved through the choir and all three of our bands, and ended past ten with the alumni band Paddy Field Radio playing songs the whole crowd somehow knew. The sound was run by students, the lights were run by students, and the dosa stall was run by the Commerce department, which made a profit.\n\nTickets were ₹150 for guests from outside the college and covered the sound hire. Every rupee left over went to repairing the drum kit and buying the choir a proper set of microphones.",
+      "guidelines": "Ticket holders enter through the main gate from 5:30; carry your ticket and a photo ID. No outside alcohol or smoking anywhere on campus. The theatre is open-air, so the show goes on in light rain; we'll message everyone if it has to stop. Earplugs are available at the sound desk for anyone near the chenda.",
+      "speakers": [
+        {"name": "Abhirami Venugopal", "designation": "Secretary, Pooram Sound Society; host", "bio": "Hosted the night in two languages and sang lead in two bands, changing her shoes in between."},
+        {"name": "Krishnadas Marar", "designation": "Chenda ensemble lead", "bio": "Led forty-two drummers, half of whom had never touched a chenda in June."},
+        {"name": "Sachin Ravunni", "designation": "Frontman, Paddy Field Radio", "bio": "Writes songs about paddy fields, buses and the Thrissur round, and plays them louder than necessary."}
+      ],
+      "agenda": [
+        {"at": "18:00", "title": "Chenda melam opens the night", "by": "Krishnadas Marar"},
+        {"at": "18:40", "title": "Choir set", "by": null},
+        {"at": "19:15", "title": "Band sets: Third Bench, Ollur Static, Mayil", "by": null},
+        {"at": "21:00", "title": "Alumni headline: Paddy Field Radio", "by": "Sachin Ravunni"},
+        {"at": "21:50", "title": "Closing, thanks and the group photo", "by": "Abhirami Venugopal"}
+      ],
+      "questions": [
+        {"key": "guest_of", "label": "Coming as", "type": "radio", "options": ["Mayilpeeli student", "Guest of a student", "Alumni", "Student from another college"], "required": true},
+        {"key": "college", "label": "Your college, if not Mayilpeeli", "type": "text", "required": false}
+      ],
+      "merch": ["tee", "cap", "stickers"],
+      "swag": [{"name": "Glow wristband", "sponsor": "Kombu Kuzhal Music Store"}],
+      "feedback": {
+        "responses": 103,
+        "avg_rating": 4.7,
+        "comments": [
+          "That chenda opening hit me in the chest. Best start to any college fest I've seen.",
+          "Paddy Field Radio's last song with the whole crowd singing was unreal.",
+          "The queue at the gate was slow around six; maybe two entry lines next year.",
+          "Proud of the student sound crew. It sounded better than some paid shows.",
+          "The Commerce department's dosa stall deserves its own award."
+        ]
+      },
+      "live": {
+        "poll": {"question": "Best set of the night?", "options": ["Chenda melam", "The choir", "Third Bench", "Paddy Field Radio"]},
+        "qna": [
+          "When is the next open jam for first-years?",
+          "Can students from other colleges join the chenda ensemble?",
+          "Will the recordings be released?"
+        ]
+      },
+      "poster": {"headline": "Sruthi Night 2026", "sub": "Chenda, choir, three bands and one alumni headliner. Open-air theatre."}
+    },
+    {
+      "slug": "home-recording-hostel-budget",
+      "name": "Home Recording on a Hostel Budget",
+      "when": {"days_from_now": -23, "time": "10:00", "duration_hours": 5},
+      "format": "in_person",
+      "venue": {"name": "Seminar Room B, Mayilpeeli College", "address": "Mayilpeeli College of Arts and Science, Ollur, Thrissur"},
+      "category": "Workshop",
+      "interests": ["music"],
+      "fee": 199,
+      "sold_out": false,
+      "capacity": 40,
+      "registrations": 36,
+      "attended_ratio": 0.86,
+      "certificates": true,
+      "about": "You don't need a studio to make a song people will want to hear twice. You need a quiet corner, one decent microphone, free software and a few habits that most people learn the hard way. Nandakishore has mixed three indie albums from a converted cowshed in Ollur, and he spent this Saturday showing us exactly how.\n\nWe recorded a vocal in a hostel wardrobe lined with blankets, a guitar in the stairwell, and a chenda from the far end of the corridor. Then we mixed it all on laptops, compared versions, and learned why the first ten minutes of a mix decide everything. By four, the room had one finished song, which Chakka Radio played the following week.",
+      "guidelines": "Bring a laptop with a free audio editor installed (the list is in your confirmation) and wired headphones. If you have a microphone or audio interface, bring it; we have six to share. The fee covers lunch and the studio's equipment hire.",
+      "speakers": [
+        {"name": "Nandakishore Pisharody", "designation": "Sound engineer, Pathiramazha Studios", "bio": "Has mixed three Malayalam indie albums in a converted cowshed studio and believes most mixes are ruined in their first ten minutes."},
+        {"name": "Muhammed Ashiq", "designation": "Sound and stage, Pooram Sound Society", "bio": "Runs the mixing desk at every show and learned most of it from tutorials at 1 a.m. in the hostel."}
+      ],
+      "agenda": [
+        {"at": "10:00", "title": "A room, a microphone, a habit", "by": "Nandakishore Pisharody"},
+        {"at": "10:45", "title": "Recording the vocal in a blanket wardrobe", "by": null},
+        {"at": "11:45", "title": "Guitar in the stairwell, chenda down the corridor", "by": "Muhammed Ashiq"},
+        {"at": "13:00", "title": "Lunch", "by": null},
+        {"at": "13:45", "title": "Mixing: the first ten minutes", "by": "Nandakishore Pisharody"},
+        {"at": "14:45", "title": "Listening session and certificates", "by": null}
+      ],
+      "questions": [
+        {"key": "gear", "label": "Which gear will you bring?", "type": "checkbox", "options": ["Laptop", "Headphones", "Microphone", "Audio interface", "An instrument"], "required": true},
+        {"key": "software", "label": "Which audio software have you used, if any?", "type": "text", "required": false}
+      ],
+      "merch": ["tee", "stickers"],
+      "swag": [{"name": "Mix checklist card", "sponsor": "Pathiramazha Studios"}],
+      "feedback": {
+        "responses": 27,
+        "avg_rating": 4.9,
+        "comments": [
+          "The blanket wardrobe trick works. I recorded a song in my room the same night.",
+          "Hearing our song on Chakka Radio a week later felt unreal.",
+          "Mixing deserved a full day on its own. Part two, please.",
+          "Nandakishore chettan explains things without making you feel stupid."
+        ]
+      },
+      "live": {
+        "poll": {"question": "Where would you record vocals in your hostel?", "options": ["Wardrobe", "Bathroom", "Stairwell", "Under a blanket on the bed"]},
+        "qna": [
+          "Is a USB microphone good enough to start with?",
+          "How loud should a song be before uploading?",
+          "How do you record chenda without it distorting?"
+        ]
+      },
+      "poster": {"headline": "Home Recording", "sub": "On a hostel budget. One microphone, free software, a song by four o'clock."}
+    },
+    {
+      "slug": "open-jam-first-years",
+      "name": "Open Jam: First Years Welcome",
+      "when": {"days_from_now": 15, "time": "16:00", "duration_hours": 2.5},
+      "format": "in_person",
+      "venue": {"name": "Old NCC Room, Mayilpeeli College", "address": "Mayilpeeli College of Arts and Science, Ollur, Thrissur"},
+      "category": "Meetup",
+      "interests": ["music", "singing"],
+      "fee": 0,
+      "sold_out": false,
+      "capacity": 80,
+      "registrations": 52,
+      "attended_ratio": null,
+      "certificates": null,
+      "about": "This is how everyone joins Pooram Sound Society. Walk in, pick up something (a guitar, the keyboard, a pair of chenda sticks, a microphone) or just sit on the floor and listen. The band members will play along with whatever you start, and the choir will try to harmonise with it. By the end of the evening you'll know who plays what and which band has room for you.\n\nNo audition, no experience needed, and nobody will ask you to play a scale. If you've only ever sung in the shower or at a family wedding, you are exactly who this is for.",
+      "guidelines": "Bring your own instrument if you have one; we have two guitars, a keyboard, a cajón, a drum kit and the chenda to share. Shoes off inside the jam room. Please let quieter people have a turn at the microphone too.",
+      "speakers": [
+        {"name": "Ashin Joseph", "designation": "Band coordinator, Pooram Sound Society", "bio": "Will play bass under any song you start, including ones he's never heard."},
+        {"name": "Haritha Unni", "designation": "Choir lead, Pooram Sound Society", "bio": "Can find a harmony for anything, and will teach you yours in about four minutes."}
+      ],
+      "agenda": [
+        {"at": "16:00", "title": "Say hello, pick up something", "by": null},
+        {"at": "16:20", "title": "Open circle: one song per person", "by": "Ashin Joseph"},
+        {"at": "17:15", "title": "Choir corner and harmony try-outs", "by": "Haritha Unni"},
+        {"at": "18:00", "title": "Sign-ups for bands, choir and the chenda ensemble", "by": null}
+      ],
+      "questions": [
+        {"key": "instrument", "label": "What do you play or sing?", "type": "checkbox", "options": ["Vocals", "Guitar", "Keys", "Drums or percussion", "Chenda", "Violin", "Nothing yet"], "required": true},
+        {"key": "department", "label": "Your department", "type": "text", "required": true}
+      ],
+      "merch": ["stickers"],
+      "swag": [{"name": "Plectrum and a welcome sticker", "sponsor": "Kombu Kuzhal Music Store"}],
+      "feedback": null,
+      "live": null,
+      "poster": {"headline": "Open Jam", "sub": "First years welcome. No audition, no experience needed, just come."}
+    },
+    {
+      "slug": "battle-of-the-bands-prelims",
+      "name": "Battle of the Bands: Inter-College Prelims",
+      "when": {"days_from_now": 45, "time": "14:00", "duration_hours": 6},
+      "format": "in_person",
+      "venue": {"name": "College Auditorium, Mayilpeeli College", "address": "Mayilpeeli College of Arts and Science, Ollur, Thrissur"},
+      "category": "Competition",
+      "interests": ["music", "singing"],
+      "fee": 0,
+      "sold_out": false,
+      "capacity": 120,
+      "registrations": 77,
+      "attended_ratio": null,
+      "certificates": null,
+      "about": "Twelve college bands from across central Kerala, fifteen minutes each, one shared backline and two judges who have heard it all. The top four go through to the finals in January, when the auditorium doors open to the whole city. Original songs earn extra marks; covers are welcome, but tell us what you did to make them yours.\n\nThe audience is free to attend and very much part of it: there's an audience vote for the band that best owns the room. Previous winners include Third Bench, who still mention it in every introduction.",
+      "guidelines": "Bands: register the band leader here, then send the member list and a rough recording through the band form linked in the confirmation. Fifteen minutes on stage, including your line check. Audience: free entry, seats on a first-come basis, and no flash photography during sets.",
+      "speakers": [
+        {"name": "Meera Raghavan", "designation": "Vocal coach", "bio": "Has trained singers for reality shows and church choirs alike, and judges on breath control before anything else."},
+        {"name": "Aneesh Pallath", "designation": "Session drummer and music teacher", "bio": "Has played on more than two hundred recordings and listens first for whether a band is actually listening to each other."}
+      ],
+      "agenda": [
+        {"at": "14:00", "title": "Line checks and running order", "by": null},
+        {"at": "14:30", "title": "Bands one to six", "by": null},
+        {"at": "16:15", "title": "Tea break", "by": null},
+        {"at": "16:35", "title": "Bands seven to twelve", "by": null},
+        {"at": "18:20", "title": "Judges' notes and the four finalists", "by": "Meera Raghavan"}
+      ],
+      "questions": [
+        {"key": "attending_as", "label": "Attending as", "type": "radio", "options": ["Competing band member", "Audience"], "required": true},
+        {"key": "band_name", "label": "Band name, if competing", "type": "text", "required": false},
+        {"key": "college", "label": "Your college", "type": "text", "required": true}
+      ],
+      "merch": ["tee", "cap"],
+      "swag": [{"name": "Finalist guitar strings", "sponsor": "Kombu Kuzhal Music Store"}, {"name": "Studio session for the winners", "sponsor": "Pathiramazha Studios"}],
+      "feedback": null,
+      "live": null,
+      "poster": {"headline": "Battle of the Bands", "sub": "Inter-college prelims. Twelve bands, fifteen minutes each, four go through."}
+    }
+  ],
+  "threads": [
+    {"days_ago": 2, "kind": "announcement", "text": "Battle of the Bands prelims: band registrations are open and we have twelve slots. Original songs earn extra marks. The audience is free, so bring your whole department to shout for you. Band leaders, the full form is in the event page.", "likes": 112, "comments": [{"text": "Third Bench is defending the title. Just saying."}, {"text": "Can a band have members from two colleges?"}, {"text": "Yes, as long as the band leader is a current student."}]},
+    {"days_ago": 6, "kind": "poll", "text": "The choir is picking a piece for carol night. Haritha will arrange whichever wins.", "options": ["An old Malayalam film classic", "A Malayalam Christmas carol", "A Tamil folk song", "An English a cappella medley"], "likes": 58, "comments": [{"text": "Malayalam carol, with the bass line doing the bells."}, {"text": "Old film classic. The seniors will cry."}]},
+    {"days_ago": 9, "kind": "post", "text": "Lost and found, NCC room edition: one blue capo, two left drumsticks (how?), a harmonium cover, a water bottle with a Kozhikode bus sticker, and someone's lab record for Organic Chemistry. Collect from Ashiq before Friday or they become society property.", "likes": 71, "comments": [{"text": "The lab record is mine, please don't make it society property."}, {"text": "Two left drumsticks is the most drummer thing ever."}]},
+    {"days_ago": 16, "kind": "post", "text": "The song we recorded at the home recording workshop played on Chakka Radio last night. Vocal recorded in a hostel wardrobe, guitar in the stairwell, chenda down the corridor. Thank you, Nandakishore chettan, and thank you to the warden for not asking questions.", "likes": 134, "comments": [{"text": "My voice on the radio. From a wardrobe. Unreal."}, {"text": "The chenda in that mix is so good."}, {"text": "When's part two? I need to learn mixing properly."}]},
+    {"days_ago": 24, "kind": "announcement", "text": "Save the date, first-years: the Open Jam is coming up in the old NCC room. No audition, nothing to prepare. If you've been listening to us rehearse through the wall, this is your sign to walk in.", "likes": 66, "comments": [{"text": "I've been listening through the wall for a month. Coming."}, {"text": "Can I just come and watch?"}, {"text": "Absolutely. Half the room usually does."}]},
+    {"days_ago": 33, "kind": "poll", "text": "Exams start soon. How should we split the rehearsal room until they're over?", "options": ["Evenings only, 6 to 8", "Weekends only", "Close it for two weeks", "Keep the normal timetable"], "likes": 43, "comments": [{"text": "Evenings. We need the stress relief."}, {"text": "Weekends only, or I will fail Statistics."}]},
+    {"days_ago": 41, "kind": "post", "text": "The chenda ensemble has been invited to open the college's founders' day. Forty-two players, many of whom had never held the sticks in June. Practice is at 6 a.m. behind the canteen every day this week. Earplugs are available for everyone who lives in the ladies' hostel.", "likes": 97, "comments": [{"text": "From zero to founders' day in three months. Krishnadas chettan is a magician."}, {"text": "Ladies' hostel thanks you for the earplugs."}]}
+  ]
+}

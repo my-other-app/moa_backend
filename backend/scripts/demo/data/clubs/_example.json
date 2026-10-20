@@ -1,0 +1,77 @@
+{
+  "slug": "example-chai-coders",
+  "name": "Chai and Coders Example",
+  "tagline": "The seed's own small club, for the tests: two events, a store, three posts.",
+  "about": "A made-up club the demo seed's tests run on. It is never seeded on the server: files whose names start with an underscore are skipped unless --include-example is passed.\n\nIt has one past event with a fee, a store, swag, feedback and a live room, and one free event to come.",
+  "org": {"name": "Example Institute of Technology", "city": "Kochi"},
+  "location": {"name": "Kaloor, Kochi", "lat": 9.9975, "lng": 76.2994},
+  "contact": {"email": "hello@example-chai-coders.demo.myotherapp.in", "phone": "+91 90000 09999"},
+  "socials": {"instagram": "chai.coders.example", "linkedin": null, "x": "chaicoders_ex"},
+  "topics": ["development"],
+  "interests": ["coding", "open-source"],
+  "brand": {"primary": "#0F766E", "accent": "#F59E0B", "ink": "#0B1F1D", "paper": "#F7FBFA", "display_font": "bebas", "motif": "dots"},
+  "team": [
+    {"name": "Asha Thomas", "role": "Lead", "bio": "Runs the evenings."},
+    {"name": "Rahul Menon", "role": "Programme", "bio": "Finds the speakers."},
+    {"name": "Divya Pillai", "role": "Community", "bio": "Answers the messages."},
+    {"name": "Arjun Nair", "role": "Venue", "bio": "Knows where the chairs are."}
+  ],
+  "partners": [
+    {"name": "Kayal Coworks", "role": "Venue partner", "since": 2024},
+    {"name": "Monsoon Roasters", "role": "Coffee partner", "since": 2025}
+  ],
+  "followers": 14,
+  "merch": [
+    {"key": "tee", "name": "Chai Coders tee", "description": "A teal tee with the dots.", "price": 399, "kind": "tee", "color": "#0F766E", "sizes": {"S": 4, "M": 6, "L": 6}, "stock": null},
+    {"key": "mug", "name": "Chai mug", "description": "For the chai.", "price": 249, "kind": "mug", "color": "#FFFFFF", "sizes": null, "stock": 30}
+  ],
+  "events": [
+    {
+      "slug": "example-chai-and-rust",
+      "name": "Chai and Rust: Ownership by Example",
+      "when": {"days_from_now": -9, "time": "18:30", "duration_hours": 2.5},
+      "format": "in_person",
+      "venue": {"name": "Kayal Coworks", "address": "Kaloor, Kochi"},
+      "category": "Workshop",
+      "interests": ["coding"],
+      "fee": 199, "sold_out": false, "capacity": 24, "registrations": 12,
+      "attended_ratio": 0.75, "certificates": true,
+      "about": "An evening on ownership, with chai. Bring a laptop.",
+      "guidelines": "Be on time; the chai runs out.",
+      "speakers": [{"name": "Asha Thomas", "designation": "Lead, Chai and Coders", "bio": "Writes Rust at work."}],
+      "agenda": [{"at": "18:30", "title": "Chai and setup", "by": null}, {"at": "19:00", "title": "Ownership by example", "by": "Asha Thomas"}],
+      "questions": [
+        {"key": "level", "label": "How much Rust have you written?", "type": "select", "options": ["None", "A little", "A lot"], "required": true},
+        {"key": "github", "label": "GitHub profile", "type": "url", "required": false},
+        {"key": "topics", "label": "What would you like covered?", "type": "checkbox", "options": ["Lifetimes", "Traits", "Async"], "required": false}
+      ],
+      "merch": ["tee", "mug"],
+      "swag": [{"name": "Sticker sheet", "sponsor": "Kayal Coworks"}],
+      "feedback": {"responses": 6, "avg_rating": 4.5, "comments": ["More chai next time.", "Clear and friendly."]},
+      "live": {"poll": {"question": "Lifetimes: clear or confusing?", "options": ["Clear", "Confusing", "Ask me tomorrow"]}, "qna": ["Is Rc ever the answer?", "Will the slides be shared?"]},
+      "poster": {"headline": "Chai and Rust", "sub": "Ownership by example, one evening, one pot of chai."}
+    },
+    {
+      "slug": "example-open-source-saturday",
+      "name": "Open Source Saturday",
+      "when": {"days_from_now": 12, "time": "10:00", "duration_hours": 5},
+      "format": "in_person",
+      "venue": {"name": "Kayal Coworks", "address": "Kaloor, Kochi"},
+      "category": "Hackathon",
+      "interests": ["open-source"],
+      "fee": 0, "sold_out": false, "capacity": 30, "registrations": 8,
+      "about": "A day of first pull requests, with mentors at every table.",
+      "speakers": [],
+      "agenda": [{"at": "10:00", "title": "Pick an issue", "by": "Rahul Menon"}],
+      "questions": [],
+      "merch": ["tee"],
+      "swag": [],
+      "poster": {"headline": "Open Source Saturday", "sub": "Your first pull request, with a mentor beside you."}
+    }
+  ],
+  "threads": [
+    {"days_ago": 1, "kind": "announcement", "text": "Open Source Saturday is up: thirty seats, mentors at every table.", "likes": 6, "comments": [{"text": "Can beginners come?"}, {"text": "Yes, that is the point of it."}]},
+    {"days_ago": 4, "kind": "poll", "text": "Next topic?", "options": ["Traits", "Async", "Macros"], "likes": 3, "comments": []},
+    {"days_ago": 8, "kind": "post", "text": "Thank you for a full room at Chai and Rust.", "likes": 9, "comments": [{"text": "Great evening!"}]}
+  ]
+}

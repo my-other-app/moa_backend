@@ -18,6 +18,12 @@ list (`warn_sync`), so a support thread can see why it may not have arrived.
 
 Nothing here removes an address: that is a decision for a person (and a row
 deleted by hand) once the mailbox is known to work again.
+
+Whole domains are off the list too (settings.MAIL_SUPPRESS_DOMAINS): the
+demo's invented people live at demo.myotherapp.in, and no mail of any kind,
+account mail included, goes there. The transport drops those recipients
+before anything is sent (`transport.deliver`), audiences leave them out,
+and a ticket or message for one is skipped with its reason.
 """
 from __future__ import annotations
 
@@ -26,7 +32,7 @@ import threading
 from datetime import datetime, timezone
 from typing import Iterable, Optional
 
-from sqlalchemy import CheckConstraint, Column, String, exists, func, select
+from sqlalchemy import CheckConstraint, Column, String, exists, false, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.core.utils.db_fields import TZAwareDateTime
@@ -36,6 +42,8 @@ logger = logging.getLogger(__name__)
 
 BOUNCE = "bounce"
 COMPLAINT = "complaint"
+#: The reason a recipient at a suppressed domain carries (never stored).
+DOMAIN = "domain"
 
 
 class EmailSuppressions(AbstractSQLModel):
@@ -68,22 +76,55 @@ async def add(session, address: Optional[str], reason: str, detail: str = "") ->
     return True
 
 
+def domains() -> frozenset[str]:
+    from app.config import settings
+
+    return settings.mail_suppress_domains
+
+
+def at_suppressed_domain(address: Optional[str]) -> bool:
+    """Whether the address is at a domain no mail goes to, or a subdomain of one."""
+    email = normal(address)
+    if "@" not in email:
+        return False
+    domain = email.rsplit("@", 1)[1]
+    return any(domain == d or domain.endswith("." + d) for d in domains())
+
+
+def domain_suppressed(column):
+    """SQL: the address in `column` is at a domain no mail goes to, or a subdomain of one."""
+    listed = sorted(domains())
+    if not listed:
+        return false()
+    domain = func.lower(func.split_part(func.trim(column), "@", 2))
+    return or_(domain.in_(listed), *(domain.like("%." + d.replace("%", "").replace("_", r"\_")) for d in listed))
+
+
 async def reasons(session, addresses: Iterable[Optional[str]]) -> dict[str, EmailSuppressions]:
-    """The suppressed ones among these addresses, by lower-case address."""
+    """The suppressed ones among these addresses, by lower-case address. An
+    address at a suppressed domain answers a row made here (reason DOMAIN),
+    never stored."""
     wanted = sorted({normal(a) for a in addresses if normal(a)})
     if not wanted:
         return {}
-    rows = await session.scalars(select(EmailSuppressions).where(EmailSuppressions.email.in_(wanted)))
-    return {r.email: r for r in rows}
+    out = {a: EmailSuppressions(email=a, reason=DOMAIN, detail=a.rsplit("@", 1)[1]) for a in wanted if at_suppressed_domain(a)}
+    rest = [a for a in wanted if a not in out]
+    if rest:
+        rows = await session.scalars(select(EmailSuppressions).where(EmailSuppressions.email.in_(rest)))
+        out.update({r.email: r for r in rows})
+    return out
 
 
 def not_suppressed(column):
-    """A WHERE clause: the address in `column` is not on the list (the primary key's lookup)."""
-    return ~exists().where(EmailSuppressions.email == func.lower(func.trim(column)))
+    """A WHERE clause: the address in `column` is not on the list (the
+    primary key's lookup) and not at a suppressed domain."""
+    return ~exists().where(EmailSuppressions.email == func.lower(func.trim(column))) & ~domain_suppressed(column)
 
 
 def why(row: EmailSuppressions) -> str:
     """The skip reason a desk reads."""
+    if row.reason == DOMAIN:
+        return f"not sent: {row.detail or 'that domain'} is a demo address, which is never mailed"[:400]
     what = "marked our mail as spam" if row.reason == COMPLAINT else "bounced"
     when = row.created_at.strftime("%-d %b %Y") if row.created_at else ""
     return f"not sent: that address {what}{' on ' + when if when else ''} — use another address"[:400]

@@ -112,7 +112,7 @@ async def test_a_gate_link_opens_the_console_on_one_door(client, world):
     assert door.status_code == 200, door.text
     link = await client.post(_url(world, f"/doors/{door.json()['id']}/link"), json={"can_walkup": False}, headers=h)
     assert link.status_code == 200, link.text
-    assert link.json()["url"].startswith("https://clubs-next.myotherapp.in/gate/")
+    assert link.json()["url"].startswith("https://club-dashboard.myotherapp.in/gate/")
     key = link.json()["key"]
 
     ctx = await client.get(_url(world, "/gate/context"), headers={"X-Gate-Key": key})

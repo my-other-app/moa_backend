@@ -33,7 +33,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.users.models import UserDeviceTokens
+from app.api.users.models import UserDeviceTokens, Users
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -103,6 +103,15 @@ def _chunks(items: list, size: int):
         yield items[start:start + size]
 
 
+def reachable(user_id_column):
+    """SQL: the account behind `user_id_column` may be pushed -- its address
+    is not at a suppressed domain (settings.MAIL_SUPPRESS_DOMAINS, the
+    demo's invented people). Every device query a push reads goes through it."""
+    from app.core.mail import suppression
+
+    return ~sa.exists().where(Users.id == user_id_column, suppression.domain_suppressed(Users.email))
+
+
 async def get_fcm_tokens_for_users(
     session: AsyncSession,
     user_ids: list[int],
@@ -119,6 +128,7 @@ async def get_fcm_tokens_for_users(
             .where(
                 UserDeviceTokens.user_id == sa.any_(int_array(part)),
                 UserDeviceTokens.is_deleted == False,  # noqa: E712
+                reachable(UserDeviceTokens.user_id),
             )
             .order_by(UserDeviceTokens.id)
         )
@@ -247,7 +257,7 @@ async def send_to_every_device(
     while True:
         rows = (await session.execute(
             select(UserDeviceTokens.id, UserDeviceTokens.fcm_token)
-            .where(UserDeviceTokens.is_deleted == False, UserDeviceTokens.id > last_id)  # noqa: E712
+            .where(UserDeviceTokens.is_deleted == False, UserDeviceTokens.id > last_id, reachable(UserDeviceTokens.user_id))  # noqa: E712
             .order_by(UserDeviceTokens.id)
             .limit(FCM_BATCH)
         )).all()
