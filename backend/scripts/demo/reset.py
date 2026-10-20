@@ -147,6 +147,19 @@ CLASSIFICATION: dict[str, str] = {
     "competitions": WIPE,
     "content_reports": WIPE,
     "deliveries": WIPE,
+    # Connected AI assistants (app/api/mcp, docs/MCP.md): each club's grants
+    # and their codes and tokens (digests), the requests waiting for a
+    # person's approval, and unsent announcement drafts -- all a club's or a
+    # person's. And the assistants' own registrations (mcp_clients): written
+    # by the apps themselves when they connected, not reference data, and of
+    # no use once every grant that used them is gone (an app registers again
+    # when it next connects). Nothing kept points at any of them.
+    "mcp_clients": WIPE,
+    "mcp_grants": WIPE,
+    "mcp_auth_codes": WIPE,
+    "mcp_tokens": WIPE,
+    "mcp_pending_actions": WIPE,
+    "announcement_drafts": WIPE,
     # AI assist (backend #91): what clubs used, clubs' own keys, cached feedback summaries.
     "ai_feedback_summaries": WIPE,
     "ai_usage": WIPE,

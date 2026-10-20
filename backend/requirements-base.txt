@@ -31,7 +31,8 @@ pillow==12.3.0
 psycopg2-binary==2.9.10
 pyasn1==0.6.4
 pyasn1_modules==0.4.1
-# 2.12.5+ for google-genai (requirements.txt), the Gemini SDK behind AI assist.
+# 2.12.5+ for google-genai (requirements.txt), the Gemini SDK behind AI assist;
+# 2.12+ for mcp, the MCP SDK (app/api/mcp).
 pydantic==2.12.5
 pydantic_core==2.41.5
 PyJWT==2.15.0
@@ -42,9 +43,10 @@ rsa==4.9
 s3transfer==0.11.2
 six==1.17.0
 SQLAlchemy==2.0.38
-# 4.14+ for both AI SDKs (google-genai, anthropic); 4.15 for typing-inspection.
-typing_extensions==4.15.0
-typing-inspection==0.4.2
+# 4.14+ for both AI SDKs (google-genai, anthropic), 4.13+ for mcp; 4.15+ for typing-inspection.
+typing_extensions==4.16.0
+# pydantic's (and the AI and MCP SDKs'), pinned here with it.
+typing-inspection==0.4.4
 tzdata==2025.1
 urllib3==2.8.0
 uvloop==0.21.0

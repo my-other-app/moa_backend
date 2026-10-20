@@ -365,6 +365,10 @@ class AppConfig(BaseSettings):
         return f"{parts.scheme}://{parts.netloc.lower()}"
 
     @property
+    def mcp_allowed_origins(self) -> list[str]:
+        return [o.strip().rstrip("/") for o in (self.MCP_ALLOWED_ORIGINS or "").split(",") if o.strip()]
+
+    @property
     def mail_suppress_domains(self) -> frozenset[str]:
         """MAIL_SUPPRESS_DOMAINS, lower case, without a leading @ or spaces."""
         raw = self.MAIL_SUPPRESS_DOMAINS
@@ -568,6 +572,30 @@ class AppConfig(BaseSettings):
     # PAYMENT_KEYS_SECRET is for their Razorpay secrets; a comma-separated
     # list rotates). Unset: no club can connect its own key.
     AI_KEYS_SECRET: str = ""
+
+    # ─── Clubs connecting AI assistants over MCP (app/api/mcp, docs/MCP.md) ──
+    # The kill switch. Off: /mcp, the OAuth endpoints and their discovery
+    # documents all answer 404, no token is accepted, and no pending action
+    # can be confirmed. The club dashboard's connected-apps list still reads
+    # and revokes.
+    MCP_ENABLED: bool = False
+    # Where the club dashboard lives, for the links the tools hand back: an
+    # event (/events/{id}), the store (/merchandise), and the page a person
+    # opens to approve what an assistant asked for (/confirm/{token}).
+    MCP_DASHBOARD_URL: str = "https://club-dashboard.myotherapp.in"
+    # An access token's life, and a refresh token's (each refresh starts a new one).
+    MCP_ACCESS_TOKEN_MINUTES: int = 60
+    MCP_REFRESH_TOKEN_DAYS: int = 30
+    # Calls one connected app may make (limits' syntax, ";" between limits).
+    MCP_RATE_LIMIT: str = "60/minute;2000/day"
+    # Browser pages allowed to call /mcp directly (the Origin header). A
+    # request with no Origin -- a server-side connector, a desktop app -- is
+    # never refused for it. Comma-separated origins.
+    MCP_ALLOWED_ORIGINS: str = "https://claude.ai,https://chatgpt.com,https://chat.openai.com"
+    # Clients that identify themselves by an https URL to their metadata
+    # (OAuth Client ID Metadata Documents): the document is fetched when one
+    # first asks to connect. False: only registered (RFC 7591) clients.
+    MCP_CLIENT_METADATA_DOCUMENTS: bool = True
 
     @field_validator("PLAN_ENFORCEMENT_FROM")
     @classmethod

@@ -114,6 +114,53 @@ async def test_every_model_table_is_classified(session):
     assert reset.CLASSIFICATION["interests"] == reset.KEEP
     assert reset.CLASSIFICATION["plans"] == reset.KEEP
     assert reset.CLASSIFICATION["clubs"] == reset.WIPE
+    # Connected AI assistants: every one of a club's or a person's, and the
+    # apps' own registrations with them.
+    for t in MCP_TABLES:
+        assert reset.CLASSIFICATION[t] == reset.WIPE, t
+
+
+#: The tables a connected AI assistant leaves (app/api/mcp).
+MCP_TABLES = ("mcp_clients", "mcp_grants", "mcp_auth_codes", "mcp_tokens", "mcp_pending_actions", "announcement_drafts")
+
+
+async def _connect_assistant(session, *, club, owner, event):
+    """An AI assistant connected to this club (app/api/mcp): the app's own
+    registration, the club's grant with an access and a refresh token and the
+    code it was made from, a request waiting for a person's approval, and the
+    unsent announcement draft it is about."""
+    import uuid
+    from datetime import datetime, timedelta, timezone
+
+    from app.api.mcp.models import AnnouncementDrafts, McpAuthCodes, McpClients, McpGrants, McpPendingActions, McpTokens
+
+    def digest() -> str:
+        return uuid.uuid4().hex + uuid.uuid4().hex
+
+    now, resource = datetime.now(timezone.utc), "https://api.myotherapp.in/mcp"
+    app = McpClients(client_id=f"mcp_{uuid.uuid4().hex[:16]}", kind="dcr", client_name="Claude",
+                     redirect_uris=["https://claude.ai/api/mcp/auth_callback"], grant_types=["authorization_code", "refresh_token"])
+    session.add(app)
+    await session.flush()
+    grant = McpGrants(club_id=club.id, user_id=owner.id, client_pk=app.id, scopes="events:read comms:write", token_version=0)
+    session.add(grant)
+    await session.flush()
+    for kind in ("access", "refresh"):
+        session.add(McpTokens(grant_id=grant.id, kind=kind, token_hash=digest(), scopes=grant.scopes, resource=resource, expires_at=now + timedelta(hours=1)))
+    session.add(McpAuthCodes(
+        code_hash=digest(), client_pk=app.id, club_id=club.id, user_id=owner.id, token_version=0, redirect_uri=app.redirect_uris[0],
+        code_challenge="c" * 43, scopes=grant.scopes, resource=resource, expires_at=now, used_at=now, grant_id=grant.id,
+    ))
+    draft = AnnouncementDrafts(club_id=club.id, event_id=event.id, title="Room change", body="Lab 3 now.", audience="all",
+                               status="draft", created_by_user_id=owner.id, client_name="Claude")
+    session.add(draft)
+    await session.flush()
+    session.add(McpPendingActions(
+        club_id=club.id, grant_id=grant.id, kind="send_announcement", target_type="announcement_draft", target_id=str(draft.id),
+        payload={}, token_hash=digest(), status="pending", expires_at=now + timedelta(days=1), requested_by_user_id=owner.id, client_name="Claude",
+    ))
+    await session.flush()
+    return app
 
 
 async def _populate(session, make_user, make_club, make_event, make_registration):
@@ -136,6 +183,7 @@ async def _populate(session, make_user, make_club, make_event, make_registration
         "INSERT INTO ledger_entries (txn_key, line, kind, account, amount_paise, units, currency, club_id, event_id, source, source_id, occurred_at, origin_at) "
         "VALUES ('t:1', 0, 'desk', 'desk', 100, 0, 'INR', :c, :e, 'test', '1', now(), now())"
     ), {"c": club.id, "e": event.id})
+    await _connect_assistant(session, club=club, owner=owner, event=event)
     await session.commit()
     return SimpleNamespace(admin=admin, person=person, owner=owner, club=club, event=event)
 
@@ -176,7 +224,7 @@ async def test_reset_keeps_admins_and_reference_data_and_wipes_the_rest(session,
         assert await _count(session, t) == n, t
     assert await _count(session, "event_categories", "created_by_id IS NULL") == shipped_types
     assert await _count(session, "event_categories", f"created_by_id = {w.admin.id}") == 1
-    for t in ("clubs", "events", "event_registrations_link", "ledger_entries", "organizations", "user_profiles", "jobs"):
+    for t in ("clubs", "events", "event_registrations_link", "ledger_entries", "organizations", "user_profiles", "jobs", *MCP_TABLES):
         assert await _count(session, t) == 0, t
     # The ledger's guard is back on.
     states = dict((await session.execute(text(
@@ -416,6 +464,37 @@ async def test_remove_takes_the_demo_and_leaves_real_clubs(seeded, session, make
     assert await session.scalar(select(func.count()).select_from(Plans)) == 6
     assert await session.scalar(select(func.count()).select_from(Interests)) > 0
     assert await session.scalar(select(func.count()).select_from(InterestCategory)) == 8
+
+
+async def test_remove_takes_a_demo_clubs_connected_assistants_and_nobody_elses(seeded, session, make_club, make_event):
+    """remove.py finds a demo club's MCP rows through their foreign keys:
+    the grant through its club and its user, its tokens through the grant,
+    the code, the pending request and the draft through the club (and the
+    draft's event). The apps' own registrations hang off nothing, so they
+    stay, as does everything a real club connected."""
+    demo = await session.scalar(select(Clubs).where(Clubs.slug == "example-chai-coders"))
+    demo_owner = await session.get(Users, demo.user_id)
+    demo_event = await session.scalar(select(Events).where(Events.club_id == demo.id).limit(1))
+    await _connect_assistant(session, club=demo, owner=demo_owner, event=demo_event)
+    owner, real = await make_club(name="Real Club", email="real@example.com")
+    real_event = await make_event(club=real, created_by=owner, name="Real Night")
+    await _connect_assistant(session, club=real, owner=owner, event=real_event)
+    await session.commit()
+    real_id, demo_id = real.id, demo.id
+    conn = await session.connection()
+    plan = await remove.make_plan(conn, None)
+    for t in MCP_TABLES[1:]:
+        assert plan.counts.get(t) == (2 if t == "mcp_tokens" else 1), t
+    assert "mcp_clients" not in plan.counts
+    await remove.execute_plan(conn, plan)
+    for t in MCP_TABLES[1:]:
+        assert await _count(session, t, f"club_id = {demo_id}" if t != "mcp_tokens" else
+                            f"grant_id IN (SELECT id FROM mcp_grants WHERE club_id = {demo_id})") == 0, t
+    assert await _count(session, "mcp_grants", f"club_id = {real_id}") == 1
+    assert await _count(session, "mcp_tokens") == 2 and await _count(session, "mcp_auth_codes") == 1
+    assert await _count(session, "mcp_pending_actions", f"club_id = {real_id}") == 1
+    assert await _count(session, "announcement_drafts", f"club_id = {real_id}") == 1
+    assert await _count(session, "mcp_clients") == 2
 
 
 # ─── The showcase ─────────────────────────────────────────────────────────

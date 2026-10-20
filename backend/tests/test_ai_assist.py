@@ -215,7 +215,7 @@ async def test_free_has_no_ai_assist_in_the_plan_gates_own_words(client, world, 
         "label": "AI assist: event drafts, writing and feedback summaries",
         "required_plan": "starter",
         "required_plan_name": "Starter",
-        "upgrade_url": "https://clubs-next.myotherapp.in/billing",
+        "upgrade_url": "https://club-dashboard.myotherapp.in/billing",
     }
     assert body["message"] == "AI assist is part of Starter and up."
     assert hub.calls == []

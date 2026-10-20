@@ -83,6 +83,7 @@ class PlanFeaturesIn(CustomBaseModel):
     api: bool = False
     ai_assist: bool = False
     ai_byok: bool = False
+    mcp: bool = False
 
 
 class PlanIn(CustomBaseModel):
