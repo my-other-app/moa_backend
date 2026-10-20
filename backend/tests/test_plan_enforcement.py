@@ -38,7 +38,7 @@ API = "/api/v1"
 NOW = datetime.now(timezone.utc)
 IST = timezone(timedelta(hours=5, minutes=30))
 LONG_AGO = datetime(2020, 1, 1, tzinfo=timezone.utc)
-UPGRADE = "https://clubs-next.myotherapp.in/billing"
+UPGRADE = "https://club-dashboard.myotherapp.in/billing"
 LABELS = dict(FEATURE_CATALOG)
 NAMES = {"free": "Free", "starter": "Starter", "growth": "Growth", "pro": "Pro", "campus": "Campus", "enterprise": "Enterprise"}
 
