@@ -202,6 +202,13 @@ application.include_router(router=public_links_router, tags=["tracking-links"])
 from app.api.health import public_router as health_router  # noqa: E402
 
 application.include_router(router=health_router)
+# Clubs' AI assistants over MCP: /mcp, its OAuth endpoints and their discovery
+# documents, at the root (all 404 until APP_MCP_ENABLED; app/api/mcp).
+from app.api.mcp.router import public_router as mcp_oauth_router  # noqa: E402
+from app.api.mcp.server import router as mcp_router  # noqa: E402
+
+application.include_router(router=mcp_oauth_router)
+application.include_router(router=mcp_router)
 # Innermost: each request's plan-gate scope, so one request resolves a club's
 # entitlements once and knows whether an admin is behind it
 # (app/api/subscriptions/gates.py).
@@ -230,6 +237,12 @@ application.add_middleware(
     # answer's tag and send it back in If-None-Match.
     expose_headers=["Retry-After", "ETag"],
 )
+# Outside the API's CORS: an MCP client in a browser calls /mcp and the OAuth
+# endpoints from its own origin, with a bearer token and no cookie
+# (app/api/mcp/cors.py).
+from app.api.mcp.cors import McpCorsMiddleware  # noqa: E402
+
+application.add_middleware(McpCorsMiddleware)
 application.add_middleware(ProcessingTimeMiddleware)
 application.add_middleware(SecurityHeadersMiddleware)
 # slowapi's checks, as plain ASGI (app/core/middlewares/rate_limit_middleware.py).

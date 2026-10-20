@@ -25,8 +25,14 @@ def _rx(*patterns: str) -> re.Pattern:
     return re.compile("|".join(f"(?:{p})" for p in patterns))
 
 
-# Every member: their own membership, the invite pages (public anyway).
-_SELF = _rx(r"^/api/v1/clubs/access/me(?:/|$)", r"^/api/v1/clubs/access/invite/")
+# Every member: their own membership, the invite pages (public anyway), and
+# the AI assistants connected to the club -- each member sees and disconnects
+# their own; owners and admins see and disconnect all (mcp.service decides).
+_SELF = _rx(
+    r"^/api/v1/clubs/access/me(?:/|$)",
+    r"^/api/v1/clubs/access/invite/",
+    r"^/api/v1/clubs/connected-apps(?:/|$)",
+)
 # The access list itself: an admin may read it; only the owner changes it.
 _ACCESS_LIST = _rx(r"^/api/v1/clubs/access/?$")
 _ACCESS = _rx(r"^/api/v1/clubs/access(?:/|$)")
@@ -136,4 +142,91 @@ def can(role: str) -> dict:
         "payment_gateway": owner,
         "site_domain": admin,
         "ai_key": admin,
+        # Every connected AI assistant, not only one's own (app/api/mcp).
+        "connected_apps": admin,
+        # Approving what an assistant asked for: publishing, sending.
+        "approve_actions": editor,
     }
+
+
+# ─── Connected AI assistants (app/api/mcp) ──────────────────────────────
+#
+# An assistant acts as the person who connected it, and only as far as that
+# person's role goes *now*: each tool stands in for the dashboard request
+# that does the same thing, and a role may use the tool exactly when `allows`
+# lets it make that request. So the rules above stay the one place roles are
+# written down, and a tool can never do what its person could not do in the
+# dashboard. An id in a path is any id: no rule depends on which event.
+MCP_TOOLS = {
+    "list_events": ("GET", "/api/v1/clubs/events/list"),
+    "get_event": ("GET", "/api/v1/events/0/summary"),
+    "event_stats": ("GET", "/api/v1/events/0/summary"),
+    "list_registrations": ("GET", "/api/v1/events/registration/0/list"),
+    "finance_summary": ("GET", "/api/v1/clubs/finance"),
+    "list_store_items": ("GET", "/api/v1/clubs/store"),
+    "list_feedback": ("GET", "/api/v1/events/ratings/0"),
+    "list_team": ("GET", "/api/v1/clubs/access"),
+    "create_event_draft": ("POST", "/api/v1/events/create"),
+    "update_event_draft": ("PUT", "/api/v1/events/update/0"),
+    "create_store_item": ("POST", "/api/v1/clubs/store"),
+    "offer_store_items": ("PUT", "/api/v1/events/0/store/offers"),
+    "draft_announcement": ("POST", "/api/v1/clubs/notifications/events/0/send"),
+    "request_publish_event": ("PATCH", "/api/v1/events/0/closeout/settings"),
+    "request_send_announcement": ("POST", "/api/v1/clubs/notifications/events/0/send"),
+}
+
+#: Each scope's dashboard request: a scope is offered at consent only to a
+#: role that could use it. attendees:read is decided by `allows_contacts`.
+MCP_SCOPES = {
+    "events:read": ("GET", "/api/v1/clubs/events/list"),
+    "events:write": ("POST", "/api/v1/events/create"),
+    "finance:read": ("GET", "/api/v1/clubs/finance"),
+    "store:read": ("GET", "/api/v1/clubs/store"),
+    "store:write": ("POST", "/api/v1/clubs/store"),
+    "comms:write": ("POST", "/api/v1/clubs/notifications/events/0/send"),
+    "team:read": ("GET", "/api/v1/clubs/access"),
+}
+
+#: An event's money, as the event's own finance page reads it.
+EVENT_MONEY = ("GET", "/api/v1/events/0/finance")
+#: Approving a pending action is making the request it stands for.
+MCP_ACTIONS = {
+    "publish_event": ("PATCH", "/api/v1/events/0/closeout/settings"),
+    "send_announcement": ("POST", "/api/v1/clubs/notifications/events/0/send"),
+}
+
+
+def allows_tool(role: str, tool: str) -> bool:
+    """Whether this role may use this MCP tool now. The owner may use every one."""
+    if role == "owner":
+        return True
+    route = MCP_TOOLS.get(tool)
+    return route is not None and allows(role, *route)
+
+
+def allows_contacts(role: str) -> bool:
+    """Attendees' email addresses and phone numbers, handed to an assistant
+    (and so to whoever runs it). Door staff see names at the gate; they do
+    not export a list of contacts to a third party."""
+    return role in ("owner", "admin", "editor")
+
+
+def allows_scope(role: str, scope: str) -> bool:
+    if scope == "attendees:read":
+        return allows_contacts(role)
+    if role == "owner":
+        return scope in MCP_SCOPES
+    route = MCP_SCOPES.get(scope)
+    return route is not None and allows(role, *route)
+
+
+def allows_event_money(role: str) -> bool:
+    return role == "owner" or allows(role, *EVENT_MONEY)
+
+
+def allows_action(role: str, kind: str) -> bool:
+    """Whether this role may approve a pending action of this kind."""
+    if role == "owner":
+        return True
+    route = MCP_ACTIONS.get(kind)
+    return route is not None and allows(role, *route)

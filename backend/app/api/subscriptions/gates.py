@@ -81,11 +81,11 @@ EVENT_SCOPED_FEATURES = frozenset({
 })
 EVENT_SCOPED_LIMITS = frozenset({"registrations_per_event", "merch_items_per_event"})
 #: Gates about the whole club, enforced whatever its events: website and
-#: its own domain, roles, finance, and the per-club limits (events and
+#: its own domain, roles, finance, AI assistants over MCP, and the per-club limits (events and
 #: announcements per month, committee seats, website templates,
 #: registrations per month -- though a registration to a grandfathered event
 #: is never refused, it still counts in `usage`).
-CLUB_WIDE_FEATURES = frozenset({"website", "custom_domain", "roles", "finance"})
+CLUB_WIDE_FEATURES = frozenset({"website", "custom_domain", "roles", "finance", "mcp"})
 
 #: The limits nothing enforces, and why (see the module docstring).
 NOT_ENFORCED = {
@@ -126,6 +126,7 @@ _SUBJECTS = {
     "finance": ("Finance and expenses", "are"),
     "ai_assist": ("AI assist", "is"),
     "ai_byok": ("AI assist with your own key", "is"),
+    "mcp": ("Connecting AI assistants", "is"),
 }
 
 #: A limit's unit, singular and plural, and whether it is counted per month.

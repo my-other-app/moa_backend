@@ -19,7 +19,7 @@ fastapi==0.139.2
 google-genai==2.28.0
 h11==0.16.0
 httpcore==1.0.9
-# The HTTP client the anthropic SDK uses: httpx2, a separate package from httpx.
+# The HTTP client the anthropic and mcp SDKs use: httpx2, a separate package from httpx.
 httpcore2==2.13.1
 httpx==0.28.1
 httpx2==2.13.1
@@ -49,6 +49,20 @@ sqlmodel==0.0.22
 starlette==1.3.1
 tenacity==9.1.4
 truststore==0.10.4
-uvicorn==0.29.0
+# 0.31.1+ for mcp, the MCP SDK (app/api/mcp).
+uvicorn==0.54.0
 websockets==16.1.1
 pyotp==2.9.0
+# The MCP server clubs connect their AI assistants to (app/api/mcp,
+# docs/MCP.md): the official Python SDK, and what it brings. Its HTTP client,
+# httpx2 with httpcore2 and truststore, is pinned above (the anthropic SDK
+# uses it too); the SDK needs pydantic 2.12 and uvicorn 0.31.1 or later.
+mcp==2.3.0
+mcp-types==2.3.0
+sse-starlette==3.5.0
+jsonschema==4.26.0
+jsonschema-specifications==2025.9.1
+referencing==0.37.0
+rpds-py==2026.9.1
+attrs==26.1.0
+opentelemetry-api==1.45.1
