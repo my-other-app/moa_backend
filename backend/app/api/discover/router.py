@@ -70,7 +70,11 @@ Topic = Query(None, max_length=80, description="A topic's slug or id: events (or
 Interest = Query(None, le=2**31 - 1, description="An interest id; wins over `topic` when both are given")
 Kind = Query("any", alias="type")
 Price = Query("any")
-Radius = Query(50, ge=0, le=20000, description="Only with a known place, for in-person events; 0 for anywhere")
+Radius = Query(
+    50, ge=0, le=20000,
+    description="Only with a known place: in-person events with a point inside it, and nothing else (type=online lists "
+    "the online ones, with no radius); 0 for anywhere",
+)
 Offset = Query(0, ge=0, le=service.MAX_OFFSET, description="At most 1,000: deeper, pass `after`")
 After = Query(None, max_length=300, description="The `next_cursor` of the page before: this page starts after it (offset is then ignored)")
 

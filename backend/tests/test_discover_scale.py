@@ -348,7 +348,8 @@ def _home_view(home):
 
     return dict(
         near=ev(home["near"]), this_week=ev(home["this_week"]), online=ev(home["online"]), popular=ev(home["popular"]),
-        clubs=[(x["id"], x["distance_km"], x["followers"]) for x in home["clubs"]], upcoming=home["stats"]["upcoming_events"],
+        clubs=[(x["id"], x["distance_km"], x["followers"]) for x in home["clubs"]],
+        clubs_more=[(x["id"], x["distance_km"], x["followers"]) for x in home["clubs_more"]], upcoming=home["stats"]["upcoming_events"],
     )
 
 
@@ -372,7 +373,7 @@ async def test_the_front_page_answers_as_before_wherever_the_visitor_is(client, 
         assert r.status_code == 200, r.text
         want = await ref.home(session, here, now=service.now_utc())
         got = _home_view(r.json())
-        for key in ("near", "this_week", "online", "popular", "clubs", "upcoming"):
+        for key in ("near", "this_week", "online", "popular", "clubs", "clubs_more", "upcoming"):
             assert got[key] == want[key], (here, key)
         assert got["this_week"] and got["popular"] and got["clubs"] and (here is None or here == LONGYEARBYEN or got["near"]), here
     cache.reset(enabled=False)
@@ -430,13 +431,17 @@ async def test_the_radius_edge_the_antimeridian_and_events_without_a_point(clien
     await session.commit()
     assert inside_east.lng < -179  # it really is across the antimeridian
 
+    # Inside the radius: only what is held in person with a point inside it.
     body = (await client.get(f"{API}/events", params={"lat": centre[0], "lng": centre[1], "radius_km": 50, "sort": "distance"})).json()
-    assert _ids(body["items"]) == [close.id, inside_north.id, inside_east.id, online.id, no_point.id]
-    assert body["total"] == 5
+    assert _ids(body["items"]) == [close.id, inside_north.id, inside_east.id]
+    assert body["total"] == 3
     assert outside_east.id not in _ids(body["items"]) and outside_south.id not in _ids(body["items"])
-    assert [x["distance_km"] for x in body["items"]] == [3.0, 50.0, 50.0, None, None]
-    paged = [_ids((await client.get(f"{API}/events", params={"lat": centre[0], "lng": centre[1], "radius_km": 50, "sort": "distance", "limit": 2, "offset": o})).json()["items"]) for o in (0, 2, 4)]
+    assert [x["distance_km"] for x in body["items"]] == [3.0, 50.0, 50.0]
+    paged = [_ids((await client.get(f"{API}/events", params={"lat": centre[0], "lng": centre[1], "radius_km": 50, "sort": "distance", "limit": 2, "offset": o})).json()["items"]) for o in (0, 2)]
     assert sum(paged, []) == _ids(body["items"])
+    # Anywhere: every one, the placed nearest first, then those without a distance.
+    anywhere = (await client.get(f"{API}/events", params={"lat": centre[0], "lng": centre[1], "radius_km": 0, "sort": "distance"})).json()
+    assert _ids(anywhere["items"]) == [close.id, inside_north.id, inside_east.id, outside_east.id, outside_south.id, online.id, no_point.id]
 
 
 # ─── Words ───────────────────────────────────────────────────────────────

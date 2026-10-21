@@ -11,7 +11,10 @@ tagline, place, interests and topics -- case and accents ignored
 (w2_search's search_text), "popular"
 is popularity.value (attention decayed by age), and For You spreads its
 first cards over clubs and counts an interest the user did not pick, under
-one of their topics, for W_SIBLING_INTEREST (topics).
+one of their topics, for W_SIBLING_INTEREST (topics). And near is near
+(near_results): a radius keeps only in-person events with a point inside
+it, and the front page's `clubs` are those within 50 km (else the most
+followed, with no distance), the nearest further ones `clubs_more`.
 
 Only what the comparisons need: ids, totals, distances and counts, not the
 cards' presentation, which the new code still builds with the same functions.
@@ -168,7 +171,7 @@ async def search_events(session, here, *, q=None, when="any", category=None, typ
         rows = [e for e in rows if words_match(q, _event_texts(e, extra[e.id]))]
     dist = {e.id: _km(e, here) for e in rows}
     if here is not None and type_ != "online" and radius_km > 0:
-        rows = [e for e in rows if e.is_online or dist[e.id] is None or dist[e.id] <= radius_km]
+        rows = [e for e in rows if dist[e.id] is not None and dist[e.id] <= radius_km]
     going = await going_counts(session, [e.id for e in rows])
     if sort == "distance" and here is not None:
         rows.sort(key=lambda e: (dist[e.id] is None, dist[e.id] or 0.0, _aware(e.event_datetime), e.id))
@@ -253,18 +256,21 @@ async def home(session, here, *, now) -> dict:
     club_rows = await _club_rows(session)
     followers = await follower_counts(session, [c.id for c in club_rows])
     dist = _club_distances(club_rows, await club_points(session, club_rows) if here is not None else {}, here)
-    if here is not None:
-        club_rows.sort(key=lambda c: (dist[c.id] is None, dist[c.id] or 0.0, -followers.get(c.id, 0), c.id))
-    else:
-        club_rows.sort(key=lambda c: (-followers.get(c.id, 0), (c.name or "").lower(), c.id))
+    popular_clubs = sorted(club_rows, key=lambda c: (-followers.get(c.id, 0), (c.name or "").lower(), c.id))[:8]
+    nearest = sorted([c for c in club_rows if dist[c.id] is not None], key=lambda c: (dist[c.id], -followers.get(c.id, 0), c.id))[:8]
+    near_clubs = [c for c in nearest if dist[c.id] <= 50.0]
+    more = [c for c in nearest if dist[c.id] > 50.0]
 
     def out(es):
         return [(e.id, round(_km(e, here), 1) if _km(e, here) is not None else None, going.get(e.id, 0)) for e in es]
 
-    top = club_rows[:8]
+    def club_out(cs, with_distance):
+        return [(c.id, round(dist[c.id], 1) if with_distance else None, followers.get(c.id, 0)) for c in cs]
+
     return dict(
         near=out(near), this_week=out(this_week), online=out(online), popular=out(popular),
-        clubs=[(c.id, round(dist[c.id], 1) if dist.get(c.id) is not None else None, followers.get(c.id, 0)) for c in top],
+        clubs=club_out(near_clubs, True) if near_clubs else club_out(popular_clubs, False),
+        clubs_more=club_out(more, True),
         upcoming=len(rows),
     )
 

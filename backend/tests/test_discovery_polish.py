@@ -328,9 +328,10 @@ async def test_the_calendar_takes_the_searchs_filters(client, scene):
     assert await _month(client, ym(m), price="paid") == {d6.isoformat(): 1}
     in_person = await _month(client, ym(m), type="in_person")
     assert in_person[d5.isoformat()] == 2
-    # Near Bengaluru: the Delhi summit is out; online and unplaced ones cannot be ruled out.
+    # Near Bengaluru: only what is held in person with a point inside; the
+    # Delhi summit, the online talk and the jam with no point are out.
     near = await _month(client, ym(m), lat=BLR[0], lng=BLR[1], radius_km=50)
-    assert near[d5.isoformat()] == 2 and near[d6.isoformat()] == 1
+    assert near == {d5.isoformat(): 1}
     everywhere = await _month(client, ym(m), lat=BLR[0], lng=BLR[1], radius_km=0)
     assert everywhere == await _month(client, ym(m))
 

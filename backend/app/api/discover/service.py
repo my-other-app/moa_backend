@@ -37,6 +37,9 @@ events and clubs:
 - A club's place (its own point, else the middle of its in-person events) is
   kept on the club by triggers (places.py), so "clubs near" is a box on an
   index and not an average over every club's events.
+- Near is near: a radius keeps in-person events whose point is inside it and
+  nothing else (an online event is near no one; type=online lists those),
+  and the front page calls a club near only within NEAR_KM.
 - The front page's sections each take a LIMIT, and the parts that are the
   same for every visitor are kept for a minute (cache.py), and for a minute
   more while one task rebuilds them in the background. "Near you" is
@@ -548,16 +551,14 @@ def _in_person_point():
 
 
 def _within(here, radius_km: float):
-    """Online events are anywhere, and an in-person one without a point cannot
-    be ruled out; the rest must be inside the radius: in one of the grid
-    cells that cover it (cells.py: an index probe per cell), then the exact
-    distance."""
-    return or_(
-        Events.is_online == True,  # noqa: E712
-        Events.lat.is_(None),
-        Events.lng.is_(None),
-        cells.near_sql(here, radius_km, Events.geocell, Events.lat, Events.lng),
-    )
+    """In person, with a point inside the radius: in one of the grid cells
+    that cover it (cells.py: an index probe per cell), then the exact
+    distance. Nothing else is: an online event is near no one, and one in
+    person without a point cannot be said to be inside. Both used to pass
+    every radius and pad "near" lists from anywhere (Mumbai's "2 events
+    near" were both online); type=online lists the online ones, and no
+    radius applies to it."""
+    return and_(_in_person_point(), cells.near_sql(here, radius_km, Events.geocell, Events.lat, Events.lng))
 
 
 def status_of(e: Events, now: datetime, going: int) -> str:
@@ -781,6 +782,9 @@ async def search_events(
     `topic` (a slug or an id) and `interest`: events with that interest, or
     any interest under that topic (`interest` wins when both are given).
 
+    With a place and a radius (not for type=online), only in-person events
+    whose point is inside it (_within).
+
     `sort` left out is relevance with words, else date. `total` is exact up
     to COUNT_CAP; past it, COUNT_CAP with `total_capped` (the pages go on
     regardless: a page is asked for, not worked out from the total).
@@ -860,7 +864,8 @@ DISTANCE_TYPES = ["int", "float", "dt", "int"]
 
 async def _distance_page(session, conds: list, here, radius_km: Optional[float], offset: int, limit: int, total: int, capped: bool, after: Optional[str]):
     """Nearest first, then everything without a distance (online, or no
-    point) by date. The two parts are paged as one list; the first can use
+    point) by date: that second part only anywhere, as a radius keeps none
+    of it (_within). The two parts are paged as one list; the first can use
     the point index, inside the radius's box. Where the page falls needs the
     placed part's size only up to the page's end. A cursor carries the part
     (0 placed, 1 not) and the last row's keys."""
@@ -871,13 +876,16 @@ async def _distance_page(session, conds: list, here, radius_km: Optional[float],
         # The cells that cover the circle: the cell index finds the placed part.
         by_cell = cells.cover_sql(Events.geocell, cells.cover(here[0], here[1], radius_km))
         placed.append(by_cell if by_cell is not None else geo.in_box_sql(geo.bbox(here[0], here[1], radius_km), Events.lat, Events.lng))
-    unplaced = conds + [or_(Events.is_online == True, Events.lat.is_(None), Events.lng.is_(None))]  # noqa: E712
+    # Inside a radius there is no second part.
+    unplaced = conds + [or_(Events.is_online == True, Events.lat.is_(None), Events.lng.is_(None))] if radius_km is None else None  # noqa: E712
     placed_keys = [(km, False), *by_date]
     start = cursors.decode(after, "events:distance", DISTANCE_TYPES)
     # Each row with its cursor: (0, km, start, id) placed, (1, 0, start, id) not.
     tagged: list[tuple[Events, list]] = []
 
     async def take(cond_list, keys, part, skip, n):
+        if cond_list is None:
+            return
         rows, keyed = await _page(session, cond_list, keys, skip, n, keyed=True)
         for e, k in zip(rows, keyed):
             tagged.append((e, [0, *k] if part == 0 else [1, 0.0, *k]))
@@ -888,7 +896,7 @@ async def _distance_page(session, conds: list, here, radius_km: Optional[float],
             await take(placed + [cursors.after(placed_keys, values)], placed_keys, 0, 0, limit + 1)
             if len(tagged) <= limit:
                 await take(unplaced, by_date, 1, 0, limit + 1 - len(tagged))
-        else:
+        elif unplaced is not None:
             await take(unplaced + [cursors.after(by_date, values[1:])], by_date, 1, 0, limit + 1)
     elif capped or total > offset:
         n_placed = await _count_upto(session, _event_ids(placed), offset + limit + 2)
@@ -1753,34 +1761,47 @@ async def _club_pool(session, now: datetime, centre: tuple[float, float], reach:
     If R is the distance from the centre to its HOME_CLUBS-th nearest club, a
     point P in reach has that many clubs within R + reach, so its own
     nearest are all within R + reach of P, and so within R + 2·reach of the
-    centre. Clubs with no place at all come after every club with one, so
-    they are only needed when fewer than HOME_CLUBS clubs have a place.
+    centre. Only clubs with a place: one without is near no one.
 
     R is found by widening circles on the clubs' place index (places.nearest):
     a few small box queries where clubs are, never every club's place."""
     r, every = await places.nearest(session, centre, HOME_CLUBS)
     if r is not None:
         rows = await places.around(session, centre, r + 2 * reach + _SLACK_KM)
-    else:  # fewer than HOME_CLUBS clubs have a place: all of them, then the most followed without
-        rows = every + await places.unplaced(session, HOME_CLUBS)
+    else:  # fewer than HOME_CLUBS clubs have a place: all of them
+        rows = every
     return dict(clubs=rows, cards={})
 
 
-async def _nearest_clubs(session, now: datetime, since: datetime, pool: dict, here: tuple[float, float]) -> list[dict]:
+async def _nearest_clubs(session, now: datetime, since: datetime, pool: dict, here: tuple[float, float]) -> tuple[list[dict], list[dict]]:
+    """(near, further): the HOME_CLUBS nearest clubs with a place, split at
+    NEAR_KM, nearest first, each with its distance. A club with no place is
+    in neither: it is near no one, and further from no one."""
     ranked = []
     for i, la, ln, n in pool["clubs"]:
-        d = geo.km(here[0], here[1], la, ln) if la is not None and ln is not None else None
-        ranked.append(((d is None, d or 0.0, -n, i), i, d))
+        if la is not None and ln is not None:
+            d = geo.km(here[0], here[1], la, ln)
+            ranked.append(((d, -n, i), i, d))
     picked = heapq.nsmallest(HOME_CLUBS, ranked)
     missing = [i for _, i, _ in picked if i not in pool["cards"]]
     if missing:
         rows = list((await session.scalars(select(Clubs).where(Clubs.id.in_(missing)))).all())
         for c in await club_cards(session, rows, now, since=since):
             pool["cards"][c["id"]] = c
-    return [dict(pool["cards"][i], distance_km=round(d, 1) if d is not None else None) for _, i, d in picked if i in pool["cards"]]
+    cards = [(dict(pool["cards"][i], distance_km=round(d, 1)), d) for _, i, d in picked if i in pool["cards"]]
+    return [c for c, d in cards if d <= NEAR_KM], [c for c, d in cards if d > NEAR_KM]
 
 
 async def home(session, where: dict, viewer_id: Optional[int], now: Optional[datetime] = None) -> dict:
+    """The front page. `clubs`, for a visitor with a place, are the clubs
+    within NEAR_KM, nearest first; with none that near, the most followed,
+    with no distance, as for a visitor with no place. The nearest beyond
+    NEAR_KM are `clubs_more`, each with its distance.
+
+    `clubs` keeps that shape for the app already in the stores, which reads
+    only it and calls every club in it near when any has a distance: it used
+    to hold the nearest eight however far (two within 9 km of
+    Thiruvananthapuram, then six from 126 to 412 km off), all "near"."""
     now = now or now_utc()
     here = _here(where)
     since = await upcoming.since(session, now)
@@ -1792,6 +1813,7 @@ async def home(session, where: dict, viewer_id: Optional[int], now: Optional[dat
 
     near: list[dict] = []
     clubs = [dict(c) for c in shared["clubs"]]
+    clubs_more: list[dict] = []
     if here is not None:
         cell = geo.cell(*here)
         if geo.cell_is_cacheable(cell):
@@ -1806,7 +1828,9 @@ async def home(session, where: dict, viewer_id: Optional[int], now: Optional[dat
             pool = await _near_pool(session, now, since, here, 0.0)
             club_pool = await _club_pool(session, now, here, 0.0)
         near = await _near(session, now, pool, here)
-        clubs = await _nearest_clubs(session, now, since, club_pool, here)
+        near_clubs, clubs_more = await _nearest_clubs(session, now, since, club_pool, here)
+        if near_clubs:
+            clubs = near_clubs
 
     return dict(
         where=where,
@@ -1816,6 +1840,7 @@ async def home(session, where: dict, viewer_id: Optional[int], now: Optional[dat
         popular=_placed(shared["popular"], here),
         categories=[dict(c) for c in shared["categories"]],
         clubs=clubs,
+        clubs_more=clubs_more,
         threads=await _for_viewer(session, shared["threads"], viewer_id),
         stats=dict(shared["stats"]),
     )

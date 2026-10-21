@@ -267,10 +267,17 @@ async def test_totals_stop_at_the_cap_and_say_so_and_the_pages_go_on(client, ses
     for i, ev in enumerate((await session.scalars(select(Events).where(Events.name.like("Capped Night%")).order_by(Events.id))).all()):
         ev.lat, ev.lng = KORAMANGALA[0] + i * 0.01, KORAMANGALA[1]
     await session.commit()
+    # Anywhere (radius 0), so the pages cross from the placed part to the rest.
     near = []
     for offset in range(0, 10, 3):
-        near += _ids((await client.get(f"{API}/events", params={"lat": BLR[0], "lng": BLR[1], "sort": "distance", "offset": offset, "limit": 3})).json()["items"])
+        params = {"lat": BLR[0], "lng": BLR[1], "radius_km": 0, "sort": "distance", "offset": offset, "limit": 3}
+        near += _ids((await client.get(f"{API}/events", params=params)).json()["items"])
     assert len(near) == 7 == len(set(near))
+    # Within the radius, only the five placed in it.
+    inside = []
+    for offset in range(0, 10, 3):
+        inside += _ids((await client.get(f"{API}/events", params={"lat": BLR[0], "lng": BLR[1], "sort": "distance", "offset": offset, "limit": 3})).json()["items"])
+    assert inside == near[:5] and len(set(inside)) == 5
 
     clubs = (await client.get(f"{API}/clubs")).json()
     assert clubs["total"] == 3 and clubs["total_capped"] is True and len(clubs["items"]) == 5

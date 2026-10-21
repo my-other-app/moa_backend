@@ -159,7 +159,8 @@ def _event_filter(
     elif price == "paid":
         f.append("has_fee = true")
     if here is not None and type_ != "online" and radius_km > 0:
-        f.append(f"(is_online = true OR has_point = false OR {_geo_radius(here, radius_km)})")
+        # In person with a point inside the radius, nothing else (discover.service._within).
+        f += ["is_online = false", "has_point = true", _geo_radius(here, radius_km)]
     return f
 
 
