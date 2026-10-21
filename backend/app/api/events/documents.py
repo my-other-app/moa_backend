@@ -97,7 +97,7 @@ def sample_values(event, kind: str) -> dict:
         "venue": event.location_name or "",
         "club_name": (club.name if club else "") or "",
         "team_name": "Team Nova",
-        "certificate_id": "MOA-SAMPLE-0041",
+        "certificate_id": "CERT-7K3QF-X9PWM",
         "placing": "First" if kind == "certificate" else "",
     }
 
