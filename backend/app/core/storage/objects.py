@@ -4,7 +4,7 @@ The image columns in `fields.py` upload as a side effect of saving a row,
 which suits a logo on a template. A designer's uploads are different: the
 file arrives before anything is saved, is referred to by key from inside a
 JSON layout, and is read back by the renderer. These calls are all that
-needs: put, presign, get.
+needs: put, presign, get, and a folder's keys.
 
 Called through the module (`objects.put_bytes`) rather than imported by
 name, so a test can swap them without reaching S3.
@@ -180,6 +180,13 @@ def fetch(key: str, *, quiet_if_missing: bool = False) -> Optional[bytes]:
         logger.warning("object %s could not be read: %s", key, exc)
         return None
     return buf.getvalue()
+
+
+def list_keys(base: str, limit: int = 100) -> list[str]:
+    """The keys under `base` (a folder ending in a slash), at most `limit`,
+    in the bucket's order. Raises when the bucket does not answer."""
+    page = client().list_objects_v2(Bucket=settings.S3_BUCKET, Prefix=base, MaxKeys=max(1, min(limit, 1000)))
+    return [item["Key"] for item in page.get("Contents") or []]
 
 
 def get_bytes(key: str) -> Optional[bytes]:
