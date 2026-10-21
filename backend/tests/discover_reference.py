@@ -258,8 +258,8 @@ async def home(session, here, *, now) -> dict:
     dist = _club_distances(club_rows, await club_points(session, club_rows) if here is not None else {}, here)
     popular_clubs = sorted(club_rows, key=lambda c: (-followers.get(c.id, 0), (c.name or "").lower(), c.id))[:8]
     nearest = sorted([c for c in club_rows if dist[c.id] is not None], key=lambda c: (dist[c.id], -followers.get(c.id, 0), c.id))[:8]
-    near_clubs = [c for c in nearest if dist[c.id] <= 50.0]
-    more = [c for c in nearest if dist[c.id] > 50.0]
+    near_clubs = [c for c in nearest if round(dist[c.id], 1) <= 50.0]
+    more = [c for c in nearest if round(dist[c.id], 1) > 50.0]
 
     def out(es):
         return [(e.id, round(_km(e, here), 1) if _km(e, here) is not None else None, going.get(e.id, 0)) for e in es]

@@ -1775,8 +1775,9 @@ async def _club_pool(session, now: datetime, centre: tuple[float, float], reach:
 
 async def _nearest_clubs(session, now: datetime, since: datetime, pool: dict, here: tuple[float, float]) -> tuple[list[dict], list[dict]]:
     """(near, further): the HOME_CLUBS nearest clubs with a place, split at
-    NEAR_KM, nearest first, each with its distance. A club with no place is
-    in neither: it is near no one, and further from no one."""
+    NEAR_KM, nearest first, each with its distance. Split on the distance as
+    sent (to 0.1 km), so a client reading `distance_km <= 50` agrees. A club
+    with no place is in neither: it is near no one, and further from no one."""
     ranked = []
     for i, la, ln, n in pool["clubs"]:
         if la is not None and ln is not None:
@@ -1788,8 +1789,8 @@ async def _nearest_clubs(session, now: datetime, since: datetime, pool: dict, he
         rows = list((await session.scalars(select(Clubs).where(Clubs.id.in_(missing)))).all())
         for c in await club_cards(session, rows, now, since=since):
             pool["cards"][c["id"]] = c
-    cards = [(dict(pool["cards"][i], distance_km=round(d, 1)), d) for _, i, d in picked if i in pool["cards"]]
-    return [c for c, d in cards if d <= NEAR_KM], [c for c, d in cards if d > NEAR_KM]
+    cards = [dict(pool["cards"][i], distance_km=round(d, 1)) for _, i, d in picked if i in pool["cards"]]
+    return [c for c in cards if c["distance_km"] <= NEAR_KM], [c for c in cards if c["distance_km"] > NEAR_KM]
 
 
 async def home(session, where: dict, viewer_id: Optional[int], now: Optional[datetime] = None) -> dict:

@@ -222,3 +222,19 @@ async def test_the_near_rule_holds_with_the_minute_cache_on(client, world):
             assert all(x["distance_km"] > 50 for x in home["clubs_more"]), point
     finally:
         cache.reset(enabled=False)
+
+
+async def test_the_edge_is_the_distance_as_sent(client, session, make_club):
+    """A client calls a club near when its distance_km is 50 or less: the
+    API splits on that same rounded number, so the two never disagree."""
+    from tests.test_geo_cells import _dest
+
+    clubs = {}
+    for key, km in (("inside", 50.04), ("outside", 50.06)):
+        _, club = await make_club(name=f"Edge {key}", email=f"near-edge-{key}@example.com")
+        club.lat, club.lng = _dest(*TVM, km, 90.0)
+        clubs[key] = club
+    await session.commit()
+    home = (await client.get(f"{API}/home", params={"lat": TVM[0], "lng": TVM[1]})).json()
+    assert [(x["id"], x["distance_km"]) for x in home["clubs"]] == [(clubs["inside"].id, 50.0)]
+    assert [(x["id"], x["distance_km"]) for x in home["clubs_more"]] == [(clubs["outside"].id, 50.1)]
