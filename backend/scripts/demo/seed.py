@@ -640,8 +640,9 @@ class Seeder:
             self.hidden_stores.append(e.slug)
         venue = venue_line(e.venue.name, e.venue.address) if e.venue else None
         short_place = (e.venue.name.split(",")[0] + ", " + e.venue.address.split(",")[-1].strip()) if e.venue else "Online"
-        lat = c.location.lat + self.rnd.uniform(-0.004, 0.004)
-        lng = c.location.lng + self.rnd.uniform(-0.004, 0.004)
+        # The venue's own point (the data gives one): an event away from its
+        # club's town is pinned there, not beside the club.
+        lat, lng = (e.venue.lat, e.venue.lng) if e.venue else (None, None)
         price = f"₹{e.fee:g}" if e.fee else "Free"
         poster = images.poster(
             brand, club_name=c.name, slug=c.slug, headline=e.poster.headline, sub=e.poster.sub,

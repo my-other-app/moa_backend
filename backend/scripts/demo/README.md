@@ -7,6 +7,7 @@ Three scripts for showing MyOtherApp to clubs with real-looking data:
 | `python -m scripts.demo.reset` | Wipes the database except the admin accounts and the reference data. |
 | `python -m scripts.demo.seed` | Seeds the 8 demo clubs in `data/clubs/`, fully public, plus a main demo user. One club, Respawn Room, is the **showcase**: every section of the clubs dashboard has data. |
 | `python -m scripts.demo.remove` | Removes the demo and only the demo, when real clubs arrive. |
+| `python -m scripts.demo.fix_pins` | Moves the venue pins of a demo seeded before each venue had its own point (section 7). |
 
 They run on the server, inside the backend container. Every command below starts there:
 
@@ -178,6 +179,22 @@ What counts as the demo:
 
 The ledger's lines for those clubs go too, and the platform's monthly sums are recomputed. Real rows that merely pointed at a demo row (a report about a demo post) lose the pointer, not themselves. Afterwards, rebuild search as in step 3 if it is set up.
 
+## 7. Fix the venue pins of a demo seeded before
+
+A seed made before each venue had its own point pinned every in-person event within about 450 m of its club, whatever the venue said. Systems Weekend at Vagamon (Idukki) showed 2.9 km from Kochi; it is some 73 km away. The data now gives every venue its own point, and a new seed pins each event there. To correct a demo already seeded, without seeding again:
+
+```sh
+$DC exec -T backend python -m scripts.demo.fix_pins --dry-run    # read-only: what would move, and how far
+$DC exec -T backend python -m scripts.demo.fix_pins              # changes things: moves them, in one transaction
+```
+
+- **Deploy first.** The script and the data arrive with the code (`sync_code`; the backend mounts `./backend`). Nothing needs a restart for it.
+- **Only the demo clubs' events.** A club counts when its slug is in `data/clubs/` *and* its contact address or its owner's sign-in is at `demo.myotherapp.in`, so a real club that later takes a removed demo club's slug is never touched.
+- **Only the pins the seed made.** A pin moves only while it is still the seed's: within about 450 m of its club, with the seed's map link for it and the seed's venue words. A pin, map link or venue someone changed on the dashboard is left alone, and listed under `left alone:` with the reason.
+- **It can be run again.** A pin already on its venue is left as it is: a second run says `0 pin(s) moved` and lists every event as already on its venue.
+- The dry run ends with `Dry run: nothing changed.`; the real run with `Done, in one transaction.` A moved event gets the map link of its new point, as a new seed writes it. Search and the "near you" cells follow by themselves; the site's pages within a minute.
+- Most events move a few hundred metres, onto their venue's point (the campus clubs' onto their campus). The ones away from their club move the most: Vagamon about 73 km, Kakkayam about 37 km, Kunhimangalam about 25 km, Pazhayangadi about 19 km, Kalamassery about 12 km, Fort Kochi and Mattancherry about 7 km.
+
 ## Rehearsing on a laptop
 
 ```sh
@@ -199,5 +216,6 @@ python -m scripts.demo.seed --main-email demo@demo.myotherapp.in --main-password
 - `images.py`: the logos, covers, posters, product shots, portraits and artwork.
 - `quiet.py`: quiet mode.
 - `reset.py`, `remove.py`: the wipe and the removal.
+- `fix_pins.py`: moves a demo seeded before onto its venues' own points (section 7).
 - `local_bucket.py`: a folder standing in for S3, for rehearsals and tests.
 - `data/`: the content (see `data/README.md`). Run `python3 data/check.py` after editing it.
