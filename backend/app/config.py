@@ -226,7 +226,7 @@ class AppConfig(BaseSettings):
     # refused. Unset, or a file that cannot be read: GEOIP_URL as before. Not
     # shipped; download it under MaxMind's licence and point this at the
     # .mmdb. In production: /geoip/GeoLite2-City.mmdb (docs/OPERATIONS.md,
-    # section 15). Read once per process: a new file needs a restart.
+    # section 16). Read once per process: a new file needs a restart.
     GEOIP_MMDB_PATH: str = ""
     # A comment is hidden from everyone but its writer once the open reports
     # on it weigh this much (app/api/reports): a report counts 1, or

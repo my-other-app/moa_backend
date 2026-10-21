@@ -20,6 +20,8 @@ from app.api.users.schemas import (
     UserCreateResponse,
     UserDetailResponse,
     UserInterestSelect,
+    UserPreferences,
+    UserPreferencesPatch,
     UserRegisterResponse,
     UserRegisteredEvents,
 )
@@ -502,6 +504,17 @@ async def get_profile(session: SessionDep, user: UserAuth) -> UserDetailResponse
     await service.merge_guests_now(session, user)
     profile = await service.get_user_profile(session=session, user_id=user.id)
     return profile
+
+
+@router.patch("/preferences", summary="The person's own switches: People Like You")
+async def update_preferences(session: SessionDep, user: DependsAuth, body: UserPreferencesPatch) -> UserPreferences:
+    """`networking_visible` off: nobody sees them in an event's People Like
+    You. They can still look themselves (events.networking.HIDDEN_CAN_BROWSE).
+    The profile (GET /user/profile/me) reads the same switch back."""
+    if body.networking_visible is not None:
+        user.networking_visible = body.networking_visible
+        await session.commit()
+    return UserPreferences(networking_visible=user.networking_visible)
 
 
 @router.post("/interests/select", summary="select interests")

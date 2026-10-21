@@ -3,9 +3,9 @@
 How to deploy, roll back, unstick a migration, restore a backup, rotate a
 secret, turn on the new services, size the server and every service on it,
 keep its disk from filling, open the live room's streams, look after the
-rendered documents in the bucket, run AI assist, place visitors by address
-without a lookup service, and fix the demo's venue pins. Every command is
-meant to be copied.
+rendered documents in the bucket, run AI assist, put a demo event live
+for People Like You, place visitors by address without a lookup service,
+and fix the demo's venue pins. Every command is meant to be copied.
 Commands under **Read-only** change nothing; anything that changes something
 says so.
 
@@ -1451,7 +1451,31 @@ API sees it. Give that location 12M if large posters matter.
 
 ---
 
-## 15. Placing visitors by address (GeoLite2)
+## 15. The demo: People Like You, live now
+
+The demo's reset, seed and removal are in `backend/scripts/demo/README.md`.
+People Like You only has people in it during an event, so one more script
+puts a showcase event live now: Respawn Room's "Open Night", started ten
+minutes ago, four hours long. It checks in the main demo user and ten demo
+members, one of them hidden.
+
+```bash
+# Read-only: what it would do.
+$DC exec -T backend python -m scripts.demo.live_now --dry-run
+
+# Changes things, only inside the demo: the event, registrations, check-ins
+# and the members' People Like You switch. Sends nothing; free; safe to rerun.
+$DC exec -T backend python -m scripts.demo.live_now
+```
+
+Then sign in to the app as `demo@demo.myotherapp.in`. The event's page has
+the People like you card, and Home's DISCOVER says where you are.
+
+It needs the backend deployed with the `add_networking_visible` migration
+(`migrate`, section 1). If its summary says `networking: OFF`, the showcase
+club's plan lacks Attendee networking. The rest is in that README, section 7.
+
+## 16. Placing visitors by address (GeoLite2)
 
 A visitor who shares no location is placed roughly by their address: the
 app's first guess of a city, and the API's "near you" for a reader the site
@@ -1545,7 +1569,7 @@ $DC restart backend < /dev/null      # changes things: about a minute of 502s
 
 ---
 
-## 16. The demo's venue pins
+## 17. The demo's venue pins
 
 A demo seeded before each venue had its own point has every in-person event
 pinned beside its club. "Systems Weekend at Vagamon" shows 2.9 km from
@@ -1560,5 +1584,5 @@ $DC exec -T backend python -m scripts.demo.fix_pins              # changes thing
 It touches only the demo clubs' events. Within those, it moves only the pins
 the seed made; anything someone changed by hand stays as it is. Running it
 twice is safe. The rules, and what the output says, are in
-`backend/scripts/demo/README.md`, section 7, next to the demo's reset, seed
+`backend/scripts/demo/README.md`, section 8, next to the demo's reset, seed
 and remove.

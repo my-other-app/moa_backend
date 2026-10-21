@@ -134,6 +134,10 @@ class UserDetailResponse(CustomBaseModel):
     # typed back the code sent to the address. The app asks the rest to
     # verify, since tickets booked on the website reach only verified ones.
     email_verified: bool = Field(False)
+    # "Show me in People Like You": whether others checked in at the same
+    # event see this person in its networking list. On unless turned off
+    # (PATCH /user/preferences).
+    networking_visible: bool = Field(True)
     created_at: datetime = Field(...)
     updated_at: datetime = Field(...)
     profile: UserProfileDetailResponse | None = Field(None)
@@ -272,6 +276,15 @@ class FCMTokenRequest(CustomBaseModel):
 class FCMTokenDelete(CustomBaseModel):
     """The token to stop sending this account's pushes to: the device's own, at sign-out."""
     token: str = Field(..., min_length=1, max_length=512)
+
+
+class UserPreferencesPatch(CustomBaseModel):
+    """The person's own switches the server keeps. Only those sent change."""
+    networking_visible: bool | None = Field(None, description="Show me in People Like You")
+
+
+class UserPreferences(CustomBaseModel):
+    networking_visible: bool = Field(...)
 
 
 class FCMTokenResponse(CustomBaseModel):

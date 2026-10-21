@@ -98,7 +98,7 @@ services:
       # The GeoLite2 database that places a visitor by address with no
       # request (APP_GEOIP_MMDB_PATH=/geoip/GeoLite2-City.mmdb), outside the
       # project directory for the same reason. Read-only, and empty until
-      # the owner downloads it there (docs/OPERATIONS.md, section 15); the
+      # the owner downloads it there (docs/OPERATIONS.md, section 16); the
       # app ignores an empty path. Reaches a container when it is recreated.
       - /var/lib/myotherapp/geoip:/geoip:ro
     env_file:

@@ -599,12 +599,22 @@ async def get_event(session: AsyncSession, event_id: str | int, user_id: int | N
             data["user_position"] = registration.position
             # The public site's ticket and certificate pages, by ticket id.
             data["ticket_url"] = public_urls.ticket_url(registration.ticket_id)
-            if registration.is_attended:
+            # By the rule the PDF and the image follow, so the app lists and
+            # opens exactly the certificates the server will hand over.
+            from app.api.events.certificates import availability
+
+            held = availability(registration)
+            data["has_certificate"] = held.available
+            data["certificate_revoked"] = held.reason == "revoked"
+            if held.available:
                 data["certificate_url"] = public_urls.certificate_url(registration.ticket_id)
             # The feedback survey, as emailed to whoever was there, for the
             # app's own survey screen: this registration's link only, and
             # only while the survey is open to it (live.feedback_url).
             data["feedback_url"] = live.feedback_url(event, registration, row if row.survey_id is not None else None)
+            # People Like You, for the event page's card: on when the club's
+            # plan has it. Asked only for someone registered, who can use it.
+            data["networking"] = await gates.allows(session, event.club_id, "networking", event=event)
             # Position label based on position
             if registration.position:
                 if registration.position == 1:

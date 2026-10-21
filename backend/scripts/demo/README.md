@@ -1,13 +1,15 @@
 # The demo: reset, seed, remove
 
-Three scripts for showing MyOtherApp to clubs with real-looking data:
+Three scripts for showing MyOtherApp to clubs with real-looking data, and one
+for trying People Like You on the day:
 
 | Script | What it does |
 |---|---|
 | `python -m scripts.demo.reset` | Wipes the database except the admin accounts and the reference data. |
 | `python -m scripts.demo.seed` | Seeds the 8 demo clubs in `data/clubs/`, fully public, plus a main demo user. One club, Respawn Room, is the **showcase**: every section of the clubs dashboard has data. |
 | `python -m scripts.demo.remove` | Removes the demo and only the demo, when real clubs arrive. |
-| `python -m scripts.demo.fix_pins` | Moves the venue pins of a demo seeded before each venue had its own point (section 7). |
+| `python -m scripts.demo.live_now` | Puts one showcase event live now, with the main demo user and demo members checked in, so People Like You has people in it (section 7). |
+| `python -m scripts.demo.fix_pins` | Moves the venue pins of a demo seeded before each venue had its own point (section 8). |
 
 They run on the server, inside the backend container. Every command below starts there:
 
@@ -179,7 +181,48 @@ What counts as the demo:
 
 The ledger's lines for those clubs go too, and the platform's monthly sums are recomputed. Real rows that merely pointed at a demo row (a report about a demo post) lose the pointer, not themselves. Afterwards, rebuild search as in step 3 if it is set up.
 
-## 7. Fix the venue pins of a demo seeded before
+## 7. People Like You, live now
+
+People Like You lists the people checked in at an event who share your
+interests, from the event's start to an hour after its end. The seeded
+events are all past or upcoming, so to try it, put one live now:
+
+```sh
+$DC exec -T backend python -m scripts.demo.live_now --dry-run   # what it would do; writes nothing
+$DC exec -T backend python -m scripts.demo.live_now             # do it
+```
+
+It ends with a summary: the event, until when People Like You is open, who
+was checked in, and who is hidden.
+
+What it does, and only inside the demo:
+
+- **The event.** Respawn Room's "Open Night" (`/events/respawn-room-open-night-live`), made the first time. Every run moves it so it started ten minutes ago and runs four hours. It is free, closed to registration and full, so nobody from the public can join it.
+- **The people.** The main demo user (`demo@demo.myotherapp.in`), 8 demo members who share at least one of their interests, and 2 who share none. All are registered and checked in at the desk.
+- **The switch.** The member sharing the most has "Show me in People Like You" turned off. They are checked in but never listed, which shows the switch working.
+
+Options:
+
+- `--main-email <address>` names a different main user. It must be at `demo.myotherapp.in`.
+- `--club <slug>` picks another demo club.
+- `--people <n>` sets how many sharing members to check in (default 8).
+
+Safety:
+
+- **It refuses anything outside the demo:** a club whose owner is not at `demo.myotherapp.in`, or a main user who is not. Members are picked only from that domain.
+- **It sends nothing.** It runs in quiet mode, writes no job, and the push sender skips the demo domain anyway.
+- **No money.** The event is free; it refuses to touch one with a fee.
+- **Run it again whenever you like.** The same event moves to now; the people already on it stay; nobody is added twice.
+
+Then sign in to the app as the main demo user:
+
+- the event's page has the **People like you** card;
+- Home's DISCOVER tab says where you are;
+- the list shows everyone but the hidden member.
+
+If the summary says `networking: OFF`, the club's plan does not include Attendee networking. Give it a plan that does (Admin → Subscriptions; the seed gives demo clubs the top plan, which has it).
+
+## 8. Fix the venue pins of a demo seeded before
 
 A seed made before each venue had its own point pinned every in-person event within about 450 m of its club, whatever the venue said. Systems Weekend at Vagamon (Idukki) showed 2.9 km from Kochi; it is some 73 km away. The data now gives every venue its own point, and a new seed pins each event there. To correct a demo already seeded, without seeding again:
 
@@ -216,6 +259,7 @@ python -m scripts.demo.seed --main-email demo@demo.myotherapp.in --main-password
 - `images.py`: the logos, covers, posters, product shots, portraits and artwork.
 - `quiet.py`: quiet mode.
 - `reset.py`, `remove.py`: the wipe and the removal.
-- `fix_pins.py`: moves a demo seeded before onto its venues' own points (section 7).
+- `live_now.py`: an event live now, for People Like You.
+- `fix_pins.py`: moves a demo seeded before onto its venues' own points (section 8).
 - `local_bucket.py`: a folder standing in for S3, for rehearsals and tests.
 - `data/`: the content (see `data/README.md`). Run `python3 data/check.py` after editing it.
