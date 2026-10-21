@@ -33,6 +33,12 @@ def _time(dt) -> str:
     return dt.strftime("%I:%M %p").lstrip("0") if dt else ""
 
 
+def _certificate_no(registration) -> str:
+    from app.api.events.certificates import number_of
+
+    return number_of(registration)
+
+
 def document_values(registration, event=None) -> dict:
     """Every token either document can show, for this registration.
 
@@ -63,7 +69,9 @@ def document_values(registration, event=None) -> dict:
         # Registrations carry no team of their own; a custom field named
         # "team_name" on the event is where one lives when it exists.
         "team_name": str(details.get("team_name") or details.get("team") or ""),
-        "certificate_id": registration.ticket_id or "",
+        # The certificate's number, never the ticket id: a certificate is
+        # shown to anyone, and the ticket id is what the door scans.
+        "certificate_id": _certificate_no(registration),
         "placing": PLACINGS.get(registration.position or 0, ""),
     }
 
@@ -263,11 +271,14 @@ def layout_values(registration, event, kind: str) -> dict:
     raw_role = getattr(registration, "role", None)
     role = getattr(raw_role, "value", raw_role) if raw_role else "attendee"
     certificate = None
+    # The code under the QR is the ticket's own on a ticket: what the gate
+    # and the kiosk take when a guest types it. On a certificate it is the
+    # certificate's number, which the QR there now carries.
+    code = registration.ticket_id or ""
     if kind == "certificate":
-        from app.api.events.certificates import certificate_number
-
+        code = _certificate_no(registration)
         certificate = TokenCertificate(
-            number=certificate_number(registration.ticket_id or ""),
+            number=code,
             issued_at=getattr(registration, "certificate_issued_at", None) or datetime.now(_tz.utc),
             checked_in_at=getattr(registration, "attended_on", None),
             placing=PLACINGS.get(registration.position or 0, ""),
@@ -277,13 +288,11 @@ def layout_values(registration, event, kind: str) -> dict:
         token_event(event),
         (club.name if club else "") or "",
         token_attendee(registration),
-        getattr(registration, "admission_no", None) or registration.ticket_id or "",
+        getattr(registration, "admission_no", None) or code,
         ROLE_LABELS.get(str(role), str(role).title()),
         certificate=certificate,
         field_labels=field_labels_of(event),
-        # The code under the QR is the ticket's own: it is what the gate and
-        # the kiosk take when a guest types it.
-        ticket_code=registration.ticket_id or "",
+        ticket_code=code,
     )
 
 

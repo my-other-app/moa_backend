@@ -22,6 +22,7 @@ from app.api.events.documents import (
 )
 from app.api.events.tickets import Document, RenderJob, design_version_of, poster_url, role_of
 from app.api.templates_images import CERTIFICATE_FIELDS, embedded
+from app.core.public_urls import site_url
 from app.core.storage.bucket import key_from_url
 from app.core.utils.pdf import generate_pdf_bytes
 
@@ -29,10 +30,18 @@ CERTIFICATE_PREFIX = "CERT"
 
 
 def certificate_number(ticket_id: str) -> str:
-    """The certificate's number, in the shape of the ticket's and never
-    readable as one: MOA-7K3QF-X9PWM certifies as CERT-7K3QF-X9PWM."""
+    """The number made from a ticket id: MOA-7K3QF-X9PWM certifies as
+    CERT-7K3QF-X9PWM. Only for certificates printed before numbers were
+    drawn on their own (number_of): anyone reading it can write the ticket id."""
     body = ticket_id.split("-", 1)[1] if "-" in ticket_id else ticket_id
     return f"{CERTIFICATE_PREFIX}-{body}"
+
+
+def number_of(registration) -> str:
+    """The number this guest's certificate carries: its own, drawn at
+    registration (certificate_no), or for an older one, the number made
+    from its ticket id, which is printed already and keeps verifying."""
+    return getattr(registration, "certificate_no", None) or certificate_number(registration.ticket_id or "")
 
 
 def ticket_id_of_certificate(number: str) -> str:
@@ -46,7 +55,9 @@ def ticket_id_of_certificate(number: str) -> str:
 
 
 def qr_text(registration) -> str:
-    return f"certificate:{registration.ticket_id}"
+    """The public verifier's page for this number: a phone's camera opens it.
+    It used to be `certificate:<ticket id>`, the ticket the door scans."""
+    return site_url(f"/verify/{number_of(registration)}")
 
 
 @dataclass
@@ -80,7 +91,7 @@ def certificate_context(registration, style: dict, *, qr: bool = True) -> dict:
     issued = getattr(registration, "certificate_issued_at", None) or datetime.now(timezone.utc)
     payload = {
         "ticket_id": registration.ticket_id,
-        "certificate_no": certificate_number(registration.ticket_id),
+        "certificate_no": number_of(registration),
         "participant_name": registration.full_name,
         "event_name": event.name,
         "event_date": event.event_datetime.strftime("%d %b %Y"),
@@ -113,7 +124,8 @@ def certificate_job(registration, style: dict) -> RenderJob:
         values = layout_values(registration, event, "certificate")
         qr = qr_text(registration)
         icon = poster_url(event)
-        title = f"Certificate {registration.ticket_id}"
+        # The PDF's title travels with the file: the number, never the ticket id.
+        title = f"Certificate {number_of(registration)}"
 
         def draw() -> tuple[bytes, bool]:
             # The certificate's colours are its own design's (no club brand),
@@ -161,7 +173,7 @@ async def certificate_document(session, registration, style: Optional[dict] = No
     content = await doc_cache.cached(job.cache_key("certificate", registration.id), job.draw)
     return Document(
         content=content,
-        filename=f"certificate-{registration.ticket_id}.pdf",
+        filename=f"certificate-{number_of(registration)}.pdf",
         design_version=job.design_version,
     )
 
