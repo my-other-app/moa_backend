@@ -117,6 +117,9 @@ class Users(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     )
     # An email when a device signs in that has not been seen for this account before.
     notify_new_device = Column(Boolean, nullable=False, default=True, server_default=sa.text("true"))
+    # Whether others checked in at the same event see this person in People
+    # Like You (app/api/events/networking.py). On unless they turn it off.
+    networking_visible = Column(Boolean, nullable=False, default=True, server_default=sa.text("true"))
     # Hashed, never stored in the clear -- they are password equivalents.
     totp_recovery_codes = Column(sa.JSON, nullable=True)
 

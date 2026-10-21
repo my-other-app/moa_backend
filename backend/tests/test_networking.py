@@ -80,3 +80,126 @@ async def test_the_window_closes_an_hour_after_the_event(client, world, session)
     await session.commit()
     r = await _fetch(client, world)
     assert r.status_code == 403 and "closed" in r.json()["message"]
+
+
+# ─── Who shows: the switch and blocks ─────────────────────────────────────
+
+
+async def _names(client, world) -> list[str]:
+    r = await _fetch(client, world)
+    assert r.status_code == 200, r.text
+    return [a["name"] for a in r.json()["attendees"]]
+
+
+async def test_someone_hidden_is_never_listed(client, world, session):
+    world["twin"].networking_visible = False
+    await session.commit()
+    body = (await _fetch(client, world)).json()
+    assert [a["name"] for a in body["attendees"]] == ["Bina", "Chirag"]
+    # Counts are of who is shown: Bina shares one interest, Chirag none.
+    assert body["total"] == 2 and body["matches"] == 1
+
+
+async def test_someone_hidden_still_sees_everyone_else(client, world, session):
+    world["me"].networking_visible = False
+    await session.commit()
+    body = (await _fetch(client, world)).json()
+    assert [a["name"] for a in body["attendees"]] == ["Dev", "Bina", "Chirag"]
+    assert body["visible"] is False and body["matches"] == 2
+
+
+async def test_reciprocity_is_one_switch(client, world, session, monkeypatch):
+    from app.api.events import networking
+
+    monkeypatch.setattr(networking, "HIDDEN_CAN_BROWSE", False)
+    world["me"].networking_visible = False
+    await session.commit()
+    r = await _fetch(client, world)
+    assert r.status_code == 403 and r.json()["error_code"] == "NETWORKING_HIDDEN"
+
+
+async def test_a_block_either_way_leaves_both_out(client, world, session):
+    from app.api.reports.models import UserBlocks
+
+    session.add(UserBlocks(blocker_id=world["me"].id, blocked_id=world["twin"].id))
+    await session.commit()
+    assert await _names(client, world) == ["Bina", "Chirag"]
+
+    # Bina blocked me: I don't see her either.
+    session.add(UserBlocks(blocker_id=world["half"].id, blocked_id=world["me"].id))
+    await session.commit()
+    assert await _names(client, world) == ["Chirag"]
+
+
+async def test_the_refusals_carry_codes_the_app_can_word(client, world, session, make_user, make_registration, mint_token):
+    from tests.conftest import auth_header as header
+
+    outsider = await make_user(email="late@example.com")
+    await make_registration(event=world["event"], user=outsider, is_attended=False)
+    await session.commit()
+    me = world["h"]
+    world["h"] = header(await mint_token(outsider))
+    r = await _fetch(client, world)
+    assert r.status_code == 403 and r.json()["error_code"] == "NETWORKING_NOT_CHECKED_IN"
+
+    from sqlalchemy import update
+
+    from app.api.events.models import Events
+
+    world["h"] = me
+    # The page's read let go of the event: changed by id.
+    await session.execute(update(Events).where(Events.id == world["event"].id).values(event_datetime=NOW - timedelta(hours=5)))
+    await session.commit()
+    r = await _fetch(client, world)
+    assert r.status_code == 403 and r.json()["error_code"] == "NETWORKING_CLOSED"
+
+
+# ─── The switch, through the API ──────────────────────────────────────────
+
+
+async def test_the_switch_is_on_unless_turned_off_and_round_trips(client, world):
+    me = await client.get("/api/v1/user/profile/me", headers=world["h"])
+    assert me.status_code == 200 and me.json()["networking_visible"] is True
+
+    off = await client.patch("/api/v1/user/preferences", json={"networking_visible": False}, headers=world["h"])
+    assert off.status_code == 200 and off.json() == {"networking_visible": False}
+    assert (await client.get("/api/v1/user/profile/me", headers=world["h"])).json()["networking_visible"] is False
+    assert (await _fetch(client, world)).json()["visible"] is False
+
+    # Nothing sent, nothing changed.
+    same = await client.patch("/api/v1/user/preferences", json={}, headers=world["h"])
+    assert same.json() == {"networking_visible": False}
+    on = await client.patch("/api/v1/user/preferences", json={"networking_visible": True}, headers=world["h"])
+    assert on.json() == {"networking_visible": True}
+
+
+async def test_the_switch_needs_an_account(client):
+    r = await client.patch("/api/v1/user/preferences", json={"networking_visible": False})
+    assert r.status_code in (401, 403)
+
+
+async def test_people_already_here_show_after_the_migration(session):
+    """The column's default is what the migration gives every existing row."""
+    from sqlalchemy import text
+
+    await session.execute(text(
+        "INSERT INTO users (full_name, username, email, user_type, token_version, is_active, notify_new_device, admin_role, "
+        "totp_enabled, is_deleted, created_at, updated_at) VALUES ('Old Timer', 'oldtimer', 'old@example.com', 'app_user', 0, "
+        "true, true, 'owner', false, false, now(), now())"
+    ))
+    shown = await session.scalar(text("SELECT networking_visible FROM users WHERE username = 'oldtimer'"))
+    assert shown is True
+
+
+# ─── The event page: whether People Like You is on ────────────────────────
+
+
+async def test_the_event_says_whether_networking_is_on_to_someone_registered(client, world, session, make_user, mint_token):
+    world["session"].expunge_all()
+    r = await client.get(f"/api/v1/events/info/{world['event'].id}", headers=world["h"])
+    assert r.status_code == 200 and r.json()["networking"] is True
+
+    stranger = await make_user(email="stranger@example.com")
+    await session.commit()
+    r = await client.get(f"/api/v1/events/info/{world['event'].id}", headers=auth_header(await mint_token(stranger)))
+    assert r.json()["networking"] is None

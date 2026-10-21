@@ -863,11 +863,7 @@ async def get_certificate_pdf(
 
 # ─── Networking Discovery ─────────────────────────────────────────────
 
-from app.api.events.schemas import (
-    NetworkingAttendeesResponse,
-    NetworkingAttendeeResponse,
-    NetworkingInterestItem,
-)
+from app.api.events.schemas import NetworkingAttendeesResponse
 from app.api.events import networking as networking_service
 
 
@@ -881,6 +877,12 @@ async def get_networking_attendees(
     Returns checked-in attendees who share interests with the requesting user.
     Only available during the event + 1 hour buffer.
     Requires the requesting user to be checked in.
+
+    Nobody who turned "Show me in People Like You" off is listed, nor anyone
+    blocked either way. Refusals carry an error_code the app words itself:
+    NETWORKING_UNAVAILABLE (the plan), NETWORKING_CLOSED (the window),
+    NETWORKING_NOT_CHECKED_IN, and NETWORKING_HIDDEN only when
+    networking.HIDDEN_CAN_BROWSE is off.
     """
     from app.api.events.models import Events
 
@@ -894,25 +896,7 @@ async def get_networking_attendees(
     result = await networking_service.get_networking_attendees(
         session, event_id, user.id
     )
-    return NetworkingAttendeesResponse(
-        event_id=result["event_id"],
-        event_name=result["event_name"],
-        window_closes_at=result["window_closes_at"],
-        attendees=[
-            NetworkingAttendeeResponse(
-                user_id=a["user_id"],
-                name=a["name"],
-                profile_pic_url=a["profile_pic_url"],
-                organization=a["organization"],
-                shared_interests=[
-                    NetworkingInterestItem(**i) for i in a["shared_interests"]
-                ],
-                match_count=a["match_count"],
-            )
-            for a in result["attendees"]
-        ],
-        total=result["total"],
-    )
+    return NetworkingAttendeesResponse(**result)
 
 
 @router.get("/admin/deleted/list", summary="Deleted events (admin)")
