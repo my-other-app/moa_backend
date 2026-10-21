@@ -523,6 +523,12 @@ class EventListResponse(CustomBaseModel):
     # The organiser revoked this ticket: the door refuses it. Null when the
     # caller has no registration for the event.
     ticket_revoked: bool | None = Field(None)
+    # Whether the caller holds a certificate for it, by the rule the PDF and
+    # the image follow (events.certificates.availability): issued and not
+    # revoked, or checked in before the organiser issued any. A speaker
+    # issued one without checking in holds one; a revoked one is not held.
+    has_certificate: bool | None = Field(None)
+    certificate_revoked: bool | None = Field(None)
     certificate_url: str | None = Field(None)
 
 
@@ -662,6 +668,10 @@ class EventDetailResponse(CustomBaseModel):
     is_attended: bool = Field(False)
     ticket_id: str | None = Field(None)
     ticket_url: str | None = Field(None)
+    #: Whether the viewer holds a certificate for it, and whether theirs was
+    #: revoked (events.certificates.availability). Null when not registered.
+    has_certificate: bool | None = Field(None)
+    certificate_revoked: bool | None = Field(None)
     certificate_url: str | None = Field(None)
     #: The viewer's own link to the event's feedback survey, the one its
     #: email sends (`/feedback/{event}/{registration}?k=...`, the app's survey
