@@ -89,6 +89,8 @@ def _backfill() -> None:
 
 
 def upgrade() -> None:
+    # A hot table: wait for its lock briefly, and let env.py try again, rather than queue every request behind it.
+    op.execute("SET LOCAL lock_timeout = '3s'")
     op.add_column("event_registrations_link", sa.Column("certificate_no", sa.String(20), nullable=True))
     op.create_table(
         "certificate_files",
@@ -113,5 +115,6 @@ def upgrade() -> None:
 def downgrade() -> None:
     with op.get_context().autocommit_block():
         op.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {INDEX}")
+    op.execute("SET LOCAL lock_timeout = '3s'")
     op.drop_table("certificate_files")
     op.drop_column("event_registrations_link", "certificate_no")

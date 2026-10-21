@@ -119,6 +119,8 @@ CLASSIFICATION: dict[str, str] = {
     "background_task_logs": WIPE,
     "badge_templates": WIPE,
     "certificate_templates": WIPE,
+    # The digests of the certificate PDFs handed out: the registrations' own.
+    "certificate_files": WIPE,
     "check_ins": WIPE,
     "closeout_reports": WIPE,
     "club_badges": WIPE,
