@@ -3,7 +3,9 @@
 How to deploy, roll back, unstick a migration, restore a backup, rotate a
 secret, turn on the new services, size the server and every service on it,
 keep its disk from filling, open the live room's streams, look after the
-rendered documents in the bucket, and run AI assist. Every command is meant to be copied.
+rendered documents in the bucket, run AI assist, place visitors by address
+without a lookup service, and fix the demo's venue pins. Every command is
+meant to be copied.
 Commands under **Read-only** change nothing; anything that changes something
 says so.
 
@@ -1446,3 +1448,117 @@ stopped following the schema; move another first in `APP_AI_MODELS`.
 A poster near 10 MB, with the form around it, is a little over 10 MB: an
 nginx in front with `client_max_body_size 10M` refuses it (413) before the
 API sees it. Give that location 12M if large posters matter.
+
+---
+
+## 15. Placing visitors by address (GeoLite2)
+
+A visitor who shares no location is placed roughly by their address: the
+app's first guess of a city, and the API's "near you" for a reader the site
+cannot place itself (`app/api/discover/geo.py`). Two ways, by `.env`:
+
+| Setting | What answers |
+|---|---|
+| `APP_GEOIP_MMDB_PATH` | A MaxMind GeoLite2-City database on the box. No request leaves the server, nothing is waited for, nothing is refused. Wins when set and readable. |
+| `APP_GEOIP_URL` (the default, ipapi.co) | Otherwise. Its free tier is about a thousand lookups a day. A place found is kept a week. After a refusal the lookup rests a minute, doubling to ten while refusals continue; meanwhile an address placed in the last 30 days keeps its place, and only one never seen goes unplaced. |
+
+Today the box has no database, so ipapi.co answers. Its refusals are what
+place new visitors "nowhere" for a while. GeoLite2 ends that, at no cost.
+
+The Security page's sign-in places still use `APP_GEOIP_URL`, from the same
+free tier.
+
+### Turning GeoLite2 on (once)
+
+1. **The owner, in a browser:** sign up for a free GeoLite2 account at
+   `https://www.maxmind.com/en/geolite2/signup` and accept the GeoLite2
+   licence. Then, under *Manage License Keys*, generate a licence key. Note
+   the account ID and the key. Only you type the key, on the server, in
+   step 3. Never put it in the repository, a workflow secret or a chat.
+2. **Deploy the code** with `sync_code`. Since this change,
+   `docker-compose.prod.yml` mounts `/var/lib/myotherapp/geoip` read-only
+   at `/geoip`. The folder is outside the project directory, as the backups
+   are, because the deploy's `rsync --delete` would erase a file inside it.
+   The mount reaches the backend when it is recreated, in step 5.
+3. **Download the database** on the server. This changes things: it writes
+   one file. The key is read without echoing and never lands in the shell
+   history.
+
+   ```bash
+   sudo mkdir -p /var/lib/myotherapp/geoip
+   read -r -p 'MaxMind account ID: ' MM_ACCOUNT; read -r -s -p 'MaxMind licence key: ' MM_KEY; echo
+   TMP=$(mktemp -d)
+   URL='https://download.maxmind.com/geoip/databases/GeoLite2-City/download?suffix=tar.gz'
+   curl -fsSL -u "$MM_ACCOUNT:$MM_KEY" -o "$TMP/city.tar.gz" "$URL"
+   curl -fsSL -u "$MM_ACCOUNT:$MM_KEY" -o "$TMP/city.sha256" "$URL.sha256"
+   echo "$(cut -d' ' -f1 "$TMP/city.sha256")  $TMP/city.tar.gz" | sha256sum -c -    # must say OK
+   tar -xzf "$TMP/city.tar.gz" -C "$TMP"
+   sudo install -m 0644 "$TMP"/GeoLite2-City_*/GeoLite2-City.mmdb /var/lib/myotherapp/geoip/GeoLite2-City.mmdb.new
+   sudo mv /var/lib/myotherapp/geoip/GeoLite2-City.mmdb.new /var/lib/myotherapp/geoip/GeoLite2-City.mmdb
+   rm -rf "$TMP"; unset MM_KEY MM_ACCOUNT
+   ls -lh /var/lib/myotherapp/geoip/                                                # about 60 MB
+   ```
+
+4. **Point the backend at it.** Add one line to
+   `/var/www/myotherapp-production/.env` by hand (`sudo nano .env`):
+
+   ```bash
+   APP_GEOIP_MMDB_PATH=/geoip/GeoLite2-City.mmdb
+   ```
+
+   Do NOT use the workflow's `sync_env` for this. It writes the whole
+   `.env` from the `PROD_ENV_VARIABLES` secret, which is older than the
+   server's file and would put retired keys back.
+5. **Recreate the backend** so it reads the line and gets the mount. This
+   changes things. The API returns 502 for about a minute.
+
+   ```bash
+   $DC up -d --build --no-deps backend < /dev/null
+   ```
+
+6. **Check.** All read-only.
+
+   ```bash
+   $DC exec -T backend python -c "import maxminddb; m = maxminddb.open_database('/geoip/GeoLite2-City.mmdb').metadata(); print(m.database_type, m.build_epoch)"
+   $DC logs --since 10m backend | grep GEOIP_MMDB_PATH    # after a few visits, nothing: a file that cannot be opened is logged once
+   ```
+
+   The first command should print `GeoLite2-City` and a recent epoch. An
+   `ImportError` means the image predates `maxminddb` in
+   `requirements.txt`: deploy with `install_requirements`, then check
+   again. From your own laptop, not the server,
+   `curl -s https://api.myotherapp.in/api/v1/discover/locate` should say
+   `"source":"ip"` with your city.
+
+### Keeping it current
+
+MaxMind updates GeoLite2 twice a week, and its licence asks you to move to
+a new release within 30 days. Once a month, repeat step 3. Then restart the
+backend, because the file is opened once per process:
+
+```bash
+$DC restart backend < /dev/null      # changes things: about a minute of 502s
+```
+
+**To turn it off:** delete the line from `.env`, then recreate as in step
+5. ipapi.co answers again.
+
+---
+
+## 16. The demo's venue pins
+
+A demo seeded before each venue had its own point has every in-person event
+pinned beside its club. "Systems Weekend at Vagamon" shows 2.9 km from
+Kochi, when it is some 73 km away. Deploy the code first (`sync_code`). The
+script and its data come with it, and nothing needs a restart. Then:
+
+```bash
+$DC exec -T backend python -m scripts.demo.fix_pins --dry-run    # read-only: what would move, and how far
+$DC exec -T backend python -m scripts.demo.fix_pins              # changes things: moves them, in one transaction
+```
+
+It touches only the demo clubs' events. Within those, it moves only the pins
+the seed made; anything someone changed by hand stays as it is. Running it
+twice is safe. The rules, and what the output says, are in
+`backend/scripts/demo/README.md`, section 7, next to the demo's reset, seed
+and remove.
