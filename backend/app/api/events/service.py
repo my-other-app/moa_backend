@@ -612,6 +612,9 @@ async def get_event(session: AsyncSession, event_id: str | int, user_id: int | N
             # app's own survey screen: this registration's link only, and
             # only while the survey is open to it (live.feedback_url).
             data["feedback_url"] = live.feedback_url(event, registration, row if row.survey_id is not None else None)
+            # People Like You, for the event page's card: on when the club's
+            # plan has it. Asked only for someone registered, who can use it.
+            data["networking"] = await gates.allows(session, event.club_id, "networking", event=event)
             # Position label based on position
             if registration.position:
                 if registration.position == 1:

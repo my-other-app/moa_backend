@@ -681,6 +681,11 @@ class EventDetailResponse(CustomBaseModel):
     user_rating: float | None = Field(None)
     user_position: int | None = Field(None)
     position_label: str | None = Field(None)
+    #: Whether People Like You is on for this event (the club's plan has
+    #: networking), for the event page's card: told only to someone
+    #: registered, null otherwise. Its window is the event's start to an
+    #: hour after its end; the list itself opens once they are checked in.
+    networking: bool | None = Field(None)
     downloads: list[EventFileResponse] | None = Field(None)
     speakers: list[EventSpeakerPublic] | None = Field(None)
 
@@ -723,5 +728,10 @@ class NetworkingAttendeesResponse(BaseModel):
     event_id: int
     event_name: str
     window_closes_at: datetime | None = None
+    #: The caller's own "Show me in People Like You": whether the others
+    #: see them, for the switch at the top of the page.
+    visible: bool = True
     attendees: list[NetworkingAttendeeResponse] = Field(default_factory=list)
     total: int = 0
+    #: How many of `attendees` share at least one interest with the caller.
+    matches: int = 0

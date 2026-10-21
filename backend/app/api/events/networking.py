@@ -3,21 +3,36 @@ Event Networking Discovery — "People Like You"
 
 Lets checked-in attendees discover others at the same event who share
 their interests. Access is time-limited to event_start → event_end + 1hr.
+
+Who is listed: the other guests checked in, except anyone who turned "Show
+me in People Like You" off (users.networking_visible), anyone the caller
+blocked or who blocked the caller (user_blocks, from Threads' report and
+block), and accounts deleted or suspended since.
 """
 import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload
 
 from app.api.events.models import Events, EventRegistrationsLink
 from app.api.users.models import Users, UserProfiles, UserInterests
 from app.api.interests.models import Interests
 from app.api.orgs.models import Organizations
+from app.api.reports.models import UserBlocks
 from app.response import CustomHTTPException
 
 logger = logging.getLogger(__name__)
+
+#: Whether someone hidden from the list may still look at it. True: turning
+#: yourself off only stops others seeing you. False makes it two-way: a
+#: hidden person is refused the list too (403 NETWORKING_HIDDEN).
+HIDDEN_CAN_BROWSE = True
+
+#: Why the list is refused, for the app to say so in its own words.
+NOT_CHECKED_IN = "NETWORKING_NOT_CHECKED_IN"
+CLOSED = "NETWORKING_CLOSED"
+HIDDEN = "NETWORKING_HIDDEN"
 
 
 def is_within_networking_window(event: Events) -> tuple[bool, datetime | None]:
@@ -36,6 +51,15 @@ def is_within_networking_window(event: Events) -> tuple[bool, datetime | None]:
     return now <= window_closes_at, window_closes_at
 
 
+def _picture(profile: UserProfiles | None) -> str | None:
+    pic = profile.profile_pic if profile is not None else None
+    if isinstance(pic, dict):
+        return pic.get("medium") or pic.get("thumbnail") or pic.get("original")
+    if isinstance(pic, str):
+        return pic
+    return None
+
+
 async def get_networking_attendees(
     session: AsyncSession,
     event_id: int,
@@ -46,10 +70,13 @@ async def get_networking_attendees(
 
     Rules:
     - Only accessible by checked-in users
-    - Only checked-in users appear in results
-    - Excludes the requesting user
+    - Only checked-in users appear in results, and only those who show
+    - Excludes the requesting user, and blocks either way
     - Sorted by shared interest count (descending)
     - Time-limited to event window + 1hr
+
+    `visible` is the caller's own switch, for the page's toggle; `matches`
+    counts the people sharing at least one interest.
     """
 
     # 1. Load the event
@@ -63,54 +90,78 @@ async def get_networking_attendees(
         raise CustomHTTPException(
             403,
             "Networking window has closed. It is only available during the event and 1 hour after.",
+            error_code=CLOSED,
         )
 
     # 3. Verify requesting user is checked in
     my_reg = await session.scalar(
-        select(EventRegistrationsLink).where(
+        select(EventRegistrationsLink.id).where(
             EventRegistrationsLink.event_id == event_id,
             EventRegistrationsLink.user_id == user_id,
-            EventRegistrationsLink.is_attended == True,
-            EventRegistrationsLink.is_deleted == False,
-        )
+            EventRegistrationsLink.is_attended == True,  # noqa: E712
+            EventRegistrationsLink.is_deleted == False,  # noqa: E712
+        ).limit(1)
     )
     if not my_reg:
         raise CustomHTTPException(
             403,
             "You must be checked in to this event to use networking.",
+            error_code=NOT_CHECKED_IN,
+        )
+
+    visible = bool(await session.scalar(select(Users.networking_visible).where(Users.id == user_id)))
+    if not visible and not HIDDEN_CAN_BROWSE:
+        raise CustomHTTPException(
+            403,
+            "Turn on “Show me in People Like You” to see who else is here.",
+            error_code=HIDDEN,
         )
 
     # 4. Get requesting user's interests
     my_interests_result = await session.execute(
         select(UserInterests.interest_id).where(
             UserInterests.user_id == user_id,
-            UserInterests.is_deleted == False,
+            UserInterests.is_deleted == False,  # noqa: E712
         )
     )
     my_interest_ids = set(row[0] for row in my_interests_result.all())
 
-    # 5. Get all other checked-in attendees
-    other_regs_result = await session.execute(
-        select(EventRegistrationsLink).where(
-            EventRegistrationsLink.event_id == event_id,
-            EventRegistrationsLink.is_attended == True,
-            EventRegistrationsLink.is_deleted == False,
-            EventRegistrationsLink.user_id != user_id,
+    # 5. Everyone else checked in who shows, blocks left out both ways. A
+    # person with two registrations (a repeat guest) is listed once.
+    blocked = select(UserBlocks.blocked_id).where(UserBlocks.blocker_id == user_id)
+    blocked_me = select(UserBlocks.blocker_id).where(UserBlocks.blocked_id == user_id)
+    others = (
+        await session.scalars(
+            select(EventRegistrationsLink.user_id)
+            .join(Users, Users.id == EventRegistrationsLink.user_id)
+            .where(
+                EventRegistrationsLink.event_id == event_id,
+                EventRegistrationsLink.is_attended == True,  # noqa: E712
+                EventRegistrationsLink.is_deleted == False,  # noqa: E712
+                EventRegistrationsLink.user_id != user_id,
+                EventRegistrationsLink.user_id.not_in(blocked),
+                EventRegistrationsLink.user_id.not_in(blocked_me),
+                Users.is_deleted == False,  # noqa: E712
+                Users.is_active == True,  # noqa: E712
+                Users.networking_visible == True,  # noqa: E712
+            )
         )
-    )
-    other_regs = other_regs_result.scalars().all()
+    ).all()
+    attendee_user_ids = list(dict.fromkeys(others))
 
-    if not other_regs:
-        return {
-            "event_id": event_id,
-            "event_name": event.name,
-            "window_closes_at": window_closes_at,
-            "attendees": [],
-            "total": 0,
-        }
+    result = {
+        "event_id": event_id,
+        "event_name": event.name,
+        "window_closes_at": window_closes_at,
+        "visible": visible,
+        "attendees": [],
+        "total": 0,
+        "matches": 0,
+    }
+    if not attendee_user_ids:
+        return result
 
     # 6. Build attendee list with interest matching
-    attendee_user_ids = [r.user_id for r in other_regs]
 
     # Fetch user profiles, with the college in the same query. It used to be
     # read afterwards as `profile.org`, a lazy load, which an async session
@@ -120,7 +171,7 @@ async def get_networking_attendees(
         select(Users, UserProfiles, Organizations.name)
         .outerjoin(UserProfiles, (Users.id == UserProfiles.user_id) & (UserProfiles.is_deleted == False))  # noqa: E712
         .outerjoin(Organizations, Organizations.id == UserProfiles.org_id)
-        .where(Users.id.in_(attendee_user_ids), Users.is_deleted == False)  # noqa: E712
+        .where(Users.id.in_(attendee_user_ids))
     )
     user_profiles = {u.id: (u, p, org) for u, p, org in profiles_result.all()}
 
@@ -130,7 +181,7 @@ async def get_networking_attendees(
         .join(Interests, UserInterests.interest_id == Interests.id)
         .where(
             UserInterests.user_id.in_(attendee_user_ids),
-            UserInterests.is_deleted == False,
+            UserInterests.is_deleted == False,  # noqa: E712
         )
     )
     # Group interests by user
@@ -150,22 +201,10 @@ async def get_networking_attendees(
         shared_ids = my_interest_ids & their_interest_ids
         shared_interests = [i for i in their_interests if i.id in shared_ids]
 
-        # Profile pic URL
-        profile_pic_url = None
-        if profile_data and profile_data.profile_pic:
-            try:
-                pic = profile_data.profile_pic
-                if isinstance(pic, dict):
-                    profile_pic_url = pic.get("medium") or pic.get("thumbnail") or pic.get("original")
-                elif isinstance(pic, str):
-                    profile_pic_url = pic
-            except Exception:
-                pass
-
         attendees.append({
             "user_id": uid,
             "name": user_data.full_name,
-            "profile_pic_url": profile_pic_url,
+            "profile_pic_url": _picture(profile_data),
             "organization": org_name,
             "shared_interests": [
                 {
@@ -182,10 +221,7 @@ async def get_networking_attendees(
     # Sort by match count descending, then name ascending
     attendees.sort(key=lambda a: (-a["match_count"], a["name"]))
 
-    return {
-        "event_id": event_id,
-        "event_name": event.name,
-        "window_closes_at": window_closes_at,
-        "attendees": attendees,
-        "total": len(attendees),
-    }
+    result["attendees"] = attendees
+    result["total"] = len(attendees)
+    result["matches"] = sum(1 for a in attendees if a["match_count"] > 0)
+    return result
