@@ -24,7 +24,7 @@ Downgrade drops the index, the table and the column; certificates then
 read their numbers from the ticket ids again.
 
 Revision ID: certificate_numbers
-Revises: mcp_server
+Revises: add_networking_visible
 """
 import secrets
 
@@ -33,7 +33,7 @@ from alembic import op
 from sqlalchemy.dialects.postgresql import UUID
 
 revision = "certificate_numbers"
-down_revision = "mcp_server"
+down_revision = "add_networking_visible"
 branch_labels = None
 depends_on = None
 
