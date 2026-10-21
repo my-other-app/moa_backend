@@ -1,6 +1,11 @@
 """What a check-in sets off once the guest is through: a note and a push to
 them, and the badges it may earn them and the club.
 
+When the event has People Like You (the club's plan has networking) and its
+window is open, the note says so and its tap opens the list
+(`open: people` in the push's data); otherwise it is the plain welcome.
+Either way it is one push, and nothing about it can undo the check-in.
+
 None of it is the door's business, so none of it holds the door up. The
 scan answers first; this runs afterwards as a job (`checkins.after`, written
 in the check-in's own transaction: app.core.jobs), on a session of its own,
@@ -23,6 +28,9 @@ from app.db.listeners import add_loader_criteria
 logger = logging.getLogger(__name__)
 
 TITLE = "✅ Checked in successfully!"
+#: The note when People Like You is open to them.
+PEOPLE_TITLE = "✅ You're checked in"
+PEOPLE_BODY = "Welcome to {event}. See who here shares your interests."
 
 @dataclass(frozen=True)
 class Admitted:
@@ -71,16 +79,24 @@ async def _notify(session, a: Admitted) -> None:
 
     from app.api.notifications.models import Notifications
 
-    body = f"Welcome to {a.event_name}. Enjoy the event!"
     try:
         told = await session.scalar(select(Notifications.id).where(
             Notifications.user_id == a.user_id, Notifications.event_id == a.event_id, Notifications.type == "event_checkin",
         ).limit(1))
         if told is not None:
             return
+        # The app opens the event from `event_checkin`, and the list from
+        # `open: people`; an app from before the list just opens the event.
+        data = {"type": "event_checkin", "event_id": str(a.event_id)}
+        if await _people_like_you(session, a.event_id):
+            title, body = PEOPLE_TITLE, PEOPLE_BODY.format(event=a.event_name)
+            data["open"] = "people"
+        else:
+            title, body = TITLE, f"Welcome to {a.event_name}. Enjoy the event!"
         await notes.create_notification(
-            session=session, user_id=a.user_id, title=TITLE, description=body, type="event_checkin",
-            event_id=a.event_id, from_club_id=a.club_id, data={"event_name": a.event_name},
+            session=session, user_id=a.user_id, title=title, description=body, type="event_checkin",
+            event_id=a.event_id, from_club_id=a.club_id,
+            data={"event_name": a.event_name, **({"open": "people"} if "open" in data else {})},
         )
         token = await push.get_fcm_token_for_user(session, a.user_id)
         # End the read before the network call, so no pooled connection is
@@ -90,12 +106,33 @@ async def _notify(session, a: Admitted) -> None:
             return
         dead: list[str] = []
         # The FCM client blocks on its HTTP call: a thread, with a loop of its own.
-        await asyncio.to_thread(_send_blocking, token, TITLE, body, {"type": "check_in", "event_id": str(a.event_id)}, dead)
+        await asyncio.to_thread(_send_blocking, token, title, body, data, dead)
         if dead:
             await push.prune_tokens(session, dead)
     except Exception:  # noqa: BLE001
         await session.rollback()
         logger.exception("check-in notification failed for user %s", a.user_id)
+
+
+async def _people_like_you(session, event_id: int) -> bool:
+    """Whether the guest just let in can look for people like them now: the
+    club's plan has networking, and the window (to an hour after the end) is
+    open. A doubt is the plain welcome: this never raises."""
+    from app.api.events.models import Events
+    from app.api.events.networking import is_within_networking_window
+    from app.api.subscriptions import gates
+
+    try:
+        # In a savepoint: a read that fails here leaves the note's own
+        # transaction usable, so the plain welcome still goes.
+        async with session.begin_nested():
+            event = await session.get(Events, event_id)
+            if event is None or not is_within_networking_window(event)[0]:
+                return False
+            return bool(await gates.allows(session, event.club_id, "networking", event=event))
+    except Exception:  # noqa: BLE001
+        logger.exception("could not tell whether People Like You is open at event %s", event_id)
+        return False
 
 
 def _send_blocking(token: str, title: str, body: str, data: dict, dead: list) -> bool:
