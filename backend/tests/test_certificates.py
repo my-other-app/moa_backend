@@ -84,7 +84,9 @@ async def test_issuing_goes_to_whoever_checked_in_and_never_twice(client, world)
     page = (await client.get(_url(world), headers=world["club"])).json()
     assert page["total"] == 3
     row = next(r for r in page["items"] if r["name"] == "Ananya Iyer")
-    assert row["number"] == f"CERT-{world['a'].ticket_id.split('-', 1)[1]}"
+    # Its own number, drawn at registration, not the ticket id's body.
+    assert row["number"] == world["a"].certificate_no
+    assert world["a"].ticket_id.split("-", 1)[1] not in row["number"]
     assert row["status"] == "issued" and row["design_version"] == 1
 
     s = (await client.get(_url(world, "/summary"), headers=world["club"])).json()
@@ -101,7 +103,8 @@ async def test_the_download_follows_issuing_but_attended_guests_keep_theirs(clie
     pdf = await client.get(f"/api/v1/events/certificates/{b.ticket_id}/pdf", headers=world["b_user"])
     assert pdf.status_code == 200
     text = " ".join(pdf_text(pdf.content).split())
-    assert "Bala Krishnan" in text and f"CERT-{b.ticket_id.split('-', 1)[1]}" in text
+    assert "Bala Krishnan" in text and b.certificate_no in text
+    assert b.ticket_id not in text and b.ticket_id.split("-", 1)[1] not in text
 
     revoked = await client.post(_url(world, f"/{a.id}/revoke"), headers=world["club"])
     assert revoked.status_code == 200 and revoked.json()["revoked_at"]
@@ -114,7 +117,7 @@ async def test_the_download_follows_issuing_but_attended_guests_keep_theirs(clie
 
 async def test_verification_is_public_and_says_only_what_a_verifier_needs(client, world):
     a = world["a"]
-    number = f"CERT-{a.ticket_id.split('-', 1)[1]}"
+    number = a.certificate_no
     # Attended but not yet explicitly issued: still a genuine certificate.
     r = await client.get(f"/api/v1/verify/certificates/{number}")
     assert r.status_code == 200
@@ -123,11 +126,12 @@ async def test_verification_is_public_and_says_only_what_a_verifier_needs(client
     assert "email" not in r.json()
 
     assert (await client.get("/api/v1/verify/certificates/CERT-NOPE-0000")).json() == {
-        "valid": False, "reason": "not_found", "number": None, "attendee_name": None, "event_name": None, "org_name": None, "issued_at": None,
+        "valid": False, "reason": "not_found", "number": None, "attendee_name": None, "event_name": None,
+        "org_name": None, "org_slug": None, "issued_at": None,
     }
     await client.post(_url(world, "/issue"), json={"audience": "checked_in"}, headers=world["club"])
     await client.post(_url(world, f"/{a.id}/revoke"), headers=world["club"])
-    assert (await client.get(f"/api/v1/verify/certificates/certificate:{a.ticket_id}")).json()["reason"] == "revoked"
+    assert (await client.get(f"/api/v1/verify/certificates/{number.lower()}")).json()["reason"] == "revoked"
 
 
 async def test_sending_reaches_only_those_issued_one(client, world, outbox, background):

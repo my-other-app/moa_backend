@@ -92,9 +92,9 @@ async def test_a_revocation_or_a_redesign_changes_the_etag(client, world, drawn)
 
 
 async def test_the_public_routes_are_limited_per_address(client, world, drawn):
-    code = f"CERT-{world['a'].ticket_id.split('-', 1)[1]}"
-    answers = [(await client.get(f"/api/v1/verify/certificates/{code}")).status_code for _ in range(61)]
-    assert answers[:60] == [200] * 60 and answers[60] == 429
+    code = world["a"].certificate_no
+    answers = [(await client.get(f"/api/v1/verify/certificates/{code}")).status_code for _ in range(21)]
+    assert answers[:20] == [200] * 20 and answers[20] == 429
 
     url = f"/api/v1/events/certificates/{world['a'].ticket_id}/image"
     statuses = [(await client.get(url)).status_code for _ in range(121)]

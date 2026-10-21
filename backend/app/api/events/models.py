@@ -28,6 +28,7 @@ from app.db.base import AbstractSQLModel
 from app.db.mixins import SoftDeleteMixin, TimestampsMixin
 from app.core.storage.fields import S3FileField, S3ImageField
 from app.core.utils.db_fields import TZAwareDateTime
+from app.core.utils.keys import generate_certificate_no
 
 
 class EventCategories(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
@@ -440,6 +441,11 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
     certificate_issued_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     certificate_revoked_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     certificate_design_version = Column(Integer, nullable=False, default=0, server_default="0")
+    # The certificate's number (CERT-XXXXX-XXXXX), drawn at registration and
+    # unrelated to the ticket id. Null on a registration older than the
+    # column that already held a certificate: its number is made from the
+    # ticket id (events.certificates.number_of), as it was printed.
+    certificate_no = Column(String(20), nullable=True, default=generate_certificate_no)
     # When this guest's ID card last printed; the reprint rule turns on it.
     badge_printed_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     # Set by the provider's bounce or complaint notice: later sends skip the
@@ -481,6 +487,12 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
         sa.Index(
             "uq_registrations_event_admission", "event_id", sa.func.upper(admission_no),
             unique=True, postgresql_where=sa.text("NOT is_deleted AND admission_no IS NOT NULL"),
+        ),
+        # A certificate is looked up by its number (the public verifier), and
+        # no two share one, deleted or not: a number once printed stays its own.
+        sa.Index(
+            "uq_registrations_certificate_no", "certificate_no",
+            unique=True, postgresql_where=sa.text("certificate_no IS NOT NULL"),
         ),
         # The attendee list, by name: a page walks this in order instead of
         # sorting the whole event (registration.service.list_event_registrations).

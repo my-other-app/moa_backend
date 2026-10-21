@@ -73,7 +73,9 @@ class CertificateState(BaseModel):
 
 class Verification(BaseModel):
     """Public. Says only what a verifier needs: genuine or not, valid or
-    revoked, whose, for what, when."""
+    revoked, whose, for what, from whom, when. Never an address, a phone,
+    a ticket id or any id of a row (tests/test_certificate_verify.py holds
+    the keys to exactly these). Every answer has every key."""
 
     valid: bool
     reason: Literal["ok", "revoked", "not_found"]
@@ -81,4 +83,16 @@ class Verification(BaseModel):
     attendee_name: Optional[str] = None
     event_name: Optional[str] = None
     org_name: Optional[str] = None
+    # The issuing club's page on the site, /clubs/{org_slug}: only while the
+    # club is public.
+    org_slug: Optional[str] = None
     issued_at: Optional[datetime] = None
+
+
+class FileCheck(BaseModel):
+    """Public. The SHA-256 of each copy of a valid certificate handed out,
+    for a browser to compare a file with without sending it anywhere.
+    Not available: nothing to compare with (or no such certificate)."""
+
+    available: bool
+    sha256: list[str] = Field(default_factory=list)

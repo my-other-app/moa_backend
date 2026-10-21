@@ -704,6 +704,9 @@ class TicketDetailsResponse(CustomBaseModel):
     attended_on: datetime | None
     user: UserPublic
     created_at: datetime
+    #: The certificate's own number; null on one older than numbers drawn
+    #: separately, whose number is CERT- and the ticket id's body.
+    certificate_no: str | None = None
 
 
 # ─── Networking Discovery ─────────────────────────────────────────────

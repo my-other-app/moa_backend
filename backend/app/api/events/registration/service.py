@@ -18,7 +18,7 @@ from app.api.service import update_background_task_log
 from app.api.users.models import UserProfiles, UserTypes, Users
 from app.api.admission import service as admission
 from app.core import jobs
-from app.core.utils.keys import TICKET_ID_INDEX, generate_ticket_id, violated_constraint
+from app.core.utils.keys import CERTIFICATE_NO_INDEX, TICKET_ID_INDEX, generate_certificate_no, generate_ticket_id, violated_constraint
 from app.core.validations.schema import validate_relations
 from app.response import CustomHTTPException
 from app.api.events.access import ensure_event_access
@@ -228,8 +228,8 @@ ADMISSION_INDEX = "uq_registrations_event_admission"
 async def insert_registration(session: AsyncSession, registration: EventRegistrationsLink) -> None:
     """INSERT the registration in a SAVEPOINT, so a ticket id that is
     already taken costs a fresh id and another try, not the registration
-    (the event's place and the address's lock stay held); so does an
-    admission number someone else already holds. A second live
+    (the event's place and the address's lock stay held); so do an
+    admission number and a certificate number someone already holds. A second live
     registration for the same account -- two requests racing past the
     checks with different addresses -- is the 400 a repeat always got."""
     for attempt in range(TICKET_ATTEMPTS):
@@ -242,9 +242,12 @@ async def insert_registration(session: AsyncSession, registration: EventRegistra
             name = violated_constraint(exc)
             if name == LIVE_REGISTRATION_INDEX:
                 raise CustomHTTPException(400, message="Already registered for this event", error_code="ALREADY_REGISTERED")
-            if attempt == TICKET_ATTEMPTS - 1 or name not in (TICKET_ID_INDEX, ADMISSION_INDEX):
+            if attempt == TICKET_ATTEMPTS - 1 or name not in (TICKET_ID_INDEX, ADMISSION_INDEX, CERTIFICATE_NO_INDEX):
                 raise
-            if name == ADMISSION_INDEX:
+            if name == CERTIFICATE_NO_INDEX:
+                logger.warning("certificate number %s was taken; drawing another", registration.certificate_no)
+                registration.certificate_no = generate_certificate_no()
+            elif name == ADMISSION_INDEX:
                 # A number given out by hand or by an import sat where the
                 # sequence was going: the next one in the sequence instead.
                 logger.warning("admission number %s was taken; numbering again", registration.admission_no)

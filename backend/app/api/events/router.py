@@ -44,6 +44,7 @@ from app.api.events.certificates import (
     certificate_context,
     certificate_job,
     certificate_style,
+    number_of,
     qr_text as certificate_qr_text,
 )
 from app.response import CustomHTTPException
@@ -862,7 +863,8 @@ async def get_certificate_pdf(
     return Response(
         content=content,
         media_type="application/pdf",
-        headers={**headers, "Content-Disposition": f'attachment; filename="certificate-{registration.ticket_id}.pdf"'},
+        # Named by its number: a file name travels wherever the file is posted.
+        headers={**headers, "Content-Disposition": f'attachment; filename="certificate-{number_of(registration)}.pdf"'},
     )
 
 

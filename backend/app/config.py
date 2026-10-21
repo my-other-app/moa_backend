@@ -327,6 +327,13 @@ class AppConfig(BaseSettings):
     # (`openssl rand -hex 32`). Empty: no request is the site.
     SITE_TOKENS: str = ""
     SITE_RATE_LIMIT: str = "3000/minute"
+    # The public certificate verifier (app/api/certificates/router.py), each
+    # of its three asks counted on its own. Per person: the visitor the
+    # site's server names in X-Visitor-IP behind a valid token, else the
+    # caller's own address; every answer counts, a miss as much as a match.
+    # And in all, for each site token, so a token that leaked buys no more.
+    CERTIFICATE_VERIFY_LIMIT: str = "20/minute;100/hour"
+    CERTIFICATE_VERIFY_SITE_LIMIT: str = "600/minute"
     # Told when an event's or a club's public page changes, so it renders the
     # page again (app/core/site_revalidate.py): a POST with
     # `Authorization: Bearer <SITE_REVALIDATE_SECRET>`. Empty secret: never told.

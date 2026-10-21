@@ -48,6 +48,7 @@ from app.api.events.documents import (
 )
 from app.api.templates_images import CERTIFICATE_FIELDS, TICKET_FIELDS, embedded, key_of, shown, stored
 from app.core.layout import pool
+from app.core.public_urls import site_url
 from app.core.storage.fields import upload
 from app.core.layout.engine import layout_problems, problems_as_fields
 from app.core.layout.model import PageSpec, TicketLayoutFields, dump
@@ -459,7 +460,8 @@ def _values_and_qr(event, kind: DesignKind, registration):
     else:
         values = sample_values(event, kind.value)
         code = values["ticket_code"]
-    qr_text = f"certificate:{code}" if kind is DesignKind.certificate else code
+    # A certificate's QR opens the public check with its number, as the real render's does.
+    qr_text = site_url(f"/verify/{values['certificate_id']}") if kind is DesignKind.certificate else code
     return values, qr_text
 
 
@@ -567,6 +569,7 @@ async def preview_design(
         default_width = 1400
         email_payload = {
             "ticket_id": values["certificate_id"],
+            "certificate_no": values["certificate_id"],
             "participant_name": name,
             "event_name": values["event_name"],
             "event_date": values["event_date"],
