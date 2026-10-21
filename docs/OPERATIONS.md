@@ -3,7 +3,8 @@
 How to deploy, roll back, unstick a migration, restore a backup, rotate a
 secret, turn on the new services, size the server and every service on it,
 keep its disk from filling, open the live room's streams, look after the
-rendered documents in the bucket, and run AI assist. Every command is meant to be copied.
+rendered documents in the bucket, run AI assist, and put a demo event live
+for People Like You. Every command is meant to be copied.
 Commands under **Read-only** change nothing; anything that changes something
 says so.
 
@@ -1446,3 +1447,29 @@ stopped following the schema; move another first in `APP_AI_MODELS`.
 A poster near 10 MB, with the form around it, is a little over 10 MB: an
 nginx in front with `client_max_body_size 10M` refuses it (413) before the
 API sees it. Give that location 12M if large posters matter.
+
+---
+
+## 15. The demo: People Like You, live now
+
+The demo's reset, seed and removal are in `backend/scripts/demo/README.md`.
+People Like You only has people in it during an event, so one more script
+puts a showcase event live now: Respawn Room's "Open Night", started ten
+minutes ago, four hours long. It checks in the main demo user and ten demo
+members, one of them hidden.
+
+```bash
+# Read-only: what it would do.
+$DC exec -T backend python -m scripts.demo.live_now --dry-run
+
+# Changes things, only inside the demo: the event, registrations, check-ins
+# and the members' People Like You switch. Sends nothing; free; safe to rerun.
+$DC exec -T backend python -m scripts.demo.live_now
+```
+
+Then sign in to the app as `demo@demo.myotherapp.in`. The event's page has
+the People like you card, and Home's DISCOVER says where you are.
+
+It needs the backend deployed with the `add_networking_visible` migration
+(`migrate`, section 1). If its summary says `networking: OFF`, the showcase
+club's plan lacks Attendee networking. The rest is in that README, section 7.
