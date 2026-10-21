@@ -427,7 +427,12 @@ async def list_events(
                 # Revoked by the organiser: the door refuses it by name, so
                 # a ticket kept for offline use drops it on the next refresh.
                 event_dict["ticket_revoked"] = reg.ticket_revoked_at is not None
-                if reg.is_attended:
+                # The certificate as the PDF and the image decide it: one
+                # issued without a check-in counts, a revoked one does not.
+                held = availability(reg)
+                event_dict["has_certificate"] = held.available
+                event_dict["certificate_revoked"] = held.reason == "revoked"
+                if held.available:
                     event_dict["certificate_url"] = public_urls.certificate_url(reg.ticket_id)
             enhanced_events.append(event_dict)
     else:

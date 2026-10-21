@@ -599,7 +599,14 @@ async def get_event(session: AsyncSession, event_id: str | int, user_id: int | N
             data["user_position"] = registration.position
             # The public site's ticket and certificate pages, by ticket id.
             data["ticket_url"] = public_urls.ticket_url(registration.ticket_id)
-            if registration.is_attended:
+            # By the rule the PDF and the image follow, so the app lists and
+            # opens exactly the certificates the server will hand over.
+            from app.api.events.certificates import availability
+
+            held = availability(registration)
+            data["has_certificate"] = held.available
+            data["certificate_revoked"] = held.reason == "revoked"
+            if held.available:
                 data["certificate_url"] = public_urls.certificate_url(registration.ticket_id)
             # The feedback survey, as emailed to whoever was there, for the
             # app's own survey screen: this registration's link only, and
