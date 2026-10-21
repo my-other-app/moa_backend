@@ -214,13 +214,19 @@ class AppConfig(BaseSettings):
     PUBLIC_WEB_URL: str = "https://club-dashboard.myotherapp.in"
     # The public site: an event's page is /events/{slug}, a club's /clubs/{slug}. Tracking links land here.
     PUBLIC_SITE_URL: str = "https://myotherapp.in"
-    # Where an address is turned into a place for the Security page; {ip} is filled in. Empty disables it.
+    # Where an address is turned into a place, for the Security page and,
+    # without GEOIP_MMDB_PATH, the discover site's "roughly where"; {ip} is
+    # filled in. Empty disables it. ipapi.co's free tier is about a thousand
+    # a day: after a refusal it rests (a minute, doubling to ten), and the
+    # addresses it placed before keep their place meanwhile (discover/geo.py).
     GEOIP_URL: str = "https://ipapi.co/{ip}/json/"
     # A local MaxMind GeoLite2-City (or City) database, read in place of
     # GEOIP_URL for the discover site's "roughly where" (app/api/discover/geo.py):
-    # no request leaves the box and nothing is waited for. Unset, or a file
-    # that cannot be read: GEOIP_URL as before. Not shipped; download it under
-    # MaxMind's licence and point this at the .mmdb.
+    # no request leaves the box, nothing is waited for, and nothing is ever
+    # refused. Unset, or a file that cannot be read: GEOIP_URL as before. Not
+    # shipped; download it under MaxMind's licence and point this at the
+    # .mmdb. In production: /geoip/GeoLite2-City.mmdb (docs/OPERATIONS.md,
+    # section 15). Read once per process: a new file needs a restart.
     GEOIP_MMDB_PATH: str = ""
     # A comment is hidden from everyone but its writer once the open reports
     # on it weigh this much (app/api/reports): a report counts 1, or

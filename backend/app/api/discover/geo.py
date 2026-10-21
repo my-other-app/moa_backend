@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import itertools
 import logging
 import math
 import re
@@ -490,9 +491,9 @@ def scan_due() -> bool:
 def reset_scan() -> None:
     """Forget this process's schedules: the backfill's minute, and a pause the
     address lookup took after a refusal (tests start each case without them)."""
-    global _last_scan, _ip_paused_until
+    global _last_scan
     _last_scan = -SCAN_EVERY
-    _ip_paused_until = 0.0
+    _ip_rest.update(until=0.0, seconds=0.0)
 
 
 def _wants_link_where(model):
@@ -811,13 +812,25 @@ def _is_public(ip: str) -> bool:
     return not (a.is_private or a.is_loopback or a.is_link_local or a.is_reserved or a.is_multicast or a.is_unspecified)
 
 
-IP_TTL = 24 * 3600
-IP_MISS_TTL = 15 * 60  # a refusal (the provider's rate limit, say) is tried again soon, not tomorrow
+#: The clock the address lookups keep time by (tests move it).
+_clock = time.monotonic
+#: A place found is kept a week: an address seldom changes town, and every
+#: lookup spends the provider's free tier (about a thousand a day).
+IP_TTL = 7 * 24 * 3600
+IP_MISS_TTL = 15 * 60  # no place (a refusal, a failure) is asked about again soon, not next week
+#: A place past its week still answers while the provider cannot be asked
+#: (resting after a refusal, or failing), up to this long after it was found.
+IP_STALE = 30 * 24 * 3600
 _IP_CACHE_MAX = 20000
-_ip_cache: dict[str, tuple[float, Optional[dict]]] = {}
-#: After the provider refuses (429, 403), no lookup is sent for this long.
-IP_PAUSE = 10 * 60
-_ip_paused_until = 0.0
+#: address -> (fresh until, place, when that place was found).
+_ip_cache: dict[str, tuple[float, Optional[dict], float]] = {}
+#: After the provider refuses (429, 403) it rests: not asked for IP_PAUSE,
+#: twice that after another refusal in a row, and so on up to IP_PAUSE_MAX;
+#: an answer ends the run. Only the provider rests: an address it placed
+#: before is still answered from what it said then (IP_STALE).
+IP_PAUSE = 60
+IP_PAUSE_MAX = 10 * 60
+_ip_rest = {"until": 0.0, "seconds": 0.0}
 #: Lookups in flight, by address: a second request for one waits for the first.
 _ip_lookups: dict[str, asyncio.Future] = {}
 #: Lookups started in the background, held so they are not collected mid-run.
@@ -901,39 +914,67 @@ def _from_mmdb(reader, ip: str) -> Optional[dict]:
     )
 
 
-def _keep_ip(ip: str, place: Optional[dict], now: float) -> None:
+def _stale(hit: Optional[tuple], now: float) -> Optional[dict]:
+    """The place a kept entry had, however old its week, if it was found
+    within IP_STALE: better than none while the provider cannot be asked."""
+    if hit and hit[1] is not None and now - hit[2] <= IP_STALE:
+        return hit[1]
+    return None
+
+
+def _keep_ip(ip: str, place: Optional[dict], now: float) -> Optional[dict]:
+    """Keep what was found for the address and return what it answers: the
+    place, or, with none found, the place it had (_stale), kept as a miss
+    is, so it is asked about again in IP_MISS_TTL."""
+    old = _ip_cache.pop(ip, None)
     if len(_ip_cache) >= _IP_CACHE_MAX:
-        _ip_cache.clear()
-    _ip_cache[ip] = (now + (IP_TTL if place else IP_MISS_TTL), place)
+        # The oldest quarter goes, not everything: a burst of lookups after
+        # forgetting everything is what gets the free tier refused. The
+        # order is age, as every keep re-inserts its address.
+        for gone in list(itertools.islice(_ip_cache, max(1, _IP_CACHE_MAX // 4))):
+            del _ip_cache[gone]
+    if place is not None:
+        _ip_cache[ip] = (now + IP_TTL, place, now)
+        return place
+    stale = _stale(old, now)
+    _ip_cache[ip] = (now + IP_MISS_TTL, stale, old[2] if stale is not None else now)
+    return stale
 
 
 async def _lookup(ip: str) -> Optional[dict]:
-    global _ip_paused_until
-    now = time.monotonic()
+    now = _clock()
     try:
         place = await _fetch_ip(ip)
     except _Refused as refused:
-        _ip_paused_until = now + IP_PAUSE
-        logger.warning("the address lookup refused us (%s); no lookups for %d s", refused, IP_PAUSE)
+        # Lookups in flight together are refused together: one run of rest, not one each.
+        if _ip_rest["until"] <= now:
+            seconds = min(_ip_rest["seconds"] * 2, IP_PAUSE_MAX) if _ip_rest["seconds"] else IP_PAUSE
+            _ip_rest.update(until=now + seconds, seconds=seconds)
+            logger.warning("the address lookup refused us (%s); not asking it for %d s", refused, seconds)
         place = None
     except Exception:  # noqa: BLE001
         place = None
-    _keep_ip(ip, place, now)
-    return place
+    else:
+        _ip_rest["seconds"] = 0.0
+    return _keep_ip(ip, place, now)
 
 
 async def locate_ip(ip: Optional[str]) -> Optional[dict]:
-    """Roughly where an address is — {city, region, country, lat, lng} — cached
-    for a day (a miss for 15 minutes). Never raises.
+    """Roughly where an address is — {city, region, country, lat, lng} — kept
+    for a week (a miss for 15 minutes). Never raises.
 
     From the local GeoLite2 database when settings.GEOIP_MMDB_PATH names one
     (no request, nothing waited for); else from GEOIP_URL, one request per
-    address at a time (another asking meanwhile waits for it), and none at
-    all for IP_PAUSE after the provider refuses one: its free tier is about a
-    thousand a day, and every refusal used to cost a visitor 2.5 seconds."""
+    address at a time (another asking meanwhile waits for it). After the
+    provider refuses one it rests (IP_PAUSE, growing to IP_PAUSE_MAX): its
+    free tier is about a thousand a day, and every refusal used to cost a
+    visitor 2.5 seconds. While it rests, or when it fails, an address it
+    placed in the last IP_STALE is answered from what it said then; only an
+    address never placed goes unplaced. (It used to place everyone nowhere
+    for ten minutes after any refusal.)"""
     if not ip or not _is_public(ip):
         return None
-    now = time.monotonic()
+    now = _clock()
     hit = _ip_cache.get(ip)
     if hit and hit[0] > now:
         return hit[1]
@@ -943,10 +984,9 @@ async def locate_ip(ip: Optional[str]) -> Optional[dict]:
             place = _from_mmdb(reader, ip)
         except Exception:  # noqa: BLE001
             place = None
-        _keep_ip(ip, place, now)
-        return place
-    if not settings.GEOIP_URL or now < _ip_paused_until:
-        return None
+        return _keep_ip(ip, place, now)
+    if not settings.GEOIP_URL or now < _ip_rest["until"]:
+        return _stale(hit, now)
     pending = _ip_lookups.get(ip)
     if pending is not None:
         return await asyncio.shield(pending)
@@ -978,17 +1018,16 @@ async def settle_lookups() -> None:
 
 
 def reset_ip() -> None:
-    """Forget every address and any pause (tests)."""
-    global _ip_paused_until
+    """Forget every address and any rest (tests)."""
     _ip_cache.clear()
-    _ip_paused_until = 0.0
+    _ip_rest.update(until=0.0, seconds=0.0)
 
 
 def known_place(ip: Optional[str]) -> tuple[bool, Optional[dict]]:
     """(known, place): what locate_ip has kept for this address, without
     asking anyone. known is False when nothing is kept (or it has expired)."""
     hit = _ip_cache.get(ip) if ip else None
-    if hit and hit[0] > time.monotonic():
+    if hit and hit[0] > _clock():
         return True, hit[1]
     return False, None
 
