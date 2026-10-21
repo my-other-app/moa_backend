@@ -43,6 +43,11 @@ It uses only the standard library. If `jsonschema` is installed, it checks
 - Emails are `hello@<slug>.demo.myotherapp.in`; phones are `+91 90000 0xxxx`;
   social handles are invented and never URLs.
 - Interest and topic slugs are the production ones.
+- An in-person venue carries its own `lat` and `lng`: its event's pin and map
+  link. The venue's, never the club's: an event out of town is pinned out of
+  town (Systems Weekend at Vagamon is in Idukki, not beside the club in
+  Kochi). The venues are made up, so the point is their locality's, to about
+  a kilometre; a campus club's venues are its campus.
 - Dates are relative: past events are within the last 120 days, upcoming ones
   within the next 60, and threads within the last 45.
 - A multi-day event keeps its agenda on day one and mentions day two in the

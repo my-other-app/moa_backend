@@ -15,7 +15,7 @@ The filters mirror the SQL they stand for (app.api.discover.service):
 - topic_ids: the topics of those of them not deleted, as `picks(topic=…)`;
 - is_online / has_fee: false when null, as coalesce(…, false);
 - has_point / _geo: has_point is "lat and lng are set" (an event without one
-  is never ruled out by a radius); _geo only for an event held in person
+  is never inside a radius); _geo only for an event held in person
   with a point, so an online event sorts with the unplaced, as km is None;
 - starts_at, ends_at, created_at: microseconds since 1970, exact (whole
   numbers below 2^53, so a filter compares them as Postgres does).

@@ -241,6 +241,8 @@ def check_event(r: Report, w: str, e: dict, merch_keys: set[str], seen_events: d
     if e["format"] == "in_person":
         if not (isinstance(venue, dict) and text(venue.get("name")) and text(venue.get("address"))):
             r.add(w, "an in-person event wants a venue with a name and an address")
+        elif not (is_num(venue.get("lat")) and 8.0 <= venue["lat"] <= 12.9 and is_num(venue.get("lng")) and 74.8 <= venue["lng"] <= 77.5):
+            r.add(w, "an in-person venue wants its own lat and lng, in Kerala")
     elif venue is not None:
         r.add(w, "an online event has no venue (null)")
     if e["category"] not in CATEGORIES:

@@ -120,7 +120,13 @@ class Home(BaseModel):
     online: list[EventCard]
     popular: list[EventCard]
     categories: list[CategoryCount]
+    # With a place: the clubs within 50 km, nearest first; with none that
+    # near, or no place, the most followed, with no distance. A club in
+    # here with a distance is near.
     clubs: list[ClubCard]
+    # With a place: the nearest clubs further than 50 km, nearest first, each
+    # with its distance; empty without a place.
+    clubs_more: list[ClubCard] = []
     threads: list[ThreadOut]
     stats: Stats
 

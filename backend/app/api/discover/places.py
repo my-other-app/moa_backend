@@ -241,13 +241,3 @@ async def around(session, centre: tuple[float, float], radius_km: Optional[float
         conds.append(cells.near_sql(centre, radius_km, Clubs.geocell, Clubs.place_lat, Clubs.place_lng))
     rows = await session.execute(select(Clubs.id, Clubs.place_lat, Clubs.place_lng, Clubs.follower_count).where(*conds))
     return [(i, float(la), float(ln), int(n or 0)) for i, la, ln, n in rows.all()]
-
-
-async def unplaced(session, k: int) -> list[tuple[int, None, None, int]]:
-    """The k most followed listed clubs with no place (then by id)."""
-    rows = await session.execute(
-        select(Clubs.id, Clubs.follower_count)
-        .where(*_listed(), or_(Clubs.place_lat.is_(None), Clubs.place_lng.is_(None)))
-        .order_by(Clubs.follower_count.desc(), Clubs.id).limit(k)
-    )
-    return [(i, None, None, int(n or 0)) for i, n in rows.all()]

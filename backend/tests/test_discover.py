@@ -308,18 +308,20 @@ async def test_a_known_place_keeps_events_within_the_radius_and_sorts_by_distanc
     here = {"lat": BLR[0], "lng": BLR[1]}
     body = (await client.get(f"{API}/events", params=here)).json()
     assert body["where"] == {"city": None, "region": None, "lat": BLR[0], "lng": BLR[1], "source": "browser"}
-    # Mysuru is past 50 km; online events and events without a point are never ruled out.
-    assert _ids(body["items"]) == [e[k].id for k in ("live", "online", "near", "nocoords")] and body["total"] == 4
-    near = next(x for x in body["items"] if x["id"] == e["near"].id)
-    assert near["distance_km"] == 5.2
-    assert next(x for x in body["items"] if x["id"] == e["online"].id)["distance_km"] is None
+    # Mysuru is past 50 km; an online event is near no one, and one without a
+    # point cannot be said to be inside (tests/test_near_results.py).
+    assert _ids(body["items"]) == [e["near"].id] and body["total"] == 1
+    assert body["items"][0]["distance_km"] == 5.2
 
     wide = (await client.get(f"{API}/events", params={**here, "radius_km": 200})).json()
     assert e["far"].id in _ids(wide["items"]) and 125 < next(x for x in wide["items"] if x["id"] == e["far"].id)["distance_km"] < 130
     assert (await client.get(f"{API}/events", params={**here, "radius_km": 0})).json()["total"] == 5
 
     by_distance = (await client.get(f"{API}/events", params={**here, "radius_km": 200, "sort": "distance"})).json()
-    assert _ids(by_distance["items"]) == [e[k].id for k in ("near", "far", "live", "online", "nocoords")]
+    assert _ids(by_distance["items"]) == [e[k].id for k in ("near", "far")]
+    # Anywhere, by distance: the placed ones nearest first, then the rest by date.
+    anywhere = (await client.get(f"{API}/events", params={**here, "radius_km": 0, "sort": "distance"})).json()
+    assert _ids(anywhere["items"]) == [e[k].id for k in ("near", "far", "live", "online", "nocoords")]
     # Without a place, distance falls back to the date.
     assert _ids((await client.get(f"{API}/events", params={"sort": "distance"})).json()["items"]) == [e[k].id for k in ("live", "online", "near", "far", "nocoords")]
     # From Delhi nothing in person is near; online is still there.
@@ -332,7 +334,7 @@ async def test_without_a_browser_point_the_visitor_is_placed_by_address(client, 
     h = {"X-Forwarded-For": "49.37.10.1, 10.0.0.1"}
     body = (await client.get(f"{API}/events", headers=h)).json()
     assert body["where"] == {"city": "Bengaluru", "region": "Karnataka", "lat": BLR[0], "lng": BLR[1], "source": "ip"}
-    assert world["e"]["far"].id not in _ids(body["items"]) and body["total"] == 4
+    assert _ids(body["items"]) == [world["e"]["near"].id] and body["total"] == 1
     assert (await client.get(f"{API}/locate", headers=h)).json()["source"] == "ip"
     assert (await client.get(f"{API}/locate", headers=h, params={"lat": 12.97, "lng": 77.6})).json() == {"city": "Bengaluru", "region": "Karnataka", "lat": 12.97, "lng": 77.6, "source": "browser"}
     assert (await client.get(f"{API}/locate")).json()["source"] == "none"
@@ -350,7 +352,8 @@ async def test_popular_sorts_by_going_and_views_and_pages_after_filtering(client
     last = (await client.get(f"{API}/events", params={"limit": 2, "offset": 4})).json()
     assert first["total"] == rest["total"] == last["total"] == 5
     assert _ids(first["items"]) + _ids(rest["items"]) + _ids(last["items"]) == [e[k].id for k in ("live", "online", "near", "far", "nocoords")]
-    assert (await client.get(f"{API}/events", params={"limit": 2, "offset": 2, "lat": BLR[0], "lng": BLR[1]})).json()["total"] == 4
+    # The total counts what the radius keeps, whatever page is asked for: Hack Night alone.
+    assert (await client.get(f"{API}/events", params={"limit": 2, "offset": 2, "lat": BLR[0], "lng": BLR[1]})).json()["total"] == 1
 
 
 # ─── Home ─────────────────────────────────────────────────────────────────
@@ -376,9 +379,10 @@ async def test_home_from_a_place(client, session, world):
         {"id": world["tech"].id, "name": "Tech", "icon": "💻", "upcoming": 3},
         {"id": world["music"].id, "name": "Music", "icon": "🎵", "upcoming": 2},
     ]
-    # The nearest club first (its own point), then the one placed by its events in Mysuru.
-    assert _ids(home["clubs"]) == [a.id, b.id]
-    assert home["clubs"][0]["distance_km"] == 0.0 and 125 < home["clubs"][1]["distance_km"] < 130
+    # The club near (its own point); the one placed by its events in Mysuru
+    # is further than 50 km: not near, but next.
+    assert _ids(home["clubs"]) == [a.id] and home["clubs"][0]["distance_km"] == 0.0
+    assert _ids(home["clubs_more"]) == [b.id] and 125 < home["clubs_more"][0]["distance_km"] < 130
     assert [t["body"] for t in home["threads"]] == [f"Post {i}" for i in range(6)]
     # Cities are places on the map, not venue names: Koramangala's hub is in
     # Bengaluru and the palace grounds in Mysuru; "Lab 1", "Lab 2", "Lab 3" and
@@ -391,7 +395,7 @@ async def test_home_without_a_place(client, world):
     assert home["where"]["source"] == "none" and home["near"] == []
     # The most followed club first.
     assert _ids(home["clubs"]) == [world["b"].id, world["a"].id]
-    assert all(c["distance_km"] is None for c in home["clubs"])
+    assert all(c["distance_km"] is None for c in home["clubs"]) and home["clubs_more"] == []
     assert home["threads"] == []
 
 

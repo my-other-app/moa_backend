@@ -298,3 +298,101 @@ async def test_a_local_geolite_database_answers_without_a_request(net, monkeypat
     net["routes"]["https://ipapi.co/49.37.10.1/json/"] = httpx.Response(200, json=IPAPI_BLR)
     assert (await geo.locate_ip("49.37.10.1"))["city"] == "Bengaluru"
     assert geo._mmdb_failed is True
+
+
+# ─── When the address lookup is refused ───────────────────────────────────
+
+
+class Clock:
+    """geo's clock, moved by hand."""
+
+    def __init__(self):
+        self.t = 10_000.0
+
+    def __call__(self):
+        return self.t
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    c = Clock()
+    monkeypatch.setattr(geo, "_clock", c)
+    geo.reset_ip()
+    yield c
+    geo.reset_ip()
+
+
+async def test_a_found_place_is_kept_for_a_week(net, clock):
+    net["routes"]["https://ipapi.co/49.37.10.1/json/"] = httpx.Response(200, json=IPAPI_BLR)
+    place = await geo.locate_ip("49.37.10.1")
+    clock.t += 6 * 24 * 3600
+    assert await geo.locate_ip("49.37.10.1") == place
+    assert len(net["calls"]) == 1
+    clock.t += 2 * 24 * 3600
+    assert await geo.locate_ip("49.37.10.1") == place
+    assert len(net["calls"]) == 2  # a week on, asked again
+
+
+async def test_a_refusal_rests_the_lookup_and_known_addresses_still_answer(net, clock):
+    """The provider's free tier refusing used to place everyone nowhere for
+    ten minutes. Now only addresses never seen go unplaced while it rests:
+    one it placed before is answered from what it said then, even past its
+    week, and nothing is asked meanwhile."""
+    net["routes"]["https://ipapi.co/49.37.10.1/json/"] = httpx.Response(200, json=IPAPI_BLR)
+    place = await geo.locate_ip("49.37.10.1")
+    clock.t += 8 * 24 * 3600  # past its week
+    net["routes"]["https://ipapi.co/"] = httpx.Response(429)
+    del net["routes"]["https://ipapi.co/49.37.10.1/json/"]
+    assert await geo.locate_ip("49.37.10.7") is None  # refused: the lookup rests
+    calls = len(net["calls"])
+    assert await geo.locate_ip("49.37.10.1") == place  # known: answered without asking
+    assert await geo.locate_ip("49.37.10.8") is None  # never seen: unplaced, and not asked
+    assert len(net["calls"]) == calls
+
+
+async def test_the_rest_starts_short_and_grows_with_refusals_in_a_row(net, clock):
+    net["routes"]["https://ipapi.co/"] = httpx.Response(429)
+    assert await geo.locate_ip("49.37.11.1") is None
+    assert len(net["calls"]) == 1
+    clock.t += geo.IP_PAUSE - 1
+    assert await geo.locate_ip("49.37.11.2") is None and len(net["calls"]) == 1  # resting
+    clock.t += 2
+    assert await geo.locate_ip("49.37.11.3") is None and len(net["calls"]) == 2  # a minute on, asked again: refused again
+    clock.t += geo.IP_PAUSE + 1
+    assert await geo.locate_ip("49.37.11.4") is None and len(net["calls"]) == 2  # twice as long now
+    clock.t += geo.IP_PAUSE
+    net["routes"] = {"https://ipapi.co/49.37.11.5/json/": httpx.Response(200, json=IPAPI_BLR), "https://ipapi.co/": httpx.Response(429)}
+    assert (await geo.locate_ip("49.37.11.5"))["city"] == "Bengaluru"
+    # An answer ends the run: the next refusal rests it a minute again.
+    assert await geo.locate_ip("49.37.11.6") is None
+    clock.t += geo.IP_PAUSE + 1
+    assert await geo.locate_ip("49.37.11.7") is None and len(net["calls"]) == 5
+    # Never longer than IP_PAUSE_MAX.
+    for _ in range(12):
+        clock.t += geo.IP_PAUSE_MAX + 1
+        await geo.locate_ip("49.37.11.8")
+    assert geo._ip_rest["seconds"] == geo.IP_PAUSE_MAX
+
+
+async def test_a_failed_refresh_keeps_the_place_it_had(net, clock):
+    net["routes"]["https://ipapi.co/49.37.10.1/json/"] = httpx.Response(200, json=IPAPI_BLR)
+    place = await geo.locate_ip("49.37.10.1")
+    clock.t += 8 * 24 * 3600
+    net["routes"]["https://ipapi.co/49.37.10.1/json/"] = httpx.ConnectError("down")
+    assert await geo.locate_ip("49.37.10.1") == place
+    # Too old to stand in for an answer: a month on, it is no place.
+    clock.t += geo.IP_STALE
+    assert await geo.locate_ip("49.37.10.1") is None
+
+
+async def test_a_full_memory_forgets_its_oldest_not_everything(net, clock, monkeypatch):
+    monkeypatch.setattr(geo, "_IP_CACHE_MAX", 8)
+    for n in range(1, 13):
+        ip = f"49.37.12.{n}"
+        net["routes"][f"https://ipapi.co/{ip}/json/"] = httpx.Response(200, json={**IPAPI_BLR, "ip": ip})
+        await geo.locate_ip(ip)
+        clock.t += 1
+    # Full, it forgets the oldest quarter at a time: the newest seven are all still known.
+    assert len(geo._ip_cache) <= 8
+    assert all(geo.known_place(f"49.37.12.{n}")[0] for n in range(6, 13))
+    assert not geo.known_place("49.37.12.1")[0]

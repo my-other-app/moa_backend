@@ -376,7 +376,9 @@ async def test_offset_stops_at_a_thousand_and_a_cursor_pages_every_order(client,
     assert (await client.get(f"{API}/events", params={"offset": 1001})).status_code == 422
     assert (await client.get(f"{API}/clubs", params={"offset": 1001})).status_code == 422
     assert (await client.get(f"{API}/threads", params={"offset": 1001})).status_code == 422
-    for params in ({"sort": "date"}, {"sort": "popular"}, {"sort": "newest"}, {"q": "paged"}, {"sort": "distance", "lat": BLR[0], "lng": BLR[1], "radius_km": 500}):
+    # By distance anywhere, the cursor crosses from the placed part to the rest (the online one).
+    for params in ({"sort": "date"}, {"sort": "popular"}, {"sort": "newest"}, {"q": "paged"}, {"sort": "distance", "lat": BLR[0], "lng": BLR[1], "radius_km": 500},
+                   {"sort": "distance", "lat": BLR[0], "lng": BLR[1], "radius_km": 0}):
         everything = _ids((await client.get(f"{API}/events", params={**params, "limit": 60})).json()["items"])
         got, after = [], None
         while True:

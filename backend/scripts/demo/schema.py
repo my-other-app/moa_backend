@@ -134,6 +134,10 @@ class When(Strict):
 class Venue(Strict):
     name: str = Field(min_length=2, max_length=120)
     address: str = Field(min_length=2, max_length=200)
+    # Where the venue is: its event's pin and map link. The venue's own,
+    # never its club's (a weekend at Vagamon was once pinned in Kochi).
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
 
 
 class Speaker(Strict):
