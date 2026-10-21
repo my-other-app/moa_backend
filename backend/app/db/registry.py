@@ -15,6 +15,7 @@ from app.api.badges.models import *
 from app.api.audit.models import *
 from app.api.admin_alerts import models as _admin_alert_models  # noqa: F401
 from app.api.deliveries.models import *
+from app.api.certificates import models as _certificate_models  # noqa: F401
 from app.api.emails.models import *
 from app.api.checkins.models import *
 from app.api.idcards.models import *

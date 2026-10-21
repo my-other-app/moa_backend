@@ -14,10 +14,30 @@ TICKET_GROUP = 5
 TICKET_ID = re.compile(rf"^MOA-[{TICKET_ALPHABET}]{{{TICKET_GROUP}}}-[{TICKET_ALPHABET}]{{{TICKET_GROUP}}}$")
 #: The unique index a duplicate ticket id runs into.
 TICKET_ID_INDEX = "ix_event_registrations_link_ticket_id"
+#: The unique index a duplicate certificate number runs into.
+CERTIFICATE_NO_INDEX = "uq_registrations_certificate_no"
+#: What a certificate's number can be, upper case: CERT- and two groups of
+#: the ticket alphabet, or, for a number made from a ticket id minted before
+#: October 2026 (MOA-<hex clock>-XXXXX), one to seven hex digits first. The
+#: ticket id an old certificate's QR carried (MOA-...) has the same body.
+CERTIFICATE_CODE = re.compile(
+    rf"^(?:CERT|MOA)-((?:[{TICKET_ALPHABET}]{{{TICKET_GROUP}}}|[0-9A-F]{{1,7}})-[{TICKET_ALPHABET}]{{{TICKET_GROUP}}})$"
+)
 
 
 def _group() -> str:
     return "".join(secrets.choice(TICKET_ALPHABET) for _ in range(TICKET_GROUP))
+
+
+def generate_certificate_no() -> str:
+    """A certificate's number: CERT-XXXXX-XXXXX, ten characters from the
+    OS's CSPRNG, drawn on its own (about 49.5 bits, like a ticket id).
+
+    The number used to be the ticket id with its prefix changed, so anyone
+    reading a certificate could write down the ticket's id, which is what
+    the door scans. Drawn separately, it says nothing about the ticket.
+    """
+    return f"CERT-{_group()}-{_group()}"
 
 
 def generate_ticket_id() -> str:
