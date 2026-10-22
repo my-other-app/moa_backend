@@ -1073,17 +1073,22 @@ async def update_profile_picture(
     # Made first if missing -- with the account's name, which a profile
     # cannot be saved without (it was made without one, and failed).
     profile = await _ensure_profile(session, user_id)
-
-    if profile.profile_pic:
-        profile.profile_pic.delete()
+    previous = profile.profile_pic
 
     content = io.BytesIO(await profile_picture.read())
     profile.profile_pic = {
         "bytes": content,
         "filename": profile_picture.filename,
     }
+    # The column checks the bytes as it saves (storage.fields.prepare_image):
+    # a file that is not a picture, or is too large, is refused here.
     await session.commit()
+    # The old photo goes only now. It was deleted first, so a refused upload
+    # left the row naming a photo no longer in the bucket.
+    if previous:
+        previous.delete()
     await session.refresh(profile)
+    # Its links by size: {"thumbnail", "medium", "large", "original"}.
     return profile.profile_pic
 
 

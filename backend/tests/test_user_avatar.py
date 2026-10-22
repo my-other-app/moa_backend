@@ -10,7 +10,11 @@ pickable, and an upload whose type was not an image was a 500.
 Nothing reaches S3: the two columns' clients are stood in for, and a
 picture's deletion is recorded rather than sent.
 """
+import io
+
 import pytest
+from PIL import Image
+from sqlalchemy import select
 
 from app.api.users.models import UserAvatars, UserProfiles
 from app.core.storage import fields
@@ -24,6 +28,12 @@ HEX = "0123456789abcdef0123456789abcdef"
 def _key(field, name: str) -> str:
     """A key as the column stores it: `name` under the column's folder."""
     return f"{field.base_path.rstrip('/')}/{name}"
+
+
+def _png(size=(40, 30)) -> bytes:
+    out = io.BytesIO()
+    Image.new("RGB", size, (23, 165, 143)).save(out, "PNG")
+    return out.getvalue()
 
 
 @pytest.fixture
@@ -64,6 +74,10 @@ async def _call(client, session, method: str, path: str, **kwargs):
 
 async def _pick(client, session, h, avatar_id):
     return await _call(client, session, "POST", "/avatar/select", json={"avatar_id": avatar_id}, headers=h)
+
+
+async def _upload(client, session, h, part):
+    return await _call(client, session, "PUT", "/profile/update-picture", files={"profile_picture": part}, headers=h)
 
 
 async def _profile(client, session, h) -> dict:
@@ -148,3 +162,59 @@ async def test_the_picker_keeps_its_order_when_an_avatar_is_renamed(client, sess
     r = await _call(client, session, "GET", "/avatar/list")
     assert r.status_code == 200, r.text
     assert [a["name"] for a in r.json()] == ["Red Fox", "Owl"]
+
+
+# ─── Uploading a photo ────────────────────────────────────────────────────
+
+
+async def test_a_photo_upload_answers_with_its_links(client, session, person, bucket):
+    r = await _upload(client, session, person["h"], ("me.png", _png(), "image/png"))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert set(body) == {"thumbnail", "medium", "large", "original"}
+    assert all(isinstance(v, str) and v.startswith("http") for v in body.values())
+    # The old photo goes once the new one is saved.
+    assert bucket["deleted"] == [person["photo"]]
+    profile = await _profile(client, session, person["h"])
+    assert profile["profile_pic"]["original"] == body["original"]
+
+
+async def test_a_photo_sent_as_octet_stream_is_still_taken(client, session, person):
+    # Some phones send a gallery photo as octet-stream; the column reads the
+    # bytes and knows a picture when it sees one.
+    r = await _upload(client, session, person["h"], ("photo", _png(), "application/octet-stream"))
+    assert r.status_code == 200, r.text
+    assert "original" in r.json()
+
+
+async def test_a_photo_sent_with_no_type_at_all_is_still_taken(client, session, person):
+    # A part without a Content-Type header: the check used to crash on it.
+    # (httpx always types a file part, so the body is written out by hand.)
+    body = (
+        b"--pic\r\n"
+        b'Content-Disposition: form-data; name="profile_picture"; filename="photo"\r\n\r\n'
+        + _png()
+        + b"\r\n--pic--\r\n"
+    )
+    headers = {**person["h"], "Content-Type": "multipart/form-data; boundary=pic"}
+    r = await _call(client, session, "PUT", "/profile/update-picture", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+    assert "original" in r.json()
+
+
+async def test_a_file_that_says_it_is_not_an_image_is_a_422(client, session, person, bucket):
+    r = await _upload(client, session, person["h"], ("notes.txt", b"just some text", "text/plain"))
+    assert r.status_code == 422, r.text
+    assert r.json()["message"] == "That file is not an image. Use PNG, JPEG or WebP."
+    assert bucket["deleted"] == [] and bucket["put"] == []
+
+
+async def test_a_file_that_is_not_really_an_image_keeps_the_photo_you_have(client, session, person, bucket):
+    r = await _upload(client, session, person["h"], ("fake.png", b"not a png at all", "image/png"))
+    assert r.status_code == 422, r.text
+    await session.rollback()  # the request's failed save, as production's session closing would
+    # The photo they had is still theirs, and still in the bucket.
+    assert bucket["deleted"] == []
+    session.expunge_all()
+    profile = await session.scalar(select(UserProfiles).where(UserProfiles.user_id == person["user"].id))
+    assert profile.profile_pic.variations["original"] == person["photo"]
