@@ -487,9 +487,18 @@ async def update_profile_picture(
     user: UserAuth,
     profile_picture: UploadFile = File(...),
 ) -> dict:
-    """Update user's profile picture."""
-    if not profile_picture.content_type.startswith("image/"):
-        raise Exception("File must be an image")
+    """Update user's profile picture. Answers with its links by size:
+    {"thumbnail", "medium", "large", "original"}."""
+    # Refused here only when the part says it is something else. Some phones
+    # send a gallery photo with no type, or as application/octet-stream:
+    # those go on, and the column reads the bytes and refuses anything that
+    # is not a picture with a 422 of its own (storage.fields.prepare_image).
+    # This was a bare Exception -- a 500 -- and crashed on a part with no type.
+    kind = (profile_picture.content_type or "").split(";")[0].strip().lower()
+    if kind and not kind.startswith("image/") and kind != "application/octet-stream":
+        raise CustomHTTPException(
+            422, message="That file is not an image. Use PNG, JPEG or WebP.", error_code="NOT_AN_IMAGE"
+        )
 
     return await service.update_profile_picture(
         session, user_id=user.id, profile_picture=profile_picture
@@ -540,7 +549,9 @@ async def list_avatars(session: SessionDep) -> List[UserAvatarDetail]:
 @router.post("/avatar/select", summary="select user avatar")
 async def select_avatar(
     session: SessionDep, user: UserAuth, avatar: UserAvatarSelect
-) -> UserAvatarDetail:
+) -> UserAvatarDetail | None:
+    """Pick a preset avatar; it replaces an uploaded photo. `avatar_id`
+    null clears the avatar (null back) and leaves a photo be."""
     return await service.select_avatar(
         session, user_id=user.id, avatar_id=avatar.avatar_id
     )

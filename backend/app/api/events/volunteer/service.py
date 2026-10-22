@@ -211,10 +211,20 @@ async def list_volunteers(
             "is_approved": volunteer.is_approved,
             "user_id": volunteer.user_id,
             "full_name": profile.full_name if profile else None,
-            "profile_pic": profile.profile_pic if profile else None,
+            "profile_pic": _photo_link(profile.profile_pic) if profile else None,
         }
         for volunteer, profile in result
     ]
+
+
+def _photo_link(pic) -> str | None:
+    """One link for an uploaded photo. The column reads back as its links by
+    size, and the response's `profile_pic` is a string: a volunteer with a
+    photo turned the whole list into a 500 -- and the app now lets anyone
+    upload one."""
+    if isinstance(pic, dict):
+        return pic.get("medium") or pic.get("thumbnail") or pic.get("original")
+    return pic if isinstance(pic, str) and pic else None
 
 
 async def checkin_user(
