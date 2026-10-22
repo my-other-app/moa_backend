@@ -540,7 +540,9 @@ async def list_avatars(session: SessionDep) -> List[UserAvatarDetail]:
 @router.post("/avatar/select", summary="select user avatar")
 async def select_avatar(
     session: SessionDep, user: UserAuth, avatar: UserAvatarSelect
-) -> UserAvatarDetail:
+) -> UserAvatarDetail | None:
+    """Pick a preset avatar; it replaces an uploaded photo. `avatar_id`
+    null clears the avatar (null back) and leaves a photo be."""
     return await service.select_avatar(
         session, user_id=user.id, avatar_id=avatar.avatar_id
     )

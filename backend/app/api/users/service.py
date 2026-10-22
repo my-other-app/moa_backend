@@ -778,23 +778,39 @@ def _forget_for_you(user_id: int) -> None:
 
 
 async def select_avatar(session: AsyncSession, user_id: int, avatar_id: int | None):
-    await validate_relations(
-        session, {"user_id": (Users, user_id), "avatar_id": (UserAvatars, avatar_id)}
-    )
-    user_profile = await session.scalar(
-        select(UserProfiles)
-        .where(UserProfiles.user_id == user_id, UserProfiles.is_deleted == False)
-        .options(
-            joinedload(UserProfiles.avatar),
-        )
-    )
-    if not user_profile:
-        raise CustomHTTPException(400, "user profile does not exists")
+    """The preset picture the person picked (POST /user/avatar/select), or
+    none: the avatar picked, or None when cleared.
 
-    user_profile.avatar_id = avatar_id
+    Everything that shows a person prefers their uploaded photo to their
+    avatar (reports.avatar, the followers list, People Like You), so picking
+    an avatar takes the photo away -- it used to stay, and the pick seemed to
+    do nothing. Clearing the avatar leaves a photo be. A profile is made if
+    the account has none yet; a removed avatar cannot be picked.
+    """
+    await validate_relations(session, {"user_id": (Users, user_id)})
+    avatar = None
+    if avatar_id is not None:
+        avatar = await session.scalar(
+            select(UserAvatars).where(UserAvatars.id == avatar_id, UserAvatars.is_deleted == False)  # noqa: E712
+        )
+        if avatar is None:
+            raise CustomHTTPException(
+                404, "That avatar is no longer available. Pick another.", error_code="AVATAR_NOT_FOUND"
+            )
+
+    profile = await _ensure_profile(session, user_id)
+    profile.avatar_id = avatar_id
+    photo = profile.profile_pic if avatar is not None else None
+    if photo:
+        profile.profile_pic = None
     await session.commit()
-    await session.refresh(user_profile)
-    return user_profile.avatar
+    # Only once saved: a save that failed leaves the photo the row still names.
+    if photo:
+        photo.delete()
+    # The avatar as loaded above. It was read back through the profile's
+    # relationship after a refresh, a lazy load an async session cannot do:
+    # the change was saved and the answer was a 500.
+    return avatar
 
 
 async def get_user_profile(session: AsyncSession, user_id: int):
@@ -1109,7 +1125,14 @@ async def delete_user_avatar(session: AsyncSession, id: int):
 
 
 async def list_avatars(session: AsyncSession):
-    query = select(UserAvatars)
+    """The avatars a person may pick: none removed, in the order they were
+    added. Without the ORDER BY the list followed the table, and an avatar
+    an admin renamed or replaced moved to the end."""
+    query = (
+        select(UserAvatars)
+        .where(UserAvatars.is_deleted == False)  # noqa: E712
+        .order_by(UserAvatars.id)
+    )
     return await session.scalars(query)
 
 
