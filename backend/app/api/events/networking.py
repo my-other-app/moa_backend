@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.api.events.models import Events, EventRegistrationsLink
 from app.api.users.models import Users, UserProfiles, UserInterests
@@ -52,7 +53,13 @@ def is_within_networking_window(event: Events) -> tuple[bool, datetime | None]:
 
 
 def _picture(profile: UserProfiles | None) -> str | None:
-    pic = profile.profile_pic if profile is not None else None
+    """A link to the person's picture: the photo they uploaded, else the
+    avatar they picked (as reports.avatar). Only the photo was read, so
+    everyone with an avatar showed no picture. `profile.avatar` must be
+    loaded with the profile (selectinload): a lazy load fails here."""
+    if profile is None:
+        return None
+    pic = profile.profile_pic or (profile.avatar.image if profile.avatar is not None else None)
     if isinstance(pic, dict):
         return pic.get("medium") or pic.get("thumbnail") or pic.get("original")
     if isinstance(pic, str):
@@ -172,6 +179,8 @@ async def get_networking_attendees(
         .outerjoin(UserProfiles, (Users.id == UserProfiles.user_id) & (UserProfiles.is_deleted == False))  # noqa: E712
         .outerjoin(Organizations, Organizations.id == UserProfiles.org_id)
         .where(Users.id.in_(attendee_user_ids))
+        # The avatars too, in one more query for them all (_picture).
+        .options(selectinload(UserProfiles.avatar))
     )
     user_profiles = {u.id: (u, p, org) for u, p, org in profiles_result.all()}
 

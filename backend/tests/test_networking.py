@@ -66,6 +66,34 @@ async def test_a_checked_in_guest_sees_the_others_most_shared_interests_first(cl
     assert body["attendees"][2]["match_count"] == 0 and body["total"] == 3
 
 
+async def test_each_guest_shows_their_photo_or_else_the_avatar_they_picked(client, world, session):
+    """The photo they uploaded first, as everywhere else (reports.avatar);
+    without one, the avatar they picked -- it used to be no picture at all."""
+    from sqlalchemy import select
+
+    from app.api.users.models import UserAvatars, UserProfiles
+
+    def key(model, column, name):
+        return f"{model.__table__.c[column].type.base_path.rstrip('/')}/{name}"
+
+    fox = UserAvatars(name="Fox", image=key(UserAvatars, "image", f"v-{'a' * 32}.png"))
+    session.add(fox)
+    await session.flush()
+    dev = await session.scalar(select(UserProfiles).where(UserProfiles.user_id == world["twin"].id))
+    dev.avatar_id = fox.id
+    bina = await session.scalar(select(UserProfiles).where(UserProfiles.user_id == world["half"].id))
+    bina.avatar_id = fox.id
+    bina.profile_pic = key(UserProfiles, "profile_pic", f"v-{'b' * 32}.png")
+    await session.commit()
+
+    r = await _fetch(client, world)
+    assert r.status_code == 200, r.text
+    pictures = {a["name"]: a["profile_pic_url"] for a in r.json()["attendees"]}
+    assert f"avatars/v-{'a' * 32}.medium.png" in pictures["Dev"]
+    assert f"profile_pic/v-{'b' * 32}.medium.png" in pictures["Bina"]  # the photo wins over the avatar
+    assert pictures["Chirag"] is None
+
+
 async def test_a_guest_not_checked_in_is_refused(client, world, session, make_user, make_registration, mint_token):
     outsider = await make_user(email="outsider@example.com")
     await make_registration(event=world["event"], user=outsider, is_attended=False)
