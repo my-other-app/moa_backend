@@ -29,7 +29,7 @@ from __future__ import annotations
 import logging
 import re
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -71,6 +71,8 @@ ACCOUNT_CODES = frozenset({"0", "3", "10", "190", "200", "131005", "131031", "13
 #: Codes about the template on the club's account (missing, paused, disabled,
 #: or not the shape ours sends): that send goes from the platform's number.
 TEMPLATE_CODES = frozenset({"132000", "132001", "132005", "132012", "132015", "132016"})
+#: Codes about the guest that only the club's number meets (is_club_only).
+CLUB_ONLY_CODES = frozenset({"131021", "131030"})
 
 TIER_ORDER = ("TIER_50", "TIER_250", "TIER_1K", "TIER_2K", "TIER_10K", "TIER_100K", "TIER_UNLIMITED")
 
@@ -551,12 +553,25 @@ async def disconnect(session, club, user, *, request=None) -> Optional[ClubWhats
 
 @dataclass
 class Route:
-    """A send from the club's own number: its Sender, and whose it is."""
+    """A send from the club's own number: its Sender, and whose it is.
+    `cache` is the send's own (route_for), which a refusal updates."""
 
     sender: whatsapp.Sender
     account_id: int
     club_id: int
     template: str
+    cache: Optional[dict] = field(default=None, repr=False, compare=False)
+
+    def forget(self, exc: Exception) -> None:
+        """The club's number refused a send: the rest of this send asks no
+        more of it -- none of the club's templates after an account problem,
+        not this one after a template problem."""
+        if self.cache is None:
+            return
+        if is_account_problem(exc):
+            self.cache[(self.club_id, None)] = False
+        elif is_template_problem(exc):
+            self.cache[(self.club_id, self.template)] = None
 
 
 async def routing_account(session, club_id: Optional[int]) -> Optional[ClubWhatsAppAccounts]:
@@ -596,8 +611,25 @@ async def approved_language(session, account_id: int, name: str) -> Optional[str
     return sorted(rows)[0]
 
 
-async def route_for(session, club_id: Optional[int], template: str) -> Optional[Route]:
-    """The club's own number for this template, or None for the platform's."""
+async def route_for(session, club_id: Optional[int], template: str, *, cache: Optional[dict] = None) -> Optional[Route]:
+    """The club's own number for this template, or None for the platform's.
+    `cache` is a send's own ((club, template) -> Route or None), so a
+    thousand guests decide it once; a refusal from the club's number takes
+    the answer back (Route.forget)."""
+    if cache is not None:
+        if cache.get((club_id, None)) is False:
+            return None
+        if (club_id, template) in cache:
+            return cache[(club_id, template)]
+    route = await _route_for(session, club_id, template)
+    if route is not None:
+        route.cache = cache
+    if cache is not None:
+        cache[(club_id, template)] = route
+    return route
+
+
+async def _route_for(session, club_id: Optional[int], template: str) -> Optional[Route]:
     account = await routing_account(session, club_id)
     if account is None or not await plan_allows(session, club_id):
         return None
@@ -622,15 +654,26 @@ def is_template_problem(exc: Exception) -> bool:
     return isinstance(exc, whatsapp.Refused) and (exc.code or "") in TEMPLATE_CODES
 
 
+def is_club_only(exc: Exception) -> bool:
+    """A refusal only a send from the club's own number meets -- the guest
+    isn't on the test list of a club account that isn't live yet (131030),
+    or the guest's number is the club's own (131021) -- which says nothing
+    of the guest's number: it is not marked, and the platform's may send."""
+    return isinstance(exc, whatsapp.Undeliverable) and (exc.code or "") in CLUB_ONLY_CODES
+
+
 def falls_back(exc: Exception) -> bool:
     """A refusal from the club's number that the platform's may not have."""
-    return is_account_problem(exc) or is_template_problem(exc)
+    return is_account_problem(exc) or is_template_problem(exc) or is_club_only(exc)
 
 
 async def after_failure(session, route: Route, exc: Exception) -> None:
     """What a refused send from the club's number says about it: the account
     failed (and the club told), or that template unusable until Meta says
-    otherwise. Either way the caller sends from the platform's number."""
+    otherwise; nothing for a refusal only the club's number meets. Either
+    way the caller sends from the platform's number."""
+    if is_club_only(exc):
+        return
     account = await session.get(ClubWhatsAppAccounts, route.account_id)
     if account is None:
         return

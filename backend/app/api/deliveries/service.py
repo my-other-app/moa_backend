@@ -386,15 +386,36 @@ async def _send_whatsapp(db: pipeline.Db, ready: "_Ready") -> tuple[dict, int]:
     return await _whatsapp_send(db, ready, message, (doc.content, doc.filename)), doc.design_version
 
 
+async def _note(db: pipeline.Db, delivery_id, what: str, write) -> None:
+    """`write(session)` in a transaction of its own, which nothing that goes
+    wrong in it -- opening it, the write, the commit -- can turn into the
+    send's outcome: a message Meta took must be recorded as sent, or
+    "retry failed" sends the guest a second copy. The write is in a
+    SAVEPOINT (flushed as it ends), so a bad row is undone there and a
+    shared session (deliver()'s) is left as it was."""
+    try:
+        async with db.tx() as s:
+            try:
+                async with s.begin_nested():
+                    await write(s)
+            except Exception as failure:  # noqa: BLE001 - the send matters more than the note
+                logger.warning("delivery %s: %s (%s)", delivery_id, what, type(failure).__name__)
+    except Exception as failure:  # noqa: BLE001 - nor can opening or committing its transaction
+        logger.warning("delivery %s: %s (%s)", delivery_id, what, type(failure).__name__)
+
+
 async def _whatsapp_send(db: pipeline.Db, ready: "_Ready", message: whatsapp.Template, document) -> dict:
     """From the club's own number when `ready.route` names it, else the
     platform's. A refusal from the club's number about its account or its
-    template marks that (the club is told) and the send goes from the
-    platform's number when there is one; any other refusal is the send's."""
+    template marks that (the club is told), and so does one only the club's
+    number meets (its test list, the guest being that number); the send then
+    goes from the platform's number when there is one -- held back first, as
+    any platform send, when the club's plan has no room for it. Any other
+    refusal is the send's."""
     from app.api.club_whatsapp import inbox as club_inbox
     from app.api.club_whatsapp import service as club_whatsapp
 
-    route, reg = ready.route, ready.reg
+    route, reg, delivery_id, kind = ready.route, ready.reg, ready.d.id, ready.d.kind.value
     if route is None:
         return await whatsapp.send(reg.phone, message, document=document)
     try:
@@ -402,25 +423,29 @@ async def _whatsapp_send(db: pipeline.Db, ready: "_Ready", message: whatsapp.Tem
     except whatsapp.WhatsAppError as exc:
         if not club_whatsapp.falls_back(exc):
             raise
-        async with db.tx() as s:
-            try:
-                async with s.begin_nested():
-                    await club_whatsapp.after_failure(s, route, exc)
-            except Exception as failure:  # noqa: BLE001 - the send matters more than the note
-                logger.warning("delivery %s: the club's number's failure could not be noted (%s)", ready.d.id, type(failure).__name__)
+        route.forget(exc)
+        await _note(db, delivery_id, "the club's number's failure could not be noted",
+                    lambda s: club_whatsapp.after_failure(s, route, exc))
         if not whatsapp.configured():
             raise
-        logger.info("delivery %s: the club's own number refused it (%s); sent from the platform's", ready.d.id, exc.code)
-        return await whatsapp.send(reg.phone, message, document=document)
-    # In the club's inbox, as what its number sent that person.
-    async with db.tx() as s:
-        try:
-            async with s.begin_nested():
-                await club_inbox.record_delivery_send(
-                    s, route, out.get("Address") or "", message, out.get("MessageId"), delivery_id=ready.d.id, kind=ready.d.kind.value,
+        if ready.quota_kind is not None and ready.event is not None:
+            # Counted as the platform's now: the club's plan decides, as for any club.
+            async with db.tx() as s:
+                ready.terms, held = await quota.check(
+                    s, ready.event.club_id, ready.d.channel.value, ready.quota_kind, via=quota.PLATFORM, terms=ready.terms,
                 )
-        except Exception as failure:  # noqa: BLE001 - it went; the inbox line is a courtesy
-            logger.warning("delivery %s: not added to the club's inbox (%s)", ready.d.id, type(failure).__name__)
+            if held:
+                raise whatsapp.Undeliverable(held)
+        logger.info("delivery %s: the club's own number refused it (%s); sent from the platform's", delivery_id, exc.code)
+        return await whatsapp.send(reg.phone, message, document=document)
+
+    async def note_it(s) -> None:
+        await club_inbox.record_delivery_send(
+            s, route, out.get("Address") or "", message, out.get("MessageId"), delivery_id=delivery_id, kind=kind,
+        )
+
+    # In the club's inbox, as what its number sent that person.
+    await _note(db, delivery_id, "not added to the club's inbox", note_it)
     return out
 
 
@@ -464,6 +489,9 @@ class _Run:
     assets: dict = field(default_factory=dict)
     # Each club's message terms (app/api/message_quota), read once a job.
     terms: dict = field(default_factory=dict)
+    # Which number each club's template goes from (club_whatsapp.route_for),
+    # decided once a job and forgotten when the club's number refuses one.
+    routes: dict = field(default_factory=dict)
 
 
 def _claim_stmt(where: list, n: int, at: datetime):
@@ -542,7 +570,7 @@ async def _read(db: pipeline.Db, c: _Claim, run: _Run) -> Optional[_Ready]:
             from app.api.club_whatsapp import service as club_whatsapp
 
             template = TEMPLATE_OF.get(d.kind)
-            ready.route = await club_whatsapp.route_for(s, event.club_id, template) if template else None
+            ready.route = await club_whatsapp.route_for(s, event.club_id, template, cache=run.routes) if template else None
             missing = None
             if ready.route is None and not whatsapp.configured() and template and await club_whatsapp.can_route(s, event.club_id):
                 missing = f"your WhatsApp number has no approved {template} template yet"

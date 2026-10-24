@@ -1081,6 +1081,108 @@ async def test_a_missing_template_falls_back_without_failing_the_number(client, 
     assert row.status == "UNUSABLE"
 
 
+async def test_a_note_that_cannot_be_written_never_makes_a_sent_ticket_failed(client, session, world, meta, platform_number, monkeypatch):
+    """The inbox's line, and the failure's note, are written after Meta took
+    (or refused) the send: a commit of either that fails must leave the
+    send as it was, or "retry failed" would send the guest a second copy."""
+    from app.api.club_whatsapp import inbox as club_inbox
+
+    await connected(client, session, world)
+
+    async def bad_row(s, *args, **kwargs):
+        # A row that fails only when it is flushed, after the note's own code is done.
+        s.add(ClubWhatsAppMessages(conversation_id=987654321, club_id=world.club.id, direction="out", type="template", status="sent"))
+
+    async def failing_commit(s, *args, **kwargs):
+        # The note's transaction cannot commit (the database went away).
+        real = s.commit
+
+        async def commit():
+            s.commit = real
+            raise ConnectionResetError("the database closed the connection")
+
+        s.commit = commit
+
+    async def again(d):
+        row = await session.scalar(select(Deliveries).where(Deliveries.id == d.id))
+        row.status, row.queued_at = DeliveryStatus.pending, datetime.now(timezone.utc)
+        await session.commit()
+        return await deliveries.deliver(session, d.id)
+
+    monkeypatch.setattr(club_inbox, "record_delivery_send", bad_row)
+    d = await _reminder(session, world)
+    assert d.status == DeliveryStatus.sent and d.provider_id == "wamid.CLUB1" and d.error is None
+    monkeypatch.setattr(club_inbox, "record_delivery_send", failing_commit)
+    d = await again(d)
+    assert d.status == DeliveryStatus.sent and d.provider_id == "wamid.CLUB2" and d.error is None
+    # And the failure's own note, when the club's number refuses it.
+    monkeypatch.setattr(accounts, "after_failure", bad_row)
+    meta.club_answer = lambda body: httpx.Response(401, json={"error": {"code": 190, "message": "expired"}})
+    d = await again(d)
+    assert d.status == DeliveryStatus.sent and d.provider_id == "wamid.PLATFORM1"
+
+
+@pytest.mark.parametrize("code", [131030, 131021])
+async def test_a_refusal_only_the_clubs_number_meets_goes_from_the_platform_and_marks_nothing(
+        client, session, world, meta, platform_number, code):
+    await connected(client, session, world)
+    meta.club_answer = lambda body: httpx.Response(400, json={"error": {"code": code, "message": "Recipient phone number not in allowed list"}})
+    d = await _reminder(session, world)
+    assert d.status == DeliveryStatus.sent and d.provider_id == "wamid.PLATFORM1"
+    await session.refresh(world.reg)
+    assert world.reg.wa_bounced_at is None and world.reg.wa_bounce_reason is None
+    assert (await account_of(session, world.club.id)).status == "active"
+    row = await session.scalar(select(ClubWhatsAppTemplates).where(ClubWhatsAppTemplates.name == "event_reminder").execution_options(populate_existing=True))
+    assert row.status == "APPROVED"
+
+
+async def test_the_platforms_number_is_held_back_by_the_plan_before_a_fallback(client, session, world, meta, platform_number, monkeypatch):
+    """A reminder from the club's own number is never held back; the same
+    reminder falling back to the platform's is a platform send, and the
+    club's plan is asked first."""
+    from app.api.message_quota import service as message_quota
+
+    asked = []
+    real_check = message_quota.check
+
+    async def check(session, club_id, channel, kind, *, via="platform", **kwargs):
+        asked.append(via)
+        if via == "platform":
+            return None, "Not sent: this month's WhatsApp messages are used up."
+        return await real_check(session, club_id, channel, kind, via=via, **kwargs)
+
+    monkeypatch.setattr(message_quota, "check", check)
+    await connected(client, session, world)
+    meta.club_answer = lambda body: httpx.Response(401, json={"error": {"code": 190, "message": "expired"}})
+    d = await _reminder(session, world)
+    assert asked == ["club", "platform"]
+    assert d.status == DeliveryStatus.skipped and "used up" in d.error and meta.platform_sent == []
+
+
+async def test_a_send_decides_each_clubs_route_once_and_forgets_it_on_a_refusal(client, session, world, meta, monkeypatch):
+    await connected(client, session, world)
+    looked = []
+    real = accounts.routing_account
+
+    async def routing_account(session, club_id):
+        looked.append(club_id)
+        return await real(session, club_id)
+
+    monkeypatch.setattr(accounts, "routing_account", routing_account)
+    cache: dict = {}
+    first = await accounts.route_for(session, world.club.id, "event_reminder", cache=cache)
+    assert first is not None and await accounts.route_for(session, world.club.id, "event_reminder", cache=cache) is first
+    assert looked == [world.club.id]
+    # A template refusal forgets that template; an account refusal forgets the club.
+    first.forget(whatsapp.Refused("No approved template (132001)", "132001"))
+    assert await accounts.route_for(session, world.club.id, "event_reminder", cache=cache) is None
+    other = await accounts.route_for(session, world.club.id, "ticket_confirmed", cache=cache)
+    assert other is not None
+    other.forget(whatsapp.Refused("token expired (190)", "190"))
+    assert await accounts.route_for(session, world.club.id, "certificate_ready", cache=cache) is None
+    assert await accounts.route_for(session, world.club.id, "ticket_confirmed", cache=cache) is None
+
+
 async def test_a_template_the_club_lacks_goes_from_the_platform_or_says_why_not(client, session, world, meta, platform_number, monkeypatch):
     meta.templates = [t for t in meta.templates if t["name"] != "event_reminder"]
     await connected(client, session, world)
