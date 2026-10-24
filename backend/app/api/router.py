@@ -61,6 +61,9 @@ from app.api.ai.router import club_router as ai_club_router, event_router as ai_
 from app.api.badges.router import router as badges_router
 from app.api.audit.router import router as audit_router
 from app.api.admin_alerts.router import router as admin_alerts_router
+from app.api.club_alerts.router import router as club_alerts_router
+from app.api.message_quota.router import admin_router as message_quota_admin_router
+from app.api.message_quota.router import club_router as message_quota_club_router
 from app.api.health import admin_router as admin_jobs_router
 from app.api.backups.router import router as backups_router
 from app.api.subscriptions.router import (
@@ -116,6 +119,10 @@ api_router.include_router(router=payment_gateways_club_router)
 api_router.include_router(router=ai_club_router)
 api_router.include_router(router=ai_event_router)
 api_router.include_router(router=payment_gateways_admin_router)
+# Before club_router too: /clubs/alerts and /clubs/messages are literal paths.
+api_router.include_router(router=club_alerts_router)
+api_router.include_router(router=message_quota_club_router)
+api_router.include_router(router=message_quota_admin_router)
 api_router.include_router(router=store_router, tags=["store"])
 # Before club_router: /clubs/store would otherwise be read as /clubs/{club_id}.
 api_router.include_router(router=store_club_router, tags=["store"])
