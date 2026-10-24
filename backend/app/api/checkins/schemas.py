@@ -92,6 +92,10 @@ class TeamVolunteer(BaseModel):
     can_merch: bool
     door_id: Optional[UUID]
     check_ins: int = 0
+    # Their picture (reports.service.avatar): the photo they uploaded, else
+    # the avatar they picked. An image's links by size, or null -- always
+    # null for an invite nobody has accepted yet.
+    avatar: Optional[dict] = None
 
 
 class TeamOut(BaseModel):
