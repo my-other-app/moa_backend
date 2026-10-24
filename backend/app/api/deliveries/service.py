@@ -603,6 +603,11 @@ async def _read(db: pipeline.Db, c: _Claim, run: _Run) -> Optional[_Ready]:
             if ready.route is None and not whatsapp.configured() and template and await club_whatsapp.can_route(s, event.club_id):
                 missing = f"your WhatsApp number has no approved {template} template yet"
             ready.skip = whatsapp_skip(reg, own=ready.route is not None, own_missing=missing)
+            if ready.skip is None:
+                from app.api.club_whatsapp import optout
+
+                # They wrote STOP to the club: not on WhatsApp, from its number or the platform's.
+                ready.skip = await optout.delivery_skip(s, event.club_id, ready.org_name, reg.phone)
         elif d.kind is DeliveryKind.reminder:
             ready.skip = "the reminder goes by WhatsApp only"
         elif not reg.email:
