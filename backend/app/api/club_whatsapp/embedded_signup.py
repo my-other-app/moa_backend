@@ -303,8 +303,8 @@ async def connect(session, club, user, finish: Finish, *, member=None, request=N
     # 6. Its quality now; its templates below.
     await accounts.record_quality(session, account, number, "connect")
     if not subscribed and account.last_error is None:
-        account.last_error = ("Meta didn't let MyOtherApp subscribe to your WhatsApp account's messages. "
-                              "Click Check again, or connect with Meta again.")
+        account.last_error = ("Meta didn't let MyOtherApp subscribe to your WhatsApp account's messages, so none will "
+                              "reach your inbox. Connect with Meta again.")
     await audit.record(
         session, actor=user, action="club_whatsapp.keys_changed" if changed else "club_whatsapp.connect",
         entity_type="club", entity_id=club.id,
