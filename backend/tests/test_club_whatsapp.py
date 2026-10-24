@@ -730,6 +730,73 @@ async def test_every_kind_of_message_is_kept_as_what_it_is(client, session, worl
     assert image["media"]["url"] == f"/api/v1/clubs/whatsapp/media/{rows['wamid.IMG'].id}"
 
 
+BSUID = "IN.13491208655302741918"
+NEW_BSUID = "IN.88812208655302741000"
+
+
+def by_bsuid(wamid: str, body: str, *, bsuid: str = BSUID, wa: str | None = None, username: str | None = "sheena.n",
+             name: str = "Sheena") -> dict:
+    """A message as Meta sends it since April 2026: the BSUID always, the
+    number only when it may be shared."""
+    message = {"from_user_id": bsuid, "id": wamid, "timestamp": str(int(datetime.now(timezone.utc).timestamp())), "type": "text",
+               "text": {"body": body}}
+    contact = {"profile": {"name": name, **({"username": username} if username else {})}, "user_id": bsuid}
+    if wa:
+        message["from"], contact["wa_id"] = wa, wa
+    value = {"messaging_product": "whatsapp", "metadata": {"display_phone_number": "919847012345", "phone_number_id": PHONE},
+             "contacts": [contact], "messages": [message]}
+    return {"object": "whatsapp_business_account", "entry": [{"id": WABA, "changes": [{"field": "messages", "value": value}]}]}
+
+
+async def test_someone_with_a_username_is_kept_and_answered_by_their_bsuid(client, session, world, meta):
+    account = await connected(client, session, world)
+    r = await hook(client, account.webhook_token, by_bsuid("wamid.U1", "Is it free?"))
+    assert r.status_code == 200 and r.json()["messages"] == 1
+    conv = await session.scalar(select(ClubWhatsAppConversations).execution_options(populate_existing=True))
+    assert conv.wa_id is None and conv.bsuid == BSUID and conv.username == "sheena.n" and conv.unread_count == 1
+    item = (await client.get(f"{API}/clubs/whatsapp/conversations", headers=world.h)).json()["items"][0]
+    assert item["wa_id"] is None and item["phone"] is None and item["bsuid"] == BSUID and item["username"] == "sheena.n"
+    assert item["contact"]["bsuid"] == BSUID and item["contact"]["wa_id"] is None and item["contact"]["username"] == "sheena.n"
+    assert (await client.get(f"{API}/clubs/whatsapp/conversations", params={"q": "sheena.n"}, headers=world.h)).json()["total"] == 1
+    r = await client.post(f"{API}/clubs/whatsapp/conversations/{conv.id}/messages", json={"type": "text", "text": "Yes."}, headers=world.h)
+    assert r.status_code == 200 and r.json()["status"] == "sent"
+    # Meta's `recipient`, and no `to`: there is no number to send to.
+    assert meta.club_sent[-1]["recipient"] == BSUID and "to" not in meta.club_sent[-1]
+    # When Meta later shares their number, the same conversation takes it (and is linked by it).
+    await hook(client, account.webhook_token, by_bsuid("wamid.U2", "It's Ananya, actually", wa=GUEST))
+    convs = (await session.scalars(select(ClubWhatsAppConversations).execution_options(populate_existing=True))).all()
+    assert len(convs) == 1 and convs[0].wa_id == GUEST and convs[0].bsuid == BSUID and convs[0].unread_count == 1
+    assert convs[0].registration_id == world.reg.id
+    r = await client.post(f"{API}/clubs/whatsapp/conversations/{conv.id}/messages", json={"type": "text", "text": "Hi!"}, headers=world.h)
+    assert meta.club_sent[-1]["to"] == GUEST and "recipient" not in meta.club_sent[-1]
+
+
+async def test_a_changed_number_or_bsuid_carries_the_conversation_on(client, session, world, meta):
+    account = await connected(client, session, world)
+    await hook(client, account.webhook_token, by_bsuid("wamid.C1", "hello", wa=GUEST))
+    conv = await session.scalar(select(ClubWhatsAppConversations).execution_options(populate_existing=True))
+    ts = str(int(datetime.now(timezone.utc).timestamp()))
+    changed = {"from": GUEST, "id": "wamid.SYS1", "timestamp": ts, "type": "system", "system": {
+        "body": "User A changed from +91 98765 43210 to +91 90000 00088", "wa_id": "919000000088", "user_id": NEW_BSUID,
+        "previous_user_id": BSUID, "type": "user_changed_number"}}
+    await hook(client, account.webhook_token, inbound(changed))
+    conv = await session.get(ClubWhatsAppConversations, conv.id, populate_existing=True)
+    assert conv.wa_id == "919000000088" and conv.bsuid == NEW_BSUID and conv.unread_count == 1
+    # Their next message, from the new number, carries on the same thread.
+    await hook(client, account.webhook_token, by_bsuid("wamid.C2", "new phone", wa="919000000088", bsuid=NEW_BSUID))
+    # And a BSUID-only change.
+    only = {"id": "wamid.SYS2", "timestamp": ts, "type": "system", "system": {
+        "body": f"User changed from {NEW_BSUID} to IN.777", "user_id": "IN.7770001", "previous_user_id": NEW_BSUID,
+        "type": "user_changed_user_id"}}
+    value = {"messaging_product": "whatsapp", "metadata": {"phone_number_id": PHONE}, "messages": [only]}
+    await hook(client, account.webhook_token, {"object": "whatsapp_business_account",
+                                               "entry": [{"id": WABA, "changes": [{"field": "messages", "value": value}]}]})
+    convs = (await session.scalars(select(ClubWhatsAppConversations).execution_options(populate_existing=True))).all()
+    assert len(convs) == 1 and convs[0].bsuid == "IN.7770001" and convs[0].unread_count == 2
+    kinds = [m.type for m in (await session.scalars(select(ClubWhatsAppMessages).order_by(ClubWhatsAppMessages.id))).all()]
+    assert kinds == ["text", "system", "text", "system"]
+
+
 async def test_a_message_on_another_number_of_the_same_app_is_not_this_clubs(client, session, world, meta):
     account = await connected(client, session, world)
     await hook(client, account.webhook_token, inbound(text_msg("wamid.OTHER", "hi"), phone_id="199999999999999"))
@@ -1016,7 +1083,7 @@ async def test_a_reply_leaves_a_message_that_came_meanwhile_waiting(client, sess
 
     async def send(keys, body):
         # They write again while the reply is on its way to Meta.
-        await inbox.record_inbound(session, account, PHONE, text_msg("wamid.MEANWHILE", "also, food?", at=meanwhile), "Ananya")
+        await inbox.record_inbound(session, account, PHONE, text_msg("wamid.MEANWHILE", "also, food?", at=meanwhile), {"name": "Ananya"})
         return await real_send(keys, body)
 
     monkeypatch.setattr(graph, "send", send)

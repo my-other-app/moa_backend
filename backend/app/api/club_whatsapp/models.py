@@ -201,10 +201,15 @@ class ClubWhatsAppConversations(AbstractSQLModel, TimestampsMixin):
     account_id = Column(Integer, ForeignKey("club_whatsapp_accounts.id", ondelete="SET NULL"), nullable=True)
     #: The business number's id at Meta: the 24-hour window is per number.
     business_phone_id = Column(String(32), nullable=False)
-    #: The person's WhatsApp id: their number in digits, with its country code.
-    wa_id = Column(String(20), nullable=False)
-    #: The name on their WhatsApp profile, as Meta passes it on.
+    #: The person's WhatsApp id: their number in digits, with its country
+    #: code. Null for someone with a username whose number Meta doesn't share.
+    wa_id = Column(String(20), nullable=True)
+    #: Their business-scoped user id ("IN.1349..."), in every webhook since
+    #: April 2026; a reply goes to it (Meta's `recipient`) when there is no number.
+    bsuid = Column(String(160), nullable=True)
+    #: The name on their WhatsApp profile, and their username, as Meta passes them on.
     profile_name = Column(String(120), nullable=True)
+    username = Column(String(64), nullable=True)
     #: Who this number is to the club, when it matches a registration for one
     #: of its events (or the account behind one).
     user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
@@ -227,6 +232,8 @@ class ClubWhatsAppConversations(AbstractSQLModel, TimestampsMixin):
 
     __table_args__ = (
         UniqueConstraint("club_id", "business_phone_id", "wa_id", name="uq_club_whatsapp_conversations_contact"),
+        UniqueConstraint("club_id", "business_phone_id", "bsuid", name="uq_club_whatsapp_conversations_bsuid"),
+        CheckConstraint("wa_id IS NOT NULL OR bsuid IS NOT NULL", name="ck_club_whatsapp_conversations_who"),
         CheckConstraint("status IN ('open', 'closed')", name="ck_club_whatsapp_conversations_status"),
         # The inbox's list: a club's conversations, latest first.
         Index("ix_club_whatsapp_conversations_club_last", "club_id", "last_message_at"),

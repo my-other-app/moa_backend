@@ -25,6 +25,7 @@ from typing import Optional
 
 from sqlalchemy import and_, case, func, literal, or_, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.orm import aliased
 
 from app.api.club_whatsapp import graph, live, quota, templates
 from app.api.club_whatsapp import service as accounts
@@ -107,8 +108,20 @@ def wa_of(raw: Optional[str]) -> Optional[str]:
     return number.lstrip("+") if number else None
 
 
-def display(wa_id: str) -> str:
-    return f"+{wa_id}"
+def display(wa_id: Optional[str]) -> Optional[str]:
+    return f"+{wa_id}" if wa_id else None
+
+
+#: Meta's business-scoped user id: a country code, a period, then up to 128
+#: letters and digits ("IN.13491208655302741918"); a parent one has "ENT."
+#: after the country.
+BSUID = re.compile(r"^[A-Z]{2}\.(?:ENT\.)?[A-Za-z0-9]{1,128}$")
+
+
+def _digits(raw) -> Optional[str]:
+    """A WhatsApp id (the number in digits) as Meta writes it, or None."""
+    value = re.sub(r"\D", "", str(raw or ""))[:20]
+    return value or None
 
 
 def _digits_tail(column, n: int = 10):
@@ -179,7 +192,7 @@ async def contact_events(session, club_id: int, convs: list[ClubWhatsAppConversa
     out: dict[int, list[dict]] = {c.id: [] for c in convs}
     if not convs:
         return out
-    by_phone = await _registrations_for(session, club_id, [c.wa_id for c in convs])
+    by_phone = await _registrations_for(session, club_id, [c.wa_id for c in convs if c.wa_id])
     users = {c.user_id for c in convs if c.user_id}
     by_user = []
     if users:
@@ -192,7 +205,7 @@ async def contact_events(session, club_id: int, convs: list[ClubWhatsAppConversa
     for c in convs:
         seen = set()
         for row in [*by_phone, *by_user]:
-            mine = wa_of(row[3]) == c.wa_id or (c.user_id is not None and row[1] == c.user_id)
+            mine = (c.wa_id is not None and wa_of(row[3]) == c.wa_id) or (c.user_id is not None and row[1] == c.user_id)
             if not mine or row[5] in seen:
                 continue
             seen.add(row[5])
@@ -205,29 +218,114 @@ async def contact_events(session, club_id: int, convs: list[ClubWhatsAppConversa
 # ─── Conversations ───────────────────────────────────────────────────────
 
 
-async def conversation(session, club_id: int, business_phone_id: str, wa_id: str, *, account_id: Optional[int],
-                       profile_name: Optional[str] = None) -> int:
-    """The id of the conversation with this person on this number, made the
-    first time (one upsert, whatever runs beside it), its profile name and
-    connection kept current, linked when it is not yet. Its counters and
-    latest line are only ever changed by single UPDATEs (`_bump`), so
-    nothing here is read and written back."""
-    table = ClubWhatsAppConversations.__table__
-    now = _now()
-    insert = pg_insert(table).values(
-        club_id=club_id, business_phone_id=business_phone_id, wa_id=wa_id, account_id=account_id,
-        profile_name=(profile_name or None) and profile_name[:120], status=OPEN, unread_count=0, created_at=now, updated_at=now,
+def bsuid_of(raw) -> Optional[str]:
+    """A business-scoped user id as Meta gives it ("IN.13491208655302741918";
+    a parent one has ".ENT."), or None."""
+    value = str(raw or "").strip()
+    return value if BSUID.match(value) else None
+
+
+def recipient(conv: ClubWhatsAppConversations) -> dict:
+    """Who a send goes to: the phone number when the club has it (Meta's
+    `to`, which wins when both are given), else the person's BSUID (Meta's
+    `recipient`, for someone with a username whose number isn't shared)."""
+    if conv.wa_id:
+        return {"to": conv.wa_id}
+    return {"recipient": conv.bsuid}
+
+
+async def conversation(session, club_id: int, business_phone_id: str, wa_id: Optional[str] = None, *,
+                       bsuid: Optional[str] = None, account_id: Optional[int], profile_name: Optional[str] = None,
+                       username: Optional[str] = None) -> int:
+    """The id of the conversation with this person on this number: found by
+    their phone number or their BSUID (since April 2026 Meta may give only
+    the BSUID of someone with a username), made the first time -- an insert
+    that does nothing when another made it first -- and given whichever of
+    the two it lacked. Their profile name, username and the connection are
+    kept current; it is linked when it is not yet. Its counters and latest
+    line are only ever changed by single UPDATEs (`_bump`)."""
+    C = ClubWhatsAppConversations
+    if not wa_id and not bsuid:
+        raise ValueError("a conversation needs a phone number or a BSUID")
+    same = [C.club_id == club_id, C.business_phone_id == business_phone_id]
+    keys = [C.wa_id == wa_id] if wa_id else []
+    keys += [C.bsuid == bsuid] if bsuid else []
+    found = None
+    for _ in range(2):
+        rows = (await session.execute(select(C.id, C.wa_id, C.bsuid, C.linked_at).where(*same, or_(*keys)))).all()
+        if rows:
+            # Their number's conversation before one known by BSUID alone: the club has known it longer.
+            found = sorted(rows, key=lambda r: (not (wa_id and r[1] == wa_id), r[0]))[0]
+            break
+        now = _now()
+        table = C.__table__
+        made = (await session.execute(
+            pg_insert(table).values(
+                club_id=club_id, business_phone_id=business_phone_id, wa_id=wa_id, bsuid=bsuid, account_id=account_id,
+                profile_name=(profile_name or None) and profile_name[:120], username=(username or None) and username[:64],
+                status=OPEN, unread_count=0, created_at=now, updated_at=now,
+            ).on_conflict_do_nothing().returning(table.c.id, table.c.wa_id, table.c.bsuid, table.c.linked_at)
+        )).first()
+        if made is not None:
+            found = made
+            break
+    if found is None:
+        raise RuntimeError("the conversation could not be made or found")
+    conv_id, has_wa, has_bsuid, linked_at = found
+    values: dict = {
+        "profile_name": func.coalesce(literal((profile_name or None) and profile_name[:120], C.profile_name.type), C.profile_name),
+        "username": func.coalesce(literal((username or None) and username[:64], C.username.type), C.username),
+        "account_id": func.coalesce(literal(account_id, C.account_id.type), C.account_id),
+    }
+    await _bump(session, conv_id, **values)
+    if wa_id and has_wa is None:
+        await _claim(session, conv_id, club_id, business_phone_id, "wa_id", wa_id)
+    if bsuid and has_bsuid != bsuid:
+        await _claim(session, conv_id, club_id, business_phone_id, "bsuid", bsuid)
+    if linked_at is None:
+        await link(session, conv_id, club_id, wa_id or has_wa)
+    return conv_id
+
+
+async def _claim(session, conv_id: int, club_id: int, business_phone_id: str, field: str, value: str) -> None:
+    """Give the conversation this number or BSUID (`field`) -- unless another
+    of the club's conversations on that business number already holds it
+    (each is unique there)."""
+    C, other = ClubWhatsAppConversations, aliased(ClubWhatsAppConversations)
+    taken = select(other.id).where(
+        other.club_id == club_id, other.business_phone_id == business_phone_id, getattr(other, field) == value, other.id != conv_id,
+    ).exists()
+    await session.execute(
+        update(C).where(C.id == conv_id, ~taken).values({field: value}).execution_options(synchronize_session=False)
     )
-    row = (await session.execute(
-        insert.on_conflict_do_update(
-            constraint="uq_club_whatsapp_conversations_contact",
-            set_={"profile_name": func.coalesce(insert.excluded.profile_name, table.c.profile_name),
-                  "account_id": func.coalesce(insert.excluded.account_id, table.c.account_id)},
-        ).returning(table.c.id, table.c.linked_at)
-    )).one()
-    if row[1] is None:
-        await link(session, row[0], club_id, wa_id)
-    return row[0]
+
+
+async def changed_identity(session, account: ClubWhatsAppAccounts, business_phone_id: str, message: dict) -> Optional[int]:
+    """Meta's system message that someone changed their number (which gives
+    them a new BSUID: `user_changed_number`) or only their BSUID
+    (`user_changed_user_id`): their existing conversation -- found by the
+    old BSUID (`previous_user_id`) or the old number (`from`) -- takes the
+    new ones, so the thread carries on. None when nothing is known of them
+    by either."""
+    C = ClubWhatsAppConversations
+    system = message.get("system") if isinstance(message.get("system"), dict) else {}
+    old_wa = _digits(message.get("from"))
+    old_bsuid = bsuid_of(system.get("previous_user_id"))
+    new_wa = _digits(system.get("wa_id") or system.get("new_wa_id"))
+    new_bsuid = bsuid_of(system.get("user_id"))
+    keys = ([C.bsuid == old_bsuid] if old_bsuid else []) + ([C.wa_id == old_wa] if old_wa else [])
+    same = [C.club_id == account.club_id, C.business_phone_id == business_phone_id]
+    conv_id = await session.scalar(select(C.id).where(*same, or_(*keys)).order_by(C.id).limit(1)) if keys else None
+    if conv_id is None:
+        if not (new_wa or new_bsuid or old_wa or old_bsuid):
+            return None
+        return await conversation(session, account.club_id, business_phone_id, new_wa or old_wa, bsuid=new_bsuid or old_bsuid,
+                                  account_id=account.id)
+    if new_wa and new_wa != old_wa:
+        await _claim(session, conv_id, account.club_id, business_phone_id, "wa_id", new_wa)
+    if new_bsuid:
+        await _claim(session, conv_id, account.club_id, business_phone_id, "bsuid", new_bsuid)
+    return conv_id
 
 
 async def _bump(session, conv_id: int, **values) -> None:
@@ -299,7 +397,7 @@ async def list_conversations(session, club_id: int, *, filter: str = "all", q: O
     if term:
         like = f"%{term}%"
         digits = re.sub(r"\D", "", term)
-        options = [C.profile_name.ilike(like), C.contact_name.ilike(like)]
+        options = [C.profile_name.ilike(like), C.contact_name.ilike(like), C.username.ilike(like)]
         if len(digits) >= 3:
             options.append(C.wa_id.like(f"%{digits}%"))
         where.append(or_(*options))
@@ -314,11 +412,17 @@ def conversation_out(conv: ClubWhatsAppConversations, events: list[dict], now: O
     now = now or _now()
     return {
         "id": conv.id,
+        # Null for someone Meta knows the club by BSUID alone (a username, their number not shared).
         "wa_id": conv.wa_id,
+        "bsuid": conv.bsuid,
+        "username": conv.username,
         "phone": display(conv.wa_id),
         "profile_name": conv.profile_name,
         "contact": {
             "name": conv.contact_name,
+            "wa_id": conv.wa_id,
+            "bsuid": conv.bsuid,
+            "username": conv.username,
             "user_id": conv.user_id,
             "registration_id": conv.registration_id,
             "events": events,
@@ -455,28 +559,45 @@ def parse_inbound(m: dict) -> dict:
     elif kind == "contacts":
         names = [((c or {}).get("name") or {}).get("formatted_name") for c in (m.get("contacts") or [])]
         out["body"] = ", ".join(n for n in names if n) or None
+    elif kind == "system":
+        out["body"] = part.get("body")
     if out["body"] is not None:
         out["body"] = str(out["body"])[:TEXT_MAX]
     return out
 
 
 async def record_inbound(session, account: ClubWhatsAppAccounts, business_phone_id: str, message: dict,
-                         profile_name: Optional[str]) -> Optional[int]:
+                         contact: Optional[dict] = None) -> Optional[int]:
     """One message someone sent the club's number: kept once (Meta may send
     it again: the insert does nothing on a wamid already kept), the window
     opened, counted unread and waiting for a reply -- in one UPDATE of the
     conversation, so two messages at once both count. A reaction, a system
     notice or a message WhatsApp can't show is kept but neither unread nor
     waiting; a system notice (not something the person wrote) doesn't open
-    the window either. The conversation's id, or None when nothing was kept."""
-    wa_id = re.sub(r"\D", "", str(message.get("from") or ""))[:20]
+    the window either. The person is their number (`from`), or -- since
+    April 2026, for someone with a username whose number Meta doesn't share
+    -- only their BSUID (`from_user_id`); `contact` is their entry in the
+    webhook's `contacts` (name, username, wa_id, user_id). A system notice
+    that they changed their number or BSUID moves their conversation to the
+    new ones. The conversation's id, or None when nothing was kept."""
+    contact = contact or {}
+    wa_id = _digits(message.get("from") or contact.get("wa_id"))
+    bsuid = bsuid_of(message.get("from_user_id") or contact.get("user_id"))
     wamid = str(message.get("id") or "")[:128]
-    if not wa_id or not wamid:
+    system = str(message.get("type") or "") == "system"
+    # A system notice names them in its own body (changed_identity).
+    if not wamid or not (wa_id or bsuid or system):
         return None
     if await session.scalar(select(ClubWhatsAppMessages.id).where(ClubWhatsAppMessages.wamid == wamid)) is not None:
         return None
     at = _ts(message.get("timestamp")) or _now()
-    conv_id = await conversation(session, account.club_id, business_phone_id, wa_id, account_id=account.id, profile_name=profile_name)
+    if system:
+        conv_id = await changed_identity(session, account, business_phone_id, message)
+        if conv_id is None:
+            return None
+    else:
+        conv_id = await conversation(session, account.club_id, business_phone_id, wa_id, bsuid=bsuid, account_id=account.id,
+                                     profile_name=contact.get("name"), username=contact.get("username"))
     fields = dict(conversation_id=conv_id, club_id=account.club_id, direction=IN, status=RECEIVED, wamid=wamid,
                   wa_timestamp=at, created_at=_now(), **parse_inbound(message))
     table = ClubWhatsAppMessages.__table__
@@ -658,7 +779,7 @@ async def send_text(session, club_id: int, conv: ClubWhatsAppConversations, text
         )
     if conv.business_phone_id != account.phone_number_id:
         raise _refuse(409, "This conversation was on another of your numbers.", "OTHER_NUMBER")
-    body = {"messaging_product": "whatsapp", "recipient_type": "individual", "to": conv.wa_id, "type": "text",
+    body = {"messaging_product": "whatsapp", "recipient_type": "individual", **recipient(conv), "type": "text",
             "text": {"preview_url": False, "body": text}}
     row = ClubWhatsAppMessages(
         conversation_id=conv.id, club_id=club_id, direction=OUT, type="text", body=text, status=PENDING, via=VIA_INBOX,
@@ -679,7 +800,7 @@ async def send_template(session, club_id: int, conv: ClubWhatsAppConversations, 
                       "TEMPLATE_NOT_APPROVED")
     definition = templates.shape(row_t.components or [])
     components, kept = templates.send_components(definition, params or {})
-    body = {"messaging_product": "whatsapp", "recipient_type": "individual", "to": conv.wa_id, "type": "template",
+    body = {"messaging_product": "whatsapp", "recipient_type": "individual", **recipient(conv), "type": "template",
             "template": {"name": row_t.name, "language": {"code": row_t.language}, "components": components}}
     row = ClubWhatsAppMessages(
         conversation_id=conv.id, club_id=club_id, direction=OUT, type="template", body=templates.render(definition, kept)[:TEXT_MAX],

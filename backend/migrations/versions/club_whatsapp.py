@@ -145,8 +145,10 @@ def upgrade() -> None:
         sa.Column("club_id", sa.Integer(), sa.ForeignKey("clubs.id", ondelete="CASCADE"), nullable=False),
         sa.Column("account_id", sa.Integer(), sa.ForeignKey("club_whatsapp_accounts.id", ondelete="SET NULL"), nullable=True),
         sa.Column("business_phone_id", sa.String(32), nullable=False),
-        sa.Column("wa_id", sa.String(20), nullable=False),
+        sa.Column("wa_id", sa.String(20), nullable=True),
+        sa.Column("bsuid", sa.String(160), nullable=True),
         sa.Column("profile_name", sa.String(120), nullable=True),
+        sa.Column("username", sa.String(64), nullable=True),
         sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
         sa.Column("registration_id", UUID(as_uuid=True), sa.ForeignKey("event_registrations_link.id", ondelete="SET NULL"), nullable=True),
         sa.Column("contact_name", sa.String(120), nullable=True),
@@ -163,6 +165,8 @@ def upgrade() -> None:
         sa.Column("awaiting_since", sa.DateTime(timezone=True), nullable=True),
         *_stamps(),
         sa.UniqueConstraint("club_id", "business_phone_id", "wa_id", name="uq_club_whatsapp_conversations_contact"),
+        sa.UniqueConstraint("club_id", "business_phone_id", "bsuid", name="uq_club_whatsapp_conversations_bsuid"),
+        sa.CheckConstraint("wa_id IS NOT NULL OR bsuid IS NOT NULL", name="ck_club_whatsapp_conversations_who"),
         sa.CheckConstraint("status IN ('open', 'closed')", name="ck_club_whatsapp_conversations_status"),
     )
     op.create_index("ix_club_whatsapp_conversations_club_last", "club_whatsapp_conversations", ["club_id", "last_message_at"])

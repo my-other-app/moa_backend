@@ -102,16 +102,24 @@ async def _messages(session, account, value: dict, touched: dict, counts: dict) 
     if number and number != account.phone_number_id:
         return
     _errors_said(account, "messages", value.get("errors"))
-    names = {}
+    # Who each message is from, by number or -- for someone whose number Meta doesn't share -- by BSUID.
+    contacts: dict = {}
     for c in value.get("contacts") or []:
-        if isinstance(c, dict) and c.get("wa_id"):
-            names[str(c["wa_id"])] = ((c.get("profile") or {}).get("name") or None)
+        if not isinstance(c, dict):
+            continue
+        profile = c.get("profile") if isinstance(c.get("profile"), dict) else {}
+        seen = {"name": profile.get("name") or None, "username": profile.get("username") or None,
+                "wa_id": c.get("wa_id") or None, "user_id": c.get("user_id") or None}
+        for key in (seen["wa_id"], seen["user_id"]):
+            if key:
+                contacts[str(key)] = seen
     for m in value.get("messages") or []:
         if not isinstance(m, dict):
             continue
+        contact = contacts.get(str(m.get("from") or "")) or contacts.get(str(m.get("from_user_id") or ""))
         try:
             async with session.begin_nested():
-                conv_id = await inbox.record_inbound(session, account, account.phone_number_id, m, names.get(str(m.get("from") or "")))
+                conv_id = await inbox.record_inbound(session, account, account.phone_number_id, m, contact)
         except Exception as exc:  # noqa: BLE001 - never the message in the log
             counts["failed"] += 1
             logger.warning("club whatsapp account %s: a message could not be kept (%s)", account.id, type(exc).__name__)

@@ -107,6 +107,12 @@ class ContactEvent(CustomBaseModel):
 
 class ContactOut(CustomBaseModel):
     name: Optional[str] = None
+    #: Their number in digits; null when Meta gives only their BSUID.
+    wa_id: Optional[str] = None
+    #: Meta's business-scoped user id ("IN.1349..."), which every webhook carries.
+    bsuid: Optional[str] = None
+    #: Their WhatsApp username, when they have one.
+    username: Optional[str] = None
     user_id: Optional[int] = None
     registration_id: Optional[UUID] = None
     events: list[ContactEvent] = Field(default_factory=list)
@@ -122,8 +128,13 @@ class LastMessage(CustomBaseModel):
 
 class ConversationOut(CustomBaseModel):
     id: int
-    wa_id: str
-    phone: str
+    #: Their number in digits; null for someone with a username whose
+    #: number Meta doesn't share (then `bsuid`, and `username`, say who).
+    wa_id: Optional[str] = None
+    bsuid: Optional[str] = None
+    username: Optional[str] = None
+    #: "+<wa_id>", or null with it.
+    phone: Optional[str] = None
     profile_name: Optional[str] = None
     contact: ContactOut
     #: open | closed
