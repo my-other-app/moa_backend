@@ -8,7 +8,7 @@ from app.api.users.models import UserProfiles, Users
 from app.response import CustomHTTPException
 from app.api.events.models import EventRegistrationsLink, Events
 from app.api.clubs.models import Clubs
-from app.core.notifications.triggers import notify_user_check_in, notify_user_added_as_volunteer
+from app.core.notifications.triggers import notify_user_added_as_volunteer
 
 
 async def _assert_club_owns_target(

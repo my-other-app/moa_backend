@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# docker compose for the MyOtherApp stack, with the settings (.env) and the
+# pinned images (images.env) both loaded. Use it for anything by hand:
+#
+#   sudo /srv/moa/dc ps
+#   sudo /srv/moa/dc logs -f --tail 100 backend
+#   sudo /srv/moa/dc exec -T backend alembic current
+#   sudo /srv/moa/dc exec postgres psql -U "$POSTGRES_USER"   (interactive)
+#
+# Deploys and recreates go through deploy.sh, which checks health and rolls
+# back. A bare `docker compose up` would start each app's :latest image.
+set -euo pipefail
+here="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+[ -f "$here/images.env" ] || : > "$here/images.env"
+exec docker compose --project-directory "$here" -f "$here/compose.yml" \
+  --env-file "$here/.env" --env-file "$here/images.env" "$@"

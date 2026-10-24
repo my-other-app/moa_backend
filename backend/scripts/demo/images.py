@@ -152,11 +152,6 @@ def caps(brand: Brand, text: str) -> str:
     return text.upper() if brand.display_font == "bebas" else text
 
 
-def text_size(draw: ImageDraw.ImageDraw, text: str, f) -> tuple[int, int]:
-    box = draw.textbbox((0, 0), text, font=f)
-    return box[2] - box[0], box[3] - box[1]
-
-
 def wrap(draw, text: str, f, width: int) -> list[str]:
     lines, line = [], ""
     for word in text.split():
@@ -191,10 +186,6 @@ def tracked(draw, xy, text: str, f, fill, tracking: float = 0.0):
         draw.text((x, y), ch, font=f, fill=fill)
         x += draw.textlength(ch, font=f) + tracking * em
     return x - xy[0] - (tracking * em if text else 0)
-
-
-def tracked_width(draw, text: str, f, tracking: float = 0.0) -> float:
-    return sum(draw.textlength(ch, font=f) for ch in text) + tracking * f.size * max(0, len(text) - 1)
 
 
 def initials(name: str, most: int = 2) -> str:
@@ -260,12 +251,6 @@ def paste_layer(base: Image.Image, layer: Image.Image, opacity: float = 1.0, xy=
         layer = layer.copy()
         layer.putalpha(alpha)
     base.alpha_composite(layer, dest=xy)
-
-
-def rounded_mask(size, radius) -> Image.Image:
-    m = Image.new("L", size, 0)
-    ImageDraw.Draw(m).rounded_rectangle((0, 0, size[0] - 1, size[1] - 1), radius=radius, fill=255)
-    return m
 
 
 def shadow(size, box, radius, blur, alpha=90, offset=(0, 0), colour=(0, 0, 0)) -> Image.Image:

@@ -958,11 +958,6 @@ async def _run_message(message_id, session=None) -> Optional[Messages]:
     return await finish_message(db, message_id)
 
 
-async def process_message(session, message_id) -> Optional[Messages]:
-    """Send what is left of a message now, on the caller's session."""
-    return await _run_message(message_id, session=session)
-
-
 async def run_message(message_id) -> None:
     """The background entry point for one message. A message already being
     sent in this process is waited for, not sent again."""

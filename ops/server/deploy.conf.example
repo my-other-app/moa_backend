@@ -1,0 +1,13 @@
+# /srv/moa/deploy.conf (optional): deploy.sh's own settings, KEY=value.
+# Nothing here is secret, and nothing in it is run as shell.
+
+# Where the images are (CI pushes to ghcr.io/my-other-app/moa-<app>).
+MOA_REGISTRY=ghcr.io/my-other-app
+
+# Seconds a new container has to become healthy (and the API ready) before
+# deploy.sh puts the previous image back.
+HEALTH_TIMEOUT=180
+
+# Images of each app kept on disk (the running one and the rollback target
+# are always among the newest).
+KEEP_IMAGES=3

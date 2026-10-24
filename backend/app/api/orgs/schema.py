@@ -17,10 +17,6 @@ class OrganizationBase(OrganizationBaseMin):
     website: Optional[str] = Field(None, max_length=100)
 
 
-class OrganizationPublic(OrganizationBase):
-    id: int = Field(..., gt=0)
-
-
 class OrganizationPublicMin(OrganizationBaseMin):
     id: int = Field(..., gt=0)
 

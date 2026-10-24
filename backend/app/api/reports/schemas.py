@@ -44,6 +44,10 @@ class BlockOut(BaseModel):
 class Person(CustomBaseModel):
     id: int
     name: str
+    #: Their picture (service.avatar): a club account's logo, else the photo
+    #: they uploaded, else the avatar they picked. An image's variations by
+    #: name ({"original", "thumbnail", ...}), or null.
+    avatar: Optional[dict] = None
 
 
 class ReportClub(CustomBaseModel):

@@ -494,11 +494,15 @@ async def _has_merch(session, event_id: int) -> bool:
 
 
 async def team(session, event: Events) -> dict:
+    from app.api.reports.service import avatar, picture_options
+
     rows = (
         await session.execute(
-            select(Volunteer, Users.full_name)
+            select(Volunteer, Users)
             .outerjoin(Users, Users.id == Volunteer.user_id)
             .where(Volunteer.is_deleted == False, or_(Volunteer.event_id == event.id, Volunteer.club_id == event.club_id))
+            # Each volunteer's picture, loaded for the whole team at once.
+            .options(*picture_options())
             .order_by(Volunteer.created_at)
         )
     ).all()
@@ -508,10 +512,11 @@ async def team(session, event: Events) -> dict:
         "owner": {"name": (owner.full_name if owner else None) or (event.club.name if event.club else ""), "email": owner.email if owner else None},
         "volunteers": [
             {
-                "id": v.id, "email": v.email, "name": name, "user_id": v.user_id, "is_approved": v.is_approved, "scope": "event" if v.event_id == event.id else "club",
+                "id": v.id, "email": v.email, "name": person.full_name if person else None, "user_id": v.user_id, "is_approved": v.is_approved, "scope": "event" if v.event_id == event.id else "club",
                 "can_check_in": v.can_check_in, "can_walkup": v.can_walkup, "can_merch": v.can_merch, "door_id": v.door_id, "check_ins": counts.get(v.user_id, 0) if v.user_id else 0,
+                "avatar": avatar(person),
             }
-            for v, name in rows
+            for v, person in rows
         ],
         "doors": await doors_mod.list_doors(session, event),
         "settings": gate_settings(event),

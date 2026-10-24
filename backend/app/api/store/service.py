@@ -561,11 +561,6 @@ async def pending_for(session, registration_id) -> EventStoreOrders | None:
     return await session.scalar(select(EventStoreOrders).where(EventStoreOrders.registration_id == registration_id, EventStoreOrders.status == "pending"))
 
 
-async def pending_total(session, registration_id) -> Decimal:
-    o = await pending_for(session, registration_id)
-    return Decimal(o.total) if o else Decimal(0)
-
-
 def _sold_out(m: EventStoreItems, variant, left: int) -> CustomHTTPException:
     name = f"{m.name}{' ' + variant.label if variant else ''}"
     return CustomHTTPException(

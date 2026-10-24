@@ -363,6 +363,7 @@ async def delete_badge_definition(session: AsyncSession, badge_id: int) -> dict:
 async def get_badge_recipients(session: AsyncSession, badge_id: int) -> list[dict]:
     """Get all users/clubs who have earned a specific badge."""
     from app.response import CustomHTTPException
+    from app.api.reports.service import avatar, picture_options
     from app.api.users.models import Users
 
     badge = await session.get(BadgeDefinitions, badge_id)
@@ -375,6 +376,8 @@ async def get_badge_recipients(session: AsyncSession, badge_id: int) -> list[dic
             select(UserBadges, Users)
             .join(Users, UserBadges.user_id == Users.id)
             .where(UserBadges.badge_id == badge_id)
+            # Each recipient's picture, loaded for the whole list at once.
+            .options(*picture_options())
             .order_by(UserBadges.awarded_at.desc())
         )
         for ub, user in result.all():
@@ -384,6 +387,7 @@ async def get_badge_recipients(session: AsyncSession, badge_id: int) -> list[dic
                 "entity_name": user.full_name,
                 "entity_email": user.email,
                 "awarded_at": ub.awarded_at,
+                "avatar": avatar(user),
             })
     else:
         result = await session.execute(
@@ -399,6 +403,7 @@ async def get_badge_recipients(session: AsyncSession, badge_id: int) -> list[dic
                 "entity_name": club.name,
                 "entity_email": club.contact_email,
                 "awarded_at": cb.awarded_at,
+                "avatar": club.logo,
             })
 
     return recipients

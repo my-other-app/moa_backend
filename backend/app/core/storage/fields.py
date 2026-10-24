@@ -39,10 +39,6 @@ _SIGNER = boto3.client(
 )
 
 
-def _signer():
-    return _SIGNER
-
-
 # Signed read URLs, kept and handed out again for half their life.
 #
 # Even with one client, signing is about 70 µs a URL (botocore resolves the

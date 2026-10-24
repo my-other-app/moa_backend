@@ -12,7 +12,6 @@ from app.api.orgs.schema import (
     OrganizationCreate,
     OrganizationUpdate,
     OrganizationDetailResponse,
-    OrganizationPublic,
     OrganizationAnalyticsResponse
 )
 from fastapi import UploadFile, File

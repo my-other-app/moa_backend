@@ -394,9 +394,6 @@ class EventInterestsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
     interest_id = Column(Integer, ForeignKey("interests.id"), nullable=False)
 
-    # event = relationship("Events")
-    # interest = relationship("Interests")
-
     __table_args__ = (
         sa.Index("ix_event_interests_event", "event_id", postgresql_where=sa.text("NOT is_deleted")),
         sa.Index("ix_event_interests_interest", "interest_id", "event_id", postgresql_where=sa.text("NOT is_deleted")),

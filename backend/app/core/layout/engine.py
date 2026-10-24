@@ -5,8 +5,6 @@ on screen wraps on paper. `layout_problems` is what makes a design wrong:
 one readable QR where one is needed, known tokens, nothing off the ticket.
 """
 
-import secrets
-import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
@@ -443,12 +441,3 @@ def problems_as_fields(problems: list) -> dict:
     for p in problems:
         fields.setdefault(".".join(map(str, p.path)) or "layers", p.message)
     return fields
-
-
-_seq = 0
-
-
-def new_layer_id(kind: str) -> str:
-    global _seq
-    _seq += 1
-    return f"{kind}-{format(int(time.time() * 1000), 'x')}{_seq}{secrets.token_hex(2)}"

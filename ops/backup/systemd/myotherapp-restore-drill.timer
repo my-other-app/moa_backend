@@ -1,0 +1,12 @@
+# The 1st of every month at 04:00 India time, after that night's backup.
+[Unit]
+Description=MyOtherApp monthly restore drill
+
+[Timer]
+OnCalendar=*-*-01 04:00:00 Asia/Kolkata
+Persistent=true
+AccuracySec=1min
+Unit=myotherapp-restore-drill.service
+
+[Install]
+WantedBy=timers.target

@@ -85,6 +85,13 @@ def start_loops() -> list[asyncio.Task]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # The production settings check (app/core/config_checks.py): under
+    # APP_CONFIG_CHECKS=warn, the default, one ERROR line naming every
+    # missing, placeholder or half-set secret -- Sentry is on by now, so it is
+    # reported -- and the app starts; under enforce it does not start.
+    from app.core import config_checks
+
+    config_checks.enforce()
     # Startup: seed badge definitions
     try:
         from app.db.core import AsyncSessionLocal
@@ -223,8 +230,6 @@ application.add_middleware(ETagMiddleware)
 # (app/core/middlewares/private_cache_middleware.py): a CDN in front of the
 # API must never keep one person's data. Outside the tags, so a 304 has it too.
 application.add_middleware(PrivateCacheMiddleware)
-# print(settings.cors_origins)
-# if settings.DEBUG:
 application.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -252,27 +257,6 @@ application.add_middleware(RateLimitMiddleware)
 from app.core.net import ClientAddressMiddleware  # noqa: E402
 
 application.add_middleware(ClientAddressMiddleware)
-
-# @application.exception_handler(ValidationError)
-# async def validation_exception_handler2(request, exc):
-#     errors = {}
-
-#     for error in exc.errors():
-#         current = errors
-
-#         if len(error["loc"]) <= 1:
-#             current[error["loc"][0]] = error["msg"]
-#             break
-
-#         keys = error["loc"][1:]
-#         for loc in keys[:-1]:
-#             current = current.setdefault(loc, {})
-#         current[keys[-1]] = error["msg"]
-
-#     return ErrorResponse(
-#         message="Invalid request",
-#         errors=errors,
-#     ).get_response(status.HTTP_422_UNPROCESSABLE_ENTITY)
 
 
 @application.exception_handler(Exception)

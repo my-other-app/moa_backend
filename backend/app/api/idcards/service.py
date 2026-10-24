@@ -10,7 +10,7 @@ from sqlalchemy.orm import joinedload
 from sqlalchemy.orm.attributes import set_committed_value
 
 from app.api.checkins.gate_auth import GateActor
-from app.api.events.documents import layout_values, render_layout_document, render_layout_pages, in_layout_mode, layout_colors
+from app.api.events.documents import layout_values, render_layout_document, render_layout_pages, in_layout_mode
 from app.api.events.models import EventRegistrationsLink, Events
 from app.api.events.tickets import design_version_of, poster_url, role_of
 from app.api.idcards.models import BadgeTemplates, PrintJobs, PrintSource, ReprintPolicy
@@ -80,11 +80,6 @@ def card_args(event: Events, reg: EventRegistrationsLink, style: dict, *, for_pr
         title=f"ID card {reg.ticket_id}", event_icon_url=poster_url(event),
         skip_preprinted=for_print and skip_preprinted_for(event, style), club=getattr(event, "club", None),
     )
-
-
-def render_card(event: Events, reg: EventRegistrationsLink, style: dict, *, for_print: bool) -> bytes:
-    """One card's PDF. Blocks while it draws: async code uses card_pdf."""
-    return render_layout_document(**card_args(event, reg, style, for_print=for_print))
 
 
 async def registration_of(session, event: Events, registration_id) -> EventRegistrationsLink:
@@ -266,7 +261,3 @@ def badge_for_scan(event: Events, reg: EventRegistrationsLink, actor: GateActor,
         "printed_at": reg.badge_printed_at,
         "policy": policy.value,
     }
-
-
-def brand_of(style: dict, club=None) -> dict:
-    return layout_colors(style, club)

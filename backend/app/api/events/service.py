@@ -984,6 +984,10 @@ async def list_event_ratings(
                     profile_data = {
                         "full_name": rating.user.profile.full_name or "",
                         "avatar": avatar_data,
+                        # The photo they uploaded, which wins over the avatar
+                        # (reports.avatar). It was left out, so a reviewer
+                        # with a photo showed as initials.
+                        "profile_pic": rating.user.profile.profile_pic,
                         "org": org_data,
                     }
                 

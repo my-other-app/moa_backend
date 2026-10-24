@@ -354,10 +354,6 @@ async def summary(session, event: Events, now: Optional[datetime] = None) -> dic
 # ─── The club's dashboard ─────────────────────────────────────────────────
 
 
-def _club_events(club_id: int):
-    return select(Events).where(Events.club_id == club_id, Events.is_deleted == False)  # noqa: E712
-
-
 async def _status_counts(session, scope) -> dict:
     rows = (await session.execute(select(Events.lifecycle, func.count()).where(scope).group_by(Events.lifecycle))).all()
     by = {(s or EventStatus.published).value: int(n) for s, n in rows}

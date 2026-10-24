@@ -8,7 +8,7 @@ from pydantic import AwareDatetime, BaseModel, EmailStr, Field, ValidationError,
 from datetime import datetime, timezone
 from fastapi.exceptions import RequestValidationError
 
-from app.api.clubs.schemas import ClubPublic, ClubPublicMin
+from app.api.clubs.schemas import ClubPublicMin
 from app.api.users.schemas import UserPublic
 from app.api.interests.schemas import InterestPublic, TopicRef
 from app.response import CustomHTTPException
@@ -144,16 +144,6 @@ class EventPublicMin(EventBaseMin):
     id: int = Field(...)
     category: EventCategoryPublic = Field(...)
     club: ClubPublicMin | None = Field(None)
-    interests: list[InterestPublic] | None = Field(None)
-
-
-class EventPublic(EventBase):
-    id: int = Field(...)
-    category: EventCategoryPublic = Field(...)
-    club: ClubPublic | None = Field(None)
-    rating: float = Field(...)
-    total_rating: int = Field(...)
-    additional_details: list[EventAdditionalDetail] | None = Field(None)
     interests: list[InterestPublic] | None = Field(None)
 
 
@@ -411,14 +401,6 @@ class EventRating(EventRatingCreate):
     created_at: datetime
     
     
-class EventRatingDetailResponse(CustomBaseModel):
-    id: UUID
-    rating: float
-    review: str | None
-    user: UserPublic
-    created_at: datetime
-
-
 # RESPONSE MODELs
 
 

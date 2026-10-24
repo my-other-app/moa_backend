@@ -276,48 +276,6 @@ async def _tell(
     return len(reached)
 
 
-async def notify_user_check_in(
-    session: AsyncSession,
-    user_id: int,
-    event_id: int,
-    event_name: str,
-    club_id: Optional[int] = None,
-) -> bool:
-    """
-    Notify a user when they successfully check in to an event.
-    
-    Trigger 3: Confirmation notification after event check-in.
-    """
-    logger.info(f"Sending check-in confirmation to user {user_id} for event {event_id}")
-    
-    title = "✅ Checked in successfully!"
-    body = f"Welcome to {event_name}. Enjoy the event!"
-    
-    # Save to database
-    await db_notification_service.create_notification(
-        session=session,
-        user_id=user_id,
-        title=title,
-        description=body,
-        type="event_checkin",
-        event_id=event_id,
-        from_club_id=club_id,
-        data={"event_name": event_name},
-    )
-    
-    # Send push notification
-    return await send_notification_to_user(
-        session=session,
-        user_id=user_id,
-        title=title,
-        body=body,
-        data={
-            "type": "check_in",
-            "event_id": str(event_id),
-        },
-    )
-
-
 async def notify_event_participants(
     session: AsyncSession,
     event_id: int,
@@ -429,49 +387,5 @@ async def notify_user_added_as_volunteer(
         data={
             "type": "volunteer_assigned",
             "event_id": str(event_id),
-        },
-    )
-
-
-async def notify_certificate_generated(
-    session: AsyncSession,
-    user_id: int,
-    event_id: int,
-    event_name: str,
-    certificate_id: Optional[str] = None,
-    club_id: Optional[int] = None,
-) -> bool:
-    """
-    Notify a user when their certificate is generated.
-    
-    Trigger 6: When a certificate is generated for a user after event completion.
-    """
-    logger.info(f"Sending certificate notification to user {user_id} for event {event_id}")
-    
-    title = "🏆 Certificate Ready!"
-    body = f"Your certificate for {event_name} is now available!"
-    
-    # Save to database
-    await db_notification_service.create_notification(
-        session=session,
-        user_id=user_id,
-        title=title,
-        description=body,
-        type="certificate_generated",
-        event_id=event_id,
-        from_club_id=club_id,
-        data={"event_name": event_name, "certificate_id": certificate_id},
-    )
-    
-    # Send push notification
-    return await send_notification_to_user(
-        session=session,
-        user_id=user_id,
-        title=title,
-        body=body,
-        data={
-            "type": "certificate_generated",
-            "event_id": str(event_id),
-            "certificate_id": certificate_id or "",
         },
     )

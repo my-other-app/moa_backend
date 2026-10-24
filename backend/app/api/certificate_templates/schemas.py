@@ -63,18 +63,6 @@ class CertificateTemplateConfig(BaseModel):
     signature_2_key: Optional[str] = Field(default=None, description="The signature_2 upload's key; set by the server")
 
 
-class CertificateTemplateCreate(BaseModel):
-    name: str = Field(..., max_length=100)
-    is_default: bool = False
-    config: CertificateTemplateConfig = CertificateTemplateConfig()
-
-
-class CertificateTemplateUpdate(BaseModel):
-    name: Optional[str] = Field(None, max_length=100)
-    is_default: Optional[bool] = None
-    config: Optional[CertificateTemplateConfig] = None
-
-
 class CertificateTemplateResponse(BaseModel):
     id: int
     name: str

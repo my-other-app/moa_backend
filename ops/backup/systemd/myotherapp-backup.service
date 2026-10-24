@@ -1,0 +1,21 @@
+# The daily database backup: ops/backup/run.sh backup, which runs
+# scripts/backup.py in the backend container (pg_dump, upload to S3 with
+# server-side encryption, local pruning). Started by
+# myotherapp-backup.timer; on failure, myotherapp-alert@ tells the admins.
+# Install: docs/OPERATIONS.md, section 19.
+[Unit]
+Description=MyOtherApp daily database backup (dump, off-site copy, prune)
+Documentation=file:///var/www/myotherapp-production/docs/OPERATIONS.md
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+OnFailure=myotherapp-alert@%N.service
+
+[Service]
+Type=oneshot
+Environment=MOA_PROJECT_DIR=/var/www/myotherapp-production
+# Optional overrides (MOA_PROJECT_DIR, MOA_COMPOSE_FILE, MOA_SERVICE).
+EnvironmentFile=-/etc/default/myotherapp-backup
+ExecStart=/bin/bash ${MOA_PROJECT_DIR}/ops/backup/run.sh backup
+# A dump of today's database takes seconds; this is a stuck one.
+TimeoutStartSec=2h

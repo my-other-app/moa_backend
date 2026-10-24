@@ -14,12 +14,27 @@ class AppConfig(BaseSettings):
     model_config = SettingsConfigDict(
         case_sensitive=True,
         env_prefix="APP_",
+        # A setting refused at startup is named, never printed: a secret
+        # that fails a validator must not end up in the container's log.
+        hide_input_in_errors=True,
     )
 
     SECRET_KEY: str
     WORKERS: int = 1
     PORT: int = 8000
     DEBUG: bool = False
+    # Which deployment this is: production, staging, development, test...
+    # Any but development, dev, local, test and ci (and, unset, any process
+    # with DEBUG off) has its settings checked at startup for a missing,
+    # placeholder, weak or half-set secret (app/core/config_checks.py;
+    # docs/OPERATIONS.md, section 19). Sentry's environment, unless
+    # SENTRY_ENVIRONMENT says otherwise.
+    ENV: str = ""
+    # What a failed check does. "warn" (the default): every finding is
+    # logged at ERROR -- and so reaches Sentry -- and the process starts
+    # anyway. "enforce": the process refuses to start. Set enforce once
+    # `python -m app.core.config_checks` prints no FATAL line.
+    CONFIG_CHECKS: str = "warn"
     # uvicorn's line per request. nginx in front already logs every request,
     # so this is a second copy, written on every request; false drops it.
     ACCESS_LOG: bool = True
@@ -37,10 +52,11 @@ class AppConfig(BaseSettings):
     # Error tracking with Sentry (app/core/observability.py). Empty DSN: off,
     # and sentry_sdk is never imported. Personal data is scrubbed before an
     # event leaves. SENTRY_RELEASE defaults to the git sha the deploy writes
-    # to backend/REVISION. SENTRY_SAMPLE_RATE: the share of errors sent;
+    # to backend/REVISION; SENTRY_ENVIRONMENT to ENV, else production.
+    # SENTRY_SAMPLE_RATE: the share of errors sent;
     # SENTRY_TRACES_SAMPLE_RATE: the share of requests traced (0: none).
     SENTRY_DSN: str = ""
-    SENTRY_ENVIRONMENT: str = "production"
+    SENTRY_ENVIRONMENT: str = ""
     SENTRY_RELEASE: str = ""
     SENTRY_SAMPLE_RATE: float = 1.0
     SENTRY_TRACES_SAMPLE_RATE: float = 0.0
@@ -165,11 +181,8 @@ class AppConfig(BaseSettings):
     GOOGLE_ANDROID_CLIENT_ID: str
     GOOGLE_IOS_CLIENT_ID: str
 
-    # Apple Sign In
-    APPLE_CLIENT_ID: str = "app.myotherapp.com"  # Your app's bundle ID
-    APPLE_TEAM_ID: str = "PX6QV826X4"  # Apple Developer Team ID
-    APPLE_KEY_ID: str = "S875RD7TDG"  # Key ID from Apple Developer Console
-    APPLE_PRIVATE_KEY: str = ""  # Contents of .p8 file (set via environment variable)
+    # Sign in with Apple: the audience an identity token must name (the app's bundle id).
+    APPLE_CLIENT_ID: str = "app.myotherapp.com"
 
     # Firebase Push Notifications
     # Option 1: Path to service account JSON file
@@ -631,10 +644,6 @@ class AppConfig(BaseSettings):
         """A cutoff written without an offset is read as India time, the
         clock every plan month is counted on."""
         return value if value.tzinfo else value.replace(tzinfo=_IST)
-
-    CORS_ORIGINS: list[str] | str
-
-    APP_VERSION: str = "1.0"
 
     @property
     def cors_origins(self) -> list[str]:
