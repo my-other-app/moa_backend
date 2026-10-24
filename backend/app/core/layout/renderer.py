@@ -171,10 +171,6 @@ def _draw_pages(pages: list, title: Optional[str], safe_fonts: bool) -> bytes:
     return buf.getvalue()
 
 
-def _draw(inp: RenderInput, safe_fonts: bool) -> bytes:
-    return _draw_pages([inp], inp.title, safe_fonts)
-
-
 def _draw_page(c, inp: RenderInput, safe_fonts: bool) -> None:
     """One design on the canvas's next page, sized to it."""
     cv = inp.canvas

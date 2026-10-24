@@ -242,38 +242,6 @@ async def send_notification_to_users(
     return sent
 
 
-async def send_to_every_device(
-    session: AsyncSession,
-    title: str,
-    body: str,
-    data: Optional[dict] = None,
-    image_url: Optional[str] = None,
-) -> int:
-    """A push to every live device token, FCM_BATCH at a time, read in key
-    order so no more than one batch is ever held. Each read is its own short
-    transaction: the connection goes back to the pool while FCM answers."""
-    last_id, sent, tried = 0, 0, 0
-    dead: list[str] = []
-    while True:
-        rows = (await session.execute(
-            select(UserDeviceTokens.id, UserDeviceTokens.fcm_token)
-            .where(UserDeviceTokens.is_deleted == False, UserDeviceTokens.id > last_id, reachable(UserDeviceTokens.user_id))  # noqa: E712
-            .order_by(UserDeviceTokens.id)
-            .limit(FCM_BATCH)
-        )).all()
-        await session.commit()
-        if not rows:
-            break
-        last_id = rows[-1].id
-        tried += len(rows)
-        sent += await _send_to_tokens([r.fcm_token for r in rows], title, body, data, image_url, dead=dead)
-        if len(rows) < FCM_BATCH:
-            break
-    await prune_tokens(session, dead)
-    report_outcome(tried, sent, what=title)
-    return sent
-
-
 def report_outcome(tried: int, sent: int, *, what: str) -> None:
     """Says, at a level someone will see, when devices were there and nothing
     reached any of them -- the failure that went unnoticed for months."""

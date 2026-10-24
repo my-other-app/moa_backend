@@ -1,4 +1,3 @@
-# from geoalchemy2 import Geometry
 import sqlalchemy as sa
 from sqlalchemy import (
     DDL,

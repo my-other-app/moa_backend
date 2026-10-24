@@ -163,13 +163,6 @@ def generate_pdf_bytes(
         raise RuntimeError(f"Unexpected error generating PDF: {e}")
 
 
-def save_pdf_to_file(pdf_bytes, filename="output.pdf"):
-    """
-    Save PDF bytes to a file
-    """
-    with open(filename, "wb") as f:
-        f.write(pdf_bytes.getvalue())
-
 def generate_image_bytes(
     template_path: str,
     context: dict,

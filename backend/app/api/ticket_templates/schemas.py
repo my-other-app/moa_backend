@@ -51,18 +51,6 @@ class TicketTemplateConfig(BaseModel):
     background_image_key: Optional[str] = Field(default=None, description="The background_image upload's key; set by the server")
 
 
-class TicketTemplateCreate(BaseModel):
-    name: str = Field(..., max_length=100)
-    is_default: bool = False
-    config: TicketTemplateConfig = TicketTemplateConfig()
-
-
-class TicketTemplateUpdate(BaseModel):
-    name: Optional[str] = Field(None, max_length=100)
-    is_default: Optional[bool] = None
-    config: Optional[TicketTemplateConfig] = None
-
-
 class TicketTemplateResponse(BaseModel):
     id: int
     name: str

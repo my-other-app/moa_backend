@@ -422,10 +422,6 @@ async def register_event(
             registration.whatsapp_opt_in = True
             registration.whatsapp_opt_in_at = now
             await session.commit()
-
-        # TODO: add service and api for updating registration info
-        # if db_event.has_fee and registration.is_paid:
-        #     raise CustomHTTPException(400, message="Already registered for this event")
     else:
         # The club's plan caps registrations per event and per month, on top
         # of the organiser's own max_participants above (never for an event

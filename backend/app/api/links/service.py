@@ -123,13 +123,6 @@ async def attribute_registration(session, registration: EventRegistrationsLink, 
     registration.tracking_link_id = link.id
 
 
-async def attribute_follow(session, follow: ClubUsersLink, club_id: int, ref: Optional[str]) -> None:
-    link = await by_code(session, ref) if ref else None
-    if link is None or link.club_id != club_id:
-        return
-    follow.tracking_link_id = link.id
-
-
 # ─── Making and keeping links ─────────────────────────────────────────────
 
 

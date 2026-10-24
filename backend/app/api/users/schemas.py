@@ -15,28 +15,10 @@ class AvatarPublic(CustomBaseModel):
     image: dict | None = None
 
 
-class UserProfileBase(CustomBaseModel):
-    whatsapp: str | None = Field(None)
-
-
-# class UserProfileCreate(CustomBaseModel):
-#     whatsapp: str | None = Form(None)
-#     org_id: int | None = Form(None)
-#     avatar_id: int | None = Form(None)
-#     profile_pic: UploadFile | None = File(None)
-
-
 class UserProfilePublic(CustomBaseModel):
     org: OrganizationPublicMin | None = None
     avatar: AvatarPublic | None = None
     profile_pic: dict | None = None
-
-
-class UserProfilePrivate(CustomBaseModel):
-    whatsapp: str | None
-    org: OrganizationPublicMin | None
-    avatar: AvatarPublic | None
-    profile_pic: dict | None = Field(None)
 
 
 class UserBase(CustomBaseModel):
@@ -57,17 +39,6 @@ class UserPublic(UserBase):
     id: int = Field(...)
     user_type: str = Field(...)
     profile: UserProfilePublic | None = Field(None)
-
-
-class UserPrivate(UserBase):
-    id: int = Field(...)
-    user_type: str = Field(...)
-    profile: UserProfilePrivate | None = Field(None)
-
-
-class UserInDB(UserCreate):
-    id: int = Field(...)
-    password: str = Field(..., min_length=8)
 
 
 class UserAvatarSelect(CustomBaseModel):

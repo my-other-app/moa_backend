@@ -2,7 +2,6 @@ from datetime import datetime
 from typing import List, Optional
 from fastapi import File, Form, UploadFile
 from pydantic import BaseModel, EmailStr, Field, HttpUrl, field_validator
-from app.api.users.schemas import UserPublic
 from app.core.storage.fields import S3Image
 from app.api.interests.schemas import InterestPublic, TopicRef
 from app.core.response.base_model import CustomBaseModel
@@ -226,18 +225,6 @@ class ClubTeamMemberPatch(CustomBaseModel):
     _links = field_validator(*SOCIALS)(_link)
 
 
-class ClubPublicDetail(ClubPublic):
-    socials: ClubSocials = Field(...)
-    tagline: str | None = Field(None)
-    cover: dict | None = Field(None)
-    partners: list[ClubPartnerOut] = Field(default_factory=list)
-    team: list[ClubTeamMemberOut] = Field(default_factory=list)
-    location_link: str | None = Field(None)
-    interests: list[str] = Field(...)
-    followers_count: int = Field(...)
-    user_data: dict | None = Field(None)
-
-
 class ClubPublicMin(ClubBaseMin):
     id: int = Field(...)
     rating: float = Field(...)
@@ -256,25 +243,9 @@ class NoteCreate(NotesBase):
     pass
 
 
-class NotesPrivate(NotesBase):
-    id: int = Field(...)
-
-
 class NotesPublic(NotesBase):
     id: int = Field(...)
     club: ClubPublicMin
-
-
-class ClubFollow(CustomBaseModel):
-    club_id: int
-    user_id: int
-    is_following: bool
-
-
-class ClubFollowPublic(CustomBaseModel):
-    user: UserPublic
-    is_following: bool
-    created_at: datetime
 
 
 # RESPONSE MODELS
@@ -487,19 +458,6 @@ class ClubListResponse(CustomBaseModel):
     interests: List[ClubInterestDetailMin] | None = Field(None)
     # The distinct topics of its interests, in topic order.
     topics: list[TopicRef] = Field(default_factory=list)
-    # org_id: int | None = Field(None)
-
-
-class ClubAdminListResponse(CustomBaseModel):
-    id: int = Field(...)
-    name: str = Field(...)
-    slug: str = Field(...)
-    logo: dict | None = Field(None)
-    location_name: str | None = Field(None)
-    user_data: dict | None = Field(None)
-    followers_count: int = Field(...)
-    initialPassword: str | None = Field(None)
-    interests: List[ClubInterestDetailMin] | None = Field(None)
 
 
 class FollowerEventRow(CustomBaseModel):

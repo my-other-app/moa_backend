@@ -80,10 +80,6 @@ def delivery_for(kind: Optional[str]) -> Delivery:
     return Delivery.TOPIC if kind in BROADCASTS else Delivery.DEVICE
 
 
-def is_broadcast(kind: Optional[str]) -> bool:
-    return delivery_for(kind) is Delivery.TOPIC
-
-
 def club_topic(club_id: int) -> str:
     return f"club_{int(club_id)}"
 

@@ -11,7 +11,6 @@ from app.api.clubs.schemas import (
     ClubAdminDetailResponse,
     ClubAdminFullResponse,
     ClubCreateUpdateResponse,
-    ClubFollowPublic,
     ClubFollowersListResponse,
     ClubListResponse,
     ClubPublicDetailResponse,

@@ -165,11 +165,8 @@ class AppConfig(BaseSettings):
     GOOGLE_ANDROID_CLIENT_ID: str
     GOOGLE_IOS_CLIENT_ID: str
 
-    # Apple Sign In
-    APPLE_CLIENT_ID: str = "app.myotherapp.com"  # Your app's bundle ID
-    APPLE_TEAM_ID: str = "PX6QV826X4"  # Apple Developer Team ID
-    APPLE_KEY_ID: str = "S875RD7TDG"  # Key ID from Apple Developer Console
-    APPLE_PRIVATE_KEY: str = ""  # Contents of .p8 file (set via environment variable)
+    # Sign in with Apple: the audience an identity token must name (the app's bundle id).
+    APPLE_CLIENT_ID: str = "app.myotherapp.com"
 
     # Firebase Push Notifications
     # Option 1: Path to service account JSON file
@@ -626,10 +623,6 @@ class AppConfig(BaseSettings):
         """A cutoff written without an offset is read as India time, the
         clock every plan month is counted on."""
         return value if value.tzinfo else value.replace(tzinfo=_IST)
-
-    CORS_ORIGINS: list[str] | str
-
-    APP_VERSION: str = "1.0"
 
     @property
     def cors_origins(self) -> list[str]:

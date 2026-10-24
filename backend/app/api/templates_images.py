@@ -121,8 +121,3 @@ def embedded(style: dict, *, fields: Iterable[str] = ALL_FIELDS) -> tuple[dict, 
                 complete = False
         out[f"{field}_url"] = url
     return out, complete
-
-
-def image_keys(style: dict, *, fields: Iterable[str] = ALL_FIELDS) -> dict:
-    """field -> key, for the ones the style names."""
-    return {f: k for f in fields if (k := key_of(style or {}, f))}

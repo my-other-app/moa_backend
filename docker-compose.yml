@@ -18,7 +18,10 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U myuser -d mydatabase"]
+      # The real role and database, not the placeholder myuser/mydatabase,
+      # which do not exist and logged a FATAL every ten seconds
+      # (docker-compose.prod.yml has the same fix).
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 10s
       retries: 5
       start_period: 5s
@@ -47,22 +50,6 @@ services:
     networks:
       doth_network:
         ipv4_address: 192.168.1.100
-
-  # nginx:
-  #   container_name: bcards-nginx
-  #   build: nginx
-  #   ports:
-  #     - 80:80
-  #   depends_on:
-  #     - backend
-  #   volumes:
-  #     - media:/var/www/html/media
-  #     - /var/logs/nginx/:/var/log/nginx
-  #   healthcheck:
-  #     test: ["CMD", "curl", "-f", "http://localhost/api/"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 3
 
 volumes:
   postgres_data:

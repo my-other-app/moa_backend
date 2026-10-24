@@ -212,7 +212,7 @@ def _own_secrets() -> tuple[str, ...]:
         settings.SES_SECRET_KEY, settings.RAZORPAY_KEY_SECRET, settings.RAZORPAY_WEBHOOK_SECRET,
         settings.RESEND_API_KEY, settings.RESEND_WEBHOOK_SECRET, settings.WHATSAPP_ACCESS_TOKEN,
         settings.WHATSAPP_APP_SECRET, settings.CLOUDFLARE_API_TOKEN, settings.SITE_REVALIDATE_SECRET,
-        settings.PAYMENT_KEYS_SECRET, settings.APPLE_PRIVATE_KEY, settings.SES_WEBHOOK_TOKEN,
+        settings.PAYMENT_KEYS_SECRET, settings.SES_WEBHOOK_TOKEN,
         settings.BACKUP_S3_ACCESS_KEY, settings.BACKUP_S3_SECRET_KEY, *settings.site_tokens,
     ]
     for url in (settings.DATABASE_URL, settings.DATABASE_URL_SYNC):

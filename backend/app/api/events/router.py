@@ -60,7 +60,6 @@ from app.api.events.schemas import (
     EventListResponse,
     EventRating,
     EventRatingCreate,
-    EventRatingDetailResponse,
     TicketDetailsResponse,
 )
 from app.core.auth.dependencies import (
