@@ -252,6 +252,7 @@ def test_the_platforms_jobs_have_the_priorities_and_limits_chosen(monkeypatch):
     chosen = {
         # A mail or push someone is waiting for.
         "admin_alerts.deliver": (H, 4), "mail.billing_notice": (H, 4), "mail.club_domain_notice": (H, 4),
+        "mail.club_whatsapp_notice": (H, 4),
         "clubs.approved_email": (H, 4), "checkins.after": (H, 4),
         "payments.receipt": (H, 2),  # a wkhtmltopdf process each
         # The room told the quiz is starting: it is starting now, for a hall at most.

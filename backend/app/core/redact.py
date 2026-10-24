@@ -6,7 +6,10 @@
 - The routes where a club pastes its Razorpay keys, or its own AI key,
   carry a secret in the body. Nothing here logs request bodies, but an
   error report about them gives the traceback's frames and the exception's
-  type, never its message, which could quote what was sent.
+  type, never its message, which could quote what was sent. So do a club's
+  own WhatsApp routes (its access token and app secret, and every message
+  sent or read through its inbox) and its WhatsApp webhook (the messages
+  people send it): no message content in a log or an error report.
 - The live room's stream (EventSource cannot send headers) carries the
   browser's key and the player's key in its query string, and a player key
   is enough to answer as that player: `key`, `player` and, beside them,
@@ -18,8 +21,8 @@ import logging
 import re
 import traceback
 
-_CLUB_WEBHOOK = re.compile(r"(/payments/webhook/club/)([A-Za-z0-9_-]{0,6})[A-Za-z0-9_-]*")
-_SENSITIVE_BODIES = re.compile(r"^/api/v1/clubs/(?:payments/gateway|ai/key)(?:/|$)")
+_CLUB_WEBHOOK = re.compile(r"(/payments/webhook/club/|/hooks/whatsapp/club/)([A-Za-z0-9_-]{0,6})[A-Za-z0-9_-]*")
+_SENSITIVE_BODIES = re.compile(r"^/api/v1/(?:clubs/(?:payments/gateway|ai/key|whatsapp)|hooks/whatsapp/club)(?:/|$)")
 #: A query parameter whose value must not be logged, and its value (up to
 #: the next parameter, fragment, space or quote).
 SECRET_QUERY = re.compile(r"(?i)([?&;](?:key|player|last_event_id|\w*token\w*)=)[^&;#\s\"']*")

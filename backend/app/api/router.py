@@ -57,6 +57,11 @@ from app.api.payment_gateways.router import (
     club_router as payment_gateways_club_router,
 )
 from app.api.ticket_templates.router import router as ticket_templates_router
+from app.api.club_whatsapp.router import (
+    admin_router as club_whatsapp_admin_router,
+    club_router as club_whatsapp_club_router,
+    hook_router as club_whatsapp_hook_router,
+)
 from app.api.ai.router import club_router as ai_club_router, event_router as ai_event_router
 from app.api.badges.router import router as badges_router
 from app.api.audit.router import router as audit_router
@@ -115,6 +120,10 @@ api_router.include_router(router=club_access_router, tags=["club-access"])
 api_router.include_router(router=mcp_club_router)
 # Before club_router too: /clubs/payments/gateway is a literal path.
 api_router.include_router(router=payment_gateways_club_router)
+# A club's own WhatsApp number (app/api/club_whatsapp): /clubs/whatsapp/... before club_router.
+api_router.include_router(router=club_whatsapp_club_router)
+api_router.include_router(router=club_whatsapp_admin_router)
+api_router.include_router(router=club_whatsapp_hook_router)
 # AI assist (app/api/ai): /clubs/ai/... before club_router, /events/{id}/ai/... before the events router.
 api_router.include_router(router=ai_club_router)
 api_router.include_router(router=ai_event_router)
