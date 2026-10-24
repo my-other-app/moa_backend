@@ -25,6 +25,8 @@ class EventRegistrationResponse(CustomBaseModel):
     auth_token: Token | None = Field(None)
     store_order_id: str | None = Field(None)
     store_total: float = Field(0)
+    #: Whether the ticket and the day-before reminder go by WhatsApp too.
+    whatsapp_opt_in: bool = Field(False)
 
 
 from app.api.store.schemas import StorePick  # noqa: E402
@@ -43,6 +45,10 @@ class EventRegistrationRequest(CustomBaseModel):
     ref: str | None = Field(None, max_length=16)
     #: What they picked from the event's shelf; paid with the ticket.
     store: list[StorePick] | None = Field(None, max_length=20)
+    #: "Send my ticket and event reminders on WhatsApp", ticked: the consent
+    #: WhatsApp's policy asks for. Unticked unless sent; it needs `phone`.
+    #: Left out altogether (the app), a registration keeps what it had.
+    whatsapp_opt_in: bool = Field(False)
 
 
 class EventAttendanceUpdate(CustomBaseModel):
@@ -79,6 +85,10 @@ class EventRegistrationDetailResponse(CustomBaseModel):
     email_bounce_reason: str | None = Field(None)
     admission_no: str | None = Field(None)
     certificate_deliveries: list[DeliveryBrief] = Field(default_factory=list)
+    # Whether they asked for WhatsApp, and whether WhatsApp could reach them.
+    whatsapp_opt_in: bool = Field(False)
+    wa_bounced_at: datetime | None = Field(None)
+    wa_bounce_reason: str | None = Field(None)
 
 
 class RegistrationUpdateRequest(CustomBaseModel):

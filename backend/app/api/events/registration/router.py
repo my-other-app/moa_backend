@@ -121,6 +121,9 @@ async def register_event(
         tracking_ref=registration.ref or ref,
         store_picks=registration.store,
         claim_existing=claim_existing,
+        # Only when the form said either way: a client that never shows the
+        # box (the app, for now) leaves an earlier answer alone.
+        whatsapp_opt_in=registration.whatsapp_opt_in if "whatsapp_opt_in" in registration.model_fields_set else None,
     )
     if not claim_existing:
         response["auth_token"] = await auth_service.create_access_refresh_tokens(user)

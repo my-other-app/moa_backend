@@ -454,6 +454,11 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
     email_bounce_reason = Column(String(300), nullable=True)
     wa_bounced_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     wa_bounce_reason = Column(String(300), nullable=True)
+    # The guest ticked "Send my ticket and event reminders on WhatsApp" on the
+    # registration form, and when. WhatsApp's policy wants that consent asked
+    # for, so it is never assumed: off for everyone until they tick it.
+    whatsapp_opt_in = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    whatsapp_opt_in_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     # The admission number the ticket prints beside the scan code.
     admission_no = Column(String(40), nullable=True)
     # The tracking link whose code this sign-up carried, when it came through one.
@@ -508,6 +513,12 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
         sa.Index(
             "ix_registrations_event_email", "event_id", sa.func.lower(sa.func.btrim(email)),
             postgresql_where=sa.text("NOT is_deleted"),
+        ),
+        # The guests who asked for WhatsApp, by event: the reminder sweep's
+        # minute look at the events starting within a day reads these alone.
+        sa.Index(
+            "ix_registrations_whatsapp_opt_in", "event_id",
+            postgresql_where=sa.text("whatsapp_opt_in AND NOT is_deleted"),
         ),
         # An event's registrations by when they came, with whether each is
         # paid: the plan's monthly count (this month's, event by event), a
