@@ -9,7 +9,8 @@ asyncpg==0.30.0
 boto3==1.36.26
 botocore==1.36.26
 cachetools==5.5.2
-certifi==2025.1.31
+# 2026.10.19+: drops the emSign roots whose intermediates were compromised (GHSA-6q48-6c7w-9gw2).
+certifi==2026.10.23
 charset-normalizer==3.4.1
 cryptography==50.0.0
 et_xmlfile==2.0.0
@@ -27,7 +28,11 @@ openpyxl==3.1.5
 orjson==3.11.9
 packaging==24.2
 pandas==2.2.3
-pillow==12.3.0
+# 13: the first release with the fixes for the 2026 advisories (the FPX and
+# JPEG decoder overflows, TIFF/PDF/GIF parsing...). Its removals -- Python
+# 3.10, get_child_images on Image, Image._show, fromarray changing a
+# dtype -- touch nothing here.
+pillow==13.0.0
 psycopg2-binary==2.9.10
 pyasn1==0.6.4
 pyasn1_modules==0.4.1
