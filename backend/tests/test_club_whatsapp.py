@@ -969,10 +969,84 @@ async def test_statuses_move_forward_only_and_a_failure_says_why(client, session
 
     assert (await status("delivered")).status == "delivered"
     assert (await status("sent")).status == "delivered"  # late
+    # Failed never undoes delivered: it reached their phone.
+    assert (await status("failed", [{"code": 131047, "title": "Re-engagement message"}])).status == "delivered"
     assert (await status("read")).status == "read"
     assert (await status("failed", [{"code": 131047, "title": "Re-engagement message"}])).status == "read"
     conv = await session.get(ClubWhatsAppConversations, conv.id, populate_existing=True)
     assert conv.last_message_status == "read"
+
+
+async def test_several_messages_in_one_delivery_all_count(client, session, world, meta):
+    """One UPDATE per message, adding to what is there: three in one payload
+    are three unread, waiting since the first. A reaction, a system notice
+    and a message WhatsApp can't show are kept and counted for nothing."""
+    account = await connected(client, session, world)
+    t0 = datetime.now(timezone.utc) - timedelta(minutes=10)
+    batch = [text_msg(f"wamid.B{n}", f"line {n}", at=t0 + timedelta(minutes=n)) for n in range(3)]
+    batch += [
+        text_msg("wamid.R", "", kind="reaction", part={"message_id": "wamid.B0", "emoji": "👍"}, at=t0 + timedelta(minutes=4)),
+        text_msg("wamid.U", "", kind="unsupported", part={}, at=t0 + timedelta(minutes=5)),
+    ]
+    r = await hook(client, account.webhook_token, inbound(*batch))
+    assert r.json()["messages"] == 5
+    conv = await session.scalar(select(ClubWhatsAppConversations).execution_options(populate_existing=True))
+    assert conv.unread_count == 3 and abs((conv.awaiting_since - t0).total_seconds()) < 1
+    assert conv.last_message_type == "unsupported" and abs((conv.last_inbound_at - (t0 + timedelta(minutes=5))).total_seconds()) < 1
+
+
+async def test_a_reaction_opens_the_window_but_a_system_notice_does_not(client, session, world, meta):
+    account = await connected(client, session, world)
+    reaction = text_msg("wamid.REA", "", kind="reaction", part={"message_id": "wamid.X", "emoji": "❤️"})
+    await hook(client, account.webhook_token, inbound(reaction))
+    conv = await session.scalar(select(ClubWhatsAppConversations).execution_options(populate_existing=True))
+    assert conv.unread_count == 0 and conv.awaiting_since is None and inbox.window_open(conv)
+    system = text_msg("wamid.SYS", "", kind="system", part={"body": "User changed number", "type": "customer_changed_number"}, wa="919000000077")
+    await hook(client, account.webhook_token, inbound(system, wa="919000000077"))
+    other = await session.scalar(select(ClubWhatsAppConversations).where(ClubWhatsAppConversations.wa_id == "919000000077")
+                                 .execution_options(populate_existing=True))
+    assert other.unread_count == 0 and other.last_inbound_at is None and not inbox.window_open(other)
+
+
+async def test_a_reply_leaves_a_message_that_came_meanwhile_waiting(client, session, world, meta, monkeypatch):
+    account = await connected(client, session, world)
+    conv = await conversation_with(client, session, world, account, at=datetime.now(timezone.utc) - timedelta(minutes=5))
+    real_send = graph.send
+    meanwhile = datetime.now(timezone.utc) - timedelta(seconds=30)
+
+    async def send(keys, body):
+        # They write again while the reply is on its way to Meta.
+        await inbox.record_inbound(session, account, PHONE, text_msg("wamid.MEANWHILE", "also, food?", at=meanwhile), "Ananya")
+        return await real_send(keys, body)
+
+    monkeypatch.setattr(graph, "send", send)
+    r = await client.post(f"{API}/clubs/whatsapp/conversations/{conv.id}/messages", json={"type": "text", "text": "Yes, free."}, headers=world.h)
+    assert r.status_code == 200 and r.json()["status"] == "sent"
+    conv = await session.get(ClubWhatsAppConversations, conv.id, populate_existing=True)
+    assert conv.unread_count == 1 and abs((conv.awaiting_since - meanwhile).total_seconds()) < 1
+    reply = await session.scalar(select(ClubWhatsAppMessages).where(ClubWhatsAppMessages.direction == "out"))
+    assert 250 <= reply.response_seconds <= 400
+
+
+async def test_a_thread_is_in_the_order_things_happened(client, session, world, meta):
+    """Meta may deliver a later message first: the thread goes by when they
+    were written, and catching up by id still finds the late one."""
+    account = await connected(client, session, world)
+    t0 = datetime.now(timezone.utc) - timedelta(minutes=30)
+    await hook(client, account.webhook_token, inbound(text_msg("wamid.SECOND", "second", at=t0 + timedelta(minutes=2))))
+    conv = await session.scalar(select(ClubWhatsAppConversations).execution_options(populate_existing=True))
+    url = f"{API}/clubs/whatsapp/conversations/{conv.id}/messages"
+    seen = (await client.get(url, headers=world.h)).json()["items"]
+    await hook(client, account.webhook_token, inbound(text_msg("wamid.FIRST", "first", at=t0)))
+    await hook(client, account.webhook_token, inbound(text_msg("wamid.THIRD", "third", at=t0 + timedelta(minutes=3))))
+    thread = (await client.get(url, headers=world.h)).json()
+    assert [m["wamid"] for m in thread["items"]] == ["wamid.FIRST", "wamid.SECOND", "wamid.THIRD"] and thread["has_more"] is False
+    caught_up = (await client.get(url, params={"after": seen[-1]["id"]}, headers=world.h)).json()["items"]
+    assert [m["wamid"] for m in caught_up] == ["wamid.FIRST", "wamid.THIRD"]
+    page = (await client.get(url, params={"limit": 2}, headers=world.h)).json()
+    assert [m["wamid"] for m in page["items"]] == ["wamid.SECOND", "wamid.THIRD"] and page["has_more"] is True
+    older = (await client.get(url, params={"limit": 2, "before": page["items"][0]["id"]}, headers=world.h)).json()
+    assert [m["wamid"] for m in older["items"]] == ["wamid.FIRST"] and older["has_more"] is False
 
 
 async def test_reading_a_conversation_clears_it_and_tells_meta(client, session, world, meta):

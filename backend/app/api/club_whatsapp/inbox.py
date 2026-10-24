@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, case, func, literal, or_, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.api.club_whatsapp import graph, live, quota, templates
@@ -62,6 +62,13 @@ EVENTS_PER_CONTACT = 5
 KNOWN_TYPES = {"text", "image", "document", "audio", "video", "sticker", "location", "reaction", "button",
                "interactive", "contacts", "template", "unsupported", "order", "system"}
 MEDIA_TYPES = ("image", "document", "audio", "video", "sticker")
+#: Kept, but neither unread nor waiting for an answer: a reaction, a
+#: system notice (a changed number), a message WhatsApp can't show.
+NOT_COUNTED = frozenset({"reaction", "system", "unsupported"})
+#: Not something the person wrote, so it doesn't open the 24-hour window.
+#: (Meta: the window starts "when a WhatsApp user messages you"; a reaction
+#: or an unsupported message is still theirs.)
+NOT_WRITTEN = frozenset({"system"})
 
 
 def _now() -> datetime:
@@ -127,33 +134,40 @@ async def _registrations_for(session, club_id: int, wa_ids: list[str]) -> list:
     return [r for r in rows if wa_of(r[3]) in wanted]
 
 
-async def link(session, conv: ClubWhatsAppConversations) -> bool:
+async def link(session, conv_id: int, club_id: int, wa_id: Optional[str]) -> bool:
     """Link the conversation to the registration (and its account) its
     number matches, latest first; else to a follower of the club whose
-    profile has this WhatsApp number. True when linked."""
-    rows = await _registrations_for(session, conv.club_id, [conv.wa_id])
+    profile has this WhatsApp number. True when linked. One UPDATE, and
+    only of a conversation not linked yet."""
+    if not wa_id:
+        return False
+    found = None
+    rows = await _registrations_for(session, club_id, [wa_id])
     if rows:
-        reg_id, user_id, full_name = rows[0][0], rows[0][1], rows[0][2]
-        conv.registration_id, conv.user_id = reg_id, user_id
-        conv.contact_name = (full_name or None) and str(full_name)[:120]
-        conv.linked_at = _now()
-        return True
-    from app.api.clubs.models import ClubUsersLink
-    from app.api.users.models import UserProfiles
+        found = {"registration_id": rows[0][0], "user_id": rows[0][1], "contact_name": rows[0][2]}
+    else:
+        from app.api.clubs.models import ClubUsersLink
+        from app.api.users.models import UserProfiles
 
-    candidates = (await session.execute(
-        select(UserProfiles.user_id, UserProfiles.full_name, UserProfiles.whatsapp)
-        .join(ClubUsersLink, and_(ClubUsersLink.user_id == UserProfiles.user_id, ClubUsersLink.club_id == conv.club_id))
-        .where(ClubUsersLink.is_following == True, _digits_tail(UserProfiles.whatsapp) == conv.wa_id[-10:])  # noqa: E712
-        .limit(5)
-    )).all()
-    for user_id, full_name, number in candidates:
-        if wa_of(number) == conv.wa_id:
-            conv.user_id = user_id
-            conv.contact_name = (full_name or None) and str(full_name)[:120]
-            conv.linked_at = _now()
-            return True
-    return False
+        candidates = (await session.execute(
+            select(UserProfiles.user_id, UserProfiles.full_name, UserProfiles.whatsapp)
+            .join(ClubUsersLink, and_(ClubUsersLink.user_id == UserProfiles.user_id, ClubUsersLink.club_id == club_id))
+            .where(ClubUsersLink.is_following == True, _digits_tail(UserProfiles.whatsapp) == wa_id[-10:])  # noqa: E712
+            .limit(5)
+        )).all()
+        for user_id, full_name, number in candidates:
+            if wa_of(number) == wa_id:
+                found = {"user_id": user_id, "contact_name": full_name}
+                break
+    if found is None:
+        return False
+    found["contact_name"] = (found["contact_name"] or None) and str(found["contact_name"])[:120]
+    C = ClubWhatsAppConversations
+    await session.execute(
+        update(C).where(C.id == conv_id, C.linked_at.is_(None)).values(**found, linked_at=_now())
+        .execution_options(synchronize_session=False)
+    )
+    return True
 
 
 async def contact_events(session, club_id: int, convs: list[ClubWhatsAppConversations]) -> dict[int, list[dict]]:
@@ -192,30 +206,55 @@ async def contact_events(session, club_id: int, convs: list[ClubWhatsAppConversa
 
 
 async def conversation(session, club_id: int, business_phone_id: str, wa_id: str, *, account_id: Optional[int],
-                       profile_name: Optional[str] = None) -> ClubWhatsAppConversations:
-    """The conversation with this person on this number, made the first time."""
+                       profile_name: Optional[str] = None) -> int:
+    """The id of the conversation with this person on this number, made the
+    first time (one upsert, whatever runs beside it), its profile name and
+    connection kept current, linked when it is not yet. Its counters and
+    latest line are only ever changed by single UPDATEs (`_bump`), so
+    nothing here is read and written back."""
     table = ClubWhatsAppConversations.__table__
     now = _now()
+    insert = pg_insert(table).values(
+        club_id=club_id, business_phone_id=business_phone_id, wa_id=wa_id, account_id=account_id,
+        profile_name=(profile_name or None) and profile_name[:120], status=OPEN, unread_count=0, created_at=now, updated_at=now,
+    )
+    row = (await session.execute(
+        insert.on_conflict_do_update(
+            constraint="uq_club_whatsapp_conversations_contact",
+            set_={"profile_name": func.coalesce(insert.excluded.profile_name, table.c.profile_name),
+                  "account_id": func.coalesce(insert.excluded.account_id, table.c.account_id)},
+        ).returning(table.c.id, table.c.linked_at)
+    )).one()
+    if row[1] is None:
+        await link(session, row[0], club_id, wa_id)
+    return row[0]
+
+
+async def _bump(session, conv_id: int, **values) -> None:
     await session.execute(
-        pg_insert(table)
-        .values(club_id=club_id, business_phone_id=business_phone_id, wa_id=wa_id, account_id=account_id,
-                profile_name=(profile_name or None) and profile_name[:120], status=OPEN, unread_count=0,
-                created_at=now, updated_at=now)
-        .on_conflict_do_nothing(constraint="uq_club_whatsapp_conversations_contact")
+        update(ClubWhatsAppConversations).where(ClubWhatsAppConversations.id == conv_id)
+        .values(updated_at=_now(), **values).execution_options(synchronize_session=False)
     )
-    conv = await session.scalar(
-        select(ClubWhatsAppConversations)
-        .where(ClubWhatsAppConversations.club_id == club_id, ClubWhatsAppConversations.business_phone_id == business_phone_id,
-               ClubWhatsAppConversations.wa_id == wa_id)
-        .execution_options(populate_existing=True)
-    )
-    if profile_name and conv.profile_name != profile_name[:120]:
-        conv.profile_name = profile_name[:120]
-    if account_id and conv.account_id != account_id:
-        conv.account_id = account_id
-    if conv.linked_at is None:
-        await link(session, conv)
-    return conv
+
+
+def _line(direction: str, kind: str, body: Optional[str], status: str, at: datetime, *,
+          filename: Optional[str] = None, template: Optional[str] = None) -> dict:
+    """The conversation's line for a message, as an UPDATE's values: only
+    when it is at least as new as the line already there (every SET sees
+    the row as it was, so they agree)."""
+    C = ClubWhatsAppConversations
+    newer = or_(C.last_message_at.is_(None), C.last_message_at <= at)
+
+    def unless_older(value, column):
+        return case((newer, literal(value, column.type)), else_=column)
+
+    return {
+        "last_message_at": unless_older(at, C.last_message_at),
+        "last_message_direction": unless_older(direction, C.last_message_direction),
+        "last_message_type": unless_older(kind, C.last_message_type),
+        "last_message_preview": unless_older(preview(kind, body, filename=filename, template=template), C.last_message_preview),
+        "last_message_status": unless_older(status, C.last_message_status),
+    }
 
 
 async def get_conversation(session, club_id: int, conversation_id: int) -> ClubWhatsAppConversations:
@@ -240,16 +279,6 @@ def preview(kind: str, body: Optional[str], *, filename: Optional[str] = None, t
     elif kind in words and kind != "document":
         text = f"{words[kind]}{': ' + text if text else ''}"
     return text[:PREVIEW_MAX]
-
-
-def _touch(conv: ClubWhatsAppConversations, msg: ClubWhatsAppMessages, at: datetime) -> None:
-    last = _aware(conv.last_message_at)
-    if last is None or at >= last:
-        conv.last_message_at = at
-        conv.last_message_direction = msg.direction
-        conv.last_message_type = msg.type
-        conv.last_message_preview = preview(msg.type, msg.body, filename=msg.media_filename, template=msg.template_name)
-        conv.last_message_status = msg.status
 
 
 async def list_conversations(session, club_id: int, *, filter: str = "all", q: Optional[str] = None,
@@ -359,18 +388,28 @@ def message_out(m: ClubWhatsAppMessages) -> dict:
 
 
 async def messages(session, conv: ClubWhatsAppConversations, *, before: Optional[int] = None, after: Optional[int] = None,
-                   limit: int = 50) -> list[ClubWhatsAppMessages]:
-    """A page of the thread, oldest first: the latest `limit`, or those
-    before (scrolling back) or after (catching up) a message id."""
+                   limit: int = 50) -> tuple[list[ClubWhatsAppMessages], bool]:
+    """A page of the thread, in the order things happened -- Meta's time,
+    then id -- and whether there is more: the latest `limit` (more: older
+    ones), those before a message (scrolling back; more: older still), or
+    those kept since a message (catching up, by id, so one that arrives late
+    with an earlier time is not missed; more: newer still). One query of
+    `limit + 1` rows each."""
     M = ClubWhatsAppMessages
     q = select(M).where(M.conversation_id == conv.id)
     if after is not None:
-        rows = (await session.scalars(q.where(M.id > after).order_by(M.id.asc()).limit(limit))).all()
-        return list(rows)
+        rows = list((await session.scalars(q.where(M.id > after).order_by(M.id.asc()).limit(limit + 1))).all())
+        more = len(rows) > limit
+        return sorted(rows[:limit], key=lambda m: (_aware(m.wa_timestamp), m.id)), more
     if before is not None:
-        q = q.where(M.id < before)
-    rows = (await session.scalars(q.order_by(M.id.desc()).limit(limit))).all()
-    return list(reversed(rows))
+        pivot = await session.scalar(select(M.wa_timestamp).where(M.id == before, M.conversation_id == conv.id))
+        if pivot is not None:
+            q = q.where(tuple_(M.wa_timestamp, M.id) < tuple_(literal(pivot, M.wa_timestamp.type), literal(before)))
+        else:
+            q = q.where(M.id < before)
+    rows = list((await session.scalars(q.order_by(M.wa_timestamp.desc(), M.id.desc()).limit(limit + 1))).all())
+    more = len(rows) > limit
+    return list(reversed(rows[:limit])), more
 
 
 def _ts(value) -> Optional[datetime]:
@@ -422,10 +461,14 @@ def parse_inbound(m: dict) -> dict:
 
 
 async def record_inbound(session, account: ClubWhatsAppAccounts, business_phone_id: str, message: dict,
-                         profile_name: Optional[str]) -> Optional[ClubWhatsAppConversations]:
+                         profile_name: Optional[str]) -> Optional[int]:
     """One message someone sent the club's number: kept once (Meta may send
     it again: the insert does nothing on a wamid already kept), the window
-    opened, counted unread and waiting for a reply."""
+    opened, counted unread and waiting for a reply -- in one UPDATE of the
+    conversation, so two messages at once both count. A reaction, a system
+    notice or a message WhatsApp can't show is kept but neither unread nor
+    waiting; a system notice (not something the person wrote) doesn't open
+    the window either. The conversation's id, or None when nothing was kept."""
     wa_id = re.sub(r"\D", "", str(message.get("from") or ""))[:20]
     wamid = str(message.get("id") or "")[:128]
     if not wa_id or not wamid:
@@ -433,8 +476,8 @@ async def record_inbound(session, account: ClubWhatsAppAccounts, business_phone_
     if await session.scalar(select(ClubWhatsAppMessages.id).where(ClubWhatsAppMessages.wamid == wamid)) is not None:
         return None
     at = _ts(message.get("timestamp")) or _now()
-    conv = await conversation(session, account.club_id, business_phone_id, wa_id, account_id=account.id, profile_name=profile_name)
-    fields = dict(conversation_id=conv.id, club_id=account.club_id, direction=IN, status=RECEIVED, wamid=wamid,
+    conv_id = await conversation(session, account.club_id, business_phone_id, wa_id, account_id=account.id, profile_name=profile_name)
+    fields = dict(conversation_id=conv_id, club_id=account.club_id, direction=IN, status=RECEIVED, wamid=wamid,
                   wa_timestamp=at, created_at=_now(), **parse_inbound(message))
     table = ClubWhatsAppMessages.__table__
     kept = await session.scalar(
@@ -443,23 +486,24 @@ async def record_inbound(session, account: ClubWhatsAppAccounts, business_phone_
     if kept is None:
         # Another delivery of it, at the same moment, kept it first.
         return None
-    msg = ClubWhatsAppMessages(id=kept, **fields)
-    last_in = _aware(conv.last_inbound_at)
-    if last_in is None or at > last_in:
-        conv.last_inbound_at = at
-    conv.unread_count = (conv.unread_count or 0) + 1
-    if conv.awaiting_since is None:
-        conv.awaiting_since = at
-    conv.status = OPEN
-    _touch(conv, msg, at)
-    return conv
+    C, kind = ClubWhatsAppConversations, fields["type"]
+    values = _line(IN, kind, fields["body"], RECEIVED, at, filename=fields["media_filename"])
+    if kind not in NOT_WRITTEN:
+        values["last_inbound_at"] = func.greatest(C.last_inbound_at, literal(at, C.last_inbound_at.type))
+    if kind not in NOT_COUNTED:
+        values.update(unread_count=C.unread_count + 1, awaiting_since=func.coalesce(C.awaiting_since, literal(at, C.awaiting_since.type)),
+                      status=OPEN)
+    await _bump(session, conv_id, **values)
+    return conv_id
 
 
 async def record_status(session, account: ClubWhatsAppAccounts, st: dict) -> Optional[int]:
     """Meta saying what became of something the club's number sent: the
     message's status moves forward only (a late "delivered" never undoes
-    "read"); failed carries Meta's error. Only this club's own messages: a
-    ticket or certificate its number sent is a delivery, which hears it too
+    "read", and "failed" never undoes "delivered"), by a conditional UPDATE
+    that two statuses at once can't both pass the wrong way; failed carries
+    Meta's error. Only this club's own messages: a ticket or certificate its
+    number sent is a delivery, which hears it too when the status moved
     (hooks.service, matched by that message's id alone and in this
     transaction), and one Meta failed for the club's account, its template
     or the club's number alone goes again from the platform's (refused_later).
@@ -467,6 +511,7 @@ async def record_status(session, account: ClubWhatsAppAccounts, st: dict) -> Opt
     from app.api.hooks import service as hooks
     from app.api.hooks.verdicts import whatsapp_verdict
 
+    M = ClubWhatsAppMessages
     wamid = str(st.get("id") or "")
     status = str(st.get("status") or "").lower()
     if not wamid or status not in (SENT, DELIVERED, READ, FAILED_MESSAGE):
@@ -474,10 +519,23 @@ async def record_status(session, account: ClubWhatsAppAccounts, st: dict) -> Opt
     at = _ts(st.get("timestamp")) or _now()
     error = (st.get("errors") or [None])[0] if isinstance(st.get("errors"), list) else None
     error = error if isinstance(error, dict) else None
-    msg = await session.scalar(
-        select(ClubWhatsAppMessages).where(ClubWhatsAppMessages.wamid == wamid, ClubWhatsAppMessages.club_id == account.club_id)
-    )
+    msg = await session.scalar(select(M).where(M.wamid == wamid, M.club_id == account.club_id))
     if msg is None or msg.direction != OUT:
+        return None
+    values: dict = {"status": status, "status_at": at}
+    if status == FAILED_MESSAGE:
+        before = (PENDING, SENT)
+        if error is not None:
+            values["error_code"] = (error.get("code") is not None and str(error.get("code"))[:16]) or None
+            detail = (error.get("error_data") or {}).get("details") if isinstance(error.get("error_data"), dict) else None
+            values["error_title"] = str(detail or error.get("title") or error.get("message") or "WhatsApp couldn't deliver it")[:200]
+    else:
+        before = tuple(s for s, n in STATUS_ORDER.items() if n < STATUS_ORDER[status])
+    moved = await session.scalar(
+        update(M).where(M.id == msg.id, M.status.in_(before)).values(**values).returning(M.id)
+        .execution_options(synchronize_session=False)
+    )
+    if moved is None:
         return None
     if msg.via == VIA_DELIVERY and msg.delivery_id is not None:
         verdict = whatsapp_verdict(status, error)
@@ -485,26 +543,11 @@ async def record_status(session, account: ClubWhatsAppAccounts, st: dict) -> Opt
             await hooks.record(session, wamid, "whatsapp", verdict, at, commit=False)
     if status == FAILED_MESSAGE and error is not None:
         await refused_later(session, account, msg, error)
-    if status == FAILED_MESSAGE:
-        if msg.status == READ:
-            return None
-        msg.status = FAILED_MESSAGE
-        if isinstance(error, dict):
-            msg.error_code = (error.get("code") is not None and str(error.get("code"))[:16]) or None
-            detail = ((error.get("error_data") or {}).get("details") if isinstance(error.get("error_data"), dict) else None)
-            msg.error_title = str(detail or error.get("title") or error.get("message") or "WhatsApp couldn't deliver it")[:200]
-    elif msg.status != FAILED_MESSAGE and STATUS_ORDER.get(status, -1) > STATUS_ORDER.get(msg.status, -1):
-        msg.status = status
-    else:
-        return None
-    msg.status_at = at
-    conv = await session.get(ClubWhatsAppConversations, msg.conversation_id)
-    if conv is not None:
-        latest = await session.scalar(
-            select(func.max(ClubWhatsAppMessages.id)).where(ClubWhatsAppMessages.conversation_id == conv.id)
-        )
-        if latest == msg.id:
-            conv.last_message_status = msg.status
+    latest = await session.scalar(
+        select(M.id).where(M.conversation_id == msg.conversation_id).order_by(M.wa_timestamp.desc(), M.id.desc()).limit(1)
+    )
+    if latest == msg.id:
+        await _bump(session, msg.conversation_id, last_message_status=status)
     return msg.conversation_id
 
 
@@ -557,7 +600,12 @@ async def _sending_account(session, club_id: int, actor_user=None) -> tuple[Club
 async def _send(session, account: ClubWhatsAppAccounts, keys: graph.Keys, conv: ClubWhatsAppConversations, body: dict,
                 row: ClubWhatsAppMessages) -> ClubWhatsAppMessages:
     """Send `body` to Meta and keep `row` with what came of it. A refusal is
-    kept on the row (failed, with Meta's words), shown in the thread."""
+    kept on the row (failed, with Meta's words), shown in the thread. A
+    reply answers what had arrived when it was sent: a message that came
+    meanwhile still waits, and is still unread."""
+    M, C = ClubWhatsAppMessages, ClubWhatsAppConversations
+    seen = await session.scalar(select(func.max(M.id)).where(M.conversation_id == conv.id, M.direction == IN)) or 0
+    waited_since = await session.scalar(select(C.awaiting_since).where(C.id == conv.id))
     now = _now()
     try:
         wamid = await graph.send(keys, body)
@@ -576,19 +624,21 @@ async def _send(session, account: ClubWhatsAppAccounts, keys: graph.Keys, conv: 
         row.status = FAILED_MESSAGE
         row.error_code = getattr(exc, "code", None) and str(exc.code)[:16]
         row.error_title = (getattr(exc, "reason", None) or str(exc) or "WhatsApp couldn't be reached. Try again.")[:200]
-    row.created_at = now
-    row.status_at = now
+    row.created_at = row.wa_timestamp = row.status_at = now
+    values = _line(OUT, row.type, row.body, row.status, now, template=row.template_name)
+    if row.status != FAILED_MESSAGE:
+        values["last_outbound_at"] = func.greatest(C.last_outbound_at, literal(now, C.last_outbound_at.type))
+        if row.via == VIA_INBOX:
+            if waited_since is not None:
+                row.response_seconds = max(0, int((now - _aware(waited_since)).total_seconds()))
+            newer = and_(M.conversation_id == conv.id, M.direction == IN, M.id > seen, M.type.not_in(NOT_COUNTED))
+            values["awaiting_since"] = select(func.min(M.wa_timestamp)).where(newer).scalar_subquery()
+            values["unread_count"] = select(func.count()).select_from(M).where(newer).scalar_subquery()
     session.add(row)
     await session.flush()
+    await _bump(session, conv.id, **values)
     if row.status != FAILED_MESSAGE:
-        conv.last_outbound_at = now
-        if row.via == VIA_INBOX:
-            if conv.awaiting_since is not None:
-                row.response_seconds = max(0, int((now - _aware(conv.awaiting_since)).total_seconds()))
-            conv.awaiting_since = None
-            conv.unread_count = 0
         await quota.record_send(session, conv.club_id, "inbox_template" if row.type == "template" else "inbox_reply", row.wamid)
-    _touch(conv, row, now)
     return row
 
 
@@ -661,18 +711,23 @@ async def start(session, club_id: int, registration_id) -> ClubWhatsAppConversat
     if account is None:
         raise _refuse(409, "Connect your WhatsApp number first.", "NO_WHATSAPP")
     await accounts.require_plan(session, club_id)
-    return await conversation(session, club_id, account.phone_number_id, wa_id, account_id=account.id)
+    conv_id = await conversation(session, club_id, account.phone_number_id, wa_id, account_id=account.id)
+    conv = await session.get(ClubWhatsAppConversations, conv_id)
+    # As the upsert left it (nothing of it is pending here: it is only ever changed by UPDATEs).
+    await session.refresh(conv)
+    return conv
 
 
 async def record_delivery_send(session, route: accounts.Route, to: str, template: whatsapp.Template, wamid: Optional[str],
                                *, delivery_id=None, kind: str) -> None:
     """A ticket, certificate or reminder the deliveries sent from the club's
-    number, in that person's conversation: the inbox shows what went."""
+    number, in that person's conversation: the inbox shows what went. Not
+    an answer: what waits for one still waits."""
     account = await session.get(ClubWhatsAppAccounts, route.account_id)
     if account is None:
         return
     wa_id = to.lstrip("+")
-    conv = await conversation(session, account.club_id, account.phone_number_id, wa_id, account_id=account.id)
+    conv_id = await conversation(session, account.club_id, account.phone_number_id, wa_id, account_id=account.id)
     now = _now()
     definition = None
     row_t = await templates.approved(session, account.id, template.name, route.sender.language)
@@ -680,16 +735,17 @@ async def record_delivery_send(session, route: accounts.Route, to: str, template
         definition = templates.shape(row_t.components or [])
     kept = {"body": list(template.body), "buttons": {"0": template.button} if template.button else {}}
     msg = ClubWhatsAppMessages(
-        conversation_id=conv.id, club_id=account.club_id, direction=OUT, type="template",
+        conversation_id=conv_id, club_id=account.club_id, direction=OUT, type="template",
         body=templates.render(definition, kept)[:TEXT_MAX] if definition else None,
         template_name=template.name, template_language=route.sender.language, template_params=kept,
         wamid=wamid or None, status=SENT, status_at=now, via=VIA_DELIVERY, delivery_id=delivery_id,
-        sent_by_name="MyOtherApp", created_at=now,
+        sent_by_name="MyOtherApp", created_at=now, wa_timestamp=now,
     )
     session.add(msg)
     await session.flush()
-    conv.last_outbound_at = now
-    _touch(conv, msg, now)
+    C = ClubWhatsAppConversations
+    await _bump(session, conv_id, last_outbound_at=func.greatest(C.last_outbound_at, literal(now, C.last_outbound_at.type)),
+                **_line(OUT, "template", msg.body, SENT, now, template=template.name))
     # Counted (as the club's, so not at all) by the pipeline, by the answer's "Via".
 
 

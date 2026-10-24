@@ -194,11 +194,12 @@ def upgrade() -> None:
         sa.Column("sent_by_member_id", sa.Integer(), sa.ForeignKey("club_members.id", ondelete="SET NULL"), nullable=True),
         sa.Column("sent_by_name", sa.String(120), nullable=True),
         sa.Column("response_seconds", sa.Integer(), nullable=True),
-        sa.Column("wa_timestamp", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("wa_timestamp", sa.DateTime(timezone=True), nullable=False, server_default=_now()),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=_now()),
         sa.CheckConstraint("direction IN ('in', 'out')", name="ck_club_whatsapp_messages_direction"),
     )
     op.create_index("ix_club_whatsapp_messages_conversation", "club_whatsapp_messages", ["conversation_id", "id"])
+    op.create_index("ix_club_whatsapp_messages_thread", "club_whatsapp_messages", ["conversation_id", "wa_timestamp", "id"])
     op.create_index("ix_club_whatsapp_messages_club_created", "club_whatsapp_messages", ["club_id", "created_at"])
 
 

@@ -111,14 +111,14 @@ async def _messages(session, account, value: dict, touched: dict, counts: dict) 
             continue
         try:
             async with session.begin_nested():
-                conv = await inbox.record_inbound(session, account, account.phone_number_id, m, names.get(str(m.get("from") or "")))
+                conv_id = await inbox.record_inbound(session, account, account.phone_number_id, m, names.get(str(m.get("from") or "")))
         except Exception as exc:  # noqa: BLE001 - never the message in the log
             counts["failed"] += 1
             logger.warning("club whatsapp account %s: a message could not be kept (%s)", account.id, type(exc).__name__)
             continue
-        if conv is not None:
+        if conv_id is not None:
             counts["messages"] += 1
-            touched[conv.id] = "message"
+            touched[conv_id] = "message"
     for st in value.get("statuses") or []:
         if not isinstance(st, dict):
             continue

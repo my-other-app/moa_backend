@@ -270,14 +270,17 @@ class ClubWhatsAppMessages(AbstractSQLModel):
     sent_by_name = Column(String(120), nullable=True)
     #: For a reply: seconds since the message it answered first waited.
     response_seconds = Column(Integer, nullable=True)
-    #: When Meta says it happened (an inbound message's own time).
-    wa_timestamp = Column(TZAwareDateTime(timezone=True), nullable=True)
+    #: When it happened: Meta's time for an inbound message, the send's for
+    #: an outbound one. A thread is in this order (then id).
+    wa_timestamp = Column(TZAwareDateTime(timezone=True), nullable=False, default=_now, server_default=text("now()"))
     created_at = Column(TZAwareDateTime(timezone=True), nullable=False, default=_now, server_default=text("now()"))
 
     conversation = relationship("ClubWhatsAppConversations", foreign_keys=[conversation_id])
 
     __table_args__ = (
         Index("ix_club_whatsapp_messages_conversation", "conversation_id", "id"),
+        # A thread, in the order things happened.
+        Index("ix_club_whatsapp_messages_thread", "conversation_id", "wa_timestamp", "id"),
         CheckConstraint("direction IN ('in', 'out')", name="ck_club_whatsapp_messages_direction"),
         # The retention sweep and the stats: a club's messages by age.
         Index("ix_club_whatsapp_messages_club_created", "club_id", "created_at"),

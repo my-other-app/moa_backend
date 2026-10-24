@@ -196,13 +196,9 @@ async def list_messages(
     access.require_inbox(request)
     club = await service.club_of(session, user)
     conv = await inbox.get_conversation(session, club.id, conversation_id)
-    rows = await inbox.messages(session, conv, before=before, after=after, limit=limit)
-    has_more = False
-    if rows and after is None:
-        has_more = await session.scalar(
-            select(func.count()).select_from(inbox.ClubWhatsAppMessages)
-            .where(inbox.ClubWhatsAppMessages.conversation_id == conv.id, inbox.ClubWhatsAppMessages.id < rows[0].id)
-        ) > 0
+    rows, more = await inbox.messages(session, conv, before=before, after=after, limit=limit)
+    # Older messages before the first item (catching up with `after` never pages back).
+    has_more = more if after is None else False
     events = await inbox.contact_events(session, club.id, [conv])
     return {"conversation": inbox.conversation_out(conv, events.get(conv.id, [])),
             "items": [inbox.message_out(m) for m in rows], "has_more": has_more}
