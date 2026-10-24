@@ -176,6 +176,19 @@ class AppConfig(BaseSettings):
     WHATSAPP_TEMPLATE_LANGUAGE: str = "en"
     # Seconds a call to Meta may take before it is given up on.
     WHATSAPP_TIMEOUT_SECONDS: float = 15.0
+    # A club's own WhatsApp Business number (app/api/club_whatsapp, an
+    # Enterprise feature): the Fernet key its access token, app secret and
+    # webhook verify token are encrypted with. Its own secret, not
+    # PAYMENT_KEYS_SECRET or AI_KEYS_SECRET, so one leaked key opens one kind
+    # of club credential; a comma-separated list rotates (app/core/keyring.py).
+    # Unset: no club can connect a number, and every WhatsApp send goes from
+    # the platform's number, as before.
+    WHATSAPP_KEYS_SECRET: str = ""
+    # How often the sweep asks Meta for each club number's quality rating and
+    # messaging limit (the club can also ask on demand).
+    CLUB_WHATSAPP_QUALITY_HOURS: int = 6
+    # The largest attachment the inbox fetches from Meta for the dashboard.
+    CLUB_WHATSAPP_MEDIA_MAX_MB: int = 25
 
     GOOGLE_WEB_CLIENT_ID: str
     GOOGLE_ANDROID_CLIENT_ID: str

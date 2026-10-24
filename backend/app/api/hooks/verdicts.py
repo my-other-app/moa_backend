@@ -60,9 +60,12 @@ def ses_verdicts(message: dict) -> list:
 
 
 # Meta's failure codes, the ones an event actually meets. Permanent ones mark
-# the number so later sends skip it; the rest are worth trying again.
+# the number so later sends skip it (131026 only the second time:
+# whatsapp.STRIKE_CODES); the rest are worth trying again. 368 is the
+# business's own account being restricted -- nothing about the guest.
 WHATSAPP_REASONS = {
     "131026": ("This number cannot receive WhatsApp messages", True),
+    "131050": ("They chose to stop marketing messages from this business", False),
     "131047": ("Outside the 24-hour window — only an approved template can reach them now", False),
     "131049": ("Held back by WhatsApp to protect the recipient from too much marketing", False),
     "131051": ("That kind of message is not supported", False),
@@ -74,9 +77,10 @@ WHATSAPP_REASONS = {
     "132012": ("A value does not fit the template’s format", False),
     "132015": ("The template is paused for poor quality", False),
     "132016": ("The template has been disabled", False),
+    "132018": ("There's a problem with the template's values", False),
     "133010": ("The sending number is not registered", False),
     "470": ("Outside the 24-hour window — only an approved template can reach them now", False),
-    "368": ("The recipient’s account is restricted", True),
+    "368": ("The business's WhatsApp account is restricted for a policy violation", False),
 }
 
 

@@ -214,7 +214,7 @@ def _own_secrets() -> tuple[str, ...]:
         settings.SES_SECRET_KEY, settings.RAZORPAY_KEY_SECRET, settings.RAZORPAY_WEBHOOK_SECRET,
         settings.RESEND_API_KEY, settings.RESEND_WEBHOOK_SECRET, settings.WHATSAPP_ACCESS_TOKEN,
         settings.WHATSAPP_APP_SECRET, settings.CLOUDFLARE_API_TOKEN, settings.SITE_REVALIDATE_SECRET,
-        settings.PAYMENT_KEYS_SECRET, settings.SES_WEBHOOK_TOKEN,
+        settings.PAYMENT_KEYS_SECRET, settings.AI_KEYS_SECRET, settings.WHATSAPP_KEYS_SECRET, settings.SES_WEBHOOK_TOKEN,
         settings.BACKUP_S3_ACCESS_KEY, settings.BACKUP_S3_SECRET_KEY, *settings.site_tokens,
     ]
     for url in (settings.DATABASE_URL, settings.DATABASE_URL_SYNC):
@@ -288,6 +288,7 @@ def scrub_event(event: dict, hint: Optional[dict] = None) -> Optional[dict]:
         return None
 
     request = event.get("request")
+    sensitive = False
     if isinstance(request, dict):
         request.pop("cookies", None)
         request.pop("data", None)
@@ -295,6 +296,12 @@ def scrub_event(event: dict, hint: Optional[dict] = None) -> Optional[dict]:
         if "headers" in request:
             request["headers"] = _headers(request["headers"])
         if isinstance(request.get("url"), str):
+            from urllib.parse import urlsplit
+
+            try:
+                sensitive = redact.is_sensitive(urlsplit(request["url"]).path)
+            except ValueError:
+                sensitive = False
             request["url"] = scrub_text(redact.path(request["url"]))
         if isinstance(request.get("query_string"), str):
             request["query_string"] = scrub_text("?" + request["query_string"])[1:]
@@ -309,6 +316,13 @@ def scrub_event(event: dict, hint: Optional[dict] = None) -> Optional[dict]:
     for exception in ((event.get("exception") or {}).get("values") or []):
         for frame in ((exception.get("stacktrace") or {}).get("frames") or []):
             frame.pop("vars", None)
+        # A route that carries a secret or a message (a club's keys, its
+        # WhatsApp inbox and webhook): the type and the frames, never the
+        # exception's words, which could quote what was sent (redact.py).
+        if sensitive and exception.get("value"):
+            exception["value"] = "(message withheld: this route carries a secret or a message)"
+    if sensitive and isinstance(event.get("logentry"), dict):
+        event["logentry"] = {"message": "(message withheld: this route carries a secret or a message)"}
     return event
 
 

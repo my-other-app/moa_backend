@@ -6,7 +6,12 @@
 - The routes where a club pastes its Razorpay keys, or its own AI key,
   carry a secret in the body. Nothing here logs request bodies, but an
   error report about them gives the traceback's frames and the exception's
-  type, never its message, which could quote what was sent.
+  type, never its message, which could quote what was sent. So do a club's
+  own WhatsApp routes (its access token and app secret, and every message
+  sent or read through its inbox) and its WhatsApp webhook (the messages
+  people send it): no message content in a log or an error report. The
+  inbox's search term (`q`, a name or a number) is [Filtered] wherever its
+  URL is logged.
 - The live room's stream (EventSource cannot send headers) carries the
   browser's key and the player's key in its query string, and a player key
   is enough to answer as that player: `key`, `player` and, beside them,
@@ -18,8 +23,8 @@ import logging
 import re
 import traceback
 
-_CLUB_WEBHOOK = re.compile(r"(/payments/webhook/club/)([A-Za-z0-9_-]{0,6})[A-Za-z0-9_-]*")
-_SENSITIVE_BODIES = re.compile(r"^/api/v1/clubs/(?:payments/gateway|ai/key)(?:/|$)")
+_CLUB_WEBHOOK = re.compile(r"(/payments/webhook/club/|/hooks/whatsapp/club/)([A-Za-z0-9_-]{0,6})[A-Za-z0-9_-]*")
+_SENSITIVE_BODIES = re.compile(r"^/api/v1/(?:clubs/(?:payments/gateway|ai/key|whatsapp)|hooks/whatsapp/club)(?:/|$)")
 #: A query parameter whose value must not be logged, and its value (up to
 #: the next parameter, fragment, space or quote).
 SECRET_QUERY = re.compile(r"(?i)([?&;](?:key|player|last_event_id|\w*token\w*)=)[^&;#\s\"']*")
@@ -31,7 +36,13 @@ def query(value: str) -> str:
     return SECRET_QUERY.sub(lambda m: m.group(1) + FILTERED, value)
 
 
+#: A search of a club's WhatsApp inbox (`q`: a name, a part of a number):
+#: what the club looked for is the person it looked for, and is not logged.
+_INBOX_SEARCH = re.compile(r"(/clubs/whatsapp/[^\s\"'?#]*\?(?:[^\s\"'#]*?[&;])?q=)[^&;#\s\"']*")
+
+
 def path(value: str) -> str:
+    value = _INBOX_SEARCH.sub(lambda m: m.group(1) + FILTERED, value)
     return query(_CLUB_WEBHOOK.sub(lambda m: f"{m.group(1)}{m.group(2)}…", value))
 
 

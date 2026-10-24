@@ -530,10 +530,8 @@ async def test_recovery_codes_are_64_bit_digests_and_old_bcrypt_ones_still_work_
 async def test_the_secret_is_encrypted_when_the_server_has_a_key(client, session, make_admin, mint_token, monkeypatch):
     from cryptography.fernet import Fernet
 
-    from app.api.payment_gateways import crypto
-
+    # The keyring (app/core/keyring.py) reads the setting afresh on every call: nothing to reset.
     monkeypatch.setattr(settings, "PAYMENT_KEYS_SECRET", Fernet.generate_key().decode())
-    monkeypatch.setattr(crypto, "_cache", None)
     admin, secret, _codes = await _enrolled_admin(client, session, make_admin, mint_token, "sealed@example.com")
     stored = await session.scalar(select(Users.totp_secret).where(Users.id == admin.id).execution_options(populate_existing=True))
     assert stored.startswith("fernet:") and secret not in stored

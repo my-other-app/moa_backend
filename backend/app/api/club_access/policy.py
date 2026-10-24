@@ -57,6 +57,15 @@ _SITE_DOMAIN = _rx(r"^/api/v1/clubs/site/domain(?:/|$)")
 # defaults: drafting and writing are changes, for editors and admins; the
 # status and an event's feedback summary are reads, door staff included.)
 _AI_KEY = _rx(r"^/api/v1/clubs/ai/key(?:/|$)")
+# The club's own WhatsApp number (app/api/club_whatsapp). Its connection --
+# the keys to the club's Meta account, routing, retention -- is changed by the
+# owner and admins. Everything else there (reading the connection's status,
+# the inbox, the templates) reaches the route whatever the role: what decides
+# is the WhatsApp permission the owner gives a member (club_members.whatsapp),
+# which the routes check (club_whatsapp.access), since a rule here sees only
+# the role.
+_WHATSAPP_ACCOUNT = _rx(r"^/api/v1/clubs/whatsapp/account(?:/|$)")
+_WHATSAPP = _rx(r"^/api/v1/clubs/whatsapp(?:/|$)")
 
 # Money: figures, statements, the ledger, refunds.
 _MONEY = _rx(
@@ -102,6 +111,10 @@ def allows(role: str, method: str, path: str) -> bool:
         return False
     if _GATEWAY.search(path):
         return role == "admin" and method == "GET"
+    if _WHATSAPP_ACCOUNT.search(path):
+        return role == "admin" or method not in WRITES
+    if _WHATSAPP.search(path):
+        return True
     if _ACCESS.search(path):
         return role == "admin" and method == "GET" and bool(_ACCESS_LIST.search(path))
     if method in WRITES and _OWNER_WRITES.search(path):
@@ -145,6 +158,9 @@ def can(role: str) -> dict:
         "payment_gateway": owner,
         "site_domain": admin,
         "ai_key": admin,
+        # The club's own WhatsApp number's connection. The inbox is a
+        # permission of its own (`whatsapp_inbox`, from the member's row).
+        "whatsapp_account": admin,
         # Every connected AI assistant, not only one's own (app/api/mcp).
         "connected_apps": admin,
         # Approving what an assistant asked for: publishing, sending.

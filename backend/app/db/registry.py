@@ -40,6 +40,8 @@ from app.api.competitions import models as _competition_models  # noqa: F401
 from app.api.sites import models as _site_models  # noqa: F401
 from app.api.club_access import models as _club_access_models  # noqa: F401
 from app.api.club_domains import models as _club_domain_models  # noqa: F401
+# A club's own WhatsApp number: the connection, quality, templates, inbox (app/api/club_whatsapp).
+from app.api.club_whatsapp import models as _club_whatsapp_models  # noqa: F401
 # Connected AI assistants: clients, grants, tokens, pending actions, announcement drafts (app/api/mcp).
 from app.api.mcp import models as _mcp_models  # noqa: F401
 from app.api.organisers import models as _organiser_models  # noqa: F401

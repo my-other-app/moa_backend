@@ -53,6 +53,8 @@ AUTH_RETENTION = 773_130
 SEARCH_SYNC = 773_140
 #: The kept documents' daily expiry (app/api/events/doc_cache_sweep.py).
 DOC_CACHE_SWEEP = 773_151
+#: Clubs' own WhatsApp numbers: quality checks and retention (app/api/club_whatsapp/sweep.py).
+CLUB_WHATSAPP_SWEEP = 773_160
 #: The job queue's maintenance pass (app/core/jobs.py).
 JOBS_MAINTENANCE = 774_501
 #: The live room's sweep (app/api/live/service.py).
@@ -96,6 +98,9 @@ ADMIN_ALERT_DEDUPE = 7_420_311
 GATEWAY_CONNECT = 7_420_377
 #: A club's plan checkout (app/api/subscriptions/router.py).
 PLAN_CHECKOUT = 7_420_388
+#: A club connecting, changing or disconnecting its own WhatsApp number
+#: (app/api/club_whatsapp/service.py).
+CLUB_WHATSAPP_CONNECT = 7_420_390
 #: A registration's or a subscription's ledger lines (app/api/ledger/service.py, backfill.py).
 LEDGER = 7_420_455
 #: One "tell the room" at a time per event, so two hosts pressing at once send

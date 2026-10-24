@@ -395,8 +395,10 @@ async def test_meta_refusals_land_on_the_row_as_skipped_failed_or_retried(client
     wa = (await _rows(session, asked))[DeliveryChannel.whatsapp]
     await session.refresh(asked)
     assert wa.status is DeliveryStatus.skipped and "(131026)" in wa.error
-    # The number is marked, so the next send skips it without asking Meta.
-    assert asked.wa_bounced_at is not None and "131026" in asked.wa_bounce_reason
+    # Noted, not yet marked: a first 131026 can be an old app or terms not
+    # accepted; a second marks the number (tests/test_club_whatsapp.py).
+    assert asked.wa_bounced_at is None and "131026" in asked.wa_bounce_reason
+    assert asked.wa_bounce_reason.startswith(whatsapp.FIRST_STRIKE)
 
     # Correcting the number clears the mark.
     fixed = await client.patch(f"/api/v1/events/registration/{world['event'].id}/info/{asked.id}", json={"phone": "9876500001"}, headers=world["club"])

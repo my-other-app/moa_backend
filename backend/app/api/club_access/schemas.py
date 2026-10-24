@@ -15,6 +15,8 @@ class MemberRow(BaseModel):
     invited_at: Optional[datetime] = None
     accepted_at: Optional[datetime] = None
     last_seen_at: Optional[datetime] = None
+    #: The WhatsApp permission: reads and answers the club's own WhatsApp inbox.
+    whatsapp: bool = False
 
 
 class RoleOption(BaseModel):
@@ -44,6 +46,12 @@ class InviteResponse(BaseModel):
 
 class RoleChange(BaseModel):
     role: str
+
+
+class WhatsAppPermission(BaseModel):
+    """Whether this member may read and answer the club's WhatsApp inbox."""
+
+    allowed: bool
 
 
 class Me(BaseModel):

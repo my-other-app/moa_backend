@@ -80,11 +80,12 @@ EVENT_SCOPED_FEATURES = frozenset({
 })
 EVENT_SCOPED_LIMITS = frozenset({"registrations_per_event", "merch_items_per_event"})
 #: Gates about the whole club, enforced whatever its events: website and
-#: its own domain, roles, finance, AI assistants over MCP, and the per-club limits (events and
+#: its own domain, roles, finance, AI assistants over MCP, the club's own
+#: WhatsApp number (app/api/club_whatsapp), and the per-club limits (events and
 #: announcements per month, committee seats, website templates,
 #: registrations per month -- though a registration to a grandfathered event
 #: is never refused, it still counts in `usage`).
-CLUB_WIDE_FEATURES = frozenset({"website", "custom_domain", "roles", "finance", "mcp"})
+CLUB_WIDE_FEATURES = frozenset({"website", "custom_domain", "roles", "finance", "mcp", "whatsapp_own"})
 
 #: The limits nothing enforces, and why (see the module docstring).
 NOT_ENFORCED = {
@@ -125,6 +126,7 @@ _SUBJECTS = {
     "ai_assist": ("AI assist", "is"),
     "ai_byok": ("AI assist with your own key", "is"),
     "mcp": ("Connecting AI assistants", "is"),
+    "whatsapp_own": ("Your own WhatsApp Business number", "is"),
 }
 
 #: A limit's unit, singular and plural, and whether it is counted per month.
@@ -243,6 +245,14 @@ def note_actor(user, impersonated_by: Optional[int] = None) -> None:
         ctx["impersonated_by"] = impersonated_by
     if user is not None and _is_admin(user):
         ctx["admin"] = True
+
+
+def impersonated_by() -> Optional[int]:
+    """The admin behind this request when it is an admin acting as the club
+    (impersonation), else None. For what only the club's own people may see
+    -- a club's WhatsApp conversations -- whatever an admin may otherwise do."""
+    ctx = _scope.get()
+    return (ctx or {}).get("impersonated_by")
 
 
 def _is_admin(user) -> bool:
