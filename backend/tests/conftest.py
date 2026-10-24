@@ -10,6 +10,9 @@ suite that creates/tears down its schema per session.
 """
 import os
 
+# Not production: the start-up checks (app/core/config_checks.py) leave the
+# suite's made-up keys alone; tests/test_config_checks.py checks them itself.
+os.environ.setdefault("APP_ENV", "test")
 os.environ.setdefault("APP_SECRET_KEY", "test-secret-key-not-for-production")
 os.environ.setdefault(
     "APP_DATABASE_URL",

@@ -14,12 +14,25 @@ class AppConfig(BaseSettings):
     model_config = SettingsConfigDict(
         case_sensitive=True,
         env_prefix="APP_",
+        # A setting refused at startup is named, never printed: a secret
+        # that fails a validator must not end up in the container's log.
+        hide_input_in_errors=True,
     )
 
     SECRET_KEY: str
     WORKERS: int = 1
     PORT: int = 8000
     DEBUG: bool = False
+    # Which deployment this is: production, staging, development, test...
+    # Any but development, dev, local, test and ci (and, unset, any process
+    # with DEBUG off) is checked at startup, and refuses to start on a
+    # missing, placeholder, weak or half-set secret (app/core/config_checks.py;
+    # docs/OPERATIONS.md, section 19). Sentry's environment, unless
+    # SENTRY_ENVIRONMENT says otherwise.
+    ENV: str = ""
+    # "warn": those findings are logged at ERROR and the process starts
+    # anyway. An emergency override only; the default refuses.
+    CONFIG_CHECKS: str = "enforce"
     # uvicorn's line per request. nginx in front already logs every request,
     # so this is a second copy, written on every request; false drops it.
     ACCESS_LOG: bool = True

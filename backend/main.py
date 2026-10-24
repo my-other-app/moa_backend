@@ -1,7 +1,13 @@
 import uvicorn
 from app.config import settings
+from app.core import config_checks
 
 if __name__ == "__main__":
+    # In production, no start on a missing, placeholder or half-set secret
+    # (app/core/config_checks.py; docs/OPERATIONS.md, section 19). Checked
+    # here, before uvicorn starts its workers: the process exits 78 and
+    # Docker's restart backs off, rather than workers refusing in a loop.
+    config_checks.enforce_or_exit()
     # APP_LOG_JSON: every line JSON, uvicorn's own included (app/core/
     # observability.py). Otherwise uvicorn's default logging, as before.
     log_options = {}

@@ -92,6 +92,11 @@ if __name__ == "__main__":
         logger.setLevel(logging.INFO)
     else:
         logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    # As the API: no start on a missing, placeholder or half-set secret in
+    # production (app/core/config_checks.py), before the app is imported.
+    from app.core import config_checks
+
+    config_checks.enforce_or_exit()
     try:
         import uvloop
     except ImportError:  # pragma: no cover - in requirements.txt, as uvicorn uses it

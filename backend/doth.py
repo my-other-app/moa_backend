@@ -85,6 +85,12 @@ def start_loops() -> list[asyncio.Task]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # In production, no start on a missing, placeholder or half-set secret
+    # (app/core/config_checks.py). main.py checks before uvicorn starts; this
+    # covers any other way the app is served.
+    from app.core import config_checks
+
+    config_checks.enforce()
     # Startup: seed badge definitions
     try:
         from app.db.core import AsyncSessionLocal
