@@ -113,7 +113,7 @@ class Plans(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     features = relationship(
         "PlanFeatures", uselist=False, back_populates="plan", cascade="all, delete-orphan"
     )
-    subscriptions = relationship("ClubSubscriptions", back_populates="plan")
+    subscriptions = relationship("ClubSubscriptions", back_populates="plan", foreign_keys="ClubSubscriptions.plan_id")
 
     __table_args__ = (
         # A negative price is never intended and would be charged.
@@ -133,7 +133,6 @@ LIMIT_KEYS = (
     "coupons_per_event",
     "merch_items_per_event",
     "committee_seats",
-    "storage_gb",
     "announcements_per_month",
     "website_templates",
     "ai_actions_per_month",
@@ -158,6 +157,11 @@ class PlanLimits(AbstractSQLModel, TimestampsMixin):
     coupons_per_event = Column(Integer, nullable=True)
     merch_items_per_event = Column(Integer, nullable=True)
     committee_seats = Column(Integer, nullable=True)
+    #: No longer a limit (migration trial_pricing): nothing ever metered what
+    #: a club stores, so it is not in LIMIT_KEYS, the API, the dashboards or
+    #: the pricing page. The column stays, unread, because production migrates
+    #: while the previous code still serves (and a rollback is code-only), and
+    #: the shipped club_plans seed still writes it. Drop it in a later release.
     storage_gb = Column(Integer, nullable=True)
     announcements_per_month = Column(Integer, nullable=True)
     website_templates = Column(Integer, nullable=True)
@@ -414,9 +418,38 @@ class ClubSubscriptions(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     #: When the "your complimentary plan ends in a week" mail went.
     comp_reminded_at = Column(TZAwareDateTime(timezone=True), nullable=True)
 
-    plan = relationship("Plans", back_populates="subscriptions")
+    # The free trial (service.start_free_trial): every new club gets Pro for
+    # FREE_TRIAL_DAYS with no card and no Razorpay, once. While
+    # `trial_plan_id` is set and `trial_ends_at` is ahead, the club has that
+    # plan whatever else the row says -- a paid plan it picks during the trial
+    # is a Razorpay subscription starting at `trial_ends_at`, held on the row
+    # as usual, and takes over only then. The hourly sweep clears it at the
+    # end and the club is on its chosen plan, or Free. `trial_started_at`
+    # (never cleared) is what makes it once per club.
+    #: The plan the free trial gives; null when no free trial is running.
+    trial_plan_id = Column(Integer, ForeignKey("plans.id", ondelete="SET NULL"), nullable=True)
+
+    # An Enterprise trial an admin grants after a sales call
+    # (service.grant_enterprise_trial). Laid over whatever the club has --
+    # its paid subscription keeps running underneath, untouched -- until
+    # `enterprise_trial_ends_at`; then the club is back on what it had (the
+    # sweep, or an admin ending it early). Not a complimentary plan: that
+    # replaces the subscription and stops Razorpay, which would leave a
+    # paying club on Free when the trial ended.
+    enterprise_trial_plan_id = Column(Integer, ForeignKey("plans.id", ondelete="SET NULL"), nullable=True)
+    enterprise_trial_started_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    enterprise_trial_ends_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    #: The admin who granted it.
+    enterprise_trial_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    #: When the "your Enterprise trial ends in three days" mail went.
+    enterprise_trial_reminded_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+
+    plan = relationship("Plans", back_populates="subscriptions", foreign_keys=[plan_id])
+    trial_plan = relationship("Plans", foreign_keys=[trial_plan_id])
+    enterprise_trial_plan = relationship("Plans", foreign_keys=[enterprise_trial_plan_id])
     club = relationship("Clubs")
     granter = relationship("Users", foreign_keys=[granted_by])
+    enterprise_trial_granter = relationship("Users", foreign_keys=[enterprise_trial_by])
 
     __table_args__ = (
         # One live subscription per club. `is_deleted` is in the key so a
