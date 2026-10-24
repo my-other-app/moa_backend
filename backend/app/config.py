@@ -50,10 +50,11 @@ class AppConfig(BaseSettings):
     # Error tracking with Sentry (app/core/observability.py). Empty DSN: off,
     # and sentry_sdk is never imported. Personal data is scrubbed before an
     # event leaves. SENTRY_RELEASE defaults to the git sha the deploy writes
-    # to backend/REVISION. SENTRY_SAMPLE_RATE: the share of errors sent;
+    # to backend/REVISION; SENTRY_ENVIRONMENT to ENV, else production.
+    # SENTRY_SAMPLE_RATE: the share of errors sent;
     # SENTRY_TRACES_SAMPLE_RATE: the share of requests traced (0: none).
     SENTRY_DSN: str = ""
-    SENTRY_ENVIRONMENT: str = "production"
+    SENTRY_ENVIRONMENT: str = ""
     SENTRY_RELEASE: str = ""
     SENTRY_SAMPLE_RATE: float = 1.0
     SENTRY_TRACES_SAMPLE_RATE: float = 0.0

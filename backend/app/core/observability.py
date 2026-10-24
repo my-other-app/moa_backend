@@ -2,9 +2,11 @@
 
 - APP_SENTRY_DSN set: errors (the 500s, and anything logged at ERROR) go to
   Sentry, tagged with the release (the git sha the deploy wrote to
-  backend/REVISION), the environment and the request id; a share of requests
-  is traced when APP_SENTRY_TRACES_SAMPLE_RATE is above 0. Unset: sentry_sdk
-  is never imported.
+  backend/REVISION), the environment (APP_SENTRY_ENVIRONMENT, else APP_ENV,
+  else production), the component (api, or worker for the job worker) and
+  the request id; a share of requests is traced when
+  APP_SENTRY_TRACES_SAMPLE_RATE is above 0. A 4xx is never sent. Unset:
+  sentry_sdk is never imported.
 - APP_LOG_JSON=true: every log line is one JSON object (time, level, logger,
   message, request id; method, path and status for uvicorn's access line),
   for a log shipper to index. Unset: uvicorn's own format, as before.
@@ -265,10 +267,25 @@ def _headers(headers: Any) -> Any:
     return headers
 
 
-def scrub_event(event: dict, hint: Optional[dict] = None) -> dict:
+def _client_error(hint: Optional[dict]) -> bool:
+    """Whether the event is about a 4xx: an exception carrying a status
+    code under 500 (the API's own refusals, FastAPI's, the rate limiter's)."""
+    exc_info = (hint or {}).get("exc_info")
+    exc = exc_info[1] if isinstance(exc_info, tuple) and len(exc_info) == 3 else None
+    status = getattr(exc, "status_code", None)
+    return isinstance(status, int) and status < 500
+
+
+def scrub_event(event: dict, hint: Optional[dict] = None) -> Optional[dict]:
     """Sentry's before_send (and before_send_transaction): the event with no
-    personal data and no credentials in it."""
+    personal data and no credentials in it -- or None, not sent, when it is
+    about a 4xx. Sentry's integrations already report only 5xx
+    (failed_request_status_codes below); this also drops one that code
+    logged by hand with its exception."""
     from app.core import redact
+
+    if _client_error(hint):
+        return None
 
     request = event.get("request")
     if isinstance(request, dict):
@@ -304,11 +321,10 @@ def scrub_breadcrumb(crumb: dict, hint: Optional[dict] = None) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def release() -> Optional[str]:
-    """APP_SENTRY_RELEASE, else the git sha: backend/REVISION (the deploy
-    writes it; the server has no .git), else `git rev-parse` in a checkout."""
-    if settings.SENTRY_RELEASE:
-        return settings.SENTRY_RELEASE
+def revision() -> Optional[str]:
+    """The deployed commit's sha: backend/REVISION (the deploy writes it; the
+    server has no .git), else `git rev-parse HEAD` in a checkout; None when
+    neither gives one. Sentry's release, and the health URLs' revision."""
     sha = None
     try:
         sha = (BACKEND / "REVISION").read_text().strip() or None
@@ -321,9 +337,21 @@ def release() -> Optional[str]:
             ).stdout.strip() or None
         except (OSError, subprocess.SubprocessError):
             sha = None
-    if sha and re.fullmatch(r"[0-9a-f]{7,40}", sha):
-        return f"myotherapp-backend@{sha[:12]}"
-    return None
+    return sha if sha and re.fullmatch(r"[0-9a-f]{7,40}", sha) else None
+
+
+def release() -> Optional[str]:
+    """APP_SENTRY_RELEASE, else myotherapp-backend@<the git sha's first 12>."""
+    if settings.SENTRY_RELEASE:
+        return settings.SENTRY_RELEASE
+    sha = revision()
+    return f"myotherapp-backend@{sha[:12]}" if sha else None
+
+
+def environment() -> str:
+    """APP_SENTRY_ENVIRONMENT, else APP_ENV (staging reports as staging),
+    else production."""
+    return (settings.SENTRY_ENVIRONMENT or "").strip() or (getattr(settings, "ENV", "") or "").strip() or "production"
 
 
 def _rate(value: float) -> float:
@@ -350,9 +378,12 @@ def init_sentry(component: Optional[str] = None) -> bool:
         logger.error("APP_SENTRY_DSN is set but sentry-sdk is not installed in this image; error tracking is off")
         return False
 
+    # Only a 5xx is an error event; a 4xx -- a refusal the API meant -- never
+    # is. Sentry's default, said here so a change of default cannot flood it.
+    server_errors = set(range(500, 600))
     sentry_sdk.init(
         dsn=settings.SENTRY_DSN.strip(),
-        environment=settings.SENTRY_ENVIRONMENT or None,
+        environment=environment(),
         release=release(),
         sample_rate=_rate(settings.SENTRY_SAMPLE_RATE),
         traces_sample_rate=_rate(settings.SENTRY_TRACES_SAMPLE_RATE),
@@ -365,13 +396,13 @@ def init_sentry(component: Optional[str] = None) -> bool:
         integrations=[
             # The route's template (/api/v1/events/{event_id}), never the
             # path with somebody's id or slug in it.
-            StarletteIntegration(transaction_style="url"),
-            FastApiIntegration(transaction_style="url"),
+            StarletteIntegration(transaction_style="url", failed_request_status_codes=server_errors),
+            FastApiIntegration(transaction_style="url", failed_request_status_codes=server_errors),
             LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
         ],
     )
     sentry_sdk.set_tag("component", component or settings.PROCESS)
     global _sentry_started
     _sentry_started = True
-    logger.info("Sentry is on (%s, release %s)", settings.SENTRY_ENVIRONMENT, release())
+    logger.info("Sentry is on (%s, release %s)", environment(), release())
     return True
