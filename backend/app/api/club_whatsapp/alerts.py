@@ -1,9 +1,10 @@
-"""Telling a club about its own WhatsApp number: a mail to its owner.
+"""Telling a club about its own WhatsApp number: its dashboard's bell, and a
+mail to its owner.
 
 When the number stops working (Meta refused its token, locked the account,
 a send failed for the account) or its quality rating drops, the club hears
-of it by mail -- at most once a day for each kind of notice -- besides what
-its dashboard shows. The audit log is the record of having told it, as for
+of it in the bell (app/api/club_alerts) and by mail -- at most once a day
+for each kind of notice -- besides what its WhatsApp settings show. The audit log is the record of having told it, as for
 the plan's paused-registrations mail: durable, shared by every worker, and
 readable by an admin. The mail is a durable job (app.core.after_commit), so
 an outage of the mail provider is retried, and it goes only if the change it
@@ -55,10 +56,12 @@ def dashboard_url(path: str = "/whatsapp/settings") -> str:
 
 async def tell_owner(session, club_id: int, kind: str, *, subject: str, paragraphs: list[str],
                      button: tuple[str, str] | None = None, now: datetime | None = None) -> bool:
-    """Mail the club's owner about `kind`, unless it was told in the last
-    day. Written in the caller's transaction. True when a mail was queued."""
+    """A notice in the club's bell (club_alerts kind `whatsapp_<kind>`) and a
+    mail to its owner about `kind`, unless it was told in the last day.
+    Written in the caller's transaction. True when a mail was queued."""
     from app.api.audit import service as audit
     from app.api.audit.models import AdminAuditLogs
+    from app.api.club_alerts import notify
     from app.api.subscriptions.notices import owner_address
 
     now = now or datetime.now(timezone.utc)
@@ -75,6 +78,10 @@ async def tell_owner(session, club_id: int, kind: str, *, subject: str, paragrap
     )
     if recent is not None:
         return False
+    await notify(
+        session, club_id, f"whatsapp_{kind}", title=subject, body=" ".join(paragraphs[:1]),
+        link="/whatsapp/settings", data={"kind": kind},
+    )
     to = await owner_address(session, club_id)
     await audit.record(
         session, actor=None, action=action, entity_type="club", entity_id=club_id,

@@ -646,7 +646,7 @@ async def record_delivery_send(session, route: accounts.Route, to: str, template
     await session.flush()
     conv.last_outbound_at = now
     _touch(conv, msg, now)
-    await quota.record_send(session, account.club_id, kind, wamid)
+    # Counted (as the club's, so not at all) by the pipeline, by the answer's "Via".
 
 
 # ─── Stats ───────────────────────────────────────────────────────────────

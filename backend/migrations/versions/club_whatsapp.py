@@ -24,14 +24,14 @@ of rows.
 Downgrade drops the tables and both columns.
 
 Revision ID: club_whatsapp
-Revises: trial_pricing
+Revises: message_quotas
 """
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import UUID
 
 revision = "club_whatsapp"
-down_revision = "trial_pricing"
+down_revision = "message_quotas"
 branch_labels = None
 depends_on = None
 

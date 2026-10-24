@@ -109,7 +109,7 @@ async def _account(session, account, value: dict) -> None:
     account.last_error = reason
     account.last_error_code = event[:16] or None
     await alerts.tell_owner(
-        session, account.club_id, "account",
+        session, account.club_id, "restricted",
         subject="Meta restricted your club's WhatsApp account",
         paragraphs=[
             reason,

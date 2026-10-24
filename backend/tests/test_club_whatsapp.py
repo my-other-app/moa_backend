@@ -959,6 +959,9 @@ async def test_an_account_problem_falls_back_to_the_platform_and_tells_the_club(
     await after_commit.drain()
     told = [m for m in mails if "stopped working on MyOtherApp" in m["subject"]]
     assert len(told) == 1 and told[0]["recipients"] == ["yukthi@example.com"] and "Session" not in told[0]["subject"]
+    # And in the club's own bell, leading to its WhatsApp settings.
+    bell = (await client.get(f"{API}/clubs/alerts", headers=world.h)).json()
+    assert [(a["kind"], a["link"]) for a in bell["items"]] == [("whatsapp_failed", "/whatsapp/settings")]
     # Once failed, it is not tried again: the next goes from the platform straight away.
     assert await accounts.route_for(session, world.club.id, "event_reminder") is None
 
@@ -996,20 +999,42 @@ async def test_routing_off_keeps_the_club_on_the_platforms_number(client, sessio
     assert await session.scalar(select(func.count()).select_from(AdminAuditLogs).where(AdminAuditLogs.action == "club_whatsapp.settings")) == 1
 
 
-async def test_every_send_from_the_clubs_number_is_counted_as_the_clubs_not_the_platforms(client, session, world, meta, monkeypatch):
-    """The quota hook (feat/message-quotas): what the club's own number sends
-    is the club's, paid to Meta, and never counts against the platform's quota."""
-    calls = []
+async def test_what_the_clubs_own_number_sends_never_counts_against_its_quota(client, session, world, meta, platform_number, monkeypatch):
+    """The club pays Meta for its own number: a reply from the inbox goes
+    through the quota hook as via="club", a reminder from the club's number
+    answers "Via": "club", and neither is counted (app/api/message_quota).
+    The same reminder from the platform's number counts."""
+    from app.api.message_quota import service as message_quota
+    from app.api.message_quota.models import MessageUsage
 
-    async def record(session, club_id, kind, ref=None):
-        calls.append((club_id, kind, ref))
+    seen = []
+    real_count = message_quota.count
 
-    monkeypatch.setattr(quota, "record_send", record)
+    async def count(session, **kwargs):
+        seen.append((kwargs["kind"], kwargs["via"]))
+        return await real_count(session, **kwargs)
+
+    monkeypatch.setattr(message_quota, "count", count)
     account = await connected(client, session, world)
     conv = await conversation_with(client, session, world, account)
     await client.post(f"{API}/clubs/whatsapp/conversations/{conv.id}/messages", json={"type": "text", "text": "Hi"}, headers=world.h)
-    await _reminder(session, world)
-    assert calls == [(world.club.id, "inbox_reply", "wamid.CLUB1"), (world.club.id, "reminder", "wamid.CLUB2")]
+    d = await _reminder(session, world)
+    assert d.provider_id == "wamid.CLUB2"
+    assert ("inbox_reply", "club") in seen and ("reminder", "club") in seen
+    used = await session.scalar(select(func.coalesce(func.sum(MessageUsage.used), 0)).where(
+        MessageUsage.club_id == world.club.id, MessageUsage.channel == "whatsapp"))
+    assert used == 0
+    # From the platform's number (routing off), the next one is the platform's, and counts.
+    await client.patch(f"{API}/clubs/whatsapp/account", json={"routing": False}, headers=world.h)
+    row = await session.scalar(select(Deliveries).where(Deliveries.id == d.id))
+    row.status = DeliveryStatus.pending
+    row.queued_at = datetime.now(timezone.utc)
+    await session.commit()
+    d = await deliveries.deliver(session, d.id)
+    assert d.provider_id == "wamid.PLATFORM1" and ("reminder", "platform") in seen
+    used = await session.scalar(select(func.coalesce(func.sum(MessageUsage.used), 0)).where(
+        MessageUsage.club_id == world.club.id, MessageUsage.channel == "whatsapp"))
+    assert used == 1
     assert quota.VIA == "club" and quota.CHANNEL == "whatsapp"
 
 
