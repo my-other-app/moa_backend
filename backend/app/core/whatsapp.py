@@ -58,6 +58,13 @@ against the club's monthly WhatsApp quota (app/api/message_quota): the
 delivery pipeline counts its own sends in the transaction that records them
 (the answer's `Via` says which number it went from); any other caller
 passes `meter` and the send is held back past Free's limit and counted here.
+
+A club on Enterprise may connect its own WhatsApp Business number
+(app/api/club_whatsapp). Its sends name a `Sender` -- that number's id, its
+access token, the language its templates were approved in -- and go through
+the same code; their answer says `"Via": "club"`, and the club, which pays
+Meta for them, is never counted or held back for them. Without a Sender,
+everything here is the platform's number, from the server's .env.
 """
 from __future__ import annotations
 
@@ -127,6 +134,37 @@ def normalise(raw: Optional[str]) -> tuple[Optional[str], Optional[str]]:
     if INDIAN_MOBILE.fullmatch(s):
         return "+91" + s, None
     return None, "not a mobile number (ten digits, the first 6 to 9, or the number with its country code)"
+
+
+# ─── Whose number ────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class Sender:
+    """A number other than the platform's: a club's own (app/api/club_whatsapp).
+    The token is decrypted for the send and never kept or logged. With an
+    `app_secret`, each call carries Meta's appsecret_proof, as a club's app
+    may require."""
+
+    phone_number_id: str
+    token: str
+    language: Optional[str] = None
+    app_secret: Optional[str] = None
+    #: Whose it is, for the caller: the club's account row.
+    account_id: Optional[int] = None
+
+    def __repr__(self) -> str:  # never the token in a log line or a traceback
+        return f"Sender(phone_number_id={self.phone_number_id!r}, account_id={self.account_id!r})"
+
+
+def appsecret_proof(token: str, app_secret: Optional[str]) -> Optional[str]:
+    """Meta's appsecret_proof: HMAC-SHA256 of the token, keyed by the app secret."""
+    if not app_secret:
+        return None
+    import hashlib
+    import hmac
+
+    return hmac.new(app_secret.encode("utf-8"), token.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 # ─── The templates ───────────────────────────────────────────────────────
@@ -221,8 +259,12 @@ def rupees_text(amount) -> str:
     return digits if paise == 0 else f"{digits}.{paise:02d}"
 
 
-def payload(to: str, template: Template, *, media_id: Optional[str] = None, filename: Optional[str] = None) -> dict:
-    """The body of POST /{phone number id}/messages for one template."""
+def payload(
+    to: str, template: Template, *, media_id: Optional[str] = None, filename: Optional[str] = None, language: Optional[str] = None,
+) -> dict:
+    """The body of POST /{phone number id}/messages for one template. The
+    language is the platform's (WHATSAPP_TEMPLATE_LANGUAGE) unless a club's
+    number had its own approved in another."""
     components: list[dict] = []
     if template.document:
         if not media_id:
@@ -243,7 +285,7 @@ def payload(to: str, template: Template, *, media_id: Optional[str] = None, file
         "type": "template",
         "template": {
             "name": template.name,
-            "language": {"code": settings.WHATSAPP_TEMPLATE_LANGUAGE or "en"},
+            "language": {"code": language or settings.WHATSAPP_TEMPLATE_LANGUAGE or "en"},
             "components": components,
         },
     }
@@ -359,12 +401,23 @@ def refusal(status: int, body) -> Exception:
 # ─── Sending ─────────────────────────────────────────────────────────────
 
 
-def _base() -> str:
-    return f"{GRAPH}/{settings.WHATSAPP_GRAPH_VERSION.strip() or 'v23.0'}/{settings.WHATSAPP_PHONE_NUMBER_ID.strip()}"
+def graph_version() -> str:
+    return settings.WHATSAPP_GRAPH_VERSION.strip() or "v23.0"
 
 
-def _headers() -> dict:
-    return {"Authorization": f"Bearer {settings.WHATSAPP_ACCESS_TOKEN.strip()}"}
+def _base(sender: Optional[Sender] = None) -> str:
+    number = sender.phone_number_id if sender is not None else settings.WHATSAPP_PHONE_NUMBER_ID.strip()
+    return f"{GRAPH}/{graph_version()}/{number}"
+
+
+def _headers(sender: Optional[Sender] = None) -> dict:
+    token = sender.token if sender is not None else settings.WHATSAPP_ACCESS_TOKEN.strip()
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _params(sender: Optional[Sender] = None) -> Optional[dict]:
+    proof = appsecret_proof(sender.token, sender.app_secret) if sender is not None else None
+    return {"appsecret_proof": proof} if proof else None
 
 
 def _client() -> httpx.AsyncClient:
@@ -379,13 +432,14 @@ def _json(r: httpx.Response):
         return {}
 
 
-async def _upload(client: httpx.AsyncClient, content: bytes, filename: str) -> str:
+async def _upload(client: httpx.AsyncClient, content: bytes, filename: str, sender: Optional[Sender] = None) -> str:
     """The document, up to Meta; its media id. Nothing has reached the guest
     yet, so any trouble here may be tried again."""
     try:
         r = await client.post(
-            f"{_base()}/media",
-            headers=_headers(),
+            f"{_base(sender)}/media",
+            headers=_headers(sender),
+            params=_params(sender),
             data={"messaging_product": "whatsapp", "type": "application/pdf"},
             files={"file": (filename, content, "application/pdf")},
         )
@@ -421,26 +475,32 @@ async def _count(meter: dict) -> None:
         logger.warning("a WhatsApp %s for club %s could not be counted", meter.get("kind"), meter.get("club_id"), exc_info=True)
 
 
+#: The number a club's own sends go from: never counted against its quota.
+VIA_CLUB = "club"
+
+
 async def send(
     number: Optional[str], template: Template, *, document: Optional[tuple[bytes, str]] = None, meter: Optional[dict] = None,
+    sender: Optional[Sender] = None,
 ) -> dict:
     """One template to one number: `{"MessageId", "Provider", "Address",
     "Via"}`, the id Meta gave the message, the number it went to and the
-    number it went from ("platform"). Raises one of the errors above when it
-    was not sent.
+    number it went from ("platform", or "club" from `sender`'s, a club's
+    own). Raises one of the errors above when it was not sent.
 
     `meter` ({"club_id", "kind", "ref"}) is for a send made outside the
     delivery pipeline: past a Free club's monthly WhatsApp it is held back
     (Undeliverable, with the reason), and once Meta takes it, it is counted.
-    The pipeline leaves it out: it checks and counts in its own transactions."""
-    if not configured():
+    The pipeline leaves it out: it checks and counts in its own transactions.
+    A send from a club's own number is neither held back nor counted."""
+    if sender is None and not configured():
         raise Undeliverable("no WhatsApp provider is configured — nothing was sent")
     to, why = normalise(number)
     if to is None:
         raise Undeliverable(f"no WhatsApp number: {why}")
     if template.document and document is None:
         raise ValueError(f"{template.name} needs its document")
-    if meter is not None:
+    if meter is not None and sender is None:
         reason = await _held_back(meter)
         if reason:
             raise Undeliverable(reason)
@@ -448,10 +508,10 @@ async def send(
         media_id = filename = None
         if template.document:
             content, filename = document
-            media_id = await _upload(client, content, filename)
-        body = payload(to, template, media_id=media_id, filename=filename)
+            media_id = await _upload(client, content, filename, sender)
+        body = payload(to, template, media_id=media_id, filename=filename, language=sender.language if sender is not None else None)
         try:
-            r = await client.post(f"{_base()}/messages", headers=_headers(), json=body)
+            r = await client.post(f"{_base(sender)}/messages", headers=_headers(sender), params=_params(sender), json=body)
         except (httpx.ConnectError, httpx.ConnectTimeout) as e:
             # Never reached Meta, so nothing was sent.
             raise Deferred(f"WhatsApp could not be reached ({e.__class__.__name__}); it will be tried again") from e
@@ -469,6 +529,8 @@ async def send(
     if not message_id:
         # Taken, with nothing to match its statuses by. Sending again could be a second copy, so it stands.
         logger.warning("WhatsApp accepted %s without a message id", template.name)
+    if sender is not None:
+        return {"MessageId": message_id, "Provider": PROVIDER, "Address": to, "Via": VIA_CLUB}
     if meter is not None:
         await _count(meter)
     return {"MessageId": message_id, "Provider": PROVIDER, "Address": to, "Via": VIA}
