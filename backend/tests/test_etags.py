@@ -710,6 +710,7 @@ async def test_answers_to_a_signed_in_caller_are_private_and_public_ones_stay_pu
     assert (await client.get("/api/v1/interests/topics", headers=signed_in)).headers["cache-control"] == "public, max-age=300"
     cert = await client.get(f"/api/v1/events/certificates/{world['a'].ticket_id}/style", headers=signed_in)
     assert cert.status_code == 200 and cert.headers["cache-control"] == "private"
-    # Not the API's own routes: nothing written.
+    # Not the API's own routes: nothing written over what they set (the
+    # probes say no-store themselves, app/api/health.py), and no tag.
     healthz = await client.get("/healthz", headers=signed_in)
-    assert healthz.status_code == 200 and "cache-control" not in healthz.headers and "etag" not in healthz.headers
+    assert healthz.status_code == 200 and healthz.headers["cache-control"] == "no-store" and "etag" not in healthz.headers
