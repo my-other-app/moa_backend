@@ -266,16 +266,17 @@ async def patch_conversation(conversation_id: int, payload: ConversationPatch, r
                  response_class=Response, responses={200: {"content": {"application/octet-stream": {}}}})
 async def get_media(message_id: int, request: Request, session: SessionDep, user: ClubAuth) -> Response:
     """Never stored and never at a public address: fetched with the club's
-    token each time, for the signed-in team. 410 MEDIA_GONE once Meta has
-    deleted it (30 days after it arrived)."""
+    token each time, for the signed-in team. Shown in place only when it is
+    a picture, a sound or a video a browser cannot run (inbox.INLINE_TYPES);
+    anything else is a download, and nothing it holds runs on this origin
+    (a sandboxing Content-Security-Policy, nosniff). 410 MEDIA_GONE once
+    Meta has let it go (7 days after it arrived), MEDIA_OTHER_NUMBER for one
+    that came to a number since replaced."""
     access.require_inbox(request)
     club = await service.club_of(session, user)
     content, mime, filename = await inbox.media(session, club.id, message_id)
-    headers = {"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"}
-    if filename:
-        safe = "".join(ch for ch in filename if ch.isalnum() or ch in "._- ")[:120] or "attachment"
-        headers["Content-Disposition"] = f'inline; filename="{safe}"'
-    return Response(content=content, media_type=mime, headers=headers)
+    media_type, headers = inbox.media_headers(mime, filename)
+    return Response(content=content, media_type=media_type, headers=headers)
 
 
 @club_router.get("/stream", summary="The inbox's changes as server-sent events",

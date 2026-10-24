@@ -17,10 +17,11 @@ import importlib.util
 import json
 import logging
 import pathlib
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, unquote
 
 import httpx
 import pytest
@@ -117,13 +118,20 @@ class FakeMeta:
         self.fail: dict = {}
         self.club_answer = None
         self.media_bytes = b"\xff\xd8\xff\xe0fake-jpeg"
+        #: Overrides of what GET /{media id} answers (its url, mime_type, file_size).
+        self.media_info: dict = {}
+        #: (status, body) the media host answers first, one per download.
+        self.download_answers: list = []
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         request.read()
         self.calls.append(request)
-        if request.url.host == "lookaside.fbsbx.com":
+        if request.url.host != "graph.facebook.com":
+            if self.download_answers:
+                status, body = self.download_answers.pop(0)
+                return httpx.Response(status, content=body if isinstance(body, bytes) else json.dumps(body).encode())
             return httpx.Response(200, content=self.media_bytes, headers={"content-type": "image/jpeg"})
-        path = request.url.path.split("/v23.0/", 1)[-1]
+        path = re.sub(r"^/v\d+\.\d+/", "", request.url.path)
         key = f"{request.method} {path}"
         if key in self.fail:
             answer = self.fail[key]
@@ -136,8 +144,8 @@ class FakeMeta:
             return httpx.Response(200, json={"messages": [{"id": f"wamid.PLATFORM{len(self.platform_sent)}"}]})
         if path == PLATFORM_PHONE + "/media" or path == PHONE + "/media":
             return httpx.Response(200, json={"id": "media-up-1"})
-        if request.method == "GET" and path == PHONE:
-            return httpx.Response(200, json=self.number)
+        if request.method == "GET" and (path == PHONE or path in self.waba_numbers):
+            return httpx.Response(200, json={**self.number, "id": path})
         if path == f"{WABA}/phone_numbers":
             return httpx.Response(200, json={"data": [{"id": n} for n in self.waba_numbers]})
         if path == f"{WABA}/subscribed_apps":
@@ -161,7 +169,8 @@ class FakeMeta:
             return httpx.Response(200, json={"messages": [{"id": f"wamid.CLUB{len(self.club_sent)}"}]})
         if path.startswith("media-") and request.method == "GET":
             return httpx.Response(200, json={"url": "https://lookaside.fbsbx.com/whatsapp_business/attachments/?mid=1",
-                                             "mime_type": "image/jpeg", "file_size": len(self.media_bytes), "id": path})
+                                             "mime_type": "image/jpeg", "file_size": len(self.media_bytes), "id": path,
+                                             **self.media_info})
         if path == f"{APP_ID}/uploads":
             return httpx.Response(200, json={"id": "upload:MTphdHRhY2htZW50"})
         if path == "upload:MTphdHRhY2htZW50":
@@ -619,11 +628,107 @@ async def test_attachments_come_through_the_authenticated_proxy_only(client, ses
     assert r.headers["cache-control"] == "private, no-store"
     download = [c for c in meta.calls if c.url.host == "lookaside.fbsbx.com"][0]
     assert download.headers["authorization"] == f"Bearer {TOKEN}"
+    assert r.headers["content-security-policy"] == "default-src 'none'; sandbox" and r.headers["x-content-type-options"] == "nosniff"
+    assert r.headers["content-disposition"] == "inline"
     assert (await client.get(url)).status_code == 401
     assert (await client.get(url, headers=world.other_h)).status_code == 404
     meta.fail["GET media-77"] = (404, {"error": {"code": 100, "message": "media not found"}})
     gone = await client.get(url, headers=world.h)
-    assert gone.status_code == 410 and gone.json()["error_code"] == "MEDIA_GONE"
+    assert gone.status_code == 410 and gone.json()["error_code"] == "MEDIA_GONE" and "7 days" in gone.json()["message"]
+    # Expired media is not the token: the number stays as it was.
+    assert (await account_of(session, world.club.id)).status == "active"
+
+
+async def _attachment(client, session, w, account, *, mime="image/jpeg", filename=None) -> str:
+    kind = "image" if mime.startswith("image/") else "document"
+    part = {"id": "media-90", "mime_type": mime, **({"filename": filename} if filename else {})}
+    await hook(client, account.webhook_token, inbound(text_msg(f"wamid.M{uuid.uuid4().hex[:6]}", "", kind=kind, part=part)))
+    msg = await session.scalar(select(ClubWhatsAppMessages).order_by(ClubWhatsAppMessages.id.desc()))
+    return f"{API}/clubs/whatsapp/media/{msg.id}"
+
+
+@pytest.mark.parametrize("mime, filename, served, disposition", [
+    ("image/jpeg", None, "image/jpeg", "inline"),
+    ("image/webp", "sticker.webp", "image/webp", "inline"),
+    ("audio/ogg; codecs=opus", None, "audio/ogg", "inline"),
+    ("video/mp4", "clip.mp4", "video/mp4", "inline"),
+    ("image/svg+xml", "logo.svg", "application/octet-stream", "attachment"),
+    ("text/html", "page.html", "application/octet-stream", "attachment"),
+    ("application/xhtml+xml", None, "application/octet-stream", "attachment"),
+    ("application/pdf", "id.pdf", "application/pdf", "attachment"),
+    ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "cv.docx",
+     "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "attachment"),
+])
+async def test_only_pictures_sound_and_video_are_shown_in_place(client, session, world, meta, mime, filename, served, disposition):
+    """Whatever Meta (or the sender) calls an attachment, nothing it holds
+    runs on the dashboard's origin: SVG and HTML are downloads of bytes."""
+    account = await connected(client, session, world)
+    meta.media_info = {"mime_type": mime}
+    meta.media_bytes = b"<svg onload=alert(1)>" if "svg" in mime or "html" in mime else b"bytes"
+    r = await client.get(await _attachment(client, session, world, account, mime=mime, filename=filename), headers=world.h)
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == served
+    assert r.headers["content-disposition"].split(";")[0] == disposition
+    assert r.headers["content-security-policy"] == "default-src 'none'; sandbox"
+    assert r.headers["x-content-type-options"] == "nosniff" and r.headers["cache-control"] == "private, no-store"
+    if filename:
+        assert f"filename*=UTF-8''{filename}" in r.headers["content-disposition"]
+
+
+async def test_a_malayalam_filename_is_saved_under_its_own_name(client, session, world, meta):
+    account = await connected(client, session, world)
+    meta.media_info = {"mime_type": "application/pdf", "file_size": "not a number"}
+    name = "ടിക്കറ്റ് 2026.pdf"
+    r = await client.get(await _attachment(client, session, world, account, mime="application/pdf", filename=name), headers=world.h)
+    assert r.status_code == 200, r.text
+    header = r.headers["content-disposition"]
+    assert header.startswith('attachment; filename="')
+    ascii_name = header.split('filename="', 1)[1].split('"', 1)[0]
+    assert ascii_name.isascii() and ascii_name.endswith(".pdf")
+    assert "filename*=UTF-8''" + "%E0%B4%9F" in header and header.endswith("%202026.pdf")
+    assert unquote(header.split("filename*=UTF-8''", 1)[1]) == name
+
+
+async def test_the_token_goes_to_metas_media_host_and_nowhere_else(client, session, world, meta):
+    account = await connected(client, session, world)
+    url = await _attachment(client, session, world, account)
+    for elsewhere in ("https://attacker.example/steal", "http://lookaside.fbsbx.com/x", "https://lookaside.fbsbx.com.attacker.example/x"):
+        meta.media_info = {"url": elsewhere}
+        r = await client.get(url, headers=world.h)
+        assert r.status_code == 502 and r.json()["error_code"] == "MEDIA_UNAVAILABLE"
+    assert [c for c in meta.calls if c.url.host != "graph.facebook.com"] == []
+
+
+async def test_an_address_that_expired_is_asked_for_once_more(client, session, world, meta):
+    account = await connected(client, session, world)
+    url = await _attachment(client, session, world, account)
+    meta.download_answers = [(404, {"error": {"message": "URL expired"}})]
+    r = await client.get(url, headers=world.h)
+    assert r.status_code == 200 and r.content == meta.media_bytes
+    assert len(meta.club_calls("GET", "/media-90")) == 2
+    # Gone twice is gone.
+    meta.download_answers = [(404, b"gone"), (404, b"gone")]
+    r = await client.get(url, headers=world.h)
+    assert r.status_code == 410 and r.json()["error_code"] == "MEDIA_GONE"
+
+
+async def test_a_revoked_token_is_not_called_an_expired_attachment(client, session, world, meta):
+    account = await connected(client, session, world)
+    url = await _attachment(client, session, world, account)
+    meta.fail["GET media-90"] = (401, {"error": {"code": 190, "message": "Error validating access token: The session has been invalidated"}})
+    r = await client.get(url, headers=world.h)
+    assert r.status_code == 409 and r.json()["error_code"] == "WHATSAPP_TOKEN_INVALID"
+    assert (await account_of(session, world.club.id)).status == "failed"
+
+
+async def test_an_attachment_from_a_replaced_number_says_so(client, session, world, meta):
+    account = await connected(client, session, world)
+    url = await _attachment(client, session, world, account)
+    meta.waba_numbers = [PHONE, "109876543210999"]
+    assert (await connect(client, world, phone_number_id="109876543210999")).status_code == 200
+    meta.fail["GET media-90"] = (400, {"error": {"code": 100, "message": "Unsupported get request."}})
+    r = await client.get(url, headers=world.h)
+    assert r.status_code == 410 and r.json()["error_code"] == "MEDIA_OTHER_NUMBER"
 
 
 async def test_no_message_content_reaches_the_log(client, session, world, meta, monkeypatch, caplog):

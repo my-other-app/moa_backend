@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Optional
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -75,6 +76,13 @@ class GraphError(Exception):
 
 #: Codes that mean "not now": Meta's own trouble, or a rate limit.
 BUSY = {"1", "2", "4", "17", "32", "613", "80007", "130429", "131000", "131016"}
+#: Codes that say the token no longer works, or lost a permission: the
+#: club's keys, not the thing asked about.
+TOKEN_CODES = frozenset({"0", "3", "10", "102", "190", "200"})
+
+
+def is_token_problem(exc: "GraphError") -> bool:
+    return exc.code in TOKEN_CODES or "appsecret_proof" in (exc.message or "").lower()
 
 
 def _error(r: httpx.Response) -> GraphError:
@@ -225,15 +233,30 @@ async def mark_read(keys: Keys, wamid: str) -> None:
                json={"messaging_product": "whatsapp", "status": "read", "message_id": wamid})
 
 
+#: Where Meta's media URLs point (the lookaside host of a GET /{media id}):
+#: the club's token is sent there and nowhere else.
+MEDIA_HOSTS = frozenset({"lookaside.fbsbx.com"})
+
+
+def media_host_ok(media_url: str) -> bool:
+    try:
+        parts = urlsplit(media_url)
+    except ValueError:
+        return False
+    return parts.scheme == "https" and (parts.hostname or "").lower() in MEDIA_HOSTS and parts.port in (None, 443)
+
+
 async def media_info(keys: Keys, media_id: str) -> dict:
-    """Where Meta keeps an attachment for now (a short-lived URL), its type and size."""
+    """Where Meta keeps an attachment for now (a URL good for five minutes), its type and size."""
     return await call(keys, "GET", media_id)
 
 
 async def download(keys: Keys, media_url: str, max_bytes: int) -> bytes:
-    """The attachment itself: Meta's URL answers only with the token."""
-    if not media_url.startswith("https://"):
-        raise GraphError("Meta gave no usable address for the attachment")
+    """The attachment itself: Meta's URL answers only with the token, which
+    goes to Meta's media host alone (MEDIA_HOSTS) -- an address anywhere
+    else is refused before anything is sent."""
+    if not media_host_ok(media_url):
+        raise GraphError("Meta gave an attachment address that isn't its media host", code="MEDIA_HOST")
     headers = {"Authorization": f"Bearer {keys.token}"}
     try:
         async with _client(60.0) as client:

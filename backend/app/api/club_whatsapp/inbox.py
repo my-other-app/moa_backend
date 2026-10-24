@@ -695,9 +695,108 @@ async def stats(session, club_id: int, *, days: int = 7, now: Optional[datetime]
 # ─── Media ───────────────────────────────────────────────────────────────
 
 
+#: Types shown in the dashboard itself (an <img>, <audio> or <video>): what
+#: WhatsApp carries that a browser cannot run. Never SVG, never HTML.
+INLINE_TYPES = frozenset({
+    "image/jpeg", "image/png", "image/webp",
+    "audio/ogg", "audio/aac", "audio/mpeg", "audio/amr", "audio/mp4",
+    "video/mp4", "video/3gpp",
+})
+#: Documents saved with their own type (the browser's viewer opens them, in a
+#: sandbox); anything else is saved as bytes.
+DOCUMENT_TYPES = frozenset({
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+})
+#: What the proxy says of every attachment: nothing in it may run on the
+#: dashboard's origin, whatever Meta or the sender called it.
+MEDIA_CSP = "default-src 'none'; sandbox"
+#: How long Meta keeps what someone sent: a media id from the webhook can be
+#: downloaded for 7 days (Meta's changelog, from 9 October 2025).
+MEDIA_DAYS = 7
+
+
+def _base_type(mime: Optional[str]) -> str:
+    return (mime or "").split(";", 1)[0].strip().lower()
+
+
+def _filename_parts(filename: Optional[str], fallback: str) -> tuple[str, str]:
+    """An ASCII name for `filename=` and the name itself, percent-encoded,
+    for `filename*=` (RFC 6266): a header carries Latin-1 at most, and a
+    Malayalam or emoji name must still reach the person saving it."""
+    import unicodedata
+    from urllib.parse import quote
+
+    name = "".join(ch for ch in (filename or "") if ch.isprintable() and ch not in '"\\/\r\n')
+    name = " ".join(name.split())[:120].strip(" .")
+    if not name:
+        return fallback, quote(fallback, safe="")
+    ascii_name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
+    ascii_name = "".join(ch for ch in ascii_name if ch.isalnum() or ch in "._- ").strip(" .")
+    stem, dot, ext = name.rpartition(".")
+    ascii_ext = "".join(ch for ch in ext if ch.isascii() and ch.isalnum())[:10] if dot else ""
+    if not ascii_name or ascii_name == ascii_ext:
+        ascii_name = f"{fallback}.{ascii_ext}" if ascii_ext else fallback
+    return ascii_name, quote(name, safe="")
+
+
+def media_headers(mime: Optional[str], filename: Optional[str]) -> tuple[str, dict]:
+    """The type and headers an attachment is served with. Inline only for
+    the pictures, sound and video in INLINE_TYPES; every other kind is a
+    download, with its own type only when it is a document a browser opens
+    safely (DOCUMENT_TYPES), else as bytes. Always a CSP that runs nothing,
+    and nosniff."""
+    base = _base_type(mime)
+    inline = base in INLINE_TYPES
+    media_type = base if (inline or base in DOCUMENT_TYPES) else "application/octet-stream"
+    ascii_name, encoded = _filename_parts(filename, "attachment")
+    disposition = "inline" if inline else "attachment"
+    if filename or not inline:
+        disposition += f'; filename="{ascii_name}"; filename*=UTF-8\'\'{encoded}'
+    return media_type, {
+        "Content-Disposition": disposition,
+        "Content-Security-Policy": MEDIA_CSP,
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "private, no-store",
+    }
+
+
+def _size(value) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+async def _fetch(keys: graph.Keys, media_id: str, limit: int) -> tuple[bytes, dict]:
+    """The attachment and what Meta said of it. Meta's URL lasts five
+    minutes: one that is already gone (404) is asked for again, once."""
+    for attempt in (1, 2):
+        info = await graph.media_info(keys, media_id)
+        if _size(info.get("file_size")) > limit:
+            raise graph.GraphError("The attachment is larger than the inbox shows", code="TOO_LARGE")
+        try:
+            return await graph.download(keys, str(info.get("url") or ""), limit), info
+        except graph.GraphError as exc:
+            if exc.status == 404 and attempt == 1:
+                continue
+            raise
+    raise graph.GraphError("Meta's address for the attachment was gone twice", status=404)
+
+
 async def media(session, club_id: int, message_id: int) -> tuple[bytes, str, Optional[str]]:
     """An attachment, fetched from Meta with the club's token for this one
-    request: never stored, never at an address anyone else could open."""
+    request: never stored, never at an address anyone else could open.
+
+    410 MEDIA_GONE once Meta has let it go (MEDIA_DAYS after it arrived);
+    410 MEDIA_OTHER_NUMBER for one that came to a number the club has since
+    replaced; 409 with the token's own error code when Meta no longer
+    accepts the token (the number is marked failed, as a check would)."""
     from app.config import settings
 
     msg = await session.get(ClubWhatsAppMessages, message_id)
@@ -706,20 +805,29 @@ async def media(session, club_id: int, message_id: int) -> tuple[bytes, str, Opt
     account = await accounts.live_account(session, club_id)
     if account is None:
         raise _refuse(409, "Your WhatsApp number isn't connected, so its attachments can't be fetched.", "NO_WHATSAPP")
+    came_to = await session.scalar(
+        select(ClubWhatsAppConversations.business_phone_id).where(ClubWhatsAppConversations.id == msg.conversation_id)
+    )
     keys = await accounts.require_keys(session, account)
     limit = int(settings.CLUB_WHATSAPP_MEDIA_MAX_MB or 25) * 1024 * 1024
     try:
-        info = await graph.media_info(keys, msg.media_id)
-        if int(info.get("file_size") or 0) > limit:
-            raise _refuse(413, "That attachment is too large to show here.", "MEDIA_TOO_LARGE")
-        content = await graph.download(keys, str(info.get("url") or ""), limit)
+        content, info = await _fetch(keys, msg.media_id, limit)
     except graph.GraphError as exc:
         if exc.code == "TOO_LARGE":
             raise _refuse(413, "That attachment is too large to show here.", "MEDIA_TOO_LARGE") from None
         if exc.unreachable:
             raise _refuse(502, "Couldn't reach WhatsApp for the attachment. Try again.", "META_UNREACHABLE") from None
-        # Meta keeps a received attachment for 30 days.
-        raise _refuse(410, "WhatsApp no longer has this attachment (it keeps them for 30 days).", "MEDIA_GONE") from None
+        if exc.code == "MEDIA_HOST":
+            raise _refuse(502, "WhatsApp gave an unexpected address for the attachment, so it wasn't fetched.", "MEDIA_UNAVAILABLE") from None
+        if came_to and came_to != account.phone_number_id:
+            raise _refuse(410, "This attachment came to the number you connected before. Only that number could fetch it.",
+                          "MEDIA_OTHER_NUMBER") from None
+        if graph.is_token_problem(exc):
+            _status, code, words = graph.explain(exc)
+            await accounts.mark_failed(session, account, words, exc.code)
+            await session.commit()
+            raise _refuse(409, f"Meta didn't accept your number's keys, so the attachment can't be fetched. {words}", code) from None
+        raise _refuse(410, f"WhatsApp no longer has this attachment (it keeps them for {MEDIA_DAYS} days).", "MEDIA_GONE") from None
     mime = str(info.get("mime_type") or msg.media_mime or "application/octet-stream")
     return content, mime, msg.media_filename
 
