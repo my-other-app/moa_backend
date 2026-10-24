@@ -1263,6 +1263,160 @@ async def test_metas_template_verdicts_arrive_by_webhook(client, session, world,
     assert row.status == "REJECTED" and row.rejected_reason == "INCORRECT_CATEGORY"
 
 
+def template_event(event: str, name: str = "event_update", language: str = "en", **extra) -> dict:
+    value = {"event": event, "message_template_id": 123, "message_template_name": name, "message_template_language": language,
+             "reason": "NONE", **extra}
+    return {"object": "whatsapp_business_account",
+            "entry": [{"id": WABA, "changes": [{"field": "message_template_status_update", "value": value}]}]}
+
+
+async def _template(session, name="event_update", language="en") -> ClubWhatsAppTemplates:
+    return await session.scalar(select(ClubWhatsAppTemplates).where(
+        ClubWhatsAppTemplates.name == name, ClubWhatsAppTemplates.language == language).execution_options(populate_existing=True))
+
+
+async def test_flagged_locked_reinstated_and_unarchived_templates(client, session, world, meta):
+    account = await connected(client, session, world)
+    await hook(client, account.webhook_token, template_event("FLAGGED"))
+    row = await _template(session)
+    assert row.status == "APPROVED" and row.flag == "FLAGGED"
+    listed = {t["name"]: t for t in (await client.get(f"{API}/clubs/whatsapp/templates?refresh=false", headers=world.h)).json()["items"]}
+    assert listed["event_update"]["flagged"] is True and listed["event_update"]["status"] == "APPROVED"
+    await hook(client, account.webhook_token, template_event("LOCKED"))
+    assert (await _template(session)).flag == "LOCKED"
+    await hook(client, account.webhook_token, template_event("DISABLED"))
+    await hook(client, account.webhook_token, template_event("REINSTATED"))
+    row = await _template(session)
+    assert row.status == "APPROVED" and row.flag is None
+    # Restored to "its previous status": which, only Meta knows. Asked again, by name.
+    meta.templates = [t if t["name"] != "event_update" else {**t, "status": "PAUSED"} for t in meta.templates]
+    await hook(client, account.webhook_token, template_event("UNARCHIVED"))
+    assert (await _template(session)).status == "PAUSED"
+    assert any(parse_qs(c.url.query.decode()).get("name") == ["event_update"] for c in meta.club_calls("GET", f"/{WABA}/message_templates"))
+    # Meta's webhooks write en-US; its template API en_US: one spelling here.
+    meta.templates.append(_tpl("event_update", "Hi {{1}}, news of {{2}}.", language="en_US", status="PENDING"))
+    await hook(client, account.webhook_token, template_event("APPROVED", language="en-US"))
+    assert (await _template(session, language="en_US")).status == "APPROVED"
+    assert await session.scalar(select(func.count()).select_from(ClubWhatsAppTemplates).where(ClubWhatsAppTemplates.language == "en-US")) == 0
+
+
+async def test_an_unusable_mark_lasts_until_meta_says_something_new(client, session, world, meta, platform_number, mails):
+    await connected(client, session, world)
+    meta.club_answer = refused(132001, "Template name does not exist in the translation")
+    await _reminder(session, world)
+    assert (await _template(session, "event_reminder")).status == "UNUSABLE"
+    # A sync that finds Meta saying what it said keeps the mark.
+    assert (await client.get(f"{API}/clubs/whatsapp/templates", headers=world.h)).status_code == 200
+    assert (await _template(session, "event_reminder")).status == "UNUSABLE"
+    assert await accounts.route_for(session, world.club.id, "event_reminder") is None
+    # The club heard of it once, in its bell (and by mail).
+    bell = (await client.get(f"{API}/clubs/alerts", headers=world.h)).json()["items"]
+    assert [a["kind"] for a in bell] == ["whatsapp_template"]
+    account = await account_of(session, world.club.id)
+    await hook(client, account.webhook_token, template_event("APPROVED", name="event_reminder"))
+    assert (await _template(session, "event_reminder")).status == "APPROVED"
+    assert await accounts.route_for(session, world.club.id, "event_reminder") is not None
+
+
+REMINDER_BODY = templates.STANDARD["event_reminder"]["body"]
+
+
+@pytest.mark.parametrize("why, template", [
+    ("a value fewer", _tpl("event_reminder", "Hi {{1}}, {{2}} starts {{3}}.", button=TICKET_BUTTON)),
+    ("marketing", {**_tpl("event_reminder", REMINDER_BODY, button=TICKET_BUTTON), "category": "MARKETING"}),
+    ("no button", _tpl("event_reminder", REMINDER_BODY)),
+    ("a picture header", _tpl("event_reminder", REMINDER_BODY, header={"type": "HEADER", "format": "IMAGE"}, button=TICKET_BUTTON)),
+    ("named values", _tpl("event_reminder", "Hi {{name}}, {{event}} starts {{when}} at {{venue}}.", button=TICKET_BUTTON)),
+    ("no components", {**_tpl("event_reminder", REMINDER_BODY), "components": []}),
+])
+async def test_a_template_in_another_shape_is_not_routed_to(client, session, world, meta, platform_number, why, template):
+    """Approved is not enough: a template of our name that our send doesn't
+    fill would be refused at every send."""
+    meta.templates = [t for t in meta.templates if t["name"] != "event_reminder"] + [template]
+    await connected(client, session, world)
+    assert await accounts.route_for(session, world.club.id, "event_reminder") is None
+    d = await _reminder(session, world)
+    assert d.provider_id == "wamid.PLATFORM1" and meta.club_sent == []
+    listed = (await client.get(f"{API}/clubs/whatsapp/templates", headers=world.h)).json()
+    assert "event_reminder" in listed["standard_missing"]
+
+
+async def test_the_standard_templates_are_resubmitted_or_explained(client, session, world, meta):
+    meta.templates = [t for t in meta.templates if t["name"] != "event_reminder"] + [
+        _tpl("event_reminder", "Hi {{1}}, it starts soon.", status="REJECTED", reason="INVALID_FORMAT")]
+    meta.templates = [t if t["name"] != "ticket_confirmed" else {**t, "category": "MARKETING"} for t in meta.templates]
+    assert (await connect(client, world, app_id=APP_ID)).status_code == 200
+    out = (await client.post(f"{API}/clubs/whatsapp/templates/standard", headers=world.h)).json()["results"]
+    # Rejected: deleted (its name is free) and submitted again.
+    assert out["event_reminder"] == "submitted" and meta.deleted[-1]["name"] == "event_reminder"
+    assert [c["name"] for c in meta.created] == ["event_reminder", "certificate_ready"]
+    # Approved in another shape: left, with what to do about it.
+    assert "30 days" in out["ticket_confirmed"] and "ticket_confirmed" not in [c["name"] for c in meta.created]
+
+
+async def test_our_template_names_are_kept_for_our_templates(client, session, world, meta):
+    await connected(client, session, world)
+    template = {"name": "ticket_confirmed", "language": "en", "category": "UTILITY", "body": {"text": "Hi {{1}}, here.", "examples": ["A"]}}
+    r = await client.post(f"{API}/clubs/whatsapp/templates", json=template, headers=world.h)
+    assert r.status_code == 422 and r.json()["errors"]["field"] == "name" and meta.created == []
+
+
+async def test_a_template_with_named_values_is_sent_by_name(client, session, world, meta):
+    meta.templates.append({**_tpl("greet_named", "Hi {{first_name}}, {{event_name}} is on. See you, {{first_name}}!"),
+                           "parameter_format": "NAMED"})
+    account = await connected(client, session, world)
+    conv = await conversation_with(client, session, world, account)
+    listed = {t["name"]: t for t in (await client.get(f"{API}/clubs/whatsapp/templates", headers=world.h)).json()["items"]}
+    assert listed["greet_named"]["body_variables"] == 2 and listed["greet_named"]["parameter_format"] == "NAMED"
+    assert listed["greet_named"]["body_names"] == ["first_name", "event_name"]
+    r = await client.post(f"{API}/clubs/whatsapp/conversations/{conv.id}/messages", headers=world.h,
+                          json={"type": "template", "template": "greet_named", "params": {"body": ["Ananya", "Build Night"]}})
+    assert r.status_code == 200, r.text
+    assert r.json()["body"] == "Hi Ananya, Build Night is on. See you, Ananya!"
+    assert meta.club_sent[-1]["template"]["components"] == [{"type": "body", "parameters": [
+        {"type": "text", "parameter_name": "first_name", "text": "Ananya"},
+        {"type": "text", "parameter_name": "event_name", "text": "Build Night"}]}]
+
+
+async def test_without_a_language_the_platforms_is_preferred_every_time(client, session, world, meta, monkeypatch):
+    meta.templates = [_tpl("event_update", "Hola {{1}}, {{2}}.", language="es"),
+                      _tpl("event_update", "Hi {{1}}, there's news about {{2}} for you.", language="en_GB")] + meta.templates
+    monkeypatch.setattr(settings, "WHATSAPP_TEMPLATE_LANGUAGE", "en_GB")
+    account = await connected(client, session, world)
+    conv = await conversation_with(client, session, world, account)
+    for _ in range(2):
+        r = await client.post(f"{API}/clubs/whatsapp/conversations/{conv.id}/messages", headers=world.h,
+                              json={"type": "template", "template": "event_update", "params": {"body": ["A", "B"]}})
+        assert r.json()["template"]["language"] == "en_GB"
+
+
+async def test_the_sweep_reads_each_numbers_templates_again(client, session, world, meta):
+    await connected(client, session, world)
+    meta.templates = [t if t["name"] != "event_reminder" else {**t, "status": "PAUSED"} for t in meta.templates]
+    assert await sweep.refresh_templates(session, datetime.now(timezone.utc)) == 0  # just read at connect
+    assert await sweep.refresh_templates(session, datetime.now(timezone.utc) + timedelta(hours=7)) == 1
+    assert (await _template(session, "event_reminder")).status == "PAUSED"
+
+
+async def test_a_stale_template_cursor_starts_the_reading_again():
+    seen = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        query = parse_qs(request.url.query.decode())
+        seen.append(query.get("after"))
+        if "after" in query:
+            return httpx.Response(400, json={"error": {"code": 131059, "message": "Invalid pagination cursor"}})
+        if len(seen) == 1:
+            return httpx.Response(200, json={"data": [{"name": "a"}], "paging": {"cursors": {"after": "c1"}, "next": "x"}})
+        return httpx.Response(200, json={"data": [{"name": "a"}, {"name": "b"}], "paging": {"cursors": {}}})
+
+    import unittest.mock
+
+    with unittest.mock.patch.object(graph, "_client", lambda timeout=None: httpx.AsyncClient(transport=httpx.MockTransport(answer))):
+        out = await graph.list_templates(graph.Keys(token="t" * 30, waba_id=WABA))
+    assert [t["name"] for t in out] == ["a", "b"] and seen == [None, ["c1"], None]
+
+
 # ─── Tickets, certificates and reminders from the club's number ──────────
 
 

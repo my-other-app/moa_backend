@@ -13,10 +13,16 @@ example for each, never a variable first or last, the header, the footer and
 the buttons within Meta's limits. A refusal names the field.
 
 `STANDARD` are MyOtherApp's own ticket, reminder and certificate templates,
-with the values our sends fill in the same order (app/core/whatsapp.py). A
-club that submits them (`install_standard`) has its tickets, certificates
-and reminders sent from its own number once Meta approves them; until then
-they go from the platform's.
+with the values our sends fill in the same order (app/core/whatsapp.py); their
+names are kept for them (`build` refuses them). A club that submits them
+(`install_standard`) has its tickets, certificates and reminders sent from its
+own number once Meta approves them -- and only while the approved template is
+the shape our sends fill (`fits`); until then they go from the platform's.
+
+What is kept is updated in place: our own UNUSABLE mark (Meta refused a send
+of it from the club's number) lasts until Meta says something new of the
+template, and Meta's FLAGGED or LOCKED is kept beside its status. The sweep
+reads every active number's templates again (sweep.refresh_templates).
 """
 from __future__ import annotations
 
@@ -55,6 +61,26 @@ def _bad(field: str, message: str) -> CustomHTTPException:
 
 # ─── Reading what Meta has ───────────────────────────────────────────────
 
+APPROVED = "APPROVED"
+PENDING = "PENDING"
+#: Our own mark: Meta refused a send of it from the club's number (a
+#: template code), so the club's tickets go from the platform's until Meta
+#: reports a new status for it.
+UNUSABLE = "UNUSABLE"
+#: The statuses Meta gives a template (its template API's enum). An event
+#: outside these, and UNARCHIVED, is answered by reading the template again.
+META_STATUSES = frozenset({"APPROVED", "ARCHIVED", "DELETED", "DISABLED", "IN_APPEAL", "LIMIT_EXCEEDED", "PAUSED",
+                           "PENDING", "PENDING_DELETION", "REJECTED"})
+#: Events that say something of a template without changing its status: kept beside it.
+FLAGS = frozenset({"FLAGGED", "LOCKED"})
+NAMED = re.compile(r"\{\{\s*([a-z_][a-z0-9_]*)\s*\}\}")
+POSITIONAL, NAMED_FORMAT = "POSITIONAL", "NAMED"
+
+
+def language_of(raw) -> str:
+    """Meta's webhooks say "en-US", its template API "en_US": one spelling."""
+    return str(raw or "").strip().replace("-", "_")[:16]
+
 
 def _component(components: list, kind: str) -> Optional[dict]:
     for c in components or []:
@@ -67,9 +93,20 @@ def variables(text: Optional[str]) -> list[int]:
     return [int(n) for n in VARIABLE.findall(text or "")]
 
 
+def _names(text: Optional[str]) -> list[str]:
+    """A text's named parameters ({{first_name}}), each once, in order."""
+    out: list[str] = []
+    for name in NAMED.findall(text or ""):
+        if name not in out:
+            out.append(name)
+    return out
+
+
 def shape(components: Optional[list]) -> dict:
     """What a send must fill: the header's variables (and its format), the
-    body's, and each URL button's."""
+    body's, and each URL button's. A template made with named parameters
+    ({{first_name}}) is counted by its names, kept in order (`body_names`),
+    and sent with them (`parameter_format` NAMED)."""
     header = _component(components or [], "HEADER")
     body = _component(components or [], "BODY")
     footer = _component(components or [], "FOOTER")
@@ -84,19 +121,55 @@ def shape(components: Optional[list]) -> dict:
             "variables": len(set(variables(b.get("url")))) if kind == "URL" else 0,
         })
     header_format = str((header or {}).get("format") or "").upper() or None
+    header_text = (header or {}).get("text") if header_format == "TEXT" else None
+    body_text = (body or {}).get("text") or ""
+    header_names, body_names = _names(header_text), _names(body_text)
+    named = bool(header_names or body_names)
     return {
         "header": {"format": header_format, "text": (header or {}).get("text"),
-                   "variables": len(set(variables((header or {}).get("text")))) if header_format == "TEXT" else 0} if header else None,
-        "body": (body or {}).get("text") or "",
-        "body_variables": len(set(variables((body or {}).get("text")))),
+                   "variables": (len(header_names) if named else len(set(variables(header_text)))) if header_format == "TEXT" else 0,
+                   "names": header_names} if header else None,
+        "body": body_text,
+        "body_variables": len(body_names) if named else len(set(variables(body_text))),
+        "body_names": body_names,
+        "parameter_format": NAMED_FORMAT if named else POSITIONAL,
         "footer": (footer or {}).get("text"),
         "buttons": out_buttons,
     }
 
 
+def fits(name: str, components: Optional[list], category: Optional[str]) -> bool:
+    """Whether the club's template of one of MyOtherApp's own names
+    (STANDARD) is the shape our sends fill (app/core/whatsapp.py): a
+    UTILITY template with components; a DOCUMENT header exactly when ours
+    carries a document (else no header that needs a value); the same
+    number of numbered body variables; and one URL button with one
+    variable, the first, as ours has -- no other button that needs a value.
+    A template of that name in another shape would be refused at every send
+    (132000), so it is not routed to."""
+    spec = STANDARD.get(name)
+    if spec is None or not components or str(category or "").upper() != "UTILITY":
+        return False
+    d = shape(components)
+    if d["parameter_format"] != POSITIONAL:
+        return False
+    header = d["header"]
+    if spec["document"]:
+        if header is None or header["format"] != "DOCUMENT":
+            return False
+    elif header is not None and (header["format"] != "TEXT" or header["variables"]):
+        return False
+    if d["body_variables"] != len(spec["examples"]):
+        return False
+    if any(b["type"] not in BUTTON_TYPES for b in d["buttons"]):
+        return False
+    return [(b["index"], b["variables"]) for b in d["buttons"] if b["variables"]] == [(0, 1)] and d["buttons"][0]["type"] == "URL"
+
+
 def template_out(row: dict) -> dict:
     """A template as the dashboard shows it, from Meta's answer or the cache."""
     components = row.get("components") or []
+    flag = row.get("flag")
     return {
         "id": row.get("id") or row.get("meta_id"),
         "name": row.get("name"),
@@ -105,6 +178,8 @@ def template_out(row: dict) -> dict:
         "status": row.get("status"),
         "rejected_reason": None if row.get("rejected_reason") in (None, "", "NONE") else row.get("rejected_reason"),
         "quality": row.get("quality"),
+        "flag": flag,
+        "flagged": flag == "FLAGGED",
         "components": components,
         **shape(components),
     }
@@ -117,27 +192,51 @@ def _quality(row: dict) -> Optional[str]:
     return None
 
 
+def _keep(account: ClubWhatsAppAccounts, row: Optional[ClubWhatsAppTemplates], t: dict, now: datetime) -> ClubWhatsAppTemplates:
+    """Meta's answer for one template onto its row. An UNUSABLE mark stays
+    while Meta says what it said when the mark was made; a FLAGGED or
+    LOCKED one while its status is unchanged."""
+    status = str(t.get("status") or "UNKNOWN")[:32]
+    if row is None:
+        row = ClubWhatsAppTemplates(account_id=account.id, club_id=account.club_id, name=str(t.get("name"))[:512],
+                                    language=language_of(t.get("language")))
+    changed = row.meta_status != status
+    row.status = UNUSABLE if (row.status == UNUSABLE and not changed) else status
+    row.meta_status = status
+    if changed:
+        row.flag = None
+    row.meta_id = str(t.get("id") or "")[:64] or row.meta_id
+    row.category = (t.get("category") or None) and str(t.get("category"))[:32]
+    row.rejected_reason = (t.get("rejected_reason") or None) and str(t.get("rejected_reason"))[:200]
+    row.quality = _quality(t)
+    row.components = t.get("components") or []
+    row.synced_at = now
+    return row
+
+
 async def sync(session, account: ClubWhatsAppAccounts, keys: graph.Keys) -> list[dict]:
-    """Every template on the club's account, read from Meta and kept. Meta is
-    asked before anything is written: a refusal leaves the cache as it was."""
-    rows = await graph.list_templates(keys)
+    """Every template on the club's account, read from Meta and kept (each
+    row updated in place, so our own marks last as long as they should; one
+    Meta no longer has is dropped). Meta is asked before anything is
+    written: a refusal leaves the cache as it was. The templates as kept."""
+    found = await graph.list_templates(keys)
     now = _now()
-    await session.execute(delete(ClubWhatsAppTemplates).where(ClubWhatsAppTemplates.account_id == account.id))
+    rows = {(r.name, r.language): r for r in (await session.scalars(
+        select(ClubWhatsAppTemplates).where(ClubWhatsAppTemplates.account_id == account.id)
+    )).all()}
     seen = set()
-    for t in rows:
-        name, language = str(t.get("name") or ""), str(t.get("language") or "")
-        if not name or not language or (name, language) in seen:
+    for t in found:
+        key = (str(t.get("name") or "")[:512], language_of(t.get("language")))
+        if not key[0] or not key[1] or key in seen:
             continue
-        seen.add((name, language))
-        session.add(ClubWhatsAppTemplates(
-            account_id=account.id, club_id=account.club_id, meta_id=str(t.get("id") or "")[:64] or None,
-            name=name[:512], language=language[:16], category=(t.get("category") or None) and str(t.get("category"))[:32],
-            status=str(t.get("status") or "UNKNOWN")[:32],
-            rejected_reason=(t.get("rejected_reason") or None) and str(t.get("rejected_reason"))[:200],
-            quality=_quality(t), components=t.get("components") or [], synced_at=now,
-        ))
+        seen.add(key)
+        session.add(_keep(account, rows.get(key), t, now))
+    for key, row in rows.items():
+        if key not in seen:
+            await session.delete(row)
+    account.templates_synced_at = now
     await session.flush()
-    return [template_out({**t, "quality": _quality(t)}) for t in rows]
+    return await cached(session, account.id)
 
 
 async def cached(session, account_id: int) -> list[dict]:
@@ -147,25 +246,101 @@ async def cached(session, account_id: int) -> list[dict]:
     )).all()
     return [template_out({
         "meta_id": r.meta_id, "name": r.name, "language": r.language, "category": r.category, "status": r.status,
-        "rejected_reason": r.rejected_reason, "quality": r.quality, "components": r.components or [],
+        "rejected_reason": r.rejected_reason, "quality": r.quality, "components": r.components or [], "flag": r.flag,
     }) for r in rows]
 
 
+def _preference(language: str) -> tuple:
+    """The platform's language first (WHATSAPP_TEMPLATE_LANGUAGE), then
+    English, then the rest alphabetically: the same answer every time."""
+    wanted = language_of(settings.WHATSAPP_TEMPLATE_LANGUAGE or "en")
+    order = [wanted, "en", "en_US", "en_GB"]
+    return (order.index(language) if language in order else len(order), language)
+
+
 async def approved(session, account_id: int, name: str, language: Optional[str]) -> Optional[ClubWhatsAppTemplates]:
+    """The approved template of this name: in `language`, or -- none given --
+    in the preferred language it is approved in (_preference)."""
     q = select(ClubWhatsAppTemplates).where(
         ClubWhatsAppTemplates.account_id == account_id, ClubWhatsAppTemplates.name == name,
-        ClubWhatsAppTemplates.status == "APPROVED",
+        ClubWhatsAppTemplates.status == APPROVED,
     )
     if language:
-        q = q.where(ClubWhatsAppTemplates.language == language)
-    return (await session.scalars(q.limit(1))).first()
+        q = q.where(ClubWhatsAppTemplates.language == language_of(language))
+    rows = (await session.scalars(q)).all()
+    return min(rows, key=lambda r: _preference(r.language)) if rows else None
+
+
+async def usable_language(session, account_id: int, name: str) -> Optional[str]:
+    """The language the club's account has one of MyOtherApp's templates
+    approved in, in the shape our sends fill (`fits`), the preferred first;
+    None when it has none such."""
+    rows = (await session.scalars(
+        select(ClubWhatsAppTemplates).where(
+            ClubWhatsAppTemplates.account_id == account_id, ClubWhatsAppTemplates.name == name,
+            ClubWhatsAppTemplates.status == APPROVED,
+        )
+    )).all()
+    good = [r.language for r in rows if fits(name, r.components, r.category)]
+    return min(good, key=_preference) if good else None
+
+
+def standard_state(rows: list) -> dict[str, Optional[ClubWhatsAppTemplates]]:
+    """For each of MyOtherApp's names, the club's template that counts as
+    having it -- APPROVED or PENDING, in the shape our sends fill (a pending
+    one Meta hasn't shown us yet counts) -- or None."""
+    out: dict[str, Optional[ClubWhatsAppTemplates]] = {}
+    for name in STANDARD:
+        mine = [r for r in rows if r.name == name and r.status in (APPROVED, PENDING)
+                and (fits(name, r.components, r.category) or (r.status == PENDING and not r.components))]
+        out[name] = min(mine, key=lambda r: (r.status != APPROVED, _preference(r.language))) if mine else None
+    return out
+
+
+async def standard_missing(session, account_id: int) -> list[str]:
+    rows = (await session.scalars(select(ClubWhatsAppTemplates).where(ClubWhatsAppTemplates.account_id == account_id))).all()
+    return [name for name, row in standard_state(list(rows)).items() if row is None]
+
+
+async def reread(session, account: ClubWhatsAppAccounts, name: str, language: str) -> bool:
+    """One template read from Meta again (its status, components), for an
+    event that says something changed without saying what: UNARCHIVED, an
+    unknown event, one of ours approved. Best effort -- the sweep's sync
+    comes round anyway -- and never for a number the plan no longer covers
+    or whose keys can't be read. True when Meta answered."""
+    from app.api.club_whatsapp import crypto
+    from app.api.club_whatsapp import service as accounts
+
+    if not await accounts.plan_allows(session, account.club_id):
+        return False
+    try:
+        keys = accounts.keys_of(account)
+        found = await graph.list_templates(keys, name=name)
+    except (graph.GraphError, crypto.Unavailable):
+        return False
+    row = await session.scalar(select(ClubWhatsAppTemplates).where(
+        ClubWhatsAppTemplates.account_id == account.id, ClubWhatsAppTemplates.name == name, ClubWhatsAppTemplates.language == language,
+    ))
+    for t in found:
+        if str(t.get("name") or "") == name and language_of(t.get("language")) == language:
+            session.add(_keep(account, row, t, _now()))
+            return True
+    if row is not None:
+        # Meta has no such template any more.
+        await session.delete(row)
+    return True
 
 
 async def status_update(session, account: ClubWhatsAppAccounts, value: dict) -> None:
-    """Meta's `message_template_status_update`: APPROVED, REJECTED (with its
-    reason), PAUSED, DISABLED, PENDING_DELETION..."""
+    """Meta's `message_template_status_update`. A status (APPROVED, REJECTED
+    with its reason, PAUSED, DISABLED, ARCHIVED ...) replaces what was kept
+    -- our own UNUSABLE mark too; REINSTATED is APPROVED again; FLAGGED and
+    LOCKED keep the status and are kept beside it (`flag`); a deleted one
+    is dropped. UNARCHIVED (restored to its earlier status) or an event
+    outside Meta's statuses is read from Meta again, and so is one of
+    MyOtherApp's own templates once approved (its components, for routing)."""
     name = str(value.get("message_template_name") or "")
-    language = str(value.get("message_template_language") or "")
+    language = language_of(value.get("message_template_language"))
     event = str(value.get("event") or "").upper()
     if not name or not event:
         return
@@ -175,19 +350,52 @@ async def status_update(session, account: ClubWhatsAppAccounts, value: dict) -> 
     rows = (await session.scalars(q)).all()
     reason = value.get("reason")
     reason = None if reason in (None, "", "NONE") else str(reason)[:200]
-    if not rows and language:
-        session.add(ClubWhatsAppTemplates(
-            account_id=account.id, club_id=account.club_id, meta_id=str(value.get("message_template_id") or "")[:64] or None,
-            name=name[:512], language=language[:16], status=event[:32], rejected_reason=reason, components=[],
-        ))
+    if event == "REINSTATED":
+        event = APPROVED
+    if event in FLAGS:
+        for row in rows:
+            row.flag = event
         return
-    for row in rows:
-        if event == "PENDING_DELETION":
+    if event in ("DELETED", "PENDING_DELETION"):
+        for row in rows:
             await session.delete(row)
-            continue
-        row.status = event[:32]
+        return
+    if event not in META_STATUSES:
+        if language:
+            await reread(session, account, name, language)
+        return
+    if not rows and language:
+        rows = [ClubWhatsAppTemplates(
+            account_id=account.id, club_id=account.club_id, meta_id=str(value.get("message_template_id") or "")[:64] or None,
+            name=name[:512], language=language, components=[],
+        )]
+        session.add(rows[0])
+    for row in rows:
+        row.status = row.meta_status = event[:32]
         row.rejected_reason = reason
+        row.flag = None
+        if value.get("message_template_category"):
+            row.category = str(value["message_template_category"]).upper()[:32]
         row.synced_at = _now()
+    if event == APPROVED and name in STANDARD and language:
+        await session.flush()
+        await reread(session, account, name, language)
+
+
+async def category_update(session, account: ClubWhatsAppAccounts, value: dict) -> None:
+    """Meta's `template_category_update`: once a template's category has
+    changed (`previous_category` given), it is kept -- a ticket template
+    moved to MARKETING is no longer one our sends use. A change only
+    announced for later (`correct_category`) waits for that."""
+    if not value.get("previous_category") or not value.get("new_category"):
+        return
+    rows = (await session.scalars(select(ClubWhatsAppTemplates).where(
+        ClubWhatsAppTemplates.account_id == account.id,
+        ClubWhatsAppTemplates.name == str(value.get("message_template_name") or ""),
+        ClubWhatsAppTemplates.language == language_of(value.get("message_template_language")),
+    ))).all()
+    for row in rows:
+        row.category = str(value["new_category"]).upper()[:32]
 
 
 # ─── Checking what is submitted ──────────────────────────────────────────
@@ -218,7 +426,10 @@ def build(payload: dict) -> dict:
     name = str(payload.get("name") or "").strip()
     if not NAME.match(name):
         raise _bad("name", "Use lowercase letters, numbers and underscores only, like event_update.")
-    language = str(payload.get("language") or "").strip()
+    if name in STANDARD:
+        raise _bad("name", f"{name} is MyOtherApp's own template, which your tickets go by. Add it with "
+                           "\"Submit MyOtherApp's templates\", or give yours another name.")
+    language = language_of(payload.get("language"))
     if not LANGUAGE.match(language):
         raise _bad("language", "Pick a language, like en or en_US.")
     category = str(payload.get("category") or "").strip().upper()
@@ -306,7 +517,8 @@ def build(payload: dict) -> dict:
 def send_components(definition: dict, params: dict) -> tuple[list[dict], dict]:
     """The `components` of a template send, from the values the dashboard
     gives (`header`, `body`, `buttons` {index: value}), checked against the
-    template's own variables. Also what is kept on the message."""
+    template's own variables (by name, in their order, for a template made
+    with named parameters). Also what is kept on the message."""
     header_values = [str(v) for v in (params.get("header") or [])]
     body_values = [str(v) for v in (params.get("body") or [])]
     button_values = {str(k): str(v) for k, v in (params.get("buttons") or {}).items()}
@@ -319,18 +531,23 @@ def send_components(definition: dict, params: dict) -> tuple[list[dict], dict]:
             raise _bad(field, "A value is too long.")
         return cleaned
 
+    def parameters(values: list[str], names: list[str]) -> list[dict]:
+        if definition.get("parameter_format") == NAMED_FORMAT:
+            return [{"type": "text", "parameter_name": n, "text": v} for n, v in zip(names, values)]
+        return [{"type": "text", "text": v} for v in values]
+
     components: list[dict] = []
     header = definition.get("header")
     kept: dict[str, Any] = {}
     if header and header.get("format") == "TEXT" and header.get("variables"):
         kept["header"] = tidy("header", header_values, header["variables"])
-        components.append({"type": "header", "parameters": [{"type": "text", "text": v} for v in kept["header"]]})
+        components.append({"type": "header", "parameters": parameters(kept["header"], header.get("names") or [])})
     elif header and header.get("format") in ("DOCUMENT", "IMAGE", "VIDEO", "LOCATION"):
         raise _bad("header", "Templates with a picture, video or document header can't be sent from the inbox yet.")
     n = int(definition.get("body_variables") or 0)
     kept["body"] = tidy("body", body_values, n)
     if n:
-        components.append({"type": "body", "parameters": [{"type": "text", "text": v} for v in kept["body"]]})
+        components.append({"type": "body", "parameters": parameters(kept["body"], definition.get("body_names") or [])})
     kept["buttons"] = {}
     for b in definition.get("buttons") or []:
         if b.get("type") == "URL" and b.get("variables"):
@@ -343,14 +560,17 @@ def send_components(definition: dict, params: dict) -> tuple[list[dict], dict]:
 
 def render(definition: dict, kept: dict) -> str:
     """The template's text with the values in, as the person saw it."""
-    def fill(text: Optional[str], values: list) -> str:
+    def fill(text: Optional[str], values: list, names: Optional[list] = None) -> str:
+        if names:
+            by_name = dict(zip(names, values))
+            return NAMED.sub(lambda m: by_name.get(m.group(1), m.group(0)), text or "")
         return VARIABLE.sub(lambda m: values[int(m.group(1)) - 1] if 0 < int(m.group(1)) <= len(values) else m.group(0), text or "")
 
     parts = []
     header = definition.get("header") or {}
     if header.get("format") == "TEXT" and header.get("text"):
-        parts.append(fill(header["text"], kept.get("header") or []))
-    parts.append(fill(definition.get("body"), kept.get("body") or []))
+        parts.append(fill(header["text"], kept.get("header") or [], header.get("names")))
+    parts.append(fill(definition.get("body"), kept.get("body") or [], definition.get("body_names")))
     if definition.get("footer"):
         parts.append(definition["footer"])
     return "\n\n".join(p for p in parts if p)
@@ -400,20 +620,41 @@ def standard_body(name: str, handle: Optional[str]) -> dict:
     components.append({"type": "BODY", "text": spec["body"], "example": {"body_text": [spec["examples"]]}})
     label, link, example = spec["button"]
     components.append({"type": "BUTTONS", "buttons": [{"type": "URL", "text": label, "url": link, "example": [example]}]})
-    return {"name": name, "language": (settings.WHATSAPP_TEMPLATE_LANGUAGE or "en").strip(), "category": "UTILITY",
+    return {"name": name, "language": language_of(settings.WHATSAPP_TEMPLATE_LANGUAGE or "en"), "category": "UTILITY",
             "components": components}
 
 
-async def install_standard(keys: graph.Keys, have: set[str]) -> dict[str, str]:
-    """Submit each of MyOtherApp's templates the club's account does not have
-    yet. {name: "submitted" | "exists" | Meta's reason}."""
+#: What a template of one of MyOtherApp's names that can't be resubmitted says.
+_NOT_OURS = ("Your account has {name} ({status}), but not in the shape MyOtherApp's {kind} fills, so they go from "
+             "MyOtherApp's number. Delete it in WhatsApp Manager and submit again here -- Meta won't take a deleted "
+             "approved template's name again for 30 days.")
+_KIND = {"ticket_confirmed": "tickets", "event_reminder": "reminders", "certificate_ready": "certificates"}
+
+
+async def install_standard(session, account: ClubWhatsAppAccounts, keys: graph.Keys) -> dict[str, str]:
+    """Submit each of MyOtherApp's templates the club's account does not
+    have in a shape our sends fill (as last read: the caller syncs first).
+    {name: "exists" | "pending" | "submitted" | why not}. One it has but
+    Meta rejected (or never approved) is deleted and submitted again; one
+    approved, paused or disabled in another shape is left, with what to do
+    (a deleted approved name can't be used again for 30 days)."""
     out: dict[str, str] = {}
+    rows = list((await session.scalars(select(ClubWhatsAppTemplates).where(ClubWhatsAppTemplates.account_id == account.id))).all())
+    have = standard_state(rows)
+    ours = language_of(settings.WHATSAPP_TEMPLATE_LANGUAGE or "en")
     handle: Optional[str] = None
     for name, spec in STANDARD.items():
-        if name in have:
-            out[name] = "exists"
+        if have[name] is not None:
+            out[name] = "exists" if have[name].status == APPROVED else "pending"
             continue
+        same = next((r for r in rows if r.name == name and r.language == ours), None)
         try:
+            if same is not None:
+                if same.status not in ("REJECTED", PENDING, "IN_APPEAL", "LIMIT_EXCEEDED"):
+                    out[name] = _NOT_OURS.format(name=name, status=same.status, kind=_KIND[name])
+                    continue
+                # Never approved: its name is free again once it is gone.
+                await graph.delete_template(keys, name, same.meta_id)
             if spec["document"] and handle is None:
                 handle = await graph.upload_sample(keys, SAMPLE_PDF, "sample.pdf", "application/pdf")
             await graph.create_template(keys, standard_body(name, handle))

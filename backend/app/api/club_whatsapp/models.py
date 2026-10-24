@@ -127,6 +127,8 @@ class ClubWhatsAppAccounts(AbstractSQLModel, TimestampsMixin):
     quality_rating = Column(String(16), nullable=True)
     messaging_limit_tier = Column(String(32), nullable=True)
     quality_checked_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    #: When its templates were last read from Meta (the sweep reads them again).
+    templates_synced_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     verified_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     last_webhook_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     last_error = Column(String(300), nullable=True)
@@ -182,8 +184,13 @@ class ClubWhatsAppTemplates(AbstractSQLModel):
     name = Column(String(512), nullable=False)
     language = Column(String(16), nullable=False)
     category = Column(String(32), nullable=True)
-    #: APPROVED, PENDING, REJECTED, PAUSED, DISABLED, ... as Meta says it.
+    #: APPROVED, PENDING, REJECTED, PAUSED, DISABLED, ... as Meta says it --
+    #: or UNUSABLE, our own mark after Meta refused a send of it from the
+    #: club's number, kept until Meta says something other than `meta_status`.
     status = Column(String(32), nullable=False)
+    meta_status = Column(String(32), nullable=True)
+    #: FLAGGED (may be paused) or LOCKED (can't be edited): Meta's word beside the status.
+    flag = Column(String(16), nullable=True)
     rejected_reason = Column(String(200), nullable=True)
     quality = Column(String(16), nullable=True)
     components = Column(JSON, nullable=True)

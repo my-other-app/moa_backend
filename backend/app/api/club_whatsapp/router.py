@@ -309,7 +309,11 @@ async def list_templates(request: Request, session: SessionDep, user: ClubAuth,
                          refresh: bool = Query(True, description="Ask Meta (true), or show what was last read (false)")) -> TemplateList:
     """Read live from Meta (and kept); `stale` when Meta couldn't be asked
     and this is what was last read. `standard_missing`: MyOtherApp's ticket,
-    reminder and certificate templates the account lacks."""
+    reminder and certificate templates the account lacks -- or has, but not
+    approved (or pending) in the shape MyOtherApp's sends fill. `status`
+    UNUSABLE: Meta refused a send of it from the club's number, until Meta
+    says something new of it; `flagged`: Meta's warning that it may be
+    paused (`flag` FLAGGED, or LOCKED: it can't be edited)."""
     access.require_inbox(request)
     club = await service.club_of(session, user)
     account, keys = await _keys(session, club.id)
@@ -322,8 +326,7 @@ async def list_templates(request: Request, session: SessionDep, user: ClubAuth,
             await session.commit()
         except graph.GraphError:
             items, stale = await templates.cached(session, account.id), True
-    have = {t["name"] for t in items}
-    return {"items": items, "stale": stale, "standard_missing": [n for n in templates.STANDARD if n not in have]}
+    return {"items": items, "stale": stale, "standard_missing": await templates.standard_missing(session, account.id)}
 
 
 @club_router.post("/templates", summary="Submit a template to Meta for approval")
@@ -395,11 +398,11 @@ async def install_standard(request: Request, session: SessionDep, user: ClubAuth
     await service.require_plan(session, club.id, actor=user)
     account, keys = await _keys(session, club.id)
     try:
-        existing = {t["name"] for t in await templates.sync(session, account, keys)}
+        await templates.sync(session, account, keys)
         await session.commit()
     except graph.GraphError as exc:
         raise service.refusal(exc) from None
-    results = await templates.install_standard(keys, existing)
+    results = await templates.install_standard(session, account, keys)
     try:
         await templates.sync(session, account, keys)
         await session.commit()

@@ -56,7 +56,10 @@ logger = logging.getLogger(__name__)
 
 FEATURE = "whatsapp_own"
 #: The fields the club ticks when it subscribes its app's webhook.
-WEBHOOK_FIELDS = ["messages", "message_template_status_update", "phone_number_quality_update", "account_update"]
+WEBHOOK_FIELDS = [
+    "messages", "message_template_status_update", "template_category_update", "phone_number_quality_update",
+    "account_update", "business_capability_update",
+]
 
 _ID = re.compile(r"^\d{5,25}$")
 _TOKEN = re.compile(r"^[\x21-\x7e]{20,2048}$")
@@ -607,24 +610,6 @@ async def can_route(session, club_id: Optional[int]) -> bool:
     return account is not None and await plan_allows(session, club_id)
 
 
-async def approved_language(session, account_id: int, name: str) -> Optional[str]:
-    """The language the club's account has `name` approved in, the platform's preferred."""
-    rows = (await session.execute(
-        select(ClubWhatsAppTemplates.language).where(
-            ClubWhatsAppTemplates.account_id == account_id,
-            ClubWhatsAppTemplates.name == name,
-            ClubWhatsAppTemplates.status == "APPROVED",
-        )
-    )).scalars().all()
-    if not rows:
-        return None
-    wanted = (settings.WHATSAPP_TEMPLATE_LANGUAGE or "en").strip()
-    for language in (wanted, "en", "en_US", "en_GB"):
-        if language in rows:
-            return language
-    return sorted(rows)[0]
-
-
 async def route_for(session, club_id: Optional[int], template: str, *, cache: Optional[dict] = None) -> Optional[Route]:
     """The club's own number for this template, or None for the platform's.
     `cache` is a send's own ((club, template) -> Route or None), so a
@@ -647,7 +632,10 @@ async def _route_for(session, club_id: Optional[int], template: str) -> Optional
     account = await routing_account(session, club_id)
     if account is None or not await plan_allows(session, club_id):
         return None
-    language = await approved_language(session, account.id, template)
+    from app.api.club_whatsapp import templates
+
+    # Approved, and in the shape our send fills: any other would be refused at every send.
+    language = await templates.usable_language(session, account.id, template)
     if language is None:
         return None
     try:
@@ -706,6 +694,16 @@ async def after_failure(session, route: Route, exc: Exception) -> None:
         for row in rows:
             row.status = "UNUSABLE"
             row.rejected_reason = (getattr(exc, "reason", "") or "")[:200]
+        await alerts.tell_owner(
+            session, account.club_id, "template",
+            subject=f"Your {route.template} WhatsApp template was refused; MyOtherApp's number sent it instead",
+            paragraphs=[
+                f"Meta refused a send of your {route.template} template from your club's number: {getattr(exc, 'reason', exc)}",
+                "Until Meta says something new of it, the messages it carries go from MyOtherApp's WhatsApp number. "
+                "Check the template in WhatsApp Manager, or submit MyOtherApp's templates again from your dashboard.",
+            ],
+            button=("Open WhatsApp templates", alerts.dashboard_url("/whatsapp/templates")),
+        )
 
 
 # ─── What is shown ───────────────────────────────────────────────────────

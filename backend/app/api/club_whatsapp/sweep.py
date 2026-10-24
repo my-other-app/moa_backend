@@ -4,6 +4,8 @@
   is read from Meta again -- its quality rating and messaging limit, logged
   when they change, the club told when they drop. A failed number that Meta
   answers for again is active again (the club fixed it in Meta).
+- Templates: each active number's, read from Meta again every
+  CLUB_WHATSAPP_QUALITY_HOURS, so what a ticket send decides by is current.
 - Retention: each club's messages older than its retention period (12
   months unless it chose otherwise) are deleted, with the conversations left
   empty.
@@ -25,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.api.club_whatsapp import crypto, inbox, live
 from app.api.club_whatsapp import service as accounts
-from app.api.club_whatsapp.models import DEFAULT_RETENTION_MONTHS, LIVE, ClubWhatsAppAccounts, ClubWhatsAppMessages
+from app.api.club_whatsapp.models import ACTIVE, DEFAULT_RETENTION_MONTHS, LIVE, ClubWhatsAppAccounts, ClubWhatsAppMessages
 from app.config import settings
 from app.db import lock_keys
 
@@ -77,6 +79,43 @@ async def refresh_quality(session, now: Optional[datetime] = None) -> int:
     return done
 
 
+async def refresh_templates(session, now: Optional[datetime] = None) -> int:
+    """Each active number's templates, read from Meta again when they were
+    last read CLUB_WHATSAPP_QUALITY_HOURS ago (a missed webhook, an edit in
+    WhatsApp Manager): what a ticket send decides by stays current. Not for
+    a number the plan no longer covers. Returns how many were read."""
+    from app.api.club_whatsapp import graph, templates
+
+    now = now or _now()
+    if not crypto.available():
+        return 0
+    due = now - timedelta(hours=int(settings.CLUB_WHATSAPP_QUALITY_HOURS or 6))
+    A = ClubWhatsAppAccounts
+    ids = (await session.scalars(
+        select(A.id).where(A.status == ACTIVE, or_(A.templates_synced_at.is_(None), A.templates_synced_at <= due))
+        .order_by(A.templates_synced_at.asc().nulls_first(), A.id).limit(BATCH)
+    )).all()
+    done = 0
+    for account_id in ids:
+        try:
+            account = await session.get(A, account_id)
+            if account is None or account.status != ACTIVE or not await accounts.plan_allows(session, account.club_id):
+                continue
+            keys = accounts.keys_of(account)
+            await session.commit()
+            # Nothing held while Meta answers.
+            await templates.sync(session, account, keys)
+            await session.commit()
+            done += 1
+        except (graph.GraphError, crypto.Unavailable) as exc:
+            logger.info("whatsapp sweep: templates of number %s not read (%s)", account_id, type(exc).__name__)
+            await session.rollback()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("whatsapp sweep: templates of number %s not read (%s)", account_id, type(exc).__name__)
+            await session.rollback()
+    return done
+
+
 async def retention(session, now: Optional[datetime] = None) -> int:
     """Each club's messages past its retention period, deleted. Returns how many."""
     now = now or _now()
@@ -104,7 +143,11 @@ async def retention(session, now: Optional[datetime] = None) -> int:
 
 async def sweep(session, now: Optional[datetime] = None) -> dict:
     now = now or _now()
-    return {"checked": await refresh_quality(session, now), "forgotten": await retention(session, now)}
+    return {
+        "checked": await refresh_quality(session, now),
+        "templates": await refresh_templates(session, now),
+        "forgotten": await retention(session, now),
+    }
 
 
 async def run_sweep(session, now: Optional[datetime] = None) -> Optional[dict]:

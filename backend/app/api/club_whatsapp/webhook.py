@@ -11,7 +11,9 @@ without a good one is refused before its body is read for anything.
   the club's number hears it too). Only the club's own number's: an app may
   serve several, and the others are not this club's.
 - `message_template_status_update`: a template approved, rejected (with
-  Meta's reason), paused or disabled.
+  Meta's reason), paused, disabled, flagged or reinstated.
+- `template_category_update`: a template's category changed (a ticket
+  template moved to MARKETING is no longer one our sends use).
 - `phone_number_quality_update`: the messaging limit changed, or the number
   was flagged; the limit is recorded and the quality read again at the
   sweep's next pass.
@@ -87,6 +89,8 @@ async def handle(session, account: ClubWhatsAppAccounts, payload: dict) -> dict:
                 async with session.begin_nested():
                     if field == "message_template_status_update":
                         await templates.status_update(session, account, value)
+                    elif field == "template_category_update":
+                        await templates.category_update(session, account, value)
                     elif field == "phone_number_quality_update":
                         await _quality(session, account, value)
                     elif field == "account_update":

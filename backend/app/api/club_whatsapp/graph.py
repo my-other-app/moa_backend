@@ -154,17 +154,30 @@ async def subscribe_app(keys: Keys) -> None:
 # ─── Templates ───────────────────────────────────────────────────────────
 
 
-async def list_templates(keys: Keys) -> list[dict]:
-    out: list[dict] = []
-    params: dict = {"fields": TEMPLATE_FIELDS, "limit": 100}
-    for _ in range(TEMPLATE_PAGES):
-        page = await call(keys, "GET", f"{keys.waba_id}/message_templates", params=params)
-        out.extend(t for t in page.get("data") or [] if isinstance(t, dict))
-        after = ((page.get("paging") or {}).get("cursors") or {}).get("after")
-        if not after or not (page.get("paging") or {}).get("next"):
-            break
-        params = {**params, "after": after}
-    return out
+#: Meta (v24+): a template page asked for with a cursor it no longer knows.
+STALE_CURSOR = "131059"
+
+
+async def list_templates(keys: Keys, *, name: Optional[str] = None) -> list[dict]:
+    """The account's templates (`name`: those of that name), page by page.
+    A cursor Meta calls stale (131059) is dropped and the reading starts
+    again, once, as Meta says to."""
+    for attempt in (1, 2):
+        out: list[dict] = []
+        params: dict = {"fields": TEMPLATE_FIELDS, "limit": 100, **({"name": name} if name else {})}
+        try:
+            for _ in range(TEMPLATE_PAGES):
+                page = await call(keys, "GET", f"{keys.waba_id}/message_templates", params=params)
+                out.extend(t for t in page.get("data") or [] if isinstance(t, dict))
+                after = ((page.get("paging") or {}).get("cursors") or {}).get("after")
+                if not after or not (page.get("paging") or {}).get("next"):
+                    break
+                params = {**params, "after": after}
+            return out
+        except GraphError as exc:
+            if exc.code != STALE_CURSOR or attempt == 2 or "after" not in params:
+                raise
+    return []
 
 
 async def create_template(keys: Keys, body: dict) -> dict:

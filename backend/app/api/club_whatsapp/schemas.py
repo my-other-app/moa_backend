@@ -278,9 +278,15 @@ class TemplateOut(CustomBaseModel):
     status: Optional[str] = None
     rejected_reason: Optional[str] = None
     quality: Optional[str] = None
+    #: Meta's FLAGGED (negative feedback: it may be paused) or LOCKED (it can't be edited), kept beside the status.
+    flag: Optional[str] = None
+    flagged: bool = False
     header: Optional[TemplateHeaderOut] = None
     body: str = ""
     body_variables: int = 0
+    #: POSITIONAL ({{1}}) or NAMED ({{first_name}}: `body_names`, in order, are what `params.body` fills).
+    parameter_format: str = "POSITIONAL"
+    body_names: list[str] = Field(default_factory=list)
     footer: Optional[str] = None
     buttons: list[TemplateButtonOut] = Field(default_factory=list)
 
@@ -294,7 +300,7 @@ class TemplateList(CustomBaseModel):
 
 
 class StandardInstallOut(CustomBaseModel):
-    #: name -> submitted | exists | why not
+    #: name -> submitted | exists | pending | why not
     results: dict[str, str]
 
 
