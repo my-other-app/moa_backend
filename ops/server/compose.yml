@@ -1,0 +1,351 @@
+# MyOtherApp on one Oracle Cloud box: the API and its job worker, Postgres,
+# Redis, Meilisearch, the public site, both dashboards, and Caddy in front of
+# them. docs/MOVE_TO_ORACLE.md is the runbook; ops/server/README.md says what
+# every file here is for.
+#
+# On the server this is /srv/moa/compose.yml, beside:
+#   .env        the API's settings and secrets, edited by hand on the server
+#               and never synced from anywhere (the old box's file, plus the
+#               lines in env/backend.env.example). Postgres and Meilisearch
+#               take their few values from it by interpolation, nothing more.
+#   images.env  which image each app runs. Written by deploy.sh only.
+#   env/        the site's and the dashboards' own run-time settings.
+#   caddy/      the Caddyfile and its pieces.
+#   certs/      the Cloudflare Origin CA certificate and key.
+#   secrets/    files the API reads: wallet certificates, a Firebase JSON.
+#
+# Run it through ./dc (docker compose with both env files) or deploy.sh. A
+# bare `docker compose up` falls back to each app's :latest image.
+#
+# Memory and CPU, on 2 cores and 12 GB (docs/MOVE_TO_ORACLE.md, "Capacity";
+# tests/test_oracle_stack.py holds these numbers):
+#   - mem_limit caps every service, so a leak or a spike is killed and
+#     restarted inside its own container, never Postgres by the kernel's OOM
+#     killer. Together they are 8 GB; the OS and Docker take about 1; the
+#     rest, and the 4 GB swapfile, absorb render and build-free spikes.
+#   - cpus caps what one service may take of the two cores.
+#   - cpu_shares decides who gets them when they are contended: the API and
+#     Postgres first, the indexer and the admin portal last.
+#
+# Nothing here publishes a port to the internet except Caddy (80, 443);
+# Postgres is on 127.0.0.1 only, for an SSH tunnel.
+
+name: moa
+
+x-logging: &logging
+  # Docker's compressed local format, rotated: 5 x 20 MB per container.
+  driver: local
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+# The API and the worker: one image, one .env, the same files.
+x-backend: &backend
+  image: ${BACKEND_IMAGE:-ghcr.io/my-other-app/moa-backend:latest}
+  env_file:
+    - .env
+  environment: &backend-environment
+    # Built from the parts, as on the old box, so the address is always the
+    # service name and never a hard-coded IP. `:?` makes a missing value a
+    # loud compose error instead of a baffling authentication failure.
+    APP_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:?POSTGRES_USER must be set in .env}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB must be set in .env}
+    APP_DATABASE_URL_SYNC: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    # Fixed by this stack, whatever the .env copied from the old box says:
+    # Caddy and the healthcheck reach the API on 8000; two uvicorn workers and
+    # one render thread each fit two cores (MOA_* in .env to change them).
+    APP_PORT: "8000"
+    APP_WORKERS: ${MOA_API_WORKERS:-2}
+    APP_RENDER_THREADS: ${MOA_RENDER_THREADS:-1}
+    # Only Caddy and the Next servers can reach the API (it publishes no
+    # port), so uvicorn may believe their X-Forwarded-Proto: the API then
+    # knows it was asked over HTTPS (cookies marked Secure).
+    FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-*}
+    # The services this box runs, on by default here (the old box could not
+    # hold them). Set in .env to override; Postgres stays the fallback for
+    # each (app/core/redis.py, app/core/search.py).
+    APP_REDIS_URL: ${APP_REDIS_URL:-redis://redis:6379/0}
+    APP_SEARCH_URL: ${APP_SEARCH_URL:-http://meilisearch:7700}
+    APP_SEARCH_KEY: ${APP_SEARCH_KEY:-${MEILI_MASTER_KEY:-}}
+    APP_JOBS_WORKER: ${APP_JOBS_WORKER:-true}
+    APP_SWEEPS_IN_WORKER: ${APP_SWEEPS_IN_WORKER:-true}
+    # The image holds the code; files that were only ever on the old box sit
+    # in /srv/moa/secrets (read-only here). The wallet certificates are
+    # always read from there; a Firebase JSON is wherever .env's
+    # APP_FIREBASE_SERVICE_ACCOUNT_PATH says (/secrets/...).
+    WALLET_CERTS_DIR: /secrets/walletethings
+  volumes:
+    # Backups (on-demand and the daily timer, ops/backup), outside the stack.
+    - /var/backups/myotherapp:/backups
+    # GeoLite2 (docs/OPERATIONS.md, section 16); empty until downloaded.
+    - /var/lib/myotherapp/geoip:/geoip:ro
+    - ./secrets:/secrets:ro
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_started
+  restart: unless-stopped
+  logging: *logging
+
+services:
+  caddy:
+    image: caddy:2.11-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    # Caddyfile (production) or Caddyfile.staging, by MOA_CADDYFILE in .env.
+    command: ["caddy", "run", "--config", "/etc/caddy/${MOA_CADDYFILE:-Caddyfile}", "--adapter", "caddyfile"]
+    environment:
+      MOA_CADDYFILE: ${MOA_CADDYFILE:-Caddyfile}
+      MOA_SITE_HOST: ${MOA_SITE_HOST:-myotherapp.in}
+      MOA_API_HOST: ${MOA_API_HOST:-api.myotherapp.in}
+      MOA_CLUBS_HOST: ${MOA_CLUBS_HOST:-club-dashboard.myotherapp.in}
+      MOA_ADMIN_HOST: ${MOA_ADMIN_HOST:-main-portal.myotherapp.in}
+    volumes:
+      - ./caddy:/etc/caddy:ro
+      - ./certs:/certs:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    # Every open live-room stream is two connections here.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    mem_limit: 128m
+    cpus: 1
+    cpu_shares: 768
+    logging: *logging
+
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    # Only these three, not the whole .env: the database never sees the
+    # API's other secrets.
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB must be set in .env}
+    # Tuned for a 2.5 GB share of a 12 GB, 2-core box. Connections: the API's
+    # 2 workers x (10 + 20) and the worker's 4 + 8 are 72 of the 97 left
+    # after the superuser's 3 (docs/OPERATIONS.md, section 10).
+    # log_parameter_max_length=0: a slow statement is logged without its
+    # values, which are personal data.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=1536MB
+      - -c
+      - effective_cache_size=3GB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=256MB
+      - -c
+      - autovacuum_work_mem=64MB
+      - -c
+      - max_connections=100
+      - -c
+      - wal_buffers=16MB
+      - -c
+      - min_wal_size=256MB
+      - -c
+      - max_wal_size=2GB
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - effective_io_concurrency=100
+      - -c
+      - max_worker_processes=4
+      - -c
+      - max_parallel_workers=2
+      - -c
+      - max_parallel_workers_per_gather=1
+      - -c
+      - log_min_duration_statement=2000
+      - -c
+      - log_parameter_max_length=0
+    # Parallel query's shared memory; Docker's default /dev/shm is 64 MB.
+    shm_size: 256m
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    # A clean shutdown (a checkpoint) rather than a crash recovery next time.
+    stop_grace_period: 60s
+    mem_limit: 2560m
+    cpus: 2
+    cpu_shares: 1024
+    logging: *logging
+
+  # Shared state for the API's processes (app/core/redis.py): rate-limit
+  # counts, the discover cache's second level, publish/subscribe for the live
+  # room. Nothing in it is the only copy of anything, so no persistence: it
+  # never forks to write a file and never needs twice its memory.
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "no", "--save", "", "--maxmemory", "224mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      # Nothing is written here; mounted so the image's VOLUME is not a new
+      # anonymous volume after every recreate.
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    mem_limit: 300m
+    cpus: 0.5
+    cpu_shares: 512
+    logging: *logging
+
+  # Search (app/core/search.py). Its master key is MEILI_MASTER_KEY in .env
+  # (16+ bytes); without one it refuses to start in production mode, and the
+  # API's search falls back to Postgres. Losing the volume costs a reindex
+  # from Postgres, not data.
+  meilisearch:
+    image: getmeili/meilisearch:v1.54.3
+    restart: unless-stopped
+    environment:
+      MEILI_ENV: production
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-}
+      MEILI_NO_ANALYTICS: "true"
+      MEILI_DB_PATH: /meili_data/data.ms
+      # One indexing thread and at most 256 MiB for it; unset, it takes up to
+      # two thirds of the memory it sees, which in a container can be the
+      # host's.
+      MEILI_MAX_INDEXING_THREADS: "1"
+      MEILI_MAX_INDEXING_MEMORY: 256MiB
+    volumes:
+      - meili_data:/meili_data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:7700/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    mem_limit: 768m
+    cpus: 1
+    cpu_shares: 256
+    logging: *logging
+
+  backend:
+    <<: *backend
+    command: ["python", "main.py"]
+    healthcheck:
+      # Liveness only: the process answers. Readiness (database, migrations,
+      # Redis) is deploy.sh's check, so a slow database never gets a healthy
+      # API restarted.
+      test: ["CMD", "python", "-c", "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4).status == 200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+      # Asked every 3 s while it boots, so a deploy sees it healthy as soon
+      # as it is (Docker Engine 25+).
+      start_interval: 3s
+    # Open files: every client connection is one, and a live-room stream is
+    # held for as long as a phone watches.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    stop_grace_period: 15s
+    # 2 workers at 0.35-0.4 GB each once imported, plus the render pool's
+    # peaks (wkhtmltopdf, tickets, certificates, wallet passes).
+    mem_limit: 2048m
+    cpus: 2
+    cpu_shares: 1024
+
+  # The job queue's worker (app/worker.py): the API's image and settings,
+  # running jobs instead of serving requests. deploy.sh moves it with the
+  # API, so it never runs older code than the API that enqueues for it. On
+  # SIGTERM it finishes what it holds for up to 25 s; the grace is longer.
+  worker:
+    <<: *backend
+    command: ["python", "-m", "app.worker"]
+    environment:
+      <<: *backend-environment
+      # Two jobs at once on two cores shared with the API.
+      APP_JOBS_CONCURRENCY: "2"
+    stop_grace_period: 35s
+    mem_limit: 768m
+    cpus: 1
+    cpu_shares: 512
+
+  # The public site, https://myotherapp.in (repo moa_events).
+  website:
+    image: ${WEBSITE_IMAGE:-ghcr.io/my-other-app/moa-website:latest}
+    restart: unless-stopped
+    init: true
+    env_file:
+      - path: env/website.env
+        required: false
+    environment:
+      # The API over the box's own network, not out through Cloudflare.
+      API_BASE_URL: ${MOA_WEBSITE_API_URL:-http://backend:8000}
+      NODE_OPTIONS: --max-old-space-size=384
+    volumes:
+      # Next's data cache (fetches with revalidate/tags) and image cache:
+      # kept across deploys, as Vercel's data cache was.
+      - website_cache:/app/.next/cache
+    mem_limit: 640m
+    cpus: 1
+    cpu_shares: 768
+    logging: *logging
+
+  # The club dashboard, https://club-dashboard.myotherapp.in (moa_web apps/clubs).
+  clubs:
+    image: ${CLUBS_IMAGE:-ghcr.io/my-other-app/moa-clubs:latest}
+    restart: unless-stopped
+    init: true
+    env_file:
+      - path: env/clubs.env
+        required: false
+    environment:
+      # Its BFF gateway (/api/gateway) and server components call the API
+      # over the box's own network; the browser never calls the API.
+      MOA_API_URL: ${MOA_DASHBOARD_API_URL:-http://backend:8000}
+      NODE_OPTIONS: --max-old-space-size=320
+    mem_limit: 512m
+    cpus: 1
+    cpu_shares: 512
+    logging: *logging
+
+  # The main portal (admin), https://main-portal.myotherapp.in (moa_web apps/admin).
+  admin:
+    image: ${ADMIN_IMAGE:-ghcr.io/my-other-app/moa-admin:latest}
+    restart: unless-stopped
+    init: true
+    env_file:
+      - path: env/admin.env
+        required: false
+    environment:
+      MOA_API_URL: ${MOA_DASHBOARD_API_URL:-http://backend:8000}
+      NODE_OPTIONS: --max-old-space-size=288
+    mem_limit: 448m
+    cpus: 1
+    cpu_shares: 256
+    logging: *logging
+
+volumes:
+  postgres_data:
+  redis_data:
+  meili_data:
+  caddy_data:
+  caddy_config:
+  website_cache:

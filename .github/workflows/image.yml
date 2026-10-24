@@ -1,0 +1,151 @@
+name: Image
+
+# Builds the API's image for linux/amd64 and linux/arm64 and pushes it to
+# ghcr.io/my-other-app/moa-backend, tagged with the commit (full and short
+# sha) and, from master, `latest`. The Oracle box pulls it
+# (ops/server/deploy.sh): nothing is built there any more. The worker runs
+# the same image. The old deploy (live-deploy.yml, which builds on the EC2
+# box) is unchanged and keeps working until the cutover.
+#
+# Each architecture builds natively, side by side, and a last job joins the
+# two into one multi-platform tag. GitHub's arm64 runners (ubuntu-24.04-arm)
+# are free in public repositories and, since January 2026, run in private
+# ones too, against the plan's free minutes. The repository variable
+# ARM64_RUNNER=qemu builds the arm64 half under emulation on an x86 runner
+# instead (a few times slower).
+#
+# The package is created private on its first push: make it public (Package
+# settings -> Change visibility), or log the box in to ghcr.io with a
+# read:packages token (docs/MOVE_TO_ORACLE.md, "Images").
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "backend/**"
+      - ".github/workflows/image.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/my-other-app/moa-backend
+
+jobs:
+  build:
+    name: build (${{ matrix.arch }})
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+          - arch: arm64
+            platform: linux/arm64
+    runs-on: ${{ (matrix.arch == 'arm64' && vars.ARM64_RUNNER != 'qemu') && (vars.ARM64_RUNNER || 'ubuntu-24.04-arm') || 'ubuntu-24.04' }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      # Sentry's release (app/core/observability.py reads backend/REVISION;
+      # the box has no .git to ask).
+      - name: Write the commit into the image
+        run: printf '%s\n' "$GITHUB_SHA" > backend/REVISION
+
+      - name: Emulate arm64
+        if: matrix.arch == 'arm64' && vars.ARM64_RUNNER == 'qemu'
+        uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          labels: |
+            org.opencontainers.image.title=moa-backend
+            org.opencontainers.image.description=MyOtherApp API and job worker
+
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Pushed by digest only; the publish job gives it its tags.
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=backend-${{ matrix.arch }}
+          cache-to: type=gha,scope=backend-${{ matrix.arch }},mode=max
+          provenance: false
+
+      - name: Keep the digest for the publish job
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag both architectures as one image
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          set -euo pipefail
+          tags=(-t "$IMAGE:$GITHUB_SHA" -t "$IMAGE:${GITHUB_SHA::7}")
+          if [ "$GITHUB_REF" = "refs/heads/master" ]; then
+            tags+=(-t "$IMAGE:latest")
+          fi
+          sources=()
+          for digest in *; do
+            sources+=("$IMAGE@sha256:$digest")
+          done
+          [ "${#sources[@]}" -eq 2 ] || { echo "::error::expected 2 digests (amd64, arm64), found ${#sources[@]}"; exit 1; }
+          docker buildx imagetools create "${tags[@]}" "${sources[@]}"
+          docker buildx imagetools inspect "$IMAGE:$GITHUB_SHA"
+
+      - name: Summary
+        run: |
+          latest=""
+          if [ "$GITHUB_REF" = "refs/heads/master" ]; then latest=", latest"; fi
+          {
+            echo "### $IMAGE"
+            echo
+            echo "Tags: $GITHUB_SHA, ${GITHUB_SHA::7}$latest (linux/amd64, linux/arm64)."
+            echo
+            echo "Deploy: Actions -> Deploy to Oracle -> service backend, tag ${GITHUB_SHA::7} (tick migrate if this commit adds a migration)."
+          } >> "$GITHUB_STEP_SUMMARY"

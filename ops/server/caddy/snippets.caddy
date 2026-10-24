@@ -1,0 +1,61 @@
+# Pieces every site block uses (imported by Caddyfile and Caddyfile.staging).
+
+# TLS between Cloudflare and this box. Every name is proxied by Cloudflare
+# (orange cloud) with SSL/TLS "Full (strict)", and Cloudflare checks this
+# certificate: a Cloudflare Origin CA certificate for myotherapp.in and
+# *.myotherapp.in (SSL/TLS -> Origin Server -> Create certificate, 15 years),
+# saved as /srv/moa/certs/origin.pem and origin.key (mode 600). Browsers never
+# see it; they see Cloudflare's edge certificate. A name that is NOT proxied
+# would need a publicly trusted certificate instead: leave `import origin_tls`
+# out of its block and Caddy gets one from Let's Encrypt by itself.
+#
+# Optional hardening, Authenticated Origin Pulls (Cloudflare presents a client
+# certificate; anything else is refused during the handshake): turn it on in
+# SSL/TLS -> Origin Server, save Cloudflare's origin-pull CA as
+# /srv/moa/certs/origin-pull-ca.pem, and use the block form:
+#	tls {$MOA_TLS_CERT:/certs/origin.pem} {$MOA_TLS_KEY:/certs/origin.key} {
+#		client_auth {
+#			mode require_and_verify
+#			trust_pool file /certs/origin-pull-ca.pem
+#		}
+#	}
+(origin_tls) {
+	tls {$MOA_TLS_CERT:/certs/origin.pem} {$MOA_TLS_KEY:/certs/origin.key}
+}
+
+# Response headers for every site. No `Server: Caddy`. HSTS as Vercel sent it
+# (two years, this name only: no includeSubDomains, which would reach every
+# club's site). Caddy writes no access log: the API logs its own requests
+# with the live room's keys and tokens filtered out, and a proxy's log would
+# keep them (they ride in query strings and paths).
+(common) {
+	header {
+		# After the app's own headers are in (uvicorn names itself too).
+		defer
+		-Server
+		Strict-Transport-Security "max-age=63072000"
+	}
+	# What nginx allowed the API (client_max_body_size 10M); the dashboards'
+	# uploads go through their gateway to the same API.
+	request_body {
+		max_size 10MB
+	}
+}
+
+# Who asked, for the app behind. {client_ip} is the visitor (global.caddy):
+# X-Forwarded-For is replaced with that one address, never appended to, so a
+# client cannot slip in a hop of its own. The API (app/core/net.py) and the
+# site (src/server/visitor.js) both read the visitor from it. A restart (a
+# deploy) holds new requests instead of failing them: a connection that
+# cannot be made is retried for up to 30 s (a dial that failed sent nothing,
+# so any method is safe to retry).
+#
+# Responses are passed on as they are written (flush_interval -1): Next
+# streams a page's HTML in pieces, and an export may stream too.
+(upstream) {
+	header_up X-Forwarded-For {client_ip}
+	header_up X-Real-IP {client_ip}
+	lb_try_duration 30s
+	lb_try_interval 250ms
+	flush_interval -1
+}

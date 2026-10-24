@@ -1,0 +1,60 @@
+# The staging box's front door: the same stack as production under staging
+# names (MOA_CADDYFILE=Caddyfile.staging and the MOA_*_HOST lines in its .env;
+# docs/MOVE_TO_ORACLE.md, "Staging"). One label under myotherapp.in each, so
+# the zone's free edge certificate and the same Origin CA certificate cover
+# them (a two-label name such as api.staging.myotherapp.in would not be).
+#
+#   api-staging.myotherapp.in             -> backend:8000
+#   staging.myotherapp.in                 -> website:3000
+#   club-dashboard-staging.myotherapp.in  -> clubs:3000
+#   main-portal-staging.myotherapp.in     -> admin:3000
+#
+# Nothing here is for search engines.
+
+import global.caddy
+import snippets.caddy
+
+(staging) {
+	header X-Robots-Tag "noindex, nofollow"
+}
+
+{$MOA_API_HOST:api-staging.myotherapp.in} {
+	import origin_tls
+	import common
+	import staging
+	reverse_proxy {$MOA_UPSTREAM_BACKEND:backend:8000} {
+		import upstream
+	}
+}
+
+{$MOA_SITE_HOST:staging.myotherapp.in} {
+	import origin_tls
+	import common
+	import staging
+	reverse_proxy {$MOA_UPSTREAM_WEBSITE:website:3000} {
+		import upstream
+		header_up X-Vercel-IP-Latitude {http.request.header.CF-IPLatitude}
+		header_up X-Vercel-IP-Longitude {http.request.header.CF-IPLongitude}
+		header_up X-Vercel-IP-City {http.request.header.CF-IPCity}
+		header_up X-Vercel-IP-Country-Region {http.request.header.CF-Region-Code}
+		header_up X-Vercel-IP-Country {http.request.header.CF-IPCountry}
+	}
+}
+
+{$MOA_CLUBS_HOST:club-dashboard-staging.myotherapp.in} {
+	import origin_tls
+	import common
+	import staging
+	reverse_proxy {$MOA_UPSTREAM_CLUBS:clubs:3000} {
+		import upstream
+	}
+}
+
+{$MOA_ADMIN_HOST:main-portal-staging.myotherapp.in} {
+	import origin_tls
+	import common
+	import staging
+	reverse_proxy {$MOA_UPSTREAM_ADMIN:admin:3000} {
+		import upstream
+	}
+}

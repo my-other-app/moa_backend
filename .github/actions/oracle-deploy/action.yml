@@ -1,0 +1,98 @@
+# One command on the Oracle box, through its deploy gate
+# (moa_backend: ops/server/deploy-gate.sh): `deploy <service> <tag>
+# [--migrate]`, `rollback <service>`, `recreate <service>`, `status`, `caddy`
+# or `stack`. The same file lives in moa_backend, moa_web and moa_events.
+#
+# The key is the moa-deploy user's, which can run nothing but the gate. The
+# host key is pinned (known-hosts), never trusted on first sight. With a
+# Tailscale OAuth client, the runner joins the tailnet first, so SSH need not
+# be open to GitHub's addresses at all; then `host` is the box's tailnet name.
+name: Deploy on the Oracle box
+description: Runs one deploy-gate command on the Oracle box over SSH and checks it finished.
+inputs:
+  command:
+    description: "What to run, e.g. 'deploy website 3f9a1c2' or 'status'"
+    required: true
+  stdin-file:
+    description: A file sent on the command's standard input (the `stack` tarball)
+    required: false
+    default: ""
+  host:
+    description: The box's address (ORACLE_SSH_HOST)
+    required: true
+  user:
+    description: The deploy user (ORACLE_SSH_USER, moa-deploy)
+    required: true
+  ssh-key:
+    description: The deploy user's private key (ORACLE_SSH_KEY)
+    required: true
+  known-hosts:
+    description: The box's host key line(s), from ssh-keyscan checked against the console (ORACLE_SSH_KNOWN_HOSTS)
+    required: true
+  tailscale-oauth-client-id:
+    description: Optional Tailscale OAuth client (TS_OAUTH_CLIENT_ID)
+    required: false
+    default: ""
+  tailscale-oauth-secret:
+    description: Optional Tailscale OAuth secret (TS_OAUTH_SECRET)
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Join the tailnet
+      if: inputs.tailscale-oauth-client-id != ''
+      uses: tailscale/github-action@v3
+      with:
+        oauth-client-id: ${{ inputs.tailscale-oauth-client-id }}
+        oauth-secret: ${{ inputs.tailscale-oauth-secret }}
+        tags: tag:ci
+
+    - name: Run on the box
+      shell: bash
+      env:
+        HOST: ${{ inputs.host }}
+        DEPLOY_USER: ${{ inputs.user }}
+        KEY: ${{ inputs.ssh-key }}
+        KNOWN_HOSTS: ${{ inputs.known-hosts }}
+        COMMAND: ${{ inputs.command }}
+        STDIN_FILE: ${{ inputs.stdin-file }}
+      run: |
+        set -euo pipefail
+        for v in HOST DEPLOY_USER KEY KNOWN_HOSTS; do
+          if [ -z "${!v}" ]; then
+            echo "::error::$v is empty: set the ORACLE_SSH_* secrets on this repository's environment (docs/MOVE_TO_ORACLE.md, 'CI')"
+            exit 1
+          fi
+        done
+        dir="$(mktemp -d)"
+        trap 'rm -rf "$dir"' EXIT
+        printf '%s\n' "$KEY" > "$dir/key"
+        chmod 600 "$dir/key"
+        printf '%s\n' "$KNOWN_HOSTS" > "$dir/known_hosts"
+        opts=(-i "$dir/key" -o IdentitiesOnly=yes -o BatchMode=yes
+              -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$dir/known_hosts"
+              -o ServerAliveInterval=20 -o ServerAliveCountMax=45 -o ConnectTimeout=20)
+        input=/dev/null
+        if [ -n "$STDIN_FILE" ]; then input="$STDIN_FILE"; fi
+        echo "::group::$COMMAND"
+        set +e
+        ssh "${opts[@]}" "$DEPLOY_USER@$HOST" "$COMMAND" < "$input" 2>&1 | tee "$dir/out.log"
+        status=${PIPESTATUS[0]}
+        set -e
+        echo "::endgroup::"
+        if [ "$status" -ne 0 ]; then
+          echo "::error::'$COMMAND' failed on the box (exit $status): see the log above. deploy.sh puts the previous image back by itself when a new one is unhealthy."
+          exit "$status"
+        fi
+        if ! grep -q MOA_DEPLOY_OK "$dir/out.log"; then
+          echo "::error::'$COMMAND' stopped before it finished (no MOA_DEPLOY_OK): do not treat it as done."
+          exit 1
+        fi
+        {
+          echo "### $COMMAND"
+          echo
+          echo '```'
+          grep -vE '^MOA_DEPLOY_OK$' "$dir/out.log" | tail -n 40
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
