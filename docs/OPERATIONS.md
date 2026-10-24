@@ -5,7 +5,8 @@ secret, turn on the new services, size the server and every service on it,
 keep its disk from filling, open the live room's streams, look after the
 rendered documents in the bucket, run AI assist, put a demo event live
 for People Like You, place visitors by address without a lookup service,
-and fix the demo's venue pins. Every command is meant to be copied.
+fix the demo's venue pins, and turn on WhatsApp. Every command is meant to
+be copied.
 Commands under **Read-only** change nothing; anything that changes something
 says so.
 
@@ -468,7 +469,7 @@ the hash of what you set.
 | `APP_S3_ACCESS_KEY` / `_SECRET_KEY`, `APP_SES_*`, `APP_BACKUP_S3_*` | AWS IAM -> the user -> security credentials | create the second key, switch, recreate, then deactivate and delete the first |
 | `APP_RESEND_API_KEY`, `APP_RESEND_WEBHOOK_SECRET` | Resend dashboard | |
 | `APP_CLOUDFLARE_API_TOKEN` | Cloudflare -> API tokens (roll) | |
-| `APP_WHATSAPP_*` | Meta developer console | |
+| `APP_WHATSAPP_*` | Meta Business settings -> System users (the token); the app's dashboard -> App settings -> Basic (the app secret) | section 18. A new verify token (`openssl rand -hex 24`) must be set in the webhook too, at once |
 | `APP_APPLE_PRIVATE_KEY`, Firebase service account | Apple / Google consoles | |
 | Wallet pass signing key and certificate | Apple developer -> Pass Type IDs | replace the files in `backend/wallet_certs`, not in git |
 | `PROD_SSH_PRIVATE_KEY` | `ssh-keygen -t ed25519` | add the new public key to the server's `authorized_keys`, update the secret, deploy once, remove the old key |
@@ -1586,3 +1587,161 @@ the seed made; anything someone changed by hand stays as it is. Running it
 twice is safe. The rules, and what the output says, are in
 `backend/scripts/demo/README.md`, section 8, next to the demo's reset, seed
 and remove.
+
+---
+
+## 18. WhatsApp (Meta's WhatsApp Cloud API)
+
+Off until the server's `.env` has the access token and the phone number id;
+until then nothing is sent on the channel and the clubs dashboard's
+providers list says "No WhatsApp provider is configured". Only the five
+templates below are ever sent, and only to a guest who ticked **"Send my
+ticket and event reminders on WhatsApp"** on the website's registration
+form (the box shows once a phone number is typed). Nobody is opted in
+without ticking it; registrations made before this are not opted in. The
+app's registration screen does not show the box yet.
+
+**What goes, and when** (each beside the email, never instead of it):
+
+| When | Template | Sent once per guest? |
+|---|---|---|
+| The ticket goes out: at registration (free event), at payment (paid event), or Send tickets on the attendees page | `ticket_confirmed`, with the ticket PDF | yes: Send again re-sends the email, never the WhatsApp |
+| Send certificates | `certificate_ready`, with the certificate PDF and its own number (`CERT-...`) | yes |
+| About 24 hours before the start, by the minute sweep, to guests who registered before then, hold a live ticket (paid for, on a paid event) and the event is published | `event_reminder` | yes, ever: a moved event does not get a second |
+| Not wired yet: there is no pending-payment email to go beside | `payment_pending` | -- |
+| Not used yet | `event_update` | -- |
+
+Skipped, with the reason on the attendee's delivery row: a guest who did
+not tick the box (no WhatsApp row at all), a number that is not a mobile
+number (India is assumed without a country code), a number WhatsApp said
+cannot receive messages (marked until the organiser corrects it), and the
+demo's invented people (`APP_MAIL_SUPPRESS_DOMAINS`). Meta busy or
+rate-limiting: tried again with email's backoff, up to `APP_MAIL_MAX_ATTEMPTS`.
+A template or token problem: failed, with Meta's code in the reason. The
+code reads Meta's answer in `backend/app/core/whatsapp.py`.
+
+### Settings
+
+| Setting (`.env`) | Default | Meaning |
+|---|---|---|
+| `APP_WHATSAPP_ACCESS_TOKEN` | empty | the system user's permanent token. With the phone number id: the switch |
+| `APP_WHATSAPP_PHONE_NUMBER_ID` | empty | the sending number's id (not the number itself) |
+| `APP_WHATSAPP_APP_SECRET` | empty | the app's secret: the hook checks each status call's signature with it, and refuses every one without it |
+| `APP_WHATSAPP_VERIFY_TOKEN` | empty | what Meta must send back when the webhook is subscribed |
+| `APP_WHATSAPP_GRAPH_VERSION` | `v23.0` | the Graph API version in the URLs. Meta retires one about two years after its release: move it on when Meta says so |
+| `APP_WHATSAPP_TEMPLATE_LANGUAGE` | `en` | the language the templates were approved in |
+| `APP_WHATSAPP_TIMEOUT_SECONDS` | `15` | one call to Meta |
+
+### The templates to submit
+
+In WhatsApp Manager -> Message templates, five templates, each **category
+Utility, language English (`en`)**. The names, the order of the values and
+the buttons must be exactly these: the code fills them in this order, and
+Meta refuses a send whose values do not match (132000).
+
+1. `ticket_confirmed`. Header: Document. Body: `Hi {{1}}, you're registered for {{2}} on {{3}}. Your ticket ({{4}}) is attached. Show its QR code at the entry.` Button: Visit website, dynamic, `https://myotherapp.in/tickets/{{1}}`.
+2. `event_reminder`. Body: `Hi {{1}}, a reminder that {{2}} starts {{3}} at {{4}}. Keep your ticket ready at the entry.` Button: Visit website, dynamic, `https://myotherapp.in/tickets/{{1}}`.
+3. `certificate_ready`. Header: Document. Body: `Hi {{1}}, thank you for attending {{2}}. Your certificate from {{3}} is attached. Anyone can check it is genuine on myotherapp.in with the number {{4}}.` Button: Visit website, dynamic, `https://myotherapp.in/verify/{{1}}`.
+4. `payment_pending`. Body: `Hi {{1}}, your registration for {{2}} is waiting for a payment of ₹{{3}}. Complete it to keep your spot.` Button: Visit website, dynamic, `https://myotherapp.in/events/{{1}}/register`.
+5. `event_update`. Body: `Hi {{1}}, {{2}} has an update about {{3}}: {{4}}. See the event page for details.`
+
+The words may change (Meta's review may ask for it) as long as each
+template keeps its values in this order, its header and its button: the
+code fills in values, never words. Pick the language **English** (`en`),
+not English (US) (`en_US`), or set `APP_WHATSAPP_TEMPLATE_LANGUAGE` to match.
+
+Meta asks for a sample value for each `{{n}}` when the template is
+submitted: `Asha`, `Build Night`, `Sat 25 Oct 2026, 6:30 PM`,
+`MOA-K7Q2M-9XH4P` (a certificate: `CERT-K7Q2M-9XH4P`; an amount: `1,499`;
+a slug: `build-night-k7q2m`). A template must say `Approved` before step 6.
+
+### Turning it on
+
+1. **Deploy the code with its migration** (`whatsapp_opt_in`): `sync_code`,
+   `restart_backend`, `migrate` (section 1). It adds two columns and an
+   index to `event_registrations_link` and `reminder` to the `deliverykind`
+   type; nothing is sent until step 5.
+2. **A permanent token.** Meta Business settings -> Users -> System users ->
+   Add (an admin system user) -> Assign assets: the app, and the WhatsApp
+   account with full control -> Generate new token: the app, expiry
+   **Never**, permissions `whatsapp_business_messaging` and
+   `whatsapp_business_management`. Copy it once; it is not shown again.
+   (The temporary token on the app's API Setup page lasts 24 hours: never
+   use it here.)
+3. **The phone number id.** The app's dashboard -> WhatsApp -> API Setup:
+   the "Phone number ID" under the sending number (a long number, not the
+   phone number). **The app secret:** App settings -> Basic -> App secret ->
+   Show. **A verify token:** run `openssl rand -hex 24` and keep the output.
+4. On the server, add the lines to `/var/www/myotherapp-production/.env` by
+   hand (`sudo nano .env`):
+
+   ```
+   APP_WHATSAPP_ACCESS_TOKEN=<the system user's token>
+   APP_WHATSAPP_PHONE_NUMBER_ID=<the phone number id>
+   APP_WHATSAPP_APP_SECRET=<the app secret>
+   APP_WHATSAPP_VERIFY_TOKEN=<the openssl output>
+   ```
+
+5. Recreate the backend so it reads them (changes things: about a minute of
+   502s):
+
+   ```bash
+   $DC up -d --build --no-deps backend < /dev/null
+   ```
+
+   Do NOT use the workflow's `sync_env`: it writes the whole `.env` from the
+   `PROD_ENV_VARIABLES` secret, which is older than the server's file.
+6. **The webhook.** The app's dashboard -> WhatsApp -> Configuration ->
+   Webhook -> Edit: callback URL
+   `https://api.myotherapp.in/api/v1/hooks/whatsapp`, verify token the
+   openssl output from step 3 -> Verify and save (Meta calls the hook, which
+   answers with Meta's challenge only when the token matches). Then, under
+   Webhook fields, **Subscribe** to `messages`: that field carries the
+   sent/delivered/read/failed statuses.
+7. **One test message**, to your own phone (changes things: sends one real
+   WhatsApp message):
+
+   ```bash
+   $DC exec -T backend python -m scripts.whatsapp_test --to <your number> --template ticket_confirmed
+   ```
+
+   It prints `{"sent": true, ..., "message_id": "wamid..."}`, or Meta's
+   reason in words (an unapproved template, a token without a permission).
+   It will not run without `--to`. Try each template the same way
+   (`event_reminder`, `certificate_ready`, `payment_pending`,
+   `event_update`); the document ones carry a sample PDF.
+8. Check the dashboard: a club's deliveries page lists WhatsApp as
+   configured; register for a test event from the website with the box
+   ticked and your number, and the ticket arrives on WhatsApp beside the
+   email, its row going `sent`, then `delivered` and `read` as the
+   statuses arrive.
+
+**To turn it off:** delete `APP_WHATSAPP_ACCESS_TOKEN` (or the phone number
+id) from `.env` and recreate as in step 5. Nothing more is sent; what was
+queued is skipped with "no WhatsApp provider is configured". The guests'
+ticks stay, for when it is turned on again.
+
+### Reading what was sent
+
+Read-only, in the psql session from the top of this runbook:
+
+```sql
+-- WhatsApp sends over the last week, by kind and what became of them.
+SELECT kind, status, outcome, count(*) FROM deliveries
+WHERE channel = 'whatsapp' AND created_at > now() - interval '7 days'
+GROUP BY 1, 2, 3 ORDER BY 1, 2, 3;
+
+-- Why they failed or were skipped (Meta's code is in the brackets).
+SELECT error, count(*) FROM deliveries
+WHERE channel = 'whatsapp' AND status IN ('failed', 'skipped', 'dead') AND created_at > now() - interval '7 days'
+GROUP BY error ORDER BY count(*) DESC LIMIT 20;
+
+-- How many guests have asked for WhatsApp.
+SELECT count(*) FROM event_registrations_link WHERE whatsapp_opt_in AND NOT is_deleted;
+```
+
+Many `(132001)`: a template is not approved in `en` under that exact name.
+`(190)`: the token expired or was revoked (step 2 again). `(131030)`: the
+account is still in test mode and the number is not on its test list.
+`(131026)`: the number cannot receive WhatsApp; the guest's row is marked
+until the number is corrected on the attendee page.

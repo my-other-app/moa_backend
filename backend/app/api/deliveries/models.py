@@ -26,12 +26,15 @@ from app.db.mixins import TimestampsMixin
 class DeliveryKind(enum.Enum):
     ticket = "ticket"
     certificate = "certificate"
+    # The day-before reminder, on WhatsApp only, to the guests who asked for
+    # it (deliveries.service.queue_reminders): one row a guest, ever.
+    reminder = "reminder"
 
 
 class DeliveryChannel(enum.Enum):
     email = "email"
-    # No provider yet. The column knows the channel exists so the day one is
-    # wired in, nothing already recorded has to change shape.
+    # Only when the server has the WhatsApp keys (app/core/whatsapp.py), and
+    # only for a guest who ticked "Send my ticket on WhatsApp".
     whatsapp = "whatsapp"
 
 
@@ -98,8 +101,8 @@ class Deliveries(AbstractSQLModel, TimestampsMixin):
     kind = Column(Enum(DeliveryKind), nullable=False)
     channel = Column(Enum(DeliveryChannel), nullable=False)
     status = Column(Enum(DeliveryStatus), nullable=False, default=DeliveryStatus.pending)
-    # The provider's id for the message -- SES's MessageId -- so a bounce
-    # notification can be matched back to the row.
+    # The provider's id for the message -- SES's MessageId, Resend's id,
+    # WhatsApp's wamid -- so a provider's notice can be matched back to the row.
     provider_id = Column(String(200), nullable=True)
     # Why it failed, or why it was skipped, in words a desk can read.
     error = Column(String(400), nullable=True)

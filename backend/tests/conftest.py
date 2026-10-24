@@ -192,6 +192,22 @@ def _razorpay_unreachable(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _whatsapp_unreachable(monkeypatch):
+    """Meta's API is never called from the suite, whatever a test sets the
+    WhatsApp keys to: every call fails as an unreachable host would. A test
+    that sends stands in for the client itself (tests/test_whatsapp.py)."""
+    import httpx
+
+    from app.core import whatsapp
+
+    def unreachable(request):
+        raise httpx.ConnectError(f"the test suite never reaches Meta: {request.method} {request.url}", request=request)
+
+    monkeypatch.setattr(whatsapp, "_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(unreachable)))
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _quiet_email(monkeypatch):
     """Transactional mail never leaves the suite. A sign-in from a device the
     account has not seen sends one, which is every first login in every test;

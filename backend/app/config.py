@@ -146,10 +146,20 @@ class AppConfig(BaseSettings):
     # between tries doubles from a minute.
     MAIL_MAX_ATTEMPTS: int = 6
     # WhatsApp Cloud API: the hook's verify token and app secret, and the sending credentials. Empty = no provider.
+    # With the token and the phone number id set, tickets, certificates and
+    # the day-before reminder also go by WhatsApp to the guests who asked for
+    # it (app/core/whatsapp.py); without them nothing is sent on the channel.
     WHATSAPP_VERIFY_TOKEN: str = ""
     WHATSAPP_APP_SECRET: str = ""
     WHATSAPP_ACCESS_TOKEN: str = ""
     WHATSAPP_PHONE_NUMBER_ID: str = ""
+    # The Graph API version the calls name. Meta retires each about two years
+    # after its release; move it on when Meta's changelog says so.
+    WHATSAPP_GRAPH_VERSION: str = "v23.0"
+    # The language code the templates were approved in.
+    WHATSAPP_TEMPLATE_LANGUAGE: str = "en"
+    # Seconds a call to Meta may take before it is given up on.
+    WHATSAPP_TIMEOUT_SECONDS: float = 15.0
 
     GOOGLE_WEB_CLIENT_ID: str
     GOOGLE_ANDROID_CLIENT_ID: str

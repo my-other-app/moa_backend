@@ -294,9 +294,17 @@ async def register_event(
     store_picks: list | None = None,
     claim_existing: bool = True,
     by_organiser: bool = False,
+    whatsapp_opt_in: bool | None = None,
 ):
     """`relaxed_fields` is for a guest registered at the door: nothing is
     required there, and what they answer goes on the record.
+
+    `whatsapp_opt_in` is the guest's own tick on the form, "Send my ticket
+    and event reminders on WhatsApp": True asks for it (and needs a number
+    WhatsApp can reach, or the registration is refused with a 422 saying
+    so), False or None does not. Never set for a guest the organiser adds:
+    consent is the guest's to give. On a registration already made (back
+    to pay) a tick adds the consent and no tick leaves it as it was.
 
     `by_organiser` is for the club adding a guest itself (by hand, by import,
     at the door): when the club's plan caps registrations it is told the
@@ -369,6 +377,21 @@ async def register_event(
     # questions when it asks any (answers.py). Before any lock is taken.
     additional_details = answers.check(db_event.additional_details, additional_details, relaxed=relaxed_fields)
 
+    # Asked for WhatsApp: a number it can reach, or say so now rather than
+    # take the consent and never be able to use it.
+    if whatsapp_opt_in:
+        from app.core import whatsapp
+
+        number, why = whatsapp.normalise(phone)
+        if number is None:
+            raise CustomHTTPException(
+                422,
+                message="To get your ticket on WhatsApp, enter a mobile number WhatsApp can reach, or untick the box.",
+                error_code="WHATSAPP_NUMBER",
+                # Keyed by the field, as the website reads a registration's field errors.
+                errors={"phone": f"WhatsApp can't reach this number: {why}."},
+            )
+
     # An existing registration: this user's, or one made with this address.
     # Two requests with the same address (a double submit) are taken one
     # after the other from here, so the second finds the first's; nobody
@@ -395,6 +418,10 @@ async def register_event(
             await session.execute(select(Events.id).where(Events.id == db_event.id).with_for_update())
             await store.place_order(session, db_event, registration, store_picks, role=(registration.role.value if getattr(registration, "role", None) else "attendee"))
             await session.commit()
+        if whatsapp_opt_in and not registration.whatsapp_opt_in:
+            registration.whatsapp_opt_in = True
+            registration.whatsapp_opt_in_at = now
+            await session.commit()
 
         # TODO: add service and api for updating registration info
         # if db_event.has_fee and registration.is_paid:
@@ -419,6 +446,8 @@ async def register_event(
             full_name=full_name,
             email=email,
             phone=phone,
+            whatsapp_opt_in=bool(whatsapp_opt_in),
+            whatsapp_opt_in_at=now if whatsapp_opt_in else None,
             # Omitted means attendee, which is the column default -- passing
             # None explicitly would violate the not-null constraint.
             **({"role": role} if role is not None else {}),
@@ -515,6 +544,7 @@ async def register_event(
         "email": data.email,
         "phone": data.phone,
         "additional_details": data.additional_details,
+        "whatsapp_opt_in": bool(data.whatsapp_opt_in),
     }
 
 
@@ -1361,6 +1391,10 @@ async def update_registration(
             registration.email_bounce_reason = None
         registration.email = email
     if phone is not None:
+        if (registration.phone or "").strip() != phone.strip():
+            # A corrected number may reach WhatsApp where the old one did not.
+            registration.wa_bounced_at = None
+            registration.wa_bounce_reason = None
         registration.phone = phone.strip() or None
     if role is not None:
         registration.role = role
