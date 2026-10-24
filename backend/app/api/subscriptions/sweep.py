@@ -18,7 +18,17 @@ rest:
   a grace, access has already ended: `is_entitled` stops honouring a comp the
   moment its end passes;
 - a complimentary plan ending within seven days: once, the club mailed and
-  the admins alerted (`comp_ending`).
+  the admins alerted (`comp_ending`);
+- a free trial (Pro, no card) whose end has passed: put away
+  (service.end_free_trial) -- the club is on the paid plan it picked during
+  it, or Free, mailed once "you're on Free" in that case, and the admins
+  alerted (`free_trial_ended`). A club with a paid subscription running is
+  never moved: only the trial's marker is cleared;
+- a free trial ending within three days: once, "3 days left";
+- an Enterprise trial whose end has passed: put away, the club back on what
+  it had, mailed once and the admins alerted (`enterprise_trial_ended`);
+- an Enterprise trial ending within three days: once, the club mailed and the
+  admins alerted (`enterprise_trial_ending`).
 
 One worker at a time, by a Postgres advisory lock held on its own connection
 (a session gives its connection back at every commit, and a session-level
@@ -70,7 +80,10 @@ async def _lock_row(session, sub_id: int, *criteria) -> ClubSubscriptions | None
     return await session.scalar(
         select(ClubSubscriptions)
         .where(ClubSubscriptions.id == sub_id, *criteria)
-        .options(selectinload(ClubSubscriptions.plan), selectinload(ClubSubscriptions.club))
+        .options(
+            selectinload(ClubSubscriptions.plan), selectinload(ClubSubscriptions.club),
+            selectinload(ClubSubscriptions.trial_plan), selectinload(ClubSubscriptions.enterprise_trial_plan),
+        )
         .with_for_update(skip_locked=True, of=ClubSubscriptions)
         .execution_options(populate_existing=True)
     )
@@ -95,11 +108,45 @@ def _grace_over(now):
 def _trial_ending(now):
     return (
         ClubSubscriptions.status == SubscriptionStatus.trial,
+        # A plan picked during the free trial hears from _free_trial_ending.
+        ClubSubscriptions.trial_plan_id.is_(None),
         ClubSubscriptions.razorpay_subscription_id.isnot(None),
         ClubSubscriptions.cancel_at_period_end == False,  # noqa: E712
         ClubSubscriptions.trial_ends_at > now,
         ClubSubscriptions.trial_ends_at <= now + service.TRIAL_REMINDER,
         ClubSubscriptions.trial_reminded_at.is_(None),
+    )
+
+
+def _free_trial_over(now):
+    return (
+        ClubSubscriptions.trial_plan_id.isnot(None),
+        ClubSubscriptions.trial_ends_at <= now,
+    )
+
+
+def _free_trial_ending(now):
+    return (
+        ClubSubscriptions.trial_plan_id.isnot(None),
+        ClubSubscriptions.trial_ends_at > now,
+        ClubSubscriptions.trial_ends_at <= now + service.TRIAL_REMINDER,
+        ClubSubscriptions.trial_reminded_at.is_(None),
+    )
+
+
+def _enterprise_trial_over(now):
+    return (
+        ClubSubscriptions.enterprise_trial_plan_id.isnot(None),
+        ClubSubscriptions.enterprise_trial_ends_at <= now,
+    )
+
+
+def _enterprise_trial_ending(now):
+    return (
+        ClubSubscriptions.enterprise_trial_plan_id.isnot(None),
+        ClubSubscriptions.enterprise_trial_ends_at > now,
+        ClubSubscriptions.enterprise_trial_ends_at <= now + service.ENTERPRISE_TRIAL_REMINDER,
+        ClubSubscriptions.enterprise_trial_reminded_at.is_(None),
     )
 
 
@@ -239,16 +286,100 @@ async def expire_comp(session, sub: ClubSubscriptions, now: datetime) -> str:
     return outcome
 
 
+async def expire_free_trial(session, sub: ClubSubscriptions, now: datetime) -> str:
+    """The free trial's end has passed: the club is on the plan it picked, or
+    Free (mailed once). Returns "chosen_plan" or "free". Access has already
+    followed the date: a trial grants nothing past its end, sweep or not."""
+    club = await _club(session, sub)
+    name = club.name if club is not None else f"Club {sub.club_id}"
+    trial_name = sub.trial_plan.name if sub.trial_plan is not None else "Pro"
+    ends = sub.trial_ends_at
+    outcome = service.end_free_trial(sub, now)
+    await session.flush()
+    if outcome == "free":
+        free = await service.plan_by_key(session, service.DEFAULT_PLAN_KEY)
+        await notices.email_free_trial_ended(session, sub, name, trial=trial_name, free_plan=free)
+    await notify(
+        session, "free_trial_ended",
+        title=f"{name}'s free {trial_name} trial ended",
+        body=(f"It ran to {notices.day(ends)}. "
+              + (f"{name} is on {sub.plan.name if sub.plan else 'the plan it picked'} now."
+                 if outcome == "chosen_plan" else f"{name} is on Free now.")),
+        club=club if club is not None else sub.club_id, subscription=sub.id,
+        data=notices._data(sub, trial_ends_at=ends, outcome=outcome),
+    )
+    return outcome
+
+
+async def remind_free_trial(session, sub: ClubSubscriptions, now: datetime) -> None:
+    club = await _club(session, sub)
+    name = club.name if club is not None else f"Club {sub.club_id}"
+    sub.trial_reminded_at = now
+    await notices.email_free_trial_ending(session, sub, name, chosen=service.chosen_plan(sub, now))
+
+
+async def _then_name(session, sub: ClubSubscriptions, now: datetime) -> str:
+    then = await service.plan_after_trials(session, sub, now)
+    if then is None or then.key == service.DEFAULT_PLAN_KEY:
+        return "the Free plan"
+    if service.free_trial_live(sub, now):
+        return f"its {then.name} trial (to {notices.day(sub.trial_ends_at)})"
+    return then.name
+
+
+async def expire_enterprise_trial(session, sub: ClubSubscriptions, now: datetime) -> str:
+    """An Enterprise trial's end has passed: the club is back on what it had.
+    Returns the plan key it is on now."""
+    club = await _club(session, sub)
+    name = club.name if club is not None else f"Club {sub.club_id}"
+    ends = sub.enterprise_trial_ends_at
+    service.end_enterprise_trial(sub, now)
+    then = await _then_name(session, sub, now)
+    after = await service.plan_after_trials(session, sub, now)
+    await session.flush()
+    await notices.email_enterprise_trial_ended(session, sub, name, then=then)
+    await notify(
+        session, "enterprise_trial_ended",
+        title=f"{name}'s Enterprise trial ended",
+        body=f"It ran to {notices.day(ends)}. {name} is on {then} now. Set a price or a complimentary plan if you agreed one.",
+        club=club if club is not None else sub.club_id, subscription=sub.id,
+        data=notices._data(sub, enterprise_trial_ends_at=ends, now_on=after.key if after else "free"),
+    )
+    return after.key if after else service.DEFAULT_PLAN_KEY
+
+
+async def remind_enterprise_trial(session, sub: ClubSubscriptions, now: datetime) -> None:
+    club = await _club(session, sub)
+    name = club.name if club is not None else f"Club {sub.club_id}"
+    sub.enterprise_trial_reminded_at = now
+    # What the club has once the trial is over, as of its end.
+    then = await _then_name(session, sub, sub.enterprise_trial_ends_at)
+    await notices.email_enterprise_trial_ending(session, sub, name, then=then)
+    await notify(
+        session, "enterprise_trial_ending",
+        title=f"{name}'s Enterprise trial ends {notices.day(sub.enterprise_trial_ends_at)}",
+        body=f"Then {name} is on {then}. Grant it again for longer, or set the price you agreed.",
+        club=club, subscription=sub,
+        data=notices._data(sub, enterprise_trial_ends_at=sub.enterprise_trial_ends_at),
+    )
+
+
 async def sweep(session, now: datetime | None = None) -> dict:
-    """One run of the five jobs. Returns how many rows each touched."""
+    """One run of the jobs. Returns how many rows each touched."""
     now = now or _now()
-    done = {"downgraded": 0, "grace_reminded": 0, "trial_reminded": 0, "comp_ended": 0, "comp_reminded": 0}
+    done = {"downgraded": 0, "grace_reminded": 0, "trial_reminded": 0, "comp_ended": 0, "comp_reminded": 0,
+            "free_trial_ended": 0, "free_trial_reminded": 0,
+            "enterprise_trial_ended": 0, "enterprise_trial_reminded": 0}
     for key, criteria, job in (
         ("downgraded", _grace_over(now), expire_grace),
         ("grace_reminded", _grace_ending(now), remind_grace),
         ("trial_reminded", _trial_ending(now), remind_trial),
         ("comp_ended", _comp_over(now), expire_comp),
         ("comp_reminded", _comp_ending(now), remind_comp),
+        ("enterprise_trial_ended", _enterprise_trial_over(now), expire_enterprise_trial),
+        ("enterprise_trial_reminded", _enterprise_trial_ending(now), remind_enterprise_trial),
+        ("free_trial_ended", _free_trial_over(now), expire_free_trial),
+        ("free_trial_reminded", _free_trial_ending(now), remind_free_trial),
     ):
         for sub_id in await _ids(session, *criteria):
             try:
