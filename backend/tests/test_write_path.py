@@ -673,7 +673,7 @@ async def test_a_registrations_ticket_reads_only_its_own_deliveries(session, mak
         regs.append(reg)
     await session.flush()
     everyone = await deliveries.queue(session, ev, DeliveryKind.ticket)
-    assert everyone["queued"] == 3 * len(deliveries.CHANNELS)
+    assert everyone["queued"] == 3 * len(deliveries.channels())
 
     seen = []
     engine = (await session.connection()).sync_connection.engine
@@ -687,5 +687,5 @@ async def test_a_registrations_ticket_reads_only_its_own_deliveries(session, mak
         again = await deliveries.queue(session, ev, DeliveryKind.ticket, registration_ids=[regs[0].id])
     finally:
         sa_event.remove(engine, "before_cursor_execute", capture)
-    assert again["queued"] == len(deliveries.CHANNELS)
+    assert again["queued"] == len(deliveries.channels())
     assert seen and all("deliveries.registration_id IN" in s for s in seen)

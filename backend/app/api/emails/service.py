@@ -1159,6 +1159,18 @@ async def sweep(session, now: Optional[datetime] = None) -> int:
     return len(queued)
 
 
+async def whatsapp_reminders(session, now: Optional[datetime] = None) -> int:
+    """The day-before WhatsApp reminders come due (deliveries.queue_reminders),
+    on the same minute as the timed emails. Nothing when WhatsApp is not
+    configured; a failure is logged, never the sweep's."""
+    try:
+        return await deliveries.queue_reminders(session, now)
+    except Exception:  # noqa: BLE001
+        logger.exception("WhatsApp reminders could not be queued")
+        await session.rollback()
+        return 0
+
+
 async def resume(session, now: Optional[datetime] = None) -> dict:
     """Everything left half-done by a process that stopped: deliveries and
     messages. (The after-commit mails that must go are jobs now, and a job
@@ -1191,6 +1203,9 @@ async def sweep_loop(interval: int = 60) -> None:
                         n = await sweep(session)
                         if n:
                             logger.info("email sweep queued %d timed email(s)", n)
+                        w = await whatsapp_reminders(session)
+                        if w:
+                            logger.info("email sweep queued %d WhatsApp reminder(s)", w)
                         resumed = await resume(session)
                         if any(v for part in resumed.values() for v in (part.values() if isinstance(part, dict) else [part])):
                             logger.info("email sweep resumed %s", resumed)

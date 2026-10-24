@@ -2,7 +2,10 @@
 
 Every channel honours one contract: never re-send a channel already SENT
 unless asked to, record a result for every attempt, and treat "no address
-on this channel" as SKIPPED -- never as an error.
+on this channel" as SKIPPED -- never as an error. WhatsApp is stricter: it
+goes once per guest, kind and channel, asked or not (a second ticket on
+someone's phone is worse than none), and only to a guest who ticked the box
+for it at registration, with a number it can reach.
 
 How a send runs -- the claim, the workers, the pace, the resumer -- is in
 app/api/deliveries/pipeline.py; this module says what a ticket or
@@ -21,7 +24,7 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 import sqlalchemy as sa
-from sqlalchemy import String, and_, case, cast, func, literal, select, union_all, update
+from sqlalchemy import String, and_, case, cast, exists, func, literal, or_, select, union_all, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import joinedload
 
@@ -43,6 +46,7 @@ from app.api.events.models import EventRegistrationsLink, Events
 from app.api.events.tickets import ticket_document
 from app.core import jobs
 from app.core import providers as providers_mod
+from app.core import whatsapp
 from app.core.email import email as email_mod
 from app.core.email import transport
 from app.core.mail import suppression
@@ -53,10 +57,22 @@ from app.response import CustomHTTPException
 
 logger = logging.getLogger(__name__)
 
-# The channels a send goes out on. WhatsApp has no provider wired in, so it
-# is not offered: a row marked sent for a message that never left would hide
-# every real email failure behind a success that never happened.
-CHANNELS = [DeliveryChannel.email]
+
+def channels() -> list[DeliveryChannel]:
+    """The channels a send goes out on: email, and WhatsApp once the server
+    holds its keys. Without them no WhatsApp row is made at all: a row
+    marked sent for a message that never left would hide every real failure
+    behind a success that never happened."""
+    return [DeliveryChannel.email, *([DeliveryChannel.whatsapp] if whatsapp.configured() else [])]
+
+
+def _wants_whatsapp() -> list:
+    """The guests a WhatsApp row is made for: they asked, and left a number."""
+    return [
+        EventRegistrationsLink.whatsapp_opt_in == True,  # noqa: E712
+        func.coalesce(func.btrim(EventRegistrationsLink.phone), "") != "",
+    ]
+
 
 PROBLEM_OUTCOMES = (DeliveryOutcome.bounced, DeliveryOutcome.complained, DeliveryOutcome.undelivered)
 
@@ -119,10 +135,11 @@ async def _registration(session, event_id: int, registration_id) -> EventRegistr
 
 def _eligible(kind: DeliveryKind):
     """The registrations this kind of document can be sent to."""
-    if kind is DeliveryKind.ticket:
-        return EventRegistrationsLink.ticket_revoked_at.is_(None)
-    # Not issued one, or had it taken back: nothing to send.
-    return and_(EventRegistrationsLink.certificate_issued_at.isnot(None), EventRegistrationsLink.certificate_revoked_at.is_(None))
+    if kind is DeliveryKind.certificate:
+        # Not issued one, or had it taken back: nothing to send.
+        return and_(EventRegistrationsLink.certificate_issued_at.isnot(None), EventRegistrationsLink.certificate_revoked_at.is_(None))
+    # A ticket, or the reminder of one.
+    return EventRegistrationsLink.ticket_revoked_at.is_(None)
 
 
 # --- queueing ---------------------------------------------------------------
@@ -137,6 +154,7 @@ async def queue(
     only: str = "unsent",
     force: bool = False,
     send: bool = False,
+    email_only: bool = False,
 ) -> dict:
     """Put a pending row in place for every guest and channel that should be
     sent, and answer with what was queued and why the rest was not. Nothing is
@@ -149,7 +167,10 @@ async def queue(
     One statement per channel: INSERT ... ON CONFLICT DO UPDATE ... WHERE the
     row may be queued again. Two clicks at once both succeed and queue each
     guest once; a row a worker holds (pending, sending) is never reset under
-    it -- it counts as queued, since it is."""
+    it -- it counts as queued, since it is.
+
+    `email_only`: a send on the public's behalf (a ticket sent again to whoever
+    typed the address) is mail alone; WhatsApp is never set off by it."""
     scope = [EventRegistrationsLink.event_id == event.id, EventRegistrationsLink.is_deleted == False]  # noqa: E712
     if registration_ids:
         scope.append(EventRegistrationsLink.id.in_(list(registration_ids)))
@@ -180,7 +201,9 @@ async def queue(
     )
     table = Deliveries.__table__
     ids: list[uuid.UUID] = []
-    for channel in CHANNELS:
+    active = [DeliveryChannel.email] if email_only else channels()
+    for channel in active:
+        by_whatsapp = channel is DeliveryChannel.whatsapp
         if only == "failed":
             # Retry what failed, was skipped or was given up on; nothing new.
             stmt = (
@@ -196,7 +219,7 @@ async def queue(
                 cast(literal(kind.name), table.c.kind.type), cast(literal(channel.name), table.c.channel.type),
                 cast(literal(DeliveryStatus.pending.name), table.c.status.type),
                 literal(0), literal(0), literal(0), literal(now, TZAwareDateTime()), literal(now, TZAwareDateTime()), literal(now, TZAwareDateTime()),
-            ).where(*scope, _eligible(kind))
+            ).where(*scope, _eligible(kind), *(_wants_whatsapp() if by_whatsapp else []))
             stmt = (
                 pg_insert(table)
                 .from_select(
@@ -204,7 +227,12 @@ async def queue(
                      "queued_at", "created_at", "updated_at"],
                     source,
                 )
-                .on_conflict_do_update(constraint="uq_deliveries_registration_kind_channel", set_=reset, where=table.c.status.in_(again))
+                # A WhatsApp message already sent is never sent again, even
+                # when the email is (`force`): once per guest, kind and channel.
+                .on_conflict_do_update(
+                    constraint="uq_deliveries_registration_kind_channel", set_=reset,
+                    where=table.c.status.in_(AGAIN if by_whatsapp else again),
+                )
                 .returning(table.c.id)
             )
         ids.extend((await session.execute(stmt)).scalars().all())
@@ -216,7 +244,7 @@ async def queue(
         "queued": len(ids) + in_flight,
         "already_sent": already_sent,
         "revoked": revoked,
-        "channels": [c.value for c in CHANNELS],
+        "channels": [c.value for c in active],
         "ids": ids,
     }
 
@@ -270,6 +298,51 @@ async def _document(session, kind: DeliveryKind, reg: EventRegistrationsLink):
     return await certificate_document(session, reg)
 
 
+def _venue(event: Events) -> str:
+    """Where, for the reminder's "starts ... at {{4}}"."""
+    if (event.location_name or "").strip():
+        return event.location_name.strip()
+    return "online" if event.is_online else "the venue"
+
+
+def whatsapp_skip(reg: EventRegistrationsLink) -> Optional[str]:
+    """Why this guest gets nothing by WhatsApp, or None when they may.
+
+    The demo's invented people (MAIL_SUPPRESS_DOMAINS) are left alone here as
+    their mail is at the transport: nobody behind them asked for anything."""
+    if not whatsapp.configured():
+        return providers_mod.NO_WHATSAPP
+    if not reg.whatsapp_opt_in:
+        return providers_mod.NO_WHATSAPP_OPT_IN
+    if reg.wa_bounced_at is not None:
+        return providers_mod.WA_BOUNCED
+    user = reg.__dict__.get("user")
+    if suppression.at_suppressed_domain(reg.email) or (user is not None and suppression.at_suppressed_domain(user.email)):
+        return providers_mod.DEMO_ACCOUNT
+    number, why = whatsapp.normalise(reg.phone)
+    if number is None:
+        return f"no WhatsApp number: {why}"
+    return None
+
+
+async def _send_whatsapp(db: pipeline.Db, ready: "_Ready") -> tuple[dict, int]:
+    """The approved template for this kind, with its document when it has one."""
+    d, reg, event = ready.d, ready.reg, ready.event
+    when = _when(event)
+    if d.kind is DeliveryKind.reminder:
+        message = whatsapp.event_reminder(name=reg.full_name, event=event.name, when=when, venue=_venue(event), ticket_id=reg.ticket_id)
+        return await whatsapp.send(reg.phone, message), 0
+    doc = await _document(db, d.kind, reg)
+    if d.kind is DeliveryKind.ticket:
+        message = whatsapp.ticket_confirmed(name=reg.full_name, event=event.name, when=when, ticket_id=reg.ticket_id)
+    else:
+        from app.api.events.certificates import number_of
+
+        # The certificate's own number, which the public verifier takes -- never the ticket id the door scans.
+        message = whatsapp.certificate_ready(name=reg.full_name, event=event.name, club=ready.org_name, number=number_of(reg))
+    return await whatsapp.send(reg.phone, message, document=(doc.content, doc.filename)), doc.design_version
+
+
 # --- one row: claim, read, render, send, record -------------------------------
 
 
@@ -286,7 +359,7 @@ class _Ready:
 
     d: Deliveries
     reg: EventRegistrationsLink
-    event: Events
+    event: Optional[Events]
     org_name: str
     skip: Optional[str] = None
     # The event's designed invite (subject, design, attachments, brand), or
@@ -361,13 +434,20 @@ async def _read(db: pipeline.Db, c: _Claim, run: _Run) -> Optional[_Ready]:
             return None
         reg = d.registration
         event = reg.event
+        if event is None:
+            # Removed since it was queued: nothing to send for it.
+            return _Ready(d=d, reg=reg, event=None, org_name="", skip="the event was removed")
         ready = _Ready(d=d, reg=reg, event=event, org_name=event.club.name if event.club else "")
-        if d.kind is DeliveryKind.ticket and reg.ticket_revoked_at is not None:
+        if d.kind in (DeliveryKind.ticket, DeliveryKind.reminder) and reg.ticket_revoked_at is not None:
             ready.skip = "ticket revoked — reinstate it to send again"
         elif d.kind is DeliveryKind.certificate and (reg.certificate_issued_at is None or reg.certificate_revoked_at is not None):
             ready.skip = "no valid certificate — issue or reinstate it to send"
+        elif d.kind is DeliveryKind.reminder and event.event_datetime <= pipeline.now():
+            ready.skip = "the event had started — too late for a reminder"
         elif d.channel is DeliveryChannel.whatsapp:
-            ready.skip = providers_mod.NO_WHATSAPP
+            ready.skip = whatsapp_skip(reg)
+        elif d.kind is DeliveryKind.reminder:
+            ready.skip = "the reminder goes by WhatsApp only"
         elif not reg.email:
             ready.skip = "no email address"
         elif reg.email_bounced_at is not None:
@@ -378,7 +458,7 @@ async def _read(db: pipeline.Db, c: _Claim, run: _Run) -> Optional[_Ready]:
             if suppressed is not None:
                 # Bounced or complained at another event or club: the same address, the same answer.
                 ready.skip = suppression.why(suppressed)
-        if ready.skip is None and d.kind is DeliveryKind.ticket:
+        if ready.skip is None and d.kind is DeliveryKind.ticket and d.channel is DeliveryChannel.email:
             # A ticket goes out in the event's designed invite when there is
             # one switched on; otherwise in the plain words.
             if event.id not in run.invites:
@@ -392,6 +472,8 @@ async def _send(db: pipeline.Db, c: _Claim, ready: _Ready, run: _Run) -> tuple[d
     from app.api.emails import service as emails
 
     d, reg, event = ready.d, ready.reg, ready.event
+    if d.channel is DeliveryChannel.whatsapp:
+        return await _send_whatsapp(db, ready)
     key = f"delivery-{d.id}-{int((d.queued_at or d.created_at).timestamp())}"
     if ready.invite is not None:
         out = await emails.compose_invite(db, event, reg, ready.invite, cache=run.assets)
@@ -410,9 +492,14 @@ async def _send(db: pipeline.Db, c: _Claim, ready: _Ready, run: _Run) -> tuple[d
     return response or {}, doc.design_version
 
 
-async def _record(db: pipeline.Db, c: _Claim, ready: Optional[_Ready], values: dict, *, attempt: Optional[dict] = None, dead: bool = False) -> None:
+async def _record(
+    db: pipeline.Db, c: _Claim, ready: Optional[_Ready], values: dict, *,
+    attempt: Optional[dict] = None, dead: bool = False, dead_number: Optional[str] = None,
+) -> None:
     """One short transaction: the result on the row (if this worker still
-    holds it), the attempt the provider took, and the admins told of a dead one."""
+    holds it), the attempt the provider took, the admins told of a dead one,
+    and -- `dead_number` -- the guest's number marked as one WhatsApp cannot
+    reach, so later sends skip it until it is corrected."""
     async with db.tx() as s:
         res = await s.execute(
             update(Deliveries)
@@ -428,7 +515,14 @@ async def _record(db: pipeline.Db, c: _Claim, ready: Optional[_Ready], values: d
                 .values(id=uuid.uuid4(), delivery_id=c.id, created_at=pipeline.now(), **attempt)
                 .on_conflict_do_nothing(index_elements=["provider_id"])
             )
-        if dead and res.rowcount and ready is not None:
+        if dead_number and ready is not None:
+            await s.execute(
+                update(EventRegistrationsLink)
+                .where(EventRegistrationsLink.id == ready.reg.id)
+                .values(wa_bounced_at=pipeline.now(), wa_bounce_reason=dead_number[:300])
+                .execution_options(synchronize_session=False)
+            )
+        if dead and res.rowcount and ready is not None and ready.event is not None:
             await pipeline.alert_dead(
                 s, event_id=ready.event.id, club_id=ready.event.club_id, event_name=ready.event.name,
                 what=ready.d.kind.value, error=values.get("error") or "",
@@ -445,6 +539,13 @@ async def _handle(db: pipeline.Db, c: _Claim, run: _Run) -> None:
         return
     try:
         response, version = await _send(db, c, ready, run)
+    except whatsapp.Undeliverable as exc:
+        # A fact about the number, not a failure.
+        await _record(
+            db, c, ready, dict(status=DeliveryStatus.skipped, error=exc.reason, provider_id=None, sent_at=None, next_attempt_at=None),
+            dead_number=exc.reason if exc.permanent else None,
+        )
+        return
     except transport.MailDeferred as exc:
         error = (str(exc) or exc.__class__.__name__)[:300]
         if c.tries >= pipeline.max_tries():
@@ -462,7 +563,8 @@ async def _handle(db: pipeline.Db, c: _Claim, run: _Run) -> None:
     await _record(
         db, c, ready,
         dict(status=DeliveryStatus.sent, error=None, provider_id=provider_id, sent_at=pipeline.now(), design_version=version, next_attempt_at=None),
-        attempt={"provider": response.get("Provider"), "provider_id": provider_id, "address": suppression.normal(ready.reg.email)},
+        # The address it went to: the mailbox, or the number in E.164.
+        attempt={"provider": response.get("Provider"), "provider_id": provider_id, "address": response.get("Address") or suppression.normal(ready.reg.email)},
     )
 
 
@@ -615,6 +717,84 @@ async def resume(session, now: Optional[datetime] = None) -> dict:
     return {"stale": len(stale), "too_old": len(too_old), "dead": len(gave_up), "started": started}
 
 
+# --- the day-before reminder, by WhatsApp ---------------------------------------
+
+#: The reminder comes due this long before the start...
+REMINDER_LEAD = timedelta(hours=24)
+#: ...and is not sent in the last hour before it: a sweep that was down
+#: catches up until then, and after that the doors-open email has it.
+REMINDER_CUTOFF = timedelta(hours=1)
+#: Only to a guest who registered at least this long before it comes due:
+#: whoever registered within the day has just had their ticket, which says
+#: when and where.
+REMINDER_AFTER_SIGNUP = timedelta(hours=1)
+
+
+async def queue_reminders(session, now: Optional[datetime] = None) -> int:
+    """The minute sweep's look for WhatsApp reminders come due: a pending
+    row for every guest who asked for WhatsApp, holds a live ticket (paid
+    for, on a paid event) and has none yet, on a published event starting
+    within REMINDER_LEAD and not within REMINDER_CUTOFF -- and the job that
+    sends them, in the same transaction.
+
+    Once per registration, ever: the delivery row is the record, and the
+    unique (registration, kind, channel) key turns a second sweep, or two at
+    once, into nothing. Nothing when WhatsApp is not configured. The journey
+    emails are the club's own words, which WhatsApp does not carry; this is
+    the approved event_reminder template, at the same moment as the
+    pre-event email's default. Returns how many were queued."""
+    if not whatsapp.configured():
+        return 0
+    from app.api.closeout.models import EventStatus
+
+    now = now or pipeline.now()
+    table = Deliveries.__table__
+    R, E = EventRegistrationsLink, Events
+    has_one = (
+        select(literal(1))
+        .where(Deliveries.registration_id == R.id, Deliveries.kind == DeliveryKind.reminder, Deliveries.channel == DeliveryChannel.whatsapp)
+    )
+    source = (
+        select(
+            func.gen_random_uuid(), R.event_id, R.id,
+            cast(literal(DeliveryKind.reminder.name), table.c.kind.type), cast(literal(DeliveryChannel.whatsapp.name), table.c.channel.type),
+            cast(literal(DeliveryStatus.pending.name), table.c.status.type),
+            literal(0), literal(0), literal(0), literal(now, TZAwareDateTime()), literal(now, TZAwareDateTime()), literal(now, TZAwareDateTime()),
+        )
+        .select_from(R)
+        .join(E, E.id == R.event_id)
+        .where(
+            # ix_events_shown_start: the events starting in the window, and no others.
+            E.is_deleted == False,  # noqa: E712
+            E.lifecycle.in_([EventStatus.published, EventStatus.live]),
+            E.event_datetime > now + REMINDER_CUTOFF,
+            E.event_datetime <= now + REMINDER_LEAD,
+            # ix_registrations_whatsapp_opt_in: the guests who asked, event by event.
+            R.is_deleted == False,  # noqa: E712
+            *_wants_whatsapp(),
+            _eligible(DeliveryKind.reminder),
+            or_(E.has_fee == False, R.is_paid == True),  # noqa: E712
+            R.created_at <= E.event_datetime - literal(REMINDER_LEAD + REMINDER_AFTER_SIGNUP, sa.Interval()),
+            ~exists(has_one),
+        )
+    )
+    stmt = (
+        pg_insert(table)
+        .from_select(
+            ["id", "event_id", "registration_id", "kind", "channel", "status", "attempts", "tries", "design_version",
+             "queued_at", "created_at", "updated_at"],
+            source,
+        )
+        .on_conflict_do_nothing(constraint="uq_deliveries_registration_kind_channel")
+        .returning(table.c.event_id)
+    )
+    event_ids = (await session.execute(stmt)).scalars().all()
+    for event_id in sorted(set(event_ids)):
+        await start(session, event_id, DeliveryKind.reminder, dedupe=True)
+    await session.commit()
+    return len(event_ids)
+
+
 async def send_ticket(session, event: Events, registration: EventRegistrationsLink, background_tasks=None) -> None:
     """The ticket email at registration or payment: queued like any other
     send, so the attendee list shows it landing, and -- when there is a
@@ -660,7 +840,7 @@ async def resend_document(session, event: Events, registration: EventRegistratio
         last = prior.sent_at if prior.status is DeliveryStatus.sent else prior.updated_at
         if last is not None and datetime.now(timezone.utc) - last < RESEND_GAP:
             return False
-    result = await queue(session, event, kind, registration_ids=[registration.id], force=True, send=not inline)
+    result = await queue(session, event, kind, registration_ids=[registration.id], force=True, send=not inline, email_only=True)
     if not result["ids"]:
         return False
     if inline:
@@ -742,17 +922,23 @@ async def summary(session, event: Events, kind: DeliveryKind) -> dict:
             _active(event.id).where(EventRegistrationsLink.ticket_revoked_at.isnot(None)).subquery()
         )
     ) or 0
+    # WhatsApp's audience is the guests who asked for it, not everyone: the
+    # rest are not "unsent" there, they were never to be sent anything.
+    wanting = await session.scalar(
+        select(func.count()).select_from(_active(event.id).where(*_wants_whatsapp()).subquery())
+    ) if whatsapp.configured() else 0
     channels = []
     for channel in DeliveryChannel:
         n = lambda s: counts.get((channel, s), 0)  # noqa: E731
         with_row = sum(n(s) for s in SHOWN_STATUSES)
+        audience = wanting if channel is DeliveryChannel.whatsapp else registrations
         channels.append({
             "channel": channel.value,
             "sent": n(DeliveryStatus.sent),
             "failed": n(DeliveryStatus.failed),
             "skipped": n(DeliveryStatus.skipped),
             "pending": n(DeliveryStatus.pending),
-            "unsent": max(0, registrations - with_row),
+            "unsent": max(0, (audience or 0) - with_row),
         })
     return {"kind": kind.value, "registrations": registrations, "revoked": revoked, "channels": channels, "providers": providers_mod.providers()}
 
@@ -769,7 +955,8 @@ def _sends(event_id: int):
         Deliveries.id.label("id"),
         Deliveries.registration_id.label("registration_id"),
         cast(Deliveries.kind, String).label("kind"),
-        literal(None, type_=String).label("what"),
+        # A ticket or certificate needs no words; the reminder says what it is.
+        case((Deliveries.kind == DeliveryKind.reminder, literal("Day-before reminder")), else_=literal(None, type_=String)).label("what"),
         cast(Deliveries.channel, String).label("channel"),
         shown_sql(Deliveries.status).label("status"),
         cast(Deliveries.outcome, String).label("outcome"),
@@ -888,11 +1075,14 @@ async def by_registration(session, event_id: int, kind: DeliveryKind, registrati
         return {}
     out: dict = {}
     for d in await session.scalars(
-        select(Deliveries).where(
+        select(Deliveries)
+        .where(
             Deliveries.event_id == event_id,
             Deliveries.kind == kind,
             Deliveries.registration_id.in_(list(registration_ids)),
         )
+        # Email first, then WhatsApp, for every guest.
+        .order_by(Deliveries.registration_id, Deliveries.channel)
     ):
         out.setdefault(d.registration_id, []).append({
             "channel": d.channel.value,
