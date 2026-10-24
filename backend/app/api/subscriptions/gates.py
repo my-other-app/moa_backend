@@ -137,6 +137,8 @@ _UNITS = {
     "merch_items_per_event": ("item", "items", False),
     "website_templates": ("website template", "website templates", False),
     "ai_actions_per_month": ("AI action", "AI actions", True),
+    "emails_per_month": ("email", "emails", True),
+    "whatsapp_per_month": ("WhatsApp message", "WhatsApp messages", True),
 }
 
 #: An owner is told registrations are paused at most this often, per club and limit.

@@ -43,6 +43,7 @@ from app.api.deliveries import service as deliveries
 from app.api.events.documents import EVENT_TIMEZONE
 from app.api.events.models import EventRegistrationsLink, Events
 from app.api.live import board, bus, room
+from app.api.message_quota import service as quota
 from app.api.live.models import (
     Audience,
     FeedbackResponses,
@@ -830,7 +831,11 @@ async def mail_survey(survey_id: UUID, registration_id: UUID) -> bool:
     it again on the retry -- rather that than a mail claimed and never sent --
     and the provider is given the same idempotency key both times, so one
     that keeps them (Resend) delivers it once. A provider that does not take
-    it raises here, and the job is tried again later."""
+    it raises here, and the job is tried again later.
+
+    It counts against the club's monthly emails (app/api/message_quota):
+    past Free's limit it is held back, the reason kept on its row."""
+    terms = held = None
     async with jobs.scope() as s:
         row = (await s.execute(
             select(FeedbackSends.mailed_at, EventRegistrationsLink, Events)
@@ -840,9 +845,17 @@ async def mail_survey(survey_id: UUID, registration_id: UUID) -> bool:
             .options(joinedload(Events.club))
             .where(FeedbackSends.survey_id == survey_id, FeedbackSends.registration_id == registration_id)
         )).first()
+        if row is not None and row[0] is None and row[1].email:
+            terms, held = await quota.check(s, row[2].club_id, quota.EMAIL, "survey")
+            if held:
+                await s.execute(
+                    update(FeedbackSends)
+                    .where(FeedbackSends.survey_id == survey_id, FeedbackSends.registration_id == registration_id)
+                    .values(skipped_reason=held[:300])
+                )
         # End the read before the provider's call: no pooled connection held meanwhile.
         await s.commit()
-    if row is None or row[0] is not None or not row[1].email:
+    if row is None or row[0] is not None or not row[1].email or held:
         return False
     reg, event = row[1], row[2]
     org = (event.club.name if event.club is not None else None) or "The organisers"
@@ -855,7 +868,11 @@ async def mail_survey(survey_id: UUID, registration_id: UUID) -> bool:
         await s.execute(
             update(FeedbackSends)
             .where(FeedbackSends.survey_id == survey_id, FeedbackSends.registration_id == registration_id, FeedbackSends.mailed_at.is_(None))
-            .values(mailed_at=now_utc())
+            .values(mailed_at=now_utc(), skipped_reason=None)
+        )
+        await quota.count(
+            s, club_id=event.club_id, channel=quota.EMAIL, kind="survey", terms=terms,
+            ref=f"survey:{survey_id}:{registration_id}",
         )
         await s.commit()
     return True

@@ -464,6 +464,25 @@ async def _receipt_job(p: dict) -> None:
             },
             recipients=[order.user.email],
         )
+        await _count_receipt(session, order, p["payment_id"])
+
+
+async def _count_receipt(session, order, payment_id: str) -> None:
+    """The receipt is a payment message the club's attendee was sent: it
+    counts against the club's monthly emails (app/api/message_quota), once
+    per payment. Never held back, and never fails the receipt."""
+    from app.api.message_quota import service as quota
+    from app.api.payments.handlers import event_for_payload
+
+    try:
+        event = await event_for_payload(session, order.source, order.payload or {})
+    except Exception:  # noqa: BLE001
+        await session.rollback()
+        return
+    if event is None or event.club_id is None:
+        return
+    await quota.count(session, club_id=event.club_id, channel=quota.EMAIL, kind="payment", ref=f"receipt:{payment_id}")
+    await session.commit()
 
 
 async def ensure_applied(session: AsyncSession, order_id, *, background_tasks: BackgroundTasks | None = None) -> Applied | None:

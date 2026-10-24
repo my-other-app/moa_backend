@@ -102,6 +102,12 @@ class Plans(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     #: price, and a club cannot start it at checkout.
     contact_sales = Column(Boolean, nullable=False, default=False, server_default="false")
 
+    #: What each message past the plan's monthly limit costs, in paise
+    #: (app/api/message_quota): added to the club's next Razorpay invoice.
+    #: The owner's defaults are ₹0.10 an email and ₹1 a WhatsApp message.
+    email_overage_paise = Column(Integer, nullable=False, default=10, server_default="10")
+    whatsapp_overage_paise = Column(Integer, nullable=False, default=100, server_default="100")
+
     #: Razorpay's own plan ids, one per cycle. Null until the plan is synced;
     #: a paid plan cannot be subscribed to until both exist.
     razorpay_plan_id_monthly = Column(String(64), nullable=True)
@@ -120,6 +126,8 @@ class Plans(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         CheckConstraint("price_monthly_paise >= 0", name="ck_plans_monthly_non_negative"),
         CheckConstraint("price_yearly_paise >= 0", name="ck_plans_yearly_non_negative"),
         CheckConstraint("trial_days >= 0", name="ck_plans_trial_non_negative"),
+        CheckConstraint("email_overage_paise >= 0", name="ck_plans_email_overage_non_negative"),
+        CheckConstraint("whatsapp_overage_paise >= 0", name="ck_plans_whatsapp_overage_non_negative"),
     )
 
 
@@ -136,6 +144,8 @@ LIMIT_KEYS = (
     "announcements_per_month",
     "website_templates",
     "ai_actions_per_month",
+    "emails_per_month",
+    "whatsapp_per_month",
 )
 
 
@@ -168,6 +178,15 @@ class PlanLimits(AbstractSQLModel, TimestampsMixin):
     #: AI assist's actions a month on the platform's key (a draft, a piece of
     #: writing, a feedback summary each). A club's own key is not counted.
     ai_actions_per_month = Column(Integer, nullable=True)
+    #: Every email and WhatsApp message a club sends to its people in a
+    #: month in India (app/api/message_quota): tickets, certificates,
+    #: reminders, announcements, campaigns, journey emails. Past it a paid
+    #: plan still sends and pays the plan's overage price for each; Free
+    #: stops what is not a ticket, certificate or payment message.
+    emails_per_month = Column(Integer, nullable=True)
+    #: Through the platform's WhatsApp number only: a club's own number is
+    #: paid to Meta by the club and not counted.
+    whatsapp_per_month = Column(Integer, nullable=True)
 
     plan = relationship("Plans", back_populates="limits")
 

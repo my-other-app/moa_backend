@@ -14,6 +14,10 @@ from app.api.certificate_templates.models import *
 from app.api.badges.models import *
 from app.api.audit.models import *
 from app.api.admin_alerts import models as _admin_alert_models  # noqa: F401
+# The club dashboard's bell (app/api/club_alerts).
+from app.api.club_alerts import models as _club_alert_models  # noqa: F401
+# Monthly message counters, statements and Enterprise clubs' own limits (app/api/message_quota).
+from app.api.message_quota import models as _message_quota_models  # noqa: F401
 from app.api.deliveries.models import *
 from app.api.certificates import models as _certificate_models  # noqa: F401
 from app.api.emails.models import *

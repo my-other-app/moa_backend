@@ -43,6 +43,7 @@ from app.api.events.documents import (
 )
 from app.api.events.models import EventRegistrationsLink, Events
 from app.api.events.tickets import poster_url, ticket_document
+from app.api.message_quota import service as quota
 from app.api.templates_audience import RegistrationRole
 from app.config import settings
 from app.core import jobs
@@ -761,6 +762,24 @@ class _MessageRun:
     brand: str
     logo_url: Optional[str]
     assets: dict = field(default_factory=dict)
+    #: What the message is to the club's quota (announcement, campaign,
+    #: journey), and the club's terms, read once a send.
+    kind: Optional[str] = None
+    terms: Optional[quota.Terms] = None
+    quota_terms: dict = field(default_factory=dict)
+
+
+def quota_kind(msg: Messages, template: Optional[EmailTemplates]) -> Optional[str]:
+    """A typed message is an announcement; a journey email (the timed
+    reminder, the thank-you) is journey; any other designed send is a
+    campaign. A test send is not counted."""
+    if msg.kind is MessageKind.TEST:
+        return None
+    if msg.kind is MessageKind.BROADCAST:
+        return "announcement"
+    if template is not None:
+        return "campaign" if template.stage is EmailStage.CUSTOM else "journey"
+    return "journey" if msg.scheduled else "campaign"
 
 
 @dataclass
@@ -777,10 +796,12 @@ async def _message_run(db: pipeline.Db, message_id) -> Optional[_MessageRun]:
             return None
         event = msg.event
         club = getattr(event, "club", None)
+        template = await s.get(EmailTemplates, msg.template_id) if msg.template_id is not None else None
         return _MessageRun(
             message_id=msg.id, event_id=event.id, event_name=event.name, club_id=event.club_id, org_name=(club.name if club else "") or "",
             subject=msg.subject or "", design=EmailDesign.model_validate(msg.design or {}),
             attachments=EmailAttachments.model_validate(msg.attachments or {}), brand=await brand_primary(s, event), logo_url=logo_url_of(event),
+            kind=quota_kind(msg, template) if event.club_id is not None else None,
         )
 
 
@@ -821,6 +842,9 @@ async def _release_message_rows(db: pipeline.Db, claims: list) -> None:
 
 
 async def _record_message_row(db: pipeline.Db, run: _MessageRun, c: _MessageClaim, values: dict, *, attempt: Optional[dict] = None, dead: bool = False) -> None:
+    """One short transaction: the row's result, the attempt the provider
+    took, the admins told of a dead one, and -- once it was sent -- the
+    message counted against the club's monthly quota (once: by its id)."""
     async with db.tx() as s:
         res = await s.execute(
             update(MessageDeliveries)
@@ -838,6 +862,8 @@ async def _record_message_row(db: pipeline.Db, run: _MessageRun, c: _MessageClai
             )
         if dead and res.rowcount:
             await pipeline.alert_dead(s, event_id=run.event_id, club_id=run.club_id, event_name=run.event_name, what="message", error=values.get("error") or "")
+        if values.get("status") is DeliveryStatus.sent and run.kind is not None:
+            await quota.count(s, club_id=run.club_id, channel=quota.EMAIL, kind=run.kind, ref=f"message:{c.id}", terms=run.terms)
 
 
 async def _handle_message_row(db: pipeline.Db, run: _MessageRun, c: _MessageClaim) -> None:
@@ -860,6 +886,9 @@ async def _handle_message_row(db: pipeline.Db, run: _MessageRun, c: _MessageClai
             # It may have bounced elsewhere since the message was queued.
             found = (await suppression.reasons(s, [reg.email])).get(suppression.normal(reg.email))
             skip = suppression.why(found) if found is not None else None
+        if skip is None and run.kind is not None:
+            # Past Free's monthly emails, an announcement or campaign is held back.
+            run.terms, skip = await quota.check(s, run.club_id, quota.EMAIL, run.kind, terms=run.terms, cache=run.quota_terms)
     if skip is not None:
         await _record_message_row(db, run, c, dict(status=DeliveryStatus.skipped, error=skip, next_attempt_at=None))
         return

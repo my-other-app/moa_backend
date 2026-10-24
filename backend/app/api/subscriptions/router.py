@@ -71,6 +71,9 @@ admin_router = APIRouter(prefix="/admin", tags=["subscriptions"])
 club_router = APIRouter(prefix="/clubs", tags=["subscriptions"])
 public_router = APIRouter(prefix="/plans", tags=["subscriptions"])
 
+#: The limits added with the message quotas, kept when an update leaves them out.
+_MESSAGE_LIMITS = frozenset({"emails_per_month", "whatsapp_per_month"})
+
 #: The same budget as the discover routes behind the public site.
 PUBLIC_LIMIT = "120/minute"
 
@@ -163,6 +166,11 @@ async def create_plan(
         featured=bool(payload.featured),
         contact_sales=bool(payload.contact_sales),
     )
+    # Omitted: the owner's defaults (the column defaults, ₹0.10 and ₹1).
+    if payload.email_overage_paise is not None:
+        plan.email_overage_paise = payload.email_overage_paise
+    if payload.whatsapp_overage_paise is not None:
+        plan.whatsapp_overage_paise = payload.whatsapp_overage_paise
     session.add(plan)
     await session.flush()
 
@@ -217,6 +225,11 @@ async def update_plan(
         plan.featured = payload.featured
     if payload.contact_sales is not None:
         plan.contact_sales = payload.contact_sales
+    # The overage prices too: an older editor that does not send them leaves them be.
+    if payload.email_overage_paise is not None:
+        plan.email_overage_paise = payload.email_overage_paise
+    if payload.whatsapp_overage_paise is not None:
+        plan.whatsapp_overage_paise = payload.whatsapp_overage_paise
 
     if price_changed:
         # Razorpay plans are immutable, so the old ids no longer describe this
@@ -229,7 +242,12 @@ async def update_plan(
     if plan.limits is None:
         session.add(PlanLimits(plan_id=plan.id, **payload.limits.model_dump()))
     else:
+        sent = payload.limits.model_fields_set
         for key, value in payload.limits.model_dump().items():
+            if key in _MESSAGE_LIMITS and key not in sent:
+                # An editor from before the message limits sends the whole
+                # plan without them: that must not make them unlimited.
+                continue
             setattr(plan.limits, key, value)
 
     if plan.features is None:
@@ -288,6 +306,8 @@ async def duplicate_plan(
         visibility=PlanVisibility.hidden,
         sort_order=source.sort_order,
         contact_sales=source.contact_sales,
+        email_overage_paise=source.email_overage_paise,
+        whatsapp_overage_paise=source.whatsapp_overage_paise,
         # Not featured: the highlight belongs to the plan it was given to,
         # and a copy made public later would make two "Most popular" plans.
         featured=False,
@@ -1171,13 +1191,27 @@ async def my_entitlements(session: SessionDep, user: ClubAuth) -> EntitlementsOu
     await _settled_subscription(session, club.id)
 
     resolved = await service.resolve_entitlements(session, club.id)
+    limits = dict(resolved.limits)
+    email_overage = int(resolved.plan.email_overage_paise or 0) if resolved.plan else 0
+    whatsapp_overage = int(resolved.plan.whatsapp_overage_paise or 0) if resolved.plan else 0
+    if resolved.plan is not None and resolved.plan.key == service.ENTERPRISE_PLAN_KEY:
+        # An Enterprise club's own message limits, set by an admin (app/api/message_quota).
+        from app.api.message_quota.models import ClubMessageQuotas
+
+        own = await session.get(ClubMessageQuotas, club.id)
+        if own is not None:
+            limits["emails_per_month"], limits["whatsapp_per_month"] = own.emails_per_month, own.whatsapp_per_month
+            email_overage = own.email_overage_paise if own.email_overage_paise is not None else email_overage
+            whatsapp_overage = own.whatsapp_overage_paise if own.whatsapp_overage_paise is not None else whatsapp_overage
     return {
         "plan_key": resolved.plan.key if resolved.plan else None,
         "plan_name": resolved.plan.name if resolved.plan else None,
         "status": resolved.grant["status"],
         "cycle": resolved.grant["cycle"],
         "current_period_end": resolved.grant["current_period_end"],
-        "limits": resolved.limits,
+        "limits": limits,
+        "email_overage_paise": email_overage,
+        "whatsapp_overage_paise": whatsapp_overage,
         "features": resolved.features,
         "configured": resolved.configured,
         "enforced": gates.enforcing(),

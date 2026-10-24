@@ -52,6 +52,12 @@ What Meta answers, and what the send becomes (the delivery's status):
 The message id Meta gives back (wamid...) is the send's `provider_id`, which
 the status webhook (app/api/hooks) matches its delivered/read/failed
 notices against.
+
+Every message sent from here goes from the PLATFORM's number, so it counts
+against the club's monthly WhatsApp quota (app/api/message_quota): the
+delivery pipeline counts its own sends in the transaction that records them
+(the answer's `Via` says which number it went from); any other caller
+passes `meter` and the send is held back past Free's limit and counted here.
 """
 from __future__ import annotations
 
@@ -393,10 +399,40 @@ async def _upload(client: httpx.AsyncClient, content: bytes, filename: str) -> s
     return media_id
 
 
-async def send(number: Optional[str], template: Template, *, document: Optional[tuple[bytes, str]] = None) -> dict:
-    """One template to one number: `{"MessageId", "Provider", "Address"}`,
-    the id Meta gave the message and the number it went to. Raises one of
-    the errors above when it was not sent."""
+#: The number a send here goes from (app/api/message_quota counts these).
+VIA = "platform"
+
+
+async def _held_back(meter: dict) -> Optional[str]:
+    from app.api.message_quota import service as quota
+
+    async with quota.session_scope() as s:
+        _, reason = await quota.check(s, meter.get("club_id"), quota.WHATSAPP, meter.get("kind") or "update")
+        await s.commit()
+    return reason
+
+
+async def _count(meter: dict) -> None:
+    from app.api.message_quota import service as quota
+
+    try:
+        await quota.record_message(meter.get("club_id"), quota.WHATSAPP, meter.get("kind") or "update", ref=meter.get("ref"))
+    except Exception:  # noqa: BLE001 - sent is sent; a count that cannot be written is logged
+        logger.warning("a WhatsApp %s for club %s could not be counted", meter.get("kind"), meter.get("club_id"), exc_info=True)
+
+
+async def send(
+    number: Optional[str], template: Template, *, document: Optional[tuple[bytes, str]] = None, meter: Optional[dict] = None,
+) -> dict:
+    """One template to one number: `{"MessageId", "Provider", "Address",
+    "Via"}`, the id Meta gave the message, the number it went to and the
+    number it went from ("platform"). Raises one of the errors above when it
+    was not sent.
+
+    `meter` ({"club_id", "kind", "ref"}) is for a send made outside the
+    delivery pipeline: past a Free club's monthly WhatsApp it is held back
+    (Undeliverable, with the reason), and once Meta takes it, it is counted.
+    The pipeline leaves it out: it checks and counts in its own transactions."""
     if not configured():
         raise Undeliverable("no WhatsApp provider is configured — nothing was sent")
     to, why = normalise(number)
@@ -404,6 +440,10 @@ async def send(number: Optional[str], template: Template, *, document: Optional[
         raise Undeliverable(f"no WhatsApp number: {why}")
     if template.document and document is None:
         raise ValueError(f"{template.name} needs its document")
+    if meter is not None:
+        reason = await _held_back(meter)
+        if reason:
+            raise Undeliverable(reason)
     async with _client() as client:
         media_id = filename = None
         if template.document:
@@ -429,4 +469,6 @@ async def send(number: Optional[str], template: Template, *, document: Optional[
     if not message_id:
         # Taken, with nothing to match its statuses by. Sending again could be a second copy, so it stands.
         logger.warning("WhatsApp accepted %s without a message id", template.name)
-    return {"MessageId": message_id, "Provider": PROVIDER, "Address": to}
+    if meter is not None:
+        await _count(meter)
+    return {"MessageId": message_id, "Provider": PROVIDER, "Address": to, "Via": VIA}
