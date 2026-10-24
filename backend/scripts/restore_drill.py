@@ -6,9 +6,13 @@ checked.
         --file NAME             that dump in BACKUP_DIR
         --keep                  leave the scratch database for a look (drop it yourself)
         --max-age-hours 26      fail when the dump is older than that (a missed backup)
+        --standalone            check the restore on its own, not against this
+                                server's database (staging: its database is not
+                                the one backed up)
 
 A backup nobody has restored is a hope, not a backup. Run this monthly, and
-after any change to how backups are taken (docs/OPERATIONS.md, "Restore").
+after any change to how backups are taken (docs/OPERATIONS.md, "Restore";
+the monthly systemd timer for staging is in ops/backup, section 19).
 
 What it does:
 1. takes the newest dump under the off-site prefix (daily/ and weekly/;
@@ -18,10 +22,12 @@ What it does:
 2. creates a new database, restore_drill_YYYYMMDD_HHMMSS, on the same server
    (or on the server of RESTORE_DRILL_DATABASE_URL, an environment variable
    naming any database there the drill may connect to and create from);
-3. restores into it with pg_restore and fails on any error it reports;
+3. restores into it with pg_restore and fails on any error it reports, or
+   on any table the dump holds (pg_restore -l) that the restore lacks;
 4. reads it: the alembic revision (beside the live one), and the rows in the
    core tables beside the live database's, failing when a table is missing
-   or empty where the live one has rows;
+   or empty where the live one has rows -- or, --standalone, when users,
+   clubs or events restored empty;
 5. drops the scratch database (unless --keep) and the downloaded file.
 
 The restore costs CPU and disk on the server it runs on: off-peak on the
@@ -57,6 +63,10 @@ CORE_TABLES = (
 #: A live table with at least this many rows must not restore empty (one
 #: that got its first rows since the dump may).
 EMPTY_MATTERS_FROM = 10
+#: --standalone: no live database to compare with, so these must simply have rows.
+NEVER_EMPTY = ("users", "clubs", "events")
+#: A table's line in `pg_restore -l`: "215; 1259 16390 TABLE public users moa".
+TOC_TABLE = re.compile(r"^\d+;\s+\d+\s+\d+\s+TABLE\s+(\S+)\s+(\S+)(?:\s|$)")
 #: pg_restore errors that mean nothing for a restore into a new database.
 BENIGN = (
     'schema "public" already exists',
@@ -158,6 +168,27 @@ def restore_errors(stderr: str, returncode: int) -> list[str]:
     return errors
 
 
+def tables_in_toc(listing: str) -> set[str]:
+    """The public tables a dump holds, from its `pg_restore -l` listing."""
+    out = set()
+    for line in listing.splitlines():
+        match = TOC_TABLE.match(line.strip())
+        if match and match.group(1) == "public":
+            out.add(match.group(2))
+    return out
+
+
+def dump_tables(dump: Path) -> set[str]:
+    listing = subprocess.run(["pg_restore", "-l", str(dump)], capture_output=True, text=True, timeout=600, check=True)
+    return tables_in_toc(listing.stdout)
+
+
+def restored_tables(conn) -> set[str]:
+    with conn.cursor() as cur:
+        cur.execute("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
+        return {row[0] for row in cur.fetchall()}
+
+
 def restore(dump: Path, server_url: str, name: str) -> list[str]:
     """pg_restore `dump` into the new database `name`; the errors it reported
     that matter (empty when it went cleanly)."""
@@ -201,6 +232,22 @@ def _revision(conn) -> Optional[str]:
         return cur.fetchone()[0]
 
 
+def check_standalone(scratch) -> list[str]:
+    """Read the restore on its own (staging); the problems found."""
+    problems = []
+    revision = _revision(scratch)
+    say(f"alembic revision: restored {revision or '(none)'}")
+    if not revision:
+        problems.append("the restore has no alembic_version: not a dump of this application's database")
+    say(f"{'table':<28}{'restored':>12}")
+    for table in CORE_TABLES:
+        restored = _count(scratch, table)
+        say(f"{table:<28}{'missing' if restored is None else restored[0]:>12}")
+        if table in NEVER_EMPTY and (restored is None or restored[0] == 0):
+            problems.append(f"{table} restored empty" if restored is not None else f"{table} is missing from the restore")
+    return problems
+
+
 def check(scratch, live) -> list[str]:
     """Read the restore beside the live database; the problems found."""
     problems = []
@@ -224,7 +271,7 @@ def check(scratch, live) -> list[str]:
 
 
 def run(*, source: str = "s3", file: Optional[str] = None, keep: bool = False,
-        max_age_hours: Optional[float] = None, s3=None) -> int:
+        max_age_hours: Optional[float] = None, standalone: bool = False, s3=None) -> int:
     live_url = settings.DATABASE_URL_SYNC
     server_url = os.environ.get("RESTORE_DRILL_DATABASE_URL") or live_url
     name = f"restore_drill_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
@@ -259,15 +306,26 @@ def run(*, source: str = "s3", file: Optional[str] = None, keep: bool = False,
             problems.extend(f"  {line}" for line in errors[:20])
 
         scratch = _connect(_with_db(server_url, name))
-        live = _connect(live_url)
         try:
-            with live.cursor() as cur:
-                # Never anything but reads on the live database.
-                cur.execute("SET default_transaction_read_only = on")
-            problems.extend(check(scratch, live))
+            expected, present = dump_tables(dump), restored_tables(scratch)
+            lost = sorted(expected - present)
+            if lost:
+                problems.append(f"{len(lost)} table(s) in the dump are missing from the restore: {', '.join(lost[:20])}")
+            else:
+                say(f"every table in the dump was restored ({len(expected)})")
+            if standalone:
+                problems.extend(check_standalone(scratch))
+            else:
+                live = _connect(live_url)
+                try:
+                    with live.cursor() as cur:
+                        # Never anything but reads on the live database.
+                        cur.execute("SET default_transaction_read_only = on")
+                    problems.extend(check(scratch, live))
+                finally:
+                    live.close()
         finally:
             scratch.close()
-            live.close()
         return _done(problems)
     finally:
         if created and not keep:
@@ -298,8 +356,9 @@ def main() -> int:
     parser.add_argument("--file", help="a dump in BACKUP_DIR, by name")
     parser.add_argument("--keep", action="store_true", help="leave the scratch database")
     parser.add_argument("--max-age-hours", type=float, default=None)
+    parser.add_argument("--standalone", action="store_true", help="check the restore on its own, not against this server's database")
     args = parser.parse_args()
-    return run(source=args.source, file=args.file, keep=args.keep, max_age_hours=args.max_age_hours)
+    return run(source=args.source, file=args.file, keep=args.keep, max_age_hours=args.max_age_hours, standalone=args.standalone)
 
 
 if __name__ == "__main__":
