@@ -58,6 +58,7 @@ hook_router = APIRouter(prefix="/hooks/whatsapp/club", tags=["hooks"])
 async def _account_out(session, request: Request, club_id: int, user) -> dict:
     return await service.account_out(
         session, club_id, manage=access.can_manage(request), inbox=access.can_inbox(request), actor=user,
+        impersonated=access.impersonated(),
     )
 
 
@@ -283,9 +284,9 @@ async def stream(request: Request, session: SessionDep, user: ClubAuth) -> Respo
     """A `changed` frame names the conversation that changed (never what it
     says); the dashboard reads it again. 404 WHATSAPP_STREAM_OFF while
     APP_LIVE_SSE is off: the dashboard polls."""
+    access.require_inbox(request)
     if not live.on():
         raise CustomHTTPException(404, message="The inbox is not pushed here; poll it.", error_code="WHATSAPP_STREAM_OFF")
-    access.require_inbox(request)
     club = await service.club_of(session, user)
     club_id = club.id
     # Nothing of the request's session is held while the stream is open.

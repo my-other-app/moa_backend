@@ -66,6 +66,9 @@ class AccountOut(CustomBaseModel):
     webhook_fields: list[str] = Field(default_factory=list)
     can_manage: bool = False
     can_inbox: bool = False
+    #: An admin acting as the club: can_inbox is false because the messages
+    #: are the club's team's alone, not for want of a permission.
+    impersonated: bool = False
 
 
 class QualityPoint(CustomBaseModel):

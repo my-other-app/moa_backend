@@ -700,10 +700,11 @@ async def upgrade_payload(session) -> dict:
     return (await gates.feature_locked(session, FEATURE)).errors or {}
 
 
-async def account_out(session, club_id: int, *, manage: bool, inbox: bool, actor=None) -> dict:
+async def account_out(session, club_id: int, *, manage: bool, inbox: bool, actor=None, impersonated: bool = False) -> dict:
     """The club's WhatsApp page. The verify token only to those who manage
     the connection, and only while connected; the access token and the app
-    secret never."""
+    secret never. `impersonated`: an admin acting as the club, to whom the
+    inbox is closed (can_inbox false) for that reason."""
     allowed = await plan_allows(session, club_id, actor=actor)
     out = {
         "available": crypto.available(),
@@ -732,6 +733,7 @@ async def account_out(session, club_id: int, *, manage: bool, inbox: bool, actor
         "webhook_fields": list(WEBHOOK_FIELDS),
         "can_manage": bool(manage and crypto.available()),
         "can_inbox": bool(inbox),
+        "impersonated": bool(impersonated),
     }
     row = await live_account(session, club_id) or await latest_account(session, club_id)
     if row is None:

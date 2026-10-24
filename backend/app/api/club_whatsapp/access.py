@@ -44,6 +44,13 @@ def can_inbox(request: Request) -> bool:
     return member is None or bool(getattr(member, "whatsapp", False))
 
 
+def impersonated() -> bool:
+    """An admin acting as the club: the page says why the inbox is closed to them."""
+    from app.api.subscriptions import gates
+
+    return bool(gates.impersonated_by())
+
+
 def require_manage(request: Request) -> None:
     if not can_manage(request):
         raise CustomHTTPException(status_code=403, message=MANAGE_MESSAGE, error_code="ROLE_FORBIDDEN")

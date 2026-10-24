@@ -102,9 +102,14 @@ async def change_role(request: Request, member_id: int, session: SessionDep, use
 @router.put("/{member_id}/whatsapp", summary="Give or take someone's WhatsApp permission")
 async def change_whatsapp(request: Request, member_id: int, session: SessionDep, user: ClubAuth, body: WhatsAppPermission) -> MemberRow:
     """The club's own WhatsApp inbox and templates are message content: only
-    the people the owner names here (and the owner) read and answer them."""
+    the people the owner names here (and the owner) read and answer them.
+    Never an admin acting as the club (403 WHATSAPP_PRIVATE): otherwise one
+    could invite a member, give them this and read the messages through them."""
     from app.api.audit import service as audit
+    from app.api.club_whatsapp import access as whatsapp_access
 
+    if gates.impersonated_by():
+        raise CustomHTTPException(status.HTTP_403_FORBIDDEN, message=whatsapp_access.PRIVATE_MESSAGE, error_code="WHATSAPP_PRIVATE")
     club = await _owners_club(session, request, user)
     member = await service.set_whatsapp(session, club, member_id, body.allowed)
     await audit.record(

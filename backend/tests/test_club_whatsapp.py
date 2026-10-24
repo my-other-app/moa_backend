@@ -688,20 +688,34 @@ async def test_a_message_is_kept_once_opens_the_window_and_is_linked_to_the_regi
     assert item["last_message"]["preview"] == "Is there parking at the venue?" and item["awaiting_reply"] is True
 
 
-async def test_a_number_known_only_to_another_club_is_not_named_here(client, session, world, meta, make_user):
+async def test_a_number_known_only_to_another_club_is_not_named_here(client, session, world, meta, make_user, make_registration):
     account = await connected(client, session, world)
     # Bala registered with Robotics Guild only: Yukthi learns nothing about him.
     await hook(client, account.webhook_token, inbound(text_msg("wamid.BALA", "hello?", wa="919123456780"), name="B", wa="919123456780"))
     conv = await session.scalar(select(ClubWhatsAppConversations).where(ClubWhatsAppConversations.wa_id == "919123456780"))
     assert conv.user_id is None and conv.registration_id is None and conv.contact_name is None
-    # A follower of the club whose profile has the number is linked.
+    # A follower whose profile has the number is not named either: the club never
+    # sees that number, and it signs its own webhook, so it could ask about any.
     fan = await make_user(email="fan@example.com")
     session.add_all([UserProfiles(user_id=fan.id, full_name="Chitra Nair", whatsapp="+91 99887 76655"),
                      ClubUsersLink(club_id=world.club.id, user_id=fan.id, is_following=True)])
     await session.commit()
     await hook(client, account.webhook_token, inbound(text_msg("wamid.FAN", "hi", wa="919988776655"), name="C", wa="919988776655"))
     conv = await session.scalar(select(ClubWhatsAppConversations).where(ClubWhatsAppConversations.wa_id == "919988776655"))
-    assert conv.user_id == fan.id and conv.contact_name == "Chitra Nair"
+    assert conv.user_id is None and conv.contact_name is None and conv.linked_at is None
+    # Nor a registration that was deleted.
+    gone_user = await make_user(email="gone@example.com")
+    gone = await make_registration(event=world.event, user=gone_user, full_name="Deleted Dev", email=gone_user.email, phone="9111111111",
+                                   whatsapp_opt_in=True)
+    gone.is_deleted = True
+    await session.commit()
+    await hook(client, account.webhook_token, inbound(text_msg("wamid.GONE", "hi", wa="919111111111"), name="D", wa="919111111111"))
+    conv = await session.scalar(select(ClubWhatsAppConversations).where(ClubWhatsAppConversations.wa_id == "919111111111"))
+    assert conv.registration_id is None and conv.contact_name is None
+    listed = (await client.get(f"{API}/clubs/whatsapp/conversations", params={"q": "91111"}, headers=world.h)).json()["items"][0]
+    assert listed["contact"]["events"] == []
+    r = await client.post(f"{API}/clubs/whatsapp/conversations", json={"registration_id": str(gone.id)}, headers=world.h)
+    assert r.status_code == 404
 
 
 async def test_every_kind_of_message_is_kept_as_what_it_is(client, session, world, meta):
@@ -1581,17 +1595,41 @@ async def test_messages_are_for_the_owner_and_members_with_the_permission(client
     assert (await client.post(f"{API}/clubs/whatsapp/account/verify", headers=_h(admin))).status_code == 200
 
 
-async def test_an_admin_acting_as_the_club_sees_the_number_never_the_messages(client, session, world, meta, make_admin):
+async def test_an_admin_acting_as_the_club_sees_the_number_never_the_messages(client, session, world, meta, make_admin, monkeypatch):
     from tests.test_plan_enforcement import impersonating
 
     account = await connected(client, session, world)
     conv = await conversation_with(client, session, world, account)
+    await hook(client, account.webhook_token, inbound(text_msg("wamid.PIC", "", kind="image", part={"id": "media-5", "mime_type": "image/jpeg"})))
+    picture = await session.scalar(select(ClubWhatsAppMessages).where(ClubWhatsAppMessages.wamid == "wamid.PIC"))
     h = await impersonating(session, make_admin, world)
-    assert (await client.get(f"{API}/clubs/whatsapp/account", headers=h)).status_code == 200
-    for path in ("/conversations", f"/conversations/{conv.id}/messages", "/templates"):
-        r = await client.get(f"{API}/clubs/whatsapp{path}", headers=h)
-        assert r.status_code == 403 and r.json()["error_code"] == "WHATSAPP_PRIVATE", path
+    page = (await client.get(f"{API}/clubs/whatsapp/account", headers=h)).json()
+    assert page["connected"] is True and page["can_inbox"] is False and page["impersonated"] is True
+    assert (await client.get(f"{API}/clubs/whatsapp/account", headers=world.h)).json()["impersonated"] is False
+    monkeypatch.setattr(settings, "LIVE_SSE", True)
+    base = f"{API}/clubs/whatsapp"
+    every_message_route = [
+        ("GET", "/conversations", None),
+        ("GET", "/conversations?q=Ananya", None),
+        ("GET", f"/conversations/{conv.id}/messages", None),
+        ("GET", f"/media/{picture.id}", None),
+        ("GET", "/stream", None),
+        ("GET", "/templates", None),
+        ("POST", f"/conversations/{conv.id}/messages", {"type": "text", "text": "Hi, it's an admin"}),
+        ("POST", f"/conversations/{conv.id}/read", None),
+        ("PATCH", f"/conversations/{conv.id}", {"status": "closed"}),
+        ("POST", "/conversations", {"registration_id": str(world.reg.id)}),
+    ]
+    for method, path, body in every_message_route:
+        r = await client.request(method, f"{base}{path}", json=body, headers=h)
+        assert r.status_code == 403 and r.json()["error_code"] == "WHATSAPP_PRIVATE", (method, path, r.text)
+    assert meta.club_sent == [] and not meta.club_calls("GET", "/media-5")
     assert (await client.get(f"{API}/clubs/access/me", headers=h)).json()["can"]["whatsapp_inbox"] is False
+    # Nor can the admin give a member the permission, and read through them.
+    editor = await member(session, world, "editor")
+    r = await client.put(f"{API}/clubs/access/{editor['_member_id']}/whatsapp", json={"allowed": True}, headers=h)
+    assert r.status_code == 403 and r.json()["error_code"] == "WHATSAPP_PRIVATE"
+    assert (await session.get(ClubMembers, int(editor["_member_id"]), populate_existing=True)).whatsapp is False
 
 
 async def test_the_admin_portal_sees_status_and_quality_and_no_content(client, session, world, meta, make_admin, mint_token):

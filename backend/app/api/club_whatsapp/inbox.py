@@ -1,10 +1,11 @@
 """A club's WhatsApp inbox: conversations, messages, replies.
 
-A conversation is one person (their WhatsApp id) on one of the club's
-business numbers. It is linked to who the person is to the club when their
-number matches a registration for one of its events (or a follower's
-WhatsApp on their profile) -- never to anyone else's account: a club learns
-nothing about a number from MyOtherApp it did not already have.
+A conversation is one person (their WhatsApp id, or their BSUID when Meta
+doesn't share the number) on one of the club's business numbers. It is
+linked to who the person is to the club when their number matches a
+registration (not deleted) for one of its events -- never to anyone else's
+account, nor through a follower's profile: a club learns nothing about a
+number from MyOtherApp it did not already have.
 
 The 24-hour customer-service window: once someone writes, the club may send
 them anything for 24 hours from their latest message; after that, only a
@@ -139,7 +140,8 @@ async def _registrations_for(session, club_id: int, wa_ids: list[str]) -> list:
     rows = (await session.execute(
         select(R.id, R.user_id, R.full_name, R.phone, R.created_at, Events.id, Events.name, Events.event_datetime)
         .join(Events, Events.id == R.event_id)
-        .where(Events.club_id == club_id, Events.is_deleted == False, _digits_tail(R.phone).in_(tails))  # noqa: E712
+        .where(Events.club_id == club_id, Events.is_deleted == False, R.is_deleted == False,  # noqa: E712
+               _digits_tail(R.phone).in_(tails))
         .order_by(R.created_at.desc())
         .limit(50 * len(tails))
     )).all()
@@ -148,36 +150,22 @@ async def _registrations_for(session, club_id: int, wa_ids: list[str]) -> list:
 
 
 async def link(session, conv_id: int, club_id: int, wa_id: Optional[str]) -> bool:
-    """Link the conversation to the registration (and its account) its
-    number matches, latest first; else to a follower of the club whose
-    profile has this WhatsApp number. True when linked. One UPDATE, and
-    only of a conversation not linked yet."""
+    """Link the conversation to the club's own registration (and its
+    account) whose number this is, latest first. True when linked. Only
+    ever through a registration for the club's events -- a number the club
+    was given -- never a follower's profile: the club never sees that
+    number, and a club can sign its own webhook to ask about any number.
+    One UPDATE, and only of a conversation not linked yet."""
     if not wa_id:
         return False
-    found = None
     rows = await _registrations_for(session, club_id, [wa_id])
-    if rows:
-        found = {"registration_id": rows[0][0], "user_id": rows[0][1], "contact_name": rows[0][2]}
-    else:
-        from app.api.clubs.models import ClubUsersLink
-        from app.api.users.models import UserProfiles
-
-        candidates = (await session.execute(
-            select(UserProfiles.user_id, UserProfiles.full_name, UserProfiles.whatsapp)
-            .join(ClubUsersLink, and_(ClubUsersLink.user_id == UserProfiles.user_id, ClubUsersLink.club_id == club_id))
-            .where(ClubUsersLink.is_following == True, _digits_tail(UserProfiles.whatsapp) == wa_id[-10:])  # noqa: E712
-            .limit(5)
-        )).all()
-        for user_id, full_name, number in candidates:
-            if wa_of(number) == wa_id:
-                found = {"user_id": user_id, "contact_name": full_name}
-                break
-    if found is None:
+    if not rows:
         return False
-    found["contact_name"] = (found["contact_name"] or None) and str(found["contact_name"])[:120]
+    reg_id, user_id, full_name = rows[0][0], rows[0][1], rows[0][2]
     C = ClubWhatsAppConversations
     await session.execute(
-        update(C).where(C.id == conv_id, C.linked_at.is_(None)).values(**found, linked_at=_now())
+        update(C).where(C.id == conv_id, C.linked_at.is_(None))
+        .values(registration_id=reg_id, user_id=user_id, contact_name=(full_name or None) and str(full_name)[:120], linked_at=_now())
         .execution_options(synchronize_session=False)
     )
     return True
@@ -199,7 +187,7 @@ async def contact_events(session, club_id: int, convs: list[ClubWhatsAppConversa
         by_user = (await session.execute(
             select(R.id, R.user_id, R.full_name, R.phone, R.created_at, Events.id, Events.name, Events.event_datetime)
             .join(Events, Events.id == R.event_id)
-            .where(Events.club_id == club_id, Events.is_deleted == False, R.user_id.in_(users))  # noqa: E712
+            .where(Events.club_id == club_id, Events.is_deleted == False, R.is_deleted == False, R.user_id.in_(users))  # noqa: E712
             .order_by(R.created_at.desc())
         )).all()
     for c in convs:
@@ -819,7 +807,7 @@ async def start(session, club_id: int, registration_id) -> ClubWhatsAppConversat
 
     row = (await session.execute(
         select(R.id, R.phone, R.whatsapp_opt_in).join(Events, Events.id == R.event_id)
-        .where(R.id == registration_id, Events.club_id == club_id)
+        .where(R.id == registration_id, Events.club_id == club_id, R.is_deleted == False, Events.is_deleted == False)  # noqa: E712
     )).first()
     if row is None:
         raise _refuse(404, "No such registration for your events.", "REGISTRATION_NOT_FOUND")
