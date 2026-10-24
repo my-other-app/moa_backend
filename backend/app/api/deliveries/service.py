@@ -44,6 +44,7 @@ from app.api.events.access import ensure_event_access, is_admin_user
 from app.api.events.documents import EVENT_TIMEZONE
 from app.api.events.models import EventRegistrationsLink, Events
 from app.api.events.tickets import ticket_document
+from app.api.message_quota import service as quota
 from app.core import jobs
 from app.core import providers as providers_mod
 from app.core import whatsapp
@@ -64,6 +65,19 @@ def channels() -> list[DeliveryChannel]:
     marked sent for a message that never left would hide every real failure
     behind a success that never happened."""
     return [DeliveryChannel.email, *([DeliveryChannel.whatsapp] if whatsapp.configured() else [])]
+
+
+#: What each document is, to the club's message quota (app/api/message_quota).
+QUOTA_KIND = {DeliveryKind.ticket: "ticket", DeliveryKind.certificate: "certificate", DeliveryKind.reminder: "reminder"}
+
+
+def whatsapp_via(event) -> str:
+    """Which number an event's WhatsApp goes from: the platform's, counted
+    against the club's plan (quota.PLATFORM), or -- once a club sends from
+    its own number -- the club's (quota.CLUB), which the club pays Meta for
+    and is never counted or held back. A send through the club's own number
+    answers with {"Via": "club"} too, and that is what is counted by."""
+    return quota.PLATFORM
 
 
 def _wants_whatsapp() -> list:
@@ -365,6 +379,10 @@ class _Ready:
     # The event's designed invite (subject, design, attachments, brand), or
     # None for the plain words.
     invite: Optional[dict] = None
+    # The club's message terms, and what this send is to its quota (None:
+    # not counted -- no club).
+    terms: Optional[quota.Terms] = None
+    quota_kind: Optional[str] = None
 
 
 @dataclass
@@ -374,6 +392,8 @@ class _Run:
 
     invites: dict = field(default_factory=dict)
     assets: dict = field(default_factory=dict)
+    # Each club's message terms (app/api/message_quota), read once a job.
+    terms: dict = field(default_factory=dict)
 
 
 def _claim_stmt(where: list, n: int, at: datetime):
@@ -429,6 +449,10 @@ async def _read(db: pipeline.Db, c: _Claim, run: _Run) -> Optional[_Ready]:
                 )
             )
             .where(Deliveries.id == c.id)
+            # As the claim left it: a session that queued it again (a send on
+            # the caller's session) holds the row as it was before, and its
+            # queued_at is the send's idempotency key and its quota ref.
+            .execution_options(populate_existing=True)
         )
         if d is None:
             return None
@@ -458,6 +482,12 @@ async def _read(db: pipeline.Db, c: _Claim, run: _Run) -> Optional[_Ready]:
             if suppressed is not None:
                 # Bounced or complained at another event or club: the same address, the same answer.
                 ready.skip = suppression.why(suppressed)
+        if ready.skip is None and event.club_id is not None:
+            # The club's plan: a reminder past Free's limit is held back,
+            # with the reason on the row; a ticket or certificate always goes.
+            ready.quota_kind = QUOTA_KIND[d.kind]
+            via = whatsapp_via(event) if d.channel is DeliveryChannel.whatsapp else quota.PLATFORM
+            ready.terms, ready.skip = await quota.check(s, event.club_id, d.channel.value, ready.quota_kind, via=via, cache=run.terms)
         if ready.skip is None and d.kind is DeliveryKind.ticket and d.channel is DeliveryChannel.email:
             # A ticket goes out in the event's designed invite when there is
             # one switched on; otherwise in the plain words.
@@ -495,11 +525,14 @@ async def _send(db: pipeline.Db, c: _Claim, ready: _Ready, run: _Run) -> tuple[d
 async def _record(
     db: pipeline.Db, c: _Claim, ready: Optional[_Ready], values: dict, *,
     attempt: Optional[dict] = None, dead: bool = False, dead_number: Optional[str] = None,
+    meter: Optional[dict] = None,
 ) -> None:
     """One short transaction: the result on the row (if this worker still
     holds it), the attempt the provider took, the admins told of a dead one,
-    and -- `dead_number` -- the guest's number marked as one WhatsApp cannot
-    reach, so later sends skip it until it is corrected."""
+    -- `dead_number` -- the guest's number marked as one WhatsApp cannot
+    reach, so later sends skip it until it is corrected, and -- `meter` --
+    the message counted against the club's monthly quota (once per send:
+    its ref is the row and when it was queued, the provider's own key)."""
     async with db.tx() as s:
         res = await s.execute(
             update(Deliveries)
@@ -527,6 +560,9 @@ async def _record(
                 s, event_id=ready.event.id, club_id=ready.event.club_id, event_name=ready.event.name,
                 what=ready.d.kind.value, error=values.get("error") or "",
             )
+        if meter is not None:
+            # Counted even when the claim was given up meanwhile: the provider took it.
+            await quota.count(s, **meter)
 
 
 async def _handle(db: pipeline.Db, c: _Claim, run: _Run) -> None:
@@ -560,11 +596,20 @@ async def _handle(db: pipeline.Db, c: _Claim, run: _Run) -> None:
         await _record(db, c, ready, dict(status=DeliveryStatus.failed, error=error, provider_id=None, sent_at=None, next_attempt_at=None))
         return
     provider_id = response.get("MessageId")
+    meter = None
+    if ready.quota_kind is not None:
+        d = ready.d
+        meter = dict(
+            club_id=ready.event.club_id, channel=d.channel.value, kind=ready.quota_kind,
+            via=response.get("Via") or quota.PLATFORM, terms=ready.terms,
+            ref=f"delivery:{d.id}:{int((d.queued_at or d.created_at).timestamp())}",
+        )
     await _record(
         db, c, ready,
         dict(status=DeliveryStatus.sent, error=None, provider_id=provider_id, sent_at=pipeline.now(), design_version=version, next_attempt_at=None),
         # The address it went to: the mailbox, or the number in E.164.
         attempt={"provider": response.get("Provider"), "provider_id": provider_id, "address": response.get("Address") or suppression.normal(ready.reg.email)},
+        meter=meter,
     )
 
 

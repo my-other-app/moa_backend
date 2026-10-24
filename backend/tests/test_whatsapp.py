@@ -142,7 +142,7 @@ def _send_tickets(client, world, **body):
 async def test_a_send_uploads_the_document_then_sends_the_template(session, meta):
     t = whatsapp.ticket_confirmed(name="Ananya", event="Build Night", when="Fri", ticket_id="MOA-1")
     out = await whatsapp.send("9876543210", t, document=(b"%PDF-1.4 ticket", "ticket-MOA-1.pdf"))
-    assert out == {"MessageId": "wamid.TEST1", "Provider": "whatsapp", "Address": "+919876543210"}
+    assert out == {"MessageId": "wamid.TEST1", "Provider": "whatsapp", "Address": "+919876543210", "Via": "platform"}
     upload, message = meta["calls"]
     assert str(upload.url) == "https://graph.facebook.com/v23.0/1029384756/media"
     assert upload.headers["authorization"] == "Bearer test-token"

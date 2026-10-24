@@ -32,6 +32,9 @@ class PlanLimitsIn(CustomBaseModel):
     announcements_per_month: int | None = Field(None, ge=0)
     website_templates: int | None = Field(None, ge=0)
     ai_actions_per_month: int | None = Field(None, ge=0)
+    #: Emails and WhatsApp messages a club sends in a month (app/api/message_quota).
+    emails_per_month: int | None = Field(None, ge=0)
+    whatsapp_per_month: int | None = Field(None, ge=0)
 
 
 def _feature_fields() -> dict:
@@ -100,6 +103,11 @@ class PlanIn(CustomBaseModel):
     #: corrected its tagline.
     featured: bool | None = None
     contact_sales: bool | None = None
+    #: What each message past the monthly limit costs, in paise. Omitted
+    #: means "leave as it is" on update, and the owner's defaults (10 and
+    #: 100: ₹0.10 an email, ₹1 a WhatsApp message) on create.
+    email_overage_paise: int | None = Field(None, ge=0, le=100_000)
+    whatsapp_overage_paise: int | None = Field(None, ge=0, le=100_000)
     limits: PlanLimitsIn = Field(default_factory=PlanLimitsIn)
     features: PlanFeaturesIn = Field(default_factory=PlanFeaturesIn)
 
@@ -127,6 +135,9 @@ class PlanOut(CustomBaseModel):
     sort_order: int = 0
     featured: bool = False
     contact_sales: bool = False
+    #: Each email / WhatsApp message past the monthly limit, in paise.
+    email_overage_paise: int = 0
+    whatsapp_overage_paise: int = 0
     #: Whether the plan can actually be billed. A paid plan with no Razorpay
     #: plan id cannot be subscribed to, and the admin screen says so rather
     #: than letting someone publish it and find out at checkout.
@@ -457,7 +468,12 @@ class EntitlementsOut(CustomBaseModel):
     status: str | None = None
     cycle: str | None = None
     current_period_end: datetime | None = None
+    #: Every limit; emails_per_month and whatsapp_per_month are an
+    #: Enterprise club's own when an admin set them (app/api/message_quota).
     limits: dict = Field(default_factory=dict)
+    #: What each email / WhatsApp message past the month's limit costs, in paise.
+    email_overage_paise: int = 0
+    whatsapp_overage_paise: int = 0
     features: dict = Field(default_factory=dict)
     #: False when the platform has no free plan configured, in which case
     #: everything is permitted -- see service._unlimited. Surfaced so the
@@ -577,6 +593,10 @@ class PublicPlan(CustomBaseModel):
     contact_sales: bool = False
     #: The plan to highlight ("Most popular").
     featured: bool = False
+    #: What each email and WhatsApp message past the monthly limit costs,
+    #: in paise (`limits.emails_per_month`, `limits.whatsapp_per_month`).
+    email_overage_paise: int = 0
+    whatsapp_overage_paise: int = 0
     #: Every limit (LIMIT_KEYS); null is unlimited, 0 is none allowed.
     limits: dict[str, int | None]
     #: The whole public catalog in a fixed order, each marked included or
@@ -620,6 +640,8 @@ def public_plan_dict(plan) -> dict:
         "trial_days": plan.trial_days,
         "contact_sales": bool(plan.contact_sales),
         "featured": bool(plan.featured),
+        "email_overage_paise": int(plan.email_overage_paise or 0),
+        "whatsapp_overage_paise": int(plan.whatsapp_overage_paise or 0),
         "limits": (
             {key: getattr(plan.limits, key) for key in LIMIT_KEYS}
             if plan.limits
@@ -670,6 +692,8 @@ def plan_to_dict(plan, subscriber_count: int = 0) -> dict:
         "sort_order": plan.sort_order,
         "featured": bool(plan.featured),
         "contact_sales": bool(plan.contact_sales),
+        "email_overage_paise": int(plan.email_overage_paise or 0),
+        "whatsapp_overage_paise": int(plan.whatsapp_overage_paise or 0),
         "billable": _is_billable(plan),
         "subscriber_count": subscriber_count,
         "limits": (

@@ -221,6 +221,8 @@ class FeedbackSends(AbstractSQLModel):
     sent_at = Column(TZAwareDateTime(timezone=True), server_default=sa.func.now(), nullable=False)
     # Mailed: the provider took it.
     mailed_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    # Not mailed, and why: past a Free club's monthly emails (app/api/message_quota).
+    skipped_reason = Column(String(300), nullable=True)
 
 
 class FeedbackResponses(AbstractSQLModel):
