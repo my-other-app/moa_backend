@@ -259,6 +259,20 @@ class ClubWhatsAppConversations(AbstractSQLModel, TimestampsMixin):
     last_message_status = Column(String(12), nullable=True)
     #: When the oldest unanswered message from them arrived; null when answered.
     awaiting_since = Column(TZAwareDateTime(timezone=True), nullable=True)
+    # ── The team's (club_whatsapp_inbox): who answers it, blocks, alerts ──
+    #: Assigned to the club's owner, or to a member with the WhatsApp permission (teamwork.py).
+    assigned_owner = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    assigned_member_id = Column(Integer, ForeignKey("club_members.id", ondelete="SET NULL"), nullable=True)
+    assigned_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    #: Blocked by the club (blocking.py): only here (`blocked_meta` false: no
+    #: alerts, no sends, the Blocked filter), or at Meta too, so they can't write.
+    blocked_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    blocked_meta = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    blocked_by_name = Column(String(120), nullable=True)
+    #: When the oldest unread message from them arrived (alerts_inbox.py); null with none unread.
+    unread_since = Column(TZAwareDateTime(timezone=True), nullable=True)
+    #: The `awaiting_since` the team was last told had waited too long: one alert a wait.
+    waiting_alerted_since = Column(TZAwareDateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("club_id", "business_phone_id", "wa_id", name="uq_club_whatsapp_conversations_contact"),
@@ -271,6 +285,12 @@ class ClubWhatsAppConversations(AbstractSQLModel, TimestampsMixin):
         Index("ix_club_whatsapp_conversations_account", "account_id", postgresql_where=text("account_id IS NOT NULL")),
         Index("ix_club_whatsapp_conversations_user", "user_id", postgresql_where=text("user_id IS NOT NULL")),
         Index("ix_club_whatsapp_conversations_registration", "registration_id", postgresql_where=text("registration_id IS NOT NULL")),
+        # club_whatsapp_inbox: a member's assignments (and the rows their removal sets null); the alerts' sweep.
+        Index("ix_club_whatsapp_conversations_assigned_member", "assigned_member_id",
+              postgresql_where=text("assigned_member_id IS NOT NULL")),
+        Index("ix_club_whatsapp_conversations_unread_since", "unread_since", postgresql_where=text("unread_since IS NOT NULL")),
+        Index("ix_club_whatsapp_conversations_awaiting", "awaiting_since", postgresql_where=text("awaiting_since IS NOT NULL")),
+        CheckConstraint("NOT (assigned_owner AND assigned_member_id IS NOT NULL)", name="ck_club_whatsapp_conversations_assignee"),
     )
 
 
