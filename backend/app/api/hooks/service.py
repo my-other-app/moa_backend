@@ -10,6 +10,7 @@ from app.api.deliveries.models import Deliveries, DeliveryAttempts, DeliveryOutc
 from app.api.emails.models import MessageDeliveries
 from app.api.hooks.verdicts import Verdict, is_permanent, resend_verdict, ses_verdicts, whatsapp_verdict
 from app.core.mail import suppression
+from app.core.whatsapp import FIRST_STRIKE, STRIKE_CODES, first_strike
 
 SETTLED = (DeliveryOutcome.bounced, DeliveryOutcome.complained)
 
@@ -71,6 +72,9 @@ async def record(session, provider_id: str, channel: str, v: Verdict, at: dateti
             if channel == "email":
                 marked.email_bounced_at = at
                 marked.email_bounce_reason = v.reason[:300]
+            elif v.code in STRIKE_CODES and not (marked.wa_bounce_reason or "").startswith(FIRST_STRIKE):
+                # The first time only noted: the number is kept until it happens again.
+                marked.wa_bounce_reason = first_strike(v.code)[:300]
             else:
                 marked.wa_bounced_at = at
                 marked.wa_bounce_reason = v.reason[:300]

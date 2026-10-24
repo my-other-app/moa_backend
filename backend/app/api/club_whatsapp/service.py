@@ -66,11 +66,17 @@ _HOOK_TOKEN = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
 _CONNECT_LOCK = lock_keys.CLUB_WHATSAPP_CONNECT
 
 #: Meta's codes that are about the account or the token, not one message:
-#: the connection is failed and the club told; the send goes from the platform.
-ACCOUNT_CODES = frozenset({"0", "3", "10", "190", "200", "131005", "131031", "131042", "131045", "133000", "133010", "368"})
+#: the connection is failed and the club told; the send goes from the
+#: platform. 368 is the business account restricted for a policy (never the
+#: guest), 131064 its limit for misclassified templates, 102 a token whose
+#: session ended; 100 counts only when Meta names the appsecret_proof.
+ACCOUNT_CODES = frozenset({
+    "0", "3", "10", "102", "190", "200", "131005", "131031", "131042", "131045", "131064", "133000", "133010", "368",
+})
 #: Codes about the template on the club's account (missing, paused, disabled,
-#: or not the shape ours sends): that send goes from the platform's number.
-TEMPLATE_CODES = frozenset({"132000", "132001", "132005", "132012", "132015", "132016"})
+#: not the shape ours sends, or its values refused -- 132018): that send goes
+#: from the platform's number.
+TEMPLATE_CODES = frozenset({"132000", "132001", "132005", "132012", "132015", "132016", "132018"})
 #: Codes about the guest that only the club's number meets (is_club_only).
 CLUB_ONLY_CODES = frozenset({"131021", "131030"})
 
@@ -203,6 +209,14 @@ def refusal(exc: graph.GraphError) -> CustomHTTPException:
     errors = {"meta_code": exc.code, "reason": exc.message} if exc.code else {}
     if code in FIELD_OF:
         errors["field"] = FIELD_OF[code]
+    return _refuse(status, message, code, errors or None)
+
+
+def template_refusal(exc: graph.GraphError) -> CustomHTTPException:
+    """A template Meta wouldn't create or delete, in Meta's own words for it
+    (graph.explain_template): 422 INVALID_TEMPLATE, or what the keys' trouble is."""
+    status, code, message = graph.explain_template(exc)
+    errors = {"meta_code": exc.code, "meta_subcode": exc.subcode, "reason": exc.message} if exc.code else {}
     return _refuse(status, message, code, errors or None)
 
 
@@ -647,7 +661,10 @@ async def _route_for(session, club_id: Optional[int], template: str) -> Optional
 
 
 def is_account_problem(exc: Exception) -> bool:
-    return isinstance(exc, whatsapp.Refused) and (exc.code or "") in ACCOUNT_CODES
+    if not isinstance(exc, whatsapp.Refused):
+        return False
+    code = exc.code or ""
+    return code in ACCOUNT_CODES or (code == "100" and "appsecret_proof" in (exc.reason or "").lower())
 
 
 def is_template_problem(exc: Exception) -> bool:

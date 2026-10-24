@@ -117,6 +117,7 @@ class FakeMeta:
         self.templates = standard_templates()
         self.fail: dict = {}
         self.club_answer = None
+        self.platform_answer = None
         self.media_bytes = b"\xff\xd8\xff\xe0fake-jpeg"
         #: Overrides of what GET /{media id} answers (its url, mime_type, file_size).
         self.media_info: dict = {}
@@ -141,6 +142,8 @@ class FakeMeta:
         if path == PLATFORM_PHONE + "/messages":
             body = json.loads(request.content)
             self.platform_sent.append(body)
+            if self.platform_answer is not None:
+                return self.platform_answer(body)
             return httpx.Response(200, json={"messages": [{"id": f"wamid.PLATFORM{len(self.platform_sent)}"}]})
         if path == PLATFORM_PHONE + "/media" or path == PHONE + "/media":
             return httpx.Response(200, json={"id": "media-up-1"})
@@ -1455,6 +1458,109 @@ async def test_a_send_decides_each_clubs_route_once_and_forgets_it_on_a_refusal(
     other.forget(whatsapp.Refused("token expired (190)", "190"))
     assert await accounts.route_for(session, world.club.id, "certificate_ready", cache=cache) is None
     assert await accounts.route_for(session, world.club.id, "ticket_confirmed", cache=cache) is None
+
+
+def refused(code, message="refused", status=400):
+    return lambda body: httpx.Response(status, json={"error": {"code": code, "message": message}})
+
+
+@pytest.mark.parametrize("code, message", [
+    (190, "Error validating access token"),
+    (102, "Session key invalid or no longer valid"),
+    (100, "Invalid appsecret_proof provided in the API argument"),
+    (368, "Temporarily blocked for policies violations"),
+    (131064, "Message failed to send because this account has reached its messaging limit"),
+    (131042, "Business eligibility payment issue"),
+])
+async def test_each_account_refusal_fails_the_number_and_goes_from_the_platform(client, session, world, meta, platform_number, code, message):
+    await connected(client, session, world)
+    meta.club_answer = refused(code, message)
+    d = await _reminder(session, world)
+    assert d.status == DeliveryStatus.sent and d.provider_id == "wamid.PLATFORM1"
+    assert (await account_of(session, world.club.id)).status == "failed"
+    await session.refresh(world.reg)
+    assert world.reg.wa_bounced_at is None
+
+
+async def test_132018_from_the_clubs_number_falls_back_and_leaves_the_number_working(client, session, world, meta, platform_number):
+    await connected(client, session, world)
+    meta.club_answer = refused(132018, "(#132018) Template validation error")
+    d = await _reminder(session, world)
+    assert d.status == DeliveryStatus.sent and d.provider_id == "wamid.PLATFORM1"
+    assert (await account_of(session, world.club.id)).status == "active"
+    row = await session.scalar(select(ClubWhatsAppTemplates).where(ClubWhatsAppTemplates.name == "event_reminder").execution_options(populate_existing=True))
+    assert row.status == "UNUSABLE"
+
+
+@pytest.mark.parametrize("code", [17, 131057])
+async def test_a_busy_or_maintained_account_is_tried_again_later(client, session, world, meta, platform_number, code):
+    meta.platform_answer = refused(code, "Account is in maintenance mode")
+    d = await _reminder(session, world)
+    assert d.status == DeliveryStatus.pending and d.error.startswith("will try again")
+
+
+async def test_a_guest_who_stopped_marketing_is_skipped_not_marked(client, session, world, meta, platform_number):
+    meta.platform_answer = refused(131050, "Unable to deliver the message")
+    d = await _reminder(session, world)
+    assert d.status == DeliveryStatus.skipped and "stop marketing" in d.error
+    await session.refresh(world.reg)
+    assert world.reg.wa_bounced_at is None
+
+
+async def test_131026_marks_the_number_only_the_second_time(client, session, world, meta, platform_number):
+    meta.platform_answer = refused(131026, "Message undeliverable")
+    d = await _reminder(session, world)
+    assert d.status == DeliveryStatus.skipped
+    await session.refresh(world.reg)
+    assert world.reg.wa_bounced_at is None and world.reg.wa_bounce_reason.startswith(whatsapp.FIRST_STRIKE)
+    row = await session.scalar(select(Deliveries).where(Deliveries.id == d.id))
+    row.status, row.queued_at = DeliveryStatus.pending, datetime.now(timezone.utc)
+    await session.commit()
+    await deliveries.deliver(session, d.id)
+    await session.refresh(world.reg)
+    assert world.reg.wa_bounced_at is not None and "cannot receive" in world.reg.wa_bounce_reason
+
+
+async def test_368_on_the_platforms_webhook_is_the_business_not_the_guest(client, session, world, meta, platform_number, monkeypatch):
+    from app.api.hooks import service as hooks
+
+    d = await _reminder(session, world)
+    assert d.provider_id == "wamid.PLATFORM1"
+    payload = {"entry": [{"changes": [{"value": {"statuses": [{
+        "id": "wamid.PLATFORM1", "status": "failed", "timestamp": str(int(NOW.timestamp())),
+        "errors": [{"code": 368, "title": "Temporarily blocked for policies violations"}]}]}}]}]}
+    await hooks.whatsapp(session, payload)
+    await session.refresh(world.reg)
+    d = await session.get(Deliveries, d.id, populate_existing=True)
+    assert world.reg.wa_bounced_at is None and d.outcome.value == "undelivered"
+    # And 131026 there is a first strike too.
+    payload["entry"][0]["changes"][0]["value"]["statuses"][0]["errors"] = [{"code": 131026, "title": "Message undeliverable"}]
+    d.outcome = None
+    await session.commit()
+    await hooks.whatsapp(session, payload)
+    await session.refresh(world.reg)
+    assert world.reg.wa_bounced_at is None and world.reg.wa_bounce_reason.startswith(whatsapp.FIRST_STRIKE)
+
+
+async def test_a_template_meta_refuses_says_so_in_metas_own_words(client, session, world, meta):
+    await connected(client, session, world)
+    meta.fail[f"POST {WABA}/message_templates"] = (400, {"error": {
+        "code": 100, "error_subcode": 2388040, "message": "Invalid parameter",
+        "error_user_title": "Character limit exceeded", "error_user_msg": "The header can have at most 60 characters."}})
+    template = {"name": "venue_change", "language": "en", "category": "UTILITY",
+                "body": {"text": "Hi {{1}}, it moved.", "examples": ["Ananya"]}}
+    r = await client.post(f"{API}/clubs/whatsapp/templates", json=template, headers=world.h)
+    assert r.status_code == 422 and r.json()["error_code"] == "INVALID_TEMPLATE"
+    assert "Character limit exceeded" in r.json()["message"] and "at most 60 characters" in r.json()["message"]
+    assert "doesn't know that ID" not in r.json()["message"]
+    meta.fail[f"DELETE {WABA}/message_templates"] = (400, {"error": {
+        "code": 100, "message": "Invalid parameter", "error_user_title": "Can't delete", "error_user_msg": "A disabled template can't be deleted."}})
+    r = await client.delete(f"{API}/clubs/whatsapp/templates/event_update", headers=world.h)
+    assert r.status_code == 422 and r.json()["error_code"] == "INVALID_TEMPLATE" and "disabled template" in r.json()["message"]
+    # A token Meta no longer accepts is still the token.
+    meta.fail[f"POST {WABA}/message_templates"] = (401, {"error": {"code": 190, "message": "expired"}})
+    r = await client.post(f"{API}/clubs/whatsapp/templates", json=template, headers=world.h)
+    assert r.json()["error_code"] == "WHATSAPP_TOKEN_INVALID"
 
 
 async def test_a_template_the_club_lacks_goes_from_the_platform_or_says_why_not(client, session, world, meta, platform_number, monkeypatch):

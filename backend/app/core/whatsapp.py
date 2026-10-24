@@ -36,11 +36,14 @@ could guess or reuse, and Meta deletes it after 30 days.
 What Meta answers, and what the send becomes (the delivery's status):
 
 - `Undeliverable` -- a fact about the number: none on file, not a mobile
-  number, or WhatsApp says it cannot receive (131026). Skipped; with
-  `permanent`, the registration's number is marked so later sends skip it
-  until it is corrected.
-- `Deferred` -- Meta is busy or down (rate limits 130429, 131048, 131056,
-  80007; 131000, 131016; a 5xx), or was never reached. Tried again with
+  number, WhatsApp says it cannot receive (131026), or the person stopped
+  this business's marketing (131050). Skipped; with `permanent`, the
+  registration's number is marked so later sends skip it until it is
+  corrected -- for 131026 only the second time (`STRIKE_CODES`): a first
+  can be an old WhatsApp or terms not yet accepted, which people fix.
+- `Deferred` -- Meta is busy or down (rate limits 4, 17, 130429, 131048,
+  131056, 80007; 131000, 131016; the account in maintenance, 131057; a
+  5xx), or was never reached. Tried again with
   the backoff email uses, and given up on after MAIL_MAX_ATTEMPTS.
 - `Refused` -- our side: the template (132xxx), the token, the account.
   Failed, with Meta's code in the reason; trying again would only fail
@@ -328,23 +331,36 @@ class Deferred(MailDeferred):
         self.code = code
 
 
-#: Codes about the recipient's number. True: the number itself is dead to WhatsApp.
+#: Codes about the recipient's number. True: the number itself is dead to
+#: WhatsApp (for STRIKE_CODES, once it has happened twice).
 UNDELIVERABLE = {
     "131026": ("WhatsApp says this number cannot receive messages", True),
     "131021": ("The guest's number is the business's own", True),
     "131030": ("The number is not on the WhatsApp account's test list (the account is not live yet)", False),
+    "131050": ("They chose to stop marketing messages from this business", False),
 }
+#: Codes that mark a number dead only the second time they are met: the
+#: first is noted on the registration (FIRST_STRIKE) and the number kept.
+STRIKE_CODES = frozenset({"131026"})
+FIRST_STRIKE = "WhatsApp couldn't reach this number once"
+
+
+def first_strike(code: Optional[str]) -> str:
+    """What a registration says after a STRIKE_CODES failure that is not yet a second."""
+    return f"{FIRST_STRIKE} ({code}); if it happens again, WhatsApp sends to it stop until the number is corrected"
 #: Codes that mean "not now".
 DEFERRED = {
     "1": "WhatsApp had an unknown problem",
     "2": "WhatsApp's service was unavailable",
     "4": "Too many calls to WhatsApp just now",
+    "17": "Too many calls to WhatsApp just now",
     "80007": "The WhatsApp account's rate limit was reached",
     "130429": "WhatsApp's sending rate limit was reached",
     "131000": "WhatsApp could not send it just now",
     "131016": "WhatsApp's service was overloaded",
     "131048": "WhatsApp is limiting this account for its spam rate",
     "131056": "Too many messages to this number just now",
+    "131057": "The WhatsApp account is in maintenance mode",
 }
 #: Codes about our side, in words.
 REFUSED = {
@@ -352,6 +368,7 @@ REFUSED = {
     "3": "The WhatsApp app is not allowed to send messages",
     "10": "The access token is missing a WhatsApp permission",
     "100": "WhatsApp found a value it does not accept",
+    "102": "The WhatsApp access token's session is no longer valid",
     "190": "The WhatsApp access token has expired or was revoked — set a new APP_WHATSAPP_ACCESS_TOKEN",
     "200": "The access token is missing a WhatsApp permission",
     "131008": "A value the template needs was missing",
@@ -359,6 +376,7 @@ REFUSED = {
     "131031": "The WhatsApp business account is locked",
     "131042": "The WhatsApp account has a payment problem",
     "131047": "Outside the 24-hour window — only an approved template can reach them now",
+    "131064": "The WhatsApp account is limited for templates in the wrong category",
     "131051": "That kind of message is not supported",
     "131052": "WhatsApp could not fetch the attachment",
     "131053": "WhatsApp could not take the attachment",
@@ -369,9 +387,9 @@ REFUSED = {
     "132012": "A value does not fit the template's format",
     "132015": "The template is paused for poor quality",
     "132016": "The template has been disabled",
-    "132018": "A value has new lines, tabs or too many spaces in it",
+    "132018": "There's a problem with the template's values (new lines, tabs or too many spaces in one)",
     "133010": "The sending number is not registered with WhatsApp",
-    "368": "The WhatsApp account is blocked for a policy violation",
+    "368": "The business's WhatsApp account is restricted for a policy violation",
 }
 
 
@@ -391,6 +409,9 @@ def refusal(status: int, body) -> Exception:
         return Undeliverable(worded(words), code, permanent=permanent)
     if code in DEFERRED or status == 429 or status >= 500:
         return Deferred(worded(DEFERRED.get(code) or f"WhatsApp answered {status}") + "; it will be tried again", code)
+    if code == "100" and "appsecret_proof" in detail.lower():
+        # The app secret isn't the token's app's: the keys, not a value in the message.
+        return Refused(worded("The app secret doesn't belong to the access token's app (appsecret_proof)"), code)
     if code in REFUSED:
         return Refused(worded(REFUSED[code]), code)
     if detail:

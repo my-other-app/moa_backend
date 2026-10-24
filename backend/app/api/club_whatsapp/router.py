@@ -341,7 +341,7 @@ async def create_template(payload: TemplateIn, request: Request, session: Sessio
     try:
         await graph.create_template(keys, body)
     except graph.GraphError as exc:
-        raise service.refusal(exc) from None
+        raise service.template_refusal(exc) from None
     await audit.record(
         session, actor=user, action="club_whatsapp.template_create", entity_type="club", entity_id=club.id,
         summary=f"Submitted WhatsApp template {body['name']} ({body['language']})",
@@ -376,7 +376,7 @@ async def delete_template(name: str, request: Request, session: SessionDep, user
     try:
         await graph.delete_template(keys, name, hsm_id)
     except graph.GraphError as exc:
-        raise service.refusal(exc) from None
+        raise service.template_refusal(exc) from None
     await audit.record(
         session, actor=user, action="club_whatsapp.template_delete", entity_type="club", entity_id=club.id,
         summary=f"Deleted WhatsApp template {name}{f' ({language})' if language else ''}",

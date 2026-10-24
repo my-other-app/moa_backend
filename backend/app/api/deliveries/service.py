@@ -656,13 +656,14 @@ async def _send(db: pipeline.Db, c: _Claim, ready: _Ready, run: _Run) -> tuple[d
 
 async def _record(
     db: pipeline.Db, c: _Claim, ready: Optional[_Ready], values: dict, *,
-    attempt: Optional[dict] = None, dead: bool = False, dead_number: Optional[str] = None,
+    attempt: Optional[dict] = None, dead: bool = False, dead_number: Optional[str] = None, dead_code: Optional[str] = None,
     meter: Optional[dict] = None,
 ) -> None:
     """One short transaction: the result on the row (if this worker still
     holds it), the attempt the provider took, the admins told of a dead one,
     -- `dead_number` -- the guest's number marked as one WhatsApp cannot
-    reach, so later sends skip it until it is corrected, and -- `meter` --
+    reach, so later sends skip it until it is corrected (a `dead_code` in
+    whatsapp.STRIKE_CODES only the second time), and -- `meter` --
     the message counted against the club's monthly quota (once per send:
     its ref is the row and when it was queued, the provider's own key)."""
     async with db.tx() as s:
@@ -681,11 +682,15 @@ async def _record(
                 .on_conflict_do_nothing(index_elements=["provider_id"])
             )
         if dead_number and ready is not None:
+            R = EventRegistrationsLink
+            values = dict(wa_bounced_at=pipeline.now(), wa_bounce_reason=dead_number[:300])
+            if dead_code in whatsapp.STRIKE_CODES:
+                # Dead only the second time: the first is noted, and the number kept.
+                again = func.coalesce(R.wa_bounce_reason, "").startswith(whatsapp.FIRST_STRIKE)
+                values = dict(wa_bounced_at=case((again, pipeline.now()), else_=R.wa_bounced_at),
+                              wa_bounce_reason=case((again, dead_number[:300]), else_=whatsapp.first_strike(dead_code)[:300]))
             await s.execute(
-                update(EventRegistrationsLink)
-                .where(EventRegistrationsLink.id == ready.reg.id)
-                .values(wa_bounced_at=pipeline.now(), wa_bounce_reason=dead_number[:300])
-                .execution_options(synchronize_session=False)
+                update(R).where(R.id == ready.reg.id).values(**values).execution_options(synchronize_session=False)
             )
         if dead and res.rowcount and ready is not None and ready.event is not None:
             await pipeline.alert_dead(
@@ -711,7 +716,7 @@ async def _handle(db: pipeline.Db, c: _Claim, run: _Run) -> None:
         # A fact about the number, not a failure.
         await _record(
             db, c, ready, dict(status=DeliveryStatus.skipped, error=exc.reason, provider_id=None, sent_at=None, next_attempt_at=None),
-            dead_number=exc.reason if exc.permanent else None,
+            dead_number=exc.reason if exc.permanent else None, dead_code=exc.code,
         )
         return
     except transport.MailDeferred as exc:

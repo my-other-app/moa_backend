@@ -62,20 +62,23 @@ class GraphError(Exception):
     may go through later: no answer, a 5xx, a rate limit."""
 
     def __init__(self, message: str, *, status: int = 0, code: Optional[str] = None, subcode: Optional[str] = None,
-                 title: Optional[str] = None, unreachable: bool = False, body: Optional[dict] = None):
+                 title: Optional[str] = None, user_message: Optional[str] = None, unreachable: bool = False,
+                 body: Optional[dict] = None):
         super().__init__(message)
         self.message = message[:300]
         self.status = status
         self.code = code
         self.subcode = subcode
+        #: Meta's own words for a person: error_user_title, error_user_msg.
         self.title = title
+        self.user_message = (user_message or None) and str(user_message)[:400]
         self.unreachable = unreachable
         #: Meta's own answer, for the send's error mapping (whatsapp.refusal).
         self.body = body or {}
 
 
 #: Codes that mean "not now": Meta's own trouble, or a rate limit.
-BUSY = {"1", "2", "4", "17", "32", "613", "80007", "130429", "131000", "131016"}
+BUSY = {"1", "2", "4", "17", "32", "613", "80007", "130429", "131000", "131016", "131057"}
 #: Codes that say the token no longer works, or lost a permission: the
 #: club's keys, not the thing asked about.
 TOKEN_CODES = frozenset({"0", "3", "10", "102", "190", "200"})
@@ -98,7 +101,7 @@ def _error(r: httpx.Response) -> GraphError:
     message = " ".join(str(details or error.get("message") or f"Meta answered {r.status_code}").split())
     unreachable = r.status_code >= 500 or r.status_code == 429 or code in BUSY
     return GraphError(message, status=r.status_code, code=code, subcode=subcode, title=error.get("error_user_title"),
-                      unreachable=unreachable, body=body if isinstance(body, dict) else {})
+                      user_message=error.get("error_user_msg"), unreachable=unreachable, body=body if isinstance(body, dict) else {})
 
 
 def _auth(keys: Keys, params: Optional[dict]) -> tuple[dict, dict]:
@@ -287,7 +290,11 @@ EXPLAINED = {
     "200": ("WHATSAPP_PERMISSION_MISSING",
             "The token is missing a permission. Give it whatsapp_business_management and whatsapp_business_messaging."),
     "3": ("WHATSAPP_PERMISSION_MISSING", "Your Meta app isn't allowed to use the WhatsApp API. Add the WhatsApp product to the app."),
-    "368": ("WHATSAPP_ACCOUNT_BLOCKED", "Meta has blocked this WhatsApp account for a policy violation. Check WhatsApp Manager."),
+    "368": ("WHATSAPP_ACCOUNT_BLOCKED",
+            "Meta has restricted or disabled this WhatsApp Business Account for a policy violation. Check WhatsApp Manager."),
+    "131064": ("WHATSAPP_ACCOUNT_BLOCKED",
+               "Meta has limited this WhatsApp Business Account for templates in the wrong category. It lifts after a while; "
+               "check the templates' categories in WhatsApp Manager."),
     "131031": ("WHATSAPP_ACCOUNT_BLOCKED", "Meta has locked this WhatsApp Business Account. Check WhatsApp Manager."),
     "131042": ("WHATSAPP_PAYMENT_PROBLEM", "The WhatsApp Business Account has a payment problem. Add or fix its payment method in WhatsApp Manager."),
     "133010": ("WHATSAPP_NUMBER_NOT_REGISTERED", "The number isn't registered with the WhatsApp Cloud API yet. Register it in your app's API setup."),
@@ -307,3 +314,20 @@ def explain(exc: GraphError) -> tuple[int, str, str]:
     if exc.code in ("100", "803") or "does not exist" in message.lower():
         return 422, "WHATSAPP_NUMBER_NOT_FOUND", "Meta doesn't know that ID, or this token can't see it. Check the WhatsApp Business Account ID and the phone number ID."
     return 422, "WHATSAPP_REFUSED", f"Meta refused it: {message}"[:300]
+
+
+def is_template_error(exc: GraphError) -> bool:
+    """Meta refusing a template itself (creating or deleting one): code 100,
+    or one of its 2388xxx template codes (as the code or the subcode)."""
+    return exc.code == "100" or any(str(c or "").startswith("2388") for c in (exc.code, exc.subcode))
+
+
+def explain_template(exc: GraphError) -> tuple[int, str, str]:
+    """(HTTP status, error code, sentence) for a template Meta wouldn't
+    create or delete: INVALID_TEMPLATE in Meta's own words for a person
+    (error_user_title, error_user_msg) when it is about the template --
+    not "Meta doesn't know that ID" -- else what `explain` says of the keys."""
+    if exc.unreachable or not is_template_error(exc) or "appsecret_proof" in (exc.message or "").lower():
+        return explain(exc)
+    words = ": ".join(w for w in (exc.title, exc.user_message) if w) or exc.message or "Meta didn't accept the template."
+    return 422, "INVALID_TEMPLATE", f"Meta didn't accept the template. {words}"[:400]

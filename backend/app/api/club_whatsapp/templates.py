@@ -422,5 +422,5 @@ async def install_standard(keys: graph.Keys, have: set[str]) -> dict[str, str]:
             if exc.code == "APP_ID":
                 out[name] = "Add your app ID in the connection settings first: a document header needs it."
             else:
-                out[name] = graph.explain(exc)[2]
+                out[name] = graph.explain_template(exc)[2]
     return out
