@@ -22,7 +22,7 @@ people the number reached in the moving day, its tickets and inbox
 templates counted too); the rest wait for the next day (`held`). Meta's
 "not now" codes are tried again with a backoff, 131049 (its per-person
 marketing limit) once more a day later, 131050 never (the person stopped the
-club's marketing: their consent is withdrawn, and the opt-out store told).
+club's marketing: a marketing opt-out is kept, and their consent withdrawn).
 A MARKETING template goes to Meta's Marketing Messages API
 (`/marketing_messages`) once the account's
 `marketing_messages_onboarding_status` is ONBOARDED, else to `/messages`;
