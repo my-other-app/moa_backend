@@ -449,6 +449,33 @@ async def _whatsapp_send(db: pipeline.Db, ready: "_Ready", message: whatsapp.Tem
     return out
 
 
+async def requeue_from_platform(session, delivery_id, *, wamid: str, club_id: int, reason: str) -> bool:
+    """A WhatsApp send that went from a club's own number (`wamid`) and that
+    Meta then failed for the club's account, its template or its number
+    alone -- Meta says it was not delivered, so it is pending again, and the
+    next try goes from the platform's number (the club's route is closed by
+    then). Only that club's own delivery, still as it was sent; in the
+    caller's transaction. True when it was put back."""
+    d = await session.scalar(
+        select(Deliveries)
+        .join(Events, Events.id == Deliveries.event_id)
+        .where(
+            Deliveries.id == delivery_id, Deliveries.provider_id == wamid, Deliveries.channel == DeliveryChannel.whatsapp,
+            Deliveries.status == DeliveryStatus.sent, Events.club_id == club_id,
+        )
+        .with_for_update()
+    )
+    if d is None:
+        return False
+    now = pipeline.now()
+    d.status, d.error, d.provider_id, d.sent_at = DeliveryStatus.pending, reason[:400], None, None
+    d.outcome = d.outcome_at = d.reason = d.reason_code = None
+    # A new send: its own idempotency key and quota ref (the club's number's was never counted).
+    d.queued_at, d.next_attempt_at, d.claimed_at, d.updated_at = now, None, None, now
+    await start(session, d.event_id, d.kind, dedupe=True)
+    return True
+
+
 # --- one row: claim, read, render, send, record -------------------------------
 
 

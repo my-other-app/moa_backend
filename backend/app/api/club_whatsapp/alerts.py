@@ -91,3 +91,32 @@ async def tell_owner(session, club_id: int, kind: str, *, subject: str, paragrap
         return False
     run_after_commit(session, _send, to, subject, paragraphs, button or ("Open WhatsApp settings", dashboard_url()), None)
     return True
+
+
+#: How often one kind of admin alert about one club may be raised.
+ADMIN_EVERY = timedelta(days=1)
+
+
+async def tell_admins(session, kind: str, *, title: str, body: str, club_id: int, data: dict,
+                      every: timedelta = ADMIN_EVERY, now: datetime | None = None) -> bool:
+    """An admin alert (app/api/admin_alerts) about a club's number, unless one
+    of this kind with the same `data["code"]` was raised for the club within
+    `every` -- a day, or an hour for what a webhook can repeat a hundred
+    times an hour (a bad signature, unreadable keys). True when raised."""
+    from app.api.admin_alerts import notify
+    from app.api.admin_alerts.models import AdminNotifications
+
+    now = now or datetime.now(timezone.utc)
+    recent = await session.scalar(
+        select(AdminNotifications.id)
+        .where(
+            AdminNotifications.kind == kind,
+            AdminNotifications.club_id == club_id,
+            AdminNotifications.data["code"].as_string() == str(data.get("code") or ""),
+            AdminNotifications.created_at >= now - every,
+        )
+        .limit(1)
+    )
+    if recent is not None:
+        return False
+    return await notify(session, kind, title=title, body=body, club=club_id, data=data) is not None

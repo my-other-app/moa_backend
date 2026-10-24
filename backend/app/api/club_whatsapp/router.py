@@ -13,17 +13,19 @@ no message content at all.
 """
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 from typing import Optional
 
 from fastapi import APIRouter, Query, Request, Response
+from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 
 from app.api.club_access import service as club_access
 from app.api.club_whatsapp import access, crypto, graph, inbox, live, templates, webhook
 from app.api.club_whatsapp import service
-from app.api.club_whatsapp.models import ClubWhatsAppConversations, ClubWhatsAppQualityLog
+from app.api.club_whatsapp.models import DISCONNECTED, ClubWhatsAppConversations, ClubWhatsAppQualityLog
 from app.api.club_whatsapp.schemas import (
     AccountKeysIn,
     AccountOut,
@@ -421,6 +423,26 @@ async def admin_get(club_id: int, session: SessionDep, admin: AdminAuth) -> Admi
 # ─── Meta's webhook for a club's number ──────────────────────────────────
 
 
+#: Meta's webhook payloads are at most 3 MB (its webhooks overview); a body
+#: past this, with a little room, is refused before anything is looked up.
+WEBHOOK_MAX_BYTES = 3 * 1024 * 1024 + 256 * 1024
+
+
+def _hook_answer(status: int, body: dict) -> JSONResponse:
+    return JSONResponse(body, status_code=status)
+
+
+async def _bounded_body(request: Request) -> Optional[bytes]:
+    """The body, or None when it is longer than Meta ever sends."""
+    chunks, size = [], 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > WEBHOOK_MAX_BYTES:
+            return None
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 @hook_router.get("/{token}", summary="Meta subscribes a club's app by asking for its verify token back")
 async def club_hook_verify(token: str, request: Request, session: SessionDep) -> Response:
     q = request.query_params
@@ -431,40 +453,57 @@ async def club_hook_verify(token: str, request: Request, session: SessionDep) ->
             expected = crypto.decrypt(account.verify_token_enc)
         except crypto.Unavailable:
             expected = None
-    import hmac
-
-    if expected and q.get("hub.mode") == "subscribe" and hmac.compare_digest(q.get("hub.verify_token") or "", expected):
+    given = (q.get("hub.verify_token") or "").encode("utf-8")
+    if expected and q.get("hub.mode") == "subscribe" and hmac.compare_digest(given, expected.encode("utf-8")):
         return Response(content=q.get("hub.challenge") or "", media_type="text/plain")
     return Response(content="", media_type="text/plain", status_code=403)
 
 
 @hook_router.post("/{token}", summary="What Meta tells a club's own number: messages, statuses, templates, quality")
-async def club_hook(token: str, request: Request, session: SessionDep) -> dict:
-    """Signed by Meta with the club's app secret (`X-Hub-Signature-256`);
-    refused without it. Answers quickly, and never with our own trouble:
-    Meta retries a failed delivery for days."""
-    raw = await request.body()
+async def club_hook(token: str, request: Request, session: SessionDep) -> Response:
+    """Signed by Meta with the club's app secret (`X-Hub-Signature-256`).
+    Meta delivers again, for 7 days, whatever is not answered 200, so the
+    answer says whether to: 200 when it was taken, and for a token that is
+    no club's (or a number since disconnected: nothing will ever take it);
+    403 for a signature that doesn't match (the club may be fixing its app
+    secret); 413 for a body larger than Meta sends; 503 when the keys can't
+    be read or something failed here -- what was kept is not kept twice
+    when it comes again. Never a message or the body in the log."""
+    length = (request.headers.get("content-length") or "").strip()
+    if length and (not length.isdigit() or int(length) > WEBHOOK_MAX_BYTES):
+        return _hook_answer(413, {"ok": False, "reason": "too_large"})
+    raw = await _bounded_body(request)
+    if raw is None:
+        return _hook_answer(413, {"ok": False, "reason": "too_large"})
     account = await service.by_webhook_token(session, token)
-    if account is None or not account.app_secret_enc:
-        return {"ok": False, "reason": "unknown"}
+    if account is None or account.status == DISCONNECTED or not account.app_secret_enc:
+        return _hook_answer(200, {"ok": False, "reason": "unknown"})
     try:
         secret = crypto.decrypt(account.app_secret_enc)
     except crypto.Unavailable:
-        return {"ok": False, "reason": "keys"}
+        await service.keys_unreadable(session, account)
+        await session.commit()
+        return _hook_answer(503, {"ok": False, "reason": "keys"})
     if not webhook.signature_ok(raw, request.headers.get("x-hub-signature-256"), secret):
         logger.warning("club whatsapp hook %s refused: signature did not verify", service.token_hint(token))
         await service.bad_signature(session, account)
         await session.commit()
-        return {"ok": False, "reason": "signature"}
-    club_id = account.club_id
+        return _hook_answer(403, {"ok": False, "reason": "signature"})
     try:
         payload = json.loads(raw.decode("utf-8") or "{}")
+    except ValueError:
+        logger.warning("club whatsapp hook %s: a signed body that isn't JSON", service.token_hint(token))
+        return _hook_answer(400, {"ok": False, "reason": "not_json"})
+    club_id = account.club_id
+    try:
         result = await webhook.handle(session, account, payload if isinstance(payload, dict) else {})
         await session.commit()
     except Exception as exc:  # noqa: BLE001 - never the body or a message in the log
         logger.warning("club whatsapp hook %s failed (%s)", service.token_hint(token), type(exc).__name__)
         await session.rollback()
-        return {"ok": True, "matched": 0}
+        return _hook_answer(503, {"ok": False, "reason": "retry"})
     for conversation_id, kind in result["conversations"].items():
         await live.changed(club_id, conversation_id, kind)
-    return {"ok": True, "messages": result["messages"], "statuses": result["statuses"]}
+    out = {"ok": not result["failed"], "messages": result["messages"], "statuses": result["statuses"], "failed": result["failed"]}
+    # What was kept stays kept; Meta brings the rest again.
+    return _hook_answer(503 if result["failed"] else 200, out)

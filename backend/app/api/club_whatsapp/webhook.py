@@ -17,11 +17,19 @@ without a good one is refused before its body is read for anything.
   sweep's next pass.
 - `account_update`: Meta restricting or banning the account, kept as the
   connection's last error and told to the club.
+
+Meta delivers again (for 7 days) whatever is not answered 200, and may
+deliver anything twice. Each message, status and change is handled in a
+SAVEPOINT of its own: one that fails is undone alone, the rest are kept,
+and the delivery is answered 503 so Meta sends it again -- when what was
+kept the first time is not kept twice (a message by its wamid, a status
+only ever moving forward).
 """
 from __future__ import annotations
 
 import hashlib
 import hmac
+import logging
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -29,24 +37,39 @@ from app.api.club_whatsapp import alerts, inbox, templates
 from app.api.club_whatsapp import service as accounts
 from app.api.club_whatsapp.models import ClubWhatsAppAccounts
 
+logger = logging.getLogger(__name__)
+
 #: Meta's account_update events that mean the number may not send.
 RESTRICTING = {"DISABLED_UPDATE", "ACCOUNT_VIOLATION", "ACCOUNT_RESTRICTION", "ACCOUNT_DELETED", "PARTNER_REMOVED"}
 
 
 def signature_ok(body: bytes, signature: Optional[str], app_secret: str) -> bool:
+    """Compared as bytes: a header with characters beyond ASCII is simply
+    not the signature (hmac.compare_digest raises on such a str)."""
     if not signature or not app_secret:
         return False
-    expected = "sha256=" + hmac.new(app_secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, signature.strip())
+    expected = b"sha256=" + hmac.new(app_secret.encode("utf-8"), body, hashlib.sha256).hexdigest().encode("ascii")
+    return hmac.compare_digest(expected, signature.strip().encode("utf-8", "replace"))
+
+
+def _errors_said(account: ClubWhatsAppAccounts, where: str, errors) -> None:
+    """Meta's own errors in a delivery (`value.errors`: about the app or the
+    account): logged by code and title, which are Meta's words, never what
+    a message said."""
+    for error in errors if isinstance(errors, list) else []:
+        if isinstance(error, dict):
+            logger.warning("club whatsapp account %s: Meta reported an error in %s (%s: %s)", account.id, where,
+                           error.get("code"), str(error.get("title") or error.get("message") or "")[:200])
 
 
 async def handle(session, account: ClubWhatsAppAccounts, payload: dict) -> dict:
     """One delivery from Meta. What changed, for the inbox's live updates:
-    {"messages": n, "statuses": n, "conversations": {id: kind}}."""
+    {"messages": n, "statuses": n, "failed": n, "conversations": {id: kind}};
+    `failed` items were undone and the caller has Meta deliver again."""
     now = datetime.now(timezone.utc)
     account.last_webhook_at = now
     touched: dict[int, str] = {}
-    counts = {"messages": 0, "statuses": 0}
+    counts = {"messages": 0, "statuses": 0, "failed": 0}
     for entry in payload.get("entry") or []:
         if not isinstance(entry, dict):
             continue
@@ -59,12 +82,18 @@ async def handle(session, account: ClubWhatsAppAccounts, payload: dict) -> dict:
             value = change.get("value") if isinstance(change.get("value"), dict) else {}
             if field == "messages":
                 await _messages(session, account, value, touched, counts)
-            elif field == "message_template_status_update":
-                await templates.status_update(session, account, value)
-            elif field == "phone_number_quality_update":
-                await _quality(session, account, value)
-            elif field == "account_update":
-                await _account(session, account, value)
+                continue
+            try:
+                async with session.begin_nested():
+                    if field == "message_template_status_update":
+                        await templates.status_update(session, account, value)
+                    elif field == "phone_number_quality_update":
+                        await _quality(session, account, value)
+                    elif field == "account_update":
+                        await _account(session, account, value)
+            except Exception as exc:  # noqa: BLE001 - undone alone; Meta delivers it again
+                counts["failed"] += 1
+                logger.warning("club whatsapp account %s: a %s change could not be kept (%s)", account.id, field, type(exc).__name__)
     return {**counts, "conversations": touched}
 
 
@@ -72,6 +101,7 @@ async def _messages(session, account, value: dict, touched: dict, counts: dict) 
     number = str(((value.get("metadata") or {}).get("phone_number_id")) or "")
     if number and number != account.phone_number_id:
         return
+    _errors_said(account, "messages", value.get("errors"))
     names = {}
     for c in value.get("contacts") or []:
         if isinstance(c, dict) and c.get("wa_id"):
@@ -79,14 +109,26 @@ async def _messages(session, account, value: dict, touched: dict, counts: dict) 
     for m in value.get("messages") or []:
         if not isinstance(m, dict):
             continue
-        conv = await inbox.record_inbound(session, account, account.phone_number_id, m, names.get(str(m.get("from") or "")))
+        try:
+            async with session.begin_nested():
+                conv = await inbox.record_inbound(session, account, account.phone_number_id, m, names.get(str(m.get("from") or "")))
+        except Exception as exc:  # noqa: BLE001 - never the message in the log
+            counts["failed"] += 1
+            logger.warning("club whatsapp account %s: a message could not be kept (%s)", account.id, type(exc).__name__)
+            continue
         if conv is not None:
             counts["messages"] += 1
             touched[conv.id] = "message"
     for st in value.get("statuses") or []:
         if not isinstance(st, dict):
             continue
-        conv_id = await inbox.record_status(session, account, st)
+        try:
+            async with session.begin_nested():
+                conv_id = await inbox.record_status(session, account, st)
+        except Exception as exc:  # noqa: BLE001
+            counts["failed"] += 1
+            logger.warning("club whatsapp account %s: a status could not be kept (%s)", account.id, type(exc).__name__)
+            continue
         counts["statuses"] += 1
         if conv_id is not None:
             touched.setdefault(conv_id, "status")

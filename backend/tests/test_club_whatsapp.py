@@ -540,13 +540,131 @@ async def test_meta_subscribes_with_the_clubs_own_verify_token(client, session, 
 async def test_a_delivery_without_the_clubs_signature_is_refused_before_it_is_read(client, session, world, meta):
     account = await connected(client, session, world)
     r = await hook(client, account.webhook_token, inbound(text_msg("wamid.FORGED", "hello")), secret="f" * 32)
-    assert r.json() == {"ok": False, "reason": "signature"}
+    # 403: Meta delivers it again while the club puts its app secret right.
+    assert r.status_code == 403 and r.json() == {"ok": False, "reason": "signature"}
     unsigned = await client.post(f"{API}/hooks/whatsapp/club/{account.webhook_token}", json=inbound(text_msg("wamid.X", "hi")))
-    assert unsigned.json()["reason"] == "signature"
+    assert unsigned.status_code == 403 and unsigned.json()["reason"] == "signature"
+    # A header beyond ASCII is just not the signature (it was a 500).
+    odd = await client.post(f"{API}/hooks/whatsapp/club/{account.webhook_token}", content=b"{}",
+                            headers={"content-type": "application/json", "x-hub-signature-256": "sha256=ü".encode()})
+    assert odd.status_code == 403
     assert await session.scalar(select(func.count()).select_from(ClubWhatsAppMessages)) == 0
     row = await account_of(session, world.club.id)
     assert "signature" in row.last_error
+    # The admins hear of it once an hour, however often Meta tries.
     assert await session.scalar(select(func.count()).select_from(AdminNotifications).where(AdminNotifications.kind == "club_whatsapp_failed")) == 1
+
+
+async def test_a_bad_signature_does_not_hide_what_the_page_already_says(client, session, world, meta):
+    account = await connected(client, session, world)
+    account.last_error = "Meta restricted the WhatsApp account (ACCOUNT_RESTRICTION)."
+    await session.commit()
+    r = await hook(client, account.webhook_token, inbound(text_msg("wamid.FORGED", "hello")), secret="f" * 32)
+    assert r.status_code == 403
+    assert (await account_of(session, world.club.id)).last_error == "Meta restricted the WhatsApp account (ACCOUNT_RESTRICTION)."
+
+
+async def test_the_verify_token_is_compared_as_bytes(client, session, world, meta):
+    account = await connected(client, session, world)
+    r = await client.get(f"{API}/hooks/whatsapp/club/{account.webhook_token}",
+                         params={"hub.mode": "subscribe", "hub.verify_token": "വെരിഫൈ", "hub.challenge": "1"})
+    assert r.status_code == 403
+
+
+async def test_unreadable_keys_answer_503_and_the_admins_hear_once_an_hour(client, session, world, meta, monkeypatch):
+    account = await connected(client, session, world)
+    monkeypatch.setattr(settings, "WHATSAPP_KEYS_SECRET", Fernet.generate_key().decode())
+    for n in range(2):
+        r = await hook(client, account.webhook_token, inbound(text_msg(f"wamid.K{n}", "hello")))
+        assert r.status_code == 503 and r.json()["reason"] == "keys"
+    told = (await session.scalars(select(AdminNotifications).where(AdminNotifications.kind == "club_whatsapp_failed"))).all()
+    assert len(told) == 1 and told[0].data["code"] == "keys_unreadable"
+    # Not the club's doing: its number is not marked, nor the club mailed.
+    assert (await account_of(session, world.club.id)).status == "active"
+
+
+async def test_a_body_larger_than_meta_sends_is_refused_unread(client, session, world, meta):
+    account = await connected(client, session, world)
+    body = b"{" + b" " * (4 * 1024 * 1024) + b"}"
+    r = await client.post(f"{API}/hooks/whatsapp/club/{account.webhook_token}", content=body,
+                          headers={"content-type": "application/json", "x-hub-signature-256": sign(body)})
+    assert r.status_code == 413
+    # Before the token is looked up at all.
+    r = await client.post(f"{API}/hooks/whatsapp/club/not-a-club-token-xyz", content=body, headers={"content-type": "application/json"})
+    assert r.status_code == 413
+    assert (await account_of(session, world.club.id)).last_webhook_at is None
+
+
+async def test_one_message_that_fails_is_undone_alone_and_comes_again(client, session, world, meta, monkeypatch):
+    """Each message in its own SAVEPOINT: the other is kept, Meta is told
+    503, and when it delivers the batch again nothing is kept twice."""
+    account = await connected(client, session, world)
+    first, second = text_msg("wamid.ONE", "first"), text_msg("wamid.TWO", "second")
+    real_parse = inbox.parse_inbound
+    broken = {"wamid.TWO"}
+
+    def parse(m):
+        if m.get("id") in broken:
+            raise RuntimeError("not today")
+        return real_parse(m)
+
+    monkeypatch.setattr(inbox, "parse_inbound", parse)
+    r = await hook(client, account.webhook_token, inbound(first, second))
+    assert r.status_code == 503 and r.json()["messages"] == 1 and r.json()["failed"] == 1
+    assert (await session.scalars(select(ClubWhatsAppMessages.wamid))).all() == ["wamid.ONE"]
+    broken.clear()
+    r = await hook(client, account.webhook_token, inbound(first, second))
+    assert r.status_code == 200 and r.json() == {"ok": True, "messages": 1, "statuses": 0, "failed": 0}
+    assert sorted((await session.scalars(select(ClubWhatsAppMessages.wamid))).all()) == ["wamid.ONE", "wamid.TWO"]
+    conv = await session.scalar(select(ClubWhatsAppConversations).execution_options(populate_existing=True))
+    assert conv.unread_count == 2
+
+
+async def test_a_clubs_webhook_cannot_touch_another_clubs_ticket(client, session, world, meta, platform_number, make_user, make_registration):
+    """A club signs its own webhook, so whatever it sends there is only
+    believed about its own messages: a status naming another club's ticket
+    changes nothing."""
+    account = await connected(client, session, world)
+    other = await make_registration(event=world.other_event, user=await make_user(email="t2@example.com"), full_name="Tara", email="t2@example.com",
+                                    phone="9000000009", whatsapp_opt_in=True, created_at=NOW - timedelta(days=10))
+    await session.commit()
+    await deliveries.queue(session, world.other_event, DeliveryKind.reminder, registration_ids=[other.id])
+    row = await session.scalar(select(Deliveries).where(Deliveries.registration_id == other.id, Deliveries.channel == DeliveryChannel.whatsapp))
+    d = await deliveries.deliver(session, row.id)
+    assert d.provider_id == "wamid.PLATFORM1"
+    st = {"id": "wamid.PLATFORM1", "status": "failed", "timestamp": str(int(NOW.timestamp())), "recipient_id": "919000000009",
+          "errors": [{"code": 131026, "title": "Message undeliverable"}]}
+    r = await hook(client, account.webhook_token, inbound(statuses=[st]))
+    assert r.status_code == 200
+    d = await session.get(Deliveries, d.id, populate_existing=True)
+    await session.refresh(other)
+    assert d.outcome is None and d.status == DeliveryStatus.sent and other.wa_bounced_at is None
+
+
+async def test_meta_failing_a_ticket_for_the_clubs_account_sends_it_again_from_the_platform(
+        client, session, world, meta, platform_number, mails):
+    await connected(client, session, world)
+    d = await _reminder(session, world)
+    assert d.provider_id == "wamid.CLUB1"
+    account = await account_of(session, world.club.id)
+    st = {"id": "wamid.CLUB1", "status": "failed", "timestamp": str(int(NOW.timestamp())), "recipient_id": GUEST,
+          "errors": [{"code": 131042, "title": "Business eligibility payment issue",
+                      "error_data": {"details": "Message failed to send because there were one or more errors related to your payment method."}}]}
+    for _ in range(2):  # and Meta may say it twice
+        r = await hook(client, account.webhook_token, inbound(statuses=[st]))
+        assert r.status_code == 200, r.text
+    account = await account_of(session, world.club.id)
+    assert account.status == "failed" and account.last_error_code == "131042"
+    assert await session.scalar(select(func.count()).select_from(AdminNotifications).where(AdminNotifications.kind == "club_whatsapp_failed")) == 1
+    d = await session.get(Deliveries, d.id, populate_existing=True)
+    assert d.status == DeliveryStatus.pending and d.provider_id is None and "MyOtherApp's number" in d.error
+    await session.refresh(world.reg)
+    assert world.reg.wa_bounced_at is None
+    d = await deliveries.deliver(session, d.id)
+    assert d.status == DeliveryStatus.sent and d.provider_id == "wamid.PLATFORM1"
+    msg = await session.scalar(select(ClubWhatsAppMessages).where(ClubWhatsAppMessages.wamid == "wamid.CLUB1")
+                               .execution_options(populate_existing=True))
+    assert msg.status == "failed" and msg.error_code == "131042"
 
 
 async def test_a_message_is_kept_once_opens_the_window_and_is_linked_to_the_registrant(client, session, world, meta):
@@ -740,7 +858,8 @@ async def test_no_message_content_reaches_the_log(client, session, world, meta, 
     monkeypatch.setattr(inbox, "record_inbound", broken)
     with caplog.at_level(logging.DEBUG):
         r = await hook(client, token, inbound(text_msg("wamid.PRIV", "my private words 4417")))
-    assert r.json() == {"ok": True, "matched": 0}
+    # Not kept, so Meta is asked to deliver it again.
+    assert r.status_code == 503 and r.json() == {"ok": False, "messages": 0, "statuses": 0, "failed": 1}
     assert "secret plan" not in caplog.text and "private words 4417" not in caplog.text and GUEST not in caplog.text
     ours = "\n".join(r.getMessage() for r in caplog.records if r.name.startswith("app."))
     assert "ValueError" in ours and token not in ours

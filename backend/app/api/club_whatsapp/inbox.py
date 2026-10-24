@@ -385,8 +385,16 @@ def parse_inbound(m: dict) -> dict:
     kind = str(m.get("type") or "unsupported")
     kind = kind if kind in KNOWN_TYPES else "unsupported"
     out: dict = {"type": kind, "body": None, "media_id": None, "media_mime": None, "media_filename": None,
-                 "location": None, "context_wamid": ((m.get("context") or {}).get("id") or None)}
+                 "location": None, "context_wamid": ((m.get("context") or {}).get("id") or None),
+                 "error_code": None, "error_title": None}
     part = m.get(kind) if isinstance(m.get(kind), dict) else {}
+    errors = m.get("errors") if isinstance(m.get("errors"), list) else []
+    error = errors[0] if errors and isinstance(errors[0], dict) else None
+    if error is not None:
+        # What Meta could not pass on (an unsupported message, media it could not fetch): its code and words.
+        out["error_code"] = (error.get("code") is not None and str(error.get("code"))[:16]) or None
+        detail = (error.get("error_data") or {}).get("details") if isinstance(error.get("error_data"), dict) else None
+        out["error_title"] = str(detail or error.get("title") or error.get("message") or "")[:200] or None
     if kind == "text":
         out["body"] = part.get("body")
     elif kind in MEDIA_TYPES:
@@ -416,7 +424,8 @@ def parse_inbound(m: dict) -> dict:
 async def record_inbound(session, account: ClubWhatsAppAccounts, business_phone_id: str, message: dict,
                          profile_name: Optional[str]) -> Optional[ClubWhatsAppConversations]:
     """One message someone sent the club's number: kept once (Meta may send
-    it again), the window opened, counted unread and waiting for a reply."""
+    it again: the insert does nothing on a wamid already kept), the window
+    opened, counted unread and waiting for a reply."""
     wa_id = re.sub(r"\D", "", str(message.get("from") or ""))[:20]
     wamid = str(message.get("id") or "")[:128]
     if not wa_id or not wamid:
@@ -425,13 +434,16 @@ async def record_inbound(session, account: ClubWhatsAppAccounts, business_phone_
         return None
     at = _ts(message.get("timestamp")) or _now()
     conv = await conversation(session, account.club_id, business_phone_id, wa_id, account_id=account.id, profile_name=profile_name)
-    fields = parse_inbound(message)
-    msg = ClubWhatsAppMessages(
-        conversation_id=conv.id, club_id=account.club_id, direction=IN, status=RECEIVED, wamid=wamid,
-        wa_timestamp=at, created_at=_now(), **fields,
+    fields = dict(conversation_id=conv.id, club_id=account.club_id, direction=IN, status=RECEIVED, wamid=wamid,
+                  wa_timestamp=at, created_at=_now(), **parse_inbound(message))
+    table = ClubWhatsAppMessages.__table__
+    kept = await session.scalar(
+        pg_insert(table).values(**fields).on_conflict_do_nothing(index_elements=[table.c.wamid]).returning(table.c.id)
     )
-    session.add(msg)
-    await session.flush()
+    if kept is None:
+        # Another delivery of it, at the same moment, kept it first.
+        return None
+    msg = ClubWhatsAppMessages(id=kept, **fields)
     last_in = _aware(conv.last_inbound_at)
     if last_in is None or at > last_in:
         conv.last_inbound_at = at
@@ -446,8 +458,11 @@ async def record_inbound(session, account: ClubWhatsAppAccounts, business_phone_
 async def record_status(session, account: ClubWhatsAppAccounts, st: dict) -> Optional[int]:
     """Meta saying what became of something the club's number sent: the
     message's status moves forward only (a late "delivered" never undoes
-    "read"); failed carries Meta's error. A ticket or certificate sent from
-    the club's number is a delivery, which hears it too (hooks.service).
+    "read"); failed carries Meta's error. Only this club's own messages: a
+    ticket or certificate its number sent is a delivery, which hears it too
+    (hooks.service, matched by that message's id alone and in this
+    transaction), and one Meta failed for the club's account, its template
+    or the club's number alone goes again from the platform's (refused_later).
     The conversation's id when a message moved."""
     from app.api.hooks import service as hooks
     from app.api.hooks.verdicts import whatsapp_verdict
@@ -458,14 +473,18 @@ async def record_status(session, account: ClubWhatsAppAccounts, st: dict) -> Opt
         return None
     at = _ts(st.get("timestamp")) or _now()
     error = (st.get("errors") or [None])[0] if isinstance(st.get("errors"), list) else None
-    verdict = whatsapp_verdict(status, error)
-    if verdict is not None:
-        await hooks.record(session, wamid, "whatsapp", verdict, at)
+    error = error if isinstance(error, dict) else None
     msg = await session.scalar(
         select(ClubWhatsAppMessages).where(ClubWhatsAppMessages.wamid == wamid, ClubWhatsAppMessages.club_id == account.club_id)
     )
     if msg is None or msg.direction != OUT:
         return None
+    if msg.via == VIA_DELIVERY and msg.delivery_id is not None:
+        verdict = whatsapp_verdict(status, error)
+        if verdict is not None:
+            await hooks.record(session, wamid, "whatsapp", verdict, at, commit=False)
+    if status == FAILED_MESSAGE and error is not None:
+        await refused_later(session, account, msg, error)
     if status == FAILED_MESSAGE:
         if msg.status == READ:
             return None
@@ -487,6 +506,31 @@ async def record_status(session, account: ClubWhatsAppAccounts, st: dict) -> Opt
         if latest == msg.id:
             conv.last_message_status = msg.status
     return msg.conversation_id
+
+
+async def refused_later(session, account: ClubWhatsAppAccounts, msg: ClubWhatsAppMessages, error: dict) -> None:
+    """A message from the club's number that Meta failed after taking it,
+    read as a send's refusal would be (whatsapp.refusal): about the club's
+    account (the number is marked failed, and the club told once), its
+    template (unusable until Meta says otherwise), or only the club's number
+    (its test list). Meta says it was not delivered, so a ticket,
+    certificate or reminder among them goes again, from the platform's
+    number -- the club's own delivery, sent from its number, only."""
+    from app.api.deliveries import service as deliveries
+
+    refusal = whatsapp.refusal(0, {"error": error})
+    route = accounts.Route(sender=None, account_id=account.id, club_id=account.club_id, template=msg.template_name or "")
+    if accounts.is_account_problem(refusal):
+        await accounts.mark_failed(session, account, refusal.reason, refusal.code)
+    elif accounts.is_template_problem(refusal) and msg.template_name:
+        await accounts.after_failure(session, route, refusal)
+    elif not accounts.is_club_only(refusal):
+        return
+    if msg.via == VIA_DELIVERY and msg.delivery_id is not None and whatsapp.configured():
+        await deliveries.requeue_from_platform(
+            session, msg.delivery_id, wamid=msg.wamid, club_id=account.club_id,
+            reason=f"{refusal.reason}; sending it again from MyOtherApp's number",
+        )
 
 
 # ─── Sending ─────────────────────────────────────────────────────────────

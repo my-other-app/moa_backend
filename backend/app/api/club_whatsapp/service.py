@@ -30,7 +30,7 @@ import logging
 import re
 import secrets
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import delete, func, select
@@ -801,15 +801,35 @@ async def by_webhook_token(session, token: str) -> Optional[ClubWhatsAppAccounts
     return await session.scalar(select(ClubWhatsAppAccounts).where(ClubWhatsAppAccounts.webhook_token == token))
 
 
+#: What the club's page says while webhooks arrive with signatures that don't match.
+BAD_SIGNATURE = "A webhook arrived with a signature that doesn't match. Check the app secret saved here is your app's."
+#: How often the admins hear of a webhook trouble that repeats with every delivery.
+HOURLY = timedelta(hours=1)
+
+
 async def bad_signature(session, account: ClubWhatsAppAccounts) -> None:
     """Most likely the app secret saved is not the app's. Said on the club's
-    page, and to the admins at most once in ten minutes."""
-    from app.api.admin_alerts import notify
-
-    account.last_error = "A webhook arrived with a signature that doesn't match. Check the app secret saved here is your app's."
-    await notify(
+    page -- unless the page already says something else, which matters
+    more -- and to the admins at most once an hour."""
+    if account.last_error in (None, BAD_SIGNATURE):
+        account.last_error = BAD_SIGNATURE
+    await alerts.tell_admins(
         session, "club_whatsapp_failed",
         title="A webhook for a club's own WhatsApp number had a bad signature",
         body="Either the club's saved app secret is wrong, or someone else is calling its webhook address.",
-        club=account.club_id, data={"account_id": account.id, "code": "bad_signature"},
+        club_id=account.club_id, data={"account_id": account.id, "code": "bad_signature"}, every=HOURLY,
+    )
+
+
+async def keys_unreadable(session, account: ClubWhatsAppAccounts) -> None:
+    """A webhook whose app secret can't be decrypted: the server's
+    WHATSAPP_KEYS_SECRET, not the club. Meta is answered 503 (it delivers
+    again) and the admins told at most once an hour."""
+    logger.error("club whatsapp account %s: a webhook came and its app secret can't be decrypted (APP_WHATSAPP_KEYS_SECRET)", account.id)
+    await alerts.tell_admins(
+        session, "club_whatsapp_failed",
+        title="A club's WhatsApp webhooks can't be checked: its keys can't be read",
+        body="APP_WHATSAPP_KEYS_SECRET is missing or isn't the key the club's keys were saved with. Meta keeps delivering "
+             "for 7 days; restore the key and they are taken.",
+        club_id=account.club_id, data={"account_id": account.id, "code": "keys_unreadable"}, every=HOURLY,
     )
