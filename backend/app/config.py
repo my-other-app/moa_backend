@@ -25,14 +25,16 @@ class AppConfig(BaseSettings):
     DEBUG: bool = False
     # Which deployment this is: production, staging, development, test...
     # Any but development, dev, local, test and ci (and, unset, any process
-    # with DEBUG off) is checked at startup, and refuses to start on a
-    # missing, placeholder, weak or half-set secret (app/core/config_checks.py;
+    # with DEBUG off) has its settings checked at startup for a missing,
+    # placeholder, weak or half-set secret (app/core/config_checks.py;
     # docs/OPERATIONS.md, section 19). Sentry's environment, unless
     # SENTRY_ENVIRONMENT says otherwise.
     ENV: str = ""
-    # "warn": those findings are logged at ERROR and the process starts
-    # anyway. An emergency override only; the default refuses.
-    CONFIG_CHECKS: str = "enforce"
+    # What a failed check does. "warn" (the default): every finding is
+    # logged at ERROR -- and so reaches Sentry -- and the process starts
+    # anyway. "enforce": the process refuses to start. Set enforce once
+    # `python -m app.core.config_checks` prints no FATAL line.
+    CONFIG_CHECKS: str = "warn"
     # uvicorn's line per request. nginx in front already logs every request,
     # so this is a second copy, written on every request; false drops it.
     ACCESS_LOG: bool = True

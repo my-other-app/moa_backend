@@ -46,9 +46,13 @@ async def _wake_on_redis(runner) -> None:
 async def main() -> None:
     import doth  # noqa: F401 - registers every handler, as the API does
     from app.config import settings
-    from app.core import jobs, redis
+    from app.core import config_checks, jobs, redis
     from app.db.core import check_connection_budget, engine
 
+    # The settings check's findings, now that Sentry is on (doth started
+    # it); under APP_CONFIG_CHECKS=enforce a fatal one already stopped the
+    # process before the app was imported (below).
+    config_checks.enforce()
     await check_connection_budget()
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -92,11 +96,12 @@ if __name__ == "__main__":
         logger.setLevel(logging.INFO)
     else:
         logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    # As the API: no start on a missing, placeholder or half-set secret in
-    # production (app/core/config_checks.py), before the app is imported.
+    # As the API: under APP_CONFIG_CHECKS=enforce, no start on a missing,
+    # placeholder or half-set secret in production (app/core/config_checks.py),
+    # before the app is imported. Under warn, main() reports them.
     from app.core import config_checks
 
-    config_checks.enforce_or_exit()
+    config_checks.enforce_or_exit(report=False)
     try:
         import uvloop
     except ImportError:  # pragma: no cover - in requirements.txt, as uvicorn uses it

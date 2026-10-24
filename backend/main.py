@@ -3,11 +3,13 @@ from app.config import settings
 from app.core import config_checks
 
 if __name__ == "__main__":
-    # In production, no start on a missing, placeholder or half-set secret
-    # (app/core/config_checks.py; docs/OPERATIONS.md, section 19). Checked
-    # here, before uvicorn starts its workers: the process exits 78 and
-    # Docker's restart backs off, rather than workers refusing in a loop.
-    config_checks.enforce_or_exit()
+    # The production settings check (app/core/config_checks.py;
+    # docs/OPERATIONS.md, section 19). Under APP_CONFIG_CHECKS=enforce a
+    # missing, placeholder or half-set secret stops it here, before uvicorn
+    # starts its workers: the process exits 78 and Docker's restart backs
+    # off, rather than workers refusing in a loop. Under warn, the default,
+    # each worker's startup reports the findings, with Sentry on.
+    config_checks.enforce_or_exit(report=False)
     # APP_LOG_JSON: every line JSON, uvicorn's own included (app/core/
     # observability.py). Otherwise uvicorn's default logging, as before.
     log_options = {}

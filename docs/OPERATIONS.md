@@ -1754,20 +1754,53 @@ until the number is corrected on the attendee page.
 
 ## 19. Production hardening: start-up checks, health URLs, scheduled backups
 
-### Settings the API refuses to start with
+### Settings checked at startup (warn now, enforce once clean)
 
 In production the API (`main.py`, and the app's startup) and the job worker
 check their settings before they serve anything
-(`backend/app/core/config_checks.py`). On a problem the process stops with
-exit status 78 and one line per setting, naming it and never its value:
+(`backend/app/core/config_checks.py`), naming every setting that is wrong
+and never its value. What a fatal finding does is `APP_CONFIG_CHECKS`:
 
-```
-Refusing to start: 2 setting(s) are missing, placeholders or half set (values not shown):
-  - APP_S3_SECRET_KEY: holds a placeholder, not a real value
-  - APP_WHATSAPP_PHONE_NUMBER_ID: is empty while APP_WHATSAPP_ACCESS_TOKEN is set: set both or neither
-```
+- **`warn` (the default)**: the API starts anyway and logs one ERROR line --
+  which Sentry reports, when `APP_SENTRY_DSN` is set -- listing every fatal
+  finding:
 
-What is refused:
+  ```
+  CONFIG CHECK: 2 setting(s) are missing, placeholders or half set (values not shown); starting anyway because APP_CONFIG_CHECKS is warn:
+    - APP_PAYMENT_KEYS_SECRET: holds a placeholder, not a real value
+    - APP_WHATSAPP_PHONE_NUMBER_ID: is empty while APP_WHATSAPP_ACCESS_TOKEN is set: set both or neither
+  Fix them in the server's .env, then set APP_CONFIG_CHECKS=enforce (docs/OPERATIONS.md, section 19).
+  ```
+
+  Production's `.env` is known to hold at least
+  `APP_PAYMENT_KEYS_SECRET=PASTE_KEY_HERE`, so this is where it starts.
+- **`enforce`**: the process refuses to start (exit status 78, before
+  uvicorn or the worker start), with the same lines.
+
+**Getting to `enforce`** (read-only until the last step; after a deploy with
+`sync_code`, the running container has the checker):
+
+1. List the findings:
+
+   ```bash
+   $DC exec -T backend python -m app.core.config_checks                                   # the environment the container has now
+   sudo cat .env | $DC exec -T backend python -m app.core.config_checks --env-file -    # the .env the next container will get
+   ```
+
+   Each problem is a `FATAL` or `warn` line, names only; the last line says
+   what a start would do under the current mode.
+2. Fix every `FATAL` line in the `PROD_ENV_VARIABLES` secret. For
+   `APP_PAYMENT_KEYS_SECRET`: a real Fernet key
+   (`python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`),
+   or delete the line (no club can then connect its own Razorpay). Repeat
+   step 1 with `--env-file -` until it says `Nothing fatal`.
+3. Add `APP_CONFIG_CHECKS=enforce`, `sync_env`, `recreate_backend`. From
+   then on a placeholder or missing secret stops the deploy's restart
+   instead of shipping: the smoke check fails, `$DC logs --tail 40 backend`
+   shows the lines, and `APP_CONFIG_CHECKS=warn` starts it again while you
+   fix it.
+
+What is checked (fatal):
 
 | Rule | Settings |
 |---|---|
@@ -1790,23 +1823,8 @@ whenever `APP_DEBUG` is off -- so production needs nothing new, a laptop sets
 production (set `APP_ENV=staging` there; Sentry then tags its events
 `staging`).
 
-**Before deploying a change to `.env`, or the first deploy of these checks**
-(read-only; the synced code is bind-mounted, so after `sync_code` the
-running container already has the checker):
-
-```bash
-$DC exec -T backend python -m app.core.config_checks                                   # the environment the container has now
-sudo cat .env | $DC exec -T backend python -m app.core.config_checks --env-file -    # the .env the next container will get
-```
-
-It prints `FATAL` and `warn` lines (names only) and exits 1 when a restart
-would be refused. Fix those lines in the `PROD_ENV_VARIABLES` secret first.
-
-**When it has refused** (the deploy's smoke check fails; the backend keeps
-restarting): `$DC logs --tail 40 backend` shows the lines above. Fix the
-settings, `sync_env`, `recreate_backend`. To get the site up while you fix
-it, `APP_CONFIG_CHECKS=warn` in `.env` logs every finding at ERROR and
-starts anyway; remove it once fixed.
+**Before any `.env` change once enforcing**: run step 1's second command
+first; it exits 1 when there is a `FATAL` line.
 
 ### Health URLs for uptime monitors
 

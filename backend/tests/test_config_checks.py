@@ -257,27 +257,61 @@ SECRETS = {
 }
 
 
-def test_enforce_refuses_naming_every_setting_and_no_value(caplog):
+NAMES = ("RAZORPAY_KEY_SECRET", "S3_SECRET_KEY", "SECRET_KEY", "WHATSAPP_PHONE_NUMBER_ID", "DATABASE_URL")
+VALUES = ("changeme-Lk29Pq", "weak-Zm4Wv8", "EAAG-leaky-token-77Qp", "moa:password@")
+
+
+def test_warn_is_the_default_and_starts_saying_everything_once(caplog):
+    """Production's .env may hold a placeholder today: the first deploy of
+    these checks must report it, not take the API down."""
+    assert AppConfig.model_fields["CONFIG_CHECKS"].default == "warn"
     config = bypass(**SECRETS)
+    assert not cc.enforcing(config)
+    with caplog.at_level(logging.WARNING, logger="app.config_checks"):
+        problems = cc.enforce(config)  # no raise
+    assert {p.setting for p in problems if p.fatal} >= {"RAZORPAY_KEY_SECRET", "S3_SECRET_KEY", "SECRET_KEY"}
+    errors = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
+    assert len(errors) == 1, errors  # one line, so one Sentry event, naming them all
+    for name in NAMES:
+        assert f"APP_{name}" in errors[0]
+    assert "starting anyway" in errors[0] and "APP_CONFIG_CHECKS=enforce" in errors[0]
+    for value in VALUES:
+        assert not any(value in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.parametrize("mode", ["", "warn", "WARN", "enforced", "off"])
+def test_anything_but_enforce_only_reports(mode):
+    assert not cc.enforcing(bypass(CONFIG_CHECKS=mode))
+    assert cc.enforce(bypass(**SECRETS, CONFIG_CHECKS=mode))
+
+
+def test_enforce_refuses_naming_every_setting_and_no_value():
+    config = bypass(**SECRETS, CONFIG_CHECKS="enforce")
+    assert cc.enforcing(config) and cc.enforcing(bypass(CONFIG_CHECKS=" Enforce "))
     with pytest.raises(cc.ConfigError) as caught:
         cc.enforce(config)
     text = str(caught.value)
-    for name in ("RAZORPAY_KEY_SECRET", "S3_SECRET_KEY", "SECRET_KEY", "WHATSAPP_PHONE_NUMBER_ID", "DATABASE_URL"):
+    for name in NAMES:
         assert f"APP_{name}" in text
-    for value in ("changeme-Lk29Pq", "weak-Zm4Wv8", "EAAG-leaky-token-77Qp", "moa:password@"):
+    for value in VALUES:
         assert value not in text
-    assert "APP_CONFIG_CHECKS=warn" in text
+    assert "APP_CONFIG_CHECKS=warn" in text  # how to start anyway
     assert {p.setting for p in caught.value.problems} >= {"RAZORPAY_KEY_SECRET", "S3_SECRET_KEY", "SECRET_KEY"}
 
 
-def test_the_emergency_override_logs_and_starts(caplog):
-    config = bypass(**SECRETS, CONFIG_CHECKS="warn")
+def test_the_entry_points_exit_only_when_enforcing(caplog, capsys):
+    warn = bypass(**SECRETS)
     with caplog.at_level(logging.WARNING, logger="app.config_checks"):
-        problems = cc.enforce(config)
-    assert any(p.fatal for p in problems)
-    errors = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
-    assert any("APP_S3_SECRET_KEY" in line for line in errors)
-    assert not any("changeme-Lk29Pq" in r.getMessage() for r in caplog.records)
+        cc.enforce_or_exit(warn, report=False)  # main.py: the workers' startup reports it
+    assert caplog.records == []
+    with caplog.at_level(logging.WARNING, logger="app.config_checks"):
+        cc.enforce_or_exit(warn)
+    assert [r for r in caplog.records if r.levelno == logging.ERROR]
+    with pytest.raises(SystemExit) as caught:
+        cc.enforce_or_exit(bypass(**SECRETS, CONFIG_CHECKS="enforce"), report=False)
+    assert caught.value.code == cc.EXIT_CONFIG == 78
+    err = capsys.readouterr().err
+    assert "Refusing to start" in err and "APP_S3_SECRET_KEY" in err and "changeme-Lk29Pq" not in err
 
 
 def test_a_value_pydantic_refuses_is_not_printed_either():
@@ -306,8 +340,8 @@ def _production_env(**extra) -> dict:
 
 
 @pytest.mark.parametrize("command", [["main.py"], ["-m", "app.worker"]])
-def test_the_api_and_the_worker_refuse_to_start(command):
-    env = _production_env(S3_SECRET_KEY="PASTE_KEY_HERE", PORT="0")
+def test_under_enforce_the_api_and_the_worker_refuse_to_start(command):
+    env = _production_env(S3_SECRET_KEY="PASTE_KEY_HERE", PORT="0", CONFIG_CHECKS="enforce")
     run = subprocess.run([sys.executable, *command], cwd=BACKEND, env=env, capture_output=True, text=True, timeout=120)
     assert run.returncode == 78, (run.stdout[-2000:], run.stderr[-2000:])
     assert "APP_S3_SECRET_KEY" in run.stderr
@@ -315,11 +349,22 @@ def test_the_api_and_the_worker_refuse_to_start(command):
     assert "Uvicorn running" not in run.stderr
 
 
-async def test_the_lifespan_refuses_too(monkeypatch):
+def test_main_and_the_worker_leave_warn_to_the_startup_that_has_sentry():
+    """Under warn the entry points neither exit nor log (report=False): the
+    API's lifespan and the worker's main(), where Sentry is on, report."""
+    assert "config_checks.enforce_or_exit(report=False)" in (BACKEND / "main.py").read_text()
+    worker = (BACKEND / "app" / "worker.py").read_text()
+    assert "config_checks.enforce_or_exit(report=False)" in worker
+    assert worker.index("import doth") < worker.index("config_checks.enforce()")
+    assert "config_checks.enforce()" in (BACKEND / "doth.py").read_text()
+
+
+async def test_under_enforce_the_lifespan_refuses_too(monkeypatch):
     import doth
 
     monkeypatch.setattr(doth.settings, "ENV", "production")
     monkeypatch.setattr(doth.settings, "SECRET_KEY", "short")
+    monkeypatch.setattr(doth.settings, "CONFIG_CHECKS", "enforce")
     with pytest.raises(cc.ConfigError):
         async with doth.lifespan(doth.application):
             pass
@@ -333,11 +378,19 @@ def test_checking_a_dotenv_by_hand():
         input=dotenv, capture_output=True, text=True, timeout=60,
     )
     assert clean.returncode == 0, clean.stdout + clean.stderr
+    assert "APP_CONFIG_CHECKS=enforce can be set" in clean.stdout
+    bad_lines = "\nAPP_RAZORPAY_KEY_SECRET=rzp_xxxxxxxx\nAPP_SECRET_KEY=hunter2hunter2\nAPP_PAYMENT_KEYS_SECRET=PASTE_KEY_HERE\n"
     broken = subprocess.run(
         [sys.executable, "-m", "app.core.config_checks", "--env-file", "-"], cwd=BACKEND, env=env,
-        input=dotenv + "\nAPP_RAZORPAY_KEY_SECRET=rzp_xxxxxxxx\nAPP_SECRET_KEY=hunter2hunter2\n",
-        capture_output=True, text=True, timeout=60,
+        input=dotenv + bad_lines, capture_output=True, text=True, timeout=60,
     )
     assert broken.returncode == 1
-    assert "FATAL APP_RAZORPAY_KEY_SECRET" in broken.stdout and "FATAL APP_SECRET_KEY" in broken.stdout
-    assert "rzp_xxxxxxxx" not in broken.stdout and "hunter2" not in broken.stdout
+    for name in ("RAZORPAY_KEY_SECRET", "SECRET_KEY", "PAYMENT_KEYS_SECRET"):
+        assert f"FATAL APP_{name}" in broken.stdout
+    assert "rzp_xxxxxxxx" not in broken.stdout and "hunter2" not in broken.stdout and "PASTE_KEY_HERE" not in broken.stdout
+    assert "APP_CONFIG_CHECKS=warn: a start with these settings goes ahead" in broken.stdout
+    enforced = subprocess.run(
+        [sys.executable, "-m", "app.core.config_checks", "--env-file", "-"], cwd=BACKEND, env=env,
+        input=dotenv + bad_lines + "APP_CONFIG_CHECKS=enforce\n", capture_output=True, text=True, timeout=60,
+    )
+    assert enforced.returncode == 1 and "APP_CONFIG_CHECKS=enforce: a start with these settings is refused" in enforced.stdout

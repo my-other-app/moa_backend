@@ -85,9 +85,10 @@ def start_loops() -> list[asyncio.Task]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # In production, no start on a missing, placeholder or half-set secret
-    # (app/core/config_checks.py). main.py checks before uvicorn starts; this
-    # covers any other way the app is served.
+    # The production settings check (app/core/config_checks.py): under
+    # APP_CONFIG_CHECKS=warn, the default, one ERROR line naming every
+    # missing, placeholder or half-set secret -- Sentry is on by now, so it is
+    # reported -- and the app starts; under enforce it does not start.
     from app.core import config_checks
 
     config_checks.enforce()

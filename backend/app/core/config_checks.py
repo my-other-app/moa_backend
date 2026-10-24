@@ -1,9 +1,10 @@
-"""Refuse to start on a missing, placeholder or half-set secret.
+"""Say -- or, once enforced, refuse to start -- when a secret is missing,
+a placeholder or half set.
 
 In production the API (main.py, and doth's lifespan) and the job worker
 (app/worker.py) call `enforce()` before serving anything. It reads the
-settings once and stops the process, naming every setting that is wrong --
-never its value -- when:
+settings once and names every setting that is wrong -- never its value --
+when:
 
 - a secret the platform cannot run without is empty (REQUIRED, and the mail
   provider's own keys);
@@ -25,11 +26,17 @@ test or ci; with APP_ENV unset, any process with APP_DEBUG off. The test
 suite sets APP_ENV=test (tests/conftest.py); a laptop sets APP_DEBUG=true or
 APP_ENV=development.
 
-APP_CONFIG_CHECKS=warn is the emergency override: every finding is logged
-at ERROR and the process starts anyway. Fix the setting, then remove it.
+What a fatal finding does is APP_CONFIG_CHECKS:
+
+- warn (the default): one ERROR line listing every fatal finding -- which
+  Sentry reports, where it is on -- and the process starts anyway. Nothing a
+  deploy brings can take the API down this way.
+- enforce: the process refuses to start (exit status 78 from main.py and the
+  worker, before anything runs). Set it once the command below prints no
+  FATAL line.
 
 Run by hand -- in a container that is already running, before a deploy
-restarts it -- to see what a restart would refuse:
+restarts it -- to see what a restart would report, or under enforce refuse:
 
     $DC exec -T backend python -m app.core.config_checks
     $DC exec -T backend python -m app.core.config_checks --env-file - < .env
@@ -139,10 +146,10 @@ class ConfigError(RuntimeError):
         self.problems = problems
         lines = "\n".join(f"  - {p}" for p in problems)
         super().__init__(
-            f"Refusing to start: {len(problems)} setting(s) are missing, placeholders or half set "
-            f"(values not shown):\n{lines}\n"
-            "Fix them in the server's .env (docs/OPERATIONS.md, section 19), or for an emergency "
-            "start set APP_CONFIG_CHECKS=warn."
+            f"Refusing to start (APP_CONFIG_CHECKS=enforce): {len(problems)} setting(s) are missing, "
+            f"placeholders or half set (values not shown):\n{lines}\n"
+            "Fix them in the server's .env (docs/OPERATIONS.md, section 19), or to start anyway "
+            "set APP_CONFIG_CHECKS=warn."
         )
 
 
@@ -334,10 +341,26 @@ def check(settings) -> list[Problem]:
     return sorted(unique.values(), key=lambda p: (not p.fatal, p.setting))
 
 
+def enforcing(settings) -> bool:
+    """APP_CONFIG_CHECKS=enforce: a fatal finding stops the process. Anything
+    else -- warn, the default, or a value it does not know -- only reports."""
+    return _text(_get(settings, "CONFIG_CHECKS")).lower() == "enforce"
+
+
+def warn_text(fatal: list[Problem]) -> str:
+    lines = "\n".join(f"  - {p}" for p in fatal)
+    return (
+        f"CONFIG CHECK: {len(fatal)} setting(s) are missing, placeholders or half set (values not shown); "
+        f"starting anyway because APP_CONFIG_CHECKS is warn:\n{lines}\n"
+        "Fix them in the server's .env, then set APP_CONFIG_CHECKS=enforce (docs/OPERATIONS.md, section 19)."
+    )
+
+
 def enforce(settings=None, *, log: Optional[logging.Logger] = None) -> list[Problem]:
-    """Raise ConfigError on any fatal finding in production; log the rest.
-    With APP_CONFIG_CHECKS=warn, log the fatal ones at ERROR and go on.
-    Returns the findings."""
+    """Check the settings in production: warnings logged at WARNING; the
+    fatal findings logged as one ERROR line (which Sentry reports) under
+    APP_CONFIG_CHECKS=warn, the default, or raised as ConfigError under
+    enforce. Returns the findings."""
     if settings is None:
         from app.config import settings
     log = log or logger
@@ -347,11 +370,9 @@ def enforce(settings=None, *, log: Optional[logging.Logger] = None) -> list[Prob
         if not p.fatal:
             log.warning("config: %s", p)
     if fatal:
-        if _text(_get(settings, "CONFIG_CHECKS")).lower() == "warn":
-            for p in fatal:
-                log.error("config (APP_CONFIG_CHECKS=warn, starting anyway): %s", p)
-        else:
+        if enforcing(settings):
             raise ConfigError(fatal)
+        log.error("%s", warn_text(fatal))
     return problems
 
 
@@ -359,11 +380,18 @@ def enforce(settings=None, *, log: Optional[logging.Logger] = None) -> list[Prob
 EXIT_CONFIG = 78
 
 
-def enforce_or_exit(settings=None) -> None:
-    """enforce() for an entry point (main.py, app/worker.py): on a refusal,
-    the reasons on stderr and exit status 78, before anything is started --
-    so the container stops and Docker's restart backs off, rather than
-    uvicorn restarting workers that each refuse."""
+def enforce_or_exit(settings=None, *, report: bool = True) -> None:
+    """enforce() for an entry point (main.py, app/worker.py): on a refusal
+    (APP_CONFIG_CHECKS=enforce), the reasons on stderr and exit status 78,
+    before anything is started -- so the container stops and Docker's
+    restart backs off, rather than uvicorn restarting workers that each
+    refuse. `report=False`: under warn, say nothing here, because the
+    process says it later, where Sentry is on (the API's lifespan, the
+    worker once the app is imported)."""
+    if settings is None:
+        from app.config import settings
+    if not report and not enforcing(settings):
+        return
     try:
         enforce(settings)
     except ConfigError as error:
@@ -425,6 +453,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"{'FATAL' if p.fatal else 'warn '} {p}")
     fatal = sum(1 for p in problems if p.fatal)
     print(f"{fatal} fatal, {len(problems) - fatal} warning(s)" if problems else "OK: nothing missing, no placeholders")
+    mode = "enforce" if enforcing(settings) else "warn"
+    if fatal and mode == "enforce":
+        print("APP_CONFIG_CHECKS=enforce: a start with these settings is refused.")
+    elif fatal:
+        print("APP_CONFIG_CHECKS=warn: a start with these settings goes ahead and logs the FATAL lines at ERROR. "
+              "Fix them, then set APP_CONFIG_CHECKS=enforce.")
+    elif mode == "warn":
+        print("Nothing fatal: APP_CONFIG_CHECKS=enforce can be set.")
     return 1 if fatal else 0
 
 

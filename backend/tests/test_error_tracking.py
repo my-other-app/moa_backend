@@ -147,6 +147,17 @@ WORKER_CHILD = 'import os\nos.environ["APP_PROCESS"] = "worker"\n' + CAPTURE + t
         json.dump({"ran": ran, "events": captured, "inits": inits}, handle)
 ''')
 
+# The production settings check under APP_CONFIG_CHECKS=warn (the default),
+# as the API's lifespan runs it: once Sentry is on.
+CONFIG_CHILD = CAPTURE + textwrap.dedent('''
+    from app.core import observability, config_checks
+    observability.init_sentry()
+    problems = config_checks.enforce()
+    sentry_sdk.flush()
+    with open(sys.argv[1], "w") as handle:
+        json.dump({"fatal": [p.setting for p in problems if p.fatal], "events": captured}, handle)
+''')
+
 
 def _run(script: str, tmp_path, **env_extra) -> dict:
     path = tmp_path / "child.py"
@@ -291,3 +302,21 @@ async def test_a_dead_job_in_the_worker_is_reported_with_its_exception(_engine, 
     assert "test.sentry_dead_job" in json.dumps(event.get("logentry") or event.get("message") or "")
     flat = json.dumps(event)
     assert "riya@example.com" not in flat and "9876543210" not in flat
+
+
+# ---------------------------------------------------------------------------
+# The settings check, reporting rather than refusing
+# ---------------------------------------------------------------------------
+
+
+def test_a_placeholder_secret_under_warn_reaches_sentry_without_its_value(tmp_path):
+    result = _run(
+        CONFIG_CHILD, tmp_path, APP_ENV="production", APP_PAYMENT_KEYS_SECRET="PASTE_KEY_HERE",
+        APP_S3_SECRET_KEY="changeme-Lk29Pq-not-real",
+    )
+    assert {"PAYMENT_KEYS_SECRET", "S3_SECRET_KEY"} <= set(result["fatal"])
+    [event] = [e for e in result["events"] if "CONFIG CHECK" in json.dumps(e)]
+    assert event["level"] == "error"
+    flat = json.dumps(event)
+    assert "APP_PAYMENT_KEYS_SECRET" in flat and "APP_S3_SECRET_KEY" in flat
+    assert "PASTE_KEY_HERE" not in flat and "changeme-Lk29Pq-not-real" not in flat
