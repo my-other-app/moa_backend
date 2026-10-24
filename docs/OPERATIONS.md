@@ -1746,7 +1746,7 @@ account is still in test mode and the number is not on its test list.
 `(131026)`: the number cannot receive WhatsApp; the guest's row is marked
 until the number is corrected on the attendee page.
 
-## 19. Message quotas and paid overage
+## 20. Message quotas and paid overage
 
 Every email and WhatsApp message a club sends to its people counts against
 its plan's monthly limits (`plan_limits.emails_per_month` and
