@@ -1,0 +1,155 @@
+name: Deploy to Oracle
+
+# Puts an image live on the Oracle box, or installs this commit's
+# ops/server files there, through the box's deploy gate (the moa-deploy
+# user, which can run ops/server/deploy.sh and nothing else). deploy.sh
+# checks health and puts the previous image back by itself when the new one
+# is not healthy. Manual only.
+#
+# Secrets, on each GitHub Environment (production, staging) -- names only;
+# docs/MOVE_TO_ORACLE.md, "CI", says where each value comes from:
+#   ORACLE_SSH_HOST         the box's address (its tailnet name with Tailscale)
+#   ORACLE_SSH_USER         moa-deploy
+#   ORACLE_SSH_KEY          the deploy key's private half (ed25519)
+#   ORACLE_SSH_KNOWN_HOSTS  the box's host key line(s)
+#   TS_OAUTH_CLIENT_ID      optional: Tailscale OAuth client (tag:ci)
+#   TS_OAUTH_SECRET         optional
+# Give `production` required reviewers in Settings -> Environments if a second
+# person should approve each production deploy.
+#
+# The website and the dashboards are deployed from their own repositories
+# too (moa_events, moa_web); this one can deploy any of them by tag.
+#
+# Never syncs .env: it is edited by hand on the box.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Which box"
+        type: choice
+        options: [production, staging]
+        default: production
+      action:
+        description: "deploy an image; stack = install this commit's ops/server; status; rollback/recreate a service; caddy = reload the Caddyfile"
+        type: choice
+        options: [deploy, stack, status, rollback, recreate, caddy]
+        default: deploy
+      service:
+        description: "For deploy, rollback, recreate (backend moves the worker with it)"
+        type: choice
+        options: [backend, website, clubs, admin]
+        default: backend
+      tag:
+        description: "Image tag (deploy). Empty: this run's commit (the website and dashboards' staging images are staging-<sha>)"
+        type: string
+        default: ""
+      migrate:
+        description: "backend only: run alembic upgrade head with the new image before it takes traffic"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  # One change at a time per box (deploy.sh also holds a lock there).
+  group: oracle-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-24.04
+    environment: ${{ inputs.environment }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: What to run
+        id: what
+        env:
+          ACTION: ${{ inputs.action }}
+          SERVICE: ${{ inputs.service }}
+          TAG: ${{ inputs.tag }}
+          MIGRATE: ${{ inputs.migrate }}
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          set -euo pipefail
+          case "$ACTION" in
+            deploy)
+              if [ -z "$TAG" ]; then
+                TAG="$GITHUB_SHA"
+                if [ "$ENVIRONMENT" = "staging" ] && [ "$SERVICE" != "backend" ]; then TAG="staging-$GITHUB_SHA"; fi
+              fi
+              [[ "$TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] || { echo "::error::not an image tag: $TAG"; exit 1; }
+              cmd="deploy $SERVICE $TAG"
+              if [ "$MIGRATE" = "true" ]; then
+                [ "$SERVICE" = "backend" ] || { echo "::error::migrate is for the backend only"; exit 1; }
+                cmd="$cmd --migrate"
+              fi
+              echo "image=ghcr.io/my-other-app/moa-$SERVICE:$TAG" >> "$GITHUB_OUTPUT"
+              ;;
+            rollback | recreate) cmd="$ACTION $SERVICE" ;;
+            status | caddy | stack) cmd="$ACTION" ;;
+          esac
+          echo "command=$cmd" >> "$GITHUB_OUTPUT"
+          echo "Will run on $ENVIRONMENT: $cmd"
+
+      - name: Check the image exists
+        if: inputs.action == 'deploy'
+        env:
+          IMAGE: ${{ steps.what.outputs.image }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # A warning only: another repository's package may not be
+          # readable with this token, and the box refuses an image it cannot
+          # pull anyway, changing nothing.
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin > /dev/null || true
+          if docker buildx imagetools inspect "$IMAGE" > "$RUNNER_TEMP/inspect.txt" 2>&1; then
+            grep -E 'Platform:' "$RUNNER_TEMP/inspect.txt" || true
+          else
+            echo "::warning::$IMAGE could not be found from here: has the Image workflow finished for that commit (or is the package private to another repository)?"
+          fi
+
+      - name: Pack ops/server and ops/backup
+        if: inputs.action == 'stack'
+        run: |
+          set -euo pipefail
+          parts=(ops/server)
+          [ -d ops/backup ] && parts+=(ops/backup)
+          tar -czf "$RUNNER_TEMP/stack.tgz" "${parts[@]}"
+          bash -n ops/server/deploy.sh
+          echo "Packed: ${parts[*]} ($(du -h "$RUNNER_TEMP/stack.tgz" | cut -f1))"
+
+      - uses: ./.github/actions/oracle-deploy
+        with:
+          command: ${{ steps.what.outputs.command }}
+          stdin-file: ${{ inputs.action == 'stack' && format('{0}/stack.tgz', runner.temp) || '' }}
+          host: ${{ secrets.ORACLE_SSH_HOST }}
+          user: ${{ secrets.ORACLE_SSH_USER }}
+          ssh-key: ${{ secrets.ORACLE_SSH_KEY }}
+          known-hosts: ${{ secrets.ORACLE_SSH_KNOWN_HOSTS }}
+          tailscale-oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          tailscale-oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+
+      # Through Cloudflare, as a visitor sees it (production only: the
+      # staging names may sit behind Cloudflare Access).
+      - name: Smoke check from outside
+        if: inputs.environment == 'production' && (inputs.action == 'deploy' || inputs.action == 'recreate' || inputs.action == 'rollback')
+        env:
+          SERVICE: ${{ inputs.service }}
+        run: |
+          case "$SERVICE" in
+            backend) url=https://api.myotherapp.in/healthz ;;
+            website) url=https://myotherapp.in/robots.txt ;;
+            clubs) url=https://club-dashboard.myotherapp.in/login ;;
+            admin) url=https://main-portal.myotherapp.in/login ;;
+          esac
+          for i in $(seq 1 12); do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "$url?smoke=$GITHUB_RUN_ID-$i" || echo 000)
+            echo "attempt $i: $url $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 5
+          done
+          echo "::warning::$url did not answer 200 from outside (DNS still on the old box? Cloudflare?)"
