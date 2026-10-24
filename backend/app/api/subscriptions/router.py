@@ -8,7 +8,7 @@ an authorisation the club completes itself, and `/retry`, which asks Razorpay
 to re-attempt a charge that already failed.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Query, Request, Response
@@ -35,6 +35,8 @@ from app.api.subscriptions.schemas import (
     AdminSubscriptionOut,
     AssignPlanIn,
     BackfillOut,
+    EndTrialIn,
+    EnterpriseTrialIn,
     ChargesPageOut,
     ClubPlanOut,
     EntitlementsOut,
@@ -93,9 +95,23 @@ async def pricing(request: Request, response: Response, session: SessionDep) -> 
     within that, and the page does not ask the database on every visit.
     """
     plans = await service.public_plans(session)
+    trial_plan = await service.plan_by_key(session, service.FREE_TRIAL_PLAN_KEY)
+    enterprise = next((p for p in plans if p.key == service.ENTERPRISE_PLAN_KEY), None)
     response.headers["Cache-Control"] = "public, max-age=300"
     return {
         "currency": "INR",
+        "trial": (
+            {
+                "days": service.FREE_TRIAL_DAYS,
+                "plan_key": trial_plan.key,
+                "plan_name": trial_plan.name,
+                "card_required": False,
+                "then_plan_key": service.DEFAULT_PLAN_KEY,
+            }
+            if trial_plan is not None
+            else None
+        ),
+        "enterprise_trial_days": service.ENTERPRISE_TRIAL_DAYS if enterprise is not None else None,
         "yearly_months_free": yearly_months_free(plans),
         "plans": [public_plan_dict(plan) for plan in plans],
     }
@@ -528,6 +544,9 @@ async def list_subscriptions(
                     selectinload(ClubSubscriptions.granter),
                     selectinload(ClubSubscriptions.plan).selectinload(Plans.limits),
                     selectinload(ClubSubscriptions.plan).selectinload(Plans.features),
+                    selectinload(ClubSubscriptions.trial_plan),
+                    selectinload(ClubSubscriptions.enterprise_trial_plan),
+                    selectinload(ClubSubscriptions.enterprise_trial_granter),
                 )
                 # Highest value first: the subscriptions worth attention are
                 # the expensive ones and the broken ones, and `past_due`
@@ -560,13 +579,125 @@ async def club_plan(club_id: int, session: SessionDep, user: AdminAuth) -> ClubP
         raise CustomHTTPException(status_code=404, message="Club not found")
     row = await service.get_club_subscription(session, club_id)
     resolved = await service.resolve_entitlements(session, club_id)
-    granter = await session.get(Users, row.granted_by) if row is not None and row.granted_by else None
     return {
         "club": {"id": club.id, "name": club.name},
         "plan_key": resolved.plan.key if resolved.plan else None,
         "plan_name": resolved.plan.name if resolved.plan else None,
-        "subscription": subscription_dict(row, club, admin=True, granter=granter) if row is not None else None,
+        "subscription": await _fresh(session, row.id) if row is not None else None,
     }
+
+
+@admin_router.post(
+    "/subscriptions/club/{club_id}/enterprise-trial", summary="Give a club an Enterprise trial (admin)"
+)
+async def grant_enterprise_trial(
+    club_id: int,
+    payload: EnterpriseTrialIn,
+    session: SessionDep,
+    user: MoneyAuth,
+    request: Request = None,
+) -> AdminSubscriptionOut:
+    """
+    Lay the Enterprise plan over a club for `days` (default 30) from now,
+    after a sales call. Nothing is charged and nothing the club has is
+    touched: a paid subscription keeps billing underneath, a free trial keeps
+    running, and when this ends -- on its date, or by "End trial" -- the club
+    is on whatever that is (or Free). Granting again sets a new end.
+    """
+    club = await session.get(Clubs, club_id)
+    if not club or club.is_deleted:
+        raise CustomHTTPException(status_code=404, message="Club not found")
+    plan = await service.plan_by_key(session, service.ENTERPRISE_PLAN_KEY)
+    if plan is None:
+        raise CustomHTTPException(
+            status_code=404, message="There is no Enterprise plan to give.", error_code="NO_ENTERPRISE_PLAN"
+        )
+    now = datetime.now(timezone.utc)
+    before = await service.get_club_subscription(session, club_id)
+    previous_end = before.enterprise_trial_ends_at if service.enterprise_trial_live(before, now) else None
+    row = await service.grant_enterprise_trial(
+        session, club_id=club_id, plan=plan, days=payload.days, granted_by=getattr(user, "id", None), now=now
+    )
+    ends = notices.day(row.enterprise_trial_ends_at)
+    await audit.record(
+        session,
+        actor=user,
+        action="subscription.enterprise_trial_grant",
+        entity_type="club",
+        entity_id=club_id,
+        summary=f"Gave {club.name} an Enterprise trial for {payload.days} day{'s' if payload.days != 1 else ''}, to {ends}",
+        details={
+            "subscription_id": row.id, "plan": plan.key, "days": payload.days,
+            "ends_at": row.enterprise_trial_ends_at.isoformat(),
+            "previous_ends_at": previous_end.isoformat() if previous_end else None,
+        },
+        request=request,
+    )
+    await notify(
+        session, "plan_assigned",
+        title=f"{_admin_name(user)} gave {club.name} an Enterprise trial",
+        body=f"{payload.days} days, to {ends}. Nothing is charged; then {club.name} is back on what it had.",
+        club=club, subscription=row, dedupe=False,
+        data={"action": "enterprise_trial", "plan": plan.key, "days": payload.days, "by": getattr(user, "email", None),
+              "ends_at": row.enterprise_trial_ends_at.isoformat(), "complimentary": False},
+    )
+    await session.commit()
+    return await _fresh(session, row.id)
+
+
+@admin_router.post("/subscriptions/club/{club_id}/end-trial", summary="End a club's trial now (admin)")
+async def end_trial(
+    club_id: int,
+    payload: EndTrialIn,
+    session: SessionDep,
+    user: MoneyAuth,
+    request: Request = None,
+) -> AdminSubscriptionOut:
+    """
+    End a trial early. `trial: "enterprise"` ends an Enterprise trial (the
+    club is back on what it had); `"free"` ends the free Pro trial (the club
+    is on the plan it picked, or Free). Omitted: the Enterprise trial if one
+    is running, else the free trial. 409 NO_TRIAL when there is none.
+    Nothing at Razorpay is touched.
+    """
+    club = await session.get(Clubs, club_id)
+    if not club or club.is_deleted:
+        raise CustomHTTPException(status_code=404, message="Club not found")
+    now = datetime.now(timezone.utc)
+    row = await service.get_club_subscription(session, club_id, for_update=True)
+    which = payload.trial or (
+        "enterprise" if service.enterprise_trial_live(row, now) else "free" if service.free_trial_live(row, now) else None
+    )
+    live = (
+        service.enterprise_trial_live(row, now) if which == "enterprise"
+        else service.free_trial_live(row, now) if which == "free" else False
+    )
+    if not live:
+        raise CustomHTTPException(status_code=409, message="This club has no trial running.", error_code="NO_TRIAL")
+    # The same as the sweep at the trial's end: the club mailed once, the
+    # admins alerted.
+    if which == "enterprise":
+        was = row.enterprise_trial_ends_at
+        outcome = await sweep.expire_enterprise_trial(session, row, now)
+    else:
+        was = row.trial_ends_at
+        outcome = await sweep.expire_free_trial(session, row, now)
+    await audit.record(
+        session,
+        actor=user,
+        action=f"subscription.{which}_trial_end",
+        entity_type="club",
+        entity_id=club_id,
+        summary=(
+            f"Ended {club.name}'s {'Enterprise' if which == 'enterprise' else 'free'} trial early "
+            f"(it was to run to {notices.day(was)})"
+        ),
+        details={"subscription_id": row.id, "trial": which, "was_ending": was.isoformat() if was else None,
+                 "outcome": outcome},
+        request=request,
+    )
+    await session.commit()
+    return await _fresh(session, row.id)
 
 
 @admin_router.put(
@@ -763,6 +894,9 @@ async def _admin_subscription(session, subscription_id: int) -> ClubSubscription
             selectinload(ClubSubscriptions.club),
             selectinload(ClubSubscriptions.plan).selectinload(Plans.limits),
             selectinload(ClubSubscriptions.plan).selectinload(Plans.features),
+            selectinload(ClubSubscriptions.trial_plan),
+            selectinload(ClubSubscriptions.enterprise_trial_plan),
+            selectinload(ClubSubscriptions.enterprise_trial_granter),
         )
         .execution_options(populate_existing=True)
     )
@@ -781,6 +915,9 @@ async def _fresh(session, subscription_id: int) -> dict:
             selectinload(ClubSubscriptions.granter),
             selectinload(ClubSubscriptions.plan).selectinload(Plans.limits),
             selectinload(ClubSubscriptions.plan).selectinload(Plans.features),
+            selectinload(ClubSubscriptions.trial_plan),
+            selectinload(ClubSubscriptions.enterprise_trial_plan),
+            selectinload(ClubSubscriptions.enterprise_trial_granter),
         )
         .execution_options(populate_existing=True)
     )
@@ -1055,6 +1192,47 @@ async def my_entitlements(session: SessionDep, user: ClubAuth) -> EntitlementsOu
         "comp_ends_at": (
             resolved.subscription.comp_ends_at if service.comp_live(resolved.subscription) else None
         ),
+        **_trial_view(resolved),
+    }
+
+
+def _trial_view(resolved) -> dict:
+    """The trial parts of EntitlementsOut."""
+    import math
+
+    now = datetime.now(timezone.utc)
+    row = resolved.row
+    trial = None
+    if resolved.trial is not None and resolved.plan is not None:
+        kind, _, ends = resolved.trial
+        trial = {
+            "kind": kind,
+            "plan_key": resolved.plan.key,
+            "plan_name": resolved.plan.name,
+            "ends_at": ends,
+            "days_left": max(1, math.ceil((ends - now).total_seconds() / 86400)),
+        }
+    chosen = None
+    if service.chosen_plan(row, now) and row.plan is not None:
+        chosen = {
+            "plan_key": row.plan.key,
+            "plan_name": row.plan.name,
+            "cycle": getattr(row.cycle, "value", row.cycle),
+            "price_paise": service.price_of(row),
+            "billing_starts_at": row.trial_ends_at,
+            "status": getattr(row.status, "value", row.status),
+        }
+    return {
+        "trial": trial,
+        "chosen_plan": chosen,
+        "trial_ended": bool(
+            row is not None
+            and row.trial_started_at is not None
+            and resolved.trial is None
+            and resolved.plan is not None
+            and resolved.plan.key == service.DEFAULT_PLAN_KEY
+        ),
+        "free_trial_days": service.FREE_TRIAL_DAYS,
     }
 
 
@@ -1140,6 +1318,15 @@ async def start_subscription(
             )
 
     trial_days = 0 if await service.trial_used(session, club.id) else plan.trial_days
+    # A plan picked during the free trial: authorised now, billed from the
+    # trial's end (Razorpay's start_at), and the club keeps the trial's plan
+    # until then. Not an Enterprise trial's end: that one is laid over what
+    # the club pays for, which bills as usual.
+    starts_at = row.trial_ends_at if service.free_trial_live(row, now) else None
+    if starts_at is not None:
+        import math
+
+        trial_days = max(1, math.ceil((starts_at - now).total_seconds() / 86400))
     if replacing:
         await billing.close_unpaid_checkout(replacing)
 
@@ -1153,6 +1340,7 @@ async def start_subscription(
         notify_phone=club.contact_phone,
         trial_days=trial_days,
         expire_by=int(expires_at.timestamp()),
+        starts_at=starts_at,
     )
 
     service.record_checkout(
@@ -1165,6 +1353,7 @@ async def start_subscription(
         trial_days=trial_days,
         replacing_pending=replacing is not None,
         now=now,
+        starts_at=starts_at,
     )
     await session.commit()
     return {
@@ -1175,6 +1364,7 @@ async def start_subscription(
         "plan_key": plan.key,
         "cycle": cycle.value,
         "trial_days": trial_days,
+        "billing_starts_at": starts_at or (now + timedelta(days=trial_days) if trial_days else None),
         "expires_at": expires_at,
     }
 

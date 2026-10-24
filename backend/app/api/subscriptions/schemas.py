@@ -29,7 +29,6 @@ class PlanLimitsIn(CustomBaseModel):
     coupons_per_event: int | None = Field(None, ge=0)
     merch_items_per_event: int | None = Field(None, ge=0)
     committee_seats: int | None = Field(None, ge=0)
-    storage_gb: int | None = Field(None, ge=0)
     announcements_per_month: int | None = Field(None, ge=0)
     website_templates: int | None = Field(None, ge=0)
     ai_actions_per_month: int | None = Field(None, ge=0)
@@ -145,6 +144,19 @@ class PlanClubMin(CustomBaseModel):
     name: str
 
 
+class PlanBrief(CustomBaseModel):
+    key: str
+    name: str
+
+
+class EnterpriseTrialOut(CustomBaseModel):
+    """An Enterprise trial an admin granted, laid over what the club has."""
+
+    plan: PlanBrief | None = None
+    started_at: datetime | None = None
+    ends_at: datetime
+
+
 class SubscriptionOut(CustomBaseModel):
     id: int
     club: PlanClubMin | None = None
@@ -178,6 +190,15 @@ class SubscriptionOut(CustomBaseModel):
     #: while it runs (409 COMPLIMENTARY_PLAN).
     complimentary: bool = False
     comp_ends_at: datetime | None = None
+    #: The free trial (Pro, no card) is running: the club has `trial_plan`
+    #: until `trial_ends_at`, whatever `plan` and `status` say.
+    free_trial: bool = False
+    trial_plan: PlanBrief | None = None
+    #: A paid plan picked during the free trial: `plan` here, billed by
+    #: Razorpay from this date (the trial's end). Null otherwise.
+    billing_starts_at: datetime | None = None
+    #: An Enterprise trial running, laid over everything above; null when none.
+    enterprise_trial: EnterpriseTrialOut | None = None
 
 
 class PlanUserMin(CustomBaseModel):
@@ -192,6 +213,11 @@ class AdminSubscriptionOut(SubscriptionOut):
     comp_reason: str | None = None
     #: The admin who last assigned the plan (a comp or a deal by hand).
     granted_by: PlanUserMin | None = None
+    #: Whether this club has ever had a trial (the free trial is once per club).
+    trial_used: bool = False
+    trial_started_at: datetime | None = None
+    #: The admin who granted the running Enterprise trial.
+    enterprise_trial_by: PlanUserMin | None = None
 
 
 class ClubPlanOut(CustomBaseModel):
@@ -223,6 +249,10 @@ class SubscriptionTotals(CustomBaseModel):
     paused: int = 0
     #: Past due, Razorpay done retrying, grace still running (also counted in past_due).
     in_grace: int = 0
+    #: Free Pro trials running (no card; also counted in trialing).
+    free_trials: int = 0
+    #: Enterprise trials an admin granted, running.
+    enterprise_trials: int = 0
 
 
 class RevenueCounts(CustomBaseModel):
@@ -355,6 +385,17 @@ class BackfillOut(CustomBaseModel):
     failed: int = 0
 
 
+class EnterpriseTrialIn(CustomBaseModel):
+    #: How long the Enterprise trial runs, from now. Granting again replaces the end.
+    days: int = Field(30, ge=1, le=365)
+
+
+class EndTrialIn(CustomBaseModel):
+    #: Which trial to end: "enterprise" or "free". Omitted: the Enterprise
+    #: trial when one is running, else the free trial.
+    trial: str | None = Field(None, pattern=r"^(enterprise|free)$")
+
+
 class ExtendGraceIn(CustomBaseModel):
     #: Days added to the grace's end (or, with no grace yet, from now).
     days: int = Field(..., ge=1, le=30)
@@ -442,6 +483,38 @@ class EntitlementsOut(CustomBaseModel):
     #: `comp_ends_at` (null: no end). Checkout is refused while it runs.
     complimentary: bool = False
     comp_ends_at: datetime | None = None
+    #: The trial the plan above comes from, or null: the free trial
+    #: ("free_trial": Pro, no card) or an admin's ("enterprise_trial").
+    trial: "TrialOut | None" = None
+    #: A paid plan picked during the free trial, billed from its end.
+    chosen_plan: "ChosenPlanOut | None" = None
+    #: The club had its free trial and it is over, and it is on the default
+    #: (Free) plan now: the dashboard says what Free limits.
+    trial_ended: bool = False
+    #: How long the free trial every new club gets is, for the copy.
+    free_trial_days: int = 14
+
+
+class TrialOut(CustomBaseModel):
+    #: "free_trial" | "enterprise_trial"
+    kind: str
+    plan_key: str
+    plan_name: str
+    ends_at: datetime
+    #: Whole days left, rounded up (0 on the last hours of the last day is 1).
+    days_left: int
+
+
+class ChosenPlanOut(CustomBaseModel):
+    plan_key: str
+    plan_name: str
+    cycle: str
+    #: What Razorpay charges each cycle, in paise.
+    price_paise: int = 0
+    #: When billing starts: the free trial's end.
+    billing_starts_at: datetime
+    #: "pending" until the club authorises the mandate at Razorpay, then "trial".
+    status: str
 
 
 class StartSubscriptionIn(CustomBaseModel):
@@ -468,8 +541,11 @@ class StartSubscriptionOut(CustomBaseModel):
     plan_key: str
     cycle: str
     #: The trial this checkout carries: the plan's, or 0 when the club has
-    #: had a trial before.
+    #: had a trial before; during the free trial, the days left of it.
     trial_days: int = 0
+    #: When Razorpay first charges: the free trial's end for a plan picked
+    #: during it; null when it charges as soon as the mandate is authorised.
+    billing_starts_at: datetime | None = None
     #: When the checkout link stops working and the club falls back unpaid.
     expires_at: datetime
 
@@ -501,15 +577,31 @@ class PublicPlan(CustomBaseModel):
     contact_sales: bool = False
     #: The plan to highlight ("Most popular").
     featured: bool = False
-    #: Every limit column; null is unlimited, 0 is none allowed.
+    #: Every limit (LIMIT_KEYS); null is unlimited, 0 is none allowed.
     limits: dict[str, int | None]
     #: The whole public catalog in a fixed order, each marked included or
     #: not, so every plan has the same rows and a comparison table lines up.
     features: list[PublicPlanFeature]
 
 
+class PublicTrialOffer(CustomBaseModel):
+    """The free trial every new club starts with."""
+
+    days: int
+    #: The plan it gives (Pro).
+    plan_key: str
+    plan_name: str
+    card_required: bool = False
+    #: The plan a club is on when the trial ends without a paid plan picked.
+    then_plan_key: str = "free"
+
+
 class PublicPlansOut(CustomBaseModel):
     currency: str = "INR"
+    #: The free trial: null when the platform has no plan to give it on.
+    trial: PublicTrialOffer | None = None
+    #: How long an Enterprise trial runs, granted by the team after a call.
+    enterprise_trial_days: int | None = None
     #: How many months a yearly plan saves, when every paid plan's yearly
     #: price is the same whole number of monthly prices ("2 months free").
     #: Null when they differ or none is discounted.
@@ -599,9 +691,18 @@ def subscription_dict(row, club=None, *, admin: bool = False, granter=None) -> d
     with `admin` into AdminSubscriptionOut. The club's own view never carries
     `comp_reason` or `granted_by`. `granter` is the Users row behind
     `granted_by`, when the caller has it loaded."""
-    from app.api.subscriptions.service import CHECKOUT_TTL, in_grace, is_entitled
+    from app.api.subscriptions.service import (
+        CHECKOUT_TTL,
+        chosen_plan,
+        enterprise_trial_live,
+        free_trial_live,
+        in_grace,
+        is_entitled,
+    )
 
     club = club if club is not None else getattr(row, "club", None)
+    trial_plan = _loaded(row, "trial_plan")
+    ent_plan = _loaded(row, "enterprise_trial_plan")
     out = {
         "id": row.id,
         "club": {"id": club.id, "name": club.name} if club else None,
@@ -623,6 +724,15 @@ def subscription_dict(row, club=None, *, admin: bool = False, granter=None) -> d
         "in_grace": in_grace(row),
         "complimentary": bool(row.complimentary),
         "comp_ends_at": row.comp_ends_at if row.complimentary else None,
+        "free_trial": free_trial_live(row),
+        "trial_plan": _brief(trial_plan) if free_trial_live(row) else None,
+        "billing_starts_at": row.trial_ends_at if chosen_plan(row) else None,
+        "enterprise_trial": (
+            {"plan": _brief(ent_plan), "started_at": row.enterprise_trial_started_at,
+             "ends_at": row.enterprise_trial_ends_at}
+            if enterprise_trial_live(row)
+            else None
+        ),
     }
     if admin:
         out["comp_reason"] = row.comp_reason
@@ -631,7 +741,30 @@ def subscription_dict(row, club=None, *, admin: bool = False, granter=None) -> d
             if granter is not None
             else ({"id": row.granted_by, "name": None} if row.granted_by else None)
         )
+        out["trial_started_at"] = row.trial_started_at
+        out["trial_used"] = row.trial_started_at is not None
+        ent_by = _loaded(row, "enterprise_trial_granter")
+        out["enterprise_trial_by"] = (
+            {"id": ent_by.id, "name": ent_by.full_name or ent_by.username or ent_by.email}
+            if ent_by is not None and enterprise_trial_live(row)
+            else ({"id": row.enterprise_trial_by, "name": None}
+                  if row.enterprise_trial_by and enterprise_trial_live(row) else None)
+        )
     return out
+
+
+def _loaded(row, name: str):
+    """A relationship's value if it is already loaded, else None: reading an
+    unloaded one would lazy-load, which an async session cannot do here."""
+    from sqlalchemy import inspect as sa_inspect
+    from sqlalchemy.orm.base import NO_VALUE
+
+    value = sa_inspect(row).attrs[name].loaded_value
+    return None if value is NO_VALUE else value
+
+
+def _brief(plan) -> dict | None:
+    return {"key": plan.key, "name": plan.name} if plan is not None else None
 
 
 def _is_billable(plan) -> bool:
@@ -644,3 +777,6 @@ def _is_billable(plan) -> bool:
     if plan.price_yearly_paise > 0 and not plan.razorpay_plan_id_yearly:
         return False
     return True
+
+
+EntitlementsOut.model_rebuild()

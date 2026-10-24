@@ -100,6 +100,7 @@ async def start_subscription(
     notify_phone: str | None,
     trial_days: int | None = None,
     expire_by: int | None = None,
+    starts_at=None,
 ) -> dict:
     """
     Create a Razorpay subscription and return the checkout URL.
@@ -112,6 +113,10 @@ async def start_subscription(
     trial, ever); None means the plan's own. `expire_by` (unix seconds) is when
     the checkout link stops working, matching when a pending checkout falls
     back, so a club cannot pay for a checkout we have already given up on.
+
+    `starts_at` (an aware datetime) overrides the trial: Razorpay takes the
+    mandate now and charges nothing until then -- a plan picked during the
+    free trial bills from the day the trial ends.
     """
     if trial_days is None:
         trial_days = plan.trial_days
@@ -130,7 +135,9 @@ async def start_subscription(
             "cycle": cycle.value,
         },
     }
-    if trial_days:
+    if starts_at is not None:
+        payload["start_at"] = int(starts_at.timestamp())
+    elif trial_days:
         payload["start_at"] = _trial_start(trial_days)
     if expire_by:
         payload["expire_by"] = expire_by

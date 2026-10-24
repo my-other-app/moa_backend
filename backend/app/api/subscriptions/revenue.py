@@ -112,6 +112,9 @@ def trialing(row, now: datetime) -> bool:
 def _plan_held(row, now: datetime, plans: dict[int, Plans]) -> Plans | None:
     """The plan this row gives the club right now, as resolve_entitlements
     would decide it (None: the club falls back to the default plan)."""
+    trial = service.active_trial(row, now)
+    if trial is not None and plans.get(trial[1]) is not None:
+        return plans[trial[1]]
     if service.is_entitled(row, now):
         return row.plan
     if (_status(row) == SubscriptionStatus.pending and service.previous_entitled(row, now)) or (
