@@ -883,7 +883,8 @@ async def run(session, broadcast_id: int, *, now: Optional[datetime] = None, bud
     return {**counts, "status": b.status}
 
 
-@jobs.handler(JOB, max_attempts=6, timeout=3600.0, concurrency=2)
+# Paced (CLUB_WHATSAPP_BROADCAST_MPS), so a big one holds its slot for most of an hour: one slot per runner at most.
+@jobs.handler(JOB, max_attempts=6, timeout=3600.0, concurrency=1)
 async def _job(payload: dict) -> None:
     async with jobs.scope() as session:
         await run(session, int(payload["broadcast_id"]))
