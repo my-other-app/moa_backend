@@ -337,8 +337,6 @@ async def record_quality(session, account: ClubWhatsAppAccounts, number: dict, s
     """What Meta said of the number: its display number and name, its quality
     rating and messaging limit. A change is logged; a drop tells the club and
     the admins. True when the rating or the limit changed."""
-    from app.api.admin_alerts import notify
-
     now = now or _now()
     rating = (str(number.get("quality_rating") or "").upper() or None) if "quality_rating" in number else account.quality_rating
     tier = account.messaging_limit_tier
@@ -382,12 +380,13 @@ async def record_quality(session, account: ClubWhatsAppAccounts, number: dict, s
             ],
             now=now,
         )
-        await notify(
+        await alerts.tell_admins(
             session, "club_whatsapp_quality",
             title=f"A club's own WhatsApp number dropped to {rating or tier}",
             body=f"Meta says {what}.",
-            club=account.club_id,
-            data={"account_id": account.id, "previous": before_rating, "rating": rating, "previous_tier": before_tier, "tier": tier},
+            club_id=account.club_id,
+            data={"account_id": account.id, "code": "quality", "previous": before_rating, "rating": rating,
+                  "previous_tier": before_tier, "tier": tier},
         )
     return True
 
@@ -413,8 +412,6 @@ async def mark_failed(session, account: ClubWhatsAppAccounts, reason: str, code:
     nothing is sent from it until the club fixes it. `source` is what found
     it: a failure a check of the keys found (READ) is undone by a later good
     check; one Meta gave a send, or its webhook, only by new keys."""
-    from app.api.admin_alerts import notify
-
     if account.status in LIVE:
         account.status = FAILED
     account.failed_by = source
@@ -433,11 +430,11 @@ async def mark_failed(session, account: ClubWhatsAppAccounts, reason: str, code:
             "Fix it in Meta, then click Check again in your dashboard, or paste new keys.",
         ],
     )
-    await notify(
+    await alerts.tell_admins(
         session, "club_whatsapp_failed",
         title=f"A club's own WhatsApp number stopped working ({code or 'error'})",
         body=reason[:300],
-        club=account.club_id,
+        club_id=account.club_id,
         data={"account_id": account.id, "code": code},
     )
 
@@ -656,18 +653,24 @@ async def verify(session, club, user, *, request=None) -> ClubWhatsAppAccounts:
     return account
 
 
-async def update_settings(session, club, user, *, routing: Optional[bool], retention_months: Optional[int], request=None) -> ClubWhatsAppAccounts:
+async def update_settings(session, club, user, *, routing: Optional[bool], retention_months: Optional[int],
+                          app_id: Optional[str] = None, request=None) -> ClubWhatsAppAccounts:
     from app.api.audit import service as audit
 
     account = await live_account(session, club.id) or await latest_account(session, club.id)
     if account is None:
         raise _refuse(404, "Connect your WhatsApp number first.", "NO_WHATSAPP")
-    before = {"routing": account.routing, "retention_months": account.retention_months}
+    app_id = _clean(app_id) or None
+    if app_id and app_id != account.app_id:
+        await _check_app_id(session, account, club.id, user, app_id)
+    before = {"routing": account.routing, "retention_months": account.retention_months, "app_id": account.app_id}
     if routing is not None:
         account.routing = bool(routing)
     if retention_months is not None:
         account.retention_months = int(retention_months)
-    after = {"routing": account.routing, "retention_months": account.retention_months}
+    if app_id:
+        account.app_id = app_id
+    after = {"routing": account.routing, "retention_months": account.retention_months, "app_id": account.app_id}
     if before != after:
         await audit.record(
             session, actor=user, action="club_whatsapp.settings", entity_type="club", entity_id=club.id,
@@ -676,6 +679,25 @@ async def update_settings(session, club, user, *, routing: Optional[bool], reten
         )
     await session.commit()
     return account
+
+
+async def _check_app_id(session, account: ClubWhatsAppAccounts, club_id: int, user, app_id: str) -> None:
+    """An app id added on its own: a long number, and the app the saved
+    token was made in, as Meta's debug_token says."""
+    if not _ID.match(app_id):
+        raise _refuse(422, "That isn't an app ID: it's a long number at the top of your app's dashboard.", "INVALID_WHATSAPP_KEYS",
+                      {"field": "app_id"})
+    if account.status not in LIVE:
+        raise _refuse(409, "Connect your WhatsApp number first.", "NO_WHATSAPP")
+    await require_plan(session, club_id, actor=user)
+    keys = await require_keys(session, account)
+    try:
+        token = await graph.debug_token(keys)
+    except graph.GraphError as exc:
+        raise refusal(exc) from None
+    if str(token.get("app_id") or "") not in ("", app_id):
+        raise _refuse(422, "That app ID isn't the app your access token was made in. Copy it from the same app's dashboard.",
+                      "WHATSAPP_APP_MISMATCH", {"field": "app_id"})
 
 
 async def disconnect(session, club, user, *, request=None) -> Optional[ClubWhatsAppAccounts]:

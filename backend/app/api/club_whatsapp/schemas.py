@@ -22,6 +22,8 @@ class AccountSettingsIn(CustomBaseModel):
     #: Send the club's tickets, certificates and reminders from its own number.
     routing: Optional[bool] = None
     retention_months: Optional[int] = Field(None, ge=1, le=36)
+    #: The club's Meta app, when it wasn't given with the keys (a template with a document header needs it).
+    app_id: Optional[str] = Field(None, max_length=40)
 
 
 class UpgradeOut(CustomBaseModel):

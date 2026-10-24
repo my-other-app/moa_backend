@@ -244,14 +244,21 @@ async def upload_sample(keys: Keys, content: bytes, filename: str, mime: str) ->
     if not upload_id:
         raise GraphError("Meta did not open an upload for the sample", unreachable=True)
     headers = {"Authorization": f"OAuth {keys.token}", "file_offset": "0"}
+    # As every Graph call with the token: an app that requires the app secret wants its proof here too.
+    _headers, proof = _auth(keys, None)
     try:
         async with _client() as client:
-            r = await client.post(url(upload_id), headers=headers, content=content)
+            r = await client.post(url(upload_id), headers=headers, params=proof or None, content=content)
     except httpx.HTTPError as exc:
         raise GraphError(f"Meta could not be reached ({exc.__class__.__name__})", unreachable=True) from None
     if r.status_code >= 300:
         raise _error(r)
-    handle = str((r.json() or {}).get("h") or "")
+    try:
+        answer = r.json()
+    except ValueError:
+        raise GraphError("Meta answered the sample's upload with something that isn't JSON", status=r.status_code,
+                         unreachable=True) from None
+    handle = str((answer if isinstance(answer, dict) else {}).get("h") or "")
     if not handle:
         raise GraphError("Meta took the sample without a handle", unreachable=True)
     return handle

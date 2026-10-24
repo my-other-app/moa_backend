@@ -8,9 +8,9 @@
   whose club's plan lapsed is not asked: its routing is turned off, once.
 - Templates: each active number's, read from Meta again every
   CLUB_WHATSAPP_QUALITY_HOURS, so what a ticket send decides by is current.
-- Retention: each club's messages older than its retention period (12
-  months unless it chose otherwise) are deleted, with the conversations left
-  empty.
+- Retention: for each club that ever connected a number, its messages older
+  than its retention period (12 months unless it chose otherwise) are
+  deleted, with the conversations left empty and those that never had one.
 
 Each number, and each club's retention, in its own transaction: one bad row
 cannot stop the rest. One worker at a time, by a Postgres advisory lock on
@@ -29,7 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.api.club_whatsapp import crypto, graph, inbox, live
 from app.api.club_whatsapp import service as accounts
-from app.api.club_whatsapp.models import ACTIVE, DEFAULT_RETENTION_MONTHS, LIVE, ClubWhatsAppAccounts, ClubWhatsAppMessages
+from app.api.club_whatsapp.models import ACTIVE, DEFAULT_RETENTION_MONTHS, LIVE, ClubWhatsAppAccounts
 from app.config import settings
 from app.db import lock_keys
 
@@ -149,7 +149,8 @@ async def refresh_templates(session, now: Optional[datetime] = None) -> int:
 async def retention(session, now: Optional[datetime] = None) -> int:
     """Each club's messages past its retention period, deleted. Returns how many."""
     now = now or _now()
-    clubs = (await session.scalars(select(func.distinct(ClubWhatsAppMessages.club_id)))).all()
+    # The clubs that ever connected a number (a disconnected one's inbox is kept too, until its time).
+    clubs = (await session.scalars(select(func.distinct(ClubWhatsAppAccounts.club_id)))).all()
     deleted = 0
     for club_id in clubs:
         try:
@@ -171,8 +172,40 @@ async def retention(session, now: Optional[datetime] = None) -> int:
     return deleted
 
 
+async def keys_readable(session) -> bool:
+    """Whether the server can read the clubs' keys (APP_WHATSAPP_KEYS_SECRET
+    set, and the key they were sealed with among its keys). When a live
+    number's can't be, every club's number is unusable -- their sends go
+    from the platform's -- and the admins are told, once a sweep."""
+    from app.api.admin_alerts import notify
+
+    A = ClubWhatsAppAccounts
+    sealed = await session.scalar(select(A.access_token_enc).where(A.status.in_(LIVE), A.access_token_enc.isnot(None)).limit(1))
+    if sealed is None:
+        return True
+    if crypto.available():
+        try:
+            crypto.decrypt(sealed)
+            return True
+        except crypto.Unavailable:
+            why = "isn't the key the clubs' keys were saved with"
+    else:
+        why = "is missing or isn't a Fernet key"
+    logger.error("whatsapp sweep: APP_WHATSAPP_KEYS_SECRET %s; clubs' own numbers can't be used", why)
+    await notify(
+        session, "club_whatsapp_keys",
+        title=f"Clubs' own WhatsApp numbers can't be used: APP_WHATSAPP_KEYS_SECRET {why}",
+        body="Their tickets go from the platform's number, their webhooks are answered 503 (Meta delivers again for 7 "
+             "days) and nothing can be sent from their inboxes. Restore the key (a new one goes first, the old after it).",
+        data={"code": "keys_secret"}, dedupe=False,
+    )
+    await session.commit()
+    return False
+
+
 async def sweep(session, now: Optional[datetime] = None) -> dict:
     now = now or _now()
+    await keys_readable(session)
     return {
         "checked": await refresh_quality(session, now),
         "templates": await refresh_templates(session, now),

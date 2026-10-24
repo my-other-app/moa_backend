@@ -61,6 +61,12 @@ def _stamps() -> list:
     ]
 
 
+def _set_null_index(name: str, table: str, column: str) -> None:
+    """A column a deleted row elsewhere sets null (ON DELETE SET NULL): indexed
+    where set, so that delete finds the rows instead of scanning the table."""
+    op.create_index(name, table, [column], postgresql_where=sa.text(f"{column} IS NOT NULL"))
+
+
 def upgrade() -> None:
     op.execute("SET LOCAL lock_timeout = '3s'")
     op.add_column("plan_features", sa.Column("whatsapp_own", sa.Boolean(), nullable=False, server_default=sa.false()))
@@ -116,6 +122,8 @@ def upgrade() -> None:
         "uq_club_whatsapp_accounts_live_number", "club_whatsapp_accounts", ["phone_number_id"], unique=True,
         postgresql_where=sa.text("status IN ('active', 'failed')"),
     )
+    _set_null_index("ix_club_whatsapp_accounts_created_by", "club_whatsapp_accounts", "created_by")
+    _set_null_index("ix_club_whatsapp_accounts_created_by_member", "club_whatsapp_accounts", "created_by_member_id")
 
     op.create_table(
         "club_whatsapp_quality_log",
@@ -130,6 +138,7 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=_now()),
     )
     op.create_index("ix_club_whatsapp_quality_log_account_id", "club_whatsapp_quality_log", ["account_id"])
+    op.create_index("ix_club_whatsapp_quality_log_club_id", "club_whatsapp_quality_log", ["club_id"])
 
     op.create_table(
         "club_whatsapp_templates",
@@ -181,7 +190,13 @@ def upgrade() -> None:
         sa.CheckConstraint("wa_id IS NOT NULL OR bsuid IS NOT NULL", name="ck_club_whatsapp_conversations_who"),
         sa.CheckConstraint("status IN ('open', 'closed')", name="ck_club_whatsapp_conversations_status"),
     )
-    op.create_index("ix_club_whatsapp_conversations_club_last", "club_whatsapp_conversations", ["club_id", "last_message_at"])
+    op.create_index(
+        "ix_club_whatsapp_conversations_club_last", "club_whatsapp_conversations",
+        ["club_id", sa.text("last_message_at DESC NULLS LAST"), sa.text("id DESC")],
+    )
+    _set_null_index("ix_club_whatsapp_conversations_account", "club_whatsapp_conversations", "account_id")
+    _set_null_index("ix_club_whatsapp_conversations_user", "club_whatsapp_conversations", "user_id")
+    _set_null_index("ix_club_whatsapp_conversations_registration", "club_whatsapp_conversations", "registration_id")
 
     op.create_table(
         "club_whatsapp_messages",
@@ -217,6 +232,8 @@ def upgrade() -> None:
     op.create_index("ix_club_whatsapp_messages_conversation", "club_whatsapp_messages", ["conversation_id", "id"])
     op.create_index("ix_club_whatsapp_messages_thread", "club_whatsapp_messages", ["conversation_id", "wa_timestamp", "id"])
     op.create_index("ix_club_whatsapp_messages_club_created", "club_whatsapp_messages", ["club_id", "created_at"])
+    _set_null_index("ix_club_whatsapp_messages_sent_by_user", "club_whatsapp_messages", "sent_by_user_id")
+    _set_null_index("ix_club_whatsapp_messages_sent_by_member", "club_whatsapp_messages", "sent_by_member_id")
 
 
 def downgrade() -> None:

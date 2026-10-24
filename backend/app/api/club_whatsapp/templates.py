@@ -30,7 +30,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 
 from app.api.club_whatsapp import graph
 from app.api.club_whatsapp.models import ClubWhatsAppAccounts, ClubWhatsAppTemplates

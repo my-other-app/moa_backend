@@ -4,9 +4,10 @@ mail to its owner.
 When the number stops working (Meta refused its token, locked the account,
 a send failed for the account) or its quality rating drops, the club hears
 of it in the bell (app/api/club_alerts) and by mail -- at most once a day
-for each kind of notice -- besides what its WhatsApp settings show. The audit log is the record of having told it, as for
-the plan's paused-registrations mail: durable, shared by every worker, and
-readable by an admin. The mail is a durable job (app.core.after_commit), so
+for each kind of notice, by the notice's own dedupe key -- besides what its
+WhatsApp settings show. The audit log records each telling. The admins hear
+of a club's number at most once a day for each kind (an hour for what a
+webhook repeats). The mail is a durable job (app.core.after_commit), so
 an outage of the mail provider is retried, and it goes only if the change it
 is about commits. It never says what any message said.
 """
@@ -22,8 +23,6 @@ from app.core.email import plain
 
 logger = logging.getLogger(__name__)
 
-#: How often one kind of notice may reach a club.
-EVERY = timedelta(hours=24)
 ACTION = "club_whatsapp.notice"
 
 
@@ -57,34 +56,25 @@ def dashboard_url(path: str = "/whatsapp/settings") -> str:
 async def tell_owner(session, club_id: int, kind: str, *, subject: str, paragraphs: list[str],
                      button: tuple[str, str] | None = None, now: datetime | None = None) -> bool:
     """A notice in the club's bell (club_alerts kind `whatsapp_<kind>`) and a
-    mail to its owner about `kind`, unless it was told in the last day.
-    Written in the caller's transaction. True when a mail was queued."""
+    mail to its owner about `kind`, at most once a day: the notice's own
+    dedupe key (`whatsapp_<kind>:<date>`) makes a second the same day
+    nothing, whatever runs beside it, and the mail goes only with a notice
+    that was new. Written in the caller's transaction. True when a mail was
+    queued."""
     from app.api.audit import service as audit
-    from app.api.audit.models import AdminAuditLogs
     from app.api.club_alerts import notify
     from app.api.subscriptions.notices import owner_address
 
     now = now or datetime.now(timezone.utc)
-    action = f"{ACTION}:{kind}"
-    recent = await session.scalar(
-        select(AdminAuditLogs.id)
-        .where(
-            AdminAuditLogs.action == action,
-            AdminAuditLogs.entity_type == "club",
-            AdminAuditLogs.entity_id == str(club_id),
-            AdminAuditLogs.created_at >= now - EVERY,
-        )
-        .limit(1)
-    )
-    if recent is not None:
-        return False
-    await notify(
+    made = await notify(
         session, club_id, f"whatsapp_{kind}", title=subject, body=" ".join(paragraphs[:1]),
-        link="/whatsapp/settings", data={"kind": kind},
+        link="/whatsapp/settings", data={"kind": kind}, dedupe_key=f"whatsapp_{kind}:{now.date().isoformat()}",
     )
+    if made is None:
+        return False
     to = await owner_address(session, club_id)
     await audit.record(
-        session, actor=None, action=action, entity_type="club", entity_id=club_id,
+        session, actor=None, action=f"{ACTION}:{kind}", entity_type="club", entity_id=club_id,
         summary=subject[:255], details={"kind": kind, "emailed": bool(to)},
     )
     if not to:

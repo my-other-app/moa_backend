@@ -56,6 +56,27 @@ async def changed(club_id: int, conversation_id: Optional[int], kind: str) -> No
         logger.warning("could not tell club %s's inbox what changed", club_id)
 
 
+def admit(address: str) -> None:
+    """Count an inbox stream in among the process's live streams (the live
+    room's, app/api/live/stream.py: LIVE_SSE_MAX_STREAMS and its bound per
+    address), or its Full when there is no room."""
+    from app.api.live import stream as live_stream
+
+    hub = live_stream.hub
+    if hub.open >= int(settings.LIVE_SSE_MAX_STREAMS):
+        raise live_stream.Full("this server holds all the streams it can")
+    if hub.by_address[address] >= live_stream.PER_ADDRESS:
+        raise live_stream.Full("too many streams from one address")
+    hub.open += 1
+    hub.by_address[address] += 1
+
+
+def release(address: str) -> None:
+    from app.api.live import stream as live_stream
+
+    live_stream.hub.release(address)
+
+
 def frame(event: str, data: dict, event_id: Optional[str] = None) -> bytes:
     lines = []
     if event_id:
@@ -71,12 +92,14 @@ class InboxStream(Response):
 
     media_type = "text/event-stream"
 
-    def __init__(self, club_id: int, lifetime: float = LIFETIME):
+    def __init__(self, club_id: int, lifetime: float = LIFETIME, address: Optional[str] = None):
         self.status_code = 200
         self.media_type = "text/event-stream; charset=utf-8"
         self.background = None
         self.init_headers({"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})
         self.club_id = club_id
+        #: Counted among the process's streams (admit) while it is open.
+        self.address = address
         self.lifetime = lifetime * random.uniform(0.9, 1.1)
         # Subscribed now, before the response starts, so nothing in between is missed.
         self.subscription = redis.subscribe(channel(club_id))
@@ -102,6 +125,9 @@ class InboxStream(Response):
                 await watcher
             with suppress(Exception):
                 await self.subscription.aclose()
+            if self.address is not None:
+                release(self.address)
+                self.address = None
 
     async def _serve(self, send, closed: asyncio.Event) -> None:
         async def write(data: bytes, more: bool = True) -> None:

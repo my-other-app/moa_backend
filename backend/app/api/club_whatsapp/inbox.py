@@ -1055,7 +1055,11 @@ async def forget_before(session, club_id: int, cutoff: datetime, batch: int = 10
         await session.execute(M.__table__.delete().where(M.id.in_(ids)))
     empty = select(M.id).where(M.conversation_id == C.id).exists()
     await session.execute(
-        C.__table__.delete().where(C.club_id == club_id, C.last_message_at < cutoff, ~empty)
+        C.__table__.delete().where(
+            C.club_id == club_id, ~empty,
+            # Its last message past the period, or none ever (started, never written in) and made before it.
+            or_(C.last_message_at < cutoff, and_(C.last_message_at.is_(None), C.created_at < cutoff)),
+        )
     )
     # A conversation whose latest line was deleted keeps no copy of it.
     await session.execute(

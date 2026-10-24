@@ -117,10 +117,13 @@ async def verify_account(request: Request, session: SessionDep, user: ClubAuth) 
 async def patch_account(payload: AccountSettingsIn, request: Request, session: SessionDep, user: ClubAuth) -> AccountOut:
     """`routing`: whether the club's tickets, certificates and reminders go
     from its own number (when it has the templates approved). `retention_months`:
-    how long the inbox keeps a message, 1 to 36."""
+    how long the inbox keeps a message, 1 to 36. `app_id`: the club's Meta
+    app, added without pasting the token and secret again -- checked with
+    Meta to be the token's own app (422 WHATSAPP_APP_MISMATCH)."""
     access.require_manage(request)
     club = await service.club_of(session, user)
-    await service.update_settings(session, club, user, routing=payload.routing, retention_months=payload.retention_months, request=request)
+    await service.update_settings(session, club, user, routing=payload.routing, retention_months=payload.retention_months,
+                                  app_id=payload.app_id, request=request)
     return await _account_out(session, request, club.id, user)
 
 
@@ -285,15 +288,31 @@ async def get_media(message_id: int, request: Request, session: SessionDep, user
 async def stream(request: Request, session: SessionDep, user: ClubAuth) -> Response:
     """A `changed` frame names the conversation that changed (never what it
     says); the dashboard reads it again. 404 WHATSAPP_STREAM_OFF while
-    APP_LIVE_SSE is off: the dashboard polls."""
+    APP_LIVE_SSE is off: the dashboard polls. It counts among the live
+    room's streams (LIVE_SSE_MAX_STREAMS), and is refused as theirs are when
+    there is no room: 503 LIVE_STREAM_FULL, with Retry-After."""
+    from app.api.live import stream as live_stream
+    from app.core.net import client_address
+
     access.require_inbox(request)
     if not live.on():
         raise CustomHTTPException(404, message="The inbox is not pushed here; poll it.", error_code="WHATSAPP_STREAM_OFF")
     club = await service.club_of(session, user)
     club_id = club.id
-    # Nothing of the request's session is held while the stream is open.
-    await session.commit()
-    return live.InboxStream(club_id)
+    address = client_address(request) or "unknown"
+    try:
+        live.admit(address)
+    except live_stream.Full as full:
+        # Answered here rather than raised: the API's error handler drops an exception's headers.
+        refusal = CustomHTTPException(503, message=f"Too many live streams here ({full}); poll for now.", error_code="LIVE_STREAM_FULL")
+        return JSONResponse(refusal.to_dict(), status_code=503, headers={"Retry-After": "60"})
+    try:
+        # Nothing of the request's session is held while the stream is open.
+        await session.commit()
+        return live.InboxStream(club_id, address=address)
+    except BaseException:
+        live.release(address)
+        raise
 
 
 # ─── Templates ───────────────────────────────────────────────────────────

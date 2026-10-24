@@ -424,8 +424,9 @@ async def _whatsapp_send(db: pipeline.Db, ready: "_Ready", message: whatsapp.Tem
         if not club_whatsapp.falls_back(exc):
             raise
         route.forget(exc)
+        refused = exc
         await _note(db, delivery_id, "the club's number's failure could not be noted",
-                    lambda s: club_whatsapp.after_failure(s, route, exc))
+                    lambda s: club_whatsapp.after_failure(s, route, refused))
         if not whatsapp.configured():
             raise
         if ready.quota_kind is not None and ready.event is not None:

@@ -2150,6 +2150,118 @@ async def test_the_stream_is_off_unless_the_server_pushes(client, session, world
     assert r.status_code == 404 and r.json()["error_code"] == "WHATSAPP_STREAM_OFF"
 
 
+async def test_inbox_streams_count_among_the_servers_live_streams(client, session, world, meta, monkeypatch):
+    from app.api.live import stream as live_stream
+
+    await connected(client, session, world)
+    monkeypatch.setattr(settings, "LIVE_SSE", True)
+    monkeypatch.setattr(settings, "LIVE_SSE_MAX_STREAMS", 0)
+    r = await client.get(f"{API}/clubs/whatsapp/stream", headers=world.h)
+    assert r.status_code == 503 and r.json()["error_code"] == "LIVE_STREAM_FULL" and r.headers["retry-after"] == "60"
+    monkeypatch.setattr(settings, "LIVE_SSE_MAX_STREAMS", 5000)
+    before = live_stream.hub.open
+    live.admit("203.0.113.9")
+    stream = live.InboxStream(world.club.id, lifetime=0.2, address="203.0.113.9")
+    assert live_stream.hub.open == before + 1
+
+    async def receive():
+        await asyncio.sleep(30)
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        pass
+
+    await asyncio.wait_for(stream({"type": "http"}, receive, send), 5)
+    assert live_stream.hub.open == before and live_stream.hub.by_address["203.0.113.9"] == 0
+
+
+def test_the_inbox_search_term_stays_out_of_the_access_log():
+    assert redact.path("/api/v1/clubs/whatsapp/conversations?filter=open&q=Ananya%20Iyer&limit=30") == \
+        "/api/v1/clubs/whatsapp/conversations?filter=open&q=[Filtered]&limit=30"
+    assert redact.path('GET /api/v1/clubs/whatsapp/conversations?q=98765 HTTP/1.1') == "GET /api/v1/clubs/whatsapp/conversations?q=[Filtered] HTTP/1.1"
+    # Elsewhere a search is not a person.
+    assert redact.path("/api/v1/discover/events?q=music") == "/api/v1/discover/events?q=music"
+
+
+async def test_a_notice_reaches_the_club_once_a_day_and_the_admins_once_a_day(client, session, world, meta, mails):
+    account = await connected(client, session, world)
+    for n in range(2):
+        await accounts.mark_failed(session, account, f"Meta refused it ({n})", "190")
+        await session.commit()
+        # Long past the admin alerts' own ten minutes, still the same day.
+        await session.execute(AdminNotifications.__table__.update().values(created_at=datetime.now(timezone.utc) - timedelta(hours=2)))
+        await session.commit()
+    await after_commit.drain()
+    assert len([m for m in mails if "stopped working" in m["subject"] and m["recipients"] == ["yukthi@example.com"]]) == 1
+    from app.api.club_alerts.models import ClubAlerts
+
+    alerts_ = (await session.scalars(select(ClubAlerts).where(ClubAlerts.club_id == world.club.id))).all()
+    assert [a.dedupe_key for a in alerts_] == [f"whatsapp_failed:{datetime.now(timezone.utc).date().isoformat()}"]
+    assert await session.scalar(select(func.count()).select_from(AdminNotifications).where(AdminNotifications.kind == "club_whatsapp_failed")) == 1
+
+
+async def test_the_admins_hear_each_sweep_that_the_keys_secret_is_unusable(client, session, world, meta, monkeypatch):
+    await connected(client, session, world)
+    assert await sweep.keys_readable(session) is True
+    monkeypatch.setattr(settings, "WHATSAPP_KEYS_SECRET", Fernet.generate_key().decode())
+    await sweep.sweep(session)
+    monkeypatch.setattr(settings, "WHATSAPP_KEYS_SECRET", "")
+    await sweep.sweep(session)
+    told = (await session.scalars(select(AdminNotifications).where(AdminNotifications.kind == "club_whatsapp_keys"))).all()
+    assert len(told) == 2 and "saved with" in told[0].title and "missing" in told[1].title
+
+
+async def test_a_conversation_never_written_in_is_forgotten_too(client, session, world, meta):
+    await connected(client, session, world)
+    r = await client.post(f"{API}/clubs/whatsapp/conversations", json={"registration_id": str(world.reg.id)}, headers=world.h)
+    conv_id = r.json()["id"]
+    await session.execute(ClubWhatsAppConversations.__table__.update().values(created_at=datetime.now(timezone.utc) - timedelta(days=400)))
+    await session.commit()
+    await sweep.retention(session, datetime.now(timezone.utc))
+    assert await session.get(ClubWhatsAppConversations, conv_id, populate_existing=True) is None
+
+
+async def test_the_app_id_is_added_on_its_own_and_checked(client, session, world, meta):
+    meta.token_info = {**meta.token_info, "app_id": None}
+    await connected(client, session, world)
+    assert (await client.get(f"{API}/clubs/whatsapp/account", headers=world.h)).json()["app_id"] is None
+    meta.token_info = {**meta.token_info, "app_id": "999999999999"}
+    r = await client.patch(f"{API}/clubs/whatsapp/account", json={"app_id": APP_ID}, headers=world.h)
+    assert r.status_code == 422 and r.json()["error_code"] == "WHATSAPP_APP_MISMATCH"
+    meta.token_info = {**meta.token_info, "app_id": APP_ID}
+    r = await client.patch(f"{API}/clubs/whatsapp/account", json={"app_id": APP_ID}, headers=world.h)
+    assert r.status_code == 200 and r.json()["app_id"] == APP_ID
+    row = await account_of(session, world.club.id)
+    assert crypto.decrypt(row.access_token_enc) == TOKEN
+
+
+async def test_the_samples_upload_carries_the_proof_and_a_strange_answer_is_said(client, session, world, meta, monkeypatch):
+    meta.templates = [t for t in meta.templates if t["name"] != "ticket_confirmed"]
+    await connect(client, world, app_id=APP_ID)
+    real = meta.handler
+
+    def handler(request):
+        if request.url.path.endswith("upload:MTphdHRhY2htZW50") and meta.upload_html:
+            request.read()
+            meta.calls.append(request)
+            return httpx.Response(200, content=b"<html>oops</html>", headers={"content-type": "text/html"})
+        return real(request)
+
+    meta.upload_html = False
+    monkeypatch.setattr(graph, "_client", lambda timeout=None: httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    out = (await client.post(f"{API}/clubs/whatsapp/templates/standard", headers=world.h)).json()["results"]
+    assert out["ticket_confirmed"] == "submitted"
+    upload = [c for c in meta.calls if c.url.path.endswith("upload:MTphdHRhY2htZW50")][-1]
+    proof = hmac.new(SECRET.encode(), TOKEN.encode(), hashlib.sha256).hexdigest()
+    assert parse_qs(upload.url.query.decode())["appsecret_proof"] == [proof]
+    meta.created.clear()
+    meta.templates = [t for t in meta.templates if t["name"] != "certificate_ready"]
+    meta.upload_html = True
+    await client.get(f"{API}/clubs/whatsapp/templates", headers=world.h)
+    out = (await client.post(f"{API}/clubs/whatsapp/templates/standard", headers=world.h)).json()["results"]
+    assert "Couldn't reach Meta" in out["certificate_ready"]
+
+
 async def test_the_stream_names_the_conversation_never_its_words():
     stream = live.InboxStream(4242, lifetime=0.6)
     sent: list[dict] = []

@@ -171,6 +171,10 @@ class ClubWhatsAppAccounts(AbstractSQLModel, TimestampsMixin):
             postgresql_where=text("status IN ('active', 'failed')"),
         ),
         CheckConstraint("failed_by IS NULL OR failed_by IN ('read', 'send', 'webhook')", name="ck_club_whatsapp_accounts_failed_by"),
+        # A user or member deleted sets these null: found by index, not a scan.
+        Index("ix_club_whatsapp_accounts_created_by", "created_by", postgresql_where=text("created_by IS NOT NULL")),
+        Index("ix_club_whatsapp_accounts_created_by_member", "created_by_member_id",
+              postgresql_where=text("created_by_member_id IS NOT NULL")),
         CheckConstraint("status IN ('active', 'failed', 'disconnected')", name="ck_club_whatsapp_accounts_status"),
         CheckConstraint("mode IN ('keys', 'embedded')", name="ck_club_whatsapp_accounts_mode"),
         CheckConstraint("retention_months BETWEEN 1 AND 36", name="ck_club_whatsapp_accounts_retention"),
@@ -182,7 +186,7 @@ class ClubWhatsAppQualityLog(AbstractSQLModel):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     account_id = Column(Integer, ForeignKey("club_whatsapp_accounts.id", ondelete="CASCADE"), nullable=False, index=True)
-    club_id = Column(Integer, ForeignKey("clubs.id", ondelete="CASCADE"), nullable=False)
+    club_id = Column(Integer, ForeignKey("clubs.id", ondelete="CASCADE"), nullable=False, index=True)
     quality_rating = Column(String(16), nullable=True)
     messaging_limit_tier = Column(String(32), nullable=True)
     previous_rating = Column(String(16), nullable=True)
@@ -261,8 +265,12 @@ class ClubWhatsAppConversations(AbstractSQLModel, TimestampsMixin):
         UniqueConstraint("club_id", "business_phone_id", "bsuid", name="uq_club_whatsapp_conversations_bsuid"),
         CheckConstraint("wa_id IS NOT NULL OR bsuid IS NOT NULL", name="ck_club_whatsapp_conversations_who"),
         CheckConstraint("status IN ('open', 'closed')", name="ck_club_whatsapp_conversations_status"),
-        # The inbox's list: a club's conversations, latest first.
-        Index("ix_club_whatsapp_conversations_club_last", "club_id", "last_message_at"),
+        # The inbox's list: a club's conversations, latest first, as it is ordered.
+        Index("ix_club_whatsapp_conversations_club_last", "club_id", text("last_message_at DESC NULLS LAST"), text("id DESC")),
+        # The rows a deleted connection, user or registration sets null.
+        Index("ix_club_whatsapp_conversations_account", "account_id", postgresql_where=text("account_id IS NOT NULL")),
+        Index("ix_club_whatsapp_conversations_user", "user_id", postgresql_where=text("user_id IS NOT NULL")),
+        Index("ix_club_whatsapp_conversations_registration", "registration_id", postgresql_where=text("registration_id IS NOT NULL")),
     )
 
 
@@ -317,4 +325,7 @@ class ClubWhatsAppMessages(AbstractSQLModel):
         CheckConstraint("direction IN ('in', 'out')", name="ck_club_whatsapp_messages_direction"),
         # The retention sweep and the stats: a club's messages by age.
         Index("ix_club_whatsapp_messages_club_created", "club_id", "created_at"),
+        # The rows a deleted user or member sets null.
+        Index("ix_club_whatsapp_messages_sent_by_user", "sent_by_user_id", postgresql_where=text("sent_by_user_id IS NOT NULL")),
+        Index("ix_club_whatsapp_messages_sent_by_member", "sent_by_member_id", postgresql_where=text("sent_by_member_id IS NOT NULL")),
     )
