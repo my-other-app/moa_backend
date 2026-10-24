@@ -147,6 +147,24 @@ class ClubWhatsAppAccounts(AbstractSQLModel, TimestampsMixin):
     restrictions = Column(JSON, nullable=True)
     #: Whether the club's tickets, certificates and reminders go from this number.
     routing = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    #: Under `routing` (the master switch), each kind on its own (club_whatsapp/delivery_routes.py).
+    route_tickets = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    route_certificates = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    route_reminders = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    #: Embedded Signup (club_whatsapp/embedded_signup.py): when the business
+    #: token expires (null: never), the number's registration PIN (Fernet,
+    #: like the token), when it was registered, and whether it is a WhatsApp
+    #: Business app number (coexistence: never registered by us).
+    token_expires_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    register_pin_enc = Column(Text, nullable=True)
+    registered_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    on_biz_app = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    #: Meta's marketing_messages_onboarding_status (ONBOARDED: promotions go to /marketing_messages), and when it was read.
+    mm_status = Column(String(32), nullable=True)
+    mm_checked_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    #: The account's currency, and when the sweep last read its spend (club_whatsapp/spend.py).
+    currency = Column(String(8), nullable=True)
+    spend_checked_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     #: Months the inbox keeps a message before the sweep deletes it.
     retention_months = Column(Integer, nullable=False, default=DEFAULT_RETENTION_MONTHS, server_default=str(DEFAULT_RETENTION_MONTHS))
     #: When it stopped: disconnected or disabled.
