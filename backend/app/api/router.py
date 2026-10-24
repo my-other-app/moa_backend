@@ -57,6 +57,10 @@ from app.api.payment_gateways.router import (
     club_router as payment_gateways_club_router,
 )
 from app.api.ticket_templates.router import router as ticket_templates_router
+from app.api.club_whatsapp.reach_router import (
+    admin_router as club_whatsapp_reach_admin_router,
+    club_router as club_whatsapp_reach_club_router,
+)
 from app.api.club_whatsapp.router import (
     admin_router as club_whatsapp_admin_router,
     club_router as club_whatsapp_club_router,
@@ -122,6 +126,10 @@ api_router.include_router(router=mcp_club_router)
 # Before club_router too: /clubs/payments/gateway is a literal path.
 api_router.include_router(router=payment_gateways_club_router)
 # A club's own WhatsApp number (app/api/club_whatsapp): /clubs/whatsapp/... before club_router.
+# Its routing by kind, spend, broadcasts and Connect with Meta: before the
+# admin's /admin/club-whatsapp/{club_id}, which would take /fallbacks.
+api_router.include_router(router=club_whatsapp_reach_club_router)
+api_router.include_router(router=club_whatsapp_reach_admin_router)
 api_router.include_router(router=club_whatsapp_club_router)
 api_router.include_router(router=club_whatsapp_inbox_router)
 api_router.include_router(router=club_whatsapp_admin_router)
