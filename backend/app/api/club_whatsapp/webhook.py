@@ -41,7 +41,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from app.api.club_whatsapp import alerts, inbound, inbox, templates
+from app.api.club_whatsapp import alerts, broadcasts, inbound, inbox, templates
 from app.api.club_whatsapp import service as accounts
 from app.api.club_whatsapp.models import ClubWhatsAppAccounts
 
@@ -146,6 +146,9 @@ async def _messages(session, account, value: dict, touched: dict, counts: dict) 
             async with session.begin_nested():
                 conv_id = await inbox.record_status(session, account, st)
                 await inbound.after_status(session, account, st)
+                # Or a broadcast's message (broadcasts.py): its own row, matched by the wamid alone.
+                if conv_id is None:
+                    await broadcasts.record_status(session, account, st)
         except Exception as exc:  # noqa: BLE001
             counts["failed"] += 1
             logger.warning("club whatsapp account %s: a status could not be kept (%s)", account.id, type(exc).__name__)

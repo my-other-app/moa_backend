@@ -101,6 +101,9 @@ PLAN_CHECKOUT = 7_420_388
 #: A club connecting, changing or disconnecting its own WhatsApp number
 #: (app/api/club_whatsapp/service.py).
 CLUB_WHATSAPP_CONNECT = 7_420_390
+#: A club's broadcasts taking their next people under its messaging limit,
+#: one sender at a time per club (app/api/club_whatsapp/broadcasts.py).
+CLUB_WHATSAPP_BROADCAST = 7_420_393
 #: A registration's or a subscription's ledger lines (app/api/ledger/service.py, backfill.py).
 LEDGER = 7_420_455
 #: One "tell the room" at a time per event, so two hosts pressing at once send
