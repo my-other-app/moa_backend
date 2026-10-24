@@ -1745,3 +1745,75 @@ Many `(132001)`: a template is not approved in `en` under that exact name.
 account is still in test mode and the number is not on its test list.
 `(131026)`: the number cannot receive WhatsApp; the guest's row is marked
 until the number is corrected on the attendee page.
+
+## 19. Message quotas and paid overage
+
+Every email and WhatsApp message a club sends to its people counts against
+its plan's monthly limits (`plan_limits.emails_per_month` and
+`whatsapp_per_month`, null for unlimited): tickets, certificates, payment
+receipts, the day-before reminder, announcements (typed messages),
+campaigns (designed sends), journey emails and feedback-survey mails. A
+month is a calendar month in India. Not counted: a send that was skipped or
+failed, a test send to the organiser, the platform's own mail to the club,
+and a WhatsApp message sent through a club's own number (`via="club"`).
+
+The owner's defaults (migration `message_quotas`, editable in Admin ->
+Subscriptions -> Plans):
+
+| Plan | Emails a month | WhatsApp a month |
+|---|---|---|
+| Free | 200 | 0 |
+| Starter | 1,000 | 50 |
+| Growth | 5,000 | 250 |
+| Pro (and the free trial) | 20,000 | 1,000 |
+| Enterprise | unlimited unless set for the club | unlimited unless set |
+
+Each plan's overage prices (`plans.email_overage_paise`, default 10 = ₹0.10;
+`whatsapp_overage_paise`, default 100 = ₹1) are edited beside them.
+
+**Past the limit:**
+
+- a plan Razorpay bills keeps sending; the month's extra is added to the
+  club's Razorpay subscription as an add-on, which Razorpay puts on its next
+  invoice (a yearly plan's next invoice is its renewal);
+- Free and the free trial have no card: announcements, campaigns, reminders
+  and surveys are held back (skipped, the reason on the row), tickets,
+  certificates and payment receipts still go and are counted. Several
+  workers sending at once can each send the last one, so Free may go a few
+  past (at most `APP_MAIL_CONCURRENCY`);
+- a complimentary plan, an Enterprise deal or trial, or a deal invoiced by
+  hand keeps sending; the month's statement says "manual" and the admins are
+  alerted (`message_overage_manual`) to invoice it.
+
+The club is told at 80% and at 100% of each limit, once each a month: a
+notice in the dashboard's bell and a mail to the owner.
+
+**The month's close** runs in the hourly billing sweep, ten minutes or more
+after midnight (IST) on the 1st: one `message_statements` row per club and
+month. The limit used is the kinder of the one the club last sent under and
+the one it ends the month on. An extra under ₹1 (Razorpay's smallest
+charge) is waived. A Razorpay add-on is asked for once; its id is kept on
+the statement and it is never asked for twice. Razorpay refusing it: tried
+again (1, 2, 4... hours) up to five times, the admins alerted each time,
+then "gave up" for an admin to invoice or retry (club page in the admin
+app). Razorpay not answering: the statement is "unconfirmed" and Razorpay's
+add-ons are searched for its reference (`[moa-messages:<id>:<club>:<month>]`
+in the description) before anything is asked again. Each charge is in the
+audit log (`messages.overage_charged`).
+
+| Setting (`.env`) | Default | Meaning |
+|---|---|---|
+| `APP_MESSAGE_OVERAGE_BILLING` | `true` | `false` stops the add-ons only: statements are still made and wait, `pending` |
+
+```sql
+-- This month's counters, the busiest first.
+SELECT c.name, u.channel, u.used, u.quota, u.blocked, u.billing, u.kinds
+FROM message_usage u JOIN clubs c ON c.id = u.club_id
+WHERE u.period = date_trunc('month', now() AT TIME ZONE 'Asia/Kolkata')::date
+ORDER BY u.used DESC LIMIT 20;
+
+-- Last month's statements that cost something, and what became of them.
+SELECT c.name, s.amount_paise, s.status, s.razorpay_addon_id, s.last_error
+FROM message_statements s JOIN clubs c ON c.id = s.club_id
+WHERE s.amount_paise > 0 ORDER BY s.period DESC, s.amount_paise DESC LIMIT 50;
+```
