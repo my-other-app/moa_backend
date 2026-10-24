@@ -139,7 +139,8 @@ async def test_a_priced_on_request_plan_says_so(client, session):
 
 async def test_with_no_plans_the_page_is_empty_not_an_error(client):
     body = (await client.get(f"{API}/plans")).json()
-    assert body == {"currency": "INR", "yearly_months_free": None, "plans": []}
+    # No Pro plan to trial and no Enterprise to talk about: neither is offered.
+    assert body == {"currency": "INR", "trial": None, "enterprise_trial_days": None, "yearly_months_free": None, "plans": []}
 
 
 def test_months_free_is_only_claimed_when_true_of_every_paid_plan():
