@@ -2,8 +2,10 @@
 
 - Quality: each live number not asked about for CLUB_WHATSAPP_QUALITY_HOURS
   is read from Meta again -- its quality rating and messaging limit, logged
-  when they change, the club told when they drop. A failed number that Meta
-  answers for again is active again (the club fixed it in Meta).
+  when they change, the club told when they drop. A number a check had
+  failed that Meta answers for again is active again (the club fixed it in
+  Meta); one Meta refused a send for stays failed until new keys. A number
+  whose club's plan lapsed is not asked: its routing is turned off, once.
 - Templates: each active number's, read from Meta again every
   CLUB_WHATSAPP_QUALITY_HOURS, so what a ticket send decides by is current.
 - Retention: each club's messages older than its retention period (12
@@ -25,7 +27,7 @@ from dateutil.relativedelta import relativedelta
 from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from app.api.club_whatsapp import crypto, inbox, live
+from app.api.club_whatsapp import crypto, graph, inbox, live
 from app.api.club_whatsapp import service as accounts
 from app.api.club_whatsapp.models import ACTIVE, DEFAULT_RETENTION_MONTHS, LIVE, ClubWhatsAppAccounts, ClubWhatsAppMessages
 from app.config import settings
@@ -48,28 +50,56 @@ def retention_cutoff(months: Optional[int], now: datetime) -> datetime:
 
 
 async def refresh_quality(session, now: Optional[datetime] = None) -> int:
-    """Ask Meta about each live number due a check. Returns how many were asked."""
+    """Ask Meta about each live number due a check. Returns how many were
+    asked. No lock is held while Meta answers: the answer is applied after,
+    to the row as it is then, and not at all when its keys changed meanwhile
+    (the club saved new ones). A number whose plan lapsed is not asked (its
+    routing is turned off, the club told once)."""
     now = now or _now()
     if not crypto.available():
         return 0
+    A = ClubWhatsAppAccounts
     due = now - timedelta(hours=int(settings.CLUB_WHATSAPP_QUALITY_HOURS or 6))
     ids = (await session.scalars(
-        select(ClubWhatsAppAccounts.id)
-        .where(ClubWhatsAppAccounts.status.in_(LIVE),
-               or_(ClubWhatsAppAccounts.quality_checked_at.is_(None), ClubWhatsAppAccounts.quality_checked_at <= due))
-        .order_by(ClubWhatsAppAccounts.quality_checked_at.asc().nulls_first(), ClubWhatsAppAccounts.id)
+        select(A.id)
+        .where(A.status.in_(LIVE), or_(A.quality_checked_at.is_(None), A.quality_checked_at <= due))
+        .order_by(A.quality_checked_at.asc().nulls_first(), A.id)
         .limit(BATCH)
     )).all()
     done = 0
     for account_id in ids:
         try:
-            account = await session.scalar(
-                select(ClubWhatsAppAccounts).where(ClubWhatsAppAccounts.id == account_id, ClubWhatsAppAccounts.status.in_(LIVE))
-                .with_for_update(skip_locked=True).execution_options(populate_existing=True)
-            )
-            if account is None:
+            account = await session.get(A, account_id)
+            if account is None or account.status not in LIVE:
                 continue
-            await accounts.recheck(session, account, source="sweep")
+            if not await accounts.plan_allows(session, account.club_id):
+                await accounts.plan_lapsed(session, account)
+                account.quality_checked_at = now
+                await session.commit()
+                continue
+            sealed = account.access_token_enc
+            try:
+                keys = accounts.keys_of(account)
+            except crypto.Unavailable:
+                keys = None
+            await session.commit()
+            answer = None
+            if keys is not None:
+                try:
+                    answer = await graph.phone_number(keys)
+                except graph.GraphError as exc:
+                    answer = exc
+            account = await session.scalar(
+                select(A).where(A.id == account_id).with_for_update().execution_options(populate_existing=True)
+            )
+            if account is None or account.status not in LIVE or account.access_token_enc != sealed:
+                await session.commit()
+                continue
+            if answer is None:
+                await accounts.mark_failed(session, account, "The saved keys can't be read any more. Paste them again.", "KEYS",
+                                           source=accounts.READ)
+            else:
+                await accounts.checked(session, account, answer, "sweep")
             account.quality_checked_at = now
             await session.commit()
             done += 1
@@ -84,7 +114,7 @@ async def refresh_templates(session, now: Optional[datetime] = None) -> int:
     last read CLUB_WHATSAPP_QUALITY_HOURS ago (a missed webhook, an edit in
     WhatsApp Manager): what a ticket send decides by stays current. Not for
     a number the plan no longer covers. Returns how many were read."""
-    from app.api.club_whatsapp import graph, templates
+    from app.api.club_whatsapp import templates
 
     now = now or _now()
     if not crypto.available():

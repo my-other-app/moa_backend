@@ -112,8 +112,13 @@ class FakeMeta:
         self.created: list[dict] = []
         self.deleted: list[dict] = []
         self.number = {"id": PHONE, "display_phone_number": "+91 98470 12345", "verified_name": "Yukthi",
-                       "quality_rating": "GREEN", "messaging_limit_tier": "TIER_1K"}
+                       "quality_rating": "GREEN", "whatsapp_business_manager_messaging_limit": "TIER_1K", "status": "CONNECTED",
+                       "name_status": "APPROVED", "code_verification_status": "VERIFIED"}
         self.waba_numbers = [PHONE]
+        #: What GET /debug_token says of the club's token.
+        self.token_info = {"app_id": APP_ID, "type": "SYSTEM_USER", "application": "Yukthi WhatsApp", "is_valid": True,
+                           "expires_at": 0, "data_access_expires_at": 0,
+                           "scopes": ["whatsapp_business_management", "whatsapp_business_messaging"]}
         self.templates = standard_templates()
         self.fail: dict = {}
         self.club_answer = None
@@ -147,6 +152,8 @@ class FakeMeta:
             return httpx.Response(200, json={"messages": [{"id": f"wamid.PLATFORM{len(self.platform_sent)}"}]})
         if path == PLATFORM_PHONE + "/media" or path == PHONE + "/media":
             return httpx.Response(200, json={"id": "media-up-1"})
+        if path == "debug_token":
+            return httpx.Response(200, json={"data": self.token_info})
         if request.method == "GET" and (path == PHONE or path in self.waba_numbers):
             return httpx.Response(200, json={**self.number, "id": path})
         if path == f"{WABA}/phone_numbers":
@@ -1240,6 +1247,8 @@ async def test_a_template_is_deleted_in_one_language_or_all(client, session, wor
 
 
 async def test_myotherapps_own_templates_are_submitted_with_a_sample_document(client, session, world, meta):
+    # A token whose app Meta didn't name: no app id to upload the sample with.
+    meta.token_info = {**meta.token_info, "app_id": None}
     await connected(client, session, world)
     no_app = (await client.post(f"{API}/clubs/whatsapp/templates/standard", headers=world.h)).json()["results"]
     assert no_app["ticket_confirmed"] == "exists" and "app ID" in no_app["certificate_ready"]
@@ -1786,7 +1795,7 @@ async def test_the_sweep_reads_quality_records_changes_and_tells_of_a_drop(clien
     await connected(client, session, world)
     account = await account_of(session, world.club.id)
     later = datetime.now(timezone.utc) + timedelta(hours=7)
-    meta.number = {**meta.number, "quality_rating": "RED", "messaging_limit_tier": "TIER_250"}
+    meta.number = {**meta.number, "quality_rating": "RED", "whatsapp_business_manager_messaging_limit": "TIER_250"}
     assert await sweep.refresh_quality(session, later) == 1
     account = await account_of(session, world.club.id)
     assert account.quality_rating == "RED" and account.messaging_limit_tier == "TIER_250"
@@ -1822,6 +1831,200 @@ async def test_metas_limit_change_by_webhook_is_recorded(client, session, world,
     await hook(client, account.webhook_token, payload)
     account = await account_of(session, world.club.id)
     assert account.messaging_limit_tier == "TIER_10K" and account.quality_checked_at is None
+
+
+async def test_the_messaging_limit_is_the_portfolios_however_meta_writes_it(client, session, world, meta):
+    account = await connected(client, session, world)
+    # Asked of a v24 Graph, by the field that replaced messaging_limit_tier.
+    number = meta.club_calls("GET", f"/{PHONE}")[0]
+    assert number.url.path.startswith("/v24.0/")
+    assert "whatsapp_business_manager_messaging_limit" in parse_qs(number.url.query.decode())["fields"][0]
+
+    def change(field, value):
+        return {"object": "whatsapp_business_account", "entry": [{"id": WABA, "changes": [{"field": field, "value": value}]}]}
+
+    for field, value, tier in [
+        ("phone_number_quality_update", {"event": "UPGRADE", "max_daily_conversations_per_business": "TIER_2K"}, "TIER_2K"),
+        ("business_capability_update", {"max_daily_conversations_per_business": 10000, "max_phone_numbers_per_waba": 25}, "TIER_10K"),
+        ("business_capability_update", {"max_daily_conversations_per_business": -1}, "TIER_UNLIMITED"),
+        # A throughput upgrade is about speed, not the limit.
+        ("phone_number_quality_update", {"event": "THROUGHPUT_UPGRADE", "current_limit": "TIER_250"}, "TIER_UNLIMITED"),
+    ]:
+        await hook(client, account.webhook_token, change(field, value))
+        assert (await account_of(session, world.club.id)).messaging_limit_tier == tier, (field, value)
+    assert accounts.tier_of(250) == "TIER_250" and accounts.tier_of("2000") == "TIER_2K" and accounts.tier_of("TIER_NOT_SET") is None
+    page = (await client.get(f"{API}/clubs/whatsapp/account", headers=world.h)).json()
+    assert page["messaging_limit_tier"] == "TIER_UNLIMITED"
+
+
+@pytest.mark.parametrize("change, code, field", [
+    ({"is_valid": False}, "WHATSAPP_TOKEN_INVALID", "access_token"),
+    ({"scopes": ["whatsapp_business_management"]}, "WHATSAPP_PERMISSION_MISSING", "access_token"),
+    ({"expires_at": 1893456000, "type": "USER"}, "WHATSAPP_TOKEN_EXPIRES", "access_token"),
+    ({"app_id": "999999999999"}, "WHATSAPP_APP_MISMATCH", "app_id"),
+])
+async def test_the_token_is_checked_with_debug_token(client, session, world, meta, change, code, field):
+    meta.token_info = {**meta.token_info, **change}
+    r = await connect(client, world, app_id=APP_ID)
+    assert r.status_code == 422 and r.json()["error_code"] == code and r.json()["errors"]["field"] == field
+    assert await account_of(session, world.club.id) is None
+    asked = meta.club_calls("GET", "/debug_token")[0]
+    assert parse_qs(asked.url.query.decode())["input_token"] == [TOKEN] and "appsecret_proof" in parse_qs(asked.url.query.decode())
+
+
+async def test_the_tokens_app_fills_in_the_app_id(client, session, world, meta):
+    r = await connect(client, world)
+    assert r.status_code == 200 and r.json()["app_id"] == APP_ID
+
+
+async def test_a_number_meta_hasnt_connected_is_refused_and_a_flagged_one_warned(client, session, world, meta):
+    meta.number = {**meta.number, "status": "PENDING"}
+    r = await connect(client, world)
+    assert r.status_code == 422 and r.json()["error_code"] == "WHATSAPP_NUMBER_NOT_CONNECTED"
+    meta.number = {**meta.number, "status": "FLAGGED", "name_status": "DECLINED"}
+    out = (await connect(client, world)).json()
+    assert out["connected"] is True and out["number_status"] == "FLAGGED" and out["name_status"] == "DECLINED"
+    warned = " ".join(out["warnings"])
+    assert "FLAGGED" in warned and "display name" in warned
+    # Meta's billing: a payment method in Billing Hub, and INR for an Indian business.
+    assert "Billing Hub" in warned and "1,000 service messages" in warned and "INR" in warned and "31 December 2026" in warned
+
+
+async def test_each_save_seals_the_verify_token_under_the_newest_key(client, session, world, meta, monkeypatch):
+    first = (await connect(client, world)).json()
+    old = settings.WHATSAPP_KEYS_SECRET
+    new = Fernet.generate_key().decode()
+    monkeypatch.setattr(settings, "WHATSAPP_KEYS_SECRET", f"{new},{old}")
+    second = (await connect(client, world)).json()
+    assert second["verify_token"] == first["verify_token"]
+    row = await account_of(session, world.club.id)
+    assert Fernet(new.encode()).decrypt(row.verify_token_enc.encode()).decode() == first["verify_token"]
+
+
+async def test_the_rotation_script_seals_every_key_again(client, session, world, meta, monkeypatch):
+    from scripts import rotate_whatsapp_keys
+
+    await connected(client, session, world)
+    old = settings.WHATSAPP_KEYS_SECRET
+    new = Fernet.generate_key().decode()
+    monkeypatch.setattr(settings, "WHATSAPP_KEYS_SECRET", f"{new},{old}")
+    assert await rotate_whatsapp_keys.run(session, dry_run=True) == {"rows": 1, "rotated": 3, "unreadable": 0}
+    row = await account_of(session, world.club.id)
+    sealed = row.access_token_enc
+    assert await rotate_whatsapp_keys.run(session) == {"rows": 1, "rotated": 3, "unreadable": 0}
+    row = await account_of(session, world.club.id)
+    assert row.access_token_enc != sealed
+    monkeypatch.setattr(settings, "WHATSAPP_KEYS_SECRET", new)
+    assert crypto.decrypt(row.access_token_enc) == TOKEN and crypto.decrypt(row.app_secret_enc) == SECRET
+    assert crypto.decrypt(row.verify_token_enc)
+
+
+async def test_one_number_is_live_in_one_club_at_most(client, session, world, meta):
+    from sqlalchemy.exc import IntegrityError
+
+    await connected(client, session, world)
+    session.add(ClubWhatsAppAccounts(club_id=world.other_club.id, waba_id=WABA, phone_number_id=PHONE, webhook_token="x" * 32))
+    with pytest.raises(IntegrityError):
+        async with session.begin_nested():
+            await session.flush()
+
+
+async def test_a_send_time_failure_stays_failed_until_new_keys(client, session, world, meta, platform_number):
+    await connected(client, session, world)
+    meta.club_answer = refused(131042, "Business eligibility payment issue")
+    await _reminder(session, world)
+    assert (await account_of(session, world.club.id)).failed_by == "send"
+    # The number can be read; the payment is still not fixed.
+    r = await client.post(f"{API}/clubs/whatsapp/account/verify", headers=world.h)
+    assert r.json()["status"] == "failed" and r.json()["last_error_code"] == "131042"
+    assert await sweep.refresh_quality(session, datetime.now(timezone.utc) + timedelta(hours=7)) == 1
+    assert (await account_of(session, world.club.id)).status == "failed"
+    # New keys are the club saying it is fixed.
+    assert (await connect(client, world)).json()["status"] == "active"
+
+
+async def test_disconnecting_tells_meta_to_stop_sending_the_webhooks_first(client, session, world, meta):
+    await connected(client, session, world)
+    r = await client.delete(f"{API}/clubs/whatsapp/account", headers=world.h)
+    assert r.status_code == 200 and r.json()["status"] == "disconnected"
+    gone = meta.club_calls("DELETE", f"/{WABA}/subscribed_apps")
+    assert len(gone) == 1 and gone[0].headers["authorization"] == f"Bearer {TOKEN}"
+    # Meta refusing it doesn't stop the disconnect.
+    await connected(client, session, world)
+    meta.fail[f"DELETE {WABA}/subscribed_apps"] = (400, {"error": {"code": 100, "message": "nope"}})
+    assert (await client.delete(f"{API}/clubs/whatsapp/account", headers=world.h)).json()["status"] == "disconnected"
+
+
+async def test_meta_banning_restricting_and_reinstating_the_account(client, session, world, meta, platform_number, mails):
+    account = await connected(client, session, world)
+
+    def update_(value):
+        return {"object": "whatsapp_business_account", "entry": [{"id": WABA, "changes": [{"field": "account_update", "value": value}]}]}
+
+    restriction = {"event": "ACCOUNT_RESTRICTION", "restriction_info": [
+        {"restriction_type": "RESTRICTED_BIZ_INITIATED_MESSAGING", "expiration": int((NOW + timedelta(days=3)).timestamp())}]}
+    await hook(client, account.webhook_token, update_(restriction))
+    assert await accounts.route_for(session, world.club.id, "event_reminder") is None
+    page = (await client.get(f"{API}/clubs/whatsapp/account", headers=world.h)).json()
+    assert page["restrictions"][0]["type"] == "RESTRICTED_BIZ_INITIATED_MESSAGING" and page["status"] == "active"
+    assert any("restricted" in w for w in page["warnings"])
+    assert await session.scalar(select(func.count()).select_from(AdminNotifications).where(AdminNotifications.kind == "club_whatsapp_failed")) == 1
+    # A restriction that doesn't stop it sending tickets doesn't pause anything.
+    await hook(client, account.webhook_token, update_({"event": "ACCOUNT_RESTRICTION", "restriction_info": [
+        {"restriction_type": "RESTRICTED_ADD_PHONE_NUMBER_ACTION"}]}))
+    assert await accounts.route_for(session, world.club.id, "event_reminder") is not None
+    # Banned, then reinstated: the number fails, and is active and checked again after.
+    await hook(client, account.webhook_token, update_({"event": "DISABLED_UPDATE", "ban_info": {"waba_ban_state": "DISABLE", "waba_ban_date": "October 20, 2026"}}))
+    row = await account_of(session, world.club.id)
+    assert row.status == "failed" and row.failed_by == "webhook" and row.last_error_code == "DISABLED_UPDATE"
+    asked = len(meta.club_calls("GET", f"/{PHONE}"))
+    await hook(client, account.webhook_token, update_({"event": "DISABLED_UPDATE", "ban_info": {"waba_ban_state": "REINSTATE", "waba_ban_date": "October 20, 2026"}}))
+    row = await account_of(session, world.club.id)
+    assert row.status == "active" and row.last_error is None and row.restrictions is None
+    assert len(meta.club_calls("GET", f"/{PHONE}")) == asked + 1
+    # Offboarded (a device change): failed, and the club told.
+    await hook(client, account.webhook_token, update_({"event": "ACCOUNT_OFFBOARDED"}))
+    row = await account_of(session, world.club.id)
+    assert row.status == "failed" and row.last_error_code == "ACCOUNT_OFFBOARDED"
+    await hook(client, account.webhook_token, update_({"event": "ACCOUNT_RECONNECTED"}))
+    assert (await account_of(session, world.club.id)).status == "active"
+
+
+async def test_a_club_that_leaves_enterprise_keeps_its_messages_and_asks_meta_nothing(client, session, world, meta):
+    account = await connected(client, session, world)
+    conv = await conversation_with(client, session, world, account)
+    await subscriptions.assign_plan(session, club_id=world.club.id, plan=world.plans["free"], cycle=BillingCycle.monthly)
+    await session.commit()
+    gates.reset()
+    asked = len(meta.calls)
+    assert await sweep.refresh_quality(session, datetime.now(timezone.utc) + timedelta(hours=7)) == 0
+    assert await sweep.refresh_quality(session, datetime.now(timezone.utc) + timedelta(hours=14)) == 0
+    assert await sweep.refresh_templates(session, datetime.now(timezone.utc) + timedelta(hours=7)) == 0
+    row = await account_of(session, world.club.id)
+    assert row.routing is False
+    bell = [a["kind"] for a in (await client.get(f"{API}/clubs/alerts", headers=world.h)).json()["items"]]
+    assert bell.count("whatsapp_plan") == 1
+    page = (await client.get(f"{API}/clubs/whatsapp/account", headers=world.h)).json()
+    assert page["locked"] is True and page["connected"] is True and "plan no longer includes" in page["warnings"][0]
+    # Messages still arrive and are kept; reading one tells Meta nothing; templates are what was last read.
+    r = await hook(client, account.webhook_token, inbound(text_msg("wamid.AFTER", "still there?")))
+    assert r.status_code == 200 and r.json()["messages"] == 1
+    assert (await client.post(f"{API}/clubs/whatsapp/conversations/{conv.id}/read", headers=world.h)).status_code == 200
+    listed = (await client.get(f"{API}/clubs/whatsapp/templates", headers=world.h)).json()
+    assert listed["stale"] is True and listed["items"]
+    assert (await client.post(f"{API}/clubs/whatsapp/account/verify", headers=world.h)).status_code == 403
+    assert len(meta.calls) == asked
+
+
+async def test_reminders_are_queued_for_own_numbers_only_on_a_plan_with_them(client, session, world, meta):
+    await connected(client, session, world)
+    world.reg.created_at = NOW - timedelta(days=10)
+    world.event.event_datetime = datetime.now(timezone.utc) + timedelta(hours=20)
+    await session.commit()
+    await subscriptions.assign_plan(session, club_id=world.club.id, plan=world.plans["free"], cycle=BillingCycle.monthly)
+    await session.commit()
+    gates.reset()
+    assert await deliveries.queue_reminders(session) == 0
 
 
 # ─── Who may see what ────────────────────────────────────────────────────

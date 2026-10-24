@@ -930,13 +930,21 @@ async def queue_reminders(session, now: Optional[datetime] = None) -> int:
     from app.api.club_whatsapp import models as club_whatsapp
 
     # Without the platform's number, only the events of clubs that send from
-    # their own (whether each reminder can go is decided at its send).
+    # their own -- on a plan that still has it (whether each reminder can go
+    # is decided at its send).
     own_only = not whatsapp.configured()
-    if own_only and not await session.scalar(
-        select(func.count()).select_from(club_whatsapp.ClubWhatsAppAccounts)
-        .where(club_whatsapp.ClubWhatsAppAccounts.status == club_whatsapp.ACTIVE, club_whatsapp.ClubWhatsAppAccounts.routing == True)  # noqa: E712
-    ):
-        return 0
+    own_clubs: list[int] = []
+    if own_only:
+        from app.api.club_whatsapp import service as club_accounts
+
+        A = club_whatsapp.ClubWhatsAppAccounts
+        for club_id in (await session.scalars(
+            select(A.club_id).where(A.status == club_whatsapp.ACTIVE, A.routing == True)  # noqa: E712
+        )).all():
+            if await club_accounts.plan_allows(session, club_id):
+                own_clubs.append(club_id)
+        if not own_clubs:
+            return 0
 
     now = now or pipeline.now()
     table = Deliveries.__table__
@@ -970,10 +978,7 @@ async def queue_reminders(session, now: Optional[datetime] = None) -> int:
         )
     )
     if own_only:
-        A = club_whatsapp.ClubWhatsAppAccounts
-        source = source.where(E.club_id.in_(
-            select(A.club_id).where(A.status == club_whatsapp.ACTIVE, A.routing == True)  # noqa: E712
-        ))
+        source = source.where(E.club_id.in_(own_clubs))
     stmt = (
         pg_insert(table)
         .from_select(

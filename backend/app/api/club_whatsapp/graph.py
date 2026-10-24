@@ -26,8 +26,18 @@ from app.config import settings
 from app.core import whatsapp
 
 GRAPH = whatsapp.GRAPH
-#: The number's fields the connect check and the quality refresh read.
-PHONE_FIELDS = "display_phone_number,verified_name,quality_rating,messaging_limit_tier,code_verification_status,name_status,status"
+#: The number's fields the connect check and the quality refresh read. The
+#: messaging limit is the business portfolio's now (Meta, October 2025):
+#: `whatsapp_business_manager_messaging_limit`, from v24.0; the old
+#: `messaging_limit_tier` is deprecated.
+PHONE_FIELDS = "display_phone_number,verified_name,quality_rating,whatsapp_business_manager_messaging_limit,code_verification_status,name_status,status"
+#: Without the beta `name_status`, for an app Meta doesn't show it to.
+PHONE_FIELDS_PLAIN = "display_phone_number,verified_name,quality_rating,whatsapp_business_manager_messaging_limit,code_verification_status,status"
+#: The oldest Graph version the club's calls use: the one the messaging
+#: limit field needs. The platform's own sends keep WHATSAPP_GRAPH_VERSION.
+MIN_VERSION = (24, 0)
+#: The permissions a club's token needs (Meta's permissions page).
+SCOPES = ("whatsapp_business_management", "whatsapp_business_messaging")
 TEMPLATE_FIELDS = "id,name,language,status,category,components,rejected_reason,quality_score"
 #: Pages of templates read at most (100 a page).
 TEMPLATE_PAGES = 10
@@ -39,8 +49,19 @@ def _client(timeout: Optional[float] = None) -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=httpx.Timeout(seconds, connect=5.0))
 
 
+def version() -> str:
+    """The Graph version of a club's calls: WHATSAPP_GRAPH_VERSION, or v24.0
+    when that is older (production's .env may pin one)."""
+    configured = whatsapp.graph_version()
+    try:
+        major, minor = (int(p) for p in configured.lstrip("v").split(".", 1))
+    except ValueError:
+        return "v{}.{}".format(*MIN_VERSION)
+    return configured if (major, minor) >= MIN_VERSION else "v{}.{}".format(*MIN_VERSION)
+
+
 def url(path: str) -> str:
-    return f"{GRAPH}/{whatsapp.graph_version()}/{path.lstrip('/')}"
+    return f"{GRAPH}/{version()}/{path.lstrip('/')}"
 
 
 @dataclass
@@ -135,8 +156,23 @@ async def call(keys: Keys, method: str, path: str, *, params: Optional[dict] = N
 
 
 async def phone_number(keys: Keys) -> dict:
-    """The number as Meta has it: display number, verified name, quality rating, messaging limit."""
-    return await call(keys, "GET", keys.phone_number_id, params={"fields": PHONE_FIELDS})
+    """The number as Meta has it: display number, verified name, quality
+    rating, messaging limit, status and display name's review. Asked again
+    without `name_status` (a beta field) when Meta won't show it to the app."""
+    try:
+        return await call(keys, "GET", keys.phone_number_id, params={"fields": PHONE_FIELDS})
+    except GraphError as exc:
+        if exc.code != "100" or "name_status" not in (exc.message or ""):
+            raise
+        return await call(keys, "GET", keys.phone_number_id, params={"fields": PHONE_FIELDS_PLAIN})
+
+
+async def debug_token(keys: Keys) -> dict:
+    """What Meta says of the club's token (GET /debug_token, asked with the
+    token itself): whether it is valid, its app, its permissions (`scopes`)
+    and when it expires (0: never, as a system user's permanent token)."""
+    out = await call(keys, "GET", "debug_token", params={"input_token": keys.token})
+    return out.get("data") if isinstance(out.get("data"), dict) else {}
 
 
 async def waba_numbers(keys: Keys) -> list[str]:
@@ -149,6 +185,11 @@ async def subscribe_app(keys: Keys) -> None:
     """Subscribes the club's app to its WhatsApp Business Account's webhooks:
     without it Meta sends the app nothing about that account."""
     await call(keys, "POST", f"{keys.waba_id}/subscribed_apps")
+
+
+async def unsubscribe_app(keys: Keys) -> None:
+    """The other way: Meta stops sending the app the account's webhooks."""
+    await call(keys, "DELETE", f"{keys.waba_id}/subscribed_apps")
 
 
 # ─── Templates ───────────────────────────────────────────────────────────

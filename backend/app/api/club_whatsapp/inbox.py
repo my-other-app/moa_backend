@@ -673,7 +673,7 @@ async def refused_later(session, account: ClubWhatsAppAccounts, msg: ClubWhatsAp
     refusal = whatsapp.refusal(0, {"error": error})
     route = accounts.Route(sender=None, account_id=account.id, club_id=account.club_id, template=msg.template_name or "")
     if accounts.is_account_problem(refusal):
-        await accounts.mark_failed(session, account, refusal.reason, refusal.code)
+        await accounts.mark_failed(session, account, refusal.reason, refusal.code, source=accounts.WEBHOOK)
     elif accounts.is_template_problem(refusal) and msg.template_name:
         await accounts.after_failure(session, route, refusal)
     elif not accounts.is_club_only(refusal):
@@ -1033,7 +1033,7 @@ async def media(session, club_id: int, message_id: int) -> tuple[bytes, str, Opt
                           "MEDIA_OTHER_NUMBER") from None
         if graph.is_token_problem(exc):
             _status, code, words = graph.explain(exc)
-            await accounts.mark_failed(session, account, words, exc.code)
+            await accounts.mark_failed(session, account, words, exc.code, source=accounts.READ)
             await session.commit()
             raise _refuse(409, f"Meta didn't accept your number's keys, so the attachment can't be fetched. {words}", code) from None
         raise _refuse(410, f"WhatsApp no longer has this attachment (it keeps them for {MEDIA_DAYS} days).", "MEDIA_GONE") from None

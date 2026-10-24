@@ -3,8 +3,8 @@
 - club_whatsapp_accounts: the connection -- WhatsApp Business Account id,
   phone number id, the encrypted access token, app secret and webhook verify
   token (WHATSAPP_KEYS_SECRET), the webhook's token, status, quality rating
-  and messaging limit. At most one live (active or failed) per club, by a
-  partial unique index.
+  and messaging limit. At most one live (active or failed) per club, and
+  one number live in one club at most, by partial unique indexes.
 - club_whatsapp_quality_log: each change of the quality rating or limit.
 - club_whatsapp_templates: the templates the club's account has, as last read.
 - club_whatsapp_conversations, club_whatsapp_messages: the inbox.
@@ -91,7 +91,11 @@ def upgrade() -> None:
         sa.Column("verified_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("last_webhook_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("last_error", sa.String(300), nullable=True),
-        sa.Column("last_error_code", sa.String(16), nullable=True),
+        sa.Column("last_error_code", sa.String(40), nullable=True),
+        sa.Column("failed_by", sa.String(8), nullable=True),
+        sa.Column("number_status", sa.String(32), nullable=True),
+        sa.Column("name_status", sa.String(32), nullable=True),
+        sa.Column("restrictions", sa.JSON(), nullable=True),
         sa.Column("routing", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("retention_months", sa.Integer(), nullable=False, server_default="12"),
         sa.Column("ended_at", sa.DateTime(timezone=True), nullable=True),
@@ -101,10 +105,15 @@ def upgrade() -> None:
         sa.CheckConstraint("status IN ('active', 'failed', 'disconnected')", name="ck_club_whatsapp_accounts_status"),
         sa.CheckConstraint("mode IN ('keys', 'embedded')", name="ck_club_whatsapp_accounts_mode"),
         sa.CheckConstraint("retention_months BETWEEN 1 AND 36", name="ck_club_whatsapp_accounts_retention"),
+        sa.CheckConstraint("failed_by IS NULL OR failed_by IN ('read', 'send', 'webhook')", name="ck_club_whatsapp_accounts_failed_by"),
     )
     op.create_index("ix_club_whatsapp_accounts_club_id", "club_whatsapp_accounts", ["club_id"])
     op.create_index(
         "uq_club_whatsapp_accounts_live", "club_whatsapp_accounts", ["club_id"], unique=True,
+        postgresql_where=sa.text("status IN ('active', 'failed')"),
+    )
+    op.create_index(
+        "uq_club_whatsapp_accounts_live_number", "club_whatsapp_accounts", ["phone_number_id"], unique=True,
         postgresql_where=sa.text("status IN ('active', 'failed')"),
     )
 

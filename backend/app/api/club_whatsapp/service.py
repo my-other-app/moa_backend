@@ -34,6 +34,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 
 from app.api.club_whatsapp import alerts, crypto, graph
 from app.api.club_whatsapp.models import (
@@ -84,6 +85,27 @@ TEMPLATE_CODES = frozenset({"132000", "132001", "132005", "132012", "132015", "1
 CLUB_ONLY_CODES = frozenset({"131021", "131030"})
 
 TIER_ORDER = ("TIER_50", "TIER_250", "TIER_1K", "TIER_2K", "TIER_10K", "TIER_100K", "TIER_UNLIMITED")
+#: Meta's messaging limit as a number of people (business_capability_update
+#: writes 250, 2000 ... and -1 for unlimited): the same TIER_* the page shows.
+TIER_OF_COUNT = {50: "TIER_50", 250: "TIER_250", 1000: "TIER_1K", 2000: "TIER_2K", 10000: "TIER_10K", 100000: "TIER_100K",
+                 -1: "TIER_UNLIMITED"}
+
+
+def tier_of(value) -> Optional[str]:
+    """A messaging limit as one of TIER_ORDER, however Meta wrote it (a
+    TIER_* string, or a count), or None for nothing (TIER_NOT_SET) or
+    something unknown."""
+    if value is None or isinstance(value, bool):
+        return None
+    text = str(value).strip().upper()
+    if text in TIER_ORDER:
+        return text
+    if text == "UNLIMITED":
+        return "TIER_UNLIMITED"
+    try:
+        return TIER_OF_COUNT.get(int(text))
+    except ValueError:
+        return None
 
 
 def _now() -> datetime:
@@ -151,7 +173,7 @@ async def require_keys(session, account: ClubWhatsAppAccounts) -> graph.Keys:
     try:
         return keys_of(account)
     except crypto.Unavailable:
-        await mark_failed(session, account, "The saved keys can't be read any more. Paste them again.", "KEYS")
+        await mark_failed(session, account, "The saved keys can't be read any more. Paste them again.", "KEYS", source=READ)
         await session.commit()
         raise _refuse(503, "Your WhatsApp keys can't be read any more. Paste them again.", "WHATSAPP_KEYS_UNREADABLE") from None
 
@@ -198,6 +220,9 @@ def check_format(waba_id: str, phone_number_id: str, token: str, app_secret: str
 #: The connect form's field each refusal is about, so the dashboard marks it.
 FIELD_OF = {
     "WHATSAPP_TOKEN_INVALID": "access_token",
+    "WHATSAPP_TOKEN_EXPIRES": "access_token",
+    "WHATSAPP_APP_MISMATCH": "app_id",
+    "WHATSAPP_NUMBER_NOT_CONNECTED": "phone_number_id",
     "WHATSAPP_PERMISSION_MISSING": "access_token",
     "WHATSAPP_APP_SECRET_WRONG": "app_secret",
     "WHATSAPP_NUMBER_NOT_FOUND": "phone_number_id",
@@ -223,10 +248,49 @@ def template_refusal(exc: graph.GraphError) -> CustomHTTPException:
     return _refuse(status, message, code, errors or None)
 
 
-async def check_keys(keys: graph.Keys) -> dict:
-    """Meta's answer for the number, once it is sure the keys work and the
-    number is in that business account. CustomHTTPException when not."""
+#: The number's statuses Meta won't send or receive with (its phone numbers
+#: page: a number "must have a status of connected"); FLAGGED, RESTRICTED and
+#: RATE_LIMITED still send, and are warned of.
+NUMBER_NOT_CONNECTED = frozenset({"DISCONNECTED", "PENDING"})
+NUMBER_WARNED = frozenset({"FLAGGED", "RESTRICTED", "RATE_LIMITED"})
+#: A display name that isn't (or is no longer) approved.
+NAME_WARNED = frozenset({"DECLINED", "EXPIRED", "NONE", "PENDING_REVIEW"})
+
+
+def check_token(keys: graph.Keys, token: dict, app_id: Optional[str]) -> Optional[str]:
+    """What Meta's debug_token says of the club's token, as a refusal when it
+    won't do: not valid, without both WhatsApp permissions, expiring (only a
+    system user's token is permanent), or another app's than the app id
+    given. The token's app id, for the connection to keep."""
+    def no(code: str, message: str, field: str = "access_token"):
+        raise _refuse(422, message, code, {"field": field})
+
+    if not token.get("is_valid"):
+        no("WHATSAPP_TOKEN_INVALID", "Meta says that access token isn't valid. Make a permanent token for a system user and paste it again.")
+    scopes = set(token.get("scopes") or [])
+    missing = [s for s in graph.SCOPES if s not in scopes]
+    if missing:
+        no("WHATSAPP_PERMISSION_MISSING", f"The token is missing {' and '.join(missing)}. Give the system user's token both WhatsApp permissions.")
     try:
+        expires = int(token.get("expires_at") or 0)
+    except (TypeError, ValueError):
+        expires = 0
+    if expires:
+        no("WHATSAPP_TOKEN_EXPIRES", "That token expires. Make a system user's token with the expiry set to Never, and paste that.")
+    token_app = str(token.get("app_id") or "") or None
+    if app_id and token_app and token_app != app_id:
+        no("WHATSAPP_APP_MISMATCH", "That app ID isn't the app the access token was made in. Copy it from the same app's dashboard.", "app_id")
+    return token_app or app_id
+
+
+async def check_keys(keys: graph.Keys) -> dict:
+    """Meta's answer for the number, once it is sure the token is a
+    permanent one with both WhatsApp permissions (debug_token), the number
+    is in that business account and connected. The token's app id comes
+    back as `_app_id`. CustomHTTPException when not."""
+    try:
+        token = await graph.debug_token(keys)
+        app_id = check_token(keys, token, keys.app_id)
         number = await graph.phone_number(keys)
         numbers = await graph.waba_numbers(keys)
     except graph.GraphError as exc:
@@ -238,7 +302,14 @@ async def check_keys(keys: graph.Keys) -> dict:
             "WHATSAPP_NUMBER_NOT_IN_WABA",
             {"field": FIELD_OF["WHATSAPP_NUMBER_NOT_IN_WABA"]},
         )
-    return number
+    status = str(number.get("status") or "").upper()
+    if status in NUMBER_NOT_CONNECTED:
+        raise _refuse(
+            422,
+            f"Meta shows the number as {status}: it can't send or receive yet. Register it in your app's API setup first.",
+            "WHATSAPP_NUMBER_NOT_CONNECTED", {"field": "phone_number_id", "meta_status": status},
+        )
+    return {**number, "_app_id": app_id}
 
 
 # ─── Quality ─────────────────────────────────────────────────────────────
@@ -270,7 +341,15 @@ async def record_quality(session, account: ClubWhatsAppAccounts, number: dict, s
 
     now = now or _now()
     rating = (str(number.get("quality_rating") or "").upper() or None) if "quality_rating" in number else account.quality_rating
-    tier = (str(number.get("messaging_limit_tier") or "").upper() or None) if "messaging_limit_tier" in number else account.messaging_limit_tier
+    tier = account.messaging_limit_tier
+    for field in ("whatsapp_business_manager_messaging_limit", "max_daily_conversations_per_business", "messaging_limit_tier"):
+        if number.get(field) is not None:
+            tier = tier_of(number[field]) or tier
+            break
+    if number.get("status"):
+        account.number_status = str(number["status"]).upper()[:32]
+    if number.get("name_status"):
+        account.name_status = str(number["name_status"]).upper()[:32]
     if number.get("display_phone_number"):
         account.display_phone_number = str(number["display_phone_number"])[:32]
     if number.get("verified_name"):
@@ -324,15 +403,23 @@ def limit_words(tier: Optional[str]) -> str:
     return f"{words[tier]} people a day" if tier in words else (tier or "not set")
 
 
-async def mark_failed(session, account: ClubWhatsAppAccounts, reason: str, code: Optional[str] = None, *, alert: bool = True) -> None:
+#: Who found a failure (ClubWhatsAppAccounts.failed_by).
+READ, SEND, WEBHOOK = "read", "send", "webhook"
+
+
+async def mark_failed(session, account: ClubWhatsAppAccounts, reason: str, code: Optional[str] = None, *,
+                      source: str = SEND, alert: bool = True) -> None:
     """The keys or the account stopped working. A live row becomes failed:
-    nothing is sent from it until the club fixes it."""
+    nothing is sent from it until the club fixes it. `source` is what found
+    it: a failure a check of the keys found (READ) is undone by a later good
+    check; one Meta gave a send, or its webhook, only by new keys."""
     from app.api.admin_alerts import notify
 
     if account.status in LIVE:
         account.status = FAILED
+    account.failed_by = source
     account.last_error = reason[:300]
-    account.last_error_code = (code or None) and str(code)[:16]
+    account.last_error_code = (code or None) and str(code)[:40]
     if not alert:
         return
     number = account.display_phone_number or "Your club's WhatsApp number"
@@ -393,6 +480,8 @@ async def connect(session, club, user, keys_in: KeysIn, *, member=None, request=
     # Nothing held while Meta answers.
     await session.commit()
     number = await check_keys(keys)
+    # The token's own app when none was given (a template with a document header needs it).
+    app_id = keys.app_id = number.pop("_app_id", None) or app_id
     subscribed = True
     try:
         await graph.subscribe_app(keys)
@@ -408,12 +497,15 @@ async def connect(session, club, user, keys_in: KeysIn, *, member=None, request=
     if account is None:
         account = ClubWhatsAppAccounts(
             club_id=club.id, mode=MODE_KEYS, webhook_token=secrets.token_urlsafe(24),
-            verify_token_enc=crypto.encrypt(secrets.token_urlsafe(24)),
             created_by=getattr(user, "id", None), created_by_member_id=getattr(member, "id", None),
         )
         session.add(account)
-    if account.verify_token_enc is None:
-        account.verify_token_enc = crypto.encrypt(secrets.token_urlsafe(24))
+    # The verify token kept, sealed again under the current key (a rotation's first one); a new one when it can't be read.
+    try:
+        verify_token = crypto.decrypt(account.verify_token_enc)
+    except crypto.Unavailable:
+        verify_token = secrets.token_urlsafe(24)
+    account.verify_token_enc = crypto.encrypt(verify_token)
     if previous and previous["phone_number_id"] != phone_id:
         # Another number: what Meta had approved on the old account says nothing of the new one.
         await session.execute(delete(ClubWhatsAppTemplates).where(ClubWhatsAppTemplates.account_id == account.id))
@@ -423,13 +515,21 @@ async def connect(session, club, user, keys_in: KeysIn, *, member=None, request=
     account.app_secret_enc = crypto.encrypt(secret)
     account.token_last4 = token[-4:]
     account.status = ACTIVE
+    account.failed_by = None
+    account.restrictions = None
     account.verified_at = now
     account.ended_at = None
     account.last_error = None if subscribed else (
         "Meta didn't let us subscribe your app to the account's webhooks. In your app, open WhatsApp → Configuration and subscribe to messages."
     )
     account.last_error_code = None
-    await session.flush()
+    try:
+        async with session.begin_nested():
+            await session.flush()
+    except IntegrityError:
+        # Another club connected this number at the same moment (one live number, one club).
+        raise _refuse(409, "That number is connected to another club on MyOtherApp.", "WHATSAPP_NUMBER_IN_USE",
+                      {"field": FIELD_OF["WHATSAPP_NUMBER_IN_USE"]}) from None
     await record_quality(session, account, number, "connect", now)
     await audit.record(
         session, actor=user,
@@ -466,27 +566,71 @@ async def connect(session, club, user, keys_in: KeysIn, *, member=None, request=
 async def recheck(session, account: ClubWhatsAppAccounts, source: str = "check") -> str:
     """Ask Meta again whether the keys work and how the number stands:
     `ok` (active, quality recorded), `refused` or `unreadable` (failed, the
-    club told), `unreachable` (the status stays: not the keys' fault)."""
+    club told), `unreachable` (the status stays: not the keys' fault),
+    `held` (still failed: Meta refused a send or said so by webhook, which
+    only new keys undo -- a failure a check found is undone by a good one)."""
     try:
         keys = keys_of(account)
     except crypto.Unavailable:
-        await mark_failed(session, account, "The saved keys can't be read any more. Paste them again.", "KEYS")
+        await mark_failed(session, account, "The saved keys can't be read any more. Paste them again.", "KEYS", source=READ)
         return "unreadable"
     try:
-        number = await graph.phone_number(keys)
+        answer = await graph.phone_number(keys)
     except graph.GraphError as exc:
-        if exc.unreachable:
-            account.last_error = "Couldn't reach Meta to check the number. Try again in a minute."
+        answer = exc
+    return await checked(session, account, answer, source)
+
+
+async def checked(session, account: ClubWhatsAppAccounts, answer, source: str) -> str:
+    """What Meta answered for the number (its fields, or GraphError) onto
+    the connection: `recheck`'s result. Apart from the call, so the sweep
+    holds no lock while Meta answers."""
+    if isinstance(answer, graph.GraphError):
+        if answer.unreachable:
+            if account.status == ACTIVE:
+                account.last_error = "Couldn't reach Meta to check the number. Try again in a minute."
             return "unreachable"
-        _status, _code, words = graph.explain(exc)
-        await mark_failed(session, account, words, exc.code)
+        _status, _code, words = graph.explain(answer)
+        await mark_failed(session, account, words, answer.code, source=READ)
         return "refused"
+    await record_quality(session, account, answer, source)
+    if account.status == FAILED and account.failed_by != READ:
+        # Meta refused a send (or said so by webhook) for the account: that
+        # the number can be read says nothing of it. New keys undo it.
+        return "held"
     account.status = ACTIVE
+    account.failed_by = None
     account.verified_at = _now()
     account.last_error = None
     account.last_error_code = None
-    await record_quality(session, account, number, source)
     return "ok"
+
+
+async def plan_lapsed(session, account: ClubWhatsAppAccounts) -> bool:
+    """A connected number whose club's plan no longer has the feature:
+    routing off (the club turns it on again after upgrading) and the owner
+    told, once. Its messages are still kept. True when it was just turned off."""
+    from app.api.audit import service as audit
+
+    if not account.routing:
+        return False
+    account.routing = False
+    await audit.record(
+        session, actor=None, action="club_whatsapp.settings", entity_type="club", entity_id=account.club_id,
+        summary="Routing turned off: the plan no longer includes the club's own WhatsApp number",
+        details={"account_id": account.id, "before": {"routing": True}, "after": {"routing": False}, "why": "plan"},
+    )
+    await alerts.tell_owner(
+        session, account.club_id, "plan",
+        subject="Your plan no longer includes your own WhatsApp number",
+        paragraphs=[
+            "Your tickets, certificates and reminders go from MyOtherApp's WhatsApp number now, and nothing is sent "
+            "from yours. Messages people send your number are still kept in your inbox.",
+            "Upgrade to Enterprise to use it again, then turn \"Send from my number\" back on in WhatsApp settings.",
+        ],
+        button=("See plans", alerts.dashboard_url("/billing")),
+    )
+    return True
 
 
 async def verify(session, club, user, *, request=None) -> ClubWhatsAppAccounts:
@@ -497,6 +641,8 @@ async def verify(session, club, user, *, request=None) -> ClubWhatsAppAccounts:
         raise _refuse(404, "Connect your WhatsApp number first.", "NO_WHATSAPP")
     if not crypto.available():
         raise unavailable_error()
+    # Not on a plan without the feature: Meta is asked nothing for the number then.
+    await require_plan(session, club.id, actor=user)
     was = account.status
     await session.commit()
     result = await recheck(session, account)
@@ -538,6 +684,19 @@ async def disconnect(session, club, user, *, request=None) -> Optional[ClubWhats
     from app.api.admin_alerts import notify
     from app.api.audit import service as audit
 
+    account = await live_account(session, club.id)
+    if account is None:
+        return None
+    # Best effort, before the keys are gone: Meta stops sending the app this
+    # account's webhooks (anything still sent finds no club, and is answered 200).
+    unsubscribed = False
+    try:
+        keys = keys_of(account)
+        await session.commit()
+        await graph.unsubscribe_app(keys)
+        unsubscribed = True
+    except (graph.GraphError, crypto.Unavailable):
+        pass
     await session.execute(select(func.pg_advisory_xact_lock(_CONNECT_LOCK, club.id)))
     account = await live_account(session, club.id)
     if account is None:
@@ -552,7 +711,8 @@ async def disconnect(session, club, user, *, request=None) -> Optional[ClubWhats
     await audit.record(
         session, actor=user, action="club_whatsapp.disconnect", entity_type="club", entity_id=club.id,
         summary=f"Disconnected WhatsApp number {account.display_phone_number or account.phone_number_id}; its keys were wiped",
-        details={"account_id": account.id, "waba_id": account.waba_id, "phone_number_id": account.phone_number_id},
+        details={"account_id": account.id, "waba_id": account.waba_id, "phone_number_id": account.phone_number_id,
+                 "unsubscribed": unsubscribed},
         request=request,
     )
     await notify(
@@ -591,16 +751,51 @@ class Route:
             self.cache[(self.club_id, self.template)] = None
 
 
+#: Meta's restrictions that don't stop the number sending a ticket: calls,
+#: adding numbers, making utility templates, answering people.
+HARMLESS_RESTRICTIONS = frozenset({
+    "RESTRICTED_ADD_PHONE_NUMBER_ACTION", "RESTRICTED_BIZ_INITIATED_AND_USER_INITIATED_CALLING",
+    "RESTRICTED_BUSINESS_INITIATED_CALLING", "RESTRICTED_USER_INITIATED_CALLING",
+    "RESTRICTED_USER_INITIATED_CALLING_CALL_BUTTON_HIDDEN", "RESTRICTED_UTILITY_TEMPLATES",
+    "RESTRICTED_CUSTOMER_INITIATED_MESSAGING",
+})
+
+
+def active_restrictions(account: ClubWhatsAppAccounts, now: Optional[datetime] = None) -> list[dict]:
+    """Meta's restrictions on the account that haven't expired."""
+    now = now or _now()
+    out = []
+    for r in account.restrictions or []:
+        if not isinstance(r, dict):
+            continue
+        ends = r.get("expires_at")
+        try:
+            ends = datetime.fromisoformat(ends) if isinstance(ends, str) else None
+        except ValueError:
+            ends = None
+        if ends is None or ends > now:
+            out.append(r)
+    return out
+
+
+def sending_restricted(account: ClubWhatsAppAccounts, now: Optional[datetime] = None) -> bool:
+    """Whether a restriction Meta put on the account stops it sending what
+    the deliveries send (business-initiated templates): routing pauses."""
+    return any(r.get("type") not in HARMLESS_RESTRICTIONS for r in active_restrictions(account, now))
+
+
 async def routing_account(session, club_id: Optional[int]) -> Optional[ClubWhatsAppAccounts]:
     if club_id is None or not crypto.available():
         return None
-    return await session.scalar(
+    account = await session.scalar(
         select(ClubWhatsAppAccounts).where(
             ClubWhatsAppAccounts.club_id == club_id,
             ClubWhatsAppAccounts.status == ACTIVE,
             ClubWhatsAppAccounts.routing == True,  # noqa: E712
         )
     )
+    # Paused while Meta restricts what it may send.
+    return None if account is None or sending_restricted(account) else account
 
 
 async def can_route(session, club_id: Optional[int]) -> bool:
@@ -641,10 +836,10 @@ async def _route_for(session, club_id: Optional[int], template: str) -> Optional
     try:
         keys = keys_of(account)
     except crypto.Unavailable:
-        await mark_failed(session, account, "The saved keys can't be read any more. Paste them again.", "KEYS")
+        await mark_failed(session, account, "The saved keys can't be read any more. Paste them again.", "KEYS", source=READ)
         return None
     sender = whatsapp.Sender(phone_number_id=account.phone_number_id, token=keys.token, language=language,
-                             app_secret=keys.app_secret, account_id=account.id)
+                             app_secret=keys.app_secret, account_id=account.id, version=graph.version())
     return Route(sender=sender, account_id=account.id, club_id=account.club_id, template=template)
 
 
@@ -749,6 +944,11 @@ async def account_out(session, club_id: int, *, manage: bool, inbox: bool, actor
         "can_manage": bool(manage and crypto.available()),
         "can_inbox": bool(inbox),
         "impersonated": bool(impersonated),
+        "locked": False,
+        "number_status": None,
+        "name_status": None,
+        "restrictions": [],
+        "warnings": [],
     }
     row = await live_account(session, club_id) or await latest_account(session, club_id)
     if row is None:
@@ -760,8 +960,12 @@ async def account_out(session, club_id: int, *, manage: bool, inbox: bool, actor
         token_last4=row.token_last4, quality_rating=row.quality_rating, messaging_limit_tier=row.messaging_limit_tier,
         quality_checked_at=row.quality_checked_at, verified_at=row.verified_at, last_webhook_at=row.last_webhook_at,
         last_error=row.last_error, last_error_code=row.last_error_code, routing=row.routing,
-        retention_months=row.retention_months,
+        retention_months=row.retention_months, number_status=row.number_status, name_status=row.name_status,
+        restrictions=active_restrictions(row) if connected else [],
+        # Connected, but the plan no longer has it: kept, receiving, sending nothing.
+        locked=bool(connected and not allowed),
     )
+    out["warnings"] = warnings(row, locked=out["locked"]) if connected else []
     if connected:
         out["webhook_url"] = webhook_url(row.webhook_token)
         if manage:
@@ -769,6 +973,28 @@ async def account_out(session, club_id: int, *, manage: bool, inbox: bool, actor
                 out["verify_token"] = crypto.decrypt(row.verify_token_enc)
             except crypto.Unavailable:
                 out["verify_token"] = None
+    return out
+
+
+def warnings(account: ClubWhatsAppAccounts, *, locked: bool = False) -> list[str]:
+    """What the club should know of its connected number, most pressing first."""
+    out = []
+    if locked:
+        out.append("Your plan no longer includes your own WhatsApp number. Messages people send it are still kept "
+                   "here, but nothing is sent from it -- your tickets go from MyOtherApp's number. Upgrade to use it again.")
+    for r in active_restrictions(account):
+        until = f" until {r['expires_at'][:10]}" if r.get("expires_at") else ""
+        out.append(f"Meta has restricted this account ({r.get('type')}){until}."
+                   + (f" {r['remediation']}" if r.get("remediation") else ""))
+    if account.number_status in NUMBER_WARNED:
+        out.append(f"Meta shows the number as {account.number_status}. Check its quality and limit in WhatsApp Manager.")
+    if account.name_status in NAME_WARNED:
+        out.append(f"The number's display name isn't approved ({account.name_status}). Until it is, Meta may limit what it sends.")
+    out.append("Add a payment method to your WhatsApp Business Account in Meta's Billing Hub: since 1 October 2026 Meta "
+               "delivers only the first 1,000 service messages a month for each number without one, and charges after that.")
+    if (account.display_phone_number or "").replace(" ", "").startswith("+91"):
+        out.append("For an Indian business, Meta bills in rupees: move this WhatsApp Business Account to INR in Billing Hub "
+                   "by 31 December 2026. From 1 January 2027 Meta stops delivering messages of accounts that haven't.")
     return out
 
 

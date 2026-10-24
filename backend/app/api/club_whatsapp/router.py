@@ -239,7 +239,9 @@ async def read_conversation(conversation_id: int, request: Request, session: Ses
     await session.commit()
     if had and wamid:
         account = await service.live_account(session, club.id)
-        if account is not None and account.status == "active" and account.phone_number_id == conv.business_phone_id:
+        # Meta is told only for a number the plan still covers.
+        if (account is not None and account.status == "active" and account.phone_number_id == conv.business_phone_id
+                and await service.plan_allows(session, club.id)):
             try:
                 await graph.mark_read(service.keys_of(account), wamid)
             except (graph.GraphError, crypto.Unavailable):
@@ -318,8 +320,9 @@ async def list_templates(request: Request, session: SessionDep, user: ClubAuth,
     club = await service.club_of(session, user)
     account, keys = await _keys(session, club.id)
     stale = False
-    if not refresh:
-        items = await templates.cached(session, account.id)
+    if not refresh or not await service.plan_allows(session, club.id, actor=user):
+        # What was last read: Meta isn't asked for a number the plan no longer covers.
+        items, stale = await templates.cached(session, account.id), bool(refresh)
     else:
         try:
             items = await templates.sync(session, account, keys)
@@ -364,6 +367,7 @@ async def delete_template(name: str, request: Request, session: SessionDep, user
 
     access.require_inbox(request)
     club = await service.club_of(session, user)
+    await service.require_plan(session, club.id, actor=user)
     if not templates.NAME.match(name):
         raise CustomHTTPException(status_code=404, message="No such template.", error_code="TEMPLATE_NOT_FOUND")
     account, keys = await _keys(session, club.id)

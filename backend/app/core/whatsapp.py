@@ -155,6 +155,8 @@ class Sender:
     app_secret: Optional[str] = None
     #: Whose it is, for the caller: the club's account row.
     account_id: Optional[int] = None
+    #: The Graph version its calls use, when not WHATSAPP_GRAPH_VERSION.
+    version: Optional[str] = None
 
     def __repr__(self) -> str:  # never the token in a log line or a traceback
         return f"Sender(phone_number_id={self.phone_number_id!r}, account_id={self.account_id!r})"
@@ -428,7 +430,7 @@ def graph_version() -> str:
 
 def _base(sender: Optional[Sender] = None) -> str:
     number = sender.phone_number_id if sender is not None else settings.WHATSAPP_PHONE_NUMBER_ID.strip()
-    return f"{GRAPH}/{graph_version()}/{number}"
+    return f"{GRAPH}/{(sender.version if sender is not None else None) or graph_version()}/{number}"
 
 
 def _headers(sender: Optional[Sender] = None) -> dict:

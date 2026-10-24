@@ -132,8 +132,19 @@ class ClubWhatsAppAccounts(AbstractSQLModel, TimestampsMixin):
     verified_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     last_webhook_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     last_error = Column(String(300), nullable=True)
-    #: Meta's code for last_error, when it gave one.
-    last_error_code = Column(String(16), nullable=True)
+    #: Meta's code for last_error, when it gave one (or its event's name: ACCOUNT_RESTRICTION ...).
+    last_error_code = Column(String(40), nullable=True)
+    #: What found the failure: `read` (a check of the keys, which a later
+    #: good check undoes), `send` or `webhook` (Meta refusing for the
+    #: account, which only new keys undo).
+    failed_by = Column(String(8), nullable=True)
+    #: The number as Meta reports it: CONNECTED, FLAGGED, RESTRICTED ...; and
+    #: its display name's review (APPROVED, DECLINED ...). The page warns of them.
+    number_status = Column(String(32), nullable=True)
+    name_status = Column(String(32), nullable=True)
+    #: Meta's restrictions on the account (account_update): [{"type", "expires_at"}].
+    #: While one stops it sending templates, nothing is routed through it.
+    restrictions = Column(JSON, nullable=True)
     #: Whether the club's tickets, certificates and reminders go from this number.
     routing = Column(Boolean, nullable=False, default=True, server_default=text("true"))
     #: Months the inbox keeps a message before the sweep deletes it.
@@ -152,6 +163,14 @@ class ClubWhatsAppAccounts(AbstractSQLModel, TimestampsMixin):
             unique=True,
             postgresql_where=text("status IN ('active', 'failed')"),
         ),
+        # And one number is live in one club at most.
+        Index(
+            "uq_club_whatsapp_accounts_live_number",
+            "phone_number_id",
+            unique=True,
+            postgresql_where=text("status IN ('active', 'failed')"),
+        ),
+        CheckConstraint("failed_by IS NULL OR failed_by IN ('read', 'send', 'webhook')", name="ck_club_whatsapp_accounts_failed_by"),
         CheckConstraint("status IN ('active', 'failed', 'disconnected')", name="ck_club_whatsapp_accounts_status"),
         CheckConstraint("mode IN ('keys', 'embedded')", name="ck_club_whatsapp_accounts_mode"),
         CheckConstraint("retention_months BETWEEN 1 AND 36", name="ck_club_whatsapp_accounts_retention"),

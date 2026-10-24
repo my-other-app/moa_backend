@@ -14,11 +14,12 @@ without a good one is refused before its body is read for anything.
   Meta's reason), paused, disabled, flagged or reinstated.
 - `template_category_update`: a template's category changed (a ticket
   template moved to MARKETING is no longer one our sends use).
-- `phone_number_quality_update`: the messaging limit changed, or the number
-  was flagged; the limit is recorded and the quality read again at the
-  sweep's next pass.
-- `account_update`: Meta restricting or banning the account, kept as the
-  connection's last error and told to the club.
+- `phone_number_quality_update`, `business_capability_update`: the
+  business portfolio's messaging limit changed (`max_daily_conversations_per_business`);
+  it is recorded, and the quality read again at the sweep's next pass.
+- `account_update`: Meta banning, restricting (routing paused while it
+  stops sending), warning, reinstating or offboarding the account: kept on
+  the connection and told to the club and the admins.
 
 Meta delivers again (for 7 days) whatever is not answered 200, and may
 deliver anything twice. Each message, status and change is handled in a
@@ -40,10 +41,6 @@ from app.api.club_whatsapp import service as accounts
 from app.api.club_whatsapp.models import ClubWhatsAppAccounts
 
 logger = logging.getLogger(__name__)
-
-#: Meta's account_update events that mean the number may not send.
-RESTRICTING = {"DISABLED_UPDATE", "ACCOUNT_VIOLATION", "ACCOUNT_RESTRICTION", "ACCOUNT_DELETED", "PARTNER_REMOVED"}
-
 
 def signature_ok(body: bytes, signature: Optional[str], app_secret: str) -> bool:
     """Compared as bytes: a header with characters beyond ASCII is simply
@@ -93,6 +90,8 @@ async def handle(session, account: ClubWhatsAppAccounts, payload: dict) -> dict:
                         await templates.category_update(session, account, value)
                     elif field == "phone_number_quality_update":
                         await _quality(session, account, value)
+                    elif field == "business_capability_update":
+                        await _capability(session, account, value)
                     elif field == "account_update":
                         await _account(session, account, value)
             except Exception as exc:  # noqa: BLE001 - undone alone; Meta delivers it again
@@ -147,27 +146,115 @@ async def _messages(session, account, value: dict, touched: dict, counts: dict) 
 
 
 async def _quality(session, account, value: dict) -> None:
-    limit = value.get("current_limit") or value.get("new_limit")
-    seen = {"messaging_limit_tier": str(limit).upper()} if limit else {}
-    if seen:
-        await accounts.record_quality(session, account, seen, "webhook")
+    """The business portfolio's messaging limit (`max_daily_conversations_per_business`;
+    the older `current_limit` when that is all there is -- and never a
+    THROUGHPUT_UPGRADE's, which is about speed, not a limit)."""
+    limit = value.get("max_daily_conversations_per_business")
+    if limit is None and str(value.get("event") or "").upper() != "THROUGHPUT_UPGRADE":
+        limit = value.get("current_limit") or value.get("new_limit")
+    if accounts.tier_of(limit):
+        await accounts.record_quality(session, account, {"max_daily_conversations_per_business": limit}, "webhook")
     # The rating itself is read from Meta at the sweep's next pass.
     account.quality_checked_at = None
 
 
+async def _capability(session, account, value: dict) -> None:
+    """`business_capability_update`: the portfolio's messaging limit, as a
+    count (250, 2000 ... -1 for unlimited) or a TIER_*."""
+    limit = value.get("max_daily_conversations_per_business")
+    if limit is None:
+        limit = value.get("max_daily_conversation_per_phone")
+    if accounts.tier_of(limit):
+        await accounts.record_quality(session, account, {"max_daily_conversations_per_business": limit}, "webhook")
+
+
+#: account_update events that end the number's use until the club acts.
+ENDING = {"ACCOUNT_DELETED", "PARTNER_REMOVED", "PARTNER_APP_UNINSTALLED", "ACCOUNT_OFFBOARDED"}
+#: And those that say it is back.
+BACK = {"ACCOUNT_RECONNECTED"}
+
+
 async def _account(session, account, value: dict) -> None:
+    """Meta's `account_update` about the club's account: banned (DISABLE),
+    to be banned, reinstated (REINSTATE: the error cleared and the number
+    checked again), restricted (each restriction kept, and routing paused
+    while one stops it sending), a policy violation, or the account gone or
+    offboarded (a device change or re-registration). The club and the
+    admins are told; other events (pricing tiers, partner news) are not
+    about sending."""
     event = str(value.get("event") or "").upper()
-    if event not in RESTRICTING and not value.get("ban_info") and not value.get("violation_info"):
+    ban = value.get("ban_info") if isinstance(value.get("ban_info"), dict) else {}
+    state = str(ban.get("waba_ban_state") or "").upper()
+    if state == "REINSTATE" or event in BACK:
+        await _reinstated(session, account, event or state)
         return
-    reason = f"Meta restricted the WhatsApp account ({event or 'account update'})."
-    account.last_error = reason
-    account.last_error_code = event[:16] or None
+    if event == "ACCOUNT_RESTRICTION":
+        await _restricted(session, account, value)
+        return
+    if state == "DISABLE" or (event == "DISABLED_UPDATE" and state != "SCHEDULE_FOR_DISABLE") or event in ENDING:
+        what = {
+            "ACCOUNT_OFFBOARDED": "was taken off the WhatsApp Business Platform (a device change or the number registered again)",
+            "ACCOUNT_DELETED": "was deleted", "PARTNER_REMOVED": "was disconnected from the app",
+            "PARTNER_APP_UNINSTALLED": "removed the app's access",
+        }.get(event, "was disabled for a policy violation")
+        await accounts.mark_failed(session, account, f"Meta says your WhatsApp Business Account {what}.", event or state,
+                                   source=accounts.WEBHOOK)
+        return
+    if state == "SCHEDULE_FOR_DISABLE" or event == "ACCOUNT_VIOLATION":
+        violation = (value.get("violation_info") or {}).get("violation_type") if isinstance(value.get("violation_info"), dict) else None
+        reason = ("Meta has scheduled your WhatsApp Business Account to be disabled." if state == "SCHEDULE_FOR_DISABLE"
+                  else f"Meta says your WhatsApp Business Account broke its policies ({violation or 'a violation'}).")
+        account.last_error, account.last_error_code = reason[:300], (state or event)[:40]
+        await _tell(session, account, "violation", reason, code=state or event)
+
+
+async def _restricted(session, account, value: dict) -> None:
+    restrictions = []
+    for r in value.get("restriction_info") or []:
+        if not isinstance(r, dict) or not r.get("restriction_type"):
+            continue
+        ends = None
+        try:
+            ends = datetime.fromtimestamp(int(r["expiration"]), tz=timezone.utc).isoformat() if r.get("expiration") else None
+        except (TypeError, ValueError, OverflowError, OSError):
+            ends = None
+        restrictions.append({"type": str(r["restriction_type"])[:80], "expires_at": ends,
+                             "remediation": (r.get("remediation") or None) and str(r["remediation"])[:300]})
+    if not restrictions:
+        restrictions = [{"type": "ACCOUNT_RESTRICTION", "expires_at": None, "remediation": None}]
+    account.restrictions = restrictions
+    kinds = ", ".join(r["type"] for r in restrictions)
+    reason = f"Meta restricted your WhatsApp Business Account ({kinds})."
+    account.last_error, account.last_error_code = reason[:300], "ACCOUNT_RESTRICTION"
+    await _tell(session, account, "restricted", reason, code="ACCOUNT_RESTRICTION",
+                paused=accounts.sending_restricted(account))
+
+
+async def _reinstated(session, account, event: str) -> None:
+    """Back: the restrictions and the error Meta's events set are cleared,
+    a number they had failed is active again, and Meta is asked how it
+    stands now (best effort; the sweep asks too)."""
+    account.restrictions = None
+    if account.status == accounts.FAILED and account.failed_by == accounts.WEBHOOK:
+        account.status, account.failed_by = accounts.ACTIVE, None
+    if account.status == accounts.ACTIVE:
+        account.last_error = account.last_error_code = None
+    account.quality_checked_at = None
+    if await accounts.plan_allows(session, account.club_id):
+        await accounts.recheck(session, account, source="webhook")
+
+
+async def _tell(session, account, kind: str, reason: str, *, code: str, paused: bool = False) -> None:
     await alerts.tell_owner(
-        session, account.club_id, "restricted",
-        subject="Meta restricted your club's WhatsApp account",
+        session, account.club_id, kind,
+        subject="Meta restricted your club's WhatsApp account" if kind == "restricted" else "Meta warned your club's WhatsApp account",
         paragraphs=[
             reason,
-            "Open WhatsApp Manager to see why and what to do. Until it's lifted, sends from your number may fail; "
-            "your tickets then go from MyOtherApp's number.",
+            "Open WhatsApp Manager to see why and what to do."
+            + (" Until it's lifted, your tickets, certificates and reminders go from MyOtherApp's number." if paused else ""),
         ],
+    )
+    await alerts.tell_admins(
+        session, "club_whatsapp_failed", title=f"Meta restricted a club's own WhatsApp account ({code})", body=reason,
+        club_id=account.club_id, data={"account_id": account.id, "code": code},
     )

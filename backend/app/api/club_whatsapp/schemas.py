@@ -69,6 +69,17 @@ class AccountOut(CustomBaseModel):
     #: An admin acting as the club: can_inbox is false because the messages
     #: are the club's team's alone, not for want of a permission.
     impersonated: bool = False
+    #: Connected, but the plan no longer includes it: messages still arrive
+    #: and are kept; nothing is sent from it, nor Meta asked about it.
+    locked: bool = False
+    #: As Meta reports the number: CONNECTED, FLAGGED, RESTRICTED ...; and its display name's review.
+    number_status: Optional[str] = None
+    name_status: Optional[str] = None
+    #: Meta's restrictions on the account that haven't expired: [{"type", "expires_at", "remediation"}].
+    restrictions: list[dict] = Field(default_factory=list)
+    #: What the club should know, most pressing first (the plan, a restriction,
+    #: the number's status, Meta's Billing Hub, INR billing for India).
+    warnings: list[str] = Field(default_factory=list)
 
 
 class QualityPoint(CustomBaseModel):
