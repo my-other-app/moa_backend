@@ -956,3 +956,14 @@ async def test_the_key_rotation_seals_the_registration_pin_too(client, session, 
     monkeypatch.setattr(settings, "WHATSAPP_KEYS_SECRET", new)
     row = await account_of(session, world.club.id)
     assert crypto.decrypt(row.register_pin_enc) == meta.registered[0]["pin"] and crypto.decrypt(row.access_token_enc) == ES_TOKEN
+
+
+async def test_pasting_keys_over_a_number_connected_with_meta_makes_it_the_clubs_own_apps(client, session, world, meta, es_on):
+    from tests.test_club_whatsapp import connect
+
+    assert (await client.post(f"{API}/clubs/whatsapp/account/embedded-signup", json=finish(), headers=world.h)).status_code == 200
+    r = await connect(client, world)
+    assert r.status_code == 200 and r.json()["mode"] == "keys"
+    row = await account_of(session, world.club.id)
+    assert row.mode == "keys" and crypto.decrypt(row.app_secret_enc) == SECRET and row.register_pin_enc is None
+    assert accounts.webhook_secret(row) == SECRET and accounts.keys_of(row).app_secret == SECRET

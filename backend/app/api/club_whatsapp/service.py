@@ -527,6 +527,10 @@ async def connect(session, club, user, keys_in: KeysIn, *, member=None, request=
         await session.execute(delete(ClubWhatsAppTemplates).where(ClubWhatsAppTemplates.account_id == account.id))
         account.quality_rating = account.messaging_limit_tier = None
     account.waba_id, account.phone_number_id, account.app_id = waba_id, phone_id, app_id
+    # Pasted keys are the club's own app's, whatever connected the number before (Embedded Signup's go).
+    account.mode = MODE_KEYS
+    account.token_expires_at = account.registered_at = account.register_pin_enc = None
+    account.on_biz_app = False
     account.access_token_enc = crypto.encrypt(token)
     account.app_secret_enc = crypto.encrypt(secret)
     account.token_last4 = token[-4:]
