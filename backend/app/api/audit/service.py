@@ -95,10 +95,14 @@ async def list_entries(
     total = await session.scalar(
         select(func.count(AdminAuditLogs.id)).where(*filters)
     )
+    from app.api.reports.service import picture_options
+
     rows = await session.scalars(
         select(AdminAuditLogs)
         .where(*filters)
-        .options(joinedload(AdminAuditLogs.actor))
+        # With what the actor's picture needs (reports.avatar), loaded for
+        # the whole page at once rather than per row.
+        .options(joinedload(AdminAuditLogs.actor).options(*picture_options()))
         .order_by(AdminAuditLogs.created_at.desc(), AdminAuditLogs.id.desc())
         .limit(limit)
         .offset(offset)

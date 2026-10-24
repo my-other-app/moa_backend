@@ -23,6 +23,10 @@ class AuditActorResponse(CustomBaseModel):
     id: int | None = Field(None)
     full_name: str | None = Field(None)
     email: str | None = Field(None)
+    # Their picture (reports.service.avatar): a club account's logo, else the
+    # photo they uploaded, else the avatar they picked; null once the
+    # account is gone. An image's links by size ({"thumbnail", ...}).
+    avatar: dict | None = Field(None)
 
 
 class AuditLogResponse(CustomBaseModel):
@@ -54,6 +58,8 @@ async def list_audit_log(
     `entity_type` and `entity_id` together give the history of one record,
     which is the question asked after something goes wrong.
     """
+    from app.api.reports.service import avatar
+
     rows, total = await service.list_entries(
         session,
         action=action,
@@ -79,6 +85,7 @@ async def list_audit_log(
                 # relationship does not.
                 full_name=row.actor.full_name if row.actor else None,
                 email=row.actor_email,
+                avatar=avatar(row.actor),
             ),
         )
         for row in rows
