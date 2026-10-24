@@ -363,7 +363,8 @@ async def run(session, now: Optional[datetime] = None) -> dict:
     except Exception as exc:  # noqa: BLE001
         logger.warning("whatsapp alerts failed (%s)", type(exc).__name__)
         await session.rollback()
-    return out
+    # Empty when nothing happened, so the sweep's log line stays quiet.
+    return out if any(out.values()) else {}
 
 
 # ─── Assigned ────────────────────────────────────────────────────────────
