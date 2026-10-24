@@ -767,6 +767,16 @@ async def follow_club(session: AsyncSession, club_id: int, user_id: int, trackin
     return await _link_row(session, row_id)
 
 
+async def following_row(session: AsyncSession, club_id: int, user_id: int):
+    """This person's follow of the club as it stands, if they follow it."""
+    return await session.scalar(
+        select(ClubUsersLink).where(
+            ClubUsersLink.club_id == club_id, ClubUsersLink.user_id == user_id, ClubUsersLink.is_deleted == False,  # noqa: E712
+            ClubUsersLink.is_following == True,  # noqa: E712
+        ).execution_options(populate_existing=True)
+    )
+
+
 def _forget_for_you(user_id: int) -> None:
     """Their For You ranking rests on the clubs they follow, pin and hide: work it out afresh."""
     from app.api.events import recommendations

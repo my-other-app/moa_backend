@@ -414,6 +414,14 @@ class NoteListResponse(CustomBaseModel):
     updated_at: datetime = Field(...)
 
 
+class FollowIn(CustomBaseModel):
+    """What may come with a follow: "Get updates from <club> on WhatsApp",
+    ticked (true) or unticked (false); left out, nothing changes
+    (app/api/club_whatsapp/consent.py)."""
+
+    club_updates_whatsapp: bool | None = Field(None)
+
+
 class UserClubLinkDetailResponse(CustomBaseModel):
     is_following: bool
     is_pinned: bool
