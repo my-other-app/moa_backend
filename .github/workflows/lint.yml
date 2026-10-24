@@ -65,5 +65,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      # The backup tests run pg_dump against the service above, and pg_dump
+      # refuses a server newer than itself: the runner's own client is 16.
+      # Production runs postgres:17.4 and its image installs
+      # postgresql-client-17 from PGDG (backend/Dockerfile); CI does the same.
+      - name: Install the Postgres 17 client
+        run: |
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y --no-install-recommends postgresql-client-17
+          echo /usr/lib/postgresql/17/bin >> "$GITHUB_PATH"
+      - run: pg_dump --version
       - run: pip install -r requirements.txt -r requirements-dev.txt
       - run: pytest
