@@ -67,6 +67,10 @@ class BadgeRecipientResponse(BaseModel):
     entity_name: str
     entity_email: Optional[str] = None
     awarded_at: datetime
+    # The recipient's picture: a club's logo, or a person's photo, else the
+    # avatar they picked (reports.service.avatar). An image's links by size
+    # ({"thumbnail", "medium", ...}), or null.
+    avatar: Optional[dict] = None
 
     class Config:
         from_attributes = True

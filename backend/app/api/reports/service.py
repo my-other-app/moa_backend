@@ -51,10 +51,18 @@ async def people(session, ids, include_deleted: bool = False) -> dict[int, Users
     rows = await session.scalars(
         select(Users)
         .where(Users.id.in_(ids))
-        .options(selectinload(Users.profile).selectinload(UserProfiles.avatar), selectinload(Users.club))
+        .options(*picture_options())
         .execution_options(**{INCLUDE_DELETED: include_deleted})
     )
     return {u.id: u for u in rows.all()}
+
+
+def picture_options():
+    """What `avatar` reads, as loader options on a query of Users (or under
+    a relationship to one: `joinedload(X.user).options(*picture_options())`).
+    One query per relationship for the whole page, not one per row -- and an
+    async session cannot lazy-load them at all."""
+    return (selectinload(Users.profile).selectinload(UserProfiles.avatar), selectinload(Users.club))
 
 
 def display_name(user: Users | None) -> str:
@@ -383,9 +391,13 @@ async def items(session, rows: list[ContentReports]) -> list[dict]:
                 "reason": r.reason,
                 "note": r.note,
                 "status": r.status,
-                "reporter": {"id": r.reporter_id, "name": display_name(reporter)},
+                "reporter": {"id": r.reporter_id, "name": display_name(reporter), "avatar": avatar(reporter)},
                 "target_preview": preview,
-                "target_author": {"id": r.target_author_id, "name": display_name(author)} if r.target_author_id is not None else None,
+                "target_author": (
+                    {"id": r.target_author_id, "name": display_name(author), "avatar": avatar(author)}
+                    if r.target_author_id is not None
+                    else None
+                ),
                 "club": {"id": club.id, "name": club.name, "slug": club.slug} if club is not None else None,
                 "report_count": counts.get((r.target_type, r.target_id), 0),
                 "target_removed": removed,

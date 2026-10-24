@@ -239,16 +239,16 @@ async def test_the_queue_shows_each_report_in_full(client, session, world):
     newest = body["items"][0]
     assert set(newest) >= {"id", "target_type", "target_id", "reason", "note", "status", "reporter", "target_preview", "target_author", "club", "report_count", "created_at", "resolved_at", "resolution"}
     assert newest["target_type"] == "user" and newest["target_id"] == str(people["writer"].id) and newest["club"] is None
-    assert newest["target_preview"] == "Writer" and newest["target_author"] == {"id": people["writer"].id, "name": "Writer"}
+    assert newest["target_preview"] == "Writer" and newest["target_author"] == {"id": people["writer"].id, "name": "Writer", "avatar": None}
 
     hate = next(i for i in body["items"] if i["reason"] == "hate")
     assert hate["target_id"] == comment["id"] and hate["note"] == "slur in the second line" and hate["status"] == "open"
-    assert hate["reporter"] == {"id": people["fan"].id, "name": "Fan"}
-    assert hate["target_preview"] == "This club is a scam, avoid." and hate["target_author"] == {"id": people["writer"].id, "name": "Writer"}
+    assert hate["reporter"] == {"id": people["fan"].id, "name": "Fan", "avatar": None}
+    assert hate["target_preview"] == "This club is a scam, avoid." and hate["target_author"] == {"id": people["writer"].id, "name": "Writer", "avatar": None}
     assert hate["club"] == {"id": club.id, "name": "Circuit Society", "slug": club.slug}
     assert hate["report_count"] == 2 and hate["resolved_at"] is None and hate["resolution"] is None and hate["target_removed"] is False
     spam = next(i for i in body["items"] if i["target_type"] == "thread")
-    assert spam["target_author"] == {"id": world["owner"].id, "name": "Circuit Society"} and spam["report_count"] == 1
+    assert spam["target_author"] == {"id": world["owner"].id, "name": "Circuit Society", "avatar": None} and spam["report_count"] == 1
 
     only_threads = (await client.get(f"{API}/admin/reports?target_type=thread", headers=world["admin_h"])).json()
     assert only_threads["total"] == 1
