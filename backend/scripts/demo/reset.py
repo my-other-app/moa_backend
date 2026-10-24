@@ -208,6 +208,13 @@ CLASSIFICATION: dict[str, str] = {
     "merch_variants": WIPE,
     "message_deliveries": WIPE,
     "messages": WIPE,
+    # What clubs sent, counted by the month, its statements and Enterprise clubs' own limits.
+    "message_usage": WIPE,
+    "message_usage_refs": WIPE,
+    "message_statements": WIPE,
+    "club_message_quotas": WIPE,
+    # The club dashboard's bell.
+    "club_alerts": WIPE,
     "notes": WIPE,
     "notification_broadcast_states": WIPE,
     "notification_broadcast_targets": WIPE,
