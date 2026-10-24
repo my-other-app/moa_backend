@@ -620,6 +620,9 @@ async def test_metas_webhook_says_how_each_went_and_131049_and_131050_by_webhook
     assert not await consent.live(session, world.club.id, wa_id="919000000061")
     row = await session.scalar(select(ClubWhatsAppConsents).where(ClubWhatsAppConsents.wa_id == "919000000061"))
     assert row.withdrawn_source == "meta_131050"
+    # And a marketing opt-out in the inbox's store, which every later promotion asks.
+    assert await optout.blocked(session, world.club.id, wa_id="919000000061", scope="marketing")
+    assert not await optout.blocked(session, world.club.id, wa_id="919000000061", scope="all")
     p = (await client.post(f"{API}/clubs/whatsapp/broadcasts/preview", json=OFFER, headers=world.h)).json()
     assert p["recipients"] == 2
     # 131049 by webhook: back in the queue for a day later, the broadcast sending again.
