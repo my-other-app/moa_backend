@@ -463,6 +463,7 @@ the hash of what you set.
 | `APP_RAZORPAY_KEY_ID` / `_SECRET` | Razorpay dashboard -> API keys | regenerate, update, recreate |
 | `APP_RAZORPAY_WEBHOOK_SECRET` | Razorpay dashboard -> Webhooks | set the same value in both, then recreate at once: webhooks fail in between (Razorpay retries) |
 | `APP_PAYMENT_KEYS_SECRET` | `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` | a comma-separated list: put the new key **first**, keep the old after it; drop the old once every saved club key has been re-saved |
+| `APP_AI_KEYS_SECRET`, `APP_WHATSAPP_KEYS_SECRET` | as `APP_PAYMENT_KEYS_SECRET` | the same: new key first, old kept after it -- until every club has re-saved its AI key; for WhatsApp, until `scripts/rotate_whatsapp_keys.py` has sealed every club's keys again (section 21) |
 | `APP_SITE_TOKENS` | `openssl rand -hex 32` | a list: add the new token, update the site (Vercel), then remove the old |
 | `APP_SITE_REVALIDATE_SECRET` | `openssl rand -hex 32` | the same value on the site (Vercel) and here |
 | `APP_S3_ACCESS_KEY` / `_SECRET_KEY`, `APP_SES_*`, `APP_BACKUP_S3_*` | AWS IAM -> the user -> security credentials | create the second key, switch, recreate, then deactivate and delete the first |
@@ -1751,78 +1752,6 @@ account is still in test mode and the number is not on its test list.
 until the number is corrected on the attendee page.
 
 
-## 20. Message quotas and paid overage
-
-Every email and WhatsApp message a club sends to its people counts against
-its plan's monthly limits (`plan_limits.emails_per_month` and
-`whatsapp_per_month`, null for unlimited): tickets, certificates, payment
-receipts, the day-before reminder, announcements (typed messages),
-campaigns (designed sends), journey emails and feedback-survey mails. A
-month is a calendar month in India. Not counted: a send that was skipped or
-failed, a test send to the organiser, the platform's own mail to the club,
-and a WhatsApp message sent through a club's own number (`via="club"`).
-
-The owner's defaults (migration `message_quotas`, editable in Admin ->
-Subscriptions -> Plans):
-
-| Plan | Emails a month | WhatsApp a month |
-|---|---|---|
-| Free | 200 | 0 |
-| Starter | 1,000 | 50 |
-| Growth | 5,000 | 250 |
-| Pro (and the free trial) | 20,000 | 1,000 |
-| Enterprise | unlimited unless set for the club | unlimited unless set |
-
-Each plan's overage prices (`plans.email_overage_paise`, default 10 = ₹0.10;
-`whatsapp_overage_paise`, default 100 = ₹1) are edited beside them.
-
-**Past the limit:**
-
-- a plan Razorpay bills keeps sending; the month's extra is added to the
-  club's Razorpay subscription as an add-on, which Razorpay puts on its next
-  invoice (a yearly plan's next invoice is its renewal);
-- Free and the free trial have no card: announcements, campaigns, reminders
-  and surveys are held back (skipped, the reason on the row), tickets,
-  certificates and payment receipts still go and are counted. Several
-  workers sending at once can each send the last one, so Free may go a few
-  past (at most `APP_MAIL_CONCURRENCY`);
-- a complimentary plan, an Enterprise deal or trial, or a deal invoiced by
-  hand keeps sending; the month's statement says "manual" and the admins are
-  alerted (`message_overage_manual`) to invoice it.
-
-The club is told at 80% and at 100% of each limit, once each a month: a
-notice in the dashboard's bell and a mail to the owner.
-
-**The month's close** runs in the hourly billing sweep, ten minutes or more
-after midnight (IST) on the 1st: one `message_statements` row per club and
-month. The limit used is the kinder of the one the club last sent under and
-the one it ends the month on. An extra under ₹1 (Razorpay's smallest
-charge) is waived. A Razorpay add-on is asked for once; its id is kept on
-the statement and it is never asked for twice. Razorpay refusing it: tried
-again (1, 2, 4... hours) up to five times, the admins alerted each time,
-then "gave up" for an admin to invoice or retry (club page in the admin
-app). Razorpay not answering: the statement is "unconfirmed" and Razorpay's
-add-ons are searched for its reference (`[moa-messages:<id>:<club>:<month>]`
-in the description) before anything is asked again. Each charge is in the
-audit log (`messages.overage_charged`).
-
-| Setting (`.env`) | Default | Meaning |
-|---|---|---|
-| `APP_MESSAGE_OVERAGE_BILLING` | `true` | `false` stops the add-ons only: statements are still made and wait, `pending` |
-
-```sql
--- This month's counters, the busiest first.
-SELECT c.name, u.channel, u.used, u.quota, u.blocked, u.billing, u.kinds
-FROM message_usage u JOIN clubs c ON c.id = u.club_id
-WHERE u.period = date_trunc('month', now() AT TIME ZONE 'Asia/Kolkata')::date
-ORDER BY u.used DESC LIMIT 20;
-
--- Last month's statements that cost something, and what became of them.
-SELECT c.name, s.amount_paise, s.status, s.razorpay_addon_id, s.last_error
-FROM message_statements s JOIN clubs c ON c.id = s.club_id
-WHERE s.amount_paise > 0 ORDER BY s.period DESC, s.amount_paise DESC LIMIT 50;
-```
-=======
 ---
 
 ## 19. Production hardening: start-up checks, health URLs, scheduled backups
@@ -2029,3 +1958,201 @@ By hand, anywhere: `sudo /bin/bash ops/backup/run.sh drill --standalone`.
 On production (off-peak; it costs CPU and disk while it runs):
 `$DC exec -T backend python scripts/restore_drill.py --max-age-hours 26`.
 
+---
+
+## 20. Message quotas and paid overage
+
+Every email and WhatsApp message a club sends to its people counts against
+its plan's monthly limits (`plan_limits.emails_per_month` and
+`whatsapp_per_month`, null for unlimited): tickets, certificates, payment
+receipts, the day-before reminder, announcements (typed messages),
+campaigns (designed sends), journey emails and feedback-survey mails. A
+month is a calendar month in India. Not counted: a send that was skipped or
+failed, a test send to the organiser, the platform's own mail to the club,
+and a WhatsApp message sent through a club's own number (`via="club"`).
+
+The owner's defaults (migration `message_quotas`, editable in Admin ->
+Subscriptions -> Plans):
+
+| Plan | Emails a month | WhatsApp a month |
+|---|---|---|
+| Free | 200 | 0 |
+| Starter | 1,000 | 50 |
+| Growth | 5,000 | 250 |
+| Pro (and the free trial) | 20,000 | 1,000 |
+| Enterprise | unlimited unless set for the club | unlimited unless set |
+
+Each plan's overage prices (`plans.email_overage_paise`, default 10 = ₹0.10;
+`whatsapp_overage_paise`, default 100 = ₹1) are edited beside them.
+
+**Past the limit:**
+
+- a plan Razorpay bills keeps sending; the month's extra is added to the
+  club's Razorpay subscription as an add-on, which Razorpay puts on its next
+  invoice (a yearly plan's next invoice is its renewal);
+- Free and the free trial have no card: announcements, campaigns, reminders
+  and surveys are held back (skipped, the reason on the row), tickets,
+  certificates and payment receipts still go and are counted. Several
+  workers sending at once can each send the last one, so Free may go a few
+  past (at most `APP_MAIL_CONCURRENCY`);
+- a complimentary plan, an Enterprise deal or trial, or a deal invoiced by
+  hand keeps sending; the month's statement says "manual" and the admins are
+  alerted (`message_overage_manual`) to invoice it.
+
+The club is told at 80% and at 100% of each limit, once each a month: a
+notice in the dashboard's bell and a mail to the owner.
+
+**The month's close** runs in the hourly billing sweep, ten minutes or more
+after midnight (IST) on the 1st: one `message_statements` row per club and
+month. The limit used is the kinder of the one the club last sent under and
+the one it ends the month on. An extra under ₹1 (Razorpay's smallest
+charge) is waived. A Razorpay add-on is asked for once; its id is kept on
+the statement and it is never asked for twice. Razorpay refusing it: tried
+again (1, 2, 4... hours) up to five times, the admins alerted each time,
+then "gave up" for an admin to invoice or retry (club page in the admin
+app). Razorpay not answering: the statement is "unconfirmed" and Razorpay's
+add-ons are searched for its reference (`[moa-messages:<id>:<club>:<month>]`
+in the description) before anything is asked again. Each charge is in the
+audit log (`messages.overage_charged`).
+
+| Setting (`.env`) | Default | Meaning |
+|---|---|---|
+| `APP_MESSAGE_OVERAGE_BILLING` | `true` | `false` stops the add-ons only: statements are still made and wait, `pending` |
+
+```sql
+-- This month's counters, the busiest first.
+SELECT c.name, u.channel, u.used, u.quota, u.blocked, u.billing, u.kinds
+FROM message_usage u JOIN clubs c ON c.id = u.club_id
+WHERE u.period = date_trunc('month', now() AT TIME ZONE 'Asia/Kolkata')::date
+ORDER BY u.used DESC LIMIT 20;
+
+-- Last month's statements that cost something, and what became of them.
+SELECT c.name, s.amount_paise, s.status, s.razorpay_addon_id, s.last_error
+FROM message_statements s JOIN clubs c ON c.id = s.club_id
+WHERE s.amount_paise > 0 ORDER BY s.period DESC, s.amount_paise DESC LIMIT 50;
+```
+
+---
+
+## 21. A club's own WhatsApp number (Enterprise)
+
+An Enterprise club (plan flag `whatsapp_own`) may connect its own WhatsApp
+Business number: it pastes its own Meta app's keys in the clubs dashboard
+(WhatsApp -> Settings), and from then on
+
+- its **inbox** (WhatsApp in the dashboard) holds every message people send
+  that number, and the club's owner, and the team members the owner gave
+  the **WhatsApp** permission on Access, reply from it: free text within 24
+  hours of the person's last message, an approved template after that;
+- its **templates** are listed, submitted for approval and deleted from the
+  dashboard, on the club's own WhatsApp Business Account;
+- its **tickets, certificates and reminders** go from its own number, not
+  the platform's, once its account has `ticket_confirmed`,
+  `event_reminder` and `certificate_ready` approved (the Templates page
+  submits MyOtherApp's three for it) and routing is on. Without them, or
+  when the number fails, they go from the platform's number as for every
+  other club. A send the club's number refuses for its account (token,
+  block, payment: Meta codes 190, 10, 200, 368, 131031, 131042, 133010...)
+  marks the number failed, mails the club's owner (at most once a day),
+  alerts the admins, and goes from the platform's number instead;
+- its **quality rating** (GREEN, YELLOW, RED) and **messaging limit** are read
+  from Meta at connect, every `APP_CLUB_WHATSAPP_QUALITY_HOURS` by the
+  sweep, and on "Check again"; a drop mails the owner and alerts the admins.
+
+The club pays Meta for what its number sends, so those messages do **not**
+count against the club's WhatsApp quota (section 20) and are never held
+back by it: a ticket, certificate or reminder sent from the club's number
+answers `"Via": "club"` and the pipeline counts by that; an inbox reply or
+template goes through `app/api/club_whatsapp/quota.py`, which records it
+`via="club"` (nothing counted). A send that fell back to the platform's
+number is the platform's, and counts.
+
+Privacy: message content is shown only to the club's owner and the members
+with the permission, never to a platform admin (impersonating answers 403
+WHATSAPP_PRIVATE; the admin portal shows status and quality only), never
+logged. Messages are deleted after the club's retention period (12 months
+unless it picks 1 to 36). Attachments are never stored: the dashboard fetches
+each through the API with the club's token (Meta keeps them 30 days).
+Connect, key changes, disconnect, settings, templates and the permission are
+in the audit log (`club_whatsapp.*`); disconnecting wipes the keys.
+
+### Settings
+
+| Setting (`.env`) | Default | Meaning |
+|---|---|---|
+| `APP_WHATSAPP_KEYS_SECRET` | empty | the Fernet key clubs' access tokens, app secrets and verify tokens are encrypted with. Empty: no club can connect a number; a connected one cannot be used (its sends go from the platform's number). Its own key, not `APP_PAYMENT_KEYS_SECRET` or `APP_AI_KEYS_SECRET` |
+| `APP_CLUB_WHATSAPP_QUALITY_HOURS` | `6` | how often the sweep reads each number's quality |
+| `APP_CLUB_WHATSAPP_MEDIA_MAX_MB` | `25` | the largest attachment the inbox fetches |
+| `APP_LIVE_SSE` | off | also pushes the inbox's changes (`GET /clubs/whatsapp/stream`); off, the dashboard polls |
+
+### Turning it on
+
+1. Deploy with the migration (`club_whatsapp`): `sync_code`,
+   `restart_backend`, `migrate` (section 1). It adds five tables, the
+   `whatsapp_own` flag (on for Enterprise) and `club_members.whatsapp`.
+2. Make the key: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`,
+   add `APP_WHATSAPP_KEYS_SECRET=<it>` to the server's `.env` by hand and
+   recreate the backend (section 18, step 5). Rotating it: section 5, as
+   `APP_PAYMENT_KEYS_SECRET` (new key first, old kept until every club has
+   re-saved its keys).
+
+### What the club does in Meta (the dashboard's Help says the same)
+
+1. In Meta Business Suite (business.facebook.com), have a business
+   portfolio, verified if the club wants a higher messaging limit.
+2. At developers.facebook.com -> My Apps -> Create app: type **Business**,
+   linked to that portfolio. Add the **WhatsApp** product.
+3. WhatsApp -> API Setup: add the club's phone number (one not already on
+   the WhatsApp app; it receives a code), set its display name (Meta reviews
+   it), and note the **Phone number ID** and the **WhatsApp Business Account
+   ID** shown there.
+4. Business settings -> Users -> System users -> Add (Admin) -> Assign
+   assets: the app, and the WhatsApp account with full control -> Generate
+   new token: the app, expiry **Never**, permissions
+   `whatsapp_business_management` and `whatsapp_business_messaging`. Copy
+   it once. (The 24-hour token on API Setup stops working the next day.)
+5. App settings -> Basic: the **App secret** (Show), and the **App ID** at
+   the top (needed only to submit templates with a document header, such as
+   the ticket).
+6. WhatsApp Manager -> Payment settings: add a payment method (Meta bills
+   the club per conversation).
+7. In the dashboard: WhatsApp -> Settings -> paste the WhatsApp Business
+   Account ID, the phone number ID, the token, the app secret (and the app
+   ID) -> **Connect WhatsApp**. MyOtherApp checks them with Meta and shows a **webhook
+   URL** and a **verify token**.
+8. Back in the app: WhatsApp -> Configuration -> Webhook -> Edit: paste the
+   webhook URL and the verify token -> Verify and save. Under Webhook
+   fields, **Subscribe** to `messages`, `message_template_status_update`,
+   `phone_number_quality_update` and `account_update`.
+9. In the dashboard: WhatsApp -> Templates -> **Add MyOtherApp's
+   templates** (the ticket, reminder and certificate). Once Meta approves
+   them (minutes to a day), tickets go from the club's number.
+10. Send the number a WhatsApp from any phone: it shows in the inbox, and
+    "Last delivery from Meta" on Settings shows the webhook works.
+
+### Reading it
+
+Read-only, in the psql session from the top of this runbook (no message
+content in any of these):
+
+```sql
+-- Every club's number: status, quality, limit, last webhook.
+SELECT club_id, status, display_phone_number, quality_rating, messaging_limit_tier,
+       quality_checked_at, last_webhook_at, last_error_code, routing
+FROM club_whatsapp_accounts ORDER BY club_id, id DESC;
+
+-- Quality changes over the last month.
+SELECT club_id, previous_rating, quality_rating, previous_tier, messaging_limit_tier, source, created_at
+FROM club_whatsapp_quality_log WHERE created_at > now() - interval '30 days' ORDER BY created_at DESC;
+
+-- Tickets, certificates and reminders sent from clubs' own numbers this week.
+SELECT club_id, count(*) FROM club_whatsapp_messages
+WHERE via = 'delivery' AND created_at > now() - interval '7 days' GROUP BY 1;
+```
+
+A number stuck `failed`: its `last_error` says why (an expired token, 190:
+the club makes a new system-user token and pastes it). Messages not
+arriving: the club's app is not subscribed to `messages`, or its webhook
+URL is not the one on Settings (the Settings page never shows "Last
+delivery from Meta"). "A webhook ... had a bad signature" in the admin bell:
+the app secret saved is not that app's.
