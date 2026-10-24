@@ -1,0 +1,99 @@
+# MyOtherApp's front door on the Oracle box (production): every name that
+# Cloudflare sends here, to the container that answers it. Caddy runs in the
+# stack (ops/server/compose.yml) and reaches each app by its service name.
+#
+#   api.myotherapp.in             -> backend:8000  (the app, the site's browser
+#                                    code, the club-sites Worker, webhooks)
+#   myotherapp.in                 -> website:3000  (moa_events)
+#   club-dashboard.myotherapp.in  -> clubs:3000    (moa_web apps/clubs)
+#   main-portal.myotherapp.in     -> admin:3000    (moa_web apps/admin)
+#   old names                     -> 308 to the new ones, path and query kept
+#
+# {name}.myotherapp.in club sites never come here: Cloudflare's club-sites
+# Worker answers them at the edge (and reads the API like any client).
+#
+# Apply a change: `sudo /srv/moa/deploy.sh caddy` (validates, then reloads
+# with no dropped connection). Staging uses Caddyfile.staging.
+
+import global.caddy
+import snippets.caddy
+
+{$MOA_API_HOST:api.myotherapp.in} {
+	import origin_tls
+	import common
+	# The live room's stream (text/event-stream) is passed through as it is
+	# written, with no timeout: Caddy flushes event streams by itself, and the
+	# API pings every 15 s, inside Cloudflare's 100 s.
+	reverse_proxy {$MOA_UPSTREAM_BACKEND:backend:8000} {
+		import upstream
+	}
+}
+
+{$MOA_SITE_HOST:myotherapp.in} {
+	import origin_tls
+	import common
+	reverse_proxy {$MOA_UPSTREAM_WEBSITE:website:3000} {
+		import upstream
+		# Where Cloudflare placed the visitor, under the names Vercel's edge
+		# used, which the site reads (src/server/visitor.js) for "near you".
+		# Needs Cloudflare's Managed Transform "Add visitor location headers"
+		# (Rules -> Settings -> Managed Transforms); without it these are
+		# empty and the site falls back to the visitor's address. Set here,
+		# so a value a client sends under these names never gets through.
+		header_up X-Vercel-IP-Latitude {http.request.header.CF-IPLatitude}
+		header_up X-Vercel-IP-Longitude {http.request.header.CF-IPLongitude}
+		header_up X-Vercel-IP-City {http.request.header.CF-IPCity}
+		header_up X-Vercel-IP-Country-Region {http.request.header.CF-Region-Code}
+		header_up X-Vercel-IP-Country {http.request.header.CF-IPCountry}
+	}
+}
+
+{$MOA_CLUBS_HOST:club-dashboard.myotherapp.in} {
+	import origin_tls
+	import common
+	reverse_proxy {$MOA_UPSTREAM_CLUBS:clubs:3000} {
+		import upstream
+	}
+}
+
+{$MOA_ADMIN_HOST:main-portal.myotherapp.in} {
+	import origin_tls
+	import common
+	reverse_proxy {$MOA_UPSTREAM_ADMIN:admin:3000} {
+		import upstream
+	}
+}
+
+# Old names keep working for good: they are printed on posters and QR codes,
+# inside sent mails and shipped app builds. Each was a Vercel domain redirect.
+www.myotherapp.in, events.myotherapp.in {
+	import origin_tls
+	header -Server
+	redir https://myotherapp.in{uri} 308
+}
+
+clubs-next.myotherapp.in {
+	import origin_tls
+	header -Server
+	redir https://club-dashboard.myotherapp.in{uri} 308
+}
+
+admin-next.myotherapp.in, admin-dashboard.myotherapp.in, admin-official.myotherapp.in {
+	import origin_tls
+	header -Server
+	redir https://main-portal.myotherapp.in{uri} 308
+}
+
+# Production under other names, DNS-only today and pointing at the old box
+# with Let's Encrypt certificates. Only if something still calls them after
+# the move (check the old box's nginx access log first; docs/MOVE_TO_ORACLE.md,
+# "Old API names"): point the record here, DNS-only, and uncomment. With no
+# `import origin_tls`, Caddy gets a Let's Encrypt certificate itself (port 80
+# and 443 open to the world, which is the default firewall here).
+#
+# api.staging.myotherapp.in {
+# 	import common
+# 	reverse_proxy {$MOA_UPSTREAM_BACKEND:backend:8000} {
+# 		import upstream
+# 	}
+# }
