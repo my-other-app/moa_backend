@@ -7,7 +7,7 @@ Two kinds of number, kept apart on purpose:
   comes from the clubs' subscription rows as they stand now. MRR is what
   paying subscriptions bring in a month (service.paying): never a
   complimentary plan, which has its own count, and never a trial. A yearly
-  subscription contributes a twelfth of its price (service.mrr_for).
+  subscription contributes a twelfth of its price (service.mrr_from_price).
 - *Money* (collected, refunded, the monthly series) comes only from the
   ledger of what Razorpay took (SubscriptionCharges; failed attempts never
   count). Gross: refunds are their own figure, attributed to the month of

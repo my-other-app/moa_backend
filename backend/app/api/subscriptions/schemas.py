@@ -34,10 +34,6 @@ class PlanLimitsIn(CustomBaseModel):
     ai_actions_per_month: int | None = Field(None, ge=0)
 
 
-def _feature_fields() -> dict:
-    return {key: (bool, False) for key in FEATURE_KEYS}
-
-
 class PlanFeaturesIn(CustomBaseModel):
     """The flags, all defaulting off.
 
