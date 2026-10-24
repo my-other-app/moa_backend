@@ -116,7 +116,8 @@ async def test_a_plan_on_the_page_carries_every_limit_and_the_whole_catalog(clie
     assert set(plan["limits"]) == set(LIMIT_KEYS)
     assert plan["limits"]["events_per_month"] == 15
     assert plan["limits"]["coupons_per_event"] == 0
-    assert plan["limits"]["storage_gb"] is None
+    # Storage was never metered, and is not a limit (migration trial_pricing).
+    assert "storage_gb" not in plan["limits"]
     # The whole catalog, in its order, with the product's words.
     assert [(f["key"], f["label"]) for f in plan["features"]] == list(FEATURE_CATALOG)
     included = {f["key"] for f in plan["features"] if f["included"]}
@@ -138,7 +139,8 @@ async def test_a_priced_on_request_plan_says_so(client, session):
 
 async def test_with_no_plans_the_page_is_empty_not_an_error(client):
     body = (await client.get(f"{API}/plans")).json()
-    assert body == {"currency": "INR", "yearly_months_free": None, "plans": []}
+    # No Pro plan to trial and no Enterprise to talk about: neither is offered.
+    assert body == {"currency": "INR", "trial": None, "enterprise_trial_days": None, "yearly_months_free": None, "plans": []}
 
 
 def test_months_free_is_only_claimed_when_true_of_every_paid_plan():
@@ -187,7 +189,8 @@ def test_the_catalog_and_the_seed_only_name_flags_that_exist():
     module = _migration()
     # Every limit is club_plans' but the one ai_assist added with its own seed
     # (tests/test_ai_assist.py).
-    assert set(module.LIMIT_COLUMNS) | {"ai_actions_per_month"} == set(LIMIT_KEYS)
+    # storage_gb is seeded there but is no longer a limit (migration trial_pricing).
+    assert set(module.LIMIT_COLUMNS) | {"ai_actions_per_month"} == set(LIMIT_KEYS) | {"storage_gb"}
     for key, flags in module.FEATURES.items():
         # Nothing seeded on that the page would not show.
         assert set(flags) <= set(keys), key
@@ -249,7 +252,9 @@ async def test_the_seeded_catalogue_as_the_pricing_page_reads_it(client, session
     assert [k for k, p in plans.items() if p["contact_sales"]] == ["enterprise"]
     for key, plan in plans.items():
         # ai_actions_per_month is the ai_assist migration's to seed (tests/test_ai_assist.py).
-        assert plan["limits"] == {**dict(zip(LIMIT_ORDER, EXPECTED_LIMITS[key])), "ai_actions_per_month": None}, key
+        seeded = {**dict(zip(LIMIT_ORDER, EXPECTED_LIMITS[key])), "ai_actions_per_month": None}
+        seeded.pop("storage_gb")  # in the table, never in the API (migration trial_pricing)
+        assert plan["limits"] == seeded, key
         assert {f["key"] for f in plan["features"] if f["included"]} == EXPECTED_FEATURES[key], key
         # Every plan lists the same rows, so the comparison table lines up.
         assert [f["key"] for f in plan["features"]] == [f["key"] for f in plans["free"]["features"]]

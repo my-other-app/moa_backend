@@ -198,6 +198,25 @@ def _grace_episode(subscription) -> str:
 
 async def email_welcome(session, subscription, club_name: str) -> bool:
     plan = _plan_name(subscription)
+    if subscription.trial_plan_id is not None and subscription.trial_ends_at is not None:
+        # A plan picked during the free trial: the trial carries on, and the
+        # plan starts (and is billed) when it ends.
+        price = _price(subscription)
+        return await send_once(
+            session, subscription, "subscription_activated", _episode(subscription),
+            subject=f"{plan} starts on {day(subscription.trial_ends_at)}",
+            paragraphs=[
+                f"Hi {club_name},",
+                f"You picked {plan}. Your free trial carries on until {day(subscription.trial_ends_at)}, "
+                f"and {plan} starts then.",
+                (f"Razorpay first charges {price} on {day(subscription.trial_ends_at)}, "
+                 "with the payment method you just set up." if price else
+                 f"Razorpay first charges on {day(subscription.trial_ends_at)}."),
+                f"Changed your mind? Cancel from Billing before {day(subscription.trial_ends_at)} and nothing is charged.",
+            ],
+            button=("Billing", billing_url()),
+            footer="Razorpay sends your payment receipts separately.",
+        )
     if subscription.status == SubscriptionStatus.trial:
         days = None
         if subscription.trial_ends_at and subscription.trial_started_at:
@@ -318,6 +337,109 @@ async def email_trial_ending(session, subscription, club_name: str) -> bool:
     )
 
 
+def _free_trial_episode(subscription) -> str:
+    """The club's one free trial."""
+    started = subscription.trial_started_at.isoformat() if subscription.trial_started_at else "unknown"
+    return f"row:{subscription.id}:free_trial:{started}"
+
+
+def free_limits_line(plan) -> str:
+    """What the Free plan allows, in a sentence: "2 events and 300
+    registrations a month, 2 team seats"."""
+    limits = getattr(plan, "limits", None)
+    if limits is None:
+        return "Free's limits"
+    parts = []
+    month = []
+    if limits.events_per_month is not None:
+        month.append(f"{limits.events_per_month} event{'s' if limits.events_per_month != 1 else ''}")
+    if limits.registrations_per_month is not None:
+        month.append(f"{limits.registrations_per_month:,} registrations")
+    if month:
+        parts.append(" and ".join(month) + " a month")
+    if limits.committee_seats is not None:
+        parts.append(f"{limits.committee_seats} team seat{'s' if limits.committee_seats != 1 else ''}")
+    return ", ".join(parts) or "Free's limits"
+
+
+async def email_free_trial_ending(session, subscription, club_name: str, *, chosen: bool) -> bool:
+    """Three days before the free trial ends, once."""
+    trial = subscription.trial_plan.name if getattr(subscription, "trial_plan", None) is not None else "Pro"
+    ends = day(subscription.trial_ends_at)
+    if chosen:
+        plan, price = _plan_name(subscription), _price(subscription)
+        then = [
+            f"Then {plan} starts" + (f", and Razorpay charges {price} with the payment method you set up." if price else "."),
+            f"Nothing to do if that's what you want. To change it, go to Billing before {ends}.",
+        ]
+        button = ("Billing", billing_url())
+    else:
+        then = [
+            f"Then {club_name} moves to the Free plan. Your published events, tickets and data keep working; "
+            "anything new follows Free's limits.",
+            f"Choose a plan now to keep everything without a break: nothing is charged until {ends}.",
+        ]
+        button = ("Choose a plan", billing_url())
+    return await send_once(
+        session, subscription, "free_trial_ending", _free_trial_episode(subscription),
+        subject=f"3 days left in your {trial} trial",
+        paragraphs=[f"Hi {club_name},", f"Your free {trial} trial ends on {ends}.", *then],
+        button=button,
+    )
+
+
+async def email_free_trial_ended(session, subscription, club_name: str, *, trial: str = "Pro", free_plan=None) -> bool:
+    """The free trial ended and the club is on Free, once. `trial` is the
+    trial plan's name (the row no longer names it once the trial is put away)."""
+    return await send_once(
+        session, subscription, "free_trial_ended", _free_trial_episode(subscription),
+        subject=f"Your {trial} trial has ended: {club_name} is on Free",
+        paragraphs=[
+            f"Hi {club_name},",
+            f"Your free {trial} trial has ended, and {club_name} is on the Free plan now.",
+            "Your published events, tickets, followers and data all keep working.",
+            f"Free covers {free_limits_line(free_plan)}. To keep running bigger events, choose a plan from Billing.",
+        ],
+        button=("Choose a plan", billing_url()),
+    )
+
+
+def _enterprise_episode(subscription) -> str:
+    started = subscription.enterprise_trial_started_at.isoformat() if subscription.enterprise_trial_started_at else "unknown"
+    return f"row:{subscription.id}:enterprise_trial:{started}"
+
+
+async def email_enterprise_trial_ending(session, subscription, club_name: str, *, then: str) -> bool:
+    """Three days before an Enterprise trial ends, once per trial."""
+    ends = day(subscription.enterprise_trial_ends_at)
+    return await send_once(
+        session, subscription, "enterprise_trial_ending", _enterprise_episode(subscription),
+        subject=f"Your Enterprise trial ends on {ends}",
+        paragraphs=[
+            f"Hi {club_name},",
+            f"Your Enterprise trial ends on {ends}. After that, {club_name} is on {then}.",
+            "Your events, followers and data stay where they are.",
+            "To stay on Enterprise, reply to this mail or talk to us and we'll set up your price.",
+        ],
+        button=("Billing", billing_url()),
+    )
+
+
+async def email_enterprise_trial_ended(session, subscription, club_name: str, *, then: str) -> bool:
+    """When an Enterprise trial ran out, once per trial."""
+    return await send_once(
+        session, subscription, "enterprise_trial_ended", _enterprise_episode(subscription),
+        subject="Your Enterprise trial has ended",
+        paragraphs=[
+            f"Hi {club_name},",
+            f"Your Enterprise trial has ended, and {club_name} is on {then} now.",
+            "Your events, followers and data are all still there.",
+            "To have Enterprise back, reply to this mail or talk to us.",
+        ],
+        button=("Billing", billing_url()),
+    )
+
+
 def _comp_episode(subscription) -> str:
     """One complimentary grant: the row and the end it was given. Granting it
     again with another end is a new one, with mails of its own."""
@@ -390,10 +512,13 @@ async def _after_webhook(session, sub, event, payload, before) -> None:
 
     if event == "subscription.authenticated":
         if was != SubscriptionStatus.trial and now_status == SubscriptionStatus.trial:
+            during_free_trial = sub.trial_plan_id is not None
             await notify(
                 session, "subscription_trial_started",
-                title=f"{name} started a {plan} trial",
-                body=f"The trial runs until {day(sub.trial_ends_at)}; Razorpay then charges {_price(sub) or 'the plan price'}.",
+                title=(f"{name} picked {plan} during its free trial" if during_free_trial
+                       else f"{name} started a {plan} trial"),
+                body=(f"The free trial runs until {day(sub.trial_ends_at)}; Razorpay then charges "
+                      f"{_price(sub) or 'the plan price'}."),
                 club=club, subscription=sub, data=_data(sub, trial_ends_at=sub.trial_ends_at),
             )
             await email_welcome(session, sub, name)

@@ -39,7 +39,6 @@ Nothing here is enforced when:
 
 Limits deliberately not enforced:
 
-- `storage_gb`: nothing meters what a club stores.
 - `ticket_types_per_event`, `coupons_per_event`: an event has one ticket type
   and there are no coupons; there is nothing to count.
 
@@ -89,7 +88,6 @@ CLUB_WIDE_FEATURES = frozenset({"website", "custom_domain", "roles", "finance", 
 
 #: The limits nothing enforces, and why (see the module docstring).
 NOT_ENFORCED = {
-    "storage_gb": "Nothing meters what a club stores.",
     "ticket_types_per_event": "An event has one ticket type.",
     "coupons_per_event": "There are no coupons.",
 }

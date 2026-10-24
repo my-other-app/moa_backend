@@ -346,7 +346,11 @@ class Seeder:
         if not plans:
             return None
         by_key = {p.key: p for p in plans}
-        return by_key.get("enterprise") or by_key.get("campus") or max(plans, key=lambda p: p.sort_order)
+        # Enterprise has every feature the demo shows (networking, finance,
+        # competitions...). Campus was folded into it (migration
+        # trial_pricing); a withdrawn plan is never the fallback.
+        on_sale = [p for p in plans if getattr(p.visibility, "value", p.visibility) != "legacy"] or plans
+        return by_key.get("enterprise") or max(on_sale, key=lambda p: p.sort_order)
 
     # ── People ───────────────────────────────────────────────────────────
 

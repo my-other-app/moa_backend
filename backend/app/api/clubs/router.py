@@ -127,13 +127,20 @@ async def create_club(
 async def admin_create_club(
     session: SessionDep, user: ContentAuth, club: CreateClubAdmin
 ) -> ClubAdminDetailResponse:
-    """Create a club as an admin. A random password will be generated."""
-    return await service.create_club(
+    """Create a club as an admin. A random password will be generated. The
+    club is approved already, so its free trial (14 days of Pro, no card)
+    starts now."""
+    from app.api.subscriptions import service as subscriptions
+
+    created = await service.create_club(
         session,
         name=club.name,
         email=club.email,
         is_admin_created=True,
     )
+    await subscriptions.start_free_trial(session, created.id)
+    await session.commit()
+    return await service.club_for_answer(session, created.id)
 
 
 @router.get("/overview", summary="Everything the club dashboard shows")
@@ -204,10 +211,15 @@ async def approve_club_endpoint(
     request: Request = None,
 ) -> ClubAdminDetailResponse:
     """Approve a club. The first approval emails the club's sign-in address
-    that it can now log in (a job after the answer; a mail that fails is logged)."""
+    that it can now log in (a job after the answer; a mail that fails is logged),
+    and starts its free trial: 14 days of Pro, no card. At approval rather
+    than at the application, so no trial day is spent waiting to be let in."""
+    from app.api.subscriptions import service as subscriptions
+
     was_verified = await session.scalar(select(Clubs.is_verified).where(Clubs.id == club_id))
     club = await service.approve_club(session, club_id)
     if was_verified is False:
+        await subscriptions.start_free_trial(session, club.id)
         owner_email = await session.scalar(select(Users.email).where(Users.id == club.user_id))
         if owner_email:
             # A job, committed with the audit line below.

@@ -26,6 +26,16 @@ from app.response import CustomHTTPException
 #: The plan a club falls back to with no subscription of its own.
 DEFAULT_PLAN_KEY = "free"
 
+#: The free trial every new club starts with: this plan, this many days, no
+#: card and no Razorpay (start_free_trial). Once per club, ever.
+FREE_TRIAL_PLAN_KEY = "pro"
+FREE_TRIAL_DAYS = 14
+#: The plan an admin's Enterprise trial gives, and its default length.
+ENTERPRISE_PLAN_KEY = "enterprise"
+ENTERPRISE_TRIAL_DAYS = 30
+#: The club hears this long before an Enterprise trial ends.
+ENTERPRISE_TRIAL_REMINDER = timedelta(hours=72)
+
 #: Statuses counted as subscribers on the admin screen (MRR, "N clubs on this
 #: plan", whether a plan can be deleted). Whether one row actually grants its
 #: plan is `is_entitled`, which also asks whether Razorpay confirmed it.
@@ -95,7 +105,7 @@ def _when(value) -> datetime | None:
 
 def _entitled(*, status, billed, authenticated_at, activated_at, trial_started_at,
               cancel_at_period_end, current_period_end, now, grace_ends_at=None,
-              comp_ends_at=None, admin_granted=False) -> bool:
+              comp_ends_at=None, admin_granted=False, trial_ends_at=None) -> bool:
     status = _status(status)
     if comp_ends_at is not None and comp_ends_at <= now:
         # A complimentary plan ends on time, whether or not the sweep that
@@ -109,7 +119,12 @@ def _entitled(*, status, billed, authenticated_at, activated_at, trial_started_a
     if status == SubscriptionStatus.trial:
         # A trial begins when Razorpay says the mandate is authorised, not when
         # checkout opened: a club that closes the checkout gets nothing.
-        return not billed or authenticated_at is not None
+        if billed:
+            return authenticated_at is not None
+        # A trial nothing bills (the free trial, or an admin's) ends on its
+        # date, whether or not the sweep has run; one with no date is the
+        # admin's word and stands.
+        return trial_ends_at is None or trial_ends_at > now
     if status == SubscriptionStatus.past_due:
         # Razorpay retries a failed renewal for days and a paying club keeps
         # its plan meanwhile. A subscription never paid for has nothing to keep.
@@ -164,6 +179,51 @@ def is_entitled(subscription: ClubSubscriptions, now: datetime | None = None) ->
         grace_ends_at=subscription.grace_ends_at,
         comp_ends_at=subscription.comp_ends_at if subscription.complimentary else None,
         admin_granted=subscription.granted_by is not None,
+        trial_ends_at=subscription.trial_ends_at,
+    )
+
+
+def free_trial_live(subscription: ClubSubscriptions | None, now: datetime | None = None) -> bool:
+    """The club's free trial is running: its plan, whatever else the row says."""
+    return bool(
+        subscription is not None
+        and subscription.trial_plan_id is not None
+        and subscription.trial_ends_at is not None
+        and subscription.trial_ends_at > (now or _now())
+    )
+
+
+def enterprise_trial_live(subscription: ClubSubscriptions | None, now: datetime | None = None) -> bool:
+    """An admin's Enterprise trial is running, laid over what the club has."""
+    return bool(
+        subscription is not None
+        and subscription.enterprise_trial_plan_id is not None
+        and subscription.enterprise_trial_ends_at is not None
+        and subscription.enterprise_trial_ends_at > (now or _now())
+    )
+
+
+def active_trial(subscription: ClubSubscriptions | None, now: datetime | None = None) -> tuple[str, int, datetime] | None:
+    """The trial that decides the club's plan right now, if one does:
+    ("enterprise_trial" | "free_trial", plan id, when it ends). An
+    Enterprise trial is laid over the free trial as over everything else."""
+    now = now or _now()
+    if enterprise_trial_live(subscription, now):
+        return ("enterprise_trial", subscription.enterprise_trial_plan_id, subscription.enterprise_trial_ends_at)
+    if free_trial_live(subscription, now):
+        return ("free_trial", subscription.trial_plan_id, subscription.trial_ends_at)
+    return None
+
+
+def chosen_plan(subscription: ClubSubscriptions | None, now: datetime | None = None) -> bool:
+    """During the free trial, the club has picked a paid plan that starts
+    when the trial ends: a Razorpay subscription authorised (or still being
+    checked out) and not cancelled."""
+    return bool(
+        free_trial_live(subscription, now)
+        and subscription.razorpay_subscription_id
+        and _status(subscription.status) in (SubscriptionStatus.pending, SubscriptionStatus.trial)
+        and not subscription.cancel_at_period_end
     )
 
 
@@ -240,6 +300,7 @@ def previous_entitled(subscription: ClubSubscriptions, now: datetime | None = No
         cancel_at_period_end=prev.get("cancel_at_period_end"),
         current_period_end=_when(prev.get("current_period_end")),
         now=now or _now(),
+        trial_ends_at=_when(prev.get("trial_ends_at")),
     )
 
 
@@ -259,7 +320,7 @@ class Entitlements:
     That is not the same as "this club may do nothing": see `unlimited`.
     """
 
-    __slots__ = ("plan", "subscription", "limits", "features", "configured", "row", "grant")
+    __slots__ = ("plan", "subscription", "limits", "features", "configured", "row", "grant", "trial")
 
     def __init__(self, *, plan, subscription, limits, features, configured):
         self.plan = plan
@@ -271,6 +332,8 @@ class Entitlements:
         #: The club's own subscription row whatever its state (a checkout
         #: pending, a cancelled one), or None.
         self.row = None
+        #: The trial `plan` comes from (`active_trial`), or None.
+        self.trial = None
         #: status / cycle / current_period_end of whatever grants `plan`.
         self.grant = (
             {
@@ -351,8 +414,33 @@ async def resolve_entitlements(session, club_id: int) -> Entitlements:
     return resolved
 
 
+async def _live_plan(session, plan_id: int) -> Plans | None:
+    return (
+        await session.execute(
+            select(Plans)
+            .where(Plans.id == plan_id, Plans.is_deleted == False)
+            .options(selectinload(Plans.limits), selectinload(Plans.features))
+        )
+    ).scalar_one_or_none()
+
+
 async def _resolve(session, row, now) -> Entitlements:
     if row is not None:
+        trial = active_trial(row, now)
+        if trial is not None:
+            # A trial is laid over the row: an admin's Enterprise trial, or
+            # the free trial (with a paid plan picked during it waiting at
+            # Razorpay for the trial's end). The row underneath is untouched.
+            plan = await _live_plan(session, trial[1])
+            if plan is not None:
+                resolved = _from_plan(plan, None)
+                resolved.grant = {
+                    "status": SubscriptionStatus.trial.value,
+                    "cycle": getattr(row.cycle, "value", row.cycle),
+                    "current_period_end": trial[2],
+                }
+                resolved.trial = trial
+                return resolved
         if is_entitled(row, now):
             if row.plan and not row.plan.is_deleted:
                 return _from_plan(row.plan, row)
@@ -627,6 +715,8 @@ async def get_club_subscription(session, club_id: int, *, for_update: bool = Fal
         .options(
             selectinload(ClubSubscriptions.plan).selectinload(Plans.limits),
             selectinload(ClubSubscriptions.plan).selectinload(Plans.features),
+            selectinload(ClubSubscriptions.trial_plan),
+            selectinload(ClubSubscriptions.enterprise_trial_plan),
         )
     )
     if for_update:
@@ -680,6 +770,12 @@ async def assign_plan(
         session.add(subscription)
 
     clear_comp(subscription)
+    # The admin decided what the club has: a free trial still running is
+    # over (an Enterprise trial, laid over everything, stays until ended).
+    subscription.trial_plan_id = None
+    if status == SubscriptionStatus.trial:
+        # An admin's trial has no end date of its own (the admin ends it).
+        subscription.trial_ends_at = None
     subscription.granted_by = granted_by
     subscription.plan_id = plan.id
     subscription.plan = plan
@@ -757,6 +853,8 @@ async def grant_complimentary(
     # Never paid for: `activated_at` means Razorpay took money.
     subscription.activated_at = None
     subscription.trial_ends_at = None
+    # A comp replaces what the club had, a free trial included.
+    subscription.trial_plan_id = None
     subscription.cancel_at_period_end = False
     subscription.cancel_requested_at = None
     clear_grace(subscription)
@@ -839,6 +937,7 @@ def record_checkout(
     trial_days: int,
     replacing_pending: bool,
     now: datetime,
+    starts_at: datetime | None = None,
 ) -> ClubSubscriptions:
     """
     Note a checkout as `pending`. Grants nothing (see `is_entitled`).
@@ -846,6 +945,10 @@ def record_checkout(
     What the club had is kept in `previous_state` so an abandoned checkout can
     put it back. Replacing a checkout that was itself pending keeps the state
     from before the first one, not the pending one.
+
+    `starts_at`: a plan picked during the free trial, whose billing (and
+    Razorpay's own trial) starts when the free trial ends. The free trial
+    itself (`trial_plan_id`) is left running.
     """
     if subscription is None:
         subscription = ClubSubscriptions(club_id=club_id)
@@ -868,7 +971,10 @@ def record_checkout(
     subscription.pending_since = now
     subscription.authenticated_at = None
     subscription.activated_at = None
-    subscription.trial_ends_at = now + timedelta(days=trial_days) if trial_days else None
+    if starts_at is not None:
+        subscription.trial_ends_at = starts_at
+    else:
+        subscription.trial_ends_at = now + timedelta(days=trial_days) if trial_days else None
     subscription.cancel_at_period_end = False
     subscription.cancel_requested_at = None
     subscription.last_failure_reason = None
@@ -957,7 +1063,7 @@ async def usage(session, club_id: int, now: datetime | None = None) -> dict:
     """
     What the club has used of the limits that are counted per club. One
     bounded query each. Per-event limits (registrations, ticket types,
-    coupons and merchandise per event), storage and website templates are not
+    coupons and merchandise per event) and website templates are not
     here: they are not one number for the club, or nothing records them yet.
     """
     from app.api.club_access.models import ClubMembers
@@ -1068,6 +1174,9 @@ async def mrr_totals(session, now: datetime | None = None) -> dict:
         # Past due, Razorpay done retrying, still within its grace: the ones
         # about to drop to Free unless someone acts.
         "in_grace": sum(1 for row in rows if in_grace(row, now)),
+        # Free trials (Pro, no card) and admins' Enterprise trials running now.
+        "free_trials": sum(1 for row in rows if free_trial_live(row, now)),
+        "enterprise_trials": sum(1 for row in rows if enterprise_trial_live(row, now)),
     }
 
 
@@ -1173,3 +1282,139 @@ def end_now(subscription: ClubSubscriptions, now: datetime | None = None) -> str
     subscription.previous_state = None
     mark_cancelled(subscription)
     return "cancelled"
+
+
+# ---------------------------------------------------------------------------
+# The free trial, and an admin's Enterprise trial
+# ---------------------------------------------------------------------------
+
+
+async def plan_by_key(session, key: str) -> Plans | None:
+    return (
+        await session.execute(
+            select(Plans)
+            .where(Plans.key == key, Plans.is_deleted == False)
+            .options(selectinload(Plans.limits), selectinload(Plans.features))
+        )
+    ).scalar_one_or_none()
+
+
+async def start_free_trial(session, club_id: int, now: datetime | None = None) -> ClubSubscriptions | None:
+    """
+    Put a new club on FREE_TRIAL_PLAN_KEY for FREE_TRIAL_DAYS: no card, no
+    Razorpay. Called when a club becomes able to use the dashboard -- an
+    admin approving its application, or an admin creating it -- so the days
+    are not spent waiting for approval.
+
+    Returns the row, or None when nothing was started: the club has had a
+    trial before (any row, ever), already has a plan that holds (a comp, a
+    paid subscription), or the platform has no such plan. Idempotent.
+    Flushes; the caller commits.
+    """
+    now = now or _now()
+    plan = await plan_by_key(session, FREE_TRIAL_PLAN_KEY)
+    if plan is None or await trial_used(session, club_id):
+        return None
+    row = await get_club_subscription(session, club_id, for_update=True)
+    if row is not None and (is_entitled(row, now) or live_at_razorpay(row) or comp_live(row, now)):
+        return None
+    if row is None:
+        row = ClubSubscriptions(club_id=club_id)
+        session.add(row)
+    clear_comp(row)
+    clear_grace(row)
+    row.plan_id = plan.id
+    row.plan = plan
+    row.trial_plan_id = plan.id
+    row.cycle = BillingCycle.monthly
+    row.status = SubscriptionStatus.trial
+    row.mrr_paise = 0
+    row.price_paise = 0
+    row.razorpay_subscription_id = None
+    row.last_event_at = None
+    row.last_failure_reason = None
+    row.pending_since = None
+    row.previous_state = None
+    row.authenticated_at = None
+    row.activated_at = None
+    row.cancel_at_period_end = False
+    row.cancel_requested_at = None
+    row.trial_started_at = now
+    row.trial_ends_at = now + timedelta(days=FREE_TRIAL_DAYS)
+    row.current_period_end = row.trial_ends_at
+    row.trial_reminded_at = None
+    await session.flush()
+    return row
+
+
+def end_free_trial(subscription: ClubSubscriptions, now: datetime | None = None) -> str:
+    """
+    The free trial is over (its date passed, or an admin ended it): the club
+    is on the paid plan it picked during it, or Free. Returns "chosen_plan"
+    when a plan it picked now holds, "free" otherwise. Never touches a
+    Razorpay subscription: a picked plan bills from the date it was given.
+    """
+    now = now or _now()
+    if subscription.trial_ends_at is None or subscription.trial_ends_at > now:
+        subscription.trial_ends_at = now
+    subscription.trial_plan_id = None
+    if subscription.razorpay_subscription_id is None and _status(subscription.status) == SubscriptionStatus.trial:
+        # Nothing picked: the row that carried the trial grants nothing now.
+        subscription.status = SubscriptionStatus.cancelled
+        subscription.mrr_paise = 0
+        subscription.current_period_end = subscription.trial_ends_at
+        return "free"
+    if subscription.razorpay_subscription_id and _status(subscription.status) == SubscriptionStatus.trial:
+        # Razorpay's own trial for the picked plan ends with ours.
+        subscription.current_period_end = subscription.trial_ends_at
+    return "chosen_plan" if is_entitled(subscription, now) else "free"
+
+
+async def grant_enterprise_trial(
+    session, *, club_id: int, plan: Plans, days: int, granted_by: int | None, now: datetime | None = None
+) -> ClubSubscriptions:
+    """
+    Lay `plan` (Enterprise) over the club for `days` from now. What the club
+    has underneath -- a paid subscription, a free trial, nothing -- is left as
+    it is, and is what it has again when this ends. Granting again replaces
+    the end date. Flushes; the caller commits.
+    """
+    now = now or _now()
+    await _live_club(session, club_id)
+    row = await get_club_subscription(session, club_id, for_update=True)
+    if row is None:
+        # A club on Free has no row: one that grants nothing carries the trial.
+        free = await plan_by_key(session, DEFAULT_PLAN_KEY)
+        row = ClubSubscriptions(
+            club_id=club_id, plan_id=(free or plan).id, cycle=BillingCycle.monthly,
+            status=SubscriptionStatus.cancelled, mrr_paise=0, price_paise=0, current_period_end=now,
+        )
+        session.add(row)
+    if not enterprise_trial_live(row, now):
+        row.enterprise_trial_started_at = now
+    row.enterprise_trial_plan_id = plan.id
+    row.enterprise_trial_ends_at = now + timedelta(days=days)
+    row.enterprise_trial_by = granted_by
+    row.enterprise_trial_reminded_at = None
+    await session.flush()
+    return row
+
+
+def end_enterprise_trial(subscription: ClubSubscriptions, now: datetime | None = None) -> None:
+    """The Enterprise trial is over: the club is back on what it had."""
+    now = now or _now()
+    if subscription.enterprise_trial_ends_at is None or subscription.enterprise_trial_ends_at > now:
+        subscription.enterprise_trial_ends_at = now
+    subscription.enterprise_trial_plan_id = None
+    subscription.enterprise_trial_reminded_at = None
+
+
+async def plan_after_trials(session, subscription: ClubSubscriptions, now: datetime | None = None) -> Plans | None:
+    """The plan the club is on once an Enterprise trial is put away: its free
+    trial's if that is still running, what its row grants, or the default."""
+    now = now or _now()
+    if free_trial_live(subscription, now):
+        return await session.get(Plans, subscription.trial_plan_id)
+    if is_entitled(subscription, now) and subscription.plan_id:
+        return await session.get(Plans, subscription.plan_id)
+    return await plan_by_key(session, DEFAULT_PLAN_KEY)
