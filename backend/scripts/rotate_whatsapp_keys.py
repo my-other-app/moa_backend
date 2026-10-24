@@ -5,8 +5,9 @@
 A rotation of APP_WHATSAPP_KEYS_SECRET (app/core/keyring.py): put the new
 Fernet key first and keep the old one after it (`new,old`), restart, run
 this, then drop the old key and restart again. Each club's access token, app
-secret and webhook verify token (club_whatsapp_accounts' three `_enc`
-columns) is re-encrypted with MultiFernet.rotate: whatever key opened it,
+secret and webhook verify token -- and, for a number connected with Meta
+(Embedded Signup), its registration PIN (club_whatsapp_accounts' `_enc`
+columns) -- is re-encrypted with MultiFernet.rotate: whatever key opened it,
 it is sealed under the first. Rows are locked and written a batch at a time.
 
 A value no key opens is left as it is and counted: that club pastes its keys
@@ -29,7 +30,7 @@ from app.api.club_whatsapp import crypto  # noqa: E402
 from app.api.club_whatsapp.models import ClubWhatsAppAccounts  # noqa: E402
 from app.db.core import AsyncSessionLocal  # noqa: E402
 
-COLUMNS = ("access_token_enc", "app_secret_enc", "verify_token_enc")
+COLUMNS = ("access_token_enc", "app_secret_enc", "verify_token_enc", "register_pin_enc")
 BATCH = 200
 
 

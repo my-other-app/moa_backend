@@ -25,7 +25,7 @@ from sqlalchemy import func, select
 from app.api.club_access import service as club_access
 from app.api.club_whatsapp import access, alerts_inbox, crypto, graph, inbox, live, replies, teamwork, templates, webhook
 from app.api.club_whatsapp import service
-from app.api.club_whatsapp.models import DISCONNECTED, ClubWhatsAppConversations, ClubWhatsAppQualityLog
+from app.api.club_whatsapp.models import DISCONNECTED, MODE_EMBEDDED, ClubWhatsAppConversations, ClubWhatsAppQualityLog
 from app.api.club_whatsapp.schemas import (
     AccountKeysIn,
     AccountOut,
@@ -506,13 +506,16 @@ async def club_hook(token: str, request: Request, session: SessionDep) -> Respon
     if raw is None:
         return _hook_answer(413, {"ok": False, "reason": "too_large"})
     account = await service.by_webhook_token(session, token)
-    if account is None or account.status == DISCONNECTED or not account.app_secret_enc:
+    if account is None or account.status == DISCONNECTED or (not account.app_secret_enc and account.mode != MODE_EMBEDDED):
         return _hook_answer(200, {"ok": False, "reason": "unknown"})
     try:
-        secret = crypto.decrypt(account.app_secret_enc)
+        # The club's app's secret; for a number connected with Meta, the platform app's.
+        secret = service.webhook_secret(account)
     except crypto.Unavailable:
         await service.keys_unreadable(session, account)
         await session.commit()
+        return _hook_answer(503, {"ok": False, "reason": "keys"})
+    if not secret:
         return _hook_answer(503, {"ok": False, "reason": "keys"})
     if not webhook.signature_ok(raw, request.headers.get("x-hub-signature-256"), secret):
         logger.warning("club whatsapp hook %s refused: signature did not verify", service.token_hint(token))

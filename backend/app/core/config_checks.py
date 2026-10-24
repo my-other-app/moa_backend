@@ -325,7 +325,23 @@ def _warnings(settings) -> list[Problem]:
     listed = origins.split(",") if isinstance(origins, str) else (origins or [])
     if any(_text(o) == "*" for o in listed):
         out.append(Problem("CORS_ORIGINS", "includes *: any site may call the API from a browser", fatal=False))
+    out.extend(_embedded_signup(settings))
     return out
+
+
+#: What "Connect with Meta" needs (app/api/club_whatsapp/embedded_signup.py).
+EMBEDDED_SIGNUP_NEEDS = ("META_APP_ID", "META_APP_SECRET", "META_ES_CONFIG_ID", "META_WEBHOOK_VERIFY_TOKEN", "WHATSAPP_KEYS_SECRET")
+
+
+def _embedded_signup(settings) -> list[Problem]:
+    """Warnings only: with one missing, the button stays hidden (or the
+    app's webhook can't be verified) and pasting keys still works."""
+    if not _get(settings, "WHATSAPP_EMBEDDED_SIGNUP"):
+        return []
+    return [
+        Problem(name, "is empty while APP_WHATSAPP_EMBEDDED_SIGNUP is on: clubs can't connect with Meta", fatal=False)
+        for name in EMBEDDED_SIGNUP_NEEDS if not _text(_get(settings, name))
+    ]
 
 
 def check(settings) -> list[Problem]:
