@@ -2335,7 +2335,12 @@ location ~ ^/api/v1/clubs/whatsapp/conversations/\d+/media$ {
 
 Cloudflare in front takes at most 100 MB a request (its free and pro
 plans): a document just under 100 MB, with the form around it, may be
-refused there (413).
+refused there (413). The clubs dashboard's gateway streams this one route
+on as it arrives too (moa_web `packages/auth/src/gateway.ts`, `STREAMED`),
+so the dashboard's server doesn't hold the file either. On Vercel a
+function takes at most 4.5 MB a request: files larger than that need the
+dashboard self-hosted (the Oracle server), or they are refused (413) before
+the API sees them.
 
 **Replies.** A text (`POST .../messages` with `reply_to`, a message id of
 the conversation) or a file (`reply_to` in the form) carries Meta's
