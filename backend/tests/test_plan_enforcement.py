@@ -673,8 +673,9 @@ async def test_website_templates_are_the_first_n_in_catalogue_order(client, sess
 
 
 async def test_the_limits_with_nothing_to_count_are_not_enforced(session, world):
-    await set_limit(session, world, "free", storage_gb=0, ticket_types_per_event=0, coupons_per_event=0)
-    for key in ("storage_gb", "ticket_types_per_event", "coupons_per_event"):
+    await set_limit(session, world, "free", ticket_types_per_event=0, coupons_per_event=0)
+    assert "storage_gb" not in gates.NOT_ENFORCED  # not a limit at all any more
+    for key in ("ticket_types_per_event", "coupons_per_event"):
         assert key in gates.NOT_ENFORCED
         await gates.require_within(session, world.club.id, key, used=5)
 

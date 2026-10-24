@@ -200,8 +200,8 @@ async def test_zero_and_unlimited_are_different(session, make_club):
     assert resolved.limit("events_per_month") == 0
     assert resolved.within("events_per_month", 0) is False
     # An unset limit is unlimited, not zero.
-    assert resolved.limit("storage_gb") is None
-    assert resolved.within("storage_gb", 10_000) is True
+    assert resolved.limit("announcements_per_month") is None
+    assert resolved.within("announcements_per_month", 10_000) is True
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +271,8 @@ async def test_create_and_read_a_plan(client, make_admin, mint_token, plan_paylo
     assert body["key"] == "growth"
     assert body["limits"]["events_per_month"] == 10
     # An unset limit comes back as null, meaning unlimited.
-    assert body["limits"]["storage_gb"] is None
+    assert body["limits"]["announcements_per_month"] is None
+    assert "storage_gb" not in body["limits"]
     assert body["features"]["tickets"] is True
     assert body["features"]["sso"] is False
     # 33 flags in four groups, so the editor does not hardcode its own copy.
