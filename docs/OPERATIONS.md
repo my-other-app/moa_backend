@@ -2048,16 +2048,31 @@ Business number: it pastes its own Meta app's keys in the clubs dashboard
   dashboard, on the club's own WhatsApp Business Account;
 - its **tickets, certificates and reminders** go from its own number, not
   the platform's, once its account has `ticket_confirmed`,
-  `event_reminder` and `certificate_ready` approved (the Templates page
-  submits MyOtherApp's three for it) and routing is on. Without them, or
-  when the number fails, they go from the platform's number as for every
-  other club. A send the club's number refuses for its account (token,
-  block, payment: Meta codes 190, 10, 200, 368, 131031, 131042, 133010...)
-  marks the number failed, mails the club's owner (at most once a day),
-  alerts the admins, and goes from the platform's number instead;
+  `event_reminder` and `certificate_ready` approved **in the shape our
+  sends fill** (UTILITY; a document header for the ticket and the
+  certificate; four numbered body values; one URL button with one value --
+  the Templates page submits MyOtherApp's three for it), routing is on and
+  Meta hasn't restricted the account's sending. Without them, or when the
+  number fails, they go from the platform's number as for every other club
+  (a reminder then counts against the club's plan, section 20). A send the
+  club's number refuses for its account (token, block, payment: Meta codes
+  0, 3, 10, 102, 190, 200, 368 -- the *business* account restricted, never
+  the guest --, 131031, 131042, 131064, 133010, 100 naming the
+  appsecret_proof) marks the number failed, tells the club's owner (bell
+  and mail, at most once a day), alerts the admins (once a day), and goes
+  from the platform's number instead; so does one Meta fails later by
+  webhook, which is queued again for the platform's number. A template
+  refusal (132000, 132001, 132005, 132012, 132015, 132016, 132018) marks
+  that template UNUSABLE until Meta reports a new status for it;
 - its **quality rating** (GREEN, YELLOW, RED) and **messaging limit** are read
   from Meta at connect, every `APP_CLUB_WHATSAPP_QUALITY_HOURS` by the
   sweep, and on "Check again"; a drop mails the owner and alerts the admins.
+  The limit is the business portfolio's now (Meta, October 2025): the
+  club's calls use Graph **v24.0** at least, whatever
+  `APP_WHATSAPP_GRAPH_VERSION` pins for the platform's own sends, to read
+  `whatsapp_business_manager_messaging_limit`; the webhook's
+  `max_daily_conversations_per_business` (250 ... -1) is shown as the same
+  `TIER_*`. Its templates are read again by the sweep on the same clock.
 
 The club pays Meta for what its number sends, so those messages do **not**
 count against the club's WhatsApp quota (section 20) and are never held
@@ -2069,10 +2084,17 @@ number is the platform's, and counts.
 
 Privacy: message content is shown only to the club's owner and the members
 with the permission, never to a platform admin (impersonating answers 403
-WHATSAPP_PRIVATE; the admin portal shows status and quality only), never
-logged. Messages are deleted after the club's retention period (12 months
-unless it picks 1 to 36). Attachments are never stored: the dashboard fetches
-each through the API with the club's token (Meta keeps them 30 days).
+WHATSAPP_PRIVATE on every inbox route, and an admin acting as the club can't
+give anyone the WhatsApp permission either; the admin portal shows status and
+quality only), never logged (the inbox's search term is filtered from the
+access log). A conversation is linked only to the club's own (not deleted)
+registrations with that number, never through a follower's profile.
+Messages are deleted after the club's retention period (12 months unless it
+picks 1 to 36). Attachments are never stored: the dashboard fetches each
+through the API with the club's token, which goes to Meta's media host only
+(Meta keeps a received attachment **7 days**, not 30; after that the inbox
+says MEDIA_GONE). Only pictures, sound and video are shown in place; any
+other attachment is a download, with a sandboxing CSP.
 Connect, key changes, disconnect, settings, templates and the permission are
 in the audit log (`club_whatsapp.*`); disconnecting wipes the keys.
 
@@ -2080,7 +2102,7 @@ in the audit log (`club_whatsapp.*`); disconnecting wipes the keys.
 
 | Setting (`.env`) | Default | Meaning |
 |---|---|---|
-| `APP_WHATSAPP_KEYS_SECRET` | empty | the Fernet key clubs' access tokens, app secrets and verify tokens are encrypted with. Empty: no club can connect a number; a connected one cannot be used (its sends go from the platform's number). Its own key, not `APP_PAYMENT_KEYS_SECRET` or `APP_AI_KEYS_SECRET` |
+| `APP_WHATSAPP_KEYS_SECRET` | empty | the Fernet key clubs' access tokens, app secrets and verify tokens are encrypted with. Empty: no club can connect a number; a connected one cannot be used (its sends go from the platform's number, its webhooks are answered 503, and the admins are told each sweep). Its own key, not `APP_PAYMENT_KEYS_SECRET` or `APP_AI_KEYS_SECRET` |
 | `APP_CLUB_WHATSAPP_QUALITY_HOURS` | `6` | how often the sweep reads each number's quality |
 | `APP_CLUB_WHATSAPP_MEDIA_MAX_MB` | `25` | the largest attachment the inbox fetches |
 | `APP_LIVE_SSE` | off | also pushes the inbox's changes (`GET /clubs/whatsapp/stream`); off, the dashboard polls |
@@ -2092,9 +2114,14 @@ in the audit log (`club_whatsapp.*`); disconnecting wipes the keys.
    `whatsapp_own` flag (on for Enterprise) and `club_members.whatsapp`.
 2. Make the key: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`,
    add `APP_WHATSAPP_KEYS_SECRET=<it>` to the server's `.env` by hand and
-   recreate the backend (section 18, step 5). Rotating it: section 5, as
-   `APP_PAYMENT_KEYS_SECRET` (new key first, old kept until every club has
-   re-saved its keys).
+   recreate the backend (section 18, step 5).
+3. Rotating it: put a new key first and keep the old after it
+   (`APP_WHATSAPP_KEYS_SECRET=<new>,<old>`), recreate the backend, then
+   seal every club's three keys again under the new one:
+   `$DC exec -T backend python scripts/rotate_whatsapp_keys.py --dry-run`,
+   then without `--dry-run`. It prints `{"rows", "rotated", "unreadable"}`;
+   when `unreadable` is 0, drop the old key and recreate again. (A club that
+   saves its keys meanwhile is sealed under the new key anyway.)
 
 ### What the club does in Meta (the dashboard's Help says the same)
 
@@ -2114,16 +2141,27 @@ in the audit log (`club_whatsapp.*`); disconnecting wipes the keys.
 5. App settings -> Basic: the **App secret** (Show), and the **App ID** at
    the top (needed only to submit templates with a document header, such as
    the ticket).
-6. WhatsApp Manager -> Payment settings: add a payment method (Meta bills
-   the club per conversation).
+6. Meta's **Billing Hub** (business.facebook.com/billing_hub): add a payment
+   method to the WhatsApp Business Account. Since 1 October 2026 Meta
+   charges for service messages (replies) after 1,000 a month per number,
+   and **without a payment method it stops delivering them** past those
+   1,000. A business billed in India must also move the account to **INR**
+   by **31 December 2026**: from 1 January 2027 Meta stops delivering the
+   messages of a non-INR account (its pricing page). The Settings page warns
+   of both.
 7. In the dashboard: WhatsApp -> Settings -> paste the WhatsApp Business
    Account ID, the phone number ID, the token, the app secret (and the app
-   ID) -> **Connect WhatsApp**. MyOtherApp checks them with Meta and shows a **webhook
-   URL** and a **verify token**.
+   ID) -> **Connect WhatsApp**. MyOtherApp checks them with Meta -- the token
+   by `debug_token` (valid, both permissions, expiry Never, and the app ID's
+   own; left empty, the app ID is taken from it), the number by its status
+   (DISCONNECTED or PENDING is refused) -- and shows a **webhook URL** and a
+   **verify token**. The app ID can be added later on its own (Settings).
 8. Back in the app: WhatsApp -> Configuration -> Webhook -> Edit: paste the
    webhook URL and the verify token -> Verify and save. Under Webhook
    fields, **Subscribe** to `messages`, `message_template_status_update`,
-   `phone_number_quality_update` and `account_update`.
+   `template_category_update`, `phone_number_quality_update`,
+   `account_update` and `business_capability_update` (the Settings page
+   lists them).
 9. In the dashboard: WhatsApp -> Templates -> **Add MyOtherApp's
    templates** (the ticket, reminder and certificate). Once Meta approves
    them (minutes to a day), tickets go from the club's number.
@@ -2137,8 +2175,8 @@ content in any of these):
 
 ```sql
 -- Every club's number: status, quality, limit, last webhook.
-SELECT club_id, status, display_phone_number, quality_rating, messaging_limit_tier,
-       quality_checked_at, last_webhook_at, last_error_code, routing
+SELECT club_id, status, failed_by, display_phone_number, number_status, quality_rating, messaging_limit_tier,
+       quality_checked_at, last_webhook_at, last_error_code, restrictions, routing
 FROM club_whatsapp_accounts ORDER BY club_id, id DESC;
 
 -- Quality changes over the last month.
@@ -2151,8 +2189,33 @@ WHERE via = 'delivery' AND created_at > now() - interval '7 days' GROUP BY 1;
 ```
 
 A number stuck `failed`: its `last_error` says why (an expired token, 190:
-the club makes a new system-user token and pastes it). Messages not
-arriving: the club's app is not subscribed to `messages`, or its webhook
-URL is not the one on Settings (the Settings page never shows "Last
-delivery from Meta"). "A webhook ... had a bad signature" in the admin bell:
-the app secret saved is not that app's.
+the club makes a new system-user token and pastes it). `failed_by` says what
+found it: `read` (a check of the keys -- the next good check, or "Check
+again", makes it active), `send` or `webhook` (Meta refused a send for the
+account, or said so: only saving the keys again makes it active, once the
+club has fixed it in Meta). A ban, a restriction or offboarding comes by
+`account_update` and is on the page; a REINSTATE (or ACCOUNT_RECONNECTED)
+clears it. A club whose plan lapses keeps its number and its messages, but
+routing is turned off (the owner is told once, and turns it on again after
+upgrading) and Meta is asked nothing for it.
+
+Messages not arriving: the club's app is not subscribed to `messages`, or
+its webhook URL is not the one on Settings (the Settings page never shows
+"Last delivery from Meta"). What the webhook answers: 200 taken (or an
+unknown or disconnected address: nothing will take it); 403 a signature
+that doesn't match (Meta retries for 7 days while the club fixes its app
+secret -- "A webhook ... had a bad signature" in the admin bell, at most
+hourly); 413 a body past Meta's 3 MB; 503 the keys can't be read, or a
+message or status couldn't be kept (the rest were; Meta delivers again,
+and nothing is kept twice).
+
+**People with usernames (BSUID).** Since April 2026 Meta may leave out
+someone's number (`messages[].from`, `contacts[].wa_id`) when they have a
+WhatsApp username, and gives their business-scoped user id instead
+(`from_user_id`, `contacts[].user_id`, like `IN.1349...`). Such a
+conversation has `wa_id` null and a `bsuid` (and the `username`); replies
+go to it by BSUID (Meta's `recipient`), and it is linked to a registration
+once Meta shares the number. A changed number or BSUID (the
+`user_changed_number` / `user_changed_user_id` system messages) moves the
+conversation to the new ones. A new conversation can still only be started
+with a registration's phone number.
