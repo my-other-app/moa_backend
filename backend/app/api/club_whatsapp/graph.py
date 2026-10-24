@@ -227,7 +227,7 @@ async def mark_read(keys: Keys, wamid: str) -> None:
 
 async def media_info(keys: Keys, media_id: str) -> dict:
     """Where Meta keeps an attachment for now (a short-lived URL), its type and size."""
-    return await call(keys, "GET", media_id, params={"phone_number_id": keys.phone_number_id})
+    return await call(keys, "GET", media_id)
 
 
 async def download(keys: Keys, media_url: str, max_bytes: int) -> bytes:
