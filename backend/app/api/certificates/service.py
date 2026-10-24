@@ -15,7 +15,7 @@ from sqlalchemy.orm import joinedload
 from app.api.certificate_templates.service import get_template_for_event
 from app.api.certificates.models import CertificateFiles
 from app.api.deliveries import service as deliveries
-from app.api.deliveries.models import Deliveries, DeliveryKind
+from app.api.deliveries.models import DeliveryKind
 from app.api.events import doc_cache
 from app.api.events.certificates import (
     CERTIFICATE_PREFIX,
@@ -64,10 +64,6 @@ def _audience_criteria(event_id: int, audience: str, roles: list[str]) -> list:
             raise CustomHTTPException(422, message="Pick at least one role.", errors={"fields": {"roles": "Pick at least one role."}})
         return [*criteria, EventRegistrationsLink.role.in_(wanted)]
     return criteria
-
-
-def _audience(event_id: int, audience: str, roles: list[str]):
-    return select(EventRegistrationsLink).where(*_audience_criteria(event_id, audience, roles))
 
 
 async def _design_version(session, event_id: int) -> int:
@@ -465,15 +461,3 @@ async def file_digests(session, reg: EventRegistrationsLink) -> list[str]:
         if added:
             await session.commit()
     return sorted(set(known.values()))
-
-
-async def outdated_sends(session, event: Events) -> int:
-    """Certificates emailed with a design older than the current one."""
-    version = await _design_version(session, event.id)
-    return await session.scalar(
-        select(func.count()).select_from(Deliveries).where(
-            Deliveries.event_id == event.id,
-            Deliveries.kind == DeliveryKind.certificate,
-            Deliveries.design_version < version,
-        )
-    ) or 0

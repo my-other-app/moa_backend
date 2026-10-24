@@ -130,10 +130,6 @@ async def find(host: str) -> dict | None:
     return None
 
 
-async def list_hostnames(page: int = 1, per_page: int = 50) -> list[dict]:
-    return list(await _call("GET", "", params={"page": page, "per_page": per_page}) or [])
-
-
 def is_duplicate(exc: CloudflareError) -> bool:
     return exc.code == DUPLICATE or "duplicate" in (exc.message or "").lower()
 

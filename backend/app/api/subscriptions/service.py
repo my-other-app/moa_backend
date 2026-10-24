@@ -667,20 +667,13 @@ def price_for(plan: Plans, cycle: BillingCycle) -> int:
     )
 
 
-def mrr_for(plan: Plans, cycle: BillingCycle) -> int:
-    """
-    Monthly recurring revenue contribution, in paise, at the plan's price
-    today. A subscription is counted at the price it pays (`mrr_of`).
+def mrr_from_price(price_paise: int, cycle: BillingCycle) -> int:
+    """A cycle's price as monthly revenue, in paise.
 
     A yearly subscription contributes a twelfth of its price per month, not
     the whole thing -- summing yearly prices into MRR overstates it by an
     order of magnitude, which is the most common way this number is wrong.
-    """
-    return mrr_from_price(price_for(plan, cycle), cycle)
-
-
-def mrr_from_price(price_paise: int, cycle: BillingCycle) -> int:
-    """A cycle's price as monthly revenue, in paise."""
+    A subscription is counted at the price it pays (`mrr_of`)."""
     if BillingCycle(cycle) == BillingCycle.yearly:
         return int(price_paise or 0) // 12
     return int(price_paise or 0)

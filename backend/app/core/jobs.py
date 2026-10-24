@@ -607,6 +607,10 @@ async def execute(job: Claimed) -> bool:
     """Run one claimed job and record what became of it. True on success."""
     h = _handlers.get(job.name)
     error: Optional[str] = None
+    # The last try's exception, so a dead job's ERROR line -- what Sentry
+    # reports, from the worker or the API -- carries its traceback and is
+    # grouped by it, not by the one message every dead job shares.
+    failure: Optional[BaseException] = None
     if h is None:
         error = f"no handler for {job.name} in this process"
     elif job.attempts > job.max_attempts:
@@ -623,12 +627,13 @@ async def execute(job: Claimed) -> bool:
             logger.warning("job %s #%s timed out (try %d of %d)", job.name, job.id, job.attempts, job.max_attempts)
         except Exception as exc:  # noqa: BLE001
             error = _describe(exc)
+            failure = exc
             logger.warning("job %s #%s failed (try %d of %d)", job.name, job.id, job.attempts, job.max_attempts, exc_info=True)
     if error is None:
         await _finish(job)
         return True
     if await _fail(job, error):
-        logger.error("job %s #%s is dead after %d tries: %s", job.name, job.id, job.attempts, error)
+        logger.error("job %s #%s is dead after %d tries: %s", job.name, job.id, job.attempts, error, exc_info=failure)
         await _alert_dead(job, error, h)
     return False
 

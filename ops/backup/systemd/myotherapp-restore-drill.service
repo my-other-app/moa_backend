@@ -1,0 +1,22 @@
+# The monthly restore drill: the newest dump in S3 restored into a scratch
+# database, checked and dropped (scripts/restore_drill.py). Meant for the
+# staging box, whose backend can read the backup bucket; --standalone
+# checks the restore on its own rather than against the local database.
+# On production use MOA_DRILL_ARGS="--max-age-hours 26" (it then compares
+# with the live database, read-only), and run it off-peak.
+# Install: docs/OPERATIONS.md, section 19.
+[Unit]
+Description=MyOtherApp monthly restore drill (latest backup into a scratch database)
+Documentation=file:///var/www/myotherapp-production/docs/OPERATIONS.md
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+OnFailure=myotherapp-alert@%N.service
+
+[Service]
+Type=oneshot
+Environment=MOA_PROJECT_DIR=/var/www/myotherapp-production
+Environment="MOA_DRILL_ARGS=--standalone --max-age-hours 26"
+EnvironmentFile=-/etc/default/myotherapp-backup
+ExecStart=/bin/bash ${MOA_PROJECT_DIR}/ops/backup/run.sh drill $MOA_DRILL_ARGS
+TimeoutStartSec=6h

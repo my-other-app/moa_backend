@@ -1,0 +1,11 @@
+# Copied to /etc/default/myotherapp-backup (optional): overrides for the
+# backup units in ops/backup/systemd. Everything here has a default.
+
+# The checkout docker-compose runs from.
+#MOA_PROJECT_DIR=/var/www/myotherapp-production
+# The compose file and the backend's service in it (staging: docker-compose.yml).
+#MOA_COMPOSE_FILE=docker-compose.prod.yml
+#MOA_SERVICE=backend
+# What the monthly drill is given. Staging: --standalone. Production:
+# --max-age-hours 26 alone (compares with the live database, read-only).
+#MOA_DRILL_ARGS=--standalone --max-age-hours 26

@@ -42,10 +42,3 @@ class MyEventEventDetails(CustomBaseModel):
     reg_fee: float | None = None
     max_participants: int | None = None
     club: MyEventsClubDetails
-
-
-class MyEventsResponse(CustomBaseModel):
-    email: str
-    is_approved: bool
-    event: MyEventEventDetails | None = None
-    club: MyEventsClubDetails | None = None

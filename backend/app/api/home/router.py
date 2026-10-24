@@ -9,8 +9,8 @@ from app.core.response.pagination import (
     paginated_response,
 )
 from app.db.core import SessionDep
-from app.api.events.schemas import EventListResponse, EventPublic, EventPublicMin
-from app.api.clubs.schemas import ClubPublic, NotesPrivate, NotesPublic
+from app.api.events.schemas import EventListResponse, EventPublicMin
+from app.api.clubs.schemas import ClubPublic, NotesPublic
 from app.api.clubs.models import Notes
 from app.api.home.schemas import SearchResults
 from . import service

@@ -1,5 +1,4 @@
 """An uploaded picture, checked and sized for where it will be shown."""
-import asyncio
 import io
 from uuid import uuid4
 
@@ -36,7 +35,7 @@ def store_image(raw: bytes, key_prefix: str, *, max_width: int, name: str = "ima
     """Validate, shrink to `max_width`, store under the prefix; answer with
     the key a design saves and a URL to show it now.
 
-    Blocking (a decode, a resize, a PUT): async code calls `store_image_async`."""
+    Blocking (a decode, a resize, a PUT): async code runs it with asyncio.to_thread."""
     image = checked_image(raw)
     fmt = (image.format or "").upper()
     if fmt not in _EXT:
@@ -64,11 +63,6 @@ def store_image(raw: bytes, key_prefix: str, *, max_width: int, name: str = "ima
     key = f"{key_prefix}{name}-{uuid4().hex}.{ext}"
     objects.put_bytes(key, raw, "image/jpeg" if ext == "jpg" else f"image/{ext}")
     return {"key": key, "url": objects.presigned_url(key), "width": upright.width, "height": upright.height}
-
-
-async def store_image_async(raw: bytes, key_prefix: str, *, max_width: int, name: str = "image") -> dict:
-    """`store_image` on a worker thread, so the event loop is not held."""
-    return await asyncio.to_thread(store_image, raw, key_prefix, max_width=max_width, name=name)
 
 
 def image_ext(data: bytes) -> str:

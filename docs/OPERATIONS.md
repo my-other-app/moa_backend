@@ -5,8 +5,9 @@ secret, turn on the new services, size the server and every service on it,
 keep its disk from filling, open the live room's streams, look after the
 rendered documents in the bucket, run AI assist, put a demo event live
 for People Like You, place visitors by address without a lookup service,
-fix the demo's venue pins, and turn on WhatsApp. Every command is meant to
-be copied.
+fix the demo's venue pins, turn on WhatsApp, and keep production's
+settings, health checks and scheduled backups honest (section 19). Every
+command is meant to be copied.
 Commands under **Read-only** change nothing; anything that changes something
 says so.
 
@@ -310,7 +311,7 @@ Then:
   owners only, audited) runs `pg_dump --format=custom` into `/backups` in the
   container, which is `/var/backups/myotherapp` on the host (outside the
   rsynced directory, so a deploy never deletes them).
-- **Daily** (once the cron line below is installed): `scripts/backup.py` takes
+- **Daily** (once section 19's timer is installed): `scripts/backup.py` takes
   the same dump, copies it off-site, and prunes old local dumps.
 - **Off-site**, when `APP_BACKUP_S3_BUCKET` is set: every dump, on demand or
   daily, is uploaded to `s3://<bucket>/backups/daily/` -- or `backups/weekly/`
@@ -386,13 +387,11 @@ Settings:
 3. **Check**: take a backup from the dashboard; its answer shows
    `offsite_key: backups/daily/backup-....dump`. Then run the restore drill
    (below) once.
-4. **Schedule** (root's crontab on the host: `sudo crontab -e`; find the
-   compose binary with `command -v docker-compose`). 21:30 UTC is 03:00 IST:
-
-   ```cron
-   30 21 * * * cd /var/www/myotherapp-production && /usr/local/bin/docker-compose -f docker-compose.prod.yml exec -T backend python scripts/backup.py >> /var/log/myotherapp-backup.log 2>&1
-   0 22 1 * * cd /var/www/myotherapp-production && /usr/local/bin/docker-compose -f docker-compose.prod.yml exec -T backend python scripts/restore_drill.py --max-age-hours 26 >> /var/log/myotherapp-restore-drill.log 2>&1
-   ```
+4. **Schedule**: the systemd timer in `ops/backup` -- every day at 02:30
+   IST, with an alert when a run fails -- and, on staging, the monthly
+   restore drill. Section 19 has the install steps. (This used to be two
+   root crontab lines; remove them if they are installed, so the backup does
+   not run twice.)
 
    Each run prints one line per step and ends with `BACKUP OK` or
    `RESTORE DRILL PASSED`; neither ever prints a credential.
@@ -470,7 +469,7 @@ the hash of what you set.
 | `APP_RESEND_API_KEY`, `APP_RESEND_WEBHOOK_SECRET` | Resend dashboard | |
 | `APP_CLOUDFLARE_API_TOKEN` | Cloudflare -> API tokens (roll) | |
 | `APP_WHATSAPP_*` | Meta Business settings -> System users (the token); the app's dashboard -> App settings -> Basic (the app secret) | section 18. A new verify token (`openssl rand -hex 24`) must be set in the webhook too, at once |
-| `APP_APPLE_PRIVATE_KEY`, Firebase service account | Apple / Google consoles | |
+| Firebase service account | Google console | |
 | Wallet pass signing key and certificate | Apple developer -> Pass Type IDs | replace the files in `backend/wallet_certs`, not in git |
 | `PROD_SSH_PRIVATE_KEY` | `ssh-keygen -t ed25519` | add the new public key to the server's `authorized_keys`, update the secret, deploy once, remove the old key |
 | `APP_SENTRY_DSN` | Sentry -> project -> Client Keys | not really secret (it can only send events); revoke the old key there |
@@ -602,7 +601,7 @@ too, and one that only syncs code restarts it (section 1). Its own sizing
 2. Make sure the running image has `sentry-sdk` (any `install_requirements`
    deploy after this change). A DSN on an older image is logged and ignored.
 3. Add `APP_SENTRY_DSN=<dsn>` (and optionally `APP_SENTRY_ENVIRONMENT`,
-   default `production`; `APP_SENTRY_TRACES_SAMPLE_RATE=0.05` to trace 5% of
+   default `APP_ENV`, else `production`; `APP_SENTRY_TRACES_SAMPLE_RATE=0.05` to trace 5% of
    requests; `APP_SENTRY_SAMPLE_RATE`, default `1.0` of errors) and deploy
    with `sync_env`, `recreate_backend`.
 4. Check: the backend log says `Sentry is on`; events carry the release
@@ -614,6 +613,11 @@ route template (`/api/v1/events/{event_id}`), never with request bodies,
 cookies, local variables, IP addresses, Authorization or token headers;
 emails, phone numbers, JWTs, bearer tokens, key-shaped strings and the
 server's own secrets are replaced in every message (`app/core/observability.py`).
+A 4xx -- the API refusing a request, a validation error, a rate limit, an
+unknown route -- is never sent. A job that dies after its last try is sent
+with its exception, tagged `component: worker` from the job worker (`api`
+when the API runs the jobs itself). `tests/test_error_tracking.py` proves
+each of these through the real application.
 
 **JSON logs**: `APP_LOG_JSON=true` makes every line one JSON object (`ts`,
 `level`, `logger`, `msg`, `request_id`; `method`, `path`, `status` on the
@@ -1745,3 +1749,209 @@ Many `(132001)`: a template is not approved in `en` under that exact name.
 account is still in test mode and the number is not on its test list.
 `(131026)`: the number cannot receive WhatsApp; the guest's row is marked
 until the number is corrected on the attendee page.
+
+---
+
+## 19. Production hardening: start-up checks, health URLs, scheduled backups
+
+### Settings checked at startup (warn now, enforce once clean)
+
+In production the API (`main.py`, and the app's startup) and the job worker
+check their settings before they serve anything
+(`backend/app/core/config_checks.py`), naming every setting that is wrong
+and never its value. What a fatal finding does is `APP_CONFIG_CHECKS`:
+
+- **`warn` (the default)**: the API starts anyway and logs one ERROR line --
+  which Sentry reports, when `APP_SENTRY_DSN` is set -- listing every fatal
+  finding:
+
+  ```
+  CONFIG CHECK: 2 setting(s) are missing, placeholders or half set (values not shown); starting anyway because APP_CONFIG_CHECKS is warn:
+    - APP_PAYMENT_KEYS_SECRET: holds a placeholder, not a real value
+    - APP_WHATSAPP_PHONE_NUMBER_ID: is empty while APP_WHATSAPP_ACCESS_TOKEN is set: set both or neither
+  Fix them in the server's .env, then set APP_CONFIG_CHECKS=enforce (docs/OPERATIONS.md, section 19).
+  ```
+
+  Production's `.env` is known to hold at least
+  `APP_PAYMENT_KEYS_SECRET=PASTE_KEY_HERE`, so this is where it starts.
+- **`enforce`**: the process refuses to start (exit status 78, before
+  uvicorn or the worker start), with the same lines.
+
+**Getting to `enforce`** (read-only until the last step; after a deploy with
+`sync_code`, the running container has the checker):
+
+1. List the findings:
+
+   ```bash
+   $DC exec -T backend python -m app.core.config_checks                                   # the environment the container has now
+   sudo cat .env | $DC exec -T backend python -m app.core.config_checks --env-file -    # the .env the next container will get
+   ```
+
+   Each problem is a `FATAL` or `warn` line, names only; the last line says
+   what a start would do under the current mode.
+2. Fix every `FATAL` line in the `PROD_ENV_VARIABLES` secret. For
+   `APP_PAYMENT_KEYS_SECRET`: a real Fernet key
+   (`python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`),
+   or delete the line (no club can then connect its own Razorpay). Repeat
+   step 1 with `--env-file -` until it says `Nothing fatal`.
+3. Add `APP_CONFIG_CHECKS=enforce`, `sync_env`, `recreate_backend`. From
+   then on a placeholder or missing secret stops the deploy's restart
+   instead of shipping: the smoke check fails, `$DC logs --tail 40 backend`
+   shows the lines, and `APP_CONFIG_CHECKS=warn` starts it again while you
+   fix it.
+
+What is checked (fatal):
+
+| Rule | Settings |
+|---|---|
+| Empty | `APP_SECRET_KEY`, `APP_DATABASE_URL`, `APP_DATABASE_URL_SYNC`, `APP_S3_BUCKET`, `APP_S3_ACCESS_KEY`, `APP_S3_SECRET_KEY`, `APP_S3_BASE_PATH`, `APP_RAZORPAY_KEY_ID`, `APP_RAZORPAY_KEY_SECRET`, `APP_RAZORPAY_WEBHOOK_SECRET`; with `APP_MAIL_PROVIDER=ses` (the default) `APP_SES_ACCESS_KEY`, `APP_SES_SECRET_KEY`, `APP_SES_DEFAULT_SENDER`; with `resend`, `APP_RESEND_API_KEY` and `APP_MAIL_FROM_ADDRESS` |
+| A placeholder, in any setting | `PASTE_KEY_HERE` (any "paste ... here"), `changeme`, `replace-me`, a run of `xxx`, `your-...`/`your_...`, `<...>`, `${...}`/`{{...}}`, an `example.com` address; and in a credential, id, address or the database password, whole values like `password`, `secret`, `test`, `none`, `postgres` |
+| A weak `APP_SECRET_KEY` | under 32 characters, fewer than 10 distinct characters, or a value from a sample or a test suite |
+| Half set | `APP_RAZORPAY_KEY_ID`/`_SECRET`, `APP_WHATSAPP_ACCESS_TOKEN`/`APP_WHATSAPP_PHONE_NUMBER_ID`, `APP_CLOUDFLARE_API_TOKEN`/`APP_CLOUDFLARE_ZONE_ID`, `APP_BACKUP_S3_ACCESS_KEY`/`_SECRET_KEY`, `APP_AI_FALLBACK_PROVIDER`/`APP_AI_FALLBACK_API_KEY` (both or neither); `APP_SEARCH_URL` without `APP_SEARCH_KEY` |
+| The wrong shape | `APP_MAIL_PROVIDER` not `ses` or `resend`; `APP_BACKUP_S3_SSE` not `AES256` or `aws:kms`; `APP_PAYMENT_KEYS_SECRET` or `APP_AI_KEYS_SECRET` not Fernet keys; `APP_SENTRY_DSN` not a DSN; `APP_FIREBASE_SERVICE_ACCOUNT_BASE64` not a base64 service account; `APP_DEBUG` on with `APP_ENV=production` |
+
+Logged as warnings, never fatal: a `rzp_test_` key, no Sentry DSN, no
+off-site bucket, no Firebase credentials (or a missing file), AI on without
+`APP_GEMINI_API_KEY`, Resend without its webhook secret, a short site token,
+`*` in `APP_CORS_ORIGINS`.
+
+**Which processes count as production.** `APP_ENV` names the deployment:
+`production`, `staging` or anything else is checked; `development`, `dev`,
+`local`, `test` and `ci` are not. With `APP_ENV` unset, a process is checked
+whenever `APP_DEBUG` is off -- so production needs nothing new, a laptop sets
+`APP_DEBUG=true` (or `APP_ENV=development`), and staging is checked like
+production (set `APP_ENV=staging` there; Sentry then tags its events
+`staging`).
+
+**Before any `.env` change once enforcing**: run step 1's second command
+first; it exits 1 when there is a `FATAL` line.
+
+### Health URLs for uptime monitors
+
+| URL | Answers | Use |
+|---|---|---|
+| `https://api.myotherapp.in/health` | 200 `{"status": "ok", "revision": "<7-character git sha>"}` while the process answers; asks nothing else | liveness |
+| `https://api.myotherapp.in/health/ready` | 200 `{"status": "ok", "checks": {"database": "ok"}, "revision": "..."}`; 503 with `"status": "fail"` when the database does not answer `SELECT 1` within 1 second, or Redis does not answer (only when `APP_REDIS_URL` is set: `"redis": "ok"` is then in `checks`) | what to monitor |
+
+Both take GET or HEAD, need no sign-in, are never rate limited, answer
+`Cache-Control: no-store`, and carry nothing but the status, the checks and
+the short sha. `/healthz` and `/readyz` stay as they were (`/readyz` also
+compares the database's migration with the code's, for the deploy's smoke
+check: set the repository variable `PROD_SMOKE_URL` to
+`https://api.myotherapp.in/readyz`).
+
+Monitor `/health/ready` every minute (UptimeRobot, Better Stack...): alert
+on a non-200 or on `"status":"fail"`, after 3 failures in a row -- a deploy
+that recreates the backend is a minute of 502s. Point the alert at the same
+people as `APP_ADMIN_ALERT_EMAILS`.
+
+### Daily off-site backups, on a systemd timer
+
+`ops/backup` (synced to the server with the code) runs section 4's
+`scripts/backup.py` every day at **02:30 India time** (21:00 UTC), replacing
+section 4's cron lines:
+
+- `ops/backup/systemd/myotherapp-backup.timer` -> `myotherapp-backup.service`
+  -> `ops/backup/run.sh backup` -> `docker-compose exec -T backend python
+  scripts/backup.py --no-alert`: `pg_dump` (custom format, compressed) into
+  `/var/backups/myotherapp`, uploaded to
+  `s3://<bucket>/backups/daily/backup-YYYYMMDD-HHMMSS.dump` (or `weekly/`)
+  with server-side encryption and its sha256, older local dumps pruned to
+  `APP_BACKUP_KEEP_LOCAL`. `Persistent=true`: a run missed while the box was
+  off happens when it is back.
+- On any failure -- the dump, the upload, the container not running, a
+  timeout -- `OnFailure=` starts `myotherapp-alert@myotherapp-backup.service`
+  -> `ops/backup/alert.sh`, which raises one `backup_failed` admin alert
+  through the app (a mail to `APP_ADMIN_ALERT_EMAILS`, a post to
+  `APP_ADMIN_ALERT_DISCORD_WEBHOOK`, the dashboard's bell) with the run's
+  last log lines; when the app cannot (container or database down), it posts
+  straight to the Discord webhook in `.env`.
+
+**AWS (once, in the console or with the CLI; the app creates none of it).**
+Section 4 has the lifecycle JSON and the IAM policy in full.
+
+1. Bucket `myotherapp-backups` in `ap-south-1`: *Block all public access* on,
+   *Default encryption* SSE-S3, *Versioning* on.
+2. Lifecycle (section 4's JSON): `backups/daily/` expires after 14 days,
+   `backups/weekly/` after 56, old versions after 7, abandoned uploads after 2.
+3. IAM user `myotherapp-backups` with only section 4's policy:
+   `s3:PutObject`, `s3:GetObject`, `s3:AbortMultipartUpload`,
+   `s3:ListMultipartUploadParts` on `arn:aws:s3:::myotherapp-backups/backups/*`
+   and `s3:ListBucket` on the bucket for the `backups/*` prefix -- no delete.
+   Create an access key for it.
+4. For the staging drill, a second user with only `s3:GetObject` on
+   `.../backups/*` and `s3:ListBucket` for that prefix.
+
+**`.env`** (the `PROD_ENV_VARIABLES` secret; `sync_env`, then `recreate_backend`):
+
+```
+APP_BACKUP_S3_BUCKET=myotherapp-backups
+APP_BACKUP_S3_REGION=ap-south-1
+APP_BACKUP_S3_ACCESS_KEY=<the backup user's key id>
+APP_BACKUP_S3_SECRET_KEY=<its secret>
+APP_BACKUP_KEEP_LOCAL=7
+APP_ADMIN_ALERT_EMAILS=<who hears about a failed backup, comma-separated>
+APP_ADMIN_ALERT_DISCORD_WEBHOOK=<a Discord channel's webhook, optional>
+```
+
+(`APP_BACKUP_S3_PREFIX=backups/` and `APP_BACKUP_S3_SSE=AES256` are the
+defaults; `aws:kms` with `APP_BACKUP_S3_KMS_KEY_ID` for a KMS key.)
+
+**On the server (once; changes things).** After a deploy with `sync_code`,
+so `ops/` and the new `scripts/backup.py` are there:
+
+```bash
+cd /var/www/myotherapp-production
+sudo install -d -m 0700 /var/backups/myotherapp
+systemd-analyze calendar "*-*-* 02:30:00 Asia/Kolkata"       # read-only: prints the next run in UTC
+sudo install -m 0644 ops/backup/systemd/myotherapp-backup.service ops/backup/systemd/myotherapp-backup.timer \
+  'ops/backup/systemd/myotherapp-alert@.service' /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now myotherapp-backup.timer
+systemctl list-timers myotherapp-backup.timer                 # NEXT: 21:00 UTC
+sudo crontab -l | grep -n scripts/                             # remove section 4's cron lines if they are there: sudo crontab -e
+```
+
+Then prove it, once:
+
+```bash
+sudo systemctl start myotherapp-backup.service                # a backup now (seconds)
+journalctl -u myotherapp-backup -n 20 --no-pager               # ends with BACKUP OK and the s3:// key
+sudo systemctl start myotherapp-alert@myotherapp-backup.service   # a test alert: check the mail and Discord
+```
+
+Nothing to change in `ops/backup` for production. Elsewhere (another path,
+`docker-compose.yml`), copy `ops/backup/myotherapp-backup.default` to
+`/etc/default/myotherapp-backup` and set `MOA_PROJECT_DIR`,
+`MOA_COMPOSE_FILE`. A failed run shows in `systemctl --failed` and
+`journalctl -u myotherapp-backup`; the alert says the same.
+
+### The restore drill, monthly on staging
+
+`scripts/restore_drill.py` downloads the newest dump in S3, checks it against
+the sha256 recorded at upload, restores it into a new
+`restore_drill_YYYYMMDD_HHMMSS` database, checks every table in the dump was
+restored and the core tables (`users`, `clubs`, `events`, registrations,
+memberships, payments, notifications) have rows, prints the counts, and
+drops the scratch database. `--standalone` checks the restore on its own
+(staging); without it the counts are put beside the live database's
+(read-only). `--max-age-hours 26` fails when the newest dump is older (a
+missed backup).
+
+On the staging box (its backend's `.env` gets `APP_BACKUP_S3_BUCKET` and the
+read-only user's keys as `APP_BACKUP_S3_ACCESS_KEY`/`_SECRET_KEY`):
+
+```bash
+cd <staging project dir>
+sudo install -m 0644 ops/backup/myotherapp-backup.default /etc/default/myotherapp-backup
+sudoedit /etc/default/myotherapp-backup     # MOA_PROJECT_DIR=<that dir>, MOA_COMPOSE_FILE=docker-compose.yml
+sudo install -m 0644 ops/backup/systemd/myotherapp-restore-drill.service ops/backup/systemd/myotherapp-restore-drill.timer \
+  'ops/backup/systemd/myotherapp-alert@.service' /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now myotherapp-restore-drill.timer    # the 1st of each month, 04:00 IST
+sudo systemctl start myotherapp-restore-drill.service         # once now: journalctl -u myotherapp-restore-drill ends RESTORE DRILL PASSED
+```
+
+By hand, anywhere: `sudo /bin/bash ops/backup/run.sh drill --standalone`.
+On production (off-peak; it costs CPU and disk while it runs):
+`$DC exec -T backend python scripts/restore_drill.py --max-age-hours 26`.

@@ -1,0 +1,13 @@
+# Every day at 02:30 India time (21:00 UTC). Persistent: a run missed while
+# the box was off happens when it comes back.
+[Unit]
+Description=MyOtherApp daily database backup at 02:30 IST
+
+[Timer]
+OnCalendar=*-*-* 02:30:00 Asia/Kolkata
+Persistent=true
+AccuracySec=1min
+Unit=myotherapp-backup.service
+
+[Install]
+WantedBy=timers.target

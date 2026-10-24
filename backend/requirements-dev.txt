@@ -6,3 +6,9 @@ ruff==0.8.4
 pytest==8.3.4
 pytest-asyncio==0.25.2
 pytest-cov==6.0.0
+# tests/test_deploy_workflow.py and tests/test_one_box.py read the workflow
+# and docker-compose.prod.yml; nothing else installs it.
+PyYAML==6.0.3
+# S3 for the backup tests (tests/test_backup_schedule.py): real boto3 calls
+# against moto's in-process S3. The test skips without it.
+moto[s3]==5.2.4

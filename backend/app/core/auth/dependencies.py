@@ -169,10 +169,6 @@ def check_user_type(required_roles: Union[str, List[str]], optional=False):
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 message="User model has no type attribute",
             )
-        # if "volunteer" in required_roles:
-        #     volunteering = select(Volunteer).where(Volunteer.user_id == current_user.id)
-        #     volunteer = await session.execute(volunteering)
-        #     request.state.volunteer = volunteer.scalars()
         user_type = current_user.user_type.value
         if not any(role == user_type for role in required_roles):
             raise CustomHTTPException(

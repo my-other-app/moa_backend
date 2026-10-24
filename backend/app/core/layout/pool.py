@@ -54,10 +54,6 @@ async def run(fn: Callable[..., T], /, *args, **kwargs) -> T:
     return await loop.run_in_executor(executor(), call)
 
 
-def on_render_thread() -> bool:
-    return threading.current_thread().name.startswith(THREAD_PREFIX)
-
-
 def shutdown() -> None:
     """Let the pool go (tests, and a process on its way out)."""
     global _executor

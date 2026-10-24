@@ -154,11 +154,6 @@ def certificate_job(registration, style: dict) -> RenderJob:
     return RenderJob(draw, print_, version, style)
 
 
-def render_certificate_pdf(registration, style: dict) -> bytes:
-    """Blocks while it renders; async code uses certificate_document."""
-    return certificate_job(registration, style).draw()[0]
-
-
 async def certificate_style(session, registration) -> dict:
     from app.api.certificate_templates.service import get_template_for_event
 
@@ -180,7 +175,3 @@ async def certificate_document(session, registration, style: Optional[dict] = No
 
 def current_design_version(style: dict) -> int:
     return design_version_of(style)
-
-
-def issued_at_of(registration) -> Optional[datetime]:
-    return getattr(registration, "certificate_issued_at", None)

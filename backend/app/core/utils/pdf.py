@@ -1,12 +1,13 @@
 import io
 import logging
 import os
+import shutil
 import subprocess
 import tempfile
 from functools import lru_cache
+from typing import Optional
 
 import jinja2
-import pdfkit
 
 from app.config import settings
 
@@ -26,9 +27,45 @@ def _environment(template_dir: str) -> jinja2.Environment:
 
 
 @lru_cache(maxsize=1)
-def _wkhtmltopdf():
-    """Where wkhtmltopdf is. pdfkit asks `which` on every call; once is enough."""
-    return pdfkit.configuration()
+def _wkhtmltopdf() -> str:
+    """Where wkhtmltopdf is, looked up once."""
+    path = shutil.which("wkhtmltopdf")
+    if not path:
+        raise IOError("No wkhtmltopdf executable found: install wkhtmltopdf (backend/Dockerfile does)")
+    return path
+
+
+def wkhtmltopdf_command(options: dict, output_path: str) -> list[str]:
+    """wkhtmltopdf's argument list: each option as --name [value] (a value of
+    None or True is a bare flag, False or "" leaves it out), then "-" (the
+    page on stdin) and the output file.
+
+    This used to be pdfkit's. pdfkit (unmaintained, an unpatched advisory:
+    GHSA-9g3x-6x24-vf9f) also read `<meta name="pdfkit-...">` tags out of the
+    page and passed them on as command-line options -- options from the
+    document being rendered, which may carry a club's text. Here only the
+    caller's options ever reach the command line.
+    """
+    args = [_wkhtmltopdf(), "--quiet"]
+    for key, value in options.items():
+        name = key.lower() if key.startswith("--") else f"--{key.lower()}"
+        if value is False or value == "":
+            continue
+        args.append(name)
+        if value is not None and value is not True:
+            args.append(str(value))
+    return [*args, "-", output_path]
+
+
+def _check_exit(returncode: int, stderr: str) -> None:
+    """Raise unless wkhtmltopdf finished: it sometimes exits non-zero after
+    writing the PDF, and then says "Done" on its second-last line."""
+    if returncode == 0:
+        return
+    lines = stderr.splitlines()
+    if len(lines) > 1 and lines[-2].strip() == "Done":
+        return
+    raise IOError(f"wkhtmltopdf exited with code {returncode}: {stderr[-1000:] or 'no output'}")
 
 
 def render_html(template_path: str, context: dict, template_dir: str = None) -> str:
@@ -43,29 +80,28 @@ def generate_pdf_bytes(
 
     :param template_path: Path to the Jinja2 HTML template
     :param context: Dictionary of variables to pass to the template
-    :param options: Optional PDFKit configuration options
+    :param options: Optional wkhtmltopdf options (name -> value; None for a flag)
     :param template_dir: Optional custom template directory (defaults to './')
     :return: PDF content as BytesIO object
 
-    wkhtmltopdf runs for at most RENDER_TIMEOUT seconds. pdfkit waits on it
-    with no limit at all, so a page that never finished loading held its
-    thread for good; the process is run here directly and killed when it
-    overruns. Blocks while it runs: async code calls this through
+    wkhtmltopdf runs for at most RENDER_TIMEOUT seconds (pdfkit, which this
+    used, waited with no limit at all, so a page that never finished loading
+    held its thread for good); it is killed when it overruns. Blocks while it runs: async code calls this through
     app.core.layout.pool.
     """
     try:
         html_out = render_html(template_path, context, template_dir)
 
-        # Default PDFKit options
-        default_options = {
+        # Default wkhtmltopdf options
+        default_options: dict[str, Optional[str]] = {
             "page-size": "A4",
             "margin-top": "0",
             "margin-right": "0",
             "margin-bottom": "0",
             "margin-left": "0",
             "encoding": "UTF-8",
-            # pdfkit/wkhtmltopdf has a known, unpatched vulnerability
-            # (PYSEC-2026-2860) where JavaScript in the rendered HTML can
+            # wkhtmltopdf has a known, unpatched vulnerability (the pdfkit
+            # advisory PYSEC-2026-2860) where JavaScript in the rendered HTML can
             # read and exfiltrate local files. These templates never need
             # JS, so disable it outright rather than rely solely on Jinja2
             # autoescape to keep script content out.
@@ -90,15 +126,14 @@ def generate_pdf_bytes(
             temp_output_path = temp_output.name
 
         try:
-            kit = pdfkit.PDFKit(html_out, "string", options=pdf_options, configuration=_wkhtmltopdf())
             done = subprocess.run(
-                kit.command(temp_output_path),
+                wkhtmltopdf_command(pdf_options, temp_output_path),
                 input=html_out.encode("utf-8"),
                 capture_output=True,
                 timeout=settings.RENDER_TIMEOUT,
             )
             stderr = (done.stderr or done.stdout or b"").decode("utf-8", errors="replace")
-            pdfkit.PDFKit.handle_error(done.returncode, stderr)
+            _check_exit(done.returncode, stderr)
 
             # Read the PDF into BytesIO
             with open(temp_output_path, "rb") as pdf_file:
@@ -127,13 +162,6 @@ def generate_pdf_bytes(
     except Exception as e:
         raise RuntimeError(f"Unexpected error generating PDF: {e}")
 
-
-def save_pdf_to_file(pdf_bytes, filename="output.pdf"):
-    """
-    Save PDF bytes to a file
-    """
-    with open(filename, "wb") as f:
-        f.write(pdf_bytes.getvalue())
 
 def generate_image_bytes(
     template_path: str,
