@@ -62,6 +62,8 @@ async def main() -> None:
     runner = jobs.Runner(kind="worker", sweeps=settings.SWEEPS_IN_WORKER).start()
     jobs.use(runner)
     loops = doth.start_loops() if settings.SWEEPS_IN_WORKER else []
+    # The portal's runtime settings, in this process too (app/api/admin_ops/runtime.py).
+    loops.append(doth.start_settings_loop())
     waker = loop.create_task(_wake_on_redis(runner)) if redis.client() is not None else None
     # As the API does after startup: what import built lives as long as the
     # process, so the collector need not walk it (doth.lifespan).

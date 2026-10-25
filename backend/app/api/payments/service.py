@@ -833,10 +833,16 @@ async def refund_payment(session: AsyncSession, payment_log_id) -> PaymentLogs:
 
     account = await gateways.for_order(session, db_payment.order)
     payment_id = db_payment.razorpay_payment_id
+    # Part of it given back already by an admin (app.api.admin_ops.refunds):
+    # Razorpay is asked for what is left, by amount.
+    from app.api.admin_ops.refunds import refunded_so_far
+
+    done = await refunded_so_far(session, db_payment.id)
+    rest = {"amount": money.to_paise(money.rupees(db_payment.amount) - done)} if done else None
     # Nothing held while Razorpay answers.
     await session.commit()
     # No `amount` param — Razorpay refunds the full captured amount.
-    refund_id = _refund_id(await rzp.call(account.client.payment.refund, payment_id))
+    refund_id = _refund_id(await rzp.call(account.client.payment.refund, payment_id, *((rest,) if rest else ())))
 
     db_payment = await session.scalar(
         select(PaymentLogs).where(PaymentLogs.id == payment_log_id).options(joinedload(PaymentLogs.order))
@@ -991,6 +997,14 @@ async def _apply_platform_event(session: AsyncSession, event_name: str, data: di
     # would have its own log and could process the same delivery twice.
     if event_name.startswith("subscription."):
         await _handle_subscription_event(session, event_name, data)
+        return
+
+    # A dispute (chargeback): recorded and the admins told (app.api.admin_ops.disputes).
+    # Before the payment branch below, which would read its payment as a capture to apply.
+    if event_name.startswith("payment.dispute."):
+        from app.api.admin_ops import disputes
+
+        await disputes.apply_webhook(session, event_name, data)
         return
 
     # A club buying message credits: a one-time order of its own

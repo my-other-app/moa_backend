@@ -92,6 +92,14 @@ def start_loops() -> list[asyncio.Task]:
     ]
 
 
+def start_settings_loop() -> asyncio.Task:
+    """Every process's own (not leader-only): the stored platform settings
+    laid over `settings`, again every REFRESH_SECONDS."""
+    from app.api.admin_ops.runtime import refresh_loop
+
+    return asyncio.create_task(refresh_loop())
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # The production settings check (app/core/config_checks.py): under
@@ -116,6 +124,9 @@ async def lifespan(app: FastAPI):
     await check_connection_budget()
     # The sweeps, here unless the worker runs them (APP_SWEEPS_IN_WORKER).
     loops = [] if settings.SWEEPS_IN_WORKER else start_loops()
+    # The runtime settings an owner changes from the portal (app/api/admin_ops/runtime.py):
+    # read now and every few seconds after, in every process.
+    loops.append(start_settings_loop())
     # The jobs this process writes, run as soon as they commit -- unless the
     # worker runs them (APP_JOBS_WORKER), when this process only writes them.
     from app.core import jobs

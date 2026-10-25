@@ -47,6 +47,7 @@ from typing import Optional, List
 from app.api.clubs.schemas import ClubEventsFigures, FollowersInsights, FollowersPage
 from app.api.events.schemas import EventListResponseSelf
 from app.api.clubs.notifications_router import router as notifications_router
+from app.api.admin_ops.club_reject import RejectIn as RejectClubIn
 
 router = APIRouter(prefix="/clubs")
 router.include_router(notifications_router, tags=["Club Notifications"])
@@ -237,11 +238,23 @@ async def approve_club_endpoint(
     return club
 
 
-@router.post("/{club_id}/reject", summary="Reject a pending club (admin)")
+@router.post("/{club_id}/reject", summary="Reject a pending club, with a reason the applicant is mailed (admin)")
 async def reject_club_endpoint(
-    club_id: int, session: SessionDep, user: DestroyAuth, request: Request = None
+    club_id: int, session: SessionDep, user: ModerateAuth, request: Request = None,
+    body: Optional[RejectClubIn] = None,
 ) -> ClubAdminDetailResponse:
+    """A pending application is a moderator's to turn down, and its sign-in
+    address is told why (app.api.admin_ops.club_reject). A club approved
+    already is deleted by this, which needs DESTROY, and is not mailed."""
+    from app.api.admin_ops import club_reject
+    from app.core.auth.permissions import DESTROY, can
+
+    was_verified = await session.scalar(select(Clubs.is_verified).where(Clubs.id == club_id))
+    if was_verified and not can(user, DESTROY):
+        raise CustomHTTPException(403, message="Your admin role cannot destroy", error_code="INSUFFICIENT_ADMIN_ROLE")
+    reason = ((body.reason if body else None) or "").strip() or None
     club = await service.reject_club(session, club_id)
+    mailed = await club_reject.tell_applicant(session, club, reason) if was_verified is False else False
     await audit.record(
         session,
         actor=user,
@@ -249,6 +262,7 @@ async def reject_club_endpoint(
         entity_type="club",
         entity_id=club_id,
         summary=f"Rejected club “{club.name}” (soft-deleted)",
+        details={"reason": reason, "applicant_mailed": mailed, "was_approved": bool(was_verified)},
         request=request,
     )
     await session.commit()

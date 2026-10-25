@@ -68,6 +68,7 @@ KINDS: dict[str, str] = {
     "email_dead_letter": "Emails to guests failed on every retry and were given up (data: event, kind, count)",
     "payment_auto_refunded": "A payment was refunded on its own: the event filled while it was paid (data.reason event_full), or it paid an order twice (duplicate)",
     "payment_refund_failed": "Razorpay did not take an automatic refund; the sweep keeps trying",
+    "payment_disputed": "Razorpay opened a dispute (chargeback) on a platform payment, or one was lost (data: dispute_id, payment_id, status, amount_paise, respond_by)",
     "payment_unapplied": "A captured payment had not been applied to its registration; the repair sweep applied it, or could not (data.repaired)",
     "subscription_orphan_charged": "Razorpay charged a subscription no club row holds (a second checkout, or one made elsewhere); it was cancelled at Razorpay",
     "backup_failed": "The daily database backup (scripts/backup.py) could not dump the database or copy the dump off-site, or a scheduled backup or restore drill failed (ops/backup)",

@@ -3167,3 +3167,88 @@ enabled, the subscription **Confirmed**, and the API's log: `mailbox hook
 refused: not the mailbox's topic` (step 7's ARN), `... signature did not
 verify`, or `couldn't be read from the bucket` (step 6's keys; SNS retries).
 Dropped mail is logged with the reason and a masked address only.
+
+---
+
+## 24. The admin portal's operator tools
+
+Code: `backend/app/api/admin_ops/`. Migration `admin_ops` (new tables only).
+
+### Runtime settings (Settings page)
+
+An owner changes these in the portal; no SSH, no restart. The value is
+stored in `platform_settings` and stands in for the `.env` value; every
+process (each API worker and the job worker) reads the table at start and
+every 15 seconds, so a change is live everywhere within 15 seconds. "Reset"
+removes the stored value and the `.env` value applies again. Each change is
+in the Activity log (`platform_setting.update` / `.reset`).
+
+| Setting | `.env` name | Restart needed |
+| --- | --- | --- |
+| AI assist | `APP_AI_ENABLED` | no |
+| AI assistants (MCP) | `APP_MCP_ENABLED` | no |
+| Mail provider (ses / resend) | `APP_MAIL_PROVIDER` | no (Resend still needs `APP_RESEND_API_KEY`) |
+| Push by topic | `APP_PUSH_TOPICS` | no |
+| Also push device by device | `APP_PUSH_TOPICS_LEGACY` | no |
+| Finance reads the ledger | `APP_LEDGER_READS` | no |
+| Bill message overage | `APP_MESSAGE_OVERAGE_BILLING` | no |
+| Maintenance banner | (database only) | no |
+| Admins must use two-factor | (database only, default on) | no |
+
+Everything else, and every secret, stays in `.env` and needs the backend
+recreated with `up -d --build backend` (section 8). The Settings page shows
+each secret as set or not, and whether the start-up check (section 19) has a
+complaint about it -- never its value.
+
+### Two-factor for admins
+
+On by default. When the migration ran, every admin without two-factor got
+seven days (`admin_2fa_grace_started_at`); the portal shows a banner with the
+date. After it, every admin route answers 403 `ADMIN_2FA_REQUIRED` and the
+portal sends them to set it up. An admin added later has no grace. Turning
+the setting off lets everyone in; turning it back on starts a new seven days.
+An admin who loses their phone signs in with one of their recovery codes and
+sets two-factor up again from the Security page.
+
+### Admin accounts
+
+Admins page: add by email (an app account is promoted; otherwise one is
+made) with a role; the address is mailed a set-password link
+(`https://main-portal.myotherapp.in/accept-invite?token=...`, 7 days,
+`APP_PUBLIC_ADMIN_URL`). A club's sign-in address can't be an admin. Removing
+an admin makes them an app account and ends their sessions; nobody removes
+themselves, and the last owner stays.
+
+### Payouts
+
+For clubs selling through MyOtherApp's Razorpay (not their own gateway):
+gross, Razorpay's fee (read from Razorpay with "Fetch fees"; estimated at
+2.36% until then, and marked), refunds, lost chargebacks, net, paid out and
+outstanding. Record each bank transfer (amount, date, UTR, note); partial
+payouts are fine, and one made in error is voided with a reason. The statement
+CSV lists every line with the running balance.
+
+### Disputes
+
+In Razorpay's dashboard, Settings -> Webhooks -> the platform webhook
+(`https://api.myotherapp.in/api/v1/payments/webhook`), tick:
+`payment.dispute.created`, `payment.dispute.under_review`,
+`payment.dispute.action_required`, `payment.dispute.won`,
+`payment.dispute.lost`, `payment.dispute.closed`. A new dispute and a lost one
+alert the admins (`payment_disputed`). Evidence is still sent from Razorpay's
+dashboard before the deadline the page shows.
+
+### Refunds
+
+Payments page, "Refund part...": part of a ticket (the ticket stands; its
+price and paid amount come down), one store order (its pieces return to the
+shelf unless handed over), or what is left of the payment. Revenue page,
+charges: refund a plan subscription's charge in full or in part. Owners only;
+each is in the Activity log and posted to the ledger.
+
+### WhatsApp templates
+
+Lists the templates on the platform's number with Meta's status. Set
+`APP_WHATSAPP_BUSINESS_ACCOUNT_ID` (WhatsApp Manager -> Account tools) for a
+direct read; without it the account is found from the access token. Cached
+10 minutes; "Refresh" asks again.
