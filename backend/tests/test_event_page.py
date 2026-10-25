@@ -27,6 +27,8 @@ EVENT_KEYS = {
     "summary", "created_at", "updated_at",
     # The topics of its interests (Topics).
     "topics",
+    # Set when the club cancelled the event (club_ops): the reason and when.
+    "cancellation",
 }
 
 

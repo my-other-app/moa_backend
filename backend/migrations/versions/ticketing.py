@@ -38,14 +38,14 @@ codes and lines are lost; the registrations keep their price), and switches
 the two flags off again.
 
 Revision ID: ticketing
-Revises: apple_refresh_token
+Revises: club_ops
 """
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "ticketing"
-down_revision = "apple_refresh_token"
+down_revision = "club_ops"
 branch_labels = None
 depends_on = None
 
