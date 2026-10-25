@@ -270,11 +270,13 @@ async def _push_job(p: dict) -> None:
 # ─── The event goes live ─────────────────────────────────────────────────
 
 
-async def queue_event_live(session, event_id: int) -> None:
-    """Tell everyone registered that the event is live, from a job written
-    in the caller's transaction (it runs once that commits): the clock's
-    sweep moves many events at once and must not wait on any of them."""
-    await jobs.enqueue(session, STARTED_JOB, {"event_id": int(event_id), "try": 1}, dedupe_key=f"live:started:{int(event_id)}")
+async def queue_event_live(session, *event_ids: int) -> None:
+    """Tell everyone registered that these events are live, from a job each,
+    written in the caller's transaction in one statement (they run once it
+    commits): the clock's sweep moves many events at once and must not wait
+    on any of them."""
+    if event_ids:
+        await jobs.enqueue_many(session, STARTED_JOB, [({"event_id": int(e), "try": 1}, f"live:started:{int(e)}") for e in event_ids])
 
 
 @jobs.handler(STARTED_JOB, max_attempts=3, timeout=120.0, priority=jobs.HIGH)
