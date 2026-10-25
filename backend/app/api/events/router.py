@@ -443,6 +443,8 @@ async def list_events(
                 # Revoked by the organiser: the door refuses it by name, so
                 # a ticket kept for offline use drops it on the next refresh.
                 event_dict["ticket_revoked"] = reg.ticket_revoked_at is not None
+                # Which ticket type it is, from the same registration row.
+                event_dict["ticket_label"] = reg.ticket_label
                 # The certificate as the PDF and the image decide it: one
                 # issued without a check-in counts, a revoked one does not.
                 held = availability(reg)
@@ -574,7 +576,18 @@ async def get_ticket(
 ) -> TicketDetailsResponse:
     result = await service.get_ticket_details(session, ticket_id=ticket_id)
     _assert_can_access_ticket(user, result)
-    return jsonable_encoder(result)
+    data = jsonable_encoder(result)
+    # The event's state, as its page says it, so the ticket can say
+    # "Cancelled" without asking the event page as well. The event is loaded
+    # with the ticket; only a cancelled one costs a query, for the reason.
+    if result.event is not None and isinstance(data.get("event"), dict):
+        status = result.event.status
+        data["event"]["status"] = status
+        if status == "cancelled":
+            from app.api.club_ops.cancel import public_cancellation
+
+            data["event"]["cancellation"] = await public_cancellation(session, result.event.id)
+    return data
 
 
 @router.get("/tickets/{ticket_id}/image", summary="Get ticket as an image")

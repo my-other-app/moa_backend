@@ -211,6 +211,8 @@ before. It shows in these places:
 | Gate scan and search | `attendee.ticket_type`. |
 | Attendee list | `ticket_type_id`, `ticket_type_name`. |
 | Attendee detail | `ticket_type_id`, `ticket_label`, `discount_amount`. |
+| The guest's ticket (`GET /events/tickets/{ticket_id}`) | `ticket_type_id`, `ticket_label`; its `event` also carries `status` and, when cancelled, `cancellation`. |
+| My events (`GET /events/list`) | `ticket_label` on each event the caller is registered for (null on the rest). |
 | Registrations export | Three new last columns: "Ticket Type", "Discount Code" and "Discount". |
 
 ---
