@@ -190,10 +190,10 @@ def test_the_catalog_and_the_seed_only_name_flags_that_exist():
 
     module = _migration()
     # Every limit is club_plans' but the one ai_assist added with its own seed
-    # (tests/test_ai_assist.py) and the two message_quotas seeds
-    # (tests/test_message_quotas.py).
+    # (tests/test_ai_assist.py), the two message_quotas seeds and the
+    # promotional cap pricing_adjust seeds (tests/test_message_quotas.py).
     # storage_gb is seeded there but is no longer a limit (migration trial_pricing).
-    later = {"ai_actions_per_month", "emails_per_month", "whatsapp_per_month"}
+    later = {"ai_actions_per_month", "emails_per_month", "whatsapp_per_month", "whatsapp_marketing_per_month"}
     assert set(module.LIMIT_COLUMNS) | later == set(LIMIT_KEYS) | {"storage_gb"}
     for key, flags in module.FEATURES.items():
         # Nothing seeded on that the page would not show.
@@ -260,6 +260,7 @@ async def test_the_seeded_catalogue_as_the_pricing_page_reads_it(client, session
         seeded = {
             **dict(zip(LIMIT_ORDER, EXPECTED_LIMITS[key])),
             "ai_actions_per_month": None, "emails_per_month": None, "whatsapp_per_month": None,
+            "whatsapp_marketing_per_month": None,
         }
         seeded.pop("storage_gb")  # in the table, never in the API (migration trial_pricing)
         assert plan["limits"] == seeded, key

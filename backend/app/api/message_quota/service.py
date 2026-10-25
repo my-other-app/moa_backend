@@ -25,6 +25,13 @@ Past the limit:
   club's plan -- and are counted;
 - a complimentary plan, an Enterprise deal or trial, or a deal invoiced by
   hand goes on sending; the extra is on a statement for an admin to invoice.
+
+Promotional WhatsApp (MARKETING templates, `is_marketing`) costs us about
+7x a utility one, so each plan caps it at `whatsapp_marketing_per_month`
+(20% of its WhatsApp): past that, on every plan, a promotional WhatsApp is
+held back. Tickets, certificates, payment messages and reminders (UTILITY)
+never are. Today the platform's number sends no MARKETING template at all;
+the cap is there for the first send that does.
 """
 from __future__ import annotations
 
@@ -65,8 +72,18 @@ LIMIT_KEY = {EMAIL: "emails_per_month", WHATSAPP: "whatsapp_per_month"}
 TRANSACTIONAL = frozenset({"ticket", "certificate", "payment"})
 KINDS = frozenset({
     "ticket", "certificate", "payment",
-    "reminder", "announcement", "campaign", "journey", "survey", "update",
+    "reminder", "announcement", "campaign", "journey", "survey", "update", "promotion",
 })
+
+#: The kinds that, sent by WhatsApp, are MARKETING templates at Meta (a
+#: promotion, an announcement to followers, a campaign): about ₹1.02 each to
+#: us with GST against ₹0.14 for a UTILITY one, so each plan caps them at
+#: `whatsapp_marketing_per_month`. The platform's number sends none of them
+#: today -- its templates (tickets, certificates, reminders, payment and event
+#: updates) are all UTILITY, and a club's promotions go from its own number,
+#: which is never counted -- so the cap is there for the first one that does.
+#: A caller that knows the template's category says so (`category=`).
+MARKETING_KINDS = frozenset({"promotion", "announcement", "campaign"})
 
 # How the extra is paid for (Terms.billing).
 #: The club's Razorpay subscription: an add-on on its next invoice.
@@ -151,6 +168,8 @@ class Terms:
     custom: bool = False
     #: "free_trial" | "enterprise_trial" when a trial gives the plan.
     trial: Optional[str] = None
+    #: Of the WhatsApp limit, how many may be promotional (null: no cap of their own).
+    whatsapp_marketing_limit: Optional[int] = None
 
     def limit(self, channel: str) -> Optional[int]:
         return self.email_limit if channel == EMAIL else self.whatsapp_limit
@@ -232,10 +251,35 @@ async def terms_for(session, club_id: int) -> Terms:
         billing=_billing(resolved),
         custom=custom,
         trial=resolved.trial[0] if resolved.trial is not None else None,
+        whatsapp_marketing_limit=resolved.limits.get(MARKETING_LIMIT_KEY),
     )
 
 
+#: The plan's cap on promotional WhatsApp messages a month.
+MARKETING_LIMIT_KEY = "whatsapp_marketing_per_month"
+
+
+def is_marketing(channel: str, kind: Optional[str], category: Optional[str] = None) -> bool:
+    """A promotional (MARKETING-category) WhatsApp message: by the template's
+    `category` when the caller knows it, else by its kind (MARKETING_KINDS).
+    Never a ticket, certificate or payment message, never an email."""
+    if channel != WHATSAPP or (kind or "") in TRANSACTIONAL:
+        return False
+    if category:
+        return category.strip().upper() == "MARKETING"
+    return (kind or "") in MARKETING_KINDS
+
+
 # ─── Holding back (Free past its limit) ──────────────────────────────────
+
+
+def _marketing_reason(terms: Terms, cap: int) -> str:
+    if cap == 0:
+        return f"Not sent: promotional WhatsApp messages aren't included on {terms.where}."
+    return (
+        f"Not sent: this month's {cap:,} promotional WhatsApp {'message' if cap == 1 else 'messages'} on {terms.where} "
+        "are used up. Tickets, certificates and reminders still go."
+    )
 
 
 def _held_reason(terms: Terms, channel: str, limit: int, kind: str) -> str:
@@ -250,11 +294,19 @@ def _held_reason(terms: Terms, channel: str, limit: int, kind: str) -> str:
 
 async def held_back(
     session, terms: Optional[Terms], channel: str, kind: str, *, via: str = PLATFORM, at: Optional[datetime] = None,
+    category: Optional[str] = None,
 ) -> Optional[str]:
-    """Why this send is held back, or None when it may go: only on a plan
-    with no way to pay for more (`Terms.blocks`), only past the month's
-    limit, never a transactional message, never one through the club's own
-    number. A held-back send is counted as `blocked` for the month.
+    """Why this send is held back, or None when it may go. Never a
+    transactional message, never one through the club's own number. Two
+    reasons:
+
+    - a promotional WhatsApp (`is_marketing`) past the plan's
+      `whatsapp_marketing_per_month`, on every plan: what the plan includes
+      of them is used up, and they are not sold as extras;
+    - anything else not transactional, only on a plan with no way to pay for
+      more (`Terms.blocks`), past the month's limit.
+
+    A held-back send is counted as `blocked` for the month.
 
     Checked before the send rather than reserved: workers sending for one
     club at once can each find room for the last message, so Free may go a
@@ -262,21 +314,27 @@ async def held_back(
     """
     from app.api.subscriptions import gates
 
-    if terms is None or via == CLUB or kind in TRANSACTIONAL or not terms.blocks or not gates.enforcing():
+    if terms is None or via == CLUB or kind in TRANSACTIONAL or not gates.enforcing():
         return None
-    limit = terms.limit(channel)
-    if limit is None:
+    marketing_cap = terms.whatsapp_marketing_limit if is_marketing(channel, kind, category) else None
+    limit = terms.limit(channel) if terms.blocks else None
+    if marketing_cap is None and limit is None:
         return None
     period = period_of(at)
-    used = await session.scalar(
-        select(MessageUsage.used).where(
+    counts = (await session.execute(
+        select(MessageUsage.used, MessageUsage.marketing).where(
             MessageUsage.club_id == terms.club_id, MessageUsage.period == period, MessageUsage.channel == channel
         )
-    ) or 0
-    if used < limit:
+    )).first()
+    used, marketing = (int(counts[0] or 0), int(counts[1] or 0)) if counts is not None else (0, 0)
+    if marketing_cap is not None and marketing >= marketing_cap:
+        reason = _marketing_reason(terms, marketing_cap)
+    elif limit is not None and used >= limit:
+        reason = _held_reason(terms, channel, limit, kind)
+    else:
         return None
     await _upsert(session, terms, channel, period, used=0, blocked=1, kind=None)
-    return _held_reason(terms, channel, limit, kind)
+    return reason
 
 
 # ─── Counting ────────────────────────────────────────────────────────────
@@ -307,12 +365,15 @@ async def session_scope():
         yield session
 
 
-async def _upsert(session, terms: Terms, channel: str, period: date, *, used: int, blocked: int, kind: Optional[str]):
-    """Add to the month's counter, creating it: one statement, atomic."""
+async def _upsert(
+    session, terms: Terms, channel: str, period: date, *, used: int, blocked: int, kind: Optional[str], marketing: int = 0,
+):
+    """Add to the month's counter, creating it: one statement, atomic.
+    `marketing`: how many of `used` are promotional WhatsApp messages."""
     now = _now()
     table = MessageUsage.__table__
     values = dict(
-        club_id=terms.club_id, period=period, channel=channel, used=used, blocked=blocked,
+        club_id=terms.club_id, period=period, channel=channel, used=used, blocked=blocked, marketing=marketing,
         kinds={kind: used} if kind and used else {}, quota=terms.limit(channel), rate_paise=terms.rate(channel),
         billing=terms.billing, plan_key=terms.plan_key, created_at=now, updated_at=now,
     )
@@ -320,6 +381,7 @@ async def _upsert(session, terms: Terms, channel: str, period: date, *, used: in
     change = {
         "used": table.c.used + stmt.excluded.used,
         "blocked": table.c.blocked + stmt.excluded.blocked,
+        "marketing": table.c.marketing + stmt.excluded.marketing,
         "updated_at": now,
     }
     if used:
@@ -347,10 +409,15 @@ async def record_message(
     count: int = 1,
     at: Optional[datetime] = None,
     terms: Optional[Terms] = None,
+    category: Optional[str] = None,
 ) -> Optional[Recorded]:
     """Count `count` messages of `kind` the club's provider took on
     `channel` ("email" or "whatsapp"). Call it once the provider accepted
     the message -- never for one skipped or failed.
+
+    `category`: the WhatsApp template's category at Meta ("UTILITY" or
+    "MARKETING"), when the caller knows it; a promotional one
+    (`is_marketing`) is also counted against the plan's promotional cap.
 
     `via="club"`: sent through the club's own WhatsApp number, which the
     club pays Meta for. Nothing is counted (returns None).
@@ -379,13 +446,13 @@ async def record_message(
     kind = (kind or "message")[:30]
     if session is None:
         async with session_scope() as own:
-            out = await _record(own, club_id, channel, kind, ref=ref, count=count, at=at, terms=terms)
+            out = await _record(own, club_id, channel, kind, ref=ref, count=count, at=at, terms=terms, category=category)
             await own.commit()
             return out
-    return await _record(session, club_id, channel, kind, ref=ref, count=count, at=at, terms=terms)
+    return await _record(session, club_id, channel, kind, ref=ref, count=count, at=at, terms=terms, category=category)
 
 
-async def _record(session, club_id, channel, kind, *, ref, count, at, terms) -> Recorded:
+async def _record(session, club_id, channel, kind, *, ref, count, at, terms, category=None) -> Recorded:
     if ref:
         fresh = await session.scalar(
             pg_insert(MessageUsageRefs)
@@ -398,7 +465,8 @@ async def _record(session, club_id, channel, kind, *, ref, count, at, terms) -> 
     if terms is None or terms.club_id != club_id:
         terms = await terms_for(session, club_id)
     period = period_of(at)
-    row = await _upsert(session, terms, channel, period, used=count, blocked=0, kind=kind)
+    marketing = count if is_marketing(channel, kind, category) else 0
+    row = await _upsert(session, terms, channel, period, used=count, blocked=0, kind=kind, marketing=marketing)
     limit = terms.limit(channel)
     await _maybe_warn(session, terms, channel, period, row, limit)
     return Recorded(counted=True, used=int(row.used), limit=limit)
@@ -406,7 +474,7 @@ async def _record(session, club_id, channel, kind, *, ref, count, at, terms) -> 
 
 async def count(
     session, *, club_id: Optional[int], channel: str, kind: str, via: str = PLATFORM, ref: Optional[str] = None,
-    terms: Optional[Terms] = None,
+    terms: Optional[Terms] = None, category: Optional[str] = None,
 ) -> Optional[Recorded]:
     """`record_message` in a SAVEPOINT of the caller's transaction, never
     raising: the senders call it in the transaction that records a message
@@ -414,7 +482,9 @@ async def count(
     message would be sent again)."""
     try:
         async with session.begin_nested():
-            return await record_message(club_id, channel, kind, via=via, session=session, ref=ref, terms=terms)
+            return await record_message(
+                club_id, channel, kind, via=via, session=session, ref=ref, terms=terms, category=category,
+            )
     except Exception:  # noqa: BLE001
         logger.warning("club %s: a %s %s could not be counted", club_id, kind, channel, exc_info=True)
         return None
@@ -422,7 +492,7 @@ async def count(
 
 async def check(
     session, club_id: Optional[int], channel: str, kind: str, *, via: str = PLATFORM, terms: Optional[Terms] = None,
-    cache: Optional[dict] = None,
+    cache: Optional[dict] = None, category: Optional[str] = None,
 ) -> tuple[Optional[Terms], Optional[str]]:
     """The club's terms and why this send is held back (None: it may go), in
     a SAVEPOINT, never raising: when the plan cannot be read the send goes.
@@ -438,7 +508,7 @@ async def check(
                 terms = await terms_for(session, club_id)
                 if cache is not None:
                     cache[club_id] = terms
-            return terms, await held_back(session, terms, channel, kind, via=via)
+            return terms, await held_back(session, terms, channel, kind, via=via, category=category)
     except Exception:  # noqa: BLE001
         logger.warning("club %s: could not check its %s quota; sending", club_id, channel, exc_info=True)
         return terms, None
@@ -581,7 +651,7 @@ def _channel_view(terms: Terms, channel: str, row: Optional[MessageUsage]) -> di
     limit = terms.limit(channel)
     extra = max(0, used - limit) if limit is not None else 0
     rate = terms.rate(channel)
-    return {
+    out = {
         "used": used,
         "limit": limit,
         "extra": extra,
@@ -594,6 +664,13 @@ def _channel_view(terms: Terms, channel: str, row: Optional[MessageUsage]) -> di
         "kinds": dict(row.kinds or {}) if row is not None else {},
         "warned": [lvl for lvl in WARN_AT if row is not None and getattr(row, f"warned_{lvl}_at") is not None],
     }
+    if channel == WHATSAPP:
+        # Of those, the promotional ones, against the plan's cap on them.
+        out["marketing"] = {
+            "used": int(row.marketing or 0) if row is not None else 0,
+            "limit": terms.whatsapp_marketing_limit,
+        }
+    return out
 
 
 async def usage(session, club_id: int, now: Optional[datetime] = None) -> dict:

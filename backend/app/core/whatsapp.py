@@ -57,10 +57,13 @@ the status webhook (app/api/hooks) matches its delivered/read/failed
 notices against.
 
 Every message sent from here goes from the PLATFORM's number, so it counts
-against the club's monthly WhatsApp quota (app/api/message_quota): the
-delivery pipeline counts its own sends in the transaction that records them
-(the answer's `Via` says which number it went from); any other caller
-passes `meter` and the send is held back past Free's limit and counted here.
+against the club's monthly WhatsApp quota (app/api/message_quota). Every
+template above is UTILITY at Meta, so none counts against the plan's cap on
+promotional (MARKETING) WhatsApp; a MARKETING template sent from here must
+say so in its `meter` ("category"). The delivery pipeline counts its own
+sends in the transaction that records them (the answer's `Via` says which
+number it went from); any other caller passes `meter` and the send is held
+back past Free's limit and counted here.
 
 A club on Enterprise may connect its own WhatsApp Business number
 (app/api/club_whatsapp). Its sends name a `Sender` -- that number's id, its
@@ -484,7 +487,9 @@ async def _held_back(meter: dict) -> Optional[str]:
     from app.api.message_quota import service as quota
 
     async with quota.session_scope() as s:
-        _, reason = await quota.check(s, meter.get("club_id"), quota.WHATSAPP, meter.get("kind") or "update")
+        _, reason = await quota.check(
+            s, meter.get("club_id"), quota.WHATSAPP, meter.get("kind") or "update", category=meter.get("category"),
+        )
         await s.commit()
     return reason
 
@@ -493,7 +498,10 @@ async def _count(meter: dict) -> None:
     from app.api.message_quota import service as quota
 
     try:
-        await quota.record_message(meter.get("club_id"), quota.WHATSAPP, meter.get("kind") or "update", ref=meter.get("ref"))
+        await quota.record_message(
+            meter.get("club_id"), quota.WHATSAPP, meter.get("kind") or "update", ref=meter.get("ref"),
+            category=meter.get("category"),
+        )
     except Exception:  # noqa: BLE001 - sent is sent; a count that cannot be written is logged
         logger.warning("a WhatsApp %s for club %s could not be counted", meter.get("kind"), meter.get("club_id"), exc_info=True)
 
@@ -511,9 +519,11 @@ async def send(
     number it went from ("platform", or "club" from `sender`'s, a club's
     own). Raises one of the errors above when it was not sent.
 
-    `meter` ({"club_id", "kind", "ref"}) is for a send made outside the
-    delivery pipeline: past a Free club's monthly WhatsApp it is held back
-    (Undeliverable, with the reason), and once Meta takes it, it is counted.
+    `meter` ({"club_id", "kind", "ref", "category"}) is for a send made
+    outside the delivery pipeline: past a Free club's monthly WhatsApp, or a
+    promotional one (category "MARKETING") past the plan's promotional cap,
+    it is held back (Undeliverable, with the reason), and once Meta takes it,
+    it is counted.
     The pipeline leaves it out: it checks and counts in its own transactions.
     A send from a club's own number is neither held back nor counted."""
     if sender is None and not configured():
