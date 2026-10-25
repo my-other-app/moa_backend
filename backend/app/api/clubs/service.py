@@ -30,6 +30,7 @@ from app.api.interests.models import Interests
 from app.api.interests.topics import interest_out, topics_of
 from app.core.validations.schema import validate_relations
 from app.api.orgs.models import Organizations
+from app.api.closeout.models import EventStatus
 from app.api.events.models import Events, EventRegistrationsLink, EventRatingsLink
 from app.api.discover import geo
 
@@ -950,13 +951,15 @@ async def get_club_details(
 
     # The club's events, counted once: all, to come (by start) and past,
     # through ix_events_club_start (is_deleted spelled out for its predicate).
+    # Drafts are the club's own: counted on its own page, never on the public one.
     now = datetime.now(timezone.utc)
+    shown = [Events.lifecycle != EventStatus.draft] if enforce_visibility else []
     total_events, live_events, past_events = (await session.execute(
         select(
             func.count(),
             func.count().filter(Events.event_datetime >= now),
             func.count().filter(Events.event_datetime < now),
-        ).where(Events.club_id == club_id, Events.is_deleted == False)  # noqa: E712
+        ).where(Events.club_id == club_id, Events.is_deleted == False, *shown)  # noqa: E712
     )).one()
     # Get user specific data
     user_data = None

@@ -286,7 +286,10 @@ async def get_all_clubs(
     search: Optional[str] = Query(None, description="Search by club name"),
 ) -> PaginatedResponse[ClubListResponse]:
     """List clubs with optional filters and search."""
-    interest_ids = [int(i) for i in (interest_ids.split(",") if interest_ids else [])]
+    try:
+        interest_ids = [int(i) for i in (interest_ids.split(",") if interest_ids else [])]
+    except ValueError:
+        raise CustomHTTPException(422, message="interest_ids must be numbers separated by commas")
     clubs = await service.get_all_clubs(
         session=session,
         user_id=user.id if user else None,
@@ -367,7 +370,9 @@ async def list_notes(
 async def list_notes_self(
     request: Request, session: SessionDep, pagination: PaginationParams, user: ClubAuth
 ) -> PaginatedResponse[NoteListResponse]:
-    query = await service.list_notes(session, club_id=user.club.id)
+    # The page asked for: this ignored limit and offset, so a club with more
+    # than ten notes never saw its older ones.
+    query = await service.list_notes(session, club_id=user.club.id, limit=pagination.limit, offset=pagination.offset)
     return paginated_response(query, request=request, schema=NoteListResponse)
 
 
