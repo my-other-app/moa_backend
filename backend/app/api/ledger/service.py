@@ -121,10 +121,12 @@ def capture_txn(log, order, registration, club_id: int | None) -> Txn:
 
 
 def refund_txn(log, order, registration, club_id: int | None, *, refund_id: str | None = None,
-               at: datetime | None = None) -> Txn:
-    """The posting of a payment given back in full (`refund`)."""
+               at: datetime | None = None, posted: int = 0) -> Txn:
+    """The posting of a payment given back in full (`refund`): all of it, or
+    what is left once `posted` paise were given back in part before
+    (`part_refund_txn`)."""
     event_id = registration.event_id if registration is not None else None
-    paise = money.to_paise(log.amount)
+    paise = money.to_paise(log.amount) - int(posted or 0)
     return Txn(
         key=f"{book.REFUND}:{log.razorpay_payment_id}", kind=book.REFUND,
         lines=[Line(book.UNAPPLIED, paise), Line(book.GATEWAY, -paise, 1)],
@@ -148,12 +150,56 @@ async def capture(session, log, order, *, registration=None) -> int:
 async def refund(session, log, order, *, registration=None, refund_id: str | None = None,
                  at: datetime | None = None) -> int:
     """A payment given back in full. Its capture first, if the ledger does
-    not have it (refunded after the ledger began, taken before it)."""
+    not have it (refunded after the ledger began, taken before it). What a
+    club gave back of it in part before (`part_refund`) is not given back
+    twice: only the rest is posted."""
     if registration is None:
         registration = await _registration_of(session, order)
     await capture(session, log, order, registration=registration)
     club_id = await _club_of(session, registration.event_id if registration is not None else None)
-    return await book.post(session, refund_txn(log, order, registration, club_id, refund_id=refund_id, at=at))
+    posted = await _parts_refunded(session, log.razorpay_payment_id)
+    if posted >= money.to_paise(log.amount):
+        return 0
+    return await book.post(session, refund_txn(log, order, registration, club_id, refund_id=refund_id, at=at, posted=posted))
+
+
+async def _parts_refunded(session, payment_id: str) -> int:
+    """Paise given back on a payment in part (`part_refund`), as the ledger holds them."""
+    return -int(await session.scalar(
+        select(func.coalesce(func.sum(E.amount_paise), 0)).where(
+            E.razorpay_payment_id == payment_id, E.account == book.GATEWAY, E.kind == book.REFUND,
+            E.txn_key.like(f"{book.REFUND}:%:part:%"),
+        )
+    ) or 0)
+
+
+def part_refund_txn(log, order, registration, club_id: int | None, *, paise: int, ref: str,
+                    refund_id: str | None = None, at: datetime | None = None) -> Txn:
+    """The posting of `paise` of a payment given back while the rest stays
+    paid (a club's refund in part, app/api/club_ops). Keyed by the club's
+    refund, so each is posted once."""
+    event_id = registration.event_id if registration is not None else None
+    return Txn(
+        key=f"{book.REFUND}:{log.razorpay_payment_id}:part:{ref}", kind=book.REFUND,
+        lines=[Line(book.UNAPPLIED, paise), Line(book.GATEWAY, -paise, 1)],
+        occurred_at=at or book.now(), origin_at=log.created_at or book.now(),
+        source=book.SRC_PAYMENT, source_id=str(log.id),
+        club_id=club_id, event_id=event_id, registration_id=registration.id if registration is not None else None,
+        gateway_id=order.payment_gateway_id, razorpay_payment_id=log.razorpay_payment_id,
+        razorpay_order_id=order.razorpay_order_id, razorpay_refund_id=refund_id, note="part",
+    )
+
+
+async def part_refund(session, log, order, *, registration=None, paise: int, ref: str,
+                      refund_id: str | None = None, at: datetime | None = None) -> int:
+    """Part of a payment given back: unapplied debited, the gateway credited.
+    The caller takes the ticket's share back first (`sync_registration`
+    with UNAPPLY), so what the refund gives back was unapplied."""
+    if registration is None:
+        registration = await _registration_of(session, order)
+    await capture(session, log, order, registration=registration)
+    club_id = await _club_of(session, registration.event_id if registration is not None else None)
+    return await book.post(session, part_refund_txn(log, order, registration, club_id, paise=paise, ref=ref, refund_id=refund_id, at=at))
 
 
 # ─── A registration's ticket and store money ─────────────────────────────

@@ -232,6 +232,10 @@ async def get_event(
         session, event_id, user_id=user.id if user else None
     )
     data = jsonable_encoder(result)
+    if data.get("status") == "cancelled":
+        from app.api.club_ops.cancel import public_cancellation
+
+        data["cancellation"] = await public_cancellation(session, data.get("id"))
     return data
 
 

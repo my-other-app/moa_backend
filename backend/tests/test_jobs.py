@@ -26,7 +26,7 @@ from app.db.listeners import add_loader_criteria
 
 #: What the test handlers saw: job name -> list of payloads, in order.
 SEEN: dict[str, list] = {}
-STATE = {"fail": 0, "delay": 0.0, "in_flight": 0, "most": 0}
+STATE = {"fail": 0, "delay": 0.0, "in_flight": 0, "most": 0, "gate": None}
 #: Every job's name as it started, all names together, in order.
 ORDER: list[str] = []
 #: Per name: how many run right now, and the most that ever ran at once.
@@ -42,6 +42,9 @@ def _record(name):
         STATE["in_flight"] += 1
         STATE["most"] = max(STATE["most"], STATE["in_flight"])
         try:
+            if STATE["gate"] is not None:
+                # Held until the test lets it finish: no guess at how long is long enough.
+                await STATE["gate"].wait()
             if STATE["delay"]:
                 await asyncio.sleep(STATE["delay"])
             if STATE["fail"]:
@@ -70,7 +73,7 @@ def _fresh():
     ORDER.clear()
     LIVE.clear()
     PEAK.clear()
-    STATE.update(fail=0, delay=0.0, in_flight=0, most=0)
+    STATE.update(fail=0, delay=0.0, in_flight=0, most=0, gate=None)
     yield
     SEEN.clear()
 
@@ -257,6 +260,8 @@ def test_the_platforms_jobs_have_the_priorities_and_limits_chosen(monkeypatch):
         "club_whatsapp.auto_reply": (H, 4),
         "clubs.approved_email": (H, 4), "checkins.after": (H, 4),
         "payments.receipt": (H, 2),  # a wkhtmltopdf process each
+        # A guest told their refund went through (app/api/club_ops).
+        "club_ops.refund_notice": (H, 4),
         # The room told the quiz is starting: it is starting now, for a hall at most.
         "live.join_push": (H, 2),
         # An update pushed to the room, and the event going live told to everyone registered.
@@ -267,6 +272,8 @@ def test_the_platforms_jobs_have_the_priorities_and_limits_chosen(monkeypatch):
         "threads.tell_followers": (N, 2),
         # A club's broadcast from its own number: paced, so long; one slot at most on a runner.
         "club_whatsapp.broadcast": (N, 1),
+        # A cancelled event: every guest told (one at a time on WhatsApp), and its refunds, a Razorpay call each.
+        "club_ops.cancel_follow_up": (N, 1), "club_ops.refund": (N, 2),
         "notifications.broadcast": (N, 4), "push.topic": (N, 4), "push.devices": (N, 4), "push.unsubscribe": (N, 4),
         "live.survey_mail": (N, 4),
         # Nobody watches these happen.
@@ -292,7 +299,17 @@ async def test_two_runners_never_run_one_job_twice(queue):
             await jobs.enqueue(s, "test.record", {"n": i})
         await s.commit()
     STATE["delay"] = 0.002
+    # Held until both have filled their slots, so each is sure to have work:
+    # left to the clock, one runner could drain the queue before the other's
+    # first claim on a busy machine.
+    STATE["gate"] = asyncio.Event()
     a, b = queue.runner(concurrency=8), queue.runner(concurrency=8)
+
+    async def both_busy():
+        return a.in_hand == 8 and b.in_hand == 8
+
+    assert await _until(both_busy)
+    STATE["gate"].set()
 
     async def settled():
         return a.handled + b.handled >= 300
@@ -350,25 +367,42 @@ async def test_a_job_whose_runner_died_is_taken_again_when_its_lease_ends(queue)
 async def test_a_long_job_keeps_its_lease_while_it_runs(queue, monkeypatch):
     """The lease is short (a dead runner's job is taken again within two
     minutes) and renewed while the job runs, so a job allowed an hour is
-    never taken by a second runner while the first is alive."""
-    monkeypatch.setattr(jobs, "LEASE", 0.6)
-    monkeypatch.setattr(jobs, "HEARTBEAT_SECONDS", 0.1)
+    never taken by a second runner while the first is alive.
+
+    Proved without racing a second runner against the heartbeat (on a busy
+    machine the heartbeat could land late and the race be lost): the job is
+    held open by the test, its lease is made to run out as if no heartbeat
+    had come, and the runner's own heartbeat must push it ahead again --
+    after which a second runner's claim finds nothing."""
+    monkeypatch.setattr(jobs, "HEARTBEAT_SECONDS", 0.05)
     async with queue.make() as s:
         await jobs.enqueue(s, "test.record", {"n": 1})
         await s.commit()
-    STATE["delay"] = 2.0
+    STATE["gate"] = asyncio.Event()
     a = queue.runner(concurrency=1)
     assert await _until(lambda: _in_hand(a))
-    b = queue.runner(concurrency=1)  # polls every 0.05 s through the run
+    # As if the lease ran out with no heartbeat: due again, as a dead runner's job is.
+    async with queue.make() as s:
+        past = datetime.now(timezone.utc) - timedelta(seconds=1)
+        await s.execute(update(jobs.Jobs).values(run_at=past, locked_until=past))
+        await s.commit()
+
+    async def renewed():
+        async with queue.make() as s:
+            return bool(await s.scalar(select(jobs.Jobs.locked_until > func.statement_timestamp())))
+
+    assert await _until(renewed, timeout=10)
+    # Its lease is ahead again: a second runner takes nothing while the first holds it.
+    assert await jobs.claim("b", [("test.record", 1, 30.0)], 1) == []
+    STATE["gate"].set()
 
     async def settled():
-        return a.handled + b.handled >= 1
+        return a.handled >= 1
 
     assert await _until(settled, timeout=10)
-    await asyncio.sleep(0.3)
-    assert SEEN["test.record"] == [{"n": 1}] and a.handled == 1 and b.handled == 0
+    assert SEEN["test.record"] == [{"n": 1}] and a.handled == 1
     [row] = await _rows(queue.make)
-    assert row.attempts == 1 and row.finished_at is not None
+    assert row.attempts == 1 and row.finished_at is not None and row.locked_by is None
 
 
 async def test_a_failing_job_backs_off_then_dies_and_the_admins_are_told(queue):

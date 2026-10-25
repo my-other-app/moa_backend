@@ -14,7 +14,6 @@ from app.config import settings
 from tests.conftest import auth_header
 
 API = "/api/v1"
-NOW = datetime.now(timezone.utc)
 
 
 async def _check_in(session, event, reg):
@@ -27,8 +26,12 @@ async def _check_in(session, event, reg):
 @pytest.fixture
 async def world(session, make_club, make_event, make_user, make_registration, mint_token):
     owner, club = await make_club(name="Feedback Society", email="fb-club@example.com")
+    # The clock as this test starts, not as the module was imported: the
+    # tests below count in minutes from it ("due in half an hour"), and a
+    # module-wide time went stale half an hour into the full suite.
+    now = datetime.now(timezone.utc)
     # Over two hours ago: past the end and the survey's default hour after it.
-    event = await make_event(club=club, created_by=owner, name="Demo Night", event_datetime=NOW - timedelta(hours=5), duration=3.0)
+    event = await make_event(club=club, created_by=owner, name="Demo Night", event_datetime=now - timedelta(hours=5), duration=3.0)
     was, other, missed, stranger = [await make_user(email=f"fb-{n}@example.com") for n in ("was", "other", "missed", "stranger")]
     r_was = await make_registration(event=event, user=was)
     r_other = await make_registration(event=event, user=other)
@@ -37,7 +40,7 @@ async def world(session, make_club, make_event, make_user, make_registration, mi
         await _check_in(session, event, reg)
     await session.commit()
     h = {u: auth_header(await mint_token(user)) for u, user in (("was", was), ("other", other), ("missed", missed), ("stranger", stranger), ("owner", owner))}
-    return dict(event=event, club=club, owner=owner, was=was, r_was=r_was, r_other=r_other, r_missed=r_missed, h=h)
+    return dict(event=event, club=club, owner=owner, was=was, r_was=r_was, r_other=r_other, r_missed=r_missed, h=h, now=now)
 
 
 async def _link(client, event, headers):
@@ -106,7 +109,7 @@ async def test_no_link_without_a_survey_or_before_it_opens(client, session, worl
 
     # Still on: none during the event, until the club sends it by hand --
     # then the guests checked in hold the emailed link, and the page shows it.
-    tonight = await make_event(club=world["club"], created_by=world["owner"], name="Tonight", event_datetime=NOW - timedelta(hours=1), duration=3.0)
+    tonight = await make_event(club=world["club"], created_by=world["owner"], name="Tonight", event_datetime=world["now"] - timedelta(hours=1), duration=3.0)
     mine = await make_registration(event=tonight, user=world["was"])
     await _check_in(session, tonight, mine)
     await session.commit()

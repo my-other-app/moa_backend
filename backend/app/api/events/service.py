@@ -299,6 +299,8 @@ async def update_event(
         db_event, user_id, as_admin, message="Not authorized to update this event"
     )
     check_duration(event.duration, was=db_event.duration)
+    if (db_event.lifecycle or EventStatus.published) is EventStatus.cancelled:
+        raise CustomHTTPException(409, message="This event was cancelled, so it can't be changed.", error_code="EVENT_CANCELLED")
     if (db_event.lifecycle or EventStatus.published) in LOCKED_STATUSES:
         raise CustomHTTPException(409, message="This event is closed, so its settings are read-only. Move its status back to Live on the closeout page to change them.", error_code="EVENT_LOCKED")
     # The club's plan: free to paid needs tickets; the store and swag switched

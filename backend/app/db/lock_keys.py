@@ -94,6 +94,8 @@ USER_MERGE = 7_316_203
 VERIFICATION_SEND = 7_316_204
 #: Two reset requests for one address (app/api/auth/password_reset.py).
 PASSWORD_RESET = 7_316_205
+#: Two reset requests for one address on the clubs dashboard (app/api/club_ops/password.py).
+CLUB_PASSWORD_RESET = 7_316_206
 #: Two admin alerts of one kind about one thing (app/api/admin_alerts/service.py).
 ADMIN_ALERT_DEDUPE = 7_420_311
 #: A club connecting its payment gateway (app/api/payment_gateways/service.py).

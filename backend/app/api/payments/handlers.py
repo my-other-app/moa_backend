@@ -32,6 +32,8 @@ async def _check_still_payable(session: AsyncSession, registration: EventRegistr
         raise CodedRequestError(404, "Event not found", "EVENT_NOT_FOUND", event_id="event_id is invalid")
     now = datetime.now(timezone.utc)
     lifecycle = getattr(event.lifecycle, "value", event.lifecycle)
+    if lifecycle == "cancelled":
+        raise CodedRequestError(409, "This event was cancelled; it can no longer be paid for.", "EVENT_CANCELLED")
     if event.event_datetime + timedelta(hours=event.duration or 0) <= now or lifecycle in ("closed", "archived"):
         raise CodedRequestError(409, "This event is over; it can no longer be paid for.", "EVENT_ENDED")
     if ticket_unpaid and event.has_fee and await capacity.full(session, event):

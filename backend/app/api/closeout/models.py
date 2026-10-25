@@ -26,6 +26,9 @@ class EventStatus(enum.Enum):
     live = "live"
     closed = "closed"
     archived = "archived"
+    #: Called off by the club (app/api/club_ops/cancel.py): for good -- its
+    #: guests were told and refunded, so nothing moves it on or back.
+    cancelled = "cancelled"
 
 
 class RetentionMode(enum.Enum):
@@ -43,7 +46,7 @@ class RetentionState(enum.Enum):
 # Statuses in which the door accepts check-ins.
 DOOR_OPEN_STATUSES = (EventStatus.published, EventStatus.live)
 # Statuses in which event settings are read-only (the status itself stays editable).
-LOCKED_STATUSES = (EventStatus.closed, EventStatus.archived)
+LOCKED_STATUSES = (EventStatus.closed, EventStatus.archived, EventStatus.cancelled)
 
 STATUS_NOTE = {
     EventStatus.draft: "Refuses check-ins",
@@ -51,6 +54,7 @@ STATUS_NOTE = {
     EventStatus.live: "Door is open",
     EventStatus.closed: "Locks settings",
     EventStatus.archived: "Hidden from lists",
+    EventStatus.cancelled: "Called off; guests told and refunded",
 }
 
 

@@ -156,6 +156,13 @@ CLASSIFICATION: dict[str, str] = {
     "club_mail_threads": WIPE,
     "club_mail_messages": WIPE,
     "club_mail_attachments": WIPE,
+    # The club tools (app/api/club_ops): results, cancellations, refunds, the
+    # guests told, and the dashboard's password reset codes.
+    "competition_placings": WIPE,
+    "event_cancellations": WIPE,
+    "club_refunds": WIPE,
+    "guest_notices": WIPE,
+    "club_password_reset_codes": WIPE,
     "club_sites": WIPE,
     "club_socials": WIPE,
     "club_subscriptions": WIPE,

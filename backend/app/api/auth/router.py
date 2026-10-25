@@ -992,10 +992,18 @@ async def totp_new_recovery_codes(
 ) -> TotpEnableResponse:
     """A fresh set of eight, shown once, for a current authenticator code;
     every earlier one stops working. Also how codes issued before the
-    current format are replaced."""
+    current format are replaced. Never for an admin acting as the account
+    (403 NOT_WHILE_IMPERSONATING): the codes get past its second factor."""
     from app.api.auth import totp as totp_service
+    from app.api.subscriptions import gates
     from sqlalchemy import select as sa_select
     from app.api.users.models import Users as UsersModel
+
+    if gates.impersonated_by():
+        raise CustomHTTPException(
+            403, message="Recovery codes are the account's own: they can't be made while acting as it.",
+            error_code="NOT_WHILE_IMPERSONATING",
+        )
 
     db_user = await session.scalar(sa_select(UsersModel).where(UsersModel.id == user.id))
     if not db_user.totp_enabled:
