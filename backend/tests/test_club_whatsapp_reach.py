@@ -7,10 +7,12 @@ more of Graph's paths here -- pricing analytics, the Marketing Messages API,
 asked. What is checked is what Meta would be asked, and what the club, the
 deliveries and the admins see afterwards.
 """
+import asyncio
 import hashlib
 import hmac
 import json
 import re
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs
 
@@ -31,7 +33,12 @@ from app.api.club_whatsapp.reach_models import (
 )
 from app.api.deliveries import service as deliveries
 from app.api.deliveries.models import Deliveries, DeliveryAttempts, DeliveryChannel, DeliveryKind, DeliveryStatus
+from app.api.discover import geo
 from app.api.message_quota.models import MessageUsageRefs
+from app.api.subscriptions import gates
+from app.api.subscriptions import service as subscriptions
+from app.api.subscriptions.models import BillingCycle
+from app.api.threads import service as threads_service
 from app.config import settings
 from app.core import jobs, whatsapp
 from tests.conftest import auth_header
@@ -419,6 +426,129 @@ async def test_following_says_yes_or_no_and_unfollowing_takes_it_back(client, se
     # Following again with false: no yes.
     r = await client.post(f"{API}/clubs/follow/{world.club.id}", json={"club_updates_whatsapp": False}, headers=h)
     assert r.status_code == 200 and not await consent.live(session, world.club.id, user_id=fan.id)
+
+
+# ─── Whether the box is offered: whatsapp_updates ────────────────────────
+
+
+@pytest.fixture
+def one_session(monkeypatch, session):
+    """Work a public page leaves for after the response runs on the test's own
+    session, one piece at a time (as tests/test_discover.py)."""
+    lock = asyncio.Lock()
+
+    @asynccontextmanager
+    async def scope():
+        async with lock:
+            yield session
+
+    monkeypatch.setattr(geo, "session_scope", scope)
+    monkeypatch.setattr(threads_service, "session_scope", scope)
+
+
+async def _offered(client, w, headers: dict) -> dict:
+    """`whatsapp_updates` on each public payload the website and the app read
+    for the club: its page, the event page's club, GET /clubs/info, and the
+    registration form's GET /events/info."""
+    club = await client.get(f"{API}/discover/clubs/{w.club.slug}", headers=headers)
+    page = await client.get(f"{API}/discover/events/{w.event.slug}", headers=headers)
+    info = await client.get(f"{API}/clubs/info/{w.club.id}", headers=headers)
+    form = await client.get(f"{API}/events/info/{w.event.id}", headers=headers)
+    for r in (club, page, info, form):
+        assert r.status_code == 200, r.text
+    return {"club page": club.json()["club"]["whatsapp_updates"], "event page": page.json()["club"]["whatsapp_updates"],
+            "club info": info.json()["whatsapp_updates"], "form": form.json()["club"]["whatsapp_updates"]}
+
+
+EVERYWHERE = {"club page": True, "event page": True, "club info": True, "form": True}
+NOWHERE = {k: False for k in EVERYWHERE}
+
+
+async def test_the_public_pages_offer_the_box_only_while_a_broadcast_could_go(client, session, world, meta, one_session, make_user,
+                                                                              make_admin, mint_token, monkeypatch):
+    reader = auth_header(await mint_token(await make_user(email="reader@example.com")))
+    # No number of its own: the box is not offered anywhere.
+    assert await _offered(client, world, reader) == NOWHERE
+    account = await connected(client, session, world)
+    assert await _offered(client, world, reader) == EVERYWHERE
+    # Signed out, the pages anyone reads say the same.
+    assert (await client.get(f"{API}/discover/clubs/{world.club.slug}")).json()["club"]["whatsapp_updates"] is True
+    assert (await client.get(f"{API}/discover/events/{world.event.slug}")).json()["club"]["whatsapp_updates"] is True
+
+    # The flag and nothing else about the connection: the club blocks are as they were, plus one boolean.
+    page = (await client.get(f"{API}/discover/events/{world.event.slug}")).json()["club"]
+    assert set(page) == {"id", "name", "slug", "logo", "tagline", "followers", "location_name", "whatsapp_updates"}
+    form = (await client.get(f"{API}/events/info/{world.event.id}")).json()["club"]
+    assert set(form) == {"id", "name", "slug", "logo", "whatsapp_updates"}
+    info = (await client.get(f"{API}/clubs/info/{world.club.id}", headers=reader)).text
+    assert account.phone_number_id not in info and account.waba_id not in info and "display_phone" not in info
+    # Lists of clubs are left alone: no flag, so no read per card.
+    cards = (await client.get(f"{API}/discover/clubs", params={"radius_km": 0})).json()["items"]
+    assert cards and all("whatsapp_updates" not in c for c in cards)
+    # A club with no number (on Free, too): never.
+    assert (await client.get(f"{API}/clubs/info/{world.other_club.id}", headers=reader)).json()["whatsapp_updates"] is False
+
+    # The number failing with Meta: no broadcast could go, so nothing is offered until it is fixed.
+    account.status = "failed"
+    await session.commit()
+    assert await _offered(client, world, reader) == NOWHERE
+    account.status = "active"
+    await session.commit()
+    assert await _offered(client, world, reader) == EVERYWHERE
+
+    # Plans not enforced (the kill switch): an active number is enough.
+    monkeypatch.setattr(settings, "PLAN_ENFORCEMENT", False)
+    await subscriptions.assign_plan(session, club_id=world.club.id, plan=world.plans["free"], cycle=BillingCycle.monthly)
+    await session.commit()
+    gates.reset()
+    assert await _offered(client, world, reader) == EVERYWHERE
+    # Enforced, off Enterprise: not offered -- whoever looks, an admin too, whom the plan gates let through.
+    monkeypatch.setattr(settings, "PLAN_ENFORCEMENT", True)
+    gates.reset()
+    assert await _offered(client, world, reader) == NOWHERE
+    admin = auth_header(await mint_token(await make_admin(email="looker@example.com")))
+    assert await _offered(client, world, admin) == NOWHERE
+
+    # Back on Enterprise, then disconnected: gone again.
+    await subscriptions.assign_plan(session, club_id=world.club.id, plan=world.plans["enterprise"], cycle=BillingCycle.monthly)
+    await session.commit()
+    gates.reset()
+    assert await _offered(client, world, reader) == EVERYWHERE
+    assert (await client.delete(f"{API}/clubs/whatsapp/account", headers=world.h)).status_code == 200
+    assert await _offered(client, world, reader) == NOWHERE
+
+
+async def test_the_club_info_tells_a_follower_their_own_yes_for_the_switch(client, session, world, meta, make_user, mint_token):
+    await connected(client, session, world)
+    fan = await make_user(email="switch@example.com")
+    fan.phone = "+91 98765 55555"
+    await session.commit()
+    h = auth_header(await mint_token(fan))
+    info, follow = f"{API}/clubs/info/{world.club.id}", f"{API}/clubs/follow/{world.club.id}"
+
+    async def mine() -> dict:
+        r = await client.get(info, headers=h)
+        assert r.status_code == 200, r.text
+        return r.json()["user_data"]
+
+    assert await mine() == {"is_following": False, "is_pinned": False, "is_hidden": False, "club_updates_whatsapp": False}
+    assert (await client.post(follow, json={"club_updates_whatsapp": True}, headers=h)).status_code == 200
+    data = await mine()
+    assert data["is_following"] is True and data["club_updates_whatsapp"] is True
+    # Switched off later, still following.
+    assert (await client.post(follow, json={"club_updates_whatsapp": False}, headers=h)).status_code == 200
+    data = await mine()
+    assert data["is_following"] is True and data["club_updates_whatsapp"] is False
+    # On again; unfollowing takes it with it.
+    assert (await client.post(follow, json={"club_updates_whatsapp": True}, headers=h)).status_code == 200
+    assert (await mine())["club_updates_whatsapp"] is True
+    assert (await client.post(f"{API}/clubs/unfollow/{world.club.id}", headers=h)).status_code == 200
+    data = await mine()
+    assert data["is_following"] is False and data["club_updates_whatsapp"] is False
+    # Their yes is theirs alone: someone else reading the page sees their own.
+    other = auth_header(await mint_token(await make_user(email="other-reader@example.com")))
+    await client.post(follow, json={"club_updates_whatsapp": True}, headers=h)
+    assert (await client.get(info, headers=other)).json()["user_data"]["club_updates_whatsapp"] is False
 
 
 # ─── Broadcasts ──────────────────────────────────────────────────────────

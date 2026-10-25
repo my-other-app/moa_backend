@@ -23,6 +23,13 @@ Withdrawn by: unfollowing the club (consent and follow go together), the
 follow body's `false`, and Meta's 131050 on a promotion (the person stopped
 the club's marketing in WhatsApp). STOP replies and Meta's user_preferences
 webhook are the opt-out store's (optout.py), which every broadcast asks too.
+
+Whether the box is shown at all is `offered` -- `whatsapp_updates` on the
+club's public payloads (the discover club and event pages, GET /clubs/info
+and GET /events/info's club): true only while a broadcast could go, so
+nobody is asked for a yes the club cannot use. GET /clubs/info's
+`user_data.club_updates_whatsapp` is the signed-in person's own yes, for the
+follower's switch.
 """
 from __future__ import annotations
 
@@ -135,6 +142,30 @@ async def live(session, club_id: int, *, user_id: Optional[int] = None, wa_id: O
     return await session.scalar(
         select(C.id).where(C.club_id == club_id, C.withdrawn_at.is_(None), or_(*who)).limit(1)
     ) is not None
+
+
+async def offered(session, club_id: Optional[int]) -> bool:
+    """`whatsapp_updates`: whether the club's pages offer the box -- the club
+    has an ACTIVE number of its own on a plan with `whatsapp_own`, so a
+    broadcast could go (broadcasts._sending_account). Nothing else about the
+    connection is said. One indexed read for a club without a number; the
+    plan is asked only for one with an active number. Who is looking never
+    changes it: an admin, whom the plan gates let through, sees what anyone
+    sees, since a broadcast goes from the club, not from them."""
+    from app.api.club_whatsapp.models import ACTIVE, ClubWhatsAppAccounts
+    from app.api.club_whatsapp.service import FEATURE
+    from app.api.subscriptions import gates
+
+    if club_id is None:
+        return False
+    active = await session.scalar(
+        select(ClubWhatsAppAccounts.id).where(ClubWhatsAppAccounts.club_id == club_id, ClubWhatsAppAccounts.status == ACTIVE).limit(1)
+    )
+    if active is None:
+        return False
+    if not gates.enforcing():
+        return True
+    return (await gates.entitlements(session, club_id)).allows(FEATURE)
 
 
 async def from_registration(session, registration_id, wanted: Optional[bool]) -> bool:

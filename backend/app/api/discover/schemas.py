@@ -186,6 +186,9 @@ class ClubDetail(ClubCard):
     contact_email: Optional[str] = None
     socials: Socials
     events_held: int
+    # Whether to offer "Get updates from <club> on WhatsApp": the club can
+    # broadcast from its own number (club_whatsapp.consent.offered).
+    whatsapp_updates: bool = False
 
 
 class TeamLinks(BaseModel):
@@ -270,6 +273,8 @@ class PageClub(BaseModel):
     tagline: Optional[str] = None
     followers: int
     location_name: Optional[str] = None
+    # As ClubDetail's: the registration form offers the club's updates on WhatsApp.
+    whatsapp_updates: bool = False
 
 
 class Speaker(BaseModel):

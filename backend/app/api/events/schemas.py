@@ -418,6 +418,14 @@ class EventClubDetail(CustomBaseModel):
     logo: dict | None = Field(None)
 
 
+class EventInfoClub(EventClubDetail):
+    """The club on GET /events/info: as everywhere, and whether the
+    registration form offers "Get updates from <club> on WhatsApp" (the club
+    can broadcast from its own number: club_whatsapp.consent.offered)."""
+
+    whatsapp_updates: bool = Field(False)
+
+
 class EventInterestDetail(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(...)
@@ -608,7 +616,7 @@ class EventDetailResponse(CustomBaseModel):
     is_online: bool | None = Field(False)
     reg_startdate: datetime = Field(...)
     reg_enddate: datetime | None = Field(None)
-    club: EventClubDetail | None = Field(None)
+    club: EventInfoClub | None = Field(None)
     category: EventCategoryDetail = Field(...)
     interests: list[EventInterestDetail] | None = Field(None)
     # The distinct topics of its interests, in topic order.

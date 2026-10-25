@@ -980,6 +980,13 @@ async def get_club_details(
                 "is_pinned": False,
                 "is_hidden": False,
             }
+    # "Get updates from <club> on WhatsApp": offered only while the club can
+    # broadcast; signed in, whether this person said yes (the follower's switch).
+    from app.api.club_whatsapp import consent
+
+    whatsapp_updates = await consent.offered(session, club_id)
+    if user_data is not None:
+        user_data["club_updates_whatsapp"] = await consent.live(session, club_id, user_id=user_id)
 
     # The rating from the club's events' ratings, in one statement.
     total_ratings, avg_rating = (await session.execute(
@@ -1016,6 +1023,7 @@ async def get_club_details(
         "total_events": total_events or 0,
         "live_events": live_events or 0,
         "past_events": past_events or 0,
+        "whatsapp_updates": whatsapp_updates,
         "user_data": user_data,
     }
 
