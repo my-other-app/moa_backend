@@ -562,7 +562,8 @@ async def create_avatar(
     session: SessionDep,
     user: ContentAuth,
     avatar: UploadFile = File(...),
-    name: str = Form(...),
+    # user_avatars.name holds twenty: a longer one was a 500 from the database.
+    name: str = Form(..., min_length=1, max_length=20),
 ) -> UserAvatarDetail:
     return await service.create_user_avatar(session, name=name, file=avatar)
 
@@ -572,7 +573,7 @@ async def update_avatar(
     id: int,
     session: SessionDep,
     user: ContentAuth,
-    name: str | None = Form(None),
+    name: str | None = Form(None, min_length=1, max_length=20),
     avatar: UploadFile | None = File(None),
 ) -> UserAvatarDetail:
     return await service.update_user_avatar(session, id=id, name=name, file=avatar)
