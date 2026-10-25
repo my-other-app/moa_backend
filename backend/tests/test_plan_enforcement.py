@@ -219,8 +219,9 @@ def test_every_built_paid_feature_has_a_gate_here():
     request of this shape (tests/test_mcp.py, test_the_plan_gate); a club's
     own WhatsApp number is gated where it connects and sends
     (tests/test_club_whatsapp.py); its mailbox where it is set up and sends
-    (tests/test_club_mailbox.py)."""
-    gated = set(ACTIONS) | {"networking", "ai_assist", "ai_byok", "mcp", "whatsapp_own", "mailbox"}
+    (tests/test_club_mailbox.py); discount codes and waiting lists where they
+    are made and switched on (tests/test_ticketing.py)."""
+    gated = set(ACTIONS) | {"networking", "ai_assist", "ai_byok", "mcp", "whatsapp_own", "mailbox", "coupons", "waitlist"}
     assert gated | gates.ALWAYS_ALLOWED == set(LABELS)
 
 
