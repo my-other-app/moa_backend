@@ -5,7 +5,7 @@ and Razorpay's fees fetched (never from the real Razorpay)."""
 import csv
 import io
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -77,6 +77,24 @@ async def test_a_payout_is_recorded_in_part_and_comes_off_the_balance(client, se
     assert {p["razorpay_payment_id"] for p in statement["payments"]} == {shop[k].razorpay_payment_id for k in ("known", "refunded", "part")}
     audit = await session.scalar(select(AdminAuditLogs).where(AdminAuditLogs.action == "payout.record"))
     assert audit is not None and audit.details["amount"] == "300.00"
+
+
+@pytest.mark.parametrize("now, today", [
+    (datetime(2026, 10, 26, 18, 29, tzinfo=timezone.utc), date(2026, 10, 26)),  # 23:59 IST
+    (datetime(2026, 10, 26, 18, 31, tzinfo=timezone.utc), date(2026, 10, 27)),  # 00:01 IST: UTC is still on the 26th
+    (datetime(2026, 10, 26, 23, 59, tzinfo=timezone.utc), date(2026, 10, 27)),  # 05:29 IST
+])
+async def test_a_payout_dated_today_in_india_is_not_in_the_future(client, make_admin, mint_token, shop, monkeypatch, now, today):
+    """Between midnight and 05:30 in India, UTC's date is still yesterday;
+    a payout an admin dated today was refused as dated in the future."""
+    monkeypatch.setattr(payouts, "_now", lambda: now)
+    h = await role_headers(make_admin, mint_token)
+    url = f"{API}/admin/payouts/clubs/{shop['club'].id}"
+    body = {"amount": "1", "paid_on": today.isoformat(), "reference": "UTR-TODAY"}
+    r = await client.post(url, json=body, headers=h["owner"])
+    assert r.status_code == 201, r.text
+    tomorrow = await client.post(url, json={**body, "paid_on": (today + timedelta(days=1)).isoformat()}, headers=h["owner"])
+    assert tomorrow.status_code == 422 and tomorrow.json()["error_code"] == "PAYOUT_IN_FUTURE"
 
 
 async def test_paying_more_than_is_owed_needs_saying_so(client, make_admin, mint_token, shop):
