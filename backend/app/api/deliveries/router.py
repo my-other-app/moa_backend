@@ -15,6 +15,7 @@ from app.api.deliveries.schemas import (
     TicketState,
 )
 from app.core.auth.dependencies import ClubAuth
+from app.core.auth.permissions import EXPORT_DATA, ensure_admin_can
 from app.db.core import SessionDep
 
 router = APIRouter(prefix="/events/{event_id}")
@@ -77,6 +78,8 @@ async def reinstate(session: SessionDep, user: ClubAuth, event_id: int, registra
 
 @router.get("/tickets/bundle.zip", summary="Every ticket PDF, one file per guest")
 async def bundle(session: SessionDep, user: ClubAuth, event_id: int) -> Response:
+    # Every guest's ticket at once: for an admin, a data export.
+    ensure_admin_can(user, EXPORT_DATA)
     event = await service.event_for_club(session, user, event_id)
     content = await service.bundle_zip(session, event)
     return Response(

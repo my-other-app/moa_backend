@@ -12,6 +12,7 @@ from app.api.finance import service
 from app.api.finance.schemas import ExpenseCreate, ExpenseOut, ExpensePatch, FinanceSummary
 from app.api.subscriptions import gates
 from app.core.auth.dependencies import ClubAuth
+from app.core.auth.permissions import EXPORT_DATA, ensure_admin_can
 from app.db.core import SessionDep
 from app.response import CustomHTTPException
 
@@ -85,6 +86,8 @@ async def event_statement(session: SessionDep, user: ClubAuth, event_id: int) ->
     """Streamed: a big event's registrations are never all in memory. The
     request's session outlives the body (FastAPI closes the dependency after
     the response is sent), as the users export relies on."""
+    # Every guest's payment at once: for an admin, a data export.
+    ensure_admin_can(user, EXPORT_DATA)
     event = await deliveries.event_for_club(session, user, event_id)
     return StreamingResponse(
         service.event_statement(session, event),

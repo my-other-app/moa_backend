@@ -59,7 +59,7 @@ async def load_event(session, event_id: int) -> Events:
     return event
 
 
-async def actor_for(session, event: Events, user: Optional[Users], gate_key: Optional[str]) -> GateActor:
+async def actor_for(session, event: Events, user: Optional[Users], gate_key: Optional[str], method: str = "GET") -> GateActor:
     if gate_key:
         door = await doors_mod.door_by_key(session, gate_key)
         if door is None or door.event_id != event.id:
@@ -67,7 +67,14 @@ async def actor_for(session, event: Events, user: Optional[Users], gate_key: Opt
         return GateActor(kind="door", name=door.name, door=door, can_check_in=True, can_walkup=door.link_can_walkup)
     if user is None:
         raise CustomHTTPException(401, message="Sign in, or open the gate link the organiser sent you.")
-    if is_admin_user(user) or (event.club is not None and event.club.user_id == user.id):
+    if is_admin_user(user):
+        # Any event's door, so the admin's role must allow what the request
+        # does: looking is VIEW, admitting someone changes the club's records.
+        from app.core.auth.permissions import capability_for_method, ensure_can
+
+        ensure_can(user, capability_for_method(method))
+        return GateActor(kind="user", name=user.full_name or user.email, user=user, full=True)
+    if event.club is not None and event.club.user_id == user.id:
         return GateActor(kind="user", name=user.full_name or user.email, user=user, full=True)
     volunteer = await session.scalar(
         select(Volunteer).where(
@@ -89,7 +96,7 @@ async def gate_actor(request: Request, session: SessionDep, event_id: int, user:
     """The key from the X-Gate-Key header only: a key in the query string
     lands in every access log between the phone and here."""
     event = await load_event(session, event_id)
-    actor = await actor_for(session, event, user, request.headers.get(GATE_KEY_HEADER))
+    actor = await actor_for(session, event, user, request.headers.get(GATE_KEY_HEADER), request.method)
     request.state.gate_event = event
     return actor
 
@@ -104,7 +111,7 @@ async def gate_actor_for_frame(request: Request, session: SessionDep, event_id: 
         key = request.query_params.get("key")
         logger.info("gate key read from the query string (deprecated) for %s", request.url.path)
     event = await load_event(session, event_id)
-    actor = await actor_for(session, event, user, key)
+    actor = await actor_for(session, event, user, key, request.method)
     request.state.gate_event = event
     return actor
 

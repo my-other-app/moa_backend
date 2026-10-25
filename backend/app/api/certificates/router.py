@@ -25,6 +25,7 @@ from app.api.events.certificates import number_of
 from app.config import settings
 from app.core import site
 from app.core.auth.dependencies import ClubAuth
+from app.core.auth.permissions import EXPORT_DATA, ensure_admin_can
 from app.core.net import client_address
 from app.core.rate_limit import limiter
 from app.db.core import SessionDep
@@ -95,6 +96,8 @@ async def bundle(session: SessionDep, user: ClubAuth, event_id: int) -> Streamin
     """Streamed: each certificate is sent as soon as it is read from the
     bucket or drawn, so the archive is never held whole in memory and the
     download starts at once. Everything is read from the database first."""
+    # Every guest's certificate at once: for an admin, a data export.
+    ensure_admin_can(user, EXPORT_DATA)
     event = await deliveries.event_for_club(session, user, event_id)
     jobs = await service.bundle_jobs(session, event)
     return StreamingResponse(

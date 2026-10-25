@@ -19,6 +19,7 @@ from app.api.events.registration.schemas import (
     SetWinnerRequest,
 )
 from app.core.auth.dependencies import AdminAuth, ClubAuth, OptionalUserAuth
+from app.core.auth.permissions import EXPORT_DATA, ensure_admin_can
 from app.db.core import SessionDep
 from app.api.users.models import UserTypes
 from app.api.users import service as user_service
@@ -231,13 +232,19 @@ async def export_event_registrations(
     user: ClubAuth,
     event_id: int,
     is_attended: bool | None = Query(None),
-    is_paid: bool = Query(True, description="Accepted and ignored, as it always was: every registration is exported"),
+    is_paid: bool | None = Query(None, description="true for paid guests only, false for unpaid only; everyone when left out"),
     session: SessionDep = SessionDep,
 ) -> FileResponse:
     """The guest list as an .xlsx: a column per answer to the event's own
     questions. Written from a server-side cursor on a worker thread, and
-    streamed from disk (export.py)."""
-    path = await export.write_export(session, user.id, event_id, is_attended=is_attended, as_admin=is_admin_user(user))
+    streamed from disk (export.py).
+
+    For an admin it is a data export (EXPORT_DATA): one file carries every
+    guest's name, email, phone and answers."""
+    ensure_admin_can(user, EXPORT_DATA)
+    path = await export.write_export(
+        session, user.id, event_id, is_attended=is_attended, is_paid=is_paid, as_admin=is_admin_user(user)
+    )
     return FileResponse(
         path,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

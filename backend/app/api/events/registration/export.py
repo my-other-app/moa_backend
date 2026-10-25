@@ -96,7 +96,10 @@ class _Writer:
         return path
 
 
-async def write_export(session: AsyncSession, user_id: int, event_id: int, *, is_attended: bool | None = None, as_admin: bool = False) -> str:
+async def write_export(
+    session: AsyncSession, user_id: int, event_id: int, *,
+    is_attended: bool | None = None, is_paid: bool | None = None, as_admin: bool = False,
+) -> str:
     """The event's registrations as an .xlsx file on disk; the caller sends
     it and removes it. Owner (or admin) only."""
     event = await session.scalar(select(Events).where(Events.id == event_id).options(joinedload(Events.club)))
@@ -107,6 +110,8 @@ async def write_export(session: AsyncSession, user_id: int, event_id: int, *, is
     where = [R.event_id == event_id, R.is_deleted == False]  # noqa: E712
     if is_attended is not None:
         where.append(R.is_attended == is_attended)
+    if is_paid is not None:
+        where.append(R.is_paid == is_paid)
     answer_keys = await _answer_keys(session, event, where)
     writer = await asyncio.to_thread(_Writer, LEAD + answer_keys + TAIL)
 
