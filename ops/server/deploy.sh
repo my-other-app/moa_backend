@@ -403,8 +403,10 @@ cmd_rollback() {
   local service="$1" line target
   valid_service "$service" || die "unknown service: $service"
   preflight
-  # The last good deploy of this service, and what ran before it.
-  line="$(awk -v s="$service" '$2 == s && $3 == "ok"' "$HISTORY" 2> /dev/null | tail -n 1)"
+  # The last good deploy of this service, and what ran before it. (No
+  # history.log yet is "nothing on record": under pipefail awk's failure
+  # ended the script there, silently, before it could say so.)
+  line="$(awk -v s="$service" '$2 == s && $3 == "ok"' "$HISTORY" 2> /dev/null | tail -n 1 || true)"
   target="$(printf '%s' "$line" | awk '{print $5}')"
   [ -n "$target" ] && [ "$target" != "-" ] || die "no earlier image of $service on record"
   valid_ref "$target" || die "history.log holds an invalid reference for $service"
