@@ -838,9 +838,17 @@ async def test_the_status_clock_moves_exactly_what_its_rules_move(session, make_
     jobs = {e.id: s for e, s in ((events[9], RetentionState.deleted), (events[10], RetentionState.pending))}
     expected = {e.id: (ref.clock_outcome(e, jobs.get(e.id), now) if e.status_clock and not e.is_deleted and e.lifecycle in (EventStatus.published, EventStatus.live, EventStatus.closed) else e.lifecycle) for e in events}
     moves = sum(1 for e in events if expected[e.id] is not e.lifecycle)
+    went_live = sorted(e.id for e in events if expected[e.id] is EventStatus.live and e.lifecycle is not EventStatus.live)
     statements.clear()
     assert await closeout.advance_clock(session, now=now) == moves
-    assert len(statements) <= 4  # one read, the jobs, the write (not one per event)
+    # One read, the retention jobs, the write, and the jobs that tell the
+    # registered an event went live (one statement however many): not one per event.
+    assert len(statements) <= 5
+    from app.api.live import notify
+    from app.core import jobs as job_queue
+
+    told = sorted(int(p["event_id"]) for p in (await session.scalars(select(job_queue.Jobs.payload).where(job_queue.Jobs.name == notify.STARTED_JOB))).all())
+    assert told == went_live and went_live
     conn = await session.connection()
     table = Events.__table__
     for e in events:

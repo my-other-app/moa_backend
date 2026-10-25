@@ -259,6 +259,8 @@ def test_the_platforms_jobs_have_the_priorities_and_limits_chosen(monkeypatch):
         "payments.receipt": (H, 2),  # a wkhtmltopdf process each
         # The room told the quiz is starting: it is starting now, for a hall at most.
         "live.join_push": (H, 2),
+        # An update pushed to the room, and the event going live told to everyone registered.
+        "live.update_push": (H, 2), "live.event_started": (H, 4),
         # Sends to many. deliveries.send is HIGH for one guest's ticket or certificate (its caller says).
         "deliveries.send": (N, 2), "emails.send_message": (N, 2),
         "notifications.new_event": (N, 2), "notifications.interest": (N, 2), "notifications.push": (N, 2),

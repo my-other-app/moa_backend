@@ -427,10 +427,9 @@ async def advance_clock(session, now: Optional[datetime] = None) -> int:
             moved += 1
         if before is not EventStatus.live and e.lifecycle is EventStatus.live:
             went_live.append(e.id)
-    for event_id in went_live:
-        # Everyone registered is told the event is live (app/api/live/notify.py):
-        # a job written with the move, sent once it commits.
-        await live_notify.queue_event_live(session, event_id)
+    # Everyone registered is told the event is live (app/api/live/notify.py):
+    # a job each, written with the move in one statement, sent once it commits.
+    await live_notify.queue_event_live(session, *went_live)
     if moved:
         await session.commit()
     return moved
