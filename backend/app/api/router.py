@@ -1,5 +1,6 @@
 from uuid import UUID
 from fastapi import APIRouter, Query
+from app.response import CustomHTTPException
 from app.api.auth.router import router as auth_router
 from app.api.orgs.router import router as org_router
 from app.api.users.router import admin_router as user_admin_router, router as user_router
@@ -198,7 +199,11 @@ async def get_background_task_log(
     """
     Retrieve a background task log by ID
     """
-    return await service.get_background_task_log(session, task_id)
+    log = await service.get_background_task_log(session, task_id)
+    if log is None:
+        # Not a 500 from the response model failing on None.
+        raise CustomHTTPException(404, message="No background task with this id.")
+    return log
 
 
 @api_router.get("/admin/overview", tags=["admin"])
