@@ -162,8 +162,19 @@ class _Broker:
         return n
 
 
+#: How long the subscription connection waits for Redis to confirm it.
+CONFIRM_SECONDS = 5.0
+
+
 class _Hub:
-    """The one Redis connection this process's subscribers share."""
+    """The one Redis connection this process's subscribers share.
+
+    `connected` is set once Redis has confirmed the subscription, not when
+    the command was sent: until Redis has it, something published through
+    Redis passes this process by, so `publish` hands it to this process's
+    own subscribers itself. (Set on sending, a publish in that moment was
+    lost here; now the worst is the same message twice, which a version
+    makes harmless.)"""
 
     def __init__(self):
         self.task: Optional[asyncio.Task] = None
@@ -181,8 +192,9 @@ class _Hub:
                 c = client()
                 if c is None:
                     return
-                pubsub = c.pubsub(ignore_subscribe_messages=True)
+                pubsub = c.pubsub()
                 await pubsub.psubscribe(_CHANNELS + "*")
+                await _confirmed(pubsub)
                 self.connected, failures = True, 0
                 while True:
                     message = await pubsub.get_message(timeout=1.0)
@@ -217,6 +229,19 @@ class _Hub:
         task.cancel()
         if task.get_loop() is asyncio.get_running_loop():
             await asyncio.gather(task, return_exceptions=True)
+
+
+async def _confirmed(pubsub) -> None:
+    """Wait for Redis's own word that the pattern subscription is in place
+    (its `psubscribe` reply); TimeoutError when it does not come, which the
+    pump treats as any other failure: reconnect, a little later."""
+    loop = asyncio.get_running_loop()
+    ends = loop.time() + CONFIRM_SECONDS
+    while loop.time() < ends:
+        message = await pubsub.get_message(timeout=min(1.0, max(0.01, ends - loop.time())))
+        if message is not None and message.get("type") == "psubscribe":
+            return
+    raise TimeoutError("Redis did not confirm the subscription")
 
 
 def _text(value) -> str:

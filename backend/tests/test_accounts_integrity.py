@@ -752,7 +752,7 @@ async def _handoff(client, session, make_admin, make_user, mint_token, email):
     admin = await make_admin(email=f"imp-{email}")
     target = await make_user(email=email, username=email.split("@")[0])
     await session.commit()
-    r = await client.post(f"{API}/auth/admin/impersonate/{target.id}", headers=auth_header(await mint_token(admin)))
+    r = await client.post(f"{API}/auth/admin/impersonate/{target.id}", headers=auth_header(await mint_token(admin)), json={"reason": "support ticket: cannot sign in"})
     assert r.status_code == 200, r.text
     return admin, target, r.json()["token"]
 

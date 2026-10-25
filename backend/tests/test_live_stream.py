@@ -695,11 +695,25 @@ async def test_when_the_clock_runs_out_the_players_are_shown_the_answer(client, 
 # ─── Across processes, through Redis ─────────────────────────────────────
 
 
-async def _arrives(feed, timeout=2.0):
+async def _arrives(feed, timeout=5.0):
     loop = asyncio.get_running_loop()
     ends = loop.time() + timeout
     while feed.inbox.empty():
         assert loop.time() < ends, "nothing arrived from Redis"
+        await asyncio.sleep(0.01)
+
+
+async def _listening(timeout=5.0):
+    """Redis has confirmed this process's subscription (app.core.redis:
+    `connected` is its psubscribe reply). Only from then on does what
+    another process publishes reach this one: pub/sub keeps nothing for a
+    subscriber that is not there yet. Publishing before it was the flake --
+    the stream subscribes on a task of its own, and on a slow runner the
+    other process's message reached Redis first and went to nobody."""
+    loop = asyncio.get_running_loop()
+    ends = loop.time() + timeout
+    while not redis._hub.connected:
+        assert loop.time() < ends, "Redis never confirmed the subscription"
         await asyncio.sleep(0.01)
 
 
@@ -716,11 +730,13 @@ async def test_a_change_told_by_another_process_reaches_the_stream_through_redis
     feed = streams.feeds[world["event"].id]
     # Versions come from Redis: another process's next one is above this one's.
     assert int(await (other := aioredis.from_url(REDIS_URL)).get(f"moa:live:v:{world['event'].id}")) == v0
+    await _listening()
     # Another process changes the room and tells it; this one hears it from Redis.
     await session.execute(text("UPDATE live_questions SET votes = 41 WHERE id = :id"), {"id": asked["id"]})
     await session.commit()
     v1 = await other.incr(f"moa:live:v:{world['event'].id}")
-    await other.publish(f"moa:ch:live:{world['event'].id}", json.dumps({"v": v1, "t": ["room"], "d": [["v", "browser-00000001", asked["id"], 1]], "x": False}))
+    heard = await other.publish(f"moa:ch:live:{world['event'].id}", json.dumps({"v": v1, "t": ["room"], "d": [["v", "browser-00000001", asked["id"], 1]], "x": False}))
+    assert heard >= 1, "Redis had no subscriber for the message"
     await _arrives(feed)
     await streams.step()
     snap = await s.next_of("snapshot")

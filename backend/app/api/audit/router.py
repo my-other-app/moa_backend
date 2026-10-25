@@ -41,6 +41,13 @@ class AuditLogResponse(CustomBaseModel):
     actor: AuditActorResponse | None = Field(None)
 
 
+class AuditLogPage(PaginatedResponse[AuditLogResponse]):
+    # The search applied, as the API read it (its words, one space apart),
+    # or null for none. Always sent: a dashboard tells from it that this API
+    # searches, and hides its search box from one that does not.
+    search: Optional[str] = Field(None)
+
+
 @router.get("/audit-log", summary="Admin action history")
 async def list_audit_log(
     request: Request,
@@ -51,21 +58,27 @@ async def list_audit_log(
     entity_type: Optional[str] = Query(None),
     entity_id: Optional[str] = Query(None),
     actor_id: Optional[int] = Query(None),
-) -> PaginatedResponse[AuditLogResponse]:
+    q: Optional[str] = Query(None, max_length=200, description="Words to find in who acted, the summary, the record or the reason"),
+) -> AuditLogPage:
     """
     Who did what, newest first.
 
     `entity_type` and `entity_id` together give the history of one record,
-    which is the question asked after something goes wrong.
+    which is the question asked after something goes wrong. `q` finds rows
+    with every one of its words, in any case, in the actor's name or email,
+    the summary, the record ("club #12") or the reason given; paged and
+    counted like the rest.
     """
     from app.api.reports.service import avatar
 
+    words = service.search_words(q)
     rows, total = await service.list_entries(
         session,
         action=action,
         entity_type=entity_type,
         entity_id=entity_id,
         actor_id=actor_id,
+        q=q,
         limit=pagination.limit,
         offset=pagination.offset,
     )
@@ -81,16 +94,20 @@ async def list_audit_log(
             created_at=row.created_at,
             actor=AuditActorResponse(
                 id=row.actor_id,
-                # The stored email survives the account being deleted; the
-                # relationship does not.
-                full_name=row.actor.full_name if row.actor else None,
+                # The stored name and email survive the account being
+                # deleted; the relationship does not.
+                full_name=row.actor.full_name if row.actor else row.actor_name,
                 email=row.actor_email,
                 avatar=avatar(row.actor),
             ),
         )
         for row in rows
     ]
-    return paginated_response(items, request, schema=AuditLogResponse, total=total)
+    page = paginated_response(items, request, schema=AuditLogResponse, total=total)
+    return AuditLogPage(
+        limit=page.limit, offset=page.offset, total=page.total, next=page.next, items=page.items,
+        search=" ".join(words) or None,
+    )
 
 
 @router.get("/audit-log/actions", summary="Distinct audit actions")
