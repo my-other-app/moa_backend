@@ -3191,9 +3191,11 @@ in the Activity log (`platform_setting.update` / `.reset`).
 | Push by topic | `APP_PUSH_TOPICS` | no |
 | Also push device by device | `APP_PUSH_TOPICS_LEGACY` | no |
 | Finance reads the ledger | `APP_LEDGER_READS` | no |
-| Bill message overage | `APP_MESSAGE_OVERAGE_BILLING` | no |
 | Maintenance banner | (database only) | no |
 | Admins must use two-factor | (database only, default on) | no |
+
+`APP_MESSAGE_OVERAGE_BILLING` is not offered: prepaid credits retired it
+(section 20), and nothing reads it.
 
 Everything else, and every secret, stays in `.env` and needs the backend
 recreated with `up -d --build backend` (section 8). The Settings page shows

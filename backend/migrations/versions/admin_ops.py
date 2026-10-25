@@ -23,14 +23,14 @@ users and clubs take a brief lock there.
 Downgrade drops the tables (the payouts, notes and settings go with them).
 
 Revision ID: admin_ops
-Revises: club_mailbox
+Revises: apple_refresh_token
 """
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "admin_ops"
-down_revision = "club_mailbox"
+down_revision = "apple_refresh_token"
 branch_labels = None
 depends_on = None
 

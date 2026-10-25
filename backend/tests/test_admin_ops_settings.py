@@ -26,8 +26,10 @@ async def test_every_admin_reads_the_settings_and_no_secret_value_leaves(client,
     assert r.status_code == 200, r.text
     body = r.json()
     keys = {s["key"] for s in body["settings"]}
-    assert {"AI_ENABLED", "MCP_ENABLED", "MAIL_PROVIDER", "PUSH_TOPICS", "LEDGER_READS", "MESSAGE_OVERAGE_BILLING",
+    assert {"AI_ENABLED", "MCP_ENABLED", "MAIL_PROVIDER", "PUSH_TOPICS", "LEDGER_READS",
             "maintenance_banner", "admin_2fa_required"} <= keys
+    # Retired by prepaid credits (read by nothing), so not offered as a switch.
+    assert "MESSAGE_OVERAGE_BILLING" not in keys
     assert all(s["restart_required"] is False for s in body["settings"])
     assert body["can_edit"] is False
     resend = next(s for s in body["secrets"] if s["name"] == "APP_RESEND_API_KEY")
