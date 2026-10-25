@@ -67,6 +67,18 @@ FEE_BATCH = 200
 TAKEN = (PaymentStatus.captured, PaymentStatus.refunded, PaymentStatus.disputed)
 CENT = Decimal("0.01")
 _DAY = timedelta(days=1)
+#: The admins are in India, and so is the day a payout is dated on.
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _today() -> date:
+    """Today in India. UTC's date is still yesterday until 05:30 IST: checked
+    against it, a payout dated today was refused as dated in the future."""
+    return _now().astimezone(IST).date()
 
 
 def _q(x) -> Decimal:
@@ -409,7 +421,7 @@ class VoidIn(BaseModel):
 @router.post("/clubs/{club_id}", summary="Record a payout to a club, in full or part (money)", status_code=201)
 async def record_payout(club_id: int, body: PayoutIn, session: SessionDep, user: MoneyAuth, request: Request) -> dict:
     club = await _club(session, club_id)
-    if body.paid_on > datetime.now(timezone.utc).date():
+    if body.paid_on > _today():
         raise CustomHTTPException(422, message="A payout can't be dated in the future", error_code="PAYOUT_IN_FUTURE")
     totals = (await club_totals(session, [club_id])).get(club_id, _blank())
     amount = _q(body.amount)

@@ -1,5 +1,5 @@
 """Finance: what the club's events brought and cost, by month, by type and by event; one event's own ledger; the expense book; the statements."""
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -11,6 +11,9 @@ from app.api.payments.models import OrderStatus, PaymentLogs, PaymentOrders, Pay
 from tests.conftest import auth_header
 
 NOW = datetime.now(timezone.utc)
+IST = timezone(timedelta(hours=5, minutes=30))
+#: The service's today: India's date.
+TODAY = NOW.astimezone(IST).date()
 
 
 @pytest.fixture(autouse=True)
@@ -21,7 +24,8 @@ def _clock(monkeypatch):
     tests many minutes later: a run started before midnight UTC (05:30 in
     India) reached them after it, when the service's today -- the default
     date of an expense, the end of the default window -- was a day (or, at
-    the end of a month, a month) past the one asserted."""
+    the end of a month, a month) past the one asserted. Its today is India's
+    (TODAY), which UTC's date trails until 05:30 IST."""
     monkeypatch.setattr(finance, "_now", lambda: NOW)
 
 
@@ -80,7 +84,7 @@ async def test_the_season_adds_up_by_month_by_type_and_by_event(client, world):
     await _expense(client, h, event_id=past.id, title="Venue", category="venue", amount=300)
     await _expense(client, h, event_id=past.id, title="Pizza", category="Food", amount=200, note="two large")
     overhead = await _expense(client, h, title="Domain renewal", category="other", amount=100)
-    assert overhead["event_id"] is None and overhead["event_name"] is None and overhead["incurred_on"] == NOW.date().isoformat() and overhead["kind"] == "expense"
+    assert overhead["event_id"] is None and overhead["event_name"] is None and overhead["incurred_on"] == TODAY.isoformat() and overhead["kind"] == "expense"
     # The ledger takes income too: a sponsor for the hackathon, a grant to the club.
     sponsor = await _expense(client, h, event_id=past.id, kind="income", title="Acme sponsorship", category="sponsorship", amount=2000)
     assert sponsor["kind"] == "income" and sponsor["category"] == "sponsorship"
@@ -91,7 +95,7 @@ async def test_the_season_adds_up_by_month_by_type_and_by_event(client, world):
 
     s = (await client.get("/api/v1/clubs/finance", headers=h)).json()
     # The window runs from four months back through the end of next month.
-    end = (datetime(NOW.year + (NOW.month + 1) // 12, (NOW.month + 1) % 12 + 1, 1, tzinfo=timezone.utc) - timedelta(days=1)).date()
+    end = date(TODAY.year + (TODAY.month + 1) // 12, (TODAY.month + 1) % 12 + 1, 1) - timedelta(days=1)
     assert s["scope"] == "club" and s["period"]["end"] == end.isoformat() and s["period"]["start"].endswith("-01")
     f = s["figures"]
     # Two paid guests held ₹1,000 and ₹2,300 came in besides; the refund grosses it up; the three expenses come off.
@@ -137,6 +141,25 @@ async def test_the_season_adds_up_by_month_by_type_and_by_event(client, world):
     wide = (await client.get("/api/v1/clubs/finance", params={"from": (NOW - timedelta(days=300)).date().isoformat()}, headers=h)).json()
     assert wide["figures"]["tickets"] == 2000.0 and wide["figures"]["events"]["conducted"] == 2 and wide["deltas"]["gross"] is None
     assert (await client.get("/api/v1/clubs/finance", params={"from": "2030-01-01", "to": "2029-01-01"}, headers=h)).status_code == 422
+
+
+@pytest.mark.parametrize("now, today, period", [
+    # 23:59 IST on the month's last day.
+    (datetime(2026, 10, 31, 18, 29, tzinfo=timezone.utc), date(2026, 10, 31), (date(2026, 6, 1), date(2026, 11, 30))),
+    # 00:01 and 05:29 IST on the 1st, when UTC is still in October.
+    (datetime(2026, 10, 31, 18, 31, tzinfo=timezone.utc), date(2026, 11, 1), (date(2026, 7, 1), date(2026, 12, 31))),
+    (datetime(2026, 10, 31, 23, 59, tzinfo=timezone.utc), date(2026, 11, 1), (date(2026, 7, 1), date(2026, 12, 31))),
+])
+async def test_today_is_the_date_in_india(client, world, monkeypatch, now, today, period):
+    """An expense logged without a date is dated today in India, and the
+    default window follows India's month: until 05:30 IST, UTC's date is
+    still yesterday (on the 1st, last month)."""
+    monkeypatch.setattr(finance, "_now", lambda: now)
+    assert finance.resolve_period(None, None) == period
+    x = await _expense(client, world["h"], title="Late-night printing", category="other", amount=40)
+    assert x["incurred_on"] == today.isoformat()
+    s = (await client.get("/api/v1/clubs/finance", headers=world["h"])).json()
+    assert (s["period"]["start"], s["period"]["end"]) == (period[0].isoformat(), period[1].isoformat())
 
 
 async def test_one_event_has_its_own_ledger_and_expense_book(client, world):

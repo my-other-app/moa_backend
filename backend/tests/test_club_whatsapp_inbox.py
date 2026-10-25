@@ -330,7 +330,7 @@ async def test_the_team_opts_someone_out_on_their_word_audited_without_content(c
     assert await optout.blocked(session, world.club.id, wa_id=GUEST)
     r = await client.delete(f"{BASE}/conversations/{conv.id}/optout", headers=world.h)
     assert r.status_code == 200 and r.json()["opt_out"] is None
-    actions = (await session.scalars(select(AdminAuditLogs).where(AdminAuditLogs.action.in_(["club_whatsapp.optout", "club_whatsapp.optin"])))).all()
+    actions = (await session.scalars(select(AdminAuditLogs).where(AdminAuditLogs.action.in_(["club_whatsapp.optout", "club_whatsapp.optin"])).order_by(AdminAuditLogs.id))).all()
     assert [a.action for a in actions] == ["club_whatsapp.optout", "club_whatsapp.optin"]
     assert all("private words" not in json.dumps(a.details) + (a.summary or "") for a in actions)
 
@@ -383,7 +383,7 @@ async def test_blocking_within_24_hours_goes_to_meta(client, session, world, met
     assert (await client.get(f"{BASE}/summary", headers=world.h)).json()["unread_total"] == 0
     r = await client.delete(f"{BASE}/conversations/{conv.id}/block", headers=world.h)
     assert r.status_code == 200 and r.json()["blocked"] is None and wa.blocks[-1][0] == "DELETE"
-    actions = [a.action for a in (await session.scalars(select(AdminAuditLogs).where(AdminAuditLogs.action.like("club_whatsapp.%block")))).all()]
+    actions = [a.action for a in (await session.scalars(select(AdminAuditLogs).where(AdminAuditLogs.action.like("club_whatsapp.%block")).order_by(AdminAuditLogs.id))).all()]
     assert actions == ["club_whatsapp.block", "club_whatsapp.unblock"]
     # Unread again, so back in the bell.
     assert [a["kind"] for a in (await bell(client, world.h))["items"]] == ["whatsapp_message"]
@@ -788,7 +788,10 @@ async def test_notes_are_the_teams_and_never_sent(client, session, world, meta):
     r = await client.delete(f"{url}/{note_id}", headers=_h(other))
     assert r.status_code == 403 and r.json()["error_code"] == "NOTE_NOT_YOURS"
     assert (await client.delete(f"{url}/{note_id}", headers=world.h)).json()["items"] == []
-    audit = (await session.scalars(select(AdminAuditLogs).where(AdminAuditLogs.action.like("club_whatsapp.note%")))).all()
+    # In the order they were written: without ORDER BY, Postgres returns rows in
+    # whatever order the table's pages hold them, which turns on what earlier
+    # tests wrote and rolled back and when autovacuum last reclaimed it.
+    audit = (await session.scalars(select(AdminAuditLogs).where(AdminAuditLogs.action.like("club_whatsapp.note%")).order_by(AdminAuditLogs.id))).all()
     assert [a.action for a in audit] == ["club_whatsapp.note", "club_whatsapp.note_delete"]
     assert all("secret 55" not in json.dumps(a.details) + (a.summary or "") for a in audit)
 

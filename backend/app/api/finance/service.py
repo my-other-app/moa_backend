@@ -43,8 +43,17 @@ _MONEY = ("gross", "tickets", "merch", "refunds", "expenses", "net")
 EXPENSE, INCOME = "expense", "income"
 
 
+#: The clubs are in India: "today" is India's day, which UTC's date trails
+#: until 05:30 IST.
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _today() -> date:
+    return _now().astimezone(IST).date()
 
 
 def _f(x) -> float:
@@ -77,7 +86,7 @@ def _shift_month(y: int, m: int, by: int) -> tuple[int, int]:
 def resolve_period(frm: date | None, to: date | None) -> tuple[date, date]:
     """Inclusive dates. Default: four months back through the end of next month, so
     the events selling now sit beside the ones just held."""
-    today = _now().date()
+    today = _today()
     if to is None:
         y, m = _shift_month(today.year, today.month, 2)
         to = date(y, m, 1) - timedelta(days=1)
@@ -485,7 +494,7 @@ async def create_expense(session, club, body: ExpenseCreate, user) -> dict:
     event = await _event_of_club(session, club.id, body.event_id) if body.event_id is not None else None
     x = ClubExpenses(
         club_id=club.id, event_id=event.id if event else None, kind=body.kind, title=body.title, category=body.category, amount=body.amount,
-        incurred_on=body.incurred_on or _now().date(), note=body.note, created_by=user.id,
+        incurred_on=body.incurred_on or _today(), note=body.note, created_by=user.id,
     )
     session.add(x)
     await session.commit()

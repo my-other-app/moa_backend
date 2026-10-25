@@ -52,7 +52,7 @@ async def test_a_stored_value_stands_in_for_the_env_value_and_reset_puts_it_back
     assert r.status_code == 200, r.text
     assert r.json()["value"] is (not before) and r.json()["overridden"] is True
     assert settings.AI_ENABLED is (not before)
-    audit = (await session.scalars(select(AdminAuditLogs).where(AdminAuditLogs.action == "platform_setting.update"))).all()
+    audit = (await session.scalars(select(AdminAuditLogs).where(AdminAuditLogs.action == "platform_setting.update").order_by(AdminAuditLogs.id))).all()
     assert audit and audit[-1].entity_id == "AI_ENABLED" and audit[-1].details == {"from": before, "to": not before}
 
     listed = (await client.get(f"{API}/admin/settings", headers=h["owner"])).json()

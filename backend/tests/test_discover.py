@@ -7,7 +7,7 @@ fake, and anything else asked of it fails the test."""
 import asyncio
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -257,47 +257,121 @@ def test_when_means_days_in_india():
     assert service.window("today", late) == (at(2026, 10, 15, 0), at(2026, 10, 16, 0))
 
 
-async def test_when_filters_events_by_those_days(client, session, world, make_event):
-    now, a, owner, tech = datetime.now(timezone.utc), world["a"], world["owner_a"], world["tech"]
+def _midnight(d: date) -> datetime:
+    """The start of a calendar day in India."""
+    return datetime.combine(d, time.min, tzinfo=IST)
 
-    async def inside(when, name):
-        """An event wholly inside the window, and still to come."""
-        w0, w1 = service.window(when, now)
-        start = max(w0, now) + (w1 - max(w0, now)) / 2
-        hours = (w1 - start).total_seconds() / 3600 / 2
-        return await make_event(club=a, created_by=owner, name=name, event_datetime=start, duration=hours, category_id=tech.id, lifecycle=EventStatus.published)
 
-    async def at(when_edge, name):
-        return await make_event(club=a, created_by=owner, name=name, event_datetime=when_edge, duration=1.0, category_id=tech.id, lifecycle=EventStatus.published)
+@pytest.mark.parametrize(
+    "now, today, saturday, monday, next_first",
+    [
+        # 23:59 on Monday 26 October in India (18:29 UTC): still the 26th.
+        (datetime(2026, 10, 26, 18, 29, tzinfo=timezone.utc), date(2026, 10, 26), date(2026, 10, 31), date(2026, 11, 2), date(2026, 11, 1)),
+        # 00:01 on Tuesday the 27th, 18:31 UTC on the 26th: India's day has turned, UTC's has not.
+        (datetime(2026, 10, 26, 18, 31, tzinfo=timezone.utc), date(2026, 10, 27), date(2026, 10, 31), date(2026, 11, 2), date(2026, 11, 1)),
+        # 05:29 on the 27th, 23:59 UTC on the 26th: the last minute the two disagree.
+        (datetime(2026, 10, 26, 23, 59, tzinfo=timezone.utc), date(2026, 10, 27), date(2026, 10, 31), date(2026, 11, 2), date(2026, 11, 1)),
+        # 00:01 on Sunday 1 November, 18:31 UTC on Saturday 31 October: a new month, and the weekend under way.
+        (datetime(2026, 10, 31, 18, 31, tzinfo=timezone.utc), date(2026, 11, 1), date(2026, 10, 31), date(2026, 11, 2), date(2026, 12, 1)),
+        # 23:59 on Thursday 31 December, and 00:01 on Friday 1 January 2027 (still 2026 in UTC).
+        (datetime(2026, 12, 31, 18, 29, tzinfo=timezone.utc), date(2026, 12, 31), date(2027, 1, 2), date(2027, 1, 4), date(2027, 1, 1)),
+        (datetime(2026, 12, 31, 18, 31, tzinfo=timezone.utc), date(2027, 1, 1), date(2027, 1, 2), date(2027, 1, 4), date(2027, 2, 1)),
+    ],
+)
+def test_the_days_turn_at_midnight_in_india_not_utc(now, today, saturday, monday, next_first):
+    day = timedelta(days=1)
+    assert service.window("today", now) == (_midnight(today), _midnight(today + day))
+    assert service.window("tomorrow", now) == (_midnight(today + day), _midnight(today + 2 * day))
+    assert service.window("this_weekend", now) == (_midnight(saturday), _midnight(saturday + 2 * day))
+    assert service.window("next_week", now) == (_midnight(monday), _midnight(monday + 7 * day))
+    assert service.window("this_month", now) == (now, _midnight(next_first))
+    assert service.window("this_week", now) == (now, now + 7 * day)
+    # A day asked for by its date (from/to) is the same day as "today".
+    assert service.date_range(today, today) == service.window("today", now)
 
-    today = await inside("today", "Later Today")
-    tomorrow = await inside("tomorrow", "Tomorrow Talk")
-    weekend = await inside("this_weekend", "Weekend Hack")
-    next_week = await inside("next_week", "Next Week Meetup")
-    after_weekend = await at(service.window("this_weekend", now)[1] + timedelta(hours=12), "Monday After")
-    next_month = await at(service.window("this_month", now)[1] + timedelta(days=1), "Next Month Fest")
+
+#: The moments the "when" filter is tried at, in India: either side of
+#: midnight, and 05:29, the last minute India is a day ahead of UTC; a
+#: weekday noon; the last minute of a month (a Saturday) and the Sunday that
+#: follows; the last minute of a year. The clock the suite happens to run at
+#: never decides the answer (it did: tests/test_discover.py failed every run
+#: in the last six days of a month, India time).
+CLOCKS = [
+    datetime(2026, 10, 26, 23, 59, tzinfo=IST),  # Monday; 18:29 UTC
+    datetime(2026, 10, 27, 0, 1, tzinfo=IST),    # Tuesday; 18:31 UTC on Monday
+    datetime(2026, 10, 27, 5, 29, tzinfo=IST),   # Tuesday; 23:59 UTC on Monday
+    datetime(2026, 10, 28, 12, 0, tzinfo=IST),   # Wednesday noon
+    datetime(2026, 10, 31, 23, 59, tzinfo=IST),  # Saturday, the month's last minute
+    datetime(2026, 11, 1, 0, 1, tzinfo=IST),     # Sunday the 1st; still 31 October in UTC
+    datetime(2026, 11, 1, 5, 29, tzinfo=IST),    # Sunday
+    datetime(2026, 12, 31, 23, 59, tzinfo=IST),  # Thursday, the year's last minute
+]
+
+
+@pytest.mark.parametrize("now", CLOCKS, ids=lambda t: t.strftime("%a-%d-%b-%H%M-IST"))
+async def test_when_filters_events_by_those_days(client, session, make_club, make_event, monkeypatch, now):
+    """Events just after and just before each midnight in India for ten days,
+    either side of the month's end and of a week from now: each `when` (and a
+    day asked for by date) finds exactly those that touch its days, counted in
+    India, and are still to come."""
+    monkeypatch.setattr(service, "now_utc", lambda: now.astimezone(timezone.utc))
+    owner, club = await make_club(name="Clockwork Club", email="clockwork@example.com")
+    tech = EventCategories(name="Tech")
+    session.add(tech)
+    await session.flush()
+
+    day = timedelta(days=1)
+    d = now.astimezone(IST).date()
+    tonight = _midnight(d + day)
+    first_next = (d.replace(day=1) + 32 * day).replace(day=1)
+    probes = {"later today": (now + (tonight - now) / 2, (tonight - now) / 4)}
+    for k in range(10):
+        # 00:30 in India is 19:00 UTC the day before; 23:00 is 17:30 UTC the same day.
+        probes[f"day {k}, 00:30"] = (_midnight(d + k * day) + timedelta(minutes=30), timedelta(hours=1))
+        probes[f"day {k}, 23:00"] = (_midnight(d + k * day) + timedelta(hours=23), timedelta(minutes=30))
+    probes["the month's last night"] = (_midnight(first_next - day) + timedelta(hours=23), timedelta(minutes=30))
+    probes["next month, 00:30"] = (_midnight(first_next) + timedelta(minutes=30), timedelta(hours=1))
+    probes["a week on, less a minute"] = (now + 7 * day - timedelta(minutes=1), timedelta(seconds=30))
+    probes["a week on, and a minute"] = (now + 7 * day + timedelta(minutes=1), timedelta(seconds=30))
+    named = {}
+    for name, (start, length) in probes.items():
+        e = await make_event(club=club, created_by=owner, name=name, event_datetime=start, duration=length.total_seconds() / 3600,
+                             category_id=tech.id, lifecycle=EventStatus.published)
+        named[e.id] = name
     await session.commit()
 
-    async def ids(when):
-        r = await client.get(f"{API}/events", params={"when": when, "limit": 60})
+    async def found(**params):
+        r = await client.get(f"{API}/events", params={**params, "limit": 60})
         assert r.status_code == 200, r.text
-        return set(_ids(r.json()["items"]))
+        return {named[x["id"]] for x in r.json()["items"] if x["id"] in named}
 
-    got = await ids("today")
-    assert today.id in got and tomorrow.id not in got and next_week.id not in got and next_month.id not in got
-    got = await ids("tomorrow")
-    assert tomorrow.id in got and today.id not in got and next_week.id not in got
-    got = await ids("this_week")
-    assert today.id in got and world["e"]["online"].id in got and world["e"]["nocoords"].id not in got and next_month.id not in got
-    got = await ids("this_weekend")
-    assert weekend.id in got and after_weekend.id not in got and next_week.id not in got
-    got = await ids("next_week")
-    assert next_week.id in got and today.id not in got
-    if service.window("tomorrow", now)[0] < service.window("next_week", now)[0]:  # not a Sunday
-        assert tomorrow.id not in got
-    got = await ids("this_month")
-    assert today.id in got and next_month.id not in got
-    assert {today.id, tomorrow.id, weekend.id, next_week.id, after_weekend.id, next_month.id} <= await ids("any")
+    # What each `when` means, worked out here in India's days; None: no end.
+    wd = d.weekday()
+    saturday = d - day if wd == 6 else d + (5 - wd) * day
+    monday = d + (7 - wd) * day
+    windows = {
+        "today": (_midnight(d), tonight),
+        "tomorrow": (tonight, _midnight(d + 2 * day)),
+        "this_week": (now, now + 7 * day),
+        "this_weekend": (_midnight(saturday), _midnight(saturday + 2 * day)),
+        "next_week": (_midnight(monday), _midnight(monday + 7 * day)),
+        "this_month": (now, _midnight(first_next)),
+        "any": (now, None),
+    }
+    got = {when: await found(when=when) for when in windows}
+    for when, (w0, w1) in windows.items():
+        # Touches the window (ends at or after its start, starts before its end) and is not over.
+        want = {name for name, (start, length) in probes.items() if start + length >= max(now, w0) and (w1 is None or start < w1)}
+        assert got[when] == want, when
+
+    # The edges, said plainly.
+    assert "later today" in got["today"] and "day 1, 00:30" not in got["today"]
+    assert {"day 1, 00:30", "day 1, 23:00"} <= got["tomorrow"] and not {"day 0, 23:00", "day 2, 00:30"} & got["tomorrow"]
+    assert "a week on, less a minute" in got["this_week"] and "a week on, and a minute" not in got["this_week"]
+    assert "next month, 00:30" not in got["this_month"]
+    # A day asked for by its date is the same day.
+    assert await found(**{"from": d.isoformat(), "to": d.isoformat()}) == got["today"]
+    assert await found(**{"from": (d + day).isoformat(), "to": (d + day).isoformat()}) == got["tomorrow"]
 
 
 # ─── Distance ─────────────────────────────────────────────────────────────
