@@ -13,6 +13,7 @@ from app.api.events.schemas import EventListResponse, EventPublicMin
 from app.api.clubs.schemas import ClubPublic, NotesPublic
 from app.api.clubs.models import Notes
 from app.api.home.schemas import SearchResults
+from app.response import CustomHTTPException
 from . import service
 
 router = APIRouter(prefix="/home")
@@ -92,7 +93,10 @@ async def global_search_endpoint(
     interest_ids: Optional[str] = Query(None),
 ) -> SearchResults:
     """Search across events, clubs, and notes."""
-    interest_ids = [int(i) for i in interest_ids.split(",")] if interest_ids else []
+    try:
+        interest_ids = [int(i) for i in interest_ids.split(",")] if interest_ids else []
+    except ValueError:
+        raise CustomHTTPException(422, message="interest_ids must be numbers separated by commas")
     results = await service.global_search(
         session=session,
         search_query=query,

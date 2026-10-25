@@ -6,10 +6,23 @@ import pytest
 
 from app.api.closeout.models import EventStatus
 from app.api.events.models import EventCategories
+from app.api.finance import service as finance
 from app.api.payments.models import OrderStatus, PaymentLogs, PaymentOrders, PaymentStatus
 from tests.conftest import auth_header
 
 NOW = datetime.now(timezone.utc)
+
+
+@pytest.fixture(autouse=True)
+def _clock(monkeypatch):
+    """The service's clock is the one these tests build their dates from.
+
+    NOW is read when the module is imported, and a full run reaches these
+    tests many minutes later: a run started before midnight UTC (05:30 in
+    India) reached them after it, when the service's today -- the default
+    date of an expense, the end of the default window -- was a day (or, at
+    the end of a month, a month) past the one asserted."""
+    monkeypatch.setattr(finance, "_now", lambda: NOW)
 
 
 async def _paid(make_registration, event, user, fee, *, is_paid=True):

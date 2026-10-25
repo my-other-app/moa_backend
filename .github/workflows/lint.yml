@@ -40,6 +40,19 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      # The Redis paths -- the live room's board and stream bus, the shared
+      # cache, the rate limits' store, the document claim -- are tested
+      # against a real one, as production runs (ops/server/compose.yml).
+      # Without it those tests skip and only the fallbacks run.
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       APP_SECRET_KEY: ci-test-secret-key
       APP_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/moa_backend_test
@@ -60,6 +73,11 @@ jobs:
       APP_RAZORPAY_WEBHOOK_SECRET: test-razorpay-webhook-secret
       APP_ACCESS_TOKEN_EXPIRE_MINUTES: "15"
       APP_REFRESH_TOKEN_EXPIRE_DAYS: "7"
+      # The Redis the tests use (tests/test_redis.py, tests/test_doc_single_flight.py),
+      # each on its own database. The app's own APP_REDIS_URL stays unset:
+      # a test turns Redis on itself.
+      APP_TEST_REDIS_URL: redis://localhost:6379/13
+      APP_TEST_DOC_REDIS_URL: redis://localhost:6379/12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -76,4 +94,7 @@ jobs:
           echo /usr/lib/postgresql/17/bin >> "$GITHUB_PATH"
       - run: pg_dump --version
       - run: pip install -r requirements.txt -r requirements-dev.txt
-      - run: pytest
+      # Fails here, not as a dozen quiet skips, if the service is not up.
+      - name: Redis answers
+        run: python -c "import os, redis; assert redis.from_url(os.environ['APP_TEST_REDIS_URL'], socket_timeout=5).ping()"
+      - run: pytest -rs

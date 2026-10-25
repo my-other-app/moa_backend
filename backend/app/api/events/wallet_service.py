@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
+from app.core.utils.db_fields import IST
 from app.core.layout import pool
 from app.response import CustomHTTPException
 from app.api.events.models import Events, EventRegistrationsLink
@@ -100,7 +101,10 @@ def generate_pass_json(
 ) -> dict:
     """Generate the pass.json structure for Apple Wallet."""
     
-    # Format date/time
+    # Format date/time, in India's time whatever zone the value was read in
+    # (a value not read back from the database is still in UTC).
+    if event_datetime is not None and event_datetime.tzinfo is not None:
+        event_datetime = event_datetime.astimezone(IST)
     date_str = event_datetime.strftime("%b %d, %Y") if event_datetime else "TBA"
     time_str = event_datetime.strftime("%I:%M %p") if event_datetime else "TBA"
     iso_date = event_datetime.isoformat() if event_datetime else None

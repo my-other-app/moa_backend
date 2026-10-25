@@ -118,7 +118,12 @@ async def test_with_redis_messages_cross_processes(with_redis):
 
     sub = redis.subscribe("room:7")
     got = asyncio.ensure_future(_next(sub))
-    await asyncio.sleep(0.2)  # the shared connection subscribes
+    # The shared connection subscribes: waited for, not slept on (0.2 s was
+    # not always enough on a loaded runner).
+    for _ in range(100):
+        if redis._hub.connected:
+            break
+        await asyncio.sleep(0.05)
     assert redis._hub.connected
     # Another process publishes: this one's subscriber hears it.
     other = aioredis.from_url(URL)
@@ -128,7 +133,8 @@ async def test_with_redis_messages_cross_processes(with_redis):
     # does its own -- once, through Redis.
     theirs = other.pubsub()
     await theirs.subscribe("moa:ch:room:7")
-    await asyncio.sleep(0.05)
+    # Redis has the subscription once it confirms it.
+    assert (await theirs.get_message(timeout=5.0))["type"] == "subscribe"
     mine = asyncio.ensure_future(_next(sub))
     await redis.publish("room:7", {"from": "here"})
     assert await mine == {"from": "here"}

@@ -322,7 +322,9 @@ async def get_notification_history(
         read = g["read_count"]
         read_pct = round((read / sent * 100), 1) if sent > 0 else 0
         
-        unique_id = f"{g['event_id']}-{idx}"
+        # The place in the whole list, not the page: two sends of one event
+        # on different pages had the same id.
+        unique_id = f"{g['event_id']}-{offset + idx}"
         
         items.append(NotificationHistoryItem(
             id=unique_id,

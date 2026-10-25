@@ -387,7 +387,10 @@ async def list_events(
         from app.api.users import service as user_service
 
         await user_service.merge_guests_now(session, user)
-    interest_ids = [int(i) for i in interest_ids.split(",")] if interest_ids else []
+    try:
+        interest_ids = [int(i) for i in interest_ids.split(",")] if interest_ids else []
+    except ValueError:
+        raise CustomHTTPException(422, message="interest_ids must be numbers separated by commas")
     events = await service.list_events(
         session=session,
         user_id=user.id if user else None,
