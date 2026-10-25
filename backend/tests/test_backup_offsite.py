@@ -135,6 +135,9 @@ def test_a_weekly_upload_is_noted(offsite_on, tmp_path):
 
 def test_scrub_hides_every_credential(monkeypatch):
     monkeypatch.setattr(settings, "BACKUP_S3_SECRET_KEY", SECRET)
+    # Both URLs: scrub() masks the password of each, wherever it appears. Left
+    # to the environment, CI's password ("postgres") would mask the host below.
+    monkeypatch.setattr(settings, "DATABASE_URL", "postgresql+asyncpg://moa:pa%24%24word-123@postgres:5432/moa")
     monkeypatch.setattr(settings, "DATABASE_URL_SYNC", "postgresql://moa:pa%24%24word-123@postgres:5432/moa")
     text = (
         f"boom {SECRET} postgresql://moa:pa%24%24word-123@postgres:5432/moa "
