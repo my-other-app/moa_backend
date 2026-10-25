@@ -204,6 +204,7 @@ LOOPS = [
          kwargs={}, setup=_doc_cache_on, runs=("doc_cache_sweep",), stub=_DOC_CACHE_DONE),
     Loop("club whatsapp", "app.api.club_whatsapp.sweep", "sweep_loop", lock_keys.CLUB_WHATSAPP_SWEEP, [("app.api.club_whatsapp.sweep", "sweep")]),
     Loop("club mailbox", "app.api.club_mailbox.sweep", "sweep_loop", lock_keys.CLUB_MAILBOX_SWEEP, [("app.api.club_mailbox.sweep", "sweep")]),
+    Loop("waiting lists", "app.api.ticketing.sweep", "sweep_loop", lock_keys.WAITLIST_SWEEP, [("app.api.ticketing.waitlist", "expire")]),
     Loop("popularity", "app.api.discover.counters", "check_loop", lock_keys.DISCOVER_POPULARITY, [("app.api.discover.popularity", "refresh")]),
     Loop("counters", "app.api.discover.counters", "check_loop", lock_keys.DISCOVER_COUNTERS,
          [("app.api.discover.counters", "reconcile"), ("app.api.discover.counters", "reconcile_more")], runs=("counters", "counters-posts")),
