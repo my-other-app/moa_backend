@@ -183,6 +183,32 @@ def parse_store_item_ids(raw: Optional[str]) -> Optional[list[str]]:
     return value
 
 
+def parse_interest_ids(raw: Optional[str]) -> list[int]:
+    """The form's `interest_ids`: comma-separated ids ("3,7"). A JSON array
+    ("[3,7]") is read too, since the field's default always was "[]"; nothing,
+    "" and "[]" are no interests. Never None: an edit that removed every
+    interest is a list to save, not a missing one (the update loops over it)."""
+    text = (raw or "").strip()
+    if not text:
+        return []
+    try:
+        if text.startswith("["):
+            value = json.loads(text)
+            if not isinstance(value, list):
+                raise ValueError
+            return [int(x) for x in value]
+        return [int(x) for x in text.split(",") if x.strip()]
+    except (ValueError, TypeError, json.JSONDecodeError):
+        raise CustomHTTPException(
+            status_code=400,
+            message="Invalid interest_ids format, expected comma seperated integers",
+        )
+
+
+#: The events.event_tag column's width.
+EVENT_TAG_MAX = 50
+
+
 class EventCreate:
     def __init__(
         self,
@@ -222,7 +248,7 @@ class EventCreate:
         max_participants: Optional[int] = Form(None),
         additional_details: Optional[str] = Form("[]"),  # JSON string
         event_guidelines: Optional[str] = Form(None),
-        event_tag: Optional[str] = Form(None),  # Event tag like "Free", "Paid", etc.
+        event_tag: Optional[str] = Form(None, max_length=EVENT_TAG_MAX),  # Event tag like "Free", "Paid", etc.
         speakers: Optional[str] = Form("[]"),  # JSON array of speakers
         ticket_template_id: Optional[int] = Form(None),
         certificate_template_id: Optional[int] = Form(None),
@@ -256,15 +282,7 @@ class EventCreate:
         self.url = url
         self.category_id = category_id
         self.club_id = club_id
-        try:
-            self.interest_ids = (
-                [int(x) for x in interest_ids.split(",")] if interest_ids else None
-            )
-        except Exception:
-            raise CustomHTTPException(
-                status_code=400,
-                message="Invalid interest_ids format, expected comma seperated integers",
-            )
+        self.interest_ids = parse_interest_ids(interest_ids)
         self.max_participants = max_participants
         self.event_guidelines = event_guidelines
         self.event_tag = event_tag
@@ -344,7 +362,7 @@ class EventEdit(EventCreate):
         additional_details: Optional[str] = Form("[]"),  # JSON string
         event_guidelines: Optional[str] = Form(None),
         max_participants: Optional[int] = Form(None),
-        event_tag: Optional[str] = Form(None),
+        event_tag: Optional[str] = Form(None, max_length=EVENT_TAG_MAX),
         speakers: Optional[str] = Form("[]"),
         ticket_template_id: Optional[int] = Form(None),
         certificate_template_id: Optional[int] = Form(None),
@@ -532,6 +550,9 @@ class EventListResponseSelf(CustomBaseModel):
     duration: float = Field(...)
     location_name: str | None = Field(None)
     has_fee: bool = Field(...)
+    # The ticket price, for the list's "₹200 entry"; without it every paid
+    # event read "Free" there.
+    reg_fee: float | None = Field(None)
     has_prize: bool = Field(True)
     prize_amount: float | None = Field(None)
     is_online: bool | None = Field(False)
@@ -630,6 +651,8 @@ class EventDetailResponse(CustomBaseModel):
     contact_email: str | None = Field(None)
     url: str | None = Field(None)
     event_guidelines: str | None = Field(None)
+    #: The organiser's label ("Workshop", "Members only"), for the edit form.
+    event_tag: str | None = Field(None)
     max_participants: int | None = Field(None)
     page_views: int = Field(0)
     #: The status clock, so the console can say "draft" or "closed" without a second call.
