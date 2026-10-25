@@ -152,6 +152,78 @@ async def test_with_redis_messages_cross_processes(with_redis):
     await sub.aclose()
 
 
+class _SlowToConfirm:
+    """A Redis whose subscription reply comes only when the test says: the
+    moment between sending PSUBSCRIBE and Redis having it."""
+
+    def __init__(self):
+        self.confirm = asyncio.Event()
+        self.published: list = []
+        self.confirmed = False
+
+    def pubsub(self, **_kw):
+        outer = self
+
+        class PubSub:
+            async def psubscribe(self, pattern):
+                assert pattern == "moa:ch:*"
+
+            async def get_message(self, timeout=0.0, **_kw):
+                if not outer.confirmed:
+                    try:
+                        await asyncio.wait_for(outer.confirm.wait(), timeout)
+                    except asyncio.TimeoutError:
+                        return None
+                    outer.confirmed = True
+                    return {"type": "psubscribe", "pattern": None, "channel": b"moa:ch:*", "data": 1}
+                await asyncio.sleep(timeout or 0)
+                return None
+
+            async def aclose(self):
+                pass
+
+        return PubSub()
+
+    async def publish(self, channel, data):
+        self.published.append((channel, data))
+        # Redis counts receivers: none until the subscription is confirmed.
+        return 1 if self.confirmed else 0
+
+
+async def test_this_process_counts_as_listening_only_once_redis_confirms(monkeypatch):
+    """Until Redis replies to PSUBSCRIBE, a message published through it
+    passes this process by, so `publish` hands it to the subscribers here
+    itself. `connected` used to be set as the command was sent: a publish in
+    that moment reached no subscriber in this process at all."""
+    fake = _SlowToConfirm()
+    monkeypatch.setattr(settings, "REDIS_URL", "redis://fake:6379/0")
+    redis.reset_for_tests()
+    monkeypatch.setattr(redis, "client", lambda: fake)
+    sub = redis.subscribe("room:3")
+    try:
+        await asyncio.sleep(0.05)
+        assert redis._hub.task is not None and not redis._hub.task.done()
+        assert redis._hub.connected is False
+        # Sent to Redis, which has no subscription from here yet: heard here directly.
+        await redis.publish("room:3", {"early": True})
+        assert fake.published and await _next(sub, timeout=1.0) == {"early": True}
+
+        fake.confirm.set()
+        for _ in range(100):
+            if redis._hub.connected:
+                break
+            await asyncio.sleep(0.01)
+        assert redis._hub.connected is True
+        # Confirmed: through Redis only, not twice.
+        await redis.publish("room:3", {"late": True})
+        with pytest.raises(asyncio.TimeoutError):
+            await _next(sub, timeout=0.1)
+    finally:
+        await sub.aclose()
+        await redis._hub.stop()
+        redis.reset_for_tests()
+
+
 async def test_with_redis_down_publish_falls_back_and_nothing_raises(redis_down):
     sub = redis.subscribe("room:9")
     got = asyncio.ensure_future(_next(sub))

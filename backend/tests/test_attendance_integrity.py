@@ -84,49 +84,116 @@ def _scans_of(node, table):
         yield from _scans_of(child, table)
 
 
+#: Every table a scan's statements read, with the check after it (the guest's
+#: note and badges, the club's badges): ANALYZEd by a_platform_sized_table, so
+#: no plan in these tests rests on what autovacuum last measured.
+PLANNED = (
+    "event_registrations_link", "events", "clubs", "users", "check_ins", "doors",
+    "badge_definitions", "user_badges", "club_badges", "notifications",
+)
+
+
+async def _analyze(session) -> None:
+    for table in PLANNED:
+        await session.execute(text(f"ANALYZE {table}"))
+
+
 @asynccontextmanager
-async def a_platform_sized_table(session, make_club, make_event, rows: int = 1500):
-    """Registrations as many as a real platform holds, the table ANALYZEd, for
-    a test that reads query plans.
+async def a_platform_sized_table(session, make_club, make_event, rows: int = 1500, events: int = 300):
+    """A platform's worth of rows around the test's world, every table the
+    scan reads ANALYZEd, for a test that reads query plans.
 
-    On the few rows a test makes, every plan costs the same: with sequential
-    scans priced out, a walk of a whole index that filters each row (one
-    that reads every registration on the platform) and a probe of the
-    ticket's unique index both came to 8.15, and the planner took either,
-    depending on what autovacuum had last measured. On a table this size
-    the probe is far cheaper and the walk never wins, as in production.
+    The plans of a world of a few rows are ties, and the planner broke them
+    by whatever it had last been told, which the test did not decide:
 
-    The rows are the test's own (rolled back with it); ANALYZE's figures for
-    the table are not, so they are measured again without the rows before
-    the test ends."""
+    - On a few registrations a walk of a whole index that filters each row
+      and a probe of the ticket's unique index both came to 8.15; the
+      planner took either, by what autovacuum had last measured (#113 gave
+      registrations their platform's size).
+    - The check after a check-in reads registrations once more, joined to
+      the events, to count the club's attended guests -- but only while the
+      club has a badge still to earn (badges.service._get_club_metrics). So
+      whether that read was there at all hung on the badge definitions in
+      the database. When it was, the club held half the events there were,
+      and the events table's statistics were autovacuum's: the planner read
+      registrations through a bitmap -- by event, or over every live row.
+
+    So the world here is decided by the test: 300 other events (the club
+    holds 2 of 302), 1,500 other registrations spread over them, half of
+    them attended, a club badge always still to earn, and every table in
+    PLANNED ANALYZEd. Production's shape, where the probes win by far.
+
+    The rows are the test's own (rolled back with it); ANALYZE's figures
+    are not, so the tables are measured again without them before the test
+    ends."""
+    from app.api.badges.models import BadgeDefinitions, BadgeType
+
     owner, club = await make_club(name="Elsewhere", email="filler-club@example.com")
-    filler = await make_event(club=club, created_by=owner, name="Somewhere Else", event_datetime=START - timedelta(days=30))
+    first = await make_event(club=club, created_by=owner, name="Somewhere Else", event_datetime=START - timedelta(days=30))
+    others = list((await session.scalars(
+        insert(Events).returning(Events.id),
+        [dict(slug=f"filler-night-{i}-{uuid.uuid4().hex[:8]}", name=f"Filler Night {i}", images=[], duration=2.0,
+              event_datetime=START - timedelta(days=30 + i % 90), club_id=club.id, category_id=first.category_id) for i in range(1, events)],
+    )).all())
+    filler_events = [first.id, *others]
     users = list((await session.scalars(
         insert(Users).returning(Users.id),
         [dict(full_name=f"Filler {i}", username=f"filler-{i}", email=f"filler-{i}@example.com", user_type=UserTypes.app_user) for i in range(rows)],
     )).all())
     await session.execute(
         insert(EventRegistrationsLink),
-        [dict(event_id=filler.id, user_id=u, full_name="Filler", email=f"filler-{u}@example.com", ticket_id=generate_ticket_id()) for u in users],
+        [dict(event_id=filler_events[i % len(filler_events)], user_id=u, full_name="Filler", email=f"filler-{u}@example.com",
+              ticket_id=generate_ticket_id(), is_attended=i % 2 == 0) for i, u in enumerate(users)],
     )
-    await session.execute(text("ANALYZE event_registrations_link"))
+    # A badge the world's club has still to earn, as clubs on a platform do:
+    # the check after a check-in then always counts the club's guests.
+    badge = BadgeDefinitions(slug=f"filler-crowd-{uuid.uuid4().hex[:8]}", name="Crowd", description="A thousand in", emoji="*",
+                             badge_type=BadgeType.club, trigger_metric="total_attendees", threshold=1000)
+    session.add(badge)
+    await session.flush()
+    await _analyze(session)
     try:
         yield
     finally:
-        await session.execute(delete(EventRegistrationsLink).where(EventRegistrationsLink.event_id == filler.id))
-        await session.execute(text("ANALYZE event_registrations_link"))
+        await session.execute(delete(EventRegistrationsLink).where(EventRegistrationsLink.event_id.in_(filler_events)))
+        await session.execute(delete(Events).where(Events.id.in_(others)))
+        await session.execute(delete(Users).where(Users.id.in_(users)))
+        await session.execute(delete(BadgeDefinitions).where(BadgeDefinitions.id == badge.id))
+        await _analyze(session)
 
 
-async def probes_registrations_by_key(session, statements, keys=("ticket_id", "(id =", "event_id", "user_id")) -> int:
+KEYS = ("ticket_id", "(id =", "event_id", "user_id")
+
+
+def _probes_by_key(scan, keys=KEYS) -> bool:
+    """A read of a table by one of `keys` through an index: an index scan
+    whose condition names one, or a bitmap whose every index scan does. Not
+    a sequential scan, and not a walk of an index filtering every row."""
+    if scan["Node Type"] in ("Index Scan", "Index Only Scan"):
+        return any(k in scan.get("Index Cond", "") for k in keys)
+    if scan["Node Type"] == "Bitmap Heap Scan":
+        def index_scans(node):
+            if node["Node Type"] == "Bitmap Index Scan":
+                yield node
+            for child in node.get("Plans", []):
+                yield from index_scans(child)
+
+        found = list(index_scans(scan))
+        return bool(found) and all(any(k in n.get("Index Cond", "") for k in keys) for n in found)
+    return False
+
+
+async def probes_registrations_by_key(session, statements, keys=KEYS) -> int:
     """EXPLAIN every statement that reads registrations, with sequential
     scans priced out, and require each read of the table to be an index probe
-    on the code looked for or on the event -- not a sequential scan, and not
-    a walk of some other index (is_deleted's, say) filtering every row on the
-    platform. Run on a_platform_sized_table: on a table of a few rows a walk
-    and a probe cost the same. (The planner may take the event's index over
-    the ticket's: both are one event's rows at most; the probe for another
-    event's ticket has only the ticket's. The guest's badges, checked after
-    the answer, read their own registrations by user.)"""
+    on the code looked for, the event, the guest or the row -- not a
+    sequential scan, and not a walk of some other index (is_deleted's, say)
+    filtering every row on the platform. Run on a_platform_sized_table: on a
+    world of a few rows a walk and a probe cost the same. (The planner may
+    take the event's index over the ticket's: both are one event's rows at
+    most; the probe for another event's ticket has only the ticket's. The
+    guest's badges, checked after the answer, read their own registrations
+    by user; the club's, its attended guests event by event.)"""
     import json
 
     await session.execute(text("SET LOCAL enable_seqscan = off"))
@@ -138,8 +205,7 @@ async def probes_registrations_by_key(session, statements, keys=("ticket_id", "(
         raw = (await conn.exec_driver_sql("EXPLAIN (FORMAT JSON) " + statement, parameters)).scalar()
         plan = (raw if isinstance(raw, list) else json.loads(raw))[0]["Plan"]
         for scan in _scans_of(plan, "event_registrations_link"):
-            cond = scan.get("Index Cond", "")
-            assert scan["Node Type"] in ("Index Scan", "Index Only Scan") and any(k in cond for k in keys), f"{statement}\n{json.dumps(scan, indent=1)}"
+            assert _probes_by_key(scan, keys), f"{statement}\n{json.dumps(scan, indent=1)}"
             probed += 1
     return probed
 
@@ -190,7 +256,9 @@ async def test_a_scan_reads_registrations_only_through_an_index(client, session,
         with captured(session) as hit:
             ok = await client.post(url, json=_scan(world["a"].ticket_id.lower()), headers=world["h"])
         assert ok.json()["outcome"] == "CHECKED_IN"
-        assert await probes_registrations_by_key(session, hit), "the scan read no registrations?"
+        # The ticket, then after the answer the guest's registrations and the club's attended guests.
+        assert any("JOIN events" in st and "is_attended" in st for st, _ in hit), "the club's badges were not checked?"
+        assert await probes_registrations_by_key(session, hit) >= 3, "the scan read no registrations?"
         # A miss on this event looks for the code elsewhere (WRONG_EVENT), on the same index.
         with captured(session) as hit:
             wrong = await client.post(url, json=_scan(world["c"].ticket_id), headers=world["h"])
