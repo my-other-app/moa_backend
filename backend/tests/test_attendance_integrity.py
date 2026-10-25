@@ -22,11 +22,11 @@ import logging
 import re
 import threading
 import uuid
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import delete, event as sa_event, func, select, text, update
+from sqlalchemy import delete, event as sa_event, func, insert, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -84,16 +84,49 @@ def _scans_of(node, table):
         yield from _scans_of(child, table)
 
 
+@asynccontextmanager
+async def a_platform_sized_table(session, make_club, make_event, rows: int = 1500):
+    """Registrations as many as a real platform holds, the table ANALYZEd, for
+    a test that reads query plans.
+
+    On the few rows a test makes, every plan costs the same: with sequential
+    scans priced out, a walk of a whole index that filters each row (one
+    that reads every registration on the platform) and a probe of the
+    ticket's unique index both came to 8.15, and the planner took either,
+    depending on what autovacuum had last measured. On a table this size
+    the probe is far cheaper and the walk never wins, as in production.
+
+    The rows are the test's own (rolled back with it); ANALYZE's figures for
+    the table are not, so they are measured again without the rows before
+    the test ends."""
+    owner, club = await make_club(name="Elsewhere", email="filler-club@example.com")
+    filler = await make_event(club=club, created_by=owner, name="Somewhere Else", event_datetime=START - timedelta(days=30))
+    users = list((await session.scalars(
+        insert(Users).returning(Users.id),
+        [dict(full_name=f"Filler {i}", username=f"filler-{i}", email=f"filler-{i}@example.com", user_type=UserTypes.app_user) for i in range(rows)],
+    )).all())
+    await session.execute(
+        insert(EventRegistrationsLink),
+        [dict(event_id=filler.id, user_id=u, full_name="Filler", email=f"filler-{u}@example.com", ticket_id=generate_ticket_id()) for u in users],
+    )
+    await session.execute(text("ANALYZE event_registrations_link"))
+    try:
+        yield
+    finally:
+        await session.execute(delete(EventRegistrationsLink).where(EventRegistrationsLink.event_id == filler.id))
+        await session.execute(text("ANALYZE event_registrations_link"))
+
+
 async def probes_registrations_by_key(session, statements, keys=("ticket_id", "(id =", "event_id", "user_id")) -> int:
     """EXPLAIN every statement that reads registrations, with sequential
     scans priced out, and require each read of the table to be an index probe
     on the code looked for or on the event -- not a sequential scan, and not
     a walk of some other index (is_deleted's, say) filtering every row on the
-    platform. (On tables this small the planner may take the event's index
-    over the ticket's; on a real one the ticket's unique index wins. Both are
-    one event's rows at most; the probe for another event's ticket has only
-    the ticket's. The guest's badges, checked after the answer, read their
-    own registrations by user.)"""
+    platform. Run on a_platform_sized_table: on a table of a few rows a walk
+    and a probe cost the same. (The planner may take the event's index over
+    the ticket's: both are one event's rows at most; the probe for another
+    event's ticket has only the ticket's. The guest's badges, checked after
+    the answer, read their own registrations by user.)"""
     import json
 
     await session.execute(text("SET LOCAL enable_seqscan = off"))
@@ -151,19 +184,20 @@ def _scan(code, ref=None):
 # ─── 1. The scan reads one event, off an index ────────────────────────────
 
 
-async def test_a_scan_reads_registrations_only_through_an_index(client, session, world):
+async def test_a_scan_reads_registrations_only_through_an_index(client, session, world, make_club, make_event):
     url = f"{API}/events/{world['event'].id}/gate/scan"
-    with captured(session) as hit:
-        ok = await client.post(url, json=_scan(world["a"].ticket_id.lower()), headers=world["h"])
-    assert ok.json()["outcome"] == "CHECKED_IN"
-    assert await probes_registrations_by_key(session, hit), "the scan read no registrations?"
-    # A miss on this event looks for the code elsewhere (WRONG_EVENT), on the same index.
-    with captured(session) as hit:
-        wrong = await client.post(url, json=_scan(world["c"].ticket_id), headers=world["h"])
-        nothing = await client.post(url, json=_scan("MOA-NOPE0-00000"), headers=world["h"])
-    assert wrong.json()["outcome"] == "WRONG_EVENT" and wrong.json()["other_event"]["name"] == "Demo Day"
-    assert nothing.json()["outcome"] == "INVALID"
-    assert await probes_registrations_by_key(session, hit) >= 4
+    async with a_platform_sized_table(session, make_club, make_event):
+        with captured(session) as hit:
+            ok = await client.post(url, json=_scan(world["a"].ticket_id.lower()), headers=world["h"])
+        assert ok.json()["outcome"] == "CHECKED_IN"
+        assert await probes_registrations_by_key(session, hit), "the scan read no registrations?"
+        # A miss on this event looks for the code elsewhere (WRONG_EVENT), on the same index.
+        with captured(session) as hit:
+            wrong = await client.post(url, json=_scan(world["c"].ticket_id), headers=world["h"])
+            nothing = await client.post(url, json=_scan("MOA-NOPE0-00000"), headers=world["h"])
+        assert wrong.json()["outcome"] == "WRONG_EVENT" and wrong.json()["other_event"]["name"] == "Demo Day"
+        assert nothing.json()["outcome"] == "INVALID"
+        assert await probes_registrations_by_key(session, hit) >= 4
 
 
 async def test_an_admission_number_is_unique_on_its_event_in_any_case(session, world, make_user, make_registration):

@@ -121,7 +121,10 @@ async def test_a_capture_is_posted_with_what_it_bought_and_summed(session, rzp, 
     # Nothing left unapplied: every rupee taken paid for the ticket.
     assert await _balance(session, "unapplied", registration_id=reg.id) == 0
 
-    month = book.month_of(NOW)
+    # The month the capture was posted in (India's), not NOW's: NOW is read
+    # at import, and a run that crosses 18:30 UTC on a month's last day
+    # posts into the next month.
+    month = book.month_of(capture[0].occurred_at)
     rows = {(r.account, r.kind): (r.amount_paise, r.units, r.entries) for r in (await session.scalars(
         select(LedgerMonthly).where(LedgerMonthly.event_id == event.id)
     )).all()}
