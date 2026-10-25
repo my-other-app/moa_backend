@@ -120,6 +120,8 @@ async def add_volunteer(
                     event_id=event_id,
                     event_name=event.name,
                     club_name=event.club.name,
+                    # The inbox line shows the club it came from (from_club).
+                    club_id=event.club_id,
                 )
         except Exception as e:
             import logging
