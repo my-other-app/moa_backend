@@ -342,5 +342,10 @@ async def test_an_offer_reaches_the_app_and_whatsapp_too(client, session, line, 
     (number, template, meter), = texted
     assert number == "9822222222" and template.name == "waitlist_offer" and template.button == offered.offer_token
     assert template.body[0] == "App" and template.body[1] == "Line Night" and template.body[2] == "Seat"
-    assert meter["club_id"] == line.club.id and meter["kind"] == "waitlist"
+    assert meter["club_id"] == line.club.id and meter["kind"] == "ticket"
     assert [m["recipients"] for m in line.mail] == [["app-offer@example.com"]]
+    # The email is the club's message too: counted once, as a ticket's would be.
+    from app.api.message_quota.models import MessageUsage
+
+    usage = await session.scalar(select(MessageUsage).where(MessageUsage.club_id == line.club.id, MessageUsage.channel == "email"))
+    assert usage is not None and usage.used == 1 and (usage.kinds or {}).get("ticket") == 1

@@ -323,10 +323,10 @@ async def fill(session, event_id: int, *, now: Optional[datetime] = None) -> lis
     if event is None:
         await session.commit()
         return []
-    if event.is_deleted or (
+    if event.is_deleted or getattr(event.lifecycle, "value", event.lifecycle) == "cancelled" or (
         event.event_datetime is not None and event.event_datetime + timedelta(hours=event.duration or 0) <= now
     ):
-        # Over, or gone: its line is closed, and the sweep stops coming back to it.
+        # Over, cancelled or gone: its line is closed, and the sweep stops coming back to it.
         W = WaitlistEntries
         await session.execute(
             update(W).where(W.event_id == event.id, W.status.in_(OPEN_STATUSES)).values(status=EXPIRED, closed_at=now, updated_at=now)
@@ -543,10 +543,19 @@ def offer_template(*, name: str, event: str, ticket: str, until: str, token: str
     )
 
 
+#: What an offer counts as against the club's messages (app/api/message_quota):
+#: a message about a ticket the person asked for -- the plan's allowance,
+#: then the club's credits, and, like a ticket, never held back when both
+#: are used up (a place nobody hears about would go to waste).
+MESSAGE_KIND = "ticket"
+
+
 @jobs.handler("waitlist.offer", max_attempts=4, timeout=120.0, priority=jobs.HIGH)
 async def _offer_job(p: dict) -> None:
     """One offer, told: email (retried until it goes), then a push and a
-    WhatsApp message, each once and best effort."""
+    WhatsApp message, each once and best effort. The email and the WhatsApp
+    message are counted as the club's messages (MESSAGE_KIND), so its plan's
+    allowance and its prepaid credits pay for them as for a ticket."""
     import uuid
 
     async with jobs.scope() as session:
@@ -582,7 +591,7 @@ async def _offer_job(p: dict) -> None:
             try:
                 from app.api.message_quota import service as quota
 
-                await quota.count(session, club_id=event.club_id, channel=quota.EMAIL, kind="waitlist", ref=f"{ref}:email")
+                await quota.count(session, club_id=event.club_id, channel=quota.EMAIL, kind=MESSAGE_KIND, ref=f"{ref}:email")
                 await session.commit()
             except Exception:  # noqa: BLE001
                 await session.rollback()
@@ -604,7 +613,7 @@ async def _offer_job(p: dict) -> None:
                     await whatsapp.send(
                         entry.phone,
                         offer_template(name=entry.full_name, event=event.name, ticket=ttype.name, until=until, token=entry.offer_token),
-                        meter={"club_id": event.club_id, "kind": "waitlist", "ref": f"{ref}:whatsapp"},
+                        meter={"club_id": event.club_id, "kind": MESSAGE_KIND, "ref": f"{ref}:whatsapp"},
                     )
                 except Exception:  # noqa: BLE001
                     logger.warning("waitlist offer %s: WhatsApp could not be sent", entry.id, exc_info=True)
