@@ -113,7 +113,9 @@ async def test_the_statement_file_has_every_line_and_the_running_balance(client,
     club_id = shop["club"].id
     await client.post(f"{API}/admin/payouts/clubs/{club_id}",
                       json={"amount": "200", "paid_on": date.today().isoformat(), "reference": "UTR-CSV"}, headers=h["owner"])
-    r = await client.get(f"{API}/admin/payouts/clubs/{club_id}/statement.csv", headers=h["viewer"])
+    for role in ("viewer", "support"):
+        assert (await client.get(f"{API}/admin/payouts/clubs/{club_id}/statement.csv", headers=h[role])).status_code == 403
+    r = await client.get(f"{API}/admin/payouts/clubs/{club_id}/statement.csv", headers=h["owner"])
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/csv")
     rows = list(csv.DictReader(io.StringIO(r.text)))
     kinds = [row["type"] for row in rows]

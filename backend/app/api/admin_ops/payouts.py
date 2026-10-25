@@ -23,8 +23,9 @@ LEDGER_READS off -- so the figures are there whether or not the money
 ledger has been backfilled. A payment taken through a club's own account
 (`payment_gateway_id`) is the club's already and never counts here.
 
-Reading is for every admin; recording or voiding a payout, and fetching the
-fees, needs MANAGE_MONEY and is in the admin audit log.
+Reading is for every admin and the statement file needs EXPORT_DATA;
+recording or voiding a payout, and fetching the fees, needs MANAGE_MONEY and
+is in the admin audit log.
 """
 from __future__ import annotations
 
@@ -48,7 +49,7 @@ from app.api.payments.models import PaymentLogs, PaymentOrders, PaymentStatus
 from app.api.users.models import Users
 from app.core import jobs, money
 from app.core.auth.dependencies import AdminAuth
-from app.core.auth.permissions import MoneyAuth
+from app.core.auth.permissions import ExportDataAuth, MoneyAuth
 from app.db.core import SessionDep
 from app.response import CustomHTTPException
 
@@ -350,14 +351,15 @@ def _csv(rows: list[list]) -> str:
     return buf.getvalue()
 
 
-@router.get("/clubs/{club_id}/statement.csv", summary="One club's statement as a CSV file (admin)")
+@router.get("/clubs/{club_id}/statement.csv", summary="One club's statement as a CSV file (export)")
 async def club_statement_csv(
-    club_id: int, session: SessionDep, user: AdminAuth,
+    club_id: int, session: SessionDep, user: ExportDataAuth,
     frm: Optional[date] = Query(None, alias="from"), to: Optional[date] = Query(None),
 ) -> Response:
     """Every line that moved the club's balance, oldest first, with the
     running balance: a payment's gross in, its fee, a refund, a chargeback
-    and a payout out. No guest's name or address: payment ids only."""
+    and a payout out. No guest's name or address: payment ids only. An
+    export, so EXPORT_DATA, as an event's finance statement is."""
     club = await _club(session, club_id)
     lines: list[tuple] = []
     for r in (await session.execute(payments_query(club_id, frm=frm, to=to))).all():
@@ -479,7 +481,7 @@ async def fetch_fees(session: SessionDep, user: MoneyAuth, request: Request) -> 
     return {"missing": missing, "queued": min(missing, FEE_BATCH)}
 
 
-@jobs.handler("admin_ops.fetch_fees", max_attempts=3, timeout=600.0, priority=jobs.LOW)
+@jobs.handler("admin_ops.fetch_fees", max_attempts=3, timeout=600.0, concurrency=1, priority=jobs.LOW)
 async def _fetch_fees_job(p: dict) -> None:
     async with jobs.scope() as s:
         written = await fetch_fee_batch(s, limit=int(p.get("limit") or FEE_BATCH))

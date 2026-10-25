@@ -82,6 +82,8 @@ FILTERS: dict[str, str] = {
     "admin_audit_logs": f"actor_id IN ({ADMINS})",
     # The event types the product ships (no author) and any an admin added; not the clubs' own.
     "event_categories": f"created_by_id IS NULL OR created_by_id IN ({ADMINS})",
+    # The admins' own invitations (app/api/admin_ops).
+    "admin_invites": f"user_id IN ({ADMINS})",
 }
 
 #: Every table in the database, and what happens to it.
@@ -103,10 +105,18 @@ CLASSIFICATION: dict[str, str] = {
     # When each sweep last ran, and the job runners' heartbeats.
     "scheduled_runs": KEEP,
     "job_workers": KEEP,
+    # The runtime settings an owner set in the admin portal (app/api/admin_ops).
+    "platform_settings": KEEP,
     # ── Kept in part: the admins and what they sign in with ──
     **{name: FILTERED for name in FILTERS},
     # ── Wiped: everything clubs, people and their events made ──
     "admin_notifications": WIPE,
+    # Money owed to and paid to clubs, Razorpay's fees, an admin's partial
+    # refunds and disputes: every row is a club's or a guest's (app/api/admin_ops).
+    "club_payouts": WIPE,
+    "payment_fees": WIPE,
+    "payment_refunds": WIPE,
+    "payment_disputes": WIPE,
     "after_commit_jobs": WIPE,
     # Colleges and companies: what people and clubs belonged to.
     "organizations": WIPE,

@@ -100,6 +100,12 @@ def start_settings_loop() -> asyncio.Task:
     return asyncio.create_task(refresh_loop())
 
 
+async def stop_settings_loop(task: asyncio.Task) -> None:
+    """It holds nothing: cancelled at once, before the loops' own shutdown."""
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # The production settings check (app/core/config_checks.py): under
@@ -126,7 +132,7 @@ async def lifespan(app: FastAPI):
     loops = [] if settings.SWEEPS_IN_WORKER else start_loops()
     # The runtime settings an owner changes from the portal (app/api/admin_ops/runtime.py):
     # read now and every few seconds after, in every process.
-    loops.append(start_settings_loop())
+    settings_loop = start_settings_loop()
     # The jobs this process writes, run as soon as they commit -- unless the
     # worker runs them (APP_JOBS_WORKER), when this process only writes them.
     from app.core import jobs
@@ -143,6 +149,7 @@ async def lifespan(app: FastAPI):
     gc.collect()
     gc.freeze()
     yield
+    await stop_settings_loop(settings_loop)
     await shutdown(loops, runner=runner)
 
 
