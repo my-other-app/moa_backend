@@ -46,6 +46,9 @@ class ClubMembers(AbstractSQLModel, TimestampsMixin):
     #: inbox and its templates (app/api/club_whatsapp). Whatever the role,
     #: only the owner gives it; message content is for those who have it.
     whatsapp = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    #: The Mail permission: reads, answers and sends from the club's mailbox
+    #: (app/api/club_mailbox). Whatever the role, only the owner gives it.
+    mail = Column(Boolean, nullable=False, default=False, server_default=text("false"))
 
     __table_args__ = (
         Index("uq_club_members_live_email", "email", unique=True, postgresql_where=text("status <> 'removed'")),

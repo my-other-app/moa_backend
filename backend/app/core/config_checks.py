@@ -326,6 +326,32 @@ def _warnings(settings) -> list[Problem]:
     if any(_text(o) == "*" for o in listed):
         out.append(Problem("CORS_ORIGINS", "includes *: any site may call the API from a browser", fatal=False))
     out.extend(_embedded_signup(settings))
+    out.extend(_club_mailbox(settings))
+    return out
+
+
+#: What clubs' mailboxes need to receive (app/api/club_mailbox, OPERATIONS section 23).
+CLUB_MAILBOX_NEEDS = ("MAILBOX_DOMAIN", "MAILBOX_INBOUND_BUCKET", "MAILBOX_SNS_TOPIC_ARN", "MAILBOX_RECEIVING_REGION")
+
+
+def _club_mailbox(settings) -> list[Problem]:
+    """Warnings only: with one missing, mail to clubs' addresses can't be
+    read (it waits in the bucket, or its notification is refused); sending
+    still works once the domain is verified in SES."""
+    if not _get(settings, "CLUB_MAILBOX"):
+        return []
+    out = [
+        Problem(name, "is empty while APP_CLUB_MAILBOX is on: mail to clubs' addresses can't be received", fatal=False)
+        for name in CLUB_MAILBOX_NEEDS if not _text(_get(settings, name))
+    ]
+    topic = _text(_get(settings, "MAILBOX_SNS_TOPIC_ARN"))
+    if topic and not topic.startswith("arn:aws:sns:"):
+        out.append(Problem("MAILBOX_SNS_TOPIC_ARN", "is not an SNS topic's ARN (arn:aws:sns:<region>:<account>:<name>)", fatal=False))
+    region = _text(_get(settings, "MAILBOX_RECEIVING_REGION"))
+    if topic.startswith("arn:aws:sns:") and region and topic.split(":")[3:4] != [region]:
+        out.append(Problem("MAILBOX_SNS_TOPIC_ARN", "is not in APP_MAILBOX_RECEIVING_REGION: SES tells only a topic in its own region", fatal=False))
+    if _text(_get(settings, "MAIL_PROVIDER")).lower() == "resend":
+        out.append(Problem("MAIL_PROVIDER", "is resend: clubs' mail goes through Resend, which must have APP_MAILBOX_DOMAIN verified too", fatal=False))
     return out
 
 

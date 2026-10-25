@@ -55,6 +55,8 @@ SEARCH_SYNC = 773_140
 DOC_CACHE_SWEEP = 773_151
 #: Clubs' own WhatsApp numbers: quality checks and retention (app/api/club_whatsapp/sweep.py).
 CLUB_WHATSAPP_SWEEP = 773_160
+#: Clubs' mailboxes: plan lapses, retention, old addresses (app/api/club_mailbox/sweep.py).
+CLUB_MAILBOX_SWEEP = 773_170
 #: The job queue's maintenance pass (app/core/jobs.py).
 JOBS_MAINTENANCE = 774_501
 #: The live room's sweep (app/api/live/service.py).

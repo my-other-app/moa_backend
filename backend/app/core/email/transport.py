@@ -70,12 +70,18 @@ class Mail:
     #: An explicit sender address; when unset, each provider uses its own verified one.
     from_address: Optional[str] = None
     bcc: list[str] = field(default_factory=list)
+    #: Shown to everyone, as To is (a club's mailbox replying to all).
+    cc: list[str] = field(default_factory=list)
     reply_to: Optional[str] = None
     attachments: list[Attachment] = field(default_factory=list)
     #: The same key on a retry makes Resend send it once (it keeps keys for a day).
     idempotency_key: Optional[str] = None
     #: False when the caller already left out suppressed addresses (app.core.mail.suppression).
     check_suppression: bool = True
+    #: Further headers, by name: a mailbox's Message-ID, In-Reply-To and
+    #: References. SES replaces a Message-ID with its own (its "Amazon SES
+    #: header fields" page); the threading headers it keeps.
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 class ResendRefused(Exception):
@@ -141,7 +147,7 @@ def deliver(mail: Mail) -> dict:
     if mail.check_suppression:
         from app.core.mail import suppression
 
-        suppression.warn_sync([*mail.to, *mail.bcc], mail.subject)
+        suppression.warn_sync([*mail.to, *mail.cc, *mail.bcc], mail.subject)
     if _resend_available():
         try:
             return {"MessageId": _send_resend(mail), "Provider": "resend"}
@@ -172,17 +178,20 @@ def _without_suppressed_domains(mail: Mail) -> Optional[Mail]:
     from app.core.mail import suppression
 
     to = [a for a in mail.to if not suppression.at_suppressed_domain(parseaddr(a)[1] or a)]
+    cc = [a for a in mail.cc if not suppression.at_suppressed_domain(parseaddr(a)[1] or a)]
     bcc = [a for a in mail.bcc if not suppression.at_suppressed_domain(parseaddr(a)[1] or a)]
-    if len(to) == len(mail.to) and len(bcc) == len(mail.bcc):
+    if len(to) == len(mail.to) and len(cc) == len(mail.cc) and len(bcc) == len(mail.bcc):
         return mail
-    dropped = len(mail.to) + len(mail.bcc) - len(to) - len(bcc)
-    if not to and not bcc:
+    dropped = len(mail.to) + len(mail.cc) + len(mail.bcc) - len(to) - len(cc) - len(bcc)
+    if not to and not cc and not bcc:
         logger.info("Mail %r not sent: every recipient (%d) is at a suppressed domain", mail.subject, dropped)
         return None
     logger.info("Mail %r: %d recipient(s) at a suppressed domain left out", mail.subject, dropped)
-    if not to:
+    if not to and cc:
+        to, cc = cc[:1], cc[1:]
+    elif not to:
         to, bcc = bcc[:1], bcc[1:]
-    return replace(mail, to=to, bcc=bcc)
+    return replace(mail, to=to, cc=cc, bcc=bcc)
 
 
 # ─── Resend ──────────────────────────────────────────────────────────────
@@ -226,6 +235,10 @@ def _send_resend(mail: Mail) -> Optional[str]:
         body["text"] = mail.text
     if mail.bcc:
         body["bcc"] = mail.bcc
+    if mail.cc:
+        body["cc"] = mail.cc
+    if mail.headers:
+        body["headers"] = dict(mail.headers)
     if reply_to:
         body["reply_to"] = reply_to
     if mail.attachments:
@@ -306,8 +319,12 @@ def to_mime(mail: Mail, from_header: str) -> MIMEMultipart:
     msg["Subject"] = mail.subject
     msg["From"] = from_header
     msg["To"] = ", ".join(mail.to)
+    if mail.cc:
+        msg["Cc"] = ", ".join(mail.cc)
     if mail.reply_to:
         msg["Reply-To"] = mail.reply_to
+    for name, value in (mail.headers or {}).items():
+        msg[name] = value
     msg.attach(related)
     for a in mail.attachments:
         ext = a.filename.rsplit(".", 1)[-1] if "." in a.filename else ""
@@ -329,7 +346,9 @@ def _send_ses(mail: Mail) -> str:
     from_header = formataddr((mail.from_name or settings.MAIL_FROM_NAME, parseaddr(address)[1] or address))
     msg = to_mime(mail, from_header)
     try:
-        response = _ses().send_raw_email(Source=from_header, Destinations=list(mail.to) + list(mail.bcc), RawMessage={"Data": msg.as_string()})
+        response = _ses().send_raw_email(
+            Source=from_header, Destinations=list(mail.to) + list(mail.cc) + list(mail.bcc), RawMessage={"Data": msg.as_string()},
+        )
     except ClientError as e:
         code = (e.response.get("Error") or {}).get("Code") or ""
         status = (e.response.get("ResponseMetadata") or {}).get("HTTPStatusCode") or 0

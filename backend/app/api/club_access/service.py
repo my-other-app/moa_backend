@@ -153,6 +153,7 @@ def to_row(member: ClubMembers) -> dict:
         accepted_at=_aware(member.accepted_at),
         last_seen_at=_aware(member.last_seen_at),
         whatsapp=bool(getattr(member, "whatsapp", False)),
+        mail=bool(getattr(member, "mail", False)),
     )
 
 
@@ -238,6 +239,14 @@ async def set_whatsapp(session, club: Clubs, member_id: int, allowed: bool) -> C
     (app/api/club_whatsapp), whatever the member's role."""
     member = await _member_of_club(session, club, member_id)
     member.whatsapp = bool(allowed)
+    return member
+
+
+async def set_mail(session, club: Clubs, member_id: int, allowed: bool) -> ClubMembers:
+    """The Mail permission: the club's mailbox (app/api/club_mailbox),
+    whatever the member's role."""
+    member = await _member_of_club(session, club, member_id)
+    member.mail = bool(allowed)
     return member
 
 

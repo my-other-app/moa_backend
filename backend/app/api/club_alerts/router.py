@@ -42,6 +42,15 @@ class MarkReadOut(CustomBaseModel):
     marked: int = 0
 
 
+def _hidden(request: Request) -> frozenset:
+    """The bell's kinds this viewer may not see: the WhatsApp inbox's without
+    the WhatsApp permission, the mailbox's without the Mail one."""
+    from app.api.club_mailbox.alerts import hidden_kinds as mail_hidden
+    from app.api.club_whatsapp.alerts_inbox import hidden_kinds as whatsapp_hidden
+
+    return whatsapp_hidden(request) | mail_hidden(request)
+
+
 async def _club(session, user) -> Clubs:
     club = await session.scalar(select(Clubs).where(Clubs.user_id == user.id, Clubs.is_deleted == False))  # noqa: E712
     if club is None:
@@ -51,16 +60,12 @@ async def _club(session, user) -> Clubs:
 
 @router.get("", summary="The club's notices, newest first, and how many are unread")
 async def list_alerts(request: Request, session: SessionDep, user: ClubAuth, limit: int = Query(service.LIMIT, ge=1, le=100)) -> ClubAlertsOut:
-    """The WhatsApp inbox's notices only to those who can read it."""
-    from app.api.club_whatsapp.alerts_inbox import hidden_kinds
-
+    """The WhatsApp inbox's and the mailbox's notices only to those who can read them."""
     club = await _club(session, user)
-    return await service.listing(session, club.id, limit=limit, hide=hidden_kinds(request))
+    return await service.listing(session, club.id, limit=limit, hide=_hidden(request))
 
 
 @router.post("/read", summary="Mark the club's notices read (these, or all)")
 async def mark_read(payload: MarkReadIn, request: Request, session: SessionDep, user: ClubAuth) -> MarkReadOut:
-    from app.api.club_whatsapp.alerts_inbox import hidden_kinds
-
     club = await _club(session, user)
-    return {"marked": await service.mark_read(session, club.id, payload.ids, hide=hidden_kinds(request))}
+    return {"marked": await service.mark_read(session, club.id, payload.ids, hide=_hidden(request))}

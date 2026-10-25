@@ -278,6 +278,7 @@ FEATURE_GROUPS: dict[str, tuple[str, ...]] = {
         "ai_byok",
         "mcp",
         "whatsapp_own",
+        "mailbox",
     ),
 }
 
@@ -317,6 +318,7 @@ FEATURE_CATALOG: tuple[tuple[str, str], ...] = (
     ("ai_byok", "AI assist with your own AI key"),
     ("mcp", "Connect AI assistants (Claude, ChatGPT) to your club"),
     ("whatsapp_own", "Your own WhatsApp Business number: inbox, templates and quality"),
+    ("mailbox", "A club mailbox: yourclub@mail.myotherapp.in, in the dashboard"),
 )
 
 #: Flags in the editor with no feature behind them yet: waitlist, coupons,
@@ -388,6 +390,10 @@ class PlanFeatures(AbstractSQLModel, TimestampsMixin):
     #: inbox, its templates, and its tickets sent from it. Enterprise, from
     #: migration club_whatsapp.
     whatsapp_own = _flag()
+    #: The club's mailbox, <handle>@mail.myotherapp.in (app/api/club_mailbox):
+    #: mail received into the dashboard, answered and sent from it. Pro and
+    #: Enterprise, from migration club_mailbox.
+    mailbox = _flag()
 
     plan = relationship("Plans", back_populates="features")
 

@@ -217,8 +217,9 @@ def test_every_built_paid_feature_has_a_gate_here():
     where an assistant connects and on each of its tool calls, neither an API
     request of this shape (tests/test_mcp.py, test_the_plan_gate); a club's
     own WhatsApp number is gated where it connects and sends
-    (tests/test_club_whatsapp.py)."""
-    gated = set(ACTIONS) | {"networking", "ai_assist", "ai_byok", "mcp", "whatsapp_own"}
+    (tests/test_club_whatsapp.py); its mailbox where it is set up and sends
+    (tests/test_club_mailbox.py)."""
+    gated = set(ACTIONS) | {"networking", "ai_assist", "ai_byok", "mcp", "whatsapp_own", "mailbox"}
     assert gated | gates.ALWAYS_ALLOWED == set(LABELS)
 
 
@@ -868,9 +869,9 @@ CLUB_WIDE_ACTIONS = ("tickets", "website", "custom_domain", "roles", "finance")
 def test_the_actions_split_into_event_scoped_and_club_wide():
     assert set(EVENT_SCOPED_ACTIONS) | set(CLUB_WIDE_ACTIONS) == set(ACTIONS)
     assert set(EVENT_SCOPED_ACTIONS) <= gates.EVENT_SCOPED_FEATURES
-    # mcp and whatsapp_own are club-wide too; their gates are tested where
-    # they hold (tests/test_mcp.py, tests/test_club_whatsapp.py).
-    assert set(CLUB_WIDE_ACTIONS) - {"tickets"} == gates.CLUB_WIDE_FEATURES - {"mcp", "whatsapp_own"}
+    # mcp, whatsapp_own and mailbox are club-wide too; their gates are tested where
+    # they hold (tests/test_mcp.py, tests/test_club_whatsapp.py, tests/test_club_mailbox.py).
+    assert set(CLUB_WIDE_ACTIONS) - {"tickets"} == gates.CLUB_WIDE_FEATURES - {"mcp", "whatsapp_own", "mailbox"}
     assert not gates.EVENT_SCOPED_FEATURES & gates.CLUB_WIDE_FEATURES
 
 

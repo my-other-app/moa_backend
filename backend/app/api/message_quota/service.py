@@ -73,6 +73,8 @@ TRANSACTIONAL = frozenset({"ticket", "certificate", "payment"})
 KINDS = frozenset({
     "ticket", "certificate", "payment",
     "reminder", "announcement", "campaign", "journey", "survey", "update", "promotion",
+    # A mail the club's team writes from its mailbox (app/api/club_mailbox): one email each.
+    "mailbox",
 })
 
 #: The kinds that, sent by WhatsApp, are MARKETING templates at Meta (a

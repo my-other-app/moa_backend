@@ -147,6 +147,13 @@ CLASSIFICATION: dict[str, str] = {
     "club_whatsapp_consents": WIPE,
     "club_whatsapp_broadcasts": WIPE,
     "club_whatsapp_broadcast_recipients": WIPE,
+    # A club's mailbox (app/api/club_mailbox): its address, threads, mail and
+    # files' rows (the files themselves are in the bucket under mailbox/<club>/).
+    "club_mailboxes": WIPE,
+    "club_mailbox_addresses": WIPE,
+    "club_mail_threads": WIPE,
+    "club_mail_messages": WIPE,
+    "club_mail_attachments": WIPE,
     "club_sites": WIPE,
     "club_socials": WIPE,
     "club_subscriptions": WIPE,

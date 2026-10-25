@@ -192,6 +192,35 @@ class AppConfig(BaseSettings):
     # Messages a second a club's broadcast is sent at (Meta allows 80 a
     # second per number; this stays well under it).
     CLUB_WHATSAPP_BROADCAST_MPS: float = 10.0
+
+    # ─── A club's mailbox: <handle>@mail.myotherapp.in (app/api/club_mailbox) ─
+    # Pro and Enterprise (plan flag `mailbox`). Off until the owner has made
+    # the SES domain, receipt rule, bucket, topic and DNS records
+    # (docs/OPERATIONS.md section 23). Off: the dashboard hides Mail, nothing
+    # can be set up or sent, and mail that arrives is dropped (never bounced).
+    CLUB_MAILBOX: bool = False
+    # The domain every club's address is on, verified in SES for sending and
+    # receiving (its MX points at SES's inbound endpoint in the receiving region).
+    MAILBOX_DOMAIN: str = "mail.myotherapp.in"
+    # The private S3 bucket SES's receipt rule writes each mail to (raw MIME),
+    # and the SNS topic the rule tells. A notification naming another bucket or
+    # topic is refused.
+    MAILBOX_INBOUND_BUCKET: str = ""
+    MAILBOX_SNS_TOPIC_ARN: str = ""
+    # Where SES receives the mail: Asia Pacific (Mumbai) receives (AWS's Email
+    # Receiving endpoints table), so the same region as the platform's sending.
+    MAILBOX_RECEIVING_REGION: str = "ap-south-1"
+    # A user that may get (and delete) objects in the inbound bucket. Empty:
+    # the SES keys (APP_SES_ACCESS_KEY / APP_SES_SECRET_KEY).
+    MAILBOX_AWS_ACCESS_KEY: str = ""
+    MAILBOX_AWS_SECRET_KEY: str = ""
+    # A mail larger than this (MB) is dropped unread (SES receives up to 40 MB).
+    MAILBOX_INBOUND_MAX_MB: int = 40
+    # What one club may send, by the hour and by the day (abuse limits on top
+    # of its email credits), and the most people one mail may go to.
+    MAILBOX_SEND_PER_HOUR: int = 60
+    MAILBOX_SEND_PER_DAY: int = 300
+    MAILBOX_MAX_RECIPIENTS: int = 50
     # Meta's Embedded Signup ("Connect with Meta", app/api/club_whatsapp/
     # embedded_signup.py), once MyOtherApp is a Tech Provider: off until the
     # owner has Meta's approval (docs/OPERATIONS.md section 21). The platform

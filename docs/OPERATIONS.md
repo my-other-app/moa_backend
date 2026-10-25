@@ -6,9 +6,9 @@ keep its disk from filling, open the live room's streams, look after the
 rendered documents in the bucket, run AI assist, put a demo event live
 for People Like You, place visitors by address without a lookup service,
 fix the demo's venue pins, turn on WhatsApp, keep production's settings,
-health checks and scheduled backups honest (section 19), and read the live
-room's pushes and the host's 409s (section 22). Every command is meant to be
-copied.
+health checks and scheduled backups honest (section 19), read the live
+room's pushes and the host's 409s (section 22), and open clubs' mailboxes
+(section 23). Every command is meant to be copied.
 Commands under **Read-only** change nothing; anything that changes something
 says so.
 
@@ -2722,3 +2722,410 @@ hundred bytes from the room's one-second snapshot, the same for everyone,
 `Cache-Control: public, max-age=15`, with a weak ETag (a 304 while nothing
 changed). The app and the site poll it every 30 seconds instead of the ~30 KB
 room feed.
+
+---
+
+## 23. Clubs' mailboxes: `<handle>@mail.myotherapp.in` (Pro and Enterprise)
+
+A club on Pro or Enterprise (plan flag `mailbox`, migration `club_mailbox`)
+picks one address on the platform's domain -- `yukthi@mail.myotherapp.in` --
+in the clubs dashboard (Mail -> Settings). Mail sent to it arrives in the
+dashboard's **Mail** section; the club's owner, and the team members the owner
+gave the **Mail** permission on Access, read it, reply, reply to all, forward
+and write new mail from it. The club does not connect a mailbox of its own:
+the platform receives through SES and sends through its own provider.
+
+It is **off** (`APP_CLUB_MAILBOX=false`) until the AWS and DNS steps below are
+done. Off, the dashboard hides Mail, every mailbox route but the status
+answers 404 `MAILBOX_OFF`, and a mail that arrives is dropped (never bounced).
+
+### Where SES receives
+
+SES receives mail in **Asia Pacific (Mumbai), ap-south-1**: AWS's General
+Reference, "Amazon Simple Email Service endpoints and quotas", table "Email
+Receiving endpoints", lists `inbound-smtp.ap-south-1.amazonaws.com`
+(https://docs.aws.amazon.com/general/latest/gr/ses.html#ses_inbound_endpoints).
+So receiving stays in the region the platform already sends from: one domain
+identity serves both. SES's "Regions and Amazon SES" page
+(https://docs.aws.amazon.com/ses/latest/dg/regions.html#region-receive-email)
+says every resource a receipt rule uses -- the SNS topic included -- must be in
+the receiving region, except the S3 bucket; keep the bucket there too.
+
+### How a mail travels
+
+```
+sender -> MX mail.myotherapp.in -> SES (ap-south-1) receipt rule
+       -> S3 action: raw MIME into the private bucket (SES's message id is the key)
+       -> SNS topic (the S3 action's notification) -> HTTPS POST /api/v1/hooks/mailbox/ses
+       -> the API: SNS signature and topic checked, the MIME read from the bucket,
+          parsed, its HTML sanitised, its files put in the media bucket, kept;
+          the raw object deleted from the inbound bucket
+```
+
+- **The webhook** (`app/api/club_mailbox/router.py`, `ses_hook`) believes only
+  an SNS envelope signed by Amazon (the certificate fetched only from an
+  `sns.<region>.amazonaws.com` host, as the platform's own SES hook) from the
+  topic in `APP_MAILBOX_SNS_TOPIC_ARN` (403 otherwise). The first call is the
+  subscription: confirmed by fetching its SubscribeURL, for that topic only.
+  Then each notification names a mail in the bucket in
+  `APP_MAILBOX_INBOUND_BUCKET` (another bucket is never read).
+- **Which club:** the envelope's recipients (`receipt.recipients`). A handle of
+  a club's -- its current address, or an old one still forwarding (below);
+  `handle+anything@` reaches `handle@`.
+- **Never a bounce.** An address that is nobody's, a club whose mailbox is
+  closed, a mail past `APP_MAILBOX_INBOUND_MAX_MB` (40), a mail that can't be
+  parsed: dropped and logged (the address masked: `n***@mail.myotherapp.in`).
+  A bounce to a forged sender is backscatter and gets the domain listed. The
+  receipt rule has no Bounce action for the same reason.
+- **Spam and viruses:** SES's verdicts (the rule's scanning is on). A virus
+  (`virusVerdict` FAIL): dropped, never read from the bucket. Spam
+  (`spamVerdict` FAIL, or `dmarcVerdict` FAIL from a domain whose DMARC policy
+  is reject or quarantine): kept in the club's **Spam**, with no notice. A
+  spam mail never joins a clean conversation, nor a clean one a spam one.
+- **Twice:** SNS delivers again what it got no 200 for; a mail is kept once
+  per club (`uq_club_mail_messages_provider`). The webhook answers 503 when the
+  bucket can't be read or the mail can't be kept, so SNS tries again.
+- **Threads:** a reply joins its conversation by `In-Reply-To`/`References`
+  (the club's own Message-ID, or the one SES gave a mail the club sent); without
+  them, by the subject (Re:, Fwd: and their kind taken off) with the sender
+  among the conversation's people and its latest mail within 30 days.
+- **Another provider later:** `app/api/club_mailbox/providers.py` turns a
+  provider's notification into a `Received`; Resend's inbound would be one more
+  class there and one more webhook route.
+
+### What the club sends
+
+From its own current address only (the server sets From; the dashboard can't),
+named as the club (or its "Sends as" name), through the platform's provider
+(`APP_MAIL_PROVIDER`: SES, or Resend first). Each mail has our `Message-ID`
+(`<uuid@mail.myotherapp.in>`), `In-Reply-To` and `References` for a reply or a
+forward, a plain-text part (with the signature and the quoted mail) and an
+HTML part made from it, and files up to **10 MB together**. SES replaces a
+supplied Message-ID with its own (SES's "Amazon SES header fields" page); that
+one (`<id@ap-south-1.amazonses.com>`) is kept too, as `alt_message_id`, since
+it is what an answer quotes.
+
+Before it goes:
+
+| Check | Refusal |
+|---|---|
+| The plan has `mailbox` | 403 `PLAN_FEATURE_LOCKED` |
+| At least one To/Cc, every address well formed, at most `APP_MAILBOX_MAX_RECIPIENTS` (50) | 422 `NO_RECIPIENTS`, `INVALID_ADDRESS`, `TOO_MANY_RECIPIENTS` |
+| No address on the platform's suppression list (section 20's bounces and complaints; `MAIL_SUPPRESS_DOMAINS`) | 422 `RECIPIENT_SUPPRESSED` (`errors.addresses`) |
+| Files at most 10 MB together, 20 files | 413 `ATTACHMENTS_TOO_LARGE`, 422 `TOO_MANY_FILES` |
+| The club's own limits: `APP_MAILBOX_SEND_PER_HOUR` (60), `APP_MAILBOX_SEND_PER_DAY` (300), sent or tried | 429 `MAILBOX_RATE_LIMITED` |
+| Email credits: the message quotas' hold-back (`message_quota.check`), and, once the prepaid credits exist, none left | 402 `NO_EMAIL_CREDITS`, "Buy more email credits" |
+
+Once the provider takes it, it counts **one EMAIL credit** (section 20):
+`record_message(club_id, "email", "mailbox", via="platform", ref="mailbox:<id>")`.
+The dashboard shows what is left: the prepaid credits' `remaining(session,
+club_id, "email")` when that module is there (`app/api/club_mailbox/credits.py`
+looks for it), else the plan's monthly email allowance less this month's use.
+A refusal from the provider keeps the mail `failed` with its reason, and the
+team can send it again (`POST /clubs/mailbox/messages/{id}/retry`). A later
+bounce or complaint marks it in its thread and puts the address on the
+suppression list, through the platform's own SES hook (step 8 below).
+
+### The address
+
+3 to 30 characters, `a-z 0-9 . -`, starting and ending with a letter or a
+digit, no two dots or hyphens in a row, lower case. Reserved for no club:
+admin, administrator, postmaster, abuse, support, info, noreply, no-reply,
+billing, security, hostmaster, webmaster, mailer-daemon, root and the others in
+`app/api/club_mailbox/handles.py` (422 `HANDLE_RESERVED`). Unique across every
+club and every old address still forwarding (409 `HANDLE_TAKEN`). The owner and
+admins change it **at most once a month** (429 `HANDLE_CHANGED_RECENTLY`,
+`errors.next_change_at`); the old address goes on delivering into the same
+mailbox for **90 days**, then the sweep lets it go and another club may take it.
+
+### Who sees what
+
+- The mail (reading, sending, the signature, the bell's mail notices): the
+  club's own account and members with the **Mail** permission (Access ->
+  member -> Mail; only the owner gives it; audited `club_mailbox.permission`).
+  Without it, 403 `MAILBOX_PERMISSION`.
+- The address, the "Sends as" name and retention: the owner and admins.
+- Exporting all the mail (an mbox file) and deleting all of it: the club's own
+  account only (403 `OWNER_ONLY`).
+- **A platform admin acting as the club** sees whether the mailbox is set up,
+  never a mail: 403 `MAILBOX_PRIVATE` on every route that carries one, and on
+  giving anyone the Mail permission. The admin portal's club page has a
+  **Mailbox** card (`GET /admin/club-mailbox/{club}`): the address, whether it
+  is open, counts (conversations, received, sent, spam, failed, this month,
+  dropped while closed, last received and sent). Never a subject, a sender or a
+  word of a mail.
+- Every query is by the club's own id: another club's conversation, mail or
+  file answers 404.
+
+Nothing a mail says reaches a log or the audit log: the routes and the webhook
+are marked sensitive (`app/core/redact.py`: an error report withholds the
+exception's message), the search term `q` is `[Filtered]` in the access log,
+and the audit log keeps only who did what and how many
+(`club_mailbox.address`, `.settings`, `.send` with the number of recipients
+and files, `.delete`, `.export`, `.wipe`, `.permission`).
+
+Files are kept in the media bucket under `mailbox/<club>/<message>/<n>` (not a
+CDN folder, server-side encrypted), served only through
+`GET /clubs/mailbox/attachments/{id}` to the signed-in team: shown in place
+only when a picture, sound or video a browser cannot run (never SVG or HTML),
+anything else a download as `application/octet-stream` (a PDF or an office
+document as its own type), always with `Content-Security-Policy: default-src
+'none'; sandbox`, `X-Content-Type-Options: nosniff`, `Cache-Control: private,
+no-store`, and the file name in ASCII and in UTF-8 (RFC 6266). A mail's HTML is
+sanitised when it is kept (no script, form, frame, event handler or
+`javascript:`), and the dashboard shows it in a sandboxed frame with its own
+CSP that blocks every remote load until the reader clicks "Show images".
+
+### The bell, live updates, retention
+
+- **The bell:** one `mail_message` notice per conversation with unread mail
+  outside Spam ("Ananya Iyer: 2 unread emails"), only for those with the Mail
+  permission; gone once read, moved to Spam or deleted. The dashboard shows the
+  unread count on Mail and in the tab's title (`GET /clubs/mailbox/summary`,
+  counts only), and each browser may turn on notifications.
+- **Live:** `GET /clubs/mailbox/stream` (behind `APP_LIVE_SSE`, as the WhatsApp
+  inbox's, section 21): a `changed` frame names the conversation, never what it
+  says. Off, the dashboard polls.
+- **Retention:** each club's mail older than its retention period (12 months;
+  1 to 36 in Mail -> Settings) is deleted with its files by the mailbox sweep
+  (every 15 minutes, lock `CLUB_MAILBOX_SWEEP`), whether the switch is on or not.
+
+### When a club leaves Pro or Enterprise
+
+The sweep finds the plan no longer has `mailbox` and the mailbox **lapses**:
+
+1. The owner is told at once (bell `mailbox_lapsed` and a mail).
+2. No new mail is accepted (dropped, counted as "dropped while closed") and
+   nothing can be sent (403 `PLAN_FEATURE_LOCKED`).
+3. The mail already there stays **readable for 30 days**.
+4. Then reading answers 403 `MAILBOX_LAPSED`; the owner is told again (bell
+   `mailbox_expired` and a mail) that the club's own account can **export**
+   everything (`GET /clubs/mailbox/export`, an mbox file Thunderbird or Apple
+   Mail opens) or **delete** it (`DELETE /clubs/mailbox/mail?confirm=DELETE`).
+   Otherwise retention deletes it in its time.
+5. Upgrading again opens it as it was (the sweep, within 15 minutes).
+
+The address stays the club's while it is lapsed.
+
+### Settings
+
+| Setting (`.env`) | Default | Meaning |
+|---|---|---|
+| `APP_CLUB_MAILBOX` | `false` | the switch: Mail in the dashboard, setting up, sending, receiving |
+| `APP_MAILBOX_DOMAIN` | `mail.myotherapp.in` | the domain every address is on |
+| `APP_MAILBOX_INBOUND_BUCKET` | empty | the private bucket the receipt rule writes to |
+| `APP_MAILBOX_SNS_TOPIC_ARN` | empty | the topic the rule tells; any other topic is refused |
+| `APP_MAILBOX_RECEIVING_REGION` | `ap-south-1` | where SES receives, and where the bucket is read |
+| `APP_MAILBOX_AWS_ACCESS_KEY`, `APP_MAILBOX_AWS_SECRET_KEY` | empty (the SES keys) | a user that may get and delete objects in the inbound bucket |
+| `APP_MAILBOX_INBOUND_MAX_MB` | `40` | a larger mail is dropped unread (SES receives up to 40 MB) |
+| `APP_MAILBOX_SEND_PER_HOUR`, `APP_MAILBOX_SEND_PER_DAY` | `60`, `300` | what one club may send |
+| `APP_MAILBOX_MAX_RECIPIENTS` | `50` | the most people one mail goes to |
+
+With `APP_CLUB_MAILBOX` on, the config check (section 19) warns -- never refuses
+to start -- for each of the domain, bucket, topic and region left empty, for a
+topic outside the receiving region, and when `APP_MAIL_PROVIDER` is `resend`
+(Resend must have `mail.myotherapp.in` verified too).
+
+### Turning it on: the owner's steps (AWS console and Cloudflare)
+
+Everything in **ap-south-1**. `<ACCOUNT_ID>` is the AWS account's 12 digits.
+Names below are suggestions; use the same ones throughout.
+
+**1. Deploy the code with its migration** (`club_mailbox`): `sync_code`,
+`restart_backend`, `migrate` (section 1). It adds five tables, the `mailbox`
+flag (on for Pro and Enterprise) and `club_members.mail`. Prove the chain first
+on a scratch database (section 3).
+
+**2. The SES domain identity.** SES -> Configuration -> Identities -> Create
+identity -> **Domain** `mail.myotherapp.in`; Advanced DKIM settings: **Easy
+DKIM**, RSA_2048_BIT; Publish DNS records to Route53: off (DNS is on
+Cloudflare). Under "Custom MAIL FROM domain" tick **Use a custom MAIL FROM
+domain**: `bounce.mail.myotherapp.in`, Behavior on MX failure: **Use default
+MAIL FROM domain**. SES then shows the records of step 3.
+
+**3. DNS at Cloudflare**, zone `myotherapp.in`, every record **DNS only** (grey
+cloud), TTL Auto:
+
+| Type | Name | Content | Why |
+|---|---|---|---|
+| MX | `mail` | `inbound-smtp.ap-south-1.amazonaws.com`, priority `10` | mail for `*@mail.myotherapp.in` goes to SES |
+| TXT | `mail` | `v=spf1 include:amazonses.com ~all` | SPF for the domain |
+| CNAME | `<token1>._domainkey.mail` | `<token1>.dkim.amazonses.com` | Easy DKIM (the three tokens SES shows in step 2) |
+| CNAME | `<token2>._domainkey.mail` | `<token2>.dkim.amazonses.com` | Easy DKIM |
+| CNAME | `<token3>._domainkey.mail` | `<token3>.dkim.amazonses.com` | Easy DKIM |
+| MX | `bounce.mail` | `feedback-smtp.ap-south-1.amazonses.com`, priority `10` | the custom MAIL FROM (SPF-aligned bounces) |
+| TXT | `bounce.mail` | `v=spf1 include:amazonses.com ~all` | SPF for the MAIL FROM domain |
+| TXT | `_dmarc.mail` | `v=DMARC1; p=none; rua=mailto:dmarc@myotherapp.in; adkim=r; aspf=r` | DMARC; after two clean weeks of reports, change `p=none` to `p=quarantine` |
+
+Wait for SES to show the identity **Verified**, DKIM **Successful** and the
+MAIL FROM **Success** (minutes to an hour). The `rua` address must exist (or
+point it at a reporting service); a domain's own `_dmarc.myotherapp.in` with
+`sp=` is overridden for this subdomain by the record above.
+
+**4. The inbound bucket.** S3 -> Create bucket `moa-mailbox-inbound`, region
+ap-south-1, **Block all public access: on**, default encryption SSE-S3, ACLs
+disabled. Management -> Lifecycle rule "expire-raw-mail": whole bucket, expire
+current versions after **7 days** (the API deletes each mail once kept; this
+deletes what it misses). Permissions -> Bucket policy (SES's own "Give
+permissions to SES to write to your S3 bucket" form):
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowSESPuts",
+      "Effect": "Allow",
+      "Principal": { "Service": "ses.amazonaws.com" },
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::moa-mailbox-inbound/*",
+      "Condition": {
+        "StringEquals": { "AWS:SourceAccount": "<ACCOUNT_ID>" },
+        "StringLike": { "AWS:SourceArn": "arn:aws:ses:ap-south-1:<ACCOUNT_ID>:receipt-rule-set/moa-mailbox:receipt-rule/club-mailboxes" }
+      }
+    }
+  ]
+}
+```
+
+**5. The SNS topic.** SNS -> Topics -> Create topic, **Standard**,
+`moa-mailbox-inbound`, ap-south-1. Access policy -> Advanced, add this
+statement to the default one:
+
+```json
+{
+  "Sid": "AllowSESPublish",
+  "Effect": "Allow",
+  "Principal": { "Service": "ses.amazonaws.com" },
+  "Action": "SNS:Publish",
+  "Resource": "arn:aws:sns:ap-south-1:<ACCOUNT_ID>:moa-mailbox-inbound",
+  "Condition": {
+    "StringEquals": { "AWS:SourceAccount": "<ACCOUNT_ID>" },
+    "StringLike": { "AWS:SourceArn": "arn:aws:ses:ap-south-1:<ACCOUNT_ID>:*" }
+  }
+}
+```
+
+Its ARN is `APP_MAILBOX_SNS_TOPIC_ARN`.
+
+**6. The reader's keys.** IAM -> the user the API's SES keys belong to (or a
+new user, whose keys go in `APP_MAILBOX_AWS_ACCESS_KEY` /
+`APP_MAILBOX_AWS_SECRET_KEY`): add an inline policy
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Effect": "Allow", "Action": ["s3:GetObject", "s3:DeleteObject"], "Resource": "arn:aws:s3:::moa-mailbox-inbound/*" }
+  ]
+}
+```
+
+The sending user needs `ses:SendRawEmail` on the new identity
+(`arn:aws:ses:ap-south-1:<ACCOUNT_ID>:identity/mail.myotherapp.in`); a policy on
+`identity/*` already covers it.
+
+**7. The settings, before the subscription** (so the API can confirm it): on
+the server's `.env` by hand
+
+```
+APP_MAILBOX_DOMAIN=mail.myotherapp.in
+APP_MAILBOX_INBOUND_BUCKET=moa-mailbox-inbound
+APP_MAILBOX_SNS_TOPIC_ARN=arn:aws:sns:ap-south-1:<ACCOUNT_ID>:moa-mailbox-inbound
+APP_MAILBOX_RECEIVING_REGION=ap-south-1
+```
+
+(and the two key settings, if a new user), then recreate the backend (section
+18, step 5). `APP_CLUB_MAILBOX` stays false for now.
+
+**8. The HTTPS subscription.** SNS -> the topic -> Create subscription:
+protocol **HTTPS**, endpoint `https://api.myotherapp.in/api/v1/hooks/mailbox/ses`,
+**Enable raw message delivery: off** (the API checks the envelope's
+signature). The API confirms it within seconds (the subscription shows
+**Confirmed**; the log says "mailbox hook: subscription to the topic
+confirmed"). Then the subscription -> Edit -> Delivery policy (HTTP/S): a
+retry policy that keeps trying for about an hour (SNS allows at most 100
+retries in 3,600 seconds), e.g. retries 20, minimum delay 10 s, maximum delay
+300 s, exponential backoff -- the console checks the sum. A notification that
+still fails leaves its mail in the bucket for the lifecycle's 7 days.
+
+Bounces and complaints of club mail: SES -> Identities -> `mail.myotherapp.in`
+-> Notifications -> Edit: Bounce and Complaint feedback to **the platform's
+existing SES feedback topic** (the one subscribed to `/api/v1/hooks/ses`), so
+the suppression list and the club's thread hear of them.
+
+**9. The receipt rule.** SES -> Email receiving -> Rule sets: if a rule set is
+already **Active** in ap-south-1, add the rule to it (only one is active per
+region); otherwise Create rule set `moa-mailbox` and **Set as active**. Create
+rule `club-mailboxes`:
+
+- Status enabled; Security and protection: **Spam and virus scanning on**;
+  TLS: optional;
+- Recipient condition: `mail.myotherapp.in` (the whole domain);
+- Action 1: **Deliver to Amazon S3 bucket** `moa-mailbox-inbound`, object key
+  prefix empty, **SNS topic** `moa-mailbox-inbound` (this is the notification
+  the API acts on); no KMS key;
+- no Bounce action, no Stop action needed after it.
+
+(Under a different rule set or rule name, change step 4's `AWS:SourceArn` to match.)
+
+**10. Before switching on:** the API serves `/clubs/mailbox/messages` with a
+multipart body up to ~10.5 MB (10 MB of files and the form). On the server's
+nginx (its `client_max_body_size` is 10M) give it its own location:
+
+```nginx
+location = /api/v1/clubs/mailbox/messages {
+    client_max_body_size 12M;
+    proxy_pass http://localhost:8000;   # with the main location's proxy_set_header lines
+}
+```
+
+While the clubs dashboard is on Vercel, a request carries at most 4.5 MB, so
+files past about 4.4 MB together are refused there (the composer says so);
+self-hosted (the Oracle server) the full 10 MB goes. The dashboard's gateway
+streams this route on (`packages/auth/src/gateway.ts`, `STREAMED`).
+
+**11. Switch it on:** `APP_CLUB_MAILBOX=true`, recreate the backend. The
+dashboard shows **Mail** to Pro and Enterprise clubs (others see it locked, with
+the upgrade).
+
+**12. Check it end to end** with a test club on Pro:
+
+1. Mail -> Settings: pick `testclub`.
+2. From a Gmail account, mail `testclub@mail.myotherapp.in`: it shows in Mail
+   within seconds (the webhook's log line: `kept 1`).
+3. Reply from the dashboard; in Gmail open the reply -> Show original: **SPF
+   PASS** (bounce.mail.myotherapp.in), **DKIM PASS** (mail.myotherapp.in),
+   **DMARC PASS**; Gmail shows it in the same conversation.
+4. Answer from Gmail: it joins the dashboard's conversation.
+5. Mail `nobody@mail.myotherapp.in`: nothing comes back to Gmail, and the log
+   says `dropped: no such address`.
+
+### Reading it
+
+Read-only, in the psql session from the top of this runbook (no mail content in
+any of these):
+
+```sql
+-- Every mailbox: address, state, counts.
+SELECT b.club_id, a.handle, b.lapsed_at, b.dropped_count, b.last_received_at, b.last_sent_at, b.retention_months
+FROM club_mailboxes b LEFT JOIN club_mailbox_addresses a ON a.club_id = b.club_id AND a.retired_at IS NULL
+ORDER BY b.club_id;
+
+-- Old addresses still forwarding.
+SELECT club_id, handle, retired_at, forward_until FROM club_mailbox_addresses WHERE retired_at IS NOT NULL ORDER BY forward_until;
+
+-- This week's mail by club: received, sent, failed or bounced.
+SELECT club_id, direction, status, count(*) FROM club_mail_messages
+WHERE created_at > now() - interval '7 days' GROUP BY 1, 2, 3 ORDER BY 1, 2, 3;
+
+-- Spam by club.
+SELECT club_id, count(*) FROM club_mail_threads WHERE folder = 'spam' GROUP BY 1 ORDER BY 2 DESC;
+```
+
+Mail not arriving: the MX record (`dig MX mail.myotherapp.in` answers
+`inbound-smtp.ap-south-1.amazonaws.com`), the rule set active with the rule
+enabled, the subscription **Confirmed**, and the API's log: `mailbox hook
+refused: not the mailbox's topic` (step 7's ARN), `... signature did not
+verify`, or `couldn't be read from the bucket` (step 6's keys; SNS retries).
+Dropped mail is logged with the reason and a masked address only.
