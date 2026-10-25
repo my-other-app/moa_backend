@@ -27,6 +27,8 @@ EVENT_KEYS = {
     "summary", "created_at", "updated_at",
     # The topics of its interests (Topics).
     "topics",
+    # Why and when the club cancelled it; null unless status is "cancelled" (app/api/club_ops).
+    "cancellation",
 }
 
 
