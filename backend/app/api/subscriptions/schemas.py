@@ -538,7 +538,8 @@ class EntitlementsOut(CustomBaseModel):
     #: Every limit; emails_per_month and whatsapp_per_month are an
     #: Enterprise club's own when an admin set them (app/api/message_quota).
     limits: dict = Field(default_factory=dict)
-    #: What each email / WhatsApp message past the month's limit costs, in paise.
+    #: Retired with overage billing (prepaid credits replace it): the
+    #: plan's old per-message prices, charged for nothing.
     email_overage_paise: int = 0
     whatsapp_overage_paise: int = 0
     features: dict = Field(default_factory=dict)
@@ -660,10 +661,10 @@ class PublicPlan(CustomBaseModel):
     contact_sales: bool = False
     #: The plan to highlight ("Most popular").
     featured: bool = False
-    #: What each email and WhatsApp message past the monthly limit costs,
-    #: in paise (`limits.emails_per_month`, `limits.whatsapp_per_month`).
-    email_overage_paise: int = 0
-    whatsapp_overage_paise: int = 0
+    #: Always null: no per-message extra is sold since prepaid credits
+    #: (the packs are GET /credit-packs). Kept for older pricing pages.
+    email_overage_paise: int | None = None
+    whatsapp_overage_paise: int | None = None
     #: Every limit (LIMIT_KEYS); null is unlimited, 0 is none allowed.
     limits: dict[str, int | None]
     #: The whole public catalog in a fixed order, each marked included or
@@ -711,8 +712,10 @@ def public_plan_dict(plan) -> dict:
         "trial_days": plan.trial_days,
         "contact_sales": bool(plan.contact_sales),
         "featured": bool(plan.featured),
-        "email_overage_paise": int(plan.email_overage_paise or 0),
-        "whatsapp_overage_paise": int(plan.whatsapp_overage_paise or 0),
+        # No per-message extra is sold since prepaid credits (packs: GET
+        # /credit-packs): null, so a pricing page shows no price for one.
+        "email_overage_paise": None,
+        "whatsapp_overage_paise": None,
         "limits": (
             {key: getattr(plan.limits, key) for key in LIMIT_KEYS}
             if plan.limits

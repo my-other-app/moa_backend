@@ -80,6 +80,7 @@ from app.api.admin_alerts.router import router as admin_alerts_router
 from app.api.club_alerts.router import router as club_alerts_router
 from app.api.message_quota.router import admin_router as message_quota_admin_router
 from app.api.message_quota.router import club_router as message_quota_club_router
+from app.api.message_quota.router import public_router as message_credits_public_router
 from app.api.health import admin_router as admin_jobs_router
 from app.api.backups.router import router as backups_router
 from app.api.subscriptions.router import (
@@ -154,6 +155,7 @@ api_router.include_router(router=payment_gateways_admin_router)
 api_router.include_router(router=club_alerts_router)
 api_router.include_router(router=message_quota_club_router)
 api_router.include_router(router=message_quota_admin_router)
+api_router.include_router(router=message_credits_public_router)
 api_router.include_router(router=store_router, tags=["store"])
 # Before club_router: /clubs/store would otherwise be read as /clubs/{club_id}.
 api_router.include_router(router=store_club_router, tags=["store"])

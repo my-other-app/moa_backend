@@ -1,6 +1,6 @@
-"""What clubs send, counted by the month, and what the extra costs.
+"""What clubs send, counted by the month, and the credits that pay for it.
 
-Four tables:
+Seven tables:
 
 - `message_usage`: one counter per club, channel (email, whatsapp) and
   month in India, raised by one atomic upsert per message handed to the
@@ -13,17 +13,24 @@ Four tables:
   (`delivery:<id>:<queued>`, `message:<id>`...). A message recorded twice
   -- a worker's record retried, a job run again -- is counted once. Kept
   for REF_DAYS, then pruned by the billing sweep.
-- `message_statements`: one per club and closed month: what was used, the
-  limit, the extra and what it costs, and what became of the charge -- a
-  Razorpay add-on on the club's subscription (its id kept, so it is never
-  added twice), a statement for an admin to invoice by hand, or nothing.
-- `club_message_quotas`: an admin's own limits and prices for one club on
-  Enterprise (custom: unlimited unless set).
+- `message_statements`: the month-end overage statements of the retired
+  pay-per-extra-message billing (migration message_credits). None is made
+  any more; those still waiting to be charged were made `void`. Kept for
+  the history they are.
+- `club_message_quotas`: an admin's own limits for one club on Enterprise
+  (custom: unlimited unless set). Its prices are no longer used.
+- `message_credit_packs`: the top-up packs on sale (admin-editable).
+- `message_credit_purchases`: one per pack a club set out to buy: the
+  Razorpay order, then the payment, then any refund.
+- `message_credit_lots`: credits a club holds: bought (one per paid
+  purchase) or granted by an admin, each with what is left and when it
+  expires (credits.py).
 """
 
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Column,
     Date,
@@ -56,9 +63,18 @@ class MessageUsage(AbstractSQLModel, TimestampsMixin):
     channel = Column(String(16), nullable=False)
     #: Messages handed to the provider this month.
     used = Column(Integer, nullable=False, default=0, server_default="0")
-    #: Sends held back because the plan has no way to pay for more (Free),
-    #: or past the plan's promotional WhatsApp cap.
+    #: Sends held back: nothing left of the plan's allowance (or its
+    #: promotional share) and no bought credits.
     blocked = Column(Integer, nullable=False, default=0, server_default="0")
+    # How `used` was paid for (migration message_credits): used = plan_used +
+    # credits_used + uncovered for every message counted since.
+    #: From the plan's monthly allowance ("plan credits").
+    plan_used = Column(Integer, nullable=False, default=0, server_default="0")
+    #: From the club's credit lots (bought or granted).
+    credits_used = Column(Integer, nullable=False, default=0, server_default="0")
+    #: Neither: a ticket, certificate or payment message with nothing left
+    #: (they always go), or a send that raced the last credit. Never charged.
+    uncovered = Column(Integer, nullable=False, default=0, server_default="0")
     #: Of `used`, the MARKETING (promotional) WhatsApp templates, counted
     #: against the plan's `whatsapp_marketing_per_month` (migration pricing_adjust).
     marketing = Column(Integer, nullable=False, default=0, server_default="0")
@@ -120,8 +136,11 @@ class StatementStatus:
     NOT_BILLABLE = "not_billable"
     #: Less than Razorpay's smallest charge (₹1): not charged.
     WAIVED = "waived"
+    #: Cancelled when overage billing was retired (migration message_credits):
+    #: never charged.
+    VOID = "void"
 
-    ALL = (NOTHING_DUE, PENDING, CHARGING, CHARGED, FAILED, UNCONFIRMED, GAVE_UP, MANUAL, NOT_BILLABLE, WAIVED)
+    ALL = (NOTHING_DUE, PENDING, CHARGING, CHARGED, FAILED, UNCONFIRMED, GAVE_UP, MANUAL, NOT_BILLABLE, WAIVED, VOID)
 
 
 class MessageStatements(AbstractSQLModel, TimestampsMixin):
@@ -160,7 +179,7 @@ class MessageStatements(AbstractSQLModel, TimestampsMixin):
         UniqueConstraint("club_id", "period", name="uq_message_statements_club_period"),
         CheckConstraint(
             "status IN ('nothing_due', 'pending', 'charging', 'charged', 'failed', 'unconfirmed', "
-            "'gave_up', 'manual', 'not_billable', 'waived')",
+            "'gave_up', 'manual', 'not_billable', 'waived', 'void')",
             name="ck_message_statements_status",
         ),
         CheckConstraint("amount_paise >= 0", name="ck_message_statements_amount"),
@@ -175,7 +194,8 @@ class MessageStatements(AbstractSQLModel, TimestampsMixin):
 class ClubMessageQuotas(AbstractSQLModel, TimestampsMixin):
     """An admin's limits for one club, used while it is on Enterprise
     (`service.ENTERPRISE`): its emails and WhatsApp a month (null:
-    unlimited) and the price of an extra one (null: the plan's)."""
+    unlimited). The prices of an extra one are from the retired overage
+    billing and are no longer used."""
 
     __tablename__ = "club_message_quotas"
 
@@ -197,3 +217,146 @@ class ClubMessageQuotas(AbstractSQLModel, TimestampsMixin):
         ),
     )
 
+
+
+# ─── Prepaid credits ─────────────────────────────────────────────────────
+
+
+class MessageCreditPacks(AbstractSQLModel, TimestampsMixin):
+    """A top-up pack on sale: `quantity` messages of one channel for
+    `price_paise`, GST included (as plan prices are). Never deleted, since
+    purchases point at it: taken off sale with `active=False`."""
+
+    __tablename__ = "message_credit_packs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    #: email | whatsapp
+    channel = Column(String(16), nullable=False)
+    quantity = Column(Integer, nullable=False)
+    price_paise = Column(Integer, nullable=False)
+    active = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    sort_order = Column(Integer, nullable=False, default=0, server_default="0")
+    updated_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("channel IN ('email', 'whatsapp')", name="ck_message_credit_packs_channel"),
+        CheckConstraint("quantity > 0 AND price_paise > 0", name="ck_message_credit_packs_positive"),
+    )
+
+
+class PurchaseStatus:
+    """What became of a pack a club set out to buy. Plain strings, checked in the table."""
+
+    #: The Razorpay order is made; nothing is paid yet.
+    CREATED = "created"
+    #: Paid: the credits are in (its lot).
+    PAID = "paid"
+    #: An admin's refund: the credits are gone, Razorpay is being asked.
+    REFUNDING = "refunding"
+    #: Razorpay refused the refund or did not answer; the credits stay gone.
+    #: Asking again checks Razorpay first, so it is never refunded twice.
+    REFUND_FAILED = "refund_failed"
+    #: Given back (`refunded_paise`, all or part of it).
+    REFUNDED = "refunded"
+
+    ALL = (CREATED, PAID, REFUNDING, REFUND_FAILED, REFUNDED)
+    #: The ones a club paid for (its history and receipts).
+    PAID_ONES = (PAID, REFUNDING, REFUND_FAILED, REFUNDED)
+
+
+class MessageCreditPurchases(AbstractSQLModel, TimestampsMixin):
+    """One pack a club set out to buy, with a one-time Razorpay order on
+    the platform's account. The pack's channel, quantity and price are kept
+    here as they were when the order was made."""
+
+    __tablename__ = "message_credit_purchases"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    club_id = Column(Integer, ForeignKey("clubs.id", ondelete="CASCADE"), nullable=False)
+    pack_id = Column(Integer, ForeignKey("message_credit_packs.id", ondelete="SET NULL"), nullable=True)
+    channel = Column(String(16), nullable=False)
+    quantity = Column(Integer, nullable=False)
+    amount_paise = Column(Integer, nullable=False)
+    currency = Column(String(3), nullable=False, default="INR", server_default="INR")
+    status = Column(String(20), nullable=False, default=PurchaseStatus.CREATED, server_default=PurchaseStatus.CREATED)
+    razorpay_order_id = Column(String(64), nullable=False, unique=True)
+    razorpay_payment_id = Column(String(64), nullable=True, unique=True)
+    payment_method = Column(String(40), nullable=True)
+    paid_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    #: Who started the checkout (the club's account).
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    # A refund (an admin's, or one made in Razorpay's dashboard).
+    refunded_paise = Column(Integer, nullable=False, default=0, server_default="0")
+    #: What the admin asked to give back, while it is being asked.
+    refund_amount_paise = Column(Integer, nullable=True)
+    refund_reason = Column(String(300), nullable=True)
+    razorpay_refund_id = Column(String(64), nullable=True)
+    refund_requested_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    refunded_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    refunded_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    refund_error = Column(String(300), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("channel IN ('email', 'whatsapp')", name="ck_message_credit_purchases_channel"),
+        CheckConstraint(
+            "status IN ('created', 'paid', 'refunding', 'refund_failed', 'refunded')",
+            name="ck_message_credit_purchases_status",
+        ),
+        CheckConstraint(
+            "quantity > 0 AND amount_paise > 0 AND refunded_paise >= 0 AND refunded_paise <= amount_paise",
+            name="ck_message_credit_purchases_amounts",
+        ),
+        Index("ix_message_credit_purchases_club", "club_id", "created_at"),
+        # The sweep's walk: checkouts a payment may still land on.
+        Index(
+            "ix_message_credit_purchases_open", "created_at",
+            postgresql_where=text("status = 'created'"),
+        ),
+    )
+
+
+class LotSource:
+    PURCHASE = "purchase"
+    GRANT = "grant"
+
+
+class MessageCreditLots(AbstractSQLModel, TimestampsMixin):
+    """Credits a club holds for one channel: `remaining` of `quantity`,
+    until `expires_at`. Sends past the plan's monthly allowance take from
+    the lot that expires first (credits.consume)."""
+
+    __tablename__ = "message_credit_lots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    club_id = Column(Integer, ForeignKey("clubs.id", ondelete="CASCADE"), nullable=False)
+    channel = Column(String(16), nullable=False)
+    #: purchase | grant
+    source = Column(String(16), nullable=False)
+    quantity = Column(Integer, nullable=False)
+    remaining = Column(Integer, nullable=False)
+    bought_at = Column(TZAwareDateTime(timezone=True), nullable=False, default=_now, server_default=text("now()"))
+    expires_at = Column(TZAwareDateTime(timezone=True), nullable=False)
+    #: The purchase it came from: one lot per purchase, ever (unique).
+    purchase_id = Column(
+        Integer, ForeignKey("message_credit_purchases.id", ondelete="CASCADE"), nullable=True, unique=True,
+    )
+    #: A grant's reason and the admin who gave it.
+    reason = Column(String(300), nullable=True)
+    granted_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    #: Its unused credits were taken back with a refund.
+    refunded_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    #: The club was told its credits run low (under 10% of this, the last pack bought).
+    low_warned_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    #: The club was told this lot expires within 30 days.
+    expiry_warned_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("channel IN ('email', 'whatsapp')", name="ck_message_credit_lots_channel"),
+        CheckConstraint("source IN ('purchase', 'grant')", name="ck_message_credit_lots_source"),
+        CheckConstraint("quantity > 0 AND remaining >= 0 AND remaining <= quantity", name="ck_message_credit_lots_remaining"),
+        # The sends' walk: a club's lots with credits left, by expiry.
+        Index(
+            "ix_message_credit_lots_live", "club_id", "channel", "expires_at",
+            postgresql_where=text("remaining > 0"),
+        ),
+    )

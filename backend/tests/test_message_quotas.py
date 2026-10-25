@@ -1,29 +1,25 @@
-"""Monthly email and WhatsApp quotas per plan, and paid overage.
+"""Monthly email and WhatsApp allowances per plan.
 
 What is checked: every message handed to the provider counts once (and a
-skipped, failed or club-number one never); Free holds back what is not a
-ticket, certificate or payment message past its limit, a paying plan never
-does; the 80% and 100% warnings go once each; a closed month's extra goes on
-the club's Razorpay subscription as one add-on, never two, retried when
-Razorpay says no and found again when it never answered; complimentary and
-Free clubs get a statement and no charge; the dashboards' answers.
+skipped, failed or club-number one never); past the plan's allowance, with
+no credits, every plan holds back what is not a ticket, certificate or
+payment message; the 80% and 100% warnings go once each, with a "Buy
+credits" link; the dashboards' answers. Prepaid credits, and overage billing
+retired: tests/test_message_credits.py.
 
-Razorpay is LIVE in production: every call here goes to FakeRazorpay
-(tests/test_club_billing.py). Meta is a stand-in (tests/test_whatsapp.py),
-mail a list.
+Meta is a stand-in (tests/test_whatsapp.py), mail a list.
 """
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from razorpay.errors import BadRequestError
 from sqlalchemy import func, select
 
 from app.api.deliveries import pipeline
 from app.api.deliveries import service as deliveries
 from app.api.deliveries.models import Deliveries, DeliveryChannel, DeliveryKind, DeliveryStatus
-from app.api.message_quota import billing, service as quota
-from app.api.message_quota.models import MessageStatements, MessageUsage
+from app.api.message_quota import service as quota
+from app.api.message_quota.models import MessageUsage
 from app.config import settings
 from app.core import jobs, whatsapp
 from app.core.email import email as email_mod
@@ -31,7 +27,7 @@ from app.core.layout.model import TicketLayoutFields, dump
 from app.core.layout.starters import ticket_starter
 from tests.conftest import auth_header
 from tests.test_billing_alerts import _alerts, mail  # noqa: F401  (mail is a fixture)
-from tests.test_club_billing import FakeRazorpay, make_plan, razorpay  # noqa: F401  (razorpay is a fixture)
+from tests.test_club_billing import make_plan
 from tests.test_whatsapp import meta  # noqa: F401  (meta is a fixture)
 
 API = "/api/v1"
@@ -55,7 +51,6 @@ def _enforced(monkeypatch):
 
     monkeypatch.setattr(settings, "PLAN_ENFORCEMENT", True)
     monkeypatch.setattr(settings, "PLAN_ENFORCEMENT_FROM", LONG_AGO)
-    monkeypatch.setattr(settings, "MESSAGE_OVERAGE_BILLING", True)
     gates.reset()
     yield
     gates.reset()
@@ -98,7 +93,7 @@ def background(monkeypatch, session):
 @pytest.fixture
 async def tiers(session):
     """Free (3 emails, no WhatsApp), Growth (3 emails, 2 WhatsApp, Razorpay
-    billed) and Enterprise (unlimited, set per club): small limits, so a
+    billed) and Enterprise (unlimited, set per club): small allowances, so a
     handful of guests goes past them."""
     from types import SimpleNamespace
 
@@ -241,7 +236,9 @@ async def test_record_message_is_idempotent_by_ref_and_counts_by_kind(session, w
     await quota.record_message(club_id, "email", "certificate", session=session)
     row = await _usage(session, club_id)
     assert row.used == 2 and row.kinds == {"announcement": 1, "certificate": 1}
-    assert (row.quota, row.billing, row.plan_key, row.rate_paise) == (3, "none", "free", 10)
+    # No per-message price is kept any more: nothing is billed after the fact.
+    assert (row.quota, row.billing, row.plan_key, row.rate_paise) == (3, "none", "free", 0)
+    assert (row.plan_used, row.credits_used, row.uncovered) == (2, 0, 0)
 
 
 # ─── Holding back on Free ────────────────────────────────────────────────
@@ -259,7 +256,8 @@ async def test_free_holds_back_announcements_past_its_limit_but_never_tickets(cl
     held = [d for d in rows.values() if d["status"] == "skipped" and d["error"] != "no email address"]
     assert len(held) == 1
     assert held[0]["error"] == (
-        "Not sent: this month's 3 emails on Free are used up. Upgrade to send more; tickets and certificates still go."
+        "Not sent: this month's 3 emails on Free are used up and there are no email credits left. "
+        "Buy credits to send more; tickets and certificates still go."
     )
     row = await _usage(session, world["club"].id)
     assert (row.used, row.blocked, row.kinds) == (3, 1, {"announcement": 3})
@@ -268,13 +266,16 @@ async def test_free_holds_back_announcements_past_its_limit_but_never_tickets(cl
     await _send_tickets(session, world)
     row = await _usage(session, world["club"].id)
     assert (row.used, row.kinds) == (7, {"announcement": 3, "ticket": 4})
+    # Three from the plan; the four tickets with nothing left are "over", never charged.
+    assert (row.plan_used, row.credits_used, row.uncovered) == (3, 0, 4)
 
     usage = (await client.get(f"{API}/clubs/messages/usage", headers=world["h"])).json()
     email = usage["channels"]["email"]
     assert (email["used"], email["limit"], email["extra"], email["blocked"], email["state"]) == (7, 3, 4, 1, "blocked")
-    # Free has no way to pay: nothing is billed.
+    assert (email["plan_used"], email["plan_remaining"], email["over"], email["total_remaining"]) == (3, 0, 4, 0)
+    # Nothing is ever billed per message.
     assert email["extra_paise"] == 0 and usage["estimated_extra_paise"] == 0
-    assert usage["billing"] == "none" and usage["blocks_past_limit"] is True
+    assert usage["billing"] == "prepaid" and usage["blocks_past_limit"] is True
     assert usage["upgrade"]["plan_key"] == "pro"
 
 
@@ -288,7 +289,10 @@ async def test_free_holds_back_whatsapp_reminders_but_tickets_go(session, world,
     await deliveries.deliver(session, reminder.id)
     reminder = await session.get(Deliveries, reminder.id, populate_existing=True)
     assert reminder.status is DeliveryStatus.skipped
-    assert reminder.error == "Not sent: WhatsApp reminders aren't included on Free. Upgrade to send them."
+    assert reminder.error == (
+        "Not sent: WhatsApp reminders aren't included on Free, and there are no WhatsApp credits left. "
+        "Buy credits to send them."
+    )
     assert meta["messages"] == []
 
     result = await deliveries.queue(session, world["event"], DeliveryKind.ticket, registration_ids=[reg.id])
@@ -299,18 +303,21 @@ async def test_free_holds_back_whatsapp_reminders_but_tickets_go(session, world,
     assert (wa.used, wa.blocked, wa.kinds) == (1, 1, {"ticket": 1})
 
 
-async def test_a_paying_club_is_never_held_back_and_its_extra_accrues(client, session, world, outbox, background):
+async def test_a_paying_club_past_its_allowance_is_held_back_too_with_no_credits(client, session, world, outbox, background, monkeypatch):
+    """Since prepaid credits, a plan Razorpay bills is no different: past
+    its allowance with no credits, announcements wait. Nothing accrues."""
+    monkeypatch.setattr(settings, "MAIL_CONCURRENCY", 1)
     await _paying(session, world["club"].id, world["tiers"].growth.id)
     msg = await _broadcast(client, world)
     assert msg["recipients"] == 5
-    # All four with an address, past the limit of three: nothing held back.
-    assert len([m for m in outbox["sent"] if m["subject"] == "Doors at six"]) == 4
+    # Four with an address, an allowance of three: the fourth waits.
+    assert len([m for m in outbox["sent"] if m["subject"] == "Doors at six"]) == 3
     usage = (await client.get(f"{API}/clubs/messages/usage", headers=world["h"])).json()
     email = usage["channels"]["email"]
-    assert (email["used"], email["limit"], email["extra"], email["blocked"], email["state"]) == (4, 3, 1, 0, "over")
-    assert (email["rate_paise"], email["extra_paise"], email["percent"]) == (10, 10, 133)
-    assert usage["billing"] == "razorpay" and usage["blocks_past_limit"] is False
-    assert usage["estimated_extra_paise"] == 10
+    assert (email["used"], email["limit"], email["extra"], email["blocked"], email["state"]) == (3, 3, 0, 1, "blocked")
+    assert (email["rate_paise"], email["extra_paise"], email["percent"]) == (0, 0, 100)
+    assert usage["billing"] == "prepaid" and usage["blocks_past_limit"] is True
+    assert usage["estimated_extra_paise"] == 0
     assert usage["upgrade"]["plan_key"] == "pro"
 
 
@@ -378,12 +385,17 @@ async def test_the_80_and_100_percent_warnings_go_once_each(client, session, wor
     assert bell["unread"] == 2
     assert [a["kind"] for a in bell["items"]] == ["message_quota_100", "message_quota_80"]
     month = quota.label(quota.period_of())
-    assert bell["items"][0]["title"] == f"You've used all 5 emails for {month}"
-    assert bell["items"][1]["title"] == f"You've used 80% of your emails for {month}"
-    assert "each extra email is ₹0.10, added to your next bill" in bell["items"][1]["body"]
-    assert bell["items"][0]["link"] == "/billing"
+    assert bell["items"][0]["title"] == f"You've used all 5 emails in your plan for {month}"
+    assert bell["items"][1]["title"] == f"You've used 80% of your plan's emails for {month}"
+    assert "unless you buy credits" in bell["items"][1]["body"]
+    assert "₹" not in bell["items"][1]["body"] and "bill" not in bell["items"][1]["body"]
+    # The notices gain a "Buy credits" link.
+    assert {a["link"] for a in bell["items"]} == {"/billing#credits"}
+    assert {a["data"]["action_label"] for a in bell["items"]} == {"Buy credits"}
     mails = mail.to("quota-owner@example.com")
-    assert [m["subject"] for m in mails] == [f"You've used 80% of your emails for {month}", f"You've used all 5 emails for {month}"]
+    assert [m["subject"] for m in mails] == [
+        f"You've used 80% of your plan's emails for {month}", f"You've used all 5 emails in your plan for {month}"]
+    assert "Buy credits" in mails[0]["text"]
     row = await _usage(session, club_id)
     assert row.warned_80_at is not None and row.warned_100_at is not None
 
@@ -399,252 +411,7 @@ async def test_free_is_warned_that_announcements_stop(session, world, mail):  # 
     await session.commit()
     await mail.drain()
     [warning] = [m for m in mail.to("quota-owner@example.com") if "all 3 emails" in m["subject"]]
-    assert "announcements, campaigns and reminders stop until next month" in warning["text"]
-
-
-# ─── Overage on the next invoice ─────────────────────────────────────────
-
-
-async def _over_last_month(session, world, plan, *, emails=5, whatsapps=4):
-    """Last month: past Growth's 3 emails and 2 WhatsApp."""
-    at = _last_month()
-    for _ in range(emails):
-        await quota.record_message(world["club"].id, "email", "announcement", session=session, at=at)
-    for _ in range(whatsapps):
-        await quota.record_message(world["club"].id, "whatsapp", "ticket", session=session, at=at)
-    await session.commit()
-    return quota.period_of(at)
-
-
-def _addons(fake, *, made=None, fail=None):
-    """createAddon: answer with an id (or raise `fail(n)` for call n)."""
-    made = made if made is not None else []
-
-    def create(sub_id, data):
-        n = len(fake.of("subscription", "createAddon")) - 1  # this call is recorded already
-        error = fail(n) if fail else None
-        if error == "made-then-timeout":
-            made.append({"id": f"ao_{n}", "subscription_id": sub_id, "item": data["item"]})
-            from app.api.payments.rzp import RazorpayTimeout
-
-            raise RazorpayTimeout("Razorpay did not answer createAddon within 10 s")
-        if error is not None:
-            raise error
-        addon = {"id": f"ao_{n}", "entity": "addon", "subscription_id": sub_id, "item": data["item"], "quantity": data["quantity"]}
-        made.append(addon)
-        return addon
-
-    fake.handlers[("subscription", "createAddon")] = create
-    fake.handlers[("addon", "all")] = lambda data: {"entity": "collection", "count": len(made), "items": list(made)}
-    return made
-
-
-async def _statement(session, club_id) -> MessageStatements:
-    return await session.scalar(
-        select(MessageStatements).where(MessageStatements.club_id == club_id).execution_options(populate_existing=True)
-    )
-
-
-async def test_a_months_extra_goes_on_the_next_invoice_once(client, session, world, razorpay):  # noqa: F811
-    from app.api.audit.models import AdminAuditLogs
-
-    await _paying(session, world["club"].id, world["tiers"].growth.id)
-    period = await _over_last_month(session, world, world["tiers"].growth)
-    made = _addons(razorpay)
-
-    done = await billing.run(session)
-    assert done == {"message_statements": 1, "overage_charged": 1, "overage_failed": 0}
-    st = await _statement(session, world["club"].id)
-    assert st.period == period
-    assert (st.email_used, st.email_limit, st.email_extra, st.whatsapp_used, st.whatsapp_limit, st.whatsapp_extra) == (5, 3, 2, 4, 2, 2)
-    # 2 × ₹0.10 + 2 × ₹1.50: the WhatsApp extra at the plan's price (pricing_adjust).
-    assert (st.email_rate_paise, st.whatsapp_rate_paise) == (10, 150)
-    assert st.amount_paise == 320 and st.status == "charged" and st.razorpay_addon_id == "ao_0"
-    [(sub_id, payload)] = razorpay.of("subscription", "createAddon")
-    assert sub_id == "sub_quota_live"
-    assert payload["quantity"] == 1 and payload["item"]["amount"] == 320 and payload["item"]["currency"] == "INR"
-    assert billing.reference(st) in payload["item"]["description"]
-    assert len(made) == 1
-
-    # The sweep again, and again: never a second add-on.
-    await billing.run(session)
-    await billing.run(session, _now() + 3 * DAY)
-    assert len(razorpay.of("subscription", "createAddon")) == 1
-    audit = await session.scalar(select(AdminAuditLogs).where(AdminAuditLogs.action == "messages.overage_charged"))
-    assert audit.details["addon_id"] == "ao_0" and audit.details["amount_paise"] == 320
-    assert [a.kind for a in await _alerts(session, "message_overage_charged")] == ["message_overage_charged"]
-
-    history = (await client.get(f"{API}/clubs/messages/history", headers=world["h"])).json()["items"]
-    assert [(h["period"], h["status"], h["amount_paise"]) for h in history] == [(quota.key(period), "charged", 320)]
-
-
-async def test_a_refused_addon_is_tried_again_later_and_charged_once(session, world, razorpay):  # noqa: F811
-    await _paying(session, world["club"].id, world["tiers"].growth.id)
-    await _over_last_month(session, world, world["tiers"].growth)
-    _addons(razorpay, fail=lambda n: BadRequestError("The id provided does not exist") if n == 0 else None)
-    now = _now()
-
-    assert (await billing.run(session, now))["overage_failed"] == 1
-    st = await _statement(session, world["club"].id)
-    assert st.status == "failed" and st.attempts == 1 and st.next_attempt_at > now
-    assert "Razorpay refused the add-on" in st.last_error
-    assert len(await _alerts(session, "message_overage_failed")) == 1
-
-    # Not due yet: nothing asked.
-    await billing.run(session, now + timedelta(minutes=5))
-    assert len(razorpay.of("subscription", "createAddon")) == 1
-    # Due: asked again, and charged once.
-    await billing.run(session, now + 2 * timedelta(hours=1))
-    st = await _statement(session, world["club"].id)
-    assert st.status == "charged" and st.razorpay_addon_id == "ao_1" and st.attempts == 2
-    assert len(razorpay.of("subscription", "createAddon")) == 2
-
-
-async def test_an_addon_razorpay_made_without_answering_is_found_not_made_again(session, world, razorpay):  # noqa: F811
-    await _paying(session, world["club"].id, world["tiers"].growth.id)
-    await _over_last_month(session, world, world["tiers"].growth)
-    made = _addons(razorpay, fail=lambda n: "made-then-timeout" if n == 0 else None)
-    now = _now()
-
-    await billing.run(session, now)
-    st = await _statement(session, world["club"].id)
-    assert st.status == "unconfirmed" and st.razorpay_addon_id is None
-    # Next run: Razorpay's add-ons are searched first; it is there, so it is the charge.
-    await billing.run(session, now + timedelta(minutes=15))
-    st = await _statement(session, world["club"].id)
-    assert st.status == "charged" and st.razorpay_addon_id == "ao_0"
-    assert len(razorpay.of("subscription", "createAddon")) == 1 and len(made) == 1
-
-
-async def test_an_addon_never_made_is_asked_for_again_after_checking(session, world, razorpay):  # noqa: F811
-    from app.api.payments.rzp import RazorpayTimeout
-
-    await _paying(session, world["club"].id, world["tiers"].growth.id)
-    await _over_last_month(session, world, world["tiers"].growth)
-    made = _addons(razorpay, fail=lambda n: RazorpayTimeout("no answer") if n == 0 else None)
-    now = _now()
-    await billing.run(session, now)
-    assert (await _statement(session, world["club"].id)).status == "unconfirmed"
-    await billing.run(session, now + timedelta(minutes=15))
-    st = await _statement(session, world["club"].id)
-    assert st.status == "charged" and st.razorpay_addon_id == "ao_1"
-    assert razorpay.of("addon", "all") and len(made) == 1
-
-
-async def test_a_charge_left_half_way_by_a_stopped_sweep_is_found_out(session, world, razorpay):  # noqa: F811
-    await _paying(session, world["club"].id, world["tiers"].growth.id)
-    await _over_last_month(session, world, world["tiers"].growth)
-    made = _addons(razorpay)
-    await billing.close_months(session)
-    st = await _statement(session, world["club"].id)
-    # A sweep claimed it, Razorpay made the add-on, and the sweep died before writing it down.
-    st.status, st.charging_since, st.attempts, st.razorpay_subscription_id = "charging", _now() - timedelta(hours=1), 1, "sub_quota_live"
-    await session.commit()
-    made.append({"id": "ao_lost", "subscription_id": "sub_quota_live",
-                 "item": {"description": f"2 extra emails {billing.reference(st)}"}})
-
-    await billing.run(session)
-    st = await _statement(session, world["club"].id)
-    assert st.status == "charged" and st.razorpay_addon_id == "ao_lost"
-    assert razorpay.of("subscription", "createAddon") == []
-
-
-async def test_given_up_after_its_tries_then_an_admin_can_retry(client, session, world, razorpay, make_admin, mint_token):  # noqa: F811
-    await _paying(session, world["club"].id, world["tiers"].growth.id)
-    await _over_last_month(session, world, world["tiers"].growth)
-    state = {"refuse": True}
-    _addons(razorpay, fail=lambda n: BadRequestError("Subscription is not active") if state["refuse"] else None)
-    when = _now()
-    for _ in range(billing.MAX_ATTEMPTS):
-        await billing.run(session, when)
-        when += timedelta(days=2)
-    st = await _statement(session, world["club"].id)
-    assert st.status == "gave_up" and st.attempts == billing.MAX_ATTEMPTS
-    await billing.run(session, when + 5 * DAY)
-    assert len(razorpay.of("subscription", "createAddon")) == billing.MAX_ATTEMPTS
-
-    admin = auth_header(await mint_token(await make_admin(email="quota-admin@example.com")))
-    state["refuse"] = False
-    r = await client.post(f"{API}/admin/messages/statements/{st.id}/retry", headers=admin)
-    assert r.status_code == 200, r.text
-    assert r.json()["status"] == "charged"
-    # Charged now: a second retry is refused.
-    again = await client.post(f"{API}/admin/messages/statements/{st.id}/retry", headers=admin)
-    assert again.status_code == 409
-
-
-async def test_a_club_whose_subscription_ended_is_left_to_invoice_by_hand(session, world, razorpay):  # noqa: F811
-    from app.api.subscriptions.models import ClubSubscriptions
-
-    await _paying(session, world["club"].id, world["tiers"].growth.id)
-    await _over_last_month(session, world, world["tiers"].growth)
-    row = await session.scalar(select(ClubSubscriptions).where(ClubSubscriptions.club_id == world["club"].id))
-    row.status = "cancelled"
-    row.current_period_end = _now() - DAY
-    await session.commit()
-    _addons(razorpay)
-    await billing.run(session)
-    st = await _statement(session, world["club"].id)
-    # Sent under Growth (Razorpay), so billed at Growth's limits -- but nothing left to add it to.
-    assert (st.billing, st.amount_paise, st.status) == ("razorpay", 320, "manual")
-    assert razorpay.of("subscription", "createAddon") == []
-    assert len(await _alerts(session, "message_overage_manual")) == 1
-
-
-async def test_a_complimentary_club_gets_a_statement_and_no_charge(session, world, razorpay):  # noqa: F811
-    from app.api.subscriptions import service as subs
-    from app.api.subscriptions.models import BillingCycle
-
-    await subs.grant_complimentary(session, club_id=world["club"].id, plan=world["tiers"].growth, cycle=BillingCycle.monthly,
-                                   reason="Fest partner", ends_at=None, granted_by=None)
-    await session.commit()
-    await _over_last_month(session, world, world["tiers"].growth)
-    _addons(razorpay)
-    done = await billing.run(session)
-    assert done["overage_charged"] == 0
-    st = await _statement(session, world["club"].id)
-    assert (st.billing, st.amount_paise, st.status) == ("manual", 320, "manual")
-    assert razorpay.of("subscription", "createAddon") == []
-    [alert] = await _alerts(session, "message_overage_manual")
-    assert "invoice ₹3.20 by hand" in alert.title
-
-
-async def test_free_past_its_limit_is_not_billable_and_a_tiny_extra_is_waived(session, world, razorpay, make_club):  # noqa: F811
-    at = _last_month()
-    for _ in range(5):
-        await quota.record_message(world["club"].id, "email", "ticket", session=session, at=at)
-    _, other = await make_club(name="Tiny Extra", email="tiny@example.com")
-    await _paying(session, other.id, world["tiers"].growth.id, sub_id="sub_tiny")
-    for _ in range(4):  # one extra email: ₹0.10, under Razorpay's ₹1
-        await quota.record_message(other.id, "email", "announcement", session=session, at=at)
-    await session.commit()
-    _addons(razorpay)
-    await billing.run(session)
-    free = await _statement(session, world["club"].id)
-    assert (free.billing, free.email_extra, free.amount_paise, free.status) == ("none", 2, 20, "not_billable")
-    tiny = await _statement(session, other.id)
-    assert (tiny.amount_paise, tiny.status) == (10, "waived")
-    assert razorpay.of("subscription", "createAddon") == []
-
-
-async def test_nothing_is_charged_while_overage_billing_is_switched_off(session, world, razorpay, monkeypatch):  # noqa: F811
-    monkeypatch.setattr(settings, "MESSAGE_OVERAGE_BILLING", False)
-    await _paying(session, world["club"].id, world["tiers"].growth.id)
-    await _over_last_month(session, world, world["tiers"].growth)
-    _addons(razorpay)
-    await billing.run(session)
-    assert (await _statement(session, world["club"].id)).status == "pending"
-    assert razorpay.of("subscription", "createAddon") == []
-
-
-async def test_the_hourly_billing_sweep_runs_the_message_steps(session, world, razorpay):  # noqa: F811
-    from app.api.subscriptions import sweep
-
-    await _paying(session, world["club"].id, world["tiers"].growth.id)
-    await _over_last_month(session, world, world["tiers"].growth)
-    _addons(razorpay)
-    done = await sweep.sweep(session)
-    assert (done["message_statements"], done["overage_charged"]) == (1, 1)
+    assert "announcements, campaigns and reminders pause until next month unless you buy credits" in warning["text"]
 
 
 # ─── What the dashboards read ────────────────────────────────────────────
@@ -654,7 +421,8 @@ async def test_the_plans_and_entitlements_carry_the_limits_and_prices(client, se
     plans = {p["key"]: p for p in (await client.get(f"{API}/plans")).json()["plans"]}
     assert plans["growth"]["limits"]["emails_per_month"] == 3 and plans["growth"]["limits"]["whatsapp_per_month"] == 2
     assert plans["enterprise"]["limits"]["emails_per_month"] is None
-    assert (plans["growth"]["email_overage_paise"], plans["growth"]["whatsapp_overage_paise"]) == (10, 150)
+    # No per-message extra is sold any more: the pricing page shows none.
+    assert (plans["growth"]["email_overage_paise"], plans["growth"]["whatsapp_overage_paise"]) == (None, None)
     ent = (await client.get(f"{API}/clubs/entitlements", headers=world["h"])).json()
     assert ent["limits"]["emails_per_month"] == 3 and ent["limits"]["whatsapp_per_month"] == 0
     assert (ent["email_overage_paise"], ent["whatsapp_overage_paise"]) == (10, 150)
@@ -668,8 +436,9 @@ async def test_the_usage_answer_has_its_shape(client, session, world):
                          "blocks_past_limit", "custom", "trial", "channels", "estimated_extra_paise", "upgrade"}
     assert body["period"] == quota.key(quota.period_of()) and body["plan_key"] == "free"
     assert body["channels"]["email"] == {
-        "used": 1, "limit": 3, "extra": 0, "blocked": 0, "rate_paise": 10, "extra_paise": 0, "percent": 33,
-        "state": "ok", "kinds": {"ticket": 1}, "warned": [],
+        "used": 1, "limit": 3, "extra": 0, "blocked": 0, "rate_paise": 0, "extra_paise": 0, "percent": 33,
+        "state": "ok", "kinds": {"ticket": 1}, "warned": [], "plan_used": 1, "plan_remaining": 2, "credits_used": 0,
+        "over": 0, "credits_remaining": 0, "total_remaining": 2,
     }
     assert body["channels"]["whatsapp"]["state"] == "not_included" and body["channels"]["whatsapp"]["limit"] == 0
     assert body["upgrade"] is None
@@ -711,8 +480,8 @@ async def test_an_admin_sees_a_clubs_usage_and_sets_enterprise_limits(client, se
     assert view["own_limits_apply"] is True and view["usage"]["custom"] is True
     assert view["usage"]["channels"]["email"]["limit"] == 50000
     assert view["usage"]["channels"]["whatsapp"]["limit"] is None
-    assert view["usage"]["channels"]["whatsapp"]["rate_paise"] == 80
-    assert view["usage"]["billing"] == "manual"
+    assert view["usage"]["channels"]["whatsapp"]["rate_paise"] == 0
+    assert view["usage"]["billing"] == "prepaid"
     assert view["own_limits"]["note"] == "Fest deal"
 
     # The club's own entitlements say the same.
@@ -868,9 +637,9 @@ def test_what_counts_as_promotional_whatsapp():
 
 
 async def test_promotional_whatsapp_past_the_cap_is_held_back_but_tickets_go(session, world, meta, background):
-    """Growth, which Razorpay bills: past its promotional cap a MARKETING
-    WhatsApp is held back (never sold as an extra); utility messages and
-    tickets go on, past the WhatsApp limit too, as extras."""
+    """Growth: past its promotional cap a MARKETING WhatsApp is held back
+    (no credits); utility messages take the rest of the allowance, and
+    tickets go past it too, never charged."""
     growth = world["tiers"].growth
     await _cap_marketing(session, growth, 1)
     await _paying(session, world["club"].id, growth.id)
@@ -884,8 +653,8 @@ async def test_promotional_whatsapp_past_the_cap_is_held_back_but_tickets_go(ses
         await whatsapp.send("9876543211", promo, meter={"club_id": club_id, "kind": "update", "category": "MARKETING",
                                                          "ref": "promo:2"})
     assert held.value.reason == (
-        "Not sent: this month's 1 promotional WhatsApp message on Growth are used up. "
-        "Tickets, certificates and reminders still go."
+        "Not sent: this month's 1 promotional WhatsApp message on Growth are used up and there are no WhatsApp "
+        "credits left. Tickets, certificates and reminders still go."
     )
     # A utility update is not promotional: it goes, and so do tickets, past the limit of 2.
     await whatsapp.send("9876543212", promo, meter={"club_id": club_id, "kind": "update", "category": "UTILITY",
@@ -899,9 +668,11 @@ async def test_promotional_whatsapp_past_the_cap_is_held_back_but_tickets_go(ses
     assert (wa.used, wa.marketing, wa.blocked) == (3, 1, 1)
     assert wa.kinds == {"update": 2, "ticket": 1}
 
+    assert (wa.plan_used, wa.credits_used, wa.uncovered) == (2, 0, 1)
+
     usage = (await quota.usage(session, club_id))["channels"]["whatsapp"]
     assert usage["marketing"] == {"used": 1, "limit": 1}
-    assert (usage["used"], usage["limit"], usage["extra"], usage["state"]) == (3, 2, 1, "over")
+    assert (usage["used"], usage["limit"], usage["extra"], usage["over"], usage["state"]) == (3, 2, 1, 1, "blocked")
 
 
 async def test_free_sends_no_promotional_whatsapp_and_a_club_number_is_never_capped(session, world, meta, background):
@@ -910,7 +681,9 @@ async def test_free_sends_no_promotional_whatsapp_and_a_club_number_is_never_cap
     terms = await quota.terms_for(session, club_id)
     assert terms.whatsapp_marketing_limit == 0
     reason = await quota.held_back(session, terms, "whatsapp", "promotion")
-    assert reason == "Not sent: promotional WhatsApp messages aren't included on Free."
+    assert reason == (
+        "Not sent: WhatsApp messages aren't included on Free, and there are no WhatsApp credits left. Buy credits to send them."
+    )
     # A ticket is never held back, a club's own number never capped or counted.
     assert await quota.held_back(session, terms, "whatsapp", "ticket", category="MARKETING") is None
     assert await quota.held_back(session, terms, "whatsapp", "promotion", via="club") is None
@@ -952,7 +725,7 @@ async def test_the_free_trial_has_its_own_allowances_and_pros_features(client, s
     terms = await quota.terms_for(session, club_id)
     assert (terms.plan_key, terms.email_limit, terms.whatsapp_limit, terms.whatsapp_marketing_limit, terms.trial) == (
         "pro", 2000, 50, 10, "free_trial")
-    assert terms.blocks  # no card: past 2,000 emails, announcements are held back
+    assert terms.blocks  # past 2,000 emails and no credits, announcements are held back
     gates.reset()
     assert await gates.cap(session, club_id, "ai_actions_per_month") == 50
     resolved = await subs.resolve_entitlements(session, club_id)
@@ -1004,3 +777,7 @@ def test_every_team_role_reads_the_bell_and_the_months_messages():
         assert policy.allows(role, "POST", "/api/v1/clubs/alerts/read"), role
         assert policy.allows(role, "GET", "/api/v1/clubs/messages/usage"), role
         assert policy.allows(role, "GET", "/api/v1/clubs/messages/history"), role
+        assert policy.allows(role, "GET", "/api/v1/clubs/messages/credits"), role
+        # Buying credits is the club's own account's: money it spends.
+        assert not policy.allows(role, "POST", "/api/v1/clubs/messages/credits/orders"), role
+        assert not policy.allows(role, "POST", "/api/v1/clubs/messages/credits/verify"), role

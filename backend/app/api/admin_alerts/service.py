@@ -76,9 +76,9 @@ KINDS: dict[str, str] = {
     "ledger_drift": "The ledger's monthly sums had drifted from its entries; the daily reconcile put them right (data: rows, clubs)",
     "ledger_unbalanced": "Ledger postings whose lines do not sum to zero (data: keys)",
     "ledger_mismatch": "Razorpay's payments or refunds for a day disagree with the ledger (data: day, gateway, and each mismatch)",
-    "message_overage_charged": "A month's extra messages were added to a club's next Razorpay invoice (data: period, amount_paise, addon_id)",
-    "message_overage_failed": "Razorpay did not take a month's extra-messages add-on; the sweep tries again, then gives up for an admin to invoice (data: period, error)",
-    "message_overage_manual": "A club went past its message limits on a plan nothing bills automatically (complimentary, Enterprise, a deal by hand, a subscription that ended): invoice it by hand (data: period, amount_paise)",
+    "message_overage_charged": "(retired with overage billing) A month's extra messages were added to a club's next Razorpay invoice (data: period, amount_paise, addon_id)",
+    "message_overage_failed": "(retired with overage billing) Razorpay did not take a month's extra-messages add-on; the sweep tries again, then gives up for an admin to invoice (data: period, error)",
+    "message_overage_manual": "(retired with overage billing) A club went past its message limits on a plan nothing bills automatically (complimentary, Enterprise, a deal by hand, a subscription that ended): invoice it by hand (data: period, amount_paise)",
     "doc_cache_unknown": "The kept-documents sweep found objects under docs/ that are not kept documents, and left them alone (data: unknown, listed, percent, samples)",
 }
 

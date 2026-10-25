@@ -91,6 +91,8 @@ CLASSIFICATION: dict[str, str] = {
     "plans": KEEP,
     "plan_features": KEEP,
     "plan_limits": KEEP,
+    # The top-up packs on sale: catalogue, like the plans.
+    "message_credit_packs": KEEP,
     "interest_categories": KEEP,
     "interests": KEEP,
     "badge_definitions": KEEP,
@@ -238,6 +240,9 @@ CLASSIFICATION: dict[str, str] = {
     "message_usage_refs": WIPE,
     "message_statements": WIPE,
     "club_message_quotas": WIPE,
+    # Credits clubs bought or were given, and their purchases.
+    "message_credit_purchases": WIPE,
+    "message_credit_lots": WIPE,
     # The club dashboard's bell.
     "club_alerts": WIPE,
     "notes": WIPE,

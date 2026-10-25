@@ -993,6 +993,13 @@ async def _apply_platform_event(session: AsyncSession, event_name: str, data: di
         await _handle_subscription_event(session, event_name, data)
         return
 
+    # A club buying message credits: a one-time order of its own
+    # (app/api/message_quota/credits.py), never a ticket's.
+    from app.api.message_quota import credits as message_credits
+
+    if await message_credits.handle_platform_event(session, event_name, data):
+        return
+
     if event_name == "payment.failed" and await _handle_subscription_payment_failure(session, data):
         return
 

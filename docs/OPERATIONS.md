@@ -1961,18 +1961,19 @@ On production (off-peak; it costs CPU and disk while it runs):
 
 ---
 
-## 20. Message quotas and paid overage
+## 20. Message quotas and prepaid credits
 
 Every email and WhatsApp message a club sends to its people counts against
-its plan's monthly limits (`plan_limits.emails_per_month` and
+its plan's monthly allowance (`plan_limits.emails_per_month` and
 `whatsapp_per_month`, null for unlimited): tickets, certificates, payment
 receipts, the day-before reminder, announcements (typed messages),
-campaigns (designed sends), journey emails and feedback-survey mails. A
-month is a calendar month in India. Not counted: a send that was skipped or
-failed, a test send to the organiser, the platform's own mail to the club,
-and a WhatsApp message sent through a club's own number (`via="club"`).
+campaigns (designed sends), journey emails, feedback-survey mails and mail
+from the club's mailbox. A month is a calendar month in India. Not counted:
+a send that was skipped or failed, a test send to the organiser, the
+platform's own mail to the club, and a WhatsApp message sent through a
+club's own number (`via="club"`).
 
-The owner's defaults (migrations `message_quotas` and `pricing_adjust`,
+The owner's allowances (migrations `message_quotas` and `pricing_adjust`,
 editable in Admin -> Subscriptions -> Plans):
 
 | Plan | Emails a month | WhatsApp a month | of which promotional |
@@ -1988,68 +1989,103 @@ The free trial also has 50 AI actions a month (Pro: 500). Its allowances are
 the trial plan's `plan_limits.trial_*` columns, edited in the plan editor
 under "Free trial allowances"; empty means the plan's own.
 
-Each plan's overage prices (`plans.email_overage_paise`, default 10 = ₹0.10;
-`whatsapp_overage_paise`, default 150 = ₹1.50, ₹1 before `pricing_adjust`)
-are edited beside them. What a WhatsApp message costs us, with GST: ₹0.136
-for a UTILITY template, ₹1.02 for a MARKETING one.
+**Prepaid credits** (migration `message_credits`, the owner's decision of
+2026-10-25; app/api/message_quota/credits.py). A send uses, in order:
 
-**Promotional WhatsApp** (MARKETING templates) is capped per plan at
-`whatsapp_marketing_per_month` (20% of the plan's WhatsApp), on every plan:
-past it, a promotional WhatsApp is held back like other non-essential
-messages over quota, and is never sold as an extra. Tickets, certificates,
-payment messages and reminders are UTILITY and never count against it.
-Today the platform's number sends no MARKETING template at all (its five
-templates are UTILITY, and a club's promotions go from its own number,
-which is not counted); the cap is enforced in `held_back` for the first
-send that does. A sender says a message is promotional with
-`category="MARKETING"` (or the kinds `promotion`, `announcement`,
-`campaign` by WhatsApp).
+1. the plan's allowance for the month ("plan credits", `message_usage.plan_used`);
+2. the club's credit lots, the one that expires first first (`credits_used`):
+   packs it bought, or credits an admin granted. Each lot lasts 12 months;
+3. nothing: a ticket, certificate or payment message still goes (an
+   attendee is never refused for the club's plan) and is counted as
+   `uncovered` ("over" in the API) -- never charged. Anything else
+   (announcements, reminders, campaigns, promotions, journeys, surveys,
+   updates, mailbox mail) is **held back** with the reason on the row, on
+   every plan. Several workers sending at once can each send the last one,
+   so a club may go a few past (at most `APP_MAIL_CONCURRENCY`; counted as
+   uncovered).
 
-**Past the limit:**
+**Promotional WhatsApp** (MARKETING templates, ₹1.02 each to us with GST
+against ₹0.136 for UTILITY) may use at most `whatsapp_marketing_per_month`
+(20%) of the plan's allowance. Past that a promotional WhatsApp needs bought
+credits, which the cap does not limit. Today the platform's number sends no
+MARKETING template at all; a sender says a message is promotional with
+`category="MARKETING"` (or the kinds `promotion`, `announcement`, `campaign`
+by WhatsApp).
 
-- a plan Razorpay bills keeps sending; the month's extra is added to the
-  club's Razorpay subscription as an add-on, which Razorpay puts on its next
-  invoice (a yearly plan's next invoice is its renewal);
-- Free and the free trial have no card: announcements, campaigns, reminders
-  and surveys are held back (skipped, the reason on the row), tickets,
-  certificates and payment receipts still go and are counted. Several
-  workers sending at once can each send the last one, so Free may go a few
-  past (at most `APP_MAIL_CONCURRENCY`);
-- a complimentary plan, an Enterprise deal or trial, or a deal invoiced by
-  hand keeps sending; the month's statement says "manual" and the admins are
-  alerted (`message_overage_manual`) to invoice it.
+**Packs** (`message_credit_packs`, Admin -> Subscriptions -> Credit packs;
+public at `GET /credit-packs`). Prices are what Razorpay charges, **GST
+included**, exactly as plan prices are (nothing is added at checkout). The
+defaults:
 
-The club is told at 80% and at 100% of each limit, once each a month: a
-notice in the dashboard's bell and a mail to the owner.
+| Channel | Pack | Price | Each |
+|---|---|---|---|
+| Email | 1,000 | ₹99 | ₹0.099 |
+| Email | 5,000 | ₹449 | ₹0.090 |
+| Email | 20,000 | ₹1,599 | ₹0.080 |
+| WhatsApp | 100 | ₹150 | ₹1.50 |
+| WhatsApp | 500 | ₹699 | ₹1.40 |
+| WhatsApp | 2,000 | ₹2,599 | ₹1.30 |
 
-**The month's close** runs in the hourly billing sweep, ten minutes or more
-after midnight (IST) on the 1st: one `message_statements` row per club and
-month. The limit used is the kinder of the one the club last sent under and
-the one it ends the month on. An extra under ₹1 (Razorpay's smallest
-charge) is waived. A Razorpay add-on is asked for once; its id is kept on
-the statement and it is never asked for twice. Razorpay refusing it: tried
-again (1, 2, 4... hours) up to five times, the admins alerted each time,
-then "gave up" for an admin to invoice or retry (club page in the admin
-app). Razorpay not answering: the statement is "unconfirmed" and Razorpay's
-add-ons are searched for its reference (`[moa-messages:<id>:<club>:<month>]`
-in the description) before anything is asked again. Each charge is in the
-audit log (`messages.overage_charged`).
+A pack is taken off sale (never deleted: purchases point at it). A price
+change applies to orders made from then on.
 
-| Setting (`.env`) | Default | Meaning |
-|---|---|---|
-| `APP_MESSAGE_OVERAGE_BILLING` | `true` | `false` stops the add-ons only: statements are still made and wait, `pending` |
+**Buying** (the club's owner only, Billing -> Credits): `POST
+/clubs/messages/credits/orders` makes a one-time Razorpay order on the
+platform's account and a `message_credit_purchases` row (`created`).
+Checkout's `POST /clubs/messages/credits/verify`, the platform webhook
+(`payment.captured`, `order.paid`) and the hourly sweep (orders still open
+after ten minutes, for two days) all apply the payment from what Razorpay
+says when asked: once captured, the purchase is `paid` and its lot made,
+exactly once. The owner gets a receipt mail (`MOA-CR-000123`); the receipt
+is also in the dashboard. Each purchase is audited (`messages.credits_bought`).
+
+**Refunds** (Admin -> the club -> Credits, money permission): the lot's
+unused credits are taken back at once, then Razorpay refunds the amount
+given (default: the unused share of what was paid, rounded down). Razorpay
+refusing or not answering leaves `refund_failed`; asking again checks
+Razorpay's refunded total first, so nothing is refunded twice. A refund made
+in Razorpay's dashboard arrives as `refund.processed` and takes the unused
+credits back too. Audited `messages.credits_refunded`.
+
+**Grants** (same page): free credits for one channel, with a reason and a
+validity (default 12 months). Audited `messages.credits_granted`; the club
+sees "MyOtherApp added ..." in its bell.
+
+**Telling the club** (the bell, with a "Buy credits" link to
+/billing#credits, and a mail to the owner): at 80% and 100% of the plan's
+allowance, once each a month (`message_quota_80`/`_100`); when bought
+credits fall under 10% of the last pack it had, once per pack
+(`message_credits_low`); and 30 days before a lot with credits left expires
+(`message_credits_expiring`, the hourly sweep).
+
+**Overage billing is retired.** Until this change, a month's messages past
+the limits were billed after the fact as a Razorpay add-on on the club's
+subscription, the first charge due on the first sweep after 1 November 2026.
+That code is gone: no statement is made and nothing is charged.
+`APP_MESSAGE_OVERAGE_BILLING` is read by nothing (kept so an `.env` that
+sets it still starts). The migration made every statement still open
+(pending, charging, failed, unconfirmed, gave_up, manual) `void` and printed
+how many; the hourly sweep makes sure of it (`statements_voided`). The
+plans' `email_overage_paise`/`whatsapp_overage_paise` remain in the table
+but mean nothing; `/plans` answers null for them.
 
 ```sql
--- This month's counters, the busiest first.
-SELECT c.name, u.channel, u.used, u.quota, u.blocked, u.billing, u.kinds
+-- This month's counters, the busiest first: what the plan, credits and nothing paid for.
+SELECT c.name, u.channel, u.used, u.quota, u.plan_used, u.credits_used, u.uncovered, u.blocked, u.kinds
 FROM message_usage u JOIN clubs c ON c.id = u.club_id
 WHERE u.period = date_trunc('month', now() AT TIME ZONE 'Asia/Kolkata')::date
 ORDER BY u.used DESC LIMIT 20;
 
--- Last month's statements that cost something, and what became of them.
-SELECT c.name, s.amount_paise, s.status, s.razorpay_addon_id, s.last_error
-FROM message_statements s JOIN clubs c ON c.id = s.club_id
-WHERE s.amount_paise > 0 ORDER BY s.period DESC, s.amount_paise DESC LIMIT 50;
+-- Credits clubs hold, by channel.
+SELECT c.name, l.channel, sum(l.remaining) AS left, min(l.expires_at) AS next_expiry
+FROM message_credit_lots l JOIN clubs c ON c.id = l.club_id
+WHERE l.remaining > 0 AND l.expires_at > now() AND l.refunded_at IS NULL
+GROUP BY c.name, l.channel ORDER BY left DESC;
+
+-- Purchases this month, and any refund that has not gone through.
+SELECT p.id, c.name, p.channel, p.quantity, p.amount_paise, p.status, p.refunded_paise, p.refund_error
+FROM message_credit_purchases p JOIN clubs c ON c.id = p.club_id
+WHERE p.created_at > now() - interval '31 days' AND p.status <> 'created' ORDER BY p.id DESC;
 ```
 
 ### Giving existing clubs the free trial

@@ -497,11 +497,12 @@ class AppConfig(BaseSettings):
     PLAN_ENFORCEMENT: bool = True
     PLAN_ENFORCEMENT_FROM: datetime = datetime(2026, 10, 18, 0, 0, tzinfo=_IST)
     PLAN_GRANDFATHER_DAYS: int = 90
-    # Extra messages past a plan's monthly email/WhatsApp limits
-    # (app/api/message_quota): each month's statement is added to the club's
-    # Razorpay subscription as an add-on by the hourly billing sweep. False
-    # stops the charging only: statements are still made and wait, pending.
-    MESSAGE_OVERAGE_BILLING: bool = True
+    # RETIRED (migration message_credits): extra messages past a plan's
+    # monthly limits were billed as a Razorpay add-on each month. Clubs buy
+    # prepaid credits instead (app/api/message_quota/credits.py) and nothing
+    # is charged after the fact, whatever this says: it is read by nothing,
+    # and kept only so an .env that still sets it starts.
+    MESSAGE_OVERAGE_BILLING: bool = False
 
     @field_validator("RAZORPAY_WEBHOOK_SECRET")
     @classmethod

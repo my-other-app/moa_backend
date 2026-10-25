@@ -1,11 +1,15 @@
-"""Counting what a club sends, against its plan's monthly limits.
+"""Counting what a club sends, against its plan's monthly allowance and
+its prepaid credits.
 
 The one call the rest of the code makes is `record_message`: a message to
 the club's people (a guest, an attendee, a follower) was handed to the
 provider. It adds one to the club's counter for the month in India and the
-channel, atomically, and -- once the count passes 80% and then 100% of the
-plan's limit -- tells the club, once each a month, by email and in the
-dashboard's bell.
+channel, under the counter's row lock, and says what paid for it: the
+plan's allowance first ("plan credits", `plan_used`), then the club's
+credit lots, the first to expire first (credits.consume, `credits_used`),
+else nothing (`uncovered`, shown as "over": never charged). Once the plan's allowance passes 80%
+and then 100% it tells the club, once each a month, by email and in the
+dashboard's bell, with a "Buy credits" link.
 
 What counts: tickets, certificates, payment messages, reminders,
 announcements, campaigns, journey emails and survey mails, by email or by
@@ -14,24 +18,21 @@ sends through its own WhatsApp number (`via="club"`: it pays Meta itself),
 a send skipped or failed (nothing was handed over), a test send to the
 organiser, and the platform's own mail to the club (billing, sign-in).
 
-Past the limit:
-
-- a plan Razorpay bills goes on sending, and each extra message is added to
-  the club's next invoice at the plan's price (billing.py);
-- Free and the free trial have no payment method, so nothing extra can be
-  billed: what is not a ticket, certificate or payment message is held back
-  (`held_back`), with the reason on the delivery row; tickets, certificates
-  and payment messages still go -- an attendee is never refused for the
-  club's plan -- and are counted;
-- a complimentary plan, an Enterprise deal or trial, or a deal invoiced by
-  hand goes on sending; the extra is on a statement for an admin to invoice.
+Past the plan's allowance, on every plan, sends use the club's bought (or
+granted) credits. With none left, what is not a ticket, certificate or
+payment message is held back (`held_back`), with the reason on the delivery
+row; tickets, certificates and payment messages still go -- an attendee is
+never refused for the club's plan -- and are counted as `uncovered`. Nothing is
+ever charged after the fact: the month-end overage billing is retired
+(billing.py).
 
 Promotional WhatsApp (MARKETING templates, `is_marketing`) costs us about
-7x a utility one, so each plan caps it at `whatsapp_marketing_per_month`
-(20% of its WhatsApp): past that, on every plan, a promotional WhatsApp is
-held back. Tickets, certificates, payment messages and reminders (UTILITY)
-never are. Today the platform's number sends no MARKETING template at all;
-the cap is there for the first send that does.
+7x a utility one, so each plan caps the share of its allowance they may use
+at `whatsapp_marketing_per_month` (20% of its WhatsApp). Past that, a
+promotional WhatsApp needs bought credits, which the cap does not limit;
+with none, it is held back. Tickets, certificates, payment messages and
+reminders (UTILITY) never are. Today the platform's number sends no
+MARKETING template at all; the cap is there for the first send that does.
 """
 from __future__ import annotations
 
@@ -70,6 +71,7 @@ LIMIT_KEY = {EMAIL: "emails_per_month", WHATSAPP: "whatsapp_per_month"}
 
 #: What a message is. The transactional ones are never held back.
 TRANSACTIONAL = frozenset({"ticket", "certificate", "payment"})
+#: `mailbox` is held back like an announcement when nothing is left.
 KINDS = frozenset({
     "ticket", "certificate", "payment",
     "reminder", "announcement", "campaign", "journey", "survey", "update", "promotion",
@@ -87,14 +89,17 @@ KINDS = frozenset({
 #: A caller that knows the template's category says so (`category=`).
 MARKETING_KINDS = frozenset({"promotion", "announcement", "campaign"})
 
-# How the extra is paid for (Terms.billing).
-#: The club's Razorpay subscription: an add-on on its next invoice.
+# How the club's plan is paid for (Terms.billing). Since prepaid credits it
+# no longer changes what happens past the allowance -- that is the same on
+# every plan -- only which upgrade is suggested.
+#: The club's Razorpay subscription.
 RAZORPAY = "razorpay"
-#: Nothing automatic: a statement an admin invoices by hand.
+#: Nothing automatic: complimentary, an Enterprise deal or trial, by hand.
 MANUAL = "manual"
-#: No payment method (Free, the free trial): nothing extra can be billed,
-#: so what is not transactional is held back past the limit.
+#: No payment method (Free, the free trial).
 NONE = "none"
+#: What the dashboards are told past the allowance is paid with.
+PREPAID = "prepaid"
 
 #: The warnings, as a share of the limit.
 WARN_AT = (80, 100)
@@ -181,8 +186,9 @@ class Terms:
 
     @property
     def blocks(self) -> bool:
-        """Past the limit, what is not transactional is held back."""
-        return self.billing == NONE
+        """Past the allowance and the credits, what is not transactional is
+        held back: on every plan, since prepaid credits."""
+        return True
 
     @property
     def where(self) -> str:
@@ -272,25 +278,36 @@ def is_marketing(channel: str, kind: Optional[str], category: Optional[str] = No
     return (kind or "") in MARKETING_KINDS
 
 
-# ─── Holding back (Free past its limit) ──────────────────────────────────
+# ─── Holding back (nothing left) ────────────────────────────────────────
+
+
+def _credits_word(channel: str) -> str:
+    return "email credits" if channel == EMAIL else "WhatsApp credits"
 
 
 def _marketing_reason(terms: Terms, cap: int) -> str:
     if cap == 0:
-        return f"Not sent: promotional WhatsApp messages aren't included on {terms.where}."
+        return (
+            f"Not sent: promotional WhatsApp messages aren't included on {terms.where}, and there are no "
+            "WhatsApp credits left. Buy credits to send them."
+        )
     return (
         f"Not sent: this month's {cap:,} promotional WhatsApp {'message' if cap == 1 else 'messages'} on {terms.where} "
-        "are used up. Tickets, certificates and reminders still go."
+        "are used up and there are no WhatsApp credits left. Tickets, certificates and reminders still go."
     )
 
 
 def _held_reason(terms: Terms, channel: str, limit: int, kind: str) -> str:
     if limit == 0:
-        what = "WhatsApp reminders" if (channel == WHATSAPP and kind == "reminder") else noun(channel).capitalize()
-        return f"Not sent: {what} aren't included on {terms.where}. Upgrade to send them."
+        many = noun(channel)
+        what = "WhatsApp reminders" if (channel == WHATSAPP and kind == "reminder") else many[0].upper() + many[1:]
+        return (
+            f"Not sent: {what} aren't included on {terms.where}, and there are no {_credits_word(channel)} left. "
+            "Buy credits to send them."
+        )
     return (
-        f"Not sent: this month's {limit:,} {noun(channel, limit)} on {terms.where} are used up. "
-        "Upgrade to send more; tickets and certificates still go."
+        f"Not sent: this month's {limit:,} {noun(channel, limit)} on {terms.where} are used up and there are no "
+        f"{_credits_word(channel)} left. Buy credits to send more; tickets and certificates still go."
     )
 
 
@@ -299,43 +316,47 @@ async def held_back(
     category: Optional[str] = None,
 ) -> Optional[str]:
     """Why this send is held back, or None when it may go. Never a
-    transactional message, never one through the club's own number. Two
-    reasons:
+    transactional message, never one through the club's own number. Held
+    back when the club has no bought credits left on the channel and:
 
-    - a promotional WhatsApp (`is_marketing`) past the plan's
-      `whatsapp_marketing_per_month`, on every plan: what the plan includes
-      of them is used up, and they are not sold as extras;
-    - anything else not transactional, only on a plan with no way to pay for
-      more (`Terms.blocks`), past the month's limit.
+    - its plan's monthly allowance is used up (any plan with a limit);
+    - or it is a promotional WhatsApp (`is_marketing`) and the plan's
+      `whatsapp_marketing_per_month` share of the allowance is used up.
 
     A held-back send is counted as `blocked` for the month.
 
     Checked before the send rather than reserved: workers sending for one
-    club at once can each find room for the last message, so Free may go a
-    message or two (at most the pipeline's MAIL_CONCURRENCY) past its limit.
+    club at once can each find room for the last message, so a club may go
+    a message or two (at most the pipeline's MAIL_CONCURRENCY) past what it
+    has; those are counted as `over`, never charged.
+
+    Contract for other senders (the club mailbox): keep this signature.
     """
+    from app.api.message_quota import credits
     from app.api.subscriptions import gates
 
     if terms is None or via == CLUB or kind in TRANSACTIONAL or not gates.enforcing():
         return None
+    limit = terms.limit(channel)
     marketing_cap = terms.whatsapp_marketing_limit if is_marketing(channel, kind, category) else None
-    limit = terms.limit(channel) if terms.blocks else None
-    if marketing_cap is None and limit is None:
+    if limit is None and marketing_cap is None:
         return None
     period = period_of(at)
     counts = (await session.execute(
-        select(MessageUsage.used, MessageUsage.marketing).where(
+        select(MessageUsage.plan_used, MessageUsage.marketing).where(
             MessageUsage.club_id == terms.club_id, MessageUsage.period == period, MessageUsage.channel == channel
         )
     )).first()
-    used, marketing = (int(counts[0] or 0), int(counts[1] or 0)) if counts is not None else (0, 0)
-    if marketing_cap is not None and marketing >= marketing_cap:
-        reason = _marketing_reason(terms, marketing_cap)
-    elif limit is not None and used >= limit:
+    plan_used, marketing = (int(counts[0] or 0), int(counts[1] or 0)) if counts is not None else (0, 0)
+    if limit is not None and plan_used >= limit:
         reason = _held_reason(terms, channel, limit, kind)
+    elif marketing_cap is not None and marketing >= marketing_cap:
+        reason = _marketing_reason(terms, marketing_cap)
     else:
         return None
-    await _upsert(session, terms, channel, period, used=0, blocked=1, kind=None)
+    if await credits.bought_remaining(session, terms.club_id, channel, at) > 0:
+        return None
+    await _upsert_blocked(session, terms, channel, period)
     return reason
 
 
@@ -348,9 +369,15 @@ class Recorded:
     counted: bool
     used: Optional[int] = None
     limit: Optional[int] = None
+    #: How these messages were paid for: the plan's allowance, credit lots,
+    #: or neither (a ticket with nothing left; never charged).
+    from_plan: int = 0
+    from_credits: int = 0
+    over: int = 0
 
     @property
     def extra(self) -> int:
+        """Past the plan's allowance this month."""
         if self.used is None or self.limit is None:
             return 0
         return max(0, self.used - self.limit)
@@ -367,37 +394,42 @@ async def session_scope():
         yield session
 
 
-async def _upsert(
-    session, terms: Terms, channel: str, period: date, *, used: int, blocked: int, kind: Optional[str], marketing: int = 0,
-):
-    """Add to the month's counter, creating it: one statement, atomic.
-    `marketing`: how many of `used` are promotional WhatsApp messages."""
+def _new_row(terms: Terms, channel: str, period: date, now: datetime, **counts) -> dict:
+    return dict(
+        club_id=terms.club_id, period=period, channel=channel, quota=terms.limit(channel), rate_paise=0,
+        billing=terms.billing, plan_key=terms.plan_key, created_at=now, updated_at=now, **counts,
+    )
+
+
+async def _upsert_blocked(session, terms: Terms, channel: str, period: date) -> None:
+    """One more send held back this month: one statement, atomic."""
     now = _now()
     table = MessageUsage.__table__
-    values = dict(
-        club_id=terms.club_id, period=period, channel=channel, used=used, blocked=blocked, marketing=marketing,
-        kinds={kind: used} if kind and used else {}, quota=terms.limit(channel), rate_paise=terms.rate(channel),
-        billing=terms.billing, plan_key=terms.plan_key, created_at=now, updated_at=now,
-    )
-    stmt = pg_insert(table).values(**values)
-    change = {
-        "used": table.c.used + stmt.excluded.used,
-        "blocked": table.c.blocked + stmt.excluded.blocked,
-        "marketing": table.c.marketing + stmt.excluded.marketing,
-        "updated_at": now,
-    }
-    if used:
-        # The terms the club is sending under now, and one more of this kind.
-        current = func.coalesce(cast(table.c.kinds[kind].astext, Integer), 0)
-        change.update(
-            kinds=table.c.kinds.op("||")(func.jsonb_build_object(kind, current + used)),
-            quota=stmt.excluded.quota, rate_paise=stmt.excluded.rate_paise, billing=stmt.excluded.billing,
-            plan_key=stmt.excluded.plan_key,
+    stmt = pg_insert(table).values(**_new_row(terms, channel, period, now, blocked=1))
+    await session.execute(
+        stmt.on_conflict_do_update(
+            constraint="uq_message_usage_club_period_channel",
+            set_={"blocked": table.c.blocked + 1, "updated_at": now},
         )
-    stmt = stmt.on_conflict_do_update(constraint="uq_message_usage_club_period_channel", set_=change).returning(
-        table.c.id, table.c.used, table.c.warned_80_at, table.c.warned_100_at
     )
-    return (await session.execute(stmt)).one()
+
+
+async def _month_row(session, terms: Terms, channel: str, period: date) -> MessageUsage:
+    """The month's counter, made if need be, under its row lock (held to the
+    caller's commit): two senders for one club take turns at the split
+    between the plan's allowance and the credits."""
+    now = _now()
+    await session.execute(
+        pg_insert(MessageUsage.__table__)
+        .values(**_new_row(terms, channel, period, now))
+        .on_conflict_do_nothing(constraint="uq_message_usage_club_period_channel")
+    )
+    return await session.scalar(
+        select(MessageUsage)
+        .where(MessageUsage.club_id == terms.club_id, MessageUsage.period == period, MessageUsage.channel == channel)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
 
 
 async def record_message(
@@ -455,6 +487,8 @@ async def record_message(
 
 
 async def _record(session, club_id, channel, kind, *, ref, count, at, terms, category=None) -> Recorded:
+    from app.api.message_quota import credits
+
     if ref:
         fresh = await session.scalar(
             pg_insert(MessageUsageRefs)
@@ -468,10 +502,37 @@ async def _record(session, club_id, channel, kind, *, ref, count, at, terms, cat
         terms = await terms_for(session, club_id)
     period = period_of(at)
     marketing = count if is_marketing(channel, kind, category) else 0
-    row = await _upsert(session, terms, channel, period, used=count, blocked=0, kind=kind, marketing=marketing)
+    row = await _month_row(session, terms, channel, period)
     limit = terms.limit(channel)
-    await _maybe_warn(session, terms, channel, period, row, limit)
-    return Recorded(counted=True, used=int(row.used), limit=limit)
+    # What is left of the plan's allowance; for a promotional WhatsApp, also
+    # of the plan's promotional share. Bought credits have no such share.
+    room = None if limit is None else max(0, limit - int(row.plan_used or 0))
+    cap = terms.whatsapp_marketing_limit if marketing else None
+    if cap is not None:
+        promo_room = max(0, cap - int(row.marketing or 0))
+        room = promo_room if room is None else min(room, promo_room)
+    from_plan = count if room is None else min(count, room)
+    from_credits = await credits.consume(session, terms, channel, count - from_plan, at) if count > from_plan else 0
+    over = count - from_plan - from_credits
+    now = _now()
+    table = MessageUsage.__table__
+    current = func.coalesce(cast(table.c.kinds[kind].astext, Integer), 0)
+    updated = (await session.execute(
+        update(table)
+        .where(table.c.id == row.id)
+        .values(
+            used=table.c.used + count, plan_used=table.c.plan_used + from_plan,
+            credits_used=table.c.credits_used + from_credits, uncovered=table.c.uncovered + over,
+            marketing=table.c.marketing + marketing,
+            kinds=table.c.kinds.op("||")(func.jsonb_build_object(kind, current + count)),
+            # The terms the club is sending under now.
+            quota=limit, rate_paise=0, billing=terms.billing, plan_key=terms.plan_key, updated_at=now,
+        )
+        .returning(table.c.id, table.c.used, table.c.plan_used, table.c.warned_80_at, table.c.warned_100_at)
+    )).one()
+    await _maybe_warn(session, terms, channel, period, updated, limit)
+    return Recorded(counted=True, used=int(updated.used), limit=limit, from_plan=from_plan,
+                    from_credits=from_credits, over=over)
 
 
 async def count(
@@ -522,13 +583,13 @@ def threshold(limit: int, level: int) -> int:
 
 
 async def _maybe_warn(session, terms: Terms, channel: str, period: date, row, limit: Optional[int]) -> None:
-    """Tell the club the first time the count reaches 80%, and 100%, of the
-    month's limit. The claim is one UPDATE ... WHERE warned_N_at IS NULL, so
-    of two workers crossing it at once one tells. When both are reached at
-    once (a limit lowered mid-month), only the 100% one is said."""
+    """Tell the club the first time its plan's allowance is 80%, and 100%,
+    used this month. The claim is one UPDATE ... WHERE warned_N_at IS NULL,
+    so of two workers crossing it at once one tells. When both are reached
+    at once (a limit lowered mid-month), only the 100% one is said."""
     if limit is None or limit <= 0:
         return
-    used = int(row.used)
+    used = int(row.plan_used)
     due = [lvl for lvl in sorted(WARN_AT, reverse=True) if used >= threshold(limit, lvl) and getattr(row, f"warned_{lvl}_at") is None]
     if not due:
         return
@@ -550,43 +611,45 @@ async def _maybe_warn(session, terms: Terms, channel: str, period: date, row, li
         logger.warning("club %s: the %s%% %s warning could not be raised", terms.club_id, level, channel, exc_info=True)
 
 
-def warning_words(terms: Terms, channel: str, period: date, *, level: int, used: int, limit: int) -> dict:
-    """The notice and the mail: title, body and the mail's paragraphs."""
+def warning_words(terms: Terms, channel: str, period: date, *, level: int, used: int, limit: int, bought: int = 0) -> dict:
+    """The notice and the mail: title, body and the mail's paragraphs.
+    `bought`: the club's credits left on the channel."""
     many = noun(channel, limit)
     month = label(period)
     if level >= 100:
-        title = f"You've used all {limit:,} {many} for {month}"
+        title = f"You've used all {limit:,} {many} in your plan for {month}"
     else:
-        title = f"You've used {level}% of your {many} for {month}"
-    counted = f"{used:,} of {limit:,} {many} sent this month on {terms.where}."
-    if terms.billing == RAZORPAY:
+        title = f"You've used {level}% of your plan's {many} for {month}"
+    counted = f"{used:,} of the {limit:,} {many} on {terms.where} used this month."
+    if bought:
         then = (
-            f"Messages keep going past {limit:,}: each extra {noun(channel, 1)} is "
-            f"{rupees(terms.rate(channel))}, added to your next bill. A bigger plan includes more."
+            f"Past {limit:,}, messages use your bought credits: {bought:,} {_credits_word(channel)} left. "
+            "With none left, announcements, campaigns and reminders pause until next month; tickets, "
+            "certificates and payment messages always go."
         )
-    elif terms.billing == MANUAL:
-        then = f"Messages keep going past {limit:,}; any extra is on your monthly statement."
     else:
         then = (
-            f"Past {limit:,}, announcements, campaigns and reminders stop until next month. "
-            "Tickets, certificates and payment messages still go. Upgrade to send more."
+            f"Past {limit:,}, announcements, campaigns and reminders pause until next month unless you buy credits. "
+            "Tickets, certificates and payment messages always go."
         )
     return {"title": title, "body": f"{counted} {then}", "paragraphs": [counted, then]}
 
 
 async def warn(session, terms: Terms, channel: str, period: date, *, level: int, used: int, limit: int) -> None:
-    """The bell, and a mail to the club's owner after the commit."""
+    """The bell, with a "Buy credits" link, and a mail to the club's owner after the commit."""
     from app.api import club_alerts
     from app.api.clubs.models import Clubs
+    from app.api.message_quota import credits
     from app.api.subscriptions import notices
     from app.core.after_commit import run_after_commit
 
-    words = warning_words(terms, channel, period, level=level, used=used, limit=limit)
+    bought = await credits.bought_remaining(session, terms.club_id, channel)
+    words = warning_words(terms, channel, period, level=level, used=used, limit=limit, bought=bought)
     await club_alerts.notify(
         session, terms.club_id, f"message_quota_{level}",
-        title=words["title"], body=words["body"], link="/billing",
+        title=words["title"], body=words["body"], link=credits.BILLING_LINK,
         data={"channel": channel, "period": key(period), "level": level, "used": used, "limit": limit,
-              "billing": terms.billing, "rate_paise": terms.rate(channel)},
+              "credits_left": bought, "action_label": "Buy credits"},
         dedupe_key=f"messages:{key(period)}:{channel}:{level}",
     )
     to = await notices.owner_address(session, terms.club_id)
@@ -594,36 +657,39 @@ async def warn(session, terms: Terms, channel: str, period: date, *, level: int,
         return
     club = await session.get(Clubs, terms.club_id)
     name = club.name if club is not None else "there"
-    button = ("See your plan", notices.billing_url())
     run_after_commit(
-        session, notices._send, to, words["title"], [f"Hi {name},", *words["paragraphs"]], list(button),
-        "You get this at 80% and at 100% of a month's limit, once each.",
+        session, notices._send, to, words["title"], [f"Hi {name},", *words["paragraphs"]],
+        ["Buy credits", credits.credits_url()],
+        "You get this at 80% and at 100% of your plan's monthly allowance, once each.",
     )
 
 
 # ─── What the dashboards read ────────────────────────────────────────────
 
 
-def _state(terms: Terms, used: int, limit: Optional[int]) -> str:
+def _state(plan_used: int, used: int, limit: Optional[int], bought: int) -> str:
+    """unlimited | not_included | ok | near (80% of the plan's allowance) |
+    credits (the allowance used up, sending on bought credits) | blocked
+    (nothing left: what is not transactional is held back)."""
     if limit is None:
         return "unlimited"
+    if plan_used < limit:
+        return "near" if plan_used >= threshold(limit, 80) else "ok"
+    if bought > 0:
+        return "credits"
     if limit == 0 and used == 0:
         return "not_included"
-    if used >= limit:
-        return "blocked" if terms.blocks else "over"
-    if limit > 0 and used >= threshold(limit, 80):
-        return "near"
-    return "ok"
+    return "blocked"
 
 
 async def _upgrade(session, terms: Terms, channels: dict) -> Optional[dict]:
     """The cheapest public plan with room for more of what is near or past
-    its limit, when the club is not already on something kinder."""
+    its allowance, when the club is not already on something kinder."""
     from app.api.subscriptions import gates
 
     if terms.billing == MANUAL:
         return None
-    tight = [ch for ch, c in channels.items() if c["state"] in ("near", "over", "blocked")]
+    tight = [ch for ch, c in channels.items() if c["state"] in ("near", "credits", "blocked")]
     if not tight:
         return None
     cards = [c for c in await gates._public_cards(session) if c.key != terms.plan_key]
@@ -648,23 +714,30 @@ def _percent(used: int, limit: Optional[int]) -> Optional[int]:
     return min(999, math.floor(used * 100 / limit))
 
 
-def _channel_view(terms: Terms, channel: str, row: Optional[MessageUsage]) -> dict:
+def _channel_view(terms: Terms, channel: str, row: Optional[MessageUsage], bought: int) -> dict:
     used = int(row.used) if row is not None else 0
+    plan_used = int(row.plan_used or 0) if row is not None else 0
     limit = terms.limit(channel)
-    extra = max(0, used - limit) if limit is not None else 0
-    rate = terms.rate(channel)
+    plan_left = None if limit is None else max(0, limit - plan_used)
     out = {
         "used": used,
         "limit": limit,
-        "extra": extra,
+        # Past the plan's allowance (paid from credits, or over).
+        "extra": max(0, used - limit) if limit is not None else 0,
         "blocked": int(row.blocked) if row is not None else 0,
-        "rate_paise": rate,
-        # What the extra comes to; billed only on a Razorpay plan.
-        "extra_paise": extra * rate if terms.billing != NONE else 0,
-        "percent": _percent(used, limit),
-        "state": _state(terms, used, limit),
+        # Nothing is billed per message any more: kept for older dashboards.
+        "rate_paise": 0,
+        "extra_paise": 0,
+        "percent": _percent(plan_used, limit),
+        "state": _state(plan_used, used, limit, bought),
         "kinds": dict(row.kinds or {}) if row is not None else {},
         "warned": [lvl for lvl in WARN_AT if row is not None and getattr(row, f"warned_{lvl}_at") is not None],
+        "plan_used": plan_used,
+        "plan_remaining": plan_left,
+        "credits_used": int(row.credits_used or 0) if row is not None else 0,
+        "over": int(row.uncovered or 0) if row is not None else 0,
+        "credits_remaining": bought,
+        "total_remaining": None if plan_left is None else plan_left + bought,
     }
     if channel == WHATSAPP:
         # Of those, the promotional ones, against the plan's cap on them.
@@ -676,8 +749,10 @@ def _channel_view(terms: Terms, channel: str, row: Optional[MessageUsage]) -> di
 
 
 async def usage(session, club_id: int, now: Optional[datetime] = None) -> dict:
-    """This month so far: each channel against its limit, the extra and what
-    it is estimated to cost, and the plan to move to when it would help."""
+    """This month so far: each channel against the plan's allowance, the
+    credits used and left, and the plan to move to when it would help."""
+    from app.api.message_quota import credits
+
     now = now or _now()
     terms = await terms_for(session, club_id)
     period = period_of(now)
@@ -687,7 +762,10 @@ async def usage(session, club_id: int, now: Optional[datetime] = None) -> dict:
             select(MessageUsage).where(MessageUsage.club_id == club_id, MessageUsage.period == period)
         )
     }
-    channels = {ch: _channel_view(terms, ch, rows.get(ch)) for ch in CHANNELS}
+    channels = {
+        ch: _channel_view(terms, ch, rows.get(ch), await credits.bought_remaining(session, club_id, ch, now))
+        for ch in CHANNELS
+    }
     start, end = bounds(period)
     return {
         "period": key(period),
@@ -696,42 +774,73 @@ async def usage(session, club_id: int, now: Optional[datetime] = None) -> dict:
         "period_end": end,
         "plan_key": terms.plan_key,
         "plan_name": terms.plan_name,
-        "billing": terms.billing,
-        "blocks_past_limit": terms.blocks,
+        "billing": PREPAID,
+        "blocks_past_limit": any(terms.limit(ch) is not None for ch in CHANNELS),
         "custom": terms.custom,
         "trial": terms.trial,
         "channels": channels,
-        "estimated_extra_paise": sum(c["extra_paise"] for c in channels.values()),
+        "estimated_extra_paise": 0,
         "upgrade": await _upgrade(session, terms, channels),
     }
 
 
-def statement_out(row: MessageStatements) -> dict:
+def _month_channel(row: Optional[MessageUsage]) -> dict:
+    if row is None:
+        return {"used": 0, "limit": None, "extra": 0, "rate_paise": 0, "plan_used": 0, "credits_used": 0, "over": 0, "blocked": 0}
+    used, limit = int(row.used), row.quota
     return {
-        "id": row.id,
-        "period": key(row.period),
-        "period_label": label(row.period),
-        "plan_key": row.plan_key,
-        "billing": row.billing,
-        "email": {"used": row.email_used, "limit": row.email_limit, "extra": row.email_extra, "rate_paise": row.email_rate_paise},
-        "whatsapp": {"used": row.whatsapp_used, "limit": row.whatsapp_limit, "extra": row.whatsapp_extra,
-                     "rate_paise": row.whatsapp_rate_paise},
-        "amount_paise": row.amount_paise,
-        "status": row.status,
-        "charged_at": row.charged_at,
-        "razorpay_addon_id": row.razorpay_addon_id,
+        "used": used, "limit": limit, "extra": max(0, used - limit) if limit is not None else 0, "rate_paise": 0,
+        "plan_used": int(row.plan_used or 0), "credits_used": int(row.credits_used or 0), "over": int(row.uncovered or 0),
+        "blocked": int(row.blocked or 0),
     }
 
 
-async def history(session, club_id: int, *, months: int = 12) -> list[dict]:
-    """The closed months' statements, newest first."""
-    rows = await session.scalars(
-        select(MessageStatements)
-        .where(MessageStatements.club_id == club_id)
-        .order_by(MessageStatements.period.desc())
-        .limit(months)
+async def history(session, club_id: int, *, months: int = 12, now: Optional[datetime] = None) -> list[dict]:
+    """The closed months, newest first: what was sent and how it was paid
+    for. A month the retired overage billing had a statement for carries
+    its status (`void`: cancelled, never charged)."""
+    current = period_of(now)
+    periods = list(
+        await session.scalars(
+            select(MessageUsage.period)
+            .where(MessageUsage.club_id == club_id, MessageUsage.period < current)
+            .group_by(MessageUsage.period)
+            .order_by(MessageUsage.period.desc())
+            .limit(months)
+        )
     )
-    return [statement_out(r) for r in rows]
+    if not periods:
+        return []
+    rows: dict = {}
+    for r in await session.scalars(
+        select(MessageUsage).where(MessageUsage.club_id == club_id, MessageUsage.period.in_(periods))
+    ):
+        rows.setdefault(r.period, {})[r.channel] = r
+    statements = {
+        s.period: s
+        for s in await session.scalars(
+            select(MessageStatements).where(MessageStatements.club_id == club_id, MessageStatements.period.in_(periods))
+        )
+    }
+    out = []
+    for period in periods:
+        by = rows.get(period, {})
+        st = statements.get(period)
+        plan_key = next((r.plan_key for r in by.values() if r.plan_key), None)
+        charged = st is not None and st.status == "charged"
+        out.append({
+            "id": period.year * 100 + period.month,
+            "period": key(period),
+            "period_label": label(period),
+            "plan_key": plan_key,
+            "billing": PREPAID,
+            "email": _month_channel(by.get(EMAIL)),
+            "whatsapp": _month_channel(by.get(WHATSAPP)),
+            "amount_paise": int(st.amount_paise) if charged else 0,
+            "status": st.status if st is not None and st.status != "nothing_due" else "nothing_due",
+            "charged_at": st.charged_at if charged else None,
+        })
+    return out
 
 
 def own_limits_out(row: Optional[ClubMessageQuotas]) -> Optional[dict]:

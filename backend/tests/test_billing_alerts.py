@@ -614,7 +614,8 @@ async def test_the_sweep_runs_on_one_worker_at_a_time(session, _engine, shop):
         assert await sweep.run_sweep(session) == {
             "downgraded": 0, "grace_reminded": 0, "trial_reminded": 0, "comp_ended": 0, "comp_reminded": 0,
             "free_trial_ended": 0, "free_trial_reminded": 0, "enterprise_trial_ended": 0, "enterprise_trial_reminded": 0,
-            "message_statements": 0, "overage_charged": 0, "overage_failed": 0,
+            "message_statements": 0, "overage_charged": 0, "overage_failed": 0, "statements_voided": 0,
+            "credits_expiry_told": 0, "credits_reconciled": 0,
         }
         # And it lets go when done.
         assert await other.scalar(text(f"SELECT pg_try_advisory_lock({sweep.SWEEP_LOCK})")) is True

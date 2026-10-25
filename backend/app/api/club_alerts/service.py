@@ -19,8 +19,11 @@ logger = logging.getLogger(__name__)
 
 #: Every kind, and what it means. A new one is added here first.
 KINDS: dict[str, str] = {
-    "message_quota_80": "The club has used 80% of a month's emails or WhatsApp messages",
-    "message_quota_100": "The club has used all of a month's emails or WhatsApp messages",
+    "message_quota_80": "The club has used 80% of its plan's monthly emails or WhatsApp messages (a Buy credits link)",
+    "message_quota_100": "The club has used all of its plan's monthly emails or WhatsApp messages (a Buy credits link)",
+    "message_credits_low": "The club's bought credits for a channel are under 10% of the last pack it had",
+    "message_credits_expiring": "A lot of the club's credits with some left expires within 30 days",
+    "message_credits_added": "MyOtherApp gave the club free credits",
     "whatsapp_failed": "The club's own WhatsApp number stopped working (Meta refused its keys or its account)",
     "whatsapp_quality": "The club's own WhatsApp number's quality rating or messaging limit dropped",
     "whatsapp_restricted": "Meta restricted the club's own WhatsApp account",
