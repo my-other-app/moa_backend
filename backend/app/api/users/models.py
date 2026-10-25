@@ -122,6 +122,10 @@ class Users(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     networking_visible = Column(Boolean, nullable=False, default=True, server_default=sa.text("true"))
     # Hashed, never stored in the clear -- they are password equivalents.
     totp_recovery_codes = Column(sa.JSON, nullable=True)
+    # Sign in with Apple's refresh token, from the code the app sends at
+    # sign-in, encrypted (app.api.auth.apple_tokens): revoked when the
+    # account deletes itself, as App Review requires.
+    apple_refresh_token = Column(sa.Text, nullable=True)
 
     admin_role = Column(
         Enum(AdminRoles), nullable=False, default=AdminRoles.owner,

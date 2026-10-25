@@ -549,7 +549,7 @@ async def list_event_registrations(
     user_id: int,
     event_id: int,
     is_attended: bool | None = None,
-    is_paid: bool | None = None,  # Changed to None to show all by default
+    is_paid: bool | None = None,  # None: everyone
     limit: int = 10,
     offset: int = 0,
     search: str | None = None,
@@ -572,6 +572,10 @@ async def list_event_registrations(
     conditions = []
     if is_attended is not None:
         conditions.append(EventRegistrationsLink.is_attended == is_attended)
+    # The guest list's Paid and Unpaid filters: the parameter was taken and
+    # never applied, so both showed every guest.
+    if is_paid is not None:
+        conditions.append(EventRegistrationsLink.is_paid == is_paid)
     if role is not None:
         conditions.append(EventRegistrationsLink.role == role)
     if search:

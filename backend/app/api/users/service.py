@@ -1164,6 +1164,9 @@ async def delete_user(session: AsyncSession, user_id: int):
 
     await validate_relations(session, {"user_id": (Users, user_id)})
     user = await session.scalar(select(Users).where(Users.id == user_id))
+    # Revoked below, once the deletion is saved: it is not kept either way.
+    apple_token = user.apple_refresh_token
+    user.apple_refresh_token = None
     user.soft_delete()
     user.email = f"deleted-{user.id}-{secrets.token_hex(4)}@{DELETED_EMAIL_DOMAIN}"
     user.phone = None
@@ -1209,6 +1212,13 @@ async def delete_user(session: AsyncSession, user_id: int):
         .execution_options(synchronize_session=False)
     )
     await session.commit()
+    # Sign in with Apple's token, as App Review requires (5.1.1(v)). Best
+    # effort and after the commit: the account is gone whatever Apple says,
+    # and a failure is logged (app.api.auth.apple_tokens).
+    if apple_token:
+        from app.api.auth import apple_tokens
+
+        await apple_tokens.revoke(apple_token)
     return None
 
 

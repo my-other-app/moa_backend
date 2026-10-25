@@ -332,7 +332,8 @@ async def update_event(
     await session.execute(
         delete(EventInterestsLink).where(EventInterestsLink.event_id == event_id)
     )
-    for interest_id in event.interest_ids:
+    # Every interest removed is an empty list: the links above are cleared and none added.
+    for interest_id in event.interest_ids or []:
         interest_exists = await session.scalar(
             select(exists().where(Interests.id == interest_id))
         )
@@ -376,6 +377,10 @@ async def update_event(
         x.model_dump(mode="json") for x in event.additional_details
     ]
     db_event.event_guidelines = event.event_guidelines
+    # The label was written on create only, so an edit to it was lost. Like
+    # every field here it is assigned as sent: the form leaves an emptied one
+    # out, which clears it.
+    db_event.event_tag = (getattr(event, "event_tag", None) or "").strip() or None
     db_event.url = event.url
     db_event.max_participants = event.max_participants
     db_event.ticket_template_id = getattr(event, "ticket_template_id", None)

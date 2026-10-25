@@ -76,6 +76,49 @@ def can(user, capability: str) -> bool:
     return capability in ROLE_CAPABILITIES.get(role_of(user), set())
 
 
+def ensure_can(user, capability: str) -> None:
+    """403 INSUFFICIENT_ADMIN_ROLE unless this admin's role allows `capability`."""
+    if not can(user, capability):
+        raise CustomHTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            message=f"Your admin role cannot {capability.replace('_', ' ')}",
+            error_code="INSUFFICIENT_ADMIN_ROLE",
+        )
+
+
+# Reading a club's records is VIEW; changing them is MANAGE_CONTENT, the
+# capability that editing the club record itself takes (PUT /clubs/admin/{id});
+# deleting is DESTROY, as deleting a club is.
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def capability_for_method(method: str) -> str:
+    """What an admin needs to use a club's own route with this HTTP method."""
+    method = (method or "GET").upper()
+    if method in _SAFE_METHODS:
+        return VIEW
+    if method == "DELETE":
+        return DESTROY
+    return MANAGE_CONTENT
+
+
+def ensure_admin_can(user, capability: str) -> None:
+    """
+    For a route a club uses on its own records and an admin may use on any
+    club's: the admin must hold `capability`. A club passes untouched -- its
+    access is the ownership check the route already makes.
+
+    The club-only auth dependency (ClubAuth) already holds an admin to the
+    capability its HTTP method implies (`capability_for_method`); a route
+    calls this only to ask for more, as a download of a whole guest list
+    asks for EXPORT_DATA.
+    """
+    from app.api.events.access import is_admin_user
+
+    if user is not None and is_admin_user(user):
+        ensure_can(user, capability)
+
+
 def requires(capability: str):
     """
     Dependency factory: `admin: Annotated[Users, Depends(requires(DESTROY))]`.
@@ -85,12 +128,7 @@ def requires(capability: str):
     """
 
     async def checker(user: AdminAuth):
-        if not can(user, capability):
-            raise CustomHTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                message=f"Your admin role cannot {capability.replace('_', ' ')}",
-                error_code="INSUFFICIENT_ADMIN_ROLE",
-            )
+        ensure_can(user, capability)
         return user
 
     return checker

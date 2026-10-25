@@ -244,6 +244,14 @@ async def apple_signin(
 
         # Merge any guest accounts with matching email
         await merge_guest_into_user(session, app_user=user)
+        # Apple's refresh token, so deleting the account can revoke it. Best
+        # effort: None (not configured, or Apple did not answer) keeps
+        # whatever was kept before, and the sign-in goes on.
+        from app.api.auth import apple_tokens
+
+        kept = await apple_tokens.exchange(authorization_code)
+        if kept:
+            user.apple_refresh_token = kept
         await session.commit()
         # See the matching comment in google_signin: refresh explicitly
         # after commit to avoid a lazy-load hitting the async

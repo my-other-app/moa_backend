@@ -239,6 +239,21 @@ class AppConfig(BaseSettings):
 
     # Sign in with Apple: the audience an identity token must name (the app's bundle id).
     APPLE_CLIENT_ID: str = "app.myotherapp.com"
+    # Revoking a deleted account's Sign in with Apple token, which App Review
+    # requires (guideline 5.1.1(v); app/api/auth/apple_tokens.py). The team id
+    # (Apple developer -> Membership), and a key with Sign in with Apple
+    # enabled (Certificates, Identifiers & Profiles -> Keys): its Key ID and
+    # the .p8 file's contents (one line in .env, with \n for each line break).
+    # APPLE_TOKENS_SECRET is the Fernet key the refresh tokens are kept under
+    # (python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())").
+    # Unset: sign-in works as before, but nothing is kept, so a deleted
+    # account's token is not revoked.
+    APPLE_TEAM_ID: str = ""
+    APPLE_KEY_ID: str = ""
+    APPLE_PRIVATE_KEY: str = ""
+    APPLE_TOKENS_SECRET: str = ""
+    # Seconds a call to Apple's token endpoints may take before it is given up on.
+    APPLE_TIMEOUT_SECONDS: float = 10.0
 
     # Firebase Push Notifications
     # Option 1: Path to service account JSON file

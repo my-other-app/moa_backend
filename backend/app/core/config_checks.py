@@ -94,7 +94,12 @@ NEEDS = (
 )
 
 #: Fernet keys, a comma-separated list each.
-FERNET_KEYS = ("PAYMENT_KEYS_SECRET", "AI_KEYS_SECRET")
+FERNET_KEYS = ("PAYMENT_KEYS_SECRET", "AI_KEYS_SECRET", "APPLE_TOKENS_SECRET")
+
+#: Revoking a deleted account's Sign in with Apple token (app/api/auth/
+#: apple_tokens.py): all of them or none. One missing and sign-in keeps no
+#: token (or keeps one nothing can revoke).
+APPLE_REVOCATION = ("APPLE_TEAM_ID", "APPLE_KEY_ID", "APPLE_PRIVATE_KEY", "APPLE_TOKENS_SECRET")
 
 MIN_SECRET_KEY = 32
 MIN_DISTINCT = 10
@@ -256,6 +261,12 @@ def _pairs(settings) -> list[Problem]:
     for setting, needs in NEEDS:
         if _text(_get(settings, setting)) and not _text(_get(settings, needs)):
             out.append(Problem(needs, f"is empty while APP_{setting} is set"))
+    apple_set = [name for name in APPLE_REVOCATION if _text(_get(settings, name))]
+    if apple_set:
+        given = apple_set[0]
+        for name in APPLE_REVOCATION:
+            if name not in apple_set:
+                out.append(Problem(name, f"is empty while APP_{given} is set: Sign in with Apple tokens need all of {', '.join('APP_' + n for n in APPLE_REVOCATION)}"))
     return out
 
 
@@ -293,6 +304,9 @@ def _formats(settings) -> list[Problem]:
             ok = False
         if not ok:
             out.append(Problem("FIREBASE_SERVICE_ACCOUNT_BASE64", "is not a base64-encoded Firebase service account"))
+    apple_key = _text(_get(settings, "APPLE_PRIVATE_KEY")).replace("\\n", "\n")
+    if apple_key and not ("-----BEGIN PRIVATE KEY-----" in apple_key and "-----END PRIVATE KEY-----" in apple_key):
+        out.append(Problem("APPLE_PRIVATE_KEY", "is not the .p8 key's contents (-----BEGIN PRIVATE KEY----- ... -----END PRIVATE KEY-----)"))
     env = _text(_get(settings, "ENV")).lower()
     if env == "production" and bool(_get(settings, "DEBUG")):
         out.append(Problem("DEBUG", "is on while APP_ENV is production"))
@@ -312,6 +326,8 @@ def _warnings(settings) -> list[Problem]:
         out.append(Problem("FIREBASE_SERVICE_ACCOUNT_BASE64", "and _PATH are both empty: no push notifications", fatal=False))
     if not _text(_get(settings, "SENTRY_DSN")):
         out.append(Problem("SENTRY_DSN", "is empty: errors are not tracked", fatal=False))
+    if not any(_text(_get(settings, name)) for name in APPLE_REVOCATION):
+        out.append(Problem("APPLE_KEY_ID", "and the other APP_APPLE_* keys are empty: a deleted account's Sign in with Apple token is not revoked (App Store guideline 5.1.1(v))", fatal=False))
     if not _text(_get(settings, "BACKUP_S3_BUCKET")):
         out.append(Problem("BACKUP_S3_BUCKET", "is empty: backups stay on the database's own disk", fatal=False))
     if _get(settings, "AI_ENABLED") and not _text(_get(settings, "GEMINI_API_KEY")):

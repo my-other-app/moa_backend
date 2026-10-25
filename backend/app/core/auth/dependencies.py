@@ -186,6 +186,16 @@ def check_user_type(required_roles: Union[str, List[str]], optional=False):
                 error_code="ACCOUNT_SUSPENDED",
             )
 
+        # A club's own routes (ClubAuth, VolunteerAuth) admit an admin too, and
+        # behind them an admin may act on any club's records -- so the admin's
+        # role must allow what the request does: reading needs VIEW, changing
+        # needs MANAGE_CONTENT, deleting needs DESTROY. Without this a viewer
+        # could edit or delete any event through the club's own routes.
+        if user_type == "admin" and "club" in required_roles and "app_user" not in required_roles:
+            from app.core.auth.permissions import capability_for_method, ensure_can
+
+            ensure_can(current_user, capability_for_method(request.method))
+
         if user_type == "club":
             if current_user.club is None or not current_user.club.is_verified:
                 if optional:
