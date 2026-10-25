@@ -14,12 +14,12 @@ Downgrade drops the column (the kept tokens go with it; they can no longer
 be revoked from here).
 
 Revision ID: apple_refresh_token
-Revises: audit_search
+Revises: club_mailbox
 """
 from alembic import op
 
 revision = "apple_refresh_token"
-down_revision = "audit_search"
+down_revision = "club_mailbox"
 branch_labels = None
 depends_on = None
 
