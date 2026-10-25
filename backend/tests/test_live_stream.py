@@ -302,18 +302,21 @@ async def test_the_banner_view_is_the_rooms_strip_sent_only_when_it_changes(clie
     from app.api.closeout.models import EventStatus
 
     await client.patch(_u(world, "/questions/settings"), json={"approve_first": False}, headers=world["h"])
+    await client.post(_u(world, "/questions"), json={"text": "Is the room on?"}, headers=_key(6))
+    await bus.drain()
     s = await SSE(_s(world), {}, {"view": "banner"}).open()
     assert s.status == 200 and s.response_headers["content-type"].startswith("text/event-stream")
     await streams.step()
     snap = await s.next_of("snapshot")
     feed = (await client.get(_u(world))).json()
     event = world["event"]
-    assert set(snap["json"]) == {"event", "banner"} and snap["json"]["banner"] is None and feed["banner"] is None
+    assert set(snap["json"]) == {"event", "banner", "poll", "quiz", "qa"} and snap["json"]["banner"] is None and feed["banner"] is None
+    assert snap["json"]["poll"] is None and snap["json"]["quiz"] == feed["quiz"] and snap["json"]["qa"] == {"open": True, "has_questions": True}
     strip_event = snap["json"]["event"]
     assert {k: strip_event[k] for k in feed["event"]} == feed["event"] and set(strip_event) == set(feed["event"]) | {"starts_at", "ends_at"}
     assert datetime.fromisoformat(strip_event["starts_at"].replace("Z", "+00:00")) == event.event_datetime
     assert datetime.fromisoformat(strip_event["ends_at"].replace("Z", "+00:00")) == event.event_datetime + timedelta(hours=event.duration)
-    assert len(snap["data"]) < 400
+    assert len(snap["data"]) < 500
 
     # The audience asks and votes: the room moves on, the strip does not.
     asked = (await client.post(_u(world, "/questions"), json={"text": "Is there a break?"}, headers=_key(7))).json()
@@ -330,7 +333,7 @@ async def test_the_banner_view_is_the_rooms_strip_sent_only_when_it_changes(clie
     snap = await s.next_of("snapshot")
     feed = (await client.get(_u(world))).json()
     assert snap["json"]["banner"] == feed["banner"] and feed["banner"]["text"] == "Doors open at seven"
-    assert len(snap["data"]) < 600 and len(snap["data"]) * 2 < len(json.dumps(feed))
+    assert len(snap["data"]) < 700 and len(snap["data"]) * 2 < len(json.dumps(feed))
 
     # Gone where the room is.
     event.lifecycle = EventStatus.draft
@@ -670,15 +673,16 @@ async def test_when_the_clock_runs_out_the_players_are_shown_the_answer(client, 
     code = await _quiz(client, world, seconds=5)
     p = await _join(client, code, 1)
     await client.post(_u(world, "/quiz/host/next"), headers=world["h"])
-    # The question has been open three and a half of its five seconds: the
-    # poll counts 0, and shows the answer, from four.
+    # The question has been open six and a half of its five seconds: the
+    # poll counts 0, but answers still count for the two seconds of grace,
+    # so the answer is shown from seven.
     await session.execute(update(LiveQuizzes).where(LiveQuizzes.event_id == world["event"].id).values(
-        question_opened_at=datetime.now(timezone.utc) - timedelta(seconds=3.5)))
+        question_opened_at=datetime.now(timezone.utc) - timedelta(seconds=6.5)))
     await session.commit()
     s = await SSE(_s(world), {"X-Live-Player": p["player_key"]}, {"view": "quiz"}).open()
     await streams.step()
     snap = await s.next_of("snapshot")
-    assert snap["json"]["question"]["correct_key"] is None and snap["json"]["question"]["time_left"] == 1
+    assert snap["json"]["question"]["correct_key"] is None and snap["json"]["question"]["time_left"] == 0
     await asyncio.sleep(0.7)
     await streams.step()   # the clock is due: the quiz is told
     await streams.step()   # and rebuilt

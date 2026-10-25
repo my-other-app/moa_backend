@@ -88,6 +88,9 @@ CLOUD_WORDS = 40
 #: How long the players of a quiz run met by this process are kept (board mode).
 ROSTER_SECONDS = 3 * 3600.0
 
+#: Answers after the clock plus this grace still count, for a slow phone.
+ANSWER_GRACE = 2
+
 rooms = TTLCache(ttl=SNAPSHOT_SECONDS, maxsize=4096)
 quizzes = TTLCache(ttl=SNAPSHOT_SECONDS, maxsize=1024)
 voters = TTLCache(ttl=VOTER_SECONDS, maxsize=200_000)
@@ -188,8 +191,10 @@ class Room:
     poll_id: Optional[str] = None
     poll_kind: Optional[PollKind] = None
     poll_options: tuple = ()
-    #: The event page's strip (BannerFeed, view=banner), JSON-safe.
+    #: The event page's strip (BannerFeed, view=banner), JSON-safe, and as
+    #: it is sent (GET .../live/banner and the stream's frames).
     strip: Optional[dict] = None
+    strip_body: bytes = b""
 
 
 def update_out(u: LiveUpdates) -> dict:
@@ -239,6 +244,9 @@ async def _build_room(session, event_id: int):
     strip = BannerFeed(
         event={**public["event"], "starts_at": event.event_datetime, "ends_at": event.event_datetime + timedelta(hours=event.duration or 0)},
         banner=public["banner"],
+        poll={"id": poll.id, "kind": poll.kind.value, "prompt": poll.prompt} if poll else None,
+        quiz=public["quiz"],
+        qa={"open": qa_open, "has_questions": bool(rows)},
     ).model_dump(mode="json")
     asked_by: dict[str, list[str]] = {}
     for q, author in rows:
@@ -247,7 +255,7 @@ async def _build_room(session, event_id: int):
         event_id=event.id, club_id=event.club_id, lifecycle=event.lifecycle, approve_first=bool(event.qa_approve_first),
         body=orjson.dumps(data), data=data, question_ids=frozenset(str(q.id) for q, _ in rows), asked_by=asked_by,
         poll_id=str(poll.id) if poll else None, poll_kind=poll.kind if poll else None, poll_options=tuple(poll.options or ()) if poll else (),
-        strip=strip,
+        strip=strip, strip_body=orjson.dumps(strip),
     )
 
 
@@ -304,19 +312,75 @@ def voter_kept(event_id: int, key: str) -> Optional[Voter]:
 
 
 def valid_key(key: Optional[str]) -> Optional[str]:
+    """A key a client made (a browser's, an install's): 8 to 64 letters,
+    digits, - and _. Never the `u:` form, which only the server makes: a
+    client cannot pass itself off as an account by sending one."""
     key = (key or "").strip()
     if 8 <= len(key) <= 64 and key.replace("-", "").replace("_", "").isalnum():
         return key
     return None
 
 
+def account_key(user_id) -> str:
+    """The room's key for a signed-in person: one voter, asker and
+    respondent across every device and browser they use."""
+    return f"u:{int(user_id)}"
+
+
+def person_key(user, client_key: Optional[str]) -> Optional[str]:
+    """Who is voting, asking or answering a poll: the account when the
+    request carried a valid token (`user`), else the client's own key
+    (validated; None when there is none)."""
+    if user is not None and getattr(user, "id", None) is not None:
+        return account_key(user.id)
+    return valid_key(client_key)
+
+
+def token_user_id(request) -> Optional[int]:
+    """The account a request's bearer token names, read from the token alone
+    (its signature and expiry checked, no database): for what the room only
+    shows a person -- their own votes, questions and poll answers on the feed
+    and its stream -- where a token revoked a minute ago does no harm.
+    Writes (a vote, a question, an answer) check the token in full
+    (OptionalAuth). None when there is no token or it does not hold."""
+    header = request.headers.get("authorization") or ""
+    scheme, _, token = header.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        return None
+    try:
+        from app.core.auth.jwt import decode_jwt_token
+
+        payload = decode_jwt_token(token.strip())
+    except Exception:  # noqa: BLE001 - expired, forged, malformed: a visitor
+        return None
+    if payload.get("token_type") != "access_token" or not payload.get("user_id"):
+        return None
+    try:
+        return int(payload["user_id"])
+    except (TypeError, ValueError):
+        return None
+
+
+def shown_key(request, client_key: Optional[str]) -> Optional[str]:
+    """`person_key` for the room's reads: the account from the token alone
+    (token_user_id), else the client's key."""
+    uid = token_user_id(request)
+    return account_key(uid) if uid is not None else valid_key(client_key)
+
+
 async def feed_body(session, event_id: int, key: Optional[str]) -> bytes:
-    """The feed for one browser: the room's body, or a copy with its own flags."""
+    """The feed for one browser (or one account: `key` is person_key's or
+    shown_key's): the room's body, or a copy with its own flags."""
     room = await room_of(session, event_id)
-    key = valid_key(key)
-    if key is None:
+    if not key:
         return room.body
     return body_for(room, key, await voter_of(session, event_id, key))
+
+
+async def banner_body(session, event_id: int) -> bytes:
+    """The event page's strip (BannerFeed), as it is sent: from the room's
+    snapshot, the same for everyone."""
+    return (await room_of(session, event_id)).strip_body
 
 
 def flags_of(room: Room, key: Optional[str], voter: Optional[Voter]) -> Optional[tuple]:
@@ -390,6 +454,20 @@ class QuizView:
     def rank_of(self, score: int) -> int:
         """1 + how many players scored more (the snapshot's own scores)."""
         return 1 + len(self.scores) - bisect.bisect_right(self.scores, score)
+
+
+def reveal_at(opened_at: datetime, seconds: int) -> datetime:
+    """When an open question's answer may be shown: once answers have closed,
+    the clock and the grace after it (ANSWER_GRACE). Not at the clock's 0:
+    answers still count for two seconds then, and a second phone shown the
+    answer could score with it."""
+    return opened_at + timedelta(seconds=seconds + ANSWER_GRACE)
+
+
+def revealed(opened_at: Optional[datetime], seconds: int, now: datetime) -> bool:
+    """Whether the open question's answer (and everything that gives it
+    away: points, scores, ranks, the board) may be shown now."""
+    return opened_at is not None and now > reveal_at(opened_at, seconds)
 
 
 def _question(q: LiveQuizQuestions) -> dict:

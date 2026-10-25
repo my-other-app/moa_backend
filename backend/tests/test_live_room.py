@@ -242,7 +242,12 @@ async def test_a_players_poll_is_read_from_the_quiz_snapshot(client, session, wo
     assert (await client.get(_u(world, "/quiz/play"), headers=keys[0])).json()["question"]["my_answer"] == "a"
 
     from app.api.live import room
+    from app.api.live.models import LiveQuizzes
 
+    # The answers close (30 s and the grace): scores, ranks and the board show.
+    await session.execute(update(LiveQuizzes).where(LiveQuizzes.event_id == world["event"].id).values(
+        question_opened_at=datetime.now(timezone.utc) - timedelta(seconds=40)))
+    await session.commit()
     room.quizzes.clear()
     await client.get(_u(world, "/quiz/play"), headers=keys[0])  # builds the quiz snapshot
     with statements(session) as seen:

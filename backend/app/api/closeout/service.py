@@ -27,6 +27,7 @@ from app.api.emails.models import MessageDeliveries, Messages
 from app.api.events.documents import EVENT_TIMEZONE, ROLE_LABELS
 from app.api.events.models import EventRatingsLink, EventRegistrationsLink, Events, ends_at_sql
 from app.api.kiosk.models import SelfCheckInSessions
+from app.api.live import notify as live_notify
 from app.api.merch.models import MerchItems
 from app.config import settings
 from app.core import jobs
@@ -203,6 +204,9 @@ async def update_settings(session, event: Events, body) -> dict:
         new = EventStatus(data["status"])
         if new is not lifecycle(event):
             event.lifecycle = new
+            if new is EventStatus.live:
+                # Set live by hand: everyone registered is told, as by the clock (once per event).
+                await live_notify.queue_event_live(session, event.id)
             # Moving the status by hand takes the event off the clock, unless it
             # is being published: that is the normal way onto the clock, not off it.
             if "status_clock" not in data and new is not EventStatus.published:
@@ -406,6 +410,7 @@ async def advance_clock(session, now: Optional[datetime] = None) -> int:
     if events:
         jobs = {j.event_id: j for j in (await session.scalars(select(RetentionJobs).where(RetentionJobs.event_id.in_([e.id for e in events])))).all()}
     moved = 0
+    went_live: list[int] = []
     for e in events:
         before = lifecycle(e)
         end = ends_at(e)
@@ -420,6 +425,12 @@ async def advance_clock(session, now: Optional[datetime] = None) -> int:
                 e.lifecycle = EventStatus.archived
         if e.lifecycle is not before:
             moved += 1
+        if before is not EventStatus.live and e.lifecycle is EventStatus.live:
+            went_live.append(e.id)
+    for event_id in went_live:
+        # Everyone registered is told the event is live (app/api/live/notify.py):
+        # a job written with the move, sent once it commits.
+        await live_notify.queue_event_live(session, event_id)
     if moved:
         await session.commit()
     return moved

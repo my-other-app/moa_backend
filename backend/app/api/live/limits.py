@@ -9,8 +9,9 @@ So each action is limited twice:
 
 - per person, on the key the room's own clients send: the browser's key
   (X-Live-Key) for asking, voting and answering polls, the player's key
-  (X-Live-Player) for the quiz. A request without one is limited by the
-  ceiling alone (the event site's join sends no key yet).
+  (X-Live-Player) for the quiz, the client's `player_key` for joining -- or
+  the account (`u:<user id>`) when the request is signed in. A request
+  without one is limited by the ceiling alone (clients from before).
 - per address, at a ceiling sized for a full hall, so one machine flooding
   the room is still stopped.
 

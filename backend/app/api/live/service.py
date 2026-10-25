@@ -12,7 +12,16 @@ Five things happen while an event runs, and one just after:
 * the feedback survey, sent to everyone who was there an hour after the end.
 
 Nobody in the room needs an account. A browser makes itself a key and sends
-it on every call; that key is the voter, the asker and the player.
+it on every call; that key is the voter, the asker and the player. A request
+that carries a valid sign-in is the account instead (`u:<user id>`,
+room.person_key): one vote, one poll answer and one quiz player per person,
+whichever devices they use.
+
+The quiz keeps its answer to itself while answers are open: the right
+answer, a player's points and whether they were right, and every score, rank
+and board that would give those away, are shown once the clock and its grace
+are out (room.revealed). Joining again with the same key -- or as the same
+account -- in the same run is the same player.
 
 What the room polls is read from second-long snapshots (room.py). Counters
 on a row (a question's votes, a player's score) move by one atomic UPDATE;
@@ -28,7 +37,7 @@ import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, func, literal, select, update
@@ -77,7 +86,7 @@ VOTER_HEADER = "X-Live-Key"
 PLAYER_HEADER = "X-Live-Player"
 SWEEP_LOCK = lock_keys.LIVE_SWEEP
 # Answers after the clock plus this grace still count, for a slow phone.
-ANSWER_GRACE = 2
+ANSWER_GRACE = room.ANSWER_GRACE
 UPDATE_TYPE = "event_live_update"
 # A banner is the latest update, as long as it is this fresh.
 BANNER_FOR = room.BANNER_FOR
@@ -98,8 +107,10 @@ def now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def voter_key_of(request) -> str:
-    key = room.valid_key(request.headers.get(VOTER_HEADER))
+def voter_key_of(request, user=None) -> str:
+    """Who votes, asks or answers: the account when the request carried a
+    valid sign-in (`user`, OptionalAuth's), else the browser's key."""
+    key = room.person_key(user, request.headers.get(VOTER_HEADER))
     if key is None:
         raise CustomHTTPException(422, message="This browser has no key for the room yet. Reload the page and try again.")
     return key
@@ -246,10 +257,29 @@ async def _moved(session, quiz: LiveQuizzes) -> dict:
     return await host_state(session, quiz)
 
 
-async def start_quiz(session, quiz: LiveQuizzes) -> dict:
-    """Opens the lobby. A quiz run before starts clean: last time's players and answers go."""
+_RUN = ["status", "current_index", "question_opened_at", "ended_at", "join_code"]
+
+
+async def _hold(session, quiz: LiveQuizzes) -> None:
+    """The quiz's row read again and held until this transaction ends: a
+    second press (or a second console) waits here, then sees what the first
+    one did."""
+    await session.refresh(quiz, attribute_names=_RUN, with_for_update=True)
+
+
+async def start_quiz(session, quiz: LiveQuizzes, restart: bool = False) -> dict:
+    """Opens the lobby. A quiz run before starts clean: last time's players
+    and answers go. A quiz that is running is started again only when asked
+    to (`restart`): it clears every player's score, so a stray press of
+    Start mid-game is 409 QUIZ_RUNNING instead."""
     if not quiz.questions:
         raise CustomHTTPException(422, message="Add at least one question before hosting.")
+    await _hold(session, quiz)
+    if quiz.status is QuizStatus.live and not restart:
+        await session.rollback()
+        raise CustomHTTPException(
+            409, message="The quiz is running. Restarting it clears every player's score.", error_code="QUIZ_RUNNING",
+        )
     await session.execute(delete(LiveQuizPlayers).where(LiveQuizPlayers.quiz_id == quiz.id))
     quiz.status, quiz.current_index, quiz.question_opened_at, quiz.ended_at = QuizStatus.live, -1, None, None
     quiz.join_code = await _fresh_code(session)
@@ -257,9 +287,23 @@ async def start_quiz(session, quiz: LiveQuizzes) -> dict:
     return await _moved(session, quiz)
 
 
-async def next_question(session, quiz: LiveQuizzes) -> dict:
+def _moved_on() -> CustomHTTPException:
+    return CustomHTTPException(409, message="The quiz has already moved on.", error_code="QUIZ_MOVED_ON")
+
+
+async def next_question(session, quiz: LiveQuizzes, expected_index: Optional[int] = None) -> dict:
+    """The next question (past the last one, the end). `expected_index`, the
+    question the console shows: when the quiz is no longer there -- a double
+    press, a second console -- nothing moves and it is 409 QUIZ_MOVED_ON."""
+    await _hold(session, quiz)
     if quiz.status is not QuizStatus.live:
+        await session.rollback()
+        if expected_index is not None:
+            raise _moved_on()
         raise CustomHTTPException(409, message="The quiz is not running.")
+    if expected_index is not None and quiz.current_index != expected_index:
+        await session.rollback()
+        raise _moved_on()
     if quiz.current_index + 1 >= len(quiz.questions):
         return await end_quiz(session, quiz)
     quiz.current_index += 1
@@ -304,9 +348,11 @@ async def _leaderboard(session, quiz: LiveQuizzes, limit: int = 10) -> list:
     return [{"rank": i + 1, "name": name, "score": score} for i, (name, score) in enumerate(rows)]
 
 
-async def host_state(session, quiz: LiveQuizzes, now: Optional[datetime] = None) -> dict:
+async def host_state(session, quiz: LiveQuizzes, now: Optional[datetime] = None, *, for_screen: bool = False) -> dict:
     """What the host (and the big screen) sees: players and the board from
-    the room's quiz snapshot, the open question's tally counted afresh."""
+    the room's quiz snapshot, the open question's tally counted afresh. The
+    big screen (`for_screen`) is in front of the room: it is not told the
+    right answer until the players are (room.revealed)."""
     now = now or now_utc()
     current = quiz.questions[quiz.current_index] if quiz.status is QuizStatus.live and 0 <= quiz.current_index < len(quiz.questions) else None
     view = await room.quiz_view(session, quiz.event_id)
@@ -318,10 +364,35 @@ async def host_state(session, quiz: LiveQuizzes, now: Optional[datetime] = None)
     }
     if current is not None:
         out["question"] = {**_question_out(current, True), "time_left": _time_left(quiz.question_opened_at, current.seconds, now), "opened_at": quiz.question_opened_at, **(await _tally(session, current))}
+        if for_screen and not room.revealed(quiz.question_opened_at, current.seconds, now):
+            q = out["question"]
+            q["correct_key"] = None
+            q["counts"] = [{**c, "correct": False} for c in q["counts"]]
     return out
 
 
-async def join_quiz(session, code: str, name: str, registration_id=None) -> dict:
+def player_key_for(quiz: LiveQuizzes, person: str) -> str:
+    """The player's secret for one person (`u:<id>`, or a client's key) in
+    one run of a quiz: the same every time they join it, and nobody's to work
+    out without the server's key. The run is its join code (a fresh one each
+    start)."""
+    import hashlib
+    import hmac
+
+    message = f"live-player:{quiz.id}:{quiz.join_code}:{person}"
+    return hmac.new(settings.SECRET_KEY.encode(), message.encode(), hashlib.sha256).hexdigest()[:48]
+
+
+def _joined(quiz: LiveQuizzes, player_id, player_key: str, name: str) -> dict:
+    return {"event_id": quiz.event_id, "quiz_id": quiz.id, "title": quiz.title, "player_id": player_id, "player_key": player_key, "name": name}
+
+
+async def join_quiz(session, code: str, name: str, registration_id=None, person: Optional[str] = None) -> dict:
+    """Into the quiz running with `code`. `person` -- the account
+    (`u:<id>`) or the client's own key -- makes it the same player however
+    many times they join this run, from whichever device: the first join's
+    name and score. Without one (an older client) each join is a new player,
+    as before; the limits bound how many."""
     quiz = await session.scalar(
         select(LiveQuizzes).join(Events, Events.id == LiveQuizzes.event_id).join(Clubs, Clubs.id == Events.club_id)
         .where(LiveQuizzes.join_code == code.strip(), LiveQuizzes.status == QuizStatus.live, *room.visible())
@@ -331,19 +402,42 @@ async def join_quiz(session, code: str, name: str, registration_id=None) -> dict
     name = " ".join(name.split())[:60]
     if not name:
         raise CustomHTTPException(422, message="Tell the room your name.")
-    player = LiveQuizPlayers(quiz_id=quiz.id, name=name, player_key=secrets.token_urlsafe(24), registration_id=registration_id, score=0)
-    session.add(player)
+    key = player_key_for(quiz, person) if person else secrets.token_urlsafe(24)
+    if person:
+        found = (await session.execute(
+            select(LiveQuizPlayers.id, LiveQuizPlayers.name, LiveQuizPlayers.registration_id)
+            .where(LiveQuizPlayers.quiz_id == quiz.id, LiveQuizPlayers.player_key == key)
+        )).first()
+        if found is not None:
+            if registration_id is not None and found[2] is None:
+                await session.execute(update(LiveQuizPlayers).where(LiveQuizPlayers.id == found[0]).values(registration_id=registration_id))
+            await session.commit()
+            return _joined(quiz, found[0], key, found[1])
+    # Two taps at once with the same key are one player: the second insert
+    # takes nothing and reads the first's row.
+    took = (await session.execute(
+        pg_insert(LiveQuizPlayers)
+        .values(id=uuid4(), quiz_id=quiz.id, name=name, player_key=key, registration_id=registration_id, score=0, created_at=now_utc(), updated_at=now_utc())
+        .on_conflict_do_nothing(index_elements=["quiz_id", "player_key"])
+        .returning(LiveQuizPlayers.id, LiveQuizPlayers.created_at)
+    )).first()
+    if took is None:
+        row = (await session.execute(
+            select(LiveQuizPlayers.id, LiveQuizPlayers.name).where(LiveQuizPlayers.quiz_id == quiz.id, LiveQuizPlayers.player_key == key)
+        )).one()
+        await session.commit()
+        return _joined(quiz, row[0], key, row[1])
     await session.commit()
-    met = room.Player(id=player.id, name=player.name, score=0, created_at=player.created_at)
+    met = room.Player(id=took[0], name=name, score=0, created_at=took[1])
     # In the snapshot at once, so the new player's first poll finds them.
     view = room.quiz_kept(quiz.event_id)
     if view is not None and view.quiz_id == quiz.id:
-        view.players[player.player_key] = met
+        view.players[key] = met
     run = board.token(quiz.status, quiz.join_code, quiz.ended_at)
     if run is not None and board.on():
         await board.joined(board.key(quiz.id, run), met.member())
     bus.changed(quiz.event_id, "quiz")
-    return {"event_id": quiz.event_id, "quiz_id": quiz.id, "title": quiz.title, "player_id": player.id, "player_key": player.player_key, "name": player.name}
+    return _joined(quiz, met.id, key, name)
 
 
 async def _player(session, view: "room.QuizView", player_key: str) -> "room.Player":
@@ -382,19 +476,33 @@ async def player_state(session, event_id: int, player_key: str, now: Optional[da
 
 def player_body(view: "room.QuizView", player: "room.Player", standing: tuple, now: datetime) -> dict:
     """What a player sees (PlayerState), from the snapshot and their
-    (score, rank): the poll's body, and the quiz stream's."""
+    (score, rank): the poll's body, and the quiz stream's.
+
+    While the open question's answers are open (room.revealed), nothing gives
+    its answer away: no `correct_key`, the player's own answer without its
+    points or verdict, their score as it stood before it, and no rank or
+    board -- a second phone that answered first would read the answer off
+    any of them. Once they close, all of it: `correct_key`, `my_points`,
+    `my_correct`, the score with this question's points, the rank and the
+    board."""
     score, rank = standing
     out = {"status": view.status.value, "title": view.title, "name": player.name, "score": score, "current_index": view.current_index, "total": len(view.questions), "question": None, "leaderboard": [], "rank": None}
     q = view.current()
+    shown = True
     if q is not None:
         left = _time_left(view.opened_at, q["seconds"], now)
+        shown = room.revealed(view.opened_at, q["seconds"], now)
         mine = view.answers.get(player.id)
         out["question"] = {
-            **_question_out(q, False), "time_left": left, "my_answer": mine[0] if mine else None, "my_points": mine[1] if mine else None,
-            # The right answer is shown once the clock is out, or once this player has answered.
-            "correct_key": q["correct_key"] if (left == 0 or mine is not None) else None,
+            **_question_out(q, False), "time_left": left,
+            "my_answer": mine[0] if mine else None,
+            "my_points": mine[1] if (mine and shown) else None,
+            "my_correct": (mine[0] == q["correct_key"]) if (mine and shown) else None,
+            "correct_key": q["correct_key"] if shown else None,
         }
-    if view.status is QuizStatus.ended or (view.status is QuizStatus.live and view.current_index >= 0):
+        if mine and not shown:
+            out["score"] = max(0, int(score) - int(mine[1] or 0))
+    if shown and (view.status is QuizStatus.ended or (view.status is QuizStatus.live and view.current_index >= 0)):
         out["leaderboard"] = list(view.board)
         out["rank"] = rank
     return out
@@ -433,7 +541,11 @@ async def answer(session, event_id: int, player_key: str, option_key: str, now: 
     if view.board_key is not None:
         await board.scored(view.board_key, player.member(), player.score)
     bus.changed(event_id, "quiz")
-    return {"correct": correct, "points": points, "score": player.score, "correct_key": q["correct_key"]}
+    # Answers close before the answer is shown (room.revealed), so an answer
+    # taken is never told whether it was right: that comes with the state.
+    if room.revealed(view.opened_at, q["seconds"], now):
+        return {"correct": correct, "points": points, "score": player.score, "answered": True}
+    return {"correct": None, "points": None, "score": player.score - points, "answered": True}
 
 
 # --- Q&A ----------------------------------------------------------------------
@@ -1018,35 +1130,55 @@ async def sweep_loop(interval: int = 60) -> None:
 update_out = room.update_out
 
 
+UPDATE_PUSH_JOB = "live.update_push"
+
+
 async def push_update(session, event: Events, kind: str, text_: str, audience: str, by=None) -> dict:
+    """An update: the banner on the event page, a line in the inbox of
+    everyone in the audience with an account, and a push to those of them
+    who have not muted the club or turned clubs' pushes off (notify.py's
+    rule). The inbox lines, the push's job and the update are one commit;
+    the push goes from the job (`live.update_push`), never inside the
+    request. `recipients` counts the audience; `pushed`, the people the push
+    was written for."""
+    from app.api.live import notify
+    from app.core.notifications import fanout
+
     body = " ".join((text_ or "").split())
     if len(body) < 3:
         raise CustomHTTPException(422, message="Say what changed.")
     aud = Audience(audience)
     regs = await audience_regs(session, event, aud)
     user_ids = sorted({r.user_id for r in regs if r.user_id})
-    row = LiveUpdates(event_id=event.id, kind=UpdateKind(kind), text=body[:500], audience=aud, recipients=len(regs), sent_by=getattr(by, "id", None), sent_at=now_utc())
+    row = LiveUpdates(id=uuid4(), event_id=event.id, kind=UpdateKind(kind), text=body[:500], audience=aud, recipients=len(regs), sent_by=getattr(by, "id", None), sent_at=now_utc(), pushed=0)
     session.add(row)
+    push_id = f"live-update:{row.id}"
+    data = {"type": UPDATE_TYPE, "event_id": str(event.id), "kind": row.kind.value, "push_id": push_id}
+    if user_ids:
+        await fanout.insert_for_audience(
+            session, fanout.users_in(user_ids), title=event.name, description=body, type=UPDATE_TYPE, data=data,
+            from_club_id=event.club_id, event_id=event.id,
+        )
+        told = sorted(int(u) for u in (await session.scalars(
+            notify.recipients(event.id, event.club_id, checked_in=aud is Audience.checked_in)
+        )).all())
+        if told:
+            await jobs.enqueue(session, UPDATE_PUSH_JOB, {"user_ids": told, "title": event.name, "body": body, "data": data}, dedupe_key=f"live:update:{row.id}")
+        row.pushed = len(told)
     await session.commit()
     room.room_changed(event.id)
-    pushed = 0
-    if user_ids:
-        from app.api.notifications.service import create_notifications_batch
-        from app.core.notifications.service import send_notification_to_users
-
-        data = {"type": UPDATE_TYPE, "event_id": str(event.id), "kind": row.kind.value}
-        try:
-            await create_notifications_batch(session, user_ids, event.name, body, UPDATE_TYPE, data=data, from_club_id=event.club_id, event_id=event.id)
-        except Exception:  # noqa: BLE001
-            logger.exception("in-app notifications failed for live update %s", row.id)
-            await session.rollback()
-        try:
-            pushed = await send_notification_to_users(session, user_ids, event.name, body, data=data)
-        except Exception:  # noqa: BLE001
-            logger.exception("push failed for live update %s", row.id)
-    row.pushed = pushed or 0
-    await session.commit()
     return update_out(row)
+
+
+@jobs.handler(UPDATE_PUSH_JOB, max_attempts=4, timeout=300.0, concurrency=2, priority=jobs.HIGH)
+async def _update_push_job(p: dict) -> None:
+    """The update's push, to every device of the people it was written for.
+    Run again, it pushes again with the same push_id: the app shows a push
+    with a given id once."""
+    from app.core.notifications.service import send_notification_to_users
+
+    async with jobs.scope() as s:
+        await send_notification_to_users(s, [int(u) for u in p.get("user_ids") or ()], p["title"], p["body"], data=dict(p.get("data") or {}))
 
 
 async def list_updates(session, event: Events, limit: int = 30) -> list:
@@ -1095,6 +1227,6 @@ async def screen(session, event: Events, now: Optional[datetime] = None) -> dict
         "pinned": _question_row_out(pinned) if pinned else None,
         "board": [_question_row_out(r) for r in board],
         "poll": await poll_out(session, live_poll) if live_poll else None,
-        "quiz": await host_state(session, quiz, now) if quiz and quiz.status is QuizStatus.live else None,
+        "quiz": await host_state(session, quiz, now, for_screen=True) if quiz and quiz.status is QuizStatus.live else None,
         "update": update_out(latest) if latest and now - latest.sent_at <= BANNER_FOR else None,
     }

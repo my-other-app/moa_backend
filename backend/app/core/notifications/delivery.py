@@ -67,6 +67,10 @@ PERSONAL: dict[str, str] = {
     # The quiz starting or a poll going live, to whoever is checked in: a
     # list only the server holds (app/api/live/notify.py).
     "event_live_join": "an event you are checked in to",
+    # The event going live, to everyone registered; Q&A opening, to whoever
+    # is checked in (app/api/live/notify.py).
+    "event_live_started": "an event you are registered for",
+    "event_live_qa": "an event you are checked in to",
 }
 
 ALL_TOPIC = "all"

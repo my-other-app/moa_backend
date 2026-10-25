@@ -43,8 +43,10 @@ every process for the same change, so a phone that reconnects anywhere with
 The feed also rebuilds every RESYNC_SECONDS, and if what it built differs from
 what it had -- a message lost, a change made outside the live room (the event
 closed, its club unlisted, the banner's three hours up) -- tells everyone
-(bus.changed). When an open question's clock runs out it asks for the quiz to
-be told once (the players' screens show the right answer then), and when the
+(bus.changed). When an open question's answers close (its clock and the
+grace after it, room.reveal_at) it asks for the quiz to be told once (the
+players' screens show the right answer, their points and the board then),
+and when the
 room or the quiz is gone (404) or a player was removed (401) its streams are
 sent `gone` and end.
 
@@ -65,7 +67,7 @@ import time
 from collections import Counter
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Optional
 
 import orjson
@@ -499,9 +501,9 @@ class Feed:
         self.quiz, self.standing = built, standing
         current = built.current()
         if current is not None and built.opened_at is not None:
-            # When the poll would first count 0 (whole seconds, rounded
-            # down) and show the right answer.
-            ends = built.opened_at + timedelta(seconds=max(0, current["seconds"] - 1))
+            # When answers close and the players may be shown the right
+            # answer, their points and the board (room.revealed).
+            ends = room.reveal_at(built.opened_at, current["seconds"])
             left = (ends - _now()).total_seconds()
             self._clock = (time.monotonic() + left + 0.05, f"clock:{current['id']}") if left > 0 else None
         else:
