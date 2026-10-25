@@ -84,6 +84,7 @@ from app.api.message_quota.router import admin_router as message_quota_admin_rou
 from app.api.message_quota.router import club_router as message_quota_club_router
 from app.api.message_quota.router import public_router as message_credits_public_router
 from app.api.health import admin_router as admin_jobs_router
+from app.api.admin_ops.router import router as admin_ops_router
 from app.api.backups.router import router as backups_router
 from app.api.subscriptions.router import (
     admin_router as subscriptions_admin_router,
@@ -205,6 +206,8 @@ api_router.include_router(router=audit_router)
 api_router.include_router(router=admin_alerts_router)
 # The job queue at a glance, and a dead job put back (app/api/health.py).
 api_router.include_router(router=admin_jobs_router)
+# The admin portal's operator tools: payouts, disputes, refunds, admins, settings, jobs, mail, WhatsApp.
+api_router.include_router(router=admin_ops_router)
 api_router.include_router(router=backups_router)
 # Before the clubs router: these are literal paths under /clubs, and the
 # clubs router owns the parameterised ones.

@@ -63,6 +63,8 @@ from app.api.ai import models as _ai_models  # noqa: F401
 # The job queue and its runners' heartbeats (app/core/jobs.py).
 from app.core import jobs as _jobs  # noqa: F401
 from app.api.ledger import models as _ledger_models  # noqa: F401
+# The admin portal's operator tools: settings, invites, payouts, fees, refunds, disputes (app/api/admin_ops).
+from app.api.admin_ops import models as _admin_ops_models  # noqa: F401
 # search_text, the search outbox and the grid cells: their triggers go in after every table.
 from app.api.search import outbox as _search_outbox, text as _search_text  # noqa: F401
 from app.api.discover import cells as _geo_cells  # noqa: F401

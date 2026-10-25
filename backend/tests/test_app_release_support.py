@@ -170,7 +170,7 @@ async def test_an_unpaid_registration_is_paid_after_the_deadline_until_the_event
     waiting = await make_registration(event=full, user=fan, actual_amount=300, paid_amount=0)
     await session.commit()
     body = _envelope(await _order(client, full.id, str(waiting.id), h), 400, "EVENT_FULL")
-    assert body["errors"] == {"max_participants": 1}
+    assert body["errors"] == {"max_participants": 1}  # the order's check: no waiting list said
 
 
 # ─── Payment orders and verify: codes, not 500s ─────────────────────────
@@ -275,7 +275,8 @@ async def test_registration_refusals_carry_codes(client, session, world, make_ev
     body = _envelope(await _register(client, later.id, email="early@example.com"), 400, "REGISTRATIONS_CLOSED")
     assert body["errors"]["closed_reason"] == "not_started" and body["errors"]["opens_at"]
     body = _envelope(await _register(client, full.id, email="no-room@example.com"), 400, "EVENT_FULL")
-    assert body["message"] == "Event is full" and body["errors"] == {"max_participants": 1}
+    # Saying too whether its waiting list could be joined instead (app/api/ticketing).
+    assert body["message"] == "Event is full" and body["errors"] == {"max_participants": 1, "waitlist": False}
 
     # Signed in: once registered, again is ALREADY_REGISTERED (free) ...
     assert (await _register(client, world["free"].id, email=world["fan"].email, headers=h)).status_code == 200

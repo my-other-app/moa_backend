@@ -169,6 +169,10 @@ class AppConfig(BaseSettings):
     WHATSAPP_APP_SECRET: str = ""
     WHATSAPP_ACCESS_TOKEN: str = ""
     WHATSAPP_PHONE_NUMBER_ID: str = ""
+    # The platform number's WhatsApp Business Account id, for the admin's
+    # template list (app/api/admin_ops/whatsapp_templates.py). Empty: read
+    # from the access token's granted accounts (Meta's debug_token).
+    WHATSAPP_BUSINESS_ACCOUNT_ID: str = ""
     # The Graph API version the calls name. Meta retires each about two years
     # after its release; move it on when Meta's changelog says so.
     WHATSAPP_GRAPH_VERSION: str = "v23.0"
@@ -306,6 +310,8 @@ class AppConfig(BaseSettings):
     LINK_SIGNING_KEYS: str = ""
     # The clubs dashboard, for links a volunteer opens on a phone.
     PUBLIC_WEB_URL: str = "https://club-dashboard.myotherapp.in"
+    # The admin portal, for an invited admin's set-password link.
+    PUBLIC_ADMIN_URL: str = "https://main-portal.myotherapp.in"
     # The public site: an event's page is /events/{slug}, a club's /clubs/{slug}. Tracking links land here.
     PUBLIC_SITE_URL: str = "https://myotherapp.in"
     # Where an address is turned into a place, for the Security page and,

@@ -207,6 +207,15 @@ def check_user_type(required_roles: Union[str, List[str]], optional=False):
                     error_code="CLUB_NOT_VERIFIED",
                 )
 
+        # Admins must use two-factor (app.api.admin_ops.two_factor): every
+        # route only an admin (or a club) may call refuses one without it
+        # once their grace is over. The routes any account may call -- set up
+        # two-factor, sign out, /auth/me -- stay open, so they can.
+        if user_type == "admin" and "app_user" not in required_roles and not getattr(current_user, "totp_enabled", False):
+            from app.api.admin_ops import two_factor
+
+            await two_factor.enforce(session, current_user)
+
         return current_user
 
     return role_checker

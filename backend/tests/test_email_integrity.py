@@ -821,6 +821,7 @@ async def test_the_lifespan_ends_with_the_shutdown(monkeypatch):
         ("app.api.ledger.jobs", "daily_loop"),
         ("app.api.search.sync", "loop"), ("app.api.events.doc_cache_sweep", "sweep_loop"),
         ("app.api.club_whatsapp.sweep", "sweep_loop"), ("app.api.club_mailbox.sweep", "sweep_loop"),
+        ("app.api.ticketing.sweep", "sweep_loop"),
     )
     for module, name in loops:
         monkeypatch.setattr(__import__(module, fromlist=[name]), name, forever)
