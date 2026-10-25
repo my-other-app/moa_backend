@@ -327,6 +327,10 @@ class ClubPublicDetailResponse(CustomBaseModel):
     contact_email: str | None = Field(None)
     brand_primary: str | None = Field(None)
     brand_secondary: str | None = Field(None)
+    #: Whether to offer "Get updates from <club> on WhatsApp": the club can
+    #: broadcast from its own number (club_whatsapp.consent.offered). Signed
+    #: in, `user_data.club_updates_whatsapp` is the person's own yes.
+    whatsapp_updates: bool = Field(False)
     user_data: dict | None = Field(None)
     org: ClubOrgDetail | None = Field(None)
 
@@ -412,6 +416,14 @@ class NoteListResponse(CustomBaseModel):
     note: str = Field(...)
     created_at: datetime = Field(...)
     updated_at: datetime = Field(...)
+
+
+class FollowIn(CustomBaseModel):
+    """What may come with a follow: "Get updates from <club> on WhatsApp",
+    ticked (true) or unticked (false); left out, nothing changes
+    (app/api/club_whatsapp/consent.py)."""
+
+    club_updates_whatsapp: bool | None = Field(None)
 
 
 class UserClubLinkDetailResponse(CustomBaseModel):

@@ -27,6 +27,8 @@ class EventRegistrationResponse(CustomBaseModel):
     store_total: float = Field(0)
     #: Whether the ticket and the day-before reminder go by WhatsApp too.
     whatsapp_opt_in: bool = Field(False)
+    #: Whether "Get updates from <club> on WhatsApp" was kept (club_whatsapp/consent.py).
+    club_updates_whatsapp: bool = Field(False)
 
 
 from app.api.store.schemas import StorePick  # noqa: E402
@@ -49,6 +51,12 @@ class EventRegistrationRequest(CustomBaseModel):
     #: WhatsApp's policy asks for. Unticked unless sent; it needs `phone`.
     #: Left out altogether (the app), a registration keeps what it had.
     whatsapp_opt_in: bool = Field(False)
+    #: "Get updates from <club> on WhatsApp" (the event's club named, as
+    #: Meta's opt-in rule asks), ticked: the club's own WhatsApp number may
+    #: send them its promotions (app/api/club_whatsapp/consent.py). Needs
+    #: `phone`, as whatsapp_opt_in. False or left out records nothing and
+    #: takes nothing back.
+    club_updates_whatsapp: bool = Field(False)
 
 
 class EventAttendanceUpdate(CustomBaseModel):

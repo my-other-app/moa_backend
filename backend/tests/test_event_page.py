@@ -148,7 +148,8 @@ async def test_the_page_by_slug(client, session, world):
     assert ev["contact"] == {"name": "Asha", "email": "asha@circuit.example", "phone": "+91 90000 00000"}
     assert ev["url"] == f"{SITE}/events/{main.slug}"
 
-    assert page["club"] == {"id": a.id, "name": "Circuit Society", "slug": a.slug, "logo": None, "tagline": "Build things that think.", "followers": 2, "location_name": "Bengaluru"}
+    assert page["club"] == {"id": a.id, "name": "Circuit Society", "slug": a.slug, "logo": None, "tagline": "Build things that think.", "followers": 2, "location_name": "Bengaluru",
+                            "whatsapp_updates": False}
     assert page["speakers"] == [
         {"id": world["meera"].id, "name": "Meera", "designation": None, "photo": None, "bio": None, "link": None},
         {"id": world["rao"].id, "name": "Dr. Rao", "designation": "Professor", "photo": None, "bio": "Builds robots.", "link": "https://rao.example"},

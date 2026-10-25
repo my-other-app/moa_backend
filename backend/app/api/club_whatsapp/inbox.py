@@ -694,7 +694,7 @@ async def refused_later(session, account: ClubWhatsAppAccounts, msg: ClubWhatsAp
     if msg.via == VIA_DELIVERY and msg.delivery_id is not None and whatsapp.configured():
         await deliveries.requeue_from_platform(
             session, msg.delivery_id, wamid=msg.wamid, club_id=account.club_id,
-            reason=f"{refusal.reason}; sending it again from MyOtherApp's number",
+            reason=f"{refusal.reason}; sending it again from MyOtherApp's number", code=refusal.code,
         )
 
 

@@ -207,6 +207,8 @@ async def keys_readable(session) -> bool:
 
 
 async def sweep(session, now: Optional[datetime] = None) -> dict:
+    from app.api.club_whatsapp import broadcasts, spend
+
     now = now or _now()
     await keys_readable(session)
     from app.api.club_whatsapp import alerts_inbox
@@ -216,6 +218,10 @@ async def sweep(session, now: Optional[datetime] = None) -> dict:
         "templates": await refresh_templates(session, now),
         "forgotten": await retention(session, now),
         "alerts": await alerts_inbox.run(session, now),
+        # Meta's spend for each number, at most daily (spend.py); broadcasts' people past retention, and any stalled.
+        "spend": await spend.refresh(session, now),
+        "broadcast_people_forgotten": await broadcasts.forget(session, now),
+        "broadcasts_resumed": await broadcasts.resume(session, now),
     }
 
 

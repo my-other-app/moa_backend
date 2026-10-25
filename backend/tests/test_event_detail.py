@@ -43,9 +43,11 @@ async def test_event_detail_serialises_the_nested_club(client, make_club, make_e
     body = response.json()
     assert body["club"] is not None
     assert body["club"]["name"] == "Nested Club"
-    # Only the four declared fields should be emitted; pulling the whole ORM
+    # Only the declared fields should be emitted (the four, and whether the
+    # form offers the club's updates on WhatsApp); pulling the whole ORM
     # object back in is what broke this endpoint.
-    assert set(body["club"]).issubset({"id", "name", "slug", "logo"})
+    assert set(body["club"]).issubset({"id", "name", "slug", "logo", "whatsapp_updates"})
+    assert body["club"]["whatsapp_updates"] is False
 
 
 @pytest.mark.asyncio

@@ -344,3 +344,7 @@ class AdminWhatsAppOut(CustomBaseModel):
     connected_at: Optional[datetime] = None
     conversations: int = 0
     plan_allows: bool = False
+    #: This month: WhatsApp deliveries sent from the club's own number, and
+    #: those that went from MyOtherApp's though the club wanted its own.
+    club_sends_this_month: int = 0
+    fallbacks_this_month: int = 0

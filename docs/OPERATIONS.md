@@ -2098,6 +2098,21 @@ other attachment is a download, with a sandboxing CSP.
 Connect, key changes, disconnect, settings, templates and the permission are
 in the audit log (`club_whatsapp.*`); disconnecting wipes the keys.
 
+Beyond the inbox (`app/api/club_whatsapp`: `delivery_routes`, `spend`,
+`consent`, `broadcasts`, `embedded_signup`, `app_webhook`), each in its own
+subsection below:
+
+- **routing by kind**: under `routing` (the master switch, unchanged), the
+  club switches tickets, certificates and reminders on their own; and every
+  WhatsApp delivery records which number it went from (`via`: `club` or
+  `platform`) and, when the club wanted its own, why it fell back;
+- **spend**: "This month" on the settings page, from Meta's pricing
+  analytics, read by the sweep at most daily;
+- **broadcasts**: event updates and promotions from the club's own number;
+- **consent**: "Get updates from <club> on WhatsApp", which a promotion needs;
+- **Connect with Meta** (Embedded Signup): built, and off until the owner
+  turns it on.
+
 ### Settings
 
 | Setting (`.env`) | Default | Meaning |
@@ -2106,6 +2121,15 @@ in the audit log (`club_whatsapp.*`); disconnecting wipes the keys.
 | `APP_CLUB_WHATSAPP_QUALITY_HOURS` | `6` | how often the sweep reads each number's quality |
 | `APP_CLUB_WHATSAPP_MEDIA_MAX_MB` | `25` | the largest attachment the inbox fetches |
 | `APP_LIVE_SSE` | off | also pushes the inbox's changes (`GET /clubs/whatsapp/stream`); off, the dashboard polls |
+| `APP_CLUB_WHATSAPP_BROADCAST_MPS` | `10` | messages a second a club's broadcast goes at (Meta allows 80 a number) |
+| `APP_WHATSAPP_EMBEDDED_SIGNUP` | off | shows "Connect with Meta" (Embedded Signup); pasting keys works either way |
+| `APP_META_APP_ID`, `APP_META_APP_SECRET` | empty | the platform's Meta app (the Tech Provider's): App settings -> Basic. Its secret signs the app's default webhook and every connected-with-Meta club's webhook |
+| `APP_META_ES_CONFIG_ID` | empty | the Facebook Login for Business configuration's id |
+| `APP_META_WEBHOOK_VERIFY_TOKEN` | empty | what Meta is answered with when it checks the app's default webhook URL (any long random string) |
+
+With `APP_WHATSAPP_EMBEDDED_SIGNUP` on, the config check (`APP_CONFIG_CHECKS`)
+warns -- never refuses to start -- for each of the four `APP_META_*` and
+`APP_WHATSAPP_KEYS_SECRET` left empty: the button stays hidden until all are set.
 
 ### Turning it on
 
@@ -2121,7 +2145,16 @@ in the audit log (`club_whatsapp.*`); disconnecting wipes the keys.
    `$DC exec -T backend python scripts/rotate_whatsapp_keys.py --dry-run`,
    then without `--dry-run`. It prints `{"rows", "rotated", "unreadable"}`;
    when `unreadable` is 0, drop the old key and recreate again. (A club that
-   saves its keys meanwhile is sealed under the new key anyway.)
+   saves its keys meanwhile is sealed under the new key anyway.) A number
+   connected with Meta has a fourth sealed value, its registration PIN,
+   rotated the same way.
+4. The reach migration (`club_whatsapp_reach`, after `club_whatsapp_inbox`):
+   deploy with `migrate` as in step 1. It adds the switches by kind, Embedded
+   Signup's columns, `via`/`fallback_code`/`fallback_reason` on `deliveries`
+   and `delivery_attempts` (nullable: no rewrite; the attempts' index is
+   built CONCURRENTLY), and four tables (spend, consents, broadcasts and their
+   recipients). Nothing else to set: broadcasts and spend work with the key
+   from step 2.
 
 ### What the club does in Meta (the dashboard's Help says the same)
 
@@ -2168,6 +2201,169 @@ in the audit log (`club_whatsapp.*`); disconnecting wipes the keys.
 10. Send the number a WhatsApp from any phone: it shows in the inbox, and
     "Last delivery from Meta" on Settings shows the webhook works.
 
+### Routing by kind, and which number each delivery went from
+
+WhatsApp -> Settings -> "Send from my number": the master switch (`PATCH
+/clubs/whatsapp/account {"routing"}`) and, under it, tickets, certificates
+and reminders (`PATCH /clubs/whatsapp/account/routing {"tickets",
+"certificates", "reminders"}`, owner and admins; read with `GET
+/clubs/whatsapp/account/reach`). A kind switched off goes from MyOtherApp's
+number, counted against the plan (section 20) as for any club; that is the
+club's choice, not a fallback.
+
+Every WhatsApp delivery and each of its attempts keeps `via` (`club` or
+`platform`) and, when the club wanted its own number for it and it went
+from MyOtherApp's, `fallback_code` and `fallback_reason`: Meta's code and
+words when its number refused (or Meta failed it later by webhook), or ours
+-- `ACCOUNT_FAILED` (or the account's own last code), `KEYS`, `RESTRICTED`,
+`PLAN`, `NO_TEMPLATE`, `TEMPLATE_UNUSABLE`. The event's Deliveries page and
+the attendee list show "From your number" or "From MyOtherApp (fallback:
+<reason>)". The admins see the month's fallbacks on the club's card
+(`GET /admin/club-whatsapp/{club}`: `fallbacks_this_month`,
+`club_sends_this_month`) and the clubs with most (`GET
+/admin/club-whatsapp/fallbacks`).
+
+### Spend ("This month")
+
+`GET /clubs/whatsapp/spend`: Meta's volume and approximate cost by pricing
+category, in the WhatsApp Business Account's own currency (`GET
+/{WABA}?fields=currency,pricing_analytics...`, Meta's analytics page), with
+the sends from the club's number (deliveries, broadcasts, inbox) and the
+fallbacks by reason. The sweep reads each active number at most once a day
+(`spend_checked_at`) and keeps it (`club_whatsapp_spend`); the page reads only
+what was kept, so a page view never calls Meta. On a new month's first read
+the month before is read once more, for its last days. Meta calls its COST
+approximate, and it is before tax: the page says so. A number on a plan
+without the feature is not read.
+
+### Broadcasts
+
+WhatsApp -> Broadcasts (the owner and members with the WhatsApp permission;
+never a platform admin acting as the club: 403 WHATSAPP_PRIVATE; Enterprise
+only: 403 PLAN_FEATURE_LOCKED). The template's category decides the kind:
+
+- **event update** (UTILITY): to the registrants of one of the club's events
+  who ticked "Send my ticket on WhatsApp", with a live ticket (paid for, on a
+  paid event);
+- **promotion** (MARKETING): to the people with a live consent (below).
+
+Both skip anyone who asked the club's number to stop (the opt-out store;
+for a promotion its marketing stop too). The composer maps each value of
+the template to the person's name, the event's name or date, or the club's
+own words, and shows the recipients, who was left out and why, and an
+estimate at Meta's list rate for India (UTILITY ₹0.1150, MARKETING ₹0.8631 a
+delivered message, GST 18% shown apart) before it sends now or at a time
+(`POST /clubs/whatsapp/broadcasts/preview`, then `POST
+/clubs/whatsapp/broadcasts`; `GET .../{id}`; `POST .../{id}/cancel`).
+
+A job (`club_whatsapp.broadcast`) sends it at
+`APP_CLUB_WHATSAPP_BROADCAST_MPS`, reading the audience when it starts. It
+never reaches more unique people in a moving 24 hours than the number's
+messaging limit (TIER_250: 250 ... ; the number's tickets and inbox
+templates count too); the rest wait for the next day ("held by the messaging
+limit"). Meta's "not now" codes (130429, 131056, 131000 ...) are tried again
+with a backoff, up to 5 times; **131049** (Meta's per-person marketing limit)
+once more a day later, then never; **131050** (they stopped the club's
+marketing in WhatsApp) never, and their consent is withdrawn. A MARKETING
+template goes to Meta's Marketing Messages API (`/marketing_messages`) once
+the account's `marketing_messages_onboarding_status` is ONBOARDED (read at
+most daily), else `/messages`; a **131063** there (marketing turned off on
+the Cloud API) moves the broadcast to `/marketing_messages`. A refusal about
+the account or the template stops the broadcast (the number is marked
+failed as for any send) and says why. Results come from Meta's status
+webhooks: sent, delivered, read, failed by Meta's code, and skipped (opted
+out, no consent, no number, held by the limit, cancelled). The club pays
+Meta: nothing counts against MyOtherApp's quotas. The audit log has who sent
+what template to how many (`club_whatsapp.broadcast`), never the words. The
+people of a broadcast are deleted with the inbox's retention; its counts stay.
+
+### Consent to a club's updates (the field for the website and the app)
+
+Meta's opt-in rule: consent may be gathered off WhatsApp, but it must name
+the business and say plainly that the person opts in. The checkbox says
+exactly **"Get updates from <club's name> on WhatsApp"** (`consent_text` in
+`GET /clubs/whatsapp/account/reach` shows it for the club), unticked by
+default. What is kept: the club, the person (account and registration), their
+number, the source, the words and their version (`TEXT_VERSION`).
+
+- Registration: `club_updates_whatsapp: true` in the body of `POST
+  /api/v1/events/registration/{event}/register`, with a `phone` WhatsApp can
+  reach (422 `WHATSAPP_NUMBER`, `errors.phone`, as `whatsapp_opt_in`; nothing
+  is registered then). `false` or left out keeps nothing and takes nothing
+  back. The answer says `club_updates_whatsapp: true` when it was kept.
+- Following: `{"club_updates_whatsapp": true}` as the body of `POST
+  /api/v1/clubs/follow/{club}` (the follower's profile number; read again
+  when a promotion goes if it had none). Already following, it answers the
+  follow as it stands, with the consent kept. `false` withdraws it; no body,
+  a follow as ever.
+- Withdrawn by unfollowing (`POST /clubs/unfollow/{club}`), the follow body's
+  `false`, Meta's 131050 on a promotion, and a STOP (the opt-out store).
+
+### Turning on one-click connect (Meta's Embedded Signup)
+
+Built, and off (`APP_WHATSAPP_EMBEDDED_SIGNUP=false`); pasting keys keeps
+working whatever it is. What the owner does, in order:
+
+1. **Become a Tech Provider.** In Meta Business Suite, complete **business
+   verification** of MyOtherApp's business portfolio. Then, in the App
+   Dashboard of MyOtherApp's own Meta app (type Business, WhatsApp product
+   added), request **App Review** for **Advanced access** to
+   `whatsapp_business_messaging` and `whatsapp_business_management`. Each
+   permission needs its own written explanation of how MyOtherApp uses it
+   (messaging: a club's tickets, reminders, certificates, inbox replies and
+   broadcasts from its own number; management: reading the club's number,
+   quality and templates, submitting MyOtherApp's templates, subscribing to
+   its webhooks) and its own **screen recording** of that use in the
+   dashboard (Meta rejects screenshots). Without Advanced access, calls on
+   clubs' accounts fail.
+2. **The login configuration.** App Dashboard -> Facebook Login for Business
+   -> Configurations -> Create: the template "WhatsApp Embedded Signup
+   Configuration With 60 Expiration Token" (or a custom one with the
+   "WhatsApp Embedded Signup" variation). Its id is `APP_META_ES_CONFIG_ID`.
+   Facebook Login for Business -> Settings -> Client OAuth settings: turn ON
+   Client OAuth login, Web OAuth login, Enforce HTTPS, Embedded Browser OAuth
+   Login, Use Strict Mode for redirect URIs, and Login with the JavaScript
+   SDK. Add `club-dashboard.myotherapp.in` to **Allowed domains for the
+   JavaScript SDK** and `https://club-dashboard.myotherapp.in/` to **Valid
+   OAuth redirect URIs**.
+3. **The app's default webhook.** App Dashboard -> WhatsApp -> Configuration
+   -> Webhook: callback URL `https://api.myotherapp.in/api/v1/hooks/whatsapp`,
+   verify token = `APP_META_WEBHOOK_VERIFY_TOKEN` (set it first, step 4).
+   Subscribe to `messages`, `message_template_status_update`,
+   `template_category_update`, `message_template_quality_update`,
+   `phone_number_quality_update`, `account_update`, `account_review_update`,
+   `account_alerts`, `business_capability_update` and `user_preferences`.
+   Template and account webhooks ignore each club's override and come here;
+   MyOtherApp routes them to the club by its WhatsApp Business Account id
+   (`app_webhook.py`, checked with `APP_META_APP_SECRET`). Each club's
+   `messages` go to its own webhook address, set when it connects.
+4. **The settings**, on the server's `.env` by hand: `APP_META_APP_ID`,
+   `APP_META_APP_SECRET` (App settings -> Basic), `APP_META_ES_CONFIG_ID`,
+   `APP_META_WEBHOOK_VERIFY_TOKEN` (a long random string), with
+   `APP_WHATSAPP_KEYS_SECRET` already set; recreate the backend (section 18,
+   step 5); then verify the webhook in step 3.
+5. **Flip the flag**: `APP_WHATSAPP_EMBEDDED_SIGNUP=true`, recreate. The
+   settings page shows "Connect with Meta" (it asks `GET
+   /clubs/whatsapp/account/reach`, whose `embedded_signup` is set only now).
+6. **The limit**: until MyOtherApp is verified and has passed App Review and
+   Access Verification, Meta allows **10 new customers in any 7 days** (200
+   after). Tech Providers have no credit line: each club adds its own payment
+   method in Meta's Billing Hub.
+
+What happens when a club clicks it: the dashboard opens Meta's flow
+(Embedded Signup **v5**) and posts the code at once -- it lasts 30 seconds --
+to `POST /clubs/whatsapp/account/embedded-signup`. MyOtherApp exchanges it for
+the business's token, checks it with `debug_token` (valid, both permissions,
+its expiry kept), subscribes the app to the club's account with the club's
+own webhook address and verify token (`override_callback_uri`), registers the
+number with a 6-digit PIN it keeps sealed (never a WhatsApp Business app
+number, which coexists), and reads its quality and templates as for a pasted
+connection. Meta allows 10 registrations of a number in 72 hours
+(**133016**): the number then waits, failed, saying so, and "Check again"
+registers it. A cancelled or failed flow (its step, or Meta's error and
+session id, for Meta's support) is in the audit log
+(`club_whatsapp.embedded_signup`); an expired code says to connect again.
+
 ### Reading it
 
 Read-only, in the psql session from the top of this runbook (no message
@@ -2186,6 +2382,19 @@ FROM club_whatsapp_quality_log WHERE created_at > now() - interval '30 days' ORD
 -- Tickets, certificates and reminders sent from clubs' own numbers this week.
 SELECT club_id, count(*) FROM club_whatsapp_messages
 WHERE via = 'delivery' AND created_at > now() - interval '7 days' GROUP BY 1;
+
+-- This month's fallbacks to the platform's number, by club and reason.
+SELECT e.club_id, a.fallback_code, count(*) FROM delivery_attempts a
+JOIN deliveries d ON d.id = a.delivery_id JOIN events e ON e.id = d.event_id
+WHERE a.fallback_code IS NOT NULL AND a.created_at > date_trunc('month', now()) GROUP BY 1, 2 ORDER BY 3 DESC;
+
+-- Broadcasts: how each stands (no number, no words).
+SELECT b.id, b.club_id, b.kind, b.template_name, b.status, b.endpoint, r.status, count(*)
+FROM club_whatsapp_broadcasts b LEFT JOIN club_whatsapp_broadcast_recipients r ON r.broadcast_id = b.id
+WHERE b.created_at > now() - interval '7 days' GROUP BY 1, 2, 3, 4, 5, 6, 7 ORDER BY 1 DESC;
+
+-- Spend as last read from Meta.
+SELECT club_id, month, currency, volume, cost, fetched_at FROM club_whatsapp_spend ORDER BY month DESC, club_id;
 ```
 
 A number stuck `failed`: its `last_error` says why (an expired token, 190:
