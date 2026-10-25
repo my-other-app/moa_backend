@@ -1,14 +1,26 @@
-"""Telling the room: a push when the host starts the quiz or launches a poll.
+"""Telling the room: a push when the host starts the quiz or launches a
+poll, when the event goes live, and when Q&A opens.
 
-The console asks for it with the action (`notify` in its body: on unless
-said otherwise for the quiz, off unless asked for a poll). Everyone checked
-in to the event with an account gets a push on each of their devices --
-`event_live_join`, a personal kind (app.core.notifications.delivery), never
-an FCM topic -- and a line in their inbox; not whoever muted the club or
-turned clubs' pushes off (app.core.notifications.topics), as with the club's
-other pushes. Guests without the app have no devices and no inbox, and are
-not counted. Nobody to tell is `nobody_checked_in` (nobody checked in with
-the app) or `all_muted` (they are, and every one of them said no).
+What is told, to whom, and as which kind (all personal kinds,
+app.core.notifications.delivery, never an FCM topic):
+
+    what   type                 who                         when
+    quiz   event_live_join      everyone checked in         the host starts the quiz
+    poll   event_live_join      everyone checked in         the host launches a poll
+    room   event_live_started   everyone registered         the event goes live (closeout's clock, or by hand)
+    qa     event_live_qa        everyone checked in         the host approves or pins a question, or switches approval off
+
+The console asks for quiz, poll and qa with the action (`notify` in its
+body: on unless said otherwise). `room` and `qa` go once per event: once one
+went, the next is `already_sent`. Each push's data is `{type, event_id,
+what, push_id}`.
+
+Everyone it is for with an account gets a push on each of their devices and
+a line in their inbox; not whoever muted the club or turned clubs' pushes
+off (app.core.notifications.topics), as with the club's other pushes. Guests
+without the app have no devices and no inbox, and are not counted. Nobody to
+tell is `nobody_checked_in` (nobody it is for has the app) or `all_muted`
+(they do, and every one of them said no).
 
 At most one per event every LIVE_NOTIFY_GAP_SECONDS (three minutes), and
 LIVE_NOTIFY_PER_DAY (ten) per event per day in India. What is counted is the
@@ -49,17 +61,30 @@ from app.db import lock_keys
 
 logger = logging.getLogger(__name__)
 
-#: The push's and the inbox line's type: the app opens the event's live room.
+#: The push's and the inbox line's type: the app opens the event's live room
+#: (the quiz's join for "quiz").
 TYPE = "event_live_join"
+STARTED_TYPE = "event_live_started"
+QA_TYPE = "event_live_qa"
+TYPES = {"quiz": TYPE, "poll": TYPE, "room": STARTED_TYPE, "qa": QA_TYPE}
 #: The audit log's action for a notification that went: the rate limit's count.
 ACTION = "live.notify"
 PUSH_JOB = "live.join_push"
+#: The event-live notification, sent off the clock's sweep (or the status
+#: change by hand) as a job of its own.
+STARTED_JOB = "live.event_started"
 NOTIFY_LOCK = lock_keys.LIVE_NOTIFY
 
 BODIES = {
     "quiz": "The quiz is starting — join now",
     "poll": "A poll is live — vote now",
+    "room": "It's on — open the live room",
+    "qa": "Q&A is open — ask your questions",
 }
+#: Told once per event, ever: the second is `already_sent`.
+ONCE = frozenset({"room", "qa"})
+#: Told to everyone registered with the app, not only those checked in.
+TO_REGISTERED = frozenset({"room"})
 
 RATE_LIMITED = "rate_limited"
 #: Nobody is checked in -- or nobody with the app: guests from the door have
@@ -70,6 +95,9 @@ NOBODY = "nobody_checked_in"
 ALL_MUTED = "all_muted"
 DISABLED = "disabled"
 FAILED = "failed"
+ALREADY_SENT = "already_sent"
+#: How many times the event-live job waits out the rate limit before giving up.
+STARTED_TRIES = 3
 
 _tz = ZoneInfo(EVENT_TIMEZONE)
 
@@ -90,16 +118,19 @@ def outcome(sent: int = 0, reason: Optional[str] = None, last_sent_at: Optional[
     return {"sent": sent, "skipped_reason": reason, "last_sent_at": last_sent_at, "retry_after": retry_after}
 
 
-def recipients(event_id: int, club_id: Optional[int], *, honour: bool = True) -> sa.Select:
-    """The people to tell: checked in to the event, with an account (not a
-    guest's), who have not muted the club or turned clubs' pushes off.
-    `honour=False`: all of them, mutes and switches or not."""
+def recipients(event_id: int, club_id: Optional[int], *, honour: bool = True, checked_in: bool = True) -> sa.Select:
+    """The people to tell: checked in to the event (or, `checked_in=False`,
+    registered for it), with an account (not a guest's), who have not muted
+    the club or turned clubs' pushes off. `honour=False`: all of them, mutes
+    and switches or not."""
     from app.core.notifications.topics import settings_off
 
     reg = EventRegistrationsLink
+    q = select(reg.user_id)
+    if checked_in:
+        q = q.join(CheckIns, CheckIns.registration_id == reg.id)
     q = (
-        select(reg.user_id)
-        .join(CheckIns, CheckIns.registration_id == reg.id)
+        q
         .join(Users, Users.id == reg.user_id)
         .where(
             reg.event_id == event_id, reg.is_deleted == False,  # noqa: E712
@@ -141,11 +172,23 @@ async def _lock(session, event_id: int) -> None:
     await session.execute(select(func.pg_advisory_xact_lock(NOTIFY_LOCK, event_id)))
 
 
+async def _told_before(session, event_id: int, what: str) -> bool:
+    """Whether a `what` notification of this event went before (any day)."""
+    return bool(await session.scalar(
+        select(AdminAuditLogs.id).where(
+            AdminAuditLogs.action == ACTION, AdminAuditLogs.entity_type == "event", AdminAuditLogs.entity_id == str(event_id),
+            AdminAuditLogs.details["what"].as_string() == what,
+        ).limit(1)
+    ))
+
+
 async def tell_room(session, event, what: str, *, actor=None, ref=None, request=None, now: Optional[datetime] = None) -> dict:
-    """Tell everyone checked in that the quiz is starting (`what` "quiz") or
-    a poll is live ("poll"), unless the limit says not now. Called once the
-    action has committed; ends the session's transaction either way. Never
-    raises: the answer is the response's `notified`."""
+    """Tell the room (see the table above) that the quiz is starting
+    (`what` "quiz"), a poll is live ("poll"), the event is live ("room") or
+    Q&A is open ("qa"), unless the limit says not now -- or, for "room" and
+    "qa", it was told before. Called once the action has committed; ends the
+    session's transaction either way. Never raises: the answer is the
+    response's `notified`."""
     if what not in BODIES:
         raise ValueError(f"nothing to tell the room about {what!r}")
     # Read now: a rollback below expires the rows the session holds.
@@ -175,31 +218,36 @@ async def _tell(session, event_id: int, club_id, name: str, what: str, who: dict
     gap = timedelta(seconds=max(0, int(settings.LIVE_NOTIFY_GAP_SECONDS)))
     today = day_start(now)
     count, last = await _sent_lately(session, event_id, now, today, gap)
+    if what in ONCE and await _told_before(session, event_id, what):
+        await session.commit()
+        return outcome(reason=ALREADY_SENT)
     if last is not None and now - last < gap:
         await session.commit()
         return outcome(reason=RATE_LIMITED, last_sent_at=last, retry_after=_seconds(last + gap - now))
     if count >= max(0, int(settings.LIVE_NOTIFY_PER_DAY)):
         await session.commit()
         return outcome(reason=RATE_LIMITED, last_sent_at=last, retry_after=_seconds(today + timedelta(days=1) - now))
-    user_ids = sorted(int(u) for u in (await session.scalars(recipients(event_id, club_id))).all())
+    checked_in = what not in TO_REGISTERED
+    user_ids = sorted(int(u) for u in (await session.scalars(recipients(event_id, club_id, checked_in=checked_in))).all())
     if not user_ids:
-        there = await session.scalar(select(func.count()).select_from(recipients(event_id, club_id, honour=False).subquery()))
+        there = await session.scalar(select(func.count()).select_from(recipients(event_id, club_id, honour=False, checked_in=checked_in).subquery()))
         await session.commit()
         return outcome(reason=ALL_MUTED if there else NOBODY)
 
     push_id = str(uuid.uuid4())
     body = BODIES[what]
-    data = {"type": TYPE, "event_id": str(event_id), "what": what, "push_id": push_id}
+    kind = TYPES[what]
+    data = {"type": kind, "event_id": str(event_id), "what": what, "push_id": push_id}
     # The inbox lines, the push's job and the count's entry: all, or none.
     await fanout.insert_for_audience(
-        session, fanout.users_in(user_ids), title=name, description=body, type=TYPE, data=data,
+        session, fanout.users_in(user_ids), title=name, description=body, type=kind, data=data,
         from_club_id=club_id, event_id=event_id,
     )
     await jobs.enqueue(session, PUSH_JOB, {"user_ids": user_ids, "title": name, "body": body, "data": data}, dedupe_key=f"live:join:{push_id}")
     people = "person" if len(user_ids) == 1 else "people"
     session.add(AdminAuditLogs(
         **who, action=ACTION, entity_type="event", entity_id=str(event_id),
-        summary=f"Told {len(user_ids)} checked-in {people}: {body}"[:255],
+        summary=f"Told {len(user_ids)} {'checked-in' if checked_in else 'registered'} {people}: {body}"[:255],
         details={"what": what, "ref": None if ref is None else str(ref), "push_id": push_id, "recipients": len(user_ids)},
         ip_address=address, created_at=now, updated_at=now,
     ))
@@ -217,3 +265,39 @@ async def _push_job(p: dict) -> None:
 
     async with jobs.scope() as s:
         await send_notification_to_users(s, [int(u) for u in p.get("user_ids") or ()], p["title"], p["body"], data=dict(p.get("data") or {}))
+
+
+# ─── The event goes live ─────────────────────────────────────────────────
+
+
+async def queue_event_live(session, event_id: int) -> None:
+    """Tell everyone registered that the event is live, from a job written
+    in the caller's transaction (it runs once that commits): the clock's
+    sweep moves many events at once and must not wait on any of them."""
+    await jobs.enqueue(session, STARTED_JOB, {"event_id": int(event_id), "try": 1}, dedupe_key=f"live:started:{int(event_id)}")
+
+
+@jobs.handler(STARTED_JOB, max_attempts=3, timeout=120.0, priority=jobs.HIGH)
+async def _started_job(p: dict) -> None:
+    """`room` for an event that is live: once per event (tell_room says
+    `already_sent` after), under the per-event limit. Held by the limit's
+    gap (a quiz push a minute before), it is written again for when the gap
+    ends, at most STARTED_TRIES times; held for the day, it is not sent."""
+    from sqlalchemy.orm import joinedload
+
+    from app.api.closeout.models import EventStatus
+    from app.api.events.models import Events
+
+    event_id, tries = int(p["event_id"]), int(p.get("try") or 1)
+    async with jobs.scope() as s:
+        event = await s.scalar(select(Events).options(joinedload(Events.club)).where(Events.id == event_id))
+        if event is None or event.is_deleted or event.lifecycle is not EventStatus.live or event.club is None or not event.club.listed:
+            return
+        out = await tell_room(s, event, "room")
+        if out["skipped_reason"] == RATE_LIMITED and out["retry_after"] is not None and out["retry_after"] <= 15 * 60 and tries < STARTED_TRIES:
+            await jobs.enqueue(
+                s, STARTED_JOB, {"event_id": event_id, "try": tries + 1},
+                run_at=now_utc() + timedelta(seconds=out["retry_after"] + 1), dedupe_key=f"live:started:{event_id}:{tries + 1}",
+            )
+            await s.commit()
+        logger.info("Event %s is live: %s", event_id, out)

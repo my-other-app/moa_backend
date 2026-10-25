@@ -70,7 +70,8 @@ class Notified(BaseModel):
     next may."""
 
     sent: int
-    skipped_reason: Optional[Literal["rate_limited", "nobody_checked_in", "all_muted", "disabled", "failed"]] = None
+    #: `already_sent`: the event-live and Q&A notifications go once per event, and this one went before.
+    skipped_reason: Optional[Literal["rate_limited", "nobody_checked_in", "all_muted", "disabled", "failed", "already_sent"]] = None
     last_sent_at: Optional[datetime] = None
     retry_after: Optional[int] = None
 
@@ -80,6 +81,8 @@ class HostActionIn(BaseModel):
     none (or `{}`) gets the defaults."""
 
     notify: Optional[bool] = Field(None, description="start only: tell everyone checked in. Not given: yes.")
+    restart: Optional[bool] = Field(None, description="start only: start again a quiz that is running, clearing every player's score. Without it, starting a running quiz is 409 QUIZ_RUNNING.")
+    expected_index: Optional[int] = Field(None, ge=-1, description="next only: the question index the console shows. When the quiz has moved on from it (a second press, another console), 409 QUIZ_MOVED_ON and nothing moves.")
 
 
 class HostActionOut(HostState):
@@ -90,6 +93,10 @@ class HostActionOut(HostState):
 class JoinIn(BaseModel):
     code: str = Field(..., min_length=4, max_length=8)
     name: str = Field(..., min_length=1, max_length=60)
+    player_key: Optional[str] = Field(
+        None, max_length=64,
+        description="The client's stable key (the browser's, the install's): joining again with it in the same quiz run returns the same player. A signed-in caller is the account instead, on any device.",
+    )
 
 
 class JoinOut(BaseModel):
@@ -118,10 +125,14 @@ class AnswerIn(BaseModel):
 
 
 class AnswerOut(BaseModel):
-    correct: bool
-    points: int
+    """The answer taken. Whether it was right, and its points, are told once
+    the question's answers close (the state's my_correct and my_points); until
+    then `correct` and `points` are null and `score` is the score before it."""
+
+    correct: Optional[bool] = None
+    points: Optional[int] = None
     score: int
-    correct_key: str
+    answered: bool = True
 
 
 # --- Q&A ----------------------------------------------------------------------
@@ -150,15 +161,27 @@ class QABoard(BaseModel):
 
 class QASettings(BaseModel):
     approve_first: bool
+    notify: Optional[bool] = Field(None, description="Switching approval off opens the floor: tell everyone checked in Q&A is open (once per event). Not given: yes.")
+
+
+class QABoardOut(QABoard):
+    #: For switching approval off, what telling the room came to; null otherwise.
+    notified: Optional[Notified] = None
 
 
 class ModerateIn(BaseModel):
     action: Literal["approve", "reject", "answered", "reopen", "pin", "unpin"]
+    notify: Optional[bool] = Field(None, description="approve or pin: tell everyone checked in Q&A is open (once per event). Not given: yes.")
 
 
 class AskIn(BaseModel):
     text: str = Field(..., min_length=3, max_length=500)
     author_name: Optional[str] = Field(None, max_length=60)
+
+
+class ModerateOut(QuestionOut):
+    #: For an approve or a pin, what telling the room Q&A is open came to; null otherwise.
+    notified: Optional[Notified] = None
 
 
 class VoteOut(BaseModel):
@@ -184,7 +207,7 @@ class PollPatch(BaseModel):
 
 class PollStatusIn(BaseModel):
     status: Literal["live", "closed"]
-    notify: Optional[bool] = Field(None, description="Launching (live) only: tell everyone checked in. Not given: no.")
+    notify: Optional[bool] = Field(None, description="Launching (live) only: tell everyone checked in. Not given: yes.")
 
 
 class PollOut(BaseModel):
@@ -303,13 +326,30 @@ class Feed(BaseModel):
     quiz: dict
 
 
+class BannerPoll(BaseModel):
+    id: UUID
+    kind: str
+    prompt: str
+
+
+class BannerQA(BaseModel):
+    open: bool
+    #: Whether the room's board has a question on it (approved or answered):
+    #: a yes or no, so a new question does not resend every event page's strip.
+    has_questions: bool
+
+
 class BannerFeed(BaseModel):
-    """The event page's live strip (the stream's view=banner): what the
-    room's feed says of the event and its banner, with the event's start and
-    end -- a few hundred bytes where the whole feed is ~30 KB."""
+    """The event page's live strip (GET .../live/banner, and the stream's
+    view=banner): what the room's feed says of the event and its banner, with
+    the event's start and end, and whether a poll, the quiz or the floor is
+    on -- a few hundred bytes where the whole feed is ~30 KB."""
 
     event: dict
     banner: Optional[UpdateOut] = None
+    poll: Optional[BannerPoll] = None
+    quiz: dict = Field(default_factory=lambda: {"live": False, "title": None})
+    qa: BannerQA = Field(default_factory=lambda: BannerQA(open=False, has_questions=False))
 
 
 class Screen(BaseModel):

@@ -5,9 +5,10 @@ secret, turn on the new services, size the server and every service on it,
 keep its disk from filling, open the live room's streams, look after the
 rendered documents in the bucket, run AI assist, put a demo event live
 for People Like You, place visitors by address without a lookup service,
-fix the demo's venue pins, turn on WhatsApp, and keep production's
-settings, health checks and scheduled backups honest (section 19). Every
-command is meant to be copied.
+fix the demo's venue pins, turn on WhatsApp, keep production's settings,
+health checks and scheduled backups honest (section 19), and read the live
+room's pushes and the host's 409s (section 22). Every command is meant to be
+copied.
 Commands under **Read-only** change nothing; anything that changes something
 says so.
 
@@ -2605,3 +2606,78 @@ SELECT club_id, count(*) FILTER (WHERE awaiting_since IS NOT NULL) AS waiting,
        count(*) FILTER (WHERE assigned_owner OR assigned_member_id IS NOT NULL) AS assigned
 FROM club_whatsapp_conversations GROUP BY 1 ORDER BY 1;
 ```
+
+---
+
+## 22. The live room: pushes, the fair quiz, and the host's 409s
+
+No migration and no new setting: what is below ships with the code.
+
+### What is pushed, and to whom
+
+Every push here goes device by device (a personal kind, never an FCM topic)
+with a line in the inbox, and none goes to someone who muted the club or
+turned clubs' pushes off. Guests without the app have no devices.
+
+| Type | `what` | To | When |
+| --- | --- | --- | --- |
+| `event_live_join` | `quiz` | checked in | the host starts the quiz (the console's switch, on by default) |
+| `event_live_join` | `poll` | checked in | the host launches a poll (on by default now) |
+| `event_live_started` | `room` | registered | the event goes live, by the status clock or by hand; once per event |
+| `event_live_qa` | `qa` | checked in | the host approves or pins a question, or switches approval off; once per event |
+| `event_live_update` | (`kind`) | the update's audience | the host pushes an update |
+
+The first four share one limit per event: one every
+`APP_LIVE_NOTIFY_GAP_SECONDS` (180) and `APP_LIVE_NOTIFY_PER_DAY` (10) a day
+in India, counted from the audit log (`live.notify` entries). A refusal is
+not counted, so a Q&A push held by a quiz push a minute earlier goes with the
+next approval. The event-live push is a job (`live.event_started`); held by
+the gap, it is written again for when the gap ends, three times at most.
+`APP_LIVE_NOTIFY=false` switches all four off. Data on each:
+`{type, event_id, what, push_id}`.
+
+An update's push is a job too (`live.update_push`): the response's `pushed`
+is the number of people it was written for, not devices reached. Its inbox
+lines still go to everyone in the audience with an account, muted or not.
+
+```sql
+-- Read-only: what the room was told tonight, and by whom.
+SELECT created_at, actor_email, details->>'what' AS what, details->>'recipients' AS people, summary
+FROM admin_audit_logs WHERE action = 'live.notify' AND entity_id = '<event id>' ORDER BY created_at;
+
+-- Read-only: live pushes waiting or failing.
+SELECT name, count(*) FILTER (WHERE finished_at IS NULL AND NOT dead) AS waiting, count(*) FILTER (WHERE dead) AS dead
+FROM jobs WHERE name IN ('live.join_push', 'live.update_push', 'live.event_started') GROUP BY 1;
+```
+
+### The fair quiz
+
+- The right answer, a player's points and whether they were right, their
+  score with this question's points, their rank and the board are shown
+  once the question's answers close: its seconds plus the two seconds of
+  grace for a slow phone. The answer's response says `correct: null,
+  points: null` with the score before it; the big screen waits as the phones
+  do. The host's console sees everything at once.
+- Joining sends `player_key` (the browser's or the install's key). The same
+  key in the same run is the same player, as is the same account on any
+  device. A join without a key (an old client) is a new player, as before.
+- A vote, a question, a poll answer and a join from a signed-in request count
+  as the account (`u:<user id>`), so one person has one vote across devices.
+  Guests keep their browser key.
+
+### The 409s the host may see
+
+| Code | From | Means | The console |
+| --- | --- | --- | --- |
+| `QUIZ_RUNNING` | `POST .../quiz/host/start` | the quiz is running; starting again clears every score | asks "Restart the quiz?", then sends `{"restart": true}` |
+| `QUIZ_MOVED_ON` | `POST .../quiz/host/next` with `expected_index` | the quiz is no longer on that question (a double press, a second console) | ignores it and refetches |
+
+### The event page's strip
+
+`GET /api/v1/events/{id}/live/banner` is the strip: the event's status, start
+and end, the banner, the poll that is up (`id`, `kind`, `prompt`), whether
+the quiz is live, and whether the floor is open and has questions. A few
+hundred bytes from the room's one-second snapshot, the same for everyone,
+`Cache-Control: public, max-age=15`, with a weak ETag (a 304 while nothing
+changed). The app and the site poll it every 30 seconds instead of the ~30 KB
+room feed.

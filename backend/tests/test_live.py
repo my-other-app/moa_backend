@@ -85,12 +85,14 @@ async def test_the_host_runs_the_quiz_and_the_room_plays_it_by_code(client, sess
     assert play.json()["question"]["prompt"] == "RAM on an ESP32-S3?" and play.json()["question"]["correct_key"] is None  # not revealed yet
     assert "correct_key" not in play.json()["question"]["options"][0]
 
+    # While answers are open, an answer is taken and nothing more is said: not
+    # whether it was right, not its points, not the score with them.
     right = await client.post(_u(world, "/quiz/answer"), json={"option_key": "a"}, headers=pa)
     assert right.status_code == 200, right.text
-    assert right.json()["correct"] is True and 900 <= right.json()["points"] <= 1000
+    assert right.json() == {"correct": None, "points": None, "score": 0, "answered": True}
     assert (await client.post(_u(world, "/quiz/answer"), json={"option_key": "b"}, headers=pa)).status_code == 409  # once
     wrong = await client.post(_u(world, "/quiz/answer"), json={"option_key": "c"}, headers=pb)
-    assert wrong.json() == {"correct": False, "points": 0, "score": 0, "correct_key": "a"}
+    assert wrong.json() == {"correct": None, "points": None, "score": 0, "answered": True}
     assert (await client.post(_u(world, "/quiz/answer"), json={"option_key": "q"}, headers=pb)).status_code == 422
 
     host = await client.get(_u(world, "/quiz/host"), headers=h)
@@ -98,8 +100,12 @@ async def test_the_host_runs_the_quiz_and_the_room_plays_it_by_code(client, sess
     assert tally["answered"] == 2 and [c["count"] for c in tally["counts"]] == [1, 0, 1]
     assert host.json()["leaderboard"][0]["name"] == "Sneha J" and host.json()["leaderboard"][1]["score"] == 0
 
-    mine = await client.get(_u(world, "/quiz/play"), headers=pa)
-    assert mine.json()["question"]["my_answer"] == "a" and mine.json()["question"]["correct_key"] == "a" and mine.json()["rank"] == 1
+    # Answered, the player's own state gives nothing away either: the answer
+    # they gave, and no right answer, points, verdict, rank or board.
+    mine = (await client.get(_u(world, "/quiz/play"), headers=pa)).json()
+    assert mine["question"]["my_answer"] == "a" and mine["question"]["correct_key"] is None
+    assert mine["question"]["my_points"] is None and mine["question"]["my_correct"] is None
+    assert mine["score"] == 0 and mine["rank"] is None and mine["leaderboard"] == []
 
     # The clock runs out: a late answer is refused and the right answer shows for everyone.
     quiz_row = await service.quiz_of(session, world["event"])
@@ -108,12 +114,18 @@ async def test_the_host_runs_the_quiz_and_the_room_plays_it_by_code(client, sess
     late = await client.post("/api/v1/live/quiz/join", json={"code": code, "name": "Late"})
     assert (await client.post(_u(world, "/quiz/answer"), json={"option_key": "a"}, headers={"X-Live-Player": late.json()["player_key"]})).status_code == 409
     assert (await client.get(_u(world, "/quiz/play"), headers={"X-Live-Player": late.json()["player_key"]})).json()["question"]["correct_key"] == "a"
+    told = (await client.get(_u(world, "/quiz/play"), headers=pa)).json()
+    q = told["question"]
+    assert q["correct_key"] == "a" and q["my_answer"] == "a" and q["my_correct"] is True and 900 <= q["my_points"] <= 1000
+    assert told["score"] == q["my_points"] and told["rank"] == 1 and told["leaderboard"][0] == {"rank": 1, "name": "Sneha J", "score": q["my_points"]}
+    theirs = (await client.get(_u(world, "/quiz/play"), headers=pb)).json()["question"]
+    assert (theirs["my_answer"], theirs["my_correct"], theirs["my_points"]) == ("c", False, 0)
 
     assert (await client.post(_u(world, "/quiz/host/next"), headers=h)).json()["current_index"] == 1
     ended = await client.post(_u(world, "/quiz/host/next"), headers=h)  # past the last question
     assert ended.json()["status"] == "ended" and ended.json()["join_code"] is None
     final = await client.get(_u(world, "/quiz/play"), headers=pa)
-    assert final.json()["status"] == "ended" and final.json()["leaderboard"][0] == {"rank": 1, "name": "Sneha J", "score": right.json()["score"]}
+    assert final.json()["status"] == "ended" and final.json()["leaderboard"][0] == {"rank": 1, "name": "Sneha J", "score": q["my_points"]}
 
     # Hosting again starts clean.
     again = await client.post(_u(world, "/quiz/host/start"), headers=h)

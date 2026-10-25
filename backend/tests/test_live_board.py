@@ -3,6 +3,8 @@ from a sorted set equal what the snapshot works out from every player --
 ties, late joiners, answers -- and the set is built again from Postgres when
 it is missing or a write to it failed. Against the local Redis the platform
 tests use, skipped when none answers."""
+from datetime import datetime, timedelta, timezone
+
 from sqlalchemy import select, update
 
 from app.api.live import board, room
@@ -74,7 +76,12 @@ async def test_the_board_in_redis_ranks_and_tops_as_the_snapshot_does(client, se
     everyone = list(expected.players.values())
     got = await room.standings(session, view, everyone)
     assert got == {p.id: (p.score, expected.rank_of(p.score)) for p in everyone}
-    # And a player's poll says the same with and without Redis.
+    # And a player's poll says the same with and without Redis, once the
+    # question's answers have closed (until then no score moves, no rank or board shows).
+    await session.execute(update(LiveQuizzes).where(LiveQuizzes.event_id == world["event"].id).values(
+        question_opened_at=datetime.now(timezone.utc) - timedelta(minutes=5)))
+    await session.commit()
+    room.quizzes.clear()
     polled = (await client.get(_u(world, "/quiz/play"), headers={"X-Live-Player": late["player_key"]})).json()
     assert (polled["score"], polled["rank"], polled["leaderboard"]) == (expected.players[late["player_key"]].score, expected.rank_of(expected.players[late["player_key"]].score), expected.board)
 

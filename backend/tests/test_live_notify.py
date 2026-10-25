@@ -35,6 +35,8 @@ QUIZ_BODY = "The quiz is starting — join now"
 POLL_BODY = "A poll is live — vote now"
 HOST_KEYS = {"status", "join_code", "title", "players", "current_index", "total", "question", "leaderboard"}
 POLL_KEYS = {"id", "kind", "prompt", "options", "status", "launched_at", "closed_at", "sort_order", "results", "my_response"}
+#: Starting the quiz again while it runs (QUIZ_RUNNING otherwise).
+AGAIN = {"restart": True}
 
 
 class FakeMessaging:
@@ -171,7 +173,7 @@ async def test_starting_the_quiz_with_no_body_tells_everyone_checked_in_and_nobo
     assert entry.summary == f"Told 2 checked-in people: {QUIZ_BODY}"
 
 
-async def test_the_console_body_sets_who_is_told_and_launching_a_poll_tells_only_when_asked(client, session, room, fcm):
+async def test_the_console_body_sets_who_is_told_and_launching_a_poll_tells_unless_asked_not_to(client, session, room, fcm):
     # The quiz, started without telling anyone.
     quiet = await client.post(room.start, json={"notify": False}, headers=room.h)
     assert quiet.status_code == 200 and quiet.json()["status"] == "live" and quiet.json()["notified"] is None
@@ -180,15 +182,16 @@ async def test_the_console_body_sets_who_is_told_and_launching_a_poll_tells_only
         r = await client.post(room.start.replace("/start", f"/{action}"), json={"notify": True}, headers=room.h)
         assert r.status_code == 200 and r.json()["notified"] is None, (action, r.text)
 
-    # A poll launched as the console sends it today: nobody told.
-    launched = await client.post(room.poll_status, json={"status": "live"}, headers=room.h)
+    # A poll launched with the switch off: nobody told.
+    launched = await client.post(room.poll_status, json={"status": "live", "notify": False}, headers=room.h)
     assert launched.status_code == 200, launched.text
     assert set(launched.json()) == POLL_KEYS | {"notified"}
     assert launched.json()["status"] == "live" and launched.json()["notified"] is None
     assert fcm.multicasts == [] and await _audits(session, room.event_id) == [] and await _inbox(session, room.event_id) == []
 
-    # Launched again, asking for it: the room is told a poll is live.
-    told = await client.post(room.poll_status, json={"status": "live", "notify": True}, headers=room.h)
+    # Launched again as a console from before sends it (no `notify`): the
+    # room is told a poll is live -- a poll notifies by default now.
+    told = await client.post(room.poll_status, json={"status": "live"}, headers=room.h)
     assert told.json()["status"] == "live" and told.json()["notified"] == _sent(2)
     [message] = fcm.multicasts
     assert message.data["what"] == "poll" and message.notification.body == POLL_BODY and message.notification.title == "Hack Night 04"
@@ -202,7 +205,7 @@ async def test_the_console_body_sets_who_is_told_and_launching_a_poll_tells_only
 async def test_the_console_of_today_sends_an_empty_body_and_the_quiz_tells_the_room(client, room, fcm):
     started = await client.post(room.start, json={}, headers=room.h)
     assert started.json()["notified"] == _sent(2)
-    assert (await client.post(room.start, json={"notify": None}, headers=room.h)).json()["notified"]["skipped_reason"] == "rate_limited"
+    assert (await client.post(room.start, json={"notify": None, "restart": True}, headers=room.h)).json()["notified"]["skipped_reason"] == "rate_limited"
 
 
 # ─── The limit ───────────────────────────────────────────────────────────
@@ -283,17 +286,17 @@ async def test_nobody_checked_in_is_said_and_does_not_count(client, session, roo
 
     # A guest from the door, with no app: nobody who can be told.
     await arrive("guest")
-    assert (await client.post(room.start, headers=room.h)).json()["notified"]["skipped_reason"] == "nobody_checked_in"
+    assert (await client.post(room.start, json=AGAIN, headers=room.h)).json()["notified"]["skipped_reason"] == "nobody_checked_in"
     # Meera (muted the club) and Sam (clubs' pushes off): there, and all muted.
     await arrive("meera", "sam")
-    muted = (await client.post(room.start, headers=room.h)).json()
+    muted = (await client.post(room.start, json=AGAIN, headers=room.h)).json()
     assert muted["status"] == "live" and muted["notified"] == {"sent": 0, "skipped_reason": "all_muted", "last_sent_at": None, "retry_after": None}
     launched = (await client.post(room.poll_status, json={"status": "live", "notify": True}, headers=room.h)).json()
     assert launched["notified"]["skipped_reason"] == "all_muted"
     assert fcm.multicasts == [] and await _audits(session, room.event_id) == [] and await _inbox(session, room.event_id) == []
     # Sneha arrives: she is told at once, nothing held it back.
     await arrive("sneha")
-    assert (await client.post(room.start, headers=room.h)).json()["notified"] == _sent(1)
+    assert (await client.post(room.start, json=AGAIN, headers=room.h)).json()["notified"] == _sent(1)
 
 
 async def test_switched_off_the_quiz_starts_and_the_console_is_told_why(client, session, room, fcm, monkeypatch):
@@ -326,7 +329,7 @@ async def test_a_notification_that_fails_never_fails_the_quiz_and_does_not_count
 
     # Mended, the next one goes: the failures were not counted.
     monkeypatch.setattr(notify.fanout, "insert_for_audience", real)
-    again =await client.post(room.start, headers=room.h)
+    again = await client.post(room.start, json=AGAIN, headers=room.h)
     assert again.json()["notified"] == _sent(2) and len(fcm.multicasts) == 1
 
 
@@ -430,7 +433,7 @@ async def _two_hosts_start_at_once(make, w, monkeypatch) -> list:
             event = await s.get(Events, w["event"])
             owner = await s.get(Users, w["owner"])
             quiz = await service.quiz_of(s, event, create=False)
-            await service.start_quiz(s, quiz)
+            await service.start_quiz(s, quiz, restart=True)
             return await notify.tell_room(s, event, "quiz", actor=owner, ref=w["quiz"])
 
     return await asyncio.gather(host(), host())

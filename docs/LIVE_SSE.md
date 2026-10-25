@@ -17,7 +17,7 @@ Accept: text/event-stream
 | view | replaces this poll (today's interval) | who may open it | body type |
 |---|---|---|---|
 | `room` | `GET /events/{id}/live` (5 s) | anyone; send the browser key for its own flags | `Feed` |
-| `banner` | the event page's live strip, read from `GET /events/{id}/live` | anyone, as `room` (no key: it has no flags) | `BannerFeed` (2a) |
+| `banner` | the event page's live strip, read from `GET /events/{id}/live/banner` | anyone, as `room` (no key: it has no flags) | `BannerFeed` (2a) |
 | `quiz` | `GET /events/{id}/live/quiz/play` (2 s) | a player: their player key | `PlayerState` |
 | `host` | `GET /events/{id}/live/quiz/host` (2 s while running) | the event's club (or an admin), as the poll | `HostState` |
 | `screen` | `GET /events/{id}/live/screen` (3 s) | the event's club, as the poll | `Screen` |
@@ -85,8 +85,10 @@ data: {"status":404,"message":"Event not found"}
 
 `time_left` (quiz, host, screen) is counted when the frame is written. Count
 down locally from the moment it arrives (corrected by `ping.t` if you like).
-When the clock runs out the server sends a fresh snapshot (the quiz view then
-shows `correct_key`), as it does on every change.
+When the question's answers close (its clock, then two seconds of grace for
+a slow phone) the server sends a fresh snapshot: the quiz view then shows
+`correct_key`, the player's `my_points` and `my_correct`, their score, rank
+and the board, none of which it shows before (OPERATIONS.md, section 22).
 
 How soon a change arrives: what the host does (next question, a question
 approved or pinned, a poll launched or closed, an update pushed, a schedule
@@ -105,14 +107,20 @@ live strip shows, and nothing else.
 
 ```
 {"event": {"id": 68, "name": "...", "status": "live", "starts_at": "2026-10-18T13:30:00Z", "ends_at": "2026-10-18T16:30:00Z"},
- "banner": null}
+ "banner": null,
+ "poll": {"id": "...", "kind": "choice", "prompt": "Which track?"},
+ "quiz": {"live": false, "title": "Hack Night quiz"},
+ "qa": {"open": true, "has_questions": true}}
 ```
 
 `event` is the `Feed`'s `event` with the event's start and end; `banner` is
 the `Feed`'s `banner` (the latest update, for three hours after it was
-pushed, or `null`). A snapshot comes when one of them changes, not when the
-audience votes or asks: a quiet strip gets pings. Gone (404) where the room
-is.
+pushed, or `null`); `poll` the poll that is up, or `null`; `quiz` the
+`Feed`'s `quiz`; `qa` whether the floor is open and whether its board has a
+question. A snapshot comes when one of them changes, not when the audience
+votes or asks: a quiet strip gets pings. Gone (404) where the room is. The
+same body is `GET /events/{id}/live/banner`, for a client that polls (every
+30 s; public, weak ETag).
 
 ## 3. Reconnecting and resuming
 

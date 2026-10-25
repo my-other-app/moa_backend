@@ -21,9 +21,11 @@ from app.api.live.schemas import (
     HostActionIn,
     HostActionOut,
     HostState,
+    BannerFeed,
     JoinIn,
     JoinOut,
     ModerateIn,
+    ModerateOut,
     PlayerState,
     PollIn,
     PollOut,
@@ -32,6 +34,7 @@ from app.api.live.schemas import (
     PollStatusOut,
     PublicSurvey,
     QABoard,
+    QABoardOut,
     QASettings,
     QuestionOut,
     QuizOut,
@@ -119,18 +122,29 @@ async def host_action(
     """`start` tells everyone checked in that the quiz is starting (a push
     and an inbox line, at most one per event every three minutes and ten a
     day) unless the body says `{"notify": false}`; with no body it does.
-    What came of it is `notified` -- the quiz starts whatever it says. The
-    other actions take no body and answer `notified: null`."""
+    What came of it is `notified` -- the quiz starts whatever it says.
+
+    Guards: `start` on a quiz that is running is 409 QUIZ_RUNNING (it would
+    clear every score) unless the body says `{"restart": true}`. `next` with
+    `{"expected_index": n}` is 409 QUIZ_MOVED_ON when the quiz is no longer
+    on question n (a double press, a second console); without it, it moves
+    on as before. The other actions answer `notified: null`."""
     event = await deliveries.event_for_club(session, user, event_id)
-    fn = {"start": service.start_quiz, "next": service.next_question, "end": service.end_quiz, "reset": service.reset_quiz}.get(action)
-    if fn is None:
+    if action not in ("start", "next", "end", "reset"):
         raise CustomHTTPException(404, message="Unknown action")
     if action == "start":
         # Starting is the plan's; a quiz already running can always be moved on or ended.
         await gates.require_feature(session, event.club_id, "quiz", actor=user, event=event)
     quiz = await service.quiz_of(session, event)
     quiz_id = quiz.id
-    out = await fn(session, quiz)
+    if action == "start":
+        out = await service.start_quiz(session, quiz, restart=bool(body and body.restart))
+    elif action == "next":
+        out = await service.next_question(session, quiz, expected_index=body.expected_index if body else None)
+    elif action == "end":
+        out = await service.end_quiz(session, quiz)
+    else:
+        out = await service.reset_quiz(session, quiz)
     notified = None
     if action == "start" and (body is None or body.notify is not False):
         notified = await notify.tell_room(session, event, "quiz", actor=user, ref=quiz_id, request=request)
@@ -142,16 +156,25 @@ async def host_action(
 
 @public_router.post("/live/quiz/join", summary="Join the quiz on the screen with its code", status_code=201)
 async def join_quiz(request: Request, session: SessionDep, body: JoinIn, user: OptionalAuth = None) -> JoinOut:
-    """Limited per browser (X-Live-Key, when sent) and, generously, per address."""
-    limits.check(request, "join", room.valid_key(request.headers.get(service.VOTER_HEADER)))
-    out = await service.join_quiz(session, body.code, body.name)
+    """Who joins: the account, for a caller signed in (one player on every
+    device); else the client's key, `player_key` in the body (or the
+    X-Live-Key it sends the room). The same one joining again in the same
+    run gets the same player back -- its name, score and player_key. With
+    neither, each join is a new player (clients from before). Limited per
+    person (that account or key) and, generously, per address."""
+    if body.player_key is not None and room.valid_key(body.player_key) is None:
+        raise CustomHTTPException(422, message="player_key is 8 to 64 letters, digits, - and _.")
+    person = room.person_key(user, body.player_key or request.headers.get(service.VOTER_HEADER))
+    limits.check(request, "join", person)
+    out = await service.join_quiz(session, body.code, body.name, person=person)
     if user is not None:
         event = await _public_event(session, out["event_id"])
         reg = await service._registration_of(session, event, user)
         if reg is not None:
             player = await session.get(service.LiveQuizPlayers, out["player_id"])
-            player.registration_id = reg.id
-            await session.commit()
+            if player.registration_id is None:
+                player.registration_id = reg.id
+                await session.commit()
     return JoinOut(**out)
 
 
@@ -182,21 +205,39 @@ async def list_questions(session: SessionDep, user: ClubAuth, event_id: int) -> 
 
 
 @router.patch("/questions/settings", summary="Whether a question waits for approval")
-async def qa_settings(session: SessionDep, user: ClubAuth, event_id: int, body: QASettings) -> QABoard:
+async def qa_settings(request: Request, session: SessionDep, user: ClubAuth, event_id: int, body: QASettings) -> QABoardOut:
+    """Switching approval off opens the floor: everyone checked in is told
+    Q&A is open (`event_live_qa`, once per event, under the room's limit)
+    unless the body says `"notify": false`. What came of it is `notified`;
+    null when approval is switched on."""
     event = await deliveries.event_for_club(session, user, event_id)
     await gates.require_feature(session, event.club_id, "qa", actor=user, event=event)
-    return QABoard(**await service.set_qa(session, event, body.approve_first))
+    out = await service.set_qa(session, event, body.approve_first)
+    notified = None
+    if not body.approve_first and body.notify is not False:
+        notified = await notify.tell_room(session, event, "qa", actor=user, request=request)
+    return QABoardOut(**out, notified=notified)
 
 
 @router.post("/questions/{question_id}", summary="approve · reject · answered · reopen · pin · unpin")
-async def moderate(session: SessionDep, user: ClubAuth, event_id: int, question_id: UUID, body: ModerateIn) -> QuestionOut:
+async def moderate(request: Request, session: SessionDep, user: ClubAuth, event_id: int, question_id: UUID, body: ModerateIn) -> ModerateOut:
+    """Approving or pinning a question puts it on the room's board: the first
+    time, everyone checked in is told Q&A is open (`event_live_qa`, once per
+    event, under the room's limit) unless the body says `"notify": false`.
+    What came of it is `notified` (`already_sent` once it went); null for
+    the other actions."""
     event = await deliveries.event_for_club(session, user, event_id)
-    return QuestionOut(**await service.moderate(session, event, question_id, body.action))
+    out = await service.moderate(session, event, question_id, body.action)
+    notified = None
+    if body.action in ("approve", "pin") and body.notify is not False:
+        notified = await notify.tell_room(session, event, "qa", actor=user, ref=question_id, request=request)
+    return ModerateOut(**out, notified=notified)
 
 
 @public_router.post("/events/{event_id}/live/questions", summary="Ask the room a question", status_code=201)
 async def ask(request: Request, session: SessionDep, event_id: int, body: AskIn, user: OptionalAuth = None) -> QuestionOut:
-    key = service.voter_key_of(request)
+    """A caller signed in asks as the account (room.person_key)."""
+    key = service.voter_key_of(request, user)
     limits.check(request, "ask", key)
     event = await _public_event(session, event_id)
     # The floor is open only on a plan with Q&A; the guest is not told why.
@@ -207,8 +248,10 @@ async def ask(request: Request, session: SessionDep, event_id: int, body: AskIn,
 
 
 @public_router.post("/events/{event_id}/live/questions/{question_id}/vote", summary="Vote a question up, or take the vote back")
-async def vote(request: Request, session: SessionDep, event_id: int, question_id: UUID) -> VoteOut:
-    key = service.voter_key_of(request)
+async def vote(request: Request, session: SessionDep, event_id: int, question_id: UUID, user: OptionalAuth = None) -> VoteOut:
+    """One vote per person: a caller signed in votes as the account, on
+    every device (room.person_key); a guest as the browser's key."""
+    key = service.voter_key_of(request, user)
     limits.check(request, "vote", key)
     return VoteOut(**await service.vote(session, event_id, question_id, key))
 
@@ -237,9 +280,9 @@ async def patch_poll(session: SessionDep, user: ClubAuth, event_id: int, poll_id
 
 @router.post("/polls/{poll_id}/status", summary="Launch or close a poll; launching closes the one that was up")
 async def poll_status(request: Request, session: SessionDep, user: ClubAuth, event_id: int, poll_id: UUID, body: PollStatusIn) -> PollStatusOut:
-    """Launching with `"notify": true` also tells everyone checked in that a
-    poll is live (as starting the quiz does, under the same limit); without
-    it, nobody is told. What came of it is `notified` (null when not asked,
+    """Launching also tells everyone checked in that a poll is live (as
+    starting the quiz does, under the same limit) unless the body says
+    `"notify": false`. What came of it is `notified` (null when not asked,
     and for a close) -- the poll is launched whatever it says."""
     event = await deliveries.event_for_club(session, user, event_id)
     if body.status == "live":
@@ -247,7 +290,7 @@ async def poll_status(request: Request, session: SessionDep, user: ClubAuth, eve
         await gates.require_feature(session, event.club_id, "polls", actor=user, event=event)
     out = await service.set_poll_status(session, event, poll_id, body.status)
     notified = None
-    if body.status == "live" and body.notify:
+    if body.status == "live" and body.notify is not False:
         notified = await notify.tell_room(session, event, "poll", actor=user, ref=poll_id, request=request)
     return PollStatusOut(**out, notified=notified)
 
@@ -260,8 +303,9 @@ async def delete_poll(session: SessionDep, user: ClubAuth, event_id: int, poll_i
 
 
 @public_router.post("/events/{event_id}/live/polls/{poll_id}/respond", summary="Answer the poll that is up")
-async def respond(request: Request, session: SessionDep, event_id: int, poll_id: UUID, body: RespondIn) -> PollOut:
-    key = service.voter_key_of(request)
+async def respond(request: Request, session: SessionDep, event_id: int, poll_id: UUID, body: RespondIn, user: OptionalAuth = None) -> PollOut:
+    """One answer per person: a caller signed in answers as the account (room.person_key)."""
+    key = service.voter_key_of(request, user)
     limits.check(request, "respond", key)
     return PollOut(**await service.respond(session, event_id, poll_id, key, body.value))
 
@@ -332,11 +376,32 @@ async def shift(session: SessionDep, user: ClubAuth, event_id: int, body: ShiftI
 )
 async def feed(request: Request, session: SessionDep, event_id: int) -> Response:
     """Read from the room's snapshot (at most a second old); the browser's
-    own flags (voted, mine, my_response) from what it did. The floor shows as
-    closed when the club's plan has no Q&A (and the event is not
-    grandfathered), so the ask box never appears only to refuse."""
-    body = await room.feed_body(session, event_id, request.headers.get(service.VOTER_HEADER))
+    own flags (voted, mine, my_response) from what it did -- the account's,
+    when the request carries a sign-in (read from the token alone,
+    room.shown_key). The floor shows as closed when the club's plan has no
+    Q&A (and the event is not grandfathered), so the ask box never appears
+    only to refuse."""
+    body = await room.feed_body(session, event_id, room.shown_key(request, request.headers.get(service.VOTER_HEADER)))
     return Response(content=body, media_type="application/json")
+
+
+#: The strip is the same for everyone and changes a few times an evening: a
+#: shared cache may keep it as long as a phone waits between two polls.
+BANNER_CACHE = "public, max-age=15"
+
+
+@public_router.get(
+    "/events/{event_id}/live/banner", response_model=BannerFeed,
+    summary="The event page's live strip: the event's status, the banner, whether a poll, the quiz or the floor is on",
+)
+async def banner(session: SessionDep, event_id: int) -> Response:
+    """A few hundred bytes, made once a second at most for everyone (the
+    room's snapshot) and sent as made: no key, no sign-in, nothing personal.
+    It carries a weak ETag (app.core.middlewares.etag_middleware): a poll
+    with If-None-Match is a 304 while nothing changed. Polled every 30
+    seconds by the event page in the app and on the site."""
+    body = await room.banner_body(session, event_id)
+    return Response(content=body, media_type="application/json", headers={"Cache-Control": BANNER_CACHE})
 
 
 @router.get("/screen", summary="The big screen")
@@ -383,7 +448,9 @@ async def live_stream(
         raise CustomHTTPException(404, message="The live room is not pushed here; poll it.", error_code="LIVE_STREAM_OFF")
     if view not in stream.VIEWS:
         raise CustomHTTPException(422, message=f"view is one of: {', '.join(stream.VIEWS)}.")
-    voter_key = room.valid_key(request.headers.get(service.VOTER_HEADER) or key) if view == "room" else None
+    # The account's flags when the stream is opened with a sign-in (the app's
+    # client sends Authorization; a browser's EventSource cannot), else the browser's.
+    voter_key = room.shown_key(request, request.headers.get(service.VOTER_HEADER) or key) if view == "room" else None
     player_key = (request.headers.get(service.PLAYER_HEADER) or player).strip() if view == "quiz" else None
     limits.check(request, "stream", voter_key or player_key or None)
     address = client_address(request) or "unknown"
