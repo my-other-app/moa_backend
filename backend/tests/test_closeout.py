@@ -88,7 +88,8 @@ async def test_the_status_clock_moves_the_event_and_closed_locks_the_door_and_th
     event = world["event"]
     got = await client.get(_url(world, "/settings"), headers=h)
     assert got.status_code == 200 and got.json()["status"] == "published" and got.json()["status_clock"] is True
-    assert [s["key"] for s in got.json()["statuses"]] == ["draft", "published", "live", "closed", "archived"]
+    # Every status, with its label; "cancelled" is reached only by cancelling (app/api/club_ops), never picked here.
+    assert [s["key"] for s in got.json()["statuses"]] == ["draft", "published", "live", "closed", "archived", "cancelled"]
 
     # The event ended ten hours ago: one sweep takes it through live to closed.
     assert await service.advance_clock(session) == 1

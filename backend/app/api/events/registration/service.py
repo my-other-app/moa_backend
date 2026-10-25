@@ -355,6 +355,9 @@ async def register_event(
     # Check if event is deleted
     if db_event.is_deleted:
         raise CustomHTTPException(404, message="Event not found")
+    # Called off by the club (app/api/club_ops): nobody new comes in.
+    if getattr(db_event.lifecycle, "value", db_event.lifecycle) == "cancelled":
+        raise CustomHTTPException(400, message="This event was cancelled", error_code="REGISTRATIONS_CLOSED", errors={"closed_reason": "cancelled"})
     
     # Check if registration deadline has passed
     from datetime import datetime, timezone

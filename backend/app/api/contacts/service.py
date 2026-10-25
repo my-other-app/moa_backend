@@ -1,6 +1,7 @@
 """The club's contact book: what retention kept of each event's guests."""
 import csv
 import io
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import func, or_, select
@@ -12,8 +13,20 @@ def _base(club_id: int):
     return select(ArchivedContacts).where(ArchivedContacts.club_id == club_id)
 
 
-def _filtered(club_id: int, *, q: Optional[str], event_id: Optional[int], attended: Optional[bool]):
+def _day_start(d: date) -> datetime:
+    """The day's first instant in India, as the club reads its dates."""
+    return datetime.combine(d, time.min, tzinfo=timezone(timedelta(hours=5, minutes=30)))
+
+
+def _filtered(club_id: int, *, q: Optional[str], event_id: Optional[int], attended: Optional[bool],
+              since: Optional[date] = None, until: Optional[date] = None):
     s = _base(club_id)
+    # By the day the event ended (when it was kept, for one with no end on record).
+    when = func.coalesce(ArchivedContacts.event_ended_at, ArchivedContacts.created_at)
+    if since is not None:
+        s = s.where(when >= _day_start(since))
+    if until is not None:
+        s = s.where(when < _day_start(until + timedelta(days=1)))
     if q:
         pat = f"%{q.strip()}%"
         s = s.where(or_(ArchivedContacts.name.ilike(pat), ArchivedContacts.email.ilike(pat), ArchivedContacts.phone.ilike(pat), ArchivedContacts.event_name.ilike(pat)))
@@ -40,8 +53,9 @@ async def groups(session, club_id: int) -> list:
     return [{"event_id": eid, "event_name": name, "event_ended_at": ended, "archived_at": archived, "contacts": n} for eid, name, ended, archived, n in rows]
 
 
-async def page(session, club_id: int, *, q: Optional[str] = None, event_id: Optional[int] = None, attended: Optional[bool] = None, page: int = 1, page_size: int = 50) -> dict:
-    s = _filtered(club_id, q=q, event_id=event_id, attended=attended)
+async def page(session, club_id: int, *, q: Optional[str] = None, event_id: Optional[int] = None, attended: Optional[bool] = None, page: int = 1, page_size: int = 50,
+               since: Optional[date] = None, until: Optional[date] = None) -> dict:
+    s = _filtered(club_id, q=q, event_id=event_id, attended=attended, since=since, until=until)
     total = await session.scalar(select(func.count()).select_from(s.subquery())) or 0
     page = max(1, page)
     page_size = max(1, min(page_size, 200))
@@ -49,9 +63,10 @@ async def page(session, club_id: int, *, q: Optional[str] = None, event_id: Opti
     return {"items": [contact_out(c) for c in rows], "total": total, "page": page, "page_size": page_size, "groups": await groups(session, club_id)}
 
 
-async def export_csv(session, club_id: int, *, q: Optional[str] = None, event_id: Optional[int] = None, attended: Optional[bool] = None) -> str:
+async def export_csv(session, club_id: int, *, q: Optional[str] = None, event_id: Optional[int] = None, attended: Optional[bool] = None,
+                     since: Optional[date] = None, until: Optional[date] = None) -> str:
     """A table as a file: CSV opens anywhere."""
-    rows = list((await session.scalars(_filtered(club_id, q=q, event_id=event_id, attended=attended).order_by(ArchivedContacts.event_name, ArchivedContacts.name))).all())
+    rows = list((await session.scalars(_filtered(club_id, q=q, event_id=event_id, attended=attended, since=since, until=until).order_by(ArchivedContacts.event_name, ArchivedContacts.name))).all())
     out = io.StringIO()
     w = csv.writer(out)
     w.writerow(["Name", "Email", "Phone", "Role", "Attended", "Event", "Event ended", "Kept on"])

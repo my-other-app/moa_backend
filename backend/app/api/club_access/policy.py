@@ -74,12 +74,18 @@ _WHATSAPP = _rx(r"^/api/v1/clubs/whatsapp(?:/|$)")
 _MAILBOX_SETUP = _rx(r"^/api/v1/clubs/mailbox/(?:address|settings)(?:/|$)")
 _MAILBOX = _rx(r"^/api/v1/clubs/mailbox(?:/|$)")
 
-# Money: figures, statements, the ledger, refunds.
+# Money: figures, statements, the ledger, refunds -- an event's payments and
+# its refunds, and cancelling it, which refunds everyone (app/api/club_ops).
 _MONEY = _rx(
     r"^/api/v1/clubs/finance",
     r"^/api/v1/events/\d+/finance",
     r"^/api/v1/payments/logs",
+    r"^/api/v1/events/\d+/(?:payments|refunds|cancel)(?:/|$)",
 )
+# The contact book: guests' addresses and numbers kept at close-out. Admins
+# and editors (who message guests anyway); door staff see names at the gate,
+# not a list to take away (as `allows_contacts` for an AI assistant).
+_CONTACTS = _rx(r"^/api/v1/clubs/contacts(?:/|$)")
 # The club's public face and setup.
 _CLUB_PROFILE_WRITES = _rx(
     r"^/api/v1/clubs/(?:update|cover|logo|socials|create)(?:/|$)",
@@ -134,6 +140,8 @@ def allows(role: str, method: str, path: str) -> bool:
         return role == "admin"
     if role == "admin":
         return True
+    if _CONTACTS.search(path):
+        return role == "editor"
     if _CLUB_STORE.search(path):
         return role == "editor" or (role == "door" and method not in WRITES)
     if _MONEY.search(path):
@@ -161,6 +169,9 @@ def can(role: str) -> dict:
         "manage_access": owner,
         "see_access": admin,
         "money": admin,
+        # Cancelling an event refunds its guests: money (app/api/club_ops).
+        "cancel_events": admin,
+        "contacts": editor,
         "club_profile": admin,
         "edit_events": editor,
         "club_store": editor,

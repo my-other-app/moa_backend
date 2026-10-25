@@ -48,7 +48,7 @@ VIA_LABEL = {
     "gate": "Scanned at the gate", "kiosk": "Self check-in kiosk", "walkup": "Registered at the door", "offline_sync": "Scanned offline",
     "desk": "By hand at the desk", "phone": "From their own phone", "app": "Volunteer app",
 }
-STATUS_LABEL = {EventStatus.draft: "Draft", EventStatus.published: "Published", EventStatus.live: "Live", EventStatus.closed: "Closed", EventStatus.archived: "Archived"}
+STATUS_LABEL = {EventStatus.draft: "Draft", EventStatus.published: "Published", EventStatus.live: "Live", EventStatus.closed: "Closed", EventStatus.archived: "Archived", EventStatus.cancelled: "Cancelled"}
 
 
 def ends_at(event: Events) -> datetime:
@@ -65,6 +65,8 @@ def lifecycle(event: Events) -> EventStatus:
 
 def assert_writable(event: Events) -> None:
     """Closed and archived events are read-only, except for the status itself."""
+    if lifecycle(event) is EventStatus.cancelled:
+        raise CustomHTTPException(409, message="This event was cancelled, so it can't be changed.", error_code="EVENT_CANCELLED")
     if lifecycle(event) in LOCKED_STATUSES:
         raise CustomHTTPException(409, message="This event is closed, so its settings are read-only. Move its status back to Live on the closeout page to change them.", error_code="EVENT_LOCKED")
 
@@ -200,6 +202,9 @@ async def ensure_job(session, event: Events) -> RetentionJobs:
 
 async def update_settings(session, event: Events, body) -> dict:
     data = body.model_dump(exclude_unset=True)
+    if lifecycle(event) is EventStatus.cancelled:
+        # A cancelled event's guests were told and refunded: it stays cancelled.
+        raise CustomHTTPException(409, message="This event was cancelled, so its status and settings stay as they are.", error_code="EVENT_CANCELLED")
     if "status" in data and data["status"] is not None:
         new = EventStatus(data["status"])
         if new is not lifecycle(event):

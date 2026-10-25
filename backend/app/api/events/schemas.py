@@ -635,6 +635,8 @@ class EventDetailResponse(CustomBaseModel):
     #: The status clock, so the console can say "draft" or "closed" without a second call.
     status: str = Field("published")
     status_clock: bool = Field(True)
+    #: When `status` is "cancelled": {"reason", "cancelled_at"} (app/api/club_ops). Null otherwise.
+    cancellation: dict | None = Field(None)
     retention_mode: str = Field("keep")
     created_at: datetime | None = Field(None)
     #: Whether the club's plan leaves this event as it was when enforcement

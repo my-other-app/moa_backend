@@ -18,6 +18,7 @@ from app.api.merch.router import router as merch_router, gate_router as merch_ga
 from app.api.closeout.router import router as closeout_router
 from app.api.hooks.router import router as hooks_router
 from app.api.contacts.router import router as contacts_router
+from app.api.club_ops.router import auth_router as club_password_router, router as club_ops_router
 from app.api.events.duplicate_router import router as duplicate_router
 from app.api.admission.router import router as admission_router
 from app.api.analytics.router import router as analytics_router
@@ -178,6 +179,9 @@ api_router.include_router(router=merch_gate_router, tags=["merch"])
 api_router.include_router(router=closeout_router, tags=["closeout"])
 api_router.include_router(router=hooks_router, tags=["hooks"])
 api_router.include_router(router=contacts_router, tags=["contacts"])
+# Results, cancelling with refunds, club refunds, a club login's forgotten password (app/api/club_ops).
+api_router.include_router(router=club_ops_router)
+api_router.include_router(router=club_password_router)
 api_router.include_router(router=duplicate_router, tags=["events"])
 api_router.include_router(router=admission_router, tags=["admission"])
 api_router.include_router(router=messages_router, tags=["emails"])

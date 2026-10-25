@@ -1377,6 +1377,11 @@ async def event_page(session, ref: str, now: Optional[datetime] = None) -> dict:
     e = None
     if key is not None:
         e = await session.scalar(_event_select().options(selectinload(Events.speakers)).where(key, *_public_where(now, since)))
+        if e is None:
+            # A cancelled event is in no list, but its page still opens and says so (app/api/club_ops).
+            e = await session.scalar(_event_select().options(selectinload(Events.speakers)).where(
+                key, Events.is_deleted == False, *_club_visible(), Events.lifecycle == EventStatus.cancelled,  # noqa: E712
+            ))
     if e is None:
         raise CustomHTTPException(404, message="Event not found")
     club, cat = e.club, e.category
@@ -1408,6 +1413,10 @@ async def event_page(session, ref: str, now: Optional[datetime] = None) -> dict:
         created_at=_iso(e.created_at),
         updated_at=_iso(e.updated_at),
     )
+    if e.lifecycle is EventStatus.cancelled:
+        from app.api.club_ops.cancel import public_cancellation
+
+        event.update(status="cancelled", registration_open=False, cancellation=await public_cancellation(session, e.id))
     speakers = [
         dict(id=s.id, name=s.name, designation=s.designation, photo=_img(s.photo, "medium", "thumbnail", "original"), bio=s.bio, link=s.link)
         for s in e.speakers if not s.is_deleted
