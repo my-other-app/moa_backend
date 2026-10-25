@@ -547,6 +547,15 @@ async def get_event(session: AsyncSession, event_id: str | int, user_id: int | N
     from app.api.payment_gateways import service as payment_gateways
 
     data["payments_to"] = await payment_gateways.payments_to(session, event.club_id)
+    # The club as the response shows it, and whether the registration form
+    # offers "Get updates from <club> on WhatsApp" (club_whatsapp.consent.offered).
+    if event.club is not None:
+        from app.api.club_whatsapp import consent
+
+        data["club"] = {
+            "id": event.club.id, "name": event.club.name, "slug": event.club.slug, "logo": event.club.logo,
+            "whatsapp_updates": await consent.offered(session, event.club_id),
+        }
 
     # Get event files (downloads) - available to all users
     data["downloads"] = [

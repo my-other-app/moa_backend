@@ -88,13 +88,14 @@ def whatsapp_via(route) -> str:
     return quota.CLUB if route is not None else quota.PLATFORM
 
 
-async def channels_for(session, event: Events) -> list[DeliveryChannel]:
+async def channels_for(session, event: Events, kind: Optional[DeliveryKind] = None) -> list[DeliveryChannel]:
     """`channels()`, and WhatsApp too when the event's club sends from its
-    own number though the platform has none configured."""
+    own number though the platform has none configured (for `kind`'s
+    template, when named: the club may route some kinds and not others)."""
     from app.api.club_whatsapp import service as club_whatsapp
 
     out = channels()
-    if DeliveryChannel.whatsapp not in out and await club_whatsapp.can_route(session, event.club_id):
+    if DeliveryChannel.whatsapp not in out and await club_whatsapp.can_route(session, event.club_id, TEMPLATE_OF.get(kind)):
         out.append(DeliveryChannel.whatsapp)
     return out
 
@@ -231,10 +232,11 @@ async def queue(
     reset = dict(
         status=DeliveryStatus.pending, error=None, outcome=None, outcome_at=None, reason=None, reason_code=None,
         tries=0, queued_at=now, claimed_at=None, next_attempt_at=None, updated_at=now,
+        via=None, fallback_code=None, fallback_reason=None,
     )
     table = Deliveries.__table__
     ids: list[uuid.UUID] = []
-    active = [DeliveryChannel.email] if email_only else await channels_for(session, event)
+    active = [DeliveryChannel.email] if email_only else await channels_for(session, event, kind)
     for channel in active:
         by_whatsapp = channel is DeliveryChannel.whatsapp
         if only == "failed":
@@ -415,6 +417,8 @@ async def _whatsapp_send(db: pipeline.Db, ready: "_Ready", message: whatsapp.Tem
     from app.api.club_whatsapp import inbox as club_inbox
     from app.api.club_whatsapp import service as club_whatsapp
 
+    from app.api.club_whatsapp import delivery_routes
+
     route, reg, delivery_id, kind = ready.route, ready.reg, ready.d.id, ready.d.kind.value
     if route is None:
         return await whatsapp.send(reg.phone, message, document=document)
@@ -425,6 +429,8 @@ async def _whatsapp_send(db: pipeline.Db, ready: "_Ready", message: whatsapp.Tem
             raise
         route.forget(exc)
         refused = exc
+        # Why it goes from MyOtherApp's number, on the row and its attempt.
+        ready.fallback = delivery_routes.refusal_words(exc)
         await _note(db, delivery_id, "the club's number's failure could not be noted",
                     lambda s: club_whatsapp.after_failure(s, route, refused))
         if not whatsapp.configured():
@@ -450,7 +456,7 @@ async def _whatsapp_send(db: pipeline.Db, ready: "_Ready", message: whatsapp.Tem
     return out
 
 
-async def requeue_from_platform(session, delivery_id, *, wamid: str, club_id: int, reason: str) -> bool:
+async def requeue_from_platform(session, delivery_id, *, wamid: str, club_id: int, reason: str, code: Optional[str] = None) -> bool:
     """A WhatsApp send that went from a club's own number (`wamid`) and that
     Meta then failed for the club's account, its template or its number
     alone -- Meta says it was not delivered, so it is pending again, and the
@@ -471,6 +477,8 @@ async def requeue_from_platform(session, delivery_id, *, wamid: str, club_id: in
     now = pipeline.now()
     d.status, d.error, d.provider_id, d.sent_at = DeliveryStatus.pending, reason[:400], None, None
     d.outcome = d.outcome_at = d.reason = d.reason_code = None
+    # The next try goes from the platform's number: why, for it to keep (Meta's code and words).
+    d.via, d.fallback_code, d.fallback_reason = None, (code or "WEBHOOK")[:40], reason[:300]
     # A new send: its own idempotency key and quota ref (the club's number's was never counted).
     d.queued_at, d.next_attempt_at, d.claimed_at, d.updated_at = now, None, None, now
     await start(session, d.event_id, d.kind, dedupe=True)
@@ -506,6 +514,9 @@ class _Ready:
     # A WhatsApp send from the club's own number (app/api/club_whatsapp), or
     # None for the platform's.
     route: Optional[object] = None
+    # When it goes from the platform's number though the club wanted its
+    # own: (code, words), kept on the row and its attempt (club_whatsapp.delivery_routes).
+    fallback: Optional[tuple] = None
 
 
 @dataclass
@@ -597,12 +608,24 @@ async def _read(db: pipeline.Db, c: _Claim, run: _Run) -> Optional[_Ready]:
         elif d.channel is DeliveryChannel.whatsapp:
             from app.api.club_whatsapp import service as club_whatsapp
 
+            from app.api.club_whatsapp import delivery_routes
+
             template = TEMPLATE_OF.get(d.kind)
             ready.route = await club_whatsapp.route_for(s, event.club_id, template, cache=run.routes) if template else None
             missing = None
-            if ready.route is None and not whatsapp.configured() and template and await club_whatsapp.can_route(s, event.club_id):
+            if ready.route is None and not whatsapp.configured() and template and await club_whatsapp.can_route(s, event.club_id, template):
                 missing = f"your WhatsApp number has no approved {template} template yet"
             ready.skip = whatsapp_skip(reg, own=ready.route is not None, own_missing=missing)
+            if ready.skip is None:
+                from app.api.club_whatsapp import optout
+
+                # They wrote STOP to the club: not on WhatsApp, from its number or the platform's.
+                ready.skip = await optout.delivery_skip(s, event.club_id, ready.org_name, reg.phone)
+            if ready.skip is None and ready.route is None and template:
+                # From the platform's number: why, when the club wanted its own (a refusal
+                # Meta sent by webhook is on the row already, from requeue_from_platform).
+                ready.fallback = ((d.fallback_code, d.fallback_reason or "") if d.fallback_code
+                                  else await delivery_routes.why_not(s, event.club_id, template, cache=run.routes))
         elif d.kind is DeliveryKind.reminder:
             ready.skip = "the reminder goes by WhatsApp only"
         elif not reg.email:
@@ -734,6 +757,14 @@ async def _handle(db: pipeline.Db, c: _Claim, run: _Run) -> None:
         await _record(db, c, ready, dict(status=DeliveryStatus.failed, error=error, provider_id=None, sent_at=None, next_attempt_at=None))
         return
     provider_id = response.get("MessageId")
+    # Which number a WhatsApp send went from, and -- from the platform's when
+    # the club wanted its own -- why: on the row and on this attempt.
+    via = response.get("Via") if ready.d.channel is DeliveryChannel.whatsapp else None
+    fallback = ready.fallback if via == quota.PLATFORM else None
+    route_values = dict(
+        via=via, fallback_code=(fallback[0] or None) if fallback else None,
+        fallback_reason=((fallback[1] or "")[:300] or None) if fallback else None,
+    )
     meter = None
     if ready.quota_kind is not None:
         d = ready.d
@@ -744,9 +775,11 @@ async def _handle(db: pipeline.Db, c: _Claim, run: _Run) -> None:
         )
     await _record(
         db, c, ready,
-        dict(status=DeliveryStatus.sent, error=None, provider_id=provider_id, sent_at=pipeline.now(), design_version=version, next_attempt_at=None),
+        dict(status=DeliveryStatus.sent, error=None, provider_id=provider_id, sent_at=pipeline.now(), design_version=version, next_attempt_at=None,
+             **route_values),
         # The address it went to: the mailbox, or the number in E.164.
-        attempt={"provider": response.get("Provider"), "provider_id": provider_id, "address": response.get("Address") or suppression.normal(ready.reg.email)},
+        attempt={"provider": response.get("Provider"), "provider_id": provider_id, "address": response.get("Address") or suppression.normal(ready.reg.email),
+                 **route_values},
         meter=meter,
     )
 
@@ -940,7 +973,7 @@ async def queue_reminders(session, now: Optional[datetime] = None) -> int:
 
         A = club_whatsapp.ClubWhatsAppAccounts
         for club_id in (await session.scalars(
-            select(A.club_id).where(A.status == club_whatsapp.ACTIVE, A.routing == True)  # noqa: E712
+            select(A.club_id).where(A.status == club_whatsapp.ACTIVE, A.routing == True, A.route_reminders == True)  # noqa: E712
         )).all():
             if await club_accounts.plan_allows(session, club_id):
                 own_clubs.append(club_id)
@@ -1128,7 +1161,7 @@ async def summary(session, event: Events, kind: DeliveryKind) -> dict:
     # rest are not "unsent" there, they were never to be sent anything.
     wanting = await session.scalar(
         select(func.count()).select_from(_active(event.id).where(*_wants_whatsapp()).subquery())
-    ) if DeliveryChannel.whatsapp in await channels_for(session, event) else 0
+    ) if DeliveryChannel.whatsapp in await channels_for(session, event, kind) else 0
     channels = []
     for channel in DeliveryChannel:
         n = lambda s: counts.get((channel, s), 0)  # noqa: E731
@@ -1168,6 +1201,9 @@ def _sends(event_id: int):
         Deliveries.sent_at.label("sent_at"),
         Deliveries.outcome_at.label("outcome_at"),
         Deliveries.created_at.label("created_at"),
+        Deliveries.via.label("via"),
+        Deliveries.fallback_code.label("fallback_code"),
+        Deliveries.fallback_reason.label("fallback_reason"),
     ).where(Deliveries.event_id == event_id)
     messages = (
         select(
@@ -1184,6 +1220,10 @@ def _sends(event_id: int):
             MessageDeliveries.sent_at.label("sent_at"),
             MessageDeliveries.outcome_at.label("outcome_at"),
             MessageDeliveries.created_at.label("created_at"),
+            # A message goes from the platform's number alone.
+            literal(None, type_=String).label("via"),
+            literal(None, type_=String).label("fallback_code"),
+            literal(None, type_=String).label("fallback_reason"),
         )
         .join(Messages, Messages.id == MessageDeliveries.message_id)
         .where(Messages.event_id == event_id, Messages.kind != MessageKind.TEST)
@@ -1249,6 +1289,10 @@ async def log(
             "attempts": row.attempts or 0,
             "sent_at": row.sent_at,
             "outcome_at": row.outcome_at,
+            # A WhatsApp send's number: "club" (the club's own) or "platform", and why when it fell back.
+            "via": row.via,
+            "fallback_code": row.fallback_code,
+            "fallback_reason": row.fallback_reason,
         })
 
     tally_q = select(s.c.status, s.c.outcome, func.count())
@@ -1294,5 +1338,8 @@ async def by_registration(session, event_id: int, kind: DeliveryKind, registrati
             "reason": d.reason,
             "attempts": d.attempts or 0,
             "sent_at": d.sent_at,
+            "via": d.via,
+            "fallback_code": d.fallback_code,
+            "fallback_reason": d.fallback_reason,
         })
     return out

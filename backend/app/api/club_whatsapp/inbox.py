@@ -177,9 +177,13 @@ async def contact_events(session, club_id: int, convs: list[ClubWhatsAppConversa
     from app.api.events.models import EventRegistrationsLink as R
     from app.api.events.models import Events
 
+    from app.api.club_whatsapp import teamwork
+
     out: dict[int, list[dict]] = {c.id: [] for c in convs}
     if not convs:
         return out
+    # And what conversation_out shows of the team's work on each (assignee, opt-out, notes).
+    await teamwork.annotate(session, club_id, convs)
     by_phone = await _registrations_for(session, club_id, [c.wa_id for c in convs if c.wa_id])
     users = {c.user_id for c in convs if c.user_id}
     by_user = []
@@ -368,11 +372,12 @@ def preview(kind: str, body: Optional[str], *, filename: Optional[str] = None, t
 
 
 async def list_conversations(session, club_id: int, *, filter: str = "all", q: Optional[str] = None,
-                             offset: int = 0, limit: int = 30) -> tuple[list[ClubWhatsAppConversations], int]:
+                             offset: int = 0, limit: int = 30, extra: tuple = ()) -> tuple[list[ClubWhatsAppConversations], int]:
+    """`extra`: the team's filters' conditions (teamwork.filter_clauses)."""
     C = ClubWhatsAppConversations
     if filter not in FILTERS:
         raise _refuse(422, f"filter is one of {', '.join(FILTERS)}", "INVALID_FILTER")
-    where = [C.club_id == club_id]
+    where = [C.club_id == club_id, *extra]
     if filter == "open":
         where.append(C.status == OPEN)
     elif filter == "closed":
@@ -429,7 +434,15 @@ def conversation_out(conv: ClubWhatsAppConversations, events: list[dict], now: O
         "last_inbound_at": conv.last_inbound_at,
         "window_open": window_open(conv, now),
         "window_expires_at": window_expires_at(conv),
+        # Assignee, block, opt-out and notes (teamwork.py).
+        **_team_out(conv),
     }
+
+
+def _team_out(conv: ClubWhatsAppConversations) -> dict:
+    from app.api.club_whatsapp import teamwork
+
+    return teamwork.team_out(conv)
 
 
 async def set_status(session, conv: ClubWhatsAppConversations, status: str) -> None:
@@ -681,7 +694,7 @@ async def refused_later(session, account: ClubWhatsAppAccounts, msg: ClubWhatsAp
     if msg.via == VIA_DELIVERY and msg.delivery_id is not None and whatsapp.configured():
         await deliveries.requeue_from_platform(
             session, msg.delivery_id, wamid=msg.wamid, club_id=account.club_id,
-            reason=f"{refusal.reason}; sending it again from MyOtherApp's number",
+            reason=f"{refusal.reason}; sending it again from MyOtherApp's number", code=refusal.code,
         )
 
 
@@ -751,13 +764,18 @@ async def _send(session, account: ClubWhatsAppAccounts, keys: graph.Keys, conv: 
     return row
 
 
-async def send_text(session, club_id: int, conv: ClubWhatsAppConversations, text: str, actor: Actor, actor_user=None) -> ClubWhatsAppMessages:
+async def send_text(session, club_id: int, conv: ClubWhatsAppConversations, text: str, actor: Actor, actor_user=None,
+                    context: Optional[str] = None) -> ClubWhatsAppMessages:
+    """`context`: the wamid it replies to (replies.context_for), quoted above it."""
+    from app.api.club_whatsapp import optout
+
     text = (text or "").strip()
     if not text:
         raise _refuse(422, "Write a message.", "EMPTY_MESSAGE")
     if len(text) > TEXT_MAX:
         raise _refuse(422, f"A message is at most {TEXT_MAX} characters.", "MESSAGE_TOO_LONG")
     account, keys = await _sending_account(session, club_id, actor_user)
+    await optout.check_send(session, conv, kind="text")
     if not window_open(conv):
         raise _refuse(
             409,
@@ -769,9 +787,11 @@ async def send_text(session, club_id: int, conv: ClubWhatsAppConversations, text
         raise _refuse(409, "This conversation was on another of your numbers.", "OTHER_NUMBER")
     body = {"messaging_product": "whatsapp", "recipient_type": "individual", **recipient(conv), "type": "text",
             "text": {"preview_url": False, "body": text}}
+    if context:
+        body["context"] = {"message_id": context}
     row = ClubWhatsAppMessages(
         conversation_id=conv.id, club_id=club_id, direction=OUT, type="text", body=text, status=PENDING, via=VIA_INBOX,
-        sent_by_user_id=actor.user_id, sent_by_member_id=actor.member_id, sent_by_name=actor.name,
+        sent_by_user_id=actor.user_id, sent_by_member_id=actor.member_id, sent_by_name=actor.name, context_wamid=context,
     )
     return await _send(session, account, keys, conv, body, row)
 
@@ -786,6 +806,10 @@ async def send_template(session, club_id: int, conv: ClubWhatsAppConversations, 
     if row_t is None:
         raise _refuse(409, "That template isn't approved on your WhatsApp account. Refresh the templates and pick an approved one.",
                       "TEMPLATE_NOT_APPROVED")
+    from app.api.club_whatsapp import optout
+
+    # Not to someone who opted out (nor marketing to someone who stopped it), nor someone blocked.
+    await optout.check_send(session, conv, kind="template", category=row_t.category)
     definition = templates.shape(row_t.components or [])
     components, kept = templates.send_components(definition, params or {})
     body = {"messaging_product": "whatsapp", "recipient_type": "individual", **recipient(conv), "type": "template",
@@ -820,10 +844,16 @@ async def start(session, club_id: int, registration_id) -> ClubWhatsAppConversat
     if account is None:
         raise _refuse(409, "Connect your WhatsApp number first.", "NO_WHATSAPP")
     await accounts.require_plan(session, club_id)
+    from app.api.club_whatsapp import optout
+
+    if await optout.opted_out(session, club_id, wa_id=wa_id) is not None:
+        raise _refuse(409, "They opted out of your WhatsApp messages, so you can't write to them first.", "OPTED_OUT",
+                      {"scope": "all"})
     conv_id = await conversation(session, club_id, account.phone_number_id, wa_id, account_id=account.id)
     conv = await session.get(ClubWhatsAppConversations, conv_id)
     # As the upsert left it (nothing of it is pending here: it is only ever changed by UPDATEs).
     await session.refresh(conv)
+    await optout.check_send(session, conv, kind="start")
     return conv
 
 
@@ -1036,7 +1066,9 @@ async def media(session, club_id: int, message_id: int) -> tuple[bytes, str, Opt
             await accounts.mark_failed(session, account, words, exc.code, source=accounts.READ)
             await session.commit()
             raise _refuse(409, f"Meta didn't accept your number's keys, so the attachment can't be fetched. {words}", code) from None
-        raise _refuse(410, f"WhatsApp no longer has this attachment (it keeps them for {MEDIA_DAYS} days).", "MEDIA_GONE") from None
+        # What the club sent lasts 30 days at Meta (outbound_media.py); what arrived, MEDIA_DAYS.
+        days = 30 if msg.direction == OUT else MEDIA_DAYS
+        raise _refuse(410, f"WhatsApp no longer has this attachment (it keeps them for {days} days).", "MEDIA_GONE") from None
     mime = str(info.get("mime_type") or msg.media_mime or "application/octet-stream")
     return content, mime, msg.media_filename
 

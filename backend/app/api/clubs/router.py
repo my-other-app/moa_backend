@@ -1,4 +1,4 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, Request, UploadFile, Query, File
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, Request, UploadFile, Query, File
 from sqlalchemy import select
 
 from app.api.clubs.models import Clubs
@@ -27,6 +27,7 @@ from app.api.clubs.schemas import (
     ClubPartnerOut,
     ClubPartnerPatch,
     FollowerProfileResponse,
+    FollowIn,
 )
 from app.db.core import SessionDep
 from app.api.clubs import events_list, followers_insights, service
@@ -374,8 +375,26 @@ async def list_notes_self(
 async def follow_club(
     club_id: int, session: SessionDep, user: UserAuth,
     ref: str | None = Query(None, max_length=16, description="A tracking link's code, so the follow is credited to it"),
+    body: FollowIn | None = Body(None),
 ) -> UserClubLinkDetailResponse:
-    follow = await service.follow_club(session, club_id, user.id, tracking_ref=ref)
+    """`{"club_updates_whatsapp": true}`: "Get updates from <club> on WhatsApp"
+    ticked as they follow (app/api/club_whatsapp/consent.py) -- kept even when
+    they already follow, which then answers the follow as it stands; false
+    takes it back; left out, nothing changes."""
+    wanted = body.club_updates_whatsapp if body is not None else None
+    if wanted is None:
+        return await service.follow_club(session, club_id, user.id, tracking_ref=ref)
+    from app.api.club_whatsapp import consent
+
+    try:
+        follow = await service.follow_club(session, club_id, user.id, tracking_ref=ref)
+    except CustomHTTPException as exc:
+        if exc.status_code != 409:
+            raise
+        follow = await service.following_row(session, club_id, user.id)
+        if follow is None:
+            raise
+    await consent.from_follow(session, club_id, user, wanted)
     return follow
 
 
@@ -383,7 +402,12 @@ async def follow_club(
 async def unfollow_club(
     club_id: int, session: SessionDep, user: UserAuth
 ) -> UserClubLinkDetailResponse:
+    """Their yes to the club's updates on WhatsApp goes with the follow."""
     follow = await service.unfollow_club(session, club_id, user.id)
+    from app.api.club_whatsapp import consent
+
+    if await consent.on_unfollow(session, club_id, user.id):
+        await session.commit()
     return follow
 
 

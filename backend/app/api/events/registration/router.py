@@ -62,6 +62,11 @@ async def register_event(
     signs in to the app with Google or Apple (users.service.merge_guest_into_user)."""
     response = {}
     registration.email = registration.email.strip()
+    if registration.club_updates_whatsapp:
+        # The club's updates on WhatsApp need a number it can reach: said now, before anything is kept.
+        from app.api.club_whatsapp import consent
+
+        consent.require_number(registration.phone)
 
     if (
         user is not None
@@ -125,6 +130,12 @@ async def register_event(
         # box (the app, for now) leaves an earlier answer alone.
         whatsapp_opt_in=registration.whatsapp_opt_in if "whatsapp_opt_in" in registration.model_fields_set else None,
     )
+    if registration.club_updates_whatsapp:
+        from app.api.club_whatsapp import consent
+
+        register_data["club_updates_whatsapp"] = await consent.from_registration(
+            session, register_data.get("event_registration_id"), True,
+        )
     if not claim_existing:
         response["auth_token"] = await auth_service.create_access_refresh_tokens(user)
     response = {**response, **register_data}

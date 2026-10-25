@@ -64,6 +64,7 @@ from sqlalchemy.orm import aliased, contains_eager, selectinload
 from app.api.agenda import service as agenda
 from app.api.closeout.models import EventStatus
 from app.api.club_domains.lookup import active_hosts
+from app.api.club_whatsapp import consent as club_consent
 from app.api.clubs import service as clubs_service
 from app.api.clubs.events_list import registration_open
 from app.api.clubs.models import ClubInterestsLink, Clubs, ClubSocials, ClubTeamMembers
@@ -1284,6 +1285,7 @@ async def club_page(session, slug: str, viewer_id: Optional[int], now: Optional[
     detail.update(
         about=club.about, contact_email=club.contact_email,
         socials=_social_links({k: getattr(socials, k, None) for k in ("instagram", "linkedin", "youtube", "website")}),
+        whatsapp_updates=await club_consent.offered(session, club.id),
     )
 
     coming = await _rows(session, filtered(now, since, club_id=club.id).limit(60))
@@ -1419,6 +1421,7 @@ async def event_page(session, ref: str, now: Optional[datetime] = None) -> dict:
         club=dict(
             id=club.id, name=club.name, slug=club.slug, logo=_img(club.logo, "thumbnail", "medium", "original"),
             tagline=club.tagline, followers=(await follower_counts(session, [club.id])).get(club.id, 0), location_name=club.location_name,
+            whatsapp_updates=await club_consent.offered(session, club.id),
         ),
         speakers=speakers,
         agenda=dict(timezone=EVENT_TIMEZONE, items=await agenda.list_items(session, e.id)),

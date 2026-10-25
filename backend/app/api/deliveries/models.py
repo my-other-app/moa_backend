@@ -125,6 +125,12 @@ class Deliveries(AbstractSQLModel, TimestampsMixin):
     claimed_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     # Not before this: the backoff after the provider said "not now".
     next_attempt_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    # A WhatsApp send's number, as its last attempt went: "club" (the club's
+    # own, app/api/club_whatsapp) or "platform"; and, from the platform's
+    # when the club wanted its own, why (Meta's code, or ours, and words).
+    via = Column(String(8), nullable=True)
+    fallback_code = Column(String(40), nullable=True)
+    fallback_reason = Column(String(300), nullable=True)
 
     registration = relationship("EventRegistrationsLink")
 
@@ -155,8 +161,17 @@ class DeliveryAttempts(AbstractSQLModel):
     outcome_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     reason = Column(String(400), nullable=True)
     created_at = Column(TZAwareDateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    # A WhatsApp attempt's number -- "club" or "platform" -- and, when the club
+    # wanted its own and this went from the platform's, why (Deliveries.via).
+    via = Column(String(8), nullable=True)
+    fallback_code = Column(String(40), nullable=True)
+    fallback_reason = Column(String(300), nullable=True)
 
-    __table_args__ = (UniqueConstraint("provider_id", name="uq_delivery_attempts_provider_id"),)
+    __table_args__ = (
+        UniqueConstraint("provider_id", name="uq_delivery_attempts_provider_id"),
+        # This month's fallbacks, for the club and the admins.
+        sa.Index("ix_delivery_attempts_fallback", "created_at", postgresql_where=sa.text("fallback_code IS NOT NULL")),
+    )
 
 
 # Kept with the models so the registry (and Alembic, and create_all) knows them.

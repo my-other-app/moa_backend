@@ -20,6 +20,11 @@ without a good one is refused before its body is read for anything.
 - `account_update`: Meta banning, restricting (routing paused while it
   stops sending), warning, reinstating or offboarding the account: kept on
   the connection and told to the club and the admins.
+- `user_preferences`: someone stopping (or resuming) marketing messages in
+  WhatsApp's own settings: a marketing opt-out (inbound.py, optout.py).
+
+Each message kept is also read for STOP and START and alerts the inbox's
+people; a status may say they stopped marketing (131050): inbound.py.
 
 Meta delivers again (for 7 days) whatever is not answered 200, and may
 deliver anything twice. Each message, status and change is handled in a
@@ -36,7 +41,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from app.api.club_whatsapp import alerts, inbox, templates
+from app.api.club_whatsapp import alerts, broadcasts, inbound, inbox, templates
 from app.api.club_whatsapp import service as accounts
 from app.api.club_whatsapp.models import ClubWhatsAppAccounts
 
@@ -94,6 +99,8 @@ async def handle(session, account: ClubWhatsAppAccounts, payload: dict) -> dict:
                         await _capability(session, account, value)
                     elif field == "account_update":
                         await _account(session, account, value)
+                    elif field == "user_preferences":
+                        await inbound.user_preferences(session, account, value)
             except Exception as exc:  # noqa: BLE001 - undone alone; Meta delivers it again
                 counts["failed"] += 1
                 logger.warning("club whatsapp account %s: a %s change could not be kept (%s)", account.id, field, type(exc).__name__)
@@ -123,6 +130,8 @@ async def _messages(session, account, value: dict, touched: dict, counts: dict) 
         try:
             async with session.begin_nested():
                 conv_id = await inbox.record_inbound(session, account, account.phone_number_id, m, contact)
+                if conv_id is not None:
+                    await inbound.after_message(session, account, conv_id, m)
         except Exception as exc:  # noqa: BLE001 - never the message in the log
             counts["failed"] += 1
             logger.warning("club whatsapp account %s: a message could not be kept (%s)", account.id, type(exc).__name__)
@@ -136,6 +145,10 @@ async def _messages(session, account, value: dict, touched: dict, counts: dict) 
         try:
             async with session.begin_nested():
                 conv_id = await inbox.record_status(session, account, st)
+                await inbound.after_status(session, account, st)
+                # Or a broadcast's message (broadcasts.py): its own row, matched by the wamid alone.
+                if conv_id is None:
+                    await broadcasts.record_status(session, account, st)
         except Exception as exc:  # noqa: BLE001
             counts["failed"] += 1
             logger.warning("club whatsapp account %s: a status could not be kept (%s)", account.id, type(exc).__name__)

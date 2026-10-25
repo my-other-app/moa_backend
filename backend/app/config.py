@@ -189,6 +189,20 @@ class AppConfig(BaseSettings):
     CLUB_WHATSAPP_QUALITY_HOURS: int = 6
     # The largest attachment the inbox fetches from Meta for the dashboard.
     CLUB_WHATSAPP_MEDIA_MAX_MB: int = 25
+    # Messages a second a club's broadcast is sent at (Meta allows 80 a
+    # second per number; this stays well under it).
+    CLUB_WHATSAPP_BROADCAST_MPS: float = 10.0
+    # Meta's Embedded Signup ("Connect with Meta", app/api/club_whatsapp/
+    # embedded_signup.py), once MyOtherApp is a Tech Provider: off until the
+    # owner has Meta's approval (docs/OPERATIONS.md section 21). The platform
+    # app's id and secret (App settings -> Basic), the login configuration's
+    # id (Facebook Login for Business -> Configurations), and the token Meta
+    # verifies the app's default webhook URL with. Pasting keys works either way.
+    WHATSAPP_EMBEDDED_SIGNUP: bool = False
+    META_APP_ID: str = ""
+    META_APP_SECRET: str = ""
+    META_ES_CONFIG_ID: str = ""
+    META_WEBHOOK_VERIFY_TOKEN: str = ""
 
     GOOGLE_WEB_CLIENT_ID: str
     GOOGLE_ANDROID_CLIENT_ID: str

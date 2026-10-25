@@ -11,6 +11,9 @@
 - Retention: for each club that ever connected a number, its messages older
   than its retention period (12 months unless it chose otherwise) are
   deleted, with the conversations left empty and those that never had one.
+- Alerts (alerts_inbox.py): a mail to the inbox's people about messages
+  unread 15 minutes, and a notice and a mail about a conversation that has
+  waited the club's alert_after_hours for an answer.
 
 Each number, and each club's retention, in its own transaction: one bad row
 cannot stop the rest. One worker at a time, by a Postgres advisory lock on
@@ -204,12 +207,21 @@ async def keys_readable(session) -> bool:
 
 
 async def sweep(session, now: Optional[datetime] = None) -> dict:
+    from app.api.club_whatsapp import broadcasts, spend
+
     now = now or _now()
     await keys_readable(session)
+    from app.api.club_whatsapp import alerts_inbox
+
     return {
         "checked": await refresh_quality(session, now),
         "templates": await refresh_templates(session, now),
         "forgotten": await retention(session, now),
+        "alerts": await alerts_inbox.run(session, now),
+        # Meta's spend for each number, at most daily (spend.py); broadcasts' people past retention, and any stalled.
+        "spend": await spend.refresh(session, now),
+        "broadcast_people_forgotten": await broadcasts.forget(session, now),
+        "broadcasts_resumed": await broadcasts.resume(session, now),
     }
 
 

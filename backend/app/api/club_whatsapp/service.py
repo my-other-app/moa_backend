@@ -42,6 +42,7 @@ from app.api.club_whatsapp.models import (
     DISCONNECTED,
     FAILED,
     LIVE,
+    MODE_EMBEDDED,
     MODE_KEYS,
     QUALITY,
     ClubWhatsAppAccounts,
@@ -60,6 +61,8 @@ FEATURE = "whatsapp_own"
 WEBHOOK_FIELDS = [
     "messages", "message_template_status_update", "template_category_update", "phone_number_quality_update",
     "account_update", "business_capability_update",
+    # Someone stopping marketing in WhatsApp's own settings: a marketing opt-out (optout.py).
+    "user_preferences",
 ]
 
 _ID = re.compile(r"^\d{5,25}$")
@@ -158,7 +161,14 @@ async def latest_account(session, club_id: int) -> Optional[ClubWhatsAppAccounts
 
 
 def keys_of(account: ClubWhatsAppAccounts) -> graph.Keys:
-    """The account's keys, decrypted for a call. crypto.Unavailable when they cannot be."""
+    """The account's keys, decrypted for a call. crypto.Unavailable when they
+    cannot be. A number connected with Meta (Embedded Signup) has a business
+    token of MyOtherApp's own app: its app secret and id are the platform's."""
+    if account.mode == MODE_EMBEDDED:
+        return graph.Keys(
+            token=crypto.decrypt(account.access_token_enc), app_secret=(settings.META_APP_SECRET or "").strip() or None,
+            waba_id=account.waba_id, phone_number_id=account.phone_number_id, app_id=(settings.META_APP_ID or "").strip() or None,
+        )
     return graph.Keys(
         token=crypto.decrypt(account.access_token_enc),
         app_secret=crypto.decrypt(account.app_secret_enc) if account.app_secret_enc else None,
@@ -166,6 +176,15 @@ def keys_of(account: ClubWhatsAppAccounts) -> graph.Keys:
         phone_number_id=account.phone_number_id,
         app_id=account.app_id,
     )
+
+
+def webhook_secret(account: ClubWhatsAppAccounts) -> Optional[str]:
+    """The secret Meta signs this number's webhooks with: the club's app's,
+    or -- connected with Meta -- the platform app's. None when there is
+    none; crypto.Unavailable when it can't be read."""
+    if account.mode == MODE_EMBEDDED:
+        return (settings.META_APP_SECRET or "").strip() or None
+    return crypto.decrypt(account.app_secret_enc) if account.app_secret_enc else None
 
 
 async def require_keys(session, account: ClubWhatsAppAccounts) -> graph.Keys:
@@ -508,6 +527,10 @@ async def connect(session, club, user, keys_in: KeysIn, *, member=None, request=
         await session.execute(delete(ClubWhatsAppTemplates).where(ClubWhatsAppTemplates.account_id == account.id))
         account.quality_rating = account.messaging_limit_tier = None
     account.waba_id, account.phone_number_id, account.app_id = waba_id, phone_id, app_id
+    # Pasted keys are the club's own app's, whatever connected the number before (Embedded Signup's go).
+    account.mode = MODE_KEYS
+    account.token_expires_at = account.registered_at = account.register_pin_enc = None
+    account.on_biz_app = False
     account.access_token_enc = crypto.encrypt(token)
     account.app_secret_enc = crypto.encrypt(secret)
     account.token_last4 = token[-4:]
@@ -642,6 +665,11 @@ async def verify(session, club, user, *, request=None) -> ClubWhatsAppAccounts:
     await require_plan(session, club.id, actor=user)
     was = account.status
     await session.commit()
+    if account.mode == MODE_EMBEDDED:
+        # Connected with Meta and not registered yet (Meta's 10 a number in 72 hours): tried again first.
+        from app.api.club_whatsapp import embedded_signup
+
+        await embedded_signup.register_again(session, account)
     result = await recheck(session, account)
     await audit.record(
         session, actor=user, action="club_whatsapp.verify", entity_type="club", entity_id=club.id,
@@ -820,11 +848,16 @@ async def routing_account(session, club_id: Optional[int]) -> Optional[ClubWhats
     return None if account is None or sending_restricted(account) else account
 
 
-async def can_route(session, club_id: Optional[int]) -> bool:
+async def can_route(session, club_id: Optional[int], template: Optional[str] = None) -> bool:
     """Whether this club's WhatsApp sends may go from its own number at all
-    (an active connection with routing on, on a plan that has it)."""
+    (an active connection with routing on -- for `template`'s kind too,
+    when named -- on a plan that has it)."""
+    from app.api.club_whatsapp import delivery_routes
+
     account = await routing_account(session, club_id)
-    return account is not None and await plan_allows(session, club_id)
+    if account is None or (template and not delivery_routes.kind_on(account, template)):
+        return False
+    return await plan_allows(session, club_id)
 
 
 async def route_for(session, club_id: Optional[int], template: str, *, cache: Optional[dict] = None) -> Optional[Route]:
@@ -846,10 +879,12 @@ async def route_for(session, club_id: Optional[int], template: str, *, cache: Op
 
 
 async def _route_for(session, club_id: Optional[int], template: str) -> Optional[Route]:
+    from app.api.club_whatsapp import delivery_routes, templates
+
     account = await routing_account(session, club_id)
-    if account is None or not await plan_allows(session, club_id):
+    # The master switch (routing_account), then this kind's own.
+    if account is None or not delivery_routes.kind_on(account, template) or not await plan_allows(session, club_id):
         return None
-    from app.api.club_whatsapp import templates
 
     # Approved, and in the shape our send fills: any other would be refused at every send.
     language = await templates.usable_language(session, account.id, template)
@@ -1054,6 +1089,9 @@ async def admin_out(session, club_id: int) -> dict:
     out["conversations"] = int(await session.scalar(
         select(func.count()).select_from(ClubWhatsAppConversations).where(ClubWhatsAppConversations.club_id == club_id)
     ) or 0)
+    from app.api.club_whatsapp import delivery_routes
+
+    out.update(await delivery_routes.admin_month(session, club_id))
     return out
 
 

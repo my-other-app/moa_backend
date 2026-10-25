@@ -15,6 +15,11 @@ class DeliveryBrief(BaseModel):
     reason: Optional[str] = None
     attempts: int = 0
     sent_at: Optional[datetime] = None
+    # A WhatsApp send's number: "club" (the club's own) or "platform"; and,
+    # from the platform's when the club wanted its own, why (Meta's code or ours).
+    via: Optional[str] = None
+    fallback_code: Optional[str] = None
+    fallback_reason: Optional[str] = None
 
 
 class SendTicketsRequest(BaseModel):
@@ -77,6 +82,10 @@ class DeliveryLogRow(BaseModel):
     attempts: int
     sent_at: Optional[datetime]
     outcome_at: Optional[datetime]
+    # As DeliveryBrief: which number a WhatsApp send went from, and why it fell back.
+    via: Optional[str] = None
+    fallback_code: Optional[str] = None
+    fallback_reason: Optional[str] = None
 
 
 class DeliveryTally(BaseModel):

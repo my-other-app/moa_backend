@@ -4,6 +4,7 @@ from uuid import UUID
 
 from pydantic import Field
 
+from app.api.club_whatsapp.inbox_schemas import AssigneeOut, BlockedOut, OptOutOut, QuotedOut
 from app.core.response.base_model import CustomBaseModel
 
 
@@ -163,6 +164,12 @@ class ConversationOut(CustomBaseModel):
     #: Free text may be sent until window_expires_at; after it, a template only.
     window_open: bool
     window_expires_at: Optional[datetime] = None
+    #: The team's (inbox_schemas): who answers it, a block, an opt-out (the thread's banner), notes.
+    assignee: Optional[AssigneeOut] = None
+    assigned_at: Optional[datetime] = None
+    blocked: Optional[BlockedOut] = None
+    opt_out: Optional[OptOutOut] = None
+    notes: int = 0
 
 
 class ConversationList(CustomBaseModel):
@@ -204,11 +211,13 @@ class MessageOut(CustomBaseModel):
     status: str
     status_at: Optional[datetime] = None
     error: Optional[MessageError] = None
-    #: inbox | delivery, for what was sent
+    #: inbox | delivery | auto (the answer to STOP or START), for what was sent
     via: Optional[str] = None
     sent_by: Optional[str] = None
     created_at: datetime
     wa_timestamp: Optional[datetime] = None
+    #: The message `context_wamid` names, when it is in this conversation: the quoted bubble.
+    quoted: Optional[QuotedOut] = None
 
 
 class MessageList(CustomBaseModel):
@@ -227,6 +236,8 @@ class SendIn(CustomBaseModel):
     language: Optional[str] = Field(None, max_length=16)
     #: {"header": [...], "body": [...], "buttons": {"0": "..."}}
     params: dict[str, Any] = Field(default_factory=dict)
+    #: A message of the conversation this text answers (Meta's context): quoted above it.
+    reply_to: Optional[int] = None
 
 
 class ConversationPatch(CustomBaseModel):
@@ -333,3 +344,7 @@ class AdminWhatsAppOut(CustomBaseModel):
     connected_at: Optional[datetime] = None
     conversations: int = 0
     plan_allows: bool = False
+    #: This month: WhatsApp deliveries sent from the club's own number, and
+    #: those that went from MyOtherApp's though the club wanted its own.
+    club_sends_this_month: int = 0
+    fallbacks_this_month: int = 0

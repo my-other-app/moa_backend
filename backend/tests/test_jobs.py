@@ -253,6 +253,8 @@ def test_the_platforms_jobs_have_the_priorities_and_limits_chosen(monkeypatch):
         # A mail or push someone is waiting for.
         "admin_alerts.deliver": (H, 4), "mail.billing_notice": (H, 4), "mail.club_domain_notice": (H, 4),
         "mail.club_whatsapp_notice": (H, 4),
+        # The answer to STOP or START, inside the window their message just opened.
+        "club_whatsapp.auto_reply": (H, 4),
         "clubs.approved_email": (H, 4), "checkins.after": (H, 4),
         "payments.receipt": (H, 2),  # a wkhtmltopdf process each
         # The room told the quiz is starting: it is starting now, for a hall at most.
@@ -261,6 +263,8 @@ def test_the_platforms_jobs_have_the_priorities_and_limits_chosen(monkeypatch):
         "deliveries.send": (N, 2), "emails.send_message": (N, 2),
         "notifications.new_event": (N, 2), "notifications.interest": (N, 2), "notifications.push": (N, 2),
         "threads.tell_followers": (N, 2),
+        # A club's broadcast from its own number: paced, so long; one slot at most on a runner.
+        "club_whatsapp.broadcast": (N, 1),
         "notifications.broadcast": (N, 4), "push.topic": (N, 4), "push.devices": (N, 4), "push.unsubscribe": (N, 4),
         "live.survey_mail": (N, 4),
         # Nobody watches these happen.
