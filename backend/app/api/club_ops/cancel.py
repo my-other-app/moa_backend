@@ -138,7 +138,10 @@ async def state(session, event: Events) -> dict:
         select(ClubRefunds).where(ClubRefunds.event_id == event.id, ClubRefunds.source == CANCELLATION)
         .order_by(ClubRefunds.created_at, ClubRefunds.id)
     )).all())
-    pending = await _to_refund(session, event)
+    # Money still on a payment the cancellation has no refund for yet (one
+    # that came in after it); a payment whose refund failed is already a row.
+    covered = {r.payment_log_id for r in rows}
+    pending = [p for p in await _to_refund(session, event) if p[0].id not in covered]
     if c is None:
         paid_online = len(pending)
         refund_paise = sum(p for _, _, p in pending)

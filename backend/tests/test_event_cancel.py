@@ -182,6 +182,8 @@ async def test_a_refund_razorpay_refuses_is_listed_and_retried(client, session, 
     assert r.status_code == 200
     s = (await client.get(_url(world), headers=world.h)).json()
     assert s["refunds"]["failed"] == 2 and len(s["failures"]) == 2
+    # Each payment counted once, failed or not.
+    assert s["paid_online"] == 2 and s["refund_total"] == 250.0
     assert {f["gateway"] for f in s["failures"]} == {"platform"} and s["failures"][0]["error"]
     world.rz.fail_with = None
     again = await client.post(_url(world, "/retry"), headers=world.h)
