@@ -23,7 +23,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 
 from app.api.club_access import service as club_access
-from app.api.club_whatsapp import access, crypto, graph, inbox, live, templates, webhook
+from app.api.club_whatsapp import access, alerts_inbox, crypto, graph, inbox, live, replies, teamwork, templates, webhook
 from app.api.club_whatsapp import service
 from app.api.club_whatsapp.models import DISCONNECTED, ClubWhatsAppConversations, ClubWhatsAppQualityLog
 from app.api.club_whatsapp.schemas import (
@@ -164,18 +164,19 @@ async def overview(request: Request, session: SessionDep, user: ClubAuth, days: 
 @club_router.get("/conversations", summary="The inbox: conversations, latest first")
 async def list_conversations(
     request: Request, session: SessionDep, user: ClubAuth,
-    filter: str = Query("all", description="all, open, unanswered, unread or closed"),
+    filter: str = Query("all", description="all, open, unanswered, unread, closed, mine, unassigned or blocked"),
+    assignee: Optional[str] = Query(None, max_length=20, description='"owner" or a member\'s id: their conversations'),
     q: Optional[str] = Query(None, max_length=100, description="A name or part of a number"),
     offset: int = Query(0, ge=0), limit: int = Query(30, ge=1, le=100),
 ) -> ConversationList:
+    """Blocked conversations are in the `blocked` filter alone, and not in `unread_total`."""
     access.require_inbox(request)
     club = await service.club_of(session, user)
-    rows, total = await inbox.list_conversations(session, club.id, filter=filter, q=q, offset=offset, limit=limit)
+    base, extra = teamwork.filter_clauses(filter, assignee, teamwork.viewer(request, user))
+    rows, total = await inbox.list_conversations(session, club.id, filter=base, q=q, offset=offset, limit=limit, extra=tuple(extra))
     events = await inbox.contact_events(session, club.id, rows)
-    unread = await session.scalar(
-        select(func.coalesce(func.sum(ClubWhatsAppConversations.unread_count), 0)).where(ClubWhatsAppConversations.club_id == club.id)
-    )
-    return {"items": [inbox.conversation_out(c, events.get(c.id, [])) for c in rows], "total": total, "unread_total": int(unread or 0)}
+    return {"items": [inbox.conversation_out(c, events.get(c.id, [])) for c in rows], "total": total,
+            "unread_total": await alerts_inbox.unread_total(session, club.id)}
 
 
 @club_router.post("/conversations", summary="Start a conversation with someone registered who asked for WhatsApp")
@@ -204,8 +205,9 @@ async def list_messages(
     # Older messages before the first item (catching up with `after` never pages back).
     has_more = more if after is None else False
     events = await inbox.contact_events(session, club.id, [conv])
+    quoted = await replies.quotes(session, conv.id, rows)
     return {"conversation": inbox.conversation_out(conv, events.get(conv.id, [])),
-            "items": [inbox.message_out(m) for m in rows], "has_more": has_more}
+            "items": [{**inbox.message_out(m), "quoted": quoted.get(m.context_wamid)} for m in rows], "has_more": has_more}
 
 
 @club_router.post("/conversations/{conversation_id}/messages", summary="Reply: free text in the window, a template any time")
@@ -220,12 +222,15 @@ async def send_message(conversation_id: int, payload: SendIn, request: Request, 
     conv = await inbox.get_conversation(session, club.id, conversation_id)
     actor = _actor(request, user)
     if payload.type == "text":
-        msg = await inbox.send_text(session, club.id, conv, payload.text or "", actor, actor_user=user)
+        context = await replies.context_for(session, conv, payload.reply_to)
+        msg = await inbox.send_text(session, club.id, conv, payload.text or "", actor, actor_user=user, context=context)
     else:
         if not payload.template:
             raise CustomHTTPException(status_code=422, message="Pick a template.", error_code="INVALID_TEMPLATE", errors={"field": "template"})
         msg = await inbox.send_template(session, club.id, conv, payload.template, payload.language, payload.params, actor, actor_user=user)
-    out = inbox.message_out(msg)
+    out = {**inbox.message_out(msg), "quoted": (await replies.quotes(session, conv.id, [msg])).get(msg.context_wamid)}
+    # A reply reads what it answers: its bell notice goes.
+    await alerts_inbox.sync_conversation(session, club.id, conv.id)
     await session.commit()
     await live.changed(club.id, conv.id, "message")
     return out
@@ -239,6 +244,8 @@ async def read_conversation(conversation_id: int, request: Request, session: Ses
     conv = await inbox.get_conversation(session, club.id, conversation_id)
     had = conv.unread_count
     wamid = await inbox.mark_read(session, conv)
+    await session.flush()
+    await alerts_inbox.sync_conversation(session, club.id, conv.id)
     await session.commit()
     if had and wamid:
         account = await service.live_account(session, club.id)

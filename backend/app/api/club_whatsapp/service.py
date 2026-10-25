@@ -60,6 +60,8 @@ FEATURE = "whatsapp_own"
 WEBHOOK_FIELDS = [
     "messages", "message_template_status_update", "template_category_update", "phone_number_quality_update",
     "account_update", "business_capability_update",
+    # Someone stopping marketing in WhatsApp's own settings: a marketing opt-out (optout.py).
+    "user_preferences",
 ]
 
 _ID = re.compile(r"^\d{5,25}$")

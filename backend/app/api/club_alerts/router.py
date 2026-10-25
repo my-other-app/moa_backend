@@ -1,5 +1,5 @@
 """The club dashboard's bell: what the platform told the club, newest first."""
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from pydantic import Field
 
 from app.api.club_alerts import service
@@ -50,12 +50,17 @@ async def _club(session, user) -> Clubs:
 
 
 @router.get("", summary="The club's notices, newest first, and how many are unread")
-async def list_alerts(session: SessionDep, user: ClubAuth, limit: int = Query(service.LIMIT, ge=1, le=100)) -> ClubAlertsOut:
+async def list_alerts(request: Request, session: SessionDep, user: ClubAuth, limit: int = Query(service.LIMIT, ge=1, le=100)) -> ClubAlertsOut:
+    """The WhatsApp inbox's notices only to those who can read it."""
+    from app.api.club_whatsapp.alerts_inbox import hidden_kinds
+
     club = await _club(session, user)
-    return await service.listing(session, club.id, limit=limit)
+    return await service.listing(session, club.id, limit=limit, hide=hidden_kinds(request))
 
 
 @router.post("/read", summary="Mark the club's notices read (these, or all)")
-async def mark_read(payload: MarkReadIn, session: SessionDep, user: ClubAuth) -> MarkReadOut:
+async def mark_read(payload: MarkReadIn, request: Request, session: SessionDep, user: ClubAuth) -> MarkReadOut:
+    from app.api.club_whatsapp.alerts_inbox import hidden_kinds
+
     club = await _club(session, user)
-    return {"marked": await service.mark_read(session, club.id, payload.ids)}
+    return {"marked": await service.mark_read(session, club.id, payload.ids, hide=hidden_kinds(request))}

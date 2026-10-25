@@ -24,6 +24,8 @@ KINDS: dict[str, str] = {
     "whatsapp_failed": "The club's own WhatsApp number stopped working (Meta refused its keys or its account)",
     "whatsapp_quality": "The club's own WhatsApp number's quality rating or messaging limit dropped",
     "whatsapp_restricted": "Meta restricted the club's own WhatsApp account",
+    "whatsapp_message": "A conversation in the club's WhatsApp inbox has unread messages (the inbox's people only)",
+    "whatsapp_waiting": "A WhatsApp conversation has waited too long for an answer (the inbox's people only)",
 }
 
 #: How many the bell shows at most.
@@ -70,21 +72,26 @@ def alert_out(row: ClubAlerts) -> dict:
     }
 
 
-async def listing(session, club_id: int, *, limit: int = LIMIT) -> dict:
+async def listing(session, club_id: int, *, limit: int = LIMIT, hide: frozenset = frozenset()) -> dict:
+    """`hide`: kinds this viewer may not see (the WhatsApp inbox's, without the inbox)."""
+    seen = [ClubAlerts.club_id == club_id, *([ClubAlerts.kind.not_in(hide)] if hide else [])]
     rows = list(
         await session.scalars(
-            select(ClubAlerts).where(ClubAlerts.club_id == club_id).order_by(ClubAlerts.created_at.desc(), ClubAlerts.id.desc()).limit(limit)
+            select(ClubAlerts).where(*seen).order_by(ClubAlerts.created_at.desc(), ClubAlerts.id.desc()).limit(limit)
         )
     )
     unread = await session.scalar(
-        select(func.count(ClubAlerts.id)).where(ClubAlerts.club_id == club_id, ClubAlerts.read_at.is_(None))
+        select(func.count(ClubAlerts.id)).where(*seen, ClubAlerts.read_at.is_(None))
     )
     return {"items": [alert_out(r) for r in rows], "unread": int(unread or 0)}
 
 
-async def mark_read(session, club_id: int, ids: list[int] | None = None) -> int:
-    """Mark the club's notices read: these ids, or every one. Returns how many changed."""
+async def mark_read(session, club_id: int, ids: list[int] | None = None, hide: frozenset = frozenset()) -> int:
+    """Mark the club's notices read: these ids, or every one (but the `hide`
+    kinds, which this viewer doesn't see). Returns how many changed."""
     query = update(ClubAlerts).where(ClubAlerts.club_id == club_id, ClubAlerts.read_at.is_(None))
+    if hide:
+        query = query.where(ClubAlerts.kind.not_in(hide))
     if ids:
         query = query.where(ClubAlerts.id.in_(ids))
     res = await session.execute(query.values(read_at=_now()).execution_options(synchronize_session=False))

@@ -136,6 +136,12 @@ CLASSIFICATION: dict[str, str] = {
     "club_whatsapp_templates": WIPE,
     "club_whatsapp_conversations": WIPE,
     "club_whatsapp_messages": WIPE,
+    # Its inbox worked as a team: who opted out, notes, saved replies, settings, each person's mails.
+    "club_whatsapp_optouts": WIPE,
+    "club_whatsapp_notes": WIPE,
+    "club_whatsapp_saved_replies": WIPE,
+    "club_whatsapp_inbox_settings": WIPE,
+    "club_whatsapp_person_prefs": WIPE,
     "club_sites": WIPE,
     "club_socials": WIPE,
     "club_subscriptions": WIPE,

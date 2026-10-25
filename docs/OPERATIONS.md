@@ -2160,8 +2160,8 @@ in the audit log (`club_whatsapp.*`); disconnecting wipes the keys.
    webhook URL and the verify token -> Verify and save. Under Webhook
    fields, **Subscribe** to `messages`, `message_template_status_update`,
    `template_category_update`, `phone_number_quality_update`,
-   `account_update` and `business_capability_update` (the Settings page
-   lists them).
+   `account_update`, `business_capability_update` and `user_preferences`
+   (the Settings page lists them).
 9. In the dashboard: WhatsApp -> Templates -> **Add MyOtherApp's
    templates** (the ticket, reminder and certificate). Once Meta approves
    them (minutes to a day), tickets go from the club's number.
@@ -2219,3 +2219,180 @@ once Meta shares the number. A changed number or BSUID (the
 `user_changed_number` / `user_changed_user_id` system messages) moves the
 conversation to the new ones. A new conversation can still only be started
 with a registration's phone number.
+
+### The inbox's alerts
+
+Only the people who can read the inbox (the owner, and the members with the
+WhatsApp permission) hear of a message, and never what it says: a contact's
+display name (the registration's name, else their WhatsApp profile name,
+username or number) and a count.
+
+- **The bell.** One notice per conversation while it has unread messages
+  from them (`whatsapp_message`, "Ananya Iyer: 2 unread WhatsApp
+  messages"), brought to the top as each arrives, gone once the
+  conversation is read or answered. The bell's list (`GET /clubs/alerts`)
+  and "mark all read" leave it out for anyone else -- a member without the
+  permission, an admin acting as the club.
+- **A mail** to each of those people when a message has waited unread 15
+  minutes -- at the sweep's next pass, so 15 to 30 minutes after it came --
+  at most one an hour each, and only when something arrived since their
+  last one. Each person turns it off in WhatsApp -> Settings ->
+  Notifications (`PATCH /clubs/whatsapp/inbox-settings/me`,
+  `email_messages`; on by default).
+- **Waiting too long.** A conversation whose oldest unanswered message has
+  waited the club's `alert_after_hours` (4 by default, 1 to 48: `PATCH
+  /clubs/whatsapp/inbox-settings`) raises a bell notice
+  (`whatsapp_waiting`) and a mail, once for that wait; an answer ends the
+  wait (its notice is marked read), and the next message starts another.
+- A conversation the club blocked alerts nobody.
+
+The mails are the platform's own to the club (`mail.club_whatsapp_notice`
+jobs), not counted against its message quotas. The club_whatsapp sweep
+(every 15 minutes) runs the mails and the waiting alerts, and drops any
+message notice whose conversation has nothing unread left
+(`"alerts": {"waiting", "mailed", "tidied"}` in its log line). The
+dashboard also shows the unread count on its WhatsApp item and in the tab's
+title (`GET /clubs/whatsapp/summary`: counts only), and each browser may
+turn on its own notifications for messages that arrive while the tab is
+hidden.
+
+### STOP, opt-outs and blocking
+
+**Opt-outs** are kept in `club_whatsapp_optouts`, by the person's WhatsApp
+id and/or BSUID, in two scopes:
+
+| Scope | Set by | Cleared by | What it stops |
+|---|---|---|---|
+| `all` | a message that is exactly STOP, STOP ALL, UNSUBSCRIBE, OPT OUT or OPTOUT (trimmed, any case, trailing punctuation ignored) -- source `keyword`; or the team, on their word -- `team` | START, SUBSCRIBE, OPT IN or UNSTOP; or the team | every template from the club's number (the inbox's, a new conversation, broadcasts); their tickets, certificates and reminders for the club's events skip WhatsApp from the club's number **and** the platform's (the email still goes; the WhatsApp row is skipped "opted out of <club> on WhatsApp"). Free text and files still go inside a 24-hour window they open themselves |
+| `marketing` | WhatsApp's own "stop marketing" (`user_preferences` webhook, `stop`) -- `user_preferences`; Meta failing a marketing template with 131050 -- `meta_131050`; or the team | `user_preferences` `resume` (the team can't undo what the person set in WhatsApp: 409 OPTOUT_IS_THEIRS) | MARKETING templates (409 OPTED_OUT_MARKETING) |
+
+STOP and START are answered at once, as a reply to their message, inside
+the window it opened (a job, `club_whatsapp.auto_reply`), and only when
+something changed: the club's own words (WhatsApp -> Settings, "{club}" is
+its name), or the defaults. Nothing is sent to someone the club blocked,
+nor while the number can't send. The thread shows a banner while they are
+opted out. Retention never deletes an opt-out. The team's opt-outs and
+opt-ins are audited (`club_whatsapp.optout`/`optin`, no content).
+`optout.blocked(session, club_id, *, wa_id=None, bsuid=None,
+scope="all"|"marketing") -> bool` is the one question other code asks
+(the broadcasts): an opt-out of that scope (marketing: either), or a block.
+
+Subscribe the club's app to **`user_preferences`** too (Settings lists it
+with the other webhook fields; clubs connected before this need to tick it).
+
+**Blocking** (`POST /clubs/whatsapp/conversations/{id}/block`):
+
+- At Meta (`POST /{number}/block_users`, by number, or by BSUID -- never a
+  parent BSUID): they can't write to the number any more. Meta allows it
+  only within 24 hours of their last message: after that the page says so
+  (409 BLOCK_WINDOW_CLOSED, `errors.local_available`) and offers a block
+  here instead. Meta's 139100 (some failed: each person's own error is
+  read), 139101 (blocklist full, 64,000), 139102/139103/130429 (try again:
+  503 BLOCK_TRY_AGAIN) and 131021 (the club's own number) are each said.
+- Here only (`{"local_only": true}`): Meta isn't asked. They can still
+  write; it is kept, in the **Blocked** filter only, with no alerts.
+
+Either way nothing is sent to them (409 CONTACT_BLOCKED) and the
+broadcasts skip them. `DELETE .../block` lifts it (at Meta too when it was
+blocked there; `?local_only=true` forgets it here only, say after lifting it
+in WhatsApp Manager). Audited (`club_whatsapp.block`/`unblock`).
+
+### Sending files, and replying to a message
+
+`POST /clubs/whatsapp/conversations/{id}/media`, multipart: `size` (the
+file's bytes) **before** the `file`, and `caption`, `reply_to`. Checked
+before a byte goes to Meta:
+
+| Kind | Types | At most |
+|---|---|---|
+| image | image/jpeg, image/png | 5 MB |
+| video | video/mp4, video/3gpp | 16 MB |
+| audio | audio/aac, audio/amr, audio/mpeg, audio/mp4, audio/ogg (Opus only) | 16 MB |
+| document | text/plain, PDF, .doc/.docx, .xls/.xlsx, .ppt/.pptx | 100 MB |
+
+(A MB is 1,000,000 bytes, under Meta's limit whichever MB it means. The
+first bytes of a JPEG, PNG, PDF, MP4 or Ogg must agree with its type.) The
+caption is at most 1,024 characters and not on a sound; a document keeps
+its file name. 415 MEDIA_TYPE, 413 MEDIA_TOO_LARGE, 422
+MEDIA_SIZE_MISSING/MEDIA_SIZE_MISMATCH/CAPTION_TOO_LONG/CAPTION_NOT_ALLOWED,
+409 WINDOW_CLOSED (only inside the 24-hour window) or CONTACT_BLOCKED.
+
+**Nothing is stored on our server.** The bytes are read as they arrive and
+streamed to Meta's upload on the club's number (`POST /{number}/media`, with
+the exact length), which gives a media id good for **30 days**; the message
+is kept with that id and shown through the same authenticated proxy (and
+sandboxing headers) as what arrives. For that to hold, **nginx must not
+buffer the upload to disk** and must let it through: on the server, give
+this one location its own block, e.g.
+
+```nginx
+location ~ ^/api/v1/clubs/whatsapp/conversations/\d+/media$ {
+    client_max_body_size 101M;
+    proxy_request_buffering off;
+    proxy_pass http://backend;   # as the main location
+}
+```
+
+Cloudflare in front takes at most 100 MB a request (its free and pro
+plans): a document just under 100 MB, with the form around it, may be
+refused there (413). The clubs dashboard's gateway streams this one route
+on as it arrives too (moa_web `packages/auth/src/gateway.ts`, `STREAMED`),
+so the dashboard's server doesn't hold the file either. On Vercel a
+function takes at most 4.5 MB a request: files larger than that need the
+dashboard self-hosted (the Oracle server), or they are refused (413) before
+the API sees them.
+
+**Replies.** A text (`POST .../messages` with `reply_to`, a message id of
+the conversation) or a file (`reply_to` in the form) carries Meta's
+`context.message_id`; WhatsApp shows the quoted message above it. The
+thread returns `quoted` (who sent it, a line of it) for each message that
+answers another, theirs or the club's. A template can't show a quote, and a
+reaction isn't one.
+
+### Working as a team: assigning, notes, saved replies
+
+- **Assigning** (`PUT .../conversations/{id}/assignee`, `{"owner": true}`,
+  `{"member_id": n}` or `{}`): only to the owner or a member with the
+  WhatsApp permission (422 INVALID_ASSIGNEE). The inbox filters **Mine**,
+  **Unassigned**, **Blocked**, and each person (`?assignee=owner` or
+  `member:<id>`; `GET /clubs/whatsapp/team` lists them). The assignee is
+  mailed "a conversation was assigned to you" -- who assigned it and the
+  contact's name, no content -- unless they turned it off (`email_assigned`)
+  or assigned it to themselves. Audited (`club_whatsapp.assign`).
+- **Notes** (`.../conversations/{id}/notes`): up to 2,000 characters, with
+  author and time; for the inbox's people only, never sent; deleted with the
+  conversation by retention; their author or the owner deletes one (403
+  NOTE_NOT_YOURS). Audited without their words (`club_whatsapp.note`,
+  `note_delete`).
+- **Saved replies** (`/clubs/whatsapp/saved-replies`): a title (60), a body
+  (4,096) and an optional `/shortcut` (one word, unique in the club: 409
+  SHORTCUT_TAKEN). The composer's "/" finds them, and "{name}" becomes the
+  contact's display name. The owner and the members with the permission
+  manage them.
+
+Every one of these routes is the inbox's: an admin acting as the club gets
+403 WHATSAPP_PRIVATE, a member without the permission 403
+WHATSAPP_PERMISSION.
+
+### Turning on the inbox's team features
+
+Deploy with the migration (`club_whatsapp_inbox`, after `club_whatsapp`):
+`sync_code`, `restart_backend`, `migrate`. It adds eight nullable or
+constant-default columns and three small partial indexes to
+`club_whatsapp_conversations` (unread messages get their `unread_since`
+from the messages already kept), and five new tables:
+`club_whatsapp_optouts`, `club_whatsapp_notes`,
+`club_whatsapp_saved_replies`, `club_whatsapp_inbox_settings`,
+`club_whatsapp_person_prefs`. Then the nginx location above, and tell
+connected clubs to tick `user_preferences` in their app's webhook fields.
+
+```sql
+-- Who opted out of which club, and why (no message content).
+SELECT club_id, scope, source, count(*) FROM club_whatsapp_optouts GROUP BY 1, 2, 3 ORDER BY 1;
+
+-- Conversations waiting, unread, blocked, assigned.
+SELECT club_id, count(*) FILTER (WHERE awaiting_since IS NOT NULL) AS waiting,
+       count(*) FILTER (WHERE unread_count > 0) AS unread, count(*) FILTER (WHERE blocked_at IS NOT NULL) AS blocked,
+       count(*) FILTER (WHERE assigned_owner OR assigned_member_id IS NOT NULL) AS assigned
+FROM club_whatsapp_conversations GROUP BY 1 ORDER BY 1;
+```
