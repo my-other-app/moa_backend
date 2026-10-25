@@ -267,8 +267,11 @@ async def _no_place(session: AsyncSession, event: Events, room, *, organiser: bo
     if going is None:
         return CustomHTTPException(404, message="Event not found")
     if room is None or room.event_cap is None or (event.max_participants and going >= event.max_participants):
-        return CustomHTTPException(
-            400, message="Event is full", error_code="EVENT_FULL", errors={"max_participants": event.max_participants}
+        from app.api.ticketing import places as ticketing_places
+        from app.api.ticketing import waitlist as ticketing_waitlist
+
+        return ticketing_places.full(
+            waitlist=await ticketing_waitlist.joinable(session, event), max_participants=event.max_participants,
         )
     from app.api.subscriptions import gates
 
@@ -295,9 +298,19 @@ async def register_event(
     claim_existing: bool = True,
     by_organiser: bool = False,
     whatsapp_opt_in: bool | None = None,
+    ticket_type_id: int | None = None,
+    discount_code: str | None = None,
+    offer=None,
 ):
     """`relaxed_fields` is for a guest registered at the door: nothing is
     required there, and what they answer goes on the record.
+
+    `ticket_type_id`, `discount_code`: the ticket type it is for and the code
+    typed for it (app/api/ticketing). Without a type, the event's only one;
+    an event selling several refuses it (422 TICKET_TYPE_REQUIRED), but for
+    the organiser adding a guest, who gets the default. What it costs is
+    worked out here alone (ticketing.quote). `offer`: the waiting-list offer
+    it claims (ticketing.waitlist), whose place it takes.
 
     `whatsapp_opt_in` is the guest's own tick on the form, "Send my ticket
     and event reminders on WhatsApp": True asks for it (and needs a number
@@ -362,7 +375,8 @@ async def register_event(
     # Check if registration deadline has passed
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
-    if db_event.reg_enddate and db_event.reg_enddate < now:
+    # (A waiting-list offer made in time may be claimed until it runs out.)
+    if db_event.reg_enddate and db_event.reg_enddate < now and offer is None:
         raise CustomHTTPException(400, message="Registration deadline has passed", error_code="REGISTRATIONS_CLOSED", errors={"closed_reason": "deadline_passed", "closed_at": db_event.reg_enddate.isoformat()})
     
     # Check if registration hasn't started yet
@@ -374,7 +388,13 @@ async def register_event(
     # event take_place makes it exact.
     if db_event.max_participants:
         if await places_taken(session, db_event) >= db_event.max_participants:
-            raise CustomHTTPException(400, message="Event is full", error_code="EVENT_FULL", errors={"max_participants": db_event.max_participants})
+            # Saying whether its waiting list can be joined instead (app/api/ticketing).
+            from app.api.ticketing import places as ticketing_places
+            from app.api.ticketing import waitlist as ticketing_waitlist
+
+            raise ticketing_places.full(
+                waitlist=await ticketing_waitlist.joinable(session, db_event), max_participants=db_event.max_participants,
+            )
 
     # The answers: bounded always, and checked against the event's own
     # questions when it asks any (answers.py). Before any lock is taken.
@@ -425,7 +445,34 @@ async def register_event(
             registration.whatsapp_opt_in = True
             registration.whatsapp_opt_in_at = now
             await session.commit()
+        # Back to pay, asking for another ticket type or with a code: priced
+        # again (it keeps its own type when it names none).
+        if (
+            (ticket_type_id is not None and ticket_type_id != registration.ticket_type_id) or discount_code
+        ) and not registration.is_paid:
+            from app.api.ticketing import quote as ticketing_quote
+            from app.api.ticketing import service as ticketing
+
+            priced = await ticketing_quote.quote(
+                session, db_event, ticket_type_id=ticket_type_id if ticket_type_id is not None else registration.ticket_type_id,
+                discount_code=discount_code, email=email, phone=phone, user_id=user_id, exclude=registration.id,
+            )
+            if await ticketing.requote(session, db_event, registration, priced) and notify:
+                from app.api.deliveries import service as deliveries
+
+                await deliveries.send_ticket(session, db_event, registration, background_tasks)
     else:
+        # Its ticket type and what it costs, worked out by the server alone,
+        # and every check of them that can refuse it before anything is
+        # written (app/api/ticketing/quote.py).
+        from app.api.ticketing import places as ticketing_places
+        from app.api.ticketing import quote as ticketing_quote
+        from app.api.ticketing import service as ticketing
+
+        priced = await ticketing_quote.quote(
+            session, db_event, ticket_type_id=ticket_type_id, discount_code=discount_code, email=email, phone=phone,
+            user_id=user_id, organiser=by_organiser, offer=offer,
+        )
         # The club's plan caps registrations per event and per month, on top
         # of the organiser's own max_participants above (never for an event
         # made before the caps began).
@@ -451,6 +498,8 @@ async def register_event(
             # None explicitly would violate the not-null constraint.
             **({"role": role} if role is not None else {}),
         )
+        # Its type, what it owes, and on a paid event confirmed now when that is nothing.
+        priced.apply(registration, db_event)
         # Credited to the tracking link the page carried, if it carried one of this club's.
         from app.api.links import service as links
 
@@ -467,9 +516,13 @@ async def register_event(
             raise await _no_place(session, db_event, room, organiser=by_organiser)
         seq, going_now = taken
         await gates.recheck_month(session, db_event, room, going_now=going_now, organiser=by_organiser)
+        # A ticket that owes nothing holds its place now: its type's, and on a
+        # paid event a paid place, the waiting list counted (ticketing.places).
+        await ticketing_places.take_room(session, db_event, priced, going_now=going_now)
         # Its admission number, from the event's own counter, before the row is kept.
         registration.admission_no = admission.number_for(db_event, seq)
         await insert_registration(session, registration)
+        await ticketing.after_insert(session, db_event, registration, priced)
 
         if store_picks:
             from app.api.store import service as store
@@ -486,9 +539,10 @@ async def register_event(
             .filter(Events.id == registration.event_id)
             .options(joinedload(Events.club))
         )
-        if not db_event.has_fee and notify:
+        if (not db_event.has_fee or registration.is_paid) and notify:
             # The ticket goes out as the event's invite email, through the
             # same queue as Send tickets, so the attendee list shows it land.
+            # (On a paid event, a ticket that owed nothing: a free type, or a code.)
             try:
                 from app.api.deliveries import service as deliveries
 
@@ -522,6 +576,9 @@ async def register_event(
 
     pending_store = await store.pending_for(session, data.id)
     payment_remining = max(0, (data.actual_amount or 0) - (data.paid_amount or 0)) + (pending_store.total if pending_store else 0)
+    from app.api.ticketing import service as ticketing_service
+
+    ticket = await ticketing_service.summary_for(session, data)
 
     # Check for new user badges after registration
     try:
@@ -544,6 +601,8 @@ async def register_event(
         "phone": data.phone,
         "additional_details": data.additional_details,
         "whatsapp_opt_in": bool(data.whatsapp_opt_in),
+        **ticket,
+        "is_paid": bool(data.is_paid),
     }
 
 
@@ -649,6 +708,9 @@ async def list_event_registrations(
     sent = await deliveries.by_registration(
         session, event_id, DeliveryKind.ticket, [r.id for r in registrations]
     )
+    from app.api.ticketing import types as ticket_types
+
+    type_names = await ticket_types.names(session, [r.ticket_type_id for r in registrations])
     
     # Manually serialize to avoid Pydantic validation errors with nested SQLAlchemy models
     serialized_results = []
@@ -740,6 +802,8 @@ async def list_event_registrations(
                 "email_bounced_at": reg.email_bounced_at,
                 "email_bounce_reason": reg.email_bounce_reason,
                 "admission_no": reg.admission_no,
+                "ticket_type_id": reg.ticket_type_id,
+                "ticket_type_name": type_names.get(reg.ticket_type_id),
             })
         except Exception as e:
             logger.error(f"Error serializing registration {reg.id}: {e}")

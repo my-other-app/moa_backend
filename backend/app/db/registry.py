@@ -35,6 +35,8 @@ from app.api.finance import models as _finance_models  # noqa: F401
 from app.api.security import models as _security_models  # noqa: F401
 from app.api.threads import models as _threads_models  # noqa: F401
 from app.api.store import models as _store_models  # noqa: F401
+# Ticket types, discount codes and waiting lists (app/api/ticketing).
+from app.api.ticketing import models as _ticketing_models  # noqa: F401
 from app.api.live import models as _live_models  # noqa: F401
 from app.api.competitions import models as _competition_models  # noqa: F401
 from app.api.sites import models as _site_models  # noqa: F401

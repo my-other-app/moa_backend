@@ -54,8 +54,15 @@ async def duplicate(session: SessionDep, user: ClubAuth, event_id: int, body: Du
     # A new event: this month's count, and paid tickets when the copy is paid.
     await gates.check_event_create(session, source.club_id, has_fee=bool(source.has_fee), actor=user)
     allowed = await gates.duplicate_allowances(session, source.club_id, actor=user)
-    return Duplicated(**await duplicate_event(
+    copied = await duplicate_event(
         session, source, user, name=body.name, event_datetime=body.event_datetime, duration=body.duration,
         copy_doors=body.copy_doors, copy_team=body.copy_team, copy_agenda=body.copy_agenda, copy_merch=body.copy_merch,
         allowed=allowed,
-    ))
+    )
+    # Its ticket types, set up as the source's (app/api/ticketing): as many as the plan allows.
+    from app.api.ticketing import types as ticket_types
+
+    cap = await gates.cap(session, source.club_id, "ticket_types_per_event", actor=user)
+    n = await ticket_types.copy_from(session, source, copied["id"], allow_more=cap is None or cap > 1)
+    copied["copied"]["ticket_types"] = n
+    return Duplicated(**copied)

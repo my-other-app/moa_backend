@@ -31,6 +31,7 @@ from app.api.subscriptions import gates, service
 from app.api.subscriptions.models import FEATURE_CATALOG, BillingCycle, Plans
 from app.config import settings
 from app.core.auth.jwt import create_access_token
+from app.response import CustomHTTPException
 from tests.conftest import auth_header
 from tests.fake_cloudflare import install
 
@@ -675,12 +676,16 @@ async def test_website_templates_are_the_first_n_in_catalogue_order(client, sess
     assert (await client.post(f"{url}/publish", headers=world.h)).status_code == 200
 
 
-async def test_the_limits_with_nothing_to_count_are_not_enforced(session, world):
-    await set_limit(session, world, "free", ticket_types_per_event=0, coupons_per_event=0)
+async def test_the_ticketing_limits_are_enforced_now_there_is_something_to_count(session, world):
+    """Ticket types and discount codes exist (app/api/ticketing): their caps hold."""
+    await set_limit(session, world, "free", ticket_types_per_event=2, coupons_per_event=0)
     assert "storage_gb" not in gates.NOT_ENFORCED  # not a limit at all any more
-    for key in ("ticket_types_per_event", "coupons_per_event"):
-        assert key in gates.NOT_ENFORCED
-        await gates.require_within(session, world.club.id, key, used=5)
+    assert not gates.NOT_ENFORCED
+    await gates.require_within(session, world.club.id, "ticket_types_per_event", used=1)
+    for key, used in (("ticket_types_per_event", 2), ("coupons_per_event", 0)):
+        with pytest.raises(CustomHTTPException) as refused:
+            await gates.require_within(session, world.club.id, key, used=used)
+        assert refused.value.error_code == gates.LIMIT_REACHED
 
 
 async def test_counting_agrees_with_what_the_dashboard_shows(session, world, make_user, make_registration):

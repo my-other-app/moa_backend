@@ -98,8 +98,10 @@ def generate_pass_json(
     location_name: Optional[str],
     holder_name: str,
     organization_name: str = ORG_NAME,
+    ticket_type: Optional[str] = None,
 ) -> dict:
-    """Generate the pass.json structure for Apple Wallet."""
+    """Generate the pass.json structure for Apple Wallet. `ticket_type`: the
+    type's name, when the event sells more than one (app/api/ticketing)."""
     
     # Format date/time, in India's time whatever zone the value was read in
     # (a value not read back from the database is still in UTC).
@@ -162,7 +164,7 @@ def generate_pass_json(
                     "label": "ATTENDEE",
                     "value": holder_name
                 }
-            ],
+            ] + ([{"key": "ticketType", "label": "TICKET", "value": ticket_type}] if ticket_type else []),
             "backFields": [
                 {
                     "key": "ticketId",
@@ -398,6 +400,7 @@ async def generate_wallet_pass(
         event_datetime=event.event_datetime,
         location_name=event.location_name,
         holder_name=registration.full_name,
+        ticket_type=getattr(registration, "ticket_label", None),
     )
     
     # Everything above read the database here, on the loop. The poster is

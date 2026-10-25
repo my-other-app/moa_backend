@@ -470,6 +470,18 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
     actual_amount = Column(Numeric(10, 2), nullable=False, default=0)
     payment_receipt = Column(String, nullable=True)
 
+    # The ticket type it was bought as, the discount code used on it and what
+    # that took off (app/api/ticketing), and the type's name as the ticket
+    # prints it when the event sells more than one type (null: the role's).
+    ticket_type_id = Column(
+        Integer, ForeignKey("ticket_types.id", ondelete="SET NULL", name="fk_registrations_ticket_type"), nullable=True
+    )
+    discount_code_id = Column(
+        Integer, ForeignKey("discount_codes.id", ondelete="SET NULL", name="fk_registrations_discount_code"), nullable=True
+    )
+    discount_amount = Column(Numeric(10, 2), nullable=True)
+    ticket_label = Column(String(80), nullable=True)
+
     additional_details = Column(JSON, nullable=True)
 
     event = relationship("Events", back_populates="registrations")
@@ -536,6 +548,13 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
         sa.Index(
             "ix_registrations_payment_receipt", "payment_receipt",
             postgresql_where=sa.text("payment_receipt IS NOT NULL"),
+        ),
+        # A ticket type's registrations (its sales, one person's tickets of
+        # it), and a discount code's uses (app/api/ticketing).
+        sa.Index("ix_registrations_ticket_type", "ticket_type_id", postgresql_where=sa.text("NOT is_deleted")),
+        sa.Index(
+            "ix_registrations_discount_code", "discount_code_id",
+            postgresql_where=sa.text("discount_code_id IS NOT NULL"),
         ),
     )
 

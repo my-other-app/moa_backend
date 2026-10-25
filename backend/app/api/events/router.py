@@ -186,6 +186,10 @@ async def create_event(
         status=event.status,
         pin=event.pin,
     )
+    # Its first ticket type, at the event's own price and cap (app/api/ticketing).
+    from app.api.ticketing import types as ticket_types
+
+    await ticket_types.follow_event_edit(session, created)
     _follow_map_link(background_tasks, created)
     return created
 
@@ -208,6 +212,11 @@ async def update_event(
         as_admin=is_admin_user(user),
         actor=user,
     )
+    # A single ticket type shows the event's price and cap again; with
+    # several, the event's fee is what they charge (app/api/ticketing).
+    from app.api.ticketing import types as ticket_types
+
+    await ticket_types.follow_event_edit(session, updated)
     _follow_map_link(background_tasks, updated)
     return updated
 

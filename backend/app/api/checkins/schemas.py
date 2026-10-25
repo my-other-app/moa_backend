@@ -144,6 +144,8 @@ class AttendeeSummary(BaseModel):
     checked_in_at: Optional[datetime] = None
     badge_printed_at: Optional[datetime] = None
     admission_no: Optional[str] = None
+    #: The ticket type's name, when the event sells more than one.
+    ticket_type: Optional[str] = None
 
 
 class ScanBody(BaseModel):

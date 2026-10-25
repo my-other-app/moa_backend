@@ -57,6 +57,8 @@ DOC_CACHE_SWEEP = 773_151
 CLUB_WHATSAPP_SWEEP = 773_160
 #: Clubs' mailboxes: plan lapses, retention, old addresses (app/api/club_mailbox/sweep.py).
 CLUB_MAILBOX_SWEEP = 773_170
+#: The waiting lists' minute: offers run out, places offered (app/api/ticketing/sweep.py).
+WAITLIST_SWEEP = 773_180
 #: The job queue's maintenance pass (app/core/jobs.py).
 JOBS_MAINTENANCE = 774_501
 #: The live room's sweep (app/api/live/service.py).
