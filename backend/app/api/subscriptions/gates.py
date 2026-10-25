@@ -37,10 +37,11 @@ Nothing here is enforced when:
   design, events and announcements per month) hold for every club. The
   scope rule lives in `_exempt`; call sites only pass `event=`.
 
-Limits deliberately not enforced:
-
-- `ticket_types_per_event`, `coupons_per_event`: an event has one ticket type
-  and there are no coupons; there is nothing to count.
+Ticketing (app/api/ticketing): `ticket_types_per_event` caps the types an
+event sells, `coupons_per_event` the discount codes usable at one event (its
+own and the club-wide ones), `coupons` is discount codes at all and
+`waitlist` the waiting lists. None of them is event-scoped: a grandfathered
+event never had them.
 
 One request resolves a club's entitlements once (`RequestScope`), however many
 gates it passes.
@@ -89,10 +90,7 @@ EVENT_SCOPED_LIMITS = frozenset({"registrations_per_event", "merch_items_per_eve
 CLUB_WIDE_FEATURES = frozenset({"website", "custom_domain", "roles", "finance", "mcp", "whatsapp_own", "mailbox"})
 
 #: The limits nothing enforces, and why (see the module docstring).
-NOT_ENFORCED = {
-    "ticket_types_per_event": "An event has one ticket type.",
-    "coupons_per_event": "There are no coupons.",
-}
+NOT_ENFORCED: dict[str, str] = {}
 
 #: The website templates in catalogue order; a plan's `website_templates`
 #: allows the first N of them. Mirrors sites.models.TEMPLATES, which is also
@@ -129,6 +127,8 @@ _SUBJECTS = {
     "mcp": ("Connecting AI assistants", "is"),
     "whatsapp_own": ("Your own WhatsApp Business number", "is"),
     "mailbox": ("A club mailbox", "is"),
+    "coupons": ("Discount codes", "are"),
+    "waitlist": ("Waiting lists", "are"),
 }
 
 #: A limit's unit, singular and plural, and whether it is counted per month.
@@ -139,6 +139,8 @@ _UNITS = {
     "committee_seats": ("team seat", "team seats", False),
     "announcements_per_month": ("announcement", "announcements", True),
     "merch_items_per_event": ("item", "items", False),
+    "ticket_types_per_event": ("ticket type", "ticket types", False),
+    "coupons_per_event": ("discount code", "discount codes", False),
     "website_templates": ("website template", "website templates", False),
     "ai_actions_per_month": ("AI action", "AI actions", True),
     "emails_per_month": ("email", "emails", True),
@@ -396,6 +398,10 @@ def limit_message(limit_key: str, *, cap: int, used: int, plan_name: str, templa
         return f"You've used {used} of {cap} {_plural(cap, unit)} on {plan_name}."
     if limit_key == "merch_items_per_event":
         return f"This event has {used} of {cap} merchandise {_plural(cap, unit)} allowed on {plan_name}."
+    if limit_key == "ticket_types_per_event":
+        return f"This event has {used} of {cap} {_plural(cap, unit)} allowed on {plan_name}."
+    if limit_key == "coupons_per_event":
+        return f"This event takes {used} of {cap} {_plural(cap, unit)} allowed on {plan_name}."
     per = " this month" if unit[2] else ""
     return f"You've used {used} of {cap} {_plural(cap, unit)}{per} on {plan_name}."
 

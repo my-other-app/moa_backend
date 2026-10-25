@@ -614,6 +614,9 @@ class EventFileResponse(CustomBaseModel):
     url: str
 
 
+from app.api.ticketing.schemas import PublicTicketing  # noqa: E402
+
+
 class EventDetailResponse(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(...)
@@ -703,6 +706,9 @@ class EventDetailResponse(CustomBaseModel):
     networking: bool | None = Field(None)
     downloads: list[EventFileResponse] | None = Field(None)
     speakers: list[EventSpeakerPublic] | None = Field(None)
+    #: Its ticket types on sale, what is left of each, and the waiting list
+    #: (docs/TICKETING.md). Null only from a server without ticket types.
+    ticketing: PublicTicketing | None = Field(None)
 
 
 # REQUEST MODELS

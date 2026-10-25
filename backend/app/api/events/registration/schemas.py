@@ -29,6 +29,14 @@ class EventRegistrationResponse(CustomBaseModel):
     whatsapp_opt_in: bool = Field(False)
     #: Whether "Get updates from <club> on WhatsApp" was kept (club_whatsapp/consent.py).
     club_updates_whatsapp: bool = Field(False)
+    #: The ticket type it is for, {id, name} (docs/TICKETING.md).
+    ticket_type: dict[str, Any] | None = Field(None)
+    #: The type's price before any code, in rupees.
+    price: float | None = Field(None)
+    #: The code used and what it took off, {code, amount}; null for none.
+    discount: dict[str, Any] | None = Field(None)
+    #: Paid, or (on a paid event) confirmed with nothing to pay.
+    is_paid: bool = Field(False)
 
 
 from app.api.store.schemas import StorePick  # noqa: E402
@@ -57,6 +65,11 @@ class EventRegistrationRequest(CustomBaseModel):
     #: `phone`, as whatsapp_opt_in. False or left out records nothing and
     #: takes nothing back.
     club_updates_whatsapp: bool = Field(False)
+    #: The ticket type (docs/TICKETING.md). Left out: the event's only one;
+    #: an event selling several answers 422 TICKET_TYPE_REQUIRED.
+    ticket_type_id: int | None = Field(None)
+    #: A discount code typed for it; checked and applied by the server.
+    discount_code: str | None = Field(None, max_length=60)
 
 
 class EventAttendanceUpdate(CustomBaseModel):
@@ -97,6 +110,10 @@ class EventRegistrationDetailResponse(CustomBaseModel):
     whatsapp_opt_in: bool = Field(False)
     wa_bounced_at: datetime | None = Field(None)
     wa_bounce_reason: str | None = Field(None)
+    # The ticket type it was bought as, and what a discount code took off it.
+    ticket_type_id: int | None = Field(None)
+    ticket_label: str | None = Field(None)
+    discount_amount: float | None = Field(None)
 
 
 class RegistrationUpdateRequest(CustomBaseModel):
@@ -154,6 +171,9 @@ class EventRegistrationPublicMin(CustomBaseModel):
     email_bounced_at: datetime | None = Field(None)
     email_bounce_reason: str | None = Field(None)
     admission_no: str | None = Field(None)
+    # The ticket type it was bought as (docs/TICKETING.md).
+    ticket_type_id: int | None = Field(None)
+    ticket_type_name: str | None = Field(None)
 
 
 class SetWinnerRequest(CustomBaseModel):

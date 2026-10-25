@@ -300,6 +300,8 @@ FEATURE_CATALOG: tuple[tuple[str, str], ...] = (
     ("reviews", "Ratings and reviews"),
     ("threads", "Threads to your followers"),
     ("tickets", "Paid tickets with Razorpay"),
+    ("waitlist", "Waiting lists for sold-out tickets"),
+    ("coupons", "Discount codes"),
     ("website", "Club website"),
     ("quiz", "Live room: quiz"),
     ("polls", "Live room: polls"),
@@ -323,7 +325,7 @@ FEATURE_CATALOG: tuple[tuple[str, str], ...] = (
     ("mailbox", "A club mailbox: yourclub@mail.myotherapp.in, in the dashboard"),
 )
 
-#: Flags in the editor with no feature behind them yet: waitlist, coupons,
+#: Flags in the editor with no feature behind them yet:
 #: per-session check-in, removing the "Made with MyOtherApp"
 #: footer, enforced 2FA for a team, next-day payouts, student SSO, API access.
 UNBUILT_FEATURES = frozenset(FEATURE_KEYS) - {key for key, _ in FEATURE_CATALOG}

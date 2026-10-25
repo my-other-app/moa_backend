@@ -130,6 +130,8 @@ def summary(reg: EventRegistrationsLink, checked_in_at=None) -> dict:
         "id": reg.id, "name": reg.full_name or "", "ticket_id": reg.ticket_id, "role": str(role), "email": reg.email or None,
         "phone": reg.phone or None, "has_contact": bool(reg.email or reg.phone), "is_paid": bool(reg.is_paid) if reg.event.has_fee else True,
         "checked_in_at": checked_in_at, "badge_printed_at": getattr(reg, "badge_printed_at", None), "admission_no": getattr(reg, "admission_no", None),
+        # The ticket type, when the event sells more than one (app/api/ticketing).
+        "ticket_type": getattr(reg, "ticket_label", None),
     }
 
 

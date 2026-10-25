@@ -653,6 +653,14 @@ async def get_event(session: AsyncSession, event_id: str | int, user_id: int | N
         if user_rating:
             data["user_rating"] = user_rating.rating
 
+    # Its tickets: the types on sale with what is left, and the waiting list
+    # (app/api/ticketing, docs/TICKETING.md). Its default type is made here
+    # the first time an event is shown without one.
+    from app.api.ticketing import views as ticketing_views
+
+    viewer = await session.get(Users, user_id) if user_id else None
+    data["ticketing"] = await ticketing_views.public(session, event, viewer=viewer)
+    await session.commit()
     return data
 
 

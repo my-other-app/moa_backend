@@ -79,13 +79,15 @@ def start_loops() -> list[asyncio.Task]:
     # Clubs' mailboxes: plans followed (a lapse closes one, an upgrade opens it),
     # mail past its retention deleted, old addresses let go -- every fifteen minutes.
     from app.api.club_mailbox.sweep import sweep_loop as club_mailbox_sweep_loop
+    # Waiting lists: offers that ran out closed, freed places offered -- every minute, one worker.
+    from app.api.ticketing.sweep import sweep_loop as waitlist_sweep_loop
 
     return [
         asyncio.create_task(loop())
         for loop in (
             sweep_loop, closeout_sweep_loop, feedback_sweep_loop, billing_sweep_loop, counter_check_loop,
             domains_sweep_loop, store_sweep_loop, payments_sweep_loop, account_sweep_loop, ledger_daily_loop,
-            search_sync_loop, doc_cache_sweep_loop, club_whatsapp_sweep_loop, club_mailbox_sweep_loop,
+            search_sync_loop, doc_cache_sweep_loop, club_whatsapp_sweep_loop, club_mailbox_sweep_loop, waitlist_sweep_loop,
         )
     ]
 
