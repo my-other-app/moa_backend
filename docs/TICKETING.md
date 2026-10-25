@@ -235,6 +235,11 @@ every offer.
   approved at Meta before it sends; until then the WhatsApp copy is skipped
   and email and push still go.
 
+- **What it costs the club.** The email and the WhatsApp message are counted
+  as the club's messages, as a ticket's are: the plan's monthly allowance
+  first, then its prepaid credits. Like a ticket, an offer is never held back
+  when both are used up.
+
 ### `GET /waitlist/offers/{token}`
 
 What the claim page shows:
