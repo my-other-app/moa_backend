@@ -51,7 +51,9 @@ async def remaining(session, club_id: int) -> Optional[int]:
     fn = _credits_remaining()
     if fn is not None:
         value = await fn(session, club_id, CHANNEL)
-        return None if value is None else max(0, int(value))
+        # The credits module answers its UNLIMITED sentinel for a plan with no limit.
+        unlimited = getattr(importlib.import_module(fn.__module__), "UNLIMITED", None)
+        return None if value is None or (unlimited is not None and value >= unlimited) else max(0, int(value))
     from sqlalchemy import select
 
     from app.api.message_quota import service as quota

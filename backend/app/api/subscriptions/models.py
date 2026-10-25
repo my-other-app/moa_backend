@@ -106,6 +106,8 @@ class Plans(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     #: (app/api/message_quota): added to the club's next Razorpay invoice.
     #: The owner's defaults are ₹0.10 an email and ₹1.50 a WhatsApp message
     #: (₹1 until migration pricing_adjust).
+    #: Retired with overage billing (migration message_credits): no longer
+    #: charged or shown; prepaid credit packs replace them.
     email_overage_paise = Column(Integer, nullable=False, default=10, server_default="10")
     whatsapp_overage_paise = Column(Integer, nullable=False, default=150, server_default="150")
 
@@ -193,9 +195,9 @@ class PlanLimits(AbstractSQLModel, TimestampsMixin):
     ai_actions_per_month = Column(Integer, nullable=True)
     #: Every email and WhatsApp message a club sends to its people in a
     #: month in India (app/api/message_quota): tickets, certificates,
-    #: reminders, announcements, campaigns, journey emails. Past it a paid
-    #: plan still sends and pays the plan's overage price for each; Free
-    #: stops what is not a ticket, certificate or payment message.
+    #: reminders, announcements, campaigns, journey emails. Past it, on any
+    #: plan, sends use the club's prepaid credits; with none left, what is
+    #: not a ticket, certificate or payment message is held back.
     emails_per_month = Column(Integer, nullable=True)
     #: Through the platform's WhatsApp number only: a club's own number is
     #: paid to Meta by the club and not counted.

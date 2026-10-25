@@ -29,9 +29,10 @@ rest:
   it had, mailed once and the admins alerted (`enterprise_trial_ended`);
 - an Enterprise trial ending within three days: once, the club mailed and the
   admins alerted (`enterprise_trial_ending`);
-- the months that have ended: each club's extra emails and WhatsApp messages
-  on a statement, added to its Razorpay subscription as an add-on for its
-  next invoice, never twice (app/api/message_quota/billing.py).
+- messages (app/api/message_quota/billing.py): prepaid credits' 30-day
+  expiry notices and checkouts whose webhook never came; any statement of
+  the retired overage billing left open is made void. Nothing is ever
+  charged for extra messages.
 
 One worker at a time, by a Postgres advisory lock held on its own connection
 (a session gives its connection back at every commit, and a session-level
@@ -397,7 +398,8 @@ async def sweep(session, now: datetime | None = None) -> dict:
                 await session.rollback()
     from app.api.message_quota import billing as message_billing
 
-    done.update({"message_statements": 0, "overage_charged": 0, "overage_failed": 0})
+    done.update({"message_statements": 0, "overage_charged": 0, "overage_failed": 0, "statements_voided": 0,
+                 "credits_expiry_told": 0, "credits_reconciled": 0})
     try:
         done.update(await message_billing.run(session, now))
     except Exception:  # noqa: BLE001

@@ -44,7 +44,8 @@ _OWNER_ACCOUNT = _rx(
     r"^/api/v1/auth/(?:change-password|2fa|sessions|security|admin)",
     r"^/api/v1/user(?:/|$)",
 )
-_OWNER_WRITES = _rx(r"^/api/v1/clubs/subscription")
+# The plan, and buying message credits: money the club's own account spends.
+_OWNER_WRITES = _rx(r"^/api/v1/clubs/subscription", r"^/api/v1/clubs/messages/credits(?:/|$)")
 # Where the club's money goes, and the keys to its Razorpay account: changed
 # by the owner alone (OWNER_ONLY). Read like the rest of the money: admins
 # only, and never with the webhook secret (payment_gateways.router).
