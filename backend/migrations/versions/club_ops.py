@@ -18,14 +18,14 @@ Downgrade drops the tables and a cancelled event goes back to closed; the
 type keeps its unused value (see downgrade).
 
 Revision ID: club_ops
-Revises: club_mailbox
+Revises: apple_refresh_token
 """
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "club_ops"
-down_revision = "club_mailbox"
+down_revision = "apple_refresh_token"
 branch_labels = None
 depends_on = None
 
