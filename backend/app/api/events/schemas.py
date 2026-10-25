@@ -538,6 +538,10 @@ class EventListResponse(CustomBaseModel):
     has_certificate: bool | None = Field(None)
     certificate_revoked: bool | None = Field(None)
     certificate_url: str | None = Field(None)
+    #: The ticket type the caller's registration was bought as, as the ticket
+    #: prints it (EventRegistrationsLink.ticket_label). Null when the caller
+    #: has no registration for the event, or its ticket names no type.
+    ticket_label: str | None = Field(None)
 
 
 
@@ -714,9 +718,22 @@ class EventDetailResponse(CustomBaseModel):
 # REQUEST MODELS
 
 
+class TicketEventResponse(EventListResponse):
+    """A ticket's event: a list row, with where it is on its status clock."""
+
+    #: draft, published, live, closed, archived, or cancelled.
+    status: str = Field("published")
+    #: When `status` is "cancelled": {"reason", "cancelled_at"} (app/api/club_ops), as the event page says it. Null otherwise.
+    cancellation: dict | None = Field(None)
+
+
 class TicketDetailsResponse(CustomBaseModel):
     ticket_id: str
-    event: EventListResponse
+    event: TicketEventResponse
+    #: The ticket type it was bought as, and its name as the ticket prints it
+    #: (app/api/ticketing). Null on a ticket that names no type.
+    ticket_type_id: int | None = None
+    ticket_label: str | None = None
     is_paid: bool
     actual_amount: float | None
     paid_amount: float | None
