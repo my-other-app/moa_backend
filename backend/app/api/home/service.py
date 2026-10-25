@@ -1,14 +1,38 @@
-from datetime import datetime, timezone
-from sqlalchemy import exists, func, select, or_, and_
+from sqlalchemy import func, select, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload, aliased
-from sqlalchemy.dialects.postgresql import INTERVAL
+from sqlalchemy.orm import joinedload, selectinload
 
-from app.api.events.models import Events, EventRegistrationsLink, EventInterestsLink
+from app.api.closeout.models import EventStatus
+from app.api.events.models import Events, EventRegistrationsLink, EventInterestsLink, ends_at_sql
 from app.api.clubs.models import Clubs, ClubUsersLink, ClubInterestsLink, Notes
 from app.api.orgs.models import Organizations
 from app.api.users.models import UserInterests, Users
 from app.api.interests.models import Interests
+
+
+def _public_events():
+    """What the public may see, as on /events/list and the discover site:
+    no drafts, nothing archived, and only the events of listed clubs."""
+    return (
+        Events.lifecycle.notin_((EventStatus.archived, EventStatus.draft)),
+        Events.club_id.in_(select(Clubs.id).where(Clubs.listed == True)),  # noqa: E712
+    )
+
+
+def _listed_clubs_notes():
+    return Notes.club_id.in_(select(Clubs.id).where(Clubs.listed == True))  # noqa: E712
+
+
+def _followed_clubs(user_id: int):
+    return (
+        select(ClubUsersLink.club_id)
+        .where(
+            ClubUsersLink.user_id == user_id,
+            ClubUsersLink.is_following == True,  # noqa: E712
+            ClubUsersLink.is_deleted == False,  # noqa: E712
+        )
+        .scalar_subquery()
+    )
 
 
 async def suggest_events(
@@ -40,30 +64,15 @@ async def suggest_events(
         .where(
             or_(
                 Events.id.in_(user_interested_events_subquery),
-                Events.club_id.in_(
-                    select(ClubUsersLink.club_id)
-                    .where(
-                        ClubUsersLink.user_id == user_id,
-                        ClubUsersLink.is_following == True,
-                        ClubUsersLink.is_deleted == False,
-                    )
-                    .scalar_subquery()
-                ),
+                Events.club_id.in_(_followed_clubs(user_id)),
             )
         )
     )
 
-    ClubAlias = aliased(Clubs)
-
+    # The clubs this person follows. (An EXISTS on an alias of clubs that was
+    # never joined made this a cross join: every event, once per followed club.)
     if is_following:
-        query = query.filter(
-            exists()
-            .select_from(ClubUsersLink)
-            .where(ClubUsersLink.club_id == ClubAlias.id)
-            .where(ClubUsersLink.user_id == user_id)
-            .where(ClubUsersLink.is_following == True)
-            .where(ClubUsersLink.is_deleted == False)
-        )
+        query = query.filter(Events.club_id.in_(_followed_clubs(user_id)))
 
     if is_registered is not None:
         if is_registered:
@@ -81,23 +90,16 @@ async def suggest_events(
                 ),
             ).filter(EventRegistrationsLink.id == None)
 
+    # Ended: its start plus its duration has passed. (This compared the start
+    # with now plus the duration, the wrong way round: "ended" was the events
+    # still to come.)
     if is_ended is not None:
-        if is_ended:
-            query = query.filter(
-                Events.event_datetime
-                > (
-                    func.now()
-                    + func.cast(func.concat(Events.duration, " HOURS"), INTERVAL)
-                )
-            )
-        else:
-            query = query.filter(
-                Events.event_datetime
-                <= (
-                    func.now()
-                    + func.cast(func.concat(Events.duration, " HOURS"), INTERVAL)
-                )
-            )
+        ends = ends_at_sql(Events)
+        query = query.filter(ends < func.now() if is_ended else ends >= func.now())
+
+    # A guest's own registrations still show an archived event (/events/list).
+    if not is_registered:
+        query = query.filter(*_public_events())
 
     query = query.order_by(Events.created_at.desc()).limit(limit).offset(offset)
     result = await session.execute(query)
@@ -170,7 +172,7 @@ async def suggest_notes(
     query = (
         select(Notes)
         .distinct()
-        .where(Notes.is_deleted == False)
+        .where(Notes.is_deleted == False, _listed_clubs_notes())  # noqa: E712
         .options(joinedload(Notes.club))
     )
 
@@ -207,12 +209,16 @@ async def global_search(
         .options(
             joinedload(Events.club, innerjoin=True),
             joinedload(Events.category, innerjoin=True),
+            # EventPublicMin carries the interests: read lazily while the
+            # answer was serialised, every search that found an event was a 500.
+            selectinload(Events.interests).joinedload(Interests.category),
         )
         .filter(
             or_(
                 Events.name.ilike(f"%{search_query}%"),
                 Events.about.ilike(f"%{search_query}%"),
-            )
+            ),
+            *_public_events(),
         )
     )
 
@@ -242,7 +248,8 @@ async def global_search(
                 Notes.title.ilike(f"%{search_query}%"),
                 Notes.note.ilike(f"%{search_query}%"),
             ),
-            Notes.is_deleted == False,
+            Notes.is_deleted == False,  # noqa: E712
+            _listed_clubs_notes(),
         )
     )
 
