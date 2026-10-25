@@ -473,6 +473,8 @@ the hash of what you set.
 | `APP_WHATSAPP_*` | Meta Business settings -> System users (the token); the app's dashboard -> App settings -> Basic (the app secret) | section 18. A new verify token (`openssl rand -hex 24`) must be set in the webhook too, at once |
 | Firebase service account | Google console | |
 | Wallet pass signing key and certificate | Apple developer -> Pass Type IDs | replace the files in `backend/wallet_certs`, not in git |
+| `APP_APPLE_KEY_ID` / `APP_APPLE_PRIVATE_KEY` | Apple developer -> Keys: a new key with Sign in with Apple, for the App ID | set both, recreate, then revoke the old key; tokens kept so far stay revocable (they belong to the app, not the key) |
+| `APP_APPLE_TOKENS_SECRET` | the same Fernet command as `APP_PAYMENT_KEYS_SECRET` | a list: the new key **first**, the old after it; drop the old once every account kept under it has signed in again (until then its token cannot be revoked on deletion) |
 | `PROD_SSH_PRIVATE_KEY` | `ssh-keygen -t ed25519` | add the new public key to the server's `authorized_keys`, update the secret, deploy once, remove the old key |
 | `APP_SENTRY_DSN` | Sentry -> project -> Client Keys | not really secret (it can only send events); revoke the old key there |
 | `APP_GEMINI_API_KEY` | Google AI Studio -> API keys, on the paid project | one key, never a list (section 14); make the new one, switch, recreate, delete the old |
