@@ -11,7 +11,8 @@
   sent or read through its inbox) and its WhatsApp webhook (the messages
   people send it): no message content in a log or an error report. The
   inbox's search term (`q`, a name or a number) is [Filtered] wherever its
-  URL is logged.
+  URL is logged. A club's mailbox the same: its routes and its webhook
+  carry mail, and its search (`q`) is filtered from the access log.
 - The live room's stream (EventSource cannot send headers) carries the
   browser's key and the player's key in its query string, and a player key
   is enough to answer as that player: `key`, `player` and, beside them,
@@ -24,7 +25,7 @@ import re
 import traceback
 
 _CLUB_WEBHOOK = re.compile(r"(/payments/webhook/club/|/hooks/whatsapp/club/)([A-Za-z0-9_-]{0,6})[A-Za-z0-9_-]*")
-_SENSITIVE_BODIES = re.compile(r"^/api/v1/(?:clubs/(?:payments/gateway|ai/key|whatsapp)|hooks/whatsapp/club)(?:/|$)")
+_SENSITIVE_BODIES = re.compile(r"^/api/v1/(?:clubs/(?:payments/gateway|ai/key|whatsapp|mailbox)|hooks/(?:whatsapp/club|mailbox))(?:/|$)")
 #: A query parameter whose value must not be logged, and its value (up to
 #: the next parameter, fragment, space or quote).
 SECRET_QUERY = re.compile(r"(?i)([?&;](?:key|player|last_event_id|\w*token\w*)=)[^&;#\s\"']*")
@@ -38,7 +39,7 @@ def query(value: str) -> str:
 
 #: A search of a club's WhatsApp inbox (`q`: a name, a part of a number):
 #: what the club looked for is the person it looked for, and is not logged.
-_INBOX_SEARCH = re.compile(r"(/clubs/whatsapp/[^\s\"'?#]*\?(?:[^\s\"'#]*?[&;])?q=)[^&;#\s\"']*")
+_INBOX_SEARCH = re.compile(r"(/clubs/(?:whatsapp|mailbox)/[^\s\"'?#]*\?(?:[^\s\"'#]*?[&;])?q=)[^&;#\s\"']*")
 
 
 def path(value: str) -> str:

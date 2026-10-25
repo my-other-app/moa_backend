@@ -96,6 +96,7 @@ class PlanFeaturesIn(CustomBaseModel):
     ai_byok: bool = False
     mcp: bool = False
     whatsapp_own: bool = False
+    mailbox: bool = False
 
 
 class PlanIn(CustomBaseModel):

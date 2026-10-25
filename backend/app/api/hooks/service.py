@@ -66,6 +66,18 @@ async def record(session, provider_id: str, channel: str, v: Verdict, at: dateti
                 touched += 1
                 if same_address and reg is not None:
                     marked = reg
+    if is_permanent(v) and channel == "email":
+        # A mail a club's mailbox sent (app/api/club_mailbox): its thread says it bounced.
+        from app.api.club_mailbox import outbound as mailbox_outbound
+
+        try:
+            async with session.begin_nested():
+                touched += await mailbox_outbound.provider_verdict(
+                    session, provider_id, bounced=v.outcome is DeliveryOutcome.bounced,
+                    complained=v.outcome is DeliveryOutcome.complained, reason=v.reason or "",
+                )
+        except Exception:  # noqa: BLE001 - the suppression below must still happen
+            pass
     if is_permanent(v):
         if marked is not None:
             # Whoever it was, later sends must leave that address alone until it is corrected.

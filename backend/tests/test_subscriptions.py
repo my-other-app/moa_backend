@@ -275,9 +275,10 @@ async def test_create_and_read_a_plan(client, make_admin, mint_token, plan_paylo
     assert "storage_gb" not in body["limits"]
     assert body["features"]["tickets"] is True
     assert body["features"]["sso"] is False
-    # 34 flags in four groups, so the editor does not hardcode its own copy.
-    assert sum(len(v) for v in body["feature_groups"].values()) == 34
+    # 35 flags in four groups, so the editor does not hardcode its own copy.
+    assert sum(len(v) for v in body["feature_groups"].values()) == 35
     assert "whatsapp_own" in body["feature_groups"]["club"] and body["features"]["whatsapp_own"] is False
+    assert "mailbox" in body["feature_groups"]["club"] and body["features"]["mailbox"] is False
 
 
 @pytest.mark.asyncio

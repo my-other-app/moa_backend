@@ -17,6 +17,8 @@ class MemberRow(BaseModel):
     last_seen_at: Optional[datetime] = None
     #: The WhatsApp permission: reads and answers the club's own WhatsApp inbox.
     whatsapp: bool = False
+    #: The Mail permission: reads, answers and sends from the club's mailbox.
+    mail: bool = False
 
 
 class RoleOption(BaseModel):
@@ -50,6 +52,12 @@ class RoleChange(BaseModel):
 
 class WhatsAppPermission(BaseModel):
     """Whether this member may read and answer the club's WhatsApp inbox."""
+
+    allowed: bool
+
+
+class MailPermission(BaseModel):
+    """Whether this member may read, answer and send from the club's mailbox."""
 
     allowed: bool
 

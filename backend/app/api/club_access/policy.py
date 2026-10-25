@@ -66,6 +66,13 @@ _AI_KEY = _rx(r"^/api/v1/clubs/ai/key(?:/|$)")
 # the role.
 _WHATSAPP_ACCOUNT = _rx(r"^/api/v1/clubs/whatsapp/account(?:/|$)")
 _WHATSAPP = _rx(r"^/api/v1/clubs/whatsapp(?:/|$)")
+# The club's mailbox (app/api/club_mailbox). Its address and settings (the
+# handle, retention, the name it sends as) are changed by the owner and
+# admins. Everything else there (the mail itself) reaches the route whatever
+# the role: the Mail permission the owner gives a member (club_members.mail)
+# decides, which the routes check (club_mailbox.access).
+_MAILBOX_SETUP = _rx(r"^/api/v1/clubs/mailbox/(?:address|settings)(?:/|$)")
+_MAILBOX = _rx(r"^/api/v1/clubs/mailbox(?:/|$)")
 
 # Money: figures, statements, the ledger, refunds.
 _MONEY = _rx(
@@ -115,6 +122,10 @@ def allows(role: str, method: str, path: str) -> bool:
         return role == "admin" or method not in WRITES
     if _WHATSAPP.search(path):
         return True
+    if _MAILBOX_SETUP.search(path):
+        return role == "admin" or method not in WRITES
+    if _MAILBOX.search(path):
+        return True
     if _ACCESS.search(path):
         return role == "admin" and method == "GET" and bool(_ACCESS_LIST.search(path))
     if method in WRITES and _OWNER_WRITES.search(path):
@@ -161,6 +172,9 @@ def can(role: str) -> dict:
         # The club's own WhatsApp number's connection. The inbox is a
         # permission of its own (`whatsapp_inbox`, from the member's row).
         "whatsapp_account": admin,
+        # The club's mailbox's address and settings. Reading and sending mail
+        # is a permission of its own (`mail_inbox`, from the member's row).
+        "mailbox_manage": admin,
         # Every connected AI assistant, not only one's own (app/api/mcp).
         "connected_apps": admin,
         # Approving what an assistant asked for: publishing, sending.

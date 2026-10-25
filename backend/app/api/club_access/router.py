@@ -11,6 +11,7 @@ from app.api.club_access.schemas import (
     InvitePreview,
     InviteRequest,
     InviteResponse,
+    MailPermission,
     Me,
     MemberRow,
     PasswordChange,
@@ -121,6 +122,27 @@ async def change_whatsapp(request: Request, member_id: int, session: SessionDep,
     return MemberRow(**service.to_row(member))
 
 
+@router.put("/{member_id}/mail", summary="Give or take someone's Mail permission")
+async def change_mail(request: Request, member_id: int, session: SessionDep, user: ClubAuth, body: MailPermission) -> MemberRow:
+    """The club's mailbox is message content: only the people the owner
+    names here (and the owner) read, answer and send from it. Never an admin
+    acting as the club (403 MAILBOX_PRIVATE), for the same reason as WhatsApp."""
+    from app.api.audit import service as audit
+    from app.api.club_mailbox import access as mail_access
+
+    if gates.impersonated_by():
+        raise CustomHTTPException(status.HTTP_403_FORBIDDEN, message=mail_access.PRIVATE_MESSAGE, error_code="MAILBOX_PRIVATE")
+    club = await _owners_club(session, request, user)
+    member = await service.set_mail(session, club, member_id, body.allowed)
+    await audit.record(
+        session, actor=user, action="club_mailbox.permission", entity_type="club", entity_id=club.id,
+        summary=f"{'Gave' if body.allowed else 'Took'} the Mail permission {'to' if body.allowed else 'from'} {member.email}",
+        details={"member_id": member.id, "allowed": bool(body.allowed)}, request=request,
+    )
+    await session.commit()
+    return MemberRow(**service.to_row(member))
+
+
 @router.delete("/{member_id}", summary="Take someone's access away; their sessions end now")
 async def remove(request: Request, member_id: int, session: SessionDep, user: ClubAuth) -> dict:
     club = await _owners_club(session, request, user)
@@ -139,6 +161,9 @@ async def me(request: Request, session: SessionDep, user: ClubAuth) -> Me:
     # The club's own WhatsApp inbox: the owner, or a member given the
     # permission -- never an admin acting as the club (club_whatsapp.access).
     can["whatsapp_inbox"] = not gates.impersonated_by() and (member is None or bool(member.whatsapp))
+    # The club's mailbox: the owner, or a member given the Mail permission --
+    # never an admin acting as the club (club_mailbox.access).
+    can["mail_inbox"] = not gates.impersonated_by() and (member is None or bool(getattr(member, "mail", False)))
     return Me(
         role=role, role_label=label, role_description=description, can=can,
         club_id=club.id, club_name=club.name, member=MemberRow(**service.to_row(member)) if member else None,

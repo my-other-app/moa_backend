@@ -26,6 +26,9 @@ KINDS: dict[str, str] = {
     "whatsapp_restricted": "Meta restricted the club's own WhatsApp account",
     "whatsapp_message": "A conversation in the club's WhatsApp inbox has unread messages (the inbox's people only)",
     "whatsapp_waiting": "A WhatsApp conversation has waited too long for an answer (the inbox's people only)",
+    "mail_message": "A conversation in the club's mailbox has unread mail (the Mail permission's people only)",
+    "mailbox_lapsed": "The club's plan no longer includes its mailbox: closed, its mail readable 30 days",
+    "mailbox_expired": "A lapsed mailbox's 30 days are over: its mail can be exported or deleted",
 }
 
 #: How many the bell shows at most.

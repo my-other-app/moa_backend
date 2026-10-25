@@ -68,6 +68,11 @@ from app.api.club_whatsapp.router import (
     hook_router as club_whatsapp_hook_router,
 )
 from app.api.club_whatsapp.inbox_router import router as club_whatsapp_inbox_router
+from app.api.club_mailbox.router import (
+    admin_router as club_mailbox_admin_router,
+    club_router as club_mailbox_club_router,
+    hook_router as club_mailbox_hook_router,
+)
 from app.api.ai.router import club_router as ai_club_router, event_router as ai_event_router
 from app.api.badges.router import router as badges_router
 from app.api.audit.router import router as audit_router
@@ -104,6 +109,12 @@ api_router.include_router(router=links_router, tags=["tracking-links"])
 api_router.include_router(router=discover_router, tags=["discover"])
 api_router.include_router(router=discover_admin_router, tags=["discover"])
 api_router.include_router(router=finance_router, tags=["finance"])
+# A club's mailbox (app/api/club_mailbox): before the threads' public
+# /clubs/{club_id}/threads, which would otherwise take /clubs/mailbox/threads,
+# and before club_router.
+api_router.include_router(router=club_mailbox_club_router)
+api_router.include_router(router=club_mailbox_admin_router)
+api_router.include_router(router=club_mailbox_hook_router)
 api_router.include_router(router=threads_router, tags=["threads"])
 api_router.include_router(router=security_router, tags=["security"])
 api_router.include_router(router=threads_public_router, tags=["threads"])

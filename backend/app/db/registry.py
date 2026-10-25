@@ -45,6 +45,8 @@ from app.api.club_whatsapp import models as _club_whatsapp_models  # noqa: F401
 from app.api.club_whatsapp import inbox_models as _club_whatsapp_inbox_models  # noqa: F401
 # Its spend, consents and broadcasts (app/api/club_whatsapp/reach_models.py).
 from app.api.club_whatsapp import reach_models as _club_whatsapp_reach_models  # noqa: F401
+# A club's mailbox: its address, threads, mail and files (app/api/club_mailbox).
+from app.api.club_mailbox import models as _club_mailbox_models  # noqa: F401
 # Connected AI assistants: clients, grants, tokens, pending actions, announcement drafts (app/api/mcp).
 from app.api.mcp import models as _mcp_models  # noqa: F401
 from app.api.organisers import models as _organiser_models  # noqa: F401
