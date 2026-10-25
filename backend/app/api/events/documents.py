@@ -73,6 +73,8 @@ def document_values(registration, event=None) -> dict:
         # shown to anyone, and the ticket id is what the door scans.
         "certificate_id": _certificate_no(registration),
         "placing": PLACINGS.get(registration.position or 0, ""),
+        # The ticket type's name when the event sells more than one.
+        "ticket_type": getattr(registration, "ticket_label", None) or "",
     }
 
 
@@ -99,6 +101,7 @@ def sample_values(event, kind: str) -> dict:
         "team_name": "Team Nova",
         "certificate_id": "CERT-7K3QF-X9PWM",
         "placing": "First" if kind == "certificate" else "",
+        "ticket_type": "",
     }
 
 
@@ -289,7 +292,10 @@ def layout_values(registration, event, kind: str) -> dict:
         (club.name if club else "") or "",
         token_attendee(registration),
         getattr(registration, "admission_no", None) or code,
-        ROLE_LABELS.get(str(role), str(role).title()),
+        # The ticket type's name when the event sells more than one
+        # (app/api/ticketing); a speaker's or staff's role over it.
+        (getattr(registration, "ticket_label", None) if str(role) == "attendee" else None)
+        or ROLE_LABELS.get(str(role), str(role).title()),
         certificate=certificate,
         field_labels=field_labels_of(event),
         ticket_code=code,

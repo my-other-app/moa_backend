@@ -38,6 +38,11 @@ async def _check_still_payable(session: AsyncSession, registration: EventRegistr
         raise CodedRequestError(409, "This event is over; it can no longer be paid for.", "EVENT_ENDED")
     if ticket_unpaid and event.has_fee and await capacity.full(session, event):
         raise CodedRequestError(400, "Event is full", "EVENT_FULL", max_participants=event.max_participants)
+    if ticket_unpaid and event.has_fee:
+        # Its ticket type, and the waiting list (app/api/ticketing/places.py).
+        from app.api.ticketing.places import check_payable
+
+        await check_payable(session, event, registration)
 
 
 async def validate_event_registration_payload(session: AsyncSession, payload: dict):
@@ -208,7 +213,13 @@ async def handle_event_registration_payment(
     was_paid = bool(event_registration.is_paid)
     if becomes_paid and not was_paid:
         event = await session.get(Events, event_registration.event_id)
-        if event is not None and event.has_fee and not await capacity.take_paid_place(session, event):
+        from app.api.ticketing.places import capture_room
+
+        # The event's paid place, then its ticket type's (the waiting list
+        # counted, and a place offered from it claimed).
+        if event is not None and event.has_fee and not (
+            await capacity.take_paid_place(session, event) and await capture_room(session, event, event_registration)
+        ):
             if pending is not None:
                 await store.release(session, pending, status="cancelled")
             outcome.full = True

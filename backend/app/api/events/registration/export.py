@@ -33,6 +33,8 @@ BATCH = 2000
 SHEET = "Event Registrations"
 LEAD = ["Ticket ID", "Full Name", "Email", "Phone"]
 TAIL = ["Is Paid", "Actual Amount", "Paid Amount", "Is Attended", "Checked In By", "Registered At"]
+#: The ticket type and the discount code (app/api/ticketing), last, so the columns before keep their places.
+TICKETING = ["Ticket Type", "Discount Code", "Discount"]
 
 
 async def _answer_keys(session: AsyncSession, event: Events, where) -> list[str]:
@@ -113,15 +115,19 @@ async def write_export(
     if is_paid is not None:
         where.append(R.is_paid == is_paid)
     answer_keys = await _answer_keys(session, event, where)
-    writer = await asyncio.to_thread(_Writer, LEAD + answer_keys + TAIL)
+    writer = await asyncio.to_thread(_Writer, LEAD + answer_keys + TAIL + TICKETING)
+    from app.api.ticketing.models import DiscountCodes, TicketTypes
 
     stmt = (
         select(
             R.ticket_id, R.full_name, R.email, R.phone, R.additional_details,
             R.is_paid, R.actual_amount, R.paid_amount, R.is_attended, Volunteer.email, R.created_at,
+            TicketTypes.name, DiscountCodes.code, R.discount_amount,
         )
         .select_from(R)
         .outerjoin(Volunteer, and_(Volunteer.id == R.volunteer_id, Volunteer.is_deleted == False))  # noqa: E712
+        .outerjoin(TicketTypes, TicketTypes.id == R.ticket_type_id)
+        .outerjoin(DiscountCodes, DiscountCodes.id == R.discount_code_id)
         .where(*where)
         .order_by(func.lower(R.full_name), R.id)
         .execution_options(yield_per=BATCH)
@@ -129,13 +135,14 @@ async def write_export(
     result = await session.stream(stmt)
     async for batch in result.partitions(BATCH):
         rows = []
-        for ticket_id, name, email, phone, answers, is_paid, actual, paid, attended, volunteer, created in batch:
+        for ticket_id, name, email, phone, answers, is_paid, actual, paid, attended, volunteer, created, type_name, code, off in batch:
             answers = answers if isinstance(answers, dict) else {}
             rows.append([
                 ticket_id, name, email, phone,
                 *(answers.get(k) for k in answer_keys),
                 is_paid, actual, paid, attended, volunteer,
                 created.strftime("%Y-%m-%d %H:%M:%S") if created else None,
+                type_name, code, off,
             ])
         await asyncio.to_thread(writer.append, rows)
     return await asyncio.to_thread(writer.save)
