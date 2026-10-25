@@ -96,7 +96,8 @@ async def test_an_owner_can_do_everything(
 
     assert (
         await client.post(
-            f"/api/v1/auth/admin/impersonate/{target.id}", headers=auth_header(token)
+            f"/api/v1/auth/admin/impersonate/{target.id}", headers=auth_header(token),
+            json={"reason": "checking a reported problem"},
         )
     ).status_code == 200
     assert (

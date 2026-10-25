@@ -181,6 +181,52 @@ async def test_impersonation_mints_a_token_and_logs_it(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "body",
+    [None, {}, {"reason": None}, {"reason": ""}, {"reason": "test"}, {"reason": "    short     "}, {"reason": "a  b  c  d  e"}],
+    ids=["no-body", "empty-body", "null", "blank", "four-letters", "padded-short", "spaced-out"],
+)
+async def test_a_session_as_someone_else_needs_a_reason_of_ten_characters(
+    client, make_admin, make_user, mint_token, body
+):
+    """Ten characters, not counting spaces at the ends or in a row: a
+    session nobody can explain afterwards is one nobody can review."""
+    admin = await make_admin()
+    target = await make_user(email="noreason@example.com")
+    token = await mint_token(admin)
+
+    kwargs = {} if body is None else {"json": body}
+    response = await client.post(
+        f"/api/v1/auth/admin/impersonate/{target.id}", headers=auth_header(token), **kwargs
+    )
+
+    assert response.status_code == 422, response.text
+    answer = response.json()
+    assert answer["error_code"] == "REASON_REQUIRED"
+    assert "at least 10 characters" in answer["message"]
+    assert answer["errors"]["fields"]["reason"]
+    assert "token" not in answer
+    # Refused before anything was minted: nothing to find in the log.
+    assert await entries(client, token, action="user.impersonate") == []
+
+
+@pytest.mark.asyncio
+async def test_the_reason_is_kept_tidied_and_bounded(client, make_admin, make_user, mint_token):
+    admin = await make_admin()
+    target = await make_user(email="tidyreason@example.com")
+    token = await mint_token(admin)
+    url = f"/api/v1/auth/admin/impersonate/{target.id}"
+
+    exactly_ten = await client.post(url, headers=auth_header(token), json={"reason": "  ticket  #42  "})
+    assert exactly_ten.status_code == 200, exactly_ten.text
+    too_long = await client.post(url, headers=auth_header(token), json={"reason": "x" * 301})
+    assert too_long.status_code == 422 and too_long.json()["error_code"] == "REASON_TOO_LONG"
+
+    rows = await entries(client, token, action="user.impersonate")
+    assert [r["details"]["reason"] for r in rows] == ["ticket #42"]
+
+
+@pytest.mark.asyncio
 async def test_an_admin_cannot_impersonate_another_admin(
     client, make_admin, mint_token
 ):
@@ -218,7 +264,9 @@ async def test_the_handoff_token_exchanges_for_a_session(
     token = await mint_token(admin)
 
     minted = await client.post(
-        f"/api/v1/auth/admin/impersonate/{target.id}", headers=auth_header(token)
+        f"/api/v1/auth/admin/impersonate/{target.id}",
+        headers=auth_header(token),
+        json={"reason": "support ticket: cannot publish"},
     )
     handoff = minted.json()["token"]
 

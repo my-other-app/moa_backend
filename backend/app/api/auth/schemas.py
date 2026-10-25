@@ -35,8 +35,17 @@ class AuthTokenData(CustomBaseModel):
     jti: str | None = None
 
 
+#: The shortest reason an admin may give for a session as someone else:
+#: enough for "ticket 4512: can't publish", too much for "test" or "x".
+IMPERSONATION_REASON_MIN = 10
+IMPERSONATION_REASON_MAX = 300
+
+
 class ImpersonationRequest(CustomBaseModel):
-    """Why the admin needs the session. Recorded in the audit log."""
+    """Why the admin needs the session. Required (IMPERSONATION_REASON_MIN
+    characters at least, checked by the endpoint so a short or missing one
+    is answered in words rather than as a schema error), and recorded in the
+    audit log with the session."""
 
     reason: str | None = None
 

@@ -656,11 +656,16 @@ async def impersonate_user(
       identifiable for its whole life rather than only at creation
     - the attempt is recorded before the token is returned, so a token that
       is minted and never used is still in the log
+    - it needs a reason, at least IMPERSONATION_REASON_MIN characters, kept
+      with the attempt in the log: a session nobody can explain later is
+      one nobody can review (422 REASON_REQUIRED without one)
 
     It was deliberately not built until the audit log existed, because an
     admin acting as a user with no record of it is precisely the thing worth
     refusing.
     """
+    from app.api.auth.schemas import IMPERSONATION_REASON_MAX, IMPERSONATION_REASON_MIN
+
     target = await get_user(session, user_id)
     if not target:
         raise CustomHTTPException(404, message="User not found")
@@ -669,6 +674,24 @@ async def impersonate_user(
     if target_type == "admin":
         raise CustomHTTPException(
             403, message="Admins cannot impersonate other admins"
+        )
+
+    # Spaces in a row count once, and none at the ends: "          " is not
+    # ten characters of reason.
+    reason = " ".join(((body.reason if body else None) or "").split())
+    if len(reason) < IMPERSONATION_REASON_MIN:
+        raise CustomHTTPException(
+            422,
+            message=f"Say why you need a session as this account: at least {IMPERSONATION_REASON_MIN} characters. It is kept in the activity log.",
+            error_code="REASON_REQUIRED",
+            errors={"fields": {"reason": f"At least {IMPERSONATION_REASON_MIN} characters."}},
+        )
+    if len(reason) > IMPERSONATION_REASON_MAX:
+        raise CustomHTTPException(
+            422,
+            message=f"Keep the reason to {IMPERSONATION_REASON_MAX} characters.",
+            error_code="REASON_TOO_LONG",
+            errors={"fields": {"reason": f"At most {IMPERSONATION_REASON_MAX} characters."}},
         )
 
     import uuid
@@ -695,7 +718,7 @@ async def impersonate_user(
         summary=f"Started a session as {target.email or target.username}",
         details={
             "target_user_type": target_type,
-            "reason": (body.reason if body else None),
+            "reason": reason,
         },
         request=request,
     )
