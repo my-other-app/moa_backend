@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from razorpay.errors import BadRequestError
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.api.deliveries import pipeline
 from app.api.deliveries import service as deliveries
@@ -457,11 +457,12 @@ async def test_a_months_extra_goes_on_the_next_invoice_once(client, session, wor
     st = await _statement(session, world["club"].id)
     assert st.period == period
     assert (st.email_used, st.email_limit, st.email_extra, st.whatsapp_used, st.whatsapp_limit, st.whatsapp_extra) == (5, 3, 2, 4, 2, 2)
-    # 2 × ₹0.10 + 2 × ₹1
-    assert st.amount_paise == 220 and st.status == "charged" and st.razorpay_addon_id == "ao_0"
+    # 2 × ₹0.10 + 2 × ₹1.50: the WhatsApp extra at the plan's price (pricing_adjust).
+    assert (st.email_rate_paise, st.whatsapp_rate_paise) == (10, 150)
+    assert st.amount_paise == 320 and st.status == "charged" and st.razorpay_addon_id == "ao_0"
     [(sub_id, payload)] = razorpay.of("subscription", "createAddon")
     assert sub_id == "sub_quota_live"
-    assert payload["quantity"] == 1 and payload["item"]["amount"] == 220 and payload["item"]["currency"] == "INR"
+    assert payload["quantity"] == 1 and payload["item"]["amount"] == 320 and payload["item"]["currency"] == "INR"
     assert billing.reference(st) in payload["item"]["description"]
     assert len(made) == 1
 
@@ -470,11 +471,11 @@ async def test_a_months_extra_goes_on_the_next_invoice_once(client, session, wor
     await billing.run(session, _now() + 3 * DAY)
     assert len(razorpay.of("subscription", "createAddon")) == 1
     audit = await session.scalar(select(AdminAuditLogs).where(AdminAuditLogs.action == "messages.overage_charged"))
-    assert audit.details["addon_id"] == "ao_0" and audit.details["amount_paise"] == 220
+    assert audit.details["addon_id"] == "ao_0" and audit.details["amount_paise"] == 320
     assert [a.kind for a in await _alerts(session, "message_overage_charged")] == ["message_overage_charged"]
 
     history = (await client.get(f"{API}/clubs/messages/history", headers=world["h"])).json()["items"]
-    assert [(h["period"], h["status"], h["amount_paise"]) for h in history] == [(quota.key(period), "charged", 220)]
+    assert [(h["period"], h["status"], h["amount_paise"]) for h in history] == [(quota.key(period), "charged", 320)]
 
 
 async def test_a_refused_addon_is_tried_again_later_and_charged_once(session, world, razorpay):  # noqa: F811
@@ -585,7 +586,7 @@ async def test_a_club_whose_subscription_ended_is_left_to_invoice_by_hand(sessio
     await billing.run(session)
     st = await _statement(session, world["club"].id)
     # Sent under Growth (Razorpay), so billed at Growth's limits -- but nothing left to add it to.
-    assert (st.billing, st.amount_paise, st.status) == ("razorpay", 220, "manual")
+    assert (st.billing, st.amount_paise, st.status) == ("razorpay", 320, "manual")
     assert razorpay.of("subscription", "createAddon") == []
     assert len(await _alerts(session, "message_overage_manual")) == 1
 
@@ -602,10 +603,10 @@ async def test_a_complimentary_club_gets_a_statement_and_no_charge(session, worl
     done = await billing.run(session)
     assert done["overage_charged"] == 0
     st = await _statement(session, world["club"].id)
-    assert (st.billing, st.amount_paise, st.status) == ("manual", 220, "manual")
+    assert (st.billing, st.amount_paise, st.status) == ("manual", 320, "manual")
     assert razorpay.of("subscription", "createAddon") == []
     [alert] = await _alerts(session, "message_overage_manual")
-    assert "invoice ₹2.20 by hand" in alert.title
+    assert "invoice ₹3.20 by hand" in alert.title
 
 
 async def test_free_past_its_limit_is_not_billable_and_a_tiny_extra_is_waived(session, world, razorpay, make_club):  # noqa: F811
@@ -653,10 +654,10 @@ async def test_the_plans_and_entitlements_carry_the_limits_and_prices(client, se
     plans = {p["key"]: p for p in (await client.get(f"{API}/plans")).json()["plans"]}
     assert plans["growth"]["limits"]["emails_per_month"] == 3 and plans["growth"]["limits"]["whatsapp_per_month"] == 2
     assert plans["enterprise"]["limits"]["emails_per_month"] is None
-    assert (plans["growth"]["email_overage_paise"], plans["growth"]["whatsapp_overage_paise"]) == (10, 100)
+    assert (plans["growth"]["email_overage_paise"], plans["growth"]["whatsapp_overage_paise"]) == (10, 150)
     ent = (await client.get(f"{API}/clubs/entitlements", headers=world["h"])).json()
     assert ent["limits"]["emails_per_month"] == 3 and ent["limits"]["whatsapp_per_month"] == 0
-    assert (ent["email_overage_paise"], ent["whatsapp_overage_paise"]) == (10, 100)
+    assert (ent["email_overage_paise"], ent["whatsapp_overage_paise"]) == (10, 150)
 
 
 async def test_the_usage_answer_has_its_shape(client, session, world):
@@ -751,7 +752,7 @@ async def test_the_plan_editor_keeps_the_message_limits_an_old_form_leaves_out(c
     assert (body["email_overage_paise"], body["whatsapp_overage_paise"]) == (15, 120)
 
     created = await client.post(f"{API}/admin/plans", json={"key": "campus2", "name": "Campus 2"}, headers=admin)
-    assert (created.json()["email_overage_paise"], created.json()["whatsapp_overage_paise"]) == (10, 100)
+    assert (created.json()["email_overage_paise"], created.json()["whatsapp_overage_paise"]) == (10, 150)
 
 
 async def test_the_migration_seeds_the_owners_limits(session):
@@ -777,10 +778,221 @@ async def test_the_migration_seeds_the_owners_limits(session):
         select(Plans.key, PlanLimits.emails_per_month, PlanLimits.whatsapp_per_month, Plans.email_overage_paise,
                Plans.whatsapp_overage_paise).join(PlanLimits, PlanLimits.plan_id == Plans.id)
     )).all()
+    # The schema here is the models' (create_all), whose WhatsApp default is
+    # pricing_adjust's ₹1.50; on a real database message_quotas added it at ₹1.
     assert {k: (e, w, ep, wp) for k, e, w, ep, wp in rows} == {
-        "free": (200, 0, 10, 100), "starter": (1000, 50, 10, 100), "growth": (5000, 250, 10, 100),
-        "pro": (20000, 1000, 10, 100), "campus": (None, None, 10, 100), "enterprise": (None, None, 10, 100),
+        "free": (200, 0, 10, 150), "starter": (1000, 50, 10, 150), "growth": (5000, 250, 10, 150),
+        "pro": (20000, 1000, 10, 150), "campus": (None, None, 10, 150), "enterprise": (None, None, 10, 150),
     }
+
+
+async def test_pricing_adjust_changes_only_what_the_owner_has_not_edited(session):
+    """The pricing_adjust migration on the seeded plans as production has
+    them (₹1 a WhatsApp extra): ₹1.50 where the price is still ₹1, a
+    promotional cap of 20% of each plan's WhatsApp, the trial's allowances on
+    Pro; an owner's own price is kept; a second run changes nothing."""
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from sqlalchemy import text
+
+    from app.api.subscriptions.models import PlanLimits, Plans
+    from tests.test_trial_pricing import _migration
+
+    plans_seed, trial_pricing, message_quotas, pricing = (
+        _migration("club_plans"), _migration("trial_pricing"), _migration("message_quotas"), _migration("pricing_adjust"))
+    assert pricing.down_revision == "club_whatsapp_reach"
+    connection = await session.connection()
+
+    def run(sync):
+        with Operations.context(MigrationContext.configure(connection=sync)):
+            plans_seed.seed_plans()
+            trial_pricing.retire_plan_trials(sync)
+            trial_pricing.fold_campus(sync)
+            message_quotas.seed_limits(sync)
+            # As message_quotas left production: ₹1 everywhere ...
+            sync.execute(text("UPDATE plans SET whatsapp_overage_paise = 100"))
+            # ... and the owner's own edits since: Growth's price, Starter's allowance.
+            sync.execute(text("UPDATE plans SET whatsapp_overage_paise = 120 WHERE key = 'growth'"))
+            sync.execute(text("UPDATE plan_limits SET whatsapp_per_month = 80 "
+                              "WHERE plan_id = (SELECT id FROM plans WHERE key = 'starter')"))
+            first = pricing.seed(sync)
+            return first, pricing.seed(sync)
+
+    first, second = await connection.run_sync(run)
+    # Five plans at ₹1 (Growth's ₹1.20 is the owner's), four with a WhatsApp allowance, four trial values.
+    assert first == {"whatsapp_overage": 5, "marketing_caps": 4, "trial_limits": 4}
+    assert second == {"whatsapp_overage": 0, "marketing_caps": 0, "trial_limits": 0}
+    await session.commit()
+    rows = (await session.execute(
+        select(Plans.key, Plans.whatsapp_overage_paise, Plans.email_overage_paise, PlanLimits.whatsapp_per_month,
+               PlanLimits.whatsapp_marketing_per_month).join(PlanLimits, PlanLimits.plan_id == Plans.id)
+    )).all()
+    assert {k: (wp, ep, w, m) for k, wp, ep, w, m in rows} == {
+        "free": (150, 10, 0, 0), "starter": (150, 10, 80, 16), "growth": (120, 10, 250, 50),
+        "pro": (150, 10, 1000, 200), "campus": (150, 10, None, None), "enterprise": (150, 10, None, None),
+    }
+    trial = (await session.execute(
+        select(PlanLimits.trial_emails_per_month, PlanLimits.trial_whatsapp_per_month,
+               PlanLimits.trial_whatsapp_marketing_per_month, PlanLimits.trial_ai_actions_per_month)
+        .join(Plans, Plans.id == PlanLimits.plan_id).where(Plans.key == "pro")
+    )).one()
+    assert tuple(trial) == (2000, 50, 10, 50)
+    others = await session.scalar(
+        select(func.count(PlanLimits.id)).join(Plans, Plans.id == PlanLimits.plan_id)
+        .where(Plans.key != "pro", PlanLimits.trial_emails_per_month.isnot(None)))
+    assert others == 0
+
+
+# ─── Promotional WhatsApp and the trial's allowances (pricing_adjust) ────
+
+
+async def _cap_marketing(session, plan, cap):
+    from sqlalchemy import update
+
+    from app.api.subscriptions.models import PlanLimits
+
+    await session.execute(update(PlanLimits).where(PlanLimits.plan_id == plan.id).values(whatsapp_marketing_per_month=cap))
+    await session.commit()
+
+
+def test_what_counts_as_promotional_whatsapp():
+    # By the template's category when the sender knows it ...
+    assert quota.is_marketing("whatsapp", "update", "MARKETING") and quota.is_marketing("whatsapp", "update", "marketing")
+    assert not quota.is_marketing("whatsapp", "announcement", "UTILITY")
+    # ... else by what the message is.
+    assert all(quota.is_marketing("whatsapp", k) for k in ("promotion", "announcement", "campaign"))
+    assert not any(quota.is_marketing("whatsapp", k) for k in ("reminder", "update", "journey", "survey"))
+    # Never a ticket, certificate or payment message, whatever it is called; never an email.
+    assert not any(quota.is_marketing("whatsapp", k, "MARKETING") for k in ("ticket", "certificate", "payment"))
+    assert not quota.is_marketing("email", "promotion", "MARKETING")
+
+
+async def test_promotional_whatsapp_past_the_cap_is_held_back_but_tickets_go(session, world, meta, background):
+    """Growth, which Razorpay bills: past its promotional cap a MARKETING
+    WhatsApp is held back (never sold as an extra); utility messages and
+    tickets go on, past the WhatsApp limit too, as extras."""
+    growth = world["tiers"].growth
+    await _cap_marketing(session, growth, 1)
+    await _paying(session, world["club"].id, growth.id)
+    club_id = world["club"].id
+    promo = whatsapp.event_update(name="Ananya", club="Quota Club", event="Build Night", update="20% off merch")
+
+    out = await whatsapp.send("9876543210", promo, meter={"club_id": club_id, "kind": "update", "category": "MARKETING",
+                                                           "ref": "promo:1"})
+    assert out["Via"] == "platform"
+    with pytest.raises(whatsapp.Undeliverable) as held:
+        await whatsapp.send("9876543211", promo, meter={"club_id": club_id, "kind": "update", "category": "MARKETING",
+                                                         "ref": "promo:2"})
+    assert held.value.reason == (
+        "Not sent: this month's 1 promotional WhatsApp message on Growth are used up. "
+        "Tickets, certificates and reminders still go."
+    )
+    # A utility update is not promotional: it goes, and so do tickets, past the limit of 2.
+    await whatsapp.send("9876543212", promo, meter={"club_id": club_id, "kind": "update", "category": "UTILITY",
+                                                     "ref": "update:1"})
+    result = await deliveries.queue(session, world["event"], DeliveryKind.ticket, registration_ids=[world["regs"][0].id])
+    for did in result["ids"]:
+        await deliveries.deliver(session, did)
+    assert [m["template"]["name"] for m in meta["messages"]].count("ticket_confirmed") == 1
+    assert len(meta["messages"]) == 3
+    wa = await _usage(session, club_id, "whatsapp")
+    assert (wa.used, wa.marketing, wa.blocked) == (3, 1, 1)
+    assert wa.kinds == {"update": 2, "ticket": 1}
+
+    usage = (await quota.usage(session, club_id))["channels"]["whatsapp"]
+    assert usage["marketing"] == {"used": 1, "limit": 1}
+    assert (usage["used"], usage["limit"], usage["extra"], usage["state"]) == (3, 2, 1, "over")
+
+
+async def test_free_sends_no_promotional_whatsapp_and_a_club_number_is_never_capped(session, world, meta, background):
+    await _cap_marketing(session, world["tiers"].free, 0)
+    club_id = world["club"].id
+    terms = await quota.terms_for(session, club_id)
+    assert terms.whatsapp_marketing_limit == 0
+    reason = await quota.held_back(session, terms, "whatsapp", "promotion")
+    assert reason == "Not sent: promotional WhatsApp messages aren't included on Free."
+    # A ticket is never held back, a club's own number never capped or counted.
+    assert await quota.held_back(session, terms, "whatsapp", "ticket", category="MARKETING") is None
+    assert await quota.held_back(session, terms, "whatsapp", "promotion", via="club") is None
+    assert await quota.record_message(club_id, "whatsapp", "promotion", via="club", session=session) is None
+
+
+async def test_certificates_go_past_a_spent_promotional_cap(session, world, background):
+    growth = world["tiers"].growth
+    await _cap_marketing(session, growth, 1)
+    await _paying(session, world["club"].id, growth.id)
+    club_id = world["club"].id
+    await quota.record_message(club_id, "whatsapp", "promotion", session=session, ref="p:1")
+    terms = await quota.terms_for(session, club_id)
+    assert await quota.held_back(session, terms, "whatsapp", "campaign") is not None
+    assert await quota.held_back(session, terms, "whatsapp", "certificate") is None
+    assert await quota.held_back(session, terms, "whatsapp", "ticket") is None
+    assert await quota.held_back(session, terms, "whatsapp", "reminder") is None
+
+
+async def test_the_free_trial_has_its_own_allowances_and_pros_features(client, session, world, monkeypatch):
+    """Pro with trial allowances: a club on the free trial is held to them
+    (emails, WhatsApp, promotional WhatsApp, AI actions), keeps Pro's
+    features, and sees them on its entitlements and the pricing page."""
+    from sqlalchemy import update
+
+    from app.api.subscriptions import gates
+    from app.api.subscriptions import service as subs
+    from app.api.subscriptions.models import PlanLimits
+
+    pro = world["tiers"].pro
+    await session.execute(update(PlanLimits).where(PlanLimits.plan_id == pro.id).values(
+        whatsapp_marketing_per_month=200, ai_actions_per_month=500, trial_emails_per_month=2000,
+        trial_whatsapp_per_month=50, trial_whatsapp_marketing_per_month=10, trial_ai_actions_per_month=50))
+    await session.commit()
+    club_id = world["club"].id
+    await subs.start_free_trial(session, club_id)
+    await session.commit()
+
+    terms = await quota.terms_for(session, club_id)
+    assert (terms.plan_key, terms.email_limit, terms.whatsapp_limit, terms.whatsapp_marketing_limit, terms.trial) == (
+        "pro", 2000, 50, 10, "free_trial")
+    assert terms.blocks  # no card: past 2,000 emails, announcements are held back
+    gates.reset()
+    assert await gates.cap(session, club_id, "ai_actions_per_month") == 50
+    resolved = await subs.resolve_entitlements(session, club_id)
+    assert resolved.allows("tickets")
+
+    ent = (await client.get(f"{API}/clubs/entitlements", headers=world["h"])).json()
+    assert (ent["limits"]["emails_per_month"], ent["limits"]["whatsapp_per_month"],
+            ent["limits"]["whatsapp_marketing_per_month"], ent["limits"]["ai_actions_per_month"]) == (2000, 50, 10, 50)
+    body = (await client.get(f"{API}/plans")).json()
+    assert body["trial"]["limits"] == {"emails_per_month": 2000, "whatsapp_per_month": 50,
+                                       "whatsapp_marketing_per_month": 10, "ai_actions_per_month": 50}
+    # The plan itself, as the pricing page and a paying Pro club have it, is untouched.
+    pro_card = next(p for p in body["plans"] if p["key"] == "pro")
+    assert (pro_card["limits"]["emails_per_month"], pro_card["limits"]["whatsapp_marketing_per_month"]) == (20000, 200)
+
+
+async def test_the_plan_editor_sets_the_cap_and_the_trial_allowances(client, session, world, make_admin, mint_token):
+    admin = auth_header(await mint_token(await make_admin(email="quota-trial-editor@example.com")))
+    pro = world["tiers"].pro
+    plan = (await client.get(f"{API}/admin/plans/{pro.id}", headers=admin)).json()
+    assert plan["trial_limits"] == {"emails_per_month": None, "whatsapp_per_month": None,
+                                    "whatsapp_marketing_per_month": None, "ai_actions_per_month": None}
+    form = {k: plan[k] for k in ("key", "name", "tagline", "price_monthly_paise", "price_yearly_paise", "trial_days",
+                                 "visibility", "sort_order", "features")}
+    form["limits"] = {**plan["limits"], "whatsapp_marketing_per_month": 200}
+    form["trial_limits"] = {"emails_per_month": 2000, "whatsapp_per_month": 50, "whatsapp_marketing_per_month": 10,
+                            "ai_actions_per_month": 50}
+    saved = (await client.put(f"{API}/admin/plans/{pro.id}", json=form, headers=admin)).json()
+    assert saved["limits"]["whatsapp_marketing_per_month"] == 200
+    assert saved["trial_limits"] == form["trial_limits"]
+
+    # An editor that sends neither keeps both.
+    older = {**form, "limits": {k: v for k, v in plan["limits"].items() if k != "whatsapp_marketing_per_month"}}
+    older.pop("trial_limits")
+    kept = (await client.put(f"{API}/admin/plans/{pro.id}", json=older, headers=admin)).json()
+    assert kept["limits"]["whatsapp_marketing_per_month"] == 200 and kept["trial_limits"]["emails_per_month"] == 2000
+
+    # A copy carries them.
+    copy = (await client.post(f"{API}/admin/plans/{pro.id}/duplicate", headers=admin)).json()
+    assert copy["limits"]["whatsapp_marketing_per_month"] == 200 and copy["trial_limits"]["ai_actions_per_month"] == 50
 
 
 def test_every_team_role_reads_the_bell_and_the_months_messages():

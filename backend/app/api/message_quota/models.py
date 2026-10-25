@@ -56,8 +56,12 @@ class MessageUsage(AbstractSQLModel, TimestampsMixin):
     channel = Column(String(16), nullable=False)
     #: Messages handed to the provider this month.
     used = Column(Integer, nullable=False, default=0, server_default="0")
-    #: Sends held back because the plan has no way to pay for more (Free).
+    #: Sends held back because the plan has no way to pay for more (Free),
+    #: or past the plan's promotional WhatsApp cap.
     blocked = Column(Integer, nullable=False, default=0, server_default="0")
+    #: Of `used`, the MARKETING (promotional) WhatsApp templates, counted
+    #: against the plan's `whatsapp_marketing_per_month` (migration pricing_adjust).
+    marketing = Column(Integer, nullable=False, default=0, server_default="0")
     #: `used` by kind: {"ticket": 120, "announcement": 40, ...}.
     kinds = Column(JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb"))
     # The terms the club last sent under: the statement's, unless the plan

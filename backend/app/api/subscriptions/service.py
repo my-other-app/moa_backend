@@ -20,6 +20,7 @@ from app.api.subscriptions.models import (
     PlanVisibility,
     Plans,
     SubscriptionStatus,
+    trial_allowances,
 )
 from app.response import CustomHTTPException
 
@@ -27,7 +28,10 @@ from app.response import CustomHTTPException
 DEFAULT_PLAN_KEY = "free"
 
 #: The free trial every new club starts with: this plan, this many days, no
-#: card and no Razorpay (start_free_trial). Once per club, ever.
+#: card and no Razorpay (start_free_trial). Once per club, ever. The plan's
+#: features, with the trial's own monthly allowances where the plan sets
+#: them (plan_limits.trial_*: 2,000 emails, 50 WhatsApp, 50 AI actions on
+#: Pro from migration pricing_adjust).
 FREE_TRIAL_PLAN_KEY = "pro"
 FREE_TRIAL_DAYS = 14
 #: The plan an admin's Enterprise trial gives, and its default length.
@@ -434,6 +438,9 @@ async def _resolve(session, row, now) -> Entitlements:
             plan = await _live_plan(session, trial[1])
             if plan is not None:
                 resolved = _from_plan(plan, None)
+                if trial[0] == "free_trial":
+                    # The plan's features, with the trial's own allowances.
+                    resolved.limits.update(trial_allowances(plan.limits))
                 resolved.grant = {
                     "status": SubscriptionStatus.trial.value,
                     "cycle": getattr(row.cycle, "value", row.cycle),

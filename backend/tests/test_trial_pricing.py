@@ -448,8 +448,11 @@ async def test_the_migration_folds_campus_into_enterprise(client, session, make_
         "free": (0, 0), "starter": (29900, 0), "growth": (69900, 0), "pro": (149900, 0), "enterprise": (0, 0),
     }
     assert by_key["growth"]["featured"] and by_key["enterprise"]["contact_sales"]
+    # The trial's allowances are Pro's own until pricing_adjust gives it smaller ones.
     assert body["trial"] == {"days": 14, "plan_key": "pro", "plan_name": "Pro", "card_required": False,
-                             "then_plan_key": "free"}
+                             "then_plan_key": "free", "limits": {
+                                 "emails_per_month": None, "whatsapp_per_month": None,
+                                 "whatsapp_marketing_per_month": None, "ai_actions_per_month": None}}
     assert body["enterprise_trial_days"] == 30
 
 

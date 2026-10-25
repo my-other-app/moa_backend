@@ -19,16 +19,18 @@ from app.api.admin_alerts import notify
 from app.api.audit import service as audit
 from app.api.clubs.models import Clubs
 from app.api.users.models import Users
-from app.api.subscriptions import billing, gates, ledger, notices, service, sweep
+from app.api.subscriptions import billing, gates, ledger, notices, service, sweep, trial_gift
 from app.api.subscriptions import revenue as revenue_service
 from app.api.subscriptions.models import (
     BillingCycle,
     ClubSubscriptions,
     PlanFeatures,
     PlanLimits,
+    TRIAL_LIMIT_COLUMNS,
     PlanVisibility,
     Plans,
     SubscriptionStatus,
+    trial_allowances,
 )
 from app.api.subscriptions.schemas import (
     AdminCancelIn,
@@ -49,6 +51,9 @@ from app.api.subscriptions.schemas import (
     StartSubscriptionOut,
     SubscriptionOut,
     SubscriptionTotals,
+    TrialGiftIn,
+    TrialGiftOut,
+    TrialGiftPreviewOut,
     plan_to_dict,
     public_plan_dict,
     subscription_dict,
@@ -71,8 +76,17 @@ admin_router = APIRouter(prefix="/admin", tags=["subscriptions"])
 club_router = APIRouter(prefix="/clubs", tags=["subscriptions"])
 public_router = APIRouter(prefix="/plans", tags=["subscriptions"])
 
-#: The limits added with the message quotas, kept when an update leaves them out.
-_MESSAGE_LIMITS = frozenset({"emails_per_month", "whatsapp_per_month"})
+#: The limits added with the message quotas (and the promotional WhatsApp
+#: cap after them), kept when an update leaves them out.
+_MESSAGE_LIMITS = frozenset({"emails_per_month", "whatsapp_per_month", "whatsapp_marketing_per_month"})
+
+
+def _set_trial_limits(limits: PlanLimits, trial_limits) -> None:
+    """The free trial's own allowances from the editor (PlanTrialLimitsIn)."""
+    if trial_limits is None:
+        return
+    for key, value in trial_limits.model_dump().items():
+        setattr(limits, TRIAL_LIMIT_COLUMNS[key], value)
 
 #: The same budget as the discover routes behind the public site.
 PUBLIC_LIMIT = "120/minute"
@@ -110,6 +124,7 @@ async def pricing(request: Request, response: Response, session: SessionDep) -> 
                 "plan_name": trial_plan.name,
                 "card_required": False,
                 "then_plan_key": service.DEFAULT_PLAN_KEY,
+                "limits": trial_allowances(trial_plan.limits),
             }
             if trial_plan is not None
             else None
@@ -166,7 +181,7 @@ async def create_plan(
         featured=bool(payload.featured),
         contact_sales=bool(payload.contact_sales),
     )
-    # Omitted: the owner's defaults (the column defaults, ₹0.10 and ₹1).
+    # Omitted: the owner's defaults (the column defaults, ₹0.10 and ₹1.50).
     if payload.email_overage_paise is not None:
         plan.email_overage_paise = payload.email_overage_paise
     if payload.whatsapp_overage_paise is not None:
@@ -174,7 +189,9 @@ async def create_plan(
     session.add(plan)
     await session.flush()
 
-    session.add(PlanLimits(plan_id=plan.id, **payload.limits.model_dump()))
+    limits = PlanLimits(plan_id=plan.id, **payload.limits.model_dump())
+    _set_trial_limits(limits, payload.trial_limits)
+    session.add(limits)
     session.add(PlanFeatures(plan_id=plan.id, **payload.features.model_dump()))
     await session.flush()
 
@@ -240,7 +257,9 @@ async def update_plan(
         plan.razorpay_plan_id_yearly = None
 
     if plan.limits is None:
-        session.add(PlanLimits(plan_id=plan.id, **payload.limits.model_dump()))
+        limits = PlanLimits(plan_id=plan.id, **payload.limits.model_dump())
+        _set_trial_limits(limits, payload.trial_limits)
+        session.add(limits)
     else:
         sent = payload.limits.model_fields_set
         for key, value in payload.limits.model_dump().items():
@@ -249,6 +268,8 @@ async def update_plan(
                 # plan without them: that must not make them unlimited.
                 continue
             setattr(plan.limits, key, value)
+        # Omitted (an older editor): the trial's allowances stay as they are.
+        _set_trial_limits(plan.limits, payload.trial_limits)
 
     if plan.features is None:
         session.add(PlanFeatures(plan_id=plan.id, **payload.features.model_dump()))
@@ -325,7 +346,7 @@ async def duplicate_plan(
             plan_id=copy.id,
             **{
                 key: (getattr(source.limits, key) if source.limits else None)
-                for key in LIMIT_KEYS
+                for key in (*LIMIT_KEYS, *TRIAL_LIMIT_COLUMNS.values())
             },
         )
     )
@@ -718,6 +739,51 @@ async def end_trial(
     )
     await session.commit()
     return await _fresh(session, row.id)
+
+
+@admin_router.get(
+    "/subscriptions/trial-gift", summary="Which existing clubs would get the free trial now (admin)"
+)
+async def trial_gift_preview(session: SessionDep, user: AdminAuth) -> TrialGiftPreviewOut:
+    """
+    The clubs that never had the free trial and would get it from the button
+    below (subscriptions.trial_gift): approved, real (not demo or showcase),
+    never had a trial, not paying or on a plan an admin set, not on a
+    complimentary plan, an Enterprise trial or its own limits. How many, a
+    sample, and how many were left out for each reason. Changes nothing.
+    """
+    return await trial_gift.preview(session)
+
+
+@admin_router.post(
+    "/subscriptions/trial-gift", summary="Give every eligible existing club the free trial (admin)"
+)
+async def trial_gift_apply(
+    payload: TrialGiftIn,
+    session: SessionDep,
+    user: MoneyAuth,
+    request: Request = None,
+) -> TrialGiftOut:
+    """
+    Start the free trial (14 days of Pro, no card) now for every club the
+    preview counts, exactly as a newly approved club's starts, and with
+    `email` (the default) mail each owner once what it unlocks and when it
+    ends. Idempotent: a club that has had a trial is never eligible again,
+    so a second run starts nothing. Each club and the run are audited.
+    """
+    result = await trial_gift.apply(session, actor=user, email=payload.email, request=request)
+    if result["started"]:
+        await notify(
+            session, "subscription_trial_started",
+            title=f"{_admin_name(user)} gave {result['started']} existing club{'s' if result['started'] != 1 else ''} the free trial",
+            body=(f"{service.FREE_TRIAL_DAYS} days of Pro, no card, to {notices.day(result['ends_at'])}."
+                  + (f" {result['emailed']} owner{'s' if result['emailed'] != 1 else ''} mailed." if payload.email else " No mail.")),
+            dedupe=False,
+            data={"action": "trial_gift", "started": result["started"], "emailed": result["emailed"],
+                  "by": getattr(user, "email", None)},
+        )
+    await session.commit()
+    return result
 
 
 @admin_router.put(

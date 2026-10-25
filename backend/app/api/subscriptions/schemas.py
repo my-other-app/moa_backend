@@ -10,6 +10,7 @@ from app.api.subscriptions.models import (
     BillingCycle,
     PlanVisibility,
     SubscriptionStatus,
+    trial_limits_of,
 )
 from app.core.response.base_model import CustomBaseModel
 
@@ -35,6 +36,18 @@ class PlanLimitsIn(CustomBaseModel):
     #: Emails and WhatsApp messages a club sends in a month (app/api/message_quota).
     emails_per_month: int | None = Field(None, ge=0)
     whatsapp_per_month: int | None = Field(None, ge=0)
+    #: Of whatsapp_per_month, how many may be promotional (MARKETING) templates.
+    whatsapp_marketing_per_month: int | None = Field(None, ge=0)
+
+
+class PlanTrialLimitsIn(CustomBaseModel):
+    """The free trial's own monthly allowances, while this plan is given as
+    the trial (models.TRIAL_LIMIT_COLUMNS). Null: the plan's own."""
+
+    emails_per_month: int | None = Field(None, ge=0)
+    whatsapp_per_month: int | None = Field(None, ge=0)
+    whatsapp_marketing_per_month: int | None = Field(None, ge=0)
+    ai_actions_per_month: int | None = Field(None, ge=0)
 
 
 class PlanFeaturesIn(CustomBaseModel):
@@ -102,10 +115,13 @@ class PlanIn(CustomBaseModel):
     contact_sales: bool | None = None
     #: What each message past the monthly limit costs, in paise. Omitted
     #: means "leave as it is" on update, and the owner's defaults (10 and
-    #: 100: ₹0.10 an email, ₹1 a WhatsApp message) on create.
+    #: 150: ₹0.10 an email, ₹1.50 a WhatsApp message) on create.
     email_overage_paise: int | None = Field(None, ge=0, le=100_000)
     whatsapp_overage_paise: int | None = Field(None, ge=0, le=100_000)
     limits: PlanLimitsIn = Field(default_factory=PlanLimitsIn)
+    #: The free trial's own allowances on this plan. Omitted: left as they
+    #: are on update, none (the plan's own) on create.
+    trial_limits: PlanTrialLimitsIn | None = None
     features: PlanFeaturesIn = Field(default_factory=PlanFeaturesIn)
 
     @model_validator(mode="after")
@@ -135,6 +151,8 @@ class PlanOut(CustomBaseModel):
     #: Each email / WhatsApp message past the monthly limit, in paise.
     email_overage_paise: int = 0
     whatsapp_overage_paise: int = 0
+    #: The free trial's own allowances on this plan (null each: the plan's own).
+    trial_limits: dict[str, int | None] = Field(default_factory=dict)
     #: Whether the plan can actually be billed. A paid plan with no Razorpay
     #: plan id cannot be subscribed to, and the admin screen says so rather
     #: than letting someone publish it and find out at checkout.
@@ -398,6 +416,57 @@ class EnterpriseTrialIn(CustomBaseModel):
     days: int = Field(30, ge=1, le=365)
 
 
+class TrialGiftClub(CustomBaseModel):
+    id: int
+    name: str
+    slug: str | None = None
+    created_at: datetime | None = None
+
+
+class TrialGiftExcluded(CustomBaseModel):
+    #: demo | had_trial | custom_limits | enterprise_trial | checkout | complimentary | paying
+    reason: str
+    label: str
+    count: int
+
+
+class TrialGiftPreviewOut(CustomBaseModel):
+    """Which existing clubs the free trial would go to now (subscriptions.trial_gift)."""
+
+    #: False when there is no trial plan to give (no Pro plan).
+    available: bool
+    plan_key: str | None = None
+    plan_name: str | None = None
+    days: int
+    #: The plan a club is on when the trial ends (Free; no card is asked for).
+    then_plan_key: str
+    #: The trial's monthly allowances (emails, WhatsApp, promotional WhatsApp, AI actions).
+    allowances: dict[str, int | None]
+    #: What it unlocks beyond Free, as the pricing page names it.
+    unlocks: list[str]
+    eligible: int
+    #: The first few eligible clubs, oldest first.
+    sample: list[TrialGiftClub]
+    excluded: list[TrialGiftExcluded]
+
+
+class TrialGiftIn(CustomBaseModel):
+    #: Mail each club's owner (once) that the trial is on. Default on.
+    email: bool = True
+
+
+class TrialGiftOut(CustomBaseModel):
+    started: int
+    emailed: int
+    #: Eligible when read, but had a trial or a plan by the time it was started.
+    skipped: int
+    #: Left for a next run (more than one run takes).
+    remaining: int
+    #: When the trials started now end.
+    ends_at: datetime | None = None
+    clubs: list[TrialGiftClub]
+
+
 class EndTrialIn(CustomBaseModel):
     #: Which trial to end: "enterprise" or "free". Omitted: the Enterprise
     #: trial when one is running, else the free trial.
@@ -611,6 +680,10 @@ class PublicTrialOffer(CustomBaseModel):
     card_required: bool = False
     #: The plan a club is on when the trial ends without a paid plan picked.
     then_plan_key: str = "free"
+    #: What the trial allows a month (emails_per_month, whatsapp_per_month,
+    #: whatsapp_marketing_per_month, ai_actions_per_month): its own where
+    #: set, else the plan's. Every other limit and feature is the plan's.
+    limits: dict[str, int | None] = Field(default_factory=dict)
 
 
 class PublicPlansOut(CustomBaseModel):
@@ -691,6 +764,7 @@ def plan_to_dict(plan, subscriber_count: int = 0) -> dict:
         "contact_sales": bool(plan.contact_sales),
         "email_overage_paise": int(plan.email_overage_paise or 0),
         "whatsapp_overage_paise": int(plan.whatsapp_overage_paise or 0),
+        "trial_limits": trial_limits_of(plan.limits),
         "billable": _is_billable(plan),
         "subscriber_count": subscriber_count,
         "limits": (

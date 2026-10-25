@@ -404,6 +404,56 @@ async def email_free_trial_ended(session, subscription, club_name: str, *, trial
     )
 
 
+def allowances_line(allowances: dict) -> str | None:
+    """"2,000 emails, 50 WhatsApp messages and 50 AI actions a month", from
+    the trial's allowances (None: unlimited, left out; 0: left out)."""
+    words = (
+        ("emails_per_month", "email", "emails"),
+        ("whatsapp_per_month", "WhatsApp message", "WhatsApp messages"),
+        ("ai_actions_per_month", "AI action", "AI actions"),
+    )
+    parts = [
+        f"{allowances[key]:,} {one if allowances[key] == 1 else many}"
+        for key, one, many in words
+        if allowances.get(key)
+    ]
+    if not parts:
+        return None
+    joined = parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
+    return f"{joined} a month"
+
+
+async def email_free_trial_gift(
+    session, subscription, club_name: str, *, plan_name: str, days: int, unlocks: list[str], allowances: dict,
+) -> bool:
+    """An existing club given the free trial by an admin (trial_gift), once
+    per trial: what it unlocks, its allowances, and when it ends."""
+    ends = day(subscription.trial_ends_at)
+    paragraphs = [
+        f"Hi {club_name},",
+        f"We've switched on MyOtherApp {plan_name} for {club_name}, free for {days} days, until {ends}. "
+        "No card and nothing to set up: it's on now.",
+    ]
+    if unlocks:
+        shown = unlocks[:8]
+        more = " and more" if len(unlocks) > len(shown) else ""
+        paragraphs.append(f"It unlocks: {'; '.join(shown)}{more}.")
+    allowed = allowances_line(allowances)
+    if allowed:
+        paragraphs.append(f"During the trial your club can send {allowed}.")
+    paragraphs.append(
+        f"On {ends} {club_name} goes back to the Free plan, unless you choose a plan before then. "
+        "Nothing is charged, and your events, followers and data stay as they are."
+    )
+    return await send_once(
+        session, subscription, "free_trial_gift", _free_trial_episode(subscription),
+        subject=f"Your club has {days} days of MyOtherApp {plan_name}, free",
+        paragraphs=paragraphs,
+        button=("Open your dashboard", dashboard_url()),
+        footer=f"You're getting this because you run {club_name} on MyOtherApp.",
+    )
+
+
 def _enterprise_episode(subscription) -> str:
     started = subscription.enterprise_trial_started_at.isoformat() if subscription.enterprise_trial_started_at else "unknown"
     return f"row:{subscription.id}:enterprise_trial:{started}"

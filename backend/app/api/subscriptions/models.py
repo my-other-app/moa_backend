@@ -104,9 +104,10 @@ class Plans(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
 
     #: What each message past the plan's monthly limit costs, in paise
     #: (app/api/message_quota): added to the club's next Razorpay invoice.
-    #: The owner's defaults are ₹0.10 an email and ₹1 a WhatsApp message.
+    #: The owner's defaults are ₹0.10 an email and ₹1.50 a WhatsApp message
+    #: (₹1 until migration pricing_adjust).
     email_overage_paise = Column(Integer, nullable=False, default=10, server_default="10")
-    whatsapp_overage_paise = Column(Integer, nullable=False, default=100, server_default="100")
+    whatsapp_overage_paise = Column(Integer, nullable=False, default=150, server_default="150")
 
     #: Razorpay's own plan ids, one per cycle. Null until the plan is synced;
     #: a paid plan cannot be subscribed to until both exist.
@@ -146,7 +147,19 @@ LIMIT_KEYS = (
     "ai_actions_per_month",
     "emails_per_month",
     "whatsapp_per_month",
+    "whatsapp_marketing_per_month",
 )
+
+#: While a plan is given as the free trial (service.FREE_TRIAL_PLAN_KEY),
+#: these allowances replace the plan's own: the trial keeps the plan's
+#: features with smaller monthly allowances. Limit key -> its trial column
+#: on plan_limits (null: the plan's own allowance).
+TRIAL_LIMIT_COLUMNS = {
+    "emails_per_month": "trial_emails_per_month",
+    "whatsapp_per_month": "trial_whatsapp_per_month",
+    "whatsapp_marketing_per_month": "trial_whatsapp_marketing_per_month",
+    "ai_actions_per_month": "trial_ai_actions_per_month",
+}
 
 
 class PlanLimits(AbstractSQLModel, TimestampsMixin):
@@ -187,8 +200,37 @@ class PlanLimits(AbstractSQLModel, TimestampsMixin):
     #: Through the platform's WhatsApp number only: a club's own number is
     #: paid to Meta by the club and not counted.
     whatsapp_per_month = Column(Integer, nullable=True)
+    #: Of `whatsapp_per_month`, how many may be MARKETING (promotional)
+    #: templates, which cost us about 7x a utility one (migration
+    #: pricing_adjust: 20% of the allowance). Past it a promotional WhatsApp
+    #: is held back on every plan; tickets, certificates and reminders
+    #: (UTILITY) never are. Null: no separate cap.
+    whatsapp_marketing_per_month = Column(Integer, nullable=True)
+
+    # The free trial's own allowances (TRIAL_LIMIT_COLUMNS), used instead of
+    # the ones above while this plan is given as the free trial. Null: the
+    # plan's own.
+    trial_emails_per_month = Column(Integer, nullable=True)
+    trial_whatsapp_per_month = Column(Integer, nullable=True)
+    trial_whatsapp_marketing_per_month = Column(Integer, nullable=True)
+    trial_ai_actions_per_month = Column(Integer, nullable=True)
 
     plan = relationship("Plans", back_populates="limits")
+
+
+def trial_limits_of(limits: "PlanLimits | None") -> dict:
+    """The trial columns as {limit key: value or None (the plan's own)}."""
+    return {key: (getattr(limits, column) if limits is not None else None) for key, column in TRIAL_LIMIT_COLUMNS.items()}
+
+
+def trial_allowances(limits: "PlanLimits | None") -> dict:
+    """What the free trial on this plan allows of each TRIAL_LIMIT_COLUMNS
+    limit: its trial column, or the plan's own when that is null."""
+    own = trial_limits_of(limits)
+    return {
+        key: own[key] if own[key] is not None else (getattr(limits, key) if limits is not None else None)
+        for key in TRIAL_LIMIT_COLUMNS
+    }
 
 
 #: Feature flags, grouped the way the pricing page and the admin editor show

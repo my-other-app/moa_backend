@@ -1971,19 +1971,38 @@ month is a calendar month in India. Not counted: a send that was skipped or
 failed, a test send to the organiser, the platform's own mail to the club,
 and a WhatsApp message sent through a club's own number (`via="club"`).
 
-The owner's defaults (migration `message_quotas`, editable in Admin ->
-Subscriptions -> Plans):
+The owner's defaults (migrations `message_quotas` and `pricing_adjust`,
+editable in Admin -> Subscriptions -> Plans):
 
-| Plan | Emails a month | WhatsApp a month |
-|---|---|---|
-| Free | 200 | 0 |
-| Starter | 1,000 | 50 |
-| Growth | 5,000 | 250 |
-| Pro (and the free trial) | 20,000 | 1,000 |
-| Enterprise | unlimited unless set for the club | unlimited unless set |
+| Plan | Emails a month | WhatsApp a month | of which promotional |
+|---|---|---|---|
+| Free | 200 | 0 | 0 |
+| Starter | 1,000 | 50 | 10 |
+| Growth | 5,000 | 250 | 50 |
+| Pro | 20,000 | 1,000 | 200 |
+| The free trial (Pro's features) | 2,000 | 50 | 10 |
+| Enterprise | unlimited unless set for the club | unlimited unless set | no cap |
+
+The free trial also has 50 AI actions a month (Pro: 500). Its allowances are
+the trial plan's `plan_limits.trial_*` columns, edited in the plan editor
+under "Free trial allowances"; empty means the plan's own.
 
 Each plan's overage prices (`plans.email_overage_paise`, default 10 = ₹0.10;
-`whatsapp_overage_paise`, default 100 = ₹1) are edited beside them.
+`whatsapp_overage_paise`, default 150 = ₹1.50, ₹1 before `pricing_adjust`)
+are edited beside them. What a WhatsApp message costs us, with GST: ₹0.136
+for a UTILITY template, ₹1.02 for a MARKETING one.
+
+**Promotional WhatsApp** (MARKETING templates) is capped per plan at
+`whatsapp_marketing_per_month` (20% of the plan's WhatsApp), on every plan:
+past it, a promotional WhatsApp is held back like other non-essential
+messages over quota, and is never sold as an extra. Tickets, certificates,
+payment messages and reminders are UTILITY and never count against it.
+Today the platform's number sends no MARKETING template at all (its five
+templates are UTILITY, and a club's promotions go from its own number,
+which is not counted); the cap is enforced in `held_back` for the first
+send that does. A sender says a message is promotional with
+`category="MARKETING"` (or the kinds `promotion`, `announcement`,
+`campaign` by WhatsApp).
 
 **Past the limit:**
 
@@ -2031,6 +2050,28 @@ SELECT c.name, s.amount_paise, s.status, s.razorpay_addon_id, s.last_error
 FROM message_statements s JOIN clubs c ON c.id = s.club_id
 WHERE s.amount_paise > 0 ORDER BY s.period DESC, s.amount_paise DESC LIMIT 50;
 ```
+
+### Giving existing clubs the free trial
+
+Clubs approved before the free trial existed never had one. Admin ->
+Subscriptions has a card, "Give existing clubs the 14-day Pro trial"
+(`GET /admin/subscriptions/trial-gift` previews, `POST` applies; applying
+needs the money permission). It counts and samples the clubs that would get
+it and says why the others would not. A club is eligible when it is approved
+and not deleted, not a demo or showcase club (its owner signs in at a
+`APP_MAIL_SUPPRESS_DOMAINS` domain), has never had a trial (any row, ever),
+has no limits of its own, and is not on an Enterprise trial, a checkout, a
+complimentary plan, or a paid or admin-set plan: in short, real clubs on
+Free that never had a trial.
+
+Applying starts each one's trial now, exactly as a new club's starts, and
+(by default) mails each owner once (`subscription_emails` kind
+`free_trial_gift`). It runs under a transaction lock and a club that has had
+a trial is never eligible again, so a second run starts nothing. Each club
+is audited (`subscription.free_trial_gift`) and so is the run
+(`subscription.free_trial_gift_run`). The trials end like any other: three
+days before, the "3 days left" mail; at the end the hourly sweep puts the
+club on Free (no card is ever asked for) and mails it once.
 
 ---
 
