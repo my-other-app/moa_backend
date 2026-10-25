@@ -10,6 +10,13 @@ for it at registration, with a number it can reach.
 How a send runs -- the claim, the workers, the pace, the resumer -- is in
 app/api/deliveries/pipeline.py; this module says what a ticket or
 certificate send is.
+
+A club on Enterprise with its own WhatsApp number (app/api/club_whatsapp)
+has its WhatsApp sends go from that number -- when it is connected and
+active, routing is on, and the club's account has the template approved --
+and from the platform's number otherwise, as for every other club. A send
+from the club's number that Meta refuses for the account or the template
+goes from the platform's number instead, and the club is told.
 """
 import html
 import io
@@ -71,13 +78,25 @@ def channels() -> list[DeliveryChannel]:
 QUOTA_KIND = {DeliveryKind.ticket: "ticket", DeliveryKind.certificate: "certificate", DeliveryKind.reminder: "reminder"}
 
 
-def whatsapp_via(event) -> str:
-    """Which number an event's WhatsApp goes from: the platform's, counted
-    against the club's plan (quota.PLATFORM), or -- once a club sends from
-    its own number -- the club's (quota.CLUB), which the club pays Meta for
-    and is never counted or held back. A send through the club's own number
-    answers with {"Via": "club"} too, and that is what is counted by."""
-    return quota.PLATFORM
+def whatsapp_via(route) -> str:
+    """Which number a WhatsApp send goes from: the club's own (quota.CLUB)
+    when it has a route there (app/api/club_whatsapp), which the club pays
+    Meta for and is never counted or held back; otherwise the platform's
+    (quota.PLATFORM), counted against the club's plan. What is counted is
+    the answer's {"Via"}: a send that fell back to the platform's number
+    says "platform"."""
+    return quota.CLUB if route is not None else quota.PLATFORM
+
+
+async def channels_for(session, event: Events) -> list[DeliveryChannel]:
+    """`channels()`, and WhatsApp too when the event's club sends from its
+    own number though the platform has none configured."""
+    from app.api.club_whatsapp import service as club_whatsapp
+
+    out = channels()
+    if DeliveryChannel.whatsapp not in out and await club_whatsapp.can_route(session, event.club_id):
+        out.append(DeliveryChannel.whatsapp)
+    return out
 
 
 def _wants_whatsapp() -> list:
@@ -215,7 +234,7 @@ async def queue(
     )
     table = Deliveries.__table__
     ids: list[uuid.UUID] = []
-    active = [DeliveryChannel.email] if email_only else channels()
+    active = [DeliveryChannel.email] if email_only else await channels_for(session, event)
     for channel in active:
         by_whatsapp = channel is DeliveryChannel.whatsapp
         if only == "failed":
@@ -319,13 +338,23 @@ def _venue(event: Events) -> str:
     return "online" if event.is_online else "the venue"
 
 
-def whatsapp_skip(reg: EventRegistrationsLink) -> Optional[str]:
+#: The template each kind is sent with: the platform's, or the club's own of that name.
+TEMPLATE_OF = {
+    DeliveryKind.ticket: "ticket_confirmed",
+    DeliveryKind.reminder: "event_reminder",
+    DeliveryKind.certificate: "certificate_ready",
+}
+
+
+def whatsapp_skip(reg: EventRegistrationsLink, *, own: bool = False, own_missing: Optional[str] = None) -> Optional[str]:
     """Why this guest gets nothing by WhatsApp, or None when they may.
+    `own`: the club's own number will send it (no platform number needed);
+    `own_missing`: why the club's number can't, when it is the only one.
 
     The demo's invented people (MAIL_SUPPRESS_DOMAINS) are left alone here as
     their mail is at the transport: nobody behind them asked for anything."""
-    if not whatsapp.configured():
-        return providers_mod.NO_WHATSAPP
+    if not whatsapp.configured() and not own:
+        return own_missing or providers_mod.NO_WHATSAPP
     if not reg.whatsapp_opt_in:
         return providers_mod.NO_WHATSAPP_OPT_IN
     if reg.wa_bounced_at is not None:
@@ -345,7 +374,7 @@ async def _send_whatsapp(db: pipeline.Db, ready: "_Ready") -> tuple[dict, int]:
     when = _when(event)
     if d.kind is DeliveryKind.reminder:
         message = whatsapp.event_reminder(name=reg.full_name, event=event.name, when=when, venue=_venue(event), ticket_id=reg.ticket_id)
-        return await whatsapp.send(reg.phone, message), 0
+        return await _whatsapp_send(db, ready, message, None), 0
     doc = await _document(db, d.kind, reg)
     if d.kind is DeliveryKind.ticket:
         message = whatsapp.ticket_confirmed(name=reg.full_name, event=event.name, when=when, ticket_id=reg.ticket_id)
@@ -354,7 +383,98 @@ async def _send_whatsapp(db: pipeline.Db, ready: "_Ready") -> tuple[dict, int]:
 
         # The certificate's own number, which the public verifier takes -- never the ticket id the door scans.
         message = whatsapp.certificate_ready(name=reg.full_name, event=event.name, club=ready.org_name, number=number_of(reg))
-    return await whatsapp.send(reg.phone, message, document=(doc.content, doc.filename)), doc.design_version
+    return await _whatsapp_send(db, ready, message, (doc.content, doc.filename)), doc.design_version
+
+
+async def _note(db: pipeline.Db, delivery_id, what: str, write) -> None:
+    """`write(session)` in a transaction of its own, which nothing that goes
+    wrong in it -- opening it, the write, the commit -- can turn into the
+    send's outcome: a message Meta took must be recorded as sent, or
+    "retry failed" sends the guest a second copy. The write is in a
+    SAVEPOINT (flushed as it ends), so a bad row is undone there and a
+    shared session (deliver()'s) is left as it was."""
+    try:
+        async with db.tx() as s:
+            try:
+                async with s.begin_nested():
+                    await write(s)
+            except Exception as failure:  # noqa: BLE001 - the send matters more than the note
+                logger.warning("delivery %s: %s (%s)", delivery_id, what, type(failure).__name__)
+    except Exception as failure:  # noqa: BLE001 - nor can opening or committing its transaction
+        logger.warning("delivery %s: %s (%s)", delivery_id, what, type(failure).__name__)
+
+
+async def _whatsapp_send(db: pipeline.Db, ready: "_Ready", message: whatsapp.Template, document) -> dict:
+    """From the club's own number when `ready.route` names it, else the
+    platform's. A refusal from the club's number about its account or its
+    template marks that (the club is told), and so does one only the club's
+    number meets (its test list, the guest being that number); the send then
+    goes from the platform's number when there is one -- held back first, as
+    any platform send, when the club's plan has no room for it. Any other
+    refusal is the send's."""
+    from app.api.club_whatsapp import inbox as club_inbox
+    from app.api.club_whatsapp import service as club_whatsapp
+
+    route, reg, delivery_id, kind = ready.route, ready.reg, ready.d.id, ready.d.kind.value
+    if route is None:
+        return await whatsapp.send(reg.phone, message, document=document)
+    try:
+        out = await whatsapp.send(reg.phone, message, document=document, sender=route.sender)
+    except whatsapp.WhatsAppError as exc:
+        if not club_whatsapp.falls_back(exc):
+            raise
+        route.forget(exc)
+        refused = exc
+        await _note(db, delivery_id, "the club's number's failure could not be noted",
+                    lambda s: club_whatsapp.after_failure(s, route, refused))
+        if not whatsapp.configured():
+            raise
+        if ready.quota_kind is not None and ready.event is not None:
+            # Counted as the platform's now: the club's plan decides, as for any club.
+            async with db.tx() as s:
+                ready.terms, held = await quota.check(
+                    s, ready.event.club_id, ready.d.channel.value, ready.quota_kind, via=quota.PLATFORM, terms=ready.terms,
+                )
+            if held:
+                raise whatsapp.Undeliverable(held)
+        logger.info("delivery %s: the club's own number refused it (%s); sent from the platform's", delivery_id, exc.code)
+        return await whatsapp.send(reg.phone, message, document=document)
+
+    async def note_it(s) -> None:
+        await club_inbox.record_delivery_send(
+            s, route, out.get("Address") or "", message, out.get("MessageId"), delivery_id=delivery_id, kind=kind,
+        )
+
+    # In the club's inbox, as what its number sent that person.
+    await _note(db, delivery_id, "not added to the club's inbox", note_it)
+    return out
+
+
+async def requeue_from_platform(session, delivery_id, *, wamid: str, club_id: int, reason: str) -> bool:
+    """A WhatsApp send that went from a club's own number (`wamid`) and that
+    Meta then failed for the club's account, its template or its number
+    alone -- Meta says it was not delivered, so it is pending again, and the
+    next try goes from the platform's number (the club's route is closed by
+    then). Only that club's own delivery, still as it was sent; in the
+    caller's transaction. True when it was put back."""
+    d = await session.scalar(
+        select(Deliveries)
+        .join(Events, Events.id == Deliveries.event_id)
+        .where(
+            Deliveries.id == delivery_id, Deliveries.provider_id == wamid, Deliveries.channel == DeliveryChannel.whatsapp,
+            Deliveries.status == DeliveryStatus.sent, Events.club_id == club_id,
+        )
+        .with_for_update()
+    )
+    if d is None:
+        return False
+    now = pipeline.now()
+    d.status, d.error, d.provider_id, d.sent_at = DeliveryStatus.pending, reason[:400], None, None
+    d.outcome = d.outcome_at = d.reason = d.reason_code = None
+    # A new send: its own idempotency key and quota ref (the club's number's was never counted).
+    d.queued_at, d.next_attempt_at, d.claimed_at, d.updated_at = now, None, None, now
+    await start(session, d.event_id, d.kind, dedupe=True)
+    return True
 
 
 # --- one row: claim, read, render, send, record -------------------------------
@@ -383,6 +503,9 @@ class _Ready:
     # not counted -- no club).
     terms: Optional[quota.Terms] = None
     quota_kind: Optional[str] = None
+    # A WhatsApp send from the club's own number (app/api/club_whatsapp), or
+    # None for the platform's.
+    route: Optional[object] = None
 
 
 @dataclass
@@ -394,6 +517,9 @@ class _Run:
     assets: dict = field(default_factory=dict)
     # Each club's message terms (app/api/message_quota), read once a job.
     terms: dict = field(default_factory=dict)
+    # Which number each club's template goes from (club_whatsapp.route_for),
+    # decided once a job and forgotten when the club's number refuses one.
+    routes: dict = field(default_factory=dict)
 
 
 def _claim_stmt(where: list, n: int, at: datetime):
@@ -469,7 +595,14 @@ async def _read(db: pipeline.Db, c: _Claim, run: _Run) -> Optional[_Ready]:
         elif d.kind is DeliveryKind.reminder and event.event_datetime <= pipeline.now():
             ready.skip = "the event had started — too late for a reminder"
         elif d.channel is DeliveryChannel.whatsapp:
-            ready.skip = whatsapp_skip(reg)
+            from app.api.club_whatsapp import service as club_whatsapp
+
+            template = TEMPLATE_OF.get(d.kind)
+            ready.route = await club_whatsapp.route_for(s, event.club_id, template, cache=run.routes) if template else None
+            missing = None
+            if ready.route is None and not whatsapp.configured() and template and await club_whatsapp.can_route(s, event.club_id):
+                missing = f"your WhatsApp number has no approved {template} template yet"
+            ready.skip = whatsapp_skip(reg, own=ready.route is not None, own_missing=missing)
         elif d.kind is DeliveryKind.reminder:
             ready.skip = "the reminder goes by WhatsApp only"
         elif not reg.email:
@@ -486,7 +619,7 @@ async def _read(db: pipeline.Db, c: _Claim, run: _Run) -> Optional[_Ready]:
             # The club's plan: a reminder past Free's limit is held back,
             # with the reason on the row; a ticket or certificate always goes.
             ready.quota_kind = QUOTA_KIND[d.kind]
-            via = whatsapp_via(event) if d.channel is DeliveryChannel.whatsapp else quota.PLATFORM
+            via = whatsapp_via(ready.route) if d.channel is DeliveryChannel.whatsapp else quota.PLATFORM
             ready.terms, ready.skip = await quota.check(s, event.club_id, d.channel.value, ready.quota_kind, via=via, cache=run.terms)
         if ready.skip is None and d.kind is DeliveryKind.ticket and d.channel is DeliveryChannel.email:
             # A ticket goes out in the event's designed invite when there is
@@ -524,13 +657,14 @@ async def _send(db: pipeline.Db, c: _Claim, ready: _Ready, run: _Run) -> tuple[d
 
 async def _record(
     db: pipeline.Db, c: _Claim, ready: Optional[_Ready], values: dict, *,
-    attempt: Optional[dict] = None, dead: bool = False, dead_number: Optional[str] = None,
+    attempt: Optional[dict] = None, dead: bool = False, dead_number: Optional[str] = None, dead_code: Optional[str] = None,
     meter: Optional[dict] = None,
 ) -> None:
     """One short transaction: the result on the row (if this worker still
     holds it), the attempt the provider took, the admins told of a dead one,
     -- `dead_number` -- the guest's number marked as one WhatsApp cannot
-    reach, so later sends skip it until it is corrected, and -- `meter` --
+    reach, so later sends skip it until it is corrected (a `dead_code` in
+    whatsapp.STRIKE_CODES only the second time), and -- `meter` --
     the message counted against the club's monthly quota (once per send:
     its ref is the row and when it was queued, the provider's own key)."""
     async with db.tx() as s:
@@ -549,11 +683,15 @@ async def _record(
                 .on_conflict_do_nothing(index_elements=["provider_id"])
             )
         if dead_number and ready is not None:
+            R = EventRegistrationsLink
+            values = dict(wa_bounced_at=pipeline.now(), wa_bounce_reason=dead_number[:300])
+            if dead_code in whatsapp.STRIKE_CODES:
+                # Dead only the second time: the first is noted, and the number kept.
+                again = func.coalesce(R.wa_bounce_reason, "").startswith(whatsapp.FIRST_STRIKE)
+                values = dict(wa_bounced_at=case((again, pipeline.now()), else_=R.wa_bounced_at),
+                              wa_bounce_reason=case((again, dead_number[:300]), else_=whatsapp.first_strike(dead_code)[:300]))
             await s.execute(
-                update(EventRegistrationsLink)
-                .where(EventRegistrationsLink.id == ready.reg.id)
-                .values(wa_bounced_at=pipeline.now(), wa_bounce_reason=dead_number[:300])
-                .execution_options(synchronize_session=False)
+                update(R).where(R.id == ready.reg.id).values(**values).execution_options(synchronize_session=False)
             )
         if dead and res.rowcount and ready is not None and ready.event is not None:
             await pipeline.alert_dead(
@@ -579,7 +717,7 @@ async def _handle(db: pipeline.Db, c: _Claim, run: _Run) -> None:
         # A fact about the number, not a failure.
         await _record(
             db, c, ready, dict(status=DeliveryStatus.skipped, error=exc.reason, provider_id=None, sent_at=None, next_attempt_at=None),
-            dead_number=exc.reason if exc.permanent else None,
+            dead_number=exc.reason if exc.permanent else None, dead_code=exc.code,
         )
         return
     except transport.MailDeferred as exc:
@@ -784,13 +922,30 @@ async def queue_reminders(session, now: Optional[datetime] = None) -> int:
 
     Once per registration, ever: the delivery row is the record, and the
     unique (registration, kind, channel) key turns a second sweep, or two at
-    once, into nothing. Nothing when WhatsApp is not configured. The journey
+    once, into nothing. Without the platform's WhatsApp number, only for the
+    clubs that send from their own (app/api/club_whatsapp). The journey
     emails are the club's own words, which WhatsApp does not carry; this is
     the approved event_reminder template, at the same moment as the
     pre-event email's default. Returns how many were queued."""
-    if not whatsapp.configured():
-        return 0
     from app.api.closeout.models import EventStatus
+    from app.api.club_whatsapp import models as club_whatsapp
+
+    # Without the platform's number, only the events of clubs that send from
+    # their own -- on a plan that still has it (whether each reminder can go
+    # is decided at its send).
+    own_only = not whatsapp.configured()
+    own_clubs: list[int] = []
+    if own_only:
+        from app.api.club_whatsapp import service as club_accounts
+
+        A = club_whatsapp.ClubWhatsAppAccounts
+        for club_id in (await session.scalars(
+            select(A.club_id).where(A.status == club_whatsapp.ACTIVE, A.routing == True)  # noqa: E712
+        )).all():
+            if await club_accounts.plan_allows(session, club_id):
+                own_clubs.append(club_id)
+        if not own_clubs:
+            return 0
 
     now = now or pipeline.now()
     table = Deliveries.__table__
@@ -823,6 +978,8 @@ async def queue_reminders(session, now: Optional[datetime] = None) -> int:
             ~exists(has_one),
         )
     )
+    if own_only:
+        source = source.where(E.club_id.in_(own_clubs))
     stmt = (
         pg_insert(table)
         .from_select(
@@ -971,7 +1128,7 @@ async def summary(session, event: Events, kind: DeliveryKind) -> dict:
     # rest are not "unsent" there, they were never to be sent anything.
     wanting = await session.scalar(
         select(func.count()).select_from(_active(event.id).where(*_wants_whatsapp()).subquery())
-    ) if whatsapp.configured() else 0
+    ) if DeliveryChannel.whatsapp in await channels_for(session, event) else 0
     channels = []
     for channel in DeliveryChannel:
         n = lambda s: counts.get((channel, s), 0)  # noqa: E731

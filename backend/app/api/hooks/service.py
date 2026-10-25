@@ -10,6 +10,7 @@ from app.api.deliveries.models import Deliveries, DeliveryAttempts, DeliveryOutc
 from app.api.emails.models import MessageDeliveries
 from app.api.hooks.verdicts import Verdict, is_permanent, resend_verdict, ses_verdicts, whatsapp_verdict
 from app.core.mail import suppression
+from app.core.whatsapp import FIRST_STRIKE, STRIKE_CODES, first_strike
 
 SETTLED = (DeliveryOutcome.bounced, DeliveryOutcome.complained)
 
@@ -18,7 +19,8 @@ def _unsettled(outcome: Optional[DeliveryOutcome]) -> bool:
     return outcome is None or outcome not in SETTLED
 
 
-async def record(session, provider_id: str, channel: str, v: Verdict, at: datetime, address: Optional[str] = None) -> int:
+async def record(session, provider_id: str, channel: str, v: Verdict, at: datetime, address: Optional[str] = None,
+                 *, commit: bool = True) -> int:
     """One message's fate, matched by the id the provider gave us when it
     took it -- an index lookup on each table (it was a sequential scan of
     both, two to four times a notification).
@@ -32,7 +34,10 @@ async def record(session, provider_id: str, channel: str, v: Verdict, at: dateti
 
     A hard bounce or a complaint also puts the address on the platform's
     suppression list -- whether or not a send matched (account mail has no
-    row) -- so no event or club mails it again. Returns the sends updated."""
+    row) -- so no event or club mails it again. Returns the sends updated.
+
+    `commit=False` leaves the commit to the caller, whose transaction this is
+    a part of (a club's own webhook, which handles a batch of statuses)."""
     attempt = await session.scalar(select(DeliveryAttempts).where(DeliveryAttempts.provider_id == provider_id))
     address = suppression.normal(address) or (attempt.address if attempt is not None else "") or ""
     if attempt is not None and _unsettled(attempt.outcome):
@@ -67,6 +72,9 @@ async def record(session, provider_id: str, channel: str, v: Verdict, at: dateti
             if channel == "email":
                 marked.email_bounced_at = at
                 marked.email_bounce_reason = v.reason[:300]
+            elif v.code in STRIKE_CODES and not (marked.wa_bounce_reason or "").startswith(FIRST_STRIKE):
+                # The first time only noted: the number is kept until it happens again.
+                marked.wa_bounce_reason = first_strike(v.code)[:300]
             else:
                 marked.wa_bounced_at = at
                 marked.wa_bounce_reason = v.reason[:300]
@@ -74,7 +82,8 @@ async def record(session, provider_id: str, channel: str, v: Verdict, at: dateti
             dead_address = address or (suppression.normal(marked.email) if marked is not None else "")
             reason = suppression.COMPLAINT if v.outcome is DeliveryOutcome.complained else suppression.BOUNCE
             await suppression.add(session, dead_address, reason, v.reason)
-    await session.commit()
+    if commit:
+        await session.commit()
     return touched
 
 

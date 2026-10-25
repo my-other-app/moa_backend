@@ -16,6 +16,7 @@ from app.api.club_access.schemas import (
     PasswordChange,
     RoleChange,
     RoleOption,
+    WhatsAppPermission,
 )
 from app.api.club_access.models import DEFAULT_ROLE
 from app.api.clubs.models import Clubs
@@ -98,6 +99,28 @@ async def change_role(request: Request, member_id: int, session: SessionDep, use
     return MemberRow(**service.to_row(member))
 
 
+@router.put("/{member_id}/whatsapp", summary="Give or take someone's WhatsApp permission")
+async def change_whatsapp(request: Request, member_id: int, session: SessionDep, user: ClubAuth, body: WhatsAppPermission) -> MemberRow:
+    """The club's own WhatsApp inbox and templates are message content: only
+    the people the owner names here (and the owner) read and answer them.
+    Never an admin acting as the club (403 WHATSAPP_PRIVATE): otherwise one
+    could invite a member, give them this and read the messages through them."""
+    from app.api.audit import service as audit
+    from app.api.club_whatsapp import access as whatsapp_access
+
+    if gates.impersonated_by():
+        raise CustomHTTPException(status.HTTP_403_FORBIDDEN, message=whatsapp_access.PRIVATE_MESSAGE, error_code="WHATSAPP_PRIVATE")
+    club = await _owners_club(session, request, user)
+    member = await service.set_whatsapp(session, club, member_id, body.allowed)
+    await audit.record(
+        session, actor=user, action="club_whatsapp.permission", entity_type="club", entity_id=club.id,
+        summary=f"{'Gave' if body.allowed else 'Took'} the WhatsApp permission {'to' if body.allowed else 'from'} {member.email}",
+        details={"member_id": member.id, "allowed": bool(body.allowed)}, request=request,
+    )
+    await session.commit()
+    return MemberRow(**service.to_row(member))
+
+
 @router.delete("/{member_id}", summary="Take someone's access away; their sessions end now")
 async def remove(request: Request, member_id: int, session: SessionDep, user: ClubAuth) -> dict:
     club = await _owners_club(session, request, user)
@@ -112,8 +135,12 @@ async def me(request: Request, session: SessionDep, user: ClubAuth) -> Me:
     member = service.current_member(request)
     role = member.role if member else "owner"
     label, description = policy.ROLE_INFO[role]
+    can = policy.can(role)
+    # The club's own WhatsApp inbox: the owner, or a member given the
+    # permission -- never an admin acting as the club (club_whatsapp.access).
+    can["whatsapp_inbox"] = not gates.impersonated_by() and (member is None or bool(member.whatsapp))
     return Me(
-        role=role, role_label=label, role_description=description, can=policy.can(role),
+        role=role, role_label=label, role_description=description, can=can,
         club_id=club.id, club_name=club.name, member=MemberRow(**service.to_row(member)) if member else None,
     )
 

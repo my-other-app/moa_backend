@@ -197,16 +197,20 @@ def _razorpay_unreachable(monkeypatch):
 @pytest.fixture(autouse=True)
 def _whatsapp_unreachable(monkeypatch):
     """Meta's API is never called from the suite, whatever a test sets the
-    WhatsApp keys to: every call fails as an unreachable host would. A test
-    that sends stands in for the client itself (tests/test_whatsapp.py)."""
+    WhatsApp keys to: every call fails as an unreachable host would -- the
+    platform's sender and a club's own number's Graph calls alike. A test
+    that sends stands in for the client itself (tests/test_whatsapp.py,
+    tests/test_club_whatsapp.py)."""
     import httpx
 
+    from app.api.club_whatsapp import graph
     from app.core import whatsapp
 
     def unreachable(request):
         raise httpx.ConnectError(f"the test suite never reaches Meta: {request.method} {request.url}", request=request)
 
     monkeypatch.setattr(whatsapp, "_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(unreachable)))
+    monkeypatch.setattr(graph, "_client", lambda timeout=None: httpx.AsyncClient(transport=httpx.MockTransport(unreachable)))
     yield
 
 

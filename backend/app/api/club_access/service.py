@@ -152,6 +152,7 @@ def to_row(member: ClubMembers) -> dict:
         invited_at=_aware(member.invited_at),
         accepted_at=_aware(member.accepted_at),
         last_seen_at=_aware(member.last_seen_at),
+        whatsapp=bool(getattr(member, "whatsapp", False)),
     )
 
 
@@ -229,6 +230,14 @@ async def set_role(session, club: Clubs, member_id: int, role: str) -> ClubMembe
     member = await _member_of_club(session, club, member_id)
     member.role = check_role(role)
     await session.flush()
+    return member
+
+
+async def set_whatsapp(session, club: Clubs, member_id: int, allowed: bool) -> ClubMembers:
+    """The WhatsApp permission: the club's own WhatsApp inbox and templates
+    (app/api/club_whatsapp), whatever the member's role."""
+    member = await _member_of_club(session, club, member_id)
+    member.whatsapp = bool(allowed)
     return member
 
 

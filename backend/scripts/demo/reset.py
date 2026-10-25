@@ -129,6 +129,13 @@ CLASSIFICATION: dict[str, str] = {
     "club_members": WIPE,
     "club_partners": WIPE,
     "club_payment_gateways": WIPE,
+    # A club's own WhatsApp number: its keys, quality, templates and inbox
+    # (people's messages). Every row is a club's; none is the platform's.
+    "club_whatsapp_accounts": WIPE,
+    "club_whatsapp_quality_log": WIPE,
+    "club_whatsapp_templates": WIPE,
+    "club_whatsapp_conversations": WIPE,
+    "club_whatsapp_messages": WIPE,
     "club_sites": WIPE,
     "club_socials": WIPE,
     "club_subscriptions": WIPE,

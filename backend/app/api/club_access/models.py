@@ -10,7 +10,7 @@ auth dependency checks on every request (still a member, role allows this).
 
 Who may do what is in `policy.py`; the club's own account is the owner.
 """
-from sqlalchemy import Column, ForeignKey, Index, Integer, String, text
+from sqlalchemy import Boolean, Column, ForeignKey, Index, Integer, String, text
 
 from app.core.utils.db_fields import TZAwareDateTime
 from app.db.base import AbstractSQLModel
@@ -42,6 +42,10 @@ class ClubMembers(AbstractSQLModel, TimestampsMixin):
     accepted_at = Column(TZAwareDateTime(), nullable=True)
     removed_at = Column(TZAwareDateTime(), nullable=True)
     last_seen_at = Column(TZAwareDateTime(), nullable=True)
+    #: The WhatsApp permission: reads and answers the club's own WhatsApp
+    #: inbox and its templates (app/api/club_whatsapp). Whatever the role,
+    #: only the owner gives it; message content is for those who have it.
+    whatsapp = Column(Boolean, nullable=False, default=False, server_default=text("false"))
 
     __table_args__ = (
         Index("uq_club_members_live_email", "email", unique=True, postgresql_where=text("status <> 'removed'")),

@@ -72,13 +72,17 @@ def start_loops() -> list[asyncio.Task]:
     # Kept documents past APP_DOC_CACHE_DAYS deleted from docs/, once a day on one
     # process (off unless that is set).
     from app.api.events.doc_cache_sweep import sweep_loop as doc_cache_sweep_loop
+    # Clubs' own WhatsApp numbers: quality and messaging limit read from Meta
+    # every few hours, and each club's inbox past its retention deleted --
+    # every fifteen minutes, on one process.
+    from app.api.club_whatsapp.sweep import sweep_loop as club_whatsapp_sweep_loop
 
     return [
         asyncio.create_task(loop())
         for loop in (
             sweep_loop, closeout_sweep_loop, feedback_sweep_loop, billing_sweep_loop, counter_check_loop,
             domains_sweep_loop, store_sweep_loop, payments_sweep_loop, account_sweep_loop, ledger_daily_loop,
-            search_sync_loop, doc_cache_sweep_loop,
+            search_sync_loop, doc_cache_sweep_loop, club_whatsapp_sweep_loop,
         )
     ]
 
