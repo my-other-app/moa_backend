@@ -4,11 +4,15 @@ import logging
 from typing import Any
 
 from fastapi import Request
-from sqlalchemy import func, select
+from sqlalchemy import func, literal_column, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from app.api.audit.models import AdminAuditLogs
+from app.api.audit.models import AdminAuditLogs, search_sql
+
+#: At most this many words in a search, each at most SEARCH_WORD_MAX long.
+SEARCH_WORDS_MAX = 8
+SEARCH_WORD_MAX = 60
 
 logger = logging.getLogger(__name__)
 
@@ -54,10 +58,12 @@ async def record(
         # PendingRollbackError -- the action would be lost because its audit
         # line could not be written, which is the opposite of the intent.
         # Rolling back to the savepoint discards only the log row.
+        name = getattr(actor, "full_name", None)
         async with session.begin_nested():
             entry = AdminAuditLogs(
                 actor_id=getattr(actor, "id", None),
                 actor_email=getattr(actor, "email", None),
+                actor_name=str(name)[:100] if name else None,
                 action=action,
                 entity_type=entity_type,
                 entity_id=None if entity_id is None else str(entity_id)[:64],
@@ -72,6 +78,20 @@ async def record(
         return None
 
 
+def search_words(q: str | None) -> list[str]:
+    """The words of a search: split on spaces, each kept whole, at most
+    SEARCH_WORDS_MAX of them. Empty when there is nothing to look for."""
+    words = (q or "").split()
+    return [w[:SEARCH_WORD_MAX] for w in words[:SEARCH_WORDS_MAX]]
+
+
+def _like(word: str) -> str:
+    """A word as an ILIKE pattern that finds it anywhere, its own % and _
+    taken literally."""
+    escaped = word.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
 async def list_entries(
     session: AsyncSession,
     *,
@@ -79,10 +99,20 @@ async def list_entries(
     entity_type: str | None = None,
     entity_id: str | None = None,
     actor_id: int | None = None,
+    q: str | None = None,
     limit: int = 20,
     offset: int = 0,
 ):
+    """A page of the log, newest first, and how many rows match in all.
+
+    `q`: every word must appear, in any case, somewhere in who acted (name or
+    address), the summary, the record ("club #12") or the reason given --
+    on the trigram index ix_audit_search_trgm.
+    """
     filters = []
+    haystack = literal_column(search_sql(AdminAuditLogs.__tablename__))
+    for word in search_words(q):
+        filters.append(haystack.ilike(_like(word), escape="\\"))
     if action:
         filters.append(AdminAuditLogs.action == action)
     if entity_type:
