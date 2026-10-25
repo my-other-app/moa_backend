@@ -114,14 +114,24 @@ async def ensure(session, event, *, adopt_untyped: bool = False) -> list[TicketT
     return rows
 
 
+#: What the ticketing reads of an event, read again once its row is held.
+EVENT_FIELDS = [
+    "has_fee", "reg_fee", "max_participants", "going_count", "paid_count", "club_id", "is_deleted",
+    "event_datetime", "duration", "reg_startdate", "reg_enddate", "lifecycle", "created_at",
+]
+
+
 async def lock_event(session, event_id: int) -> Events:
-    """The event's row, held to the end of the transaction."""
-    event = await session.scalar(
-        select(Events).where(Events.id == event_id, Events.is_deleted == False)  # noqa: E712
-        .with_for_update(of=Events).execution_options(populate_existing=True)
+    """The event's row, held to the end of the transaction, and its fields
+    as they are now. Only the columns are read again: the relationships the
+    caller loaded (to answer with) stay loaded."""
+    held = await session.scalar(
+        select(Events.id).where(Events.id == event_id, Events.is_deleted == False).with_for_update()  # noqa: E712
     )
-    if event is None:
+    if held is None:
         raise CustomHTTPException(404, message="Event not found")
+    event = await session.get(Events, event_id)
+    await session.refresh(event, attribute_names=EVENT_FIELDS)
     return event
 
 
