@@ -266,6 +266,8 @@ def test_the_platforms_jobs_have_the_priorities_and_limits_chosen(monkeypatch):
         "club_ops.refund_notice": (H, 4),
         # A place on a waiting list offered to the next in line, and the offer told (app/api/ticketing).
         "waitlist.fill": (H, 4), "waitlist.offer": (H, 4),
+        # A registration request's email or push: received, confirmed, declined, lapsed (app/api/approvals).
+        "approvals.notify": (H, 4),
         # The room told the quiz is starting: it is starting now, for a hall at most.
         "live.join_push": (H, 2),
         # An update pushed to the room, and the event going live told to everyone registered.

@@ -721,6 +721,14 @@ async def approve(session, event, *, ids=None, all_pending: bool = False, limit:
         )).all())
     else:
         wanted = _ids(ids)[:MAX_IDS]
+        if wanted:
+            # In queue order whatever order they were named in, so the places
+            # left go to whoever asked first, across chunks too.
+            ordered = list((await session.scalars(
+                select(R.id).where(R.id.in_(wanted), R.event_id == event_id).order_by(R.submitted_at, R.id)
+            )).all())
+            known = set(ordered)
+            wanted = ordered + [i for i in wanted if i not in known]
     run = _Run(actor_id=getattr(getattr(actor, "user", actor), "id", None), actor_name=getattr(actor, "name", None))
     if wanted:
         # The event's default type made now, if it has none: never while its row is held (types.ensure).
