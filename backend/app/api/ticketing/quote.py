@@ -154,7 +154,7 @@ async def quote(
     session, event, *, ticket_type_id=None, discount_code: Optional[str] = None, email: Optional[str] = None,
     phone: Optional[str] = None, user_id: Optional[int] = None, organiser: bool = False,
     offer: Optional[WaitlistEntries] = None, lock: bool = True, early_capacity: bool = True,
-    now: Optional[datetime] = None, exclude=None,
+    now: Optional[datetime] = None, exclude=None, window: bool = True,
 ) -> Quote:
     """The price of a registration about to be made, and every check that can
     refuse it before anything is written: the type (TICKET_TYPE_REQUIRED,
@@ -162,7 +162,9 @@ async def quote(
     many one person may hold (TICKET_TYPE_LIMIT), the code (DISCOUNT_CODE_*),
     and an early look at what is left (TICKET_TYPE_SOLD_OUT, EVENT_FULL).
     The organiser adding a guest is held to nothing but the places.
-    `exclude`: a registration already made, being priced again."""
+    `exclude`: a registration already made, being priced again. `window`
+    False leaves the type's sales window alone: a club confirming a request
+    made while it was on sale (app/api/approvals)."""
     now = now or _now()
     types = await types_mod.ensure(session, event)
     if offer is not None:
@@ -176,7 +178,8 @@ async def quote(
         follows=types_mod.follows(types),
     )
     if not organiser and offer is None:
-        check_window(ttype, now)
+        if window:
+            check_window(ttype, now)
         await check_per_person(session, ttype, email=email, phone=phone, user_id=user_id, exclude=exclude)
     if discount_code and not organiser:
         q.code, q.discount = await codes_mod.resolve(

@@ -77,9 +77,14 @@ async def public(session, event, *, include_hidden: Optional[int] = None, viewer
             "offer_hours": settings_row.offer_hours if settings_row is not None else DEFAULT_OFFER_HOURS,
         },
         "viewer_waitlist": [],
+        "requires_approval": bool(getattr(event, "requires_approval", False)),
     }
     if viewer is not None:
         out["viewer_waitlist"] = [await entry_public(session, e) for e in await waitlist.mine(session, event.id, viewer)]
+        # Their own registration request, while it is open (app/api/approvals).
+        from app.api.approvals import service as approvals
+
+        out["viewer_request"] = await approvals.viewer_request(session, event.id, viewer)
     return out
 
 

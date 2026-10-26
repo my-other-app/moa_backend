@@ -265,7 +265,11 @@ async def waitlist_settings(session: SessionDep, user: ClubAuth, event_id: int, 
 
 async def _club_entry(session, event, entry_id) -> WaitlistEntries:
     entry = await session.scalar(
-        select(WaitlistEntries).where(WaitlistEntries.id == entry_id, WaitlistEntries.event_id == event.id)
+        select(WaitlistEntries).where(
+            WaitlistEntries.id == entry_id, WaitlistEntries.event_id == event.id,
+            # A confirmed request's hold is the request's (app/api/approvals), not the line's.
+            WaitlistEntries.via_request == False,  # noqa: E712
+        )
     )
     if entry is None:
         raise CustomHTTPException(404, message="Not on this event's waiting list", error_code="WAITLIST_ENTRY_NOT_FOUND")
@@ -399,8 +403,10 @@ def _mask_phone(phone):
 
 @public_router.get("/waitlist/offers/{token}", summary="A waiting-list offer, as its claim page shows it")
 async def get_offer(session: SessionDep, token: str) -> OfferOut:
+    from sqlalchemy.orm import joinedload
+
     entry = await waitlist.by_token(session, token)
-    event = await session.get(Events, entry.event_id)
+    event = await session.scalar(select(Events).options(joinedload(Events.club)).where(Events.id == entry.event_id))
     ttype = await types_mod.get_type(session, event.id, entry.ticket_type_id) if event is not None else None
     if event is None or ttype is None:
         raise CustomHTTPException(404, message="This link is not valid.", error_code="OFFER_NOT_FOUND")
@@ -409,16 +415,27 @@ async def get_offer(session: SessionDep, token: str) -> OfferOut:
     status = entry.status
     if status == OFFERED and entry.offer_expires_at is not None and entry.offer_expires_at <= _now():
         status = "expired"
+    # A club's confirmation of a registration request (app/api/approvals):
+    # "{club} confirmed your place", at the price it was confirmed at.
+    request = None
+    if entry.via_request:
+        from app.api.approvals import service as approvals
+
+        request = await approvals.for_entry(session, entry.id)
     return {
         "id": entry.id, "status": status,
         "event": {
             "id": event.id, "slug": event.slug, "name": event.name, "event_datetime": event.event_datetime,
             "location_name": event.location_name, "poster": event.poster if isinstance(event.poster, dict) else None,
+            "club": {"name": event.club.name, "slug": event.club.slug} if event.club is not None else None,
         },
         "ticket_type": {"id": ttype.id, "name": ttype.name, "price": float(price), "currency": "INR"},
         "full_name": entry.full_name, "email": _mask_email(entry.email), "phone": _mask_phone(entry.phone),
-        "expires_at": entry.offer_expires_at, "needs_email": not entry.email, "needs_payment": price > 0,
+        "expires_at": entry.offer_expires_at, "needs_email": not entry.email,
+        "needs_payment": (request.amount > 0) if request is not None and request.amount is not None else price > 0,
         "registration_id": entry.registration_id,
+        "reason": "approved" if entry.via_request else "waitlist",
+        "amount": float(request.amount) if request is not None and request.amount is not None else None,
     }
 
 
@@ -450,16 +467,24 @@ async def claim_offer(
     event = await session.get(Events, entry.event_id)
     if event is None or event.is_deleted:
         raise CustomHTTPException(404, message="Event not found")
+    # A club's confirmation of a registration request (app/api/approvals):
+    # the claim registers what the request said -- its name, number,
+    # answers, code and WhatsApp tick -- whatever the page sends.
+    request = None
+    if entry.via_request:
+        from app.api.approvals import service as approvals
+
+        request = await approvals.for_entry(session, entry.id)
     email = (entry.email or (body.email or "")).strip()
     if not email:
         raise CustomHTTPException(
             422, message="Enter your email address for your ticket.", error_code="EMAIL_REQUIRED",
             errors={"email": "Your ticket is sent here."},
         )
-    full_name = (body.full_name or entry.full_name or "").strip()
+    full_name = ((request.full_name if request is not None else None) or body.full_name or entry.full_name or "").strip()
     if len(full_name) < 3:
         raise CustomHTTPException(422, message="Enter your full name.", errors={"full_name": "At least 3 letters."})
-    phone = body.phone or entry.phone
+    phone = (request.phone if request is not None else None) or body.phone or entry.phone
     if user is not None and (user.user_type == UserTypes.guest or not user_service.emails_match(user.email, email)):
         # Signed in as someone else: the place is the offer's address's.
         user = None
@@ -481,16 +506,26 @@ async def claim_offer(
         claimant_id = existing.user_id
     elif user is not None:
         claimant_id = user.id
+    elif request is not None and await _request_guest(session, request) is not None:
+        # The guest the request made: the claim link is its holder's.
+        claimant_id = request.user_id
     else:
         guest = await user_service.new_guest(session, full_name=full_name, email=email, phone=phone)
         claimant_id = guest.id
-    additional = dict(body.additional_details or {})
-    if body.organization:
-        additional["organization"] = body.organization
+    if request is not None:
+        additional = dict(request.answers or {})
+        discount_code, whatsapp_opt_in = request.discount_code, request.whatsapp_opt_in or None
+    else:
+        additional = dict(body.additional_details or {})
+        if body.organization:
+            additional["organization"] = body.organization
+        discount_code, whatsapp_opt_in = body.discount_code, body.whatsapp_opt_in or None
     data = await registration_service.register_event(
         session=session, background_tasks=background_tasks, full_name=full_name, email=email, phone=phone,
         user_id=claimant_id, event_id=event.id, additional_details=additional or None,
-        discount_code=body.discount_code, offer=entry, whatsapp_opt_in=body.whatsapp_opt_in or None,
+        discount_code=discount_code, offer=entry, whatsapp_opt_in=whatsapp_opt_in,
+        # The request's answers were checked when it was made: the form may have changed since.
+        relaxed_fields=request is not None,
     )
     if user is None:
         # The claim link reached them, so the guest the claim made is theirs:
@@ -503,3 +538,14 @@ async def claim_offer(
     from app.api.events.registration.schemas import EventRegistrationResponse
 
     return EventRegistrationResponse(**data)
+
+
+async def _request_guest(session, request):
+    """The guest a registration request was made by, when it is one (and still live)."""
+    from app.api.users.models import UserTypes, Users
+
+    if request.user_id is None:
+        return None
+    return await session.scalar(
+        select(Users).where(Users.id == request.user_id, Users.user_type == UserTypes.guest, Users.is_deleted == False)  # noqa: E712
+    )

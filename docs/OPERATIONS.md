@@ -3254,3 +3254,70 @@ Lists the templates on the platform's number with Meta's status. Set
 `APP_WHATSAPP_BUSINESS_ACCOUNT_ID` (WhatsApp Manager -> Account tools) for a
 direct read; without it the account is found from the access token. Cached
 10 minutes; "Refresh" asks again.
+
+## 25. Registration approval ("Confirm each registration")
+
+The contract and how it works: docs/APPROVALS.md. Code: `backend/app/api/approvals/`.
+
+### What the owner asked for
+
+A club can confirm each place itself. Someone who fills the form is told, in
+the owner's words: "You are registered successfully. You are on the waiting
+list. We will inform you." The email says it as: "Your registration for
+{event} was received, and you're on the waiting list. {Club} confirms each
+place and will email your ticket if they confirm yours. Nothing else to do:
+we'll let you know." Nobody holds a place until the club confirms them; the
+club is never allowed past its capacity.
+
+### Deploying it
+
+- One migration, `registration_approval` (after `admin_ops`): a new table and
+  two boolean columns with constant defaults (catalogue-only changes, under
+  `lock_timeout` 3s). Deploy with `migrate=true`. Proven on a scratch copy of
+  the chain from `audit_search` (production's head at the time) up, down one
+  and up again.
+- Old app versions get 409 `APPROVAL_REQUIRED` on an approval event ("Update
+  the app, or register on myotherapp.in"). Only events a club switched it on
+  for are affected.
+
+### Where things happen
+
+- Emails and pushes are jobs (`approvals.notify` in the jobs table), written
+  with the decision and run after it commits: by the API's runner, or the
+  worker when `APP_JOBS_WORKER` is set. A free ticket's email is the event's
+  normal ticket email, through the deliveries outbox.
+- The waiting list's minute sweep (`ticketing/sweep.py`, one worker at a time)
+  also lapses paid holds that ran out (in the same transaction as the offer's
+  expiry), and closes pending requests of events that are over, cancelled or
+  deleted.
+- A cancellation closes its requests from its follow-up job
+  (`club_ops.cancel_follow_up`), and emails them the cancellation.
+
+### Read-only checks
+
+```sql
+-- Read-only: requests by event and status.
+SELECT event_id, status, count(*) FROM registration_requests GROUP BY 1, 2 ORDER BY 1, 2;
+
+-- Read-only: confirmed paid holds, and when each runs out.
+SELECT r.id, r.event_id, w.status, w.offer_expires_at, r.registration_id
+FROM registration_requests r JOIN waitlist_entries w ON w.id = r.waitlist_entry_id
+WHERE r.status = 'approved' AND w.status = 'offered' ORDER BY w.offer_expires_at;
+
+-- Read-only: request emails that failed for good.
+SELECT id, payload, last_error FROM jobs WHERE name = 'approvals.notify' AND dead ORDER BY id DESC LIMIT 20;
+```
+
+### When something looks wrong
+
+- "Confirm" skipped everyone with `event_full`: the event (or the plan's
+  per-event cap) is full, counting paid holds still standing. Raise the cap,
+  or wait for holds to lapse (the event's offer hours, 24 by default).
+- A person says they never got the "received" email: sending the form again
+  with the same address re-sends the status link to that address (at most
+  every 10 minutes); the club can see them in the queue regardless.
+- A paid confirmation not paid in time lapses by itself; the club can reopen
+  a lapsed (or declined) request, which puts it back in the queue where it
+  was.
+- The four request emails are listed in the club's email library but can't
+  be edited yet.

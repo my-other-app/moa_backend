@@ -344,7 +344,12 @@ async def delete_type(session, event, ttype: TicketTypes) -> None:
         rest[0].is_default = True
     await session.execute(
         update(WaitlistEntries)
-        .where(WaitlistEntries.ticket_type_id == ttype.id, WaitlistEntries.status.in_(OPEN_STATUSES))
+        .where(
+            WaitlistEntries.ticket_type_id == ttype.id, WaitlistEntries.status.in_(OPEN_STATUSES),
+            # A confirmed request's hold runs its course (app/api/approvals):
+            # it lapses when its time is up, and its request with it.
+            WaitlistEntries.via_request == False,  # noqa: E712
+        )
         .values(status=REMOVED, closed_at=_now(), offer_token=None)
     )
     types = await _after_change(session, event, was_paid)

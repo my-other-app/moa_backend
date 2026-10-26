@@ -99,6 +99,10 @@ async def list_events(session, club_id: int, *, scope: str = "all", sort: Option
     q = select(Events, reg, attended, checked).where(Events.id.in_(select(base.subquery().c.id))).options(joinedload(Events.category), joinedload(Events.club)).order_by(*order).limit(limit).offset(offset)
     rows = (await session.execute(q)).all()
     money = await _per_event(session, [e.id for e, *_ in rows])
+    # Registration requests waiting for the club (app/api/approvals).
+    from app.api.approvals import service as approvals
+
+    waiting = await approvals.pending_counts(session, [e.id for e, *_ in rows])
     at = datetime.now(timezone.utc)
     items = []
     for event, regs, attended_n, checked_n in rows:
@@ -106,6 +110,7 @@ async def list_events(session, club_id: int, *, scope: str = "all", sort: Option
         items.append(
             jsonable_encoder(event)
             | {
+                "requests_pending": waiting.get(event.id, 0),
                 "registration_count": regs, "attended_count": attended_n, "checked_in": checked_n,
                 "status": event.status, "max_participants": event.max_participants,
                 "collected": float(m["tickets"] + m["merch"]), "outstanding": float(m["outstanding"]),
@@ -129,6 +134,9 @@ async def figures(session, club_id: int) -> dict:
     doors_open = [e for e, _r in upcoming if door_is_open(e, now)]
     unmarked = [e for e, r, a, c in rows if ends_at(e) <= now and r > 0 and a == 0 and c == 0 and e.lifecycle is not EventStatus.draft]
     stale_drafts = [e for e, *_ in rows if e.lifecycle is EventStatus.draft and e.event_datetime <= now + timedelta(days=7)]
+    from app.api.approvals import service as approvals
+
+    waiting = await approvals.pending_counts(session, [e.id for e, *_ in rows])
     return {
         "upcoming": len(upcoming),
         "next_event": {"id": next_event.id, "name": next_event.name, "starts_at": next_event.event_datetime} if next_event else None,
@@ -141,6 +149,10 @@ async def figures(session, club_id: int) -> dict:
             "doors_open": [{"id": e.id, "name": e.name} for e in doors_open],
             "unmarked": [{"id": e.id, "name": e.name} for e in sorted(unmarked, key=lambda e: e.event_datetime, reverse=True)],
             "stale_drafts": [{"id": e.id, "name": e.name, "at": e.event_datetime} for e in stale_drafts],
+            # Registration requests waiting for the club (app/api/approvals).
+            "requests_pending": [
+                {"id": e.id, "name": e.name, "count": waiting[e.id]} for e, *_ in rows if waiting.get(e.id)
+            ],
         },
         "past": sum(1 for e, *_ in rows if ends_at(e) <= now and e.lifecycle is not EventStatus.draft),
         "drafts": sum(1 for e, *_ in rows if e.lifecycle is EventStatus.draft),

@@ -124,7 +124,13 @@ async def overview(session, club: Clubs) -> dict:
 
     recent = [dict(id=m.id, subject=m.subject or "", stage=next((c.stage.value for c in copies if c.id == m.template_id), "CUSTOM") if m.template_id else "BROADCAST", event=dict(id=e.id, name=e.name), recipients=m.recipients, sent=m.sent_count, failed=m.failed_count, scheduled=m.scheduled, created_at=m.created_at, **{k: outcomes[m.id][k] for k in ("delivered", "read", "bounced")}) for m, e in msgs[:8]]
     disabled = [t for t in library if t.stage is not EmailStage.CUSTOM and not t.enabled]
+    # The emails registration requests send (app/api/approvals): sent by
+    # themselves, in the club's colours, and not edited here yet.
+    from app.api.approvals.notify import LIBRARY as request_emails
+
+    automatic = [dict(**e, group="Registration requests", customisable=False) for e in request_emails]
     return dict(
+        automatic=automatic,
         figures=f_cur, previous=f_prev,
         delta=dict(messages=f_cur["messages"] - f_prev["messages"], recipients=f_cur["recipients"] - f_prev["recipients"]) if (cur or prev) else None,
         templates=templates, queue=queue[:10], recent=recent,

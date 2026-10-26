@@ -265,6 +265,11 @@ async def capture_room(session, event, registration) -> bool:
         from app.api.ticketing import waitlist
 
         waitlist.mark_claimed(entry)
+        if entry.via_request:
+            # A club's confirmation, paid for (app/api/approvals).
+            from app.api.approvals import service as approvals
+
+            await approvals.on_paid(session, entry, registration)
     return True
 
 

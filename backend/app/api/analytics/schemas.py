@@ -134,6 +134,8 @@ class EventSummary(BaseModel):
     by_source: list[SourceFigures]
     merch: list[MerchFigures]
     tickets: TicketFigures
+    #: Registration requests waiting for the club (docs/APPROVALS.md).
+    requests_pending: int = 0
     retention: RetentionFigures
     analytics: EventFigures
     from_report: bool

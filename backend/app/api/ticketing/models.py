@@ -144,6 +144,11 @@ class WaitlistEntries(AbstractSQLModel, TimestampsMixin):
         UUID(as_uuid=True), ForeignKey("event_registrations_link.id", ondelete="SET NULL"), nullable=True
     )
     closed_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    #: The hold a club's confirmation gave a paid registration request
+    #: (app/api/approvals): an offer like any other -- it holds its place,
+    #: runs out, is claimed and paid -- but never one of the line's. The
+    #: club's waiting list, its counts and "my places in line" leave it out.
+    via_request = Column(Boolean, nullable=False, default=False, server_default=sa.false())
 
     __table_args__ = (
         # The line, in order, per type: who is next.

@@ -44,6 +44,7 @@ from app.api.mcp.router import club_router as mcp_club_router
 from app.api.store.router import club_router as store_club_router, public_router as store_public_router, router as store_router
 from app.api.links.router import router as links_router
 from app.api.ticketing.router import public_router as ticketing_public_router, router as ticketing_router
+from app.api.approvals.router import public_router as approvals_public_router, router as approvals_router
 from app.api.discover.router import admin_router as discover_admin_router, router as discover_router
 from app.api.emails.router import (
     library_router as email_library_router,
@@ -167,6 +168,10 @@ api_router.include_router(router=store_public_router, tags=["store"])
 # and the events router (/events/{event_id}/...).
 api_router.include_router(router=ticketing_router)
 api_router.include_router(router=ticketing_public_router)
+# Registration requests (app/api/approvals): /events/registration/{id}/requests
+# before the events router, and /registration-requests/mine before /{token}.
+api_router.include_router(router=approvals_router)
+api_router.include_router(router=approvals_public_router)
 api_router.include_router(router=club_router, tags=["clubs"])
 # Before the events router: these sit under /events/{event_id} and the
 # events router owns the rest of that space.

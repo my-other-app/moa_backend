@@ -36,6 +36,11 @@ async def after_insert(session, event, registration, priced) -> None:
         priced.offer.registration_id = registration.id
         if priced.holding:
             waitlist.mark_claimed(priced.offer)
+        if priced.offer.via_request:
+            # A club's confirmation's hold (app/api/approvals): its request has its registration now.
+            from app.api.approvals import service as approvals
+
+            await approvals.link_registration(session, priced.offer, registration)
     if event.has_fee and priced.holding:
         await _book_comp(session, registration)
 

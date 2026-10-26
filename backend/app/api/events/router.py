@@ -185,6 +185,7 @@ async def create_event(
         speaker_photos=speaker_photos,
         status=event.status,
         pin=event.pin,
+        requires_approval=event.requires_approval,
     )
     # Its first ticket type, at the event's own price and cap (app/api/ticketing).
     from app.api.ticketing import types as ticket_types

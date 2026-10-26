@@ -268,6 +268,9 @@ What the claim page shows:
 - `needs_email`: the person joined with a phone number only, so the claim
   must send `email`.
 - `registration_id`: a claim was started and is waiting for its payment.
+- `reason`: `"waitlist"`, or `"approved"` for a club's confirmation of a
+  registration request (docs/APPROVALS.md), which also carries `amount` (the
+  confirmed price). `event.club` is `{name, slug}` on every offer.
 
 ### `POST /waitlist/offers/{token}/claim`
 

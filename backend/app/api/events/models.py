@@ -71,6 +71,9 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     swag_enabled = Column(Boolean, nullable=False, default=False)
     # Live Q&A: a question waits for the organiser before the room sees it.
     qa_approve_first = Column(Boolean, nullable=False, default=True, server_default=sa.true())
+    # "Confirm each registration": the public form makes a request the club
+    # confirms or declines (app/api/approvals, docs/APPROVALS.md).
+    requires_approval = Column(Boolean, nullable=False, default=False, server_default=sa.false())
     duration = Column(Float, nullable=False)
     about = Column(String, nullable=True)
     location_name = Column(String, nullable=True)

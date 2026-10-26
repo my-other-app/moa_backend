@@ -255,8 +255,11 @@ class EventCreate:
         # Where the event starts on its status clock: a draft stays off the
         # app and refuses check-ins until it is published.
         status: Optional[str] = Form(None, pattern="^(draft|published)$"),
+        # "Confirm each registration" (docs/APPROVALS.md). Omitted leaves it as it is.
+        requires_approval: Optional[bool] = Form(None),
     ):
         self.name = name
+        self.requires_approval = requires_approval
         self.poster = poster
         self.status = status
         self.event_datetime = event_datetime
@@ -366,6 +369,8 @@ class EventEdit(EventCreate):
         speakers: Optional[str] = Form("[]"),
         ticket_template_id: Optional[int] = Form(None),
         certificate_template_id: Optional[int] = Form(None),
+        # "Confirm each registration" (docs/APPROVALS.md). Omitted leaves it as it is.
+        requires_approval: Optional[bool] = Form(None),
     ):
         super().__init__(
             name=name,
@@ -402,6 +407,7 @@ class EventEdit(EventCreate):
             speakers=speakers,
             ticket_template_id=ticket_template_id,
             certificate_template_id=certificate_template_id,
+            requires_approval=requires_approval,
         )
         self.clear_location_link = clear_location_link
         self.clear_point = clear_point
@@ -503,6 +509,8 @@ class EventCreateUpdateResponse(CustomBaseModel):
     additional_details: list[EventAdditionalDetail] | None = Field(None)
     event_guidelines: str | None = Field(None)
     max_participants: int | None = Field(None)
+    #: "Confirm each registration": the form makes requests the club decides (docs/APPROVALS.md).
+    requires_approval: bool = Field(False)
 
 
 class EventListResponse(CustomBaseModel):
@@ -640,6 +648,9 @@ class EventDetailResponse(CustomBaseModel):
     has_prize: bool = Field(True)
     merch_enabled: bool = Field(False)
     swag_enabled: bool = Field(False)
+    #: "Confirm each registration": register with `accepts_approval: true`,
+    #: and the answer is a request the club decides (docs/APPROVALS.md).
+    requires_approval: bool = Field(False)
     prize_amount: float | None = Field(None)
     is_online: bool | None = Field(False)
     reg_startdate: datetime = Field(...)

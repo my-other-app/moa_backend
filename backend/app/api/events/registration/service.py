@@ -280,6 +280,92 @@ async def _no_place(session: AsyncSession, event: Events, room, *, organiser: bo
     )
 
 
+async def add_registration(
+    session: AsyncSession,
+    db_event: Events,
+    priced,
+    *,
+    full_name: str,
+    email: str,
+    phone: str | None,
+    user_id: int,
+    additional_details: dict | None,
+    whatsapp_opt_in: bool | None = None,
+    role: RegistrationRole | None = None,
+    tracking_ref: str | None = None,
+    tracking_link_id=None,
+    by_organiser: bool = False,
+    now: datetime | None = None,
+) -> EventRegistrationsLink:
+    """A new registration, priced (`priced`: ticketing.quote's answer), its
+    place taken and the row inserted, in the caller's transaction: flushed,
+    never committed. Every check of the event itself (open, not cancelled,
+    the answers) is the caller's; this takes the plan's caps, the event's
+    row (take_place) and its ticket type's (take_room), and refuses with
+    EVENT_FULL, TICKET_TYPE_SOLD_OUT or the plan's limit when there is no
+    place, leaving the event's row as it was.
+
+    register_event makes every registration through this; so does a club
+    confirming registration requests (app/api/approvals), one SAVEPOINT a
+    request, many in one transaction. `tracking_link_id`: a link already
+    resolved (a request kept the one its page carried), else `tracking_ref`."""
+    from app.api.subscriptions import gates
+    from app.api.ticketing import places as ticketing_places
+    from app.api.ticketing import service as ticketing
+
+    now = now or datetime.now(timezone.utc)
+    # The club's plan caps registrations per event and per month, on top
+    # of the organiser's own max_participants (never for an event made
+    # before the caps began).
+    room = await gates.check_registration(session, db_event, organiser=by_organiser)
+
+    registration = EventRegistrationsLink(
+        event_id=db_event.id,
+        user_id=user_id,
+        ticket_id=generate_ticket_id(),
+        actual_amount=db_event.reg_fee,
+        paid_amount=0,
+        additional_details=additional_details,
+        full_name=full_name,
+        email=email,
+        phone=phone,
+        whatsapp_opt_in=bool(whatsapp_opt_in),
+        whatsapp_opt_in_at=now if whatsapp_opt_in else None,
+        # Omitted means attendee, which is the column default -- passing
+        # None explicitly would violate the not-null constraint.
+        **({"role": role} if role is not None else {}),
+    )
+    # Its type, what it owes, and on a paid event confirmed now when that is nothing.
+    priced.apply(registration, db_event)
+    # Credited to the tracking link the page carried, if it carried one of this club's.
+    if tracking_link_id is not None:
+        registration.tracking_link_id = tracking_link_id
+    else:
+        from app.api.links import service as links
+
+        await links.attribute_registration(session, registration, db_event, tracking_ref)
+
+    # Now the event's row, and the place, in one statement. On a free
+    # event the cap is the lower of the organiser's and the plan's; a paid
+    # event's places are its paid registrations, which no registration
+    # changes, so the checks above stand.
+    caps = [] if db_event.has_fee else [c for c in (db_event.max_participants, room.event_cap if room else None) if c]
+    taken = await take_place(session, db_event, min(caps) if caps else None)
+    if taken is None:
+        # Nothing was updated, so nothing is held.
+        raise await _no_place(session, db_event, room, organiser=by_organiser)
+    seq, going_now = taken
+    await gates.recheck_month(session, db_event, room, going_now=going_now, organiser=by_organiser)
+    # A ticket that owes nothing holds its place now: its type's, and on a
+    # paid event a paid place, the waiting list counted (ticketing.places).
+    await ticketing_places.take_room(session, db_event, priced, going_now=going_now)
+    # Its admission number, from the event's own counter, before the row is kept.
+    registration.admission_no = admission.number_for(db_event, seq)
+    await insert_registration(session, registration)
+    await ticketing.after_insert(session, db_event, registration, priced)
+    return registration
+
+
 async def register_event(
     session: AsyncSession,
     full_name: str,
@@ -465,64 +551,17 @@ async def register_event(
         # Its ticket type and what it costs, worked out by the server alone,
         # and every check of them that can refuse it before anything is
         # written (app/api/ticketing/quote.py).
-        from app.api.ticketing import places as ticketing_places
         from app.api.ticketing import quote as ticketing_quote
-        from app.api.ticketing import service as ticketing
 
         priced = await ticketing_quote.quote(
             session, db_event, ticket_type_id=ticket_type_id, discount_code=discount_code, email=email, phone=phone,
             user_id=user_id, organiser=by_organiser, offer=offer,
         )
-        # The club's plan caps registrations per event and per month, on top
-        # of the organiser's own max_participants above (never for an event
-        # made before the caps began).
-        from app.api.subscriptions import gates
-
-        room = await gates.check_registration(session, db_event, organiser=by_organiser)
-
-        ticket_id = generate_ticket_id()
-
-        registration = EventRegistrationsLink(
-            event_id=db_event.id,
-            user_id=user_id,
-            ticket_id=ticket_id,
-            actual_amount=db_event.reg_fee,
-            paid_amount=0,
-            additional_details=additional_details,
-            full_name=full_name,
-            email=email,
-            phone=phone,
-            whatsapp_opt_in=bool(whatsapp_opt_in),
-            whatsapp_opt_in_at=now if whatsapp_opt_in else None,
-            # Omitted means attendee, which is the column default -- passing
-            # None explicitly would violate the not-null constraint.
-            **({"role": role} if role is not None else {}),
+        registration = await add_registration(
+            session, db_event, priced, full_name=full_name, email=email, phone=phone, user_id=user_id,
+            additional_details=additional_details, whatsapp_opt_in=whatsapp_opt_in, role=role,
+            tracking_ref=tracking_ref, by_organiser=by_organiser, now=now,
         )
-        # Its type, what it owes, and on a paid event confirmed now when that is nothing.
-        priced.apply(registration, db_event)
-        # Credited to the tracking link the page carried, if it carried one of this club's.
-        from app.api.links import service as links
-
-        await links.attribute_registration(session, registration, db_event, tracking_ref)
-
-        # Now the event's row, and the place, in one statement. On a free
-        # event the cap is the lower of the organiser's and the plan's; a paid
-        # event's places are its paid registrations, which no registration
-        # changes, so the checks above stand.
-        caps = [] if db_event.has_fee else [c for c in (db_event.max_participants, room.event_cap if room else None) if c]
-        taken = await take_place(session, db_event, min(caps) if caps else None)
-        if taken is None:
-            # Nothing was updated, so nothing is held.
-            raise await _no_place(session, db_event, room, organiser=by_organiser)
-        seq, going_now = taken
-        await gates.recheck_month(session, db_event, room, going_now=going_now, organiser=by_organiser)
-        # A ticket that owes nothing holds its place now: its type's, and on a
-        # paid event a paid place, the waiting list counted (ticketing.places).
-        await ticketing_places.take_room(session, db_event, priced, going_now=going_now)
-        # Its admission number, from the event's own counter, before the row is kept.
-        registration.admission_no = admission.number_for(db_event, seq)
-        await insert_registration(session, registration)
-        await ticketing.after_insert(session, db_event, registration, priced)
 
         if store_picks:
             from app.api.store import service as store

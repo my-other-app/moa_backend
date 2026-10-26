@@ -136,7 +136,7 @@ async def test_retention_sends_the_report_then_scrubs_and_never_runs_twice(clien
     st = await client.get(_url(world, "/retention"), headers=h)
     assert st.status_code == 200, st.text
     assert st.json()["state"] == "pending" and st.json()["mode"] == "delete" and st.json()["ended"] is True
-    assert st.json()["preview"] == {"registrations": 3, "walkups": 1, "phones": 1, "answers": 1, "deliveries": 0, "message_deliveries": 0, "self_check_in_sessions": 0}
+    assert st.json()["preview"] == {"registrations": 3, "walkups": 1, "phones": 1, "answers": 1, "deliveries": 0, "message_deliveries": 0, "self_check_in_sessions": 0, "requests": 0}
     assert datetime.fromisoformat(st.json()["run_at"]) < datetime.now(timezone.utc)
 
     # The slug typed back confirms it; a refused delivery scrubs nothing.

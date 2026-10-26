@@ -6,6 +6,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import select
 from starlette.background import BackgroundTask
 
+from app.api.approvals.schemas import RegistrationApprovalResponse
 from app.api.events.registration.schemas import (
     AddAttendeeRequest,
     ImportLogSummary,
@@ -51,7 +52,7 @@ async def register_event(
     user: OptionalUserAuth,
     session: SessionDep = SessionDep,
     ref: str | None = Query(None, max_length=16, description="A tracking link's code, so the sign-up is credited to it"),
-) -> EventRegistrationResponse:
+) -> EventRegistrationResponse | RegistrationApprovalResponse:
     """Register the signed-in caller, or anyone at all from the public form.
 
     Without a sign-in, the caller has shown nothing but that they can type an
@@ -60,7 +61,12 @@ async def register_event(
     nothing else. Handing over the guest that already had the address, as
     this did, gave its tickets, payments and profile to whoever typed it.
     The guests are folded into the app account once the address's owner
-    signs in to the app with Google or Apple (users.service.merge_guest_into_user)."""
+    signs in to the app with Google or Apple (users.service.merge_guest_into_user).
+
+    An event whose club confirms each registration (docs/APPROVALS.md) makes
+    a request instead, for a client that says it knows them
+    (`accepts_approval: true`); any other gets 409 APPROVAL_REQUIRED. Someone
+    already registered is answered as before, whichever client."""
     response = {}
     registration.email = registration.email.strip()
     if registration.club_updates_whatsapp:
@@ -78,6 +84,12 @@ async def register_event(
         # this browser. With another address it is someone else signing up
         # here, and their ticket must not land on the first person's account.
         user = None
+
+    approval_event = await _live_event(session, event_id)
+    if approval_event is not None and approval_event.requires_approval:
+        answered = await _request_instead(session, background_tasks, approval_event, registration, user, ref)
+        if answered is not None:
+            return answered
 
     if user is None:
         event = await service.resolve_event(session, event_id)
@@ -143,6 +155,80 @@ async def register_event(
         response["auth_token"] = await auth_service.create_access_refresh_tokens(user)
     response = {**response, **register_data}
     return response
+
+
+async def _live_event(session, event_id: int | str):
+    """The live event an id or slug names, or None (the usual path answers for a missing one)."""
+    try:
+        return await service.resolve_event(session, event_id)
+    except CustomHTTPException:
+        return None
+
+
+async def _request_instead(session, background_tasks, event: Events, registration: EventRegistrationRequest, user, ref):
+    """On an event whose club confirms each registration: a request
+    (app/api/approvals), the 409 for an address already on the list, or None
+    for a signed-in person registered already, whom the usual path answers
+    (ALREADY_REGISTERED, or back to pay)."""
+    from app.api.approvals import service as approvals
+
+    if user is None:
+        if await user_service.email_has_club_account(session, registration.email):
+            raise CustomHTTPException(
+                400, "This email belongs to a club's account. Register with your own email.", error_code="CLUB_EMAIL",
+            )
+        # The address's lock first, as the usual path takes it (see below).
+        await service.hold_address(session, event.id, registration.email)
+        existing = await service.live_registration_for_email(session, event.id, registration.email)
+        if existing is not None and not await service.retire_if_abandoned(session, event, existing):
+            return await _already_registered(session, background_tasks, event, existing)
+    else:
+        if user.user_type != UserTypes.guest:
+            if not user_service.emails_match(registration.email, user.email):
+                raise CustomHTTPException(
+                    400, "Email does not match with the logged in user email", error_code="EMAIL_MISMATCH"
+                )
+            registration.email = user.email
+        if await service.existing_registration(session, event.id, user.id, registration.email) is not None:
+            return None
+    if not registration.accepts_approval:
+        raise CustomHTTPException(
+            409,
+            message="This event needs the club to confirm each place. Update the app, or register on myotherapp.in.",
+            error_code="APPROVAL_REQUIRED",
+        )
+    if registration.store:
+        # A request holds nothing from the shelf: there is nothing to pay
+        # for until the club confirms the place. Refused rather than dropped,
+        # so nobody believes they bought something they did not.
+        raise CustomHTTPException(
+            422, message="Add-ons can't be picked with a request for a place.",
+            error_code="ADD_ONS_NOT_ALLOWED", errors={"store": "Not with a request."},
+        )
+    answers = dict(registration.additional_details or {})
+    if registration.organization:
+        answers["organization"] = registration.organization
+    done = await approvals.submit(
+        session, event, full_name=registration.full_name, email=registration.email, phone=registration.phone,
+        user=user, answers=answers or None, ticket_type_id=registration.ticket_type_id,
+        discount_code=registration.discount_code, whatsapp_opt_in=bool(registration.whatsapp_opt_in),
+        club_updates_whatsapp=bool(registration.club_updates_whatsapp), tracking_ref=registration.ref or ref,
+    )
+    req = done.request
+    out = {
+        "approval": {
+            "id": req.id, "status": req.status, "submitted_at": req.submitted_at,
+            "token": req.token if done.owner else None,
+            "status_url": approvals.status_url(req.token) if done.owner else None,
+        },
+        "event_registration_id": None,
+        "event_id": event.id,
+        "event_name": event.name,
+    }
+    if done.guest is not None:
+        # The guest this request made, as a registration's: a session for it alone.
+        out["auth_token"] = await auth_service.create_access_refresh_tokens(done.guest)
+    return RegistrationApprovalResponse(**out)
 
 
 async def _already_registered(session, background_tasks, event: Events, existing) -> JSONResponse:
