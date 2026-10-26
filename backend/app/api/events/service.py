@@ -157,6 +157,7 @@ async def create_event(
         event_tag=event_tag,
         ticket_template_id=ticket_template_id,
         certificate_template_id=certificate_template_id,
+        requires_approval=bool(kwargs.get("requires_approval")),
     )
     if status:
         from app.api.closeout.models import EventStatus
@@ -369,6 +370,9 @@ async def update_event(
         db_event.merch_enabled = event.merch_enabled
     if getattr(event, "swag_enabled", None) is not None:
         db_event.swag_enabled = event.swag_enabled
+    if getattr(event, "requires_approval", None) is not None:
+        # Off again: new people register directly; requests already waiting stay for the club.
+        db_event.requires_approval = bool(event.requires_approval)
     db_event.reg_startdate = event.reg_startdate
     db_event.reg_enddate = event.reg_enddate
     db_event.about = event.about

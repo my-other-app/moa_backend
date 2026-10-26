@@ -191,6 +191,9 @@ def can(role: str) -> dict:
         "connected_apps": admin,
         # Approving what an assistant asked for: publishing, sending.
         "approve_actions": editor,
+        # Confirming or declining registration requests (app/api/approvals):
+        # a change, so not door staff, who may still read the queue.
+        "decide_requests": editor,
     }
 
 

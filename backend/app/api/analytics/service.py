@@ -14,6 +14,7 @@ from typing import Optional
 from sqlalchemy import and_, func, literal_column, or_, select
 from sqlalchemy.orm import joinedload
 
+from app.api.approvals import service as approvals
 from app.api.checkins import service as checkins
 from app.api.checkins.models import CheckIns, CheckInVia, Doors
 from app.api.checkins.service import WALKUP_DOMAIN
@@ -344,6 +345,8 @@ async def summary(session, event: Events, now: Optional[datetime] = None) -> dic
         "by_source": await _by_source(session, event),
         "merch": await _merch(session, event),
         "tickets": await tickets(session, event, registered),
+        # Registration requests waiting for the club (app/api/approvals).
+        "requests_pending": (await approvals.pending_counts(session, [event.id])).get(event.id, 0),
         "retention": {"mode": (event.retention_mode or RetentionMode.keep).value, "state": job.state.value if job else None, "run_at": _iso(job.run_at) if job else None},
         "analytics": frozen if frozen is not None else await figures(session, event, now),
         "from_report": frozen is not None,
@@ -401,8 +404,24 @@ def _scope_query(scope):
     return select(Events).where(scope)
 
 
-async def _attention(session, scope, now: datetime, *, failed: list) -> list:
+async def _attention(session, scope, now: datetime, *, failed: list, requests: bool = False) -> list:
     items: list[dict] = []
+    if requests:
+        # Registration requests waiting for the club (app/api/approvals), longest-waiting event first.
+        from app.api.approvals.models import PENDING, RegistrationRequests as Req
+
+        waiting = (await session.execute(
+            select(Events.id, Events.name, func.count(Req.id)).join(Req, Req.event_id == Events.id)
+            .where(scope, Req.status == PENDING).group_by(Events.id, Events.name)
+            .order_by(func.min(Req.submitted_at)).limit(3)
+        )).all()
+        for event_id, name, n in waiting:
+            items.append({
+                "kind": "REQUESTS_PENDING", "tone": "amber",
+                "title": f"{n} registration {'request' if n == 1 else 'requests'} waiting on {name}",
+                "body": "Nobody is registered until you confirm them. Confirm or decline them from the event's registrations.",
+                "event_id": event_id,
+            })
     for job, event in failed:
         items.append({
             "kind": "RETENTION_FAILED", "tone": "red", "title": f"Retention failed for {event.name}",
@@ -468,7 +487,7 @@ async def dashboard(session, club, now: Optional[datetime] = None) -> dict:
             "next_retention_at": next((_iso(j.run_at) for j, _ in due if j.run_at > now), None),
             "doors_open": sum(1 for e in live if e["door_open"]),
         },
-        "attention": await _attention(session, scope, now, failed=failed),
+        "attention": await _attention(session, scope, now, failed=failed, requests=True),
         "live": live,
         "generated_at": _iso(now),
     }

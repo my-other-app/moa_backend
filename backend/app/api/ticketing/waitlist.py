@@ -263,7 +263,9 @@ async def mine(session, event_id: int, user) -> list[WaitlistEntries]:
     if user.email:
         who.append(same_email(W.email, user.email))
     return list((await session.scalars(
-        select(W).where(W.event_id == event_id, W.status.in_(OPEN_STATUSES), or_(*who)).order_by(W.created_at)
+        select(W).where(
+            W.event_id == event_id, W.status.in_(OPEN_STATUSES), W.via_request == False, or_(*who),  # noqa: E712
+        ).order_by(W.created_at)
     )).all())
 
 
@@ -328,9 +330,19 @@ async def fill(session, event_id: int, *, now: Optional[datetime] = None) -> lis
     ):
         # Over, cancelled or gone: its line is closed, and the sweep stops coming back to it.
         W = WaitlistEntries
-        await session.execute(
+        gone = (await session.execute(
             update(W).where(W.event_id == event.id, W.status.in_(OPEN_STATUSES)).values(status=EXPIRED, closed_at=now, updated_at=now)
-        )
+            .returning(W.id, W.via_request)
+        )).all()
+        holds = [i for i, via in gone if via]
+        if holds:
+            # Holds a club's confirmation gave (app/api/approvals): their requests close.
+            from app.api.approvals import service as approvals
+
+            await approvals.close_holds(
+                session, holds, cancelled=getattr(event.lifecycle, "value", event.lifecycle) == "cancelled",
+                event_id=event.id, now=now,
+            )
         await session.commit()
         return []
     if not registration_open(event, now):
@@ -414,10 +426,17 @@ async def expire(session, *, now: Optional[datetime] = None) -> list[int]:
         update(W)
         .where(W.status == OFFERED, W.offer_expires_at <= now)
         .values(status=EXPIRED, closed_at=now, updated_at=now)
-        .returning(W.event_id)
-    )).scalars().all()
+        .returning(W.event_id, W.id, W.via_request)
+    )).all()
+    holds = [entry_id for _event_id, entry_id, via in rows if via]
+    if holds:
+        # A club's confirmation not paid for in time (app/api/approvals): its
+        # request lapses, in this same transaction, and the person is told.
+        from app.api.approvals import service as approvals
+
+        await approvals.lapse(session, holds, now=now)
     await session.commit()
-    return sorted(set(rows))
+    return sorted({event_id for event_id, _entry_id, _via in rows})
 
 
 async def fill_soon(session, event_id: int) -> None:
@@ -467,6 +486,11 @@ def check_claimable(entry: WaitlistEntries, now: Optional[datetime] = None) -> N
 async def decline(session, entry: WaitlistEntries) -> None:
     check_claimable(entry)
     entry.offer_token = None
+    if entry.via_request:
+        # A confirmed request's hold given back: the request is withdrawn.
+        from app.api.approvals import service as approvals
+
+        await approvals.withdrawn_by_entry(session, entry)
     await close(session, entry, LEFT)
 
 
@@ -475,7 +499,8 @@ async def decline(session, entry: WaitlistEntries) -> None:
 
 async def entries(session, event_id: int, *, status: Optional[str] = None, limit: int = 200, offset: int = 0):
     W = WaitlistEntries
-    q = select(W).where(W.event_id == event_id)
+    # The line itself: never the holds a club's confirmations gave (app/api/approvals).
+    q = select(W).where(W.event_id == event_id, W.via_request == False)  # noqa: E712
     if status:
         q = q.where(W.status == status)
     total = int(await session.scalar(select(func.count()).select_from(q.subquery())) or 0)
@@ -491,7 +516,7 @@ async def entries(session, event_id: int, *, status: Optional[str] = None, limit
 async def counts(session, event_id: int) -> dict:
     W = WaitlistEntries
     rows = (await session.execute(
-        select(W.status, func.count()).where(W.event_id == event_id).group_by(W.status)
+        select(W.status, func.count()).where(W.event_id == event_id, W.via_request == False).group_by(W.status)  # noqa: E712
     )).all()
     out = {s: 0 for s in (WAITING, OFFERED, CLAIMED, EXPIRED, REMOVED, LEFT)}
     out.update({s: int(n) for s, n in rows})

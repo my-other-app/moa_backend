@@ -177,6 +177,8 @@ CLASSIFICATION: dict[str, str] = {
     "discount_codes": WIPE,
     "waitlist_entries": WIPE,
     "waitlist_settings": WIPE,
+    # Registration requests (app/api/approvals): people's, like registrations.
+    "registration_requests": WIPE,
     "guest_notices": WIPE,
     "club_password_reset_codes": WIPE,
     "club_sites": WIPE,

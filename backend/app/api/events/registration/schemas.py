@@ -70,6 +70,10 @@ class EventRegistrationRequest(CustomBaseModel):
     ticket_type_id: int | None = Field(None)
     #: A discount code typed for it; checked and applied by the server.
     discount_code: str | None = Field(None, max_length=60)
+    #: The client knows registration requests (docs/APPROVALS.md): on an
+    #: event whose club confirms each registration, the answer is a request.
+    #: Without it such an event answers 409 APPROVAL_REQUIRED (an old app).
+    accepts_approval: bool = Field(False)
 
 
 class EventAttendanceUpdate(CustomBaseModel):

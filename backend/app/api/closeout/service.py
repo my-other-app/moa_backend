@@ -17,6 +17,7 @@ from uuid import UUID
 from sqlalchemy import and_, delete, func, or_, select, text
 from sqlalchemy.orm import joinedload
 
+from app.api.approvals import service as approvals
 from app.api.checkins.models import CheckIns
 from app.api.checkins.service import WALKUP_DOMAIN
 from app.api.closeout.models import DOOR_OPEN_STATUSES, LOCKED_STATUSES, STATUS_NOTE, ArchivedContacts, CloseoutReports, EventStatus, RetentionJobs, RetentionMode, RetentionState
@@ -253,6 +254,8 @@ async def preview_counts(session, event: Events) -> dict:
         "deliveries": (await session.scalar(select(func.count()).select_from(Deliveries).where(Deliveries.event_id == event.id))) or 0,
         "message_deliveries": (await session.scalar(select(func.count()).select_from(MessageDeliveries).where(MessageDeliveries.registration_id.in_(ids)))) if ids else 0,
         "self_check_in_sessions": (await session.scalar(select(func.count()).select_from(SelfCheckInSessions).where(SelfCheckInSessions.event_id == event.id))) or 0,
+        # Registration requests (app/api/approvals): their names, addresses, numbers and answers go too.
+        "requests": await approvals.count_for_event(session, event.id),
     }
 
 
@@ -305,6 +308,7 @@ async def scrub(session, event: Events, job: RetentionJobs) -> dict:
             r.is_deleted = True
         r.phone = None
         r.additional_details = None
+    await approvals.scrub_event(session, event.id)
     job.state = RetentionState.deleted
     job.completed_at = datetime.now(timezone.utc)
     job.deleted_counts = counts

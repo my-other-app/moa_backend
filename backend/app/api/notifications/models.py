@@ -31,6 +31,12 @@ class NotificationType(PyEnum):
     volunteer_removed = "volunteer_removed"          # User removed as volunteer
     club_thread = "club_thread"
 
+    # Registration requests (app/api/approvals): confirmed (free: opens the
+    # ticket; paid: opens the claim to pay), and declined (an inbox item).
+    request_approved = "request_approved"
+    request_approved_pay = "request_approved_pay"
+    request_declined = "request_declined"
+
 
 class NotificationStatus(PyEnum):
     read = "read"

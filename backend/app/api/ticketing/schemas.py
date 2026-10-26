@@ -177,6 +177,12 @@ class PublicTicketing(CustomBaseModel):
     waitlist: WaitlistBrief = Field(default_factory=WaitlistBrief)
     #: The signed-in viewer's own places in line.
     viewer_waitlist: list[WaitlistEntryPublic] = Field(default_factory=list)
+    #: The club confirms each registration (docs/APPROVALS.md): the form
+    #: makes a request, sent with `accepts_approval: true`.
+    requires_approval: bool = False
+    #: The signed-in viewer's own open request for it -- pending, or
+    #: confirmed and not paid yet -- {id, status, token, status_url}; else null.
+    viewer_request: Optional[dict[str, Any]] = None
 
 
 # ─── Discount codes ─────────────────────────────────────────────────────
@@ -316,6 +322,8 @@ class OfferEvent(CustomBaseModel):
     event_datetime: datetime
     location_name: Optional[str] = None
     poster: Optional[dict] = None
+    #: The event's club, {name, slug}: "{club} confirmed your place".
+    club: Optional[dict[str, Any]] = None
 
 
 class OfferOut(CustomBaseModel):
@@ -336,6 +344,11 @@ class OfferOut(CustomBaseModel):
     needs_payment: bool = False
     #: A claim was started and is waiting for its payment.
     registration_id: Optional[UUID] = None
+    #: Why the place is offered: "waitlist" (the line moved), or "approved"
+    #: (the club confirmed a registration request: docs/APPROVALS.md).
+    reason: str = "waitlist"
+    #: For "approved": what the confirmed ticket costs (its code taken off).
+    amount: Optional[float] = None
 
 
 class ClaimIn(CustomBaseModel):

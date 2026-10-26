@@ -263,8 +263,9 @@ def _guests_of(app_user: Users):
 async def merge_guest_into_user(session: AsyncSession, app_user: Users) -> dict:
     """Fold every guest under this app account's address into it.
 
-    Registrations, ratings, payment orders, shop orders, volunteer places,
-    badges and notifications move over, and the guests are retired. Rows
+    Registrations, registration requests, ratings, payment orders, shop
+    orders, volunteer places, badges and notifications move over, and the
+    guests are retired. Rows
     kept by registration (check-ins, certificates, deliveries, team places,
     merch) follow their registration. Staff and audit columns -- who checked
     someone in, who created what -- stay as they are.
@@ -354,6 +355,7 @@ async def merge_all_guests(session: AsyncSession) -> dict:
 
 
 async def _fold(session: AsyncSession, app_user: Users, guests: list[Users]) -> dict:
+    from app.api.approvals import service as approvals
     from app.api.events.models import EventRatingsLink
     from app.api.events.volunteer.models import Volunteer
     from app.api.notifications.models import Notifications
@@ -384,6 +386,7 @@ async def _fold(session: AsyncSession, app_user: Users, guests: list[Users]) -> 
         "volunteers_transferred": await _move(session, Volunteer, guest_ids, app_user.id),
         "notifications_transferred": await _move(session, Notifications, guest_ids, app_user.id),
         "badges_transferred": await _fold_badges(session, app_user, guest_ids),
+        "requests_transferred": await approvals.move_requests(session, guest_ids, app_user.id),
     }
 
     # A guest still holding a registration that is being paid for stays live

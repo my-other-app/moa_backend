@@ -174,3 +174,7 @@ class LibraryOverview(BaseModel):
     attention: dict
     all_time: dict
     generated_at: datetime
+    #: Emails that go by themselves and are not edited here (yet): the
+    #: registration requests' (docs/APPROVALS.md). Each {key, name, subject,
+    #: when, group, customisable}.
+    automatic: list[dict] = []

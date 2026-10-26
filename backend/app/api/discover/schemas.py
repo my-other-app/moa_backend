@@ -255,6 +255,8 @@ class PageEvent(BaseModel):
     #: "cancelled": the club called it off (app/api/club_ops); `cancellation` says why and when.
     status: Literal["upcoming", "closing_soon", "full", "live", "ended", "cancelled"]
     registration_open: bool
+    #: The club confirms each registration: the form makes a request (docs/APPROVALS.md).
+    requires_approval: bool = False
     cancellation: Optional[dict] = None
     category: Optional[CategoryRef] = None
     interests: list[str]

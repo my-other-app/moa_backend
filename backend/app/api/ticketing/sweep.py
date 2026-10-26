@@ -1,7 +1,9 @@
 """The waiting lists' minute: offers that ran out closed, and every event with
 people waiting offered the places it has free -- one ticket refunded or
-cancelled from anywhere reaches the line within the minute. On one worker
-(an advisory lock on a connection of its own)."""
+cancelled from anywhere reaches the line within the minute. Registration
+requests (app/api/approvals) ride along: a confirmation's hold that ran out
+lapses with its offer, and an event over or called off has its pending
+requests closed. On one worker (an advisory lock on a connection of its own)."""
 from __future__ import annotations
 
 import asyncio
@@ -25,6 +27,7 @@ async def run_sweep(session, now: Optional[datetime] = None) -> Optional[dict]:
     async with singleton(session, SWEEP_LOCK) as mine:
         if not mine:
             return None
+        # (A hold a club's confirmation gave that ran out lapses with it: app/api/approvals.)
         expired = await waitlist.expire(session, now=now)
         offered = 0
         for event_id in sorted(set(expired) | set(await waitlist.events_waiting(session))):
@@ -33,6 +36,16 @@ async def run_sweep(session, now: Optional[datetime] = None) -> Optional[dict]:
             except Exception:  # noqa: BLE001 - one event's trouble is not the rest's
                 await session.rollback()
                 logger.exception("waitlist sweep: event %s could not be filled", event_id)
+        try:
+            # Registration requests still pending for an event now over, cancelled or gone.
+            from app.api.approvals import service as approvals
+
+            closed = await approvals.close_finished(session, now=now)
+            if closed:
+                logger.info("waitlist sweep: %s registration requests closed", closed)
+        except Exception:  # noqa: BLE001 - the next minute tries again
+            await session.rollback()
+            logger.exception("waitlist sweep: registration requests could not be closed")
         return {"expired_events": len(expired), "offered": offered}
 
 

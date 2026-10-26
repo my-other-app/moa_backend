@@ -12,6 +12,8 @@ the door and is the club's to hand back), and confirms. Then, once:
 - every online payment is refunded in full, through the account that took
   it (refunds.py), each one a row of its own: one Razorpay refused is listed
   with its reason and tried again from the dashboard;
+- registration requests not yet settled close, their people emailed too
+  (app/api/approvals);
 - every registered guest is told: by email, in the event's Messages (the
   messages pipeline: suppression, bounces, retries and the club's quota);
   in the app (push and the notification list); and on WhatsApp for those who
@@ -416,13 +418,25 @@ async def _whatsapp(session, event: Events, c: EventCancellations) -> None:
         await session.commit()
 
 
+async def _requests(session, event: Events, c: EventCancellations) -> None:
+    """Registration requests not yet settled (app/api/approvals) close, and
+    their people get the cancellation email too. Here, after the cancel's
+    commit and off the event's row: a confirmation in flight holds request
+    rows before it takes the event's, so taking them the other way round
+    while the row is held could deadlock with it."""
+    from app.api.approvals import service as approvals
+
+    await approvals.close_for_event(session, event.id, cancelled=True)
+    await session.commit()
+
+
 async def follow_up(session, event_id: int) -> None:
     """Tell everyone: each channel once, whatever else failed."""
     event = await session.scalar(select(Events).options(joinedload(Events.club)).where(Events.id == event_id))
     c = await cancellation_of(session, event_id)
     if event is None or c is None:
         return
-    for step in (_email, _push, _whatsapp):
+    for step in (_requests, _email, _push, _whatsapp):
         try:
             await step(session, event, c)
         except Exception:  # noqa: BLE001 - one channel failing must not stop the others

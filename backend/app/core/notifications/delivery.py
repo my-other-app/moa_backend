@@ -71,6 +71,10 @@ PERSONAL: dict[str, str] = {
     # is checked in (app/api/live/notify.py).
     "event_live_started": "an event you are registered for",
     "event_live_qa": "an event you are checked in to",
+    # A club's decision on the person's own registration request (app/api/approvals).
+    "request_approved": "your registration request",
+    "request_approved_pay": "your registration request",
+    "request_declined": "your registration request",
 }
 
 ALL_TOPIC = "all"

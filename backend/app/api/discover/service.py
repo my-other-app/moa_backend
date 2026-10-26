@@ -1403,6 +1403,7 @@ async def event_page(session, ref: str, now: Optional[datetime] = None) -> dict:
         seats_left=max(e.max_participants - going, 0) if e.max_participants else None,
         reg_opens_at=_iso(e.reg_startdate), reg_closes_at=_iso(e.reg_enddate),
         status=status_of(e, now, going), registration_open=registration_open(e, going, now),
+        requires_approval=bool(e.requires_approval),
         category=dict(id=cat.id, name=cat.name) if cat is not None else None,
         interests=interest_names,
         topics=topics,

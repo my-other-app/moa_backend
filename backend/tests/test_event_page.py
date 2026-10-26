@@ -29,6 +29,8 @@ EVENT_KEYS = {
     "topics",
     # Why it was called off, when it was (app/api/club_ops): null otherwise.
     "cancellation",
+    # The club confirms each registration (app/api/approvals).
+    "requires_approval",
 }
 
 
