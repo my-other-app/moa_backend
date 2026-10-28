@@ -26,6 +26,14 @@ class EmailStage(enum.Enum):
     REMINDER = "REMINDER"
     POST_EVENT = "POST_EVENT"
     CUSTOM = "CUSTOM"
+    # An event that reviews every registration (app/api/approvals): the
+    # club's library only, one each (migration review_emails).
+    REQUEST_RECEIVED = "REQUEST_RECEIVED"
+    REQUEST_APPROVED = "REQUEST_APPROVED"
+    REQUEST_APPROVED_PAY = "REQUEST_APPROVED_PAY"
+    REQUEST_DECLINED = "REQUEST_DECLINED"
+    REQUEST_LAPSED = "REQUEST_LAPSED"
+    REQUEST_UNANSWERED = "REQUEST_UNANSWERED"
 
 
 class EmailTemplates(AbstractSQLModel, TimestampsMixin):

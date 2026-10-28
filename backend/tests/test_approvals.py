@@ -121,7 +121,8 @@ async def test_a_request_is_made_once_and_the_form_sent_again_is_the_same_one(cl
     assert req.ticket_type_id is not None and req.user_id is not None
     # "You're on the waiting list", with the status link, once the request is kept.
     got = [m for m in shop.mail if m["recipients"] == ["asker1@example.com"]]
-    assert len(got) == 1 and "waiting list" in got[0]["subject"] and a["token"] in got[0]["html"]
+    assert len(got) == 1 and got[0]["subject"] == "Thanks for registering for Appr Night" and a["token"] in got[0]["html"]
+    assert "reviews every registration" in got[0]["html"] and f"{a['token']}?withdraw=1" in got[0]["html"]
 
     # The form again, signed out: the same request. Whoever typed the address
     # gets no token; the link goes to the address instead (once in ten minutes).
@@ -374,7 +375,9 @@ async def test_decline_tells_them_only_when_asked_and_reopen_puts_it_back(client
     assert (await decline(client, shop, ids=[told["id"]], note="We're full up, {sorry}")).json()["declined"] == [told["id"]]
     assert (await decline(client, shop, ids=[quiet["id"]], notify=False)).json()["declined"] == [quiet["id"]]
     assert [m["recipients"] for m in shop.mail] == [["declined-app@example.com"]]
-    assert "couldn't offer you a place" in shop.mail[0]["html"] and "(sorry)" in shop.mail[0]["html"]
+    assert "couldn't confirm your registration" in shop.mail[0]["html"]
+    # The club's note is a value, never template text: shown as typed.
+    assert "We're full up, {sorry}" in shop.mail[0]["html"]
     assert [(u, d["type"]) for u, _t, d in pushed] == [(user.id, "request_declined")]
     from app.api.notifications.models import Notifications
 
@@ -445,7 +448,7 @@ async def test_a_paid_confirmation_holds_the_place_until_paid_or_it_lapses(clien
     assert third["skipped"] == [{"id": ids[2], "reason": "event_full"}]
     # "Pay ₹199 by …", with the claim link.
     pay_mail = [m for m in mail if m["recipients"] == ["asker90@example.com"]]
-    assert len(pay_mail) == 1 and "confirmed your place" in pay_mail[0]["subject"] and "₹199" in pay_mail[0]["html"]
+    assert len(pay_mail) == 1 and pay_mail[0]["subject"].endswith("is confirmed") and "₹199" in pay_mail[0]["html"]
 
     first = await _req(session, ids[0])
     view = (await client.get(f"{API}/registration-requests/{first.token}")).json()
@@ -483,7 +486,8 @@ async def test_a_paid_confirmation_holds_the_place_until_paid_or_it_lapses(clien
     await jobs.settle()
     second = await _req(session, ids[1])
     assert second.status == "lapsed"
-    assert [m["recipients"] for m in mail] == [["asker91@example.com"]] and "released" in mail[0]["subject"]
+    assert [m["recipients"] for m in mail] == [["asker91@example.com"]] and mail[0]["subject"].endswith("has expired")
+    assert "wasn't paid in time" in mail[0]["html"]
     assert (await client.get(f"{API}/registration-requests/{second.token}")).json()["pay"] is None
     # The third gets it now.
     now = (await approve(client, w, ids=ids[2:])).json()
@@ -615,7 +619,9 @@ async def test_the_door_certificates_and_exports_never_see_a_request(client, ses
     assert [a["kind"] for a in dash["attention"]][:1] == ["REQUESTS_PENDING"]
     lib = await client.get(f"{API}/clubs/me/emails/overview", headers=shop.h)
     assert lib.status_code == 200, lib.text
-    assert {e["key"] for e in lib.json()["automatic"]} >= {"request_received", "request_approved_pay", "request_declined", "request_lapsed"}
+    # The review emails are the club's library templates now, each with its key.
+    keys = {t.get("key") for t in lib.json()["templates"]}
+    assert keys >= {"request_received", "request_approved", "request_approved_pay", "request_declined", "request_lapsed", "request_unanswered"}
 
 
 # ─── The queries use the index ───────────────────────────────────────────

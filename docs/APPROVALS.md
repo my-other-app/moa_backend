@@ -1,9 +1,18 @@
-# Registration approval ("Confirm each registration")
+# Review registrations (registration approval)
 
 The contract as built: the backend (`backend/app/api/approvals/`), and what
 the club dashboard, the website and the app read from it. Migrations:
 `registration_approval` (after `admin_ops`), then `approval_stats` for the
-full numbers and the loopholes closed (§7). All paths are under `/api/v1`.
+full numbers and the loopholes closed (§7), then `review_emails` for the
+club's own review emails (§9). All paths are under `/api/v1`.
+
+The words changed on 28 Oct 2026 (§10): it is a **normal registration**. People
+register; the club reviews the registrations, confirms some (they get their
+ticket by email) and declines the rest. The switch is "Review registrations
+before sending tickets". The code, the routes, the JSON keys, the statuses
+and the error codes keep their first names (`requires_approval`, "request",
+`pending`/`approved`/…), so older app builds keep working; only what people
+read changed.
 
 Everything is additive. An event without `requires_approval` behaves exactly
 as before, for every client.
@@ -12,12 +21,13 @@ as before, for every client.
 
 ## 1. What it does
 
-A club turns on **Confirm each registration** for an event. Then:
+A club turns on **Review registrations before sending tickets** for an event.
+Then:
 
-1. Anyone who fills the registration form is **not registered yet**. They get
-   a *request*, and an email: "Your registration for {event} was received, and
-   you're on the waiting list. {Club} confirms each place and will email your
-   ticket if they confirm yours. Nothing else to do: we'll let you know."
+1. Anyone who fills the registration form is registered **under review**: they
+   have no ticket yet. The record is a *request* (`pending`), and they get the
+   club's "Thanks for registering" email: "Thank you for registering for
+   {event}. {Club} reviews every registration and will get back to you soon."
 2. The club sees the requests in the dashboard, and confirms or declines them,
    one at a time or in bulk.
 3. **Confirmed, free ticket** (a free type, or a code that makes it free): they
@@ -45,13 +55,14 @@ Product rules:
   waiting-list offer) has their open request closed
   (`closed_reason: registered_directly`), in the same transaction, with no
   email (§7).
-- No separate waiting list on a confirm-each event: the request queue is the
-  line (§7).
+- No separate waiting list on an event that reviews registrations: the
+  review queue is the line (§7). The people in the event's waiting list when
+  review goes on become registrations under review, each told once (§8).
 - The event cancelled: pending requests, and confirmed paid ones not paid yet,
   close (`closed`, `event_cancelled`), their places go back, and their people
   get the cancellation email. The event over (`event_ended`) or deleted
   (`event_deleted`): the same, and the pending ones get "{Club} wasn't able to
-  confirm your place" (`request_unanswered`, once each).
+  confirm your registration" (`request_unanswered`, once each).
 - Club roles owner, admin and editor decide. Door staff may read the queue but
   not decide (`club_access.policy`; `can().decide_requests`).
 
@@ -233,20 +244,23 @@ request again and sends only what is still true. Emails carry an idempotency
 key, and count against the club's messages like a waiting-list offer
 (`ticket` kind).
 
-| kind | when | email | push (app accounts only) |
+| kind | when | email (library key; default subject) | push (app accounts only) |
 |---|---|---|---|
-| `received` | submitted (and again, at most every 10 minutes, when the form is sent again by someone who can't show it is theirs) | "You're on the waiting list for {event}", status link, withdraw link | — |
-| `approved` | confirmed, free | the event's own ticket email (deliveries outbox) | `request_approved` |
-| `approved_pay` | confirmed, paid | "{Club} confirmed your place at {event}": pay ₹{amount} by {pay_by}, pay link | `request_approved_pay` |
-| `declined` | declined with `notify` | "Sorry, {Club} couldn't offer you a place at {event} this time." + the note | `request_declined` (and an inbox item) |
-| `lapsed` | a hold ran out | "Your place was released because payment didn't arrive in time." | — |
-| `cancelled` | the event cancelled | "{Club} has cancelled {event}", the reason; nothing was charged | — |
-| `unanswered` | a pending request closed because its event ended or was deleted (once a request: the job's key is the request's) | "{Club} wasn't able to confirm your place for {event}." Nothing was charged. | — |
+| `received` | submitted (and again, at most every 10 minutes, when the form is sent again by someone who can't show it is theirs); once for each person moved in from the waiting list (§8) | `request_received`: "Thanks for registering for {event}", status link, cancel link | — |
+| `approved` | confirmed, free | `request_approved`: "Your ticket for {event}", the ticket email of confirmed people (deliveries outbox), ticket attached | `request_approved` "{Club} confirmed your registration" |
+| `approved_pay` | confirmed, paid | `request_approved_pay`: "Your registration for {event} is confirmed": pay {amount} by {pay_by}, pay link | `request_approved_pay` "{Club} confirmed your registration" |
+| `declined` | declined with `notify` | `request_declined`: "Your registration for {event}": "{Club} couldn't confirm your registration this time." + the note | `request_declined` "Your registration for {event}" (and an inbox item) |
+| `lapsed` | a hold ran out | `request_lapsed`: "Your registration for {event} has expired": it wasn't paid in time | — |
+| `cancelled` | the event cancelled | (not in the library) "Cancelled: {event}", the reason; "Your registration is closed. Nothing was charged." | — |
+| `unanswered` | a pending request closed because its event ended or was deleted (once a request: the job's key is the request's) | `request_unanswered`: "Your registration for {event}": "{Club} wasn't able to confirm your registration for {event}." | — |
 
 The emails are the club's: its logo, colour and name as the sender, drawn by
-the designed-email renderer (a plain email if that fails). They are listed in
-the club's email library (`GET /clubs/me/emails/overview` → `automatic`) but
-not edited there yet.
+the designed-email renderer (a plain email if that fails). Since
+`review_emails` the six keyed ones are templates of the club's email library,
+which the club edits (§9); a club that never opened its library gets
+MyOtherApp's defaults. A ticket for a registration that came from a request
+(free at confirmation, paid after the payment) goes in the club's
+`request_approved` email instead of the event's invite.
 
 Push data (as `waitlist_offer`'s): `type`, `token`, `event_id`, `url` (the
 status link); `request_approved` adds `ticket_id` (`""` when none);
@@ -423,9 +437,8 @@ the address by email instead (at most every 10 minutes). The request's owner
    `discount_code` and `whatsapp_opt_in` on the club's list items;
    `event_id`/`event_name` on the register response; `claim_url` in `pay`;
    `amount` on the claim view; the `reopen` response's shape.
-4. The request emails (five since §7) are listed in the email library but
-   not customisable yet: that needs new journey stages in the editor, the
-   dashboard's too.
+4. The request emails were listed in the email library but not customisable
+   at first. They are since `review_emails` (§9).
 
 ---
 
@@ -590,10 +603,10 @@ lists, below).
 
 ### Email
 
-`request_unanswered` (club-branded, in the email library's `automatic` list
-with the other request emails): "Your request for {event}" — "{Club} wasn't
-able to confirm your place for {event}. Your request is closed. Nothing was
-charged."
+`request_unanswered` (club-branded, in the email library with the other
+review emails, §9): "Your registration for {event}" — "{Club} wasn't able to
+confirm your registration for {event}. Your registration is closed. Nothing
+was charged."
 
 ### Contract changes
 
@@ -609,3 +622,161 @@ charged."
    always (not only on confirm-each events); `expected_from_holds_count`;
    `closed_reason` on the guest's view.
 
+
+---
+
+## 8. The waiting list, once review goes on
+
+Contract: `feature-register/review-wording-contract.md` §3.3 (28 Oct 2026).
+An event that reviews registrations has no waiting list (§7): nobody in its
+line is ever offered a place. So the people in line become registrations
+under review, which the club can confirm (`approvals.service.from_waiting_list`).
+
+- **When.** In the transaction that switches review on
+  (`events.service.update_event`, when `requires_approval` goes from false to
+  true). The event's row is written first; joining the line re-reads the
+  setting under a share lock (`waitlist.join`). So a join racing the switch
+  either lands before the line is read, and is converted, or is refused with
+  `WAITLIST_OFF_ON_APPROVAL_EVENTS`.
+- **Who.** Every entry `waiting` (not `via_request`), in line order, row-locked.
+  Each becomes a `pending` request:
+  - `submitted_at` is when they joined, so they come before anyone who
+    registers later;
+  - they keep their ticket type, name, phone (when it fits 15 characters),
+    account and WhatsApp choice;
+  - their entry becomes `removed`, so it no longer counts in the line or its
+    figures.
+- **Told once.** Each new request gets `request_received`, a job keyed on the
+  request, run after the commit.
+- **Nobody twice.**
+  - Someone with an open request on the event already, or a live registration,
+    is not made another one. Their entry just closes.
+  - A concurrent request from the same account is caught by the unique
+    indexes (a SAVEPOINT per row).
+- **Left alone.**
+  - An entry with no address to write to stays in line, untouched, counted as
+    `kept_no_email`. That covers a phone-only entry, and an address longer
+    than a registration takes (100).
+  - A standing offer (`offered`) stays: it can be claimed until it runs out.
+  - An event that can't confirm anyone any more (deleted, called off, over)
+    is left as it is.
+- **Events switched on before this.** The backfill
+  `python -m scripts.waitlist_to_review` (dry run; `--apply` to do it) runs the
+  same function for every event that reviews registrations and still has
+  people waiting. It runs one transaction per event, with the event's row held
+  first, and is idempotent. See docs/OPERATIONS.md §25.
+
+Counts it returns (and the backfill prints): `moved`, `already_under_review`,
+`already_registered`, `kept_no_email`. Clients need nothing new: the people
+moved appear as `ticketing.viewer_request` and in
+`/registration-requests/mine`, and their `viewer_waitlist` entry is gone.
+
+---
+
+## 9. The review emails are the club's to edit (migration `review_emails`)
+
+`EmailStage` gains six values, one per library email: `REQUEST_RECEIVED`,
+`REQUEST_APPROVED`, `REQUEST_APPROVED_PAY`, `REQUEST_DECLINED`,
+`REQUEST_LAPSED` and `REQUEST_UNANSWERED`. The template key is the stage in
+lower case (`request_received`, …), the keys this document always used.
+
+- **Where they live.** In `email_templates`, as **library rows only**
+  (`event_id` null), one per club per stage. `uq_email_templates_library_stage`
+  enforces that.
+  - `ensure_library` makes them from the starters (`app/core/mail/starters.py`)
+    the first time the library is read. The library's GET routes commit, so
+    the ids they answer with stay.
+  - The send path reads the club's row, else the starter. It never writes.
+- **No event copies.**
+  - `POST /events/{id}/emails` with a request stage → 422 "These emails belong
+    to the club's library: edit them in Emails."
+  - Creating one in the library by hand, duplicating one, or deleting one is
+    refused too (422).
+  - An event's own Emails tab never lists them.
+- **Editing** (the library's own permission: club auth, the user's club):
+  `PUT /clubs/me/emails/{id}`. Words only:
+  - `enabled` stays true, `trigger` stays `MANUAL`, `audience` stays ALL, and
+    `channels` stay email;
+  - attachments are the ticket for `REQUEST_APPROVED` and nothing for the
+    others.
+  - Validation is every email's: tokens, conditionals, own images.
+  - The request tokens are held to their stages: `{{pay_url}}` in a reminder
+    or in the "thanks" email → 422.
+- **Reset.** **NEW** `POST /clubs/me/emails/{id}/reset` puts any non-custom
+  library email back to MyOtherApp's default and bumps `version`. A custom
+  email → 422 "A custom email has no default to go back to."
+- **The editor.**
+  - `GET /clubs/me/emails/context` lists the request tokens (group
+    "Registration review"), each with `stages`, and the six stages' meta
+    (`label`, `note`, `when`).
+  - `POST /clubs/me/emails/preview` fills in their samples.
+  - `GET /clubs/me/emails/overview` lists the six among `templates`, each with
+    `key`, `group` and `when`. `automatic` is now empty.
+- **Tokens of the review emails** (beside every usual one). `REQUEST_APPROVED`
+  is a ticket email, and takes the ticket email's tokens.
+
+| Token | Stages |
+|---|---|
+| `status_url` (their registration's page) | all but `REQUEST_APPROVED` |
+| `cancel_url` (`status_url?withdraw=1`) | `REQUEST_RECEIVED`, `REQUEST_APPROVED_PAY` |
+| `pay_url`, `pay_amount`, `pay_by` | `REQUEST_APPROVED_PAY` |
+| `decline_note` | `REQUEST_DECLINED` |
+| `event_url` | all but `REQUEST_APPROVED` |
+
+- **Escaping.** Values are filled in and HTML-escaped, as every token's are.
+  What people type (the club's decline note, the person's name) is a value,
+  never template text: `{{event_name}}` typed in a note arrives as typed. A
+  heading or paragraph that renders empty (an `{% if decline_note %}` with no
+  note) is left out of the email, so it leaves no gap.
+- **The confirmed ticket.** The deliveries outbox sends a ticket for a
+  registration that came from a request (one probe of
+  `ix_registration_requests_registration`) in the club's `request_approved`
+  email. Every other ticket goes in the event's invite, as before.
+- **Migration.** `review_emails` (after `add_event_partners`) adds the six enum
+  values with `ADD VALUE IF NOT EXISTS` in autocommit, which touches only the
+  catalogue. It writes no rows. Downgrade deletes the rows in those stages;
+  the values stay in the type, unused.
+
+---
+
+## 10. The words (owner, 28 Oct 2026)
+
+Contract: `feature-register/review-wording-contract.md`. People never read
+"request a place", "your request", "waiting list" or "place" (a seat) on
+these events.
+
+| status | attendees read | the club reads |
+|---|---|---|
+| `pending` | Under review | Under review |
+| `approved` (ticket) | Confirmed | Confirmed |
+| `approved` (paid, unpaid) | Confirmed · pay by {time} to get your ticket | Confirmed |
+| `declined` | Not confirmed | Declined |
+| `withdrawn` | Cancelled ("Cancel my registration") | Cancelled |
+| `lapsed` | Expired | Expired |
+| `closed` | Closed | Closed |
+
+The backend's own words:
+
+- **API messages.** The codes are unchanged; only the `message` changed:
+  - `APPROVAL_REQUIRED` "This event reviews every registration. Update the
+    app, or register on myotherapp.in."
+  - `ADD_ONS_NOT_ALLOWED` "Add-ons can't be picked when registrations are
+    reviewed."
+  - `REQUEST_DECLINED` "The organisers couldn't confirm your registration for
+    this event, so you can't register again with this email."
+  - `REQUEST_NOT_WITHDRAWABLE` "This registration can't be cancelled any
+    more."
+  - `WAITLIST_OFF_ON_APPROVAL_EVENTS` "This event has no waiting list: the
+    organisers review every registration. Register instead, and they'll get
+    back to you."
+- **Pushes.**
+  - "{Club} confirmed your registration" (`request_approved`,
+    `request_approved_pay`).
+  - "Your registration for {event}" / "{Club} couldn't confirm your
+    registration this time." (`request_declined`).
+- **Requests CSV.**
+  - Status in the club's words.
+  - "Registered at", "Reviewed at", "Reviewed by".
+- **Closeout PDF.** The section is "REGISTRATION REVIEW", with rows "Received",
+  "Confirmed", "Cancelled by them", "Expired (not paid in time)", "Closed …"
+  and "Average time to review".

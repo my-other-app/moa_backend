@@ -66,7 +66,8 @@ async def test_a_burst_of_first_registrations_copies_the_journey_emails_once(_en
                 .where(EmailTemplates.club_id == club_id, EmailTemplates.event_id.is_(None))
             )
         assert on_event == len(emails.JOURNEY_STAGES)
-        assert in_library == len(emails.JOURNEY_STAGES)
+        # The library: the four journey emails and the six review emails, once each.
+        assert in_library == len(emails.LIBRARY_STAGES)
     finally:
         async with make() as s:
             await s.execute(delete(EmailTemplates).where(EmailTemplates.club_id == club_id))

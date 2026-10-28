@@ -646,10 +646,22 @@ async def _read(db: pipeline.Db, c: _Claim, run: _Run) -> Optional[_Ready]:
             ready.terms, ready.skip = await quota.check(s, event.club_id, d.channel.value, ready.quota_kind, via=via, cache=run.terms)
         if ready.skip is None and d.kind is DeliveryKind.ticket and d.channel is DeliveryChannel.email:
             # A ticket goes out in the event's designed invite when there is
-            # one switched on; otherwise in the plain words.
-            if event.id not in run.invites:
-                run.invites[event.id] = await emails.invite_for(s, event)
-            ready.invite = run.invites[event.id]
+            # one switched on; otherwise in the plain words. Someone the club
+            # confirmed (a registration from a request, on an event that
+            # reviews registrations) gets the club's "Confirmed · ticket"
+            # email instead (its library's REQUEST_APPROVED): one probe of
+            # ix_registration_requests_registration.
+            from app.api.approvals.models import RegistrationRequests
+
+            confirmed = await s.scalar(
+                select(RegistrationRequests.id).where(RegistrationRequests.registration_id == reg.id).limit(1)
+            )
+            key = ("confirmed", event.id) if confirmed is not None else event.id
+            if key not in run.invites:
+                run.invites[key] = (
+                    await emails.request_ticket_for(s, event) if confirmed is not None else await emails.invite_for(s, event)
+                )
+            ready.invite = run.invites[key]
         return ready
 
 

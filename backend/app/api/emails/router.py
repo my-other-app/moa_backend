@@ -203,7 +203,10 @@ async def get_message(
 @library_router.get("", summary="The club's email library")
 async def list_library(session: SessionDep, user: ClubAuth) -> list[EmailTemplateOut]:
     club = await service.club_of(session, user)
-    return [EmailTemplateOut(**service.template_out(t)) for t in await service.ensure_library(session, club.id)]
+    library = await service.ensure_library(session, club.id)
+    # The emails made just now are kept, so the ids answered here can be opened.
+    await session.commit()
+    return [EmailTemplateOut(**service.template_out(t)) for t in library]
 
 
 @library_router.post("", summary="A new custom email in the library")
@@ -236,7 +239,10 @@ async def upload_library_image(session: SessionDep, user: ClubAuth, file: Upload
 @library_router.get("/overview", summary="The library with how each email is used and what it did, the month in figures, and what goes out next")
 async def library_overview_endpoint(session: SessionDep, user: ClubAuth) -> LibraryOverview:
     club = await service.club_of(session, user)
-    return LibraryOverview(**await library_overview.overview(session, club))
+    out = LibraryOverview(**await library_overview.overview(session, club))
+    # The library's emails made just now are kept, so their Edit links open.
+    await session.commit()
+    return out
 
 
 @library_router.get("/{template_id}", summary="One library email")
@@ -257,6 +263,16 @@ async def delete_library_template(session: SessionDep, user: ClubAuth, template_
     club = await service.club_of(session, user)
     await service.remove_template(session, await service.template_of(session, template_id, club_id=club.id))
     return {"deleted": True}
+
+
+@library_router.post("/{template_id}/reset", summary="Back to MyOtherApp's default for this email")
+async def reset_library_template(session: SessionDep, user: ClubAuth, template_id: UUID) -> EmailTemplateOut:
+    """A journey or registration review email of the library goes back to
+    the words MyOtherApp wrote (its version climbs). 422 for a custom email,
+    which has no default."""
+    club = await service.club_of(session, user)
+    tpl = await service.template_of(session, template_id, club_id=club.id)
+    return EmailTemplateOut(**service.template_out(await service.reset_template(session, tpl)))
 
 
 @library_router.post("/{template_id}/duplicate", summary="A copy in the library")

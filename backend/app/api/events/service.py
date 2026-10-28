@@ -371,8 +371,10 @@ async def update_event(
         db_event.merch_enabled = event.merch_enabled
     if getattr(event, "swag_enabled", None) is not None:
         db_event.swag_enabled = event.swag_enabled
+    review_on = False
     if getattr(event, "requires_approval", None) is not None:
-        # Off again: new people register directly; requests already waiting stay for the club.
+        # Off again: new people register directly; registrations under review stay for the club.
+        review_on = bool(event.requires_approval) and not bool(db_event.requires_approval)
         db_event.requires_approval = bool(event.requires_approval)
     if getattr(event, "high_demand_label", None) is not None:
         db_event.high_demand_label = bool(event.high_demand_label)
@@ -473,6 +475,17 @@ async def update_event(
 
     if store_item_ids is not None:
         await store.write_offers(session, event_id, store_item_ids)
+
+    if review_on:
+        # Review just went on: the people in the event's waiting list become
+        # registrations under review, each told once, in this transaction.
+        # The event's row is written first (the flush), so a join racing the
+        # switch either finishes before these are read or sees the switch
+        # (waitlist.join re-reads it under a share lock).
+        from app.api.approvals import service as approvals
+
+        await session.flush()
+        await approvals.from_waiting_list(session, db_event)
 
     await session.commit()
     await _republish_site(session, event_id)

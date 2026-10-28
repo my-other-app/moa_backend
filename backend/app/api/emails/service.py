@@ -56,6 +56,10 @@ from app.core.mail.schema import (
     EMAIL_ONLY_TOKENS,
     EMAIL_STAGE_META,
     JOURNEY_STAGES,
+    LIBRARY_STAGES,
+    REQUEST_STAGES,
+    REQUEST_TOKEN_STAGES,
+    REQUEST_TOKENS,
     EmailAttachments,
     EmailAudience,
     EmailDesign,
@@ -74,6 +78,11 @@ logger = logging.getLogger(__name__)
 
 STAGE_ORDER = {EmailStage(s): i for i, s in enumerate(JOURNEY_STAGES)}
 STAGE_ORDER[EmailStage.CUSTOM] = len(JOURNEY_STAGES)
+STAGE_ORDER.update({EmailStage(s): len(JOURNEY_STAGES) + 1 + i for i, s in enumerate(REQUEST_STAGES)})
+#: The emails of an event that reviews every registration: library rows only.
+REQUEST_EMAIL_STAGES = frozenset(EmailStage(s) for s in REQUEST_STAGES)
+#: Where a club edits them; an event's own emails never hold one.
+LIBRARY_ONLY = "These emails belong to the club's library: edit them in Emails."
 # Keeps a timer from sending an old event's reminder on the day it is deployed.
 SWEEP_GRACE = timedelta(days=2)
 SWEEP_LOCK = lock_keys.EMAIL_SWEEP
@@ -181,8 +190,38 @@ def design_problems(subject: str, design: EmailDesign) -> list[str]:
     return out
 
 
+def is_request(stage: EmailStage) -> bool:
+    return stage in REQUEST_EMAIL_STAGES
+
+
+def request_fixed(fields: EmailTemplateFields, stage: EmailStage) -> EmailTemplateFields:
+    """A request email as it is kept: always on, sent by the server as the
+    registration moves (no timer, no audience), and only the ticket one
+    carries the ticket. The club changes its words; these stay."""
+    out = fields.model_copy(deep=True)
+    out.enabled = True
+    out.trigger = EmailTrigger()
+    out.audience = EmailAudience()
+    out.channels = ["email"]
+    ticket = stage is EmailStage.REQUEST_APPROVED
+    out.attachments = EmailAttachments(ticket_pdf=ticket, certificate_pdf=False)
+    return out
+
+
+def request_token_problems(subject: str, design: EmailDesign, stage: EmailStage) -> list[str]:
+    """A request email's own tokens used where they mean nothing: a pay link
+    in a reminder, a decline note in the "thanks for registering" email."""
+    out = []
+    for where, src in _texts(subject, design):
+        for key in parse_email_template(src).tokens:
+            allowed = REQUEST_TOKEN_STAGES.get(key)
+            if allowed is not None and stage.value not in allowed:
+                out.append(f"{where}: {{{{{key}}}}} works only in the registration review emails that have it.")
+    return out
+
+
 def validate_fields(fields: EmailTemplateFields, *, event_id: Optional[int], club_id: int, stage: EmailStage = EmailStage.CUSTOM) -> None:
-    problems = design_problems(fields.subject, fields.design)
+    problems = design_problems(fields.subject, fields.design) or request_token_problems(fields.subject, fields.design, stage)
     if problems:
         raise CustomHTTPException(422, message=problems[0], errors={"fields": {"design": problems}})
     for b in fields.design.blocks:
@@ -236,10 +275,12 @@ def _library_query(club_id: int):
 
 
 async def ensure_library(session, club_id: int) -> list[EmailTemplates]:
-    """The club's library, with the four journey emails present."""
+    """The club's library, with the four journey emails and the six request
+    emails present (made from the starters the first time). Inserted, not
+    committed: a caller that answers with their ids commits."""
     rows = list(await session.scalars(_library_query(club_id)))
     have = {t.stage for t in rows}
-    missing = [EmailStage(s) for s in JOURNEY_STAGES if EmailStage(s) not in have]
+    missing = [EmailStage(s) for s in LIBRARY_STAGES if EmailStage(s) not in have]
     if missing:
         await _insert_missing(session, [_row(club_id, None, stage, email_starter(stage.value)) for stage in missing])
         rows = list(await session.scalars(_library_query(club_id)))
@@ -278,6 +319,9 @@ async def template_of(session, template_id, *, event: Optional[Events] = None, c
 
 
 async def create_template(session, *, club_id: int, event_id: Optional[int], fields: EmailTemplateFields, stage: EmailStage = EmailStage.CUSTOM, created_by=None) -> EmailTemplates:
+    if is_request(stage):
+        # One of each in the library, made by ensure_library; never on an event.
+        raise CustomHTTPException(422, message=LIBRARY_ONLY, errors={"fields": {"stage": LIBRARY_ONLY}})
     validate_fields(fields, event_id=event_id, club_id=club_id, stage=stage)
     if stage is not EmailStage.CUSTOM:
         dup = await session.scalar(select(EmailTemplates).where(EmailTemplates.club_id == club_id, EmailTemplates.event_id == event_id if event_id is not None else EmailTemplates.event_id.is_(None), EmailTemplates.stage == stage))
@@ -295,6 +339,8 @@ async def create_template(session, *, club_id: int, event_id: Optional[int], fie
 
 
 async def update_template(session, tpl: EmailTemplates, fields: EmailTemplateFields) -> EmailTemplates:
+    if is_request(tpl.stage):
+        fields = request_fixed(fields, tpl.stage)
     validate_fields(fields, event_id=tpl.event_id, club_id=tpl.club_id, stage=tpl.stage)
     before = (tpl.subject, tpl.design)
     _apply(tpl, fields)
@@ -312,6 +358,9 @@ async def remove_template(session, tpl: EmailTemplates) -> None:
 
 
 async def duplicate_template(session, tpl: EmailTemplates, created_by=None) -> EmailTemplates:
+    if is_request(tpl.stage):
+        # Its links (to pay, to cancel) mean nothing in an email sent by hand.
+        raise CustomHTTPException(422, message="The registration review emails can't be copied. Edit the words instead.")
     fields = fields_of(tpl)
     fields.name = f"Copy of {fields.name}"[:80]
     fields.trigger = EmailTrigger()
@@ -345,7 +394,15 @@ async def save_to_library(session, tpl: EmailTemplates) -> EmailTemplates:
 
 async def reset_template(session, tpl: EmailTemplates) -> EmailTemplates:
     """Back to what the event started from: the library's version of the
-    stage, or the starter."""
+    stage, or the starter. A library email goes back to MyOtherApp's own
+    default (the starter); a custom one in the library has none."""
+    if tpl.event_id is None:
+        if tpl.stage is EmailStage.CUSTOM:
+            raise CustomHTTPException(422, message="A custom email has no default to go back to.")
+        _apply(tpl, email_starter(tpl.stage.value))
+        tpl.version = (tpl.version or 1) + 1
+        await session.commit()
+        return tpl
     source = None
     if tpl.stage is not EmailStage.CUSTOM:
         library = {t.stage: t for t in await ensure_library(session, tpl.club_id)}
@@ -1118,6 +1175,38 @@ async def invite_for(session, event: Events) -> Optional[dict]:
     }
 
 
+# --- the request emails -------------------------------------------------------------
+
+
+async def request_template(session, club_id: Optional[int], stage: EmailStage) -> EmailTemplateFields:
+    """One of the request emails as the club wrote it: its library row, or
+    MyOtherApp's default when the club has none yet. Read only: the row is
+    made when the club opens its library."""
+    if club_id is not None:
+        tpl = await session.scalar(
+            select(EmailTemplates).where(
+                EmailTemplates.club_id == club_id, EmailTemplates.event_id.is_(None), EmailTemplates.stage == stage,
+            ).limit(1)
+        )
+        if tpl is not None:
+            return request_fixed(fields_of(tpl), stage)
+    return email_starter(stage.value)
+
+
+async def request_ticket_for(session, event: Events) -> dict:
+    """The ticket email of someone the club confirmed (a registration that
+    came from a request): the club's "Confirmed · ticket" email, shaped as
+    `invite_for`'s, ticket attached."""
+    fields = await request_template(session, event.club_id, EmailStage.REQUEST_APPROVED)
+    return {
+        "subject": fields.subject,
+        "design": fields.design,
+        "attachments": EmailAttachments(ticket_pdf=True, certificate_pdf=False),
+        "brand": await brand_primary(session, event),
+        "logo_url": logo_url_of(event),
+    }
+
+
 async def compose_invite(session, event: Events, reg: EventRegistrationsLink, invite: dict, *, cache: Optional[dict] = None) -> Outgoing:
     return await compose(
         session, event, reg, invite["subject"], invite["design"], invite["attachments"], brand=invite["brand"], logo_url=invite["logo_url"], cache=cache,
@@ -1246,7 +1335,8 @@ def context(event, *, brand: str) -> dict:
     from app.core.layout.tokens import TICKET_TOKENS
 
     return {
-        "tokens": [*TICKET_TOKENS, *EMAIL_ONLY_TOKENS],
+        # The request emails' own carry `stages`: the ones they may be used in.
+        "tokens": [*TICKET_TOKENS, *EMAIL_ONLY_TOKENS, *REQUEST_TOKENS],
         "sample_values": sample_values(event),
         "brand_primary": brand,
         "logo_url": logo_url_of(event),

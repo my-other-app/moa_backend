@@ -19,8 +19,24 @@ from app.core.layout.tokens import TOKEN_BY_KEY
 
 Hex = Annotated[str, StringConstraints(pattern=r"^#[0-9A-Fa-f]{6}$")]
 
-EmailStage = Literal["INVITE", "PRE_EVENT", "REMINDER", "POST_EVENT", "CUSTOM"]
+EmailStage = Literal[
+    "INVITE", "PRE_EVENT", "REMINDER", "POST_EVENT", "CUSTOM",
+    "REQUEST_RECEIVED", "REQUEST_APPROVED", "REQUEST_APPROVED_PAY", "REQUEST_DECLINED", "REQUEST_LAPSED",
+    "REQUEST_UNANSWERED",
+]
 JOURNEY_STAGES: list[str] = ["INVITE", "PRE_EVENT", "REMINDER", "POST_EVENT"]
+#: The emails of an event that reviews every registration (app/api/approvals):
+#: each goes to the one person, by itself, as their registration moves. The
+#: club edits them in its library; they have no event copies, no timer and no
+#: audience. A template's key is its stage in lower case (`request_received`).
+REQUEST_STAGES: list[str] = [
+    "REQUEST_RECEIVED", "REQUEST_APPROVED", "REQUEST_APPROVED_PAY", "REQUEST_DECLINED", "REQUEST_LAPSED",
+    "REQUEST_UNANSWERED",
+]
+#: What a club's library holds, besides its custom emails: one of each.
+LIBRARY_STAGES: list[str] = [*JOURNEY_STAGES, *REQUEST_STAGES]
+#: The library's heading for the request emails.
+REQUEST_GROUP = "Registration review"
 
 EMAIL_STAGE_META: dict[str, dict] = {
     "INVITE": {"label": "Invite", "note": "The ticket email — sent with the ticket when tickets go out.", "order": 1},
@@ -28,6 +44,36 @@ EMAIL_STAGE_META: dict[str, dict] = {
     "REMINDER": {"label": "Reminder", "note": "As the doors open, to guests not yet inside.", "order": 3},
     "POST_EVENT": {"label": "Post-event", "note": "After the close: thanks, the certificate, what is next.", "order": 4},
     "CUSTOM": {"label": "Custom", "note": "Any other email, sent by hand or on a timer.", "order": 5},
+    "REQUEST_RECEIVED": {
+        "label": "Thanks for registering", "order": 6,
+        "note": "Their registration is in and you review it: with a link to it, and to cancel it.",
+        "when": "as soon as someone registers for an event that reviews registrations",
+    },
+    "REQUEST_APPROVED": {
+        "label": "Confirmed · ticket", "order": 7,
+        "note": "The ticket email for the people you confirm, with the ticket attached.",
+        "when": "when you confirm a free ticket. It is the ticket email for confirmed people, with the ticket attached.",
+    },
+    "REQUEST_APPROVED_PAY": {
+        "label": "Confirmed · pay for the ticket", "order": 8,
+        "note": "The amount, the link to pay, and how long the ticket is held for them.",
+        "when": "when you confirm a paid ticket: the pay link and the pay-by time",
+    },
+    "REQUEST_DECLINED": {
+        "label": "Not confirmed", "order": 9,
+        "note": "You couldn't confirm them this time, with the note you wrote.",
+        "when": "when you decline someone and leave “Email them” on, with your note if you wrote one",
+    },
+    "REQUEST_LAPSED": {
+        "label": "Expired · not paid in time", "order": 10,
+        "note": "You confirmed them, but the payment didn't arrive in time.",
+        "when": "when a confirmed paid ticket isn't paid in time",
+    },
+    "REQUEST_UNANSWERED": {
+        "label": "Closed before review", "order": 11,
+        "note": "The event ended or was deleted before you reviewed them.",
+        "when": "when the event ends, or is deleted, while someone is still under review: once to each",
+    },
 }
 
 # Web-safe families only: an email client draws with the fonts it has.
@@ -254,4 +300,28 @@ EMAIL_ONLY_TOKENS: list[dict] = [
     {"key": "doors_in", "group": "Event", "label": "Minutes until the doors open", "sample": "30"},
     *([] if "ticket_code" in TOKEN_BY_KEY else [_TICKET_CODE]),
 ]
-EMAIL_TOKEN_KEYS: frozenset = frozenset(t["key"] for t in EMAIL_ONLY_TOKENS)
+#: The tokens of the request emails (REQUEST_STAGES but the ticket one), each
+#: with the stages it may be used in: a link to pay means nothing in a
+#: reminder. Their values come from the registration under review
+#: (app/api/approvals/notify.py); the samples are the editor's.
+_ALL_BUT_TICKET = ["REQUEST_RECEIVED", "REQUEST_APPROVED_PAY", "REQUEST_DECLINED", "REQUEST_LAPSED", "REQUEST_UNANSWERED"]
+REQUEST_TOKENS: list[dict] = [
+    {"key": "status_url", "group": REQUEST_GROUP, "label": "Link to their registration",
+     "sample": "https://myotherapp.in/requests/sample", "stages": _ALL_BUT_TICKET},
+    {"key": "cancel_url", "group": REQUEST_GROUP, "label": "Link to cancel their registration",
+     "sample": "https://myotherapp.in/requests/sample?withdraw=1", "stages": ["REQUEST_RECEIVED", "REQUEST_APPROVED_PAY"]},
+    {"key": "pay_url", "group": REQUEST_GROUP, "label": "Link to pay",
+     "sample": "https://myotherapp.in/claim/sample", "stages": ["REQUEST_APPROVED_PAY"]},
+    {"key": "pay_amount", "group": REQUEST_GROUP, "label": "Amount to pay", "sample": "₹499", "stages": ["REQUEST_APPROVED_PAY"]},
+    {"key": "pay_by", "group": REQUEST_GROUP, "label": "Pay by", "sample": "3 Nov, 6:00 PM IST", "stages": ["REQUEST_APPROVED_PAY"]},
+    {"key": "decline_note", "group": REQUEST_GROUP, "label": "Your note",
+     "sample": "We had many more registrations than seats this time.", "stages": ["REQUEST_DECLINED"]},
+    {"key": "event_url", "group": REQUEST_GROUP, "label": "Event page link",
+     "sample": "https://myotherapp.in/events/sample-event", "stages": _ALL_BUT_TICKET},
+]
+#: Token -> the stages it may be used in.
+REQUEST_TOKEN_STAGES: dict[str, frozenset] = {t["key"]: frozenset(t["stages"]) for t in REQUEST_TOKENS}
+#: Every token an email's text may name beyond the ticket's: the parser and
+#: the renderer know them all, and validation holds the request ones to their
+#: stages (emails.service.validate_fields).
+EMAIL_TOKEN_KEYS: frozenset = frozenset(t["key"] for t in [*EMAIL_ONLY_TOKENS, *REQUEST_TOKENS])
