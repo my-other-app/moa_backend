@@ -581,8 +581,9 @@ lists, below).
   come from the places calculation: holds count, and a paid event's cap
   counts paid tickets (an unpaid registration made it read "full" before).
   `registration_open` on the event page follows them. The cards' places are
-  two statements for the whole page (its types, its open waiting-list
-  entries; `ticketing.places.places_many`).
+  one statement for the whole page, and only when it has events not started
+  yet (their types with their open waiting-list entries;
+  `ticketing.places.places_many`).
 - Ticketing: on a confirm-each event `waitlist.enabled: false`,
   `types[].waitlist: false`, and `POST /events/{id}/waitlist` is 409
   `WAITLIST_OFF_ON_APPROVAL_EVENTS`.

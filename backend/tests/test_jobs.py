@@ -284,6 +284,8 @@ def test_the_platforms_jobs_have_the_priorities_and_limits_chosen(monkeypatch):
         "live.survey_mail": (N, 4),
         # Nobody watches these happen.
         "closeout.retention": (L, 1), "registrations.import": (L, 1),
+        # A lapsed hold's unpaid registration retired (app/api/approvals): rare, and nobody waits.
+        "approvals.retire_lapsed": (L, 1),
         # Razorpay's fee on each payment, read for the payouts page: one batch at a time.
         "admin_ops.fetch_fees": (L, 1),
     }

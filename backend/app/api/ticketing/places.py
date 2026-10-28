@@ -86,21 +86,6 @@ async def lines(session, event_id: int, *, exclude=None, now: Optional[datetime]
     return out
 
 
-async def lines_many(session, event_ids: list[int], *, now: Optional[datetime] = None) -> dict[int, dict[int, Line]]:
-    """`lines` for many events in one grouped statement (ix_waitlist_line)."""
-    if not event_ids:
-        return {}
-    now = now or _now()
-    W = WaitlistEntries
-    rows = (await session.execute(
-        select(W.event_id, W.ticket_type_id, W.status, W.via_request, func.count())
-        .where(W.event_id.in_(list(event_ids)), _open_entries(now))
-        .group_by(W.event_id, W.ticket_type_id, W.status, W.via_request)
-    )).all()
-    out: dict[int, dict[int, Line]] = {}
-    for event_id, type_id, status, via, n in rows:
-        _add(out.setdefault(event_id, {}).setdefault(type_id, Line()), status, bool(via), int(n))
-    return out
 
 
 def event_cap(event) -> Optional[int]:
@@ -244,22 +229,37 @@ async def summary(session, event) -> Places:
 
 
 async def places_many(session, events: list, *, now: Optional[datetime] = None) -> dict[int, Places]:
-    """`summary` for a page of events in two statements, whatever their
-    number: their live types (ix_ticket_types_event) and their open
-    waiting-list entries (ix_waitlist_line). The events' own counts are the
-    rows as the caller read them."""
+    """`summary` for a page of events in one statement, whatever their
+    number: their ticket types (ix_ticket_types_event), each with its open
+    waiting-list entries counted (ix_waitlist_line). Deleted types come too,
+    only for their offers, which still hold their places. The events' own
+    counts are the rows as the caller read them."""
     ids = [e.id for e in events]
     if not ids:
         return {}
-    rows = (await session.scalars(
-        select(TicketTypes).where(TicketTypes.event_id.in_(ids), TicketTypes.is_deleted == False)  # noqa: E712
+    now = now or _now()
+    W = WaitlistEntries
+    line = (
+        select(W.ticket_type_id.label("type_id"), W.status, W.via_request, func.count().label("n"))
+        .where(W.event_id.in_(ids), _open_entries(now))
+        .group_by(W.ticket_type_id, W.status, W.via_request)
+        .subquery("line")
+    )
+    rows = (await session.execute(
+        select(TicketTypes, line.c.status, line.c.via_request, line.c.n)
+        .outerjoin(line, line.c.type_id == TicketTypes.id)
+        .where(TicketTypes.event_id.in_(ids))
         .order_by(TicketTypes.event_id, TicketTypes.sort_order, TicketTypes.id)
+        .execution_options(include_deleted=True)
     )).all()
-    types: dict[int, list] = {}
-    for t in rows:
-        types.setdefault(t.event_id, []).append(t)
-    lines_ = await lines_many(session, ids, now=now)
-    return {e.id: places_of(e, types.get(e.id, []), lines_.get(e.id, {})) for e in events}
+    types: dict[int, dict[int, TicketTypes]] = {}
+    lines_: dict[int, dict[int, Line]] = {}
+    for t, status, via, n in rows:
+        if not t.is_deleted:
+            types.setdefault(t.event_id, {})[t.id] = t
+        if status is not None:
+            _add(lines_.setdefault(t.event_id, {}).setdefault(t.id, Line()), status, bool(via), int(n))
+    return {e.id: places_of(e, list(types.get(e.id, {}).values()), lines_.get(e.id, {})) for e in events}
 
 
 def full(*, waitlist: bool, max_participants=None) -> CustomHTTPException:
