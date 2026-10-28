@@ -1,0 +1,29 @@
+# Garage, the S3-compatible store that holds uploaded media on this box
+# (posters, logos, tickets, certificates, store photos...): compose.yml's
+# `media` service. One node, one copy: the box's own disk is the only copy,
+# so the box's snapshots (Vultr backups) are what protects it.
+#
+# No secret here: GARAGE_RPC_SECRET and GARAGE_ADMIN_TOKEN come from .env
+# through compose.yml. One-time setup (layout, bucket, the API's key, CORS):
+# ops/server/media/init.sh, from README.md "Media store".
+
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+db_engine = "lmdb"
+# A consistent copy of the metadata next to it, so a crash mid-write never
+# costs more than the last six hours of keys (the files themselves are safe).
+metadata_auto_snapshot_interval = "6h"
+
+replication_factor = 1
+compression_level = 2
+
+rpc_bind_addr = "[::]:3901"
+rpc_public_addr = "127.0.0.1:3901"
+
+[s3_api]
+# The region every client signs for (the API's APP_S3_REGION).
+s3_region = "garage"
+api_bind_addr = "[::]:3900"
+
+[admin]
+api_bind_addr = "[::]:3903"

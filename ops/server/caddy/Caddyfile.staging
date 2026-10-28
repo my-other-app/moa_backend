@@ -58,3 +58,14 @@ import snippets.caddy
 		import upstream
 	}
 }
+
+# Uploaded media, reads only (as in Caddyfile).
+{$MOA_MEDIA_HOST:media-staging.myotherapp.in} {
+	import origin_tls
+	import common
+	@write not method GET HEAD OPTIONS
+	respond @write 405
+	reverse_proxy {$MOA_UPSTREAM_MEDIA:media:3900} {
+		import upstream
+	}
+}

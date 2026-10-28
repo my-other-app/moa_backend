@@ -35,6 +35,7 @@ BUDGET_MIB = {
     "clubs": 512,
     "admin": 448,
     "caddy": 128,
+    "media": 256,
 }
 
 #: https://www.cloudflare.com/ips/ on 2026-10-24 (ops/server/cloudflare-ips.sh
@@ -82,7 +83,7 @@ def test_the_limits_fit_a_12gb_box_and_the_api_and_postgres_come_first():
     assert sum(_mib(s["mem_limit"]) for s in services.values()) <= ALL_LIMITS_MIB
     shares = {name: int(s["cpu_shares"]) for name, s in services.items()}
     assert shares["backend"] == shares["postgres"] == max(shares.values())
-    for background in ("worker", "redis", "meilisearch", "admin"):
+    for background in ("worker", "redis", "meilisearch", "admin", "media"):
         assert shares[background] < shares["backend"], background
         assert float(services[background]["cpus"]) <= 1, background
 

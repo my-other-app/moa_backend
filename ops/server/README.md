@@ -81,3 +81,31 @@ a self-signed `MOA_TLS_CERT`/`MOA_TLS_KEY`, and
 `curl -k --resolve api.myotherapp.in:8443:127.0.0.1 -H 'CF-Connecting-IP: 1.2.3.4' ...`.
 Never set the `MOA_UPSTREAM_*` or `MOA_EXTRA_TRUSTED_PROXIES` variables on a
 server. `tests/test_oracle_stack.py` holds the limits and the rules above.
+
+## Media store (Garage)
+
+Uploads (posters, logos, tickets, certificates, store photos) live on this box
+in Garage, an S3-compatible store: compose.yml's `media` service,
+`media/garage.toml`. The API writes over the box's own network
+(`http://media:3900`); browsers read signed links at `https://media.myotherapp.in`,
+where Caddy lets through reads only.
+
+Once, on a new box (after `.env` has `GARAGE_RPC_SECRET` and
+`GARAGE_ADMIN_TOKEN`, each `openssl rand -hex 32`):
+
+```bash
+sudo install -d -m 700 /var/lib/myotherapp/media/meta /var/lib/myotherapp/media/data
+sudo bash /srv/moa/media/init.sh            # layout, bucket, the API's key into .env
+```
+
+Then in `.env`: `APP_S3_ENDPOINT_URL=http://media:3900`,
+`APP_S3_PUBLIC_URL=https://media.myotherapp.in`, `APP_S3_REGION=garage`,
+`APP_S3_BUCKET=myotherapp-media`, `APP_S3_BASE_PATH` as
+`ops/server/env/backend.env.example` says, and
+`sudo /srv/moa/deploy.sh recreate backend` (and the worker). Cloudflare:
+`media` as a proxied record, and a "None" Worker route `media.myotherapp.in/*`
+so the club-sites Worker never takes it.
+
+There is one copy, on this disk: turn on the provider's automatic backups
+(snapshots) for the box. `sudo moa-dc exec media /garage status` and
+`... /garage bucket info myotherapp-media` show its state.
