@@ -76,15 +76,16 @@ class _GoogleCerts:
 _google_certs = _GoogleCerts()
 
 
-async def _verify_google(id_token_str: str, client_id: str) -> dict:
+async def _verify_google(id_token_str: str, client_id: str | list[str]) -> dict:
     """Google's checks (signature, audience, issuer, expiry) on a worker
-    thread, against the cached certificates."""
+    thread, against the cached certificates. `client_id` may list several
+    accepted audiences."""
     return await asyncio.to_thread(id_token.verify_oauth2_token, id_token_str, _google_certs, client_id)
 
 
-async def google_identity(id_token_str: str, client_id: str) -> dict:
+async def google_identity(id_token_str: str, client_id: str | list[str]) -> dict:
     """The claims of a Google ID token Google vouches for, with `client_id`
-    as its audience (_verify_google). One it would not vouch for is 401
+    (or one of them) as its audience (_verify_google). One it would not vouch for is 401
     INVALID_GOOGLE_TOKEN; Google's certificates out of reach, 503."""
     try:
         return await _verify_google(id_token_str, client_id)
@@ -136,16 +137,20 @@ async def google_signin(
     session: AsyncSession, id_token_str: str, platform: str = "web"
 ):
     try:
-        client_id = {
+        client_ids = {
             "web": settings.GOOGLE_WEB_CLIENT_ID,
             "android": settings.GOOGLE_ANDROID_CLIENT_ID,
             "ios": settings.GOOGLE_IOS_CLIENT_ID,
-        }.get(platform)
+        }
 
-        if not client_id:
+        if not client_ids.get(platform):
             raise CustomHTTPException(status_code=400, message=f"Invalid platform: {platform}", error_code="INVALID_PLATFORM")
 
-        idinfo = await google_identity(id_token_str, client_id)
+        # Any of our own clients is accepted, whichever platform the app
+        # names: the app says "web" on both phones (its serverClientId), but
+        # Google gives an iPhone's token the iOS client as its audience.
+        audiences = list(dict.fromkeys([client_ids[platform], *(c for c in client_ids.values() if c)]))
+        idinfo = await google_identity(id_token_str, audiences)
 
         if not idinfo.get("email_verified"):
             raise CustomHTTPException(
