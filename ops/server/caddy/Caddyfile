@@ -64,6 +64,20 @@ import snippets.caddy
 	}
 }
 
+# Uploaded media: signed links to Garage (compose.yml `media`). Reads only:
+# the API writes over the box's own network (http://media:3900), so nothing
+# from outside may PUT, POST or DELETE here even with a key. The Host header
+# goes through unchanged, as the links' signatures cover it.
+{$MOA_MEDIA_HOST:media.myotherapp.in} {
+	import origin_tls
+	import common
+	@write not method GET HEAD OPTIONS
+	respond @write 405
+	reverse_proxy {$MOA_UPSTREAM_MEDIA:media:3900} {
+		import upstream
+	}
+}
+
 # Old names keep working for good: they are printed on posters and QR codes,
 # inside sent mails and shipped app builds. Each was a Vercel domain redirect.
 www.myotherapp.in, events.myotherapp.in {

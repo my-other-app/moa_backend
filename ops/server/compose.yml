@@ -243,6 +243,33 @@ services:
     cpu_shares: 256
     logging: *logging
 
+  # Uploaded media (posters, logos, tickets, certificates, store photos) in
+  # Garage, an S3-compatible store (media/garage.toml). The API reaches it as
+  # http://media:3900 (APP_S3_ENDPOINT_URL); browsers read signed links at
+  # https://media.myotherapp.in through Caddy (APP_S3_PUBLIC_URL), which lets
+  # through reads only. One copy, on this box's disk: the box's snapshots are
+  # its backup. One-time setup: media/init.sh.
+  media:
+    image: dxflrs/garage:v2.4.1
+    restart: unless-stopped
+    environment:
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?GARAGE_RPC_SECRET must be set in .env (openssl rand -hex 32)}
+      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN:?GARAGE_ADMIN_TOKEN must be set in .env (openssl rand -hex 32)}
+    volumes:
+      - ./media/garage.toml:/etc/garage.toml:ro
+      - /var/lib/myotherapp/media/meta:/var/lib/garage/meta
+      - /var/lib/myotherapp/media/data:/var/lib/garage/data
+    healthcheck:
+      test: ["CMD", "/garage", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    mem_limit: 256m
+    cpus: 1
+    cpu_shares: 256
+    logging: *logging
+
   backend:
     <<: *backend
     command: ["python", "main.py"]
