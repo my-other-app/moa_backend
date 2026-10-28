@@ -88,10 +88,11 @@ def not_readable(raw: bytes = b"") -> CustomHTTPException:
 def refused(fmt: str, works: Optional[Iterable[str]] = None) -> CustomHTTPException:
     """The 422 for a picture we can read but do not take here."""
     names = _say(works) if works is not None else WORKS
-    shown = {"MPO": "JPG", "JPEG": "JPG", "HEIF": "HEIC", "DIB": "BMP"}.get(fmt, fmt) or "That"
+    shown = {"MPO": "JPG", "JPEG": "JPG", "HEIF": "HEIC", "DIB": "BMP"}.get(fmt, fmt)
+    what = f"{shown} pictures" if shown else "That kind of picture"
     return CustomHTTPException(
         422,
-        message=f"{shown} pictures can't be used here. Upload a {names} picture.",
+        message=f"{what} can't be used here. Upload a {names} picture.",
         error_code="IMAGE_FORMAT",
     )
 
