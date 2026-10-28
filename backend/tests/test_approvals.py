@@ -202,7 +202,7 @@ async def test_the_list_pages_by_key_counts_and_searches(client, session, shop):
     await decline(client, shop, ids=[made[5]], note="Full up")
     page1 = (await listing(client, shop, limit=3)).json()
     assert [i["id"] for i in page1["items"]] == made[:3] and page1["next"]
-    assert page1["counts"] == {"pending": 6, "approved": 0, "declined": 1, "withdrawn": 0, "lapsed": 0, "closed": 0}
+    assert page1["counts"] == {"pending": 6, "approved": 0, "declined": 1, "withdrawn": 0, "lapsed": 0, "closed": 0, "total": 7}
     assert page1["places_left"] is None
     item = page1["items"][0]
     assert (item["full_name"], item["email"], item["status"], item["ticket_type"]["name"]) == ("Asker Number 10", "asker10@example.com", "pending", "General admission")

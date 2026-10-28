@@ -164,7 +164,7 @@ async def world(session, make_club, make_event, make_user, make_registration, mi
 # ─── Visibility and the event card ─────────────────────────────────────────
 
 
-async def test_events_lists_what_is_on_and_nothing_else(client, world):
+async def test_events_lists_what_is_on_and_nothing_else(client, session, world):
     e = world["e"]
     r = await client.get(f"{API}/events")
     assert r.status_code == 200, r.text
@@ -180,7 +180,21 @@ async def test_events_lists_what_is_on_and_nothing_else(client, world):
 
     cards = {x["id"]: x for x in body["items"]}
     far = cards[e["far"].id]
-    assert far["has_fee"] is True and far["fee"] == 200.0 and far["going"] == 2 and far["capacity"] == 2 and far["status"] == "full"
+    # A paid event's cap counts paid tickets (the ticket picker's places): its
+    # two sign-ups still to pay leave it open...
+    assert far["has_fee"] is True and far["fee"] == 200.0 and far["going"] == 2 and far["capacity"] == 2 and far["status"] == "upcoming"
+    assert (far["requires_approval"], far["high_demand"]) == (False, False)
+    # ...and paid, it is full.
+    from sqlalchemy import update
+
+    from app.api.events.models import EventRegistrationsLink as Reg
+
+    await session.execute(update(Reg).where(Reg.event_id == e["far"].id, Reg.is_deleted == False).values(is_paid=True))  # noqa: E712
+    await session.commit()
+    body = (await client.get(f"{API}/events")).json()
+    cards = {x["id"]: x for x in body["items"]}
+    far = cards[e["far"].id]
+    assert far["status"] == "full"
     assert far["category"] == {"id": world["music"].id, "name": "Music"}
     assert far["club"] == {"id": world["b"].id, "name": "Rhythm Collective", "slug": world["b"].slug, "logo": None}
     assert far["slug"] == e["far"].slug and far["url"] == f"https://myotherapp.in/events/{e['far'].slug}"

@@ -195,8 +195,10 @@ async def test_a_clubs_events_take_a_few_statements_however_many_it_has(client, 
         assert r.status_code == 200
         # The club, the count, the page, the counters; and for what is to come
         # the floor of what can be on (discover.upcoming), which production
-        # keeps for the minute and the suite, with the cache off, looks up.
-        assert len(statements) <= (4 if when == "past" else 5), [s for s, _ in statements]
+        # keeps for the minute and the suite, with the cache off, looks up,
+        # and the places left as the ticket picker counts them (its types and
+        # its waiting lists: two statements for the page, ticketing.places).
+        assert len(statements) <= (4 if when == "past" else 7), [s for s, _ in statements]
 
 
 # ─── Between two days ────────────────────────────────────────────────────

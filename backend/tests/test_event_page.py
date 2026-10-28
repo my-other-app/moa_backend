@@ -27,6 +27,8 @@ EVENT_KEYS = {
     "summary", "created_at", "updated_at",
     # The topics of its interests (Topics).
     "topics",
+    # The club's "High demand" label (docs/APPROVALS.md §7): a chip, never a number.
+    "high_demand",
     # Why it was called off, when it was (app/api/club_ops): null otherwise.
     "cancellation",
     # The club confirms each registration (app/api/approvals).
@@ -143,7 +145,9 @@ async def test_the_page_by_slug(client, session, world):
     assert ev["duration_hours"] == 2.5 and ev["timezone"] == "Asia/Kolkata"
     assert (ev["is_online"], ev["location_name"], ev["location_link"], ev["lat"], ev["lng"]) == (False, "Koramangala Hub", "https://maps.google.com/?q=12.93,77.62", 12.93, 77.62)
     assert (ev["has_fee"], ev["fee"], ev["has_prize"], ev["prize_amount"]) == (True, 150.0, True, 5000.0)
-    assert (ev["capacity"], ev["going"], ev["seats_left"]) == (3, 2, 1)
+    # Seats left as the ticket picker counts them: a paid event's cap counts
+    # paid tickets, and these two have not paid yet.
+    assert (ev["capacity"], ev["going"], ev["seats_left"]) == (3, 2, 3)
     assert datetime.fromisoformat(ev["reg_opens_at"]) == main.reg_startdate and datetime.fromisoformat(ev["reg_closes_at"]) == main.reg_enddate
     assert ev["status"] == "upcoming" and ev["registration_open"] is True
     assert ev["category"] == {"id": world["tech"].id, "name": "EP Tech"} and ev["interests"] == ["EP Robotics", "EP AI"]
@@ -228,6 +232,16 @@ async def test_registration_is_open_only_inside_the_window_and_below_capacity(cl
 
     late = await make_user(email="ep-late@example.com")
     await make_registration(event=e["main"], user=late)
+    await session.commit()
+    # A paid event's cap counts paid tickets, as the ticket picker does: three
+    # sign-ups still to pay leave its three places open.
+    ev = (await client.get(f"{API}/events/{e['main'].slug}")).json()["event"]
+    assert ev["status"] == "upcoming" and ev["registration_open"] is True and ev["going"] == 3 and ev["seats_left"] == 3
+    from sqlalchemy import update
+
+    from app.api.events.models import EventRegistrationsLink as Reg
+
+    await session.execute(update(Reg).where(Reg.event_id == e["main"].id, Reg.is_deleted == False).values(is_paid=True))  # noqa: E712
     await session.commit()
     ev = (await client.get(f"{API}/events/{e['main'].slug}")).json()["event"]
     assert ev["status"] == "full" and ev["registration_open"] is False and ev["going"] == 3 and ev["seats_left"] == 0
