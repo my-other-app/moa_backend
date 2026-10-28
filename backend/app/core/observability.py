@@ -215,7 +215,8 @@ def _own_secrets() -> tuple[str, ...]:
         settings.RESEND_API_KEY, settings.RESEND_WEBHOOK_SECRET, settings.WHATSAPP_ACCESS_TOKEN,
         settings.WHATSAPP_APP_SECRET, settings.CLOUDFLARE_API_TOKEN, settings.SITE_REVALIDATE_SECRET,
         settings.PAYMENT_KEYS_SECRET, settings.AI_KEYS_SECRET, settings.WHATSAPP_KEYS_SECRET, settings.SES_WEBHOOK_TOKEN,
-        settings.BACKUP_S3_ACCESS_KEY, settings.BACKUP_S3_SECRET_KEY, *settings.site_tokens,
+        settings.BACKUP_S3_ACCESS_KEY, settings.BACKUP_S3_SECRET_KEY, settings.SMTP_USERNAME, settings.SMTP_PASSWORD,
+        *settings.site_tokens,
     ]
     for url in (settings.DATABASE_URL, settings.DATABASE_URL_SYNC):
         try:

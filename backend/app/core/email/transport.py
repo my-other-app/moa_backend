@@ -1,4 +1,4 @@
-"""Where a mail goes once it is written: Resend or SES.
+"""Where a mail goes once it is written: Resend or SES (its API, or its SMTP interface).
 
 The two send functions in `email.py` describe a mail — who from, who to,
 the subject, the text and HTML, the files — and hand it here. This picks
@@ -13,7 +13,11 @@ is not asked, since that would be the guest's second copy: `MailDeferred`
 is raised, and the send is tried again later under the same idempotency
 key, which Resend honours for a day. After a quota refusal Resend is left
 alone until the next UTC day. `MAIL_PROVIDER=ses`, the default, sends
-through SES alone.
+through SES's API alone. `MAIL_PROVIDER=ses_smtp` sends through SES's SMTP
+interface (`ses_smtp.py`), for a server with SMTP credentials and no API
+key: the same raw MIME to the same recipients, and SES's message id back,
+so the SES hook matches its notices either way. Resend's fallback is SES's
+API while its keys are set, else SES's SMTP interface when that is set up.
 
 One SES client serves the process (`_ses`), built once under a lock: a
 client per mail meant a fresh TLS handshake to ap-south-1 each time -- some
@@ -126,6 +130,8 @@ def _pause_resend_until_tomorrow() -> None:
 
 def reset_for_tests() -> None:
     global _resend_paused_until, _ses_client, _ses_key, _http_client
+    from app.core.email import ses_smtp
+
     with _lock:
         _resend_paused_until = None
     with _clients_lock:
@@ -133,6 +139,7 @@ def reset_for_tests() -> None:
         if _http_client is not None:
             _http_client.close()
         _http_client = None
+    ses_smtp.reset_for_tests()
 
 
 def deliver(mail: Mail) -> dict:
@@ -165,7 +172,23 @@ def deliver(mail: Mail) -> dict:
         except httpx.HTTPError as e:
             # Sent, perhaps taken, and no answer.
             raise MailDeferred(f"Resend did not answer ({e.__class__.__name__}); it will be tried again") from e
+    if _ses_over_smtp():
+        # The same SES, the same ids and hook: only the door differs.
+        return {"MessageId": _send_ses_smtp(mail), "Provider": "ses"}
     return {"MessageId": _send_ses(mail), "Provider": "ses"}
+
+
+def _ses_over_smtp() -> bool:
+    """MAIL_PROVIDER=ses_smtp; or Resend's fallback on a server that has SES's
+    SMTP credentials and no API keys (with the keys, the API, as ever)."""
+    provider = (settings.MAIL_PROVIDER or "ses").lower()
+    if provider == "ses_smtp":
+        return True
+    if provider != "resend" or (settings.SES_ACCESS_KEY and settings.SES_SECRET_KEY):
+        return False
+    from app.core.email import ses_smtp
+
+    return ses_smtp.configured()
 
 
 def _without_suppressed_domains(mail: Mail) -> Optional[Mail]:
@@ -340,15 +363,21 @@ def to_mime(mail: Mail, from_header: str) -> MIMEMultipart:
     return msg
 
 
-def _send_ses(mail: Mail) -> str:
+def ses_envelope(mail: Mail) -> tuple[str, list[str], str]:
+    """What SES is handed for a mail, through its API or its SMTP interface:
+    the From header (the API's Source), every recipient (To, Cc and Bcc), and
+    the raw MIME."""
     # SES sends from the identity verified there; the requested sender, if any, still wins.
     address = mail.from_address or settings.SES_DEFAULT_SENDER
     from_header = formataddr((mail.from_name or settings.MAIL_FROM_NAME, parseaddr(address)[1] or address))
     msg = to_mime(mail, from_header)
+    return from_header, list(mail.to) + list(mail.cc) + list(mail.bcc), msg.as_string()
+
+
+def _send_ses(mail: Mail) -> str:
+    source, destinations, raw = ses_envelope(mail)
     try:
-        response = _ses().send_raw_email(
-            Source=from_header, Destinations=list(mail.to) + list(mail.cc) + list(mail.bcc), RawMessage={"Data": msg.as_string()},
-        )
+        response = _ses().send_raw_email(Source=source, Destinations=destinations, RawMessage={"Data": raw})
     except ClientError as e:
         code = (e.response.get("Error") or {}).get("Code") or ""
         status = (e.response.get("ResponseMetadata") or {}).get("HTTPStatusCode") or 0
@@ -361,6 +390,18 @@ def _send_ses(mail: Mail) -> str:
         raise MailDeferred(f"SES did not answer ({e.__class__.__name__}); it will be tried again") from e
     logger.info("Email sent through SES: %s", response.get("MessageId"))
     return response["MessageId"]
+
+
+def _send_ses_smtp(mail: Mail) -> Optional[str]:
+    """The same mail through SES's SMTP interface. Raises as `_send_ses` does:
+    MailThrottled, MailDeferred, or -- final for the mail -- ses_smtp's
+    SmtpRejected (SmtpConfigError for the server's settings)."""
+    from app.core.email import ses_smtp
+
+    source, destinations, raw = ses_envelope(mail)
+    message_id = ses_smtp.send(parseaddr(source)[1] or source, destinations, raw)
+    logger.info("Email sent through SES (SMTP): %s", message_id)
+    return message_id
 
 
 def as_bytes(content: Union[bytes, io.BytesIO]) -> bytes:

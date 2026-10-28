@@ -126,6 +126,44 @@ def test_the_mail_providers_own_settings():
     assert "MAIL_PROVIDER" in fatal(make(MAIL_PROVIDER="sendgrid"))
 
 
+#: SES through its SMTP interface (made-up credentials).
+SMTP = dict(
+    MAIL_PROVIDER="ses_smtp", SMTP_HOST="email-smtp.ap-south-1.amazonaws.com", SMTP_PORT=587,
+    SMTP_USERNAME="AKIA4Q7J2H8WN3PLM5RT", SMTP_PASSWORD="BHk2Lq9Zp4Rt8Wm3Nb6Vc1Xs5Df0Gj7Ka2Ye9Ui3Op",
+)
+
+
+def test_ses_over_smtp_needs_its_credentials_and_no_api_key():
+    assert cc.MAIL_REQUIRED["ses_smtp"] == ("SMTP_HOST", "SMTP_USERNAME", "SMTP_PASSWORD", "SES_DEFAULT_SENDER")
+    # The API keys may be left out of the .env altogether.
+    assert AppConfig.model_fields["SES_ACCESS_KEY"].default == "" and AppConfig.model_fields["SES_SECRET_KEY"].default == ""
+    assert fatal(bypass(**SMTP, SES_ACCESS_KEY="", SES_SECRET_KEY="")) == {}
+    for name in ("SMTP_HOST", "SMTP_USERNAME", "SMTP_PASSWORD", "SES_DEFAULT_SENDER"):
+        assert name in fatal(bypass(**{**SMTP, "SES_ACCESS_KEY": "", "SES_SECRET_KEY": "", name: ""})), name
+    # ses (the API) still needs its keys, whatever SMTP holds.
+    assert {"SES_ACCESS_KEY", "SES_SECRET_KEY"} <= set(fatal(bypass(**{**SMTP, "MAIL_PROVIDER": "ses"}, SES_ACCESS_KEY="", SES_SECRET_KEY="")))
+
+
+@pytest.mark.parametrize("host", ["smtp://email-smtp.ap-south-1.amazonaws.com", "email-smtp.ap-south-1.amazonaws.com:587", "localhost"])
+def test_the_smtp_host_is_a_bare_host_name(host):
+    assert "SMTP_HOST" in fatal(make(**{**SMTP, "SMTP_HOST": host}))
+
+
+@pytest.mark.parametrize("port, bad", [(587, False), (2587, False), (465, True), (2465, True), (0, True)])
+def test_the_smtp_port_speaks_starttls(port, bad):
+    assert ("SMTP_PORT" in fatal(make(**{**SMTP, "SMTP_PORT": port}))) is bad
+
+
+def test_a_placeholder_smtp_password_is_refused():
+    assert "SMTP_PASSWORD" in fatal(make(**{**SMTP, "SMTP_PASSWORD": "PASTE_PASSWORD_HERE"}))
+
+
+def test_resend_falls_back_on_smtp_without_a_warning():
+    resend = dict(MAIL_PROVIDER="resend", RESEND_API_KEY="re_9Kd2Lm7Qp4Zx8Wv3Nb6", RESEND_WEBHOOK_SECRET="whsec_Lp8Kq3Zm9")
+    with_smtp = bypass(**{**SMTP, **resend}, SES_ACCESS_KEY="", SES_SECRET_KEY="")
+    assert fatal(with_smtp) == {} and "SES_ACCESS_KEY" not in warnings(with_smtp)
+
+
 @pytest.mark.parametrize(
     "name, value",
     [

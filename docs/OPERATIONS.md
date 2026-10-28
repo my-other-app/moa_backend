@@ -8,7 +8,8 @@ for People Like You, place visitors by address without a lookup service,
 fix the demo's venue pins, turn on WhatsApp, keep production's settings,
 health checks and scheduled backups honest (section 19), read the live
 room's pushes and the host's 409s (section 22), open clubs' mailboxes
-(section 23), and keep media on a store of our own (section 26). Every command is meant to be copied.
+(section 23), keep media on a store of our own (section 26), and send mail
+through SES's SMTP interface with SMTP credentials only (section 27). Every command is meant to be copied.
 Commands under **Read-only** change nothing; anything that changes something
 says so.
 
@@ -469,6 +470,7 @@ the hash of what you set.
 | `APP_SITE_REVALIDATE_SECRET` | `openssl rand -hex 32` | the same value on the site (Vercel) and here |
 | `APP_S3_ACCESS_KEY` / `_SECRET_KEY`, `APP_SES_*`, `APP_BACKUP_S3_*` | AWS IAM -> the user -> security credentials | create the second key, switch, recreate, then deactivate and delete the first |
 | `APP_RESEND_API_KEY`, `APP_RESEND_WEBHOOK_SECRET` | Resend dashboard | |
+| `APP_SMTP_USERNAME` / `APP_SMTP_PASSWORD` | SES console -> SMTP settings -> Create SMTP credentials (a new IAM user) | section 27: set both, recreate, send a test mail, then delete the old IAM user |
 | `APP_CLOUDFLARE_API_TOKEN` | Cloudflare -> API tokens (roll) | |
 | `APP_WHATSAPP_*` | Meta Business settings -> System users (the token); the app's dashboard -> App settings -> Basic (the app secret) | section 18. A new verify token (`openssl rand -hex 24`) must be set in the webhook too, at once |
 | Firebase service account | Google console | |
@@ -1809,11 +1811,11 @@ What is checked (fatal):
 
 | Rule | Settings |
 |---|---|
-| Empty | `APP_SECRET_KEY`, `APP_DATABASE_URL`, `APP_DATABASE_URL_SYNC`, `APP_S3_BUCKET`, `APP_S3_ACCESS_KEY`, `APP_S3_SECRET_KEY`, `APP_RAZORPAY_KEY_ID`, `APP_RAZORPAY_KEY_SECRET`, `APP_RAZORPAY_WEBHOOK_SECRET`; with `APP_MAIL_PROVIDER=ses` (the default) `APP_SES_ACCESS_KEY`, `APP_SES_SECRET_KEY`, `APP_SES_DEFAULT_SENDER`; with `resend`, `APP_RESEND_API_KEY` and `APP_MAIL_FROM_ADDRESS` |
+| Empty | `APP_SECRET_KEY`, `APP_DATABASE_URL`, `APP_DATABASE_URL_SYNC`, `APP_S3_BUCKET`, `APP_S3_ACCESS_KEY`, `APP_S3_SECRET_KEY`, `APP_RAZORPAY_KEY_ID`, `APP_RAZORPAY_KEY_SECRET`, `APP_RAZORPAY_WEBHOOK_SECRET`; with `APP_MAIL_PROVIDER=ses` (the default) `APP_SES_ACCESS_KEY`, `APP_SES_SECRET_KEY`, `APP_SES_DEFAULT_SENDER`; with `ses_smtp`, `APP_SMTP_HOST`, `APP_SMTP_USERNAME`, `APP_SMTP_PASSWORD`, `APP_SES_DEFAULT_SENDER`; with `resend`, `APP_RESEND_API_KEY` and `APP_MAIL_FROM_ADDRESS` |
 | A placeholder, in any setting | `PASTE_KEY_HERE` (any "paste ... here"), `changeme`, `replace-me`, a run of `xxx`, `your-...`/`your_...`, `<...>`, `${...}`/`{{...}}`, an `example.com` address; and in a credential, id, address or the database password, whole values like `password`, `secret`, `test`, `none`, `postgres` |
 | A weak `APP_SECRET_KEY` | under 32 characters, fewer than 10 distinct characters, or a value from a sample or a test suite |
 | Half set | `APP_RAZORPAY_KEY_ID`/`_SECRET`, `APP_WHATSAPP_ACCESS_TOKEN`/`APP_WHATSAPP_PHONE_NUMBER_ID`, `APP_CLOUDFLARE_API_TOKEN`/`APP_CLOUDFLARE_ZONE_ID`, `APP_BACKUP_S3_ACCESS_KEY`/`_SECRET_KEY`, `APP_AI_FALLBACK_PROVIDER`/`APP_AI_FALLBACK_API_KEY` (both or neither); `APP_SEARCH_URL` without `APP_SEARCH_KEY`; `APP_S3_PUBLIC_URL` without `APP_S3_ENDPOINT_URL` |
-| The wrong shape | `APP_MAIL_PROVIDER` not `ses` or `resend`; `APP_BACKUP_S3_SSE` not `AES256` or `aws:kms`; `APP_PAYMENT_KEYS_SECRET` or `APP_AI_KEYS_SECRET` not Fernet keys; `APP_SENTRY_DSN` not a DSN; `APP_FIREBASE_SERVICE_ACCOUNT_BASE64` not a base64 service account; `APP_DEBUG` on with `APP_ENV=production` |
+| The wrong shape | `APP_MAIL_PROVIDER` not `ses`, `ses_smtp` or `resend`; with `ses_smtp`, `APP_SMTP_HOST` not a bare host name or `APP_SMTP_PORT` 465/2465 (STARTTLS needs 587 or 2587); `APP_BACKUP_S3_SSE` not `AES256` or `aws:kms`; `APP_PAYMENT_KEYS_SECRET` or `APP_AI_KEYS_SECRET` not Fernet keys; `APP_SENTRY_DSN` not a DSN; `APP_FIREBASE_SERVICE_ACCOUNT_BASE64` not a base64 service account; `APP_DEBUG` on with `APP_ENV=production` |
 | The media store (section 26) | `APP_S3_ENDPOINT_URL` or `APP_S3_PUBLIC_URL` not an http(s) address; with an endpoint set, `APP_MEDIA_CDN_URL` on the store's own host, or `APP_BACKUP_S3_BUCKET` set without `APP_BACKUP_S3_ACCESS_KEY` |
 
 Logged as warnings, never fatal: a `rzp_test_` key, no Sentry DSN, no
@@ -3190,7 +3192,7 @@ in the Activity log (`platform_setting.update` / `.reset`).
 | --- | --- | --- |
 | AI assist | `APP_AI_ENABLED` | no |
 | AI assistants (MCP) | `APP_MCP_ENABLED` | no |
-| Mail provider (ses / resend) | `APP_MAIL_PROVIDER` | no (Resend still needs `APP_RESEND_API_KEY`) |
+| Mail provider (ses / ses_smtp / resend) | `APP_MAIL_PROVIDER` | no (`ses_smtp` needs `APP_SMTP_*`, Resend `APP_RESEND_API_KEY`) |
 | Push by topic | `APP_PUSH_TOPICS` | no |
 | Also push device by device | `APP_PUSH_TOPICS_LEGACY` | no |
 | Finance reads the ledger | `APP_LEDGER_READS` | no |
@@ -3416,3 +3418,92 @@ To go back to AWS: empty `APP_S3_ENDPOINT_URL`, `APP_S3_PUBLIC_URL` and
 `APP_S3_REGION`, put the AWS bucket and keys back, and recreate the backend.
 Keys are the same on both stores, so copying the objects across (by key) is
 all a move needs.
+
+---
+
+## 27. Mail through SES's SMTP interface (`APP_MAIL_PROVIDER=ses_smtp`)
+
+For a server that has SES **SMTP credentials** (an IAM user's SMTP username
+and password, made in the SES console) and no API access key. An SMTP
+password can't be turned back into a secret key, so the API path (`ses`)
+can't use it; `ses_smtp` speaks SMTP to SES instead. Code:
+`backend/app/core/email/ses_smtp.py`.
+
+It is the same SES: the same raw message (headers, attachments, inline
+pictures), the same sender (`APP_SES_DEFAULT_SENDER`), every To, Cc and Bcc,
+and the same message id back. SES gives that id in its `250 Ok <id>` reply,
+and it is stored where the API's `MessageId` was, so the SES hook
+(`/hooks/ses`) matches delivery, bounce and complaint notices exactly as
+before. Pacing (`APP_MAIL_SEND_RATE`, `APP_MAIL_CONCURRENCY`) and retries
+(`APP_MAIL_MAX_ATTEMPTS`) are unchanged.
+
+### Settings
+
+```bash
+APP_MAIL_PROVIDER=ses_smtp
+APP_SMTP_HOST=email-smtp.ap-south-1.amazonaws.com
+APP_SMTP_PORT=587
+APP_SMTP_USERNAME=<the SMTP username SES showed>
+APP_SMTP_PASSWORD=<the SMTP password SES showed>
+APP_SES_DEFAULT_SENDER=<a verified address, e.g. info@myotherapp.in>
+# Optional: seconds to connect and for each reply (default 20).
+# APP_SMTP_TIMEOUT=20
+```
+
+`APP_SES_ACCESS_KEY` and `APP_SES_SECRET_KEY` may be left out (or empty).
+Keep `APP_SES_REGION` the region in the host name (ap-south-1). The host is
+the region where the sender is verified; port 587 (or 2587) with STARTTLS.
+465/2465 (TLS from the first byte) are refused by the start-up check.
+
+Then `sudo /srv/moa/deploy.sh recreate backend` (it recreates the worker too).
+The provider can also be switched from the admin portal (Settings -> Mail
+provider) once the `APP_SMTP_*` lines are in the `.env`.
+
+### How it behaves
+
+- **Encryption first.** STARTTLS, with SES's certificate and host name
+  checked, before the credentials are sent. A server that offers no STARTTLS,
+  or a certificate that doesn't verify, is refused and nothing is sent.
+- **Connections.** One per sending thread, reused for the next mail (SES
+  takes many per connection). One idle 8 seconds, older than 5 minutes or past
+  100 mails is replaced; one SES dropped while idle is replaced and the mail
+  tried once more, since nothing of it had been taken.
+- **SES's answers**, sorted as the API's are:
+
+| SES says | What happens |
+|---|---|
+| `250 Ok <id>` | Sent; the id is kept on the send. |
+| `454 Throttling failure` (rate or the day's quota) | Slowed down and tried again (as the API's `Throttling`). |
+| Any other 4xx (421, 451, 454 temporary failure), a timeout, no connection | Tried again later with the usual backoff; after `APP_MAIL_MAX_ATTEMPTS` the send is given up on and the admins are told. |
+| 5xx about the mail: `554 Message rejected` (an unverified address, the sandbox), `552` too long, `553` a bad address | Failed for good, with SES's words on the send (as the API's `MessageRejected`). |
+| `535`/`530` (wrong or missing credentials), `554 Access denied` (the IAM user may not `ses:SendRawEmail`), no STARTTLS, a bad certificate | Failed for good, logged at ERROR (Sentry) at most once a minute, and for a minute no new connection tries the same credentials. Fix the `.env` and recreate. |
+
+### What SMTP does not do that the API did
+
+- Nothing the platform used is lost: the API call sent no configuration set
+  and no message tags, so there is nothing to carry over in the
+  `X-SES-CONFIGURATION-SET` / `X-SES-MESSAGE-TAGS` headers. Bounce,
+  complaint and delivery notices come from the identity's SNS notifications,
+  which apply to SMTP sends too.
+- With SMTP credentials only, nothing else that needs an AWS API key works:
+  the **club mailbox** (section 23) still reads its inbound bucket with
+  `APP_MAILBOX_AWS_*` or the SES API keys. It is off in production.
+- `APP_MAIL_PROVIDER=resend` falls back to SES's API when its keys are set,
+  and to SES's SMTP interface when only `APP_SMTP_*` is.
+
+### Checking it
+
+```bash
+# Read-only: the start-up checks (FATAL on a missing SMTP setting, a host with
+# a scheme or port, or port 465).
+sudo /srv/moa/dc exec -T backend python -m app.core.config_checks
+
+# Sends one mail: to an address you read, through the configured provider.
+sudo /srv/moa/dc exec -T backend python -c "
+from app.core.email import transport
+print(transport.deliver(transport.Mail(to=['you@example.org'], subject='SES SMTP test', text='It works.')))
+"
+```
+
+The last command prints `{'MessageId': '0109019...-000000', 'Provider': 'ses'}`.
+The admin portal's Settings page shows `APP_SMTP_*` as set and "in use".

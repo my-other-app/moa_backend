@@ -7,7 +7,7 @@ settings once and names every setting that is wrong -- never its value --
 when:
 
 - a secret the platform cannot run without is empty (REQUIRED, and the mail
-  provider's own keys);
+  provider's own keys: SES's API keys, SES's SMTP credentials or Resend's);
 - any setting holds an obvious placeholder: PASTE_KEY_HERE, changeme,
   replace-me, xxx, your-..., <...>, ${...}, example.com, "password"...;
 - APP_SECRET_KEY is weak: under 32 characters, few distinct characters, or
@@ -76,11 +76,16 @@ REQUIRED = (
     "RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET", "RAZORPAY_WEBHOOK_SECRET",
 )
 
-#: Each mail provider's own settings (MAIL_PROVIDER picks one).
+#: Each mail provider's own settings (MAIL_PROVIDER picks one). ses_smtp is
+#: SES through its SMTP interface: SMTP credentials, no API key.
 MAIL_REQUIRED = {
     "ses": ("SES_ACCESS_KEY", "SES_SECRET_KEY", "SES_DEFAULT_SENDER"),
+    "ses_smtp": ("SMTP_HOST", "SMTP_USERNAME", "SMTP_PASSWORD", "SES_DEFAULT_SENDER"),
     "resend": ("RESEND_API_KEY", "MAIL_FROM_ADDRESS"),
 }
+
+#: SES's TLS-wrapper ports. The SMTP sender speaks STARTTLS (587 or 2587).
+SMTP_TLS_WRAPPER_PORTS = frozenset({465, 2465})
 
 #: Set together or not at all: one without the other is an integration that
 #: looks on and fails on its first call.
@@ -229,8 +234,28 @@ def _required(settings) -> list[Problem]:
         ]
         if provider == "resend":
             missing = [name for name in MAIL_REQUIRED["ses"][:2] if not _text(_get(settings, name))]
-            if missing:
+            smtp_ready = all(_text(_get(settings, name)) for name in MAIL_REQUIRED["ses_smtp"])
+            if missing and not smtp_ready:
                 out.append(Problem(missing[0], "is empty: a mail Resend refuses has no SES to fall back to", fatal=False))
+        if provider == "ses_smtp":
+            out += _smtp(settings)
+    return out
+
+
+def _smtp(settings) -> list[Problem]:
+    """SES's SMTP interface: a bare host name and a STARTTLS port."""
+    out = []
+    host = _text(_get(settings, "SMTP_HOST"))
+    if host and (re.search(r"[\s/:@]", host) or "." not in host):
+        out.append(Problem("SMTP_HOST", "is not a host name like email-smtp.ap-south-1.amazonaws.com (no scheme, port or path)"))
+    try:
+        port = int(_get(settings, "SMTP_PORT") or 0)
+    except (TypeError, ValueError):
+        port = 0
+    if port in SMTP_TLS_WRAPPER_PORTS:
+        out.append(Problem("SMTP_PORT", f"is {port}, SES's TLS-wrapper port; mail is sent with STARTTLS: use 587 (or 2587)"))
+    elif not 0 < port < 65536:
+        out.append(Problem("SMTP_PORT", "is not a port; use 587 (or 2587)"))
     return out
 
 
