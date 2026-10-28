@@ -1,5 +1,4 @@
 """Merchandise: items and their stock, what a guest is owed, the handover, the log."""
-import io
 import os
 from typing import Optional
 from uuid import UUID, uuid4
@@ -20,7 +19,7 @@ from app.api.merch.models import MerchCollections, MerchItems, MerchVariants
 from app.api.users.models import Users
 from app.config import settings
 from app.core.storage import formats, media, objects
-from app.core.storage.images import checked_image
+from app.core.storage.images import checked_image, encoded, kept_bytes
 from app.response import CustomHTTPException
 
 # ─── Items ────────────────────────────────────────────────────────────────
@@ -204,18 +203,13 @@ def product_photo(folder: str, raw: bytes) -> dict:
     except Exception:
         raise formats.not_readable(raw)
     if image.width > 1200 or rotate or convert:
+        # Shrunk, turned or converted: new bytes, which carry no metadata.
         if image.width > 1200:
             image = image.resize((1200, round(image.height * 1200 / image.width)), Image.Resampling.LANCZOS)
-        out = io.BytesIO()
-        if _EXT[fmt] == "jpg":
-            image.convert("RGB").save(out, "JPEG", quality=88)
-            fmt = "JPEG"
-        elif fmt == "WEBP":
-            image.save(out, "WEBP", quality=88)
-        else:
-            image.save(out, "PNG")
-            fmt = "PNG"
-        raw = out.getvalue()
+        raw, fmt = encoded(image, "JPEG" if _EXT[fmt] == "jpg" else fmt)
+    else:
+        # As it came, without its metadata (a phone's GPS position, XMP...).
+        raw = kept_bytes(raw, image)
     ext = _EXT[fmt]
     # A versioned name, written once: the media CDN may keep it for a year.
     key = folder + f"/{media.versioned_name(ext)}"

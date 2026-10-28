@@ -2,7 +2,9 @@
 
 A JPEG, PNG, WebP or GIF is kept in its format; a HEIC, AVIF, BMP or TIFF
 (formats.CONVERTED) is stored as a JPEG, or a PNG when some of it is
-see-through.
+see-through. Kept or made, no stored picture carries its metadata (EXIF with
+a phone's GPS position, XMP, IPTC, comments): one kept as it came has it
+taken out losslessly, colour profile kept (storage.metadata, `kept_bytes`).
 """
 import io
 from uuid import uuid4
@@ -10,6 +12,7 @@ from uuid import uuid4
 from PIL import Image, ImageOps
 
 from app.core.storage import formats, objects
+from app.core.storage.metadata import NO_METADATA, keep_colour, without_metadata
 from app.response import CustomHTTPException
 
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
@@ -38,6 +41,32 @@ def checked_image(raw: bytes, *, max_bytes: int = MAX_IMAGE_BYTES) -> Image.Imag
     return image
 
 
+def encoded(image: Image.Image, fmt: str, *, quality: int = 88) -> tuple[bytes, str]:
+    """`image` encoded anew as a JPEG (for "JPEG"), a WebP (for "WEBP") or
+    else a PNG, and the format it is: no EXIF, XMP or text, the colour profile
+    kept."""
+    out = io.BytesIO()
+    icc = keep_colour(image)
+    if fmt == "JPEG":
+        image.convert("RGB").save(out, "JPEG", quality=quality, **icc, **NO_METADATA)
+    elif fmt == "WEBP":
+        image.save(out, "WEBP", quality=quality, **icc, **NO_METADATA)
+    else:
+        image.save(out, "PNG", **NO_METADATA)
+        fmt = "PNG"
+    return out.getvalue(), fmt
+
+
+def kept_bytes(raw: bytes, image: Image.Image) -> bytes:
+    """An upright upload's own bytes, without their metadata (storage.metadata);
+    encoded anew, which carries none, when its structure does not parse."""
+    fmt = (image.format or "").upper()
+    try:
+        return without_metadata(raw, fmt)
+    except ValueError:
+        return encoded(image, "JPEG" if fmt in ("JPEG", "MPO") else fmt)[0]
+
+
 def store_image(raw: bytes, key_prefix: str, *, max_width: int, name: str = "image") -> dict:
     """Validate, shrink to `max_width`, store under the prefix; answer with
     the key a design saves and a URL to show it now.
@@ -60,19 +89,14 @@ def store_image(raw: bytes, key_prefix: str, *, max_width: int, name: str = "ima
     except Exception:
         raise formats.not_readable(raw)
     if upright.width > max_width or rotate or convert:
-        # Shrunk, turned the way the camera held it, or converted: new bytes.
+        # Shrunk, turned the way the camera held it, or converted: new bytes,
+        # which carry no metadata.
         if upright.width > max_width:
             upright = upright.resize((max_width, round(upright.height * max_width / upright.width)), Image.Resampling.LANCZOS)
-        out = io.BytesIO()
-        if _EXT[fmt] == "jpg":
-            upright.convert("RGB").save(out, "JPEG", quality=88)
-            fmt = "JPEG"
-        elif fmt == "WEBP":
-            upright.save(out, "WEBP", quality=88)
-        else:
-            upright.save(out, "PNG")
-            fmt = "PNG"
-        raw = out.getvalue()
+        raw, fmt = encoded(upright, "JPEG" if _EXT[fmt] == "jpg" else fmt)
+    else:
+        # As it came, without its metadata.
+        raw = kept_bytes(raw, image)
     ext = _EXT[fmt]
     key = f"{key_prefix}{name}-{uuid4().hex}.{ext}"
     objects.put_bytes(key, raw, "image/jpeg" if ext == "jpg" else f"image/{ext}")
