@@ -35,7 +35,7 @@ from urllib.parse import urlsplit
 from fastapi.responses import HTMLResponse
 from limits import parse_many
 from sqlalchemy import select
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 
 from app.api.audit import service as audit
 from app.api.deliveries import service as deliveries
@@ -233,7 +233,7 @@ async def resend(session, request, *, kind: str, code: str, email: str) -> None:
     GENERIC whatever happened. The audit log has every ask."""
     reg = await session.scalar(
         select(EventRegistrationsLink)
-        .options(joinedload(EventRegistrationsLink.event).joinedload(Events.club))
+        .options(joinedload(EventRegistrationsLink.event).joinedload(Events.club), joinedload(EventRegistrationsLink.event).selectinload(Events.cohost_clubs))
         .where(EventRegistrationsLink.ticket_id == code, EventRegistrationsLink.is_deleted == False)  # noqa: E712
     )
     event = reg.event if reg is not None else None

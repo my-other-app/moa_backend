@@ -281,7 +281,8 @@ async def list_events(call: Call, args: dict) -> dict:
     from app.api.clubs import events_list
 
     status, limit, offset = args.get("status", "upcoming"), args.get("limit", 20), args.get("offset", 0)
-    rows, total = await events_list.list_events(call.session, call.club.id, scope=status, search=args.get("search"), limit=limit, offset=offset)
+    # The club's own events: an assistant does not act on events it co-hosts (app/api/cohosts).
+    rows, total = await events_list.list_events(call.session, call.club.id, scope=status, search=args.get("search"), limit=limit, offset=offset, role="hosted")
     events = [
         {
             "id": r["id"], "name": r["name"], "status": r["status"], "starts_at": _iso(r.get("event_datetime")),

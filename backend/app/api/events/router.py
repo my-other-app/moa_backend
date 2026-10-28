@@ -101,14 +101,20 @@ def _role_of(registration) -> Optional[RegistrationRole]:
     return role_of(registration)
 
 
-def _assert_can_access_ticket(user, registration) -> None:
-    """Allow the ticket's own user, the event's owning club, or an admin."""
+async def _assert_can_access_ticket(session, user, registration) -> None:
+    """Allow the ticket's own user, the event's owning club, a club
+    co-hosting it (app/api/cohosts), or an admin."""
     if user.user_type == UserTypes.admin:
         return
     if registration.user_id == user.id:
         return
     if user.club and registration.event and registration.event.club_id == user.club.id:
         return
+    if user.club and registration.event:
+        from app.api.cohosts import access as cohosts
+
+        if await cohosts.is_cohost(session, registration.event.id, user.club.id):
+            return
     raise CustomHTTPException(403, "You do not have permission to access this ticket.")
 
 
@@ -243,6 +249,13 @@ async def get_event(
         session, event_id, user_id=user.id if user else None
     )
     data = jsonable_encoder(result)
+    # The signed-in club's place on it: "host", "cohost" or null (app/api/cohosts).
+    from types import SimpleNamespace
+
+    from app.api.cohosts import access as cohosts
+
+    shell = SimpleNamespace(id=data.get("id"), club_id=(data.get("club") or {}).get("id"))
+    data["viewer_role"] = await cohosts.viewer_role(session, shell, user) if shell.club_id is not None else None
     if data.get("status") == "cancelled":
         from app.api.club_ops.cancel import public_cancellation
 
@@ -258,6 +271,7 @@ async def list_all_events_admin(
     user: AdminAuth,
     search: Optional[str] = Query(None, description="Search by event name or category"),
     club_id: Optional[int] = Query(None, description="Filter by club"),
+    cohost_club_id: Optional[int] = Query(None, description="The events this club co-hosts (app/api/cohosts)"),
     org_id: Optional[int] = Query(
         None, description="Filter by the organisation the hosting club belongs to"
     ),
@@ -305,6 +319,10 @@ async def list_all_events_admin(
     filters = []
     if club_id is not None:
         filters.append(Events.club_id == club_id)
+    if cohost_club_id is not None:
+        from app.api.cohosts import access as cohosts
+
+        filters.append(Events.id.in_(cohosts.cohosted_event_ids(cohost_club_id)))
     if org_id is not None:
         # Events belong to clubs, and clubs to organisations; an organisation's
         # page needs its events without first fetching all of its clubs.
@@ -379,7 +397,13 @@ async def list_all_events_admin(
         from app.api.approvals import service as approvals
 
         asked = await approvals.totals(session, [e.id for e in events])
+        # Each event's co-hosts (app/api/cohosts).
+        from app.api.cohosts import access as cohosts
+        from app.api.cohosts.schemas import CohostRef
+
+        shared = await cohosts.refs(session, [e.id for e in events])
         for item in rows.items:
+            item.cohosts = [CohostRef(**c) for c in shared.get(item.id, [])]
             registered, present = by_event.get(item.id, (0, 0))
             item.registration_count = registered
             item.attended_count = present
@@ -463,7 +487,10 @@ async def list_events(
             enhanced_events.append(event_dict)
     else:
         enhanced_events = [jsonable_encoder(e) for e in events]
-    
+    # Each event's co-hosts (app/api/cohosts).
+    from app.api.cohosts import access as cohosts
+
+    await cohosts.attach(session, enhanced_events)
     return paginated_response(enhanced_events, request, schema=EventListResponse)
 
 
@@ -510,7 +537,10 @@ async def for_you(
         if debug_scores:
             item["_score"] = round(score, 3)
         payload.append(item)
+    # Each event's co-hosts (app/api/cohosts).
+    from app.api.cohosts import access as cohosts
 
+    await cohosts.attach(session, payload)
     return paginated_response(payload, request, schema=EventListResponse)
 
 
@@ -583,7 +613,7 @@ async def get_ticket(
     user: DependsAuth = None,  # Require authentication
 ) -> TicketDetailsResponse:
     result = await service.get_ticket_details(session, ticket_id=ticket_id)
-    _assert_can_access_ticket(user, result)
+    await _assert_can_access_ticket(session, user, result)
     data = jsonable_encoder(result)
     # The event's state, as its page says it, so the ticket can say
     # "Cancelled" without asking the event page as well. The event is loaded
@@ -620,7 +650,7 @@ async def get_ticket_image(
     "-png"): a 304 without drawing when If-None-Match names it.
     """
     registration = await service.get_ticket_details(session, ticket_id=ticket_id)
-    _assert_can_access_ticket(user, registration)
+    await _assert_can_access_ticket(session, user, registration)
 
     style = await ticket_style(session, registration)
     job = ticket_job(registration, style)
@@ -719,7 +749,7 @@ async def get_ticket_pdf(
     drawing it or reading the bucket. The access check comes first.
     """
     registration = await service.get_ticket_details(session, ticket_id=ticket_id)
-    _assert_can_access_ticket(user, registration)
+    await _assert_can_access_ticket(session, user, registration)
 
     job = ticket_job(registration, await ticket_style(session, registration))
     etag = _document_etag(job)
@@ -744,7 +774,7 @@ async def get_wallet_pass(
     Requires authentication. The pass can be added to Apple Wallet on iOS devices.
     """
     registration = await service.get_ticket_details(session, ticket_id=ticket_id)
-    _assert_can_access_ticket(user, registration)
+    await _assert_can_access_ticket(session, user, registration)
 
     pkpass_bytes = await wallet_service.generate_wallet_pass(session, ticket_id)
     

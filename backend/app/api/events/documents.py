@@ -66,6 +66,8 @@ def document_values(registration, event=None) -> dict:
         "event_end_time": _time(end),
         "venue": event.location_name or "",
         "club_name": (club.name if club else "") or "",
+        # The club and its co-hosts ("A with B"; app/api/cohosts).
+        "hosted_by": hosted_by(event),
         # Registrations carry no team of their own; a custom field named
         # "team_name" on the event is where one lives when it exists.
         "team_name": str(details.get("team_name") or details.get("team") or ""),
@@ -98,6 +100,7 @@ def sample_values(event, kind: str) -> dict:
         "event_end_time": _time(end),
         "venue": event.location_name or "",
         "club_name": (club.name if club else "") or "",
+        "hosted_by": hosted_by(event),
         "team_name": "Team Nova",
         "certificate_id": "CERT-7K3QF-X9PWM",
         "placing": "First" if kind == "certificate" else "",
@@ -212,15 +215,35 @@ def layout_of(style) -> TicketLayoutFields:
     return TicketLayoutFields.model_validate(style["layout"])
 
 
+def join_names(names: list) -> str:
+    """"A", "A and B", "A, B and C"."""
+    names = [n for n in names if n]
+    if len(names) <= 1:
+        return names[0] if names else ""
+    return ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def hosted_by(event) -> str:
+    """Who hosts it, as a document's "hosted by" line says: the club, and the
+    clubs co-hosting it ("Design Society with Robotics Club"; app/api/cohosts)
+    when its loader read them (Events.cohost_clubs). The branding -- the
+    logo, the club's name as `org_name` -- stays the host's."""
+    club = getattr(event, "club", None)
+    host = (club.name if club else "") or ""
+    cohosts = [c.name for c in event.cohost_clubs if not c.is_deleted] if _loaded(event, "cohost_clubs") else []
+    if not cohosts:
+        return host
+    return f"{host} with {join_names(cohosts)}" if host else join_names(cohosts)
+
+
 def token_event(event) -> TokenEvent:
     start = event.event_datetime
     end = start + timedelta(hours=event.duration) if event.duration else start
-    club = getattr(event, "club", None)
     return TokenEvent(
         name=event.name or "",
         code=f"E{event.id}",
         venue=event.location_name,
-        organiser=club.name if club else None,
+        organiser=hosted_by(event) or None,
         starts_at=start,
         ends_at=end,
         timezone=EVENT_TIMEZONE,

@@ -504,6 +504,9 @@ class ClubEventsFigures(BaseModel):
     capacity: Optional[int] = None
     collected: float
     outstanding: float
+    #: Of the upcoming, how many the club co-hosts (app/api/cohosts); their
+    #: money is the host's, so not in collected or outstanding.
+    cohosted_upcoming: int = 0
     attention: dict
     past: int
     drafts: int

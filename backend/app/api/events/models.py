@@ -197,6 +197,18 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     files = relationship("EventFiles", back_populates="event")
     ratings = relationship("EventRatingsLink", back_populates="event")
     speakers = relationship("EventSpeakers", back_populates="event", order_by="EventSpeakers.display_order")
+    #: The clubs co-hosting it (accepted), in the order they accepted
+    #: (app/api/cohosts). Only for the loaders that ask for it -- the
+    #: documents' "hosted by" line (events.documents.hosted_by); never lazy.
+    cohost_clubs = relationship(
+        "Clubs",
+        secondary="event_cohosts",
+        primaryjoin="and_(Events.id == EventCohosts.event_id, EventCohosts.status == 'accepted')",
+        secondaryjoin="Clubs.id == EventCohosts.club_id",
+        order_by="EventCohosts.responded_at",
+        viewonly=True,
+        lazy="raise_on_sql",
+    )
 
     @property
     def topics(self) -> list[dict]:

@@ -74,10 +74,27 @@ def _scoped(query, scope: str, now):
     return query
 
 
-async def list_events(session, club_id: int, *, scope: str = "all", sort: Optional[str] = None, search: Optional[str] = None, limit: int = 20, offset: int = 0, is_ended: Optional[bool] = None) -> tuple[list, int]:
+ROLES = ("all", "hosted", "cohosted")
+
+
+def _of_club(club_id: int, role: str = "all"):
+    """The club's events: those it hosts, those it co-hosts (app/api/cohosts), or both."""
+    from app.api.cohosts import access as cohosts
+
+    if role == "hosted":
+        return Events.club_id == club_id
+    if role == "cohosted":
+        return Events.id.in_(cohosts.cohosted_event_ids(club_id))
+    return cohosts.hosted_or_cohosted(club_id)
+
+
+async def list_events(session, club_id: int, *, scope: str = "all", sort: Optional[str] = None, search: Optional[str] = None, limit: int = 20, offset: int = 0, is_ended: Optional[bool] = None, role: str = "all") -> tuple[list, int]:
+    from app.api.cohosts import access as cohosts
+
     now = func.now()
     reg, attended, checked = _counts()
-    base = select(Events).where(Events.club_id == club_id, Events.is_deleted == False)  # noqa: E712
+    # The club's own events and those it co-hosts, each once.
+    base = select(Events).where(_of_club(club_id, role), Events.is_deleted == False)  # noqa: E712
     # The old switch still works: is_ended maps onto the scopes.
     if is_ended is True and scope == "all":
         scope = "past"
@@ -104,6 +121,8 @@ async def list_events(session, club_id: int, *, scope: str = "all", sort: Option
 
     # One grouped statement for the page, never a subquery a row.
     asked = await approvals.totals(session, [e.id for e, *_ in rows])
+    # Each event's co-hosts, for the page in one statement (app/api/cohosts).
+    shared = await cohosts.refs(session, [e.id for e, *_ in rows])
     at = datetime.now(timezone.utc)
     items = []
     for event, regs, attended_n, checked_n in rows:
@@ -111,6 +130,8 @@ async def list_events(session, club_id: int, *, scope: str = "all", sort: Option
         items.append(
             jsonable_encoder(event)
             | {
+                "viewer_role": "host" if event.club_id == club_id else "cohost",
+                "cohosts": shared.get(event.id, []),
                 "requires_approval": bool(event.requires_approval),
                 "high_demand_label": bool(event.high_demand_label),
                 "requests_pending": asked.get(event.id, {}).get("pending", 0),
@@ -126,13 +147,18 @@ async def list_events(session, club_id: int, *, scope: str = "all", sort: Option
 
 
 async def figures(session, club_id: int) -> dict:
-    """The season above the list: what is coming, who is in, what it brought, and what waits."""
+    """The season above the list: what is coming, who is in, what it brought, and what waits.
+
+    The counts include the events the club co-hosts (app/api/cohosts), with
+    `cohosted_upcoming` saying how many of the upcoming are; the money is
+    the club's own events' only -- a co-hosted event's went to its host."""
     now = datetime.now(timezone.utc)
     reg, attended, checked = _counts()
-    live = select(Events, reg, attended, checked).where(Events.club_id == club_id, Events.is_deleted == False, Events.lifecycle != EventStatus.archived)  # noqa: E712
+    live = select(Events, reg, attended, checked).where(_of_club(club_id), Events.is_deleted == False, Events.lifecycle != EventStatus.archived)  # noqa: E712
     rows = (await session.execute(live.options(joinedload(Events.category)))).all()
     upcoming = [(e, r) for e, r, _a, _c in rows if ends_at(e) > now and e.lifecycle is not EventStatus.draft]
-    money = await _per_event(session, [e.id for e, _ in upcoming])
+    own_upcoming = [(e, r) for e, r in upcoming if e.club_id == club_id]
+    money = await _per_event(session, [e.id for e, _ in own_upcoming])
     next_event = min((e for e, _ in upcoming), key=lambda e: e.event_datetime, default=None)
     closing_soon = [e for e, r in upcoming if e.reg_enddate and now < e.reg_enddate <= now + CLOSING_SOON and registration_open(e, r, now)]
     doors_open = [e for e, _r in upcoming if door_is_open(e, now)]
@@ -151,8 +177,10 @@ async def figures(session, club_id: int) -> dict:
         "requests_pending": sum(asked.get(e.id, {}).get("pending", 0) for e, _ in upcoming),
         "requests_total": sum(asked.get(e.id, {}).get("total", 0) for e, _ in upcoming),
         "capacity": sum(e.max_participants for e, _ in upcoming if e.max_participants) or None,
-        "collected": float(sum((money[e.id]["tickets"] + money[e.id]["merch"] for e, _ in upcoming), 0)),
-        "outstanding": float(sum((money[e.id]["outstanding"] for e, _ in upcoming), 0)),
+        "collected": float(sum((money[e.id]["tickets"] + money[e.id]["merch"] for e, _ in own_upcoming), 0)),
+        "outstanding": float(sum((money[e.id]["outstanding"] for e, _ in own_upcoming), 0)),
+        # Of the upcoming, those the club co-hosts (app/api/cohosts).
+        "cohosted_upcoming": sum(1 for e, _ in upcoming if e.club_id != club_id),
         "attention": {
             "closing_soon": [{"id": e.id, "name": e.name, "at": e.reg_enddate} for e in sorted(closing_soon, key=lambda e: e.reg_enddate)],
             "doors_open": [{"id": e.id, "name": e.name} for e in doors_open],
@@ -169,4 +197,4 @@ async def figures(session, club_id: int) -> dict:
     }
 
 
-__all__ = ["list_events", "figures", "SCOPES", "SORTS"]
+__all__ = ["list_events", "figures", "SCOPES", "SORTS", "ROLES"]

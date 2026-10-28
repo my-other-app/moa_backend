@@ -95,6 +95,94 @@ async def _new_event_job(p: dict) -> None:
         )
 
 
+async def notify_cohost_followers(
+    session: AsyncSession,
+    *,
+    club_id: int,
+    club_name: str,
+    event_id: int,
+    event_name: str,
+    except_club_ids: Sequence[int] = (),
+) -> None:
+    """A co-host's followers get the event's new-event notice, as the host's
+    did (app/api/cohosts, docs/COHOSTS.md): the same `new_event` line and
+    push, from the co-host. Nobody is told twice: whoever follows a club in
+    `except_club_ids` (the host: its followers were told, maybe by a topic
+    broadcast that left no line of theirs to find) is left out, and so is
+    anyone already holding a `new_event` line about the event (told by
+    another co-host). A job, once per event and co-host, written and
+    committed here and run after; the push goes only to the people this
+    co-host's line reached."""
+    await jobs.enqueue(
+        session, "notifications.cohost_new_event",
+        {
+            "club_id": int(club_id), "club_name": club_name, "event_id": int(event_id), "event_name": event_name,
+            "except_club_ids": [int(c) for c in except_club_ids if c is not None],
+        },
+        dedupe_key=f"notify:new_event:{int(event_id)}:club:{int(club_id)}",
+    )
+    await session.commit()
+
+
+@jobs.handler("notifications.cohost_new_event", max_attempts=6, timeout=600.0, concurrency=2)
+async def _cohost_new_event_job(p: dict) -> None:
+    club_id, event_id = int(p["club_id"]), int(p["event_id"])
+    title, body = f"🎉 New from {p['club_name']}!", f"Check out: {p['event_name']}"
+    data = {"club_name": p["club_name"], "event_name": p["event_name"]}
+    push_data = {"type": "new_event", "event_id": str(event_id), "club_id": str(club_id)}
+    others = [int(c) for c in p.get("except_club_ids") or ()]
+    other = ClubUsersLink.__table__.alias("other_follow")
+    audience = (
+        select(ClubUsersLink.user_id)
+        .where(
+            ClubUsersLink.club_id == club_id,
+            ClubUsersLink.is_following == True,  # noqa: E712
+            ClubUsersLink.is_deleted == False,  # noqa: E712
+            ClubUsersLink.is_muted == False,  # noqa: E712
+            ~settings_off("clubs", ClubUsersLink.user_id),
+            ~select(other.c.id).where(
+                other.c.user_id == ClubUsersLink.user_id,
+                other.c.club_id.in_(others or [0]),
+                other.c.is_following == True,  # noqa: E712
+                other.c.is_deleted == False,  # noqa: E712
+                other.c.is_muted == False,  # noqa: E712
+            ).exists(),
+        )
+        .distinct()
+    )
+    async with jobs.scope() as s:
+        reached = await fanout.insert_for_audience(
+            s, audience, title=title, description=body, type="new_event", data=data,
+            from_club_id=club_id, event_id=event_id, once=True,
+        )
+        if reached:
+            await jobs.enqueue(
+                s, "notifications.cohost_push",
+                {"event_id": event_id, "club_id": club_id, "title": title, "body": body, "data": push_data},
+                dedupe_key=f"push:new_event:{event_id}:club:{club_id}",
+            )
+        await s.commit()
+    logger.info("Told %d followers of co-host %s about event %s", len(reached), club_id, event_id)
+
+
+@jobs.handler("notifications.cohost_push", max_attempts=4, timeout=900.0, concurrency=2)
+async def _cohost_push_job(p: dict) -> None:
+    """The push to the people holding this co-host's `new_event` line about
+    the event, and nobody else (the host's followers hold the host's)."""
+    from app.api.notifications.models import Notifications
+
+    async with jobs.scope() as s:
+        user_ids = list((await s.scalars(
+            select(Notifications.user_id).where(
+                Notifications.event_id == int(p["event_id"]), Notifications.type == "new_event",
+                Notifications.from_club_id == int(p["club_id"]), Notifications.is_deleted == False,  # noqa: E712
+            ).distinct()
+        )).all())
+        await s.commit()
+        if user_ids:
+            await send_notification_to_users(session=s, user_ids=user_ids, title=p["title"], body=p["body"], data=p.get("data") or {})
+
+
 async def notify_users_by_interest(
     session: AsyncSession,
     category_id: int | Sequence[int],

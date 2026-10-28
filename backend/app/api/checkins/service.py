@@ -496,20 +496,26 @@ async def _has_merch(session, event_id: int) -> bool:
 
 
 async def team(session, event: Events) -> dict:
+    from app.api.cohosts import access as cohosts
     from app.api.reports.service import avatar, picture_options
 
+    # The event's volunteers, and the club-wide ones of its club and of each
+    # club co-hosting it (they work its door: checkins.gate_auth).
+    clubs = [c for c in (event.club_id, *await cohosts.cohost_club_ids(session, event.id)) if c is not None]
     rows = (
         await session.execute(
             select(Volunteer, Users)
             .outerjoin(Users, Users.id == Volunteer.user_id)
-            .where(Volunteer.is_deleted == False, or_(Volunteer.event_id == event.id, Volunteer.club_id == event.club_id))
+            .where(Volunteer.is_deleted == False, or_(Volunteer.event_id == event.id, Volunteer.club_id.in_(clubs)))
             # Each volunteer's picture, loaded for the whole team at once.
             .options(*picture_options())
             .order_by(Volunteer.created_at)
         )
     ).all()
     counts = dict((await session.execute(select(CheckIns.checked_in_by, func.count()).where(CheckIns.event_id == event.id, CheckIns.checked_in_by.isnot(None)).group_by(CheckIns.checked_in_by))).all())
-    owner = event.club.user if event.club is not None and hasattr(event.club, "user") else None
+    # Read, not lazy-loaded: the club's account is not in the session when a
+    # co-host or an admin opens the page.
+    owner = await session.get(Users, event.club.user_id) if event.club is not None and event.club.user_id else None
     return {
         "owner": {"name": (owner.full_name if owner else None) or (event.club.name if event.club else ""), "email": owner.email if owner else None},
         "volunteers": [

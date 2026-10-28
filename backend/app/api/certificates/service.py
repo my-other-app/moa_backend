@@ -10,7 +10,7 @@ from typing import AsyncIterator, Optional
 
 from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 
 from app.api.certificate_templates.service import get_template_for_event
 from app.api.certificates.models import CertificateFiles
@@ -266,7 +266,7 @@ async def bundle_jobs(session, event: Events) -> list[tuple[str, Optional[str], 
         await session.scalars(
             _active(event.id)
             .options(
-                joinedload(EventRegistrationsLink.event).options(joinedload(Events.club)),
+                joinedload(EventRegistrationsLink.event).options(joinedload(Events.club), selectinload(Events.cohost_clubs)),
                 joinedload(EventRegistrationsLink.user),
             )
             .where(
@@ -352,7 +352,7 @@ async def certificate_by_number(session, number: Optional[str]) -> Optional[Even
     ticket_id = "MOA-" + number.split("-", 1)[1]
     return await session.scalar(
         select(EventRegistrationsLink)
-        .options(joinedload(EventRegistrationsLink.event).joinedload(Events.club))
+        .options(joinedload(EventRegistrationsLink.event).joinedload(Events.club), joinedload(EventRegistrationsLink.event).selectinload(Events.cohost_clubs))
         .where(
             EventRegistrationsLink.is_deleted == False,  # noqa: E712
             or_(

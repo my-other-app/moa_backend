@@ -104,6 +104,15 @@ _DESTRUCTIVE = _rx(
 # editors and admins make, change, photograph and delete items; door staff read.
 _CLUB_STORE = _rx(r"^/api/v1/clubs/store(?:/|$)")
 
+# Co-hosting (app/api/cohosts, docs/COHOSTS.md): who else hosts an event is
+# the club's decision, so inviting, cancelling and removing co-hosts (and
+# looking for clubs to invite) at the host, and answering an invitation or
+# leaving at the co-host, are for owners and admins. Every role reads the list
+# and the invitations. (What a co-host may do on the event itself is the
+# member's own role here, then cohosts.policy.)
+_COHOSTS = _rx(r"^/api/v1/events/\d+/cohosts(?:/|$)", r"^/api/v1/clubs/cohosts(?:/|$)")
+_COHOST_SEARCH = _rx(r"^/api/v1/events/\d+/cohosts/search$")
+
 # The only changes door staff make: letting people in and handing things over.
 _DOOR_WRITES = _rx(
     r"^/api/v1/events/\d+/gate/",
@@ -135,6 +144,8 @@ def allows(role: str, method: str, path: str) -> bool:
         return True
     if _ACCESS.search(path):
         return role == "admin" and method == "GET" and bool(_ACCESS_LIST.search(path))
+    if _COHOSTS.search(path):
+        return role == "admin" or (method not in WRITES and not _COHOST_SEARCH.search(path))
     if method in WRITES and _OWNER_WRITES.search(path):
         return False
     if _SITE_DOMAIN.search(path) or _AI_KEY.search(path):
@@ -194,6 +205,9 @@ def can(role: str) -> dict:
         # Confirming or declining registration requests (app/api/approvals):
         # a change, so not door staff, who may still read the queue.
         "decide_requests": editor,
+        # Co-hosting (app/api/cohosts): inviting, cancelling and removing
+        # co-hosts on the club's events, answering invitations, leaving.
+        "manage_cohosts": admin,
     }
 
 

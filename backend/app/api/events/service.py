@@ -608,6 +608,10 @@ async def get_event(session: AsyncSession, event_id: str | int, user_id: int | N
     from app.api.event_partners import service as event_partners
 
     data.update(await event_partners.split(session, event.id))
+    # The clubs co-hosting it, in the order they accepted (app/api/cohosts).
+    from app.api.cohosts import access as cohost_access
+
+    data["cohosts"] = await cohost_access.refs_for(session, event.id)
 
     # User-specific data (only if user is authenticated)
     if user_id:
@@ -1078,7 +1082,8 @@ async def get_ticket_details(session: AsyncSession, ticket_id: str | int):
         )
         .options(
             joinedload(EventRegistrationsLink.event).options(
-                joinedload(Events.club), joinedload(Events.category)
+                # Its co-hosts: the ticket prints "hosted by" (app/api/cohosts).
+                joinedload(Events.club), joinedload(Events.category), selectinload(Events.cohost_clubs)
             ),
             joinedload(EventRegistrationsLink.user),
         )

@@ -19,7 +19,7 @@ from typing import Optional
 from fastapi import APIRouter, File, Form, Query, Response, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import select
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 
 from app.api.certificate_templates.models import CertificateTemplates
 from app.api.agenda import service as agenda_service
@@ -128,7 +128,8 @@ async def _event_for_editing(session, user, event_id: int) -> Events:
     """The event, once the caller is allowed to act on it."""
     event = await session.scalar(
         select(Events)
-        .options(joinedload(Events.club))
+        # Its co-hosts too: the previews print "hosted by" (app/api/cohosts).
+        .options(joinedload(Events.club), selectinload(Events.cohost_clubs))
         .where(Events.id == event_id, Events.is_deleted == False)
     )
     if event is None:
@@ -440,7 +441,7 @@ async def _registration_for_preview(session, event_id: int, ticket_id: Optional[
         return None
     registration = await session.scalar(
         select(EventRegistrationsLink)
-        .options(joinedload(EventRegistrationsLink.event).joinedload(Events.club))
+        .options(joinedload(EventRegistrationsLink.event).joinedload(Events.club), joinedload(EventRegistrationsLink.event).selectinload(Events.cohost_clubs))
         .where(
             EventRegistrationsLink.event_id == event_id,
             EventRegistrationsLink.ticket_id == ticket_id,

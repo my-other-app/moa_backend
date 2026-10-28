@@ -38,9 +38,14 @@ async def order_partners(session: SessionDep, user: ClubAuth, event_id: int, bod
 
 @router.post("/from-club", summary="Add some of the club's own partners to this event", status_code=201)
 async def add_from_club(session: SessionDep, user: ClubAuth, event_id: int, body: FromClubIn) -> FromClubOut:
-    """Copies each one's name, logo and role (as the label); one already on the event is skipped."""
+    """Copies each one's name, logo and role (as the label); one already on the event is skipped.
+    A co-host's request takes its own club's partners (app/api/cohosts)."""
+    from app.api.cohosts import access as cohosts
+
     event = await deliveries.event_for_club(session, user, event_id)
-    return FromClubOut(**await service.from_club(session, event, body.kind, body.club_partner_ids))
+    # A co-host adds from its own club's partners (app/api/cohosts).
+    own = cohosts.own_club_id(event, user)
+    return FromClubOut(**await service.from_club(session, event, body.kind, body.club_partner_ids, club_id=own))
 
 
 @router.patch("/{partner_id}", summary="Correct a sponsor or partner")

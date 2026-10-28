@@ -5,6 +5,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel
 
 from app.api.agenda.schemas import AgendaItemOut
+from app.api.cohosts.schemas import CohostRefUrl
 from app.api.event_partners.schemas import PagePartner
 from app.api.interests.schemas import TopicRef
 from app.api.threads.schemas import ThreadOut
@@ -64,6 +65,9 @@ class EventCard(BaseModel):
     updated_at: Optional[str] = None
     # The distinct topics of the event's interests, in topic order.
     topics: list[TopicRef] = []
+    #: The clubs co-hosting it, in the order they accepted; `club` is the
+    #: host (app/api/cohosts, docs/COHOSTS.md).
+    cohosts: list[CohostRefUrl] = []
 
 
 class ClubCard(BaseModel):
@@ -316,6 +320,9 @@ class EventPage(BaseModel):
     # The event's own sponsors and partners, each in its order (docs/EVENT_PARTNERS.md).
     sponsors: list[PagePartner] = []
     partners: list[PagePartner] = []
+    #: The clubs co-hosting it, beside `club` (the host), in the order they
+    #: accepted (app/api/cohosts, docs/COHOSTS.md).
+    cohosts: list[CohostRefUrl] = []
     more_from_club: list[EventCard]
     similar: list[EventCard]
 

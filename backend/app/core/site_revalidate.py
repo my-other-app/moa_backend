@@ -29,6 +29,8 @@ sweep, approval and rejection, logo and cover uploads, scripts.
   * The rows those pages show: an event's speakers, agenda, organisers,
     sponsors and partners;
     a club's team, partners, socials and interests.
+  * A club's invite to co-host an event answered, left or ended
+    (app/api/cohosts): the event's page, and that club's, which lists it.
 
 An admin's change to the topic tree (a topic or an interest made, renamed,
 moved, reordered or deleted) is told as "topics": true (`topics_changed`,
@@ -146,6 +148,8 @@ def _changes(session: Session) -> tuple[set[str], set[str]]:
     after_flush, `new`, `dirty`, `deleted` and every attribute's history still
     describe the flush, and new rows already have their ids."""
     Events, Clubs, event_rows, club_rows = _models()
+    from app.api.cohosts.models import EventCohosts
+
     events: set[str] = set()
     clubs: set[str] = set()
     event_ids: set[int] = set()  # events reached through a row on their page
@@ -163,6 +167,12 @@ def _changes(session: Session) -> tuple[set[str], set[str]]:
                 if _shown(obj, how, CLUB_QUIET, ("is_verified", "is_deleted"), _club_public):
                     clubs.update(_values(obj, "slug"))
                     with_events.update(_values(obj, "id"))
+            elif isinstance(obj, EventCohosts):
+                # A club co-hosting an event, or no longer: the event's page
+                # names its hosts, and the co-host's page lists it.
+                if _row_changed(obj, how):
+                    event_ids.update(_values(obj, "event_id"))
+                    club_ids.update(_values(obj, "club_id"))
             elif isinstance(obj, event_rows):
                 if _row_changed(obj, how):
                     event_ids.update(_values(obj, "event_id"))

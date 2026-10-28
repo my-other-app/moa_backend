@@ -187,7 +187,7 @@ async def _copied_logo(club_partner: ClubPartners) -> Optional[str]:
         return None
 
 
-async def from_club(session, event: Events, kind: str, club_partner_ids: list[int]) -> dict:
+async def from_club(session, event: Events, kind: str, club_partner_ids: list[int], club_id: int | None = None) -> dict:
     """The club's partners, as rows of `kind` at the end of it, in the order
     given. One already on the event (of either kind) is skipped."""
     wanted = list(dict.fromkeys(club_partner_ids))
@@ -195,7 +195,7 @@ async def from_club(session, event: Events, kind: str, club_partner_ids: list[in
         p.id: p
         for p in (await session.scalars(
             select(ClubPartners).where(
-                ClubPartners.id.in_(wanted), ClubPartners.club_id == event.club_id, ClubPartners.is_deleted == False,  # noqa: E712
+                ClubPartners.id.in_(wanted), ClubPartners.club_id == (club_id or event.club_id), ClubPartners.is_deleted == False,  # noqa: E712
             )
         )).all()
     }

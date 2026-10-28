@@ -39,9 +39,12 @@ async def get_suggested_events(
         is_registered=is_registered,
         is_ended=is_ended,
     )
-    return paginated_response(
-        jsonable_encoder(events), request, schema=EventListResponse
-    )
+    items = jsonable_encoder(events)
+    # Each event's co-hosts (app/api/cohosts).
+    from app.api.cohosts import access as cohosts
+
+    await cohosts.attach(session, items)
+    return paginated_response(items, request, schema=EventListResponse)
 
 
 @router.get("/feed/clubs", summary="Get suggested clubs")

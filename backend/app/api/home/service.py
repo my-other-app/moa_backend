@@ -72,7 +72,11 @@ async def suggest_events(
     # The clubs this person follows. (An EXISTS on an alias of clubs that was
     # never joined made this a cross join: every event, once per followed club.)
     if is_following:
-        query = query.filter(Events.club_id.in_(_followed_clubs(user_id)))
+        # The followed clubs' events, and those they co-host (app/api/cohosts).
+        from app.api.cohosts.models import ACCEPTED, EventCohosts
+
+        cohosted = select(EventCohosts.event_id).where(EventCohosts.status == ACCEPTED, EventCohosts.club_id.in_(_followed_clubs(user_id)))
+        query = query.filter(or_(Events.club_id.in_(_followed_clubs(user_id)), Events.id.in_(cohosted)))
 
     if is_registered is not None:
         if is_registered:
