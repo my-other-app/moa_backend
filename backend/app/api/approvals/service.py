@@ -1356,7 +1356,7 @@ async def retire_lapsed(session, request_id, *, now: Optional[datetime] = None) 
     return "retired"
 
 
-@jobs.handler(RETIRE_JOB, max_attempts=5, timeout=60.0)
+@jobs.handler(RETIRE_JOB, max_attempts=5, timeout=60.0, priority=jobs.LOW, concurrency=1)
 async def _retire_job(p: dict) -> None:
     async with jobs.scope() as session:
         await retire_lapsed(session, uuid.UUID(str(p["request_id"])))

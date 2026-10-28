@@ -518,8 +518,8 @@ async def card_extras(session, ids: list[int]) -> tuple[dict[int, int], dict[int
     event's cap counts paid tickets; None: no cap), for `status: full`.
     The events with their interests in one statement (an event's row comes
     back once per interest it picked: a few at most), and, when the page has
-    events not started yet (only they can be full), their ticket types and
-    open waiting-list entries in two more, whatever the page's size."""
+    events not started yet (only they can be full), their ticket types with
+    their open waiting-list entries in one more, whatever the page's size."""
     from types import SimpleNamespace
 
     from app.api.ticketing import places as ticket_places
