@@ -9,7 +9,8 @@ fix the demo's venue pins, turn on WhatsApp, keep production's settings,
 health checks and scheduled backups honest (section 19), read the live
 room's pushes and the host's 409s (section 22), open clubs' mailboxes
 (section 23), keep media on a store of our own (section 26), and send mail
-through SES's SMTP interface with SMTP credentials only (section 27). Every command is meant to be copied.
+through SES's SMTP interface with SMTP credentials only (section 27), and
+let the dashboards sign in with Google (section 28). Every command is meant to be copied.
 Commands under **Read-only** change nothing; anything that changes something
 says so.
 
@@ -3507,3 +3508,74 @@ print(transport.deliver(transport.Mail(to=['you@example.org'], subject='SES SMTP
 
 The last command prints `{'MessageId': '0109019...-000000', 'Provider': 'ses'}`.
 The admin portal's Settings page shows `APP_SMTP_*` as set and "in use".
+
+---
+
+## 28. Sign in with Google on the club dashboard and the main portal
+
+`POST /api/v1/auth/google/dashboard` with
+`{"id_token": "<Google credential>", "scope": "club" | "admin", "totp_code": "123456"}`.
+The dashboards' "Continue with Google" button calls it through their own
+server, as the password login does. Code: `backend/app/api/auth/router.py`
+(`google_dashboard_sign_in`) and `service.dashboard_account`.
+
+Google only signs in **accounts that already exist**. It never makes one,
+and an app user's or a guest's Google account never opens a dashboard.
+
+- **`scope: "club"`** (club-dashboard.myotherapp.in): an active club team
+  member with the Google address, then the club's own login account. The
+  same order and refusals as the password login with scope "club":
+  `CLUB_UNAVAILABLE` when the club's own account is suspended or gone,
+  `CLUB_NOT_VERIFIED` for a club waiting for approval.
+- **`scope: "admin"`** (main-portal.myotherapp.in): an admin account only.
+  The admin two-factor rule and its grace (section 24, "Two-factor for
+  admins") apply unchanged.
+- **Two-factor.** An account with two-factor on (an admin, or a club's own
+  account) gets `401 TOTP_REQUIRED`; the portal sends the same `id_token`
+  again with `totp_code`. A wrong code is `TOTP_INVALID` and counts toward
+  the lockout. Google's token lasts an hour; after that the person signs in
+  with Google again.
+- **Everything else is the password login's:** `403 ACCOUNT_SUSPENDED`,
+  the lockout (`429 LOGIN_LOCKED`, shared with the password door for the
+  same address), 20 tries a minute per address, the Security page's record
+  (method `google`), the new-device mail, the session and its cookies.
+- **Any miss** is one plain `401 GOOGLE_NO_ACCOUNT`, whether the address has
+  no account, is an app user's, a guest's, or belongs to the other dashboard.
+  It is kept on the record as `no_account` with no account attached, and
+  does not count toward the lockout.
+- A token Google would not vouch for (another app's client id, an
+  unverified address, expired, another issuer, bad signature) is
+  `401 INVALID_GOOGLE_TOKEN`. When Google's certificates can't be fetched it
+  is `503 GOOGLE_UNAVAILABLE`.
+
+The token's audience is `APP_GOOGLE_WEB_CLIENT_ID`, the web client the
+public site's Google sign-in already uses. Nothing new goes in the server's
+`.env`.
+
+### Turning it on (once, the owner)
+
+1. Google Cloud console -> project **My Other App** -> Google Auth Platform
+   -> **Clients** -> **myotherapp-dev** (the web client whose id is
+   `APP_GOOGLE_WEB_CLIENT_ID`). Under **Authorised JavaScript origins** add:
+   - `https://club-dashboard.myotherapp.in`
+   - `https://main-portal.myotherapp.in`
+
+   Save. Google takes from five minutes to a few hours to apply it; until
+   then the button says the origin is not allowed.
+2. Deploy this backend (no migration, no new packages).
+3. The dashboards show the button once their build has
+   `NEXT_PUBLIC_GOOGLE_CLIENT_ID` (`deploy/build/clubs.production.env` and
+   `admin.production.env` in moa_web). Against a backend without this
+   route they get a 404 and hide it.
+
+### Checking it
+
+Read-only, in the read-only psql session at the top of this file:
+
+```sql
+-- Google sign-ins to the dashboards in the last day.
+SELECT created_at, identifier, result, user_id
+FROM sign_in_attempts
+WHERE method = 'google' AND created_at > now() - interval '1 day'
+ORDER BY created_at DESC LIMIT 50;
+```

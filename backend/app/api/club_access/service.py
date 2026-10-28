@@ -300,12 +300,19 @@ async def accept(session, token: str, *, full_name: str | None, password: str) -
 # ─── Signing in ──────────────────────────────────────────────────────────
 
 
-async def authenticate(session, email: str, password: str) -> ClubMembers | None:
-    """The active member with this email and password, or None."""
+async def active_member(session, email: str) -> ClubMembers | None:
+    """The active member with this address (kept lower-cased), or None."""
     address = (email or "").strip().lower()
     if "@" not in address:
         return None
-    member = await session.scalar(select(ClubMembers).where(ClubMembers.email == address, ClubMembers.status == "active"))
+    return await session.scalar(select(ClubMembers).where(ClubMembers.email == address, ClubMembers.status == "active"))
+
+
+async def authenticate(session, email: str, password: str) -> ClubMembers | None:
+    """The active member with this email and password, or None."""
+    if "@" not in (email or ""):
+        return None
+    member = await active_member(session, email)
     # On a worker thread, and as slow for no member as for a wrong password.
     if not await verify_password_async(password, member.password if member is not None else None):
         return None
