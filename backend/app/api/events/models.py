@@ -74,6 +74,9 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     # "Confirm each registration": the public form makes a request the club
     # confirms or declines (app/api/approvals, docs/APPROVALS.md).
     requires_approval = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    # "High demand": a label the club may show on the public page instead of
+    # any request numbers (docs/APPROVALS.md §7). No number, only the label.
+    high_demand_label = Column(Boolean, nullable=False, default=False, server_default=sa.false())
     duration = Column(Float, nullable=False)
     about = Column(String, nullable=True)
     location_name = Column(String, nullable=True)
@@ -276,6 +279,11 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         if getattr(self, "is_deleted", False):
             return "cancelled"
         return (self.lifecycle or EventStatus.published).value
+
+    @property
+    def high_demand(self) -> bool:
+        """What the public reads: the club's "High demand" label is on."""
+        return bool(self.high_demand_label)
 
 
 #: The longest an event may run, in hours, checked when one is created, edited

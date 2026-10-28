@@ -64,6 +64,8 @@ class RequestPublic(CustomBaseModel):
     submitted_at: datetime
     decided_at: Optional[datetime] = None
     decline_note: Optional[str] = None
+    #: Why it is `closed`: registered_directly, event_ended, event_deleted or event_cancelled.
+    closed_reason: Optional[str] = None
     ticket_id: Optional[str] = None
     pay: Optional[RequestPay] = None
     token: Optional[str] = None
@@ -87,6 +89,8 @@ class RequestClubItem(CustomBaseModel):
     decided_by: Optional[dict[str, Any]] = None
     decline_note: Optional[str] = None
     registration_id: Optional[UUID] = None
+    #: Why it is `closed`: registered_directly, event_ended, event_deleted or event_cancelled.
+    closed_reason: Optional[str] = None
     pay_by: Optional[datetime] = None
     #: A confirmed paid ticket's price, as confirmed (its code taken off).
     amount: Optional[float] = None
@@ -101,6 +105,7 @@ class RequestCounts(CustomBaseModel):
     withdrawn: int = 0
     lapsed: int = 0
     closed: int = 0
+    total: int = 0
 
 
 class RequestsPage(CustomBaseModel):
@@ -170,3 +175,37 @@ class ReopenIn(CustomBaseModel):
 class ReopenOut(CustomBaseModel):
     reopened: list[UUID]
     skipped: list[SkippedRow]
+
+
+class RequestStats(CustomBaseModel):
+    """The event's requests, as its overview's funnel reads them
+    (`GET /events/{id}/summary` → `requests`)."""
+
+    enabled: bool = False
+    total: int = 0
+    pending: int = 0
+    approved: int = 0
+    declined: int = 0
+    withdrawn: int = 0
+    lapsed: int = 0
+    closed: int = 0
+    approved_paid: int = 0
+    approved_awaiting_payment: int = 0
+    awaiting_payment_amount: float = 0.0
+    earliest_hold_expires_at: Optional[datetime] = None
+    checked_in: int = 0
+    oldest_pending_at: Optional[datetime] = None
+    avg_decision_hours: Optional[float] = None
+    #: Registrations that came from no request (the desk, an import, before
+    #: the switch): those that did and these are `registered`.
+    added_directly: int = 0
+
+
+class PlacesFigures(CustomBaseModel):
+    """The event's places as the ticket picker counts them: holds count,
+    pending requests don't. `capacity`/`left` null: no cap."""
+
+    capacity: Optional[int] = None
+    taken: int = 0
+    held: int = 0
+    left: Optional[int] = None

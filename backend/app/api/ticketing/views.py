@@ -120,7 +120,10 @@ async def club_types(session, event) -> dict:
                 "sales_start": t.sales_start, "sales_end": t.sales_end, "is_hidden": bool(t.is_hidden),
                 "per_person_limit": t.per_person_limit, "sort_order": t.sort_order, "is_default": bool(t.is_default),
                 "sold": int(t.taken_count or 0), "available": room.for_type(t.id),
-                "waiting": lines_.get(t.id, places.Line()).waiting, "offered": lines_.get(t.id, places.Line()).offered,
+                "waiting": lines_.get(t.id, places.Line()).waiting,
+                # The waiting list's offers; a confirmed request's hold is `held`.
+                "offered": lines_.get(t.id, places.Line()).offered - lines_.get(t.id, places.Line()).held,
+                "held": lines_.get(t.id, places.Line()).held,
                 "has_registrations": held.get(t.id, False),
             }
             for t in types
@@ -146,7 +149,9 @@ async def _registered(session, type_ids: list[int]) -> dict[int, bool]:
 async def sales(session, event) -> dict:
     """The event's overview: per type, what sold and for how much, what is
     waiting for its payment, what is left, and who is in line; and the codes
-    used on its tickets."""
+    used on its tickets. `held`: places held for confirmed registration
+    requests not paid yet (app/api/approvals), apart from the waiting list's
+    `offered`; both hold their places."""
     await types_mod.ensure(session, event)
     await session.commit()
     types = await places.fresh(session, event)
@@ -168,7 +173,7 @@ async def sales(session, event) -> dict:
     lines_ = await places.lines(session, event.id)
     room = places.compute(event, types, lines_)
     out_types = []
-    totals = {"sold": 0, "paid": 0, "revenue": 0.0, "pending": 0, "discount_total": 0.0, "waiting": 0, "offered": 0}
+    totals = {"sold": 0, "paid": 0, "revenue": 0.0, "pending": 0, "discount_total": 0.0, "waiting": 0, "offered": 0, "held": 0}
     for t in types:
         r = by_type.get(t.id)
         line = lines_.get(t.id, places.Line())
@@ -182,7 +187,7 @@ async def sales(session, event) -> dict:
             "pending": int(r[4]) if r else 0,
             "discount_total": float(money.rupees(r[5])) if r else 0.0,
             "available": room.for_type(t.id),
-            "waiting": line.waiting, "offered": line.offered,
+            "waiting": line.waiting, "offered": line.offered - line.held, "held": line.held,
         }
         for key in totals:
             totals[key] += item[key]

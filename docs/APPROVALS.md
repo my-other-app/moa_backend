@@ -1,8 +1,9 @@
 # Registration approval ("Confirm each registration")
 
 The contract as built: the backend (`backend/app/api/approvals/`), and what
-the club dashboard, the website and the app read from it. Migration:
-`registration_approval` (after `admin_ops`). All paths are under `/api/v1`.
+the club dashboard, the website and the app read from it. Migrations:
+`registration_approval` (after `admin_ops`), then `approval_stats` for the
+full numbers and the loopholes closed (§7). All paths are under `/api/v1`.
 
 Everything is additive. An event without `requires_approval` behaves exactly
 as before, for every client.
@@ -39,10 +40,18 @@ Product rules:
 - Withdrawn: may ask again. Declined: may not (409 `REQUEST_DECLINED`) unless
   the club reopens it.
 - Turning the setting off: new people register directly; requests already
-  waiting stay until the club decides.
+  waiting stay until the club decides. A person who gets a ticket another
+  way (the form with the setting off, the desk, an import, added by hand, a
+  waiting-list offer) has their open request closed
+  (`closed_reason: registered_directly`), in the same transaction, with no
+  email (§7).
+- No separate waiting list on a confirm-each event: the request queue is the
+  line (§7).
 - The event cancelled: pending requests, and confirmed paid ones not paid yet,
-  close (`closed`), their places go back, and their people get the
-  cancellation email. The event over: the same, without an email.
+  close (`closed`, `event_cancelled`), their places go back, and their people
+  get the cancellation email. The event over (`event_ended`) or deleted
+  (`event_deleted`): the same, and the pending ones get "{Club} wasn't able to
+  confirm your place" (`request_unanswered`, once each).
 - Club roles owner, admin and editor decide. Door staff may read the queue but
   not decide (`club_access.policy`; `can().decide_requests`).
 
@@ -75,6 +84,7 @@ Product rules:
 | registration_id | uuid fk event_registrations_link, set null | set when the registration exists (free: at confirmation; paid: at the claim) |
 | waitlist_entry_id | uuid fk waitlist_entries, set null | the paid hold |
 | resent_at | timestamptz | when the "received" email last went again |
+| closed_reason | varchar(24) | why `closed`: `registered_directly`, `event_ended`, `event_deleted`, `event_cancelled` (check constraint); null otherwise. Migration `approval_stats` |
 | created_at, updated_at | timestamptz | |
 
 Indexes:
@@ -88,10 +98,13 @@ Indexes:
 | `uq_registration_requests_token` | unique `(token)` | the status link |
 | `ix_registration_requests_user` | `(user_id, submitted_at) WHERE user_id IS NOT NULL` | "my requests" |
 | `ix_registration_requests_hold` | `(waitlist_entry_id) WHERE waitlist_entry_id IS NOT NULL` | a claim finding its request, an expiry lapsing it |
+| `ix_registration_requests_registration` | `(registration_id) WHERE registration_id IS NOT NULL` | the registration's deletion (the FK's SET NULL); telling a confirmed registration from one added directly (`approval_stats`) |
 
 ### Columns added
 
 - `events.requires_approval boolean not null default false`.
+- `events.high_demand_label boolean not null default false` (`approval_stats`):
+  the club's public "High demand" label (§7).
 - `waitlist_entries.via_request boolean not null default false`: marks the
   offers that are confirmations' holds. The club's waiting list (its entries,
   counts, export, offer and remove), "my places in line" and deleting a ticket
@@ -191,7 +204,11 @@ minute sweep), and it is claimed and paid like any offer:
   its `registration_id`, also when it had lapsed and a place was still free.
 - The hold runs out: in the same transaction as the expiry, the request
   becomes `lapsed`, the person is emailed, and the place goes to whoever is
-  next (`waitlist.fill`).
+  next (`waitlist.fill`). The registration a claim made and nobody paid for
+  is retired after that commits (job `approvals.retire_lapsed`): soft
+  deleted, so it stops counting as going and as owed. Never once money
+  moved or the person was checked in; a checkout opened in the last 30
+  minutes is waited for (the job comes back when that window has passed).
 - "No thanks" on the claim page, or withdrawing from the status link: the hold
   is given back, the request `withdrawn`.
 
@@ -203,7 +220,10 @@ so the waiting list's automatic "offer the next person" never picks them.
 After the waiting list's expiry and fills: `approvals.close_finished` finds
 the events with requests still pending by a loose index scan of
 `ix_registration_requests_pending` (one step per event, however many requests
-each has), and closes those of events gone, cancelled, closed or over.
+each has), and closes those of events gone (`event_deleted`), cancelled
+(`event_cancelled`, no email: the cancellation sends its own), closed or
+over (`event_ended`). The pending ones closed `event_ended` or
+`event_deleted` get `request_unanswered`.
 
 ### Telling people (`approvals/notify.py`)
 
@@ -221,6 +241,7 @@ key, and count against the club's messages like a waiting-list offer
 | `declined` | declined with `notify` | "Sorry, {Club} couldn't offer you a place at {event} this time." + the note | `request_declined` (and an inbox item) |
 | `lapsed` | a hold ran out | "Your place was released because payment didn't arrive in time." | — |
 | `cancelled` | the event cancelled | "{Club} has cancelled {event}", the reason; nothing was charged | — |
+| `unanswered` | a pending request closed because its event ended or was deleted (once a request: the job's key is the request's) | "{Club} wasn't able to confirm your place for {event}." Nothing was charged. | — |
 
 The emails are the club's: its logo, colour and name as the sender, drawn by
 the designed-email renderer (a plain email if that fails). They are listed in
@@ -237,6 +258,10 @@ status link); `request_approved` adds `ticket_id` (`""` when none);
 - Cancellation (`club_ops.cancel`): its follow-up closes the requests not yet
   settled and emails their people, before the registrants' email.
 - The event over: the sweep above.
+- The event deleted (`DELETE /events/delete/{id}`, allowed: requests are not
+  registrations): its requests not yet settled close `event_deleted` in the
+  same transaction, holds given back, and the pending ones are told
+  (`request_unanswered`).
 - Retention scrub (`closeout.scrub`): every request of the event loses its
   name, address (replaced by `removed-<id>@removed.invalid`), phone, answers
   and the club's note. The retention preview counts them (`requests`).
@@ -365,8 +390,10 @@ the address by email instead (at most every 10 minutes). The request's owner
   reopened request keeps its place in the queue.
 - Event settings: `POST /events/create` and `PUT /events/update/{id}` take
   `requires_approval` (form field; omitted leaves it as it is) and return it.
+- `GET …/requests/export`: every request as CSV (§7).
 - Overviews:
-  - `GET /events/{id}/summary` (the event's overview): `requests_pending`.
+  - `GET /events/{id}/summary` (the event's overview): `requests_pending`,
+    and since §7 `requests` and `places`.
   - `GET /clubs/dashboard`: an attention item `REQUESTS_PENDING` (amber) for
     each of the three events whose requests have waited longest.
   - `GET /clubs/overview`: each event (`next_event`, `upcoming`,
@@ -396,8 +423,8 @@ the address by email instead (at most every 10 minutes). The request's owner
    `discount_code` and `whatsapp_opt_in` on the club's list items;
    `event_id`/`event_name` on the register response; `claim_url` in `pay`;
    `amount` on the claim view; the `reopen` response's shape.
-4. The four request emails are listed in the email library but not
-   customisable yet: that needs new journey stages in the editor, the
+4. The request emails (five since §7) are listed in the email library but
+   not customisable yet: that needs new journey stages in the editor, the
    dashboard's too.
 
 ---
@@ -405,3 +432,179 @@ the address by email instead (at most every 10 minutes). The request's owner
 ## 6. Running it
 
 See docs/OPERATIONS.md §25.
+
+---
+
+## 7. Full numbers for confirm-each events, and the loopholes closed
+
+Contract: `feature-register/approval-stats-contract.md` (agreed 28 Oct
+2026). Migration `approval_stats` (after `registration_approval`). Every
+field is added; none changes meaning (but `offered` in the sales and types
+lists, below).
+
+### Owner decisions, as built
+
+1. **No request numbers in public.** A club may switch on a "High demand"
+   label per event (`events.high_demand_label`), shown as a chip, never a
+   number.
+2. **No separate waiting list** on a confirm-each event: `waitlist.enabled`
+   is false whatever the setting says, every type's `waitlist` is false, and
+   joining is refused (409 `WAITLIST_OFF_ON_APPROVAL_EVENTS`). People already
+   in the line from before the switch are left there, but nothing offers
+   them a place (not the sweep's `fill`, not the club's "Offer now": the same
+   409), and they hold no place ahead of anyone (`places.compute` leaves
+   them out on such an event). Offers already standing still hold, and may
+   be claimed or sent again. Turning confirming off brings the line back as
+   it was (the setting is kept).
+3. **Switching confirm-each off keeps people waiting.** If a waiting person
+   gets a ticket another way, their open request (pending, or a paid hold not
+   paid yet) is closed `registered_directly` in the registration's own
+   transaction (`approvals.settle_direct`, called by
+   `registration.service.add_registration`, which every way in uses: the
+   form, the desk's walk-up, imports, by hand, a waiting-list claim). A hold
+   they had goes back (`left`). No email. The request a confirmation is
+   registering, and the hold a claim pays for, are left alone. The request
+   rows are taken `SKIP LOCKED` (a registration holds the address and the
+   event's row by then, and a confirmation takes request rows first): one a
+   confirmation holds at that moment is left to it, and the confirmation,
+   finding the registration, skips it `already_registered` and closes it
+   `registered_directly` itself.
+4. **Unanswered requests get a polite email** (`request_unanswered`) when
+   the event ends or is deleted: "{Club} wasn't able to confirm your place
+   for {event}." Once a request (its job's key is the request's alone, and a
+   closed request never closes again). Only pending ones: a confirmed hold
+   closed with its event was answered. A cancellation keeps its own email.
+
+### `GET /events/{id}/summary` gains
+
+```json
+"requests": {
+  "enabled": true,
+  "total": 412, "pending": 37, "approved": 310, "declined": 40,
+  "withdrawn": 8, "lapsed": 17, "closed": 0,
+  "approved_paid": 281, "approved_awaiting_payment": 12,
+  "awaiting_payment_amount": 2388.0, "earliest_hold_expires_at": "…|null",
+  "checked_in": 240,
+  "oldest_pending_at": "…|null",
+  "avg_decision_hours": 20.5,
+  "added_directly": 15
+},
+"places": { "capacity": 300, "taken": 281, "held": 12, "left": 7 }
+```
+
+- `requests`: null for an event that does not confirm each place and has no
+  requests. Three grouped statements over the event's requests
+  (`approvals.stats`), whatever their number.
+  - `approved_paid`: confirmed, their registration paid (an amount above 0).
+  - `approved_awaiting_payment`, `awaiting_payment_amount`,
+    `earliest_hold_expires_at`: confirmed paid ones whose hold still stands
+    and is not paid (claimed or not).
+  - `checked_in`: confirmed ones whose registration was admitted (marked, or
+    a check-in).
+  - `avg_decision_hours`: submitted to decided, over every request decided.
+  - `added_directly`: the event's live registrations that came from no
+    request. The registrations that did and these are `registered` exactly.
+- `places` (`ticketing.places.summary`, the ticket picker's own sums):
+  `capacity` (the event's cap, or with none the types' together when every
+  type has one; null: no cap), `taken` (what the cap counts: paid tickets on
+  a paid event, every registration on a free one), `held` (standing offers:
+  confirmed requests' holds, and any waiting-list offers), `left` (what
+  someone new could have, never below 0; null: no cap). Pending requests
+  hold nothing.
+
+### Requests
+
+- `GET …/requests`: `counts.total`. List items and the guest's view:
+  `closed_reason` (null unless `closed`).
+- `GET /events/registration/{event_id}/requests/export`: CSV of every
+  request, newest first. Columns: `Status, Closed reason, Full name, Email,
+  Phone, Ticket type, Discount code`, one per answer (the event's questions
+  first, in order), then `Submitted at, Decided at, Decided by, Decline
+  note, Amount, Payment, Pay by, Ticket ID, WhatsApp`. `Payment`: `free`,
+  `paid`, `awaiting payment`, `not paid` (a hold that ran out),
+  `not paid in time` (lapsed), or blank. A cell starting with `= + - @` is
+  quoted with `'`. Same permission as the list (club roles may read it, door
+  staff included; another club's event is 404).
+- `closed_reason`: `registered_directly`, `event_ended`, `event_deleted`,
+  `event_cancelled`. Requests closed before §7 were given theirs from their
+  event by the migration.
+- A lapsed hold's unpaid registration is retired (§3, "Paid tickets").
+
+### Lists and pages
+
+- The club's events list (`GET /clubs/events/list`) rows: `requires_approval`,
+  `high_demand_label`, `requests_pending` (it was computed but dropped by the
+  schema), `requests_total`; one grouped statement for the page
+  (`approvals.totals`), never a subquery a row. Figures
+  (`GET /clubs/events/figures`): `requires_approval` (any upcoming event),
+  `requests_pending`, `requests_total` (upcoming events).
+- Admin events list (`GET /events/admin/list`) rows: `requires_approval`,
+  `high_demand_label`, `requests_pending`, `requests_total` (one grouped
+  statement). The admin's event detail reads the summary: `requests`.
+  `GET /admin/overview`: `requests: {received, waiting, avg_decision_hours}`
+  (the average over the last 30 days; one statement, in the minute's cache).
+- `GET /clubs/overview`: every event (`next_event`, `upcoming`,
+  `needs_attention`, `reach`) has `requests_total` beside `registrations`.
+  `GET /clubs/dashboard`: `live[]` has `requires_approval`, `requests_total`,
+  `requests_pending`.
+- Event analytics (`GET /events/registration/{id}/analytics`):
+  `requests_total`, `requests_per_view` (requests ÷ page views, null without
+  views), `requests_by_day` (`[{date, count}]`, IST days, by when they asked).
+- Closeout figures and PDF: `requests` (the summary's block, dates as ISO
+  strings; a "Registration requests" table in the PDF).
+- Sales by ticket type (`GET /events/{id}/ticketing/sales`) and the types
+  list (`GET /events/{id}/ticketing/types`): `held` per type and in the
+  totals, places held for confirmed requests; `offered` is now the waiting
+  list's offers only (it counted the holds too, which the club's waiting
+  list never showed). Both hold their places.
+- Finance (`GET /events/{id}/finance`, `GET /clubs/finance`): per event and
+  in the figures, `expected_from_holds` and `expected_from_holds_count`:
+  confirmed paid requests inside their hold and not claimed yet. A claimed
+  hold has an unpaid registration, which is `outstanding` already; it is
+  never in both.
+- Event delete: allowed with requests (they are not registrations); see §3,
+  Lifecycle. The delete confirmation reads `requests_pending` from the
+  events list row (club) or the summary (admin).
+- MCP `event_stats`: `requires_approval`, and `requests` (the counts by
+  status and `total`; null when the event never had any).
+
+### Public (website and app)
+
+- Event fields: `high_demand_label` (form field on `POST /events/create` and
+  `PUT /events/update/{id}`, omitted leaves it as it is; returned by both and
+  by `GET /events/info/{id}`, and copied when an event is duplicated).
+- `GET /events/info/{id}` and the app's lists (`EventListResponse`):
+  `high_demand`. `GET /discover/events/{ref}` (`event`), discover cards
+  (search, home, club pages, near you, `/search`): `requires_approval`,
+  `high_demand`.
+- Public `seats_left` and `status: "full"` (the event page and every card)
+  come from the places calculation: holds count, and a paid event's cap
+  counts paid tickets (an unpaid registration made it read "full" before).
+  `registration_open` on the event page follows them. The cards' places are
+  two statements for the whole page (its types, its open waiting-list
+  entries; `ticketing.places.places_many`).
+- Ticketing: on a confirm-each event `waitlist.enabled: false`,
+  `types[].waitlist: false`, and `POST /events/{id}/waitlist` is 409
+  `WAITLIST_OFF_ON_APPROVAL_EVENTS`.
+
+### Email
+
+`request_unanswered` (club-branded, in the email library's `automatic` list
+with the other request emails): "Your request for {event}" — "{Club} wasn't
+able to confirm your place for {event}. Your request is closed. Nothing was
+charged."
+
+### Contract changes
+
+1. `request_unanswered` goes to requests that were pending when closed, not
+   to confirmed paid holds closed with their event: those were answered
+   (and "wasn't able to confirm your place" would not be true).
+2. `offered` in the sales and ticket-types lists no longer includes the
+   holds, now that `held` reports them (the contract's "separate from
+   waiting-list offered").
+3. Additions beyond the contract, all optional to read: `high_demand_label`
+   on list rows and the event info; `requests_pending`/`requires_approval` on
+   the events figures and the dashboard's `live[]`; `places` on the summary
+   always (not only on confirm-each events); `expected_from_holds_count`;
+   `closed_reason` on the guest's view.
+

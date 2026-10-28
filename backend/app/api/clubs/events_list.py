@@ -102,7 +102,8 @@ async def list_events(session, club_id: int, *, scope: str = "all", sort: Option
     # Registration requests waiting for the club (app/api/approvals).
     from app.api.approvals import service as approvals
 
-    waiting = await approvals.pending_counts(session, [e.id for e, *_ in rows])
+    # One grouped statement for the page, never a subquery a row.
+    asked = await approvals.totals(session, [e.id for e, *_ in rows])
     at = datetime.now(timezone.utc)
     items = []
     for event, regs, attended_n, checked_n in rows:
@@ -110,7 +111,10 @@ async def list_events(session, club_id: int, *, scope: str = "all", sort: Option
         items.append(
             jsonable_encoder(event)
             | {
-                "requests_pending": waiting.get(event.id, 0),
+                "requires_approval": bool(event.requires_approval),
+                "high_demand_label": bool(event.high_demand_label),
+                "requests_pending": asked.get(event.id, {}).get("pending", 0),
+                "requests_total": asked.get(event.id, {}).get("total", 0),
                 "registration_count": regs, "attended_count": attended_n, "checked_in": checked_n,
                 "status": event.status, "max_participants": event.max_participants,
                 "collected": float(m["tickets"] + m["merch"]), "outstanding": float(m["outstanding"]),
@@ -136,11 +140,16 @@ async def figures(session, club_id: int) -> dict:
     stale_drafts = [e for e, *_ in rows if e.lifecycle is EventStatus.draft and e.event_datetime <= now + timedelta(days=7)]
     from app.api.approvals import service as approvals
 
-    waiting = await approvals.pending_counts(session, [e.id for e, *_ in rows])
+    asked = await approvals.totals(session, [e.id for e, *_ in rows])
+    waiting = {e: t["pending"] for e, t in asked.items() if t["pending"]}
     return {
         "upcoming": len(upcoming),
         "next_event": {"id": next_event.id, "name": next_event.name, "starts_at": next_event.event_datetime} if next_event else None,
         "registered": sum(r for _, r in upcoming),
+        # Registration requests on the events to come (app/api/approvals).
+        "requires_approval": any(e.requires_approval for e, _ in upcoming),
+        "requests_pending": sum(asked.get(e.id, {}).get("pending", 0) for e, _ in upcoming),
+        "requests_total": sum(asked.get(e.id, {}).get("total", 0) for e, _ in upcoming),
         "capacity": sum(e.max_participants for e, _ in upcoming if e.max_participants) or None,
         "collected": float(sum((money[e.id]["tickets"] + money[e.id]["merch"] for e, _ in upcoming), 0)),
         "outstanding": float(sum((money[e.id]["outstanding"] for e, _ in upcoming), 0)),

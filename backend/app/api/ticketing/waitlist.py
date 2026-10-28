@@ -81,8 +81,26 @@ async def settings_for(session, event_id: int) -> Optional[WaitlistSettings]:
     return await session.get(WaitlistSettings, event_id)
 
 
+#: Joining the line of an event whose club confirms each registration
+#: (app/api/approvals): there is none. New people ask instead, and wait in the
+#: club's queue.
+OFF_ON_APPROVAL = "WAITLIST_OFF_ON_APPROVAL_EVENTS"
+
+
+def off_on_approval() -> CustomHTTPException:
+    return CustomHTTPException(
+        409, message="This event has no waiting list: the organisers confirm each place. Ask for a place instead.",
+        error_code=OFF_ON_APPROVAL,
+    )
+
+
 async def enabled(session, event) -> bool:
-    """The club turned the event's list on, and its plan has the feature."""
+    """The club turned the event's list on, and its plan has the feature.
+    Never on an event whose club confirms each registration: the request
+    queue is the only line there (docs/APPROVALS.md §7). Its setting is kept,
+    and counts again if the club turns confirming off."""
+    if getattr(event, "requires_approval", False):
+        return False
     row = await settings_for(session, event.id)
     if row is None or not row.enabled:
         return False
@@ -173,6 +191,8 @@ async def join(
     user=None, whatsapp_opt_in: bool = False,
 ) -> tuple[WaitlistEntries, bool]:
     """Their place in line, and whether it is new (joining twice is the one place)."""
+    if getattr(event, "requires_approval", False):
+        raise off_on_approval()
     email = (email or "").strip() or None
     phone = (phone or "").strip() or None
     if user is not None and user.email and not email:
@@ -341,11 +361,14 @@ async def fill(session, event_id: int, *, now: Optional[datetime] = None) -> lis
 
             await approvals.close_holds(
                 session, holds, cancelled=getattr(event.lifecycle, "value", event.lifecycle) == "cancelled",
-                event_id=event.id, now=now,
+                event_id=event.id, now=now, deleted=bool(event.is_deleted),
             )
         await session.commit()
         return []
-    if not registration_open(event, now):
+    if not registration_open(event, now) or getattr(event, "requires_approval", False):
+        # (An event whose club confirms each place has no waiting list: the
+        # people left in its line from before are offered nothing. They stay,
+        # and are offered places again if the club turns confirming off.)
         await session.commit()
         return []
     await _locked_types(session, event.id)
@@ -390,6 +413,12 @@ async def offer_now(session, event, entry: WaitlistEntries) -> WaitlistEntries:
     if entry.status not in (WAITING, EXPIRED, OFFERED):
         raise CustomHTTPException(409, message="This person is no longer waiting.", error_code="WAITLIST_ENTRY_CLOSED")
     now = _now()
+    standing = entry.status == OFFERED and entry.offer_expires_at is not None and entry.offer_expires_at > now
+    if getattr(event, "requires_approval", False) and not standing:
+        # No new offers from the line of an event whose club confirms each
+        # place (an offer standing from before may be sent again): confirming
+        # their request is how someone gets a place there.
+        raise off_on_approval()
     event = await types_mod.lock_event(session, event.id)
     await _locked_types(session, event.id)
     entry = await session.scalar(

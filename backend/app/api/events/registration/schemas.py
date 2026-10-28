@@ -206,6 +206,12 @@ class EventAnalyticsResponse(CustomBaseModel):
     total_institutions: int = 0  # distinct institutions, not capped at the top 5
     registration_time: RegistrationTimeDistribution
     attendance_over_time: list[dict[str, Any]]  # [{"time": "10:00 AM", "count": 5}, ...]
+    #: Registration requests (docs/APPROVALS.md): everyone who asked, that
+    #: per page view (null without views), and a count a day by when they
+    #: asked ([{"date": "2026-10-28", "count": 4}], IST days).
+    requests_total: int = 0
+    requests_per_view: Optional[float] = None
+    requests_by_day: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class SetRoleRequest(CustomBaseModel):

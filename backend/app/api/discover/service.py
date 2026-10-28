@@ -507,18 +507,30 @@ async def going_counts(session, ids: list[int]) -> dict[int, int]:
     return {k: int(v) for k, v in rows.all() if v}
 
 
-async def card_extras(session, ids: list[int]) -> tuple[dict[int, int], dict[int, list[dict]]]:
-    """What a page of cards needs beside their rows, in one statement: how
-    many are going to each (the counter, read as going_counts reads it) and
-    each event's topics (its interests' topics, in topic order). An event's
-    row comes back once per interest it picked: a few at most."""
+_NOT_COUNTED = object()
+
+
+async def card_extras(session, ids: list[int]) -> tuple[dict[int, int], dict[int, list[dict]], dict[int, Optional[int]]]:
+    """What a page of cards needs beside their rows: how many are going to
+    each (the counter, read as going_counts reads it), each event's topics
+    (its interests' topics, in topic order), and the places left as the
+    ticket picker counts them (ticketing.places: holds count, a paid
+    event's cap counts paid tickets; None: no cap), for `status: full`.
+    The events with their interests in one statement (an event's row comes
+    back once per interest it picked: a few at most), and, when the page has
+    events not started yet (only they can be full), their ticket types and
+    open waiting-list entries in two more, whatever the page's size."""
+    from types import SimpleNamespace
+
+    from app.api.ticketing import places as ticket_places
+
     if not ids:
-        return {}, {}
+        return {}, {}, {}
     link = EventInterestsLink
     rows = await session.execute(
         select(
-            Events.id, Events.going_count,
-            InterestCategory.id, InterestCategory.slug, InterestCategory.name, InterestCategory.color, InterestCategory.sort_order,
+            Events.id, Events.going_count, Events.paid_count, Events.has_fee, Events.max_participants, Events.requires_approval,
+            Events.event_datetime, InterestCategory.id, InterestCategory.slug, InterestCategory.name, InterestCategory.color, InterestCategory.sort_order,
         )
         .select_from(Events)
         .outerjoin(link, and_(link.event_id == Events.id, link.is_deleted == False))  # noqa: E712
@@ -528,12 +540,20 @@ async def card_extras(session, ids: list[int]) -> tuple[dict[int, int], dict[int
     )
     going: dict[int, int] = {}
     topics: dict[int, dict[int, tuple]] = {}
-    for event_id, count, *topic in rows.all():
+    shells: dict[int, SimpleNamespace] = {}
+    now = now_utc()
+    for event_id, count, paid, has_fee, cap, approval, starts, *topic in rows.all():
         if count:
             going[event_id] = int(count)
+        if _aware(starts) > now:
+            shells.setdefault(event_id, SimpleNamespace(
+                id=event_id, going_count=count, paid_count=paid, has_fee=has_fee, max_participants=cap, requires_approval=approval,
+            ))
         if topic[0] is not None:
             topics.setdefault(event_id, {}).setdefault(topic[0], tuple(topic))
-    return going, {k: _topic_list(v.values()) for k, v in topics.items()}
+    room = await ticket_places.places_many(session, list(shells.values()))
+    left = {event_id: p.left for event_id, p in room.items()}
+    return going, {k: _topic_list(v.values()) for k, v in topics.items()}, left
 
 
 def _topic_list(rows) -> list[dict]:
@@ -562,13 +582,17 @@ def _within(here, radius_km: float):
     return and_(_in_person_point(), cells.near_sql(here, radius_km, Events.geocell, Events.lat, Events.lng))
 
 
-def status_of(e: Events, now: datetime, going: int) -> str:
+def status_of(e: Events, now: datetime, going: int, left=_NOT_COUNTED) -> str:
+    """`left`: the places left as the ticket picker counts them (card_extras,
+    ticketing.places.summary; None: no cap). Without it, the going count
+    against the event's cap, as before."""
     start, end = _aware(e.event_datetime), _ends_at(e)
     if end < now:
         return "ended"
     if start <= now:
         return "live"
-    if e.max_participants and going >= e.max_participants:
+    full = (left is not None and left <= 0) if left is not _NOT_COUNTED else bool(e.max_participants and going >= e.max_participants)
+    if full:
         return "full"
     reg_end = _aware(e.reg_enddate)
     if reg_end is not None and now <= reg_end <= now + timedelta(hours=48):
@@ -576,8 +600,8 @@ def status_of(e: Events, now: datetime, going: int) -> str:
     return "upcoming"
 
 
-def card(e: Events, now: datetime, going: int, distance: Optional[float] = None, topics: Optional[list] = None) -> dict:
-    """`going` and `topics` as card_extras reads them for the whole page."""
+def card(e: Events, now: datetime, going: int, distance: Optional[float] = None, topics: Optional[list] = None, left=_NOT_COUNTED) -> dict:
+    """`going`, `topics` and `left` as card_extras reads them for the whole page."""
     club = e.club
     cat = e.category
     return dict(
@@ -598,7 +622,10 @@ def card(e: Events, now: datetime, going: int, distance: Optional[float] = None,
         club=dict(id=club.id, name=club.name, slug=club.slug, logo=_img(club.logo, "thumbnail", "medium", "original")) if club is not None else None,
         going=going,
         capacity=e.max_participants,
-        status=status_of(e, now, going),
+        status=status_of(e, now, going, left),
+        # The club confirms each place, and shows "High demand" (never a number).
+        requires_approval=bool(e.requires_approval),
+        high_demand=bool(e.high_demand_label),
         url=public_urls.event_url(e.slug),
         summary=summary_of(e.about),
         # No publish time is kept; when the event was made stands in for it (sort=newest).
@@ -622,8 +649,8 @@ def _placed(cards_: list[dict], here) -> list[dict]:
 
 async def cards(session, rows: list[Events], now: datetime, here=None, extras: Optional[tuple] = None) -> list[dict]:
     """`extras`: card_extras for these rows (or more), when the caller has it."""
-    going, topics = extras if extras is not None else await card_extras(session, [e.id for e in rows])
-    return [card(e, now, going.get(e.id, 0), _event_km(e, here), topics.get(e.id)) for e in rows]
+    going, topics, left = extras if extras is not None else await card_extras(session, [e.id for e in rows])
+    return [card(e, now, going.get(e.id, 0), _event_km(e, here), topics.get(e.id), left.get(e.id)) for e in rows]
 
 
 async def category_counts(session, now: datetime, since: Optional[datetime] = None) -> dict[int, int]:
@@ -851,10 +878,10 @@ async def search_events(
             if len(page) > limit:
                 page = page[:limit]
                 next_cursor = cursors.encode(f"events:{sort}", keyed[limit - 1])
-    going, topics = await card_extras(session, [e.id for e in page])
+    going, topics, left = await card_extras(session, [e.id for e in page])
     cats = [dict(id=c["id"], name=c["name"], upcoming=c["upcoming"]) for c in await categories(session, now, only_upcoming=True, since=since)]
     return dict(
-        items=[card(e, now, going.get(e.id, 0), _event_km(e, here), topics.get(e.id)) for e in page],
+        items=[card(e, now, going.get(e.id, 0), _event_km(e, here), topics.get(e.id), left.get(e.id)) for e in page],
         total=total, total_capped=capped, offset=offset, limit=limit, where=where, categories=cats,
         topics=await topic_refs.facet(session, now), next_cursor=next_cursor,
     )
@@ -1384,8 +1411,14 @@ async def event_page(session, ref: str, now: Optional[datetime] = None) -> dict:
             ))
     if e is None:
         raise CustomHTTPException(404, message="Event not found")
+    from app.api.ticketing import places as ticket_places
+
     club, cat = e.club, e.category
     going = (await going_counts(session, [e.id])).get(e.id, 0)
+    # What is left as the ticket picker counts it: holds count, and a paid
+    # event's cap counts its paid tickets (pending requests hold nothing).
+    left = (await ticket_places.summary(session, e)).left
+    full = left is not None and left <= 0
     poster = _img(e.poster, "original", "large", "medium", "thumbnail")
     # An online event has no venue to show; a link left in the map field may well be the meeting itself.
     venue = (None, None, None) if e.is_online else (e.location_link, e.lat, e.lng)
@@ -1400,10 +1433,12 @@ async def event_page(session, ref: str, now: Optional[datetime] = None) -> dict:
         has_fee=bool(e.has_fee), fee=float(e.reg_fee) if e.has_fee and e.reg_fee is not None else None,
         has_prize=bool(e.has_prize), prize_amount=float(e.prize_amount) if e.has_prize and e.prize_amount is not None else None,
         capacity=e.max_participants, going=going,
-        seats_left=max(e.max_participants - going, 0) if e.max_participants else None,
+        seats_left=left,
         reg_opens_at=_iso(e.reg_startdate), reg_closes_at=_iso(e.reg_enddate),
-        status=status_of(e, now, going), registration_open=registration_open(e, going, now),
+        status=status_of(e, now, going, left), registration_open=registration_open(e, 0, now) and not full,
         requires_approval=bool(e.requires_approval),
+        # The club's "High demand" label (never a number).
+        high_demand=bool(e.high_demand_label),
         category=dict(id=cat.id, name=cat.name) if cat is not None else None,
         interests=interest_names,
         topics=topics,
@@ -1635,7 +1670,7 @@ async def _home_shared(session, now: datetime, since: datetime) -> dict:
     this_week = await _page(session, visible + [Events.event_datetime < now + timedelta(days=7)], by_date, 0, HOME_LIST)
     online = await _page(session, visible + [Events.is_online == True], by_date, 0, HOME_LIST)  # noqa: E712
     popular = await _page(session, visible, [(_popularity(), True), *by_date], 0, HOME_LIST)
-    going, topics = await card_extras(session, list({e.id for e in this_week + online + popular}))
+    going, topics, left = await card_extras(session, list({e.id for e in this_week + online + popular}))
 
     top_clubs = list((await session.scalars(select(Clubs).where(*_club_visible()).order_by(*_popular_clubs_order()).limit(HOME_CLUBS))).all())
 
@@ -1643,7 +1678,7 @@ async def _home_shared(session, now: datetime, since: datetime) -> dict:
     by_id = await threads._clubs_by_id(session, {t.club_id for t in posts})
 
     def out(es):
-        return [card(e, now, going.get(e.id, 0), None, topics.get(e.id)) for e in es]
+        return [card(e, now, going.get(e.id, 0), None, topics.get(e.id), left.get(e.id)) for e in es]
 
     # Every event has a category: the per-category counts add up to every
     # event on or to come, so the front page's number needs no count of its own.
@@ -1761,9 +1796,9 @@ async def _near(session, now: datetime, pool: dict, here: tuple[float, float]) -
     missing = [i for i in picked if i not in pool["cards"]]
     if missing:
         rows = await _rows(session, _event_select().where(Events.id.in_(missing)))
-        going, topics = await card_extras(session, missing)
+        going, topics, left = await card_extras(session, missing)
         for e in rows:
-            pool["cards"][e.id] = card(e, now, going.get(e.id, 0), None, topics.get(e.id))
+            pool["cards"][e.id] = card(e, now, going.get(e.id, 0), None, topics.get(e.id), left.get(e.id))
     return _placed([pool["cards"][i] for i in picked if i in pool["cards"]], here)
 
 

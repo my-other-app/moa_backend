@@ -44,10 +44,27 @@ def _now() -> datetime:
 @dataclass
 class Line:
     """One type's open waiting-list entries: offers still standing, and the
-    people still waiting."""
+    people still waiting. `held`: those of the offers that are a club's
+    confirmations of registration requests (app/api/approvals), counted in
+    `offered` too -- every standing offer holds its place."""
 
     offered: int = 0
     waiting: int = 0
+    held: int = 0
+
+
+def _open_entries(now: datetime):
+    W = WaitlistEntries
+    return or_(W.status == WAITING, and_(W.status == OFFERED, W.offer_expires_at > now))
+
+
+def _add(line: Line, status: str, via_request: bool, n: int) -> None:
+    if status == OFFERED:
+        line.offered += n
+        if via_request:
+            line.held += n
+    else:
+        line.waiting += n
 
 
 async def lines(session, event_id: int, *, exclude=None, now: Optional[datetime] = None) -> dict[int, Line]:
@@ -57,19 +74,32 @@ async def lines(session, event_id: int, *, exclude=None, now: Optional[datetime]
     now = now or _now()
     W = WaitlistEntries
     stmt = (
-        select(W.ticket_type_id, W.status, func.count())
-        .where(
-            W.event_id == event_id,
-            or_(W.status == WAITING, and_(W.status == OFFERED, W.offer_expires_at > now)),
-        )
-        .group_by(W.ticket_type_id, W.status)
+        select(W.ticket_type_id, W.status, W.via_request, func.count())
+        .where(W.event_id == event_id, _open_entries(now))
+        .group_by(W.ticket_type_id, W.status, W.via_request)
     )
     if exclude is not None:
         stmt = stmt.where(W.id != exclude)
     out: dict[int, Line] = {}
-    for type_id, status, n in (await session.execute(stmt)).all():
-        line = out.setdefault(type_id, Line())
-        setattr(line, status, int(n))
+    for type_id, status, via, n in (await session.execute(stmt)).all():
+        _add(out.setdefault(type_id, Line()), status, bool(via), int(n))
+    return out
+
+
+async def lines_many(session, event_ids: list[int], *, now: Optional[datetime] = None) -> dict[int, dict[int, Line]]:
+    """`lines` for many events in one grouped statement (ix_waitlist_line)."""
+    if not event_ids:
+        return {}
+    now = now or _now()
+    W = WaitlistEntries
+    rows = (await session.execute(
+        select(W.event_id, W.ticket_type_id, W.status, W.via_request, func.count())
+        .where(W.event_id.in_(list(event_ids)), _open_entries(now))
+        .group_by(W.event_id, W.ticket_type_id, W.status, W.via_request)
+    )).all()
+    out: dict[int, dict[int, Line]] = {}
+    for event_id, type_id, status, via, n in rows:
+        _add(out.setdefault(event_id, {}).setdefault(type_id, Line()), status, bool(via), int(n))
     return out
 
 
@@ -122,18 +152,25 @@ def _left(cap: Optional[int], used: int) -> Optional[int]:
 
 def compute(event, types: list, lines_: dict[int, Line], *, count: Optional[int] = None) -> Room:
     """The places left, from the event (its cap and count, or `count` read
-    under its row), its types (their caps and counts) and its waiting lists."""
+    under its row), its types (their caps and counts) and its waiting lists.
+
+    An event whose club confirms each registration has no waiting list
+    (waitlist.enabled): the people left waiting from before the switch are
+    offered nothing, so they hold no place ahead of anyone. Its standing
+    offers -- the holds of paid confirmations among them -- still do."""
     room = Room()
     reserved_event = 0
+    line_off = bool(getattr(event, "requires_approval", False))
     for t in types:
         line = lines_.get(t.id, Line())
+        waiting = 0 if line_off else line.waiting
         cap = types_mod.capacity_of(event, t, types)
         free = _left(cap, int(t.taken_count or 0) + line.offered)
         room.free[t.id] = free
-        room.public[t.id] = None if free is None else free - line.waiting
+        room.public[t.id] = None if free is None else free - waiting
         # Those waiting whom this type's own room could serve come first for
         # the event's places too.
-        servable = line.waiting if free is None else max(0, min(line.waiting, free))
+        servable = waiting if free is None else max(0, min(waiting, free))
         reserved_event += line.offered + servable
     for type_id, line in lines_.items():
         if type_id not in room.free:
@@ -162,6 +199,67 @@ async def room_now(session, event, types: Optional[list] = None) -> Room:
     """What is left right now, for a page to show (no lock)."""
     types = await fresh(session, event)
     return compute(event, types, await lines(session, event.id))
+
+
+@dataclass
+class Places:
+    """The event's places as one figure, the ticket picker's own sums:
+    `capacity` (None: no cap), `taken` (what the cap counts: paid tickets on
+    a paid event, every registration on a free one), `held` (standing offers:
+    confirmed requests' holds and waiting-list offers) and `left` (what
+    someone new could have now, never below 0; None: no cap). Pending
+    registration requests hold nothing, so they are in none of them."""
+
+    capacity: Optional[int]
+    taken: int
+    held: int
+    left: Optional[int]
+
+    def as_dict(self) -> dict:
+        return {"capacity": self.capacity, "taken": self.taken, "held": self.held, "left": self.left}
+
+
+def places_of(event, types: list, lines_: dict[int, Line], room: Optional[Room] = None) -> Places:
+    """The event's total when it has one (the picker's `available`); with no
+    total but a cap on every type, the types' together; else no cap."""
+    room = room or compute(event, types, lines_)
+    held = sum(line.offered for line in lines_.values())
+    cap = event_cap(event)
+    if cap is not None:
+        return Places(capacity=cap, taken=event_count(event), held=held, left=max(0, room.event_public))
+    caps = [types_mod.capacity_of(event, t, types) for t in types]
+    if types and all(c is not None for c in caps):
+        return Places(
+            capacity=sum(caps), taken=sum(int(t.taken_count or 0) for t in types), held=held,
+            left=sum(max(0, room.public.get(t.id) or 0) for t in types),
+        )
+    return Places(capacity=None, taken=event_count(event), held=held, left=None)
+
+
+async def summary(session, event) -> Places:
+    """The event's places now, as the ticket picker counts them (no lock)."""
+    types = await fresh(session, event)
+    lines_ = await lines(session, event.id)
+    return places_of(event, types, lines_)
+
+
+async def places_many(session, events: list, *, now: Optional[datetime] = None) -> dict[int, Places]:
+    """`summary` for a page of events in two statements, whatever their
+    number: their live types (ix_ticket_types_event) and their open
+    waiting-list entries (ix_waitlist_line). The events' own counts are the
+    rows as the caller read them."""
+    ids = [e.id for e in events]
+    if not ids:
+        return {}
+    rows = (await session.scalars(
+        select(TicketTypes).where(TicketTypes.event_id.in_(ids), TicketTypes.is_deleted == False)  # noqa: E712
+        .order_by(TicketTypes.event_id, TicketTypes.sort_order, TicketTypes.id)
+    )).all()
+    types: dict[int, list] = {}
+    for t in rows:
+        types.setdefault(t.event_id, []).append(t)
+    lines_ = await lines_many(session, ids, now=now)
+    return {e.id: places_of(e, types.get(e.id, []), lines_.get(e.id, {})) for e in events}
 
 
 def full(*, waitlist: bool, max_participants=None) -> CustomHTTPException:

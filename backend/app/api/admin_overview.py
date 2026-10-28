@@ -536,6 +536,12 @@ async def get_overview(
         return data
 
 
+async def _requests(session: AsyncSession) -> dict:
+    from app.api.approvals import service as approvals
+
+    return await approvals.platform_figures(session)
+
+
 async def _work_out(session: AsyncSession, days: int, top_by: str) -> dict:
     estimated: list[str] = []
     totals = await _totals(session, estimated)
@@ -555,6 +561,9 @@ async def _work_out(session: AsyncSession, days: int, top_by: str) -> dict:
         "funnel": await _funnel(session, totals, averages),
         "top_clubs": await _top_clubs(session, top_by),
         "money": await _money(session, days),
+        # Registration requests on the platform (app/api/approvals): received,
+        # waiting now, and the average hours to a decision over 30 days.
+        "requests": await _requests(session),
         # The daily series and its previous-window comparison, folded in rather
         # than left as a second call: the KPI cards double as the chart's
         # series selector, so the figure and the line have to come from one

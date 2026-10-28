@@ -52,6 +52,20 @@ async def list_requests(
     return await service.club_list(session, event, status=None if status == "all" else status, q=q, after=after, limit=limit)
 
 
+@router.get("/events/registration/{event_id}/requests/export", summary="Every registration request of the event, as CSV")
+async def export_requests(session: SessionDep, user: ClubAuth, event_id: int) -> Response:
+    """Every request, whatever its status: the person, the ticket type and
+    code, the answers, when asked and decided and by whom, the decline note,
+    and the payment's state. Whoever may read the queue may export it."""
+    event = await deliveries.event_for_club(session, user, event_id)
+    body = await service.export_csv(session, event)
+    name = f"{event.slug or event.id}-requests.csv"
+    return Response(
+        content=body, media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": NO_STORE},
+    )
+
+
 @router.post("/events/registration/{event_id}/requests/approve", summary="Confirm registration requests")
 async def approve_requests(request: Request, session: SessionDep, user: ClubAuth, event_id: int, body: ApproveIn) -> ApproveOut:
     """In queue order, never past the event's or a ticket type's places: the

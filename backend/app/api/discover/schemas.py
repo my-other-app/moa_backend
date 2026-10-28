@@ -47,7 +47,12 @@ class EventCard(BaseModel):
     club: Optional[EventClub] = None
     going: int
     capacity: Optional[int] = None
+    #: "full": nothing left as the ticket picker counts it (holds count).
     status: Literal["upcoming", "closing_soon", "full", "live", "ended"]
+    #: The club confirms each place (docs/APPROVALS.md), and its "High
+    #: demand" label is on: a chip, never a number.
+    requires_approval: bool = False
+    high_demand: bool = False
     url: str
     # The description as one line of plain text, at most 200 characters (cut
     # at a word, with an ellipsis): enough for a feed without the event page.
@@ -249,6 +254,8 @@ class PageEvent(BaseModel):
     prize_amount: Optional[float] = None
     capacity: Optional[int] = None
     going: int
+    #: What is left as the ticket picker counts it (holds count; a paid
+    #: event's cap counts paid tickets). Null: no cap.
     seats_left: Optional[int] = None
     reg_opens_at: Optional[str] = None
     reg_closes_at: Optional[str] = None
@@ -257,6 +264,8 @@ class PageEvent(BaseModel):
     registration_open: bool
     #: The club confirms each registration: the form makes a request (docs/APPROVALS.md).
     requires_approval: bool = False
+    #: The club's "High demand" label is on: a chip, never a number.
+    high_demand: bool = False
     cancellation: Optional[dict] = None
     category: Optional[CategoryRef] = None
     interests: list[str]

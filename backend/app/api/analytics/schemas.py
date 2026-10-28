@@ -3,6 +3,8 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from app.api.approvals.schemas import PlacesFigures, RequestStats
+
 
 # --- the shape of the door -------------------------------------------------
 
@@ -136,6 +138,11 @@ class EventSummary(BaseModel):
     tickets: TicketFigures
     #: Registration requests waiting for the club (docs/APPROVALS.md).
     requests_pending: int = 0
+    #: Every request's figure for the funnel; null for an event that never
+    #: confirmed each place and has no requests (docs/APPROVALS.md §7).
+    requests: Optional[RequestStats] = None
+    #: The places as the ticket picker counts them.
+    places: Optional[PlacesFigures] = None
     retention: RetentionFigures
     analytics: EventFigures
     from_report: bool
@@ -180,6 +187,10 @@ class LiveEvent(BaseModel):
     volunteers: int
     door_open: bool
     starts_at: str
+    #: Confirm each registration, and the requests beside `registered`.
+    requires_approval: bool = False
+    requests_total: int = 0
+    requests_pending: int = 0
 
 
 class ClubDashboard(BaseModel):

@@ -281,7 +281,7 @@ async def get_club_overview(session, club: Clubs, days: int = 30) -> dict:
     # Registration requests waiting for the club, per event (app/api/approvals).
     from app.api.approvals import service as approvals
 
-    pending_requests = await approvals.pending_counts(session, [e.id for e in events])
+    asked = await approvals.totals(session, [e.id for e in events])
 
     def shape(event) -> dict:
         registered, attended = per_event_counts.get(event.id, (0, 0))
@@ -303,7 +303,9 @@ async def get_club_overview(session, club: Clubs, days: int = 30) -> dict:
                 round((attended / registered) * 100, 1) if registered else None
             ),
             "requires_approval": bool(getattr(event, "requires_approval", False)),
-            "requests_pending": pending_requests.get(event.id, 0),
+            "requests_pending": asked.get(event.id, {}).get("pending", 0),
+            # Everyone who asked, beside `registrations` ("Asked").
+            "requests_total": asked.get(event.id, {}).get("total", 0),
         }
 
     upcoming_events = sorted(

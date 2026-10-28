@@ -242,11 +242,11 @@ async def discover_events(
         conds.append(discover._within(here, radius_km))
     rows = {e.id: e for e in await discover._rows(session, discover._event_select().where(Events.id.in_(ids), *conds))} if ids else {}
     page = [rows[i] for i in ids if i in rows]
-    going, topics = await discover.card_extras(session, [e.id for e in page])
+    going, topics, left = await discover.card_extras(session, [e.id for e in page])
     cats = [dict(id=c["id"], name=c["name"], upcoming=c["upcoming"]) for c in await discover.categories(session, now, only_upcoming=True, since=since)]
     capped = hits > discover.COUNT_CAP
     return dict(
-        items=[discover.card(e, now, going.get(e.id, 0), discover._event_km(e, here), topics.get(e.id)) for e in page],
+        items=[discover.card(e, now, going.get(e.id, 0), discover._event_km(e, here), topics.get(e.id), left.get(e.id)) for e in page],
         total=discover.COUNT_CAP if capped else hits, total_capped=capped, offset=offset, limit=limit, where=where,
         categories=cats, topics=await topic_refs.facet(session, now),
         next_cursor=offset_cursor(kind, offset + limit) if more and offset + limit < MAX_HITS else None,

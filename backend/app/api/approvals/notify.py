@@ -67,6 +67,11 @@ LIBRARY = [
         "subject": "Your place at {{event_name}} was released",
         "when": "When a confirmed paid ticket isn't paid in time and its place goes back.",
     },
+    {
+        "key": "request_unanswered", "name": "Not confirmed in time",
+        "subject": "Your request for {{event_name}}",
+        "when": "When the event ends, or is deleted, while someone's request is still waiting for you: once to each.",
+    },
 ]
 
 FOOTER = (
@@ -154,6 +159,12 @@ def _design(kind: str, req, event, *, entry=None, note: Optional[str] = None, re
             _heading("Your place was released."),
             _paragraph("Your place at **{{event_name}}** was released because payment didn't arrive in time."),
             _paragraph(f"If you'd still like to go, [ask again from the event's page]({public_urls.event_url(event.slug)}).", **QUIET),
+        ]
+    if kind == service.UNANSWERED:
+        return "Your request for {{event_name}}", [
+            _heading("Sorry, {{first_name}}."),
+            _paragraph("{{org_name}} wasn't able to confirm your place for **{{event_name}}**."),
+            _paragraph("Your request is closed. Nothing was charged. Thank you for your interest.", **QUIET),
         ]
     if kind == service.CANCELLED:
         blocks = [
@@ -301,6 +312,11 @@ async def tell(session, request_id, kind: str, stamp: str) -> None:
         )
     elif kind == service.LAPSED_NOTE:
         if req.status != LAPSED:
+            return
+        await _email(session, event, req, kind, key, values)
+    elif kind == service.UNANSWERED:
+        # Still closed for that reason (never for one closed another way since).
+        if req.status != CLOSED or req.closed_reason not in service.UNANSWERED_REASONS:
             return
         await _email(session, event, req, kind, key, values)
     elif kind == service.CANCELLED:

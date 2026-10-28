@@ -497,6 +497,10 @@ class ClubEventsFigures(BaseModel):
     upcoming: int
     next_event: Optional[dict] = None
     registered: int
+    #: Registration requests on the events to come (docs/APPROVALS.md).
+    requires_approval: bool = False
+    requests_pending: int = 0
+    requests_total: int = 0
     capacity: Optional[int] = None
     collected: float
     outstanding: float
