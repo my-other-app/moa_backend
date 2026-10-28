@@ -58,7 +58,7 @@ from zoneinfo import ZoneInfo
 
 import orjson
 
-from sqlalchemy import ARRAY, DateTime, Integer, and_, bindparam, case, cast, column, exists, func, literal_column, or_, select, text, true, union
+from sqlalchemy import ARRAY, DateTime, Integer, and_, bindparam, case, cast, column, exists, func, literal_column, or_, select, text, true, union, union_all
 from sqlalchemy.orm import aliased, contains_eager, selectinload
 
 from app.api.agenda import service as agenda
@@ -542,10 +542,23 @@ async def card_extras(session, ids: list[int]) -> tuple[dict[int, int], dict[int
     if not ids:
         return CardExtras({}, {}, {})
     link = EventInterestsLink
+    from sqlalchemy.dialects.postgresql import aggregate_order_by
+
+    from app.api.cohosts.models import ACCEPTED, EventCohosts
+
+    # Each event's co-hosts' club ids, in the order they accepted, in the same
+    # statement (app/api/cohosts); their names are read only when there are any.
+    cohost_ids = (
+        select(func.array_agg(aggregate_order_by(EventCohosts.club_id, EventCohosts.responded_at)))
+        .where(EventCohosts.event_id == Events.id, EventCohosts.status == ACCEPTED)
+        .correlate(Events)
+        .scalar_subquery()
+    )
     rows = await session.execute(
         select(
             Events.id, Events.going_count, Events.paid_count, Events.has_fee, Events.max_participants, Events.requires_approval,
-            Events.event_datetime, InterestCategory.id, InterestCategory.slug, InterestCategory.name, InterestCategory.color, InterestCategory.sort_order,
+            Events.event_datetime, cohost_ids,
+            InterestCategory.id, InterestCategory.slug, InterestCategory.name, InterestCategory.color, InterestCategory.sort_order,
         )
         .select_from(Events)
         .outerjoin(link, and_(link.event_id == Events.id, link.is_deleted == False))  # noqa: E712
@@ -557,7 +570,10 @@ async def card_extras(session, ids: list[int]) -> tuple[dict[int, int], dict[int
     topics: dict[int, dict[int, tuple]] = {}
     shells: dict[int, SimpleNamespace] = {}
     now = now_utc()
-    for event_id, count, paid, has_fee, cap, approval, starts, *topic in rows.all():
+    shared_ids: dict[int, list[int]] = {}
+    for event_id, count, paid, has_fee, cap, approval, starts, club_ids, *topic in rows.all():
+        if club_ids:
+            shared_ids.setdefault(event_id, list(club_ids))
         if count:
             going[event_id] = int(count)
         if _aware(starts) > now:
@@ -568,7 +584,7 @@ async def card_extras(session, ids: list[int]) -> tuple[dict[int, int], dict[int
             topics.setdefault(event_id, {}).setdefault(topic[0], tuple(topic))
     room = await ticket_places.places_many(session, list(shells.values()))
     left = {event_id: p.left for event_id, p in room.items()}
-    shared = await cohost_access.refs(session, ids, logo="url")
+    shared = await cohost_access.refs_by_club_ids(session, shared_ids, logo="url") if shared_ids else {}
     return CardExtras(going, {k: _topic_list(v.values()) for k, v in topics.items()}, left, shared)
 
 
@@ -1083,26 +1099,24 @@ async def follower_counts(session, ids: list[int]) -> dict[int, int]:
 async def _upcoming_counts(session, ids: list[int], now: datetime, since: datetime) -> dict[int, int]:
     if not ids:
         return {}
-    rows = await session.execute(
-        select(Events.club_id, func.count(Events.id))
-        .join(Clubs, Clubs.id == Events.club_id)
-        .where(Events.club_id.in_(ids), *_visible_where(now, since))
-        .group_by(Events.club_id)
-    )
-    counts = {k: int(v) for k, v in rows.all()}
-    # And the events each co-hosts (app/api/cohosts): its page lists them too.
+    # The club's own events and those it co-hosts (app/api/cohosts): its page
+    # lists both. One statement: the two lists, counted together.
     from app.api.cohosts.models import ACCEPTED, EventCohosts
 
-    shared = await session.execute(
-        select(EventCohosts.club_id, func.count(Events.id))
+    hosted = (
+        select(Events.club_id.label("club_id"), Events.id.label("event_id"))
+        .join(Clubs, Clubs.id == Events.club_id)
+        .where(Events.club_id.in_(ids), *_visible_where(now, since))
+    )
+    cohosted = (
+        select(EventCohosts.club_id.label("club_id"), Events.id.label("event_id"))
         .join(Events, Events.id == EventCohosts.event_id)
         .join(Clubs, Clubs.id == Events.club_id)
         .where(EventCohosts.club_id.in_(ids), EventCohosts.status == ACCEPTED, *_visible_where(now, since))
-        .group_by(EventCohosts.club_id)
     )
-    for k, v in shared.all():
-        counts[k] = counts.get(k, 0) + int(v)
-    return counts
+    both = union_all(hosted, cohosted).subquery()
+    rows = await session.execute(select(both.c.club_id, func.count()).group_by(both.c.club_id))
+    return {k: int(v) for k, v in rows.all()}
 
 
 async def _club_interests(session, ids: list[int]) -> tuple[dict[int, list[str]], dict[int, list[dict]]]:

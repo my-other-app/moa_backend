@@ -169,6 +169,28 @@ async def refs(session, event_ids, *, logo: str = "sizes") -> dict[int, list[dic
     return out
 
 
+async def refs_by_club_ids(session, by_event: dict, *, logo: str = "sizes") -> dict[int, list[dict]]:
+    """`refs`, for events whose co-hosts' club ids are already known (in
+    order): one statement for the clubs."""
+    from app.api.clubs.models import Clubs
+
+    wanted = {int(c) for ids in by_event.values() for c in ids}
+    if not wanted:
+        return {}
+    clubs = {
+        c.id: c for c in await session.scalars(
+            select(Clubs).where(Clubs.id.in_(wanted), Clubs.is_deleted == False, Clubs.is_verified == True)  # noqa: E712
+        )
+    }
+    return {
+        int(event_id): [
+            dict(club_id=c.id, name=c.name, slug=c.slug, logo=_logo(c.logo, logo))
+            for c in (clubs.get(int(i)) for i in ids) if c is not None
+        ]
+        for event_id, ids in by_event.items()
+    }
+
+
 async def attach(session, items: list, *, logo: str = "sizes") -> list:
     """Fill `cohosts` on a page of event dicts (each with an `id`), in one statement."""
     shared = await refs(session, [i.get("id") for i in items if isinstance(i, dict)], logo=logo)

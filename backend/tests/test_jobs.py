@@ -275,6 +275,8 @@ def test_the_platforms_jobs_have_the_priorities_and_limits_chosen(monkeypatch):
         # Sends to many. deliveries.send is HIGH for one guest's ticket or certificate (its caller says).
         "deliveries.send": (N, 2), "emails.send_message": (N, 2),
         "notifications.new_event": (N, 2), "notifications.interest": (N, 2), "notifications.push": (N, 2),
+        # A co-host's followers told about the event, and their push (app/api/cohosts).
+        "notifications.cohost_new_event": (N, 2), "notifications.cohost_push": (N, 2),
         "threads.tell_followers": (N, 2),
         # A club's broadcast from its own number: paced, so long; one slot at most on a runner.
         "club_whatsapp.broadcast": (N, 1),
