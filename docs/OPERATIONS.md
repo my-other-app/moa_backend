@@ -3398,7 +3398,7 @@ made.
 | `APP_S3_ENDPOINT_URL` | `http://media:3900` | Where the API reaches the store, inside Docker: uploads, reads, copies, deletes, listings. Set, every media client is path-style (`<endpoint>/<bucket>/<key>`) SigV4. Empty: AWS S3, exactly as before. |
 | `APP_S3_PUBLIC_URL` | `https://media.myotherapp.in` | Where browsers reach it. Every signed link is made for this host (SigV4 signs the host), so the proxy in front must pass the `Host` header through unchanged. Empty: the endpoint. |
 | `APP_S3_REGION` | `garage` | The region the store signs with (Garage's `s3_region`). Empty: boto3's default. |
-| `APP_S3_BASE_PATH` | empty | A folder inside the bucket every key goes under -- a key prefix, **not** an address. Leave it empty: keys start at the bucket's root (`clubs/logos/v-<hex>.png`) and a link is `https://media.myotherapp.in/<bucket>/clubs/logos/v-<hex>.png`. An address here would become the start of every key, the link would hold it twice, and the club sites' image route (keys under `clubs/`) would 404. |
+| `APP_S3_BASE_PATH` | empty | A folder inside the bucket every key goes under -- a key prefix, **not** an address. Leave it empty: keys start at the bucket's root (`clubs/logos/v-<hex>.png`) and a link is `https://media.myotherapp.in/<bucket>/clubs/logos/v-<hex>.png`. An address here would become the start of every key, the link would hold it twice, and the club sites' image route (keys under `clubs/` and `events/posters/`) would 404. |
 | `APP_MEDIA_CDN_URL` | empty | Must not be the store's host: a CDN link is `<cdn>/<key>`, with no bucket in it. |
 | `APP_BACKUP_S3_ACCESS_KEY`, `_SECRET_KEY` | the backup user's | Must be set: unset, backups fall back to `APP_S3_ACCESS_KEY`, which is now the store's key and means nothing to AWS. |
 

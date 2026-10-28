@@ -609,7 +609,9 @@ def card(e: Events, now: datetime, going: int, distance: Optional[float] = None,
         id=e.id,
         name=e.name,
         slug=e.slug,
-        poster=_img(e.poster, "medium", "original"),
+        # A card draws its poster 200-380 px wide: the large size (1080 x 1350
+        # at most) is at least twice that, as every picture frame asks.
+        poster=_img(e.poster, "large", "original"),
         starts_at=_aware(e.event_datetime).isoformat(),
         ends_at=_ends_at(e).isoformat(),
         location_name=e.location_name,
@@ -1309,6 +1311,12 @@ async def club_page(session, slug: str, viewer_id: Optional[int], now: Optional[
         raise CustomHTTPException(404, message="Club not found")
     since = await upcoming.since(session, now)
     detail = (await club_cards(session, [club], now, since=since))[0]
+    # The page's header draws the logo about 100 px and the banner across the
+    # page: sizes at least twice those, where a club card's are smaller.
+    detail.update(
+        logo=_img(club.logo, "medium", "large", "original"),
+        cover=_img(club.cover, "large", "medium", "original"),
+    )
     socials = await session.scalar(select(ClubSocials).where(ClubSocials.club_id == club.id, ClubSocials.is_deleted == False))  # noqa: E712
     detail.update(
         about=club.about, contact_email=club.contact_email,

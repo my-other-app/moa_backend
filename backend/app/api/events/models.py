@@ -26,7 +26,9 @@ from app.api.kiosk.models import SelfCheckInVerify
 from app.api.closeout.models import EventStatus, RetentionMode
 from app.db.base import AbstractSQLModel
 from app.db.mixins import SoftDeleteMixin, TimestampsMixin
+from app.core.storage import shapes
 from app.core.storage.fields import S3FileField, S3ImageField
+from app.core.storage.shapes import MovedImageField
 from app.core.utils.db_fields import TZAwareDateTime
 from app.core.utils.keys import generate_certificate_no
 
@@ -51,15 +53,10 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     slug = Column(String(120), nullable=False, unique=True, index=True)
     name = Column(String(100), nullable=False)
     poster = Column(
-        S3ImageField(
-            upload_to="clubs/logos/",
-            variations={
-                "thumbnail": {"width": 150, "height": 150},
-                "medium": {"width": 500, "height": 500},
-                "large": {"width": 800, "height": 800},
-            },
-            public=True,
-        ),
+        # Portrait 4:5, 1080 x 1350 asked for (storage/shapes.py). Stored in
+        # events/posters/; the posters uploaded before Oct 2026 are in the club
+        # logos' folder, and keep their sizes there.
+        MovedImageField(upload_to="events/posters/", earlier=("clubs/logos/",), variations=shapes.POSTER_SIZES, public=True),
         nullable=True,
     )
     images = Column(ARRAY(String), nullable=False, default=[])

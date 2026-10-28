@@ -142,7 +142,8 @@ h2{{font-size:28px;letter-spacing:-.02em;margin:0 0 18px;font-weight:700}}
 .date small{{font-size:10px;letter-spacing:.08em}}.date b{{font-size:22px}}
 .card h3{{margin:4px 0 0;font-size:17px;letter-spacing:-.01em}}.card p{{margin:0;color:var(--ink3);font-size:13.5px}}
 .card .btn{{margin-top:auto;align-self:flex-start}}
-.poster{{aspect-ratio:16/9;object-fit:cover;border-radius:calc(var(--r) - 6px);background:var(--sunken)}}
+.poster{{position:relative;display:block;aspect-ratio:4/5;overflow:hidden;border-radius:calc(var(--r) - 6px);background:var(--sunken)}}
+.poster img{{position:absolute;inset:0;width:100%;height:100%;max-width:none}}.poster .bg{{object-fit:cover;filter:blur(20px) saturate(1.1) brightness(.92);transform:scale(1.15)}}.poster .fg{{object-fit:contain}}
 .row{{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}}
 .more{{color:var(--brand);font-weight:600;font-size:14px}}
 .nums{{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-top:20px}}
@@ -158,6 +159,8 @@ h2{{font-size:28px;letter-spacing:-.02em;margin:0 0 18px;font-weight:700}}
 .logo{{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--surface);border:1px solid var(--line);border-radius:999px;font-size:14px}}
 .logo img,.logo .mark{{width:28px;height:28px;border-radius:8px;object-fit:cover;background:var(--sunken);display:grid;place-items:center;font-size:11px;font-weight:700}}
 .logo span{{color:var(--ink3);font-size:12px}}
+/* A logo whole on white: a square one fills its tile, any other shape gets room around it (_JS adds .pad). */
+.brand img,.logo img{{object-fit:contain;background:#fff}}.brand img.pad,.logo img.pad{{padding:3px}}
 .band{{background:var(--brand);color:var(--on-brand);border-radius:var(--r);padding:32px;display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap}}
 .band h2{{margin:0 0 4px}}.band p{{margin:0;opacity:.85}}
 .band .btn{{background:var(--on-brand);color:var(--brand)}}
@@ -178,10 +181,10 @@ h2{font-size:22px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink3
 """
     elif template == "campus":
         base += """
-.hero{position:relative;min-height:440px;display:flex;align-items:flex-end;padding:0 0 40px;border-radius:var(--r);overflow:hidden;margin-top:20px;color:#fff}
-.hero .cover{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}.hero .shade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.05),rgba(0,0,0,.72))}
-.hero .wrap{position:relative}.hero .sub{color:rgba(255,255,255,.85)}.hero .pill{background:rgba(255,255,255,.15);color:#fff}
-.gallery{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}.gallery img{aspect-ratio:1;object-fit:cover;border-radius:var(--r)}
+.hero{width:min(1120px,calc(100% - 40px));margin:20px auto 0;border-radius:var(--r);overflow:hidden;background:var(--surface);border:1px solid var(--line)}
+.hero .cover{display:block;width:100%;max-width:none;aspect-ratio:3/1;object-fit:cover;background:linear-gradient(135deg,var(--brand),color-mix(in srgb,var(--brand) 55%,#0b1413))}
+.hero .wrap{width:auto;padding:28px clamp(20px,4vw,40px) 36px}
+.gallery{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}.gallery .poster{border-radius:var(--r)}
 """
     elif template == "arena":
         base += """
@@ -196,6 +199,8 @@ h1{text-transform:uppercase;letter-spacing:-.01em}
 _JS = """
 (function(){var m=document.querySelector('.menu'),l=document.querySelector('.links');if(m&&l){m.addEventListener('click',function(){l.classList.toggle('open')})}
 var y=document.getElementById('y');if(y){y.textContent=new Date().getFullYear()}
+// A logo that is not square (a wordmark) is shown whole with room around it; a square one fills its tile.
+document.querySelectorAll('.brand img,.logo img').forEach(function(i){function f(){if(i.naturalWidth&&Math.abs(i.naturalWidth/i.naturalHeight-1)>0.03){i.classList.add('pad')}}if(i.complete){f()}else{i.addEventListener('load',f)}});
 document.querySelectorAll('[data-when]').forEach(function(el){var d=new Date(el.getAttribute('data-when'));if(!isNaN(d)){el.textContent=d.toLocaleString(undefined,{weekday:'short',day:'numeric',month:'short',hour:'numeric',minute:'2-digit'})}});
 var c=document.querySelector('[data-countdown]');if(c){var t=new Date(c.getAttribute('data-countdown')).getTime();function tick(){var s=Math.max(0,Math.floor((t-Date.now())/1000));var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),mi=Math.floor(s%3600/60),se=s%60;c.querySelector('[data-d]').textContent=d;c.querySelector('[data-h]').textContent=('0'+h).slice(-2);c.querySelector('[data-m]').textContent=('0'+mi).slice(-2);c.querySelector('[data-s]').textContent=('0'+se).slice(-2)}tick();setInterval(tick,1000)}
 // A visit, counted for the club's analytics -- only where the page is the whole tab (its own address).
@@ -246,10 +251,23 @@ def _img(url: str | None, name: str, cls: str = "", *, srcset: str | None = None
     return f'<span class="mark">{_mark(name)}</span>'
 
 
+def _poster(e: dict, kind: str) -> str:
+    """An event's poster in its 4:5 frame, never cropped: whole, over a
+    blurred copy of itself (the same file, so one download). A 4:5 poster
+    covers its copy completely."""
+    src = esc(e["poster"])
+    srcset = _srcset(e.get("poster_srcset"), kind)
+    alt = esc(e["name"]) if kind == "gallery" else ""
+    return (
+        f'<span class="poster"><img class="bg" src="{src}"{srcset} alt="" aria-hidden="true" loading="lazy">'
+        f'<img class="fg" src="{src}"{srcset} alt="{alt}" loading="lazy"></span>'
+    )
+
+
 def _event_card(e: dict, template: str, register: str) -> str:
     mon, day = _day(e["starts_at"])
     meta = " · ".join(x for x in (e.get("where"), e.get("fee")) if x)
-    poster = f'<img class="poster" src="{esc(e["poster"])}"{_srcset(e.get("poster_srcset"), "poster")} alt="" loading="lazy">' if e.get("poster") and template == "campus" else ""
+    poster = _poster(e, "poster") if e.get("poster") and template == "campus" else ""
     when = esc(_when(e["starts_at"]))
     meta_html = f" · {esc(meta)}" if meta else ""
     label = "Register" if e.get("upcoming") else "See the event"
@@ -305,8 +323,10 @@ def render(data: dict) -> str:
         cta = f'<div class="cta">{see}{join}</div>'
         text = f'{pill}<h1>{esc(headline)}</h1><p class="sub">{esc(subline)}</p>'
         if template == "campus":
-            img = f'<img class="cover" src="{esc(cover)}" alt="">' if cover else ""
-            parts.append(f'<header class="hero" id="top">{img}<div class="shade"></div><div class="wrap">{text}{cta}</div></header>')
+            # The banner, 3:1 as everywhere, above the words (not behind them: on a phone a
+            # hero tall enough for the words would show a third of a 3:1 banner).
+            img = f'<img class="cover" src="{esc(cover)}" alt="">' if cover else '<div class="cover"></div>'
+            parts.append(f'<header class="hero" id="top">{img}<div class="wrap">{text}{cta}</div></header>')
         elif template == "arena" and nxt:
             count = (
                 f'<div class="count" data-countdown="{esc(nxt["starts_at"].isoformat())}"><div><b data-d>0</b><span>days</span></div>'
@@ -330,7 +350,7 @@ def render(data: dict) -> str:
         )
 
     if on.get("past", True) and past:
-        pics = "".join(f'<a href="{esc(e["url"])}" title="{esc(e["name"])}" target="_top"><img src="{esc(e["poster"])}"{_srcset(e.get("poster_srcset"), "gallery")} alt="{esc(e["name"])}" loading="lazy"></a>' for e in past if e.get("poster")) if template == "campus" else ""
+        pics = "".join(f'<a href="{esc(e["url"])}" title="{esc(e["name"])}" target="_top">{_poster(e, "gallery")}</a>' for e in past if e.get("poster")) if template == "campus" else ""
         body = f'<div class="gallery">{pics}</div>' if pics else '<div class="grid">' + "".join(_event_card(e, template, e["url"]) for e in past) + "</div>"
         parts.append(f'<section id="past"><div class="wrap"><h2>Past events</h2>{body}</div></section>')
 
@@ -409,18 +429,18 @@ def inline_styles() -> list[str]:
 
 
 SITE_SCRIPT_HASHES: tuple = (
-    "'sha256-swis8fs/eRtw6T6o+nS85xTSH7Ylty5NMLKG5zERxEk='",
+    "'sha256-G46dCTnrg774fseYkRyhOzn441jv+kKKGYkyWqTag+E='",
 )
 # One per template and look, in TEMPLATES x THEMES order.
 SITE_STYLE_HASHES: tuple = (
-    "'sha256-GBBvFLvHlVpk4y5HawA437l+MFNckS35/X5GiPYE2qc='",
-    "'sha256-3KJYC2Prrnnq2kxrxjDQrBSFfeBOZPuA4/VNNdXVP0c='",
-    "'sha256-0n8OIRBFch+kRnbsdNfVBu8XMzcvq3kFJQWvL/jnB4Q='",
-    "'sha256-1d1LLH3Yq6EHPQphmeJFZW5NzmxdR8UA1Z+/W4gScks='",
-    "'sha256-5FAM0jLJxVYkw7pB0jKRrRxaBMtJAYC0zDE4Re2rQak='",
-    "'sha256-wWCraX8POyWjliccgx4kFoXge5Jjtm/vUlQN3OKthwg='",
-    "'sha256-obi4wHve0AlUv9FsY4OFgC0l/1BGLzv2cIg94RAY75M='",
-    "'sha256-7y3wJmhKX5qKXeR0hpfQWxIYr9OwlhN9TMRF2OIqpts='",
+    "'sha256-gUhBwHY5yVy/YkaZOf+qR+TesRdEqKuRyjCj099JqPc='",
+    "'sha256-Q4Suj/LMDoGebqcJZphncuCsGVpmaowf/AKUC6BMSy0='",
+    "'sha256-0P8agz3Mmyy9p+GwX9DyOInqA9kAQrGMbSQpEsXxP0k='",
+    "'sha256-SyrvDSgdFesZyzF/3hIFuk2e3kX0SDOCi3I5Jd2VX3I='",
+    "'sha256-s7qUVSv8/Oo435nvM2FSKd2snYgDfLkYgla/Rt57Zm8='",
+    "'sha256-fsFW9rmnG695OknJ8Kg+KPg6W2bLsWCiERGCVEZeR6A='",
+    "'sha256-xYtE49+16ppwE0WtKLFM0dlodBBmklI9kmOfB8I6BtI='",
+    "'sha256-/y3LedMRrr6bdcvDR7Be2n6k6SAGgsw9WcEsy/t23X0='",
 )
 
 

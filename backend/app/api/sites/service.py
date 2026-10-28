@@ -121,7 +121,7 @@ async def site_data(session: AsyncSession, club: Clubs, choices: dict, ref_code:
         fee = f"₹{int(e.reg_fee)}" if e.has_fee and e.reg_fee else "Free"
         where = "Online" if e.is_online else (e.location_name or None)
         url = public_urls.event_url(e.slug) + (f"?sref={ref_code}" if ref_code else "")
-        return dict(id=e.id, name=e.name, starts_at=e.event_datetime, where=where, fee=fee, poster=image_url(base, e.poster, "medium"), poster_srcset=image_srcset(e.poster), url=url, upcoming=upcoming)
+        return dict(id=e.id, name=e.name, starts_at=e.event_datetime, where=where, fee=fee, poster=image_url(base, e.poster, "large"), poster_srcset=image_srcset(e.poster), url=url, upcoming=upcoming)
 
     upcoming = [ev(e, True) for e in sorted((e for e in events if e.event_datetime >= now and e.lifecycle in (EventStatus.published, EventStatus.live)), key=lambda e: e.event_datetime)][:6]
     past = [ev(e, False) for e in events if e.event_datetime < now][:6]
@@ -135,7 +135,7 @@ async def site_data(session: AsyncSession, club: Clubs, choices: dict, ref_code:
     default_subline = _first_sentence(club.about) if club.tagline else (_first_sentence(club.about) or None)
     return dict(
         site=choices, site_url=await site_address(session, club),
-        club=dict(name=club.name, about=club.about, tagline=club.tagline, location_name=club.location_name, contact_email=club.contact_email, brand_primary=club.brand_primary, logo_url=image_url(base, club.logo, "medium"), logo_srcset=image_srcset(club.logo), cover_url=image_url(base, club.cover, "original")),
+        club=dict(name=club.name, about=club.about, tagline=club.tagline, location_name=club.location_name, contact_email=club.contact_email, brand_primary=club.brand_primary, logo_url=image_url(base, club.logo, "medium"), logo_srcset=image_srcset(club.logo), cover_url=image_url(base, club.cover, "large")),
         default_headline=default_headline, default_subline=default_subline,
         upcoming=upcoming, past=past, team=team, partners=partners, socials=social_links,
         numbers=dict(followers=followers, events=sum(1 for e in events if e.event_datetime < now)),

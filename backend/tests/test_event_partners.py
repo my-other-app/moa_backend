@@ -181,7 +181,7 @@ def test_the_logo_is_never_cropped():
     column = EventPartners.__table__.c.logo.type
     made = prepare_image(_png((1600, 400)), max_size=column.max_size, allowed=column.allowed_extensions, variations=column.variations)
     sizes = {name: Image.open(io.BytesIO(data)).size for name, data in made.variants.items()}
-    assert sizes == {"thumbnail": (150, 38), "medium": (400, 100), "large": (1080, 270)}
+    assert sizes == {"thumbnail": (150, 38), "medium": (500, 125), "large": (1080, 270)}
 
 
 # ─── From the club's partners ────────────────────────────────────────────

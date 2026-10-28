@@ -215,9 +215,12 @@ async def test_images_are_the_right_size_urls(client, session, world):
     await session.refresh(a)
     await session.refresh(near)
     card = next(x for x in (await client.get(f"{API}/events")).json()["items"] if x["id"] == near.id)
-    assert "poster.medium.png" in card["poster"] and "circuit.thumbnail.png" in card["club"]["logo"]
+    # A card's poster at its large size (at least twice the 200-380 px a card
+    # draws it), kept in the logos' folder by an older upload: its sizes are there.
+    assert "poster.large.png" in card["poster"] and "circuit.thumbnail.png" in card["club"]["logo"]
+    # The club page's header draws its logo about 100 px: the medium size.
     club = (await client.get(f"{API}/clubs/{a.slug}")).json()["club"]
-    assert "circuit.thumbnail.png" in club["logo"] and club["cover"] is None
+    assert "circuit.medium.png" in club["logo"] and club["cover"] is None
 
 
 # ─── Filters ──────────────────────────────────────────────────────────────

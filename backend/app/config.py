@@ -139,7 +139,7 @@ class AppConfig(BaseSettings):
     # the bucket's root, `clubs/logos/v-<hex>.png`, as production's always
     # have. Leave it empty on a store of our own (S3_ENDPOINT_URL set): its
     # links are then `<S3_PUBLIC_URL>/<S3_BUCKET>/clubs/logos/v-<hex>.png`,
-    # and the club sites' image route, which serves keys under `clubs/`,
+    # and the club sites' image route, which serves keys under `clubs/` and `events/posters/`,
     # works. Set to `https://media.myotherapp.in/<bucket>`, every key would
     # begin with that text and its link would hold the address twice.
     S3_BASE_PATH: str = ""
