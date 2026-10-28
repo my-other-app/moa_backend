@@ -249,7 +249,7 @@ def test_srcset_only_on_the_cdn(monkeypatch):
     monkeypatch.setattr(settings, "MEDIA_CDN_URL", CDN)
     image = field.process_result_value(key, None)
     assert media.srcset(image) == (
-        f"{CDN}/clubs/logos/v-{HEX}.thumbnail.png 150w, {CDN}/clubs/logos/v-{HEX}.medium.png 500w, {CDN}/clubs/logos/v-{HEX}.large.png 800w"
+        f"{CDN}/events/posters/v-{HEX}.thumbnail.png 240w, {CDN}/events/posters/v-{HEX}.medium.png 540w, {CDN}/events/posters/v-{HEX}.large.png 1080w"
     )
     # A picture without sizes of its own has no srcset to give.
     assert media.srcset(field.process_result_value(at(f"elsewhere/{LEGACY}.png"), None)) is None
@@ -453,12 +453,12 @@ async def test_the_club_site_uses_the_cdn_with_srcsets_and_the_image_route_witho
     assert "/i?k=" not in on
     # The brand mark and the poster card, each size in a srcset with how wide it is drawn.
     assert f'src="{CDN}/clubs/logos/v-{HEX}.medium.png"' in on
-    assert f"{CDN}/clubs/logos/v-{HEX}.thumbnail.png 150w, {CDN}/clubs/logos/v-{HEX}.medium.png 500w, {CDN}/clubs/logos/v-{HEX}.large.png 800w" in on
+    assert f"{CDN}/clubs/logos/v-{HEX}.thumbnail.png 150w, {CDN}/clubs/logos/v-{HEX}.medium.png 500w, {CDN}/clubs/logos/v-{HEX}.large.png 1080w" in on
     assert 'sizes="34px"' in on and 'sizes="(max-width: 720px) calc(100vw - 40px), 380px"' in on
-    assert f"{CDN}/clubs/logos/v-{'1' * 32}.large.png 800w" in on  # the poster's card
-    # The cover stays its original (no sizes made wide enough to stand in) and is the link preview's picture.
-    assert f'<img class="cover" src="{CDN}/clubs/covers/{LEGACY}.png"' in on
-    assert f'<meta property="og:image" content="{CDN}/clubs/covers/{LEGACY}.png">' in on
+    assert f"{CDN}/events/posters/v-{'1' * 32}.large.png 1080w" in on  # the poster's card
+    # The banner is its large size (3:1, up to 3000 x 1000), and the link preview's picture.
+    assert f'<img class="cover" src="{CDN}/clubs/covers/{LEGACY}.large.png"' in on
+    assert f'<meta property="og:image" content="{CDN}/clubs/covers/{LEGACY}.large.png">' in on
     assert "amazonaws.com" not in on
 
 
@@ -479,12 +479,12 @@ async def test_emails_show_the_logo_and_poster_from_the_cdn_and_inline_them_by_k
     event = await session.get(Events, world["event"].id)
     await session.refresh(event, ["club"])
     assert emails.logo_url_of(event) == f"{CDN}/clubs/logos/v-{HEX}.medium.png"
-    assert poster_url(event) == f"{CDN}/clubs/logos/v-{'1' * 32}.large.png"
+    assert poster_url(event) == f"{CDN}/events/posters/v-{'1' * 32}.large.png"
     read = []
     monkeypatch.setattr(objects, "get_bytes", lambda k: read.append(k) or b"img")
     monkeypatch.setattr(documents.urllib.request, "urlopen", lambda *a, **k: pytest.fail("fetched over http"))
     assert documents.fetch_bytes(poster_url(event)) == b"img"
-    assert read == [at(f"clubs/logos/v-{'1' * 32}.large.png")]
+    assert read == [at(f"events/posters/v-{'1' * 32}.large.png")]
 
 
 def test_an_agenda_photo_from_the_designers_folder_stays_signed_with_the_cdn_on(cdn, signer):

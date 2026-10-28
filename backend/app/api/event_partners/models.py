@@ -6,6 +6,7 @@ to one event. One copied from a club partner keeps a note of which
 partner never touches the event."""
 from sqlalchemy import CheckConstraint, Column, ForeignKey, Index, Integer, String, text
 
+from app.core.storage import shapes
 from app.core.storage.fields import S3ImageField
 from app.db.base import AbstractSQLModel
 from app.db.mixins import SoftDeleteMixin, TimestampsMixin
@@ -18,13 +19,9 @@ LABEL_MAX = 60
 LINK_MAX = 500
 
 #: A logo goes in a square tile, whole: each size is the picture fitted inside
-#: the box, never cropped or enlarged (fields.prepare_image). 1080 is the size
-#: we ask clubs for.
-LOGO_SIZES = {
-    "thumbnail": {"width": 150, "height": 150},
-    "medium": {"width": 400, "height": 400},
-    "large": {"width": 1080, "height": 1080},
-}
+#: the box, never cropped or enlarged (fields.prepare_image). The same sizes
+#: as a club's logo, 1080 being the size we ask clubs for (storage/shapes.py).
+LOGO_SIZES = shapes.LOGO_SIZES
 
 
 class EventPartners(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):

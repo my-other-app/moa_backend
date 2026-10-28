@@ -18,6 +18,7 @@ from app.db.base import AbstractSQLModel
 from app.db.mixins import SoftDeleteMixin, TimestampsMixin
 from sqlalchemy.orm import deferred, relationship
 
+from app.core.storage import shapes
 from app.core.storage.fields import S3ImageField
 
 
@@ -28,29 +29,16 @@ class Clubs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     slug = Column(String(120), nullable=False, unique=True, index=True)
     name = Column(String(100), nullable=False)
     logo = Column(
-        S3ImageField(
-            upload_to="clubs/logos/",
-            variations={
-                "thumbnail": {"width": 150, "height": 150},
-                "medium": {"width": 500, "height": 500},
-                "large": {"width": 800, "height": 800},
-            },
-            public=True,
-        ),
+        # Square, 1080 x 1080 asked for (storage/shapes.py).
+        S3ImageField(upload_to="clubs/logos/", variations=shapes.LOGO_SIZES, public=True),
         nullable=True,
     )
     about = Column(String, nullable=True)
     # One line under the name on the club page and every event; the about is the long form.
     tagline = Column(String(120), nullable=True)
     cover = Column(
-        S3ImageField(
-            upload_to="clubs/covers/",
-            variations={
-                "medium": {"width": 1200, "height": 400},
-                "large": {"width": 1800, "height": 600},
-            },
-            public=True,
-        ),
+        # The banner across the club page: 3:1, 1500 x 500 asked for (storage/shapes.py).
+        S3ImageField(upload_to="clubs/covers/", variations=shapes.COVER_SIZES, public=True),
         nullable=True,
     )
     org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)

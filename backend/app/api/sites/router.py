@@ -25,7 +25,9 @@ from app.response import CustomHTTPException
 router = APIRouter(prefix="/clubs/site")
 public_router = APIRouter(prefix="/sites")
 
-IMAGE_PREFIXES = ("clubs/",)
+# A club page shows its logo, banner, people and partners (clubs/) and its
+# events' posters (events/posters/; clubs/logos/ before Oct 2026).
+IMAGE_PREFIXES = ("clubs/", "events/posters/")
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".gif")
 
 
