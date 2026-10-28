@@ -82,6 +82,56 @@ async def _verify_google(id_token_str: str, client_id: str) -> dict:
     return await asyncio.to_thread(id_token.verify_oauth2_token, id_token_str, _google_certs, client_id)
 
 
+async def google_identity(id_token_str: str, client_id: str) -> dict:
+    """The claims of a Google ID token Google vouches for, with `client_id`
+    as its audience (_verify_google). One it would not vouch for is 401
+    INVALID_GOOGLE_TOKEN; Google's certificates out of reach, 503."""
+    try:
+        return await _verify_google(id_token_str, client_id)
+    except (google_exceptions.TransportError, httpx.HTTPError):
+        logger.warning("Google's certificates could not be fetched", exc_info=True)
+        raise CustomHTTPException(status_code=503, message="Google sign-in is unavailable right now. Try again in a minute.", error_code="GOOGLE_UNAVAILABLE")
+    except (ValueError, google_exceptions.GoogleAuthError, jwt.PyJWTError):
+        # A wrong issuer is a GoogleAuthError, not a ValueError: it was a 500.
+        raise CustomHTTPException(status_code=401, message="Invalid authentication credentials", error_code="INVALID_GOOGLE_TOKEN")
+
+
+async def dashboard_google_email(id_token_str: str) -> str:
+    """The address, lower-cased, on a Google ID token from the club
+    dashboard's or the main portal's button: checked as /auth/google checks
+    the web's (audience APP_GOOGLE_WEB_CLIENT_ID), and Google must have
+    verified the address."""
+    if not settings.GOOGLE_WEB_CLIENT_ID:
+        raise CustomHTTPException(status_code=503, message="Google sign-in is not set up on this server.", error_code="GOOGLE_UNAVAILABLE")
+    idinfo = await google_identity(id_token_str, settings.GOOGLE_WEB_CLIENT_ID)
+    email = (idinfo.get("email") or "").strip().lower()
+    if not email or str(idinfo.get("email_verified")).lower() != "true":
+        raise CustomHTTPException(status_code=401, message="Google has not verified this account's email address.", error_code="INVALID_GOOGLE_TOKEN")
+    return email
+
+
+async def dashboard_account(session: AsyncSession, email: str, scope: str):
+    """Who a Google address signs in as on a dashboard, as `(member, account)`.
+
+    scope "club", in /auth/token's order: an active club team member with
+    the address (member, None); else the club's own login account (None,
+    account), approved or not. scope "admin": an admin account. Nothing
+    else: an app user, a guest or another type is (None, None), as is no
+    account at all. Google vouched for the address, so no password is asked."""
+    from app.core.auth.authentication import find_account, find_club_account
+
+    if scope == "club":
+        from app.api.club_access import service as club_access
+
+        member = await club_access.active_member(session, email)
+        if member is not None:
+            return member, None
+        return None, await find_club_account(session, email)
+    if scope == "admin":
+        return None, await find_account(session, email, UserTypes.admin)
+    return None, None
+
+
 async def google_signin(
     session: AsyncSession, id_token_str: str, platform: str = "web"
 ):
@@ -95,7 +145,7 @@ async def google_signin(
         if not client_id:
             raise CustomHTTPException(status_code=400, message=f"Invalid platform: {platform}", error_code="INVALID_PLATFORM")
 
-        idinfo = await _verify_google(id_token_str, client_id)
+        idinfo = await google_identity(id_token_str, client_id)
 
         if not idinfo.get("email_verified"):
             raise CustomHTTPException(
@@ -146,9 +196,6 @@ async def google_signin(
         # Refusals made above on purpose (an unverified Google address, an
         # unknown platform) are answers, not crashes; they used to come back 500.
         raise
-    except google_exceptions.TransportError:
-        logger.warning("Google's certificates could not be fetched", exc_info=True)
-        raise CustomHTTPException(status_code=503, message="Google sign-in is unavailable right now. Try again in a minute.", error_code="GOOGLE_UNAVAILABLE")
     except ValueError:
         raise CustomHTTPException(
             status_code=401, message="Invalid authentication credentials", error_code="INVALID_GOOGLE_TOKEN"

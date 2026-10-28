@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import field_validator, BaseModel, Field
 from app.core.response.base_model import CustomBaseModel
@@ -87,6 +88,16 @@ class GoogleSignInRequest(CustomBaseModel):
     id_token: str
     platform: str = Field(
         default="web", description="Platform type: 'web', 'android', or 'ios'"
+    )
+
+
+class DashboardGoogleSignInRequest(CustomBaseModel):
+    """The club dashboard's or the main portal's "Continue with Google"."""
+
+    id_token: str = Field(min_length=1, description="The credential Google's sign-in button gave")
+    scope: Literal["club", "admin"] = Field(description="club: the club dashboard; admin: the main portal")
+    totp_code: str | None = Field(
+        default=None, description="After 401 TOTP_REQUIRED: the authenticator (or a recovery) code, sent with the same id_token",
     )
 
 

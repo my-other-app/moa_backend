@@ -95,27 +95,22 @@ async def get_user(session: AsyncSession, username_or_id: str, *, password_holde
     return result
 
 
-async def authenticate_club_account(session: AsyncSession, username: str, password: str):
-    """
-    The club account behind this address or username, when the password is
-    its own -- for the clubs dashboard's sign-in (scope "club") only.
+async def find_account(session: AsyncSession, username: str, user_type: UserTypes, *, password_holders: bool = False):
+    """The live account of this one type behind this address or username, or None.
 
     One address can hold a club account and an app account. `get_user` takes
-    whichever row comes first, which on the dashboard could be the person's
-    app account. Here the club account is looked for alone. Returned whether
-    or not the club is approved yet, so the caller can say so; None when
-    there is no such account, the club was rejected, or the password is not
-    this account's.
+    whichever row comes first, which on a dashboard could be the person's
+    app account; here only `user_type` is looked for. The address as stored
+    first; failing that, ignoring case and stray spaces, but only when that
+    finds one account.
     """
     query = (
         select(Users)
         .options(joinedload(Users.club), joinedload(Users.profile))
-        .where(
-            Users.is_deleted == False,  # noqa: E712
-            Users.user_type == UserTypes.club,
-            Users.password.isnot(None),
-        )
+        .where(Users.is_deleted == False, Users.user_type == user_type)  # noqa: E712
     )
+    if password_holders:
+        query = query.where(Users.password.isnot(None))
     if "@" in username:
         user = (await session.execute(query.where(Users.email == username))).scalars().first()
         if user is None:
@@ -123,10 +118,32 @@ async def authenticate_club_account(session: AsyncSession, username: str, passwo
                 query.where(func.lower(func.btrim(Users.email)) == username.strip().lower()).limit(2)
             )).unique().scalars().all()
             user = loose[0] if len(loose) == 1 else None
-    else:
-        user = (await session.execute(query.where(Users.username == username))).scalars().first()
+        return user
+    return (await session.execute(query.where(Users.username == username))).scalars().first()
 
+
+async def find_club_account(session: AsyncSession, username: str, *, password_holders: bool = False):
+    """The club account behind this address or username, whether or not the
+    club is approved yet (so the caller can say so); None when there is no
+    such account or the club was rejected."""
+    user = await find_account(session, username, UserTypes.club, password_holders=password_holders)
     if user is None or user.club is None or user.club.is_deleted:
+        return None
+    return user
+
+
+async def authenticate_club_account(session: AsyncSession, username: str, password: str):
+    """
+    The club account behind this address or username, when the password is
+    its own -- for the clubs dashboard's sign-in (scope "club") only.
+
+    The club account is looked for alone (find_club_account). Returned
+    whether or not the club is approved yet, so the caller can say so; None
+    when there is no such account, the club was rejected, or the password is
+    not this account's.
+    """
+    user = await find_club_account(session, username, password_holders=True)
+    if user is None:
         # No dummy check here: the caller goes on to authenticate_user, which
         # makes one when there is no account at all.
         return None

@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Annotated, Optional
+from typing import Annotated, NoReturn, Optional
 from fastapi import APIRouter, Depends, Form, Request, Response, BackgroundTasks
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi import status
@@ -32,6 +32,7 @@ from app.api.auth.schemas import (
     PasswordResetResponse,
     ChangePasswordRequest,
     ChangePasswordResponse,
+    DashboardGoogleSignInRequest,
     ImpersonationRequest,
     ImpersonationResponse,
 )
@@ -126,6 +127,138 @@ async def apple_sign_in(
     return token
 
 
+# ─── The door ────────────────────────────────────────────────────────────
+#
+# /token (a password) and /google/dashboard (Google) each find the account
+# their own way. From there they are one door: the same refusals, kept on
+# the record the same way, the same second factor, session, new-device mail
+# and cookies. `identifier` is what the lockout and the record key on (what
+# was typed, or Google's address); `method` is what the record says.
+
+
+async def _refuse(session, request: Request, *, identifier: str | None, user, method: str, result: str, status_code: int, message: str, **extra) -> NoReturn:
+    """Kept on the record (the lockout counts the failed ones) and committed,
+    the place looked up after; then the answer."""
+    from app.api.security import service as security
+
+    await security.record(session, request=request, identifier=identifier, user=user, method=method, result=result)
+    await session.commit()
+    await security.place_later(session, security.client_ip(request))
+    raise CustomHTTPException(status_code=status_code, message=message, **extra)
+
+
+async def _refuse_if_locked(session, request: Request, *, identifier: str, method: str) -> None:
+    from app.api.security import service as security
+
+    wait = await security.lockout_remaining(session, identifier, security.client_ip(request))
+    if wait:
+        await _refuse(
+            session, request, identifier=identifier, user=None, method=method, result="blocked",
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS, message=f"Too many wrong passwords. Try again in {max(1, wait // 60)} min.",
+            error_code="LOGIN_LOCKED",
+        )
+
+
+async def _refuse_if_club_waiting(session, request: Request, user, *, identifier: str, method: str) -> None:
+    if not user.club.is_verified:
+        await _refuse(
+            session, request, identifier=identifier, user=user, method=method, result="blocked",
+            status_code=status.HTTP_403_FORBIDDEN, message="Your club is waiting for approval. We will email you when it is approved.",
+            error_code="CLUB_NOT_VERIFIED",
+        )
+
+
+async def _member_signed_in(session, request: Request, response: Response, member, *, identifier: str, method: str) -> Token:
+    """A club team member: a session on the club's own account, with the
+    member behind it. Closed while the club's own account is suspended or
+    gone (CLUB_UNAVAILABLE)."""
+    from app.api.clubs.models import Clubs
+
+    club = await session.get(Clubs, member.club_id)
+    owner = await get_user(session, club.user_id) if club is not None and not club.is_deleted and club.user_id else None
+    if owner is None or getattr(owner, "is_active", True) is False:
+        await _refuse(
+            session, request, identifier=identifier, user=None, method=method, result="blocked",
+            status_code=status.HTTP_403_FORBIDDEN, message="This club's dashboard is closed right now. Ask the club's owner.",
+            error_code="CLUB_UNAVAILABLE",
+        )
+    return await _signed_in(session, request, response, owner, identifier=member.email, method=method, member=member, account=club.name)
+
+
+async def _account_signed_in(
+    session, request: Request, response: Response, user, *, identifier: str, method: str, totp_code: str | None,
+) -> Token:
+    """An account itself (a club's own, an admin, an app user): refused when
+    suspended, asked for its second factor when it has one, then signed in."""
+    # Said plainly at the door: a suspended account used to get tokens here
+    # and then a 403 on its first request.
+    if getattr(user, "is_active", True) is False:
+        await _refuse(
+            session, request, identifier=identifier, user=user, method=method, result="blocked",
+            status_code=status.HTTP_403_FORBIDDEN, message="This account has been suspended", error_code="ACCOUNT_SUSPENDED",
+        )
+
+    # Second factor, where the account has one. The password (or Google) is
+    # checked first so an attacker learns nothing new from the order; the
+    # distinct error code is what lets the UI show the code field rather than
+    # claiming the password was wrong.
+    if getattr(user, "totp_enabled", False):
+        from app.api.auth import totp as totp_service
+
+        if not totp_code:
+            await _refuse(
+                session, request, identifier=identifier, user=user, method=method, result="totp_required",
+                status_code=status.HTTP_401_UNAUTHORIZED, message="Enter the code from your authenticator app", error_code="TOTP_REQUIRED",
+            )
+        # A code is good once (a replayed one is refused) and a recovery code
+        # is spent: app.api.auth.totp.
+        if not await totp_service.check_second_factor(session, user, totp_code):
+            await _refuse(
+                session, request, identifier=identifier, user=user, method=method, result="totp_invalid",
+                status_code=status.HTTP_401_UNAUTHORIZED, message="That code is not valid", error_code="TOTP_INVALID",
+            )
+        await session.commit()
+    # Merge any guest accounts with matching email into this user
+    from app.api.users.service import merge_guest_into_user
+    await merge_guest_into_user(session, app_user=user)
+    await session.commit()
+    # commit() expires user's attributes; refresh explicitly here (a proper
+    # awaited ORM op) rather than letting create_access_refresh_tokens's bare
+    # attribute access trigger an implicit lazy-load, which can hit a
+    # pool_pre_ping/greenlet interaction bug on an async engine (MissingGreenlet).
+    await session.refresh(user)
+    return await _signed_in(session, request, response, user, identifier=identifier, method=method)
+
+
+async def _signed_in(
+    session, request: Request, response: Response, user, *, identifier: str, method: str, member=None, account: str | None = None,
+) -> Token:
+    """The session (a member's rides on the club's account), the record, the
+    new-device mail (to the member, for a member) and the cookies."""
+    from app.api.security import service as security
+
+    token = await service.create_access_refresh_tokens(
+        user, session=session, request=request, member_id=member.id if member is not None else None,
+    )
+    first_time_here = await security.is_new_device(session, user.id, request)
+    await security.record(
+        session, request=request, identifier=identifier, user=user, method=method, result="signed_in",
+        session_id=security.sid_in(token.access_token),
+    )
+    if member is not None:
+        member.last_seen_at = datetime.now(timezone.utc)
+    await session.commit()
+    mail = None
+    to = member.email if member is not None else user.email
+    if first_time_here and getattr(user, "notify_new_device", True) and to:
+        device, _ = security.parse_agent(security.user_agent_of(request))
+        mail = dict(to=to, account=account or await security.account_name(session, user), device=device, when=datetime.now(timezone.utc))
+    # The place is looked up after the commit, never inside the sign-in.
+    await security.place_later(session, security.client_ip(request), new_device_mail=mail)
+    _set_auth_cookies(request, response, token.access_token, token.refresh_token)
+    return token
+
+
 @router.post("/token", summary="get access token")
 # Per caller address (app.core.net). A whole campus behind one Wi-Fi address
 # signs in through this at a fest, so the cap is loose; guessing one account's
@@ -138,111 +271,95 @@ async def login_for_access_token(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
     totp_code: Optional[str] = Form(None),
 ) -> Token:
-    from app.api.security import service as security
-
-    ip = security.client_ip(request)
-
-    async def refuse(user, result: str, status_code: int, message: str, **extra):
-        await security.record(session, request=request, identifier=form_data.username, user=user, method="password", result=result)
-        await session.commit()
-        await security.place_later(session, ip)
-        raise CustomHTTPException(status_code=status_code, message=message, **extra)
-
-    wait = await security.lockout_remaining(session, form_data.username, ip)
-    if wait:
-        await refuse(None, "blocked", status.HTTP_429_TOO_MANY_REQUESTS, f"Too many wrong passwords. Try again in {max(1, wait // 60)} min.", error_code="LOGIN_LOCKED")
+    username = form_data.username
+    await _refuse_if_locked(session, request, identifier=username, method="password")
 
     # The clubs dashboard asks with scope "club": there, a club team member's
     # own email and password open a session on the club's account. Only
     # there — the same address may be someone's app account too, and the app
     # must keep signing them in as themselves.
-    if "club" in (form_data.scopes or []):
+    club_scope = "club" in (form_data.scopes or [])
+    if club_scope:
         from app.api.club_access import service as club_access
-        from app.api.clubs.models import Clubs
 
-        member = await club_access.authenticate(session, form_data.username, form_data.password)
+        member = await club_access.authenticate(session, username, form_data.password)
         if member is not None:
-            club = await session.get(Clubs, member.club_id)
-            owner = await get_user(session, club.user_id) if club is not None and not club.is_deleted and club.user_id else None
-            if owner is None or getattr(owner, "is_active", True) is False:
-                await refuse(None, "blocked", status.HTTP_403_FORBIDDEN, "This club's dashboard is closed right now. Ask the club's owner.", error_code="CLUB_UNAVAILABLE")
-            token = await service.create_access_refresh_tokens(owner, session=session, request=request, member_id=member.id)
-            first_time_here = await security.is_new_device(session, owner.id, request)
-            await security.record(session, request=request, identifier=member.email, user=owner, method="password", result="signed_in", session_id=security.sid_in(token.access_token))
-            member.last_seen_at = datetime.now(timezone.utc)
-            await session.commit()
-            mail = None
-            if first_time_here and getattr(owner, "notify_new_device", True):
-                device, _ = security.parse_agent(security.user_agent_of(request))
-                mail = dict(to=member.email, account=club.name, device=device, when=datetime.now(timezone.utc))
-            await security.place_later(session, ip, new_device_mail=mail)
-            _set_auth_cookies(request, response, token.access_token, token.refresh_token)
-            return token
+            return await _member_signed_in(session, request, response, member, identifier=username, method="password")
 
     user = None
-    tried_club = False
-    if "club" in (form_data.scopes or []):
+    if club_scope:
         # On the clubs dashboard the club account comes first: the same
         # address may also be the person's app account, and that one cannot
         # open a club's dashboard. Without the scope (the app) nothing changes.
         from app.core.auth.authentication import authenticate_club_account
 
-        user = await authenticate_club_account(session, form_data.username, form_data.password)
-        tried_club = True
-        if user is not None and not user.club.is_verified:
-            await refuse(user, "blocked", status.HTTP_403_FORBIDDEN, "Your club is waiting for approval. We will email you when it is approved.", error_code="CLUB_NOT_VERIFIED")
+        user = await authenticate_club_account(session, username, form_data.password)
+        if user is not None:
+            await _refuse_if_club_waiting(session, request, user, identifier=username, method="password")
     if user is None:
         from app.api.users.models import UserTypes
 
         user = await authenticate_user(
-            session, form_data.username, form_data.password,
-            exclude_type=UserTypes.club if tried_club else None,
+            session, username, form_data.password,
+            exclude_type=UserTypes.club if club_scope else None,
         )
     if not user:
-        await refuse(None, "wrong_password", status.HTTP_401_UNAUTHORIZED, "Incorrect username or password", headers={"WWW-Authenticate": "Bearer"})
-    # Said plainly at the door: a suspended account used to get tokens here
-    # and then a 403 on its first request.
-    if getattr(user, "is_active", True) is False:
-        await refuse(user, "blocked", status.HTTP_403_FORBIDDEN, "This account has been suspended", error_code="ACCOUNT_SUSPENDED")
+        await _refuse(
+            session, request, identifier=username, user=None, method="password", result="wrong_password",
+            status_code=status.HTTP_401_UNAUTHORIZED, message="Incorrect username or password", headers={"WWW-Authenticate": "Bearer"},
+        )
+    return await _account_signed_in(session, request, response, user, identifier=username, method="password", totp_code=totp_code)
 
-    # Second factor, where the account has one. The password is verified
-    # first so an attacker learns nothing new from the order; the distinct
-    # error code is what lets the UI show the code field rather than claiming
-    # the password was wrong.
-    if getattr(user, "totp_enabled", False):
-        from app.api.auth import totp as totp_service
 
-        if not totp_code:
-            await refuse(user, "totp_required", status.HTTP_401_UNAUTHORIZED, "Enter the code from your authenticator app", error_code="TOTP_REQUIRED")
+GOOGLE_NO_ACCOUNT_MESSAGE = (
+    "No club dashboard / admin account uses this Google account. "
+    "Sign in with your email and password, or ask to be invited."
+)
 
-        # A code is good once (a replayed one is refused) and a recovery code
-        # is spent: app.api.auth.totp.
-        if not await totp_service.check_second_factor(session, user, totp_code):
-            await refuse(user, "totp_invalid", status.HTTP_401_UNAUTHORIZED, "That code is not valid", error_code="TOTP_INVALID")
-        await session.commit()
-    # Merge any guest accounts with matching email into this user
-    from app.api.users.service import merge_guest_into_user
-    await merge_guest_into_user(session, app_user=user)
-    await session.commit()
-    # commit() expires user's attributes; refresh explicitly here (a proper
-    # awaited ORM op) rather than letting create_access_refresh_tokens's bare
-    # attribute access trigger an implicit lazy-load, which can hit a
-    # pool_pre_ping/greenlet interaction bug on an async engine (MissingGreenlet).
-    await session.refresh(user)
-    token = await service.create_access_refresh_tokens(
-        user, session=session, request=request
-    )
-    first_time_here = await security.is_new_device(session, user.id, request)
-    await security.record(session, request=request, identifier=form_data.username, user=user, method="password", result="signed_in", session_id=security.sid_in(token.access_token))
-    await session.commit()
-    mail = None
-    if first_time_here and getattr(user, "notify_new_device", True) and user.email:
-        device, _ = security.parse_agent(security.user_agent_of(request))
-        mail = dict(to=user.email, account=await security.account_name(session, user), device=device, when=datetime.now(timezone.utc))
-    # The place is looked up after the commit, never inside the sign-in.
-    await security.place_later(session, ip, new_device_mail=mail)
-    _set_auth_cookies(request, response, token.access_token, token.refresh_token)
-    return token
+
+@router.post("/google/dashboard", summary="Sign in to the club dashboard or the main portal with Google")
+# The password sign-in's limit: this is the same door.
+@limiter.limit("20/minute")
+async def google_dashboard_sign_in(
+    request: Request,
+    response: Response,
+    body: DashboardGoogleSignInRequest,
+    session: SessionDep,
+) -> Token:
+    """
+    The dashboards' "Continue with Google". The ID token is checked as
+    `/auth/google` checks the web's (audience APP_GOOGLE_WEB_CLIENT_ID,
+    signature, issuer, expiry; Google must have verified the address), and
+    its address signs in an account that already exists. None is ever made.
+
+    - `scope: "club"`: an active club team member with the address (a session
+      on the club's account, with `member_id`), else the club's own login
+      account. 403 CLUB_UNAVAILABLE / CLUB_NOT_VERIFIED as on `/auth/token`.
+    - `scope: "admin"`: an admin account only.
+
+    Anything else -- no account, an app user, a guest, the other dashboard's
+    account -- is the same 401 GOOGLE_NO_ACCOUNT. Then as `/auth/token`: 403
+    ACCOUNT_SUSPENDED; 401 TOTP_REQUIRED when the account has two-factor
+    (send the same id_token again with `totp_code`) and TOTP_INVALID; 429
+    LOGIN_LOCKED; the same answer, session and cookies. 401
+    INVALID_GOOGLE_TOKEN for a token Google would not vouch for; 503
+    GOOGLE_UNAVAILABLE when its certificates can't be fetched.
+    """
+    email = await service.dashboard_google_email(body.id_token)
+    await _refuse_if_locked(session, request, identifier=email, method="google")
+    member, user = await service.dashboard_account(session, email, body.scope)
+    if member is not None:
+        return await _member_signed_in(session, request, response, member, identifier=email, method="google")
+    if user is None:
+        # One answer for every miss: which addresses have which accounts is
+        # not for anyone holding a Google account to find out.
+        await _refuse(
+            session, request, identifier=email, user=None, method="google", result="no_account",
+            status_code=status.HTTP_401_UNAUTHORIZED, message=GOOGLE_NO_ACCOUNT_MESSAGE, error_code="GOOGLE_NO_ACCOUNT",
+        )
+    if body.scope == "club":
+        await _refuse_if_club_waiting(session, request, user, identifier=email, method="google")
+    return await _account_signed_in(session, request, response, user, identifier=email, method="google", totp_code=body.totp_code)
 
 
 def _unauthorized(message: str, **extra) -> CustomHTTPException:
