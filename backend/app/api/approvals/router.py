@@ -19,9 +19,12 @@ from app.api.approvals.schemas import (
     RequestsPage,
 )
 from app.api.deliveries import service as deliveries
+from app.api.events.access import is_admin_user
 from app.core.auth.dependencies import ClubAuth, GuestAuth
+from app.core.auth.permissions import EXPORT_DATA, ensure_admin_can
 from app.core.rate_limit import limiter
 from app.db.core import SessionDep
+from app.response import CustomHTTPException
 
 router = APIRouter(tags=["registration requests"])
 public_router = APIRouter(tags=["registration requests"])
@@ -30,12 +33,25 @@ NO_STORE = "no-store"
 
 
 def _actor(request: Request, user):
+    """Who is deciding (confirm, decline, back to review): the club, never a
+    platform admin. ClubAuth admits admins, so an admin reads the queue and
+    exports it as they read an event's attendees, but the decisions are the
+    club's. An admin acting as the club (impersonating) arrives as the club's
+    own account and decides as it."""
     from app.api.club_ops.access import actor_of
 
+    if is_admin_user(user):
+        raise CustomHTTPException(
+            403,
+            message="Only the club can confirm, decline or put back a registration under review",
+            error_code="INSUFFICIENT_PERMISSIONS",
+        )
     return actor_of(request, user)
 
 
 # ─── The club's (owner, admin, editor decide; door staff read: club_access.policy) ──
+# Platform admins read the queue and its export for any event, as they read
+# its attendees (app/api/events/access.py), and decide nothing (_actor).
 
 
 @router.get("/events/registration/{event_id}/requests", summary="The event's registration requests, a page at a time")
@@ -56,7 +72,9 @@ async def list_requests(
 async def export_requests(session: SessionDep, user: ClubAuth, event_id: int) -> Response:
     """Every request, whatever its status: the person, the ticket type and
     code, the answers, when asked and decided and by whom, the decline note,
-    and the payment's state. Whoever may read the queue may export it."""
+    and the payment's state. Whoever may read the queue may export it; an
+    admin also needs EXPORT_DATA, as for the attendees' export."""
+    ensure_admin_can(user, EXPORT_DATA)
     event = await deliveries.event_for_club(session, user, event_id)
     body = await service.export_csv(session, event)
     name = f"{event.slug or event.id}-requests.csv"
