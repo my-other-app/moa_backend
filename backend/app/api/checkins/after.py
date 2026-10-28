@@ -99,6 +99,8 @@ async def _notify(session, a: Admitted) -> None:
             data={"event_name": a.event_name, **({"open": "people"} if "open" in data else {})},
         )
         token = await push.get_fcm_token_for_user(session, a.user_id)
+        # The icon's badge: their unread count, the welcome just written included.
+        badge = await push.unread_badge(session, a.user_id) if token else None
         # End the read before the network call, so no pooled connection is
         # held while FCM answers.
         await session.commit()
@@ -106,7 +108,7 @@ async def _notify(session, a: Admitted) -> None:
             return
         dead: list[str] = []
         # The FCM client blocks on its HTTP call: a thread, with a loop of its own.
-        await asyncio.to_thread(_send_blocking, token, title, body, data, dead)
+        await asyncio.to_thread(_send_blocking, token, title, body, data, dead, badge)
         if dead:
             await push.prune_tokens(session, dead)
     except Exception:  # noqa: BLE001
@@ -135,10 +137,10 @@ async def _people_like_you(session, event_id: int) -> bool:
         return False
 
 
-def _send_blocking(token: str, title: str, body: str, data: dict, dead: list) -> bool:
+def _send_blocking(token: str, title: str, body: str, data: dict, dead: list, badge: Optional[int] = None) -> bool:
     from app.core.notifications import service as push
 
-    return asyncio.run(push._send_to_token(token, title, body, data, dead=dead))
+    return asyncio.run(push._send_to_token(token, title, body, data, dead=dead, badge=badge))
 
 
 async def _badges(session, a: Admitted) -> None:

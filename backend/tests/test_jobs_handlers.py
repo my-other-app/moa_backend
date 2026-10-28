@@ -97,9 +97,11 @@ async def test_a_push_to_every_device_is_one_job_a_batch_each_device_once(sessio
     from app.core.notifications import service as push
 
     batches: list = []
+    sent_badges: dict = {}
 
-    async def send(tokens, title, body, data, image_url, dead=None):
+    async def send(tokens, title, body, data, image_url, dead=None, badges=None):
         batches.append(list(tokens))
+        sent_badges.update(badges or {})
         return len(tokens)
 
     monkeypatch.setattr(push, "FCM_BATCH", 2)
@@ -114,6 +116,9 @@ async def test_a_push_to_every_device_is_one_job_a_batch_each_device_once(sessio
     mine = [t for b in batches for t in b if t not in before]
     assert len(mine) == 5 and len(set(mine)) == 5
     assert all(len(b) <= 2 for b in batches)
+    # No inbox line goes with it: each device's badge is its person's count
+    # as it was, nothing unread here -- 0, never a made-up 1.
+    assert [sent_badges[t] for t in mine] == [0] * 5
     assert all(j.finished_at is not None for j in await _jobs(session, "notifications.broadcast"))
 
 

@@ -32,7 +32,7 @@ def pushes(monkeypatch):
         return "tok-guest"
 
     monkeypatch.setattr(push, "get_fcm_token_for_user", token)
-    monkeypatch.setattr(after, "_send_blocking", lambda tok, title, body, data, dead: sent.append((title, body, dict(data))) or True)
+    monkeypatch.setattr(after, "_send_blocking", lambda tok, title, body, data, dead, badge=None: sent.append((title, body, dict(data))) or True)
     return sent
 
 
