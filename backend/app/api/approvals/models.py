@@ -16,7 +16,8 @@ A request's life (`status`), forward only but for the club's reopen:
        │                    │
        ├──decline──> declined          (reopen: declined or lapsed -> pending)
        ├──withdraw─> withdrawn         (approved and unpaid may withdraw too)
-       └──event cancelled or over──> closed   (pending or approved)
+       └──registered another way, or the event over, deleted or cancelled──> closed
+                                        (pending, or approved and unpaid; `closed_reason` says which)
 """
 import uuid
 
@@ -30,6 +31,13 @@ from app.db.mixins import TimestampsMixin
 
 PENDING, APPROVED, DECLINED, WITHDRAWN, LAPSED, CLOSED = "pending", "approved", "declined", "withdrawn", "lapsed", "closed"
 STATUSES = (PENDING, APPROVED, DECLINED, WITHDRAWN, LAPSED, CLOSED)
+#: Why a request is `closed`: the person got a ticket another way (the desk,
+#: an import, the form once the setting was off), or the event ended, was
+#: deleted or was called off.
+REGISTERED_DIRECTLY, EVENT_ENDED, EVENT_DELETED, EVENT_CANCELLED = (
+    "registered_directly", "event_ended", "event_deleted", "event_cancelled",
+)
+CLOSED_REASONS = (REGISTERED_DIRECTLY, EVENT_ENDED, EVENT_DELETED, EVENT_CANCELLED)
 #: A person has at most one of these per event (address and account).
 OPEN = (PENDING, APPROVED)
 #: The statuses the club may put back in the queue.
@@ -81,6 +89,8 @@ class RegistrationRequests(AbstractSQLModel, TimestampsMixin):
     waitlist_entry_id = Column(UUID(as_uuid=True), ForeignKey("waitlist_entries.id", ondelete="SET NULL"), nullable=True)
     #: When the "request received" email last went again, for a form sent twice.
     resent_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    #: Why it is `closed` (CLOSED_REASONS); null for any other status.
+    closed_reason = Column(String(24), nullable=True)
 
     __table_args__ = (
         # The queue, its pages and its counts: an event's requests by status, oldest first.
@@ -110,8 +120,20 @@ class RegistrationRequests(AbstractSQLModel, TimestampsMixin):
             "ix_registration_requests_pending", "event_id", "submitted_at", "id",
             postgresql_where=sa.text("status = 'pending'"),
         ),
+        # The request a registration came from: the registration's own
+        # deletion (the foreign key's SET NULL) and the figures that tell a
+        # confirmed registration from one added directly read it.
+        sa.Index(
+            "ix_registration_requests_registration", "registration_id",
+            postgresql_where=sa.text("registration_id IS NOT NULL"),
+        ),
         CheckConstraint(
             "status IN ('pending', 'approved', 'declined', 'withdrawn', 'lapsed', 'closed')",
             name="ck_registration_requests_status",
+        ),
+        CheckConstraint(
+            "closed_reason IS NULL OR closed_reason IN "
+            "('registered_directly', 'event_ended', 'event_deleted', 'event_cancelled')",
+            name="ck_registration_requests_closed_reason",
         ),
     )
