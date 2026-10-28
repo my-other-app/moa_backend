@@ -71,21 +71,21 @@ def report_pdf(f: dict, generated_at: datetime, tz: str) -> bytes:
 
     req = f.get("requests")
     if req:
-        # Confirm each registration (app/api/approvals): who asked, and what became of it.
-        out.append(Paragraph("REGISTRATION REQUESTS", s["section"]))
+        # Registrations the club reviewed (app/api/approvals): how many came in, and what became of them.
+        out.append(Paragraph("REGISTRATION REVIEW", s["section"]))
         rows = [
-            ["Asked", str(req.get("total", 0))],
+            ["Received", str(req.get("total", 0))],
             ["Confirmed", str(req.get("approved", 0))],
             ["  of them paid", str(req.get("approved_paid", 0))],
             ["  checked in", str(req.get("checked_in", 0))],
             ["Declined", str(req.get("declined", 0))],
-            ["Withdrew", str(req.get("withdrawn", 0))],
-            ["Didn't pay in time", str(req.get("lapsed", 0))],
-            ["Closed unanswered or settled", str(req.get("closed", 0))],
-            ["Added directly (desk, import, before the switch)", str(req.get("added_directly", 0))],
+            ["Cancelled by them", str(req.get("withdrawn", 0))],
+            ["Expired (not paid in time)", str(req.get("lapsed", 0))],
+            ["Closed (event ended, or registered another way)", str(req.get("closed", 0))],
+            ["Added directly (desk, import, before review was on)", str(req.get("added_directly", 0))],
         ]
         if req.get("avg_decision_hours") is not None:
-            rows.append(["Average time to decide", f"{req['avg_decision_hours']} h"])
+            rows.append(["Average time to review", f"{req['avg_decision_hours']} h"])
         out.append(_table(rows, [W * 0.8, W * 0.2], header=False))
 
     out.append(Paragraph("BY ROLE", s["section"]))

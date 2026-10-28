@@ -111,6 +111,11 @@ def _block_html(b, inp: RenderInput) -> str:
     base = f"{pad}{bg}text-align:{s.align};font-family:{font};color:{color};letter-spacing:{s.letter_spacing:g}px;"
     v = inp.values
     kind = b.kind
+    if kind in ("heading", "paragraph") and not plain(b.text, v).strip():
+        # Nothing to say once its tokens are filled in (a {% if %} whose
+        # value is empty): no gap where it would have been. The text twin
+        # leaves it out too.
+        return ""
     if kind == "heading":
         size = s.size or (30 if b.level == 1 else 22)
         return _cell(f'<div style="font-size:{size}px;line-height:1.2;font-weight:{s.weight or "700"};margin:0">{inline(b.text, v, accent)}</div>', base)
@@ -281,10 +286,10 @@ def uses_qr(design: EmailDesign) -> bool:
 
 def sample_email_values(values: dict, *, organiser_email: Optional[str] = None, api_origin: Optional[str] = None) -> dict:
     """The sample token values plus the email-only ones."""
-    from app.core.mail.schema import EMAIL_ONLY_TOKENS
+    from app.core.mail.schema import EMAIL_ONLY_TOKENS, REQUEST_TOKENS
 
     out = dict(values)
-    for t in EMAIL_ONLY_TOKENS:
+    for t in [*EMAIL_ONLY_TOKENS, *REQUEST_TOKENS]:
         out[t["key"]] = t["sample"]
     out["organiser_email"] = organiser_email or ""
     out["event_start"] = f"{(out.get('event_day') or '')[:3]} {out.get('event_date', '')} · {out.get('event_time', '')}".strip()

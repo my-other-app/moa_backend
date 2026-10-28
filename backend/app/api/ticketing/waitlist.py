@@ -81,15 +81,17 @@ async def settings_for(session, event_id: int) -> Optional[WaitlistSettings]:
     return await session.get(WaitlistSettings, event_id)
 
 
-#: Joining the line of an event whose club confirms each registration
-#: (app/api/approvals): there is none. New people ask instead, and wait in the
-#: club's queue.
+#: Joining the line of an event whose club reviews every registration
+#: (app/api/approvals): there is none. New people register instead, and the
+#: club reviews them; the people in line when review went on became
+#: registrations under review (approvals.from_waiting_list).
 OFF_ON_APPROVAL = "WAITLIST_OFF_ON_APPROVAL_EVENTS"
 
 
 def off_on_approval() -> CustomHTTPException:
     return CustomHTTPException(
-        409, message="This event has no waiting list: the organisers confirm each place. Ask for a place instead.",
+        409,
+        message="This event has no waiting list: the organisers review every registration. Register instead, and they'll get back to you.",
         error_code=OFF_ON_APPROVAL,
     )
 
@@ -265,6 +267,15 @@ async def join(
             409, message="Tickets are still available: register instead.", error_code="WAITLIST_NOT_NEEDED",
             errors={"ticket_type_id": ttype.id, "available": left},
         )
+    # The club may have switched review on since this event was read: a line
+    # joined now would never move (its people become registrations under
+    # review only at the switch). Read again under a share lock, which waits
+    # for a switch being written and holds one off until this commits, so a
+    # join either lands before the switch converts the line or is refused.
+    if await session.scalar(
+        select(Events.requires_approval).where(Events.id == event.id).with_for_update(read=True)
+    ):
+        raise off_on_approval()
     entry = WaitlistEntries(
         event_id=event.id, ticket_type_id=ttype.id, user_id=user.id if user is not None else None,
         full_name=(full_name or "").strip()[:100] or (user.full_name if user is not None else "") or "Guest",

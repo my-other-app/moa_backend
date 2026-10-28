@@ -3261,7 +3261,7 @@ Lists the templates on the platform's number with Meta's status. Set
 direct read; without it the account is found from the access token. Cached
 10 minutes; "Refresh" asks again.
 
-## 25. Registration approval ("Confirm each registration")
+## 25. Review registrations (registration approval)
 
 The contract and how it works: docs/APPROVALS.md. Code: `backend/app/api/approvals/`.
 
@@ -3325,8 +3325,8 @@ SELECT id, payload, last_error FROM jobs WHERE name = 'approvals.notify' AND dea
 - A paid confirmation not paid in time lapses by itself; the club can reopen
   a lapsed (or declined) request, which puts it back in the queue where it
   was.
-- The request emails are listed in the club's email library but can't
-  be edited yet.
+- The review emails are the club's to edit in its email library (Emails →
+  Registration review); "Reset to default" puts MyOtherApp's words back.
 
 ### Full numbers, and the loopholes closed (migration `approval_stats`)
 
@@ -3354,11 +3354,11 @@ docs/APPROVALS.md §7 has the contract. What changes in running it:
   requests still pending (the sweep closed those before, silently, so in
   practice there are none: it ran every minute).
 - **Waiting list off on confirm-each events**: joining is refused (409
-  `WAITLIST_OFF_ON_APPROVAL_EVENTS`); people already in an event's line from
-  before the switch stay but are offered nothing (not by the sweep, not by
-  the club's "Offer now") and hold no place; they are offered places again
-  if the club turns confirming off. The event's waiting-list setting is
-  kept.
+  `WAITLIST_OFF_ON_APPROVAL_EVENTS`). Since `review_emails`, the people in
+  an event's line when review goes on become registrations under review
+  (see "Review wording" below). Before that they stayed in line and were
+  offered nothing: the backfill below moves them. The event's waiting-list
+  setting is kept.
 - **Settling**: every registration (form, desk, import, by hand, a
   waiting-list claim) closes its person's open request on the event
   (`registered_directly`) in its own transaction, giving back a hold if
@@ -3378,6 +3378,90 @@ WHERE r.status = 'lapsed' AND NOT g.is_deleted AND NOT g.is_paid;
 SELECT w.event_id, count(*) FROM waitlist_entries w JOIN events e ON e.id = w.event_id
 WHERE e.requires_approval AND w.status = 'waiting' AND NOT w.via_request GROUP BY 1;
 ```
+
+### Review wording, the club's review emails, and old waiting lists (migration `review_emails`)
+
+docs/APPROVALS.md §8–§10 has the contract. In the owner's words it is a
+normal registration: people register, the club reviews them and confirms
+some, and the confirmed get their ticket by email. Every attendee-facing
+and club-facing word changed; no route, JSON key, status or error code did.
+
+**Deploying it**
+
+1. Run Live Deployment with `migrate=true`.
+   - `review_emails` (after `add_event_partners`) adds six values to the
+     `emailstage` enum.
+   - It uses `ADD VALUE IF NOT EXISTS` in autocommit. That is catalogue-only:
+     no rewrite, and no lock beyond an instant. It writes no rows.
+   - `requirements.txt` is unchanged, so `install_requirements` isn't needed
+     for this one.
+   - The chain has one head: `$DC exec -T backend alembic heads` prints
+     `review_emails (head)`. If a deploy of the partners PR
+     (`add_event_partners`) hasn't run yet, this one migrates both in order.
+2. Nothing else is needed for new switches.
+   - Switching review on now converts that event's waiting list in the same
+     transaction.
+   - Each club's six review emails appear in its library the first time
+     someone opens Emails.
+   - Until then the defaults go out, with the new words.
+
+**The backfill: waiting lists of events switched on before this release**
+
+Those people are still `waiting` in a line that never moves. Run the backfill
+**after the deploy**, once the backend answers again (about a minute):
+
+```sh
+# Read-only: who would move, per event (it does the work in a transaction and rolls it back).
+$DC exec -T backend python -m scripts.waitlist_to_review
+
+# Does it: each waiting person becomes a registration under review, in their
+# turn, and gets the "Thanks for registering" email once (queued as a job).
+$DC exec -T backend python -m scripts.waitlist_to_review --apply
+```
+
+- It prints one JSON line per event, then the totals:
+  - `moved`;
+  - `already_under_review` and `already_registered` (their entry just closed);
+  - `kept_no_email` (phone-only entries, left in line untouched).
+- **Safe to run again.** A second `--apply` finds nobody waiting and changes
+  nothing. Nobody becomes two registrations.
+- **Scope.** Only events that review registrations and are still taking them:
+  not deleted, cancelled, closed, archived or over.
+- **Locks.** One transaction per event, with the event's row held first. It
+  can run while the site is live.
+- **Why a script, not a data migration.**
+  - Each person must get the email once, through the job queue, with their own
+    status link: app code, the same function the switch runs. A migration
+    would have to copy that into SQL, or import app code that later changes
+    would break.
+  - A script can be dry-run first. It can be re-run safely. It can't fail or
+    block a deploy.
+- **Before and after**, the read-only query above (people in line at events
+  that review registrations) should go to zero, except phone-only entries:
+
+```sql
+-- Read-only: registrations moved in from a waiting list (submitted when they joined, after the event switched).
+SELECT r.event_id, count(*) FROM registration_requests r
+JOIN waitlist_entries w ON w.event_id = r.event_id AND lower(btrim(w.email)) = lower(btrim(r.email)) AND w.status = 'removed'
+WHERE r.submitted_at = w.created_at GROUP BY 1;
+
+-- Read-only: the "thanks for registering" emails still queued or failed.
+SELECT id, payload, attempts, last_error FROM jobs
+WHERE name = 'approvals.notify' AND payload->>'kind' = 'received' AND (dead OR finished_at IS NULL) ORDER BY id DESC LIMIT 50;
+```
+
+**When something looks wrong**
+
+- **A club says its email "didn't change".**
+  - Edits apply from the next email sent.
+  - A confirmed person's ticket goes in "Confirmed · ticket" (REQUEST_APPROVED),
+    not in the event's Invite.
+  - Everyone else's ticket goes in the Invite, as before.
+- **A save is refused with "… works only in the registration review emails
+  that have it".** A token like `{{pay_url}}` was used where it means nothing
+  (in the "thanks" email, or in a journey email).
+- **Old app builds** still read their own words for these screens until they
+  update. The API's codes and fields didn't change, so nothing breaks.
 
 ---
 

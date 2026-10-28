@@ -1,4 +1,7 @@
-"""Registration requests: "Confirm each registration" (docs/APPROVALS.md).
+"""Registrations under review: "Review registrations before sending
+tickets" (docs/APPROVALS.md). People register; the club reviews them,
+confirms some and declines the rest. The record of a registration under
+review is a *request* (the code's and the API's word, kept for old clients).
 
 - Submitting: the public form on an event that requires approval makes a
   request, never a registration. Taken under the address's lock, as a
@@ -24,8 +27,11 @@
   and a public registration never both take the last place (the event's row).
 - Telling people: every email and push is a job (app/core/jobs.py) written in
   the transaction that decided, so it runs once that commits and never for
-  one that rolled back. A free ticket's email is the event's own ticket
-  email, through the deliveries outbox like any other.
+  one that rolled back. A free ticket's email is the club's "Confirmed ·
+  ticket" email (its library's REQUEST_APPROVED), through the deliveries
+  outbox like any other ticket.
+- The waiting list, once review goes on: its people become registrations
+  under review (`from_waiting_list`, §8 of docs/APPROVALS.md).
 """
 from __future__ import annotations
 
@@ -274,7 +280,8 @@ async def submit(
         return Submitted(existing, created=False, owner=owner)
     if await _declined(session, event.id, email=email, user_id=user_id):
         raise CustomHTTPException(
-            409, message="The organisers already decided on your request for this event.", error_code="REQUEST_DECLINED",
+            409, message="The organisers couldn't confirm your registration for this event, so you can't register again with this email.",
+            error_code="REQUEST_DECLINED",
         )
     # The ticket type, its sales window, the per-person limit and the code,
     # as a registration checks them. A request holds no place, so the places
@@ -528,7 +535,7 @@ async def _not_withdrawable(session, req) -> CustomHTTPException:
 
     shown = jsonable_encoder(await view(session, req))
     return CustomHTTPException(
-        409, message="This request can no longer be withdrawn.", error_code="REQUEST_NOT_WITHDRAWABLE",
+        409, message="This registration can't be cancelled any more.", error_code="REQUEST_NOT_WITHDRAWABLE",
         errors={"request": shown},
     )
 
@@ -1064,6 +1071,110 @@ async def reopen(session, event, ids, *, actor=None) -> dict:
     return {"reopened": reopened, "skipped": skipped}
 
 
+# ─── The waiting list, once the club reviews every registration ──────────
+
+#: Longest values a request keeps (its columns: a registration's own widths).
+_EMAIL_MAX, _PHONE_MAX = 100, 15
+
+
+async def from_waiting_list(session, event, *, now: Optional[datetime] = None) -> dict:
+    """Everyone `waiting` in the event's waiting list becomes a registration
+    under review (a pending request), now that the club reviews every
+    registration: the event's line has no other way to move (docs/APPROVALS.md
+    §8). Called where the switch goes on (events.service.update_event), and
+    by the backfill for events switched on before this (scripts/
+    waitlist_to_review.py).
+
+    - In line order, keeping their turn: `submitted_at` is when they joined,
+      so they come before anyone who registers later. Their ticket type,
+      name, phone, account and WhatsApp choice go with them.
+    - Their line entry becomes `removed`, so nobody is counted twice.
+    - Someone with an open request on the event already, or a live
+      registration, is not made a second one: the entry just closes.
+    - An entry with no address to write to (a phone-only one, or an address
+      longer than a registration takes) stays in line, untouched, and is
+      counted as `kept_no_email`.
+    - A standing offer (`offered`) is left alone: it can be claimed until it
+      runs out, as any offer.
+    - Each new request gets the "thanks for registering" email once: a job,
+      written here, that runs when the caller commits (keyed on the request).
+
+    Nothing happens for an event no request of which could be confirmed any
+    more (gone, called off, over). Takes the entries' rows (FOR UPDATE, in
+    line order, after the event's row where the caller holds it, as `fill`
+    and `offer_now` take them). Does not commit. Returns the counts:
+    `moved`, `already_under_review`, `already_registered`, `kept_no_email`."""
+    from app.api.events.registration import service as registration
+    from app.api.ticketing.models import REMOVED, WAITING, WaitlistEntries as W
+    from app.api.users.models import Users
+
+    now = now or _now()
+    out = {"moved": 0, "already_under_review": 0, "already_registered": 0, "kept_no_email": 0}
+    if event_closed(event, now):
+        return out
+    entries = list((await session.scalars(
+        select(W).where(W.event_id == event.id, W.status == WAITING, W.via_request == false())
+        .order_by(W.created_at, W.id).with_for_update().execution_options(populate_existing=True)
+    )).all())
+    made: list[RegistrationRequests] = []
+    for entry in entries:
+        email = (entry.email or "").strip()
+        if not email and entry.user_id is not None:
+            email = (await session.scalar(select(Users.email).where(Users.id == entry.user_id)) or "").strip()
+        if not email or len(email) > _EMAIL_MAX:
+            out["kept_no_email"] += 1
+            continue
+        user_id = entry.user_id
+        if await registration.existing_registration(session, event.id, user_id if user_id is not None else -1, email) is not None:
+            out["already_registered"] += 1
+        elif await open_request(session, event.id, email=email, user_id=user_id) is not None:
+            out["already_under_review"] += 1
+        else:
+            phone = (entry.phone or "").strip() or None
+            req = R(
+                event_id=event.id, user_id=user_id, full_name=((entry.full_name or "").strip() or "Guest")[:100],
+                email=email, phone=phone if phone is not None and len(phone) <= _PHONE_MAX else None,
+                ticket_type_id=entry.ticket_type_id, whatsapp_opt_in=bool(entry.whatsapp_opt_in),
+                status=PENDING, token=new_token(), submitted_at=entry.created_at or now, created_at=now, updated_at=now,
+            )
+            try:
+                async with session.begin_nested():
+                    session.add(req)
+                    await session.flush()
+            except IntegrityError:
+                # Their open request (another address of the same account), made meanwhile.
+                out["already_under_review"] += 1
+            else:
+                made.append(req)
+                out["moved"] += 1
+        entry.status = REMOVED
+        entry.closed_at = now
+        entry.updated_at = now
+    if made:
+        await enqueue(session, made, RECEIVED)
+    await session.flush()
+    return out
+
+
+async def waiting_list_events(session, *, now: Optional[datetime] = None) -> list[int]:
+    """The events that review every registration with people still waiting
+    in their line (the backfill's list): not deleted, called off, closed or
+    over, oldest event first."""
+    from app.api.ticketing.models import WAITING, WaitlistEntries as W
+
+    now = now or _now()
+    rows = await session.scalars(
+        select(Events.id).where(
+            Events.requires_approval == True,  # noqa: E712
+            Events.is_deleted == False,  # noqa: E712
+            or_(Events.lifecycle.is_(None), Events.lifecycle.notin_((EventStatus.cancelled, EventStatus.closed, EventStatus.archived))),
+            ends_at_sql() > now,
+            select(W.id).where(W.event_id == Events.id, W.status == WAITING, W.via_request == false()).exists(),
+        ).order_by(Events.id)
+    )
+    return list(rows.all())
+
+
 # ─── What the waiting-list machinery tells us ────────────────────────────
 
 
@@ -1509,8 +1620,13 @@ async def by_day(session, event_id: int) -> list[dict]:
 
 EXPORT_LEAD = ["Status", "Closed reason", "Full name", "Email", "Phone", "Ticket type", "Discount code"]
 EXPORT_TAIL = [
-    "Submitted at", "Decided at", "Decided by", "Decline note", "Amount", "Payment", "Pay by", "Ticket ID", "WhatsApp",
+    "Registered at", "Reviewed at", "Reviewed by", "Decline note", "Amount", "Payment", "Pay by", "Ticket ID", "WhatsApp",
 ]
+#: A request's status as the club reads it (the dashboard's words).
+STATUS_WORD = {
+    PENDING: "Under review", APPROVED: "Confirmed", DECLINED: "Declined", WITHDRAWN: "Cancelled",
+    LAPSED: "Expired", CLOSED: "Closed",
+}
 _FORMULA = ("=", "+", "-", "@", "\t", "\r")
 
 
@@ -1595,7 +1711,7 @@ async def export_csv(session, event) -> bytes:
             reg_live = bool(reg_live)
             pay = _payment(status, reg_live, is_paid, actual, entry_status, expires, now)
             out.writerow([_csv_cell(v) for v in (
-                status, reason if status == CLOSED else None, name, email, phone, type_name, code,
+                STATUS_WORD.get(status, status), reason if status == CLOSED else None, name, email, phone, type_name, code,
                 *(answers.get(k) for k in keys),
                 submitted, decided, by, note if status == DECLINED else None,
                 float(money.rupees(amount)) if amount is not None else None, pay,

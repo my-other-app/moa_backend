@@ -196,10 +196,10 @@ async def test_a_burst_copies_the_clubs_library_once(_engine):
                 return {t.stage: t.id for t in rows}
 
         answers = await asyncio.gather(*(ask() for _ in range(6)))
-        # Every request reads back the same four.
-        assert all(a == answers[0] for a in answers) and len(answers[0]) == len(emails.JOURNEY_STAGES)
+        # Every request reads back the same ten: the four journey emails and the six review emails.
+        assert all(a == answers[0] for a in answers) and len(answers[0]) == len(emails.LIBRARY_STAGES)
         async with make() as s:
-            assert await s.scalar(select(func.count()).select_from(EmailTemplates).where(EmailTemplates.club_id == w["club"])) == 4
+            assert await s.scalar(select(func.count()).select_from(EmailTemplates).where(EmailTemplates.club_id == w["club"])) == 10
     finally:
         await _drop_world(make, w)
 

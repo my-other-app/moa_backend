@@ -160,6 +160,12 @@ class ImageUpload(Wire):
 class LibraryTemplateOut(EmailTemplateOut):
     label: str
     usage: dict
+    #: The request emails' (docs/APPROVALS.md): the template key
+    #: (`request_received`), their heading ("Registration review") and when
+    #: each goes. Null for the journey and custom emails.
+    key: Optional[str] = None
+    group: Optional[str] = None
+    when: Optional[str] = None
 
 
 class LibraryOverview(BaseModel):
@@ -174,7 +180,9 @@ class LibraryOverview(BaseModel):
     attention: dict
     all_time: dict
     generated_at: datetime
-    #: Emails that go by themselves and are not edited here (yet): the
-    #: registration requests' (docs/APPROVALS.md). Each {key, name, subject,
-    #: when, group, customisable}.
+    #: Emails that go by themselves and are not edited here, each {key, name,
+    #: subject, when, group, customisable}. The registration review emails
+    #: were listed here until they became templates of the library (with
+    #: `key`, `group` and `when`); none are listed now, and the list stays for
+    #: the clients that read it.
     automatic: list[dict] = []

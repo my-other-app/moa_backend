@@ -4,6 +4,11 @@ The four journey emails and any custom ones, each with how it is set to go
 out, how many events carry it, and what it has done — sends, delivered,
 opened, bounced — across the club's events. Above them, the month in
 figures and what goes out next by itself.
+
+The six emails of an event that reviews registrations (app/api/approvals)
+are templates of the library too, with their `key`, `group` and `when`:
+they go by themselves, one person at a time, so they carry no event copies
+and their usage is zeros.
 """
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
@@ -13,11 +18,19 @@ from sqlalchemy.orm import joinedload
 from app.api.clubs.models import Clubs
 from app.api.deliveries.models import DeliveryOutcome, DeliveryStatus
 from app.api.emails.models import EmailStage, EmailTemplates, MessageDeliveries, Messages
-from app.api.emails.service import due_at, ensure_library, fields_of, template_out
+from app.api.emails.service import due_at, ensure_library, fields_of, is_request, template_out
 from app.api.events.models import Events
+from app.core.mail.schema import EMAIL_STAGE_META, REQUEST_GROUP
 
 WINDOW = timedelta(days=30)
-STAGE_LABEL = {"INVITE": "Invite", "PRE_EVENT": "Pre-event", "REMINDER": "Reminder", "POST_EVENT": "Post-event", "CUSTOM": "Custom"}
+STAGE_LABEL = {stage: meta["label"] for stage, meta in EMAIL_STAGE_META.items()}
+
+
+def _request_fields(tpl: EmailTemplates) -> dict:
+    """A request email's key, heading and moment; nothing for the others."""
+    if not is_request(tpl.stage):
+        return {}
+    return dict(key=tpl.stage.value.lower(), group=REQUEST_GROUP, when=EMAIL_STAGE_META[tpl.stage.value]["when"])
 
 
 def _now() -> datetime:
@@ -106,7 +119,10 @@ async def overview(session, club: Clubs) -> dict:
         last = max((m.created_at for m, _ in sends), default=None)
         return dict(events=len(mine), customised=len(changed), off=sum(1 for c in mine if not c.enabled), sends=f["messages"], recipients=f["recipients"], delivery_rate=f["delivery_rate"], open_rate=f["open_rate"], bounced=f["bounced"], last_sent_at=last)
 
-    templates = [dict(**template_out(t), label=STAGE_LABEL[t.stage.value], usage=usage(t)) for t in library]
+    templates = [
+        dict(**template_out(t), label=STAGE_LABEL.get(t.stage.value, t.stage.value), usage=usage(t), **_request_fields(t))
+        for t in library
+    ]
 
     # What goes out next by itself: every enabled, timed copy on an upcoming event that has not gone.
     upcoming = {e.id: e for e in (await session.scalars(select(Events).options(joinedload(Events.club)).where(Events.club_id == club.id, Events.is_deleted == False, Events.event_datetime + func.cast(func.concat(Events.duration, " HOURS"), INTERVAL) > now - timedelta(days=1)))).unique().all()}  # noqa: E712
@@ -123,14 +139,10 @@ async def overview(session, club: Clubs) -> dict:
     queue.sort(key=lambda q: q["due_at"])
 
     recent = [dict(id=m.id, subject=m.subject or "", stage=next((c.stage.value for c in copies if c.id == m.template_id), "CUSTOM") if m.template_id else "BROADCAST", event=dict(id=e.id, name=e.name), recipients=m.recipients, sent=m.sent_count, failed=m.failed_count, scheduled=m.scheduled, created_at=m.created_at, **{k: outcomes[m.id][k] for k in ("delivered", "read", "bounced")}) for m, e in msgs[:8]]
-    disabled = [t for t in library if t.stage is not EmailStage.CUSTOM and not t.enabled]
-    # The emails registration requests send (app/api/approvals): sent by
-    # themselves, in the club's colours, and not edited here yet.
-    from app.api.approvals.notify import LIBRARY as request_emails
-
-    automatic = [dict(**e, group="Registration requests", customisable=False) for e in request_emails]
+    disabled = [t for t in library if t.stage is not EmailStage.CUSTOM and not is_request(t.stage) and not t.enabled]
     return dict(
-        automatic=automatic,
+        # Nothing goes by itself unedited any more: the review emails are templates above.
+        automatic=[],
         figures=f_cur, previous=f_prev,
         delta=dict(messages=f_cur["messages"] - f_prev["messages"], recipients=f_cur["recipients"] - f_prev["recipients"]) if (cur or prev) else None,
         templates=templates, queue=queue[:10], recent=recent,

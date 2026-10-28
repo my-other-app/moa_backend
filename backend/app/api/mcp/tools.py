@@ -331,7 +331,7 @@ async def get_event(call: Call, args: dict) -> dict:
     "event_stats",
     title="Event figures",
     scope="events:read",
-    description="An event's numbers: registrations, check-ins, paying guests and capacity, registration requests by status when the club confirms each place, and its money (tickets, store, refunds, owed) when the connection has finance:read and your role sees money.",
+    description="An event's numbers: registrations, check-ins, paying guests and capacity, registrations under review and their outcomes, by status, when the club reviews every registration, and its money (tickets, store, refunds, owed) when the connection has finance:read and your role sees money.",
     schema=obj({"event_id": EVENT_ID}, ("event_id",)),
 )
 async def event_stats(call: Call, args: dict) -> dict:

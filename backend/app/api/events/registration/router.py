@@ -194,7 +194,7 @@ async def _request_instead(session, background_tasks, event: Events, registratio
     if not registration.accepts_approval:
         raise CustomHTTPException(
             409,
-            message="This event needs the club to confirm each place. Update the app, or register on myotherapp.in.",
+            message="This event reviews every registration. Update the app, or register on myotherapp.in.",
             error_code="APPROVAL_REQUIRED",
         )
     if registration.store:
@@ -202,7 +202,7 @@ async def _request_instead(session, background_tasks, event: Events, registratio
         # for until the club confirms the place. Refused rather than dropped,
         # so nobody believes they bought something they did not.
         raise CustomHTTPException(
-            422, message="Add-ons can't be picked with a request for a place.",
+            422, message="Add-ons can't be picked when registrations are reviewed.",
             error_code="ADD_ONS_NOT_ALLOWED", errors={"store": "Not with a request."},
         )
     answers = dict(registration.additional_details or {})

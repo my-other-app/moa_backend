@@ -543,13 +543,13 @@ async def test_deleting_an_event_closes_its_requests_and_tells_them(client, sess
         req = await _req(session, rid)
         assert (req.status, req.closed_reason) == ("closed", "event_deleted")
     assert (await _req(session, declined)).status == "declined"
-    told = [m for m in mail if m["subject"].startswith("Your request for")]
+    told = [m for m in mail if m["subject"].startswith("Your registration for")]
     assert sorted(m["recipients"][0] for m in told) == ["asker440@example.com", "asker441@example.com"]
-    assert "able to confirm your place" in told[0]["html"] and "Deleted Club" in told[0]["html"]
+    assert "able to confirm your registration" in told[0]["html"] and "Deleted Club" in told[0]["html"]
     # The sweep finds nothing more to do, and nobody hears twice.
     await sweep.run_sweep(session)
     await jobs.settle()
-    assert len([m for m in mail if m["subject"].startswith("Your request for")]) == 2
+    assert len([m for m in mail if m["subject"].startswith("Your registration for")]) == 2
 
 
 async def test_an_event_ending_tells_each_unanswered_person_once(client, session, make_club, make_event, mint_token, mail, pushed):
@@ -568,12 +568,12 @@ async def test_an_event_ending_tells_each_unanswered_person_once(client, session
         assert (req.status, req.closed_reason) == ("closed", "event_ended")
     hold = await _req(session, held)
     assert (hold.status, hold.closed_reason) == ("closed", "event_ended")
-    told = [m for m in mail if m["subject"].startswith("Your request for")]
+    told = [m for m in mail if m["subject"].startswith("Your registration for")]
     # Once each, and only to those nobody answered (the club did confirm the hold).
     assert sorted(m["recipients"][0] for m in told) == ["asker450@example.com", "asker451@example.com"]
-    # The email library lists it.
+    # The email library holds it, for the club to edit.
     lib = (await client.get(f"{API}/clubs/me/emails/overview", headers=w.h)).json()
-    assert "request_unanswered" in {e["key"] for e in lib["automatic"]}
+    assert "request_unanswered" in {t.get("key") for t in lib["templates"]}
 
     # A cancellation keeps its own email: no unanswered one.
     c = await _club_event(session, make_club, make_event, mint_token, tag="cancelled")
@@ -584,7 +584,7 @@ async def test_an_event_ending_tells_each_unanswered_person_once(client, session
     req = await _req(session, rid)
     assert (req.status, req.closed_reason) == ("closed", "event_cancelled")
     subjects = [m["subject"] for m in _sent_to(mail, "asker455@example.com")]
-    assert any(s.startswith("Cancelled") for s in subjects) and not any(s.startswith("Your request for") for s in subjects)
+    assert any(s.startswith("Cancelled") for s in subjects) and not any(s.startswith("Your registration for") for s in subjects)
 
 
 # ─── The export ──────────────────────────────────────────────────────────
@@ -609,11 +609,12 @@ async def test_the_requests_export(client, session, make_club, make_event, mint_
     by_email = {row["Email"]: row for row in rows}
     assert len(rows) == 3 and set(by_email) == {"asker460@example.com", "asker461@example.com", "asker462@example.com"}
     first = by_email["asker460@example.com"]
-    assert (first["Status"], first["Payment"], first["Amount"]) == ("approved", "awaiting payment", "60.0")
-    assert first["Pay by"] and first["Decided at"] and first["college"] == "'=CET"
+    # The club's words for each status (the dashboard's).
+    assert (first["Status"], first["Payment"], first["Amount"]) == ("Confirmed", "awaiting payment", "60.0")
+    assert first["Pay by"] and first["Reviewed at"] and first["Registered at"] and first["college"] == "'=CET"
     second = by_email["asker461@example.com"]
-    assert (second["Status"], second["Decline note"], second["Payment"]) == ("declined", "Full up", "")
-    assert by_email["asker462@example.com"]["Status"] == "pending"
+    assert (second["Status"], second["Decline note"], second["Payment"]) == ("Declined", "Full up", "")
+    assert by_email["asker462@example.com"]["Status"] == "Under review"
     assert (await _req(session, c)).status == "pending"
 
     # Whoever may read the queue may export it: the same rule, the same answers.

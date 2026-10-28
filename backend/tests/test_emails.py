@@ -120,7 +120,11 @@ async def test_an_event_starts_with_the_four_journey_emails_from_the_club_librar
 
     library = await client.get("/api/v1/clubs/me/emails", headers=world["club"])
     assert library.status_code == 200, library.text
-    assert [t["stage"] for t in library.json()] == ["INVITE", "PRE_EVENT", "REMINDER", "POST_EVENT"]
+    # The four journey emails, then the six an event that reviews registrations sends.
+    assert [t["stage"] for t in library.json()] == [
+        "INVITE", "PRE_EVENT", "REMINDER", "POST_EVENT",
+        "REQUEST_RECEIVED", "REQUEST_APPROVED", "REQUEST_APPROVED_PAY", "REQUEST_DECLINED", "REQUEST_LAPSED", "REQUEST_UNANSWERED",
+    ]
     assert all(t["eventId"] is None for t in library.json())
     assert invite["sourceId"] == next(t["id"] for t in library.json() if t["stage"] == "INVITE")
 
