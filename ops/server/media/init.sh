@@ -6,6 +6,7 @@
 #   sudo bash /srv/moa/media/init.sh [bucket] [capacity]
 #
 # Defaults: bucket myotherapp-media, capacity 150G (what the layout may use).
+# Also sets the bucket's CORS: our sites may read files in the browser.
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")/.."
 BUCKET="${1:-myotherapp-media}"
@@ -43,3 +44,20 @@ fi
 id="$(grep -E '^APP_S3_ACCESS_KEY=' .env | cut -d= -f2)"
 g bucket allow --read --write --owner "$BUCKET" --key "$id" > /dev/null
 echo "key $id may read and write $BUCKET"
+
+# CORS: the sites may read (GET/HEAD) from the browser, nothing else (the
+# dashboards' ticket and certificate designers fetch template images). Set
+# through the S3 API with the API's own key, from the backend's image.
+"${DC[@]}" run --rm --no-deps -T -e MOA_BUCKET="$BUCKET" backend python -c '
+import os, boto3
+from botocore.config import Config
+s3 = boto3.client("s3", endpoint_url="http://media:3900", region_name="garage",
+                  aws_access_key_id=os.environ["APP_S3_ACCESS_KEY"],
+                  aws_secret_access_key=os.environ["APP_S3_SECRET_KEY"],
+                  config=Config(signature_version="s3v4", s3={"addressing_style": "path"}))
+origins = ["https://myotherapp.in", "https://club-dashboard.myotherapp.in", "https://main-portal.myotherapp.in"]
+s3.put_bucket_cors(Bucket=os.environ["MOA_BUCKET"], CORSConfiguration={"CORSRules": [{
+    "AllowedOrigins": origins, "AllowedMethods": ["GET", "HEAD"], "AllowedHeaders": ["*"],
+    "ExposeHeaders": ["ETag", "Content-Length", "Content-Type"], "MaxAgeSeconds": 3600}]})
+print("CORS: GET/HEAD from " + ", ".join(origins))
+' < /dev/null
