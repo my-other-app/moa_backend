@@ -298,8 +298,9 @@ class AppConfig(BaseSettings):
     GOOGLE_ANDROID_CLIENT_ID: str
     GOOGLE_IOS_CLIENT_ID: str
 
-    # Sign in with Apple: the audience an identity token must name (the app's bundle id).
-    APPLE_CLIENT_ID: str = "app.myotherapp.com"
+    # Sign in with Apple: the audience an identity token must name, which is
+    # the iOS app's bundle id (Team ID PX6QV826X4; the Android package is the same).
+    APPLE_CLIENT_ID: str = "app.myotherapp.in"
     # Revoking a deleted account's Sign in with Apple token, which App Review
     # requires (guideline 5.1.1(v); app/api/auth/apple_tokens.py). The team id
     # (Apple developer -> Membership), and a key with Sign in with Apple
