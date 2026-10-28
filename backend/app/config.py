@@ -172,14 +172,32 @@ class AppConfig(BaseSettings):
         without stopping the process unless APP_CONFIG_CHECKS=enforce."""
         return (value or "").strip().rstrip("/")
 
-    SES_ACCESS_KEY: str
-    SES_SECRET_KEY: str
+    # SES's API keys. Empty is allowed so a server that sends through SES's
+    # SMTP interface (MAIL_PROVIDER=ses_smtp) needs no API key; with
+    # MAIL_PROVIDER=ses, app/core/config_checks.py says when they are missing.
+    SES_ACCESS_KEY: str = ""
+    SES_SECRET_KEY: str = ""
+    # The From address of platform mail through SES (API or SMTP): an
+    # identity verified in SES.
     SES_DEFAULT_SENDER: str
     # Shared secret in the SES → SNS hook URL (?token=), on top of Amazon's signature.
     SES_WEBHOOK_TOKEN: str = ""
-    # Which provider sends mail: "ses" (default) or "resend", which falls back
-    # to SES when Resend refuses a mail (a 4xx) -- never when it may have taken it.
+    # Which provider sends mail: "ses" (default, SES's API), "ses_smtp" (SES
+    # through its SMTP interface, with SMTP credentials and no API key), or
+    # "resend", which falls back to SES when Resend refuses a mail (a 4xx) --
+    # never when it may have taken it.
     MAIL_PROVIDER: str = "ses"
+    # SES's SMTP interface (MAIL_PROVIDER=ses_smtp; app/core/email/ses_smtp.py):
+    # the endpoint of the region the sender is verified in, STARTTLS on 587
+    # (or 2587), and the SMTP credentials SES made for an IAM user -- not an
+    # API key pair. The From address stays SES_DEFAULT_SENDER.
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    # Seconds the connection, and then each reply, may take before the mail is
+    # tried again later.
+    SMTP_TIMEOUT: float = 20.0
     RESEND_API_KEY: str = ""
     # The signing secret Resend shows for the webhook (whsec_…); without it the Resend hook refuses everything.
     RESEND_WEBHOOK_SECRET: str = ""

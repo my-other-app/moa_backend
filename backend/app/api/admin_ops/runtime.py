@@ -66,8 +66,9 @@ SPECS: dict[str, Spec] = {s.key: s for s in (
          group="Features"),
     Spec("MAIL_PROVIDER", "choice", "Mail provider",
          "Who sends the platform's mail. Each send reads it, so a switch applies to the next mail.",
-         choices=("ses", "resend"),
-         note="Resend needs RESEND_API_KEY in the server's .env; without it mail stays on SES.",
+         choices=("ses", "ses_smtp", "resend"),
+         note="ses is SES's API (APP_SES_ACCESS_KEY / _SECRET_KEY); ses_smtp is SES's SMTP interface "
+              "(APP_SMTP_HOST, _USERNAME, _PASSWORD); resend needs RESEND_API_KEY, and without it mail stays on SES.",
          group="Delivery"),
     Spec("PUSH_TOPICS", "bool", "Push by topic",
          "Club and platform pushes go to FCM topics instead of device by device.",
@@ -96,8 +97,8 @@ INTERNAL_KEYS = frozenset({GRACE_STARTED_AT})
 #: Secrets and keys shown as set or not -- never their values.
 SECRET_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Payments", ("RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET", "RAZORPAY_WEBHOOK_SECRET", "PAYMENT_KEYS_SECRET")),
-    ("Mail", ("SES_ACCESS_KEY", "SES_SECRET_KEY", "SES_DEFAULT_SENDER", "SES_WEBHOOK_TOKEN", "RESEND_API_KEY",
-              "RESEND_WEBHOOK_SECRET", "MAIL_FROM_ADDRESS")),
+    ("Mail", ("SES_ACCESS_KEY", "SES_SECRET_KEY", "SES_DEFAULT_SENDER", "SES_WEBHOOK_TOKEN", "SMTP_HOST",
+              "SMTP_USERNAME", "SMTP_PASSWORD", "RESEND_API_KEY", "RESEND_WEBHOOK_SECRET", "MAIL_FROM_ADDRESS")),
     ("WhatsApp", ("WHATSAPP_ACCESS_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "WHATSAPP_BUSINESS_ACCOUNT_ID",
                   "WHATSAPP_APP_SECRET", "WHATSAPP_VERIFY_TOKEN", "WHATSAPP_KEYS_SECRET")),
     ("Push", ("FIREBASE_SERVICE_ACCOUNT_PATH", "FIREBASE_SERVICE_ACCOUNT_BASE64")),
@@ -106,6 +107,13 @@ SECRET_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Monitoring", ("SENTRY_DSN",)),
     ("Infrastructure", ("REDIS_URL", "SEARCH_KEY", "CLOUDFLARE_API_TOKEN")),
 )
+#: The mail keys, and the MAIL_PROVIDER values that send with them (the
+#: page says "in use" or "not in use" beside each one that is set).
+_MAIL_KEYS = {
+    "SES_ACCESS_KEY": ("ses", "resend"), "SES_SECRET_KEY": ("ses", "resend"),
+    "SMTP_HOST": ("ses_smtp",), "SMTP_USERNAME": ("ses_smtp",), "SMTP_PASSWORD": ("ses_smtp",),
+    "RESEND_API_KEY": ("resend",),
+}
 #: Of a pair, either one set is enough (Firebase's path or its base64).
 ANY_OF = {"FIREBASE_SERVICE_ACCOUNT_PATH": "FIREBASE_SERVICE_ACCOUNT_BASE64",
           "FIREBASE_SERVICE_ACCOUNT_BASE64": "FIREBASE_SERVICE_ACCOUNT_PATH"}
@@ -288,7 +296,11 @@ def secrets_health() -> list[dict]:
 
 
 def _mode(name: str) -> Optional[str]:
-    """A word about a set key that is not its value: Razorpay's live or test."""
+    """A word about a set key that is not its value: Razorpay's live or test,
+    and whether the mail keys are the ones MAIL_PROVIDER sends with."""
+    if name in _MAIL_KEYS:
+        provider = (getattr(settings, "MAIL_PROVIDER", "") or "ses").lower()
+        return "in use" if provider in _MAIL_KEYS[name] else "not in use"
     if name == "RAZORPAY_KEY_ID":
         value = str(getattr(settings, name, "") or "")
         if value.startswith("rzp_live_"):

@@ -22,6 +22,15 @@ class ChannelProvider:
 
 
 def email_provider() -> ChannelProvider:
+    if (getattr(settings, "MAIL_PROVIDER", "") or "ses").lower() == "ses_smtp":
+        # SES through its SMTP interface: SMTP credentials instead of API keys,
+        # the same SES behind them and the same hook for its notices.
+        ok = all((getattr(settings, name, "") or "").strip() for name in ("SMTP_HOST", "SMTP_USERNAME", "SMTP_PASSWORD", "SES_DEFAULT_SENDER"))
+        return ChannelProvider(
+            "email", "Amazon SES (SMTP)", ok,
+            "Sent through SES's SMTP interface; delivery, bounce and complaint notices arrive through the SES hook." if ok
+            else "No email provider is configured — nothing is sent on this channel.",
+        )
     ok = bool(getattr(settings, "SES_ACCESS_KEY", "") and getattr(settings, "SES_SECRET_KEY", "") and getattr(settings, "SES_DEFAULT_SENDER", ""))
     return ChannelProvider("email", "Amazon SES", ok, "Delivery, bounce and complaint notices arrive through the SES hook." if ok else "No email provider is configured — nothing is sent on this channel.")
 

@@ -74,6 +74,20 @@ async def test_mail_provider_takes_only_a_known_provider(client, make_admin, min
     assert good.status_code == 200 and settings.MAIL_PROVIDER == "resend"
 
 
+async def test_ses_over_smtp_is_a_provider_and_its_password_never_leaves(client, make_admin, mint_token, monkeypatch):
+    monkeypatch.setattr(settings, "SMTP_HOST", "email-smtp.ap-south-1.amazonaws.com")
+    monkeypatch.setattr(settings, "SMTP_USERNAME", "smtp-user-for-tests")
+    monkeypatch.setattr(settings, "SMTP_PASSWORD", "smtp-password-for-tests-0123")
+    h = await role_headers(make_admin, mint_token)
+    r = await client.put(f"{API}/admin/settings/MAIL_PROVIDER", json={"value": "ses_smtp"}, headers=h["owner"])
+    assert r.status_code == 200 and settings.MAIL_PROVIDER == "ses_smtp"
+    listed = await client.get(f"{API}/admin/settings", headers=h["owner"])
+    secrets = {s["name"]: s for s in listed.json()["secrets"]}
+    assert secrets["APP_SMTP_PASSWORD"]["set"] is True and secrets["APP_SMTP_PASSWORD"]["mode"] == "in use"
+    assert secrets["APP_SMTP_HOST"]["set"] is True and secrets["APP_SES_ACCESS_KEY"]["mode"] == "not in use"
+    assert "smtp-password-for-tests-0123" not in listed.text and "smtp-user-for-tests" not in listed.text
+
+
 async def test_an_unknown_key_is_not_a_setting(client, make_admin, mint_token):
     h = await role_headers(make_admin, mint_token)
     r = await client.put(f"{API}/admin/settings/SECRET_KEY", json={"value": "x"}, headers=h["owner"])
