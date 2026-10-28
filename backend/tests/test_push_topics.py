@@ -58,6 +58,17 @@ class FakeMessaging:
         self.multicasts.append(message)
         return SimpleNamespace(success_count=len(message.tokens), failure_count=0, responses=[])
 
+    def send_each(self, messages):
+        """A batch whose devices have different badges (each its person's
+        unread count): a message per device, in one call. Recorded as the
+        batch it is -- its tokens, and what every message shares."""
+        first = messages[0]
+        self.multicasts.append(SimpleNamespace(
+            tokens=[m.token for m in messages], data=first.data, notification=first.notification,
+            android=first.android, apns=first.apns, badges=[m.apns.payload.aps.badge for m in messages],
+        ))
+        return SimpleNamespace(success_count=len(messages), failure_count=0, responses=[])
+
     def unsubscribe_from_topic(self, tokens, topic):
         self.unsubscribed.append((sorted(tokens), topic))
         return SimpleNamespace(success_count=len(tokens), errors=[])
@@ -72,6 +83,7 @@ def fcm(monkeypatch):
     monkeypatch.setattr(push, "initialize_firebase", lambda: True)
     monkeypatch.setattr(messaging, "send", fake.send)
     monkeypatch.setattr(messaging, "send_each_for_multicast", fake.send_each_for_multicast)
+    monkeypatch.setattr(messaging, "send_each", fake.send_each)
     monkeypatch.setattr(messaging, "unsubscribe_from_topic", fake.unsubscribe_from_topic)
     return fake
 

@@ -335,8 +335,11 @@ async def test_the_scan_answers_before_the_check_in_hooks_and_fcm_runs_on_a_thre
     async def token(_session, _user_id):
         return "fcm-token"
 
-    async def send(token, title, body, data=None, dead=None):
+    badges: list = []
+
+    async def send(token, title, body, data=None, dead=None, badge=None):
         sent_on.append(threading.get_ident())
+        badges.append(badge)
         return True
 
     monkeypatch.setattr(checkins, "scan", scan)
@@ -347,6 +350,10 @@ async def test_the_scan_answers_before_the_check_in_hooks_and_fcm_runs_on_a_thre
     assert r.json()["outcome"] == "CHECKED_IN"
     assert order == ["answered", "noted"]
     assert sent_on and sent_on[0] != loop_thread
+    # The icon's badge, read on the loop before the thread: the guest's
+    # unread count (the welcome is faked here, so nothing is unread).
+    ananya = world["users"][0]
+    assert badges == [await notes.get_unread_count(session, ananya.id)] == [0]
 
 
 async def test_club_badges_read_the_follower_counter(session, world):
