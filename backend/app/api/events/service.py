@@ -158,6 +158,7 @@ async def create_event(
         ticket_template_id=ticket_template_id,
         certificate_template_id=certificate_template_id,
         requires_approval=bool(kwargs.get("requires_approval")),
+        high_demand_label=bool(kwargs.get("high_demand_label")),
     )
     if status:
         from app.api.closeout.models import EventStatus
@@ -373,6 +374,8 @@ async def update_event(
     if getattr(event, "requires_approval", None) is not None:
         # Off again: new people register directly; requests already waiting stay for the club.
         db_event.requires_approval = bool(event.requires_approval)
+    if getattr(event, "high_demand_label", None) is not None:
+        db_event.high_demand_label = bool(event.high_demand_label)
     db_event.reg_startdate = event.reg_startdate
     db_event.reg_enddate = event.reg_enddate
     db_event.about = event.about
@@ -1134,6 +1137,13 @@ async def delete_event(
     )
     if registration_count > 0:
         raise CustomHTTPException(400, message="Cannot delete event with registrations")
+    # Requests are not registrations: the event goes, and those still waiting
+    # (or holding a place they have not paid for) close with it, their people
+    # told nobody could confirm them (app/api/approvals). Before the event's
+    # row is written, in the same transaction.
+    from app.api.approvals import service as approvals
+
+    await approvals.close_for_deleted_event(session, event_id)
     db_event.soft_delete()
     await session.commit()
     return None

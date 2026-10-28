@@ -296,6 +296,7 @@ async def add_registration(
     tracking_link_id=None,
     by_organiser: bool = False,
     now: datetime | None = None,
+    from_request=None,
 ) -> EventRegistrationsLink:
     """A new registration, priced (`priced`: ticketing.quote's answer), its
     place taken and the row inserted, in the caller's transaction: flushed,
@@ -308,7 +309,14 @@ async def add_registration(
     register_event makes every registration through this; so does a club
     confirming registration requests (app/api/approvals), one SAVEPOINT a
     request, many in one transaction. `tracking_link_id`: a link already
-    resolved (a request kept the one its page carried), else `tracking_ref`."""
+    resolved (a request kept the one its page carried), else `tracking_ref`.
+
+    Whoever is registered here any other way than through their own request
+    (`from_request`: the one being confirmed; or the hold a waiting-list
+    offer's claim pays for) has their open request on the event settled in
+    this same transaction: closed `registered_directly`, its hold given back
+    (approvals.settle_direct). The form, the desk, imports and the organiser
+    adding someone all come through here."""
     from app.api.subscriptions import gates
     from app.api.ticketing import places as ticketing_places
     from app.api.ticketing import service as ticketing
@@ -363,6 +371,13 @@ async def add_registration(
     registration.admission_no = admission.number_for(db_event, seq)
     await insert_registration(session, registration)
     await ticketing.after_insert(session, db_event, registration, priced)
+    from app.api.approvals import service as approvals
+
+    offer = getattr(priced, "offer", None)
+    await approvals.settle_direct(
+        session, db_event.id, email=email, user_id=user_id, keep=from_request,
+        keep_entry=offer.id if offer is not None else None, now=now,
+    )
     return registration
 
 
@@ -1162,7 +1177,16 @@ async def get_event_analytics(
         ).all()
     ]
 
+    # Registration requests (app/api/approvals): how many asked, of the page's
+    # views, and when they asked.
+    from app.api.approvals import service as approvals
+
+    requests_total = (await approvals.counts(session, event_id))["total"]
+
     return {
+        "requests_total": requests_total,
+        "requests_per_view": round(requests_total / page_views, 4) if page_views > 0 else None,
+        "requests_by_day": await approvals.by_day(session, event_id) if requests_total else [],
         "total_registrations": total_registrations,
         "total_revenue": total_revenue,
         "attendance_rate": round(attendance_rate, 1),
