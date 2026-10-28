@@ -128,10 +128,49 @@ class AppConfig(BaseSettings):
     # deleting older ones only after a good off-site upload. 0 keeps every one.
     BACKUP_KEEP_LOCAL: int = 0
 
+    # The media bucket: posters, logos, photos, tickets, certificates, the
+    # designer's uploads, mailbox files (app/core/storage/clients.py).
     S3_BUCKET: str
     S3_ACCESS_KEY: str
     S3_SECRET_KEY: str
-    S3_BASE_PATH: str
+    # A folder inside the bucket that every key is written under: a key
+    # prefix, never an address (a link is made by the client from the
+    # endpoint, the bucket and the key). Empty, the default: keys start at
+    # the bucket's root, `clubs/logos/v-<hex>.png`, as production's always
+    # have. Leave it empty on a store of our own (S3_ENDPOINT_URL set): its
+    # links are then `<S3_PUBLIC_URL>/<S3_BUCKET>/clubs/logos/v-<hex>.png`,
+    # and the club sites' image route, which serves keys under `clubs/`,
+    # works. Set to `https://media.myotherapp.in/<bucket>`, every key would
+    # begin with that text and its link would hold the address twice.
+    S3_BASE_PATH: str = ""
+    # A store of our own that speaks S3 (Garage on the production server),
+    # for the media bucket only; all unset, AWS S3 as before. Off-site
+    # backups (BACKUP_S3_*), the club mailbox's inbound bucket (MAILBOX_*)
+    # and SES stay on AWS whatever these say.
+    #   S3_ENDPOINT_URL  where the API reaches the store: uploads, reads,
+    #                    deletes, listings (e.g. http://media:3900 inside
+    #                    Docker). Set, every media client is path-style SigV4.
+    #   S3_PUBLIC_URL    where browsers reach it: signed links are made for
+    #                    this host (e.g. https://media.myotherapp.in, with
+    #                    the proxy passing the Host header through). Unset:
+    #                    S3_ENDPOINT_URL.
+    #   S3_REGION        the region the store signs with (Garage's
+    #                    s3_region, e.g. garage). Unset: boto3's default.
+    # With an endpoint set, MEDIA_CDN_URL must not be the store's public
+    # host (a CDN address is `<cdn>/<key>`, with no bucket in it), and
+    # BACKUP_S3_ACCESS_KEY/_SECRET_KEY must be set (unset, backups would use
+    # this store's keys on AWS). app/core/config_checks.py says so.
+    S3_ENDPOINT_URL: str = ""
+    S3_PUBLIC_URL: str = ""
+    S3_REGION: str = ""
+
+    @field_validator("S3_ENDPOINT_URL", "S3_PUBLIC_URL", "S3_REGION")
+    @classmethod
+    def _trimmed(cls, value: str) -> str:
+        """Without spaces, and an address without its trailing slash. Its
+        shape is checked by app/core/config_checks.py, which says so
+        without stopping the process unless APP_CONFIG_CHECKS=enforce."""
+        return (value or "").strip().rstrip("/")
 
     SES_ACCESS_KEY: str
     SES_SECRET_KEY: str

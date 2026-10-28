@@ -16,6 +16,9 @@ when:
   WhatsApp's token without its phone number id...), names a mode that does
   not exist, or holds a key in the wrong shape (a Fernet key, Sentry's DSN,
   Firebase's service account);
+- the media bucket's own store (S3_ENDPOINT_URL, S3_PUBLIC_URL) has an
+  address that is not http(s), a public address without the endpoint, the
+  media CDN on the store's own host, or backups left on the store's keys;
 - APP_ENV says production while APP_DEBUG is on.
 
 Softer findings -- off-site backups or error tracking not set up, a test
@@ -65,10 +68,11 @@ logger = logging.getLogger("app.config_checks")
 #: APP_ENV values that are not production: nothing here is enforced.
 NOT_PRODUCTION = frozenset({"development", "dev", "local", "test", "testing", "ci"})
 
-#: Empty, and the platform cannot run: sign-in, storage, payments.
+#: Empty, and the platform cannot run: sign-in, storage, payments. (Not
+#: S3_BASE_PATH: empty is right, every key at the bucket's root.)
 REQUIRED = (
     "SECRET_KEY", "DATABASE_URL", "DATABASE_URL_SYNC",
-    "S3_BUCKET", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_BASE_PATH",
+    "S3_BUCKET", "S3_ACCESS_KEY", "S3_SECRET_KEY",
     "RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET", "RAZORPAY_WEBHOOK_SECRET",
 )
 
@@ -91,6 +95,8 @@ PAIRS = (
 #: (setting, needs): the first set without the second.
 NEEDS = (
     ("SEARCH_URL", "SEARCH_KEY"),
+    # Links signed for a public address of a store nothing else talks to.
+    ("S3_PUBLIC_URL", "S3_ENDPOINT_URL"),
 )
 
 #: Fernet keys, a comma-separated list each.
@@ -310,6 +316,55 @@ def _formats(settings) -> list[Problem]:
     env = _text(_get(settings, "ENV")).lower()
     if env == "production" and bool(_get(settings, "DEBUG")):
         out.append(Problem("DEBUG", "is on while APP_ENV is production"))
+    out.extend(_media_store(settings))
+    return out
+
+
+def _http_url(value: str) -> bool:
+    try:
+        parts = urlsplit(value)
+        return parts.scheme in ("http", "https") and bool(parts.hostname) and not parts.query and not parts.fragment
+    except ValueError:
+        return False
+
+
+def _media_store(settings) -> list[Problem]:
+    """The media bucket on a store of our own (S3_ENDPOINT_URL, app/core/
+    storage/clients.py). A public address without the endpoint is NEEDS's."""
+    out = []
+    endpoint = _text(_get(settings, "S3_ENDPOINT_URL"))
+    public = _text(_get(settings, "S3_PUBLIC_URL"))
+    for name, value in (("S3_ENDPOINT_URL", endpoint), ("S3_PUBLIC_URL", public)):
+        if value and not _http_url(value):
+            out.append(Problem(name, "is not an http(s) address like http://media:3900 or https://media.myotherapp.in"))
+    if not endpoint:
+        return out
+    links = public or endpoint  # the host every signed link is made for
+    if _http_url(links) and urlsplit(links).scheme != "https":
+        out.append(Problem(
+            "S3_PUBLIC_URL",
+            "is not https" if public else "is empty, so links are signed for APP_S3_ENDPOINT_URL, which is not https",
+            fatal=False,
+        ))
+    cdn = _text(_get(settings, "MEDIA_CDN_URL"))
+    if cdn and _http_url(links) and urlsplit(cdn).netloc.lower() == urlsplit(links).netloc.lower():
+        out.append(Problem(
+            "MEDIA_CDN_URL",
+            "is the media store's own address: a CDN link is <cdn>/<key> with no bucket in it, so every public "
+            "picture would be missing; leave it empty",
+        ))
+    if _text(_get(settings, "BACKUP_S3_BUCKET")) and not _text(_get(settings, "BACKUP_S3_ACCESS_KEY")):
+        out.append(Problem(
+            "BACKUP_S3_ACCESS_KEY",
+            "is empty while APP_S3_ENDPOINT_URL is set: off-site backups would send the media store's keys to AWS; "
+            "set APP_BACKUP_S3_ACCESS_KEY and APP_BACKUP_S3_SECRET_KEY",
+        ))
+    if "://" in _text(_get(settings, "S3_BASE_PATH")):
+        out.append(Problem(
+            "S3_BASE_PATH",
+            "is an address, but it is a folder inside the bucket: every key would begin with it; leave it empty",
+            fatal=False,
+        ))
     return out
 
 

@@ -1,5 +1,4 @@
 import asyncio
-import boto3
 import logging
 import threading
 import time
@@ -18,7 +17,7 @@ from typing import Dict, Optional, Union
 
 
 from app.config import settings
-from app.core.storage import media
+from app.core.storage import clients, media
 from app.response import CustomHTTPException
 
 logger = logging.getLogger(__name__)
@@ -32,11 +31,10 @@ logger = logging.getLogger(__name__)
 # thousand events spent seconds here. Clients are safe to share across
 # threads. Made at import rather than on first use, so a test that swaps
 # `boto3.client` for a fake while it runs cannot leave the fake behind here.
-_SIGNER = boto3.client(
-    "s3",
-    aws_access_key_id=settings.S3_ACCESS_KEY,
-    aws_secret_access_key=settings.S3_SECRET_KEY,
-)
+# It signs for the address browsers reach the bucket at (S3_PUBLIC_URL on a
+# store of our own, clients.py); uploads and deletes go through the internal
+# client, clients.media_client().
+_SIGNER = clients.media_client(public=True)
 
 
 # Signed read URLs, kept and handed out again for half their life.
@@ -296,7 +294,7 @@ class S3Image(dict):
         super().__init__(kwargs)
 
     def _delete_now(self, keys) -> None:
-        s3_client = self._client or _SIGNER
+        s3_client = self._client or clients.media_client()
         for value in keys:
             try:
                 s3_client.delete_object(Bucket=settings.S3_BUCKET, Key=value)
@@ -326,7 +324,7 @@ class S3File(str):
         return obj
 
     def delete(self):
-        s3_client = getattr(self, "_client", None) or _SIGNER
+        s3_client = getattr(self, "_client", None) or clients.media_client()
         try:
             s3_client.delete_object(Bucket=settings.S3_BUCKET, Key=self.file_path)
         except Exception as e:
@@ -412,11 +410,9 @@ class S3ImageField(TypeDecorator):
         # The column's own folder, without the base path: a key keeps its
         # folder when the base path setting changes.
         self.folder = upload_to.strip("/")
-        self.s3_client = boto3.client(
-            "s3",
-            aws_access_key_id=settings.S3_ACCESS_KEY,
-            aws_secret_access_key=settings.S3_SECRET_KEY,
-        )
+        # The process's one client for the bucket (clients.py), shared by
+        # every column rather than one made (~4 ms) per column.
+        self.s3_client = clients.media_client()
         self.variations = variations
 
     # The two halves of an upload: `prepare` is CPU (no network), `store` is
@@ -545,11 +541,7 @@ class S3FileField(TypeDecorator):
         self.allowed_extensions = allowed_extensions
         self.bucket_name = settings.S3_BUCKET
         self.base_path = os.path.join(settings.S3_BASE_PATH, upload_to)
-        self.s3_client = boto3.client(
-            "s3",
-            aws_access_key_id=settings.S3_ACCESS_KEY,
-            aws_secret_access_key=settings.S3_SECRET_KEY,
-        )
+        self.s3_client = clients.media_client()
 
     def upload(self, value) -> str:
         """Check and store one file; the key. Blocking: see `upload()`."""

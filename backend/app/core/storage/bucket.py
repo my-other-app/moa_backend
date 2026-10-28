@@ -12,11 +12,24 @@ from typing import Iterable, Optional
 from urllib.parse import unquote, urlsplit
 
 from app.config import settings
-from app.core.storage import media
+from app.core.storage import clients, media
 
 
 def _bucket() -> str:
     return settings.S3_BUCKET
+
+
+def _on_our_store(netloc: str, path: str, bucket: str) -> Optional[str]:
+    """The key in a path-style address on our own store, `{S3_PUBLIC_URL or
+    S3_ENDPOINT_URL}/{bucket}/{key}`; None for any other host or bucket."""
+    for endpoint in clients.endpoints():
+        base = urlsplit(endpoint)
+        if netloc.lower() != base.netloc.lower():
+            continue
+        prefix = f"{base.path.rstrip('/')}/{bucket}/"
+        if path.startswith(prefix):
+            return path[len(prefix):] or None
+    return None
 
 
 def key_from_url(url: Optional[str]) -> Optional[str]:
@@ -24,7 +37,9 @@ def key_from_url(url: Optional[str]) -> Optional[str]:
 
     Understands the shapes boto3 signs: virtual-hosted
     (`{bucket}.s3[.{region}].amazonaws.com/{key}`) and path style
-    (`s3[.{region}].amazonaws.com/{bucket}/{key}`). The query (the signature)
+    (`s3[.{region}].amazonaws.com/{bucket}/{key}`), and, on a store of our
+    own (S3_ENDPOINT_URL), path style on its public or internal address
+    (`https://media.myotherapp.in/{bucket}/{key}`). The query (the signature)
     is ignored, so an expired URL still names its key. And, while the media
     CDN is on, its addresses (`{APP_MEDIA_CDN_URL}/{key}`, public pictures
     only: media.key_from_url), so a poster handed out on the CDN is read by
@@ -44,6 +59,9 @@ def key_from_url(url: Optional[str]) -> Optional[str]:
     host = parts.hostname or ""
     bucket = _bucket()
     path = unquote(parts.path or "")
+    ours = _on_our_store(parts.netloc, path, bucket)
+    if ours:
+        return ours
     if not host.endswith(".amazonaws.com"):
         return None
     if host.startswith(f"{bucket}.s3.") or host.startswith(f"{bucket}.s3-"):
