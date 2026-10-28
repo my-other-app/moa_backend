@@ -74,6 +74,7 @@ from app.api.events.models import EventCategories, EventInterestsLink, Events, e
 from app.api.interests import topics as topic_refs
 from app.api.interests.models import InterestCategory, Interests
 from app.api.organisers import service as organisers
+from app.api.event_partners import service as event_partners
 from app.api.search import text as stext
 from app.api.sites import service as sites
 from app.api.sites.models import ClubSites
@@ -1471,6 +1472,8 @@ async def event_page(session, ref: str, now: Optional[datetime] = None) -> dict:
         speakers=speakers,
         agenda=dict(timezone=EVENT_TIMEZONE, items=await agenda.list_items(session, e.id)),
         team=team, team_source=team_source,
+        # The event's own sponsors and partners (app/api/event_partners), each in its order.
+        **await event_partners.split(session, e.id, event_partners.page_out),
         more_from_club=await cards(session, more, now, extras=shown),
         similar=await cards(session, similar, now, extras=shown),
     )

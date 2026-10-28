@@ -591,6 +591,11 @@ async def get_event(session: AsyncSession, event_id: str | int, user_id: int | N
         for s in event.speakers if not s.is_deleted
     ] if event.speakers else []
 
+    # Its own sponsors and partners, each in its order (app/api/event_partners).
+    from app.api.event_partners import service as event_partners
+
+    data.update(await event_partners.split(session, event.id))
+
     # User-specific data (only if user is authenticated)
     if user_id:
         from app.api.live import service as live

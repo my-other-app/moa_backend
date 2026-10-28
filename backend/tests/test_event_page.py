@@ -135,7 +135,9 @@ async def test_the_page_by_slug(client, session, world):
     r = await client.get(f"{API}/events/{main.slug}")
     assert r.status_code == 200, r.text
     page = r.json()
-    assert set(page) == {"event", "club", "speakers", "agenda", "team", "team_source", "more_from_club", "similar"}
+    assert set(page) == {"event", "club", "speakers", "agenda", "team", "team_source", "sponsors", "partners", "more_from_club", "similar"}
+    # None named: both lists are there, empty (docs/EVENT_PARTNERS.md).
+    assert page["sponsors"] == [] and page["partners"] == []
     ev = page["event"]
     assert set(ev) == EVENT_KEYS
     assert (ev["id"], ev["slug"], ev["name"], ev["about"]) == (main.id, main.slug, "Hack Night", "All night, all hands.")

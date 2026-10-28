@@ -26,7 +26,8 @@ sweep, approval and rejection, logo and cover uploads, scripts.
     -- unless it was unverified (or deleted) both before and after: a club
     rejected before it was ever approved had no page. With it go its most
     recent events, whose pages show the club.
-  * The rows those pages show: an event's speakers, agenda and organisers;
+  * The rows those pages show: an event's speakers, agenda, organisers,
+    sponsors and partners;
     a club's team, partners, socials and interests.
 
 An admin's change to the topic tree (a topic or an interest made, renamed,
@@ -110,10 +111,11 @@ def enabled() -> bool:
 def _models():
     from app.api.agenda.models import AgendaItems
     from app.api.clubs.models import ClubInterestsLink, ClubPartners, Clubs, ClubSocials, ClubTeamMembers
+    from app.api.event_partners.models import EventPartners
     from app.api.events.models import Events, EventSpeakers
     from app.api.organisers.models import EventTeamMembers
 
-    return Events, Clubs, (EventSpeakers, AgendaItems, EventTeamMembers), (ClubTeamMembers, ClubPartners, ClubSocials, ClubInterestsLink)
+    return Events, Clubs, (EventSpeakers, AgendaItems, EventTeamMembers, EventPartners), (ClubTeamMembers, ClubPartners, ClubSocials, ClubInterestsLink)
 
 
 # ─── What changed ─────────────────────────────────────────────────────────

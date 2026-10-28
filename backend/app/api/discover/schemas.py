@@ -5,6 +5,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel
 
 from app.api.agenda.schemas import AgendaItemOut
+from app.api.event_partners.schemas import PagePartner
 from app.api.interests.schemas import TopicRef
 from app.api.threads.schemas import ThreadOut
 
@@ -312,6 +313,9 @@ class EventPage(BaseModel):
     team: list[TeamMember]
     # The event's own organisers when it names them, else the club's team.
     team_source: Literal["event", "club", "none"]
+    # The event's own sponsors and partners, each in its order (docs/EVENT_PARTNERS.md).
+    sponsors: list[PagePartner] = []
+    partners: list[PagePartner] = []
     more_from_club: list[EventCard]
     similar: list[EventCard]
 

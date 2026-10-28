@@ -14,6 +14,7 @@ from app.api.idcards.router import router as idcards_router
 from app.api.kiosk.router import admin_router as kiosks_admin_router, kiosk_router, self_router
 from app.api.agenda.router import router as agenda_router
 from app.api.organisers.router import router as organisers_router
+from app.api.event_partners.router import router as event_partners_router
 from app.api.merch.router import router as merch_router, gate_router as merch_gate_router
 from app.api.closeout.router import router as closeout_router
 from app.api.hooks.router import router as hooks_router
@@ -187,6 +188,7 @@ api_router.include_router(router=kiosk_router, tags=["kiosks"])
 api_router.include_router(router=self_router, tags=["kiosks"])
 api_router.include_router(router=agenda_router, tags=["agenda"])
 api_router.include_router(router=organisers_router, tags=["organisers"])
+api_router.include_router(router=event_partners_router, tags=["event partners"])
 api_router.include_router(router=merch_router, tags=["merch"])
 api_router.include_router(router=merch_gate_router, tags=["merch"])
 api_router.include_router(router=closeout_router, tags=["closeout"])
