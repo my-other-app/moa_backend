@@ -326,10 +326,13 @@ async def _frozen(session, event: Events) -> Optional[dict]:
 async def summary(session, event: Events, now: Optional[datetime] = None) -> dict:
     """Everything the event's overview shows, in one response, so no figure on
     the page can describe a different moment from the one beside it."""
+    from app.api.ticketing import places as ticket_places
+
     now = _now(now)
     registered, checked_in = await _head_count(session, event.id)
     frozen = await _frozen(session, event)
     job = await session.scalar(select(RetentionJobs).where(RetentionJobs.event_id == event.id))
+    room = await ticket_places.summary(session, event)
     return {
         "event_id": event.id,
         "status": lifecycle(event).value,
@@ -347,6 +350,10 @@ async def summary(session, event: Events, now: Optional[datetime] = None) -> dic
         "tickets": await tickets(session, event, registered),
         # Registration requests waiting for the club (app/api/approvals).
         "requests_pending": (await approvals.pending_counts(session, [event.id])).get(event.id, 0),
+        # Every request's figure, for the funnel (null: never confirmed each place).
+        "requests": await approvals.stats(session, event, registered=registered, now=now),
+        # The places as the ticket picker counts them: holds count, requests don't.
+        "places": room.as_dict(),
         "retention": {"mode": (event.retention_mode or RetentionMode.keep).value, "state": job.state.value if job else None, "run_at": _iso(job.run_at) if job else None},
         "analytics": frozen if frozen is not None else await figures(session, event, now),
         "from_report": frozen is not None,
@@ -388,6 +395,8 @@ async def _retention(session, scope, now: datetime) -> tuple[list, list]:
 
 async def _live(session, scope, now: datetime, limit: int) -> list:
     events = list((await session.scalars(_scope_query(scope).options(joinedload(Events.club)).where(Events.lifecycle == EventStatus.live).order_by(Events.event_datetime).limit(limit))).unique().all())
+    # Registration requests beside the registrations, one grouped statement for them all.
+    asked = await approvals.totals(session, [e.id for e in events])
     out = []
     for e in events:
         registered, checked_in = await _head_count(session, e.id)
@@ -396,6 +405,8 @@ async def _live(session, scope, now: datetime, limit: int) -> list:
         out.append({
             "event_id": e.id, "name": e.name, "club": e.club.name if e.club else None, "registered": registered, "checked_in": checked_in,
             "gates": gates, "volunteers": int(volunteers), "door_open": checkins.door_open(e, now), "starts_at": _iso(e.event_datetime),
+            "requires_approval": bool(e.requires_approval),
+            "requests_total": asked.get(e.id, {}).get("total", 0), "requests_pending": asked.get(e.id, {}).get("pending", 0),
         })
     return out
 

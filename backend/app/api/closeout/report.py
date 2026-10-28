@@ -69,6 +69,25 @@ def report_pdf(f: dict, generated_at: datetime, tz: str) -> bytes:
     t.setStyle(TableStyle([("LEFTPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, 0), 0), ("TOPPADDING", (0, 1), (-1, 1), 0)]))
     out.append(t)
 
+    req = f.get("requests")
+    if req:
+        # Confirm each registration (app/api/approvals): who asked, and what became of it.
+        out.append(Paragraph("REGISTRATION REQUESTS", s["section"]))
+        rows = [
+            ["Asked", str(req.get("total", 0))],
+            ["Confirmed", str(req.get("approved", 0))],
+            ["  of them paid", str(req.get("approved_paid", 0))],
+            ["  checked in", str(req.get("checked_in", 0))],
+            ["Declined", str(req.get("declined", 0))],
+            ["Withdrew", str(req.get("withdrawn", 0))],
+            ["Didn't pay in time", str(req.get("lapsed", 0))],
+            ["Closed unanswered or settled", str(req.get("closed", 0))],
+            ["Added directly (desk, import, before the switch)", str(req.get("added_directly", 0))],
+        ]
+        if req.get("avg_decision_hours") is not None:
+            rows.append(["Average time to decide", f"{req['avg_decision_hours']} h"])
+        out.append(_table(rows, [W * 0.8, W * 0.2], header=False))
+
     out.append(Paragraph("BY ROLE", s["section"]))
     out.append(_table([["Role", "Registered", "Checked in"]] + [[r["label"], str(r["registered"]), str(r["checked_in"])] for r in f["by_role"]], [W * 0.6, W * 0.2, W * 0.2]))
 

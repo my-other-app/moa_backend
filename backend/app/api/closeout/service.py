@@ -96,9 +96,12 @@ async def figures(session, event: Events) -> dict:
     # The door as a shape, frozen here so the overview can read it back once
     # retention has deleted the rows it was computed from.
     from app.api.analytics import service as analytics
+    from app.api.approvals import service as approvals
 
     return {
         "analytics": await analytics.figures(session, event),
+        # Registration requests (app/api/approvals): null for an event that never confirmed each place.
+        "requests": _plain(await approvals.stats(session, event, registered=registered)),
         "event_name": event.name, "org_name": club.name if club else "", "venue": event.location_name,
         "starts_at": event.event_datetime.isoformat(), "ends_at": ends_at(event).isoformat(),
         "registered": registered, "checked_in": checked_in,
@@ -113,6 +116,13 @@ async def figures(session, event: Events) -> dict:
         "cards_printed": sum(1 for r in regs if r.badge_printed_at),
         "rating_avg": float(rating[0] or 0), "rating_count": int(rating[1] or 0),
     }
+
+
+def _plain(stats: Optional[dict]) -> Optional[dict]:
+    """The requests' figures as the report keeps them (JSON: dates as ISO strings)."""
+    if stats is None:
+        return None
+    return {k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in stats.items()}
 
 
 def report_out(r: CloseoutReports, by_name: Optional[str]) -> dict:

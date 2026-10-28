@@ -186,6 +186,7 @@ async def create_event(
         status=event.status,
         pin=event.pin,
         requires_approval=event.requires_approval,
+        high_demand_label=event.high_demand_label,
     )
     # Its first ticket type, at the event's own price and cap (app/api/ticketing).
     from app.api.ticketing import types as ticket_types
@@ -374,10 +375,16 @@ async def list_all_events_admin(
             )
         ).all()
         by_event = {event_id: (total_, present) for event_id, total_, present in counts}
+        # Registration requests, waiting and all, one grouped statement for the page.
+        from app.api.approvals import service as approvals
+
+        asked = await approvals.totals(session, [e.id for e in events])
         for item in rows.items:
             registered, present = by_event.get(item.id, (0, 0))
             item.registration_count = registered
             item.attended_count = present
+            item.requests_pending = asked.get(item.id, {}).get("pending", 0)
+            item.requests_total = asked.get(item.id, {}).get("total", 0)
 
     return rows
 

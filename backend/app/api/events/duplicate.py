@@ -48,7 +48,7 @@ SETTINGS = (
     "additional_details", "event_guidelines", "event_tag", "ticket_template_id", "certificate_template_id", "max_participants",
     "door_mode", "close_after_minutes", "spot_registration_checks_in", "capture_contact_at_gate", "require_contact_at_gate",
     "reprint_policy", "auto_print_badges", "preprinted_carries", "self_check_in_enabled", "self_check_in_verify", "self_check_in_print",
-    "retention_mode", "retention_hours", "report_recipients", "keep_contacts", "requires_approval",
+    "retention_mode", "retention_hours", "report_recipients", "keep_contacts", "requires_approval", "high_demand_label",
 )
 DESIGN_MODELS = (TicketTemplates, BadgeTemplates, CertificateTemplates, AgendaTemplates)
 

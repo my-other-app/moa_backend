@@ -331,7 +331,7 @@ async def get_event(call: Call, args: dict) -> dict:
     "event_stats",
     title="Event figures",
     scope="events:read",
-    description="An event's numbers: registrations, check-ins, paying guests and capacity, and its money (tickets, store, refunds, owed) when the connection has finance:read and your role sees money.",
+    description="An event's numbers: registrations, check-ins, paying guests and capacity, registration requests by status when the club confirms each place, and its money (tickets, store, refunds, owed) when the connection has finance:read and your role sees money.",
     schema=obj({"event_id": EVENT_ID}, ("event_id",)),
 )
 async def event_stats(call: Call, args: dict) -> dict:
@@ -353,6 +353,12 @@ async def event_stats(call: Call, args: dict) -> dict:
         "checked_in_percent": round(100 * checked_in / registered) if registered else None,
         "revenue": None,
     }
+    # Confirm each registration (app/api/approvals): the requests by status, one grouped count.
+    from app.api.approvals import service as approvals
+
+    asked = await approvals.counts(call.session, event.id)
+    out["requires_approval"] = bool(event.requires_approval)
+    out["requests"] = asked if (asked["total"] or event.requires_approval) else None
     if call.money_allowed():
         from app.api.finance import service as finance
 

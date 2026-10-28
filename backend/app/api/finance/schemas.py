@@ -103,6 +103,11 @@ class Figures(BaseModel):
     margin: Optional[float] = None
     outstanding: float
     outstanding_count: int
+    #: Confirmed paid registration requests still inside their hold, not
+    #: claimed yet: what they bring in if paid (docs/APPROVALS.md). A claimed
+    #: one is in `outstanding` instead, never in both.
+    expected_from_holds: float = 0
+    expected_from_holds_count: int = 0
     avg_ticket: Optional[float]
     cost_per_head: Optional[float] = None
 
@@ -159,6 +164,8 @@ class EventRow(BaseModel):
     margin: Optional[float] = None
     outstanding: float = 0
     outstanding_count: int = 0
+    expected_from_holds: float = 0
+    expected_from_holds_count: int = 0
 
 
 class CategoryRow(BaseModel):

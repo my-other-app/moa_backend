@@ -136,14 +136,32 @@ def _blank() -> dict:
     return dict(
         regs=0, paying=0, tickets=Decimal(0), merch=Decimal(0), online=Decimal(0), online_count=0, cash=Decimal(0), cash_count=0,
         outstanding=Decimal(0), outstanding_count=0, refunds=Decimal(0), refund_count=0, expenses=Decimal(0), expense_count=0,
-        other_income=Decimal(0), other_income_count=0,
+        other_income=Decimal(0), other_income_count=0, expected_from_holds=Decimal(0), expected_from_holds_count=0,
     )
 
 
 async def _per_event(session, event_ids: list[int]) -> dict[int, dict]:
-    """Registrations, what they paid, what is still owed, what was refunded and what was spent — per event, all time."""
-    if ledger_reads.enabled():
-        return await ledger_reads.per_event(session, event_ids)
+    """Registrations, what they paid, what is still owed, what was refunded
+    and what was spent — per event, all time — and what confirmed paid
+    registration requests are expected to bring in (`expected_from_holds`)."""
+    out = await (ledger_reads.per_event(session, event_ids) if ledger_reads.enabled() else _per_event_rows(session, event_ids))
+    await _holds(session, event_ids, out)
+    return out
+
+
+async def _holds(session, event_ids: list[int], out: dict[int, dict]) -> None:
+    """Confirmed paid requests still inside their hold and not claimed yet
+    (app/api/approvals): what they will bring in if paid. A claimed hold's
+    registration is owed (`outstanding`) already, and counted there only."""
+    from app.api.approvals import service as approvals
+
+    for eid, (amount, n) in (await approvals.expected_from_holds(session, event_ids)).items():
+        if eid in out:
+            out[eid].update(expected_from_holds=Decimal(amount), expected_from_holds_count=n)
+
+
+async def _per_event_rows(session, event_ids: list[int]) -> dict[int, dict]:
+    """_per_event from the registrations themselves (the ledger off)."""
     out = {i: _blank() for i in event_ids}
     if not event_ids:
         return out
@@ -234,6 +252,7 @@ def _figures(t: dict, events: dict | None = None) -> dict:
         online=_f(t["online"]), online_count=t["online_count"], cash=_f(t["cash"]), cash_count=t["cash_count"],
         expenses=_f(t["expenses"]), expense_count=t["expense_count"], net=_f(t["net"]), margin=_margin(t),
         outstanding=_f(t["outstanding"]), outstanding_count=t["outstanding_count"],
+        expected_from_holds=_f(t["expected_from_holds"]), expected_from_holds_count=t["expected_from_holds_count"],
         avg_ticket=_f(t["tickets"] / t["paying"]) if t["paying"] else None,
         cost_per_head=_f(t["expenses"] / t["regs"]) if t["regs"] and t["expenses"] else None,
     )
@@ -246,6 +265,7 @@ def _event_row(e, m: dict, kind: str, now: datetime) -> dict:
         regs=m["regs"], paying=m["paying"], tickets=_f(m["tickets"]), merch=_f(m["merch"]), other_income=_f(m["other_income"]), online=_f(m["online"]), cash=_f(m["cash"]), refunds=_f(m["refunds"]),
         expenses=_f(m["expenses"]), expense_count=m["expense_count"], net=_f(net), margin=_margin({**m, "net": net}),
         outstanding=_f(m["outstanding"]), outstanding_count=m["outstanding_count"],
+        expected_from_holds=_f(m["expected_from_holds"]), expected_from_holds_count=m["expected_from_holds_count"],
     )
 
 

@@ -4,7 +4,7 @@ from typing import Any, Optional
 from urllib.parse import urlsplit
 from uuid import UUID
 from fastapi import File, Form, UploadFile
-from pydantic import AwareDatetime, BaseModel, EmailStr, Field, ValidationError, field_validator
+from pydantic import AwareDatetime, BaseModel, EmailStr, Field, ValidationError, field_validator, model_validator
 from datetime import datetime, timezone
 from fastapi.exceptions import RequestValidationError
 
@@ -257,9 +257,12 @@ class EventCreate:
         status: Optional[str] = Form(None, pattern="^(draft|published)$"),
         # "Confirm each registration" (docs/APPROVALS.md). Omitted leaves it as it is.
         requires_approval: Optional[bool] = Form(None),
+        # The public "High demand" label, instead of any request numbers. Omitted leaves it as it is.
+        high_demand_label: Optional[bool] = Form(None),
     ):
         self.name = name
         self.requires_approval = requires_approval
+        self.high_demand_label = high_demand_label
         self.poster = poster
         self.status = status
         self.event_datetime = event_datetime
@@ -371,6 +374,8 @@ class EventEdit(EventCreate):
         certificate_template_id: Optional[int] = Form(None),
         # "Confirm each registration" (docs/APPROVALS.md). Omitted leaves it as it is.
         requires_approval: Optional[bool] = Form(None),
+        # The public "High demand" label. Omitted leaves it as it is.
+        high_demand_label: Optional[bool] = Form(None),
     ):
         super().__init__(
             name=name,
@@ -408,6 +413,7 @@ class EventEdit(EventCreate):
             ticket_template_id=ticket_template_id,
             certificate_template_id=certificate_template_id,
             requires_approval=requires_approval,
+            high_demand_label=high_demand_label,
         )
         self.clear_location_link = clear_location_link
         self.clear_point = clear_point
@@ -477,6 +483,14 @@ class EventCategoryDetail(CustomBaseModel):
         return value.value if hasattr(value, "value") else value
 
 
+def _high_demand_from_label(cls, data):
+    """`high_demand` from the event's own column, for a row handed over as a
+    dict (jsonable_encoder leaves the model's properties out)."""
+    if isinstance(data, dict) and "high_demand" not in data and "high_demand_label" in data:
+        return {**data, "high_demand": bool(data["high_demand_label"])}
+    return data
+
+
 class EventCreateUpdateResponse(CustomBaseModel):
     id: int = Field(...)
     name: str = Field(...)
@@ -511,6 +525,8 @@ class EventCreateUpdateResponse(CustomBaseModel):
     max_participants: int | None = Field(None)
     #: "Confirm each registration": the form makes requests the club decides (docs/APPROVALS.md).
     requires_approval: bool = Field(False)
+    #: The club's "High demand" label for the public page.
+    high_demand_label: bool = Field(False)
 
 
 class EventListResponse(CustomBaseModel):
@@ -530,6 +546,10 @@ class EventListResponse(CustomBaseModel):
     club: EventClubDetail | None = Field(None)
     category: EventCategoryDetail = Field(...)
     page_views: int = Field(0)
+    #: "Confirm each registration" (docs/APPROVALS.md), and the club's
+    #: "High demand" label: show the chip, never a number.
+    requires_approval: bool = Field(False)
+    high_demand: bool = Field(False)
     # User-specific fields (only populated when authenticated and registered)
     is_attended: bool | None = Field(None)
     # A paid event's registration still waiting for its payment is not a ticket yet.
@@ -551,6 +571,10 @@ class EventListResponse(CustomBaseModel):
     #: has no registration for the event, or its ticket names no type.
     ticket_label: str | None = Field(None)
 
+    @model_validator(mode="before")
+    @classmethod
+    def fill_high_demand(cls, data):
+        return _high_demand_from_label(cls, data)
 
 
 class EventListResponseSelf(CustomBaseModel):
@@ -584,6 +608,12 @@ class EventListResponseSelf(CustomBaseModel):
     door_open: bool = Field(False)
     registration_open: bool = Field(False)
     ends_at: Optional[datetime] = Field(None)
+    #: Confirm each registration, and its requests: waiting, and all of them
+    #: (docs/APPROVALS.md). Filled on the club's own list.
+    requires_approval: bool = Field(False)
+    high_demand_label: bool = Field(False)
+    requests_pending: int = Field(0)
+    requests_total: int = Field(0)
 
 
 class EventAdminListResponse(CustomBaseModel):
@@ -618,6 +648,12 @@ class EventAdminListResponse(CustomBaseModel):
     #: a marked zero. The list fills both for every row it returns.
     registration_count: int = Field(0)
     attended_count: int = Field(0)
+    #: Confirm each registration, and its requests: waiting, and all of them
+    #: (docs/APPROVALS.md). The list fills both counts for every row.
+    requires_approval: bool = Field(False)
+    high_demand_label: bool = Field(False)
+    requests_pending: int = Field(0)
+    requests_total: int = Field(0)
 
 
 class EventFileResponse(CustomBaseModel):
@@ -651,6 +687,10 @@ class EventDetailResponse(CustomBaseModel):
     #: "Confirm each registration": register with `accepts_approval: true`,
     #: and the answer is a request the club decides (docs/APPROVALS.md).
     requires_approval: bool = Field(False)
+    #: The club's "High demand" label is on: show the chip, never a number.
+    high_demand: bool = Field(False)
+    #: The setting itself, for the club's edit form (the same as `high_demand`).
+    high_demand_label: bool = Field(False)
     prize_amount: float | None = Field(None)
     is_online: bool | None = Field(False)
     reg_startdate: datetime = Field(...)
@@ -724,6 +764,11 @@ class EventDetailResponse(CustomBaseModel):
     #: Its ticket types on sale, what is left of each, and the waiting list
     #: (docs/TICKETING.md). Null only from a server without ticket types.
     ticketing: PublicTicketing | None = Field(None)
+
+    @model_validator(mode="before")
+    @classmethod
+    def fill_high_demand(cls, data):
+        return _high_demand_from_label(cls, data)
 
 
 # REQUEST MODELS
