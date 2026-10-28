@@ -77,7 +77,10 @@ class TicketTypeOut(CustomBaseModel):
     #: Left for someone new (null: no cap).
     available: Optional[int] = None
     waiting: int = 0
+    #: The waiting list's offers standing.
     offered: int = 0
+    #: Places held for confirmed registration requests not paid yet.
+    held: int = 0
     #: Someone holds a ticket of it: it can be hidden, not removed.
     has_registrations: bool = False
 
@@ -107,7 +110,10 @@ class TypeSales(CustomBaseModel):
     discount_total: float = 0.0
     available: Optional[int] = None
     waiting: int = 0
+    #: The waiting list's offers standing.
     offered: int = 0
+    #: Places held for confirmed registration requests not paid yet (app/api/approvals).
+    held: int = 0
 
 
 class CodeSales(CustomBaseModel):
