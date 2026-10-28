@@ -101,6 +101,9 @@ class FakeSES:
                 conn, _ = self.listener.accept()
             except OSError:
                 return
+            if self.closed:
+                conn.close()
+                return
             threading.Thread(target=self._handle, args=(conn,), daemon=True).start()
 
     def _handle(self, conn: socket.socket):
@@ -212,8 +215,18 @@ class FakeSES:
         return [v for n, _, v in self.commands if connection is None or n == connection]
 
     def close(self):
+        """Stop listening, for good. On Linux, close() alone does not: the
+        thread blocked in accept() keeps the socket listening and takes the
+        next connection, so a "closed" server still answered (macOS wakes
+        accept() on close and never showed it). shutdown() wakes it on Linux;
+        macOS refuses shutdown() on a listening socket, where close() is enough."""
         self.closed = True
+        try:
+            self.listener.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
         self.listener.close()
+        self.thread.join(timeout=5)
 
 
 @pytest.fixture
@@ -498,8 +511,12 @@ def test_a_certificate_that_does_not_verify_means_no_credentials(ses, monkeypatc
 
 def test_an_unreachable_endpoint_is_tried_again_later(ses, monkeypatch):
     ses.close()
-    with pytest.raises(transport.MailDeferred):
+    assert not ses.thread.is_alive()
+    with pytest.raises(transport.MailDeferred) as deferred:
         transport.deliver(_mail())
+    assert "could not be reached" in str(deferred.value)
+    # Nothing answered: no connection was taken and no mail went.
+    assert ses.connections == 0 and ses.messages == []
 
 
 # ─── The other providers are as they were ────────────────────────────────
