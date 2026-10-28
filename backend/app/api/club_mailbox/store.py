@@ -32,10 +32,15 @@ def _client():
 
 
 def put(key: str, data: bytes, content_type: str) -> None:
-    _client().upload_fileobj(
-        io.BytesIO(data), settings.S3_BUCKET, key,
-        ExtraArgs={"ContentType": "application/octet-stream", "ServerSideEncryption": "AES256"},
-    )
+    extra = {"ContentType": "application/octet-stream"}
+    # Encrypted at rest by S3 itself. A store of our own (S3_ENDPOINT_URL)
+    # has no such thing -- Garage implements no SSE-S3 -- so the header is
+    # not sent there: the server's disk is what protects the files.
+    from app.core.storage import clients
+
+    if not clients.custom_endpoint():
+        extra["ServerSideEncryption"] = "AES256"
+    _client().upload_fileobj(io.BytesIO(data), settings.S3_BUCKET, key, ExtraArgs=extra)
 
 
 def get(key: str) -> Optional[bytes]:

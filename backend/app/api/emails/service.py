@@ -63,7 +63,7 @@ from app.core.mail.schema import (
     EmailTrigger,
 )
 from app.core.mail.starters import email_starter
-from app.core.storage import objects
+from app.core.storage import bucket, objects
 from app.core.storage.images import image_ext
 from app.core.utils.db_fields import TZAwareDateTime
 from app.db.locks import singleton
@@ -97,10 +97,12 @@ async def club_of(session, user) -> Clubs:
 
 
 def image_prefix(*, event_id: Optional[int] = None, club_id: Optional[int] = None) -> str:
-    base = settings.S3_BASE_PATH.rstrip("/")
+    """The folder an email's uploaded pictures go in. Made like every other
+    folder (bucket.prefix): with S3_BASE_PATH empty it is `events/7/layout/`
+    -- the designer's own folder for the event -- never `/events/7/layout/`."""
     if event_id is not None:
-        return f"{base}/events/{event_id}/layout/"
-    return f"{base}/clubs/{club_id}/email/"
+        return bucket.prefix("events", str(event_id), "layout")
+    return bucket.prefix("clubs", str(club_id), "email")
 
 
 def _own_key(key: str, *, event_id: Optional[int], club_id: int) -> bool:

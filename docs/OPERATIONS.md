@@ -7,8 +7,8 @@ rendered documents in the bucket, run AI assist, put a demo event live
 for People Like You, place visitors by address without a lookup service,
 fix the demo's venue pins, turn on WhatsApp, keep production's settings,
 health checks and scheduled backups honest (section 19), read the live
-room's pushes and the host's 409s (section 22), and open clubs' mailboxes
-(section 23). Every command is meant to be copied.
+room's pushes and the host's 409s (section 22), open clubs' mailboxes
+(section 23), and keep media on a store of our own (section 26). Every command is meant to be copied.
 Commands under **Read-only** change nothing; anything that changes something
 says so.
 
@@ -1809,16 +1809,19 @@ What is checked (fatal):
 
 | Rule | Settings |
 |---|---|
-| Empty | `APP_SECRET_KEY`, `APP_DATABASE_URL`, `APP_DATABASE_URL_SYNC`, `APP_S3_BUCKET`, `APP_S3_ACCESS_KEY`, `APP_S3_SECRET_KEY`, `APP_S3_BASE_PATH`, `APP_RAZORPAY_KEY_ID`, `APP_RAZORPAY_KEY_SECRET`, `APP_RAZORPAY_WEBHOOK_SECRET`; with `APP_MAIL_PROVIDER=ses` (the default) `APP_SES_ACCESS_KEY`, `APP_SES_SECRET_KEY`, `APP_SES_DEFAULT_SENDER`; with `resend`, `APP_RESEND_API_KEY` and `APP_MAIL_FROM_ADDRESS` |
+| Empty | `APP_SECRET_KEY`, `APP_DATABASE_URL`, `APP_DATABASE_URL_SYNC`, `APP_S3_BUCKET`, `APP_S3_ACCESS_KEY`, `APP_S3_SECRET_KEY`, `APP_RAZORPAY_KEY_ID`, `APP_RAZORPAY_KEY_SECRET`, `APP_RAZORPAY_WEBHOOK_SECRET`; with `APP_MAIL_PROVIDER=ses` (the default) `APP_SES_ACCESS_KEY`, `APP_SES_SECRET_KEY`, `APP_SES_DEFAULT_SENDER`; with `resend`, `APP_RESEND_API_KEY` and `APP_MAIL_FROM_ADDRESS` |
 | A placeholder, in any setting | `PASTE_KEY_HERE` (any "paste ... here"), `changeme`, `replace-me`, a run of `xxx`, `your-...`/`your_...`, `<...>`, `${...}`/`{{...}}`, an `example.com` address; and in a credential, id, address or the database password, whole values like `password`, `secret`, `test`, `none`, `postgres` |
 | A weak `APP_SECRET_KEY` | under 32 characters, fewer than 10 distinct characters, or a value from a sample or a test suite |
-| Half set | `APP_RAZORPAY_KEY_ID`/`_SECRET`, `APP_WHATSAPP_ACCESS_TOKEN`/`APP_WHATSAPP_PHONE_NUMBER_ID`, `APP_CLOUDFLARE_API_TOKEN`/`APP_CLOUDFLARE_ZONE_ID`, `APP_BACKUP_S3_ACCESS_KEY`/`_SECRET_KEY`, `APP_AI_FALLBACK_PROVIDER`/`APP_AI_FALLBACK_API_KEY` (both or neither); `APP_SEARCH_URL` without `APP_SEARCH_KEY` |
+| Half set | `APP_RAZORPAY_KEY_ID`/`_SECRET`, `APP_WHATSAPP_ACCESS_TOKEN`/`APP_WHATSAPP_PHONE_NUMBER_ID`, `APP_CLOUDFLARE_API_TOKEN`/`APP_CLOUDFLARE_ZONE_ID`, `APP_BACKUP_S3_ACCESS_KEY`/`_SECRET_KEY`, `APP_AI_FALLBACK_PROVIDER`/`APP_AI_FALLBACK_API_KEY` (both or neither); `APP_SEARCH_URL` without `APP_SEARCH_KEY`; `APP_S3_PUBLIC_URL` without `APP_S3_ENDPOINT_URL` |
 | The wrong shape | `APP_MAIL_PROVIDER` not `ses` or `resend`; `APP_BACKUP_S3_SSE` not `AES256` or `aws:kms`; `APP_PAYMENT_KEYS_SECRET` or `APP_AI_KEYS_SECRET` not Fernet keys; `APP_SENTRY_DSN` not a DSN; `APP_FIREBASE_SERVICE_ACCOUNT_BASE64` not a base64 service account; `APP_DEBUG` on with `APP_ENV=production` |
+| The media store (section 26) | `APP_S3_ENDPOINT_URL` or `APP_S3_PUBLIC_URL` not an http(s) address; with an endpoint set, `APP_MEDIA_CDN_URL` on the store's own host, or `APP_BACKUP_S3_BUCKET` set without `APP_BACKUP_S3_ACCESS_KEY` |
 
 Logged as warnings, never fatal: a `rzp_test_` key, no Sentry DSN, no
 off-site bucket, no Firebase credentials (or a missing file), AI on without
 `APP_GEMINI_API_KEY`, Resend without its webhook secret, a short site token,
-`*` in `APP_CORS_ORIGINS`.
+`*` in `APP_CORS_ORIGINS`; on a media store of our own, links that are not
+https or an `APP_S3_BASE_PATH` that looks like an address. (`APP_S3_BASE_PATH`
+empty is right: keys at the bucket's root.)
 
 **Which processes count as production.** `APP_ENV` names the deployment:
 `production`, `staging` or anything else is checked; `development`, `dev`,
@@ -3321,3 +3324,95 @@ SELECT id, payload, last_error FROM jobs WHERE name = 'approvals.notify' AND dea
   was.
 - The four request emails are listed in the club's email library but can't
   be edited yet.
+
+---
+
+## 26. Media on a store of our own (Garage on the production server)
+
+Uploaded media -- posters, logos, photos, tickets, certificates, the
+designer's uploads, mailbox files -- can live in an S3-compatible store on
+the server instead of AWS S3. Only the media bucket (`APP_S3_BUCKET`) moves:
+off-site backups (`APP_BACKUP_S3_*`), the club mailbox's inbound bucket
+(`APP_MAILBOX_*`) and SES keep talking to AWS whatever these settings say.
+Code: `backend/app/core/storage/clients.py`, the one place media clients are
+made.
+
+### Settings
+
+| Setting | Example | What it does |
+|---|---|---|
+| `APP_S3_ENDPOINT_URL` | `http://media:3900` | Where the API reaches the store, inside Docker: uploads, reads, copies, deletes, listings. Set, every media client is path-style (`<endpoint>/<bucket>/<key>`) SigV4. Empty: AWS S3, exactly as before. |
+| `APP_S3_PUBLIC_URL` | `https://media.myotherapp.in` | Where browsers reach it. Every signed link is made for this host (SigV4 signs the host), so the proxy in front must pass the `Host` header through unchanged. Empty: the endpoint. |
+| `APP_S3_REGION` | `garage` | The region the store signs with (Garage's `s3_region`). Empty: boto3's default. |
+| `APP_S3_BASE_PATH` | empty | A folder inside the bucket every key goes under -- a key prefix, **not** an address. Leave it empty: keys start at the bucket's root (`clubs/logos/v-<hex>.png`) and a link is `https://media.myotherapp.in/<bucket>/clubs/logos/v-<hex>.png`. An address here would become the start of every key, the link would hold it twice, and the club sites' image route (keys under `clubs/`) would 404. |
+| `APP_MEDIA_CDN_URL` | empty | Must not be the store's host: a CDN link is `<cdn>/<key>`, with no bucket in it. |
+| `APP_BACKUP_S3_ACCESS_KEY`, `_SECRET_KEY` | the backup user's | Must be set: unset, backups fall back to `APP_S3_ACCESS_KEY`, which is now the store's key and means nothing to AWS. |
+
+The lines for Garage on the production box (`/srv/moa/.env`): the bucket
+the media store was set up with (`myotherapp-media` unless named otherwise),
+and a Garage key with read and write on it:
+
+```bash
+APP_S3_ENDPOINT_URL=http://media:3900
+APP_S3_PUBLIC_URL=https://media.myotherapp.in
+APP_S3_REGION=garage
+APP_S3_BASE_PATH=
+APP_S3_BUCKET=myotherapp-media
+APP_S3_ACCESS_KEY=<Garage key id, GK...>
+APP_S3_SECRET_KEY=<Garage secret key>
+APP_MEDIA_CDN_URL=
+```
+
+Then `sudo /srv/moa/deploy.sh recreate backend`, which recreates the worker
+too (it reads the same `.env`).
+
+### What else must be true
+
+- **Nothing else answers `media.myotherapp.in`.** If the old media Worker
+  (app repo, `infra/cloudflare/media`) was ever deployed, its route
+  `media.myotherapp.in/*` sends every request for that host to the Worker
+  (which reads AWS), not to the server. Remove the route, or the Worker,
+  before switching.
+- **Garage reads the host as path style.** Leave `[s3_api] root_domain` unset
+  or on a name other than `.myotherapp.in`: with `.myotherapp.in` Garage would
+  read `media.myotherapp.in` as a bucket called `media`.
+- **CORS for the dashboard.** The designer fetches a template's background in
+  the browser (`fetch(url)`), so the bucket needs a CORS rule allowing `GET`
+  from `https://club-dashboard.myotherapp.in` (Garage: `PutBucketCors`, for
+  example with `aws s3api put-bucket-cors --endpoint-url ...`).
+- **Mailbox files are not encrypted by the store.** On AWS they are sent with
+  SSE-S3 (`AES256`); Garage has no SSE-S3, so the header is not sent there and
+  the server's disk is what protects them.
+- Uploads skip boto3's newer checksum trailers (`when_required`, as before
+  boto3 1.36): S3-compatible stores differ in which they accept.
+
+### Checking it
+
+```bash
+# Read-only: the start-up checks. FATAL on an endpoint or public address
+# that is not http(s), a public address without the endpoint, the CDN on the
+# store's host, or backups without their own keys; a warning when links are
+# not https or the base path looks like an address.
+sudo /srv/moa/dc exec -T backend python -m app.core.config_checks
+
+# Read-only: where the clients point, and one listing through the internal one.
+sudo /srv/moa/dc exec -T backend python -c "
+from app.config import settings
+from app.core.storage import clients, fields
+c = clients.media_client()
+print('internal', c.meta.endpoint_url, c.meta.region_name)
+print('links   ', clients.media_client(public=True).meta.endpoint_url)
+print('objects ', c.list_objects_v2(Bucket=settings.S3_BUCKET, MaxKeys=1).get('KeyCount'))
+print(fields.signed_url('clubs/logos/none.png').split('?')[0])
+"
+```
+
+The last line should print
+`https://media.myotherapp.in/<bucket>/clubs/logos/none.png`. Then upload a
+club logo in the dashboard and open it: the picture loads from
+`https://media.myotherapp.in/<bucket>/clubs/logos/v-<hex>.png?X-Amz-...`.
+
+To go back to AWS: empty `APP_S3_ENDPOINT_URL`, `APP_S3_PUBLIC_URL` and
+`APP_S3_REGION`, put the AWS bucket and keys back, and recreate the backend.
+Keys are the same on both stores, so copying the objects across (by key) is
+all a move needs.

@@ -245,6 +245,85 @@ def test_softer_findings_only_warn():
 
 
 # ---------------------------------------------------------------------------
+# The media bucket on a store of our own (app/core/storage/clients.py)
+# ---------------------------------------------------------------------------
+
+#: Garage on the production server, as its .env says it (made-up keys).
+GARAGE = dict(
+    S3_ENDPOINT_URL="http://media:3900",
+    S3_PUBLIC_URL="https://media.myotherapp.in",
+    S3_REGION="garage",
+    S3_BASE_PATH="",
+    S3_BUCKET="moa-media",
+    S3_ACCESS_KEY="GK31c2f218a2e44f485b94239e",
+    S3_SECRET_KEY="b892c0665f0ada8a4755dae98baa3b133590e11dae3bcc1f9d769d67f16c3835",
+    BACKUP_S3_ACCESS_KEY="AKIA7Y4T2R8E0W9Q5P3L",
+    BACKUP_S3_SECRET_KEY="Hk2Lq9Zp4Rt8Wm3Nb6Vc1Xs5Df0Gj7Ka2Ye9Ui8",
+)
+
+
+def test_a_media_store_of_our_own_passes():
+    config = make(**GARAGE)
+    assert fatal(config) == {}
+    assert not {"S3_ENDPOINT_URL", "S3_PUBLIC_URL", "S3_BASE_PATH", "MEDIA_CDN_URL"} & set(warnings(config))
+
+
+def test_the_store_addresses_are_kept_without_a_trailing_slash():
+    config = make(S3_ENDPOINT_URL=" http://media:3900/ ", S3_PUBLIC_URL="https://media.myotherapp.in/", S3_REGION=" garage ")
+    assert (config.S3_ENDPOINT_URL, config.S3_PUBLIC_URL, config.S3_REGION) == ("http://media:3900", "https://media.myotherapp.in", "garage")
+
+
+def test_an_empty_base_path_is_right_not_missing():
+    assert fatal(make(S3_BASE_PATH="")) == {}
+    assert "S3_BASE_PATH" not in cc.REQUIRED
+
+
+@pytest.mark.parametrize(
+    "name, value",
+    [
+        ("S3_ENDPOINT_URL", "media:3900"),
+        ("S3_ENDPOINT_URL", "ftp://media:3900"),
+        ("S3_PUBLIC_URL", "media.myotherapp.in"),
+        ("S3_PUBLIC_URL", "https://media.myotherapp.in?bucket=moa-media"),
+    ],
+)
+def test_a_store_address_that_is_not_http(name, value):
+    assert "is not an http(s) address" in fatal(make(**{**GARAGE, name: value}))[name]
+
+
+def test_a_public_address_without_the_endpoint_is_half_set():
+    problems = fatal(make(**{**GARAGE, "S3_ENDPOINT_URL": ""}))
+    assert problems["S3_ENDPOINT_URL"] == "is empty while APP_S3_PUBLIC_URL is set"
+
+
+def test_links_that_are_not_https_only_warn():
+    plain = make(**{**GARAGE, "S3_PUBLIC_URL": "http://media.myotherapp.in"})
+    assert fatal(plain) == {} and warnings(plain)["S3_PUBLIC_URL"] == "is not https"
+    internal = make(**{**GARAGE, "S3_PUBLIC_URL": ""})
+    assert fatal(internal) == {} and "APP_S3_ENDPOINT_URL, which is not https" in warnings(internal)["S3_PUBLIC_URL"]
+
+
+def test_the_media_cdn_on_the_stores_own_host_is_refused():
+    assert "no bucket in it" in fatal(make(**GARAGE, MEDIA_CDN_URL="https://media.myotherapp.in"))["MEDIA_CDN_URL"]
+    assert fatal(make(**GARAGE, MEDIA_CDN_URL="https://cdn.myotherapp.in")) == {}
+    assert fatal(make(MEDIA_CDN_URL="https://media.myotherapp.in")) == {}  # on AWS, as before
+
+
+def test_backups_never_fall_back_to_the_stores_keys():
+    no_keys = {**GARAGE, "BACKUP_S3_ACCESS_KEY": "", "BACKUP_S3_SECRET_KEY": ""}
+    assert "off-site backups would send the media store's keys to AWS" in fatal(make(**no_keys))["BACKUP_S3_ACCESS_KEY"]
+    assert fatal(make(**{**no_keys, "BACKUP_S3_BUCKET": ""})) == {}  # no off-site copies: nothing to send
+    assert fatal(make(BACKUP_S3_ACCESS_KEY="", BACKUP_S3_SECRET_KEY="")) == {}  # on AWS the media keys may do, as before
+
+
+def test_a_base_path_that_is_an_address_warns_on_our_store():
+    config = make(**{**GARAGE, "S3_BASE_PATH": "https://media.myotherapp.in/moa-media"})
+    assert fatal(config) == {}
+    assert "folder inside the bucket" in warnings(config)["S3_BASE_PATH"]
+    assert "S3_BASE_PATH" not in warnings(make())  # AWS with an address-like base path: as before
+
+
+# ---------------------------------------------------------------------------
 # Refusing, and never saying the value
 # ---------------------------------------------------------------------------
 

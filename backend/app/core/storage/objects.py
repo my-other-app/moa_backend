@@ -14,26 +14,20 @@ import logging
 import threading
 import time
 from collections import OrderedDict
-from functools import lru_cache
 from typing import Callable, Optional
 
-import boto3
-
 from app.config import settings
-from app.core.storage import media
+from app.core.storage import clients, media
 
 logger = logging.getLogger(__name__)
 
 MB = 1024 * 1024
 
 
-@lru_cache(maxsize=1)
 def client():
-    return boto3.client(
-        "s3",
-        aws_access_key_id=settings.S3_ACCESS_KEY,
-        aws_secret_access_key=settings.S3_SECRET_KEY,
-    )
+    """The bucket's client for every operation: the internal endpoint on a
+    store of our own (clients.media_client)."""
+    return clients.media_client()
 
 
 def put_bytes(key: str, data: bytes, content_type: str) -> None:
@@ -45,7 +39,8 @@ def put_bytes(key: str, data: bytes, content_type: str) -> None:
 
 
 def presigned_url(key: str, expires: int = 3600) -> str:
-    return client().generate_presigned_url(
+    """A link a browser opens: signed for the store's public address."""
+    return clients.media_client(public=True).generate_presigned_url(
         "get_object", Params={"Bucket": settings.S3_BUCKET, "Key": key}, ExpiresIn=expires
     )
 
