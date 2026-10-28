@@ -514,14 +514,19 @@ _NOT_COUNTED = object()
 
 
 class CardExtras(tuple):
-    """card_extras' (going, topics, left), which unpacks as before, and each
-    event's co-hosts beside them (`cohosts`, app/api/cohosts)."""
+    """card_extras' (going, topics, left), which unpacks as before, and two
+    maps beside them: each event's co-hosts (`cohosts`, app/api/cohosts), and,
+    on an event that reviews registrations, how many applied (`applied`,
+    approvals.applied: every registration ever made for it; absent on any
+    other event)."""
 
     cohosts: dict
+    applied: dict
 
-    def __new__(cls, going, topics, left, cohosts=None):
+    def __new__(cls, going, topics, left, cohosts=None, applied=None):
         made = super().__new__(cls, (going, topics, left))
         made.cohosts = cohosts or {}
+        made.applied = applied or {}
         return made
 
 
@@ -534,20 +539,26 @@ async def card_extras(session, ids: list[int]) -> tuple[dict[int, int], dict[int
     The events with their interests in one statement (an event's row comes
     back once per interest it picked: a few at most), and, when the page has
     events not started yet (only they can be full), their ticket types with
-    their open waiting-list entries in one more, whatever the page's size."""
+    their open waiting-list entries in one more, whatever the page's size.
+
+    Beside them (CardExtras): on an event that reviews registrations, how
+    many applied (`applied`) -- its requests, grouped for the whole page
+    (approvals.asked_by_event), joined to the first statement; and each
+    event's co-hosts (`cohosts`) -- their club ids read in the first
+    statement too, and the clubs in one more only when there are any."""
     from types import SimpleNamespace
 
+    from sqlalchemy.dialects.postgresql import aggregate_order_by
+
+    from app.api.approvals import service as approvals
+    from app.api.cohosts.models import ACCEPTED, EventCohosts
     from app.api.ticketing import places as ticket_places
 
     if not ids:
         return CardExtras({}, {}, {})
     link = EventInterestsLink
-    from sqlalchemy.dialects.postgresql import aggregate_order_by
-
-    from app.api.cohosts.models import ACCEPTED, EventCohosts
-
-    # Each event's co-hosts' club ids, in the order they accepted, in the same
-    # statement (app/api/cohosts); their names are read only when there are any.
+    asked = approvals.asked_by_event(ids)
+    # Each event's co-hosts' club ids, in the order they accepted (app/api/cohosts).
     cohost_ids = (
         select(func.array_agg(aggregate_order_by(EventCohosts.club_id, EventCohosts.responded_at)))
         .where(EventCohosts.event_id == Events.id, EventCohosts.status == ACCEPTED)
@@ -557,25 +568,29 @@ async def card_extras(session, ids: list[int]) -> tuple[dict[int, int], dict[int
     rows = await session.execute(
         select(
             Events.id, Events.going_count, Events.paid_count, Events.has_fee, Events.max_participants, Events.requires_approval,
-            Events.event_datetime, cohost_ids,
+            Events.event_datetime, asked.c.asked, asked.c.linked, cohost_ids,
             InterestCategory.id, InterestCategory.slug, InterestCategory.name, InterestCategory.color, InterestCategory.sort_order,
         )
         .select_from(Events)
+        .outerjoin(asked, asked.c.event_id == Events.id)
         .outerjoin(link, and_(link.event_id == Events.id, link.is_deleted == False))  # noqa: E712
         .outerjoin(Interests, and_(Interests.id == link.interest_id, Interests.is_deleted == False))  # noqa: E712
         .outerjoin(InterestCategory, and_(InterestCategory.id == Interests.category_id, InterestCategory.is_deleted == False))  # noqa: E712
         .where(Events.id.in_(ids))
     )
     going: dict[int, int] = {}
+    applied: dict[int, int] = {}
     topics: dict[int, dict[int, tuple]] = {}
     shells: dict[int, SimpleNamespace] = {}
-    now = now_utc()
     shared_ids: dict[int, list[int]] = {}
-    for event_id, count, paid, has_fee, cap, approval, starts, club_ids, *topic in rows.all():
-        if club_ids:
-            shared_ids.setdefault(event_id, list(club_ids))
+    now = now_utc()
+    for event_id, count, paid, has_fee, cap, approval, starts, n_asked, n_linked, club_ids, *topic in rows.all():
         if count:
             going[event_id] = int(count)
+        if approval:
+            applied[event_id] = approvals.applied(n_asked, n_linked, count)
+        if club_ids:
+            shared_ids.setdefault(event_id, list(club_ids))
         if _aware(starts) > now:
             shells.setdefault(event_id, SimpleNamespace(
                 id=event_id, going_count=count, paid_count=paid, has_fee=has_fee, max_participants=cap, requires_approval=approval,
@@ -585,7 +600,7 @@ async def card_extras(session, ids: list[int]) -> tuple[dict[int, int], dict[int
     room = await ticket_places.places_many(session, list(shells.values()))
     left = {event_id: p.left for event_id, p in room.items()}
     shared = await cohost_access.refs_by_club_ids(session, shared_ids, logo="url") if shared_ids else {}
-    return CardExtras(going, {k: _topic_list(v.values()) for k, v in topics.items()}, left, shared)
+    return CardExtras(going, {k: _topic_list(v.values()) for k, v in topics.items()}, left, shared, applied)
 
 
 def _topic_list(rows) -> list[dict]:
@@ -632,8 +647,12 @@ def status_of(e: Events, now: datetime, going: int, left=_NOT_COUNTED) -> str:
     return "upcoming"
 
 
-def card(e: Events, now: datetime, going: int, distance: Optional[float] = None, topics: Optional[list] = None, left=_NOT_COUNTED, cohosts: Optional[list] = None) -> dict:
-    """`going`, `topics`, `left` and `cohosts` as card_extras reads them for the whole page."""
+def card(
+    e: Events, now: datetime, going: int, distance: Optional[float] = None, topics: Optional[list] = None, left=_NOT_COUNTED,
+    cohosts: Optional[list] = None, applied_count: Optional[int] = None,
+) -> dict:
+    """`going`, `topics`, `left`, `cohosts` and `applied_count` as card_extras
+    reads them for the whole page (CardExtras: `cohosts` and `applied`)."""
     club = e.club
     cat = e.category
     return dict(
@@ -655,6 +674,9 @@ def card(e: Events, now: datetime, going: int, distance: Optional[float] = None,
         category=dict(id=cat.id, name=cat.name) if cat is not None else None,
         club=dict(id=club.id, name=club.name, slug=club.slug, logo=_img(club.logo, "thumbnail", "medium", "original")) if club is not None else None,
         going=going,
+        # On an event that reviews registrations, how many applied: every
+        # registration ever made for it (card_extras' `applied`). None elsewhere.
+        applied_count=applied_count,
         capacity=e.max_participants,
         status=status_of(e, now, going, left),
         # The club confirms each place, and shows "High demand" (never a number).
@@ -688,7 +710,8 @@ async def cards(session, rows: list[Events], now: datetime, here=None, extras: O
     extras = extras if extras is not None else await card_extras(session, [e.id for e in rows])
     going, topics, left = extras
     shared = getattr(extras, "cohosts", {})
-    return [card(e, now, going.get(e.id, 0), _event_km(e, here), topics.get(e.id), left.get(e.id), shared.get(e.id)) for e in rows]
+    applied = getattr(extras, "applied", {})
+    return [card(e, now, going.get(e.id, 0), _event_km(e, here), topics.get(e.id), left.get(e.id), shared.get(e.id), applied.get(e.id)) for e in rows]
 
 
 async def category_counts(session, now: datetime, since: Optional[datetime] = None) -> dict[int, int]:
@@ -920,7 +943,7 @@ async def search_events(
     going, topics, left = extras
     cats = [dict(id=c["id"], name=c["name"], upcoming=c["upcoming"]) for c in await categories(session, now, only_upcoming=True, since=since)]
     return dict(
-        items=[card(e, now, going.get(e.id, 0), _event_km(e, here), topics.get(e.id), left.get(e.id), extras.cohosts.get(e.id)) for e in page],
+        items=[card(e, now, going.get(e.id, 0), _event_km(e, here), topics.get(e.id), left.get(e.id), extras.cohosts.get(e.id), extras.applied.get(e.id)) for e in page],
         total=total, total_capped=capped, offset=offset, limit=limit, where=where, categories=cats,
         topics=await topic_refs.facet(session, now), next_cursor=next_cursor,
     )
@@ -1467,10 +1490,13 @@ async def event_page(session, ref: str, now: Optional[datetime] = None) -> dict:
             ))
     if e is None:
         raise CustomHTTPException(404, message="Event not found")
+    from app.api.approvals import service as approvals
     from app.api.ticketing import places as ticket_places
 
     club, cat = e.club, e.category
     going = (await going_counts(session, [e.id])).get(e.id, 0)
+    # On an event that reviews registrations, how many applied: every registration ever made for it.
+    applied = (await approvals.applied_counts(session, [e.id])).get(e.id) if e.requires_approval else None
     # What is left as the ticket picker counts it: holds count, and a paid
     # event's cap counts its paid tickets (pending requests hold nothing).
     left = (await ticket_places.summary(session, e)).left
@@ -1489,6 +1515,7 @@ async def event_page(session, ref: str, now: Optional[datetime] = None) -> dict:
         has_fee=bool(e.has_fee), fee=float(e.reg_fee) if e.has_fee and e.reg_fee is not None else None,
         has_prize=bool(e.has_prize), prize_amount=float(e.prize_amount) if e.has_prize and e.prize_amount is not None else None,
         capacity=e.max_participants, going=going,
+        applied_count=applied,
         seats_left=left,
         reg_opens_at=_iso(e.reg_startdate), reg_closes_at=_iso(e.reg_enddate),
         status=status_of(e, now, going, left), registration_open=registration_open(e, 0, now) and not full,
@@ -1739,7 +1766,7 @@ async def _home_shared(session, now: datetime, since: datetime) -> dict:
     by_id = await threads._clubs_by_id(session, {t.club_id for t in posts})
 
     def out(es):
-        return [card(e, now, going.get(e.id, 0), None, topics.get(e.id), left.get(e.id), extras.cohosts.get(e.id)) for e in es]
+        return [card(e, now, going.get(e.id, 0), None, topics.get(e.id), left.get(e.id), extras.cohosts.get(e.id), extras.applied.get(e.id)) for e in es]
 
     # Every event has a category: the per-category counts add up to every
     # event on or to come, so the front page's number needs no count of its own.
@@ -1860,7 +1887,7 @@ async def _near(session, now: datetime, pool: dict, here: tuple[float, float]) -
         extras = await card_extras(session, missing)
         going, topics, left = extras
         for e in rows:
-            pool["cards"][e.id] = card(e, now, going.get(e.id, 0), None, topics.get(e.id), left.get(e.id), extras.cohosts.get(e.id))
+            pool["cards"][e.id] = card(e, now, going.get(e.id, 0), None, topics.get(e.id), left.get(e.id), extras.cohosts.get(e.id), extras.applied.get(e.id))
     return _placed([pool["cards"][i] for i in picked if i in pool["cards"]], here)
 
 

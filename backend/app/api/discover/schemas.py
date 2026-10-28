@@ -48,6 +48,10 @@ class EventCard(BaseModel):
     category: Optional[CategoryRef] = None
     club: Optional[EventClub] = None
     going: int
+    #: On an event that reviews registrations (`requires_approval`), how
+    #: many applied: every registration ever made for it, whatever became
+    #: of it, so it never drops ("108 applied"). Null on any other event.
+    applied_count: Optional[int] = None
     capacity: Optional[int] = None
     #: "full": nothing left as the ticket picker counts it (holds count).
     status: Literal["upcoming", "closing_soon", "full", "live", "ended"]
@@ -259,6 +263,8 @@ class PageEvent(BaseModel):
     prize_amount: Optional[float] = None
     capacity: Optional[int] = None
     going: int
+    #: As EventCard's: how many applied, on an event that reviews registrations; else null.
+    applied_count: Optional[int] = None
     #: What is left as the ticket picker counts it (holds count; a paid
     #: event's cap counts paid tickets). Null: no cap.
     seats_left: Optional[int] = None
