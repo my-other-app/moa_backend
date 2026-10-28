@@ -3325,8 +3325,59 @@ SELECT id, payload, last_error FROM jobs WHERE name = 'approvals.notify' AND dea
 - A paid confirmation not paid in time lapses by itself; the club can reopen
   a lapsed (or declined) request, which puts it back in the queue where it
   was.
-- The four request emails are listed in the club's email library but can't
+- The request emails are listed in the club's email library but can't
   be edited yet.
+
+### Full numbers, and the loopholes closed (migration `approval_stats`)
+
+docs/APPROVALS.md §7 has the contract. What changes in running it:
+
+- **Migration** `approval_stats` (after `registration_approval`): adds
+  `events.high_demand_label` (constant default, catalogue-only, under
+  `lock_timeout` 3s), `registration_requests.closed_reason` with a check
+  constraint, and `ix_registration_requests_registration`. The requests
+  already closed get their reason from their event (cancelled, deleted, else
+  ended). `registration_requests` is small; nothing touches a hot table but
+  the one column. Deploy with `migrate=true`. Proven on a scratch database:
+  the whole chain up to `registration_approval`, three closed requests seeded
+  (one per reason), up to `approval_stats` (backfill checked), down one and
+  up again.
+- **New job** `approvals.retire_lapsed`: a hold that ran out retires the
+  unpaid registration its claim made, after the expiry commits. It comes
+  back by itself (`run_at`) when a checkout was opened in the last 30
+  minutes. Dead ones: `SELECT id, payload, last_error FROM jobs WHERE name =
+  'approvals.retire_lapsed' AND dead`.
+- **New email** `request_unanswered`, through `approvals.notify` (once a
+  request): sent when the sweep closes pending requests of an event that
+  ended, and when a club deletes an event with requests waiting. Expect a
+  burst the first minute after the deploy for events already over with
+  requests still pending (the sweep closed those before, silently, so in
+  practice there are none: it ran every minute).
+- **Waiting list off on confirm-each events**: joining is refused (409
+  `WAITLIST_OFF_ON_APPROVAL_EVENTS`); people already in an event's line from
+  before the switch stay but are offered nothing (not by the sweep, not by
+  the club's "Offer now") and hold no place; they are offered places again
+  if the club turns confirming off. The event's waiting-list setting is
+  kept.
+- **Settling**: every registration (form, desk, import, by hand, a
+  waiting-list claim) closes its person's open request on the event
+  (`registered_directly`) in its own transaction, giving back a hold if
+  they had one. Two index probes per registration.
+
+```sql
+-- Read-only: why requests closed, by event.
+SELECT event_id, closed_reason, count(*) FROM registration_requests
+WHERE status = 'closed' GROUP BY 1, 2 ORDER BY 1, 2;
+
+-- Read-only: lapsed holds whose unpaid registration is still live (retire_lapsed's backlog).
+SELECT r.id, r.event_id, g.id AS registration_id, g.created_at
+FROM registration_requests r JOIN event_registrations_link g ON g.id = r.registration_id
+WHERE r.status = 'lapsed' AND NOT g.is_deleted AND NOT g.is_paid;
+
+-- Read-only: confirm-each events that still have people in a waiting list from before the switch.
+SELECT w.event_id, count(*) FROM waitlist_entries w JOIN events e ON e.id = w.event_id
+WHERE e.requires_approval AND w.status = 'waiting' AND NOT w.via_request GROUP BY 1;
+```
 
 ---
 
