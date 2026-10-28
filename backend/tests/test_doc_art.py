@@ -301,7 +301,8 @@ def test_a_decompression_bomb_is_refused_before_it_is_decoded(claim, monkeypatch
 
 
 def test_what_is_not_a_picture_is_refused():
-    for raw in (b"%PDF-1.4 not a picture", _save(Image.new("RGB", (40, 40)), "BMP")):
+    # A BMP was refused here too; it is converted now (tests/test_image_formats.py).
+    for raw in (b"%PDF-1.4 not a picture", _save(Image.new("RGB", (40, 40)), "PCX")):
         with pytest.raises(CustomHTTPException) as refused:
             doc_art.normalise(raw)
         assert refused.value.status_code == 422

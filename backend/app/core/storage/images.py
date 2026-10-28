@@ -1,15 +1,20 @@
-"""An uploaded picture, checked and sized for where it will be shown."""
+"""An uploaded picture, checked and sized for where it will be shown.
+
+A JPEG, PNG, WebP or GIF is kept in its format; a HEIC, AVIF, BMP or TIFF
+(formats.CONVERTED) is stored as a JPEG, or a PNG when some of it is
+see-through.
+"""
 import io
 from uuid import uuid4
 
 from PIL import Image, ImageOps
 
-from app.core.storage import objects
+from app.core.storage import formats, objects
 from app.response import CustomHTTPException
 
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 MAX_IMAGE_PIXELS = 40_000_000
-_EXT = {"PNG": "png", "JPEG": "jpg", "MPO": "jpg", "WEBP": "webp"}
+_EXT = {"PNG": "png", "JPEG": "jpg", "MPO": "jpg", "WEBP": "webp", "GIF": "gif"}
 
 
 def checked_image(raw: bytes, *, max_bytes: int = MAX_IMAGE_BYTES) -> Image.Image:
@@ -20,14 +25,16 @@ def checked_image(raw: bytes, *, max_bytes: int = MAX_IMAGE_BYTES) -> Image.Imag
         raise CustomHTTPException(413, message=f"That image is over {max_bytes // (1024 * 1024)} MB. Export it smaller and try again.")
     try:
         image = Image.open(io.BytesIO(raw))
+    except Image.DecompressionBombError:
+        raise CustomHTTPException(422, message=f"That image is too large. Use one under {MAX_IMAGE_PIXELS // 1_000_000} megapixels.")
     except Exception:
-        raise CustomHTTPException(422, message="That file is not an image we can read. Use PNG, JPEG or WebP.")
+        raise formats.not_readable(raw)
     if image.width * image.height > MAX_IMAGE_PIXELS:
         raise CustomHTTPException(422, message=f"That image is {image.width} x {image.height} pixels. Use one under {MAX_IMAGE_PIXELS // 1_000_000} megapixels.")
     try:
         image.load()
     except Exception:
-        raise CustomHTTPException(422, message="That file is not an image we can read. Use PNG, JPEG or WebP.")
+        raise formats.not_readable(raw)
     return image
 
 
@@ -38,15 +45,22 @@ def store_image(raw: bytes, key_prefix: str, *, max_width: int, name: str = "ima
     Blocking (a decode, a resize, a PUT): async code runs it with asyncio.to_thread."""
     image = checked_image(raw)
     fmt = (image.format or "").upper()
-    if fmt not in _EXT:
-        raise CustomHTTPException(422, message="Use PNG, JPEG or WebP.")
+    convert = fmt in formats.CONVERTED
+    if fmt not in _EXT and not convert:
+        raise formats.refused(fmt)
     try:
         rotate = (image.getexif().get(0x0112, 1) or 1) != 1
     except Exception:
         rotate = False
-    upright = ImageOps.exif_transpose(image) if rotate else image
-    if upright.width > max_width or rotate:
-        # Shrunk, or turned the way the camera held it: either way new bytes.
+    try:
+        upright = ImageOps.exif_transpose(image) if rotate else image
+        if convert:
+            upright, kept = formats.kept_as(upright)
+            fmt = "PNG" if kept == "png" else "JPEG"
+    except Exception:
+        raise formats.not_readable(raw)
+    if upright.width > max_width or rotate or convert:
+        # Shrunk, turned the way the camera held it, or converted: new bytes.
         if upright.width > max_width:
             upright = upright.resize((max_width, round(upright.height * max_width / upright.width)), Image.Resampling.LANCZOS)
         out = io.BytesIO()

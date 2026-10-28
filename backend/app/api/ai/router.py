@@ -11,6 +11,7 @@ Each successful draft, piece of writing or new summary is one action
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import date, datetime
 from typing import Optional
 
@@ -30,6 +31,7 @@ from app.core.ai import providers
 from app.core.ai.base import AIRequest, Attachment
 from app.core.auth.dependencies import ClubAuth
 from app.core.rate_limit import account_or_address, limiter
+from app.core.storage import formats
 from app.db.core import SessionDep
 from app.response import CustomHTTPException
 
@@ -87,8 +89,9 @@ async def event_draft(
     file: Optional[UploadFile] = File(None),
 ) -> DraftOut:
     """
-    Multipart: `text` (up to 6,000 characters) and/or `file` (PNG, JPEG,
-    WebP or PDF, up to 10 MB). The draft has only what the material states;
+    Multipart: `text` (up to 6,000 characters) and/or `file` (a picture --
+    PNG, JPEG, WebP, or a HEIC, AVIF, GIF, BMP or TIFF, which is converted --
+    or a PDF, up to 10 MB). The draft has only what the material states;
     anything missing is null with a line in `warnings`. 422 for no input, a
     long text, a file of another type or a larger one.
     """
@@ -102,10 +105,13 @@ async def event_draft(
         data = await file.read(draft.MAX_FILE_BYTES + 1)
         if len(data) > draft.MAX_FILE_BYTES:
             raise CustomHTTPException(422, message="That file is over 10 MB. Use a smaller one.", errors={"file": "Too large."})
-        mime = draft.sniff(data) if data else None
-        if mime is None:
-            raise CustomHTTPException(422, message="Use a PNG, JPEG or WebP image, or a PDF.", errors={"file": "Not a PNG, JPEG, WebP or PDF."})
-        attachment = Attachment(mime_type=mime, data=data)
+        sent = await asyncio.to_thread(draft.attachment, data) if data else None
+        if sent is None:
+            raise CustomHTTPException(
+                422, message=f"Add the poster as a picture ({formats.WORKS}) or a PDF.",
+                errors={"file": "Not a picture or a PDF."},
+            )
+        attachment = Attachment(mime_type=sent[0], data=sent[1])
     if not text and attachment is None:
         raise CustomHTTPException(422, message="Paste some notes or add a poster or PDF.", errors={"text": "Give notes or a file."})
 

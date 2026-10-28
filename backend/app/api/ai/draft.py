@@ -23,6 +23,7 @@ find): fewer nullable fields is a schema both providers take.
 """
 from __future__ import annotations
 
+import io
 import re
 from datetime import date, datetime, time, timedelta
 from typing import Optional
@@ -68,6 +69,41 @@ def sniff(data: bytes) -> Optional[str]:
     if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return "image/webp"
     return None
+
+
+#: The longest side a converted poster is sent at: more than either model reads.
+CONVERTED_MAX_SIDE = 2048
+
+
+def attachment(data: bytes) -> Optional[tuple[str, bytes]]:
+    """The file as the model is sent it, with its type: a PNG, JPEG, WebP or
+    PDF as it came; a poster in another picture format (a HEIC from an
+    iPhone, an AVIF download, a GIF, BMP or TIFF) converted to a JPEG, or a
+    PNG when see-through (storage.formats), with the same pixel limit as any
+    upload. None for anything else. Blocking: a decode."""
+    mime = sniff(data)
+    if mime is not None:
+        return mime, data
+    from PIL import Image, ImageOps
+
+    from app.core.storage import formats
+    from app.core.storage.images import checked_image
+    from app.response import CustomHTTPException
+
+    try:
+        image = checked_image(data, max_bytes=MAX_FILE_BYTES)
+    except CustomHTTPException:
+        return None
+    if (image.format or "").upper() not in (*formats.CONVERTED, "GIF"):
+        return None
+    try:
+        image, ext = formats.kept_as(ImageOps.exif_transpose(image))
+        image.thumbnail((CONVERTED_MAX_SIDE, CONVERTED_MAX_SIDE), Image.Resampling.LANCZOS)
+        out = io.BytesIO()
+        image.save(out, "PNG" if ext == "png" else "JPEG", **({} if ext == "png" else {"quality": 88}))
+    except Exception:  # noqa: BLE001 - a file that does not decode is not a poster
+        return None
+    return ("image/png" if ext == "png" else "image/jpeg"), out.getvalue()
 
 
 def _text(value, limit: int) -> Optional[str]:

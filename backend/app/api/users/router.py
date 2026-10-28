@@ -47,6 +47,7 @@ from app.core.auth.permissions import (
 from app.api.interests.schemas import InterestPublic
 from app.api.auth import service as auth_service
 from app.core.rate_limit import limiter
+from app.core.storage import formats
 
 logger = logging.getLogger(__name__)
 
@@ -494,10 +495,9 @@ async def update_profile_picture(
     # those go on, and the column reads the bytes and refuses anything that
     # is not a picture with a 422 of its own (storage.fields.prepare_image).
     # This was a bare Exception -- a 500 -- and crashed on a part with no type.
-    kind = (profile_picture.content_type or "").split(";")[0].strip().lower()
-    if kind and not kind.startswith("image/") and kind != "application/octet-stream":
+    if not formats.may_be_picture(profile_picture.content_type):
         raise CustomHTTPException(
-            422, message="That file is not an image. Use PNG, JPEG or WebP.", error_code="NOT_AN_IMAGE"
+            422, message=f"That file is not a picture. Upload a {formats.WORKS} picture.", error_code="NOT_AN_IMAGE"
         )
 
     return await service.update_profile_picture(

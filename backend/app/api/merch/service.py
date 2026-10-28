@@ -4,7 +4,7 @@ import os
 from typing import Optional
 from uuid import UUID, uuid4
 
-from PIL import Image
+from PIL import Image, ImageOps
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
@@ -19,7 +19,8 @@ from app.api.merch import rules
 from app.api.merch.models import MerchCollections, MerchItems, MerchVariants
 from app.api.users.models import Users
 from app.config import settings
-from app.core.storage import media, objects
+from app.core.storage import formats, media, objects
+from app.core.storage.images import checked_image
 from app.response import CustomHTTPException
 
 # ─── Items ────────────────────────────────────────────────────────────────
@@ -171,7 +172,7 @@ async def delete_variant(session, event: Events, item_id: UUID, variant_id: UUID
 
 
 MAX_PHOTO_BYTES = 5 * 1024 * 1024
-_EXT = {"PNG": "png", "JPEG": "jpg", "WEBP": "webp"}
+_EXT = {"PNG": "png", "JPEG": "jpg", "MPO": "jpg", "WEBP": "webp", "GIF": "gif"}
 
 
 def store_photo(event_id: int, raw: bytes) -> dict:
@@ -181,22 +182,36 @@ def store_photo(event_id: int, raw: bytes) -> dict:
 
 def product_photo(folder: str, raw: bytes) -> dict:
     """A product photo, checked and sized, stored in `folder`: the event's
-    (store_photo) or the club's store catalogue's."""
-    if len(raw) > MAX_PHOTO_BYTES:
-        raise CustomHTTPException(413, message="That image is over 5 MB. Export it smaller and try again.")
-    try:
-        image = Image.open(io.BytesIO(raw))
-        image.load()
-    except Exception:
-        raise CustomHTTPException(422, message="That file is not an image we can read. Use PNG, JPEG or WebP.")
+    (store_photo) or the club's store catalogue's. A HEIC, AVIF, BMP or TIFF
+    is stored as a JPEG, or a PNG when some of it is see-through
+    (storage.images.store_image, which this follows)."""
+    # Its bytes counted before anything decodes them, its pixels from the header.
+    image = checked_image(raw, max_bytes=MAX_PHOTO_BYTES)
     fmt = (image.format or "").upper()
-    if fmt not in _EXT:
-        raise CustomHTTPException(422, message="Use PNG, JPEG or WebP.")
-    if image.width > 1200:
-        image = image.resize((1200, round(image.height * 1200 / image.width)), Image.Resampling.LANCZOS)
+    convert = fmt in formats.CONVERTED
+    if fmt not in _EXT and not convert:
+        raise formats.refused(fmt)
+    try:
+        rotate = (image.getexif().get(0x0112, 1) or 1) != 1
+    except Exception:
+        rotate = False
+    try:
+        if rotate:
+            image = ImageOps.exif_transpose(image)
+        if convert:
+            image, kept = formats.kept_as(image)
+            fmt = "PNG" if kept == "png" else "JPEG"
+    except Exception:
+        raise formats.not_readable(raw)
+    if image.width > 1200 or rotate or convert:
+        if image.width > 1200:
+            image = image.resize((1200, round(image.height * 1200 / image.width)), Image.Resampling.LANCZOS)
         out = io.BytesIO()
-        if fmt == "JPEG":
+        if _EXT[fmt] == "jpg":
             image.convert("RGB").save(out, "JPEG", quality=88)
+            fmt = "JPEG"
+        elif fmt == "WEBP":
+            image.save(out, "WEBP", quality=88)
         else:
             image.save(out, "PNG")
             fmt = "PNG"

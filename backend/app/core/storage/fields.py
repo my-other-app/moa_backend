@@ -17,7 +17,7 @@ from typing import Dict, Optional, Union
 
 
 from app.config import settings
-from app.core.storage import clients, media
+from app.core.storage import clients, formats, media
 from app.response import CustomHTTPException
 
 logger = logging.getLogger(__name__)
@@ -100,7 +100,11 @@ def signed_url(key: str, *, public: bool = False) -> str:
 #     renderer ignores EXIF;
 #   - the original is kept byte for byte -- it used to be re-encoded at
 #     JPEG's default quality 75, losing detail on every upload -- unless its
-#     orientation has to be baked in or it is larger than ORIGINAL_MAX_SIDE.
+#     orientation has to be baked in or it is larger than ORIGINAL_MAX_SIDE;
+#   - a HEIC, AVIF, BMP or TIFF (formats.CONVERTED: an iPhone photo, a web
+#     download, a scan) is converted, original and variants alike, to a JPEG,
+#     or a PNG when some of it is see-through: not every browser, nor the
+#     app, shows those formats. The checks above apply to it as to any other.
 #
 # All of it runs off the event loop. It used to run inside the column's
 # `process_bind_param`, during the flush, on the loop: a decode, a LANCZOS
@@ -114,7 +118,7 @@ MAX_IMAGE_PIXELS = 40_000_000
 # refused above it by `_check_pixels` before Pillow gets that far.
 Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 ORIGINAL_MAX_SIDE = 4096
-_FORMATS = {"JPEG": "jpeg", "MPO": "jpeg", "PNG": "png", "GIF": "gif", "WEBP": "webp"}
+_FORMATS = formats.KEPT
 _CONTENT_TYPES = {"jpeg": "image/jpeg", "jpg": "image/jpeg", "png": "image/png", "gif": "image/gif", "webp": "image/webp"}
 _ORIENTATION = 0x0112
 
@@ -186,6 +190,10 @@ class Prepared:
         return _CONTENT_TYPES.get(self.ext, f"image/{self.ext}")
 
 
+def _allowed(ext: str, allowed: Optional[list]) -> bool:
+    return not allowed or ext in allowed or (ext == "jpeg" and "jpg" in allowed)
+
+
 def prepare_image(raw: bytes, *, max_size: Optional[int], allowed: Optional[list], variations: dict) -> Prepared:
     """Check one upload and make its variants. CPU only; no network."""
     if max_size and len(raw) > max_size:
@@ -195,13 +203,16 @@ def prepare_image(raw: bytes, *, max_size: Optional[int], allowed: Optional[list
     except Image.DecompressionBombError:
         raise CustomHTTPException(422, message=f"That image is too large. Use one under {MAX_IMAGE_PIXELS // 1_000_000} megapixels.")
     except Exception:
-        raise CustomHTTPException(422, message="That file is not an image we can read. Use PNG, JPEG or WebP.")
-    ext = _FORMATS.get((img.format or "").upper())
-    if ext is None or (allowed and ext not in allowed and not (ext == "jpeg" and "jpg" in allowed)):
-        raise CustomHTTPException(
-            status_code=422,
-            message=f"Unsupported image format. Allowed formats: {allowed}",
-        )
+        raise formats.not_readable(raw)
+    fmt = (img.format or "").upper()
+    # A HEIC, AVIF, BMP or TIFF is decoded and kept as a JPEG or a PNG,
+    # which one decided once its pixels are read.
+    convert = fmt in formats.CONVERTED
+    ext = _FORMATS.get(fmt)
+    if ext is None and not convert:
+        raise formats.refused(fmt)
+    if ext is not None and not _allowed(ext, allowed):
+        raise formats.refused(fmt, allowed)
     _check_pixels(img)
 
     try:
@@ -211,7 +222,7 @@ def prepare_image(raw: bytes, *, max_size: Optional[int], allowed: Optional[list
     rotate = orientation != 1
     oversized = max(img.size) > ORIGINAL_MAX_SIDE
     boxes = [(int(v["width"]), int(v["height"])) for v in variations.values() if v.get("width") and v.get("height")]
-    need_full = rotate or oversized
+    need_full = rotate or oversized or convert
     # Decode a JPEG only as large as anything made from it needs.
     if ext == "jpeg":
         side = ORIGINAL_MAX_SIDE if need_full else max((max(b) for b in boxes), default=0)
@@ -223,16 +234,20 @@ def prepare_image(raw: bytes, *, max_size: Optional[int], allowed: Optional[list
             # On a fresh handle: verify() must come straight after open().
             Image.open(io.BytesIO(raw)).verify()
         except Exception:
-            raise CustomHTTPException(422, message="That file is not an image we can read. Use PNG, JPEG or WebP.")
+            raise formats.not_readable(raw)
         return Prepared(ext=ext, original=raw)
 
     try:
         img.load()
         upright = ImageOps.exif_transpose(img) if rotate else img
+        if convert:
+            upright, ext = formats.kept_as(upright)
     except Image.DecompressionBombError:
         raise CustomHTTPException(422, message=f"That image is too large. Use one under {MAX_IMAGE_PIXELS // 1_000_000} megapixels.")
     except Exception:
-        raise CustomHTTPException(422, message="That file is not an image we can read. Use PNG, JPEG or WebP.")
+        raise formats.not_readable(raw)
+    if convert and not _allowed(ext, allowed):
+        raise formats.refused(fmt, allowed)
     if upright.mode == "P" and ext != "gif":
         upright = upright.convert("RGBA")
 
