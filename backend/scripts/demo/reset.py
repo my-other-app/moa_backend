@@ -224,6 +224,8 @@ CLASSIFICATION: dict[str, str] = {
     "event_files": WIPE,
     "event_interests_link": WIPE,
     "event_page_views": WIPE,
+    # An event's own sponsors and partners (app/api/event_partners).
+    "event_partners": WIPE,
     "event_ratings_link": WIPE,
     "event_registrations_link": WIPE,
     "event_speakers": WIPE,

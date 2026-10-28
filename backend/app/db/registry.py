@@ -56,6 +56,8 @@ from app.api.club_ops import models as _club_ops_models  # noqa: F401
 # Connected AI assistants: clients, grants, tokens, pending actions, announcement drafts (app/api/mcp).
 from app.api.mcp import models as _mcp_models  # noqa: F401
 from app.api.organisers import models as _organiser_models  # noqa: F401
+# An event's own sponsors and partners (app/api/event_partners).
+from app.api.event_partners import models as _event_partner_models  # noqa: F401
 from app.api.discover.geocode import GeocodeCache  # noqa: F401
 from app.api.discover.stats import DiscoverStats  # noqa: F401
 # The triggers that keep clubs.place_lat/place_lng, installed with the events table.

@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from fastapi.exceptions import RequestValidationError
 
 from app.api.clubs.schemas import ClubPublicMin
+from app.api.event_partners.schemas import EventPartnerOut
 from app.api.users.schemas import UserPublic
 from app.api.interests.schemas import InterestPublic, TopicRef
 from app.response import CustomHTTPException
@@ -729,6 +730,10 @@ class EventDetailResponse(CustomBaseModel):
     #: "club" when the club has connected its own and it is working,
     #: "platform" otherwise (app/api/payment_gateways).
     payments_to: str = Field("platform")
+    #: The event's own sponsors and partners, each in its order
+    #: (app/api/event_partners, docs/EVENT_PARTNERS.md).
+    sponsors: list[EventPartnerOut] = Field(default_factory=list)
+    partners: list[EventPartnerOut] = Field(default_factory=list)
     # User-specific fields (only populated when authenticated)
     is_registered: bool = Field(False)
     #: Null when the viewer is not registered. True for a free event, or a
