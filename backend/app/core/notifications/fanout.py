@@ -12,9 +12,20 @@ without writing the rows twice.
 
 With PUSH_TOPICS or INBOX_SHARED on, a broadcast goes through `announce`
 instead (below): one row, and one send to its FCM topic.
+
+A push carries the inbox line it is about as `notification_id` in its data
+(PUSH_LINE), so a tap on it marks that line read (POST
+/notifications/read/{id}) and the app's icon badge drops. A line written for
+one person is sent its own id. The lines a fan-out writes for many people
+share one push, so that push carries the fan-out's key instead, and each
+line's id is derived from the key and its person (line_id): the endpoint
+finds the reader's own line from the key, and nobody else's. A shared
+broadcast's line (INBOX_SHARED) is the broadcast's own id, which the
+endpoint already marks.
 """
 from __future__ import annotations
 
+import hashlib
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -38,6 +49,29 @@ from app.core.background import dispatch, drain, runs_inline  # noqa: F401  (re-
 
 # ─── The inbox rows ─────────────────────────────────────────────────────────
 
+#: The push data key that names the inbox line a push is about: the line's
+#: id, or the key of the fan-out that wrote it (line_id).
+PUSH_LINE = "notification_id"
+
+
+def line_id(key, user_id: int) -> uuid.UUID:
+    """The id of `user_id`'s line in the fan-out `key`: the md5 of
+    "{key}:{user_id}", as a uuid -- what insert_for_audience writes with a
+    `line_key`, so the line can be found from the key its push carried."""
+    return uuid.UUID(hashlib.md5(f"{uuid.UUID(str(key))}:{int(user_id)}".encode()).hexdigest())
+
+
+def line_key(*parts) -> uuid.UUID:
+    """A fan-out's key, from what makes it one fan-out (a type and an event),
+    for a fan-out with no id of its own."""
+    return uuid.UUID(hashlib.md5(":".join(str(p) for p in ("line", *parts)).encode()).hexdigest())
+
+
+def with_line(data: Optional[dict], key) -> dict:
+    """A push's data, naming its inbox line (PUSH_LINE): additive, so an app
+    from before it ignores it."""
+    return {**(data or {}), PUSH_LINE: str(key)}
+
 
 async def insert_for_audience(
     session: AsyncSession,
@@ -51,11 +85,16 @@ async def insert_for_audience(
     from_user_id: Optional[int] = None,
     event_id: Optional[int] = None,
     once: bool = False,
+    line_key: Optional[uuid.UUID] = None,
 ) -> list[int]:
     """One notification for each user id `audience` (a SELECT of one column)
     yields, in one statement. Returns the ids of the users it reached. The
     caller commits. `once` (with an event): not to anyone who already has a
-    notification of this type about it -- the job run again adds none."""
+    notification of this type about it -- the job run again adds none.
+
+    `line_key`: the fan-out's key, which its push carries (PUSH_LINE). Each
+    line's id is then line_id(key, its person) rather than random, and a
+    line already there (the same fan-out written again) is left alone."""
     now = datetime.now(timezone.utc)
     people = audience.subquery("audience")
     user_id = list(people.c)[0]
@@ -66,8 +105,16 @@ async def insert_for_audience(
         ).exists()
         people = select(user_id).where(~told).subquery("audience_new")
         user_id = list(people.c)[0]
+    if line_key is None:
+        row_id = func.gen_random_uuid()
+    else:
+        # md5("{key}:{user_id}") as a uuid: line_id, in SQL.
+        row_id = sa.cast(
+            func.md5(literal(f"{uuid.UUID(str(line_key))}:", sa.String) + sa.cast(user_id, sa.String)),
+            Notifications.__table__.c.id.type,
+        )
     source = select(
-        func.gen_random_uuid(),
+        row_id,
         user_id,
         literal(title, sa.String),
         literal(description, sa.String),
@@ -82,15 +129,12 @@ async def insert_for_audience(
         literal(now, Notifications.__table__.c.updated_at.type),
     ).select_from(people)
     c = Notifications.__table__.c
-    stmt = (
-        insert(Notifications.__table__)
-        .from_select(
-            [c.id, c.user_id, c.title, c.description, c.type, c.from_club_id, c.from_user_id, c.event_id, c.status, c.data, c.is_deleted, c.created_at, c.updated_at],
-            source,
-        )
-        .returning(c.user_id)
-    )
-    return list((await session.execute(stmt)).scalars().all())
+    columns = [c.id, c.user_id, c.title, c.description, c.type, c.from_club_id, c.from_user_id, c.event_id, c.status, c.data, c.is_deleted, c.created_at, c.updated_at]
+    if line_key is None:
+        stmt = insert(Notifications.__table__).from_select(columns, source)
+    else:
+        stmt = pg_insert(Notifications.__table__).from_select(columns, source).on_conflict_do_nothing(index_elements=[c.id])
+    return list((await session.execute(stmt.returning(c.user_id))).scalars().all())
 
 
 def users_in(user_ids) -> sa.Select:
@@ -290,9 +334,13 @@ async def announce(session: AsyncSession, b: Broadcast, *, topic: Optional[str] 
     elif not b.everyone:
         await insert_for_audience(
             session, audience_users(audience), title=b.title, description=b.body, type=b.kind, data=b.data,
-            from_club_id=b.from_club_id, from_user_id=b.from_user_id, event_id=b.event_id,
+            from_club_id=b.from_club_id, from_user_id=b.from_user_id, event_id=b.event_id, line_key=row_id,
         )
     data = {**{k: str(v) for k, v in (b.push_data or {}).items()}, "push_id": b.push_id}
+    if not b.everyone:
+        # The line it is about: the shared line's own id, or the key of each
+        # person's line (line_id) -- the broadcast's id either way.
+        data = with_line(data, row_id)
     push = dict(push_id=b.push_id, title=b.title, body=b.body, data=data, image_url=b.image_url)
     if settings.PUSH_TOPICS:
         await jobs.enqueue(session, "push.topic", {**push, "topic": topic, "condition": condition}, dedupe_key=f"topic:{b.push_id}")

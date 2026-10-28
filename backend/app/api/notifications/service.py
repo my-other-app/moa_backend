@@ -64,8 +64,12 @@ async def create_notifications_batch(
     data: Optional[dict] = None,
     from_club_id: Optional[int] = None,
     event_id: Optional[int] = None,
+    line_key: Optional[uuid.UUID] = None,
 ) -> int:
     """Create notifications for multiple users at once.
+
+    `line_key`: the key their push carries (fanout.insert_for_audience), so
+    a tap on it marks the reader's own line read.
     
     Args:
         session: Database session
@@ -95,6 +99,7 @@ async def create_notifications_batch(
         data=data,
         from_club_id=from_club_id,
         event_id=event_id,
+        line_key=line_key,
     )
     await session.commit()
     return len(reached)
@@ -198,6 +203,15 @@ async def mark_notification_as_read(
         line = await inbox.mark_read(session, user_id, notification_id)
         if line is not None:
             return line.as_row()
+    if not notification:
+        # The key a fan-out's push carried (a tap on it): the reader's own
+        # line in that fan-out, whose id is derived from the key and them --
+        # never anyone else's.
+        from app.core.notifications.fanout import line_id
+
+        notification = await session.scalar(select(Notifications).where(
+            Notifications.id == line_id(notification_id, user_id), Notifications.user_id == user_id,
+        ))
     if not notification:
         raise CustomHTTPException(404, "Notification not found")
     if notification.user_id != user_id:

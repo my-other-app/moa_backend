@@ -257,9 +257,11 @@ async def tell_followers(club_id: int, thread_id) -> int:
                 ids = [i for i in ids if i not in already]
                 if not ids:
                     continue
-                await create_notifications_batch(session, user_ids=ids, title=title, description=preview, type="club_thread", data=data, from_club_id=club.id)
+                # The post is the fan-out: its id is the key the push carries,
+                # and each follower's line id is derived from it.
+                await create_notifications_batch(session, user_ids=ids, title=title, description=preview, type="club_thread", data=data, from_club_id=club.id, line_key=t.id)
                 await session.commit()
-                await send_notification_to_users(session, ids, title, preview, data=data)
+                await send_notification_to_users(session, ids, title, preview, data=fanout.with_line(data, t.id))
                 told += len(ids)
                 if len(ids) < TELL_BATCH:
                     break

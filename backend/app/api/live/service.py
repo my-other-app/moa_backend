@@ -1157,13 +1157,15 @@ async def push_update(session, event: Events, kind: str, text_: str, audience: s
     if user_ids:
         await fanout.insert_for_audience(
             session, fanout.users_in(user_ids), title=event.name, description=body, type=UPDATE_TYPE, data=data,
-            from_club_id=event.club_id, event_id=event.id,
+            from_club_id=event.club_id, event_id=event.id, line_key=row.id,
         )
         told = sorted(int(u) for u in (await session.scalars(
             notify.recipients(event.id, event.club_id, checked_in=aud is Audience.checked_in)
         )).all())
         if told:
-            await jobs.enqueue(session, UPDATE_PUSH_JOB, {"user_ids": told, "title": event.name, "body": body, "data": data}, dedupe_key=f"live:update:{row.id}")
+            # The update is the fan-out: its id names each person's line.
+            push = {"user_ids": told, "title": event.name, "body": body, "data": fanout.with_line(data, row.id)}
+            await jobs.enqueue(session, UPDATE_PUSH_JOB, push, dedupe_key=f"live:update:{row.id}")
         row.pushed = len(told)
     await session.commit()
     room.room_changed(event.id)
