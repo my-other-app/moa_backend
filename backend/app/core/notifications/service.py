@@ -20,11 +20,33 @@ app.core.notifications.delivery says which pushes are broadcasts): one request
 however many devices are subscribed. A push whose data carries a `push_id`
 gets it as Android's notification tag and APNs' collapse id, whichever way it
 is sent, so two copies of one push show as one.
+
+The number on an iPhone's app icon is APNs' `badge`. It was 1 in every push,
+and the app never set it, so after one push the icon said 1 for good. Now it
+is the person's unread inbox count, the number GET
+/notifications/unread-count gives them, read as the push goes (their new
+line included, as every caller writes the line first):
+
+- a push to one person (send_notification_to_user): their count;
+- a push to many (send_notification_to_users, a broadcast device by device):
+  each device its person's count, from one grouped count per LOOKUP_BATCH
+  people (unread_badges). A batch of devices whose counts are all the same
+  is one multicast, as before; a batch with different counts is one
+  `send_each` of a message per device -- the call firebase-admin makes for
+  a multicast anyway, FCM_BATCH at a time. With INBOX_SHARED on, the shared
+  broadcasts' part of each count is a query per person
+  (app.core.notifications.inbox), so a push to many carries no badge;
+- a send to an FCM topic is one message for every device subscribed: no
+  badge.
+
+No badge leaves the number on the icon as it was; the app sets it from the
+same count whenever it opens or comes to the front. A wrong number is never
+sent: when a count cannot be read, the push goes without one.
 """
 
 import asyncio
 import logging
-from typing import Iterable, Optional
+from typing import Iterable, Mapping, Optional
 
 import firebase_admin
 import sqlalchemy as sa
@@ -33,6 +55,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.notifications.models import Notifications, NotificationStatus
 from app.api.users.models import UserDeviceTokens, Users
 from app.config import settings
 
@@ -112,19 +135,20 @@ def reachable(user_id_column):
     return ~sa.exists().where(Users.id == user_id_column, suppression.domain_suppressed(Users.email))
 
 
-async def get_fcm_tokens_for_users(
+async def get_fcm_devices_for_users(
     session: AsyncSession,
     user_ids: list[int],
-) -> list[str]:
-    """Every live device token of these users, each once, oldest first."""
+) -> list[tuple[int, str]]:
+    """Every live device of these users, as (user id, token), each token
+    once, oldest first."""
     if not user_ids:
         return []
     ids = sorted({int(u) for u in user_ids})
-    tokens: list[str] = []
+    devices: list[tuple[int, str]] = []
     seen: set[str] = set()
     for part in _chunks(ids, LOOKUP_BATCH):
-        rows = await session.scalars(
-            select(UserDeviceTokens.fcm_token)
+        rows = await session.execute(
+            select(UserDeviceTokens.user_id, UserDeviceTokens.fcm_token)
             .where(
                 UserDeviceTokens.user_id == sa.any_(int_array(part)),
                 UserDeviceTokens.is_deleted == False,  # noqa: E712
@@ -132,12 +156,75 @@ async def get_fcm_tokens_for_users(
             )
             .order_by(UserDeviceTokens.id)
         )
-        for token in rows:
+        for user_id, token in rows.all():
             if token and token not in seen:
                 seen.add(token)
-                tokens.append(token)
-    logger.info("Found %d FCM tokens for %d users", len(tokens), len(ids))
-    return tokens
+                devices.append((int(user_id), token))
+    logger.info("Found %d FCM tokens for %d users", len(devices), len(ids))
+    return devices
+
+
+async def get_fcm_tokens_for_users(
+    session: AsyncSession,
+    user_ids: list[int],
+) -> list[str]:
+    """Every live device token of these users, each once, oldest first."""
+    return [token for _, token in await get_fcm_devices_for_users(session, user_ids)]
+
+
+# ─── The number on the app's icon ───────────────────────────────────────────
+
+
+async def unread_badge(session: AsyncSession, user_id: int) -> Optional[int]:
+    """The badge for a push to this person: their unread inbox count, as GET
+    /notifications/unread-count gives it (with INBOX_SHARED, the shared
+    lines' part included). None when it cannot be read: the push then goes
+    without a badge. In a savepoint, so a count that fails leaves the
+    caller's transaction usable."""
+    from app.api.notifications.service import get_unread_count
+
+    try:
+        async with session.begin_nested():
+            return max(0, int(await get_unread_count(session, int(user_id))))
+    except Exception:  # noqa: BLE001 -- a push is never stopped by its badge
+        logger.warning("No badge for user %s: the unread count could not be read", user_id, exc_info=True)
+        return None
+
+
+async def unread_badges(session: AsyncSession, user_ids: Iterable[int]) -> Optional[dict[int, int]]:
+    """Each person's unread inbox count, for a push to many: one grouped
+    count (ix_notifications_user_unread) per LOOKUP_BATCH people, the same
+    number GET /notifications/unread-count gives each of them; 0 for whoever
+    has none. None -- no badge -- with INBOX_SHARED on, whose shared lines
+    are counted by a query per person, or when the counts cannot be read."""
+    if settings.INBOX_SHARED:
+        return None
+    ids = sorted({int(u) for u in user_ids})
+    counts = dict.fromkeys(ids, 0)
+    try:
+        async with session.begin_nested():
+            for part in _chunks(ids, LOOKUP_BATCH):
+                rows = await session.execute(
+                    select(Notifications.user_id, sa.func.count())
+                    .where(
+                        Notifications.user_id == sa.any_(int_array(part)),
+                        Notifications.status == NotificationStatus.unread,
+                        Notifications.is_deleted == False,  # noqa: E712
+                    )
+                    .group_by(Notifications.user_id)
+                )
+                counts.update({int(u): int(n) for u, n in rows.all()})
+    except Exception:  # noqa: BLE001 -- a push is never stopped by its badge
+        logger.warning("No badges for %d users: the unread counts could not be read", len(ids), exc_info=True)
+        return None
+    return counts
+
+
+def badges_by_token(devices: list[tuple[int, str]], counts: Optional[dict[int, int]]) -> Optional[dict[str, int]]:
+    """Each device's badge, its person's count; None when there are no counts."""
+    if counts is None:
+        return None
+    return {token: counts[user_id] for user_id, token in devices if user_id in counts}
 
 
 async def get_fcm_token_for_user(
@@ -196,18 +283,22 @@ async def send_notification_to_user(
     body: str,
     data: Optional[dict] = None,
 ) -> bool:
-    """A push to every device the user is signed in on. True when at least
-    one took it."""
+    """A push to every device the user is signed in on, its badge their
+    unread count (unread_badge: the push's own inbox line included when it
+    was written first, as every caller does). True when at least one device
+    took it."""
     tokens = await get_fcm_tokens_for_users(session, [user_id])
     if not tokens:
         logger.debug("No FCM token found for user %s", user_id)
         return False
 
+    badge = await unread_badge(session, user_id)
     dead: list[str] = []
     if len(tokens) == 1:
-        sent = 1 if await _send_to_token(tokens[0], title, body, data, dead=dead) else 0
+        sent = 1 if await _send_to_token(tokens[0], title, body, data, dead=dead, badge=badge) else 0
     else:
-        sent = await _send_to_tokens(tokens, title, body, data, dead=dead)
+        badges = None if badge is None else dict.fromkeys(tokens, badge)
+        sent = await _send_to_tokens(tokens, title, body, data, dead=dead, badges=badges)
     await prune_tokens(session, dead)
     return sent > 0
 
@@ -220,20 +311,26 @@ async def send_notification_to_users(
     data: Optional[dict] = None,
     image_url: Optional[str] = None,
 ) -> int:
-    """A push to every device of these users. Returns how many devices took it.
+    """A push to every device of these users, each device's badge its
+    person's unread count (unread_badges; none with INBOX_SHARED on).
+    Returns how many devices took it.
 
-    The token lookups and the sends go in batches, however many users there
-    are; a batch that fails is logged and the rest still go."""
+    The token lookups, the counts and the sends go in batches, however many
+    users there are; a batch that fails is logged and the rest still go."""
     if not user_ids:
         return 0
     ids = sorted({int(u) for u in user_ids})
     sent = tried = 0
     dead: list[str] = []
     for part in _chunks(ids, LOOKUP_BATCH):
-        tokens = await get_fcm_tokens_for_users(session, part)
-        tried += len(tokens)
-        if tokens:
-            sent += await _send_to_tokens(tokens, title, body, data, image_url, dead=dead)
+        devices = await get_fcm_devices_for_users(session, part)
+        tried += len(devices)
+        if devices:
+            counts = await unread_badges(session, {user_id for user_id, _ in devices})
+            tokens = [token for _, token in devices]
+            sent += await _send_to_tokens(
+                tokens, title, body, data, image_url, dead=dead, badges=badges_by_token(devices, counts),
+            )
     if not tried:
         logger.debug("No FCM tokens found for %d users", len(ids))
         return 0
@@ -259,10 +356,12 @@ def _tag(data: Optional[dict]) -> Optional[str]:
     return str(value)[:64] if value else None
 
 
-def _apns(image_url: Optional[str], tag: Optional[str]) -> messaging.APNSConfig:
+def _apns(image_url: Optional[str], tag: Optional[str], badge: Optional[int] = None) -> messaging.APNSConfig:
+    """`badge`: the number for the app's icon, the person's unread count; None
+    leaves the key out, and the icon as it was."""
     return messaging.APNSConfig(
         headers={"apns-collapse-id": tag} if tag else None,
-        payload=messaging.APNSPayload(aps=messaging.Aps(sound="default", badge=1)),
+        payload=messaging.APNSPayload(aps=messaging.Aps(sound="default", badge=None if badge is None else max(0, int(badge)))),
         fcm_options=messaging.APNSFCMOptions(image=image_url) if image_url else None,
     )
 
@@ -279,14 +378,23 @@ def _android(image_url: Optional[str], tag: Optional[str]) -> messaging.AndroidC
     )
 
 
-def _message(token: str, title: str, body: str, data: Optional[dict]) -> messaging.Message:
+def _message(
+    token: str,
+    title: str,
+    body: str,
+    data: Optional[dict],
+    image_url: Optional[str] = None,
+    badge: Optional[int] = None,
+) -> messaging.Message:
+    """One device's message: what _multicast sends each of its devices, with
+    this device's badge."""
     tag = _tag(data)
     return messaging.Message(
-        notification=messaging.Notification(title=title, body=body),
+        notification=messaging.Notification(title=title, body=body, image=image_url),
         data=data or {},
         token=token,
-        android=_android(None, tag),
-        apns=_apns(None, tag),
+        android=_android(image_url, tag),
+        apns=_apns(image_url, tag, badge),
     )
 
 
@@ -296,16 +404,18 @@ async def _send_to_token(
     body: str,
     data: Optional[dict] = None,
     dead: Optional[list] = None,
+    badge: Optional[int] = None,
 ) -> bool:
     """Send notification to a single FCM token, on a worker thread. A token
     FCM says is dead is added to `dead`, for the caller to remove
-    (prune_tokens)."""
+    (prune_tokens). `badge`: its person's unread count (unread_badge), or
+    None for none."""
     if not initialize_firebase():
         logger.error("Firebase not initialized, cannot send notification")
         return False
 
     try:
-        response = await asyncio.to_thread(messaging.send, _message(token, title, body, data))
+        response = await asyncio.to_thread(messaging.send, _message(token, title, body, data, badge=badge))
         logger.info(f"Successfully sent notification: {response}")
         return True
     except Exception as e:
@@ -318,14 +428,21 @@ async def _send_to_token(
         return False
 
 
-def _multicast(tokens: list[str], title: str, body: str, data: Optional[dict], image_url: Optional[str]) -> messaging.MulticastMessage:
+def _multicast(
+    tokens: list[str],
+    title: str,
+    body: str,
+    data: Optional[dict],
+    image_url: Optional[str],
+    badge: Optional[int] = None,
+) -> messaging.MulticastMessage:
     tag = _tag(data)
     return messaging.MulticastMessage(
         notification=messaging.Notification(title=title, body=body, image=image_url),
         data=data or {},
         tokens=tokens,
         android=_android(image_url, tag),
-        apns=_apns(image_url, tag),
+        apns=_apns(image_url, tag, badge),
     )
 
 
@@ -336,10 +453,17 @@ async def _send_to_tokens(
     data: Optional[dict] = None,
     image_url: Optional[str] = None,
     dead: Optional[list] = None,
+    badges: Optional[Mapping[str, int]] = None,
 ) -> int:
     """Send to any number of tokens, FCM_BATCH at a time, each batch on a
     worker thread. Returns how many devices took it. Tokens FCM says are dead
-    are added to `dead`, for the caller to remove."""
+    are added to `dead`, for the caller to remove.
+
+    `badges`: each token's badge, its person's unread count; a token not in
+    it (or no `badges`) goes without one. A batch whose tokens all have the
+    same badge is one multicast; one with different badges is one
+    `send_each` of a message per token -- what firebase-admin makes of a
+    multicast itself -- so it is still one call per FCM_BATCH devices."""
     if not tokens:
         return 0
 
@@ -349,10 +473,17 @@ async def _send_to_tokens(
 
     sent = 0
     for batch in _chunks(list(tokens), FCM_BATCH):
+        counts = {badges.get(token) for token in batch} if badges else {None}
         try:
-            response = await asyncio.to_thread(
-                messaging.send_each_for_multicast, _multicast(batch, title, body, data, image_url)
-            )
+            if len(counts) == 1:
+                response = await asyncio.to_thread(
+                    messaging.send_each_for_multicast, _multicast(batch, title, body, data, image_url, badge=counts.pop())
+                )
+            else:
+                response = await asyncio.to_thread(
+                    messaging.send_each,
+                    [_message(token, title, body, data, image_url, badge=badges.get(token)) for token in batch],
+                )
         except Exception:  # noqa: BLE001
             logger.exception("A batch of %d pushes could not be sent", len(batch))
             continue
@@ -394,7 +525,8 @@ async def send_to_topic(
 ) -> Optional[str]:
     """One push to every device subscribed to `topic`, or matching
     `condition` ("('topic_tech' in topics) && !('club_12' in topics)"): one
-    request, however many devices, on a worker thread. Returns FCM's message
+    request, however many devices, on a worker thread. No badge: one message
+    for everyone cannot carry each person's count. Returns FCM's message
     id, or None when Firebase is not set up or FCM refused the message as
     wrong (logged; trying again would not help). Raises TopicSendFailed for a
     failure that may pass, so the job retries it -- with the same push_id, so

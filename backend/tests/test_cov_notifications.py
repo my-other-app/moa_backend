@@ -354,6 +354,8 @@ async def test_one_push_to_one_token_for_owners(client, admins, fcm, monkeypatch
     assert ok.json() == {"success": True, "message_id": "projects/test/messages/1"}
     (m,) = fcm.singles
     assert m.token == "tok-debug" and m.notification.title == "Ping" and m.notification.body == "Pong"
+    # A token alone says nobody's unread count: no badge, not a made-up 1.
+    assert messaging._MessagingService.encode_message(m)["apns"]["payload"]["aps"] == {"sound": "default"}
 
     fcm.fail_single = messaging.UnregisteredError("Requested entity was not found.")
     failed = (await client.post(f"{API}/notifications/test/send-single", params=params, headers=admins.h)).json()

@@ -365,7 +365,8 @@ async def send_push_to_single_token(
         if not app:
             return {"success": False, "error": "Firebase not initialized"}
         
-        # Create message
+        # Create message. No badge: a token alone says nobody's unread
+        # count, and a made-up number stays on the icon.
         message = messaging.Message(
             notification=messaging.Notification(
                 title=title,
@@ -374,10 +375,7 @@ async def send_push_to_single_token(
             token=token,
             apns=messaging.APNSConfig(
                 payload=messaging.APNSPayload(
-                    aps=messaging.Aps(
-                        sound="default",
-                        badge=1,
-                    ),
+                    aps=messaging.Aps(sound="default"),
                 ),
             ),
         )

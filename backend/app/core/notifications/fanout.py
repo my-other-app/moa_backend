@@ -153,18 +153,22 @@ async def _broadcast_job(p: dict) -> None:
 
     async with jobs.scope() as s:
         rows = (await s.execute(
-            select(UserDeviceTokens.id, UserDeviceTokens.fcm_token)
+            select(UserDeviceTokens.id, UserDeviceTokens.user_id, UserDeviceTokens.fcm_token)
             .where(UserDeviceTokens.is_deleted == False, UserDeviceTokens.id > int(p.get("after") or 0), push.reachable(UserDeviceTokens.user_id))  # noqa: E712
             .order_by(UserDeviceTokens.id)
             .limit(push.FCM_BATCH)
         )).all()
         if len(rows) == push.FCM_BATCH:
             await enqueue_broadcast(s, p["id"], p["title"], p["body"], p.get("image_url"), after=rows[-1].id)
+        # Each device's badge, its person's unread count: one count for the
+        # batch, read before the commit ends the transaction.
+        devices = [(r.user_id, r.fcm_token) for r in rows]
+        badges = push.badges_by_token(devices, await push.unread_badges(s, {u for u, _ in devices})) if devices else None
         await s.commit()
         if not rows:
             return
         dead: list[str] = []
-        sent = await push._send_to_tokens([r.fcm_token for r in rows], p["title"], p["body"], None, p.get("image_url"), dead=dead)
+        sent = await push._send_to_tokens([r.fcm_token for r in rows], p["title"], p["body"], None, p.get("image_url"), dead=dead, badges=badges)
         if dead:
             await push.prune_tokens(s, dead)
         push.report_outcome(len(rows), sent, what=p["title"])
@@ -343,12 +347,12 @@ async def _devices_job(p: dict) -> None:
     async with jobs.scope() as s:
         if audience.get("all"):
             rows = (await s.execute(
-                select(UserDeviceTokens.id, UserDeviceTokens.fcm_token)
+                select(UserDeviceTokens.id, UserDeviceTokens.user_id, UserDeviceTokens.fcm_token)
                 .where(*live, UserDeviceTokens.id > after, ~settings_off("platform", UserDeviceTokens.user_id))
                 .order_by(UserDeviceTokens.id)
                 .limit(push.FCM_BATCH)
             )).all()
-            tokens = [r.fcm_token for r in rows]
+            devices = [(r.user_id, r.fcm_token) for r in rows]
             last = rows[-1].id if len(rows) == push.FCM_BATCH else None
         else:
             people = audience_users(audience).subquery()
@@ -357,18 +361,22 @@ async def _devices_job(p: dict) -> None:
                 select(user_id).where(user_id > after).order_by(user_id).limit(USERS_PER_JOB)
             )).all())
             last = ids[-1] if len(ids) == USERS_PER_JOB else None
-            tokens = list((await s.scalars(
-                select(UserDeviceTokens.fcm_token)
+            devices = [tuple(r) for r in (await s.execute(
+                select(UserDeviceTokens.user_id, UserDeviceTokens.fcm_token)
                 .where(*live, UserDeviceTokens.user_id == sa.any_(_ints(ids)))
                 .order_by(UserDeviceTokens.id)
-            )).all()) if ids else []
+            )).all()] if ids else []
         if last is not None:
             await enqueue_devices(s, {k: p[k] for k in ("push_id", "title", "body", "data", "image_url")}, audience, legacy_only=legacy_only, after=last)
+        # Each device's badge, its person's unread count (none with
+        # INBOX_SHARED on: push.unread_badges), read before the commit.
+        badges = push.badges_by_token(devices, await push.unread_badges(s, {u for u, _ in devices})) if devices else None
         await s.commit()
+        tokens = [token for _, token in devices]
         if not tokens:
             return
         dead: list[str] = []
-        sent = await push._send_to_tokens(tokens, p["title"], p["body"], p.get("data") or {}, p.get("image_url"), dead=dead)
+        sent = await push._send_to_tokens(tokens, p["title"], p["body"], p.get("data") or {}, p.get("image_url"), dead=dead, badges=badges)
         if dead:
             await push.prune_tokens(s, dead)
         push.report_outcome(len(tokens), sent, what=p["title"])
