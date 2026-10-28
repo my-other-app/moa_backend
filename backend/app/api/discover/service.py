@@ -508,6 +508,20 @@ async def going_counts(session, ids: list[int]) -> dict[int, int]:
     return {k: int(v) for k, v in rows.all() if v}
 
 
+class Going(int):
+    """How many are going to an event, as card_extras counts them, that
+    also carries, on an event that reviews registrations, how many applied
+    (`applied`, approvals.applied): every registration ever made for it.
+    card() says both; `applied` is None on any other event."""
+
+    applied: Optional[int] = None
+
+    def __new__(cls, going: int, applied: Optional[int] = None):
+        made = super().__new__(cls, going)
+        made.applied = applied
+        return made
+
+
 _NOT_COUNTED = object()
 
 
@@ -520,20 +534,27 @@ async def card_extras(session, ids: list[int]) -> tuple[dict[int, int], dict[int
     The events with their interests in one statement (an event's row comes
     back once per interest it picked: a few at most), and, when the page has
     events not started yet (only they can be full), their ticket types with
-    their open waiting-list entries in one more, whatever the page's size."""
+    their open waiting-list entries in one more, whatever the page's size.
+    On an event that reviews registrations, the going count is a Going that
+    says how many applied too: its requests, grouped for the whole page
+    (approvals.asked_by_event), are joined to the first statement."""
     from types import SimpleNamespace
 
+    from app.api.approvals import service as approvals
     from app.api.ticketing import places as ticket_places
 
     if not ids:
         return {}, {}, {}
     link = EventInterestsLink
+    asked = approvals.asked_by_event(ids)
     rows = await session.execute(
         select(
             Events.id, Events.going_count, Events.paid_count, Events.has_fee, Events.max_participants, Events.requires_approval,
-            Events.event_datetime, InterestCategory.id, InterestCategory.slug, InterestCategory.name, InterestCategory.color, InterestCategory.sort_order,
+            Events.event_datetime, asked.c.asked, asked.c.linked,
+            InterestCategory.id, InterestCategory.slug, InterestCategory.name, InterestCategory.color, InterestCategory.sort_order,
         )
         .select_from(Events)
+        .outerjoin(asked, asked.c.event_id == Events.id)
         .outerjoin(link, and_(link.event_id == Events.id, link.is_deleted == False))  # noqa: E712
         .outerjoin(Interests, and_(Interests.id == link.interest_id, Interests.is_deleted == False))  # noqa: E712
         .outerjoin(InterestCategory, and_(InterestCategory.id == Interests.category_id, InterestCategory.is_deleted == False))  # noqa: E712
@@ -543,8 +564,10 @@ async def card_extras(session, ids: list[int]) -> tuple[dict[int, int], dict[int
     topics: dict[int, dict[int, tuple]] = {}
     shells: dict[int, SimpleNamespace] = {}
     now = now_utc()
-    for event_id, count, paid, has_fee, cap, approval, starts, *topic in rows.all():
-        if count:
+    for event_id, count, paid, has_fee, cap, approval, starts, n_asked, n_linked, *topic in rows.all():
+        if approval:
+            going[event_id] = Going(count or 0, approvals.applied(n_asked, n_linked, count))
+        elif count:
             going[event_id] = int(count)
         if _aware(starts) > now:
             shells.setdefault(event_id, SimpleNamespace(
@@ -623,7 +646,10 @@ def card(e: Events, now: datetime, going: int, distance: Optional[float] = None,
         fee=float(e.reg_fee) if e.has_fee and e.reg_fee is not None else None,
         category=dict(id=cat.id, name=cat.name) if cat is not None else None,
         club=dict(id=club.id, name=club.name, slug=club.slug, logo=_img(club.logo, "thumbnail", "medium", "original")) if club is not None else None,
-        going=going,
+        going=int(going),
+        # On an event that reviews registrations, how many applied: every
+        # registration ever made for it (card_extras' Going). None elsewhere.
+        applied_count=getattr(going, "applied", None),
         capacity=e.max_participants,
         status=status_of(e, now, going, left),
         # The club confirms each place, and shows "High demand" (never a number).
@@ -1420,10 +1446,13 @@ async def event_page(session, ref: str, now: Optional[datetime] = None) -> dict:
             ))
     if e is None:
         raise CustomHTTPException(404, message="Event not found")
+    from app.api.approvals import service as approvals
     from app.api.ticketing import places as ticket_places
 
     club, cat = e.club, e.category
     going = (await going_counts(session, [e.id])).get(e.id, 0)
+    # On an event that reviews registrations, how many applied: every registration ever made for it.
+    applied = (await approvals.applied_counts(session, [e.id])).get(e.id) if e.requires_approval else None
     # What is left as the ticket picker counts it: holds count, and a paid
     # event's cap counts its paid tickets (pending requests hold nothing).
     left = (await ticket_places.summary(session, e)).left
@@ -1442,6 +1471,7 @@ async def event_page(session, ref: str, now: Optional[datetime] = None) -> dict:
         has_fee=bool(e.has_fee), fee=float(e.reg_fee) if e.has_fee and e.reg_fee is not None else None,
         has_prize=bool(e.has_prize), prize_amount=float(e.prize_amount) if e.has_prize and e.prize_amount is not None else None,
         capacity=e.max_participants, going=going,
+        applied_count=applied,
         seats_left=left,
         reg_opens_at=_iso(e.reg_startdate), reg_closes_at=_iso(e.reg_enddate),
         status=status_of(e, now, going, left), registration_open=registration_open(e, 0, now) and not full,
