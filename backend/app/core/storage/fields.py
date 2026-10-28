@@ -17,7 +17,8 @@ from typing import Dict, Optional, Union
 
 
 from app.config import settings
-from app.core.storage import clients, media
+from app.core.storage import clients, formats, media
+from app.core.storage.metadata import NO_METADATA, keep_colour, without_metadata
 from app.response import CustomHTTPException
 
 logger = logging.getLogger(__name__)
@@ -98,9 +99,16 @@ def signed_url(key: str, *, public: bool = False) -> str:
 #   - the camera's orientation is applied (`exif_transpose`), so a portrait
 #     taken on a phone is upright in every variant and in the PDFs, whose
 #     renderer ignores EXIF;
-#   - the original is kept byte for byte -- it used to be re-encoded at
-#     JPEG's default quality 75, losing detail on every upload -- unless its
-#     orientation has to be baked in or it is larger than ORIGINAL_MAX_SIDE.
+#   - the original's picture is kept byte for byte -- it used to be
+#     re-encoded at JPEG's default quality 75, losing detail on every upload
+#     -- unless its orientation has to be baked in or it is larger than
+#     ORIGINAL_MAX_SIDE; its metadata is not: EXIF (with a phone's GPS
+#     position), XMP, IPTC and comments are taken out losslessly, the colour
+#     profile kept (storage.metadata). Anything encoded anew carries none;
+#   - a HEIC, AVIF, BMP or TIFF (formats.CONVERTED: an iPhone photo, a web
+#     download, a scan) is converted, original and variants alike, to a JPEG,
+#     or a PNG when some of it is see-through: not every browser, nor the
+#     app, shows those formats. The checks above apply to it as to any other.
 #
 # All of it runs off the event loop. It used to run inside the column's
 # `process_bind_param`, during the flush, on the loop: a decode, a LANCZOS
@@ -114,7 +122,7 @@ MAX_IMAGE_PIXELS = 40_000_000
 # refused above it by `_check_pixels` before Pillow gets that far.
 Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 ORIGINAL_MAX_SIDE = 4096
-_FORMATS = {"JPEG": "jpeg", "MPO": "jpeg", "PNG": "png", "GIF": "gif", "WEBP": "webp"}
+_FORMATS = formats.KEPT
 _CONTENT_TYPES = {"jpeg": "image/jpeg", "jpg": "image/jpeg", "png": "image/png", "gif": "image/gif", "webp": "image/webp"}
 _ORIENTATION = 0x0112
 
@@ -159,18 +167,35 @@ def _fit(size: tuple[int, int], box: tuple[int, int]) -> tuple[int, int]:
 
 
 def _encode(img: Image.Image, ext: str) -> bytes:
+    """`img` encoded as `ext`: no EXIF, XMP or text (Pillow writes them only
+    when asked), the colour profile kept (Pillow keeps a PNG's itself)."""
     out = io.BytesIO()
+    icc = keep_colour(img)
     if ext == "jpeg":
         if img.mode not in ("RGB", "L", "CMYK"):
             img = img.convert("RGB")
-        img.save(out, format="JPEG", quality=88, optimize=True, progressive=True)
+        img.save(out, format="JPEG", quality=88, optimize=True, progressive=True, **icc, **NO_METADATA)
     elif ext == "png":
-        img.save(out, format="PNG", optimize=True)
+        img.save(out, format="PNG", optimize=True, **NO_METADATA)
     elif ext == "webp":
-        img.save(out, format="WEBP", quality=88, method=4)
+        img.save(out, format="WEBP", quality=88, method=4, **icc, **NO_METADATA)
     else:
-        img.save(out, format=ext.upper())
+        img.save(out, format=ext.upper(), comment=b"")
     return out.getvalue()
+
+
+def _kept(raw: bytes, fmt: str, ext: str) -> bytes:
+    """The upload's own bytes without their metadata (storage.metadata); one
+    whose structure does not parse is decoded and encoded anew instead, which
+    carries none. Its orientation is 1: a turned picture is encoded anew."""
+    try:
+        return without_metadata(raw, fmt)
+    except ValueError:
+        img = Image.open(io.BytesIO(raw))
+        img.load()
+        if img.mode == "P" and ext != "gif":
+            img = img.convert("RGBA")
+        return _encode(img, ext)
 
 
 @dataclass
@@ -186,6 +211,10 @@ class Prepared:
         return _CONTENT_TYPES.get(self.ext, f"image/{self.ext}")
 
 
+def _allowed(ext: str, allowed: Optional[list]) -> bool:
+    return not allowed or ext in allowed or (ext == "jpeg" and "jpg" in allowed)
+
+
 def prepare_image(raw: bytes, *, max_size: Optional[int], allowed: Optional[list], variations: dict) -> Prepared:
     """Check one upload and make its variants. CPU only; no network."""
     if max_size and len(raw) > max_size:
@@ -195,13 +224,16 @@ def prepare_image(raw: bytes, *, max_size: Optional[int], allowed: Optional[list
     except Image.DecompressionBombError:
         raise CustomHTTPException(422, message=f"That image is too large. Use one under {MAX_IMAGE_PIXELS // 1_000_000} megapixels.")
     except Exception:
-        raise CustomHTTPException(422, message="That file is not an image we can read. Use PNG, JPEG or WebP.")
-    ext = _FORMATS.get((img.format or "").upper())
-    if ext is None or (allowed and ext not in allowed and not (ext == "jpeg" and "jpg" in allowed)):
-        raise CustomHTTPException(
-            status_code=422,
-            message=f"Unsupported image format. Allowed formats: {allowed}",
-        )
+        raise formats.not_readable(raw)
+    fmt = (img.format or "").upper()
+    # A HEIC, AVIF, BMP or TIFF is decoded and kept as a JPEG or a PNG,
+    # which one decided once its pixels are read.
+    convert = fmt in formats.CONVERTED
+    ext = _FORMATS.get(fmt)
+    if ext is None and not convert:
+        raise formats.refused(fmt)
+    if ext is not None and not _allowed(ext, allowed):
+        raise formats.refused(fmt, allowed)
     _check_pixels(img)
 
     try:
@@ -211,41 +243,48 @@ def prepare_image(raw: bytes, *, max_size: Optional[int], allowed: Optional[list
     rotate = orientation != 1
     oversized = max(img.size) > ORIGINAL_MAX_SIDE
     boxes = [(int(v["width"]), int(v["height"])) for v in variations.values() if v.get("width") and v.get("height")]
-    need_full = rotate or oversized
+    need_full = rotate or oversized or convert
     # Decode a JPEG only as large as anything made from it needs.
     if ext == "jpeg":
         side = ORIGINAL_MAX_SIDE if need_full else max((max(b) for b in boxes), default=0)
         if side and not (rotate and not oversized):
             img.draft(img.mode if img.mode in ("RGB", "L", "CMYK") else "RGB", (side, side))
     if not need_full and not boxes:
-        # Nothing to make: the bytes are checked, and kept as they are.
+        # Nothing to make: the bytes are checked, and kept without their metadata.
         try:
             # On a fresh handle: verify() must come straight after open().
             Image.open(io.BytesIO(raw)).verify()
+            original = _kept(raw, fmt, ext)
         except Exception:
-            raise CustomHTTPException(422, message="That file is not an image we can read. Use PNG, JPEG or WebP.")
-        return Prepared(ext=ext, original=raw)
+            raise formats.not_readable(raw)
+        return Prepared(ext=ext, original=original)
 
     try:
         img.load()
         upright = ImageOps.exif_transpose(img) if rotate else img
+        if convert:
+            upright, ext = formats.kept_as(upright)
     except Image.DecompressionBombError:
         raise CustomHTTPException(422, message=f"That image is too large. Use one under {MAX_IMAGE_PIXELS // 1_000_000} megapixels.")
     except Exception:
-        raise CustomHTTPException(422, message="That file is not an image we can read. Use PNG, JPEG or WebP.")
+        raise formats.not_readable(raw)
+    if convert and not _allowed(ext, allowed):
+        raise formats.refused(fmt, allowed)
     if upright.mode == "P" and ext != "gif":
         upright = upright.convert("RGBA")
 
-    original = raw
-    if need_full:
+    if ext == "gif":
+        # An animation is kept whole; a sideways GIF is rare enough to leave.
+        original = raw
+    elif need_full:
+        # Turned, shrunk or converted: encoded anew, which carries no metadata.
         whole = upright
         if max(whole.size) > ORIGINAL_MAX_SIDE:
             whole = whole.resize(_fit(whole.size, (ORIGINAL_MAX_SIDE, ORIGINAL_MAX_SIDE)), Image.Resampling.LANCZOS)
-        if ext == "gif":
-            # An animation is kept whole; a sideways GIF is rare enough to leave.
-            original = raw
-        else:
-            original = _encode(whole, ext)
+        original = _encode(whole, ext)
+    else:
+        # Upright and in size: its own bytes, without their metadata.
+        original = _kept(raw, fmt, ext)
 
     variants = {}
     for name, spec in variations.items():

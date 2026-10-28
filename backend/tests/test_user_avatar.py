@@ -205,7 +205,7 @@ async def test_a_photo_sent_with_no_type_at_all_is_still_taken(client, session, 
 async def test_a_file_that_says_it_is_not_an_image_is_a_422(client, session, person, bucket):
     r = await _upload(client, session, person["h"], ("notes.txt", b"just some text", "text/plain"))
     assert r.status_code == 422, r.text
-    assert r.json()["message"] == "That file is not an image. Use PNG, JPEG or WebP."
+    assert r.json()["message"] == "That file is not a picture. Upload a JPG, PNG, WebP, GIF, HEIC, AVIF, BMP or TIFF picture."
     assert bucket["deleted"] == [] and bucket["put"] == []
 
 

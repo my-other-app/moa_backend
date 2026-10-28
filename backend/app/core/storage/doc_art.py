@@ -45,10 +45,12 @@ same to what was stored before:
   not PDF bytes. A flat picture without transparency is kept as such a PNG
   when that is no larger than its JPEG, which is lossless and as small.
 
-Refused, as the uploads always were: more than the path's byte limit (413),
-anything that is not a PNG, JPEG, WebP or GIF picture, and anything over
-MAX_IMAGE_PIXELS (422), counted from the header before anything is decoded,
-so a small file claiming to be enormous never is.
+Taken as well, and converted like everything else: HEIC/HEIF, AVIF, BMP and
+TIFF (formats.CONVERTED). Refused, as the uploads always were: more than the
+path's byte limit (413), anything else -- an SVG, a PDF (formats.not_readable
+says what to do instead) -- and anything over MAX_IMAGE_PIXELS (422),
+counted from the header before anything is decoded, so a small file claiming
+to be enormous never is.
 """
 from __future__ import annotations
 
@@ -59,6 +61,10 @@ from typing import Optional
 from PIL import Image, ImageChops, ImageOps
 
 from app.config import settings
+from app.core.storage import formats
+from app.core.storage.formats import has_alpha as _has_alpha
+from app.core.storage.formats import in_srgb as _srgb
+from app.core.storage.formats import plain_pixels as _pixels
 from app.response import CustomHTTPException
 
 #: Pixels a picture may have, counted from its header (the same limit as every upload's).
@@ -68,8 +74,12 @@ MAX_IMAGE_BYTES = 5 * 1024 * 1024
 JPEG_QUALITY = 85
 #: The shortest side a capped picture keeps (TicketCanvas.width's floor).
 MIN_SIDE = 300
-#: What arrives: a JPEG (an MPO is a camera's JPEG with a second frame), PNG, WebP or GIF.
-ACCEPTED = frozenset({"JPEG", "MPO", "PNG", "WEBP", "GIF"})
+#: What arrives: a JPEG (an MPO is a camera's JPEG with a second frame), PNG,
+#: WebP or GIF, or a HEIC, AVIF, BMP or TIFF (formats.CONVERTED). Every one
+#: is stored as a JPEG or a PNG.
+ACCEPTED = frozenset({"JPEG", "MPO", "PNG", "WEBP", "GIF", *formats.CONVERTED})
+#: Photographed rather than made: a JPEG keeps its colour at half resolution.
+_PHOTOS = frozenset({"JPEG", "HEIF"})
 _ORIENTATION = 0x0112
 
 
@@ -95,8 +105,8 @@ def max_side() -> int:
     return max(MIN_SIDE, int(settings.DOC_ART_MAX_PX or 2400))
 
 
-def _not_readable() -> CustomHTTPException:
-    return CustomHTTPException(422, message="That file is not an image we can read. Use PNG, JPEG or WebP.")
+def _not_readable(raw: bytes = b"") -> CustomHTTPException:
+    return formats.not_readable(raw)
 
 
 def _too_many_pixels(width: int, height: int) -> CustomHTTPException:
@@ -114,9 +124,9 @@ def opened(raw: bytes, *, max_bytes: int = MAX_IMAGE_BYTES) -> Image.Image:
     except Image.DecompressionBombError:
         raise CustomHTTPException(422, message=f"That image is too large. Use one under {MAX_IMAGE_PIXELS // 1_000_000} megapixels.")
     except Exception:
-        raise _not_readable()
+        raise _not_readable(raw)
     if (image.format or "").upper() not in ACCEPTED:
-        raise CustomHTTPException(422, message="Use PNG, JPEG or WebP.")
+        raise formats.refused((image.format or "").upper())
     if image.width * image.height > MAX_IMAGE_PIXELS:
         raise _too_many_pixels(image.width, image.height)
     return image
@@ -132,51 +142,6 @@ def target_size(size: tuple[int, int], longest: Optional[int] = None) -> tuple[i
     if scale < 1.0 and min(w, h) * scale < MIN_SIDE:
         scale = min(1.0, MIN_SIDE / min(w, h))
     return max(1, round(w * scale)), max(1, round(h * scale))
-
-
-def _srgb(image: Image.Image) -> Image.Image:
-    """The pixels in sRGB, when the picture names another colour space
-    (a grey one is left: grey is grey)."""
-    icc = image.info.get("icc_profile")
-    if not icc or image.mode not in ("RGB", "RGBA", "CMYK"):
-        return image
-    try:
-        from PIL import ImageCms
-
-        source = ImageCms.ImageCmsProfile(io.BytesIO(icc))
-        if image.mode != "CMYK" and "srgb" in (ImageCms.getProfileDescription(source) or "").lower():
-            return image
-        alpha = image.getchannel("A") if image.mode == "RGBA" else None
-        out = ImageCms.profileToProfile(
-            image.convert("RGB") if alpha is not None else image, source, ImageCms.createProfile("sRGB"),
-            renderingIntent=ImageCms.Intent.PERCEPTUAL, outputMode="RGB",
-        )
-        if alpha is not None:
-            out.putalpha(alpha)
-        return out
-    except Exception:  # noqa: BLE001 - a profile that cannot be read: the pixels as they are
-        return image
-
-
-def _has_alpha(image: Image.Image) -> bool:
-    return image.mode in ("RGBA", "LA", "PA", "RGBa", "La") or "transparency" in image.info
-
-
-def _pixels(image: Image.Image) -> Image.Image:
-    """RGB, RGBA or L: what is encoded. Alpha that is opaque everywhere is dropped."""
-    if _has_alpha(image):
-        image = image.convert("RGBA")
-        low, _ = image.getchannel("A").getextrema()
-        if low == 255:
-            image = image.convert("RGB")
-    elif image.mode in ("I;16", "I;16B", "I;16L", "I"):
-        # 16-bit grey: scaled to 8 bits, not clipped to white.
-        image = image.convert("I").point(lambda v: v * (1 / 257)).convert("L")
-    elif image.mode == "1":
-        image = image.convert("L")
-    elif image.mode not in ("RGB", "L"):
-        image = image.convert("RGB")
-    return image
 
 
 def _png(image: Image.Image) -> bytes:
@@ -336,7 +301,7 @@ def normalise(raw: bytes, *, max_bytes: int = MAX_IMAGE_BYTES, longest: Optional
     except CustomHTTPException:
         raise
     except Exception:
-        raise _not_readable()
+        raise _not_readable(raw)
     size = target_size(image.size, longest)
     if size != image.size:
         image = image.resize(size, Image.Resampling.LANCZOS)  # premultiplied, so no dark fringes on alpha
@@ -347,7 +312,7 @@ def normalise(raw: bytes, *, max_bytes: int = MAX_IMAGE_BYTES, longest: Optional
     if image.mode == "RGBA":
         candidates = [PrintArt(_png(image), "PNG", image.width, image.height)]
     else:
-        candidates = [PrintArt(_jpeg(image, sharp=fmt != "JPEG"), "JPEG", image.width, image.height)]
+        candidates = [PrintArt(_jpeg(image, sharp=fmt not in _PHOTOS), "JPEG", image.width, image.height)]
     palette = exact_palette(image)
     if palette is not None:
         candidates.append(PrintArt(_png(_fresh(palette)), "PNG", image.width, image.height))

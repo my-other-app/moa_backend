@@ -147,10 +147,13 @@ async def update_club(session: AsyncSession, club_id: int, club: CreateClub):
     if not db_club:
         raise CustomHTTPException(404, "Club not found")
 
+    # The picture replaced goes only once the new one is saved (`_drop`): it
+    # was deleted first, so an upload the column refused left the club
+    # naming a logo no longer in the bucket.
+    replaced = None
     if club.logo:
         content = io.BytesIO(await club.logo.read())
-        if db_club.logo:
-            db_club.logo.delete()
+        replaced = db_club.logo
         db_club.logo = {
             "bytes": content,
             "filename": club.logo.filename,
@@ -216,8 +219,18 @@ async def update_club(session: AsyncSession, club_id: int, club: CreateClub):
             session.add(db_socials)
 
     await session.commit()
+    _drop(replaced)
     await session.refresh(db_club)
     return db_club
+
+
+def _drop(picture) -> None:
+    """Delete a replaced picture from the bucket, after the row naming its
+    successor is committed. Never before: a refused upload (a file that is
+    not a picture, one too large) rolls the row back to the old picture,
+    which must still be there."""
+    if picture is not None and hasattr(picture, "delete"):
+        picture.delete()
 
 
 async def get_club(club_id: int, session: AsyncSession):
@@ -1071,15 +1084,14 @@ async def update_club_logo(
     if not club:
         raise CustomHTTPException(404, "Club not found")
 
-    if club.logo:
-        club.logo.delete()
-
+    replaced = club.logo
     content = io.BytesIO(await logo.read())
     club.logo = {
         "bytes": content,
         "filename": logo.filename,
     }
     await session.commit()
+    _drop(replaced)
     return {"message": "Club logo updated successfully"}
 
 
@@ -1222,10 +1234,10 @@ async def update_club_cover(session: AsyncSession, club_id: int, cover: UploadFi
     club = await session.get(Clubs, club_id)
     if not club:
         raise CustomHTTPException(404, "Club not found")
-    if club.cover:
-        club.cover.delete()
+    replaced = club.cover
     club.cover = {"bytes": io.BytesIO(await cover.read()), "filename": cover.filename}
     await session.commit()
+    _drop(replaced)
     return {"message": "Club cover updated successfully"}
 
 
@@ -1234,10 +1246,10 @@ def _partner_out(p: ClubPartners) -> dict:
 
 
 async def update_partner_logo(session: AsyncSession, p: ClubPartners, logo: UploadFile) -> dict:
-    if p.logo:
-        p.logo.delete()
+    replaced = p.logo
     p.logo = {"bytes": io.BytesIO(await logo.read()), "filename": logo.filename}
     await session.commit()
+    _drop(replaced)
     await session.refresh(p)
     return _partner_out(p)
 
@@ -1331,10 +1343,10 @@ async def update_member(session: AsyncSession, m: ClubTeamMembers, data: dict) -
 
 
 async def update_member_photo(session: AsyncSession, m: ClubTeamMembers, photo: UploadFile) -> dict:
-    if m.photo:
-        m.photo.delete()
+    replaced = m.photo
     m.photo = {"bytes": io.BytesIO(await photo.read()), "filename": photo.filename}
     await session.commit()
+    _drop(replaced)
     await session.refresh(m)
     return _member_out(m)
 

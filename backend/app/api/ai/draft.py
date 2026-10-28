@@ -23,6 +23,7 @@ find): fewer nullable fields is a schema both providers take.
 """
 from __future__ import annotations
 
+import io
 import re
 from datetime import date, datetime, time, timedelta
 from typing import Optional
@@ -68,6 +69,62 @@ def sniff(data: bytes) -> Optional[str]:
     if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return "image/webp"
     return None
+
+
+#: The longest side a converted poster is sent at: more than either model reads.
+CONVERTED_MAX_SIDE = 2048
+
+
+#: Pillow's name for each picture type `sniff` knows.
+_SNIFFED_FORMAT = {"image/png": "PNG", "image/jpeg": "JPEG", "image/webp": "WEBP"}
+
+
+def attachment(data: bytes) -> Optional[tuple[str, bytes]]:
+    """The file as the model is sent it, with its type: a PDF as it came; a
+    PNG, JPEG or WebP as it came but without its metadata (EXIF with a
+    phone's GPS position, XMP...: storage.metadata), which no provider needs;
+    a poster in another picture format (a HEIC from an iPhone, an AVIF
+    download, a GIF, BMP or TIFF), or one the camera turned, converted to an
+    upright JPEG, or a PNG when see-through (storage.formats), with the same
+    pixel limit as any upload. None for anything else. Blocking: a decode."""
+    from app.core.storage.metadata import without_metadata
+
+    mime = sniff(data)
+    if mime == "application/pdf":
+        return mime, data
+    if mime is not None:
+        try:
+            return mime, without_metadata(data, _SNIFFED_FORMAT[mime])
+        except ValueError:
+            # Turned by the camera, or its structure does not parse: drawn
+            # anew; one that does not even decode goes as it always did.
+            return _drawn(data) or (mime, data)
+    return _drawn(data)
+
+
+def _drawn(data: bytes) -> Optional[tuple[str, bytes]]:
+    """A picture decoded, turned upright and encoded anew as a JPEG (a PNG when
+    see-through), at most CONVERTED_MAX_SIDE; None when it is not one."""
+    from PIL import Image, ImageOps
+
+    from app.core.storage import formats
+    from app.core.storage.images import checked_image
+    from app.response import CustomHTTPException
+
+    try:
+        image = checked_image(data, max_bytes=MAX_FILE_BYTES)
+    except CustomHTTPException:
+        return None
+    if (image.format or "").upper() not in (*formats.CONVERTED, "GIF", *formats.KEPT):
+        return None
+    try:
+        image, ext = formats.kept_as(ImageOps.exif_transpose(image))
+        image.thumbnail((CONVERTED_MAX_SIDE, CONVERTED_MAX_SIDE), Image.Resampling.LANCZOS)
+        out = io.BytesIO()
+        image.save(out, "PNG" if ext == "png" else "JPEG", **({} if ext == "png" else {"quality": 88}))
+    except Exception:  # noqa: BLE001 - a file that does not decode is not a poster
+        return None
+    return ("image/png" if ext == "png" else "image/jpeg"), out.getvalue()
 
 
 def _text(value, limit: int) -> Optional[str]:

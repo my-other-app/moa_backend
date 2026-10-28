@@ -7,6 +7,7 @@ Anthropic. The plans are the ones production has: club_plans' seed, then
 ai_assist's.
 """
 import importlib.util
+import io
 import logging
 import pathlib
 import uuid
@@ -18,6 +19,7 @@ import pytest_asyncio
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from cryptography.fernet import Fernet
+from PIL import Image
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
@@ -385,6 +387,24 @@ async def test_a_poster_goes_to_the_vision_models_and_a_pdf_too(client, session,
     assert r.json()["warnings"][0] == "No date found in your notes or the file."
 
 
+async def test_a_poster_photographed_on_an_iphone_is_sent_as_a_jpeg(client, session, world, hub):
+    """A HEIC (and an AVIF, a GIF...) was refused: "Use a PNG, JPEG or WebP
+    image". It is converted for the model, which takes neither."""
+    await on_plan(session, world, "starter")
+    buf = io.BytesIO()
+    Image.new("RGB", (3000, 2000), (200, 30, 30)).save(buf, "HEIF")
+    r = await client.post(f"{API}/clubs/ai/event-draft", files={"file": ("IMG_0042.HEIC", buf.getvalue(), "application/octet-stream")}, headers=world.h)
+    assert r.status_code == 200, r.text
+    sent = hub.calls[-1].request.attachments[0]
+    assert sent.mime_type == "image/jpeg"
+    shown = Image.open(io.BytesIO(sent.data))
+    assert shown.format == "JPEG" and shown.size == (2048, 1365)  # no larger than either model reads
+
+    svg = b'<svg xmlns="http://www.w3.org/2000/svg"><text>Hackathon</text></svg>'
+    r = await client.post(f"{API}/clubs/ai/event-draft", files={"file": ("poster.svg", svg, "image/svg+xml")}, headers=world.h)
+    assert r.status_code == 422 and r.json()["message"].startswith("Add the poster as a picture")
+
+
 async def test_a_draft_refuses_other_files_big_files_long_notes_and_nothing(client, session, world, hub):
     await on_plan(session, world, "starter")
     cases = [
@@ -399,7 +419,7 @@ async def test_a_draft_refuses_other_files_big_files_long_notes_and_nothing(clie
         assert r.status_code == 422, r.text
         messages.append(r.json()["message"])
     assert messages == [
-        "Use a PNG, JPEG or WebP image, or a PDF.",
+        "Add the poster as a picture (JPG, PNG, WebP, GIF, HEIC, AVIF, BMP or TIFF) or a PDF.",
         "That file is over 10 MB. Use a smaller one.",
         "Keep the notes under 6,000 characters.",
         "Paste some notes or add a poster or PDF.",

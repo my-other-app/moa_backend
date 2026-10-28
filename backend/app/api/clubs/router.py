@@ -36,6 +36,7 @@ from app.api.audit import service as audit
 from app.core.auth.dependencies import ClubAuth, DependsAuth, UserAuth, AdminAuth
 from app.core.auth.permissions import ContentAuth, DestroyAuth, ModerateAuth
 from app.core import jobs
+from app.core.storage import formats
 from app.core.rate_limit import limiter
 from app.core.response.pagination import (
     PaginatedResponse,
@@ -532,16 +533,18 @@ async def update_club_logo(
     logo: UploadFile = File(...),
 ):
     """Update club logo."""
-    if not logo.content_type.startswith("image/"):
-        raise Exception("File must be an image")
+    # The part's type only rules out what says it is something else (a HEIC
+    # can come with none); the column reads the bytes (storage.formats).
+    if not formats.may_be_picture(logo.content_type):
+        raise CustomHTTPException(422, message=f"The logo must be a picture: {formats.WORKS}.")
 
     return await service.update_club_logo(session, club_id=user.club.id, logo=logo)
 
 
 @router.put("/cover", summary="The banner across the top of the club page")
 async def update_club_cover(session: SessionDep, user: ClubAuth, cover: UploadFile = File(...)):
-    if not (cover.content_type or "").startswith("image/"):
-        raise CustomHTTPException(422, message="The cover must be an image")
+    if not formats.may_be_picture(cover.content_type):
+        raise CustomHTTPException(422, message=f"The cover must be a picture: {formats.WORKS}.")
     return await service.update_club_cover(session, club_id=user.club.id, cover=cover)
 
 
@@ -566,8 +569,8 @@ async def update_partner(session: SessionDep, user: ClubAuth, partner_id: int, b
 
 @router.put("/partners/{partner_id}/logo", summary="A partner's logo")
 async def update_partner_logo(session: SessionDep, user: ClubAuth, partner_id: int, logo: UploadFile = File(...)) -> ClubPartnerOut:
-    if not (logo.content_type or "").startswith("image/"):
-        raise CustomHTTPException(422, message="The logo must be an image")
+    if not formats.may_be_picture(logo.content_type):
+        raise CustomHTTPException(422, message=f"The logo must be a picture: {formats.WORKS}.")
     p = await service.partner_for(session, user.club.id, partner_id)
     return ClubPartnerOut(**await service.update_partner_logo(session, p, logo))
 
@@ -593,8 +596,8 @@ async def update_member(session: SessionDep, user: ClubAuth, member_id: int, bod
 
 @router.put("/team/{member_id}/photo", summary="A team member's photo")
 async def update_member_photo(session: SessionDep, user: ClubAuth, member_id: int, photo: UploadFile = File(...)) -> ClubTeamMemberOut:
-    if not (photo.content_type or "").startswith("image/"):
-        raise CustomHTTPException(422, message="The photo must be an image")
+    if not formats.may_be_picture(photo.content_type):
+        raise CustomHTTPException(422, message=f"The photo must be a picture: {formats.WORKS}.")
     m = await service.member_for(session, user.club.id, member_id)
     return ClubTeamMemberOut(**await service.update_member_photo(session, m, photo))
 

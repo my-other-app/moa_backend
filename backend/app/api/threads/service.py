@@ -33,6 +33,7 @@ from app.api.threads.schemas import MAX_BODY, MAX_OPTION, MAX_OPTIONS
 from app.api.notifications.models import Notifications
 from app.api.users.models import Users
 from app.core import jobs
+from app.core.storage import formats
 from app.response import CustomHTTPException
 
 logger = logging.getLogger(__name__)
@@ -180,8 +181,8 @@ async def create(session, club: Clubs, user, *, body: str, notify_followers: boo
         raise CustomHTTPException(422, message=f"Keep it under {MAX_BODY} characters")
     t = ClubThreads(club_id=club.id, body=body, kind="poll" if poll_options else "post", notify_followers=notify_followers, created_by=user.id)
     if image is not None:
-        if not (image.content_type or "").startswith("image/"):
-            raise CustomHTTPException(422, message="The photo must be an image")
+        if not formats.may_be_picture(image.content_type):
+            raise CustomHTTPException(422, message=f"The photo must be a picture: {formats.WORKS}.")
         t.image = {"bytes": io.BytesIO(await image.read()), "filename": image.filename}
     session.add(t)
     await session.flush()
