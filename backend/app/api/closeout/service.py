@@ -213,6 +213,7 @@ async def ensure_job(session, event: Events) -> RetentionJobs:
 
 async def update_settings(session, event: Events, body) -> dict:
     data = body.model_dump(exclude_unset=True)
+    was = lifecycle(event)
     if lifecycle(event) is EventStatus.cancelled:
         # A cancelled event's guests were told and refunded: it stays cancelled.
         raise CustomHTTPException(409, message="This event was cancelled, so its status and settings stay as they are.", error_code="EVENT_CANCELLED")
@@ -242,6 +243,15 @@ async def update_settings(session, event: Events, body) -> dict:
         from app.api.sites import service as sites
 
         await sites.republish_for_event(session, event.id)
+    if was is EventStatus.draft and lifecycle(event) in (EventStatus.published, EventStatus.live):
+        # A draft its co-hosts accepted is out: their followers hear of it
+        # now, once each (app/api/cohosts).
+        from app.api.cohosts import service as cohosts
+
+        try:
+            await cohosts.tell_followers(session, event)
+        except Exception:  # noqa: BLE001 - telling followers must never undo the publish
+            logger.exception("telling co-hosts' followers about event %s failed", event.id)
     # Editing the hours re-times the job. DELETED stays terminal.
     job = await ensure_job(session, event)
     if job.state is not RetentionState.deleted:

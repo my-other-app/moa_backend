@@ -226,6 +226,8 @@ CLASSIFICATION: dict[str, str] = {
     "event_page_views": WIPE,
     # An event's own sponsors and partners (app/api/event_partners).
     "event_partners": WIPE,
+    # Clubs invited to co-host an event, and their answers (app/api/cohosts).
+    "event_cohosts": WIPE,
     "event_ratings_link": WIPE,
     "event_registrations_link": WIPE,
     "event_speakers": WIPE,

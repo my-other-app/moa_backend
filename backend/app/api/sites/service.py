@@ -115,7 +115,10 @@ async def site_data(session: AsyncSession, club: Clubs, choices: dict, ref_code:
     socials = await session.scalar(select(ClubSocials).where(ClubSocials.club_id == club.id, ClubSocials.is_deleted == False))  # noqa: E712
     followers = await session.scalar(select(func.count()).where(ClubUsersLink.club_id == club.id, ClubUsersLink.is_following == True, ClubUsersLink.is_deleted == False)) or 0  # noqa: E712
     shown = (EventStatus.published, EventStatus.live, EventStatus.closed, EventStatus.archived)
-    events = list((await session.scalars(select(Events).where(Events.club_id == club.id, Events.is_deleted == False, Events.lifecycle.in_(shown)).order_by(Events.event_datetime.desc()))).all())  # noqa: E712
+    # The club's own events and those it co-hosts (app/api/cohosts).
+    from app.api.cohosts import access as cohosts
+
+    events = list((await session.scalars(select(Events).where(cohosts.hosted_or_cohosted(club.id), Events.is_deleted == False, Events.lifecycle.in_(shown)).order_by(Events.event_datetime.desc()))).all())  # noqa: E712
 
     def ev(e: Events, upcoming: bool) -> dict:
         fee = f"₹{int(e.reg_fee)}" if e.has_fee and e.reg_fee else "Free"
@@ -212,12 +215,17 @@ async def republish_for_club(session: AsyncSession, club_id: int) -> bool:
         return False
 
 
-async def republish_for_event(session: AsyncSession, event_id: int) -> None:
-    """The same, from an event that just changed."""
+async def republish_for_event(session: AsyncSession, event_id: int, also: tuple = ()) -> None:
+    """The same, from an event that just changed: the host's site, and each
+    co-host's (their sites list it too, app/api/cohosts), and `also` (a club
+    that just stopped co-hosting it)."""
+    from app.api.cohosts import access as cohosts
+
     try:
         club_id = await session.scalar(select(Events.club_id).where(Events.id == event_id))
+        club_ids = [club_id, *await cohosts.cohost_club_ids(session, event_id), *also]
     except Exception:  # noqa: BLE001
         await session.rollback()
         return
-    if club_id is not None:
-        await republish_for_club(session, club_id)
+    for cid in dict.fromkeys(c for c in club_ids if c is not None):
+        await republish_for_club(session, cid)

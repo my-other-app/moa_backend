@@ -590,6 +590,17 @@ lists, below).
   `high_demand`. `GET /discover/events/{ref}` (`event`), discover cards
   (search, home, club pages, near you, `/search`): `requires_approval`,
   `high_demand`.
+- The same event and every card: `applied_count`, on an event that reviews
+  registrations ("108 applied"), null on any other. Every registration ever
+  made for it, so it never drops as the club decides: its requests whatever
+  their status, and the registrations made without one (the desk, an import,
+  before review was on). That is the summary's `total + added_directly`
+  (`approvals.applied`). The clients show it in place of "N going" and show
+  no seats left there. A page of cards counts its requests in one grouped
+  subquery (`approvals.asked_by_event`, on ix_registration_requests_queue)
+  joined into the statement that already reads the page's going counts, so a
+  list runs no statement more; the event's own page runs one more, on a review
+  event only.
 - Public `seats_left` and `status: "full"` (the event page and every card)
   come from the places calculation: holds count, and a paid event's cap
   counts paid tickets (an unpaid registration made it read "full" before).

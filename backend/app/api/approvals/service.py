@@ -614,6 +614,55 @@ async def pending_counts(session, event_ids: list) -> dict[int, int]:
     return {e: t["pending"] for e, t in (await totals(session, event_ids)).items() if t["pending"]}
 
 
+# ─── How many applied (the public "N applied") ─────────────────────────────
+
+
+def asked_by_event(event_ids: list):
+    """A subquery, one row per event of `event_ids` with requests: `asked`,
+    its requests whatever their status (pending, approved, declined,
+    withdrawn, lapsed, closed), and `linked`, the live registrations they
+    made. Grouped once for a page of events, on
+    ix_registration_requests_queue (event_id first); each request's
+    registration by its primary key. The registrations' table is joined as
+    a table, its deletion said in the ON clause, so the soft-delete filter
+    (app.db.listeners) has nothing to put in a WHERE that would drop the
+    requests without one."""
+    reg = EventRegistrationsLink.__table__
+    return (
+        select(R.event_id.label("event_id"), func.count().label("asked"), func.count(func.distinct(reg.c.id)).label("linked"))
+        .select_from(R)
+        .outerjoin(reg, and_(reg.c.id == R.registration_id, reg.c.is_deleted == false()))
+        .where(R.event_id.in_(list(event_ids)))
+        .group_by(R.event_id)
+        .subquery("asked_by_event")
+    )
+
+
+def applied(asked, linked, going) -> int:
+    """How many applied to an event that reviews registrations: every
+    registration ever made for it, so it never drops as the club decides.
+    Its requests, whatever their status, and the registrations made without
+    one (the desk, an import, before review was on): the approvals summary's
+    `total + added_directly` (stats), from the event's going count, which
+    the database keeps equal to its live registrations. Never fewer than
+    are going."""
+    return int(asked or 0) + max(0, int(going or 0) - int(linked or 0))
+
+
+async def applied_counts(session, event_ids: list) -> dict[int, int]:
+    """`applied` for each of these events that reviews registrations, in one
+    grouped statement (asked_by_event); the others are left out."""
+    if not event_ids:
+        return {}
+    asked = asked_by_event(event_ids)
+    rows = await session.execute(
+        select(Events.id, Events.going_count, asked.c.asked, asked.c.linked)
+        .outerjoin(asked, asked.c.event_id == Events.id)
+        .where(Events.id.in_(list(event_ids)), Events.requires_approval == True)  # noqa: E712
+    )
+    return {int(e): applied(n, linked, going) for e, going, n, linked in rows.all()}
+
+
 async def places_left(session, event) -> Optional[int]:
     """The places someone could still be confirmed into: the event's, or,
     with no total but a cap on every type, the types' together. None: no

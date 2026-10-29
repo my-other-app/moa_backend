@@ -99,8 +99,8 @@ async def send_notification_to_participants(
     
     logger.info(f"Event found: {event.name}, club_id={event.club_id}, club_user_id={event.club.user_id}")
     
-    # Check if the club user owns this event through their club
-    if event.club.user_id != user.id:
+    # The event's club, or one co-hosting it (app/api/cohosts), may announce.
+    if not _may_manage(event, user):
         logger.warning(f"User {user.id} doesn't own event {event_id} (club_user_id={event.club.user_id})")
         return SendNotificationResponse(
             success=False,
@@ -194,8 +194,8 @@ async def get_notification_stats(
     if not event:
         return NotificationStatsResponse(total_sent=0, total_read=0, read_percentage=0)
     
-    # Check ownership
-    if event.club.user_id != user.id:
+    # Check ownership (the event's club, or one co-hosting it)
+    if not _may_manage(event, user):
         return NotificationStatsResponse(total_sent=0, total_read=0, read_percentage=0)
     
     stats = await get_event_notification_stats(session, event_id)
@@ -397,6 +397,17 @@ class PushAudience(BaseModel):
     by_audience: dict
 
 
+def _may_manage(event, user) -> bool:
+    """The event's own club, a club co-hosting it, or an admin (events.access)."""
+    from app.api.events.access import ensure_event_access, is_admin_user
+
+    try:
+        ensure_event_access(event, user.id, as_admin=is_admin_user(user))
+    except CustomHTTPException:
+        return False
+    return True
+
+
 async def _club_of(session, user) -> Clubs:
     club = await session.scalar(select(Clubs).where(Clubs.user_id == user.id, Clubs.is_deleted == False))  # noqa: E712
     if club is None:
@@ -420,8 +431,7 @@ async def push_insights(session: SessionDep, user: ClubAuth) -> PushInsights:
 
 @router.get("/events/{event_id}/audience", summary="What a send to this event would reach, by audience")
 async def push_audience(session: SessionDep, user: ClubAuth, event_id: int) -> PushAudience:
-    club = await _club_of(session, user)
-    event = await session.scalar(select(Events).where(Events.id == event_id, Events.club_id == club.id, Events.is_deleted == False))  # noqa: E712
-    if event is None:
-        raise CustomHTTPException(404, message="Event not found")
+    from app.api.deliveries import service as deliveries
+
+    event = await deliveries.event_for_club(session, user, event_id)
     return PushAudience(**await announcements_page.audience(session, event))

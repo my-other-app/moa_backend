@@ -11,6 +11,17 @@ from app.api.clubs.models import Clubs
 from app.core.notifications.triggers import notify_user_added_as_volunteer
 
 
+async def _runs_event(session: AsyncSession, event: Events, caller_user_id: int) -> bool:
+    """The event's own club, or a club co-hosting it (app/api/cohosts): the
+    volunteer routes name the event in a body or a path of their own."""
+    from app.api.cohosts import access as cohosts
+
+    if event.club.user_id == caller_user_id or cohosts.granted(event.id, caller_user_id):
+        return True
+    club_id = await session.scalar(select(Clubs.id).where(Clubs.user_id == caller_user_id, Clubs.is_deleted == False))  # noqa: E712
+    return club_id is not None and await cohosts.is_cohost(session, event.id, club_id)
+
+
 async def _assert_club_owns_target(
     session: AsyncSession,
     caller_user_id: int,
@@ -26,7 +37,7 @@ async def _assert_club_owns_target(
             .where(Events.id == event_id, Events.is_deleted == False)
             .options(joinedload(Events.club))
         )
-        if not event or not event.club or event.club.user_id != caller_user_id:
+        if not event or not event.club or not await _runs_event(session, event, caller_user_id):
             raise CustomHTTPException(
                 403, "You do not have permission to manage volunteers for this event."
             )
@@ -341,14 +352,18 @@ async def is_volunteer(session: AsyncSession, user_id: int, event_id: int):
     fresh from the public form included -- could check people in at every
     event of a club with one club-wide volunteer. Same rule as the gate's
     (checkins.gate_auth.actor_for)."""
+    from app.api.cohosts.models import ACCEPTED, EventCohosts
+
     club_id = select(Events.club_id).where(Events.id == event_id).scalar_subquery()
+    # And the club-wide volunteers of each club co-hosting it (app/api/cohosts).
+    cohosts = select(EventCohosts.club_id).where(EventCohosts.event_id == event_id, EventCohosts.status == ACCEPTED)
     return await session.scalar(
         select(Volunteer)
         .where(
             Volunteer.user_id == user_id,
             Volunteer.is_deleted == False,
             Volunteer.is_approved == True,
-            or_(Volunteer.event_id == event_id, Volunteer.club_id == club_id),
+            or_(Volunteer.event_id == event_id, Volunteer.club_id == club_id, Volunteer.club_id.in_(cohosts)),
         )
         .order_by(Volunteer.event_id.desc().nulls_last())
         .limit(1)

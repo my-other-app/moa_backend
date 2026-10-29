@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import cast, func, literal, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 
 from app.api.clubs.models import Clubs
 from app.api.deliveries import pipeline
@@ -370,24 +370,29 @@ async def duplicate_template(session, tpl: EmailTemplates, created_by=None) -> E
     return copy
 
 
-async def save_to_library(session, tpl: EmailTemplates) -> EmailTemplates:
+async def save_to_library(session, tpl: EmailTemplates, club_id: Optional[int] = None) -> EmailTemplates:
     """This event's version becomes the club's default for the stage, so the
-    next event starts from it. A custom email becomes a new library one."""
+    next event starts from it. A custom email becomes a new library one.
+    `club_id`: the library it goes to when not the event's club's -- a club
+    co-hosting the event keeps a copy in its own (app/api/cohosts); the
+    event's email still comes from the host's."""
     if tpl.event_id is None:
         return tpl
+    into = club_id or tpl.club_id
     fields = fields_of(tpl)
     target = None
     if tpl.stage is not EmailStage.CUSTOM:
-        library = {t.stage: t for t in await ensure_library(session, tpl.club_id)}
+        library = {t.stage: t for t in await ensure_library(session, into)}
         target = library.get(tpl.stage)
     if target is None:
         fields.trigger = EmailTrigger()
-        target = _new(tpl.club_id, None, tpl.stage, fields, created_by=tpl.created_by)
+        target = _new(into, None, tpl.stage, fields, created_by=tpl.created_by)
         session.add(target)
     else:
         _apply(target, fields)
         target.version = (target.version or 1) + 1
-    tpl.source_id = target.id
+    if into == tpl.club_id:
+        tpl.source_id = target.id
     await session.commit()
     return target
 
@@ -607,7 +612,7 @@ async def loaded_registration(session, event_id: int, registration_id) -> EventR
     """A guest with what rendering needs in memory: the event, its club, the user."""
     reg = await session.scalar(
         deliveries._active(event_id)
-        .options(joinedload(EventRegistrationsLink.event).joinedload(Events.club), joinedload(EventRegistrationsLink.user))
+        .options(joinedload(EventRegistrationsLink.event).joinedload(Events.club), joinedload(EventRegistrationsLink.event).selectinload(Events.cohost_clubs), joinedload(EventRegistrationsLink.user))
         .where(EventRegistrationsLink.id == registration_id)
     )
     if reg is None:
@@ -850,7 +855,7 @@ class _MessageClaim:
 
 async def _message_run(db: pipeline.Db, message_id) -> Optional[_MessageRun]:
     async with db.tx() as s:
-        msg = await s.scalar(select(Messages).options(joinedload(Messages.event).joinedload(Events.club)).where(Messages.id == message_id))
+        msg = await s.scalar(select(Messages).options(joinedload(Messages.event).joinedload(Events.club), joinedload(Messages.event).selectinload(Events.cohost_clubs)).where(Messages.id == message_id))
         if msg is None:
             return None
         event = msg.event
@@ -930,7 +935,7 @@ async def _handle_message_row(db: pipeline.Db, run: _MessageRun, c: _MessageClai
     async with db.tx() as s:
         d = await s.scalar(
             select(MessageDeliveries)
-            .options(joinedload(MessageDeliveries.registration).options(joinedload(EventRegistrationsLink.event).joinedload(Events.club), joinedload(EventRegistrationsLink.user)))
+            .options(joinedload(MessageDeliveries.registration).options(joinedload(EventRegistrationsLink.event).joinedload(Events.club), joinedload(EventRegistrationsLink.event).selectinload(Events.cohost_clubs), joinedload(EventRegistrationsLink.user)))
             .where(MessageDeliveries.id == c.id)
         )
         if d is None:
@@ -1232,7 +1237,7 @@ def due_query(now: datetime):
     return (
         select(EmailTemplates, Events)
         .join(Events, Events.id == EmailTemplates.event_id)
-        .options(joinedload(Events.club))
+        .options(joinedload(Events.club), selectinload(Events.cohost_clubs))
         .where(
             EmailTemplates.enabled == True,  # noqa: E712
             EmailTemplates.due_at.isnot(None),

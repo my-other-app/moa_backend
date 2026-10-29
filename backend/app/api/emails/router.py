@@ -39,7 +39,7 @@ from app.core.storage.images import store_image
 from app.db.core import SessionDep
 from app.response import CustomHTTPException
 from sqlalchemy import select
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 
 router = APIRouter(prefix="/events/{event_id}/emails")
 messages_router = APIRouter(prefix="/events/{event_id}/messages")
@@ -136,7 +136,11 @@ async def duplicate_template(session: SessionDep, user: ClubAuth, event_id: int,
 async def save_to_library(session: SessionDep, user: ClubAuth, event_id: int, template_id: UUID) -> EmailTemplateOut:
     event = await deliveries.event_for_club(session, user, event_id)
     tpl = await service.template_of(session, template_id, event=event)
-    return EmailTemplateOut(**service.template_out(await service.save_to_library(session, tpl)))
+    # A co-host saves it to its own club's library, not the host's (app/api/cohosts).
+    from app.api.cohosts import access as cohosts
+
+    own = cohosts.own_club_id(event, user)
+    return EmailTemplateOut(**service.template_out(await service.save_to_library(session, tpl, club_id=own)))
 
 
 @router.post("/{template_id}/reset", summary="Back to the club's version of this email")
@@ -293,7 +297,7 @@ async def duplicate_library_template(session: SessionDep, user: ClubAuth, templa
 async def _registration_by_ticket(session, ticket_id: str) -> Optional[EventRegistrationsLink]:
     return await session.scalar(
         select(EventRegistrationsLink)
-        .options(joinedload(EventRegistrationsLink.event).joinedload(Events.club), joinedload(EventRegistrationsLink.user))
+        .options(joinedload(EventRegistrationsLink.event).joinedload(Events.club), joinedload(EventRegistrationsLink.event).selectinload(Events.cohost_clubs), joinedload(EventRegistrationsLink.user))
         .where(EventRegistrationsLink.ticket_id == ticket_id, EventRegistrationsLink.is_deleted == False)
     )
 

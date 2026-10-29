@@ -44,11 +44,15 @@ class MarkReadOut(CustomBaseModel):
 
 def _hidden(request: Request) -> frozenset:
     """The bell's kinds this viewer may not see: the WhatsApp inbox's without
-    the WhatsApp permission, the mailbox's without the Mail one."""
+    the WhatsApp permission, the mailbox's without the Mail one, co-hosting's
+    (invitations and answers: app/api/cohosts) below admin."""
+    from app.api.club_access import service as club_access
     from app.api.club_mailbox.alerts import hidden_kinds as mail_hidden
     from app.api.club_whatsapp.alerts_inbox import hidden_kinds as whatsapp_hidden
+    from app.api.cohosts.service import ALERT_KINDS as cohost_kinds
 
-    return whatsapp_hidden(request) | mail_hidden(request)
+    cohosts = frozenset() if club_access.role_of(request) in ("owner", "admin") else cohost_kinds
+    return whatsapp_hidden(request) | mail_hidden(request) | cohosts
 
 
 async def _club(session, user) -> Clubs:

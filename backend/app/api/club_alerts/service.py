@@ -32,6 +32,8 @@ KINDS: dict[str, str] = {
     "mail_message": "A conversation in the club's mailbox has unread mail (the Mail permission's people only)",
     "mailbox_lapsed": "The club's plan no longer includes its mailbox: closed, its mail readable 30 days",
     "mailbox_expired": "A lapsed mailbox's 30 days are over: its mail can be exported or deleted",
+    "cohost_invite": "Another club invited this club to co-host its event (owners and admins only; app/api/cohosts)",
+    "cohost_update": "A co-host accepted, declined or left one of the club's events, or the host removed this club as a co-host (owners and admins only)",
 }
 
 #: How many the bell shows at most.

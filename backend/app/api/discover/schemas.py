@@ -5,6 +5,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel
 
 from app.api.agenda.schemas import AgendaItemOut
+from app.api.cohosts.schemas import CohostRefUrl
 from app.api.event_partners.schemas import PagePartner
 from app.api.interests.schemas import TopicRef
 from app.api.threads.schemas import ThreadOut
@@ -47,6 +48,10 @@ class EventCard(BaseModel):
     category: Optional[CategoryRef] = None
     club: Optional[EventClub] = None
     going: int
+    #: On an event that reviews registrations (`requires_approval`), how
+    #: many applied: every registration ever made for it, whatever became
+    #: of it, so it never drops ("108 applied"). Null on any other event.
+    applied_count: Optional[int] = None
     capacity: Optional[int] = None
     #: "full": nothing left as the ticket picker counts it (holds count).
     status: Literal["upcoming", "closing_soon", "full", "live", "ended"]
@@ -64,6 +69,9 @@ class EventCard(BaseModel):
     updated_at: Optional[str] = None
     # The distinct topics of the event's interests, in topic order.
     topics: list[TopicRef] = []
+    #: The clubs co-hosting it, in the order they accepted; `club` is the
+    #: host (app/api/cohosts, docs/COHOSTS.md).
+    cohosts: list[CohostRefUrl] = []
 
 
 class ClubCard(BaseModel):
@@ -255,6 +263,8 @@ class PageEvent(BaseModel):
     prize_amount: Optional[float] = None
     capacity: Optional[int] = None
     going: int
+    #: As EventCard's: how many applied, on an event that reviews registrations; else null.
+    applied_count: Optional[int] = None
     #: What is left as the ticket picker counts it (holds count; a paid
     #: event's cap counts paid tickets). Null: no cap.
     seats_left: Optional[int] = None
@@ -316,6 +326,9 @@ class EventPage(BaseModel):
     # The event's own sponsors and partners, each in its order (docs/EVENT_PARTNERS.md).
     sponsors: list[PagePartner] = []
     partners: list[PagePartner] = []
+    #: The clubs co-hosting it, beside `club` (the host), in the order they
+    #: accepted (app/api/cohosts, docs/COHOSTS.md).
+    cohosts: list[CohostRefUrl] = []
     more_from_club: list[EventCard]
     similar: list[EventCard]
 

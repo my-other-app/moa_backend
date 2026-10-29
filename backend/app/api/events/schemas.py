@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from fastapi.exceptions import RequestValidationError
 
 from app.api.clubs.schemas import ClubPublicMin
+from app.api.cohosts.schemas import CohostRef
 from app.api.event_partners.schemas import EventPartnerOut
 from app.api.users.schemas import UserPublic
 from app.api.interests.schemas import InterestPublic, TopicRef
@@ -545,6 +546,8 @@ class EventListResponse(CustomBaseModel):
     reg_startdate: datetime = Field(...)
     reg_enddate: datetime | None = Field(None)
     club: EventClubDetail | None = Field(None)
+    #: The clubs co-hosting it (app/api/cohosts); the host is `club`.
+    cohosts: list[CohostRef] = Field(default_factory=list)
     category: EventCategoryDetail = Field(...)
     page_views: int = Field(0)
     #: "Confirm each registration" (docs/APPROVALS.md), and the club's
@@ -615,6 +618,12 @@ class EventListResponseSelf(CustomBaseModel):
     high_demand_label: bool = Field(False)
     requests_pending: int = Field(0)
     requests_total: int = Field(0)
+    #: The event's club (the host), the clubs co-hosting it, and, on the
+    #: club's own list, the club's place on it: "host" or "cohost"
+    #: (app/api/cohosts, docs/COHOSTS.md).
+    club: EventClubDetail | None = Field(None)
+    cohosts: list[CohostRef] = Field(default_factory=list)
+    viewer_role: Optional[str] = Field(None)
 
 
 class EventAdminListResponse(CustomBaseModel):
@@ -655,6 +664,8 @@ class EventAdminListResponse(CustomBaseModel):
     high_demand_label: bool = Field(False)
     requests_pending: int = Field(0)
     requests_total: int = Field(0)
+    #: The clubs co-hosting it (app/api/cohosts); the host is `club`.
+    cohosts: list[CohostRef] = Field(default_factory=list)
 
 
 class EventFileResponse(CustomBaseModel):
@@ -734,6 +745,12 @@ class EventDetailResponse(CustomBaseModel):
     #: (app/api/event_partners, docs/EVENT_PARTNERS.md).
     sponsors: list[EventPartnerOut] = Field(default_factory=list)
     partners: list[EventPartnerOut] = Field(default_factory=list)
+    #: The clubs co-hosting it (accepted), in the order they accepted; the
+    #: host stays `club` (app/api/cohosts, docs/COHOSTS.md).
+    cohosts: list[CohostRef] = Field(default_factory=list)
+    #: The signed-in club's place on it: "host", "cohost", or null (app
+    #: users, visitors, admins).
+    viewer_role: Optional[str] = Field(None)
     # User-specific fields (only populated when authenticated)
     is_registered: bool = Field(False)
     #: Null when the viewer is not registered. True for a free event, or a

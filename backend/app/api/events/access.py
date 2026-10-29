@@ -7,7 +7,8 @@ already admits admins by role, so the request got through the router and then
 failed the comparison, because an admin's user id is never a club's user id.
 
 Centralising it means the rule is stated once and the admin exemption cannot
-drift between call sites.
+drift between call sites. A club co-hosting the event passes too
+(app/api/cohosts, docs/COHOSTS.md).
 """
 
 from app.api.users.models import UserTypes
@@ -40,5 +41,12 @@ def ensure_event_access(
     """
     if as_admin:
         return
-    if event.club is None or event.club.user_id != user_id:
-        raise CustomHTTPException(403, message=message)
+    if event.club is not None and event.club.user_id == user_id:
+        return
+    # A club co-hosting it, as the auth dependency decided for this request
+    # (app/api/cohosts/access.py): host-only requests never get this far.
+    from app.api.cohosts import access as cohosts
+
+    if cohosts.granted(getattr(event, "id", None), user_id):
+        return
+    raise CustomHTTPException(403, message=message)

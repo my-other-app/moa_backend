@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import func, select, update
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy.orm.attributes import set_committed_value
 
 from app.api.checkins.gate_auth import GateActor
@@ -85,7 +85,7 @@ def card_args(event: Events, reg: EventRegistrationsLink, style: dict, *, for_pr
 async def registration_of(session, event: Events, registration_id) -> EventRegistrationsLink:
     reg = await session.scalar(
         select(EventRegistrationsLink)
-        .options(joinedload(EventRegistrationsLink.event).joinedload(Events.club), joinedload(EventRegistrationsLink.user))
+        .options(joinedload(EventRegistrationsLink.event).joinedload(Events.club), joinedload(EventRegistrationsLink.event).selectinload(Events.cohost_clubs), joinedload(EventRegistrationsLink.user))
         .where(EventRegistrationsLink.id == registration_id, EventRegistrationsLink.event_id == event.id, EventRegistrationsLink.is_deleted == False)
     )
     if reg is None:
@@ -140,7 +140,7 @@ async def claim_print(session, registration_id, *, first_only: bool):
 
 
 def _active(event_id: int):
-    return select(EventRegistrationsLink).options(joinedload(EventRegistrationsLink.event).joinedload(Events.club), joinedload(EventRegistrationsLink.user)).where(EventRegistrationsLink.event_id == event_id, EventRegistrationsLink.is_deleted == False, EventRegistrationsLink.ticket_revoked_at.is_(None))
+    return select(EventRegistrationsLink).options(joinedload(EventRegistrationsLink.event).joinedload(Events.club), joinedload(EventRegistrationsLink.event).selectinload(Events.cohost_clubs), joinedload(EventRegistrationsLink.user)).where(EventRegistrationsLink.event_id == event_id, EventRegistrationsLink.is_deleted == False, EventRegistrationsLink.ticket_revoked_at.is_(None))
 
 
 async def batch_targets(session, event: Events, *, scope: str, role: Optional[str]) -> list[EventRegistrationsLink]:

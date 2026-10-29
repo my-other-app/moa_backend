@@ -629,12 +629,14 @@ async def get_club_events(
     scope: str = Query("all", description="upcoming · now · draft · past · all"),
     sort: Optional[str] = Query(None, description="soonest · latest · registered · viewed"),
     search: Optional[str] = Query(None, description="Search by event name"),
+    role: str = Query("all", description="all · hosted · cohosted (app/api/cohosts)"),
 ) -> PaginatedResponse[EventListResponseSelf]:
-    """List events with optional filters."""
-    if scope not in events_list.SCOPES or (sort is not None and sort not in events_list.SORTS):
-        raise CustomHTTPException(422, message="Unknown scope or sort.")
+    """List events with optional filters: the club's own and those it co-hosts,
+    each row saying which (`viewer_role`) with its host (`club`) and co-hosts."""
+    if scope not in events_list.SCOPES or (sort is not None and sort not in events_list.SORTS) or role not in events_list.ROLES:
+        raise CustomHTTPException(422, message="Unknown scope, sort or role.")
     events, total = await events_list.list_events(
-        session, user.club.id, scope=scope, sort=sort, search=search, limit=pagination.limit, offset=pagination.offset, is_ended=is_ended,
+        session, user.club.id, scope=scope, sort=sort, search=search, limit=pagination.limit, offset=pagination.offset, is_ended=is_ended, role=role,
     )
     return paginated_response(events, request, schema=EventListResponseSelf, total=total)
 

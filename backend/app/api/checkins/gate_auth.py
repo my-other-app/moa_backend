@@ -1,6 +1,7 @@
 """Who is at the door.
 
-Three ways in: the club that runs the event (everything), an approved
+Three ways in: the club that runs the event, or one co-hosting it
+(everything; app/api/cohosts), an approved
 volunteer signed into their account (their switches), or a phone opened on
 a door's gate link (that door's switches, with the door as the name on
 every admission).
@@ -76,12 +77,19 @@ async def actor_for(session, event: Events, user: Optional[Users], gate_key: Opt
         return GateActor(kind="user", name=user.full_name or user.email, user=user, full=True)
     if event.club is not None and event.club.user_id == user.id:
         return GateActor(kind="user", name=user.full_name or user.email, user=user, full=True)
+    # A club co-hosting the event runs its door as the host does (app/api/cohosts).
+    from app.api.cohosts import access as cohosts
+
+    if cohosts.granted(event.id, user.id):
+        return GateActor(kind="user", name=user.full_name or user.email, user=user, full=True)
+    # The event's volunteers, and the host's and each co-host's club-wide ones.
+    clubs = [event.club_id, *await cohosts.cohost_club_ids(session, event.id)]
     volunteer = await session.scalar(
         select(Volunteer).where(
             Volunteer.user_id == user.id,
             Volunteer.is_deleted == False,
             Volunteer.is_approved == True,
-            or_(Volunteer.event_id == event.id, Volunteer.club_id == event.club_id),
+            or_(Volunteer.event_id == event.id, Volunteer.club_id.in_([c for c in clubs if c is not None])),
         ).order_by(Volunteer.event_id.desc().nulls_last())
     )
     if volunteer is None:

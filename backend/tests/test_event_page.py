@@ -33,6 +33,8 @@ EVENT_KEYS = {
     "cancellation",
     # The club confirms each registration (app/api/approvals).
     "requires_approval",
+    # How many applied, where it does: every registration ever made (null elsewhere).
+    "applied_count",
 }
 
 
@@ -135,9 +137,10 @@ async def test_the_page_by_slug(client, session, world):
     r = await client.get(f"{API}/events/{main.slug}")
     assert r.status_code == 200, r.text
     page = r.json()
-    assert set(page) == {"event", "club", "speakers", "agenda", "team", "team_source", "sponsors", "partners", "more_from_club", "similar"}
+    assert set(page) == {"event", "club", "speakers", "agenda", "team", "team_source", "sponsors", "partners", "cohosts", "more_from_club", "similar"}
     # None named: both lists are there, empty (docs/EVENT_PARTNERS.md).
     assert page["sponsors"] == [] and page["partners"] == []
+    assert page["cohosts"] == []
     ev = page["event"]
     assert set(ev) == EVENT_KEYS
     assert (ev["id"], ev["slug"], ev["name"], ev["about"]) == (main.id, main.slug, "Hack Night", "All night, all hands.")
@@ -150,6 +153,8 @@ async def test_the_page_by_slug(client, session, world):
     # Seats left as the ticket picker counts them: a paid event's cap counts
     # paid tickets, and these two have not paid yet.
     assert (ev["capacity"], ev["going"], ev["seats_left"]) == (3, 2, 3)
+    # It doesn't review registrations: nobody "applied" (tests/test_applied_count.py).
+    assert ev["applied_count"] is None
     assert datetime.fromisoformat(ev["reg_opens_at"]) == main.reg_startdate and datetime.fromisoformat(ev["reg_closes_at"]) == main.reg_enddate
     assert ev["status"] == "upcoming" and ev["registration_open"] is True
     assert ev["category"] == {"id": world["tech"].id, "name": "EP Tech"} and ev["interests"] == ["EP Robotics", "EP AI"]

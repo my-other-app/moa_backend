@@ -33,7 +33,7 @@ from zoneinfo import ZoneInfo
 import sqlalchemy as sa
 from sqlalchemy import String, and_, case, cast, exists, func, literal, or_, select, union_all, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 
 from app.api.deliveries import pipeline
 from app.api.deliveries.models import (
@@ -581,7 +581,7 @@ async def _read(db: pipeline.Db, c: _Claim, run: _Run) -> Optional[_Ready]:
             select(Deliveries)
             .options(
                 joinedload(Deliveries.registration).options(
-                    joinedload(EventRegistrationsLink.event).options(joinedload(Events.club)),
+                    joinedload(EventRegistrationsLink.event).options(joinedload(Events.club), selectinload(Events.cohost_clubs)),
                     joinedload(EventRegistrationsLink.user),
                 )
             )
@@ -1118,7 +1118,7 @@ async def bundle_zip(session, event: Events) -> bytes:
         await session.scalars(
             _active(event.id)
             .options(
-                joinedload(EventRegistrationsLink.event).options(joinedload(Events.club)),
+                joinedload(EventRegistrationsLink.event).options(joinedload(Events.club), selectinload(Events.cohost_clubs)),
                 joinedload(EventRegistrationsLink.user),
             )
             .where(EventRegistrationsLink.ticket_revoked_at.is_(None))

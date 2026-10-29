@@ -19,6 +19,10 @@ async def get_current_user(
     token: Annotated[str, Depends(oauth2_scheme)],
     session: SessionDep = SessionDep(),
 ):
+    # Each request decides co-host access afresh (app/api/cohosts/access.py).
+    from app.api.cohosts import access as cohost_access
+
+    cohost_access.reset()
     # Fall back to the access-token cookie when no Authorization header is
     # present (the cookie-auth web frontends never send one).
     token = token or request.cookies.get("access_token")
@@ -77,6 +81,9 @@ async def get_current_user(
         from app.api.club_access import service as club_access
 
         await club_access.check_member(session, request, user, token_data.member_id)
+    # A club co-hosting the event this path names acts on it as the host's
+    # team does, but for the host's own decisions (app/api/cohosts/access.py).
+    await cohost_access.gate(session, request, user)
     # Plan gates let admins through, and an admin acting as a club with them.
     from app.api.subscriptions import gates
 

@@ -502,6 +502,10 @@ async def _expense_rows(session, club_id: int, event_ids: list[int], frm: date |
 async def _event_of_club(session, club_id: int, event_id: int) -> Events:
     event = await session.scalar(select(Events).where(Events.id == event_id, Events.club_id == club_id, Events.is_deleted == False))  # noqa: E712
     if event is None:
+        # A co-host's books and codes are its own; the event's money is the host's (app/api/cohosts).
+        from app.api.cohosts import access as cohosts
+
+        await cohosts.refuse_if_cohost(session, club_id, event_id, "Expenses")
         raise CustomHTTPException(404, message="Event not found")
     return event
 

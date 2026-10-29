@@ -15,6 +15,7 @@ from app.api.kiosk.router import admin_router as kiosks_admin_router, kiosk_rout
 from app.api.agenda.router import router as agenda_router
 from app.api.organisers.router import router as organisers_router
 from app.api.event_partners.router import router as event_partners_router
+from app.api.cohosts.router import club_router as cohost_invitations_router, router as cohosts_router
 from app.api.merch.router import router as merch_router, gate_router as merch_gate_router
 from app.api.closeout.router import router as closeout_router
 from app.api.hooks.router import router as hooks_router
@@ -109,6 +110,9 @@ api_router.include_router(router=auth_router, tags=["auth"])
 api_router.include_router(router=org_router, tags=["organization"])
 api_router.include_router(router=user_router, tags=["user"])
 api_router.include_router(router=user_admin_router)
+# Co-hosted events (app/api/cohosts): before the clubs' routes, so /clubs/cohosts/... is never read as a club id.
+api_router.include_router(router=cohosts_router, tags=["cohosts"])
+api_router.include_router(router=cohost_invitations_router, tags=["cohosts"])
 api_router.include_router(router=analytics_router, tags=["analytics"])
 api_router.include_router(router=club_designs_router, tags=["club-designs"])
 api_router.include_router(router=links_router, tags=["tracking-links"])

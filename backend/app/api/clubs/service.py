@@ -1138,8 +1138,12 @@ async def get_club_events(
     is_ended: bool | None = None,
     search: str | None = None,
 ):
-    """Get events of a club with optional past/upcoming filter and search."""
+    """Get events of a club with optional past/upcoming filter and search:
+    those it hosts and those it co-hosts, each once, with its host as `club`
+    and its co-hosts (app/api/cohosts)."""
     from sqlalchemy.dialects.postgresql import INTERVAL
+
+    from app.api.cohosts import access as cohost_access
     
     # Subquery to count registrations for each event
     reg_link = aliased(EventRegistrationsLink)
@@ -1172,14 +1176,14 @@ async def get_club_events(
             reg_count_subquery.label("registration_count"),
             attended_count_subquery.label("attended_count"),
         )
-        .where(Events.club_id == club_id, Events.is_deleted == False)
+        .where(cohost_access.hosted_or_cohosted(club_id), Events.is_deleted == False)
         .options(
             joinedload(Events.category),
             joinedload(Events.club),
         )
     )
 
-    count_query = select(func.count(Events.id)).where(Events.club_id == club_id, Events.is_deleted == False)
+    count_query = select(func.count(Events.id)).where(cohost_access.hosted_or_cohosted(club_id), Events.is_deleted == False)
 
     if search and search.strip():
         search_pattern = f"%{search.strip()}%"
@@ -1213,14 +1217,17 @@ async def get_club_events(
     results = await session.execute(query)
     
     # Convert results to list of dicts with counts
+    rows = results.all()
+    shared = await cohost_access.refs(session, [event.id for event, *_ in rows])
     items = [
         jsonable_encoder(event) | {
             "registration_count": reg_count,
             "attended_count": attended_count,
             # A property, so the encoder does not see it on its own.
             "status": event.status,
+            "cohosts": shared.get(event.id, []),
         }
-        for event, reg_count, attended_count in results
+        for event, reg_count, attended_count in rows
     ]
 
     return items, total
