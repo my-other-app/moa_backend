@@ -1,14 +1,26 @@
 import io
-from sqlalchemy import select, func
+import logging
+from sqlalchemy import func, literal_column, select, update
+from sqlalchemy.exc import IntegrityError
 from app.response import CustomHTTPException
-from app.api.orgs.models import Organizations
+from app.api.orgs import search
+from app.api.orgs.models import Organizations, OrgTypes
 from app.api.clubs.models import Clubs, ClubUsersLink
 from app.api.events.models import Events
 from app.api.orgs.schema import OrganizationCreate, OrganizationAnalyticsResponse
+from app.api.search import text as stext
+from app.db.base import AbstractSQLModel
 from sqlalchemy.ext.asyncio import AsyncSession
 import pandas as pd
 from fastapi import UploadFile
 from typing import List
+
+logger = logging.getLogger(__name__)
+
+#: How many rows the type-ahead answers with when the caller does not say,
+#: and the most it ever will: a picker shows a handful.
+SEARCH_LIMIT_DEFAULT = 10
+SEARCH_LIMIT_MAX = 25
 
 
 async def create_organization(org: OrganizationCreate, session: AsyncSession):
@@ -213,3 +225,227 @@ async def restore_organization(session: AsyncSession, id: int):
     org.deleted_at = None
     await session.commit()
     return org
+
+
+# ─── Search, suggestions, merging and the admin's list ────────────────────
+
+
+async def search_organizations(
+    session: AsyncSession,
+    q: str | None,
+    *,
+    type_: OrgTypes | None = None,
+    limit: int = SEARCH_LIMIT_DEFAULT,
+) -> List[Organizations]:
+    """The type-ahead behind the app's onboarding and the public registration
+    form. Neither blocked nor deleted rows, best first (app.api.orgs.search)."""
+    return await search.find(session, q, type_=type_, limit=limit)
+
+
+async def suggest_organization(
+    session: AsyncSession, proposal, actor
+) -> tuple[Organizations, bool]:
+    """An organisation a signed-in app user says is missing, and whether it
+    was added. Unverified: an admin verifies it, and until then it ranks
+    below the real rows (app.api.orgs.search).
+
+    An obvious duplicate -- the same name and the same address, both
+    normalised -- is not added; the row already there is returned instead, so
+    onboarding selects that one. Branches of one college differ by their
+    address and are not duplicates of each other.
+
+    The caller commits."""
+    existing = await search.same_organisation(session, proposal.name, proposal.address)
+    if existing is not None:
+        if existing.is_blocked:
+            raise CustomHTTPException(
+                status_code=409,
+                message="That organisation is blocked",
+                error_code="ORG_BLOCKED",
+            )
+        return existing, False
+
+    org = Organizations(
+        name=proposal.name.strip(),
+        type=proposal.type,
+        address=(proposal.address or "").strip() or None,
+        is_verified=False,
+    )
+    session.add(org)
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        # Nothing constrains the name, so this is a column the proposal
+        # overran or a type the enum does not have; either way it is the
+        # caller's, not ours.
+        await session.rollback()
+        raise CustomHTTPException(status_code=400, message="That organisation could not be added") from exc
+    logger.info("organisation %s suggested by user %s", org.id, getattr(actor, "id", None))
+    return org, True
+
+
+def org_references() -> List:
+    """Every column in the schema that points at organizations.id.
+
+    Read from the metadata rather than listed here, so a table that gains an
+    org_id later is moved by a merge without anyone remembering to come back.
+    Today it is clubs.org_id and user_profiles.org_id; tests/test_org_search.py
+    pins that, and will fail on a third so it can be thought about rather
+    than silently moved."""
+    found = []
+    for table in AbstractSQLModel.metadata.sorted_tables:
+        for column in table.columns:
+            for fk in column.foreign_keys:
+                if fk.column.table.name == "organizations" and fk.column.name == "id":
+                    found.append(column)
+    return found
+
+
+async def merge_organizations(
+    session: AsyncSession, duplicate_id: int, target_id: int
+) -> dict:
+    """Move every reference to `duplicate_id` onto `target_id` and delete the
+    duplicate. One transaction: either every reference moved and the
+    duplicate is gone, or nothing happened.
+
+    The updates are statements against the tables, not the ORM: a club or a
+    profile an admin removed still points at the duplicate, and leaving it
+    pointing at a row that is gone is how a restore from the trash comes back
+    attached to nothing.
+
+    The caller commits (and writes the audit line in the same transaction)."""
+    if duplicate_id == target_id:
+        raise CustomHTTPException(
+            status_code=400,
+            message="An organisation cannot be merged into itself",
+            error_code="ORG_MERGE_SELF",
+        )
+    duplicate = await session.get(Organizations, duplicate_id)
+    if not duplicate or duplicate.is_deleted:
+        raise CustomHTTPException(status_code=404, message="Organization not found")
+    target = await session.get(Organizations, target_id)
+    if not target or target.is_deleted:
+        raise CustomHTTPException(status_code=404, message="No organization to merge into")
+
+    moved: dict[str, int] = {}
+    for column in org_references():
+        result = await session.execute(
+            update(column.table)
+            .where(column == duplicate_id)
+            .values({column.name: target_id})
+        )
+        moved[f"{column.table.name}.{column.name}"] = int(result.rowcount or 0)
+    duplicate.soft_delete()
+    return {
+        "merged": duplicate_id,
+        "into": target_id,
+        "moved": moved,
+        "duplicate_name": duplicate.name,
+        "target_name": target.name,
+    }
+
+
+async def admin_list_organizations(
+    session: AsyncSession,
+    *,
+    q: str | None = None,
+    type_: OrgTypes | None = None,
+    is_verified: bool | None = None,
+    is_blocked: bool | None = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> tuple[List[Organizations], int]:
+    """The admin's list: a page of organisations and how many there are.
+
+    Blocked rows are in it, unlike the public search's -- an admin blocked
+    them and has to be able to find them again. The search is the same words
+    over the same column, without the typo pass: a pager whose total comes
+    from one set of conditions and whose rows come from another cannot be
+    paged through."""
+    criteria = [Organizations.is_deleted == False]  # noqa: E712
+    if type_ is not None:
+        criteria.append(Organizations.type == type_)
+    if is_verified is not None:
+        criteria.append(Organizations.is_verified.is_(is_verified))
+    if is_blocked is not None:
+        criteria.append(Organizations.is_blocked.is_(is_blocked))
+    nq = await stext.normalise_org(session, q)
+    words = search.words_of(nq)
+    if words:
+        criteria.append(search.every_word(Organizations.search_text, words))
+
+    total = await session.scalar(select(func.count(Organizations.id)).where(*criteria))
+    query = select(Organizations).where(*criteria)
+    if words:
+        query = search.ordered(query, nq, words)
+    else:
+        query = query.order_by(Organizations.name, Organizations.id)
+    rows = await session.scalars(query.limit(limit).offset(offset))
+    return list(rows), (total or 0)
+
+
+async def duplicate_organizations(
+    session: AsyncSession, *, limit: int = 20, offset: int = 0
+) -> tuple[List[dict], int]:
+    """Groups of organisations that share one normalised name, and how many
+    groups there are.
+
+    The same name with and without its punctuation is one group, which is
+    what brings "College of Applied Science (IHRD)" together with "College of
+    Applied Science IHRD". Most groups are not duplicates at all -- one
+    college's teacher education centres sit in five towns under one name,
+    each with its own address -- so a group where one row has no address
+    beside siblings that do, the shape of a row imported twice, is flagged
+    and sorted first.
+
+    No index serves this (unaccent is STABLE, so no index may hold the
+    normalised name): it reads the table, which is why it is the admin's and
+    paged. At 1,936 rows it is a few milliseconds, and at fifty thousand a
+    fraction of a second."""
+    name_norm = search.NAME_NORM.label("norm")
+    has_address = Organizations.address.isnot(None) & (func.btrim(Organizations.address) != "")
+    groups = (
+        select(
+            name_norm,
+            func.count(Organizations.id).label("count"),
+            (func.bool_or(~has_address) & func.bool_or(has_address)).label("needs_attention"),
+        )
+        .where(Organizations.is_deleted == False)  # noqa: E712
+        .group_by(name_norm)
+        .having(func.count(Organizations.id) > 1)
+    )
+    total = await session.scalar(select(func.count()).select_from(groups.subquery()))
+    page = (
+        await session.execute(
+            groups.order_by(
+                literal_column("needs_attention").desc(),
+                literal_column("count").desc(),
+                literal_column("norm"),
+            )
+            .limit(limit)
+            .offset(offset)
+        )
+    ).all()
+    if not page:
+        return [], (total or 0)
+
+    names = [row.norm for row in page]
+    rows = (
+        await session.execute(
+            select(Organizations, name_norm)
+            .where(Organizations.is_deleted == False, name_norm.in_(names))  # noqa: E712
+            .order_by(Organizations.is_verified.desc(), Organizations.id)
+        )
+    ).all()
+    by_name: dict[str, list] = {name: [] for name in names}
+    for org, norm in rows:
+        by_name.setdefault(norm, []).append(org)
+    return [
+        {
+            "name": row.norm,
+            "count": row.count,
+            "needs_attention": bool(row.needs_attention),
+            "orgs": by_name.get(row.norm, []),
+        }
+        for row in page
+    ], (total or 0)

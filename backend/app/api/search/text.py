@@ -10,18 +10,23 @@ lowercased and unaccented, that holds all of it:
   category's name; the names of its interests and of their topics;
 - clubs: name, tagline, place; the names of its interests and their topics;
 - users (the admin's search): full name, username and address, with a
-  separator between them that no search term spans.
+  separator between them that no search term spans;
+- organizations: name and address, normalised one step further -- every run
+  of punctuation becomes one space -- so the branch written "College of
+  Applied Science (IHRD)" and the one written "College of Applied Science
+  IHRD" hold the same text (app.api.orgs.search).
 
 A word is then one LIKE on one column, served by one trigram index
 (ix_events_search_trgm, ix_events_shown_search_trgm, ix_clubs_search_trgm,
-ix_users_search_trgm), and a typo one `%>` on the same index.
+ix_users_search_trgm, ix_organizations_search_trgm), and a typo one `%>` on
+the same index.
 
 Kept by the database, in the writer's transaction, as the counters and the
 club places are: a trigger sees the dashboard, the app, imports, the trash's
 restore and raw SQL alike.
 
 - BEFORE INSERT or an UPDATE of a column the text is built from, on events,
-  clubs and users: the row's own text, worked out again.
+  clubs, users and organizations: the row's own text, worked out again.
 - AFTER a change to an event's or a club's interest links: that one row's.
 - AFTER a club's name or place changes: the text of each of its events (a
   club's events are a bounded set).
@@ -100,6 +105,22 @@ FUNCTIONS_SQL = (
       RETURN moa_search_norm(concat_ws(' ', cname, ctagline, cplace, interest_part));
     END $$
     """,
+    # An organisation's words, punctuation and all turned into spaces: a
+    # name's bracketed suffix ("(IHRD)") must not keep a query from finding
+    # it, and the same name written with and without the brackets must come
+    # out as one text (ORG_PUNCTUATION here is the same class).
+    """
+    CREATE OR REPLACE FUNCTION moa_org_search_norm(t text) RETURNS text
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+      SELECT nullif(btrim(regexp_replace(moa_search_norm(t), '[^[:alnum:]]+', ' ', 'g')), '')
+    $$
+    """,
+    """
+    CREATE OR REPLACE FUNCTION moa_org_search_text(oname text, oaddr text) RETURNS text
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+      SELECT moa_org_search_norm(concat_ws(' ', oname, oaddr))
+    $$
+    """,
     f"""
     CREATE OR REPLACE FUNCTION moa_user_search_text(fname text, uname text, mail text)
     RETURNS text LANGUAGE sql STABLE PARALLEL SAFE AS $$
@@ -149,6 +170,13 @@ FUNCTIONS_SQL = (
     CREATE OR REPLACE FUNCTION moa_users_search_text() RETURNS trigger LANGUAGE plpgsql AS $$
     BEGIN
       NEW.search_text := moa_user_search_text(NEW.full_name, NEW.username, NEW.email);
+      RETURN NEW;
+    END $$
+    """,
+    """
+    CREATE OR REPLACE FUNCTION moa_orgs_search_text() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      NEW.search_text := moa_org_search_text(NEW.name, NEW.address);
       RETURN NEW;
     END $$
     """,
@@ -208,6 +236,10 @@ TRIGGERS_SQL = (
     FOR EACH ROW EXECUTE FUNCTION moa_users_search_text()
     """,
     """
+    CREATE TRIGGER trg_organizations_search_text BEFORE INSERT OR UPDATE OF name, address ON organizations
+    FOR EACH ROW EXECUTE FUNCTION moa_orgs_search_text()
+    """,
+    """
     CREATE TRIGGER trg_event_interests_search AFTER INSERT OR DELETE OR UPDATE OF event_id, interest_id, is_deleted ON event_interests_link
     FOR EACH ROW EXECUTE FUNCTION moa_event_links_search()
     """,
@@ -262,14 +294,38 @@ async def normalise(session, q: Optional[str]) -> str:
     return (await session.scalar(text("SELECT moa_search_norm(:q)"), {"q": q})) or ""
 
 
+#: Every run of anything that is not a letter or a digit: what
+#: `moa_org_search_norm` turns into one space. `\W` is not quite the class
+#: (it leaves the underscore in), hence the `_` beside it.
+ORG_PUNCTUATION = re.compile(r"[\W_]+", re.UNICODE)
+
+
+async def normalise_org(session, q: Optional[str]) -> str:
+    """A query as an organisation's search_text is written: `normalise`, and
+    then punctuation turned into spaces, so "science(ihrd)" and "Science
+    (IHRD)" are the one query. ASCII here; anything else by the database's
+    own function, for the same reason `normalise` asks it."""
+    if not q:
+        return ""
+    if q.isascii():
+        return ORG_PUNCTUATION.sub(" ", q.lower()).strip()
+    return (await session.scalar(text("SELECT moa_org_search_norm(:q)"), {"q": q})) or ""
+
+
 # ─── Drift and repair ─────────────────────────────────────────────────────
 
 _EVENT_TRUE = "moa_event_search_text(e.id, e.name, e.location_name, e.event_tag, e.club_id, e.category_id)"
 _CLUB_TRUE = "moa_club_search_text(c.id, c.name, c.tagline, c.location_name)"
 _USER_TRUE = "moa_user_search_text(u.full_name, u.username, u.email)"
+_ORG_TRUE = "moa_org_search_text(o.name, o.address)"
 
 #: (table, alias, what the text should be) for each kept column.
-KEPT = (("events", "e", _EVENT_TRUE), ("clubs", "c", _CLUB_TRUE), ("users", "u", _USER_TRUE))
+KEPT = (
+    ("events", "e", _EVENT_TRUE),
+    ("clubs", "c", _CLUB_TRUE),
+    ("users", "u", _USER_TRUE),
+    ("organizations", "o", _ORG_TRUE),
+)
 
 #: Rows compared per statement, so no check holds one long scan.
 SLICE = 5000

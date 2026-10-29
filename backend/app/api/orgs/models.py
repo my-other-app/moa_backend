@@ -1,6 +1,7 @@
+import sqlalchemy as sa
 from sqlalchemy import Boolean, Column, Enum, Integer, String
 from sqlmodel import Field, SQLModel
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import deferred, relationship
 import enum
 
 from app.db.base import AbstractSQLModel
@@ -41,5 +42,25 @@ class Organizations(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     )
     is_verified = Column(Boolean, default=False, nullable=False)
     is_blocked = Column(Boolean, default=False, nullable=False)
+    # The name and the address, lowercased, unaccented and with every run of
+    # punctuation turned into one space (app.api.search.text), so "College of
+    # Applied Science (IHRD)" and "College of Applied Science IHRD" are the
+    # same text and a word is found by one LIKE on one trigram-indexed
+    # column. Kept by a trigger; only SQL reads it.
+    search_text = deferred(Column(sa.Text, nullable=True))
 
     clubs = relationship("Clubs", back_populates="org")
+
+    __table_args__ = (
+        # Everything an organisation is found by: substrings for the words of
+        # a query, `%>` for a word with a typo in it (app.api.orgs.search).
+        sa.Index(
+            "ix_organizations_search_trgm",
+            "search_text",
+            postgresql_using="gin",
+            postgresql_ops={"search_text": "gin_trgm_ops"},
+            postgresql_where=sa.text("NOT is_deleted"),
+        ),
+        # The picker's list and the admin's, both by name.
+        sa.Index("ix_organizations_name", "name", postgresql_where=sa.text("NOT is_deleted")),
+    )

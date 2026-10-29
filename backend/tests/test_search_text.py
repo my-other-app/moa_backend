@@ -46,7 +46,7 @@ async def _text(session, table: str, row_id: int) -> str:
 
 async def _no_drift(session):
     found = await stext.drift(session)
-    assert found == {"events": [], "clubs": [], "users": []}, found
+    assert found == {"events": [], "clubs": [], "users": [], "organizations": []}, found
 
 
 @pytest.fixture
@@ -267,7 +267,7 @@ async def test_drift_is_found_and_put_right(session, scene):
     await session.execute(text("UPDATE clubs SET search_text = NULL WHERE id = :id"), {"id": scene["club"].id})
     found = await stext.drift(session)
     assert found["events"] == [scene["event"].id] and found["clubs"] == [scene["club"].id]
-    assert await stext.recompute(session) == {"events": 1, "clubs": 1, "users": 0}
+    assert await stext.recompute(session) == {"events": 1, "clubs": 1, "users": 0, "organizations": 0}
     await _no_drift(session)
 
 
