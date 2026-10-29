@@ -140,6 +140,10 @@ def visible(type_: Optional[OrgTypes] = None) -> list:
 
 
 def ordered(query, nq: str, words: Sequence[str]):
+    """Best first: how well the name answers the query, then verified before
+    not, then how alike the name is, then the shortest name -- so "Calicut
+    University" is not buried under its fifteen teacher education centres --
+    then alphabetically, then by id so a page never shuffles."""
     return query.order_by(
         _rank(nq, words),
         Organizations.is_verified.desc(),
