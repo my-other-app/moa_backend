@@ -29,6 +29,7 @@ from app.api.notifications.models import NotificationStatus, Notifications
 from app.api.security import service as security
 from app.api.users.models import AdminRoles, UserDeviceTokens, UserTypes, Users
 from app.core.email import email as email_mod
+from app.core.notifications import fanout
 from app.core.notifications import service as push
 from app.core.rate_limit import limiter
 from tests.conftest import auth_header
@@ -134,7 +135,11 @@ async def test_an_announcement_reaches_every_registrant_on_every_device(client, 
     assert fcm.tokens() == ["tok-asha-phone", "tok-asha-tablet", "tok-chitra", "tok-dev"]
     (m,) = fcm.multicasts
     assert m.notification.title == "Doors for all" and m.notification.body == "Lab 3B from 6" and m.notification.image == "https://cdn.example.com/doors.png"
+    # One push for all: it names their lines by the send's key, from which
+    # each line's id is derived (a tap marks the reader's own).
+    key = m.data.pop("notification_id")
     assert m.data == {"type": "club_announcement", "event_id": str(hall.event.id), "image_url": "https://cdn.example.com/doors.png"}
+    assert all(n.id == fanout.line_id(key, n.user_id) for n in rows)
 
 
 async def test_an_announcement_to_attendees_or_no_shows_reaches_only_them(client, session, hall, fcm):
@@ -225,7 +230,8 @@ async def test_a_volunteer_added_to_an_event_is_told_in_the_inbox_and_on_the_pho
     # One device: one direct send, which opens the volunteer's event.
     (m,) = fcm.singles
     assert m.token == "tok-vani" and m.notification.title == "🎖️ You're now a volunteer!"
-    assert m.data == {"type": "volunteer_assigned", "event_id": str(crew.event.id)}
+    # It names its line: a tap marks it read.
+    assert m.data == {"type": "volunteer_assigned", "event_id": str(crew.event.id), "notification_id": str(note.id)}
 
 
 async def test_a_new_guest_volunteer_gets_the_inbox_line_but_no_push(client, session, crew, fcm):

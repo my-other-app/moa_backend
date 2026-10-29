@@ -60,12 +60,13 @@ async def _note(session, user_id):
 async def test_a_check_in_sends_one_push_that_opens_people_like_you(session, door, pushes):
     out = await _check_in(session, door)
     assert out["outcome"] == "CHECKED_IN"
+    note = await _note(session, door["guest"].id)
+    # The push names its line: a tap marks the welcome read.
     assert pushes == [(
         "✅ You're checked in",
         "Welcome to Mixer Night. See who here shares your interests.",
-        {"type": "event_checkin", "event_id": str(door["event"].id), "open": "people"},
+        {"type": "event_checkin", "event_id": str(door["event"].id), "open": "people", "notification_id": str(note.id)},
     )]
-    note = await _note(session, door["guest"].id)
     assert note.title == "✅ You're checked in" and note.data["open"] == "people"
 
     # Scanned again (and the job run again): still the one push.
@@ -101,18 +102,22 @@ async def test_a_doubt_about_the_list_is_the_plain_welcome(session, door, pushes
     monkeypatch.setattr(gates, "allows", broken)
     out = await _check_in(session, door)
     assert out["outcome"] == "CHECKED_IN"
-    assert [(t, d) for t, _b, d in pushes] == [("✅ Checked in successfully!", {"type": "event_checkin", "event_id": str(door["event"].id)})]
+    note = await _note(session, door["guest"].id)
+    assert [(t, d) for t, _b, d in pushes] == [
+        ("✅ Checked in successfully!", {"type": "event_checkin", "event_id": str(door["event"].id), "notification_id": str(note.id)}),
+    ]
 
 
 async def test_no_people_push_once_the_window_has_closed(session, door, pushes):
     door["event"].event_datetime = NOW - timedelta(hours=6)  # 3h event, its hour after over two hours ago
     await session.commit()
     await after.run(after.Admitted(user_id=door["guest"].id, event_id=door["event"].id, event_name="Mixer Night", club_id=door["club"].id))
+    note = await _note(session, door["guest"].id)
     assert [(t, b, d) for t, b, d in pushes] == [(
         "✅ Checked in successfully!", "Welcome to Mixer Night. Enjoy the event!",
-        {"type": "event_checkin", "event_id": str(door["event"].id)},
+        {"type": "event_checkin", "event_id": str(door["event"].id), "notification_id": str(note.id)},
     )]
-    assert "open" not in ((await _note(session, door["guest"].id)).data or {})
+    assert "open" not in (note.data or {})
 
 
 def _migration(name):
@@ -144,5 +149,6 @@ async def test_no_people_push_when_the_plan_lacks_networking(session, door, push
 
     out = await _check_in(session, door)
     assert out["outcome"] == "CHECKED_IN"
-    assert [d for _t, _b, d in pushes] == [{"type": "event_checkin", "event_id": str(door["event"].id)}]
+    note = await _note(session, door["guest"].id)
+    assert [d for _t, _b, d in pushes] == [{"type": "event_checkin", "event_id": str(door["event"].id), "notification_id": str(note.id)}]
     gates.reset()

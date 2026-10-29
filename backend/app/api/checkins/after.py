@@ -93,11 +93,14 @@ async def _notify(session, a: Admitted) -> None:
             data["open"] = "people"
         else:
             title, body = TITLE, f"Welcome to {a.event_name}. Enjoy the event!"
-        await notes.create_notification(
+        line = await notes.create_notification(
             session=session, user_id=a.user_id, title=title, description=body, type="event_checkin",
             event_id=a.event_id, from_club_id=a.club_id,
             data={"event_name": a.event_name, **({"open": "people"} if "open" in data else {})},
         )
+        # A tap on the push marks the welcome read.
+        if getattr(line, "id", None) is not None:
+            data["notification_id"] = str(line.id)
         token = await push.get_fcm_token_for_user(session, a.user_id)
         # The icon's badge: their unread count, the welcome just written included.
         badge = await push.unread_badge(session, a.user_id) if token else None

@@ -10,6 +10,7 @@ Each trigger:
 """
 
 import logging
+import uuid
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Sequence
@@ -262,12 +263,16 @@ async def _tell(
     rows skip anyone already told about this event (`once`), so the job run
     again adds none; the push job, run again, pushes again -- a second
     buzz rather than none."""
+    # One fan-out per (type, event), however often the job runs: its key.
+    key = fanout.line_key(type, event_id)
     reached = await fanout.insert_for_audience(
         session, audience, title=title, description=body, type=type, data=data,
-        from_club_id=from_club_id, event_id=event_id, once=True,
+        from_club_id=from_club_id, event_id=event_id, once=True, line_key=key,
     )
     if reached:
-        await fanout.enqueue_push(session, type=type, event_id=event_id, title=title, body=body, data=push_data)
+        await fanout.enqueue_push(
+            session, type=type, event_id=event_id, title=title, body=body, data=fanout.with_line(push_data, key),
+        )
     await session.commit()
     if not reached:
         logger.debug("Nobody new to tell about %s for event %s", type, event_id)
@@ -319,7 +324,9 @@ async def notify_event_participants(
     
     logger.info(f"Sending club notification to {len(user_ids)} {audience} of event {event_id}")
     
-    # Save to database
+    # Save to database. Each line's id comes from this send's key, which the
+    # push carries: a tap marks the reader's own line read.
+    key = uuid.uuid4()
     await db_notification_service.create_notifications_batch(
         session=session,
         user_ids=user_ids,
@@ -329,6 +336,7 @@ async def notify_event_participants(
         from_club_id=club_id,
         event_id=event_id,
         data={"audience": audience, "has_image": image_url is not None},
+        line_key=key,
     )
     
     # Send push notification
@@ -337,11 +345,11 @@ async def notify_event_participants(
         user_ids=user_ids,
         title=title,
         body=body,
-        data={
+        data=fanout.with_line({
             "type": "club_announcement",
             "event_id": str(event_id),
             "image_url": image_url or "",
-        },
+        }, key),
         image_url=image_url,
     )
     
@@ -367,7 +375,7 @@ async def notify_user_added_as_volunteer(
     body = f"{club_name} added you as a volunteer for {event_name}"
     
     # Save to database
-    await db_notification_service.create_notification(
+    line = await db_notification_service.create_notification(
         session=session,
         user_id=user_id,
         title=title,
@@ -378,14 +386,14 @@ async def notify_user_added_as_volunteer(
         data={"club_name": club_name, "event_name": event_name},
     )
     
-    # Send push notification
+    # Send push notification: a tap marks its line read.
     return await send_notification_to_user(
         session=session,
         user_id=user_id,
         title=title,
         body=body,
-        data={
+        data=fanout.with_line({
             "type": "volunteer_assigned",
             "event_id": str(event_id),
-        },
+        }, line.id),
     )

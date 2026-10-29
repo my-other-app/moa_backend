@@ -202,10 +202,12 @@ async def _push(session, event, req, kind: str, *, title: str, body: str, extra:
         if inbox:
             from app.api.notifications import service as inbox_service
 
-            await inbox_service.create_notification(
+            line = await inbox_service.create_notification(
                 session, user_id=user.id, title=title, description=body, type=kind,
                 data={k: v for k, v in data.items() if k != "type"}, from_club_id=event.club_id, event_id=event.id,
             )
+            # A tap on the push marks this line read.
+            data["notification_id"] = str(line.id)
         from app.core.notifications.service import send_notification_to_user
 
         await send_notification_to_user(session, user.id, title, body, data=data)

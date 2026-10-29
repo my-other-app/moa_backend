@@ -241,9 +241,11 @@ async def _tell(session, event_id: int, club_id, name: str, what: str, who: dict
     # The inbox lines, the push's job and the count's entry: all, or none.
     await fanout.insert_for_audience(
         session, fanout.users_in(user_ids), title=name, description=body, type=kind, data=data,
-        from_club_id=club_id, event_id=event_id,
+        from_club_id=club_id, event_id=event_id, line_key=uuid.UUID(push_id),
     )
-    await jobs.enqueue(session, PUSH_JOB, {"user_ids": user_ids, "title": name, "body": body, "data": data}, dedupe_key=f"live:join:{push_id}")
+    # The push names each person's line by the push's id (fanout.line_id).
+    push = {"user_ids": user_ids, "title": name, "body": body, "data": fanout.with_line(data, push_id)}
+    await jobs.enqueue(session, PUSH_JOB, push, dedupe_key=f"live:join:{push_id}")
     people = "person" if len(user_ids) == 1 else "people"
     session.add(AdminAuditLogs(
         **who, action=ACTION, entity_type="event", entity_id=str(event_id),

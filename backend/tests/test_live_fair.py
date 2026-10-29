@@ -270,7 +270,8 @@ async def test_the_event_going_live_tells_everyone_registered_once(client, sessi
     # Registered, checked in or not, with the app, not muted: Sneha, Rohan, Kiran.
     assert sorted(message.tokens) == ["tok-kiran", "tok-rohan", "tok-sneha-1", "tok-sneha-2"]
     push_id = message.data["push_id"]
-    assert message.data == {"type": "event_live_started", "event_id": str(room.event_id), "what": "room", "push_id": push_id}
+    # The push's id is also its lines' key (fanout.line_id): a tap marks the reader's.
+    assert message.data == {"type": "event_live_started", "event_id": str(room.event_id), "what": "room", "push_id": push_id, "notification_id": push_id}
     assert message.notification.body == LIVE_BODY
     [entry] = await _audits(session, room.event_id)
     assert entry.actor_id is None and entry.details["what"] == "room" and entry.summary.startswith("Told 3 registered people")

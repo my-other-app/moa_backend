@@ -160,7 +160,8 @@ async def test_starting_the_quiz_with_no_body_tells_everyone_checked_in_and_nobo
     assert sorted(message.tokens) == ["tok-rohan", "tok-sneha-1", "tok-sneha-2"]
     push_id = message.data["push_id"]
     assert str(uuid.UUID(push_id)) == push_id
-    assert message.data == {"type": "event_live_join", "event_id": str(room.event_id), "what": "quiz", "push_id": push_id}
+    # The push's id is also its lines' key (fanout.line_id): a tap marks the reader's.
+    assert message.data == {"type": "event_live_join", "event_id": str(room.event_id), "what": "quiz", "push_id": push_id, "notification_id": push_id}
     assert message.notification.title == "Hack Night 04" and message.notification.body == QUIZ_BODY
     # Wave 2's dedupe: the push_id is the tray's tag and APNs' collapse id.
     assert message.android.notification.tag == push_id and message.apns.headers == {"apns-collapse-id": push_id}
@@ -169,14 +170,20 @@ async def test_starting_the_quiz_with_no_body_tells_everyone_checked_in_and_nobo
     [job] = await _push_jobs(session)
     assert job.priority == jobs.HIGH and job.finished_at is not None and sorted(job.payload["user_ids"]) == sorted([room.ids["sneha"], room.ids["rohan"]])
 
-    # An inbox line each, that opens as the push does.
+    # An inbox line each, that opens as the push does; the push names it
+    # (its id derived from the push's id and the person: a tap marks it read).
+    from app.core.notifications import fanout
+
+    opens = {k: v for k, v in message.data.items() if k != "notification_id"}
     lines = await _inbox(session, room.event_id)
     assert sorted(n.user_id for n in lines) == sorted([room.ids["sneha"], room.ids["rohan"]])
     for n in lines:
-        assert (n.title, n.description, n.from_club_id, n.data) == ("Hack Night 04", QUIZ_BODY, room.club_id, message.data)
+        assert (n.title, n.description, n.from_club_id, n.data) == ("Hack Night 04", QUIZ_BODY, room.club_id, opens)
+        assert n.id == fanout.line_id(message.data["notification_id"], n.user_id)
     page = (await client.get("/api/v1/notifications/fetch-list", headers=room.sneha_h)).json()
     mine = next(i for i in page["items"] if i["type"] == "event_live_join")
-    assert mine["event"]["id"] == room.event_id and mine["data"] == message.data and mine["description"] == QUIZ_BODY
+    assert mine["event"]["id"] == room.event_id and mine["data"] == opens and mine["description"] == QUIZ_BODY
+    assert mine["id"] == str(fanout.line_id(push_id, room.ids["sneha"]))
 
     # Who told the room, in the audit log.
     [entry] = await _audits(session, room.event_id)
