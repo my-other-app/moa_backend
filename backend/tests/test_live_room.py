@@ -335,8 +335,10 @@ async def test_survey_mails_are_jobs_and_a_rerun_mails_nobody_twice(client, sess
     out = (await client.post(_u(world, "/feedback/send"), headers=world["h"])).json()
     assert out["sent"] == 3 and sorted(a for a, _ in sent) == sorted(r.email for r in g)
     survey = await service.survey_of(session, world["event"])
-    rows = (await session.execute(select(FeedbackSends.registration_id, FeedbackSends.mailed_at).where(FeedbackSends.survey_id == survey.id))).all()
-    assert len(rows) == 3 and all(at is not None for _, at in rows)
+    rows = (await session.execute(select(FeedbackSends.registration_id, FeedbackSends.mailed_at, FeedbackSends.channel, FeedbackSends.delivered_at).where(FeedbackSends.survey_id == survey.id))).all()
+    assert len(rows) == 3 and all(at is not None for _, at, _c, _d in rows)
+    # Nobody here has the app, so the email carried it, and the row says so.
+    assert {(c, d is not None) for _, _at, c, d in rows} == {("email", True)}
     # One job per guest, keyed by the guest.
     keys = (await session.scalars(text("SELECT dedupe_key FROM jobs WHERE name = 'live.survey_mail' ORDER BY dedupe_key"))).all()
     assert keys == sorted(f"live:survey:{survey.id}:{r.id}" for r in g)
@@ -352,7 +354,9 @@ async def test_survey_mails_are_jobs_and_a_rerun_mails_nobody_twice(client, sess
 
     # A mail the provider does not take is tried again, and only that one.
     later = await service.survey_of(session, world["event"])
-    await session.execute(update(FeedbackSends).where(FeedbackSends.survey_id == later.id, FeedbackSends.registration_id == g[1].id).values(mailed_at=None))
+    # Not delivered on any channel: `delivered_at` is what a retry reads now,
+    # and `mailed_at` is still the email's own record beside it.
+    await session.execute(update(FeedbackSends).where(FeedbackSends.survey_id == later.id, FeedbackSends.registration_id == g[1].id).values(mailed_at=None, delivered_at=None))
     await session.commit()
     calls = []
 

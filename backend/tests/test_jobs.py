@@ -283,7 +283,9 @@ def test_the_platforms_jobs_have_the_priorities_and_limits_chosen(monkeypatch):
         # A cancelled event: every guest told (one at a time on WhatsApp), and its refunds, a Razorpay call each.
         "club_ops.cancel_follow_up": (N, 1), "club_ops.refund": (N, 2),
         "notifications.broadcast": (N, 4), "push.topic": (N, 4), "push.devices": (N, 4), "push.unsubscribe": (N, 4),
-        "live.survey_mail": (N, 4),
+        # The feedback survey, one message a guest on the channel chosen for
+        # them; the push is live.join_push's one fan-out, not a job each.
+        "live.survey_mail": (N, 4), "live.survey_whatsapp": (N, 4),
         # Nobody watches these happen.
         "closeout.retention": (L, 1), "registrations.import": (L, 1),
         # A lapsed hold's unpaid registration retired (app/api/approvals): rare, and nobody waits.

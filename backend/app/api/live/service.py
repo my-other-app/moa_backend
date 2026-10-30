@@ -9,7 +9,10 @@ Five things happen while an event runs, and one just after:
 * polls and word clouds, one live at a time;
 * updates pushed to phones and shown as a banner on the event page, some of
   them made by shifting the run of show;
-* the feedback survey, sent to everyone who was there an hour after the end.
+* the feedback survey, sent to everyone who was there an hour after the end,
+  each on the cheapest channel that reaches them -- a free push to whoever
+  has the app, and the club's own choice of WhatsApp or email for the rest
+  (send_survey, pick_channel).
 
 Nobody in the room needs an account. A browser makes itself a key and sends
 it on every call; that key is the voter, the asker and the player. A request
@@ -35,11 +38,13 @@ quiz_changed), the audience's folded a third of a second.
 import asyncio
 import logging
 import secrets
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
+import sqlalchemy as sa
 from sqlalchemy import delete, func, literal, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import joinedload
@@ -51,9 +56,14 @@ from app.api.clubs.models import Clubs
 from app.api.deliveries import service as deliveries
 from app.api.events.documents import EVENT_TIMEZONE
 from app.api.events.models import EventRegistrationsLink, Events
-from app.api.live import board, bus, room
+from app.api.live import board, bus, notify, room
 from app.api.message_quota import service as quota
 from app.api.live.models import (
+    DEFAULT_CHANNELS,
+    EMAIL,
+    FEEDBACK_CHANNELS,
+    PUSH,
+    WHATSAPP,
     Audience,
     FeedbackResponses,
     FeedbackSends,
@@ -867,7 +877,117 @@ def _check_questions(questions: list) -> list:
 
 
 def survey_out(survey: FeedbackSurveys) -> dict:
-    return {"auto_send": survey.auto_send, "delay_minutes": survey.delay_minutes, "questions": list(survey.questions or []), "sent_at": survey.sent_at, "sent_count": survey.sent_count}
+    return {
+        "auto_send": survey.auto_send, "delay_minutes": survey.delay_minutes, "channels": clean_channels(survey.channels),
+        "questions": list(survey.questions or []), "sent_at": survey.sent_at, "sent_count": survey.sent_count,
+    }
+
+
+# --- which channel each guest is asked on -------------------------------------
+#
+# The club says which channels the survey may go on; the server decides, for
+# each guest, which one it actually goes on: the cheapest allowed channel
+# that can reach them, in CHANNEL_ORDER. A push to a phone that has the app
+# costs nothing, a WhatsApp and an email each cost the club one of the
+# month's messages, so this order is cost order -- and allowing a channel
+# can only widen the reach, never raise the bill. Nothing is ever sent twice
+# to one guest: one channel each, recorded on their feedback_sends row.
+#
+# The fallback is written down rather than implied: with ["push", "email"]
+# (the default), whoever has the app gets the free push and nobody else's
+# address is touched; the people the push cannot reach -- no app, the club
+# muted, clubs' pushes switched off -- get the email. With ["push"] alone
+# the rest get nothing, and their row says so. With ["email"] alone it
+# behaves exactly as it did before this existed.
+
+CHANNEL_ORDER = (PUSH, WHATSAPP, EMAIL)
+
+#: Why a channel could not carry it, per guest: what the row's
+#: `skipped_reason` is built from when no allowed channel can.
+WHY = {
+    PUSH: "the app is not on their phone, or they muted the club",
+    WHATSAPP: "they did not ask for WhatsApp, or their number cannot take it",
+    EMAIL: "no email address",
+}
+
+
+def clean_channels(raw) -> list[str]:
+    """A survey's channels as the rest of the code reads them: the known
+    ones, each once, in CHANNEL_ORDER. Anything unrecognised -- a null
+    column on a row from before, an empty list -- is the default."""
+    picked = {str(c).strip().lower() for c in (raw or [])}
+    out = [c for c in CHANNEL_ORDER if c in picked]
+    return out or list(DEFAULT_CHANNELS)
+
+
+def _check_channels(raw) -> list[str]:
+    """What the club asked for, refusing what cannot be honoured (the
+    dashboard's PUT)."""
+    picked = [str(c).strip().lower() for c in (raw or [])]
+    bad = [c for c in picked if c not in FEEDBACK_CHANNELS]
+    if bad:
+        raise CustomHTTPException(422, message=f"The survey goes by push, WhatsApp or email, not {bad[0]!r}.")
+    out = [c for c in CHANNEL_ORDER if c in set(picked)]
+    if not out:
+        raise CustomHTTPException(422, message="Keep at least one channel for the survey.")
+    return out
+
+
+async def push_reachable(session, event: Events, user_ids) -> set[int]:
+    """Of these accounts, the ones a survey push would reach: checked in to
+    the event, with the club not muted and clubs' pushes on
+    (notify.recipients), and with a live device to push to. Exactly the set
+    notify.tell_room would tell, so what it says it sent is what these
+    people got."""
+    from app.api.users.models import UserDeviceTokens
+    from app.core.notifications.service import int_array, reachable
+
+    ids = sorted({int(u) for u in user_ids if u})
+    if not ids:
+        return set()
+    with_devices = list((await session.scalars(
+        select(UserDeviceTokens.user_id).where(
+            UserDeviceTokens.user_id == sa.any_(int_array(ids)),
+            UserDeviceTokens.is_deleted == False,  # noqa: E712
+            reachable(UserDeviceTokens.user_id),
+        ).distinct()
+    )).all())
+    if not with_devices:
+        return set()
+    return {int(u) for u in (await session.scalars(
+        notify.recipients(event.id, event.club_id, checked_in=True, only=with_devices)
+    )).all()}
+
+
+def whatsapp_possible() -> bool:
+    """Whether a WhatsApp survey could go at all: the server holds the
+    platform's keys. A club that sends from its own number is decided per
+    send (app/api/club_whatsapp.service.route_for), which is why a club
+    without the platform's keys is still offered the channel."""
+    from app.core import whatsapp
+
+    return bool(whatsapp.configured())
+
+
+def pick_channel(channels: list[str], guest, pushed: set[int], *, whatsapp_on: bool) -> tuple[Optional[str], Optional[str]]:
+    """The channel this guest's survey goes on, and -- when none can -- why
+    not, in words a club can read. `guest` is a `_Guest`."""
+    from app.core import whatsapp
+
+    tried: list[str] = []
+    for channel in channels:
+        if channel == PUSH:
+            if guest.user_id is not None and int(guest.user_id) in pushed:
+                return PUSH, None
+        elif channel == WHATSAPP:
+            number, _ = whatsapp.normalise(guest.phone)
+            if whatsapp_on and guest.whatsapp_opt_in and number is not None and guest.wa_bounced_at is None:
+                return WHATSAPP, None
+        elif channel == EMAIL:
+            if guest.email:
+                return EMAIL, None
+        tried.append(f"{channel}: {WHY[channel]}")
+    return None, ("Nothing could reach this guest — " + "; ".join(tried))[:300]
 
 
 async def update_survey(session, event: Events, body) -> dict:
@@ -879,6 +999,8 @@ async def update_survey(session, event: Events, body) -> dict:
         survey.auto_send = data["auto_send"]
     if data.get("delay_minutes") is not None:
         survey.delay_minutes = max(0, min(7 * 24 * 60, data["delay_minutes"]))
+    if data.get("channels") is not None:
+        survey.channels = _check_channels(body.channels)
     await session.commit()
     return survey_out(survey)
 
@@ -896,39 +1018,176 @@ def _survey_email(event: Events, reg, org: str) -> dict:
 
 
 SURVEY_MAIL = "live.survey_mail"
+SURVEY_WHATSAPP = "live.survey_whatsapp"
+
+#: What the club's monthly messages count a survey as (app/api/message_quota).
+SURVEY_KIND = "survey"
 
 
 def _survey_mail_key(survey_id, registration_id) -> str:
     return f"live:survey:{survey_id}:{registration_id}"
 
 
+def _survey_whatsapp_key(survey_id, registration_id) -> str:
+    return f"live:survey:wa:{survey_id}:{registration_id}"
+
+
+#: The job that carries one guest's survey on each paid channel.
+CHANNEL_JOB = {EMAIL: SURVEY_MAIL, WHATSAPP: SURVEY_WHATSAPP}
+CHANNEL_KEY = {EMAIL: _survey_mail_key, WHATSAPP: _survey_whatsapp_key}
+
+
+@dataclass(frozen=True)
+class _Guest:
+    """One checked-in guest as the send reads them, read before anything
+    commits: the push below ends this session's transaction, which would
+    expire the rows themselves."""
+
+    id: object
+    user_id: Optional[int]
+    email: Optional[str]
+    phone: Optional[str]
+    whatsapp_opt_in: bool
+    wa_bounced_at: Optional[datetime]
+
+
+def _guests(regs) -> list[_Guest]:
+    return [
+        _Guest(id=r.id, user_id=r.user_id, email=r.email, phone=r.phone,
+               whatsapp_opt_in=bool(r.whatsapp_opt_in), wa_bounced_at=r.wa_bounced_at)
+        for r in regs
+    ]
+
+
+async def sends_by_channel(session, survey_id) -> dict:
+    """What the survey's sends became, by channel: `{"push": 12,
+    "whatsapp": 0, "email": 3, "none": 1}` -- what the club's report shows
+    as the split. `none` is the guests no allowed channel could reach
+    (their row says why). A row from before the channels existed, which was
+    always a mail, counts as an email."""
+    out = {c: 0 for c in CHANNEL_ORDER}
+    out["none"] = 0
+    rows = (await session.execute(
+        select(FeedbackSends.channel, FeedbackSends.mailed_at.isnot(None), func.count())
+        .where(FeedbackSends.survey_id == survey_id)
+        .group_by(FeedbackSends.channel, FeedbackSends.mailed_at.isnot(None))
+    )).all()
+    for channel, mailed, count in rows:
+        key = channel if channel in out else (EMAIL if mailed else "none")
+        out[key] += int(count)
+    return out
+
+
 async def send_survey(session, event: Events, now: Optional[datetime] = None) -> dict:
-    """To everyone who was checked in and has not been sent it yet; each gets
-    a link only they hold. The recipients are claimed (feedback_sends) in the
-    same transaction that marks the survey sent, so sending again, or the
-    sweep and a send at once, reaches only the people not sent yet. Each
-    claimed guest's mail is a job of its own (SURVEY_MAIL), written in that
-    transaction: it survives a restart, is retried when the provider does not
-    take it, and marks the guest mailed (feedback_sends.mailed_at) once it
-    went, so a job run twice mails nobody twice."""
+    """To everyone who was checked in and has not been sent it yet, each on
+    one channel and each with a link only they hold.
+
+    The free channel goes first and as one send: the guests whose phones
+    have the app are worked out (push_reachable), and all of them are told
+    in a single fan-out through the live room's own machinery
+    (notify.tell_room with `what="feedback"`), which honours their mutes,
+    the per-event rate limits and the audit log, and writes their inbox
+    lines. Only then is anything paid for: every other guest is claimed for
+    the cheapest remaining channel the club allows that can reach them
+    (pick_channel), so a club never spends an email on somebody who could
+    have had the push. A guest no allowed channel can reach is claimed with
+    no channel at all and the reason on their row.
+
+    The claim (feedback_sends) is in the same transaction that marks the
+    survey sent, so sending again, or the sweep and a send at once, reaches
+    only the people not sent yet. Each paid guest's message is a job of its
+    own (SURVEY_MAIL, SURVEY_WHATSAPP), written in that transaction: it
+    survives a restart, is retried when the provider does not take it, and
+    marks the guest delivered once it went, so a job run twice sends nobody
+    twice.
+
+    A guest claimed with no channel is claimed again by a later send (the
+    claim re-opens a row that carries neither a channel nor a delivery), so
+    a club that adds email after a push-only send does reach them."""
     survey = await survey_of(session, event)
-    everyone = await audience_regs(session, event, Audience.checked_in)
-    regs = [r for r in everyone if r.email]
+    survey_id, club_id = survey.id, event.club_id
+    channels = clean_channels(survey.channels)
+    everyone = _guests(await audience_regs(session, event, Audience.checked_in))
+    now = now or now_utc()
+
+    # The free channel, as one fan-out. It commits (and on a failure rolls
+    # back) this session's transaction, which is why `everyone` is already
+    # read out of the rows above.
+    pushed: set[int] = set()
+    push_outcome = None
+    if PUSH in channels and everyone:
+        candidates = await push_reachable(session, event, [g.user_id for g in everyone])
+        told = await notify.tell_room(session, event, "feedback", only=candidates, now=now)
+        push_outcome = told["skipped_reason"]
+        if told["sent"]:
+            pushed = candidates
+
+    # Asked once a send, not once a guest -- and not at all when the club
+    # did not allow the channel.
+    whatsapp_on = WHATSAPP in channels and (whatsapp_possible() or await _club_sends_whatsapp(session, club_id))
+    rows, waiting = [], []
+    for guest in everyone:
+        channel, why = pick_channel(channels, guest, pushed, whatsapp_on=whatsapp_on)
+        rows.append({
+            "survey_id": survey_id, "registration_id": guest.id, "sent_at": now, "channel": channel,
+            # The push is already out; the rest wait on their job.
+            "delivered_at": now if channel == PUSH else None, "skipped_reason": why,
+        })
+        if channel in CHANNEL_JOB:
+            waiting.append((channel, guest.id))
+
     claimed: list = []
-    if regs:
-        claimed = list((await session.scalars(
-            pg_insert(FeedbackSends)
-            .values([{"survey_id": survey.id, "registration_id": r.id} for r in regs])
-            .on_conflict_do_nothing(index_elements=["survey_id", "registration_id"])
-            .returning(FeedbackSends.registration_id)
+    if rows:
+        stmt = pg_insert(FeedbackSends).values(rows)
+        claimed = list((await session.execute(
+            stmt.on_conflict_do_update(
+                index_elements=["survey_id", "registration_id"],
+                set_={
+                    "sent_at": stmt.excluded.sent_at, "channel": stmt.excluded.channel,
+                    "delivered_at": stmt.excluded.delivered_at, "skipped_reason": stmt.excluded.skipped_reason,
+                },
+                # Only a row nothing ever went out on: a guest already sent
+                # the survey -- or with a message still waiting on its job --
+                # is left exactly as they are.
+                where=sa.and_(
+                    FeedbackSends.channel.is_(None), FeedbackSends.delivered_at.is_(None), FeedbackSends.mailed_at.is_(None),
+                ),
+            ).returning(FeedbackSends.registration_id, FeedbackSends.channel)
         )).all())
-    survey.sent_at = now or now_utc()
-    survey.sent_count = (survey.sent_count or 0) + len(claimed)
-    await jobs.enqueue_many(session, SURVEY_MAIL, [
-        ({"survey_id": survey.id, "registration_id": reg_id}, _survey_mail_key(survey.id, reg_id)) for reg_id in claimed
-    ])
+    mine = {r[0] for r in claimed}
+    sent = sum(1 for _reg_id, channel in claimed if channel is not None)
+    await session.execute(
+        update(FeedbackSurveys)
+        .where(FeedbackSurveys.id == survey_id)
+        .values(sent_at=now, sent_count=FeedbackSurveys.sent_count + sent)
+    )
+    for channel, job in CHANNEL_JOB.items():
+        await jobs.enqueue_many(session, job, [
+            ({"survey_id": survey_id, "registration_id": reg_id}, CHANNEL_KEY[channel](survey_id, reg_id))
+            for c, reg_id in waiting if c == channel and reg_id in mine
+        ])
     await session.commit()
-    return {"sent": len(claimed), "invited": len(everyone), **survey_out(survey)}
+    survey = await session.scalar(select(FeedbackSurveys).where(FeedbackSurveys.id == survey_id))
+    return {
+        "sent": sent, "invited": len(everyone), "push_skipped_reason": push_outcome,
+        "by_channel": await sends_by_channel(session, survey_id), **survey_out(survey),
+    }
+
+
+async def _club_sends_whatsapp(session, club_id: Optional[int]) -> bool:
+    """Whether this club could send the survey from its own WhatsApp number
+    (app/api/club_whatsapp), which costs it nothing of its MyOtherApp
+    allowance. Never raises: without an answer the channel is simply not
+    offered to this send."""
+    if club_id is None:
+        return False
+    try:
+        from app.api.club_whatsapp import service as club_whatsapp
+
+        return await club_whatsapp.route_for(session, int(club_id), "event_update") is not None
+    except Exception:  # noqa: BLE001 - the other channels still carry it
+        logger.warning("club %s: could not tell whether it sends WhatsApp itself", club_id, exc_info=True)
+        return False
 
 
 @jobs.handler(SURVEY_MAIL, max_attempts=6, timeout=60.0)
@@ -946,11 +1205,16 @@ async def mail_survey(survey_id: UUID, registration_id: UUID) -> bool:
     it raises here, and the job is tried again later.
 
     It counts against the club's monthly emails (app/api/message_quota):
-    past Free's limit it is held back, the reason kept on its row."""
+    past Free's limit it is held back, the reason kept on its row.
+
+    `delivered_at` and `mailed_at` are both written: the first is what the
+    channels read, the second is what it has always been for an email."""
     terms = held = None
     async with jobs.scope() as s:
         row = (await s.execute(
-            select(FeedbackSends.mailed_at, EventRegistrationsLink, Events)
+            # Already gone, on either column: a row claimed before
+            # `delivered_at` existed has only `mailed_at`.
+            select(func.coalesce(FeedbackSends.delivered_at, FeedbackSends.mailed_at), EventRegistrationsLink, Events)
             .join(EventRegistrationsLink, EventRegistrationsLink.id == FeedbackSends.registration_id)
             .join(FeedbackSurveys, FeedbackSurveys.id == FeedbackSends.survey_id)
             .join(Events, Events.id == FeedbackSurveys.event_id)
@@ -958,7 +1222,7 @@ async def mail_survey(survey_id: UUID, registration_id: UUID) -> bool:
             .where(FeedbackSends.survey_id == survey_id, FeedbackSends.registration_id == registration_id)
         )).first()
         if row is not None and row[0] is None and row[1].email:
-            terms, held = await quota.check(s, row[2].club_id, quota.EMAIL, "survey")
+            terms, held = await quota.check(s, row[2].club_id, quota.EMAIL, SURVEY_KIND)
             if held:
                 await s.execute(
                     update(FeedbackSends)
@@ -979,13 +1243,107 @@ async def mail_survey(survey_id: UUID, registration_id: UUID) -> bool:
     async with jobs.scope() as s:
         await s.execute(
             update(FeedbackSends)
-            .where(FeedbackSends.survey_id == survey_id, FeedbackSends.registration_id == registration_id, FeedbackSends.mailed_at.is_(None))
-            .values(mailed_at=now_utc(), skipped_reason=None)
+            .where(
+                FeedbackSends.survey_id == survey_id, FeedbackSends.registration_id == registration_id,
+                FeedbackSends.delivered_at.is_(None), FeedbackSends.mailed_at.is_(None),
+            )
+            .values(channel=EMAIL, delivered_at=now_utc(), mailed_at=now_utc(), skipped_reason=None)
         )
         await quota.count(
-            s, club_id=event.club_id, channel=quota.EMAIL, kind="survey", terms=terms,
+            s, club_id=event.club_id, channel=quota.EMAIL, kind=SURVEY_KIND, terms=terms,
             ref=f"survey:{survey_id}:{registration_id}",
         )
+        await s.commit()
+    return True
+
+
+# --- the survey on WhatsApp ----------------------------------------------------
+
+
+def _survey_whatsapp(event: Events, reg, org: str):
+    """The survey as the approved `event_update` template carries it. Our
+    own words cannot go by WhatsApp outside a conversation the guest
+    started, so this is the UTILITY template Meta already approved for
+    event updates, with the ask and the guest's own link as the update. A
+    `feedback_survey` template of its own would read better and is the
+    follow-up this leaves for Meta's review."""
+    from app.core import whatsapp
+
+    return whatsapp.event_update(
+        name=reg.full_name or "", club=org, event=event.name,
+        update=f"how was it? Two minutes of your thoughts would help the next one: {survey_link(event, reg)}",
+    )
+
+
+@jobs.handler(SURVEY_WHATSAPP, max_attempts=6, timeout=60.0)
+async def _survey_whatsapp_job(payload: dict) -> None:
+    await whatsapp_survey(UUID(str(payload["survey_id"])), UUID(str(payload["registration_id"])))
+
+
+async def whatsapp_survey(survey_id: UUID, registration_id: UUID) -> bool:
+    """One guest's survey on WhatsApp, unless it went already. True when it
+    went now. Read, send, then mark, as the mail does: a run cut off between
+    the two sends it again on the retry rather than claim a message nobody
+    got. Meta has no idempotency key, so a guest could see it twice; the
+    alternative is a guest who never sees it.
+
+    It goes from the club's own number when the club has one routed
+    (app/api/club_whatsapp), which it pays Meta for and which is never
+    counted here; otherwise from the platform's, counted against the club's
+    monthly WhatsApp (app/api/message_quota) and held back past the
+    allowance with the reason kept on its row."""
+    from app.api.club_whatsapp import service as club_whatsapp
+    from app.core import whatsapp
+
+    terms = held = route = None
+    async with jobs.scope() as s:
+        row = (await s.execute(
+            select(FeedbackSends.delivered_at, EventRegistrationsLink, Events)
+            .join(EventRegistrationsLink, EventRegistrationsLink.id == FeedbackSends.registration_id)
+            .join(FeedbackSurveys, FeedbackSurveys.id == FeedbackSends.survey_id)
+            .join(Events, Events.id == FeedbackSurveys.event_id)
+            .options(joinedload(Events.club))
+            .where(FeedbackSends.survey_id == survey_id, FeedbackSends.registration_id == registration_id)
+        )).first()
+        if row is not None and row[0] is None and row[1].phone:
+            route = await club_whatsapp.route_for(s, row[2].club_id, "event_update")
+            if route is None:
+                terms, held = await quota.check(s, row[2].club_id, quota.WHATSAPP, SURVEY_KIND)
+            if held:
+                await s.execute(
+                    update(FeedbackSends)
+                    .where(FeedbackSends.survey_id == survey_id, FeedbackSends.registration_id == registration_id)
+                    .values(skipped_reason=held[:300])
+                )
+        await s.commit()
+    if row is None or row[0] is not None or not row[1].phone or held:
+        return False
+    reg, event = row[1], row[2]
+    org = (event.club.name if event.club is not None else None) or "The organisers"
+    try:
+        await whatsapp.send(reg.phone, _survey_whatsapp(event, reg, org), sender=route.sender if route is not None else None)
+    except whatsapp.Undeliverable as e:
+        # A fact about the number, not a failure: the row says so and the
+        # job is done with it.
+        async with jobs.scope() as s:
+            await s.execute(
+                update(FeedbackSends)
+                .where(FeedbackSends.survey_id == survey_id, FeedbackSends.registration_id == registration_id)
+                .values(skipped_reason=str(e.reason)[:300])
+            )
+            await s.commit()
+        return False
+    async with jobs.scope() as s:
+        await s.execute(
+            update(FeedbackSends)
+            .where(FeedbackSends.survey_id == survey_id, FeedbackSends.registration_id == registration_id, FeedbackSends.delivered_at.is_(None))
+            .values(channel=WHATSAPP, delivered_at=now_utc(), skipped_reason=None)
+        )
+        if route is None:
+            await quota.count(
+                s, club_id=event.club_id, channel=quota.WHATSAPP, kind=SURVEY_KIND, terms=terms,
+                ref=f"survey:wa:{survey_id}:{registration_id}",
+            )
         await s.commit()
     return True
 
@@ -1027,7 +1385,10 @@ async def feedback_for_club(session, event: Events) -> dict:
         if r["responses"]:
             previous = {"event_id": e.id, "event_name": e.name, **r}
             break
-    return {**survey_out(survey), "sends_at": _auto_send_at(event, survey), "results": results, "previous": previous, "checked_in": counts["checked_in"]}
+    return {
+        **survey_out(survey), "sends_at": _auto_send_at(event, survey), "results": results, "previous": previous,
+        "checked_in": counts["checked_in"], "by_channel": await sends_by_channel(session, survey.id),
+    }
 
 
 def _ends_at(event: Events) -> datetime:
