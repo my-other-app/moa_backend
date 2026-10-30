@@ -30,13 +30,13 @@ matters: `mailed_at` still records every email that went, which is all the
 table held before.
 
 Revision ID: feedback_channels
-Revises: add_event_cohosts
+Revises: org_search
 """
 import sqlalchemy as sa
 from alembic import op
 
 revision = "feedback_channels"
-down_revision = "add_event_cohosts"
+down_revision = "org_search"
 branch_labels = None
 depends_on = None
 
