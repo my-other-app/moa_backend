@@ -60,6 +60,25 @@ class RenderJob:
         return doc_cache.key_for(kind, registration_id, self.design_version, self.fingerprint)
 
 
+#: What a refused ticket document says, and the code it says it under. The
+#: door already refuses a revoked ticket under this code
+#: (events/volunteer/service.py; checkins/service.py answers "REVOKED"), so a
+#: client reads one name for it whether it asks at the door or for the ticket.
+TICKET_REVOKED_CODE = "TICKET_REVOKED"
+TICKET_REVOKED_MESSAGE = "This ticket was revoked by the organiser."
+
+
+def is_revoked(registration) -> bool:
+    """Whether the organiser took this ticket back.
+
+    The counterpart of events.certificates.availability for a ticket: the one
+    answer every path that hands out a ticket -- or a QR of one -- asks before
+    it does. A document that still draws the QR of a revoked ticket only tells
+    the holder they have a ticket until they are turned away at the door.
+    """
+    return getattr(registration, "ticket_revoked_at", None) is not None
+
+
 def role_of(registration) -> Optional[RegistrationRole]:
     """The role this registration's document should be rendered for.
 
@@ -131,6 +150,13 @@ def ticket_job(registration, style: dict) -> RenderJob:
     touched from there. `registration.event` and its club must be loaded."""
     event = registration.event
     version = design_version_of(style)
+    # Revoking it is part of what this ticket is, so it is part of its name:
+    # the fingerprint is both the ETag the endpoints send and the key the
+    # drawn PDF is kept under (RenderJob.cache_key), so a revocation retires
+    # the stored file and every browser copy tagged with it at once -- as a
+    # certificate's revocation does for its cache seed. Reinstating it gives
+    # back the old fingerprint, so the kept PDF is read, not drawn again.
+    revoked_at = getattr(registration, "ticket_revoked_at", None)
     if in_layout_mode(style):
         # Drawn by the layout renderer with the editor's own fonts and layout
         # code, so the ticket is what the canvas showed. No HTML, no browser.
@@ -141,7 +167,7 @@ def ticket_job(registration, style: dict) -> RenderJob:
         def draw() -> tuple[bytes, bool]:
             return render_layout(style, values, ticket_id, title=f"Ticket {ticket_id}", event_icon_url=icon, club=club)
 
-        print_ = doc_cache.fingerprint("ticket-layout", style, values, ticket_id, key_from_url(icon) or icon, layout_colors(style, club))
+        print_ = doc_cache.fingerprint("ticket-layout", style, values, ticket_id, key_from_url(icon) or icon, layout_colors(style, club), revoked_at)
         return RenderJob(draw, print_, version, style)
 
     payload = ticket_payload(registration, qr=False)
@@ -167,7 +193,7 @@ def ticket_job(registration, style: dict) -> RenderJob:
 
     print_ = doc_cache.fingerprint(
         "ticket-html", doc_cache.template_digest("events/ticket.html"),
-        payload, styled, options,
+        payload, styled, options, revoked_at,
     )
     return RenderJob(draw, print_, version, style)
 

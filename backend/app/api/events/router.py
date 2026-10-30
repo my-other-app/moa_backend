@@ -38,7 +38,15 @@ from app.api.events import wallet_service
 from app.api.subscriptions import gates
 from app.api.users.models import UserTypes
 from app.api.templates_audience import RegistrationRole
-from app.api.events.tickets import role_of, ticket_job, ticket_payload, ticket_style
+from app.api.events.tickets import (
+    TICKET_REVOKED_CODE,
+    TICKET_REVOKED_MESSAGE,
+    is_revoked,
+    role_of,
+    ticket_job,
+    ticket_payload,
+    ticket_style,
+)
 from app.api.events.certificates import (
     availability,
     certificate_context,
@@ -116,6 +124,22 @@ async def _assert_can_access_ticket(session, user, registration) -> None:
         if await cohosts.is_cohost(session, registration.event.id, user.club.id):
             return
     raise CustomHTTPException(403, "You do not have permission to access this ticket.")
+
+
+def _assert_ticket_not_revoked(registration) -> None:
+    """Refuse the ticket's documents once the organiser has taken it back.
+
+    410 Gone, like the emailed link's own refusal (app/api/emails/router.py:
+    `ticket_file`): the ticket existed, it is the right ticket, and it is not
+    coming back by trying again -- which is not what a 403 from
+    `_assert_can_access_ticket` means, and not what the volunteer scanner's
+    400 means either (it answers about a scan, not about a file). The app's
+    ticket screen already treats 403, 404 and 410 on a document as a refusal
+    and drops the copy kept on the phone, so the stale design and its QR go
+    with the server's. The code is the door's own, TICKET_REVOKED.
+    """
+    if is_revoked(registration):
+        raise CustomHTTPException(410, TICKET_REVOKED_MESSAGE, error_code=TICKET_REVOKED_CODE)
 
 
 @router.post("/categories/create", summary="Create a new event category")
@@ -615,6 +639,11 @@ async def get_ticket(
     result = await service.get_ticket_details(session, ticket_id=ticket_id)
     await _assert_can_access_ticket(session, user, result)
     data = jsonable_encoder(result)
+    # Revoked by the organiser, under the name the event list already uses
+    # for it (EventListResponse.ticket_revoked). The ticket's own page is the
+    # only thing a guest reading the link from their email can ask -- there
+    # is no list for them -- so without this they were told nothing.
+    data["ticket_revoked"] = is_revoked(result)
     # The event's state, as its page says it, so the ticket can say
     # "Cancelled" without asking the event page as well. The event is loaded
     # with the ticket; only a cancelled one costs a query, for the reason.
@@ -647,10 +676,16 @@ async def get_ticket_image(
     admin. A QR is an entry pass, not a public image.
 
     Tagged like the PDF, from the same fingerprint (_document_etag, with
-    "-png"): a 304 without drawing when If-None-Match names it.
+    "-png"): a 304 without drawing when If-None-Match names it. The
+    fingerprint names the revocation too, so a revoked ticket can never be
+    answered 304 against the picture a phone kept while it still worked.
+
+    A revoked ticket is refused (410, TICKET_REVOKED): the door will not
+    open on this QR, so nothing here draws one.
     """
     registration = await service.get_ticket_details(session, ticket_id=ticket_id)
     await _assert_can_access_ticket(session, user, registration)
+    _assert_ticket_not_revoked(registration)
 
     style = await ticket_style(session, registration)
     job = ticket_job(registration, style)
@@ -747,9 +782,15 @@ async def get_ticket_pdf(
     Its ETag names this ticket as drawn (_document_etag). Asked again with
     that tag in If-None-Match, an unchanged ticket is a 304, decided without
     drawing it or reading the bucket. The access check comes first.
+
+    A revoked ticket is refused (410, TICKET_REVOKED), as the emailed link's
+    own download has always been (app/api/emails/router.py). Revoking it also
+    changes the fingerprint, so the copy kept in the bucket is retired and no
+    held ETag matches.
     """
     registration = await service.get_ticket_details(session, ticket_id=ticket_id)
     await _assert_can_access_ticket(session, user, registration)
+    _assert_ticket_not_revoked(registration)
 
     job = ticket_job(registration, await ticket_style(session, registration))
     etag = _document_etag(job)
@@ -772,9 +813,15 @@ async def get_wallet_pass(
     Generate and download an Apple Wallet pass (.pkpass) for the ticket.
     
     Requires authentication. The pass can be added to Apple Wallet on iOS devices.
+
+    A revoked ticket is refused (410, TICKET_REVOKED). A pass already in
+    Wallet is not recalled by this -- there is no push service registered for
+    these passes -- but it stops being handed out, and the door refuses the
+    barcode on it (app/api/checkins).
     """
     registration = await service.get_ticket_details(session, ticket_id=ticket_id)
     await _assert_can_access_ticket(session, user, registration)
+    _assert_ticket_not_revoked(registration)
 
     pkpass_bytes = await wallet_service.generate_wallet_pass(session, ticket_id)
     
