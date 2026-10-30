@@ -62,7 +62,19 @@ async def _design(client, world, audience="event_default"):
     return r.json()["version"]
 
 
+async def _issue(client, world) -> None:
+    """The club issues to whoever checked in. Without it there is nothing to
+    cache, draw or revoke: a check-in is not a certificate
+    (events.certificates.availability)."""
+    r = await client.post(
+        f"/api/v1/events/{world['event'].id}/certificates/issue",
+        json={"audience": "checked_in"}, headers=world["club"],
+    )
+    assert r.status_code == 200, r.text
+
+
 async def test_the_public_certificate_is_cached_minutes_and_revalidated(client, world, drawn):
+    await _issue(client, world)
     url = f"/api/v1/events/certificates/{world['a'].ticket_id}"
     png = await client.get(f"{url}/image")
     pdf = await client.get(f"{url}/pdf")
@@ -78,6 +90,7 @@ async def test_the_public_certificate_is_cached_minutes_and_revalidated(client, 
 
 
 async def test_a_revocation_or_a_redesign_changes_the_etag(client, world, drawn):
+    await _issue(client, world)
     url = f"/api/v1/events/certificates/{world['a'].ticket_id}/image"
     first = (await client.get(url)).headers["etag"]
 
@@ -86,12 +99,12 @@ async def test_a_revocation_or_a_redesign_changes_the_etag(client, world, drawn)
     assert redesigned.status_code == 200 and redesigned.headers["etag"] != first
 
     base = f"/api/v1/events/{world['event'].id}/certificates"
-    await client.post(f"{base}/issue", json={"audience": "checked_in"}, headers=world["club"])
     await client.post(f"{base}/{world['a'].id}/revoke", headers=world["club"])
     assert (await client.get(url)).status_code == 403
 
 
 async def test_the_public_routes_are_limited_per_address(client, world, drawn):
+    await _issue(client, world)
     code = world["a"].certificate_no
     answers = [(await client.get(f"/api/v1/verify/certificates/{code}")).status_code for _ in range(21)]
     assert answers[:20] == [200] * 20 and answers[20] == 429

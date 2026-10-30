@@ -80,7 +80,12 @@ async def world(client, session, make_club, make_event, make_user, make_registra
     owner, club = await make_club(name="Yukthi", email="pool@example.com")
     event = await make_event(club=club, created_by=owner, name="Build Night", event_datetime=START, duration=3.0, location_name="Hall")
     user = await make_user(email="pool-guest@example.com")
-    reg = await make_registration(event=event, user=user, full_name="Ananya Iyer", is_attended=True)
+    # Issued as well as checked in: a check-in is not a certificate
+    # (events.certificates.availability), and the routes below draw one.
+    reg = await make_registration(
+        event=event, user=user, full_name="Ananya Iyer", is_attended=True,
+        certificate_issued_at=datetime.now(timezone.utc),
+    )
     await session.commit()
     return {"event": event, "reg": reg, "club": auth_header(await mint_token(owner)), "guest": auth_header(await mint_token(user))}
 

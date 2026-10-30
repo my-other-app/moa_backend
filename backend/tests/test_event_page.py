@@ -343,7 +343,10 @@ async def test_ticket_and_certificate_links_point_at_the_site(client, session, w
     h = auth_header(await mint_token(world["users"][0]))
     info = (await client.get(f"/api/v1/events/info/{main.id}", headers=h)).json()
     assert info["ticket_url"] == f"{SITE}/tickets/{reg.ticket_id}" and info["certificate_url"] is None
+    # A certificate link once the club issues one; checking in alone is not
+    # a certificate (events.certificates.availability).
     reg.is_attended = True
+    reg.certificate_issued_at = datetime.now(timezone.utc)
     await session.commit()
     info = (await client.get(f"/api/v1/events/info/{main.id}", headers=h)).json()
     assert info["certificate_url"] == f"{SITE}/certificates/{reg.ticket_id}"

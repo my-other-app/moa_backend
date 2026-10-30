@@ -33,6 +33,9 @@ async def world(session, make_club, make_event, make_user, make_registration, mi
     user = await make_user(email="lakshmi-layout@example.com")
     registration = await make_registration(event=event, user=user, full_name="Lakshminarayanan Venkataraman")
     registration.is_attended = True
+    # Issued, so there is a certificate to draw: a check-in is not one
+    # (events.certificates.availability).
+    registration.certificate_issued_at = datetime.now(timezone.utc)
     await session.commit()
     return {"event": event, "registration": registration, "club": auth_header(await mint_token(owner)),
             "attendee": auth_header(await mint_token(user))}
