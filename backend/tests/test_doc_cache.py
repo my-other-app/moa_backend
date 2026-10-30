@@ -101,6 +101,14 @@ async def test_a_render_missing_an_image_is_not_kept(session, world, bucket, dra
 async def test_the_download_and_a_resend_share_the_kept_certificate(client, session, world, bucket, drawn):
     from app.api.events.certificates import certificate_document
 
+    # Issued first: a check-in is not a certificate, so without this there is
+    # nothing to download (events.certificates.availability).
+    issued = await client.post(
+        f"/api/v1/events/{world['event'].id}/certificates/issue",
+        json={"audience": "checked_in"}, headers=world["club"],
+    )
+    assert issued.status_code == 200, issued.text
+
     r = await client.get(f"/api/v1/events/certificates/{world['a'].ticket_id}/pdf")
     assert r.status_code == 200
     doc = await certificate_document(session, await _reg(session, world))

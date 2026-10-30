@@ -564,9 +564,10 @@ class EventListResponse(CustomBaseModel):
     # caller has no registration for the event.
     ticket_revoked: bool | None = Field(None)
     # Whether the caller holds a certificate for it, by the rule the PDF and
-    # the image follow (events.certificates.availability): issued and not
-    # revoked, or checked in before the organiser issued any. A speaker
-    # issued one without checking in holds one; a revoked one is not held.
+    # the image follow (events.certificates.availability): issued by the
+    # organiser and not revoked. A speaker issued one without checking in
+    # holds one; checking in alone never gives one, so this stays false
+    # until the organiser issues -- forever, at an event that issues none.
     has_certificate: bool | None = Field(None)
     certificate_revoked: bool | None = Field(None)
     certificate_url: str | None = Field(None)
@@ -763,8 +764,9 @@ class EventDetailResponse(CustomBaseModel):
     is_attended: bool = Field(False)
     ticket_id: str | None = Field(None)
     ticket_url: str | None = Field(None)
-    #: Whether the viewer holds a certificate for it, and whether theirs was
-    #: revoked (events.certificates.availability). Null when not registered.
+    #: Whether the viewer holds a certificate for it -- one the organiser
+    #: issued, never a check-in on its own -- and whether theirs was revoked
+    #: (events.certificates.availability). Null when not registered.
     has_certificate: bool | None = Field(None)
     certificate_revoked: bool | None = Field(None)
     certificate_url: str | None = Field(None)

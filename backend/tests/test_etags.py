@@ -295,8 +295,12 @@ async def world(client, session, make_club, make_event, make_user, make_registra
     )
     a = await make_user(email="etags-a@example.com")
     b = await make_user(email="etags-b@example.com")
-    r_a = await make_registration(event=event, user=a, full_name="Ananya Iyer", is_attended=True)
-    r_b = await make_registration(event=event, user=b, full_name="Bala Krishnan", is_attended=True)
+    # Both were there and both were issued a certificate: a check-in on its
+    # own is not one (events.certificates.availability), and the certificate
+    # routes below need one to tag.
+    issued = datetime.now(timezone.utc)
+    r_a = await make_registration(event=event, user=a, full_name="Ananya Iyer", is_attended=True, certificate_issued_at=issued)
+    r_b = await make_registration(event=event, user=b, full_name="Bala Krishnan", is_attended=True, certificate_issued_at=issued)
     await session.commit()
     return {
         "event": event, "a": r_a, "b": r_b,
@@ -526,7 +530,6 @@ async def test_the_certificate_pdf_is_tagged_the_same_way_and_a_revoked_one_is_r
     assert drawn["calls"] == ["Ananya Iyer"] and len(drawn["trips"]) == 1
 
     base = f"/api/v1/events/{world['event'].id}/certificates"
-    await client.post(f"{base}/issue", json={"audience": "checked_in"}, headers=world["club"])
     await client.post(f"{base}/{world['a'].id}/revoke", headers=world["club"])
     assert (await client.get(url, headers={"If-None-Match": first.headers["etag"]})).status_code == 403
 

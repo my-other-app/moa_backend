@@ -502,7 +502,8 @@ async def list_events(
                 # Which ticket type it is, from the same registration row.
                 event_dict["ticket_label"] = reg.ticket_label
                 # The certificate as the PDF and the image decide it: one
-                # issued without a check-in counts, a revoked one does not.
+                # issued without a check-in counts, a check-in without an
+                # issuing does not, and neither does a revoked one.
                 held = availability(reg)
                 event_dict["has_certificate"] = held.available
                 event_dict["certificate_revoked"] = held.reason == "revoked"
@@ -867,8 +868,10 @@ async def _certificate_for(session, ticket_id: str):
             message=(
                 "This certificate was revoked."
                 if held.reason == "revoked"
-                else "Certificate is only available for attendees who checked in"
+                else "No certificate has been issued for this event yet. "
+                "It will be here once the organiser issues one."
             ),
+            error_code="CERTIFICATE_NOT_ISSUED" if held.reason == "not_issued" else "CERTIFICATE_REVOKED",
         )
     return registration, await certificate_style(session, registration)
 

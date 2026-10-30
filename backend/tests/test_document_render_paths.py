@@ -86,6 +86,9 @@ async def layered_event(session, make_club, make_event, make_user, make_registra
         event=event, user=user, full_name="Lakshminarayanan Venkataraman",
     )
     registration.is_attended = True
+    # A certificate exists only once the club issues it, and without one
+    # there is nothing for the certificate renders below to draw.
+    registration.certificate_issued_at = datetime.now(timezone.utc)
     await session.commit()
     return {
         "event": event,
@@ -224,6 +227,7 @@ async def test_a_built_in_certificate_keeps_landscape_a4(
     user = await make_user(email="plain-user@example.com")
     registration = await make_registration(event=event, user=user)
     registration.is_attended = True
+    registration.certificate_issued_at = datetime.now(timezone.utc)
     await session.commit()
 
     await client.get(f"/api/v1/events/certificates/{registration.ticket_id}/pdf")

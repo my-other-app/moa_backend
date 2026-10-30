@@ -2,8 +2,8 @@
 
 A certificate used to be implicit: anyone who checked in could download
 one. It is now issued -- by the organiser, to whoever they choose, numbered,
-and revocable -- while the download an attended guest already had keeps
-working until the organiser takes the decision in hand.
+and revocable. Nothing exists before that: a check-in is attendance, not a
+certificate, and an event whose club issues none has none (`availability`).
 """
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -63,23 +63,26 @@ def qr_text(registration) -> str:
 @dataclass
 class Availability:
     available: bool
-    reason: str  # "issued" | "attended" | "revoked" | "not_issued"
+    reason: str  # "issued" | "revoked" | "not_issued"
 
 
 def availability(registration) -> Availability:
-    """Whether this guest holds a valid certificate.
+    """Whether this guest holds a certificate.
 
-    Issued and not revoked is the rule. A guest who checked in and was never
-    explicitly issued one keeps the certificate they always had, so turning
-    the feature on takes nothing away; issuing to anyone at an event moves
-    that event onto the explicit rule for everyone else.
+    Issued and not revoked is the whole rule. A certificate exists because
+    the organiser issued it (POST /events/{id}/certificates/issue), to the
+    audience they chose -- never because someone walked through the door.
+
+    Checking in used to be enough on its own, so an event whose club had
+    issued nothing handed a certificate to everyone who checked in, the
+    moment they checked in. Certificates are for some events only, and who
+    gets one is the club's decision: until it is taken, there is nothing to
+    see, nothing to download and nothing to verify.
     """
     if getattr(registration, "certificate_revoked_at", None):
         return Availability(False, "revoked")
     if getattr(registration, "certificate_issued_at", None):
         return Availability(True, "issued")
-    if registration.is_attended:
-        return Availability(True, "attended")
     return Availability(False, "not_issued")
 
 
