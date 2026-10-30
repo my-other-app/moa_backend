@@ -823,6 +823,11 @@ class TicketDetailsResponse(CustomBaseModel):
     #: The certificate's own number; null on one older than numbers drawn
     #: separately, whose number is CERT- and the ticket id's body.
     certificate_no: str | None = None
+    #: The organiser revoked this ticket: the door refuses it, and so do its
+    #: image, its PDF and its Wallet pass (410, TICKET_REVOKED). Spelled as
+    #: the event list already spells it (EventListResponse.ticket_revoked), so
+    #: a client reads one name for it everywhere. False on a working ticket.
+    ticket_revoked: bool = False
 
 
 # ─── Networking Discovery ─────────────────────────────────────────────
