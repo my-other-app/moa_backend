@@ -1,19 +1,27 @@
 """Telling the room: a push when the host starts the quiz or launches a
-poll, when the event goes live, and when Q&A opens.
+poll, when the event goes live, when Q&A opens, and -- after it is all
+over -- when the feedback survey goes out.
 
 What is told, to whom, and as which kind (all personal kinds,
 app.core.notifications.delivery, never an FCM topic):
 
-    what   type                 who                         when
-    quiz   event_live_join      everyone checked in         the host starts the quiz
-    poll   event_live_join      everyone checked in         the host launches a poll
-    room   event_live_started   everyone registered         the event goes live (closeout's clock, or by hand)
-    qa     event_live_qa        everyone checked in         the host approves or pins a question, or switches approval off
+    what      type                 who                        when
+    quiz      event_live_join      everyone checked in        the host starts the quiz
+    poll      event_live_join      everyone checked in        the host launches a poll
+    room      event_live_started   everyone registered        the event goes live (closeout's clock, or by hand)
+    qa        event_live_qa        everyone checked in        the host approves or pins a question, or switches approval off
+    feedback  event_feedback       the guests in `only`       the feedback survey goes out (service.send_survey)
+
+`feedback` is the one whose people the caller picks. The survey asks on the
+free channel first and pays only for the rest, so it works out which guests'
+phones have the app before anything is sent and names them in `only`; it
+then knows exactly whom it still has to mail. Everything else here -- the
+mutes, the limits, the audit entry -- holds for it as for the others.
 
 The console asks for quiz, poll and qa with the action (`notify` in its
-body: on unless said otherwise). `room` and `qa` go once per event: once one
-went, the next is `already_sent`. Each push's data is `{type, event_id,
-what, push_id}`.
+body: on unless said otherwise). `room`, `qa` and `feedback` go once per
+event: once one went, the next is `already_sent`. Each push's data is
+`{type, event_id, what, push_id}`.
 
 Everyone it is for with an account gets a push on each of their devices and
 a line in their inbox; not whoever muted the club or turned clubs' pushes
@@ -66,7 +74,10 @@ logger = logging.getLogger(__name__)
 TYPE = "event_live_join"
 STARTED_TYPE = "event_live_started"
 QA_TYPE = "event_live_qa"
-TYPES = {"quiz": TYPE, "poll": TYPE, "room": STARTED_TYPE, "qa": QA_TYPE}
+#: The survey's own: the app opens the event's feedback form (the guest's
+#: own link, which the event page already carries).
+FEEDBACK_TYPE = "event_feedback"
+TYPES = {"quiz": TYPE, "poll": TYPE, "room": STARTED_TYPE, "qa": QA_TYPE, "feedback": FEEDBACK_TYPE}
 #: The audit log's action for a notification that went: the rate limit's count.
 ACTION = "live.notify"
 PUSH_JOB = "live.join_push"
@@ -80,9 +91,10 @@ BODIES = {
     "poll": "A poll is live — vote now",
     "room": "It's on — open the live room",
     "qa": "Q&A is open — ask your questions",
+    "feedback": "How was it? Tell us in a minute",
 }
 #: Told once per event, ever: the second is `already_sent`.
-ONCE = frozenset({"room", "qa"})
+ONCE = frozenset({"room", "qa", "feedback"})
 #: Told to everyone registered with the app, not only those checked in.
 TO_REGISTERED = frozenset({"room"})
 
@@ -118,11 +130,14 @@ def outcome(sent: int = 0, reason: Optional[str] = None, last_sent_at: Optional[
     return {"sent": sent, "skipped_reason": reason, "last_sent_at": last_sent_at, "retry_after": retry_after}
 
 
-def recipients(event_id: int, club_id: Optional[int], *, honour: bool = True, checked_in: bool = True) -> sa.Select:
+def recipients(event_id: int, club_id: Optional[int], *, honour: bool = True, checked_in: bool = True, only=None) -> sa.Select:
     """The people to tell: checked in to the event (or, `checked_in=False`,
     registered for it), with an account (not a guest's), who have not muted
     the club or turned clubs' pushes off. `honour=False`: all of them, mutes
-    and switches or not."""
+    and switches or not. `only` (a collection of user ids): of those, the
+    ones in it -- the survey names the guests whose phones have the app, and
+    the mutes and the switches still cut that set down."""
+    from app.core.notifications.service import int_array
     from app.core.notifications.topics import settings_off
 
     reg = EventRegistrationsLink
@@ -137,6 +152,8 @@ def recipients(event_id: int, club_id: Optional[int], *, honour: bool = True, ch
             Users.is_deleted == False, Users.user_type != UserTypes.guest,  # noqa: E712
         )
     )
+    if only is not None:
+        q = q.where(reg.user_id == sa.any_(int_array(sorted({int(u) for u in only}))))
     if not honour:
         return q.distinct()
     q = q.where(~settings_off("clubs", reg.user_id))
@@ -182,13 +199,18 @@ async def _told_before(session, event_id: int, what: str) -> bool:
     ))
 
 
-async def tell_room(session, event, what: str, *, actor=None, ref=None, request=None, now: Optional[datetime] = None) -> dict:
+async def tell_room(session, event, what: str, *, actor=None, ref=None, request=None, now: Optional[datetime] = None, only=None) -> dict:
     """Tell the room (see the table above) that the quiz is starting
-    (`what` "quiz"), a poll is live ("poll"), the event is live ("room") or
-    Q&A is open ("qa"), unless the limit says not now -- or, for "room" and
-    "qa", it was told before. Called once the action has committed; ends the
-    session's transaction either way. Never raises: the answer is the
-    response's `notified`."""
+    (`what` "quiz"), a poll is live ("poll"), the event is live ("room"),
+    Q&A is open ("qa") or the feedback survey is out ("feedback"), unless
+    the limit says not now -- or, for "room", "qa" and "feedback", it was
+    told before. Called once the action has committed; ends the session's
+    transaction either way. Never raises: the answer is the response's
+    `notified`.
+
+    `only`: of the people it would be for, tell these alone (the survey's
+    own, the guests whose phones have the app). Their mutes and switches
+    still hold, so the answer's `sent` is how many of them were told."""
     if what not in BODIES:
         raise ValueError(f"nothing to tell the room about {what!r}")
     # Read now: a rollback below expires the rows the session holds.
@@ -196,11 +218,13 @@ async def tell_room(session, event, what: str, *, actor=None, ref=None, request=
     who = {"actor_id": getattr(actor, "id", None), "actor_email": getattr(actor, "email", None)}
     if not settings.LIVE_NOTIFY:
         return outcome(reason=DISABLED)
+    if only is not None and not only:
+        return outcome(reason=NOBODY)
     try:
         from app.core.net import client_address
 
         address = (client_address(request)[:45] or None) if request is not None else None
-        return await _tell(session, event_id, club_id, name, what, who, address, ref, now or now_utc())
+        return await _tell(session, event_id, club_id, name, what, who, address, ref, now or now_utc(), only)
     except Exception:  # noqa: BLE001 - the quiz or the poll stands; the room is just not told
         logger.exception("Could not tell the room of event %s about the %s", event_id, what)
         try:
@@ -210,7 +234,7 @@ async def tell_room(session, event, what: str, *, actor=None, ref=None, request=
         return outcome(reason=FAILED)
 
 
-async def _tell(session, event_id: int, club_id, name: str, what: str, who: dict, address, ref, now: datetime) -> dict:
+async def _tell(session, event_id: int, club_id, name: str, what: str, who: dict, address, ref, now: datetime, only=None) -> dict:
     # Whatever the action's answer read is done with: the lock below is held
     # by this transaction only, and goes with its commit.
     await session.commit()
@@ -228,9 +252,9 @@ async def _tell(session, event_id: int, club_id, name: str, what: str, who: dict
         await session.commit()
         return outcome(reason=RATE_LIMITED, last_sent_at=last, retry_after=_seconds(today + timedelta(days=1) - now))
     checked_in = what not in TO_REGISTERED
-    user_ids = sorted(int(u) for u in (await session.scalars(recipients(event_id, club_id, checked_in=checked_in))).all())
+    user_ids = sorted(int(u) for u in (await session.scalars(recipients(event_id, club_id, checked_in=checked_in, only=only))).all())
     if not user_ids:
-        there = await session.scalar(select(func.count()).select_from(recipients(event_id, club_id, honour=False, checked_in=checked_in).subquery()))
+        there = await session.scalar(select(func.count()).select_from(recipients(event_id, club_id, honour=False, checked_in=checked_in, only=only).subquery()))
         await session.commit()
         return outcome(reason=ALL_MUTED if there else NOBODY)
 

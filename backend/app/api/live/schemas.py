@@ -244,12 +244,17 @@ class SurveyQuestion(BaseModel):
 class SurveyPatch(BaseModel):
     auto_send: Optional[bool] = None
     delay_minutes: Optional[int] = Field(None, ge=0, le=7 * 24 * 60)
+    #: Which channels the survey may go on; each guest is sent on the
+    #: cheapest of them that reaches them (app/api/live/service.pick_channel).
+    #: Left out, it stays as it is; an empty list is refused.
+    channels: Optional[list[Literal["push", "whatsapp", "email"]]] = Field(None, max_length=3)
     questions: Optional[list[SurveyQuestion]] = Field(None, max_length=12)
 
 
 class SurveyOut(BaseModel):
     auto_send: bool
     delay_minutes: int
+    channels: list[str]
     questions: list[dict]
     sent_at: Optional[datetime] = None
     sent_count: int
@@ -260,11 +265,18 @@ class FeedbackOut(SurveyOut):
     results: dict
     previous: Optional[dict] = None
     checked_in: int
+    #: How the sends went out: {"push": n, "whatsapp": n, "email": n, "none": n}.
+    by_channel: dict
 
 
 class SendOut(SurveyOut):
     sent: int
     invited: int
+    by_channel: dict
+    #: Why the free push did not go, when it did not: the live room's own
+    #: reasons (rate_limited, already_sent, nobody_checked_in, all_muted,
+    #: disabled). Null when it went, or when push is not one of the channels.
+    push_skipped_reason: Optional[str] = None
 
 
 class PublicSurvey(BaseModel):

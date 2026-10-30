@@ -181,8 +181,20 @@ class LivePollResponses(AbstractSQLModel):
 # --- feedback ----------------------------------------------------------------------
 
 
+#: The channels a survey may go on, cheapest first -- and that is the order
+#: every send tries them in. A push to a phone that has the app costs
+#: nothing; a WhatsApp and an email each cost the club one of its month's
+#: messages (app/api/message_quota).
+PUSH, WHATSAPP, EMAIL = "push", "whatsapp", "email"
+FEEDBACK_CHANNELS = (PUSH, WHATSAPP, EMAIL)
+#: What a club gets without choosing: a push to whoever has the app, the
+#: email only for the people a push cannot reach.
+DEFAULT_CHANNELS = [PUSH, EMAIL]
+
+
 class FeedbackSurveys(AbstractSQLModel, TimestampsMixin):
-    """The event's survey: its questions and when it goes out."""
+    """The event's survey: its questions, which channels it may go on, and
+    when it goes out."""
 
     __tablename__ = "feedback_surveys"
 
@@ -190,6 +202,10 @@ class FeedbackSurveys(AbstractSQLModel, TimestampsMixin):
     event_id = Column(Integer, ForeignKey("events.id"), nullable=False, unique=True, index=True)
     auto_send = Column(Boolean, nullable=False, default=True)
     delay_minutes = Column(Integer, nullable=False, default=60)
+    # The channels the club allows, a non-empty subset of FEEDBACK_CHANNELS.
+    # What one guest is sent is the cheapest allowed channel that can reach
+    # them (service.pick_channel), so allowing more never costs more.
+    channels = Column(JSON, nullable=False, default=lambda: list(DEFAULT_CHANNELS), server_default=sa.text("""'["push", "email"]'::json"""))
     # [{"key": "overall", "kind": "rating" | "nps" | "text", "label": "..."}]
     questions = Column(JSON, nullable=False, default=list)
     sent_at = Column(TZAwareDateTime(timezone=True), nullable=True)
@@ -207,11 +223,27 @@ class FeedbackSurveys(AbstractSQLModel, TimestampsMixin):
 
 
 class FeedbackSends(AbstractSQLModel):
-    """Who the survey went to: one row per guest, claimed before the mail goes,
-    so sending again (or the sweep and a send at once) reaches only those not
-    sent yet. The mail itself is a job per guest (service.SURVEY_MAIL), which
-    sets `mailed_at` once the provider took it: a job run again finds it set
-    and mails nobody twice; a guest claimed whose mail never went has none."""
+    """Who the survey went to and how: one row per guest, claimed with the
+    channel it is to go on before anything is sent, so sending again (or the
+    sweep and a send at once) reaches only those not sent yet.
+
+    The channel is decided once, at the claim (service.pick_channel), and
+    kept here: `push` for a guest whose phone has the app, else the cheapest
+    other channel the club allows that can reach them, else none at all with
+    `skipped_reason` saying why. The club's report is a GROUP BY over this
+    column (service.sends_by_channel).
+
+    A push is already out when the row is written (one fan-out for all of
+    them, app/api/live/notify.py), so its `delivered_at` is set there and
+    then. A WhatsApp or an email is a job per guest (service.SURVEY_MAIL,
+    service.SURVEY_WHATSAPP) which sets `delivered_at` once the provider
+    took it: a job run again finds it set and sends nobody twice; a guest
+    claimed whose message never went has none.
+
+    `mailed_at` is what `delivered_at` was before there were channels:
+    it is still written for an email and only for an email, so everything
+    reading it (the rows from before this column, a club's own export) still
+    means the same thing."""
 
     __tablename__ = "feedback_sends"
 
@@ -219,10 +251,22 @@ class FeedbackSends(AbstractSQLModel):
     registration_id = Column(UUID(as_uuid=True), ForeignKey("event_registrations_link.id", ondelete="CASCADE"), primary_key=True)
     # Claimed: the guest is to be sent it.
     sent_at = Column(TZAwareDateTime(timezone=True), server_default=sa.func.now(), nullable=False)
-    # Mailed: the provider took it.
+    # push | whatsapp | email, decided at the claim. Null: nothing could be
+    # sent (see skipped_reason), or a row claimed before this column existed,
+    # which was always an email.
+    channel = Column(String(16), nullable=True)
+    # The channel took it. For an email, `mailed_at` says the same.
+    delivered_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    # Mailed: the provider took it. Emails only.
     mailed_at = Column(TZAwareDateTime(timezone=True), nullable=True)
-    # Not mailed, and why: past a Free club's monthly emails (app/api/message_quota).
+    # Nothing sent, and why: no channel the club allows can reach this guest,
+    # or past a Free club's monthly messages (app/api/message_quota).
     skipped_reason = Column(String(300), nullable=True)
+
+    __table_args__ = (
+        # The club's split by channel, read from the index alone.
+        sa.Index("ix_feedback_sends_channel", "survey_id", "channel"),
+    )
 
 
 class FeedbackResponses(AbstractSQLModel):
