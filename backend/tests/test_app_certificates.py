@@ -5,6 +5,10 @@ server's render of each. The registrations used to say only `is_attended`,
 so a speaker the organiser issued one to without a check-in never saw it in
 the app, and a revoked one was still listed: its render refused, and the
 app drew its own stand-in in place of the club's design.
+
+`is_attended` then stopped counting the other way too: checking in at an
+event whose club had issued nothing listed a certificate the club never
+meant to give. Nothing is listed until the club issues one.
 """
 import io
 from datetime import datetime, timezone
@@ -63,11 +67,24 @@ def _issue_url(world, path=""):
     return f"/api/v1/events/{world['event'].id}/certificates{path}"
 
 
-async def test_before_any_issuing_a_check_in_holds_one_and_a_no_show_does_not(client, world):
+async def test_before_any_issuing_nobody_holds_one_not_even_a_check_in(client, world):
+    """What the owner hit: they checked in while the event was still on, the
+    club had done nothing, and the app listed a certificate for them."""
+    for read in (_row, _info):
+        a, b = await read(client, world, "a"), await read(client, world, "b")
+        assert a["is_attended"] is True
+        assert a["has_certificate"] is False and a["certificate_revoked"] is False
+        assert a["certificate_url"] is None
+        assert b["has_certificate"] is False and b["certificate_url"] is None
+
+    # It appears the moment the club issues, and not before.
+    issued = await client.post(_issue_url(world, "/issue"), json={"audience": "checked_in"}, headers=world["club"])
+    assert issued.status_code == 200, issued.text
     for read in (_row, _info):
         a, b = await read(client, world, "a"), await read(client, world, "b")
         assert a["has_certificate"] is True and a["certificate_revoked"] is False
         assert a["certificate_url"].endswith(f"/certificates/{world['a'].ticket_id}")
+        # The no-show was not in the audience: still nothing.
         assert b["has_certificate"] is False and b["certificate_url"] is None
 
 
@@ -105,6 +122,7 @@ async def test_the_image_the_app_shows_is_the_clubs_design_the_email_attaches(cl
     attaches (certificate_document), drawn from the club's own layout at the
     layout's own size -- not a default design."""
     reg = world["a"]
+    await client.post(_issue_url(world, "/issue"), json={"audience": "checked_in"}, headers=world["club"])
     image = await client.get(f"/api/v1/events/certificates/{reg.ticket_id}/image")
     assert image.status_code == 200, image.text
     etag = image.headers["etag"]

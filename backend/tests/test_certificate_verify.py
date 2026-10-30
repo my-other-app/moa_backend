@@ -7,6 +7,9 @@ door scans, and the QR printed the ticket id itself. Numbers are now drawn
 on their own; the QR opens the verifier; the answer says only what a
 verifier needs; and the checks are counted per person, a miss as much as a
 match, even when the site's server asks on the person's behalf.
+
+There is something to check only once the club issues it, so the fixture
+issues. A check-in verified on its own until that was fixed.
 """
 import hashlib
 import re
@@ -65,6 +68,15 @@ async def world(client, session, make_club, make_event, make_user, make_registra
         headers=club_headers,
     )
     assert r.status_code == 200, r.text
+    # There is a certificate to verify only once the club issues one: Ananya
+    # and Old Timer were both at it, so both are issued. Bala was not, and a
+    # check-in on its own would not have been enough either.
+    issued = await client.post(
+        f"/api/v1/events/{event.id}/certificates/issue", json={"audience": "checked_in"}, headers=club_headers,
+    )
+    assert issued.status_code == 200 and issued.json()["issued"] == 2, issued.text
+    for reg in (r_a, r_old):
+        await session.refresh(reg)
     return {
         "event": event, "club": club, "a": r_a, "b": r_b, "old": r_old, "club_headers": club_headers,
         "as_a": auth_header(await mint_token(a)),
@@ -179,7 +191,8 @@ async def test_every_answer_has_exactly_the_same_keys_and_nothing_personal(clien
     assert set(not_found) == set(malformed) == KEYS
     assert not_found == malformed == {k: None for k in KEYS} | {"valid": False, "reason": "not_found"}
 
-    # Registered, never issued one, never came: as if there were no such number.
+    # Registered and never issued one: as if there were no such number --
+    # whether they came or not (test_certificates covers the check-in).
     assert (await _check(client, world["b"].certificate_no)).json() == not_found
 
 

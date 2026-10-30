@@ -25,6 +25,9 @@ def no_email(monkeypatch):
 
 @pytest.fixture
 async def attended(session, make_club, make_event, make_user, make_registration):
+    """Someone who was there and whose club issued them a certificate.
+    Checking in is not enough to have one (events.certificates.availability),
+    and with none there is nothing for either render to draw."""
     owner, club = await make_club(name="Yukthi", email="cert@example.com")
     event = await make_event(
         club=club,
@@ -35,6 +38,7 @@ async def attended(session, make_club, make_event, make_user, make_registration)
     user = await make_user(email="attendee@example.com")
     registration = await make_registration(event=event, user=user)
     registration.is_attended = True
+    registration.certificate_issued_at = datetime.now(timezone.utc)
     await session.flush()
     return registration
 

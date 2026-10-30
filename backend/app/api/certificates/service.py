@@ -399,7 +399,9 @@ async def verify(session, code: str) -> dict:
         "attendee_name": reg.full_name,
         "event_name": reg.event.name,
         **_club_facts(reg.event),
-        "issued_at": reg.certificate_issued_at or reg.attended_on,
+        # A valid certificate was issued, so it is always dated: nothing
+        # falls back to the check-in any more (events.certificates.availability).
+        "issued_at": reg.certificate_issued_at,
     }
 
 
