@@ -34,7 +34,7 @@ from urllib.parse import urlsplit
 
 from fastapi.responses import HTMLResponse
 from limits import parse_many
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import joinedload, selectinload
 
 from app.api.audit import service as audit
@@ -231,10 +231,16 @@ async def resend(session, request, *, kind: str, code: str, email: str) -> None:
     """The fresh link, when `code` and `email` are a live registration's for
     `kind`; nothing otherwise. Says nothing either way: the caller answers
     GENERIC whatever happened. The audit log has every ask."""
+    # The code the old link carried: a ticket id, or for a certificate link
+    # its public id (and the ticket id, for one from before those).
+    named = EventRegistrationsLink.ticket_id == code
+    if kind == "certificate":
+        named = or_(named, EventRegistrationsLink.certificate_public_id == code)
     reg = await session.scalar(
         select(EventRegistrationsLink)
         .options(joinedload(EventRegistrationsLink.event).joinedload(Events.club), joinedload(EventRegistrationsLink.event).selectinload(Events.cohost_clubs))
-        .where(EventRegistrationsLink.ticket_id == code, EventRegistrationsLink.is_deleted == False)  # noqa: E712
+        .where(named, EventRegistrationsLink.is_deleted == False)  # noqa: E712
+        .limit(1)
     )
     event = reg.event if reg is not None else None
     # Read now: a failed send below rolls back, and expires them.

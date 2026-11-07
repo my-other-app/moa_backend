@@ -8,7 +8,7 @@ import zipfile
 from datetime import datetime, timezone
 from typing import AsyncIterator, Optional
 
-from sqlalchemy import and_, case, func, or_, select, update
+from sqlalchemy import case, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -25,7 +25,7 @@ from app.api.events.certificates import (
     certificate_style,
     current_design_version,
     number_of,
-    ticket_id_of_certificate,
+    public_url_of,
 )
 from app.api.events.documents import image_width, in_layout_mode, layout_png
 from app.api.events.tickets import role_of
@@ -36,7 +36,13 @@ from app.config import settings
 from app.core.layout import pool
 from app.core.storage import objects
 from app.core.storage.bucket import prefix
-from app.core.utils.keys import CERTIFICATE_CODE, TICKET_ALPHABET
+from app.core.utils.keys import (
+    CERTIFICATE_CODE,
+    CERTIFICATE_PUBLIC_ID,
+    TICKET_ALPHABET,
+    generate_certificate_no,
+    generate_certificate_public_id,
+)
 from app.core.utils.pdf import generate_image_bytes
 from app.response import CustomHTTPException
 
@@ -130,6 +136,7 @@ async def issue(session, event: Events, audience: str, roles: list[str]) -> dict
         .values(certificate_issued_at=now, certificate_design_version=version)
         .execution_options(synchronize_session="fetch")
     )).rowcount or 0
+    await give_public_ids(session, criteria)
     refreshed = (await session.execute(
         update(EventRegistrationsLink)
         .where(
@@ -143,6 +150,49 @@ async def issue(session, event: Events, audience: str, roles: list[str]) -> dict
     )).rowcount or 0
     await session.commit()
     return {"issued": issued, "refreshed": refreshed, "already_issued": total - issued - refreshed}
+
+
+#: Registrations given their certificate's public id (and number) per UPDATE.
+_IDS_PER_UPDATE = 1000
+
+
+async def give_public_ids(session, criteria: list) -> int:
+    """Every issued certificate among `criteria` without a public id gets
+    one, drawn here from the CSPRNG (keys.generate_certificate_public_id),
+    and a number of its own if it has none. In the caller's transaction:
+    an UPDATE per thousand rows from arrays, each row re-checked as still
+    without one, so a second issue running at once never overwrites an id
+    already handed out. Kept for good: revoking and reinstating keep it."""
+    given = 0
+    while True:
+        rows = (await session.execute(
+            select(EventRegistrationsLink.id, EventRegistrationsLink.certificate_no)
+            .where(
+                *criteria,
+                EventRegistrationsLink.certificate_issued_at.isnot(None),
+                EventRegistrationsLink.certificate_public_id.is_(None),
+            )
+            .order_by(EventRegistrationsLink.id)
+            .limit(_IDS_PER_UPDATE)
+        )).all()
+        if not rows:
+            return given
+        ids = [str(r[0]) for r in rows]
+        public_ids = [generate_certificate_public_id() for _ in rows]
+        numbers = [r[1] or generate_certificate_no() for r in rows]
+        done = (await session.execute(
+            text(
+                "UPDATE event_registrations_link AS r "
+                "SET certificate_public_id = v.public_id, certificate_no = COALESCE(r.certificate_no, v.no) "
+                "FROM (SELECT unnest(CAST(:ids AS uuid[])) AS id, unnest(CAST(:public_ids AS text[])) AS public_id, "
+                "unnest(CAST(:numbers AS text[])) AS no) AS v "
+                "WHERE r.id = v.id AND r.certificate_public_id IS NULL"
+            ),
+            {"ids": ids, "public_ids": public_ids, "numbers": numbers},
+        )).rowcount or 0
+        given += done
+        if len(rows) < _IDS_PER_UPDATE:
+            return given
 
 
 async def set_revoked(session, event: Events, registration_id, revoked: bool) -> EventRegistrationsLink:
@@ -184,6 +234,8 @@ def _row(reg: EventRegistrationsLink, sends: list) -> dict:
         "registration_id": reg.id,
         "ticket_id": reg.ticket_id,
         "number": number_of(reg),
+        # Its public page, to share or open (by its public id).
+        "certificate_url": public_url_of(reg),
         "name": reg.full_name or "",
         "email": reg.email or None,
         "role": str(role),
@@ -205,14 +257,14 @@ async def list_certificates(
         q = q.where(EventRegistrationsLink.certificate_revoked_at.isnot(None))
     if search:
         pat = f"%{search}%"
-        # A certificate's own number, or for an older one, the body its
-        # number shares with the ticket.
+        # The organiser's own list: by name, address, the certificate's
+        # number, or the guest's ticket id.
         q = q.where(
             or_(
                 EventRegistrationsLink.full_name.ilike(pat),
                 EventRegistrationsLink.email.ilike(pat),
                 EventRegistrationsLink.certificate_no.ilike(f"%{search.strip()}%"),
-                EventRegistrationsLink.ticket_id.ilike(f"%{ticket_id_of_certificate(search).replace('MOA-', '')}%"),
+                EventRegistrationsLink.ticket_id.ilike(f"%{search.strip()}%"),
             )
         )
     total = await session.scalar(select(func.count()).select_from(q.subquery())) or 0
@@ -316,17 +368,19 @@ _NO_SUCH_NUMBER = "CERT-?"
 FILES_PER_ASK = 10
 #: How long listing a certificate's copies in the bucket may take.
 LIST_TIMEOUT = 5.0
-_FLAT_CODE = re.compile(rf"^(?:CERT|MOA)([{TICKET_ALPHABET}]{{5}}|[0-9A-F]{{1,7}})([{TICKET_ALPHABET}]{{5}})$")
+_FLAT_CODE = re.compile(rf"^CERT([{TICKET_ALPHABET}]{{5}})([{TICKET_ALPHABET}]{{5}})$")
 
 
 def code_number(code: str) -> Optional[str]:
     """The certificate number a typed, scanned or pasted code names, upper
     case, or None when it cannot be one.
 
-    Takes the number printed on a certificate (CERT-XXXXX-XXXXX), what an
-    older certificate's QR held (certificate:MOA-XXXXX-XXXXX, its ticket id)
-    and the ticket id alone, in any case and with spaces anywhere. Whatever
-    else is never looked up as typed.
+    Takes the number printed on a certificate (CERT-XXXXX-XXXXX), in any
+    case, with spaces anywhere, without its dashes, or after `certificate:`.
+    Never a ticket id, nor what an older certificate's QR held
+    (certificate:MOA-..., its ticket id): a certificate is no way to check
+    a ticket. Whatever else is never
+    looked up as typed.
     """
     text = re.sub(r"\s", "", code or "")[:80]
     if text.lower().startswith("certificate:"):
@@ -339,35 +393,65 @@ def code_number(code: str) -> Optional[str]:
     return f"{CERTIFICATE_PREFIX}-{flat.group(1)}-{flat.group(2)}" if flat else None
 
 
+def code_public_id(code: str) -> Optional[str]:
+    """The public id a certificate's link carries, as it is (case matters),
+    or None when `code` cannot be one."""
+    text = (code or "").strip()
+    return text if CERTIFICATE_PUBLIC_ID.match(text) else None
+
+
+def _with_event():
+    return (
+        joinedload(EventRegistrationsLink.event).joinedload(Events.club),
+        joinedload(EventRegistrationsLink.event).selectinload(Events.cohost_clubs),
+    )
+
+
 async def certificate_by_number(session, number: Optional[str]) -> Optional[EventRegistrationsLink]:
     """The live registration whose certificate has this number, with its
-    event and club, in one lookup on two unique indexes.
-
-    Its own number first. A number made from a ticket id finds only a
-    registration with no number of its own, whose certificate was printed
-    before numbers were drawn separately: one that has its own never answers
-    to its ticket id, so the verifier tells no one who holds a ticket.
-    """
-    number = number or _NO_SUCH_NUMBER
-    ticket_id = "MOA-" + number.split("-", 1)[1]
+    event and club, off uq_registrations_certificate_no. A number is only
+    ever a certificate's own: no ticket id answers."""
     return await session.scalar(
         select(EventRegistrationsLink)
-        .options(joinedload(EventRegistrationsLink.event).joinedload(Events.club), joinedload(EventRegistrationsLink.event).selectinload(Events.cohost_clubs))
+        .options(*_with_event())
         .where(
             EventRegistrationsLink.is_deleted == False,  # noqa: E712
-            or_(
-                EventRegistrationsLink.certificate_no == number,
-                and_(EventRegistrationsLink.certificate_no.is_(None), EventRegistrationsLink.ticket_id == ticket_id),
-            ),
+            EventRegistrationsLink.certificate_no == (number or _NO_SUCH_NUMBER),
         )
-        .order_by(EventRegistrationsLink.certificate_no.is_(None))
         .limit(1)
     )
 
 
+async def certificate_by_public_id(session, public_id: Optional[str]) -> Optional[EventRegistrationsLink]:
+    """The live registration whose certificate has this public id, off
+    uq_registrations_certificate_public_id."""
+    if not public_id:
+        return None
+    return await session.scalar(
+        select(EventRegistrationsLink)
+        .options(*_with_event())
+        .where(
+            EventRegistrationsLink.is_deleted == False,  # noqa: E712
+            EventRegistrationsLink.certificate_public_id == public_id,
+        )
+        .limit(1)
+    )
+
+
+async def certificate_by_code(session, code: str) -> Optional[EventRegistrationsLink]:
+    """The registration a verifier's code names: the certificate's public id
+    (its link), or its printed number. One probe of one unique index either
+    way; a code that is neither costs the number's probe, so a malformed one
+    takes as long, and is answered the same, as one not found."""
+    public_id = code_public_id(code)
+    if public_id is not None:
+        return await certificate_by_public_id(session, public_id)
+    return await certificate_by_number(session, code_number(code))
+
+
 async def held_certificate(session, code: str) -> Optional[EventRegistrationsLink]:
     """The registration holding a valid certificate under this code, or None."""
-    reg = await certificate_by_number(session, code_number(code))
+    reg = await certificate_by_code(session, code)
     return reg if reg is not None and availability(reg).available else None
 
 
@@ -383,8 +467,9 @@ def _club_facts(event) -> dict:
 async def verify(session, code: str) -> dict:
     """Public. Whether the certificate is genuine and still valid, whose,
     for what, from whom and when -- nothing more. A revoked one says which
-    event and club took it back, not whose it was."""
-    reg = await certificate_by_number(session, code_number(code))
+    event and club took it back, not whose it was. By the certificate's
+    number or its public id; never by a ticket id."""
+    reg = await certificate_by_code(session, code)
     if reg is None:
         return {"valid": False, "reason": "not_found"}
     held = availability(reg)
@@ -407,7 +492,7 @@ async def verify(session, code: str) -> dict:
 
 async def preview_png(session, reg: EventRegistrationsLink) -> bytes:
     """The certificate as a PNG: the render the app previews
-    (GET /events/certificates/{ticket}/image), same design, same engine."""
+    (GET /verify/certificates/{code}/image), same design, same engine."""
     style = await certificate_style(session, reg)
     job = certificate_job(reg, style)
     if in_layout_mode(style):

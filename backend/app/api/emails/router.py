@@ -302,6 +302,18 @@ async def _registration_by_ticket(session, ticket_id: str) -> Optional[EventRegi
     )
 
 
+async def _registration_by_certificate(session, public_id: str) -> Optional[EventRegistrationsLink]:
+    from app.core.utils.keys import CERTIFICATE_PUBLIC_ID
+
+    if not CERTIFICATE_PUBLIC_ID.match(public_id or ""):
+        return None
+    return await session.scalar(
+        select(EventRegistrationsLink)
+        .options(joinedload(EventRegistrationsLink.event).joinedload(Events.club), joinedload(EventRegistrationsLink.event).selectinload(Events.cohost_clubs), joinedload(EventRegistrationsLink.user))
+        .where(EventRegistrationsLink.certificate_public_id == public_id, EventRegistrationsLink.is_deleted == False)  # noqa: E712
+    )
+
+
 def _refused(request: Request, kind: str, ticket_id: str, status: int, message: str, reason: str) -> Response:
     """The JSON error an app has always had, or for a browser the page."""
     if not old_links.wants_html(request):
@@ -322,15 +334,20 @@ async def ticket_file(request: Request, session: SessionDep, ticket_id: str, s: 
     return Response(content=doc.content, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{doc.filename}"'})
 
 
-@public_router.get("/certificates/{ticket_id}.pdf", summary="A guest's certificate, from the link in their email")
-async def certificate_file(request: Request, session: SessionDep, ticket_id: str, s: str = Query("")) -> Response:
-    if not links.file_token_ok("certificate", ticket_id, s):
-        return _refused(request, "certificate", ticket_id, 403, "This link is not valid.", "invalid")
-    reg = await _registration_by_ticket(session, ticket_id)
+@public_router.get("/certificates/{public_id}.pdf", summary="A guest's certificate, from the link in their email")
+async def certificate_file(request: Request, session: SessionDep, public_id: str, s: str = Query("")) -> Response:
+    """By the certificate's own public id (certificate_public_id), signed.
+    A link from before, with the ticket id in its place, finds nothing: a
+    certificate's address must not carry the code the door scans. Its page
+    asks for a fresh link (POST /files/resend), which goes to the address
+    the guest registered with."""
+    if not links.file_token_ok("certificate", public_id, s):
+        return _refused(request, "certificate", public_id, 403, "This link is not valid.", "invalid")
+    reg = await _registration_by_certificate(session, public_id)
     if reg is None:
-        return _refused(request, "certificate", ticket_id, 404, "No such ticket", "invalid")
+        return _refused(request, "certificate", public_id, 404, "No such certificate", "invalid")
     if not availability(reg).available:
-        return _refused(request, "certificate", ticket_id, 410, "This certificate is not available.", "unavailable")
+        return _refused(request, "certificate", public_id, 410, "This certificate is not available.", "unavailable")
     doc = await certificate_document(session, reg)
     return Response(content=doc.content, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{doc.filename}"'})
 

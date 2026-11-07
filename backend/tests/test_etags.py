@@ -518,20 +518,20 @@ async def test_a_ticket_drawn_without_one_of_its_images_goes_out_untagged(client
 
 async def test_the_certificate_pdf_is_tagged_the_same_way_and_a_revoked_one_is_refused_first(client, world, bucket, drawn):
     url = f"/api/v1/events/certificates/{world['a'].ticket_id}/pdf"
-    first = await client.get(url)
+    first = await client.get(url, headers=world["a_user"])
     assert first.status_code == 200 and DOCUMENT.fullmatch(first.headers["etag"])
     (key,) = bucket["held"]
     assert key.endswith(f"/docs/certificate/{world['a'].id}/{first.headers['etag'].strip(chr(34))}.pdf")
 
-    again = await client.get(url, headers={"If-None-Match": first.headers["etag"]})
+    again = await client.get(url, headers={**world["a_user"], "If-None-Match": first.headers["etag"]})
     assert again.status_code == 304 and again.headers["etag"] == first.headers["etag"]
-    # Its Cache-Control is what it was, on both.
-    assert first.headers["cache-control"] == again.headers["cache-control"] == "public, max-age=300"
+    # By ticket id it is the holder's own copy: private, on both.
+    assert first.headers["cache-control"] == again.headers["cache-control"] == "private, max-age=300"
     assert drawn["calls"] == ["Ananya Iyer"] and len(drawn["trips"]) == 1
 
     base = f"/api/v1/events/{world['event'].id}/certificates"
     await client.post(f"{base}/{world['a'].id}/revoke", headers=world["club"])
-    assert (await client.get(url, headers={"If-None-Match": first.headers["etag"]})).status_code == 403
+    assert (await client.get(url, headers={**world["a_user"], "If-None-Match": first.headers["etag"]})).status_code == 403
 
 
 async def test_a_certificate_drawn_without_one_of_its_images_goes_out_untagged(client, session, world, bucket, drawn, monkeypatch):
@@ -544,8 +544,8 @@ async def test_a_certificate_drawn_without_one_of_its_images_goes_out_untagged(c
     await session.commit()
     monkeypatch.setattr(objects, "get_bytes", lambda key: None)
 
-    r = await client.get(f"/api/v1/events/certificates/{world['a'].ticket_id}/pdf")
-    assert r.status_code == 200 and "etag" not in r.headers and r.headers["cache-control"] == "public, max-age=300"
+    r = await client.get(f"/api/v1/events/certificates/{world['a'].ticket_id}/pdf", headers=world["a_user"])
+    assert r.status_code == 200 and "etag" not in r.headers and r.headers["cache-control"] == "private, max-age=300"
     assert bucket["held"] == {}
 
 

@@ -245,8 +245,8 @@ async def checkin_user(
 ) -> None:
     """Check-in a participant for an event, from the volunteer app.
 
-    Accepts a ticket id (MOA-XXXXX-XXXXX) or a registration UUID -- not an
-    admission number, which is not a scan code. Goes through the same
+    Accepts a ticket id (MOA-XXXXX-XXXXX) only: not a registration's id nor
+    an admission number, neither of which is a scan code (checkins.service). Goes through the same
     admission as every door, so the check-in is recorded with who did it;
     the app's error codes are kept.
     """
@@ -286,9 +286,7 @@ async def validate_ticket(
     """
     Validate a ticket without marking attendance.
     Returns ticket details if valid, raises exception if invalid.
-    Accepts either:
-    - ticket_id format: MOA-XXXXX-XXXXX
-    - registration UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+    Accepts a ticket id (MOA-XXXXX-XXXXX) only, as the door does.
 
     The door's own lookup (checkins.service): the code on this event off the
     ticket id's unique index, and only on a miss the same code anywhere, to

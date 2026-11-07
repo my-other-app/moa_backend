@@ -285,7 +285,7 @@ async def check_in(session, session_id: str, background=None) -> dict:
     if not checkins.door_open(event):
         return {"outcome": "EVENT_NOT_OPEN", "guest": None, "can_print": False}
     reg = await checkins.registration_of(session, event, s.registration_id)
-    res = await checkins.scan(session, event, code=str(reg.id), door_label=device.door_label, client_ref=f"self-{s.id}", scanned_at=None, actor=kiosk_actor(device), via=CheckInVia.phone, background=background)
+    res = await checkins.scan(session, event, registration=reg, door_label=device.door_label, client_ref=f"self-{s.id}", scanned_at=None, actor=kiosk_actor(device), via=CheckInVia.phone, background=background)
     if res["outcome"] not in ("CHECKED_IN", "ALREADY_CHECKED_IN"):
         return {"outcome": "EVENT_NOT_OPEN" if res["outcome"] == "EVENT_NOT_OPEN" else "REFUSED", "guest": None, "can_print": False, "why": res["outcome"]}
     if res["outcome"] == "CHECKED_IN":

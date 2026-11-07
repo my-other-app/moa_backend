@@ -122,7 +122,7 @@ async def test_a_certificate_is_drawn_on_the_render_pool(session, world, threads
 
 async def test_a_layered_certificate_and_its_png_are_drawn_on_the_pool(client, world, threads):
     await _layered(client, world, "certificate")
-    r = await client.get(f"/api/v1/events/certificates/{world['reg'].ticket_id}/image")
+    r = await client.get(f"/api/v1/events/certificates/{world['reg'].ticket_id}/image", headers=world["guest"])
 
     assert r.status_code == 200, r.text
     assert {kind for kind, _ in threads} == {"layout", "png"} and _on_pool(threads)
@@ -130,8 +130,8 @@ async def test_a_layered_certificate_and_its_png_are_drawn_on_the_pool(client, w
 
 async def test_the_ticket_and_certificate_images_are_drawn_on_the_pool(client, world, threads):
     t = await client.get(f"/api/v1/events/tickets/{world['reg'].ticket_id}/image", headers=world["guest"])
-    c = await client.get(f"/api/v1/events/certificates/{world['reg'].ticket_id}/image")
-    p = await client.get(f"/api/v1/events/certificates/{world['reg'].ticket_id}/pdf")
+    c = await client.get(f"/api/v1/events/certificates/{world['reg'].ticket_id}/image", headers=world["guest"])
+    p = await client.get(f"/api/v1/events/certificates/{world['reg'].ticket_id}/pdf", headers=world["guest"])
 
     assert (t.status_code, c.status_code, p.status_code) == (200, 200, 200)
     assert [kind for kind, _ in threads] == ["html-png", "html-png", "html-pdf"] and _on_pool(threads)

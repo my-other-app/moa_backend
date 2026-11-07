@@ -647,7 +647,8 @@ async def get_event(session: AsyncSession, event_id: str | int, user_id: int | N
             data["is_attended"] = registration.is_attended
             data["ticket_id"] = registration.ticket_id
             data["user_position"] = registration.position
-            # The public site's ticket and certificate pages, by ticket id.
+            # The public site's ticket page, by ticket id (only its holder's
+            # session opens it); the certificate's goes by its public id.
             data["ticket_url"] = public_urls.ticket_url(registration.ticket_id)
             # By the rule the PDF and the image follow, so the app lists and
             # opens exactly the certificates the server will hand over.
@@ -657,7 +658,12 @@ async def get_event(session: AsyncSession, event_id: str | int, user_id: int | N
             data["has_certificate"] = held.available
             data["certificate_revoked"] = held.reason == "revoked"
             if held.available:
-                data["certificate_url"] = public_urls.certificate_url(registration.ticket_id)
+                # By the certificate's own public id, and its own number:
+                # neither gives away the ticket id the door scans.
+                from app.api.events.certificates import number_of, public_url_of
+
+                data["certificate_url"] = public_url_of(registration)
+                data["certificate_no"] = number_of(registration) or None
             # The feedback survey, as emailed to whoever was there, for the
             # app's own survey screen: this registration's link only, and
             # only while the survey is open to it (live.feedback_url).

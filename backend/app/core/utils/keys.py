@@ -16,13 +16,19 @@ TICKET_ID = re.compile(rf"^MOA-[{TICKET_ALPHABET}]{{{TICKET_GROUP}}}-[{TICKET_AL
 TICKET_ID_INDEX = "ix_event_registrations_link_ticket_id"
 #: The unique index a duplicate certificate number runs into.
 CERTIFICATE_NO_INDEX = "uq_registrations_certificate_no"
-#: What a certificate's number can be, upper case: CERT- and two groups of
-#: the ticket alphabet, or, for a number made from a ticket id minted before
-#: October 2026 (MOA-<hex clock>-XXXXX), one to seven hex digits first. The
-#: ticket id an old certificate's QR carried (MOA-...) has the same body.
+#: What a certificate's number is, upper case: CERT- and two groups of the
+#: ticket alphabet, drawn on its own. Numbers once made from a ticket id
+#: were all drawn again (migration certificate_public_ids), so a ticket id,
+#: or anything shaped like one, is never a certificate's number.
 CERTIFICATE_CODE = re.compile(
-    rf"^(?:CERT|MOA)-((?:[{TICKET_ALPHABET}]{{{TICKET_GROUP}}}|[0-9A-F]{{1,7}})-[{TICKET_ALPHABET}]{{{TICKET_GROUP}}})$"
+    rf"^CERT-([{TICKET_ALPHABET}]{{{TICKET_GROUP}}}-[{TICKET_ALPHABET}]{{{TICKET_GROUP}}})$"
 )
+#: The unique index a duplicate certificate public id runs into.
+CERTIFICATE_PUBLIC_ID_INDEX = "uq_registrations_certificate_public_id"
+#: Random bytes in a certificate's public id: 144 bits, 24 URL-safe characters.
+CERTIFICATE_PUBLIC_ID_BYTES = 18
+#: What a certificate's public id is (secrets.token_urlsafe's alphabet).
+CERTIFICATE_PUBLIC_ID = re.compile(r"^[A-Za-z0-9_-]{24}$")
 
 
 def _group() -> str:
@@ -38,6 +44,13 @@ def generate_certificate_no() -> str:
     the door scans. Drawn separately, it says nothing about the ticket.
     """
     return f"CERT-{_group()}-{_group()}"
+
+
+def generate_certificate_public_id() -> str:
+    """A certificate's public id: 24 URL-safe characters from the OS's
+    CSPRNG (144 bits), for its public page and links. It says nothing about
+    the ticket, and nobody types it: it is only ever a link."""
+    return secrets.token_urlsafe(CERTIFICATE_PUBLIC_ID_BYTES)
 
 
 def generate_ticket_id() -> str:

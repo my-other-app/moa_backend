@@ -53,6 +53,7 @@ from app.api.events.certificates import (
     certificate_job,
     certificate_style,
     number_of,
+    public_url_of,
     qr_text as certificate_qr_text,
 )
 from app.response import CustomHTTPException
@@ -532,7 +533,10 @@ async def list_events(
                 event_dict["has_certificate"] = held.available
                 event_dict["certificate_revoked"] = held.reason == "revoked"
                 if held.available:
-                    event_dict["certificate_url"] = public_urls.certificate_url(reg.ticket_id)
+                    # Its public page by the certificate's own public id,
+                    # and the number printed on it: neither is the ticket's.
+                    event_dict["certificate_url"] = public_url_of(reg)
+                    event_dict["certificate_no"] = number_of(reg) or None
             enhanced_events.append(event_dict)
     else:
         enhanced_events = [jsonable_encoder(e) for e in events]
@@ -669,6 +673,10 @@ async def get_ticket(
     # only thing a guest reading the link from their email can ask -- there
     # is no list for them -- so without this they were told nothing.
     data["ticket_revoked"] = is_revoked(result)
+    # The certificate's public page, once issued and not revoked, by its
+    # own public id: where an old /certificates/{ticket id} address sends
+    # its holder (the site reads this, signed in as them).
+    data["certificate_url"] = public_url_of(result) if availability(result).available else None
     # The event's state, as its page says it, so the ticket can say
     # "Cancelled" without asking the event page as well. The event is loaded
     # with the ticket; only a cancelled one costs a query, for the reason.
@@ -859,16 +867,63 @@ async def get_wallet_pass(
     )
 
 
+async def _holders_registration(session, code: str, user):
+    """The registration a certificate route's code names.
+
+    By the certificate's public id (the link its holder shares, 24 URL-safe
+    characters): anyone, as its public page shows it. By a ticket id: only
+    whoever may see that ticket (_assert_can_access_ticket: its holder, its
+    club or a co-host, an admin) -- the app's certificate screen, the club's
+    list. The ticket id is what the door scans, so a link shared to show a
+    certificate must never be one; an address from before with a ticket id
+    in it opens nothing for a stranger (404 signed out, 403 signed in as
+    someone else, as the ticket itself answers), and for its holder
+    GET /events/tickets/{ticket_id} says the `certificate_url` to go to."""
+    from sqlalchemy import select
+    from sqlalchemy.orm import joinedload, selectinload
+
+    from app.api.certificates import service as certificates
+    from app.api.events.models import EventRegistrationsLink, Events
+
+    missing = CustomHTTPException(404, "No certificate here.", error_code="CERTIFICATE_NOT_FOUND")
+    public_id = certificates.code_public_id(code)
+    if public_id is not None:
+        registration = await certificates.certificate_by_public_id(session, public_id)
+        if registration is None:
+            raise missing
+        return registration
+    if user is None:
+        raise missing
+    registration = await session.scalar(
+        select(EventRegistrationsLink)
+        .where(EventRegistrationsLink.ticket_id == code.strip(), EventRegistrationsLink.is_deleted == False)  # noqa: E712
+        .options(
+            joinedload(EventRegistrationsLink.event).options(
+                joinedload(Events.club), joinedload(Events.category), selectinload(Events.cohost_clubs)
+            ),
+            joinedload(EventRegistrationsLink.user),
+        )
+    )
+    if registration is None:
+        raise missing
+    # 403 for a session that is not the ticket's, as GET /events/tickets/{id}
+    # answers it: never 401, which tells the website its session is gone.
+    await _assert_can_access_ticket(session, user, registration)
+    return registration
+
+
 @router.get("/certificates/{ticket_id}/style", summary="Get certificate template style")
 async def get_certificate_style(
     ticket_id: str,
     session: SessionDep = SessionDep,
+    user: OptionalAuth = None,
 ) -> dict:
     """
-    Return the certificate template style config for a ticket's event.
-    Public endpoint so the event website can render a styled preview.
+    Return the certificate template style config for a ticket's event: by
+    the certificate's public id, or by the ticket id for the ticket's
+    holder, its club or an admin (_holders_registration).
     """
-    registration = await service.get_ticket_details(session, ticket_id=ticket_id)
+    registration = await _holders_registration(session, ticket_id, user)
     from app.api.certificate_templates.service import get_template_for_event
     style = await get_template_for_event(
         session, registration.event_id, role=_role_of(registration)
@@ -876,14 +931,16 @@ async def get_certificate_style(
     return style
 
 
-async def _certificate_for(session, ticket_id: str):
-    """The registration and its certificate design, once it holds one.
+async def _certificate_for(session, ticket_id: str, user):
+    """The registration and its certificate design, once it holds one: by
+    its public id, or by ticket id for the ticket's holder, its club or an
+    admin (_holders_registration).
 
     The PNG and the PDF both come through here, so the preview the app shows
     and the file the download produces are the same document: the same
     design, the same values, the same engine.
     """
-    registration = await service.get_ticket_details(session, ticket_id=ticket_id)
+    registration = await _holders_registration(session, ticket_id, user)
 
     held = availability(registration)
     if not held.available:
@@ -900,16 +957,16 @@ async def _certificate_for(session, ticket_id: str):
     return registration, await certificate_style(session, registration)
 
 
-async def _certificate_render_context(session, ticket_id: str) -> dict:
+async def _certificate_render_context(session, ticket_id: str, user) -> dict:
     """The HTML template's context for a certificate, as both renders build it."""
-    registration, style = await _certificate_for(session, ticket_id)
+    registration, style = await _certificate_for(session, ticket_id, user)
     context = certificate_context(registration, style)
     return {**context, "registration": registration, "qr_text": certificate_qr_text(registration)}
 
 
-# Public and unauthenticated, and each one a render: limited per address.
-# Generous, because a campus behind one NAT address is many people; with
-# max-age=300 and the ETag an app showing a list asks again rarely.
+# Each one a render: limited per address. Generous, because a campus behind
+# one NAT address is many people; with max-age=300 and the ETag an app
+# showing a list asks again rarely.
 CERTIFICATE_LIMIT = "120/minute"
 
 
@@ -917,14 +974,23 @@ def _visitor(request: Request) -> str:
     return client_address(request) or "unknown"
 
 
-def _certificate_headers(registration, job, kind: str) -> dict:
+def _certificate_cache(code: str) -> str:
+    """By its public id the certificate is public, and a shared cache may
+    keep it for the five minutes; by ticket id it is the holder's own, and
+    only their device may."""
+    from app.api.certificates.service import code_public_id
+
+    return "public, max-age=300" if code_public_id(code) else "private, max-age=300"
+
+
+def _certificate_headers(registration, job, kind: str, code: str = "") -> dict:
     """Five minutes, not a day: a certificate can be revoked or redesigned,
     and a day-long public cache kept serving the old one. The ETag names the
     design version, the revocation and everything printed, so a client
     asking again gets a 304 until one of them changes."""
     seed = f"{kind}|{job.design_version}|{getattr(registration, 'certificate_revoked_at', None)}|{job.fingerprint}"
     return {
-        "Cache-Control": "public, max-age=300",
+        "Cache-Control": _certificate_cache(code),
         "ETag": f'"{hashlib.sha256(seed.encode()).hexdigest()[:32]}"',
     }
 
@@ -941,6 +1007,7 @@ async def get_certificate_image(
     request: Request,
     ticket_id: str,
     session: SessionDep = SessionDep,
+    user: OptionalAuth = None,
 ) -> Response:
     """The certificate as a PNG, for previewing it in the app.
 
@@ -950,11 +1017,13 @@ async def get_certificate_image(
     it crops to the certificate itself.
 
     Same template, same payload and the same rendering engine as the PDF,
-    so what is previewed is what is downloaded.
+    so what is previewed is what is downloaded. `ticket_id` is the
+    certificate's public id (anyone) or the ticket id (its holder, its club
+    or an admin only).
     """
-    registration, style = await _certificate_for(session, ticket_id)
+    registration, style = await _certificate_for(session, ticket_id, user)
     job = certificate_job(registration, style)
-    headers = _certificate_headers(registration, job, "png")
+    headers = _certificate_headers(registration, job, "png", ticket_id)
     if (unchanged := _not_modified(request, headers)) is not None:
         return unchanged
 
@@ -983,17 +1052,19 @@ async def get_certificate_pdf(
     request: Request,
     ticket_id: str,
     session: SessionDep = SessionDep,
+    user: OptionalAuth = None,
 ) -> Response:
     """
-    Generate and download a PDF certificate of participation.
-    Only available for attendees who have checked in (is_attended=True).
+    The certificate of participation as a PDF, once the organiser issued
+    one. `ticket_id` is the certificate's public id (anyone) or the ticket
+    id (its holder, its club or an admin only).
 
     Tagged like the ticket (_document_etag): a 304 without drawing it when
     the caller's If-None-Match names it. A revoked one is refused first.
     """
-    registration, style = await _certificate_for(session, ticket_id)
+    registration, style = await _certificate_for(session, ticket_id, user)
     job = certificate_job(registration, style)
-    headers = {"Cache-Control": "public, max-age=300", "ETag": _document_etag(job)}
+    headers = {"Cache-Control": _certificate_cache(ticket_id), "ETag": _document_etag(job)}
     if (unchanged := _not_modified(request, headers)) is not None:
         return unchanged
 

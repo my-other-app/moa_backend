@@ -202,11 +202,12 @@ async def test_a_check_in_reaches_no_certificate_by_any_route(client, world):
         assert r.status_code == 403, route
         assert r.json()["error_code"] == "CERTIFICATE_NOT_ISSUED", route
 
-    # The link an email carries: properly signed, and still nothing behind it.
+    # The link an email carries: a certificate never issued has no public id
+    # to link by, and a link by its ticket id, however well signed, finds nothing.
+    assert a.certificate_public_id is None
     signed = links.file_token("certificate", a.ticket_id)
     emailed = await client.get(f"/api/v1/files/certificates/{a.ticket_id}.pdf?s={signed}")
-    assert emailed.status_code == 410
-    assert emailed.json()["message"] == "This certificate is not available."
+    assert emailed.status_code == 404
 
     # The public verifier: as if there were no such number, so nobody learns
     # from it that this person was at this event.

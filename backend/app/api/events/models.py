@@ -30,7 +30,7 @@ from app.core.storage import shapes
 from app.core.storage.fields import S3FileField, S3ImageField
 from app.core.storage.shapes import MovedImageField
 from app.core.utils.db_fields import TZAwareDateTime
-from app.core.utils.keys import generate_certificate_no
+from app.core.utils.keys import generate_certificate_no, generate_certificate_public_id
 
 
 class EventCategories(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
@@ -459,10 +459,15 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
     certificate_revoked_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     certificate_design_version = Column(Integer, nullable=False, default=0, server_default="0")
     # The certificate's number (CERT-XXXXX-XXXXX), drawn at registration and
-    # unrelated to the ticket id. Null on a registration older than the
-    # column that already held a certificate: its number is made from the
-    # ticket id (events.certificates.number_of), as it was printed.
+    # unrelated to the ticket id. Every registration has one (the migration
+    # certificate_public_ids drew one for the older ones, whose number used
+    # to be made from the ticket id); issuing draws one for any that has not.
     certificate_no = Column(String(20), nullable=True, default=generate_certificate_no)
+    # The certificate's public address (myotherapp.in/certificates/{this}),
+    # drawn when it is issued: 144 random bits, URL-safe, unrelated to the
+    # ticket. Every public certificate link and page is keyed by it, never by
+    # the ticket id the door scans. Null until issued.
+    certificate_public_id = Column(String(32), nullable=True)
     # When this guest's ID card last printed; the reprint rule turns on it.
     badge_printed_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     # Set by the provider's bounce or complaint notice: later sends skip the
@@ -528,6 +533,11 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
             "uq_registrations_certificate_no", "certificate_no",
             unique=True, postgresql_where=sa.text("certificate_no IS NOT NULL"),
         ),
+        # A certificate's public page and links, by its public id.
+        sa.Index(
+            "uq_registrations_certificate_public_id", "certificate_public_id",
+            unique=True, postgresql_where=sa.text("certificate_public_id IS NOT NULL"),
+        ),
         # The attendee list, by name: a page walks this in order instead of
         # sorting the whole event (registration.service.list_event_registrations).
         sa.Index(
@@ -591,6 +601,19 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
     @property
     def name(self) -> str:
         return self.full_name
+
+
+@sa_event.listens_for(EventRegistrationsLink, "before_insert")
+@sa_event.listens_for(EventRegistrationsLink, "before_update")
+def _certificate_public_id(mapper, connection, target) -> None:
+    """A certificate issued through the ORM (a seed, a script, a test) gets
+    its public id and a number of its own as it is written, as one issued
+    by certificates.service.issue does: an issued certificate is never left
+    without a public address but its ticket id."""
+    if target.certificate_issued_at is not None and not target.certificate_public_id:
+        target.certificate_public_id = generate_certificate_public_id()
+    if target.certificate_issued_at is not None and not target.certificate_no:
+        target.certificate_no = generate_certificate_no()
 
 
 class EventRatingsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):

@@ -388,9 +388,9 @@ async def test_main_user_has_tickets_and_certificates_in_the_club_design(seeded,
         for reg in regs:
             r = await client.get(f"/api/v1/events/tickets/{reg.ticket_id}/image", headers=h)
             assert r.status_code == 200 and r.content[:8] == b"\x89PNG\r\n\x1a\n"
-        r = await client.get(f"/api/v1/events/certificates/{attended.ticket_id}/image")
+        r = await client.get(f"/api/v1/events/certificates/{attended.ticket_id}/image", headers=h)
         assert r.status_code == 200 and r.content[:8] == b"\x89PNG\r\n\x1a\n"
-        r = await client.get(f"/api/v1/events/certificates/{attended.ticket_id}/pdf")
+        r = await client.get(f"/api/v1/events/certificates/{attended.ticket_id}/pdf", headers=h)
         assert r.status_code == 200 and r.content[:4] == b"%PDF"
     # Drawn from the club's own designs, not the platform's.
     from app.api.events.certificates import certificate_style

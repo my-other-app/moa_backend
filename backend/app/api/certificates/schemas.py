@@ -48,6 +48,8 @@ class CertificateRow(BaseModel):
     registration_id: UUID
     ticket_id: str
     number: str
+    #: Its public page, by the certificate's public id (null on none).
+    certificate_url: Optional[str] = None
     name: str
     email: Optional[str]
     role: str

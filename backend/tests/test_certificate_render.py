@@ -48,9 +48,14 @@ async def test_the_two_renders_share_one_payload(session, attended):
     # and the download cannot describe different things.
     from app.api.events.router import _certificate_render_context
 
-    context = await _certificate_render_context(session, attended.ticket_id)
+    from app.api.users.models import Users
 
-    assert context["email_payload"]["ticket_id"] == attended.ticket_id
+    holder = await session.get(Users, attended.user_id)
+    context = await _certificate_render_context(session, attended.ticket_id, holder)
+
+    # The certificate's own number; the ticket id is never in what it prints.
+    assert context["email_payload"]["certificate_no"] == attended.certificate_no
+    assert "ticket_id" not in context["email_payload"]
     assert context["email_payload"]["event_name"] == "LaTeX Workshop"
     assert context["email_payload"]["organizer_name"] == "Yukthi"
     # The QR is embedded rather than linked, so the render needs no network.
@@ -73,11 +78,11 @@ async def test_a_registration_that_never_checked_in_has_no_certificate(
     # refuse them too, or it would preview a certificate that cannot be
     # downloaded.
     with pytest.raises(CustomHTTPException):
-        await _certificate_render_context(session, registration.ticket_id)
+        await _certificate_render_context(session, registration.ticket_id, user)
 
 
 async def test_the_image_endpoint_refuses_a_non_attendee(
-    client, make_club, make_event, make_user, make_registration,
+    client, make_club, make_event, make_user, make_registration, mint_token,
 ):
     owner, club = await make_club(name="Club", email="img@example.com")
     event = await make_event(club=club, created_by=owner)
@@ -85,14 +90,14 @@ async def test_the_image_endpoint_refuses_a_non_attendee(
     registration = await make_registration(event=event, user=user)
 
     response = await client.get(
-        f"/api/v1/events/certificates/{registration.ticket_id}/image"
+        f"/api/v1/events/certificates/{registration.ticket_id}/image", headers=auth_header(await mint_token(user)),
     )
 
     assert response.status_code == 403
 
 
 async def test_the_pdf_endpoint_still_refuses_one_too(
-    client, make_club, make_event, make_user, make_registration,
+    client, make_club, make_event, make_user, make_registration, mint_token,
 ):
     # The PDF path was refactored onto the shared helper; this is the
     # behaviour that must not have changed in the process.
@@ -102,7 +107,7 @@ async def test_the_pdf_endpoint_still_refuses_one_too(
     registration = await make_registration(event=event, user=user)
 
     response = await client.get(
-        f"/api/v1/events/certificates/{registration.ticket_id}/pdf"
+        f"/api/v1/events/certificates/{registration.ticket_id}/pdf", headers=auth_header(await mint_token(user)),
     )
 
     assert response.status_code == 403
