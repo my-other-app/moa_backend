@@ -321,7 +321,9 @@ async def test_the_token_list_is_the_newest_hundred_shortened_for_admins(client,
     gone.is_deleted = True
     await session.commit()
 
-    r = await client.get(f"{API}/notifications/test/tokens", headers=admins.support)  # any admin
+    # Owners only (BROADCAST, as sending to a token is); support is refused.
+    assert (await client.get(f"{API}/notifications/test/tokens", headers=admins.support)).status_code == 403
+    r = await client.get(f"{API}/notifications/test/tokens", headers=admins.h)
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["count"] == 103  # the deleted one is not counted

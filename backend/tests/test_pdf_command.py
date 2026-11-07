@@ -150,3 +150,12 @@ def test_the_real_renderer_fetches_nothing_a_page_names(tmp_path):
         assert hits == []
     finally:
         server.shutdown()
+
+
+def test_the_receipt_logo_is_embedded_not_fetched():
+    from app.api.payments import background_tasks
+
+    logo = background_tasks.receipt_logo_url()
+    assert logo.startswith("data:image/png;base64,") and len(logo) > 1000
+    html = pdf.render_html("payments/receipt.html", {"logo_url": logo})
+    assert logo in html and "githubusercontent" not in html

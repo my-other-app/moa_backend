@@ -34,6 +34,9 @@ async def test_only_an_owner_pushes_to_every_device_and_it_is_audited(client, se
 
 async def test_the_health_reads_are_open_to_every_admin(client, make_admin, mint_token):
     h = await role_headers(make_admin, mint_token)
-    for path in ("/notifications/test/tokens", "/notifications/topics/adoption", "/notifications/test/firebase-status"):
+    for path in ("/notifications/topics/adoption", "/notifications/test/firebase-status"):
         r = await client.get(f"{API}{path}", headers=h["viewer"])
         assert r.status_code == 200, (path, r.text)
+    # The devices' tokens are what a push needs: owners only (BROADCAST).
+    assert (await client.get(f"{API}/notifications/test/tokens", headers=h["viewer"])).status_code == 403
+    assert (await client.get(f"{API}/notifications/test/tokens", headers=h["owner"])).status_code == 200

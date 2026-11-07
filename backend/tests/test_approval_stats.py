@@ -617,11 +617,14 @@ async def test_the_requests_export(client, session, make_club, make_event, mint_
     assert by_email["asker462@example.com"]["Status"] == "Under review"
     assert (await _req(session, c)).status == "pending"
 
-    # Whoever may read the queue may export it: the same rule, the same answers.
-    for role in ("admin", "editor", "door"):
+    # Whoever may read the queue may export it -- except door staff, who read
+    # the queue at the gate but download no list (club_access.policy).
+    for role in ("admin", "editor"):
         assert policy.allows(role, "GET", f"/api/v1/events/registration/{w.event.id}/requests/export") == policy.allows(
             role, "GET", f"/api/v1/events/registration/{w.event.id}/requests"
         ) is True
+    assert policy.allows("door", "GET", f"/api/v1/events/registration/{w.event.id}/requests") is True
+    assert policy.allows("door", "GET", f"/api/v1/events/registration/{w.event.id}/requests/export") is False
     other = await _club_event(session, make_club, make_event, mint_token, tag="exportother")
     seen = {}
     for path in ("requests", "requests/export"):
