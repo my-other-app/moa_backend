@@ -41,8 +41,10 @@ and keeps working until the cutover.
 | `cloudflare-ips.sh` | `/srv/moa/cloudflare-ips.sh` | Checks Caddy's trusted ranges against Cloudflare's list |
 | `env/*.example` | `/srv/moa/env/*.example` | What goes in `.env` and `env/<app>.env` |
 | `deploy.conf.example` | `/srv/moa/deploy.conf` | deploy.sh's own settings (registry, timeouts) |
+| `ops-bot/` | `/srv/moa/ops-bot/` | The Telegram ops bot: encrypted nightly backups, alerts, `/status` ([its README](ops-bot/README.md)) |
 
-Never in git, only on the server (root, mode 600/700): `.env`, `env/*.env`,
+Never in git, only on the server (root, mode 600/700): `.env`, `env/*.env`
+(including `env/ops-bot.env`, the bot's token),
 `certs/origin.pem` and `origin.key`, `secrets/` (wallet certificates,
 Firebase JSON). `images.env` and `state/` are written by deploy.sh.
 

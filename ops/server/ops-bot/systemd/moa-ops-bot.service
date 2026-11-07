@@ -1,0 +1,58 @@
+# The Telegram ops bot (ops/server/ops-bot): alerts every minute, and the
+# owner's /status, /disk, /logs, /backup. Long polling only: no webhook, no
+# open port. Settings: /srv/moa/env/ops-bot.env (root, mode 600).
+#
+# It runs as root because it reads Docker (the socket is root's) and the
+# journal, and starts myotherapp-backup.service for /backup. What it may
+# write is limited to its state directory below; the rest of the box is
+# read-only to it.
+[Unit]
+Description=MyOtherApp ops bot (Telegram alerts, status, backups)
+Documentation=file:///srv/moa/ops-bot/README.md
+After=docker.service network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/python3 -I -B /srv/moa/ops-bot/run.py serve
+# Network blips and Telegram outages are handled inside; this is for a crash.
+# Backs off from 10 s to 10 min (systemd 254+; older ones restart every 10 s).
+Restart=on-failure
+RestartSec=10s
+RestartSteps=6
+RestartMaxDelaySec=10min
+# 78: not configured (no token / chat id, or the file is not mode 600). Not
+# restarted until the settings are fixed and the service is started again.
+RestartPreventExitStatus=78
+Environment=PYTHONUNBUFFERED=1
+Environment=DOCKER_CONFIG=/var/lib/moa-ops-bot/docker
+StateDirectory=moa-ops-bot
+StateDirectoryMode=0700
+# Small and unimportant next to the stack it watches.
+Nice=10
+MemoryMax=192M
+CPUQuota=25%
+TasksMax=64
+# Sandbox: read-only system, no home directories, no new privileges.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

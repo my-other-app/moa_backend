@@ -17,6 +17,8 @@ jobs:
           python-version: "3.11"
       - run: pip install -r requirements-dev.txt
       - run: ruff check .
+      # The Telegram ops bot (ops/server/ops-bot), with its own ruff.toml.
+      - run: ruff check ../ops/server/ops-bot
       # New migrations only (after the cutoff revision): what would lock a
       # hot table or rewrite it while production serves. Standard library only.
       - run: python scripts/check_migrations.py
@@ -98,3 +100,7 @@ jobs:
       - name: Redis answers
         run: python -c "import os, redis; assert redis.from_url(os.environ['APP_TEST_REDIS_URL'], socket_timeout=5).ping()"
       - run: pytest -rs
+      # The Telegram ops bot: standard library only, no services, no network.
+      - name: Ops bot tests
+        working-directory: ops/server/ops-bot
+        run: python -m pytest -q -p no:cacheprovider tests

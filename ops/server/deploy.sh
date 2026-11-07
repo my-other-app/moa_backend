@@ -601,6 +601,7 @@ cmd_doctor() {
   [ "$avail" -ge 10 ] && doctor_line ok "disk: ${avail} GB free" || doctor_line WARN "disk: only ${avail} GB free"
   [ -d /var/backups/myotherapp ] && doctor_line ok "/var/backups/myotherapp" || doctor_line WARN "/var/backups/myotherapp missing"
   systemctl is-active --quiet myotherapp-backup.timer 2> /dev/null && doctor_line ok "backup timer active" || doctor_line WARN "backup timer not active (ops/backup; setup.sh installs it once the files are here)"
+  systemctl is-active --quiet moa-ops-bot.service 2> /dev/null && doctor_line ok "ops bot running (Telegram)" || doctor_line WARN "ops bot not running (ops/server/ops-bot/README.md: install.sh, then the token and chat id)"
   if [ -n "$(container_of backend)" ]; then
     echo "== inside the API container"
     dc exec -T backend python -c '

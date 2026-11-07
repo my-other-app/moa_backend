@@ -1,5 +1,9 @@
 # Copied to /etc/default/myotherapp-backup (optional): overrides for the
 # backup units in ops/backup/systemd. Everything here has a default.
+# (ops/server/setup.sh and ops/server/ops-bot/install.sh write it on the
+# Oracle box: MOA_PROJECT_DIR=/srv/moa, MOA_COMPOSE_FILE=compose.yml. The
+# Telegram delivery and alerts find the bot at $MOA_PROJECT_DIR/ops-bot; its
+# own settings are in /srv/moa/env/ops-bot.env, not here.)
 
 # The checkout docker-compose runs from.
 #MOA_PROJECT_DIR=/var/www/myotherapp-production

@@ -757,7 +757,7 @@ The daily backup and the monthly restore drill come with backend PR #102
 (`ops/backup/`, docs/OPERATIONS.md section 19 there). They fit this layout
 as they are: setup.sh writes `/etc/default/myotherapp-backup` with
 `MOA_PROJECT_DIR=/srv/moa`, `MOA_COMPOSE_FILE=compose.yml`,
-`MOA_SERVICE=backend`, installs the units and enables the timer (02:30 IST)
+`MOA_SERVICE=backend`, installs the units and enables the timer (03:00 IST)
 once `ops/backup` is on the box (`Deploy to Oracle → stack` after #102 is
 merged, then run setup.sh again). The dump runs in the backend container
 (`pg_dump` 17 is in the image) into `/var/backups/myotherapp` (on the data

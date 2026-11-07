@@ -1,7 +1,8 @@
 # Runs when a backup unit fails (its OnFailure=): ops/backup/alert.sh tells
-# the admins -- through the app (mail to APP_ADMIN_ALERT_EMAILS, Discord,
-# the dashboard's bell), or straight to the Discord webhook in .env when the
-# app is down. %i is the failed unit.
+# the admins -- the owner's Telegram first (the ops bot, when it is set up),
+# then through the app (mail to APP_ADMIN_ALERT_EMAILS, Discord, the
+# dashboard's bell), or straight to the Discord webhook in .env when the app
+# is down. %i is the failed unit.
 [Unit]
 Description=MyOtherApp: tell the admins that %i failed
 

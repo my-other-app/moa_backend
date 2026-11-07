@@ -390,7 +390,7 @@ Settings:
 3. **Check**: take a backup from the dashboard; its answer shows
    `offsite_key: backups/daily/backup-....dump`. Then run the restore drill
    (below) once.
-4. **Schedule**: the systemd timer in `ops/backup` -- every day at 02:30
+4. **Schedule**: the systemd timer in `ops/backup` -- every day at 03:00
    IST, with an alert when a run fails -- and, on staging, the monthly
    restore drill. Section 19 has the install steps. (This used to be two
    root crontab lines; remove them if they are installed, so the backup does
@@ -1859,7 +1859,7 @@ people as `APP_ADMIN_ALERT_EMAILS`.
 ### Daily off-site backups, on a systemd timer
 
 `ops/backup` (synced to the server with the code) runs section 4's
-`scripts/backup.py` every day at **02:30 India time** (21:00 UTC), replacing
+`scripts/backup.py` every day at **03:00 India time** (21:30 UTC), replacing
 section 4's cron lines:
 
 - `ops/backup/systemd/myotherapp-backup.timer` -> `myotherapp-backup.service`
@@ -1877,6 +1877,13 @@ section 4's cron lines:
   `APP_ADMIN_ALERT_DISCORD_WEBHOOK`, the dashboard's bell) with the run's
   last log lines; when the app cannot (container or database down), it posts
   straight to the Discord webhook in `.env`.
+- On the Oracle box, the Telegram ops bot (`ops/server/ops-bot`, its
+  README has the install and the restore): after a good dump the unit's
+  `ExecStartPost=` (`run.sh deliver`) encrypts it with `age` to the owner's
+  public key and sends it to the owner's Telegram (over 50 MB: a message
+  instead); `alert.sh` sends every failure there first. The bot also
+  alerts on containers, disk, memory, SSH logins and error bursts, and
+  answers `/status`, `/disk`, `/logs`, `/backup`.
 
 **AWS (once, in the console or with the CLI; the app creates none of it).**
 Section 4 has the lifecycle JSON and the IAM policy in full.
@@ -1914,12 +1921,12 @@ so `ops/` and the new `scripts/backup.py` are there:
 ```bash
 cd /var/www/myotherapp-production
 sudo install -d -m 0700 /var/backups/myotherapp
-systemd-analyze calendar "*-*-* 02:30:00 Asia/Kolkata"       # read-only: prints the next run in UTC
+systemd-analyze calendar "*-*-* 03:00:00 Asia/Kolkata"       # read-only: prints the next run in UTC
 sudo install -m 0644 ops/backup/systemd/myotherapp-backup.service ops/backup/systemd/myotherapp-backup.timer \
   'ops/backup/systemd/myotherapp-alert@.service' /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now myotherapp-backup.timer
-systemctl list-timers myotherapp-backup.timer                 # NEXT: 21:00 UTC
+systemctl list-timers myotherapp-backup.timer                 # NEXT: 21:30 UTC
 sudo crontab -l | grep -n scripts/                             # remove section 4's cron lines if they are there: sudo crontab -e
 ```
 
