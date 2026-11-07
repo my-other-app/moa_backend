@@ -40,6 +40,8 @@ GOOD = dict(
     SES_ACCESS_KEY="AKIA6R4T2Y8U0I9O7P5L",
     SES_SECRET_KEY="Tq3Wm8Zr1Lp6Kn4Vb9Xc2Hs7Jd5Fg0Ya3Ue8Io1",
     SES_DEFAULT_SENDER="info@myotherapp.in",
+    SES_WEBHOOK_TOKEN="Vx7Kq2Lm9Zp4Rt8Wn3Bc6Hs1Jd5Fg0Ya",
+    SES_SNS_TOPIC_ARN="arn:aws:sns:ap-south-1:123456789012:ses-feedback",
     RAZORPAY_KEY_ID="rzp_live_Q8dK2mZ7pL4wR9",
     RAZORPAY_KEY_SECRET="h3Jk8Lm2Np7Qr4St9Uv1Wy6Zb",
     RAZORPAY_WEBHOOK_SECRET="w9Ex4Rt7Yu2Io5Pa8Sd3Fg6Hj",
@@ -280,6 +282,17 @@ def test_softer_findings_only_warn():
         "SITE_TOKENS", "CORS_ORIGINS", "BACKUP_S3_KMS_KEY_ID",
     }
     assert cc.enforce(config)  # returned, not raised
+
+
+def test_the_ses_hook_without_its_token_or_topic_is_said():
+    """POST /hooks/ses refuses everything in production without both, so no
+    bounce or complaint is heard: a warning names each one."""
+    assert not {"SES_WEBHOOK_TOKEN", "SES_SNS_TOPIC_ARN"} & set(warnings(make()))
+    missing = warnings(make(SES_WEBHOOK_TOKEN="", SES_SNS_TOPIC_ARN=""))
+    assert "refused" in missing["SES_WEBHOOK_TOKEN"] and "refused" in missing["SES_SNS_TOPIC_ARN"]
+    assert fatal(make(SES_WEBHOOK_TOKEN="", SES_SNS_TOPIC_ARN="")) == {}
+    assert "SNS topics' ARNs" in warnings(make(SES_SNS_TOPIC_ARN="arn:aws:sns:ap-south-1:1:a, ses-feedback"))["SES_SNS_TOPIC_ARN"]
+    assert "SES_SNS_TOPIC_ARN" not in warnings(make(SES_SNS_TOPIC_ARN="arn:aws:sns:ap-south-1:1:a,arn:aws:sns:ap-south-1:1:b"))
 
 
 # ---------------------------------------------------------------------------

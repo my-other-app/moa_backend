@@ -20,7 +20,7 @@ from app.api.events.registration.schemas import (
     SetWinnerRequest,
 )
 from app.core.auth.dependencies import AdminAuth, ClubAuth, OptionalUserAuth
-from app.core.auth.permissions import EXPORT_DATA, ensure_admin_can
+from app.core.auth.permissions import EXPORT_DATA, ContentAuth, ensure_admin_can
 from app.db.core import SessionDep
 from app.api.users.models import UserTypes
 from app.api.users import service as user_service
@@ -469,13 +469,17 @@ async def list_event_imports(
     return await service.list_imports(session, user_id=user.id, event_id=event_id, as_admin=is_admin_user(user))
 
 
-@router.post("/{event_id}/bulk-import", summary="Bulk import user registrations")
+@router.post("/{event_id}/bulk-import", summary="Bulk import user registrations (admin)")
 async def bulk_import_event_registrations(
-    user: AdminAuth,
+    user: ContentAuth,
     event_id: int,
     session: SessionDep = SessionDep,
     file: UploadFile = Form(...),
 ) -> BackgroundTaskLogResponseSchema:
+    """Writes registrations into any club's event and mails every row its
+    ticket, so it is a change to a club's records: MANAGE_CONTENT, the
+    capability an admin needs to use a club's own routes to change anything
+    (403 INSUFFICIENT_ADMIN_ROLE for a viewer or support admin)."""
     df = await read_excel(file)
     event = await session.scalar(select(Events).filter(Events.id == event_id))
     if not event:

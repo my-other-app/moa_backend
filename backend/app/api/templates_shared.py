@@ -16,9 +16,10 @@ it did.
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.api.templates_fit import fit_font_size
+from app.api.templates_style import check_colour, check_font
 
 
 class TemplateLayer(BaseModel):
@@ -77,6 +78,17 @@ class TemplateLayer(BaseModel):
     # Shape layers: a filled rectangle, optionally rounded.
     fill: Optional[str] = Field(default=None)
     radius: int = Field(default=0, ge=0, le=400)
+
+    # Printed into the document's CSS (app/api/templates_style.py).
+    @field_validator("color", "fill")
+    @classmethod
+    def _colour(cls, v, info):
+        return check_colour(v, info.field_name)
+
+    @field_validator("font")
+    @classmethod
+    def _font(cls, v, info):
+        return check_font(v, info.field_name)
 
     @property
     def effective_weight(self) -> int:

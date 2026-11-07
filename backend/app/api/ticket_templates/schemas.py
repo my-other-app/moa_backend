@@ -1,7 +1,8 @@
-from pydantic import BaseModel, Field
-from typing import Optional
+from pydantic import BaseModel, Field, field_validator
+from typing import Literal, Optional
 
 from app.api.templates_shared import LayerCanvas, TemplateLayer
+from app.api.templates_style import check_colour, check_font
 
 
 class TicketTemplateConfig(BaseModel):
@@ -17,7 +18,8 @@ class TicketTemplateConfig(BaseModel):
 
     # Layout & Options
     ticket_type_label: str = Field(default="GENERAL", description="GENERAL, VIP, EARLY BIRD, PREMIUM, STUDENT, FREE")
-    border_style: str = Field(default="none", description="none, solid, dashed, double")
+    # Printed into the document's CSS: one of these, nothing else (app/api/templates_style.py).
+    border_style: Literal["none", "solid", "dashed", "dotted", "double"] = Field(default="none", description="none, solid, dashed, dotted, double")
     show_prizes: bool = Field(default=True, description="Show prize info on ticket")
     show_guidelines_link: bool = Field(default=True, description="Show guidelines link")
 
@@ -50,6 +52,18 @@ class TicketTemplateConfig(BaseModel):
     secondary_logo_key: Optional[str] = Field(default=None, description="The secondary_logo upload's key; set by the server")
     background_image_key: Optional[str] = Field(default=None, description="The background_image upload's key; set by the server")
 
+
+    # Colours and fonts are printed into the document's CSS, so each must be
+    # one (app/api/templates_style.py); the render drops any that is not.
+    @field_validator("accent_color", "bg_color", "text_color", "secondary_text_color", "border_color")
+    @classmethod
+    def _colour(cls, v, info):
+        return check_colour(v, info.field_name)
+
+    @field_validator("font")
+    @classmethod
+    def _font(cls, v, info):
+        return check_font(v, info.field_name)
 
 class TicketTemplateResponse(BaseModel):
     id: int

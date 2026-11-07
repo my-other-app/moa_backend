@@ -47,6 +47,10 @@ class RetentionState(enum.Enum):
 DOOR_OPEN_STATUSES = (EventStatus.published, EventStatus.live)
 # Statuses in which event settings are read-only (the status itself stays editable).
 LOCKED_STATUSES = (EventStatus.closed, EventStatus.archived, EventStatus.cancelled)
+#: The soonest after its end an event's guests' data may be deleted by the
+#: schedule. Sooner would be "run retention now" by another name, which only
+#: the host's owner and admins may do, and only by typing the slug back.
+MIN_RETENTION_HOURS = 24
 
 STATUS_NOTE = {
     EventStatus.draft: "Refuses check-ins",

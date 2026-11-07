@@ -5,6 +5,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.api.closeout.models import MIN_RETENTION_HOURS
+
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
@@ -30,7 +32,7 @@ class SettingsPatch(BaseModel):
     status: Optional[str] = Field(default=None, pattern="^(draft|published|live|closed|archived)$")
     status_clock: Optional[bool] = None
     retention_mode: Optional[str] = Field(default=None, pattern="^(keep|delete)$")
-    retention_hours: Optional[int] = Field(default=None, ge=1, le=24 * 365)
+    retention_hours: Optional[int] = Field(default=None, ge=MIN_RETENTION_HOURS, le=24 * 365)
     report_recipients: Optional[list[str]] = Field(default=None, max_length=10)
     keep_contacts: Optional[bool] = None
 

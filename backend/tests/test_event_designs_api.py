@@ -145,11 +145,11 @@ async def test_a_role_variant_is_separate_from_the_event_default(
 
     await client.put(
         f"/api/v1/events/{event.id}/designs/ticket",
-        headers=headers, json={"config": {"bg_color": "#default0"}},
+        headers=headers, json={"config": {"bg_color": "#defa01"}},
     )
     await client.put(
         f"/api/v1/events/{event.id}/designs/ticket?audience=speaker",
-        headers=headers, json={"config": {"bg_color": "#speaker0"}},
+        headers=headers, json={"config": {"bg_color": "#5beac0"}},
     )
 
     default = await client.get(
@@ -160,8 +160,8 @@ async def test_a_role_variant_is_separate_from_the_event_default(
         headers=headers,
     )
 
-    assert default.json()["config"]["bg_color"] == "#default0"
-    assert speaker.json()["config"]["bg_color"] == "#speaker0"
+    assert default.json()["config"]["bg_color"] == "#defa01"
+    assert speaker.json()["config"]["bg_color"] == "#5beac0"
     assert speaker.json()["source"] == "event_role"
 
 
@@ -173,7 +173,7 @@ async def test_a_role_with_no_variant_falls_back_to_the_event_default(
     await _club_default(session, club.id)
     await client.put(
         f"/api/v1/events/{event.id}/designs/ticket",
-        headers=headers, json={"config": {"bg_color": "#default0"}},
+        headers=headers, json={"config": {"bg_color": "#defa01"}},
     )
 
     staff = await client.get(
@@ -181,7 +181,7 @@ async def test_a_role_with_no_variant_falls_back_to_the_event_default(
         headers=headers,
     )
 
-    assert staff.json()["config"]["bg_color"] == "#default0"
+    assert staff.json()["config"]["bg_color"] == "#defa01"
     assert staff.json()["source"] == "event_default"
     # It is the event's design, but not the staff variant, so there is no
     # staff design to reset.

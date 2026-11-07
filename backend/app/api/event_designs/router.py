@@ -47,6 +47,7 @@ from app.api.events.documents import (
     sample_values,
 )
 from app.api.templates_images import CERTIFICATE_FIELDS, TICKET_FIELDS, embedded, key_of, shown, stored
+from app.api.templates_style import problems as style_problems
 from app.core.layout import pool
 from app.core.public_urls import site_url
 from app.core.storage.fields import upload
@@ -222,6 +223,11 @@ async def save_design(
     template they started from is left untouched.
     """
     event = await _event_for_editing(session, user, event_id)
+    # Its colours, fonts, border and layers are printed into the document's
+    # CSS, so each must be of its shape (app/api/templates_style.py).
+    found = style_problems(payload.config)
+    if found:
+        raise CustomHTTPException(422, message=f"Invalid design: {'; '.join(found[:5])}", error_code="INVALID_DESIGN", errors={"config": found})
     await _plan_allows(session, event.club_id, kind, user, event)
     model = _MODELS[kind]
 

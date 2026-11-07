@@ -118,10 +118,11 @@ async def test_no_link_without_a_survey_or_before_it_opens(client, session, worl
     await live.send_survey(session, tonight)
     assert await _link(client, tonight, h) == live.survey_link(tonight, mine)
 
-    # A draft's survey page is a 404, so a draft's link is not handed out.
+    # A draft's survey page is a 404, so a draft's link is not handed out:
+    # to a guest, the draft itself is a 404 now (only its hosts and admins see it).
     event.lifecycle = EventStatus.draft
     await session.commit()
-    assert await _link(client, event, h) is None
+    assert (await client.get(f"{API}/events/info/{event.id}", headers=h)).status_code == 404
 
 
 async def test_the_link_costs_no_query_of_its_own(client, session, world, statements):

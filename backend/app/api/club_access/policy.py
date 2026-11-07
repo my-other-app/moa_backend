@@ -14,8 +14,8 @@ import re
 ROLE_INFO = {
     "owner": ("Owner", "The club's own account. Everything, including who can sign in."),
     "admin": ("Admin", "Everything except changing who can sign in."),
-    "editor": ("Editor", "Events, attendees, messages, designs and the website. No money and no club profile."),
-    "door": ("Door", "Check-ins, the gate and hand-overs on the day. Sees events and attendees; changes nothing else."),
+    "editor": ("Editor", "Events, attendees, messages, designs and the website. No money, discount codes or club profile."),
+    "door": ("Door", "Check-ins, the gate and hand-overs on the day. Sees events and attendees; changes nothing else and downloads no lists."),
 }
 
 WRITES = frozenset({"POST", "PUT", "PATCH", "DELETE"})
@@ -87,6 +87,26 @@ _MONEY = _rx(
 # and editors (who message guests anyway); door staff see names at the gate,
 # not a list to take away (as `allows_contacts` for an AI assistant).
 _CONTACTS = _rx(r"^/api/v1/clubs/contacts(?:/|$)")
+# A list to take away: a file of many guests, followers or contacts -- every
+# export (`/export`, `/export.csv`), a spreadsheet, an archive or mailbox
+# (.csv, .xlsx, .zip, .mbox), a bundle or a batch of documents. Door staff see
+# names at the gate, one guest at a time; they never download the list. Decided
+# by the shape of the path, so an export written later is refused to them
+# without anyone remembering to add it here (tests/test_club_access.py walks
+# every route the API serves and fails if one slips through).
+_TAKEAWAY = _rx(
+    r"/export(?:[./]|$)",
+    r"\.(?:csv|xlsx|xls|zip|mbox)$",
+    r"/(?:bundle|batch)(?:\.[a-z]+)?$",
+)
+# Discount codes: a code gives tickets away (a 100%-off code is a free ticket
+# to anyone who has it), so they are money -- owners and admins, read and write.
+# The public price check (`POST /events/{id}/discount-codes/check`) is no
+# member's request.
+_DISCOUNT_CODES = _rx(
+    r"^/api/v1/clubs/discount-codes(?:/|$)",
+    r"^/api/v1/events/\d+/ticketing/codes(?:/|$)",
+)
 # The club's public face and setup.
 _CLUB_PROFILE_WRITES = _rx(
     r"^/api/v1/clubs/(?:update|cover|logo|socials|create)(?:/|$)",
@@ -132,6 +152,8 @@ def allows(role: str, method: str, path: str) -> bool:
         return True
     if _OWNER_ACCOUNT.search(path):
         return False
+    if role == "door" and _TAKEAWAY.search(path):
+        return False
     if _GATEWAY.search(path):
         return role == "admin" and method == "GET"
     if _WHATSAPP_ACCOUNT.search(path):
@@ -152,6 +174,8 @@ def allows(role: str, method: str, path: str) -> bool:
         return role == "admin"
     if role == "admin":
         return True
+    if _DISCOUNT_CODES.search(path):
+        return False
     if _CONTACTS.search(path):
         return role == "editor"
     if _CLUB_STORE.search(path):
@@ -184,6 +208,16 @@ def can(role: str) -> dict:
         # Cancelling an event refunds its guests: money (app/api/club_ops).
         "cancel_events": admin,
         "contacts": editor,
+        # Every download of a list: the guest list, the waiting list, the
+        # followers, registration requests, ticket and certificate bundles,
+        # a batch of ID cards (`_TAKEAWAY`). Door staff see names at the gate.
+        "exports": editor,
+        # Discount codes give tickets away: money (`_DISCOUNT_CODES`).
+        "discount_codes": admin,
+        # An event's retention (keep or delete its guests' data, and when),
+        # whether contacts are kept, and who gets the closeout report: the
+        # host's owner and admins only, never a co-host (closeout.router).
+        "retention_settings": admin,
         "club_profile": admin,
         "edit_events": editor,
         "club_store": editor,

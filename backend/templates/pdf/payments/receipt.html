@@ -1,6 +1,3 @@
-{% set logo_url =
-"https://raw.githubusercontent.com/SrutavTarun/MyOtherApp_Template/refs/heads/main/logo.png"
-%}
 <!DOCTYPE html>
 <html>
   <head>
@@ -99,7 +96,7 @@
     <div class="container">
       <div class="company-info">
         <div class="logo">
-          <img src="{{ logo_url }}" alt="MyOtherApp Logo" width="150" />
+          {% if logo_url %}<img src="{{ logo_url }}" alt="MyOtherApp Logo" width="150" />{% endif %}
         </div>
         <div class="company-details">
           <p>
