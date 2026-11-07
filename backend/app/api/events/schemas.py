@@ -602,7 +602,12 @@ class EventListResponse(CustomBaseModel):
     # until the organiser issues -- forever, at an event that issues none.
     has_certificate: bool | None = Field(None)
     certificate_revoked: bool | None = Field(None)
+    #: The certificate's public page (myotherapp.in/certificates/{public id}),
+    #: to open and share; and the number printed on it. Neither is made from
+    #: the ticket id, which must never be built into either. Null unless
+    #: has_certificate.
     certificate_url: str | None = Field(None)
+    certificate_no: str | None = Field(None)
     #: The ticket type the caller's registration was bought as, as the ticket
     #: prints it (EventRegistrationsLink.ticket_label). Null when the caller
     #: has no registration for the event, or its ticket names no type.
@@ -801,7 +806,10 @@ class EventDetailResponse(CustomBaseModel):
     #: (events.certificates.availability). Null when not registered.
     has_certificate: bool | None = Field(None)
     certificate_revoked: bool | None = Field(None)
+    #: As EventListResponse's: the certificate's public page by its public
+    #: id, and its number. Null unless has_certificate.
     certificate_url: str | None = Field(None)
+    certificate_no: str | None = Field(None)
     #: The viewer's own link to the event's feedback survey, the one its
     #: email sends (`/feedback/{event}/{registration}?k=...`, the app's survey
     #: screen): set once they were checked in and the survey is open (sent,
@@ -854,9 +862,12 @@ class TicketDetailsResponse(CustomBaseModel):
     attended_on: datetime | None
     user: UserPublic
     created_at: datetime
-    #: The certificate's own number; null on one older than numbers drawn
-    #: separately, whose number is CERT- and the ticket id's body.
+    #: The certificate's own number, never made from the ticket id.
     certificate_no: str | None = None
+    #: The certificate's public page by its public id, while it is issued and
+    #: not revoked; null otherwise. Where an older /certificates/{ticket id}
+    #: address sends the ticket's holder.
+    certificate_url: str | None = None
     #: The organiser revoked this ticket: the door refuses it, and so do its
     #: image, its PDF and its Wallet pass (410, TICKET_REVOKED). Spelled as
     #: the event list already spells it (EventListResponse.ticket_revoked), so

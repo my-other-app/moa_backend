@@ -503,7 +503,10 @@ def guest_values(event: Events, reg: EventRegistrationsLink) -> dict:
     hold one, and the email-only ones."""
     v = layout_values(reg, event, "certificate" if has_certificate(reg) else "ticket")
     v["ticket_url"] = "" if reg.ticket_revoked_at else links.file_url("ticket", reg.ticket_id)
-    v["certificate_url"] = links.file_url("certificate", reg.ticket_id) if has_certificate(reg) else ""
+    # The certificate's file by its own public id, never the ticket id: an
+    # email with a certificate in it is forwarded and posted.
+    public_id = getattr(reg, "certificate_public_id", None)
+    v["certificate_url"] = links.file_url("certificate", public_id) if has_certificate(reg) and public_id else ""
     v["organiser_email"] = organiser_email(event)
     v["event_start"] = f"{v['event_day'][:3]} {v['event_date']} · {v['event_time']}"
     v["doors_in"] = doors_in(event.event_datetime)

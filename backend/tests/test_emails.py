@@ -323,8 +323,10 @@ async def test_the_link_in_the_email_opens_the_guests_ticket(client, world):
 
     assert (await client.get(f"{parsed.path}?s=deadbeef")).status_code == 403
     assert (await client.get(parsed.path)).status_code == 403
+    # A certificate link is by the certificate's public id: one by a ticket
+    # id, however well signed, finds no certificate.
     cert = urlparse(links.file_url("certificate", world["b"].ticket_id))
-    assert (await client.get(f"{cert.path}?{cert.query}")).status_code == 410
+    assert (await client.get(f"{cert.path}?{cert.query}")).status_code == 404
 
     revoked = await client.post(f"/api/v1/events/{world['event'].id}/tickets/{world['a'].id}/revoke", json={}, headers=world["club"])
     assert revoked.status_code == 200

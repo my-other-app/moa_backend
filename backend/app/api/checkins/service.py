@@ -51,20 +51,19 @@ def door_open(event: Events, now: Optional[datetime] = None) -> bool:
 
 def _code_filters(code: str) -> list:
     """What a scanned code can be, each a probe of a unique index: the
-    registration's id, or its ticket id as minted (upper case; the input is
-    upper-cased, never the column, which would read every registration on
-    the platform), then as typed for any legacy id that is not upper case.
+    ticket id as minted (upper case; the input is upper-cased, never the
+    column, which would read every registration on the platform), then as
+    typed for any legacy id that is not upper case.
 
-    Never the admission number printed beside it: those run in sequence
-    (MOA-0042-E123), so anyone could print a QR for an unused one. Staff
-    find a guest by it in the search, and admit them there by hand."""
+    Only the ticket id, the one code that is the guest's alone. Never the
+    admission number printed beside it: those run in sequence
+    (MOA-0042-E123), so anyone could print a QR for an unused one. Nor the
+    registration's id: it is a record's key, not an entry pass, and travels
+    in places a ticket never does. Staff find a guest by name or number in
+    the search, and admit them there by hand (admit, by id)."""
     code = code.strip()
     if not code:
         return []
-    try:
-        return [EventRegistrationsLink.id == uuid.UUID(code)]
-    except ValueError:
-        pass
     found = [EventRegistrationsLink.ticket_id == code.upper()]
     if code != code.upper():
         found.append(EventRegistrationsLink.ticket_id == code)
@@ -201,15 +200,20 @@ async def admit(session, event: Events, reg: EventRegistrationsLink, *, actor: G
     return await check_in_of(session, reg.id)
 
 
-async def scan(session, event: Events, *, code: str, door_label: Optional[str], client_ref: Optional[str], scanned_at: Optional[datetime], actor: GateActor, via: CheckInVia = CheckInVia.gate, background=None) -> dict:
+async def scan(session, event: Events, *, code: Optional[str] = None, door_label: Optional[str], client_ref: Optional[str], scanned_at: Optional[datetime], actor: GateActor, via: CheckInVia = CheckInVia.gate, background=None, registration: Optional[EventRegistrationsLink] = None) -> dict:
     """The hot path. Idempotent on `client_ref`. Seven outcomes, all answered, none raised.
 
     Every read is an index probe: the code on this event (the ticket id's
     unique index), and only on a miss the same code anywhere, for
     WRONG_EVENT. A race with another door is settled by the unique keys on
-    check_ins, never by an error."""
-    reg = await lookup(session, event.id, code)
+    check_ins, never by an error.
+
+    `registration`: a guest a person already picked out, instead of a code
+    (check_in_by_hand, the kiosk's verified self check-in); the rest of the
+    path is the same. A code is only ever a ticket id (_code_filters)."""
+    reg = registration if registration is not None else await lookup(session, event.id, code or "")
     if reg is None:
+        code = code or ""
         other = await elsewhere(session, code)
         if other is not None and other.event_id != event.id:
             return _not_admitted("WRONG_EVENT", other_event={"name": other.event.name, "starts_at": other.event.event_datetime})
@@ -292,7 +296,7 @@ async def check_in_by_hand(session, event: Events, registration_id, door_label: 
     scan, recorded as by hand at the desk. Staff found them first (by name,
     email, ticket or admission number), so a person has confirmed who it is."""
     reg = await registration_of(session, event, registration_id)
-    return await scan(session, event, code=str(reg.id), door_label=door_label or "Desk", client_ref=f"hand-{uuid.uuid4().hex}", scanned_at=None, actor=actor, via=CheckInVia.desk, background=background)
+    return await scan(session, event, registration=reg, door_label=door_label or "Desk", client_ref=f"hand-{uuid.uuid4().hex}", scanned_at=None, actor=actor, via=CheckInVia.desk, background=background)
 
 
 async def undo(session, event: Events, registration_id, actor: GateActor) -> dict:

@@ -188,7 +188,8 @@ async def test_the_owning_club_can_see_the_ticket_image(client, captured, layere
 async def test_the_certificate_now_substitutes_its_layers(client, captured, layered_event):
     """Nothing substituted certificate tokens: every text layer was empty."""
     r = await client.get(
-        f"/api/v1/events/certificates/{layered_event['registration'].ticket_id}/image"
+        f"/api/v1/events/certificates/{layered_event['registration'].ticket_id}/image",
+        headers=layered_event["attendee"],
     )
 
     assert r.status_code == 200
@@ -199,7 +200,8 @@ async def test_the_certificate_now_substitutes_its_layers(client, captured, laye
 async def test_the_certificate_qr_layer_has_a_source(client, captured, layered_event):
     """The template's QR layer reads `qr_code_url`; the context never set it."""
     await client.get(
-        f"/api/v1/events/certificates/{layered_event['registration'].ticket_id}/image"
+        f"/api/v1/events/certificates/{layered_event['registration'].ticket_id}/image",
+        headers=layered_event["attendee"],
     )
 
     context = captured[-1][2]
@@ -208,7 +210,8 @@ async def test_the_certificate_qr_layer_has_a_source(client, captured, layered_e
 
 async def test_a_layered_certificate_pdf_is_sized_to_its_artwork(client, captured, layered_event):
     await client.get(
-        f"/api/v1/events/certificates/{layered_event['registration'].ticket_id}/pdf"
+        f"/api/v1/events/certificates/{layered_event['registration'].ticket_id}/pdf",
+        headers=layered_event["attendee"],
     )
 
     options = captured[-1][3]
@@ -217,7 +220,7 @@ async def test_a_layered_certificate_pdf_is_sized_to_its_artwork(client, capture
 
 
 async def test_a_built_in_certificate_keeps_landscape_a4(
-    client, captured, session, make_club, make_event, make_user, make_registration
+    client, captured, session, make_club, make_event, make_user, make_registration, mint_token
 ):
     owner, club = await make_club(name="Plain", email="plain@example.com")
     event = await make_event(
@@ -230,7 +233,8 @@ async def test_a_built_in_certificate_keeps_landscape_a4(
     registration.certificate_issued_at = datetime.now(timezone.utc)
     await session.commit()
 
-    await client.get(f"/api/v1/events/certificates/{registration.ticket_id}/pdf")
+    r = await client.get(f"/api/v1/events/certificates/{registration.ticket_id}/pdf", headers=auth_header(await mint_token(user)))
+    assert r.status_code == 200, r.text
 
     assert captured[-1][3] == {"orientation": "Landscape"}
     assert captured[-1][2]["style"].get("layers") in (None, [])

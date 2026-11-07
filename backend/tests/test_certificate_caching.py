@@ -27,7 +27,7 @@ async def world(client, session, make_club, make_event, make_user, make_registra
     r_a = await make_registration(event=event, user=a, full_name="Ananya Iyer", is_attended=True)
     r_s = await make_registration(event=event, user=s, full_name="Sita Raman", is_attended=True, role="speaker")
     await session.commit()
-    return {"event": event, "a": r_a, "s": r_s, "club": auth_header(await mint_token(owner))}
+    return {"event": event, "a": r_a, "s": r_s, "club": auth_header(await mint_token(owner)), "session": session}
 
 
 @pytest.fixture
@@ -62,6 +62,13 @@ async def _design(client, world, audience="event_default"):
     return r.json()["version"]
 
 
+async def _public_id(world) -> str:
+    """The certificate's public id, drawn when it was issued: its public
+    page's address (never the ticket id)."""
+    await world["session"].refresh(world["a"])
+    return world["a"].certificate_public_id
+
+
 async def _issue(client, world) -> None:
     """The club issues to whoever checked in. Without it there is nothing to
     cache, draw or revoke: a check-in is not a certificate
@@ -75,7 +82,7 @@ async def _issue(client, world) -> None:
 
 async def test_the_public_certificate_is_cached_minutes_and_revalidated(client, world, drawn):
     await _issue(client, world)
-    url = f"/api/v1/events/certificates/{world['a'].ticket_id}"
+    url = f"/api/v1/events/certificates/{await _public_id(world)}"
     png = await client.get(f"{url}/image")
     pdf = await client.get(f"{url}/pdf")
 
@@ -91,7 +98,7 @@ async def test_the_public_certificate_is_cached_minutes_and_revalidated(client, 
 
 async def test_a_revocation_or_a_redesign_changes_the_etag(client, world, drawn):
     await _issue(client, world)
-    url = f"/api/v1/events/certificates/{world['a'].ticket_id}/image"
+    url = f"/api/v1/events/certificates/{await _public_id(world)}/image"
     first = (await client.get(url)).headers["etag"]
 
     await _design(client, world)
@@ -105,11 +112,12 @@ async def test_a_revocation_or_a_redesign_changes_the_etag(client, world, drawn)
 
 async def test_the_public_routes_are_limited_per_address(client, world, drawn):
     await _issue(client, world)
+    await _public_id(world)  # read again: issuing wrote the row
     code = world["a"].certificate_no
     answers = [(await client.get(f"/api/v1/verify/certificates/{code}")).status_code for _ in range(21)]
     assert answers[:20] == [200] * 20 and answers[20] == 429
 
-    url = f"/api/v1/events/certificates/{world['a'].ticket_id}/image"
+    url = f"/api/v1/events/certificates/{await _public_id(world)}/image"
     statuses = [(await client.get(url)).status_code for _ in range(121)]
     assert statuses[-1] == 429 and statuses[:120] == [200] * 120
 

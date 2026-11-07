@@ -158,6 +158,32 @@ async def existing_registration(
     )
 
 
+async def may_reuse(session: AsyncSession, registration: EventRegistrationsLink, caller_id: int) -> bool:
+    """Whether the caller may be handed `registration`, which
+    existing_registration found for them: theirs, or one a guest made under
+    the address of an account that has shown it owns that address.
+
+    Only what the merge would fold into the account anyway
+    (users.service.merges_into, _guests_of): a guest's, under the account's
+    own address, for an app account its provider vouched for or whose owner
+    typed back the code. An address typed on a form, a guest session, or a
+    password account never confirmed proves nothing, so a registration found
+    by address alone stays its holder's: its ticket, contact and answers, its
+    price and its order."""
+    if registration.user_id == caller_id:
+        return True
+    caller = await session.get(Users, caller_id)
+    if not user_service.merges_into(caller):
+        return False
+    holder = await session.get(Users, registration.user_id)
+    return (
+        holder is not None
+        and not holder.is_deleted
+        and getattr(holder.user_type, "value", holder.user_type) == UserTypes.guest.value
+        and user_service.emails_match(holder.email, caller.email)
+    )
+
+
 async def places_taken(session: AsyncSession, event: Events) -> int:
     """What the organiser's `max_participants` counts: on a paid event the
     paid registrations (from ix_registrations_event_created alone), on a free
@@ -523,7 +549,14 @@ async def register_event(
     await hold_address(session, db_event.id, email)
     registration = await existing_registration(session, db_event.id, user_id, email)
     if registration:
-        if not claim_existing and registration.user_id != user_id:
+        # Found by its address, not the caller's own: someone else's unless
+        # the caller has shown the address is theirs (may_reuse). Refused as
+        # the public form refuses an address on the list, with nothing of the
+        # registration in the answer. The organiser adding a guest (by hand,
+        # by import, at the door) is told as before.
+        if registration.user_id != user_id and not by_organiser and not (
+            claim_existing and await may_reuse(session, registration, user_id)
+        ):
             raise CustomHTTPException(409, message=ALREADY_REGISTERED, error_code="ALREADY_REGISTERED")
         from app.api.store import service as store
 

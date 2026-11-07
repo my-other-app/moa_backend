@@ -307,9 +307,10 @@ async def test_tickets_minted_before_keep_working(client, session, world, make_u
     assert (await client.post(url, json=_scan("moa-2bceba8-pfzg3"), headers=world["h"])).json()["attendee"]["id"] == str(old.id)
     # One not minted upper case is still found as typed.
     assert (await client.post(url, json=_scan("moa-legacy-x1"), headers=world["h"])).json()["attendee"]["id"] == str(odd.id)
-    from app.api.events.certificates import certificate_number, ticket_id_of_certificate
+    # Its certificate's number is its own, never made from the old ticket id.
+    from app.api.events.certificates import number_of
 
-    assert ticket_id_of_certificate(certificate_number(old.ticket_id)) == old.ticket_id
+    assert "2BCEBA8" not in number_of(old) and "PFZG3" not in number_of(old)
 
 
 # ─── 3. After the answer, off the loop; club badges off counters ─────────

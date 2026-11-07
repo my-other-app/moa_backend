@@ -29,29 +29,29 @@ from app.core.utils.pdf import generate_pdf_bytes
 CERTIFICATE_PREFIX = "CERT"
 
 
-def certificate_number(ticket_id: str) -> str:
-    """The number made from a ticket id: MOA-7K3QF-X9PWM certifies as
-    CERT-7K3QF-X9PWM. Only for certificates printed before numbers were
-    drawn on their own (number_of): anyone reading it can write the ticket id."""
-    body = ticket_id.split("-", 1)[1] if "-" in ticket_id else ticket_id
-    return f"{CERTIFICATE_PREFIX}-{body}"
-
-
 def number_of(registration) -> str:
-    """The number this guest's certificate carries: its own, drawn at
-    registration (certificate_no), or for an older one, the number made
-    from its ticket id, which is printed already and keeps verifying."""
-    return getattr(registration, "certificate_no", None) or certificate_number(registration.ticket_id or "")
+    """The number this guest's certificate carries: its own, drawn on its
+    own (certificate_no). It used to fall back to the ticket id under CERT-
+    for a registration older than the column, so a certificate shown to
+    anyone gave away the code the door scans; those were all drawn a number
+    of their own (migration certificate_public_ids), and issuing draws one
+    for any still without. Never made from the ticket id."""
+    return getattr(registration, "certificate_no", None) or ""
 
 
-def ticket_id_of_certificate(number: str) -> str:
-    """The ticket id a certificate number or verification code points at."""
-    code = number.strip()
-    if code.startswith("certificate:"):
-        code = code[len("certificate:"):]
-    if code.upper().startswith(f"{CERTIFICATE_PREFIX}-"):
-        return "MOA-" + code[len(CERTIFICATE_PREFIX) + 1:]
-    return code
+def public_id_of(registration) -> Optional[str]:
+    """The certificate's public id, which its page and links are keyed by;
+    None before it is issued."""
+    return getattr(registration, "certificate_public_id", None) or None
+
+
+def public_url_of(registration) -> Optional[str]:
+    """The certificate's page on the public site, for sharing: by its public
+    id, never the ticket id. None while it has none."""
+    from app.core.public_urls import certificate_url
+
+    public_id = public_id_of(registration)
+    return certificate_url(public_id) if public_id else None
 
 
 def qr_text(registration) -> str:
@@ -92,8 +92,10 @@ def certificate_context(registration, style: dict, *, qr: bool = True) -> dict:
     them is CPU work, and a bundle prepares hundreds of these on the loop."""
     event = registration.event
     issued = getattr(registration, "certificate_issued_at", None) or datetime.now(timezone.utc)
+    # Nothing of the ticket: a certificate is shown to anyone, and the ticket
+    # id is what the door scans. A design's "ticket code" layer prints the
+    # certificate's number, as the layout designs' does (layout_values).
     payload = {
-        "ticket_id": registration.ticket_id,
         "certificate_no": number_of(registration),
         "participant_name": registration.full_name,
         "event_name": event.name,
@@ -103,7 +105,7 @@ def certificate_context(registration, style: dict, *, qr: bool = True) -> dict:
     }
     context = {
         "email_payload": payload,
-        "style": apply_layers(style, document_values(registration, event)),
+        "style": apply_layers(style, {**document_values(registration, event), "ticket_code": number_of(registration)}),
         "qr_text": qr_text(registration),
     }
     return with_qr(context) if qr else context

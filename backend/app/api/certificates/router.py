@@ -123,9 +123,10 @@ async def list_certificates(
 
 # ─── The public verifier ────────────────────────────────────────────────────
 #
-# Anyone may check a certificate, by its number, its QR or a link ending in
-# either; never by a name or an address, so the verifier is no directory of
-# who went where. Each ask is counted before anything is looked up, a miss
+# Anyone may check a certificate, by its number, its QR, its public id (the
+# link its holder shares) or a link ending in any of them; never by a name,
+# an address or a ticket id, so the verifier is no directory of who went
+# where, and no way to try ticket ids. Each ask is counted before anything is looked up, a miss
 # as much as a match (settings.CERTIFICATE_VERIFY_LIMIT), per person: the
 # site renders its result pages on Vercel, from addresses every visitor
 # shares, so the visitor it names in X-Visitor-IP is believed -- only
@@ -187,6 +188,24 @@ async def verify_image(request: Request, session: SessionDep, code: str) -> Resp
         raise CustomHTTPException(404, message="No certificate has this number.")
     png = await service.preview_png(session, reg)
     return Response(content=png, media_type="image/png", headers={**NO_STORE, "X-Content-Type-Options": "nosniff"})
+
+
+@public_router.get("/certificates/{code}/pdf", summary="A valid certificate's PDF, from its public page")
+async def verify_pdf(request: Request, session: SessionDep, code: str) -> Response:
+    """The certificate's PDF -- the very file its holder downloads -- while
+    it is valid, by its public id (the page a holder shares) or its number;
+    404 for anything else, revoked or not found alike. Never by a ticket id."""
+    _count(request, "certificates:verify-pdf")
+    reg = await service.held_certificate(session, code)
+    if reg is None:
+        raise CustomHTTPException(404, message="No certificate has this number.")
+    from app.api.events.certificates import certificate_document
+
+    doc = await certificate_document(session, reg)
+    return Response(
+        content=doc.content, media_type="application/pdf",
+        headers={**NO_STORE, "X-Content-Type-Options": "nosniff", "Content-Disposition": f'attachment; filename="{doc.filename}"'},
+    )
 
 
 @public_router.get("/certificates/{code}/files", summary="The SHA-256 of each copy of a valid certificate handed out")

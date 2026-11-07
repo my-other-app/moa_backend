@@ -618,6 +618,11 @@ async def _seeker_rows(session: AsyncSession, c: Competitions, event: Events) ->
     return [dict(registration_id=s.registration_id, name=regs[s.registration_id].full_name if s.registration_id in regs else "Guest", skills=list(s.skills or []), note=s.note) for s in seekers]
 
 
+def _seeker_public(row: dict) -> dict:
+    """A seeker as another guest sees them (SeekerPublic)."""
+    return {"name": row["name"], "skills": row["skills"], "note": row["note"]}
+
+
 def _mentor_rows(c: Competitions, teams: dict) -> list[dict]:
     return [dict(id=m.id, name=m.name, topic=m.topic, sort_order=m.sort_order, slots=[dict(id=s.id, starts_at=s.starts_at, minutes=s.minutes, team_id=s.team_id, team=teams.get(s.team_id)) for s in m.slots]) for m in c.mentors]
 
@@ -665,7 +670,12 @@ async def my_state(session: AsyncSession, c: Competitions, event: Events, reg: R
     tracks = {t.id: t.name for t in c.tracks}
     mine = await team_of_registration(session, c, reg.id)
     my_row = (await _team_rows(session, c, event, [mine], scores, tracks, with_email=False))[0] if mine is not None else None
-    seeking = next((s for s in await _seeker_rows(session, c, event) if s["registration_id"] == reg.id), None)
+    if my_row is not None:
+        # Teammates by name only: a registration's id is the organiser's
+        # handle on a guest, not something to hand the other guests.
+        my_row = {**my_row, "members": [{"name": m["name"]} for m in my_row["members"]]}
+    seekers = await _seeker_rows(session, c, event)
+    seeking = next((_seeker_public(s) for s in seekers if s["registration_id"] == reg.id), None)
     counts: dict = {}
     for t in teams:
         counts[t.track_id] = counts.get(t.track_id, 0) + 1
@@ -676,7 +686,7 @@ async def my_state(session: AsyncSession, c: Competitions, event: Events, reg: R
         requirements=c.requirements or [], submissions_open=submissions_open(c), submissions_close_at=c.submissions_close_at,
         team=my_row,
         open_teams=[dict(id=t.id, name=t.name, track=tracks.get(t.track_id), members=len(t.members), open_spots=c.team_max - len(t.members)) for t in teams if len(t.members) < c.team_max and (mine is None or t.id != mine.id)],
-        seeking=seeking, seekers=[s for s in await _seeker_rows(session, c, event) if s["registration_id"] != reg.id],
+        seeking=seeking, seekers=[_seeker_public(s) for s in seekers if s["registration_id"] != reg.id],
         mentors=_mentor_rows(c, team_names),
         board=_board(c, teams, scores, tracks) if c.leaderboard_public else None,
     )

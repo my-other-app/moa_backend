@@ -297,15 +297,18 @@ def copy_for(kind: DeliveryKind, reg: EventRegistrationsLink, event: Events, org
     first = (reg.full_name or "").split(" ")[0] or "there"
     e = html.escape
     if kind is DeliveryKind.certificate:
+        from app.api.events.certificates import number_of
+
         return {
             "subject": f"Your certificate for {event.name}",
+            # Its own number, never the ticket id: a certificate's email is forwarded and posted.
             "text": (
                 f"Hi {first},\n\nThank you for attending {event.name}. Your certificate is attached "
-                f"({reg.ticket_id}).\n\nThe QR code on it lets anyone confirm it is genuine.\n\n{org_name}"
+                f"({number_of(reg)}).\n\nThe QR code on it lets anyone confirm it is genuine.\n\n{org_name}"
             ),
             "html": (
                 f"<p>Hi {e(first)},</p><p>Thank you for attending <strong>{e(event.name)}</strong>. "
-                f"Your certificate is attached (<code>{e(reg.ticket_id)}</code>).</p>"
+                f"Your certificate is attached (<code>{e(number_of(reg))}</code>).</p>"
                 f"<p>The QR code on it lets anyone confirm it is genuine.</p><p>{e(org_name)}</p>"
             ),
         }

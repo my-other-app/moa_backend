@@ -105,8 +105,8 @@ async def test_the_certificate_follows_its_own_design(client, world):
     saved = await client.put(f"/api/v1/events/{e}/designs/certificate/layout", json=_starter_body("certificate"), headers=world["club"])
     assert saved.status_code == 200, saved.text
 
-    pdf = await client.get(f"/api/v1/events/certificates/{reg.ticket_id}/pdf")
-    png = await client.get(f"/api/v1/events/certificates/{reg.ticket_id}/image")
+    pdf = await client.get(f"/api/v1/events/certificates/{reg.ticket_id}/pdf", headers=world["club"])
+    png = await client.get(f"/api/v1/events/certificates/{reg.ticket_id}/image", headers=world["club"])
 
     assert pdf.status_code == 200, pdf.text
     # The name is set large and wraps onto two lines, as the starter allows;

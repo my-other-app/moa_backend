@@ -99,9 +99,10 @@ async def test_a_registration_draws_a_number_unrelated_to_its_ticket(world):
     assert NUMBER.match(a.certificate_no)
     assert a.ticket_id.split("-", 1)[1] not in a.certificate_no
     assert number_of(a) == a.certificate_no
-    # The older one keeps the number made from its ticket, as printed.
-    assert world["old"].certificate_no is None
-    assert number_of(world["old"]) == "CERT-2BCEBA8-PFZG3"
+    # The older one, issued, was drawn a number of its own: never its ticket's.
+    old = world["old"]
+    assert NUMBER.match(old.certificate_no) and number_of(old) == old.certificate_no
+    assert "2BCEBA8" not in old.certificate_no and "PFZG3" not in old.certificate_no
 
 
 async def test_a_number_already_taken_is_drawn_again(session, world, make_user):
@@ -124,8 +125,9 @@ async def test_the_qr_opens_the_verifier_with_the_number_only(world):
     a, old = world["a"], world["old"]
     assert qr_text(a) == f"https://myotherapp.in/verify/{a.certificate_no}"
     assert a.ticket_id not in qr_text(a)
-    # An older certificate's QR names the number already printed on it.
-    assert qr_text(old) == "https://myotherapp.in/verify/CERT-2BCEBA8-PFZG3"
+    # An older certificate's QR names its new number, never its ticket.
+    assert qr_text(old) == f"https://myotherapp.in/verify/{old.certificate_no}"
+    assert "PFZG3" not in qr_text(old)
 
 
 async def test_the_printed_certificate_carries_the_number_never_the_ticket(client, session, world, monkeypatch):
@@ -183,8 +185,10 @@ async def test_every_answer_has_exactly_the_same_keys_and_nothing_personal(clien
         a.certificate_no, "Ananya Iyer", "LAN Night", "Respawn Verify",
     )
     assert body["org_slug"] == world["club"].slug and body["issued_at"]
-    for secret in (a.ticket_id, a.ticket_id.split("-", 1)[1], str(a.id), str(a.user_id), a.email, a.phone):
+    for secret in (a.ticket_id, a.ticket_id.split("-", 1)[1], str(a.id), a.email, a.phone):
         assert secret not in valid.text
+    # The account's id is a small number: looked for as a value, not as a digit anywhere.
+    assert a.user_id not in body.values() and str(a.user_id) not in body.values()
 
     not_found = (await _check(client, "CERT-ZZZZZ-ZZZZZ")).json()
     malformed = (await _check(client, "<script>")).json()
@@ -232,11 +236,18 @@ async def test_a_number_drawn_on_its_own_never_answers_to_the_ticket(client, wor
         assert (await _check(client, code)).json()["reason"] == "not_found", code
 
 
-async def test_an_older_certificate_verifies_by_its_printed_number_and_its_old_qr(client, world):
+async def test_an_older_certificate_is_numbered_again_and_its_ticket_id_verifies_nothing(client, world):
+    """A certificate printed before numbers were drawn on their own carried
+    the ticket id under CERT-, and its QR the ticket id itself. Issuing (and
+    the migration, for those already issued) draws it a number of its own;
+    the old one is the ticket's code, so it no longer answers at all."""
+    old = world["old"]
+    assert old.certificate_no and old.certificate_no != "CERT-2BCEBA8-PFZG3"
+    assert "2BCEBA8" not in old.certificate_no and "PFZG3" not in old.certificate_no
+    body = (await _check(client, old.certificate_no)).json()
+    assert (body["valid"], body["number"], body["attendee_name"]) == (True, old.certificate_no, "Old Timer")
     for code in ("CERT-2BCEBA8-PFZG3", "certificate:MOA-2BCEBA8-PFZG3", "MOA-2BCEBA8-PFZG3", "cert-2bceba8-pfzg3", "CERT2BCEBA8PFZG3"):
-        body = (await _check(client, code)).json()
-        assert (body["valid"], body["number"], body["attendee_name"]) == (True, "CERT-2BCEBA8-PFZG3", "Old Timer"), code
-        assert "MOA-" not in str(body)
+        assert (await _check(client, code)).json()["reason"] == "not_found", code
 
 
 async def test_a_malformed_code_costs_the_same_lookup_as_a_miss(client, world, monkeypatch):

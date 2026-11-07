@@ -15,5 +15,8 @@ def ticket_url(ticket_id: str) -> str:
     return site_url(f"/tickets/{ticket_id}")
 
 
-def certificate_url(ticket_id: str) -> str:
-    return site_url(f"/certificates/{ticket_id}")
+def certificate_url(public_id: str) -> str:
+    """A certificate's public page, by the certificate's own public id
+    (EventRegistrationsLink.certificate_public_id) -- never the ticket id,
+    which is what the door scans."""
+    return site_url(f"/certificates/{public_id}")

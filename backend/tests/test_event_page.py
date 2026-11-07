@@ -333,7 +333,7 @@ def test_public_addresses_are_built_on_the_site(monkeypatch):
     assert settings.PUBLIC_SITE_URL == SITE and settings.PUBLIC_CLUB_URL == f"{SITE}/clubs/{{slug}}"
     assert public_urls.event_url("mutate-c5d68d") == f"{SITE}/events/mutate-c5d68d"
     assert public_urls.ticket_url("MOA-1") == f"{SITE}/tickets/MOA-1"
-    assert public_urls.certificate_url("MOA-1") == f"{SITE}/certificates/MOA-1"
+    assert public_urls.certificate_url("pUbL1c-Id_0123456789abcd") == f"{SITE}/certificates/pUbL1c-Id_0123456789abcd"
     monkeypatch.setattr(settings, "PUBLIC_SITE_URL", "https://staging.example/")
     assert public_urls.event_url("x") == "https://staging.example/events/x"
 
@@ -349,10 +349,12 @@ async def test_ticket_and_certificate_links_point_at_the_site(client, session, w
     reg.certificate_issued_at = datetime.now(timezone.utc)
     await session.commit()
     info = (await client.get(f"/api/v1/events/info/{main.id}", headers=h)).json()
-    assert info["certificate_url"] == f"{SITE}/certificates/{reg.ticket_id}"
+    # By the certificate's own public id, drawn as it was issued; never the ticket id.
+    await session.refresh(reg)
+    assert reg.certificate_public_id and info["certificate_url"] == f"{SITE}/certificates/{reg.certificate_public_id}"
     listed = (await client.get("/api/v1/events/list", params={"is_registered": "true"}, headers=h)).json()["items"]
     row = next(x for x in listed if x["id"] == main.id)
-    assert row["ticket_url"] == f"{SITE}/tickets/{reg.ticket_id}" and row["certificate_url"] == f"{SITE}/certificates/{reg.ticket_id}"
+    assert row["ticket_url"] == f"{SITE}/tickets/{reg.ticket_id}" and row["certificate_url"] == f"{SITE}/certificates/{reg.certificate_public_id}"
 
 
 async def test_a_tracking_link_lands_on_the_events_page_by_slug(client, world):

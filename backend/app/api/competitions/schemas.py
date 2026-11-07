@@ -347,6 +347,25 @@ class OpenTeam(BaseModel):
     open_spots: int
 
 
+class TeammateOut(BaseModel):
+    """Someone on the caller's team, as a guest sees them: a name. Never
+    their registration's id or contact: those are the organiser's."""
+
+    name: str
+
+
+class MyTeamOut(TeamOut):
+    members: list[TeammateOut]
+
+
+class SeekerPublic(BaseModel):
+    """Someone looking for a team, as another guest sees them."""
+
+    name: str
+    skills: list[str]
+    note: Optional[str]
+
+
 class MyState(BaseModel):
     event_id: int
     enabled: bool
@@ -359,9 +378,9 @@ class MyState(BaseModel):
     requirements: list[Requirement]
     submissions_open: bool
     submissions_close_at: Optional[datetime]
-    team: Optional[TeamOut]
+    team: Optional[MyTeamOut]
     open_teams: list[OpenTeam]
-    seeking: Optional[SeekerOut]
-    seekers: list[SeekerOut]
+    seeking: Optional[SeekerPublic]
+    seekers: list[SeekerPublic]
     mentors: list[MentorOut]
     board: Optional[list[BoardRow]]

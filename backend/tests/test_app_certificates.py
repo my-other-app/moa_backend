@@ -67,7 +67,7 @@ def _issue_url(world, path=""):
     return f"/api/v1/events/{world['event'].id}/certificates{path}"
 
 
-async def test_before_any_issuing_nobody_holds_one_not_even_a_check_in(client, world):
+async def test_before_any_issuing_nobody_holds_one_not_even_a_check_in(client, session, world):
     """What the owner hit: they checked in while the event was still on, the
     club had done nothing, and the app listed a certificate for them."""
     for read in (_row, _info):
@@ -83,21 +83,25 @@ async def test_before_any_issuing_nobody_holds_one_not_even_a_check_in(client, w
     for read in (_row, _info):
         a, b = await read(client, world, "a"), await read(client, world, "b")
         assert a["has_certificate"] is True and a["certificate_revoked"] is False
-        assert a["certificate_url"].endswith(f"/certificates/{world['a'].ticket_id}")
+        # Its public page by its own public id, never the ticket id.
+        await session.refresh(world["a"])
+        assert a["certificate_url"] == f"https://myotherapp.in/certificates/{world['a'].certificate_public_id}"
+        assert world["a"].ticket_id not in a["certificate_url"] and a["certificate_no"] == world["a"].certificate_no
         # The no-show was not in the audience: still nothing.
         assert b["has_certificate"] is False and b["certificate_url"] is None
 
 
-async def test_one_issued_without_a_check_in_is_listed_for_the_app(client, world):
+async def test_one_issued_without_a_check_in_is_listed_for_the_app(client, session, world):
     issued = await client.post(_issue_url(world, "/issue"), json={"audience": "roles", "roles": ["speaker"]}, headers=world["club"])
     assert issued.status_code == 200, issued.text
     for read in (_row, _info):
         s = await read(client, world, "s")
         assert s["is_attended"] is False
         assert s["has_certificate"] is True
-        assert s["certificate_url"].endswith(f"/certificates/{world['s'].ticket_id}")
-    # And the render the app opens is served to it, as the email's PDF is.
-    image = await client.get(f"/api/v1/events/certificates/{world['s'].ticket_id}/image")
+        await session.refresh(world["s"])
+        assert s["certificate_url"].endswith(f"/certificates/{world['s'].certificate_public_id}")
+    # And the render the app opens is served to it (signed in), as the email's PDF is.
+    image = await client.get(f"/api/v1/events/certificates/{world['s'].ticket_id}/image", headers=world["as_s"])
     assert image.status_code == 200 and image.headers["content-type"] == "image/png"
 
 
@@ -110,7 +114,7 @@ async def test_a_revoked_one_is_not_listed_as_held(client, world):
         assert a["is_attended"] is True
         assert a["has_certificate"] is False and a["certificate_revoked"] is True
         assert a["certificate_url"] is None
-    assert (await client.get(f"/api/v1/events/certificates/{world['a'].ticket_id}/image")).status_code == 403
+    assert (await client.get(f"/api/v1/events/certificates/{world['a'].ticket_id}/image", headers=world["as_a"])).status_code == 403
 
     await client.post(_issue_url(world, f"/{world['a'].id}/reinstate"), headers=world["club"])
     a = await _row(client, world, "a")
@@ -123,7 +127,7 @@ async def test_the_image_the_app_shows_is_the_clubs_design_the_email_attaches(cl
     layout's own size -- not a default design."""
     reg = world["a"]
     await client.post(_issue_url(world, "/issue"), json={"audience": "checked_in"}, headers=world["club"])
-    image = await client.get(f"/api/v1/events/certificates/{reg.ticket_id}/image")
+    image = await client.get(f"/api/v1/events/certificates/{reg.ticket_id}/image", headers=world["as_a"])
     assert image.status_code == 200, image.text
     etag = image.headers["etag"]
     assert etag
@@ -139,5 +143,5 @@ async def test_the_image_the_app_shows_is_the_clubs_design_the_email_attaches(cl
 
     # The same address answers with the same tag until something printed on
     # it changes, so the app can keep it under the certificate's id.
-    again = await client.get(f"/api/v1/events/certificates/{reg.ticket_id}/image", headers={"If-None-Match": etag})
+    again = await client.get(f"/api/v1/events/certificates/{reg.ticket_id}/image", headers={**world["as_a"], "If-None-Match": etag})
     assert again.status_code == 304

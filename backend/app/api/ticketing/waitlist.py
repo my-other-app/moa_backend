@@ -287,11 +287,18 @@ async def join(
 
 
 async def mine(session, event_id: int, user) -> list[WaitlistEntries]:
+    """The caller's open places in line (GET and DELETE …/waitlist/me).
+
+    Their own, and by address only for an account that has shown the
+    address is theirs (users.service.merges_into), as registrations are
+    handed back. A guest session or an unconfirmed password account only
+    typed the address, so an entry someone joined with it is not theirs to
+    see or to leave."""
     W = WaitlistEntries
-    from app.api.users.service import same_email
+    from app.api.users.service import merges_into, same_email
 
     who = [W.user_id == user.id]
-    if user.email:
+    if merges_into(user):
         who.append(same_email(W.email, user.email))
     return list((await session.scalars(
         select(W).where(
