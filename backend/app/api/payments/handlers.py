@@ -45,10 +45,26 @@ async def _check_still_payable(session: AsyncSession, registration: EventRegistr
         await check_payable(session, event, registration)
 
 
-async def validate_event_registration_payload(session: AsyncSession, payload: dict):
+async def _pays_for(session: AsyncSession, registration: EventRegistrationsLink, payer_id: int) -> bool:
+    """Whether `payer_id` may pay for `registration`: its holder (the
+    account, or the guest whose session the form or a claim link handed
+    out), or an account that has shown the address is its own, as
+    registering again hands that registration back
+    (registration.service.may_reuse)."""
+    from app.api.events.registration.service import may_reuse
+
+    return await may_reuse(session, registration, payer_id)
+
+
+async def validate_event_registration_payload(session: AsyncSession, payload: dict, *, payer_id: int):
     """
     validate payment payload of an event registration. Returns (amount in
     rupees as a Decimal, receipt).
+
+    Only the registration's holder (`_pays_for`) gets an order. Anyone else
+    is told there is no such registration -- the same 404 as an id nobody
+    has -- before anything about it (paid, what is due, its event's state)
+    is said or written.
     """
     errors = {}
     if "event_id" not in payload:
@@ -71,7 +87,7 @@ async def validate_event_registration_payload(session: AsyncSession, payload: di
         )
     )
 
-    if not event_registration:
+    if not event_registration or not await _pays_for(session, event_registration, payer_id):
         raise CodedRequestError(
             404, "Registration not found", "REGISTRATION_NOT_FOUND",
             event_registration_id="event_registration_id is invalid",
@@ -263,12 +279,13 @@ HANDLERS ENTRY POINT
 """
 
 
-async def validate_payload(session: AsyncSession, source: str, payload: dict):
+async def validate_payload(session: AsyncSession, source: str, payload: dict, *, payer_id: int):
     """
-    validates payment payload based on the source
+    validates payment payload based on the source, for `payer_id`: only
+    what is theirs to pay for
     """
     if source == "event_registration":
-        return await validate_event_registration_payload(session, payload)
+        return await validate_event_registration_payload(session, payload, payer_id=payer_id)
     raise RequestValidationError(source="source is invalid")
 
 

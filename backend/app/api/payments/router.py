@@ -54,6 +54,10 @@ async def create_order(
     The Razorpay order to open checkout with. `key_id` is the publishable key
     of the account the order was made on and `gateway` says whose it is:
     "platform", or "club" for a club's own Razorpay account.
+
+    Only for the registration's holder: its account, or the guest session
+    the form or a claim link handed out (handlers._pays_for). Anyone else
+    gets 404 REGISTRATION_NOT_FOUND, as for an id nobody has.
     """
     from app.api.payment_gateways import service as gateways
 

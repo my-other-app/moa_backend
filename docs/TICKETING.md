@@ -163,7 +163,11 @@ The response keeps every existing field and gains these:
   code, plus any store picks. The payment step is unchanged: `POST
   /payments/orders` with `{"source": "event_registration", "payload":
   {"event_id", "event_registration_id"}}`. The order's amount is the server's
-  own figure.
+  own figure. It is sent with the registration's own session: the account
+  that registered, or the guest session in the answer's `auth_token` (an
+  account that has shown the address is its own may pay for that guest's
+  registration too). Any other caller gets 404 `REGISTRATION_NOT_FOUND`,
+  the same answer as for an id nobody has.
 - `pay_amount == 0` means **no payment step**. On a paid event,
   `is_paid: true` means the ticket was confirmed at nothing (a free type, or
   a code that covered it) and the ticket email is on its way.
@@ -339,8 +343,15 @@ Response:
 }
 ```
 
-- Joining again with the same email, phone or account returns the same
-  place, with `created: false`.
+- Joining again returns the same place, with `created: false`, to its own
+  holder only: the account that joined, or an account that has shown the
+  address is its own (Google, Apple, or the code typed back), as `GET
+  …/waitlist/me` lists them.
+- Anyone else sending an email or phone number that already has a place for
+  that type (no session, a guest session, an account that never confirmed
+  the address) gets 409 `ALREADY_ON_WAITLIST`, with a message to show and
+  nothing of the place: no id, status or position. No second place is made,
+  and nothing is sent to the holder.
 - `position` is 1 for the next person in line.
 - It is limited to 10 requests a minute per address.
 
@@ -374,6 +385,7 @@ Fields a form shows are keyed in `errors` by field name: `ticket_type_id`,
 | 409 | `WAITLIST_CLOSED` | The event has no waiting list: off, its plan lacks it, or registration has closed. |
 | 409 | `WAITLIST_NOT_NEEDED` | Tickets are still available. `errors.available`. |
 | 422 | `WAITLIST_CONTACT_REQUIRED` | Neither email nor phone was sent. |
+| 409 | `ALREADY_ON_WAITLIST` | The email or phone number already has a place for this type, and the caller is not shown to be its holder. Says nothing of the place. |
 | 409 | `ALREADY_REGISTERED` | Joining or claiming while already registered for the event. |
 | 404 | `OFFER_NOT_FOUND` | Unknown claim token. |
 | 410 | `OFFER_EXPIRED` | The offer ran out; the place went to the next person. |

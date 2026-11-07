@@ -81,8 +81,11 @@ async def test_joining_needs_the_list_on_and_the_type_sold_out(client, session, 
     first = await join(client, line, 1)
     assert first.status_code == 200, first.text
     assert (first.json()["status"], first.json()["position"], first.json()["created"]) == ("waiting", 1, True)
+    # The address again, with no session: no second place, and nothing of
+    # the first in the answer (test_waitlist_and_payment_ownership.py).
     again = await join(client, line, 1, email="WAIT1@example.com ")
-    assert (again.json()["id"], again.json()["created"]) == (first.json()["id"], False)
+    assert again.status_code == 409 and again.json()["error_code"] == "ALREADY_ON_WAITLIST", again.text
+    assert first.json()["id"] not in again.text
     second = (await join(client, line, 2)).json()
     assert second["position"] == 2
     no_contact = await client.post(f"{API}/events/{line.event.id}/waitlist", json={"full_name": "Nobody", "ticket_type_id": line.seat})

@@ -150,7 +150,7 @@ async def create_razorpay_order(
     from app.core import public_urls
 
     amount_in_rupee, db_receipt = await validate_payload(
-        session=session, source=source, payload=payload
+        session=session, source=source, payload=payload, payer_id=user_id
     )
     amount = money.rupees(amount_in_rupee)
     event = await event_for_payload(session, source, payload)
