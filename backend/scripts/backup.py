@@ -6,7 +6,7 @@
         --report-failure TITLE  only raise the `backup_failed` alert, its body
                                 read from stdin, and exit
 
-Run every day at 02:30 IST by the systemd timer in ops/backup
+Run every day at 03:00 IST by the systemd timer in ops/backup
 (docs/OPERATIONS.md, section 19), as `--no-alert`: when a run fails for any
 reason -- this script's, or a container that is not running -- the unit's
 OnFailure handler (ops/backup/alert.sh) raises the one alert, through

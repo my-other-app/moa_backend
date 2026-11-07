@@ -8,7 +8,7 @@ runs them:
   counting it, against the live database or on its own (--standalone, for
   staging);
 - the failure path: scripts/backup.py --report-failure, the one alert;
-- ops/backup: the systemd units (daily at 02:30 IST, monthly drill, the
+- ops/backup: the systemd units (daily at 03:00 IST, monthly drill, the
   OnFailure alert) and the two shell scripts they run, with docker-compose,
   journalctl and curl faked on PATH."""
 import hashlib
@@ -234,9 +234,9 @@ def _unit(name: str) -> dict[str, dict[str, list[str]]]:
     return sections
 
 
-def test_the_daily_timer_is_0230_india_time_and_catches_up():
+def test_the_daily_timer_is_0300_india_time_and_catches_up():
     timer = _unit("myotherapp-backup.timer")
-    assert timer["Timer"]["OnCalendar"] == ["*-*-* 02:30:00 Asia/Kolkata"]
+    assert timer["Timer"]["OnCalendar"] == ["*-*-* 03:00:00 Asia/Kolkata"]
     assert timer["Timer"]["Persistent"] == ["true"]
     assert timer["Timer"]["Unit"] == ["myotherapp-backup.service"]
     assert timer["Install"]["WantedBy"] == ["timers.target"]

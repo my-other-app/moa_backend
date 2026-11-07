@@ -1,0 +1,6 @@
+# The ops bot (standard library only, Python 3.10+ on the box).
+line-length = 140
+target-version = "py310"
+
+[lint]
+select = ["E", "F", "W", "B", "I", "UP", "BLE"]

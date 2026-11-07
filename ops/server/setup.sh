@@ -486,7 +486,7 @@ MOA_DRILL_ARGS=$drill_args" || true
   [ "$units_changed" = "yes" ] && systemctl daemon-reload
   if [ "$ROLE" = "production" ]; then
     systemctl enable --quiet --now myotherapp-backup.timer
-    say "daily backup timer on (02:30 IST): $(systemctl show -p NextElapseUSecRealtime --value myotherapp-backup.timer 2> /dev/null || true)"
+    say "daily backup timer on (03:00 IST): $(systemctl show -p NextElapseUSecRealtime --value myotherapp-backup.timer 2> /dev/null || true)"
   else
     systemctl enable --quiet --now myotherapp-restore-drill.timer
     say "staging: the monthly restore drill timer is on; no daily backup here"

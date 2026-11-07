@@ -13,6 +13,10 @@
 #   including a container that is not running, which the script cannot see.
 # drill: scripts/restore_drill.py -- the newest dump in S3 restored into a
 #   scratch database, checked, and dropped. Extra arguments go to it.
+# deliver: the ops bot (ops/server/ops-bot, /srv/moa/ops-bot on the box)
+#   encrypts the newest dump with age and sends it to the owner's Telegram.
+#   The unit runs it after `backup` succeeded (ExecStartPost=). No bot here,
+#   or not set up yet: says so and exits 0.
 #
 # Settings (environment, or /etc/default/myotherapp-backup for the units):
 #   MOA_PROJECT_DIR   the checkout docker-compose runs from
@@ -30,6 +34,20 @@ SERVICE="${MOA_SERVICE:-backend}"
 
 cd "$PROJECT_DIR"
 
+what="${1:-}"
+[ $# -gt 0 ] && shift
+
+if [ "$what" = "deliver" ]; then
+  for bot in "$PROJECT_DIR/ops-bot/run.py" "$PROJECT_DIR/ops/server/ops-bot/run.py"; do
+    if [ -f "$bot" ]; then
+      echo "run.sh: sending the new dump to Telegram, encrypted"
+      exec python3 -I -B "$bot" deliver-backup "$@"
+    fi
+  done
+  echo "run.sh: no ops bot in $PROJECT_DIR (ops-bot/run.py): the dump was not sent to Telegram"
+  exit 0
+fi
+
 if command -v docker-compose > /dev/null 2>&1; then
   DC=(docker-compose -f "$COMPOSE_FILE")
 elif docker compose version > /dev/null 2>&1; then
@@ -38,9 +56,6 @@ else
   echo "run.sh: neither docker-compose nor 'docker compose' is installed" >&2
   exit 127
 fi
-
-what="${1:-}"
-[ $# -gt 0 ] && shift
 
 case "$what" in
   backup)
@@ -52,7 +67,7 @@ case "$what" in
     exec "${DC[@]}" exec -T "$SERVICE" python scripts/restore_drill.py "$@" < /dev/null
     ;;
   *)
-    echo "usage: run.sh backup [--keep-local N] | drill [restore_drill.py arguments]" >&2
+    echo "usage: run.sh backup [--keep-local N] | drill [restore_drill.py arguments] | deliver" >&2
     exit 64
     ;;
 esac
