@@ -44,6 +44,7 @@ from starlette.requests import Request
 from app.api.audit import service as audit
 from app.api.club_access import policy
 from app.api.closeout.models import EventStatus
+from app.api.events import questions as form
 from app.api.events.models import EventCategories, EventRatingsLink, EventRegistrationsLink, Events, MAX_EVENT_HOURS
 from app.api.mcp import actions
 from app.api.mcp.access import Principal
@@ -301,16 +302,21 @@ async def list_events(call: Call, args: dict) -> dict:
     "get_event",
     title="Get an event",
     scope="events:read",
-    description="Everything about one event: dates, venue, fee, capacity, registration window, contact, description, registration form questions, speakers and the store items it offers.",
+    description="Everything about one event: dates, venue, fee, capacity, registration window, contact, description, registration form questions, speakers and the store items it offers. A question with show_if is asked only when the earlier question show_if.key was answered with one of show_if.any_of; its required_when_shown says whether it must then be answered.",
     schema=obj({"event_id": EVENT_ID}, ("event_id",)),
 )
 async def get_event(call: Call, args: dict) -> dict:
     from app.api.store import service as store
 
     event = await _event(call, args["event_id"], load=(joinedload(Events.category), selectinload(Events.speakers)))
+    # As every read sends a form (questions.wire): a conditional question as
+    # not required, with the club's setting in required_when_shown.
     questions = [
-        {"key": q.get("key"), "label": q.get("label"), "type": q.get("field_type"), "required": bool(q.get("required", True)), "options": q.get("options")}
-        for q in (event.additional_details or []) if isinstance(q, dict)
+        {
+            "key": q.get("key"), "label": q.get("label"), "type": q.get("field_type"), "required": bool(q.get("required", True)), "options": q.get("options"),
+            **({"show_if": q["show_if"], "required_when_shown": q["required_when_shown"]} if q.get("show_if") else {}),
+        }
+        for q in form.wire_all(event.additional_details)
     ]
     return {
         "id": event.id, "name": event.name, "status": _status(event), "starts_at": _iso(event.event_datetime), "ends_at": _iso(_ends(event)),
@@ -594,6 +600,12 @@ QUESTION = obj({
     "required": {"type": "boolean", "default": True},
     "options": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 100}, "maxItems": 30,
                 "description": "The choices, for select, radio and checkbox."},
+    "show_if": obj({
+        "question": {"type": "string", "minLength": 1, "maxLength": 200,
+                     "description": "The label of an earlier select, radio or checkbox question in this list."},
+        "any_of": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 100}, "minItems": 1, "maxItems": 30,
+                   "description": "That question's options which show this one."},
+    }, ("question", "any_of")),
 }, ("label", "type"))
 
 EVENT_FIELDS = {
@@ -636,7 +648,10 @@ async def _category(call: Call, name: str | None) -> EventCategories:
     raise ToolError(f"There is no event type called “{name}”. The types are: {', '.join(r.name for r in rows)}.", "UNKNOWN_CATEGORY")
 
 
-def _questions(items: list) -> list[dict]:
+def _questions(items: list, before: list | None = None) -> list[dict]:
+    """The form's questions from the assistant's list. A show_if names an
+    earlier question by its label; the form keeps the rules the dashboard's
+    does (questions.check_form), said as the assistant's refusal."""
     out, seen = [], set()
     for q in items:
         kind = q["type"]
@@ -648,7 +663,18 @@ def _questions(items: list) -> list[dict]:
         while key in seen:
             key, n = f"{base}_{n}", n + 1
         seen.add(key)
-        out.append({"key": key, "label": q["label"].strip(), "field_type": kind, "required": bool(q.get("required", True)), "options": options or None})
+        question = {"key": key, "label": q["label"].strip(), "field_type": kind, "required": bool(q.get("required", True)), "options": options or None}
+        if q.get("show_if"):
+            named = q["show_if"]["question"].strip().lower()
+            parent = next((p for p in out if p["label"].lower() == named or p["key"] == named), None)
+            if parent is None:
+                raise ToolError(f"The question “{q['label']}” is shown only after “{q['show_if']['question']}”, which must be an earlier question in the list.", "INVALID_ARGUMENT")
+            question["show_if"] = {"key": parent["key"], "any_of": [v.strip() for v in q["show_if"]["any_of"]]}
+        out.append(question)
+    try:
+        form.check_form(out, before=before)
+    except CustomHTTPException as e:
+        raise ToolError(e.message, "INVALID_ARGUMENT")
     return out
 
 
@@ -690,7 +716,7 @@ def _apply(event: Events, args: dict) -> list[str]:
         geo.apply_place(event, link=(args["map_link"] or "").strip() or None)
         changed.append("map_link")
     if "questions" in args:
-        event.additional_details = _questions(args["questions"])
+        event.additional_details = _questions(args["questions"], before=event.additional_details)
         changed.append("questions")
     if event.reg_enddate is not None and event.reg_enddate > event.event_datetime + timedelta(hours=float(event.duration or 0)):
         raise ToolError("Registration can't close after the event ends.", "INVALID_ARGUMENT")

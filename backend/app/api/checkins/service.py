@@ -19,6 +19,7 @@ from app.api.checkins import doors as doors_mod
 from app.api.checkins.gate_auth import GateActor
 from app.api.checkins.models import CheckIns, CheckInVia, DoorKind, DoorMode, Doors
 from app.api.closeout.models import DOOR_OPEN_STATUSES, EventStatus
+from app.api.events import questions
 from app.api.events.models import EventRegistrationsLink, Events
 from app.api.events.volunteer.models import Volunteer
 from app.api.templates_audience import RegistrationRole
@@ -478,7 +479,8 @@ async def context(session, event: Events, actor: GateActor) -> dict:
         "walkup_roles": [r.value for r in RegistrationRole] if actor.full else ["attendee"],
         "doors": [{"id": d.id, "name": d.name, "kind": d.kind.value} for d in doors],
         "expected_door_id": expected,
-        "guest_fields": [f for f in (event.additional_details or []) if isinstance(f, dict)],
+        # As every read sends a form: a conditional question as not required (questions.wire).
+        "guest_fields": questions.wire_all(event.additional_details),
         "me": {"name": actor.name, "kind": actor.kind},
         # Whether there is anything to hand out: the console shows the merch tab only then.
         "has_merch": await _has_merch(session, event.id),

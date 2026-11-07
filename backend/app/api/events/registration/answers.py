@@ -15,6 +15,7 @@ import re
 from datetime import datetime
 from urllib.parse import urlparse
 
+from app.api.events import questions as form
 from app.response import CustomHTTPException
 
 #: Bounds on any set of answers.
@@ -128,21 +129,29 @@ def _problem(field, value) -> str | None:
 
 def check(questions, answers, *, relaxed: bool = False) -> dict | None:
     """The answers to keep. `relaxed` is the door's: nothing is required,
-    blanks are dropped, and what was answered is kept as it came (bounded).
+    blanks are dropped, and what was answered is kept as it came (bounded),
+    but for the answers to questions those answers hide.
     With no questions, the answers are kept as they came (bounded).
-    Otherwise the answers to the event's questions, each checked; a
-    required one missing, or one of the wrong type, is a 400 naming them."""
+    Otherwise the answers to the event's questions shown to this person,
+    each checked; a shown required one missing, or one of the wrong type,
+    is a 400 naming them. A question its conditions hide (show_if;
+    app/api/events/questions.py) is never required and its answer is
+    dropped: an old app sends every question's."""
     answers = bound(answers)
     if relaxed:
-        return {k: v for k, v in answers.items() if not _blank(v)}
+        kept = {k: v for k, v in answers.items() if not _blank(v)}
+        return form.prune(questions, kept) if questions else kept
     if not questions:
         return answers or None
     from app.api.events.schemas import EventAdditionalDetail
 
     fields = [EventAdditionalDetail.model_validate(q) for q in questions]
+    shown = form.visibility(fields, answers)
     errors: dict = {}
     kept: dict = {}
     for field in fields:
+        if not shown.get(field.key, True):
+            continue
         value = answers.get(field.key)
         if _blank(value):
             if field.required:
