@@ -128,7 +128,7 @@ async def test_the_status_clock_moves_the_event_and_closed_locks_the_door_and_th
 async def test_retention_sends_the_report_then_scrubs_and_never_runs_twice(client, session, world, outbox):
     h = world["club"]
     event = world["event"]
-    saved = await client.patch(_url(world, "/settings"), json={"retention_mode": "delete", "retention_hours": 1, "report_recipients": ["Ops@example.com", "ops@example.com", ""]}, headers=h)
+    saved = await client.patch(_url(world, "/settings"), json={"retention_mode": "delete", "retention_hours": 24, "report_recipients": ["Ops@example.com", "ops@example.com", ""]}, headers=h)
     assert saved.status_code == 200, saved.text
     assert saved.json()["report_recipients"] == ["ops@example.com"]
     assert (await client.patch(_url(world, "/settings"), json={"report_recipients": ["not an email"]}, headers=h)).status_code == 422
@@ -137,7 +137,9 @@ async def test_retention_sends_the_report_then_scrubs_and_never_runs_twice(clien
     assert st.status_code == 200, st.text
     assert st.json()["state"] == "pending" and st.json()["mode"] == "delete" and st.json()["ended"] is True
     assert st.json()["preview"] == {"registrations": 3, "walkups": 1, "phones": 1, "answers": 1, "deliveries": 0, "message_deliveries": 0, "self_check_in_sessions": 0, "requests": 0}
-    assert datetime.fromisoformat(st.json()["run_at"]) < datetime.now(timezone.utc)
+    # Not due on its own yet (a day after the end, at the soonest); the
+    # host's owner runs it now by hand.
+    assert datetime.fromisoformat(st.json()["run_at"]) > datetime.now(timezone.utc)
 
     # The slug typed back confirms it; a refused delivery scrubs nothing.
     assert (await client.post(_url(world, "/retention/run"), json={"confirm_slug": "wrong"}, headers=h)).status_code == 422
@@ -181,7 +183,9 @@ async def test_a_scheduled_run_waits_for_the_event_to_end(client, session, world
     assert job.last_refusal == "NOT_ENDED" and job.refused_at is not None
     # The ended event on "delete" with no recipients: the sweep generates the report, keeps it, and scrubs.
     event = world["event"]
-    await client.patch(_url(world, "/settings"), json={"retention_mode": "delete", "retention_hours": 1}, headers=world["club"])
+    event.event_datetime = datetime.now(timezone.utc) - timedelta(hours=30)
+    await session.commit()
+    await client.patch(_url(world, "/settings"), json={"retention_mode": "delete", "retention_hours": 24}, headers=world["club"])
     done = await service.sweep(session)
     # Queued as a job, run after the sweep's commit (the suite runs it when waited for).
     assert done["queued"] == 1

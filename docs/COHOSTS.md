@@ -80,7 +80,19 @@ Access ends at the next request when the row stops being `accepted`.
 | Deleting it | `DELETE /events/delete/{id}` |
 | Duplicating it (the copy is a new event of the host club) | `POST /events/{id}/duplicate` |
 | Running retention now (irreversibly scrubs attendees' data) | `POST /events/{id}/closeout/retention/run` |
+| Changing retention (keep or delete, how long after the end), whether contacts are kept, and who gets the closeout report | `PATCH /events/{id}/closeout/settings` with any of `retention_mode`, `retention_hours`, `keep_contacts`, `report_recipients` changed |
 | Inviting, cancelling and removing co-hosts, and looking for clubs | `POST /events/{id}/cohosts`, `DELETE /events/{id}/cohosts/{invite_id}`, `GET /events/{id}/cohosts/search` |
+
+The closeout settings are one route for two kinds of change: the status
+and its clock are the event's (a co-host and an editor may publish or close
+it), while retention and the report's recipients decide what happens to the
+guests' data and where their report goes. So the route decides by the body
+(`closeout.router.RETENTION_FIELDS`), not by its path, and only when a field
+actually changes (the dashboard sends the whole form): a co-host gets
+`403 COHOST_HOST_ONLY`, and at the host only the owner and admins may change
+them (`403 ROLE_FORBIDDEN` for an editor; `can().retention_settings`). The
+schedule never deletes sooner than 24 hours after the end
+(`closeout.models.MIN_RETENTION_HOURS`); sooner is "run retention now".
 
 Payout and gateway settings, the club's finance page, its contacts, its
 discount codes, store catalogue and email library are club-level: a co-host

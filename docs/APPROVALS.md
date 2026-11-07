@@ -536,8 +536,9 @@ lists, below).
   note, Amount, Payment, Pay by, Ticket ID, WhatsApp`. `Payment`: `free`,
   `paid`, `awaiting payment`, `not paid` (a hold that ran out),
   `not paid in time` (lapsed), or blank. A cell starting with `= + - @` is
-  quoted with `'`. Same permission as the list (club roles may read it, door
-  staff included; another club's event is 404).
+  quoted with `'`. Owners, admins and editors (door staff read the list but
+  download no lists: `club_access.policy` refuses every export to them);
+  another club's event is 404.
 - `closed_reason`: `registered_directly`, `event_ended`, `event_deleted`,
   `event_cancelled`. Requests closed before §7 were given theirs from their
   event by the migration.

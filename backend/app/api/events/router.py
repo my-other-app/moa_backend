@@ -253,6 +253,28 @@ async def update_event(
     return updated
 
 
+async def _hide_draft(session, event_id: str, user) -> None:
+    """404 for a draft unless the caller is its host (or one of the host's
+    team), a co-host or an admin: a draft is not out yet, and the page
+    carries its contact details. The same 404 as an event that does not
+    exist, so an id or slug says nothing about what is being prepared."""
+    from types import SimpleNamespace
+
+    from sqlalchemy import select
+
+    from app.api.closeout.models import EventStatus
+    from app.api.cohosts import access as cohosts
+    from app.api.events.models import Events
+
+    key = Events.id == int(event_id) if str(event_id).isdigit() else Events.slug == event_id
+    row = (await session.execute(select(Events.id, Events.club_id, Events.lifecycle).where(key, Events.is_deleted == False))).first()  # noqa: E712
+    if row is None or row.lifecycle is not EventStatus.draft:
+        return
+    if user is not None and (is_admin_user(user) or await cohosts.viewer_role(session, SimpleNamespace(id=row.id, club_id=row.club_id), user)):
+        return
+    raise CustomHTTPException(404, message="Event not found")
+
+
 @router.get("/info/{event_id}", summary="Get event info")
 async def get_event(
     request: Request,
@@ -260,6 +282,8 @@ async def get_event(
     session: SessionDep = SessionDep,
     user: OptionalAuth = None,
 ) -> EventDetailResponse:
+    """404 for a draft, unless the caller hosts or co-hosts it or is an admin."""
+    await _hide_draft(session, event_id, user)
     # Increment view count
     try:
         await service.increment_event_page_view(

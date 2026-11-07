@@ -33,6 +33,10 @@ _HOST_ONLY_WRITES = _rx(
     r"^/api/v1/events/\d+/cohosts/?$",
     r"^/api/v1/events/\d+/cohosts/\d+$",
 )
+# Not here, because the path alone cannot say: changing an event's retention
+# or the closeout report's recipients (PATCH .../closeout/settings, whose
+# status a co-host may change). closeout.router decides by the body.
+
 #: Reads only the host makes: looking for clubs to invite.
 _HOST_ONLY_READS = _rx(r"^/api/v1/events/\d+/cohosts/search$")
 

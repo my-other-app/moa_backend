@@ -286,13 +286,15 @@ async def send_push_to_all_devices(
 @router.get("/test/tokens", response_model=ListTokensResponse, summary="The newest registered FCM tokens")
 async def list_all_tokens(
     session: SessionDep,
-    user: AdminAuth,  # Admin only
+    user: BroadcastAuth,
 ):
     """
     The 100 newest registered FCM tokens, and how many there are in all.
 
-    This is an admin-only endpoint for debugging push notifications. It used
-    to return every row in the table.
+    For debugging push notifications. A token is what a push to that device
+    needs (POST /test/send-single takes one), so reading them is BROADCAST,
+    as sending is: owners only. It used to return every row in the table,
+    and then any admin, viewers included, could read them.
     """
     from sqlalchemy import func, select
     from app.api.users.models import UserDeviceTokens

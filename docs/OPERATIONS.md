@@ -3573,6 +3573,23 @@ and it is stored where the API's `MessageId` was, so the SES hook
 before. Pacing (`APP_MAIL_SEND_RATE`, `APP_MAIL_CONCURRENCY`) and retries
 (`APP_MAIL_MAX_ATTEMPTS`) are unchanged.
 
+The hook itself needs two settings, whichever way mail is sent. A bounce or
+a complaint puts an address on the suppression list, so the hook takes a
+notice only from SES's own topic and only with the shared token:
+
+```bash
+# The SNS topic(s) SES publishes bounces, complaints and deliveries to,
+# comma-separated. Empty: every notice and subscription is refused.
+APP_SES_SNS_TOPIC_ARN=arn:aws:sns:ap-south-1:<account>:<topic>
+# The ?token= on the subscription's endpoint URL
+# (https://api.myotherapp.in/api/v1/hooks/ses?token=...). Empty: in
+# production every notice is refused.
+APP_SES_WEBHOOK_TOKEN=<random, 32+ characters>
+```
+
+The start-up checks warn while either is empty. Set both before the
+subscription is (re)confirmed: a confirmation from any other topic is refused.
+
 ### Settings
 
 ```bash

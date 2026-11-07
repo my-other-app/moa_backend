@@ -20,7 +20,7 @@ from sqlalchemy.orm import joinedload
 from app.api.approvals import service as approvals
 from app.api.checkins.models import CheckIns
 from app.api.checkins.service import WALKUP_DOMAIN
-from app.api.closeout.models import DOOR_OPEN_STATUSES, LOCKED_STATUSES, STATUS_NOTE, ArchivedContacts, CloseoutReports, EventStatus, RetentionJobs, RetentionMode, RetentionState
+from app.api.closeout.models import DOOR_OPEN_STATUSES, LOCKED_STATUSES, MIN_RETENTION_HOURS, STATUS_NOTE, ArchivedContacts, CloseoutReports, EventStatus, RetentionJobs, RetentionMode, RetentionState
 from app.api.closeout.report import report_pdf
 from app.api.deliveries import service as deliveries
 from app.api.deliveries.models import Deliveries
@@ -189,17 +189,23 @@ async def report_file(session, event: Events, report_id: UUID) -> tuple:
 # ─── Settings and the status clock ────────────────────────────────────────
 
 
+def retention_hours(event: Events) -> int:
+    """How long after its end the event's data is kept: its setting, never
+    under MIN_RETENTION_HOURS (a value saved before the floor counts as it)."""
+    return max(event.retention_hours or 72, MIN_RETENTION_HOURS)
+
+
 def settings_of(event: Events) -> dict:
     return {
         "status": lifecycle(event).value, "status_clock": bool(event.status_clock), "retention_mode": (event.retention_mode or RetentionMode.keep).value,
-        "retention_hours": event.retention_hours or 72, "report_recipients": list(event.report_recipients or []), "keep_contacts": bool(event.keep_contacts),
+        "retention_hours": retention_hours(event), "report_recipients": list(event.report_recipients or []), "keep_contacts": bool(event.keep_contacts),
         "starts_at": event.event_datetime, "ends_at": ends_at(event),
         "statuses": [{"key": s.value, "label": STATUS_LABEL[s], "note": STATUS_NOTE[s]} for s in EventStatus],
     }
 
 
 def run_at_for(event: Events) -> datetime:
-    return ends_at(event) + timedelta(hours=event.retention_hours or 72)
+    return ends_at(event) + timedelta(hours=retention_hours(event))
 
 
 async def ensure_job(session, event: Events) -> RetentionJobs:
@@ -375,6 +381,14 @@ async def _run_retention(session, event: Events, *, manual: bool, confirm_slug: 
         job.refused_at = now
         await session.commit()
         return _result(job.state, refusal="NOT_ENDED")
+    if not manual and job.state in (RetentionState.pending, RetentionState.failed) and now < run_at_for(event):
+        # Due by a time saved before the floor (MIN_RETENTION_HOURS): the
+        # schedule waits for the floor, and the sweep for the new time.
+        job.run_at = run_at_for(event)
+        job.last_refusal = "NOT_DUE"
+        job.refused_at = now
+        await session.commit()
+        return _result(job.state, refusal="NOT_DUE")
     if job.state in (RetentionState.pending, RetentionState.failed):
         report = await generate(session, event, user)
         recipients = list(event.report_recipients or [])

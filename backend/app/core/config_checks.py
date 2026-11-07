@@ -412,6 +412,7 @@ def _warnings(settings) -> list[Problem]:
         out.append(Problem("BACKUP_S3_BUCKET", "is empty: backups stay on the database's own disk", fatal=False))
     if _get(settings, "AI_ENABLED") and not _text(_get(settings, "GEMINI_API_KEY")):
         out.append(Problem("GEMINI_API_KEY", "is empty while APP_AI_ENABLED is on: only clubs' own keys work", fatal=False))
+    out.extend(_ses_hook(settings))
     if _text(_get(settings, "RESEND_API_KEY")) and not _text(_get(settings, "RESEND_WEBHOOK_SECRET")):
         out.append(Problem("RESEND_WEBHOOK_SECRET", "is empty: Resend's delivery reports are all refused", fatal=False))
     short = [t for t in _text(_get(settings, "SITE_TOKENS")).split(",") if t.strip() and len(t.strip()) < 32]
@@ -423,6 +424,21 @@ def _warnings(settings) -> list[Problem]:
         out.append(Problem("CORS_ORIGINS", "includes *: any site may call the API from a browser", fatal=False))
     out.extend(_embedded_signup(settings))
     out.extend(_club_mailbox(settings))
+    return out
+
+
+def _ses_hook(settings) -> list[Problem]:
+    """SES's delivery reports (POST /hooks/ses): warnings, since mail still
+    goes out without them -- but no bounce or complaint is heard, so no
+    address is suppressed, until both are set."""
+    out = []
+    if not _text(_get(settings, "SES_WEBHOOK_TOKEN")):
+        out.append(Problem("SES_WEBHOOK_TOKEN", "is empty: SES's bounce and complaint reports are all refused", fatal=False))
+    topics = [t.strip() for t in _text(_get(settings, "SES_SNS_TOPIC_ARN")).split(",") if t.strip()]
+    if not topics:
+        out.append(Problem("SES_SNS_TOPIC_ARN", "is empty: SES's bounce and complaint reports are all refused", fatal=False))
+    elif any(not t.startswith("arn:aws:sns:") for t in topics):
+        out.append(Problem("SES_SNS_TOPIC_ARN", "is not a list of SNS topics' ARNs (arn:aws:sns:<region>:<account>:<name>)", fatal=False))
     return out
 
 

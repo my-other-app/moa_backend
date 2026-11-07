@@ -43,6 +43,8 @@ def amazon(monkeypatch):
         return "ok"
 
     monkeypatch.setattr(sns, "fetch", fetch)
+    # SES's own topic: the hook takes no other's (APP_SES_SNS_TOPIC_ARN).
+    monkeypatch.setattr(settings, "SES_SNS_TOPIC_ARN", "arn:aws:sns:ap-south-1:1:ses", raising=False)
     sns._certs.clear()
 
     def envelope(kind: str, message: str, **more) -> dict:
@@ -156,6 +158,37 @@ async def test_the_hook_trusts_only_amazons_signature_and_the_shared_token(clien
     assert (await client.post("/api/v1/hooks/ses", params={"token": "hooktoken"}, content=b"not json", headers={"content-type": "text/plain"})).json()["ok"] is False
     # The real one lands, as a complaint.
     assert (await client.post("/api/v1/hooks/ses", params={"token": "hooktoken"}, content=json.dumps(good), headers={"content-type": "text/plain"})).json() == {"ok": True, "matched": 1}
+
+
+async def test_the_hook_takes_only_ses_own_topic_and_confirms_no_other(client, world, amazon, monkeypatch):
+    """Anyone can sign an SNS message from a topic of their own: the topic is
+    checked before a subscription is confirmed or a notice is read."""
+    monkeypatch.setattr(settings, "SES_WEBHOOK_TOKEN", "hooktoken", raising=False)
+    post = lambda msg: client.post("/api/v1/hooks/ses", params={"token": "hooktoken"}, content=json.dumps(msg), headers={"content-type": "text/plain"})  # noqa: E731
+    theirs = "arn:aws:sns:ap-south-1:999:not-ours"
+    sub = amazon["envelope"]("SubscriptionConfirmation", "subscribe", TopicArn=theirs, SubscribeURL="https://sns.ap-south-1.amazonaws.com/?Action=ConfirmSubscription&Token=t9", Token="t9")
+    assert (await post(sub)).json() == {"ok": False, "reason": "topic"}
+    assert not any("ConfirmSubscription" in u for u in amazon["fetched"])
+    bounce = amazon["envelope"]("Notification", ses_message("Bounce", "ses-abc", world["reg"].email), TopicArn=theirs)
+    assert (await post(bounce)).json() == {"ok": False, "reason": "topic"}
+    # No topic configured: nothing is taken, not even from the topic it used to be.
+    monkeypatch.setattr(settings, "SES_SNS_TOPIC_ARN", "", raising=False)
+    ours = amazon["envelope"]("Notification", ses_message("Bounce", "ses-abc", world["reg"].email))
+    assert (await post(ours)).json() == {"ok": False, "reason": "topic"}
+    # One of several configured topics is SES's.
+    monkeypatch.setattr(settings, "SES_SNS_TOPIC_ARN", "arn:aws:sns:ap-south-1:1:other, arn:aws:sns:ap-south-1:1:ses", raising=False)
+    assert (await post(ours)).json() == {"ok": True, "matched": 1}
+
+
+async def test_in_production_the_hook_takes_nothing_without_its_token(client, world, amazon, monkeypatch):
+    monkeypatch.setattr(settings, "SES_WEBHOOK_TOKEN", "", raising=False)
+    good = amazon["envelope"]("Notification", ses_message("Complaint", "ses-abc", world["reg"].email))
+    send = lambda: client.post("/api/v1/hooks/ses", content=json.dumps(good), headers={"content-type": "text/plain"})  # noqa: E731
+    monkeypatch.setattr(settings, "ENV", "production", raising=False)
+    assert (await send()).json() == {"ok": False, "reason": "token"}
+    # Outside production (a laptop, the suite) the token stays optional.
+    monkeypatch.setattr(settings, "ENV", "test", raising=False)
+    assert (await send()).json() == {"ok": True, "matched": 1}
 
 
 async def test_whatsapp_subscribes_by_token_and_signs_its_statuses(client, world, monkeypatch):

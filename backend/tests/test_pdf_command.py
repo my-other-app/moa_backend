@@ -64,3 +64,89 @@ def test_no_wkhtmltopdf_is_said(monkeypatch, tmp_path):
     finally:
         pdf._wkhtmltopdf.cache_clear()
     assert settings.RENDER_TIMEOUT > 0
+
+
+# ─── No network but the fonts ───────────────────────────────────────────────
+
+
+def test_the_renderer_reaches_nothing_but_the_fonts(fake_wkhtmltopdf, tmp_path):
+    """A design's text reaches these pages: whatever it names, wkhtmltopdf
+    goes through a proxy that is not there -- host lookups included -- and
+    only Google Fonts bypasses it."""
+    (tmp_path / "page.html").write_text("<html><body>{{ name }}</body></html>")
+    out = pdf.generate_pdf_bytes("page.html", {"name": "Riya"}, template_dir=f"{tmp_path}/").getvalue().decode()
+    args = out.partition("---\n")[0].splitlines()
+    assert args[args.index("--proxy") + 1] == "http://127.0.0.1:9"
+    assert "--proxy-hostname-lookup" in args
+    bypassed = [args[i + 1] for i, a in enumerate(args) if a == "--bypass-proxy-for"]
+    assert bypassed == ["fonts.googleapis.com", "fonts.gstatic.com"]
+    # A resource that can't load is left out rather than failing the page.
+    assert args[args.index("--load-error-handling") + 1] == "ignore"
+    assert args[args.index("--load-media-error-handling") + 1] == "ignore"
+    # And the PNG path is held to the same.
+    assert pdf.network_args() == [
+        "--proxy", "http://127.0.0.1:9", "--proxy-hostname-lookup", "--load-error-handling", "ignore",
+        "--load-media-error-handling", "ignore", "--bypass-proxy-for", "fonts.googleapis.com", "--bypass-proxy-for", "fonts.gstatic.com",
+    ]
+
+
+def test_wkhtmltoimage_runs_without_the_network_too(tmp_path, monkeypatch):
+    seen: list[list[str]] = []
+
+    def run(args, **kwargs):
+        seen.append(args)
+        from PIL import Image
+
+        Image.new("RGBA", (4, 4), (255, 0, 0, 255)).save(args[-1], format="PNG")
+        # A blocked resource: wkhtmltoimage exits 1 after writing the whole image.
+        return pdf.subprocess.CompletedProcess(args, 1, b"", b"Exit with code 1 due to network error: ConnectionRefusedError\n")
+
+    monkeypatch.setattr(pdf.subprocess, "run", run)
+    (tmp_path / "page.html").write_text("<html><body>x</body></html>")
+    png = pdf.generate_image_bytes("page.html", {}, template_dir=f"{tmp_path}/").getvalue()
+    assert png.startswith(b"\x89PNG")
+    args = seen[0]
+    assert args[0] == "wkhtmltoimage" and "--proxy" in args and "--proxy-hostname-lookup" in args
+    assert args.index("--proxy") < args.index("-")
+
+
+def test_a_document_missing_a_blocked_resource_still_counts():
+    blocked = "QStandardPaths: XDG_RUNTIME_DIR not set\nExit with code 1 due to network error: ConnectionRefusedError\n"
+    pdf._check_exit(1, blocked, wrote=True)
+    with pytest.raises(IOError, match="code 1"):
+        pdf._check_exit(1, blocked, wrote=False)
+    with pytest.raises(IOError, match="code 1"):
+        pdf._check_exit(1, "Error: something else\nfailed\n", wrote=True)
+
+
+@pytest.mark.skipif(not __import__("shutil").which("wkhtmltopdf"), reason="needs the real wkhtmltopdf (backend/Dockerfile installs it)")
+def test_the_real_renderer_fetches_nothing_a_page_names(tmp_path):
+    """With the real binary: a page naming a server on this host, in CSS and
+    in an image, gets a PDF, and the server is never asked."""
+    import http.server
+    import threading
+
+    hits: list[str] = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            hits.append(self.path)
+            self.send_response(404)
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    port = server.server_address[1]
+    try:
+        (tmp_path / "page.html").write_text(
+            f'<html><head><style>.a {{ background: url(http://127.0.0.1:{port}/css) }}</style></head>'
+            f'<body><div class="a">x</div><img src="http://localhost:{port}/img"></body></html>'
+        )
+        out = pdf.generate_pdf_bytes("page.html", {}, template_dir=f"{tmp_path}/").getvalue()
+        assert out.startswith(b"%PDF")
+        assert hits == []
+    finally:
+        server.shutdown()

@@ -13,7 +13,8 @@ from app.api.discover.schemas import (
     EventSearch, GeocodeBackfillResult, Home, Sitemap, SitemapIndex, SitemapPage, Where,
 )
 from app.api.threads.schemas import ThreadPage
-from app.core.auth.dependencies import AdminAuth, OptionalAuth
+from app.core.auth.dependencies import OptionalAuth
+from app.core.auth.permissions import ContentAuth
 from app.core.rate_limit import limiter, signed_in_key
 from app.db.core import SessionDep
 
@@ -244,14 +245,14 @@ async def sitemap_page(
 
 
 @admin_router.post("/geo-backfill", summary="Read the point out of every event and club map link that has none yet")
-async def geo_backfill(session: SessionDep, user: AdminAuth) -> BackfillResult:
+async def geo_backfill(session: SessionDep, user: ContentAuth) -> BackfillResult:
     return BackfillResult(**await geo.backfill_all(session))
 
 
 @admin_router.post("/geocode-backfill", summary="Place every event and club without a point by geocoding its venue's words")
 async def geocode_backfill(
     session: SessionDep,
-    user: AdminAuth,
+    user: ContentAuth,
     max_requests: int = Query(30, ge=0, le=50, description="At most this many requests go to the geocoder (one a second); words it already answered cost none"),
 ) -> GeocodeBackfillResult:
     """Events not over yet first, then clubs, then past events. Only rows
@@ -265,7 +266,7 @@ async def geocode_backfill(
 
 
 @admin_router.post("/recompute-club-places", summary="Store again every club's place (its point, else its events' middle) that disagrees with its rows")
-async def recompute_club_places(session: SessionDep, user: AdminAuth) -> ClubPlaceFixes:
+async def recompute_club_places(session: SessionDep, user: ContentAuth) -> ClubPlaceFixes:
     """Triggers keep each club's place; this puts right what a write with
     triggers switched off (a restore, a bulk load) left behind. Returns how
     many were wrong: normally none."""
@@ -273,7 +274,7 @@ async def recompute_club_places(session: SessionDep, user: AdminAuth) -> ClubPla
 
 
 @admin_router.post("/reconcile-counters", summary="Recount any counter that disagrees with its rows: going, followers, a post's likes, comments, views and votes, a live question's votes")
-async def reconcile_counters(session: SessionDep, user: AdminAuth) -> CounterFixes:
+async def reconcile_counters(session: SessionDep, user: ContentAuth) -> CounterFixes:
     """Triggers and atomic updates keep the counts exact; this finds and puts
     right any that a write with triggers switched off (a restore, say) left
     behind. Returns how many were wrong: normally none."""

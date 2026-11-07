@@ -78,14 +78,14 @@ async def create_order(
             # create order".
             raise
         await session.rollback()
-        raise CustomHTTPException(
-            status_code=500, message=f"Failed to create order: {str(e)}"
-        )
-    except Exception as e:
+        # The cause goes to the log, never to the client: it can carry the
+        # gateway's own error text, a query or a key's name.
+        logger.error("creating a payment order failed: %s %s", e.status_code, e.message)
+        raise CustomHTTPException(status_code=500, message="Failed to create order", error_code="ORDER_FAILED")
+    except Exception:
         await session.rollback()
-        raise CustomHTTPException(
-            status_code=500, message=f"Failed to create order: {str(e)}"
-        )
+        logger.exception("creating a payment order failed")
+        raise CustomHTTPException(status_code=500, message="Failed to create order", error_code="ORDER_FAILED")
 
 
 @router.post("/verify", summary="Verify a payment")
@@ -170,10 +170,8 @@ async def razorpay_webhook(request: Request, session: SessionDep):
             request_body, webhook_signature, settings.RAZORPAY_WEBHOOK_SECRET
         ):
             raise Exception("Invalid webhook signature")
-    except Exception as e:
-        raise HTTPException(
-            status_code=400, detail=f"Invalid webhook signature: {str(e)}"
-        )
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid webhook signature")
 
     try:
         return await service.handle_razorpay_webhook(

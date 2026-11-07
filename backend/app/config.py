@@ -180,8 +180,14 @@ class AppConfig(BaseSettings):
     # The From address of platform mail through SES (API or SMTP): an
     # identity verified in SES.
     SES_DEFAULT_SENDER: str
-    # Shared secret in the SES → SNS hook URL (?token=), on top of Amazon's signature.
+    # Shared secret in the SES → SNS hook URL (?token=), on top of Amazon's
+    # signature. In production the hook processes nothing without it.
     SES_WEBHOOK_TOKEN: str = ""
+    # The SNS topic(s) SES publishes its bounce, complaint and delivery
+    # notices to, comma-separated (arn:aws:sns:<region>:<account>:<name>).
+    # Anyone can sign an SNS message from a topic of their own, so the hook
+    # confirms and reads only these topics' messages: empty, it takes none.
+    SES_SNS_TOPIC_ARN: str = ""
     # Which provider sends mail: "ses" (default, SES's API), "ses_smtp" (SES
     # through its SMTP interface, with SMTP credentials and no API key), or
     # "resend", which falls back to SES when Resend refuses a mail (a 4xx) --

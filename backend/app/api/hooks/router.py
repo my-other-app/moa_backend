@@ -17,17 +17,39 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/hooks")
 
 
+def ses_topics() -> set[str]:
+    """The SNS topics SES's notices come from (APP_SES_SNS_TOPIC_ARN)."""
+    raw = getattr(settings, "SES_SNS_TOPIC_ARN", "") or ""
+    return {t.strip() for t in raw.split(",") if t.strip()}
+
+
 @router.post("/ses", summary="What SES says became of a mail", status_code=202)
 async def ses_hook(request: Request, session: SessionDep, token: Optional[str] = Query(None)) -> dict:
     """An SNS envelope: the first call subscribes, the rest carry SES's
-    bounce, complaint, delivery and delay notices."""
+    bounce, complaint, delivery and delay notices.
+
+    Taken only with the shared token (APP_SES_WEBHOOK_TOKEN; in production
+    nothing is taken while it is unset), only from the configured topics
+    (APP_SES_SNS_TOPIC_ARN; none while it is unset) -- checked before the
+    subscription is confirmed or a notice read, as the mailbox's hook does --
+    and only signed by Amazon. A bounce puts an address on the suppression
+    list, so a notice from anyone else's topic must never count."""
+    from app.core import config_checks
+
     expected = getattr(settings, "SES_WEBHOOK_TOKEN", "") or ""
-    if expected and not hmac.compare_digest(token or "", expected):
-        logger.warning("ses hook refused: token did not match")
+    if expected:
+        if not hmac.compare_digest(token or "", expected):
+            logger.warning("ses hook refused: token did not match")
+            return {"ok": False, "reason": "token"}
+    elif config_checks.is_production(settings):
+        logger.warning("ses hook refused: APP_SES_WEBHOOK_TOKEN is not set")
         return {"ok": False, "reason": "token"}
     msg = sns.parse(await request.body())
     if msg is None:
         return {"ok": False, "reason": "not an SNS message"}
+    if msg.get("TopicArn") not in ses_topics():
+        logger.warning("ses hook refused: not SES's topic")
+        return {"ok": False, "reason": "topic"}
     if not sns.verify(msg):
         logger.warning("ses hook refused: signature did not verify")
         return {"ok": False, "reason": "signature"}
