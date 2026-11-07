@@ -279,6 +279,8 @@ application.add_middleware(ProcessingTimeMiddleware)
 application.add_middleware(SecurityHeadersMiddleware)
 # slowapi's checks, as plain ASGI (app/core/middlewares/rate_limit_middleware.py).
 application.add_middleware(RateLimitMiddleware)
+# The app's X-App-Version, on the request's log lines (app/core/observability.py).
+application.add_middleware(observability.AppVersionMiddleware)
 # Outermost, so the rate limiter and everything after it see the caller
 # rather than Docker's bridge address (app.core.net).
 from app.core.net import ClientAddressMiddleware  # noqa: E402

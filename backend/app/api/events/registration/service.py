@@ -1530,7 +1530,12 @@ async def update_registration(
         registration.role = role
     if additional_details is not None:
         current = registration.additional_details if isinstance(registration.additional_details, dict) else {}
-        registration.additional_details = answers.bound({**current, **additional_details})
+        merged = answers.bound({**current, **additional_details})
+        # A changed answer can hide other questions (show_if): theirs go, as
+        # they would on the form (app/api/events/questions.py).
+        from app.api.events import questions as form
+
+        registration.additional_details = form.prune(registration.event.additional_details, merged)
     await session.commit()
     await session.refresh(registration, attribute_names=["full_name", "email", "phone", "role", "additional_details", "updated_at", "user"])
     return registration

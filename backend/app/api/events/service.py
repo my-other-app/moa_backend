@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload, joinedload
 from sqlalchemy.dialects.postgresql import INTERVAL
 
 from app.response import CustomHTTPException
+from app.api.events import questions
 from app.api.events.access import ensure_event_access
 from app.api.events.schemas import (
     EventAdditionalDetail,
@@ -118,6 +119,7 @@ async def create_event(
 
     if not user.club:
         raise CustomHTTPException(403, message="Not authorized to create event")
+    additional_details = additional_details or []
     for field in additional_details:
         # Same enum-or-string question as at registration time; see
         # _field_type in app/api/events/registration/service.py.
@@ -127,6 +129,8 @@ async def create_event(
                 raise CustomHTTPException(
                     400, message="Options required for select, radio, checkbox fields"
                 )
+    # Conditions between questions (show_if): rules R1-R6 (app/api/events/questions.py).
+    questions.check_form(additional_details)
     slug = generate_slug(name)
     db_event = Events(
         name=name,
@@ -152,7 +156,7 @@ async def create_event(
         url=url,
         club_id=user.club.id,
         max_participants=max_participants,
-        additional_details=[x.model_dump(mode="json") for x in additional_details],
+        additional_details=[x.to_store() for x in additional_details],
         event_guidelines=event_guidelines,
         event_tag=event_tag,
         ticket_template_id=ticket_template_id,
@@ -305,6 +309,9 @@ async def update_event(
         raise CustomHTTPException(409, message="This event was cancelled, so it can't be changed.", error_code="EVENT_CANCELLED")
     if (db_event.lifecycle or EventStatus.published) in LOCKED_STATUSES:
         raise CustomHTTPException(409, message="This event is closed, so its settings are read-only. Move its status back to Live on the closeout page to change them.", error_code="EVENT_LOCKED")
+    # The form's conditions (show_if), against the form as it was: an option a
+    # condition uses can't be removed from under it (app/api/events/questions.py).
+    questions.check_form(event.additional_details, before=db_event.additional_details)
     # The club's plan: free to paid needs tickets; the store and swag switched
     # on need theirs. Not for a grandfathered event, judged by its new date.
     from app.api.subscriptions import gates
@@ -384,9 +391,7 @@ async def update_event(
     db_event.contact_name = event.contact_name
     db_event.contact_phone = event.contact_phone
     db_event.contact_email = event.contact_email
-    db_event.additional_details = [
-        x.model_dump(mode="json") for x in event.additional_details
-    ]
+    db_event.additional_details = [x.to_store() for x in event.additional_details]
     db_event.event_guidelines = event.event_guidelines
     # The label was written on create only, so an edit to it was lost. Like
     # every field here it is assigned as sent: the form leaves an emptied one

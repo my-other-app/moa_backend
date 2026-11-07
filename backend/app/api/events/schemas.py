@@ -4,11 +4,12 @@ from typing import Any, Optional
 from urllib.parse import urlsplit
 from uuid import UUID
 from fastapi import File, Form, UploadFile
-from pydantic import AwareDatetime, BaseModel, EmailStr, Field, ValidationError, field_validator, model_validator
+from pydantic import AwareDatetime, BaseModel, EmailStr, Field, ValidationError, field_validator, model_serializer, model_validator
 from datetime import datetime, timezone
 from fastapi.exceptions import RequestValidationError
 
 from app.api.clubs.schemas import ClubPublicMin
+from app.api.events import questions
 from app.api.cohosts.schemas import CohostRef
 from app.api.event_partners.schemas import EventPartnerOut
 from app.api.users.schemas import UserPublic
@@ -36,12 +37,43 @@ class FieldTypes(enum.Enum):
     image = "image"
 
 
+class QuestionCondition(CustomBaseModel):
+    """`show_if`: the question is shown only when the earlier question `key`
+    was answered with one of `any_of` (app/api/events/questions.py)."""
+    key: str
+    any_of: list[str] = Field(default_factory=list)
+
+
 class EventAdditionalDetail(CustomBaseModel):
+    """One registration question. Sent (every response that carries a form)
+    by questions.wire: one with `show_if` as `required: false` plus
+    `required_when_shown`, which old apps ignore. Read from a client, a
+    `required_when_shown` is the club's setting; kept, it is `required`
+    (dump with context={"stored": True}; questions.stored)."""
     key: str
     label: str
     field_type: FieldTypes
     required: bool = True
     options: list[str] | None = None
+    show_if: QuestionCondition | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _required_when_shown(cls, data: Any) -> Any:
+        if isinstance(data, dict) and data.get("required_when_shown") is not None:
+            data = {**data, "required": data["required_when_shown"]}
+        return data
+
+    @model_serializer(mode="wrap")
+    def _out(self, handler, info):
+        data = handler(self)
+        if not isinstance(data, dict):
+            return data
+        return questions.stored(data) if (info.context or {}).get("stored") else questions.wire(data)
+
+    def to_store(self) -> dict:
+        """The question as events.additional_details keeps it."""
+        return self.model_dump(mode="json", context={"stored": True})
 
 
 SPEAKER_BIO_MAX = 600

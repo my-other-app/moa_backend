@@ -15,6 +15,11 @@
   It is sent back in X-Request-ID, stamped on every log line the request
   causes, tagged on its Sentry event, and is the track_id of a 500 -- so a
   user's screenshot of an error leads to its log lines and its event.
+- The app's X-App-Version (`<version>+<build>`, e.g. 1.2.0+7) is read on
+  every request (AppVersionMiddleware), whatever the settings: put on each
+  log line the request causes as `app_version` and tagged on its Sentry
+  event. Nothing behaves differently by it yet; it is there so the next
+  change old apps can't take can tell them apart.
 
 Personal data never leaves for Sentry (scrub_event): no request bodies, no
 cookies, no local variables; the Authorization, Cookie, token and forwarded
@@ -43,6 +48,10 @@ logger = logging.getLogger(__name__)
 REQUEST_ID_HEADER = "X-Request-ID"
 _SAFE_ID = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
 _request_id: ContextVar[Optional[str]] = ContextVar("request_id", default=None)
+APP_VERSION_HEADER = "X-App-Version"
+#: What an app version looks like: 1.1.0+6, 1.2.0-beta.1+12. Anything else is not kept.
+_SAFE_VERSION = re.compile(r"^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$")
+_app_version: ContextVar[Optional[str]] = ContextVar("app_version", default=None)
 #: Whether init_sentry started Sentry in this process.
 _sentry_started = False
 
@@ -51,6 +60,12 @@ BACKEND = Path(__file__).resolve().parents[2]
 
 def current_request_id() -> Optional[str]:
     return _request_id.get()
+
+
+def current_app_version() -> Optional[str]:
+    """The calling app's X-App-Version, when it sent one that looks like a
+    version; None for the website, the dashboards and older apps."""
+    return _app_version.get()
 
 
 def sentry_enabled() -> bool:
@@ -104,6 +119,38 @@ class RequestIdMiddleware:
             _request_id.reset(token)
 
 
+class AppVersionMiddleware:
+    """Pure ASGI: the request's X-App-Version, for everything downstream
+    (current_app_version) and for its log lines. Accepted from anyone,
+    never required, and changes nothing about the answer."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+        version = None
+        for name, value in scope.get("headers") or ():
+            if name == b"x-app-version":
+                text = value.decode("latin-1").strip()
+                version = text if _SAFE_VERSION.match(text) else None
+                break
+        if version is None:
+            await self.app(scope, receive, send)
+            return
+        token = _app_version.set(version)
+        if _sentry_started:
+            import sentry_sdk
+
+            sentry_sdk.set_tag("app_version", version)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            _app_version.reset(token)
+
+
 # ---------------------------------------------------------------------------
 # JSON logs
 # ---------------------------------------------------------------------------
@@ -116,6 +163,8 @@ class RequestIdFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         if not getattr(record, "request_id", None):
             record.request_id = current_request_id()
+        if not getattr(record, "app_version", None):
+            record.app_version = current_app_version()
         return True
 
 
@@ -130,6 +179,9 @@ class JsonFormatter(logging.Formatter):
         request_id = getattr(record, "request_id", None) or current_request_id()
         if request_id:
             out["request_id"] = request_id
+        app_version = getattr(record, "app_version", None) or current_app_version()
+        if app_version:
+            out["app_version"] = app_version
         # uvicorn's access line: (client, method, path, http version, status).
         if record.name == "uvicorn.access" and isinstance(record.args, tuple) and len(record.args) == 5:
             client, method, path, version, status = record.args
