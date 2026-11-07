@@ -112,6 +112,7 @@ async def test_a_revocation_or_a_redesign_changes_the_etag(client, world, drawn)
 
 async def test_the_public_routes_are_limited_per_address(client, world, drawn):
     await _issue(client, world)
+    await _public_id(world)  # read again: issuing wrote the row
     code = world["a"].certificate_no
     answers = [(await client.get(f"/api/v1/verify/certificates/{code}")).status_code for _ in range(21)]
     assert answers[:20] == [200] * 20 and answers[20] == 429

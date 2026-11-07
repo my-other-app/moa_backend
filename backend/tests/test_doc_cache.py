@@ -109,7 +109,7 @@ async def test_the_download_and_a_resend_share_the_kept_certificate(client, sess
     )
     assert issued.status_code == 200, issued.text
 
-    r = await client.get(f"/api/v1/events/certificates/{world['a'].ticket_id}/pdf")
+    r = await client.get(f"/api/v1/events/certificates/{world['a'].ticket_id}/pdf", headers=world["guest"])
     assert r.status_code == 200
     doc = await certificate_document(session, await _reg(session, world))
 

@@ -191,6 +191,12 @@ async def give_public_ids(session, criteria: list) -> int:
             {"ids": ids, "public_ids": public_ids, "numbers": numbers},
         )).rowcount or 0
         given += done
+        # The rows written behind the ORM's back: anything this session
+        # already holds reads them again, not the ids it had before.
+        written = {r[0] for r in rows}
+        for held in list(session.identity_map.values()):
+            if isinstance(held, EventRegistrationsLink) and held.id in written:
+                session.expire(held, ["certificate_public_id", "certificate_no"])
         if len(rows) < _IDS_PER_UPDATE:
             return given
 
