@@ -1,0 +1,14 @@
+# Every night at 04:30 India time: after the 03:00 backup, before anyone
+# deploys. Persistent: a run missed while the box was off happens when it is
+# back. The zone is in OnCalendar itself, so the box's own does not matter.
+[Unit]
+Description=MyOtherApp: tidy Docker every night at 04:30 IST
+
+[Timer]
+OnCalendar=*-*-* 04:30:00 Asia/Kolkata
+Persistent=true
+AccuracySec=1min
+Unit=moa-tidy.service
+
+[Install]
+WantedBy=timers.target
