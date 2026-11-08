@@ -42,6 +42,7 @@ and keeps working until the cutover.
 | `env/*.example` | `/srv/moa/env/*.example` | What goes in `.env` and `env/<app>.env` |
 | `deploy.conf.example` | `/srv/moa/deploy.conf` | deploy.sh's own settings (registry, timeouts) |
 | `ops-bot/` | `/srv/moa/ops-bot/` | The Telegram ops bot: encrypted nightly backups, alerts, `/status` ([its README](ops-bot/README.md)) |
+| `tidy/` | `/srv/moa/tidy/tidy.sh`, `moa-tidy.{service,timer}` | Every night at 04:30 IST: Docker's build cache cut to 5 GB, old app images beyond the last 3 per app removed (`sudo bash ops/server/tidy/install.sh`) |
 
 Never in git, only on the server (root, mode 600/700): `.env`, `env/*.env`
 (including `env/ops-bot.env`, the bot's token),
@@ -61,6 +62,8 @@ sudo /srv/moa/deploy.sh recreate backend             # same image, new container
 sudo /srv/moa/deploy.sh caddy                        # validate + reload the Caddyfile
 sudo /srv/moa/deploy.sh doctor                       # files, settings, mounts (names only)
 sudo moa-dc logs -f --tail 100 backend               # anything else: docker compose
+sudo /srv/moa/tidy/tidy.sh --dry-run                 # what the nightly Docker tidy would remove
+sudo systemctl start moa-tidy.service                # tidy now; journalctl -u moa-tidy.service
 ```
 
 From GitHub: each repository's **Deploy to Oracle** workflow (manual) SSHes in

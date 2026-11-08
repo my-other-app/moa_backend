@@ -1,0 +1,17 @@
+# Docker's build cache and old app images, cut back (tidy.sh). Started by
+# moa-tidy.timer; by hand: sudo systemctl start moa-tidy.service, then
+# journalctl -u moa-tidy.service. A failure reaches the owner's Telegram
+# through the backup's alert unit.
+[Unit]
+Description=MyOtherApp: Docker build cache and old app images cut back
+After=docker.service
+Requires=docker.service
+OnFailure=myotherapp-alert@%n.service
+
+[Service]
+Type=oneshot
+Environment=MOA_DIR=/srv/moa
+ExecStart=/bin/bash /srv/moa/tidy/tidy.sh
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=30min
