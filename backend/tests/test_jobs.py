@@ -286,6 +286,9 @@ def test_the_platforms_jobs_have_the_priorities_and_limits_chosen(monkeypatch):
         # The feedback survey, one message a guest on the channel chosen for
         # them; the push is live.join_push's one fan-out, not a job each.
         "live.survey_mail": (N, 4), "live.survey_whatsapp": (N, 4),
+        # A club asking for missing answers: one person's round (push, email,
+        # WhatsApp) a job, and the automatic reminder, which queues those (app/api/missing_answers).
+        "missing_answers.send": (N, 4), "missing_answers.remind": (N, 4),
         # Nobody watches these happen.
         "closeout.retention": (L, 1), "registrations.import": (L, 1),
         # A lapsed hold's unpaid registration retired (app/api/approvals): rare, and nobody waits.

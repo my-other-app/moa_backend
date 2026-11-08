@@ -179,6 +179,11 @@ CLASSIFICATION: dict[str, str] = {
     "waitlist_settings": WIPE,
     # Registration requests (app/api/approvals): people's, like registrations.
     "registration_requests": WIPE,
+    # Missing answers (app/api/missing_answers): events' form versions, and asks with who they went to.
+    "event_form_revisions": WIPE,
+    "answer_asks": WIPE,
+    "answer_ask_people": WIPE,
+    "answer_ask_sends": WIPE,
     "guest_notices": WIPE,
     "club_password_reset_codes": WIPE,
     "club_sites": WIPE,

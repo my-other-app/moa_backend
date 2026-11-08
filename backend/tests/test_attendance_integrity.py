@@ -834,9 +834,10 @@ async def test_the_export_is_written_off_the_event_loop_and_answers_stay_text(cl
     sheet = openpyxl.load_workbook(BytesIO(r.content)).active
     rows = list(sheet.iter_rows(values_only=False))
     header = [c.value for c in rows[0]]
-    assert header[:6] == ["Ticket ID", "Full Name", "Email", "Phone", "tracks", "note"] and header[-4] == "Registered At"
-    # The ticket type and the discount code come last (app/api/ticketing).
-    assert header[-3:] == ["Ticket Type", "Discount Code", "Discount"]
+    # A question by its label, a key the form doesn't ask by the key (app/api/missing_answers).
+    assert header[:6] == ["Ticket ID", "Full Name", "Email", "Phone", "Tracks", "note"] and header[-5] == "Registered At"
+    # The ticket type and the discount code, then the missing answers, come last (app/api/ticketing).
+    assert header[-4:] == ["Ticket Type", "Discount Code", "Discount", "Missing answers"]
     ananya = next(row for row in rows[1:] if row[1].value == "Ananya Iyer")
     assert ananya[4].value == "AI, Web"
     assert ananya[5].value.startswith("=HYPERLINK") and ananya[5].data_type == "s"
