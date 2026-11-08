@@ -605,7 +605,8 @@ async def test_the_requests_export(client, session, make_club, make_event, mint_
     assert r.headers["content-type"].startswith("text/csv") and "attachment" in r.headers["content-disposition"]
     rows = list(csv.DictReader(io.StringIO(r.text)))
     head = list(csv.reader(io.StringIO(r.text)))[0]
-    assert head == approvals.EXPORT_LEAD + ["college"] + approvals.EXPORT_TAIL
+    # An answer under a key the form doesn't ask keeps the key; the missing answers come last.
+    assert head == approvals.EXPORT_LEAD + ["college"] + approvals.EXPORT_TAIL + ["Missing answers"]
     by_email = {row["Email"]: row for row in rows}
     assert len(rows) == 3 and set(by_email) == {"asker460@example.com", "asker461@example.com", "asker462@example.com"}
     first = by_email["asker460@example.com"]

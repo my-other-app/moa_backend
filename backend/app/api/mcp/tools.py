@@ -671,6 +671,8 @@ def _questions(items: list, before: list | None = None) -> list[dict]:
                 raise ToolError(f"The question “{q['label']}” is shown only after “{q['show_if']['question']}”, which must be an earlier question in the list.", "INVALID_ARGUMENT")
             question["show_if"] = {"key": parent["key"], "any_of": [v.strip() for v in q["show_if"]["any_of"]]}
         out.append(question)
+    # A question renamed only in its spacing or case keeps the stored key, and its answers (§1.1).
+    out = form.keep_keys(out, before) if before else out
     try:
         form.check_form(out, before=before)
     except CustomHTTPException as e:
@@ -803,7 +805,16 @@ async def update_event_draft(call: Call, args: dict) -> dict:
         changed = ["category"]
     else:
         changed = []
+    form_before = list(event.additional_details or [])
     changed += _apply(event, fields)
+    if "questions" in changed:
+        # A new version of the questions (app/api/missing_answers), as the dashboard's save writes one.
+        from app.api.missing_answers import service as missing_answers
+
+        await missing_answers.record_revision(
+            call.session, event, form_before, event.additional_details,
+            user_id=call.principal.user.id, member_id=getattr(call.principal.member, "id", None),
+        )
     await _record(call, "mcp.event.draft_updated", entity_type="event", entity_id=event.id, summary=f"Draft event “{event.name}” edited by {call.principal.client_name}", tool="update_event_draft", fields=changed)
     await call.session.commit()
     return _draft_out(event, changed)

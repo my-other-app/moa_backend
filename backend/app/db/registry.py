@@ -39,6 +39,8 @@ from app.api.store import models as _store_models  # noqa: F401
 from app.api.ticketing import models as _ticketing_models  # noqa: F401
 # Registration requests: "Confirm each registration" (app/api/approvals).
 from app.api.approvals import models as _approval_models  # noqa: F401
+# Form versions, and asking people for the answers they are missing (app/api/missing_answers).
+from app.api.missing_answers import models as _missing_answer_models  # noqa: F401
 from app.api.live import models as _live_models  # noqa: F401
 from app.api.competitions import models as _competition_models  # noqa: F401
 from app.api.sites import models as _site_models  # noqa: F401

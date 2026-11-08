@@ -705,6 +705,7 @@ async def list_event_registrations(
     as_admin: bool = False,
     role: RegistrationRole | None = None,
     delivery: str | None = None,
+    missing: str | None = None,
 ):
     event = await session.execute(
         select(Events).filter(Events.id == event_id).options(joinedload(Events.club))
@@ -715,6 +716,11 @@ async def list_event_registrations(
         raise CustomHTTPException(404, message="Event not found")
 
     ensure_event_access(event, user_id, as_admin)
+    from app.api.missing_answers import service as missing_answers
+    from app.api.missing_answers.state import Form
+
+    form = Form(event.additional_details)
+    wanted = missing_answers.check_missing_filter(form, missing)
 
     # The filters are built once and applied to both the page and the count,
     # so the two can never disagree.
@@ -747,6 +753,11 @@ async def list_event_registrations(
             (Deliveries.outcome.is_(None)) | (Deliveries.outcome.in_((DeliveryOutcome.delivered, DeliveryOutcome.read))),
         )
         conditions.append(EventRegistrationsLink.id.not_in(reached))
+    if wanted is not None:
+        # Missing answers (§1.4): any required question blank or invalid for
+        # them (`missing=1`), or that one; worked out from the form and their
+        # answers, as everywhere (app/api/missing_answers/state.py).
+        conditions.append(EventRegistrationsLink.id.in_(await missing_answers.missing_registration_ids(session, event, wanted)))
 
     query = (
         select(EventRegistrationsLink)
@@ -891,6 +902,9 @@ async def list_event_registrations(
                 "admission_no": reg.admission_no,
                 "ticket_type_id": reg.ticket_type_id,
                 "ticket_type_name": type_names.get(reg.ticket_type_id),
+                # The required questions they haven't validly answered, in form
+                # order; none for a revoked ticket, which nobody asks.
+                "missing_answers": [] if reg.ticket_revoked_at is not None else form.missing(reg.additional_details),
             })
         except Exception as e:
             logger.error(f"Error serializing registration {reg.id}: {e}")

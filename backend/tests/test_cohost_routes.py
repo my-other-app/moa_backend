@@ -212,6 +212,18 @@ ROUTES = {
     "POST /api/v1/events/{event_id}/gate/walkup": ALLOW,
     "POST /api/v1/events/{event_id}/gate/capture/{registration_id}": ALLOW,
     "GET /api/v1/events/{event_id}/check-ins": ALLOW,
+    # missing answers (a co-host asks, reads and moves as the host does)
+    "POST /api/v1/events/{event_id}/form/impact": ALLOW,
+    "GET /api/v1/events/{event_id}/answers/summary": ALLOW,
+    "GET /api/v1/events/{event_id}/answers/asks": ALLOW,
+    "POST /api/v1/events/{event_id}/answers/move": ALLOW,
+    "POST /api/v1/events/{event_id}/answers/asks/preview": ALLOW,
+    "POST /api/v1/events/{event_id}/answers/asks": ALLOW,
+    "POST /api/v1/events/{event_id}/answers/asks/{ask_id}/remind": ALLOW,
+    "POST /api/v1/events/{event_id}/answers/asks/{ask_id}/close": ALLOW,
+    "POST /api/v1/events/{event_id}/gate/answers/{registration_id}": ALLOW,
+    "GET /api/v1/events/{event_id}/answers/{ref}": PUBLIC,
+    "POST /api/v1/events/{event_id}/answers/{ref}": PUBLIC,
     # idcards
     "GET /api/v1/events/{event_id}/idcards/summary": ALLOW,
     "PATCH /api/v1/events/{event_id}/idcards/settings": ALLOW,

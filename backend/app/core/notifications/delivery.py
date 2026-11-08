@@ -75,6 +75,8 @@ PERSONAL: dict[str, str] = {
     "request_approved": "your registration",
     "request_approved_pay": "your registration",
     "request_declined": "your registration",
+    # A club asking the person for answers they're missing, with their own link (app/api/missing_answers).
+    "answers_needed": "your registration",
 }
 
 ALL_TOPIC = "all"

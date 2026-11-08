@@ -35,6 +35,28 @@ LEAD = ["Ticket ID", "Full Name", "Email", "Phone"]
 TAIL = ["Is Paid", "Actual Amount", "Paid Amount", "Is Attended", "Checked In By", "Registered At"]
 #: The ticket type and the discount code (app/api/ticketing), last, so the columns before keep their places.
 TICKETING = ["Ticket Type", "Discount Code", "Discount"]
+#: The very last column: the required questions each has not validly
+#: answered, by label (app/api/missing_answers).
+MISSING = "Missing answers"
+
+
+def answer_headers(form, keys: list[str], taken=()) -> list[str]:
+    """Each answer column's header: the question's label (one used twice, or
+    taken by another column, gets " (key)" after it), or for a key the form
+    no longer asks, the key itself. The requests' CSV uses the same."""
+    labels = [form.label(k) if k in form else k for k in keys]
+    seen: dict[str, int] = {}
+    for label in labels:
+        seen[label] = seen.get(label, 0) + 1
+    taken = set(taken)
+    return [
+        f"{label} ({k})" if k in form and (seen[label] > 1 or label in taken) else label
+        for k, label in zip(keys, labels)
+    ]
+
+
+def missing_cell(form, answers) -> str:
+    return "; ".join(form.label(k) for k in form.missing(answers))
 
 
 async def _answer_keys(session: AsyncSession, event: Events, where) -> list[str]:
@@ -115,7 +137,11 @@ async def write_export(
     if is_paid is not None:
         where.append(R.is_paid == is_paid)
     answer_keys = await _answer_keys(session, event, where)
-    writer = await asyncio.to_thread(_Writer, LEAD + answer_keys + TAIL + TICKETING)
+    from app.api.missing_answers.state import Form
+
+    form = Form(event.additional_details)
+    headers = answer_headers(form, answer_keys, taken=[*LEAD, *TAIL, *TICKETING, MISSING])
+    writer = await asyncio.to_thread(_Writer, LEAD + headers + TAIL + TICKETING + [MISSING])
     from app.api.ticketing.models import DiscountCodes, TicketTypes
 
     stmt = (
@@ -143,6 +169,7 @@ async def write_export(
                 is_paid, actual, paid, attended, volunteer,
                 created.strftime("%Y-%m-%d %H:%M:%S") if created else None,
                 type_name, code, off,
+                missing_cell(form, answers),
             ])
         await asyncio.to_thread(writer.append, rows)
     return await asyncio.to_thread(writer.save)

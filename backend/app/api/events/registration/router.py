@@ -259,6 +259,7 @@ async def list_event_registration(
     search: str | None = Query(None, description="Search by name, email, phone or ticket ID"),
     role: RegistrationRole | None = Query(None),
     delivery: str | None = Query(None, pattern="^(not_delivered)$", description="Only guests not reached on any channel"),
+    missing: str | None = Query(None, max_length=100, description="Missing answers: 1 for any, or a question's key"),
     session: SessionDep = SessionDep,
 ) -> PaginatedResponse[EventRegistrationPublicMin]:
     result, total = await service.list_event_registrations(
@@ -273,6 +274,7 @@ async def list_event_registration(
         as_admin=is_admin_user(user),
         role=role,
         delivery=delivery,
+        missing=missing,
     )
     return paginated_response(result, request, EventRegistrationPublicMin, total=total)
 
@@ -371,6 +373,11 @@ async def _with_deliveries(session, registration) -> dict:
     for kind, key in ((DeliveryKind.ticket, "ticket_deliveries"), (DeliveryKind.certificate, "certificate_deliveries")):
         sent = await deliveries.by_registration(session, registration.event_id, kind, [registration.id])
         out[key] = jsonable_encoder(sent.get(registration.id, []))
+    # The required questions they haven't validly answered (app/api/missing_answers).
+    from app.api.missing_answers.state import Form
+
+    form = await session.scalar(select(Events.additional_details).where(Events.id == registration.event_id))
+    out["missing_answers"] = [] if registration.ticket_revoked_at is not None else Form(form).missing(registration.additional_details)
     return out
 
 
@@ -394,6 +401,14 @@ async def update_event_registration(
         additional_details=body.additional_details,
         as_admin=is_admin_user(user),
     )
+    if body.additional_details is not None:
+        # Answered for any of their asks with nothing left (app/api/missing_answers).
+        from app.api.missing_answers import people, service as missing_answers
+        from app.api.missing_answers.models import REGISTRATION
+
+        event = await session.get(Events, result.event_id)
+        if event is not None:
+            await missing_answers.after_answers_changed(session, event, await people.load_one(session, event, REGISTRATION, result.id))
     return jsonable_encoder(await _with_deliveries(session, result))
 
 

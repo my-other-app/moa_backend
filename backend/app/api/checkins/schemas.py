@@ -146,6 +146,9 @@ class AttendeeSummary(BaseModel):
     admission_no: Optional[str] = None
     #: The ticket type's name, when the event sells more than one.
     ticket_type: Optional[str] = None
+    #: The required questions they haven't validly answered, [{"key",
+    #: "label"}]; never a reason to refuse them (app/api/missing_answers).
+    missing_answers: list[dict] = Field(default_factory=list)
 
 
 class ScanBody(BaseModel):

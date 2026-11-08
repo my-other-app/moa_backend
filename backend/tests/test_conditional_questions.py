@@ -543,12 +543,16 @@ async def test_the_export_leaves_a_hidden_question_blank_in_form_order(client, w
     assert r.status_code == 200, r.text
     rows = list(load_workbook(io.BytesIO(r.content)).active.iter_rows(values_only=True))
     header = list(rows[0])
-    assert header[4:12] == [q["key"] for q in FORM]
+    # Headed by the questions' labels (feature-register/missing-answers-contract.md §1.4).
+    label = {q["key"]: q["label"] for q in FORM}
+    assert header[4:12] == [q["label"] for q in FORM]
     by_email = {row[2]: dict(zip(header, row)) for row in rows[1:]}
     worker = by_email["worker@example.com"]
-    assert worker["company"] == "Acme" and worker["college"] in (None, "") and worker["pg_spec"] in (None, "")
+    assert worker[label["company"]] == "Acme" and worker[label["college"]] in (None, "") and worker[label["pg_spec"]] in (None, "")
     student = by_email["student@example.com"]
-    assert student["pg_spec"] == "VLSI" and student["company"] in (None, "")
+    assert student[label["pg_spec"]] == "VLSI" and student[label["company"]] in (None, "")
+    # A hidden question is never missing.
+    assert worker["Missing answers"] in (None, "") and student["Missing answers"] in (None, "")
 
 
 async def test_the_attendee_detail_shows_only_what_each_answered(client, world, answered):

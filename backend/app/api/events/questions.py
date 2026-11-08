@@ -252,6 +252,68 @@ def _option_removed(before, parent_key: str, child_key: str, value) -> bool:
     return value in (_get(parent, "options") or []) and cond is not None and cond["key"] == parent_key and value in cond["any_of"]
 
 
+def check_options(questions) -> None:
+    """A 400 when a choice question (select, radio, checkbox) has no
+    options: on create, and on every update (it used to be create only, so
+    an edit could save a choice nobody can pick)."""
+    for q in questions or []:
+        if kind_of(q) in CHOICE_TYPES and not [o for o in (_get(q, "options") or []) if o is not None]:
+            raise CustomHTTPException(400, message="Options required for select, radio, checkbox fields")
+
+
+# ---------------------------------------------------------------------------
+# Keys that stay put (feature-register/missing-answers-contract.md §1.1)
+# ---------------------------------------------------------------------------
+
+
+def normal_label(label) -> str:
+    """A label as two labels are compared: trimmed, lower case, one space
+    between words."""
+    return " ".join(str(label or "").split()).lower()
+
+
+def keep_keys(incoming: list[dict], before) -> list[dict]:
+    """The form about to be saved, with the stored keys kept where an editor
+    re-derived one from a label it did not really change.
+
+    An incoming question whose key the stored form does not have, but whose
+    label is the same (normal_label) as a stored question's whose key is no
+    longer in the form, is that stored question: it keeps the stored key,
+    and so the answers people already gave stay its answers. A condition on
+    the renamed key (a child's show_if) follows. Only a label that is one
+    stored question's and one incoming question's is taken as the same
+    question; anything less certain is left as sent. Stored answers are
+    never rewritten here."""
+    stored = [q for q in (before or []) if isinstance(q, dict) and isinstance(q.get("key"), str)]
+    sent_keys = {q.get("key") for q in incoming}
+    stored_keys = {q["key"] for q in stored}
+    gone: dict[str, list[str]] = {}
+    for q in stored:
+        if q["key"] not in sent_keys:
+            gone.setdefault(normal_label(q.get("label")), []).append(q["key"])
+    new: dict[str, list[int]] = {}
+    for i, q in enumerate(incoming):
+        if q.get("key") not in stored_keys:
+            new.setdefault(normal_label(q.get("label")), []).append(i)
+    renames: dict[str, str] = {}
+    for label, at in new.items():
+        old = gone.get(label) or []
+        if label and len(at) == 1 and len(old) == 1:
+            renames[incoming[at[0]]["key"]] = old[0]
+    if not renames:
+        return incoming
+    out = []
+    for q in incoming:
+        q = dict(q)
+        if q.get("key") in renames:
+            q["key"] = renames[q["key"]]
+        cond = q.get("show_if")
+        if isinstance(cond, dict) and cond.get("key") in renames:
+            q["show_if"] = {**cond, "key": renames[cond["key"]]}
+        out.append(q)
+    return out
+
+
 def explain_form_error(questions, before=None) -> Optional[str]:
     """The message check_form would refuse with, or None: for callers that
     say it in their own words (the MCP tools)."""

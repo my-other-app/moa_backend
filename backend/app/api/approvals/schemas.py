@@ -70,6 +70,9 @@ class RequestPublic(CustomBaseModel):
     pay: Optional[RequestPay] = None
     token: Optional[str] = None
     status_url: Optional[str] = None
+    #: While the club asks them for answers they're missing:
+    #: {"count", "url", "deadline"}; null otherwise (app/api/missing_answers).
+    answers_needed: Optional[dict[str, Any]] = None
 
 
 class RequestsMine(CustomBaseModel):
@@ -96,6 +99,9 @@ class RequestClubItem(CustomBaseModel):
     amount: Optional[float] = None
     discount_code: Optional[str] = None
     whatsapp_opt_in: bool = False
+    #: The required questions they haven't validly answered, keys in form
+    #: order; [] when none (app/api/missing_answers).
+    missing_answers: list[str] = Field(default_factory=list)
 
 
 class RequestCounts(CustomBaseModel):

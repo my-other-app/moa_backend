@@ -120,15 +120,8 @@ async def create_event(
     if not user.club:
         raise CustomHTTPException(403, message="Not authorized to create event")
     additional_details = additional_details or []
-    for field in additional_details:
-        # Same enum-or-string question as at registration time; see
-        # _field_type in app/api/events/registration/service.py.
-        field_type = getattr(field.field_type, "value", field.field_type)
-        if field_type in ("select", "radio", "checkbox"):
-            if not field.options:
-                raise CustomHTTPException(
-                    400, message="Options required for select, radio, checkbox fields"
-                )
+    # A choice question needs its options; the same check runs on every update.
+    questions.check_options(additional_details)
     # Conditions between questions (show_if): rules R1-R6 (app/api/events/questions.py).
     questions.check_form(additional_details)
     slug = generate_slug(name)
@@ -292,6 +285,7 @@ async def update_event(
     speaker_photos: Optional[list[UploadFile]] = None,
     as_admin: bool = False,
     actor=None,
+    member_id: Optional[int] = None,
 ):
     db_event = await session.execute(
         select(Events)
@@ -309,9 +303,17 @@ async def update_event(
         raise CustomHTTPException(409, message="This event was cancelled, so it can't be changed.", error_code="EVENT_CANCELLED")
     if (db_event.lifecycle or EventStatus.published) in LOCKED_STATUSES:
         raise CustomHTTPException(409, message="This event is closed, so its settings are read-only. Move its status back to Live on the closeout page to change them.", error_code="EVENT_LOCKED")
+    # The questions about to be saved. A question an editor sent under a new
+    # key but with the label of a stored one whose key is gone keeps the
+    # stored key, so the answers people gave stay its answers (stored answers
+    # are never rewritten here; feature-register/missing-answers-contract.md §1.1).
+    form_before = list(db_event.additional_details or [])
+    form_after = questions.keep_keys([x.to_store() for x in event.additional_details], form_before)
+    # A choice question needs its options, on an update as on a create.
+    questions.check_options(form_after)
     # The form's conditions (show_if), against the form as it was: an option a
     # condition uses can't be removed from under it (app/api/events/questions.py).
-    questions.check_form(event.additional_details, before=db_event.additional_details)
+    questions.check_form(form_after, before=form_before)
     # The club's plan: free to paid needs tickets; the store and swag switched
     # on need theirs. Not for a grandfathered event, judged by its new date.
     from app.api.subscriptions import gates
@@ -391,7 +393,7 @@ async def update_event(
     db_event.contact_name = event.contact_name
     db_event.contact_phone = event.contact_phone
     db_event.contact_email = event.contact_email
-    db_event.additional_details = [x.to_store() for x in event.additional_details]
+    db_event.additional_details = form_after
     db_event.event_guidelines = event.event_guidelines
     # The label was written on create only, so an edit to it was lost. Like
     # every field here it is assigned as sent: the form leaves an emptied one
@@ -492,6 +494,14 @@ async def update_event(
         await session.flush()
         await approvals.from_waiting_list(session, db_event)
 
+    # A new version of the questions, with what it did to the people signed
+    # up, when they changed (app/api/missing_answers).
+    from app.api.missing_answers import service as missing_answers
+
+    await missing_answers.record_revision(
+        session, db_event, form_before, form_after,
+        user_id=getattr(actor, "id", None) or user_id, member_id=member_id,
+    )
     await session.commit()
     await _republish_site(session, event_id)
     db_event = await session.execute(

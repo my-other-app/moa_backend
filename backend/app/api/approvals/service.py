@@ -445,7 +445,13 @@ def public_view(req, ctx: dict, *, with_token: bool = True, now: Optional[dateti
 
 
 async def view(session, req, *, with_token: bool = True) -> dict:
-    return public_view(req, await _context(session, [req]), with_token=with_token)
+    out = public_view(req, await _context(session, [req]), with_token=with_token)
+    # The club asking for answers they're missing: a note on the request's
+    # page while an ask is open (app/api/missing_answers).
+    from app.api.missing_answers import service as missing_answers
+
+    out["answers_needed"] = await missing_answers.flag_for_request(session, req) if req.status in OPEN else None
+    return out
 
 
 async def mine(session, user) -> list[dict]:
@@ -463,6 +469,13 @@ async def mine(session, user) -> list[dict]:
     ctx = await _context(session, rows)
     now = _now()
     views = [public_view(r, ctx, now=now) for r in rows]
+    # The club asking them for answers they're missing, on each open one
+    # (app/api/missing_answers): one statement to know which, more only for those.
+    from app.api.missing_answers import service as missing_answers
+
+    flags = await missing_answers.flags_for_requests(session, [r for r in rows if r.status in OPEN], ctx["events"])
+    for r, v in zip(rows, views):
+        v["answers_needed"] = flags.get(r.id)
     return sorted(views, key=lambda v: 0 if (v["status"] == PENDING or v["pay"] is not None) else 1)
 
 
@@ -567,12 +580,15 @@ def _search(q: Optional[str]):
     return or_(R.full_name.ilike(pattern, escape="\\"), R.email.ilike(pattern, escape="\\"), R.phone.ilike(pattern, escape="\\"))
 
 
-def list_query(event_id: int, *, status: Optional[str], q: Optional[str], after=None, limit: int = 50):
+def list_query(event_id: int, *, status: Optional[str], q: Optional[str], after=None, limit: int = 50, only_ids=None):
     """A page of the event's requests from the cursor: the queue (pending)
     oldest first, walking ix_registration_requests_pending; any other status
     newest first, walking ix_registration_requests_queue backwards.
-    (submitted_at, id) is the key; a page reads `limit + 1` rows."""
+    (submitted_at, id) is the key; a page reads `limit + 1` rows. `only_ids`:
+    just these (the missing-answers filter)."""
     stmt = select(R).where(R.event_id == event_id)
+    if only_ids is not None:
+        stmt = stmt.where(R.id.in_(list(only_ids)))
     newest_first = status != PENDING
     if status in STATUSES:
         stmt = stmt.where(R.status == status)
@@ -672,9 +688,17 @@ async def places_left(session, event) -> Optional[int]:
     return (await places.summary(session, event)).left
 
 
-async def club_list(session, event, *, status: Optional[str], q: Optional[str], after: Optional[str], limit: int) -> dict:
+async def club_list(
+    session, event, *, status: Optional[str], q: Optional[str], after: Optional[str], limit: int, missing: Optional[str] = None,
+) -> dict:
+    from app.api.missing_answers import service as missing_answers
+    from app.api.missing_answers.state import Form
+
+    form = Form(event.additional_details)
+    wanted = missing_answers.check_missing_filter(form, missing)
+    only = await missing_answers.missing_request_ids(session, event, wanted) if wanted is not None else None
     cursor = decode_cursor(after)
-    rows = list((await session.scalars(list_query(event.id, status=status, q=q, after=cursor, limit=limit))).all())
+    rows = list((await session.scalars(list_query(event.id, status=status, q=q, after=cursor, limit=limit, only_ids=only))).all())
     more = len(rows) > limit
     rows = rows[:limit]
     ctx = await _context(session, rows)
@@ -694,6 +718,8 @@ async def club_list(session, event, *, status: Optional[str], q: Optional[str], 
             "amount": float(money.rupees(r.amount)) if r.amount is not None else None,
             "discount_code": r.discount_code,
             "whatsapp_opt_in": bool(r.whatsapp_opt_in),
+            # The required questions they haven't validly answered (app/api/missing_answers).
+            "missing_answers": form.missing(r.answers),
         })
     return {
         "items": items,
@@ -1733,9 +1759,15 @@ async def export_csv(session, event) -> bytes:
         .group_by(key).order_by(func.min(R.submitted_at), key)
     )).scalars().all()
     keys = asked + [k for k in seen if k not in asked]
+    from app.api.events.registration.export import MISSING, answer_headers, missing_cell
+    from app.api.missing_answers.state import Form
+
+    form = Form(event.additional_details)
     buf = io.StringIO()
     out = csv.writer(buf)
-    out.writerow(EXPORT_LEAD + keys + EXPORT_TAIL)
+    # The questions by label, a key the form no longer asks by its key, and
+    # last the required ones each has not validly answered (app/api/missing_answers).
+    out.writerow(EXPORT_LEAD + answer_headers(form, keys, taken=[*EXPORT_LEAD, *EXPORT_TAIL, MISSING]) + EXPORT_TAIL + [MISSING])
     G = EventRegistrationsLink
     stmt = (
         select(
@@ -1766,6 +1798,7 @@ async def export_csv(session, event) -> bytes:
                 float(money.rupees(amount)) if amount is not None else None, pay,
                 expires if pay == "awaiting payment" else None,
                 ticket_id if reg_live else None, bool(whatsapp),
+                missing_cell(form, answers),
             )])
     return buf.getvalue().encode("utf-8")
 

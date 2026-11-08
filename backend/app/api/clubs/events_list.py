@@ -143,6 +143,10 @@ async def list_events(session, club_id: int, *, scope: str = "all", sort: Option
                 "ends_at": ends_at(event),
             }
         )
+    # Which version of its questions each is on (app/api/missing_answers): one statement.
+    from app.api.missing_answers import service as missing_answers
+
+    await missing_answers.attach_form_meta(session, items)
     return items, total
 
 
