@@ -118,6 +118,9 @@ class EventRegistrationDetailResponse(CustomBaseModel):
     ticket_type_id: int | None = Field(None)
     ticket_label: str | None = Field(None)
     discount_amount: float | None = Field(None)
+    #: The required questions they haven't validly answered, keys in form
+    #: order (app/api/missing_answers); the list rows carry the same.
+    missing_answers: list[str] = Field(default_factory=list)
 
 
 class RegistrationUpdateRequest(CustomBaseModel):
@@ -178,6 +181,9 @@ class EventRegistrationPublicMin(CustomBaseModel):
     # The ticket type it was bought as (docs/TICKETING.md).
     ticket_type_id: int | None = Field(None)
     ticket_type_name: str | None = Field(None)
+    #: The required questions they haven't validly answered, keys in form
+    #: order; [] when none (app/api/missing_answers).
+    missing_answers: list[str] = Field(default_factory=list)
 
 
 class SetWinnerRequest(CustomBaseModel):

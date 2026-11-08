@@ -61,11 +61,14 @@ async def list_requests(
     q: str | None = Query(None, max_length=100, description="Name, email or phone contains"),
     after: str | None = Query(None, max_length=200, description="The `next` of the page before"),
     limit: int = Query(50, ge=1, le=200),
+    missing: str | None = Query(None, max_length=100, description="Missing answers: 1 for any, or a question's key"),
 ) -> RequestsPage:
     """Pending: the queue, oldest first. Any other status: newest first.
     Keyset pages (`next`), the counts by status, and the places left."""
     event = await deliveries.event_for_club(session, user, event_id)
-    return await service.club_list(session, event, status=None if status == "all" else status, q=q, after=after, limit=limit)
+    return await service.club_list(
+        session, event, status=None if status == "all" else status, q=q, after=after, limit=limit, missing=missing,
+    )
 
 
 @router.get("/events/registration/{event_id}/requests/export", summary="Every registration request of the event, as CSV")

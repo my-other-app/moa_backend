@@ -617,6 +617,14 @@ async def get_my_events(
         limit=pagination.limit,
         offset=pagination.offset,
     )
+    # The club asking them for answers they're missing (app/api/missing_answers).
+    from app.api.missing_answers import service as missing_answers
+
+    flags = await missing_answers.flags_for_registrations(
+        session, [(r.id, r.event) for r in events if r.ticket_revoked_at is None],
+    )
+    for r in events:
+        r.answers_needed = flags.get(r.id)
     return paginated_response(events, request=request, schema=UserRegisteredEvents)
 
 

@@ -198,6 +198,9 @@ class UserRegisteredEvents(CustomBaseModel):
     actual_amount: float | None = Field(None)
     paid_amount: float | None = Field(None)
     event: UserEventList = Field(...)
+    #: While the club asks them for answers they're missing:
+    #: {"count", "url", "deadline"}; null otherwise (app/api/missing_answers).
+    answers_needed: dict | None = Field(None)
 
 
 class AdminUserStats(CustomBaseModel):

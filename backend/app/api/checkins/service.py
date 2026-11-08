@@ -22,6 +22,7 @@ from app.api.closeout.models import DOOR_OPEN_STATUSES, EventStatus
 from app.api.events import questions
 from app.api.events.models import EventRegistrationsLink, Events
 from app.api.events.volunteer.models import Volunteer
+from app.api.missing_answers.state import Form
 from app.api.templates_audience import RegistrationRole
 from app.api.users.models import Users
 from app.response import CustomHTTPException
@@ -132,6 +133,10 @@ def summary(reg: EventRegistrationsLink, checked_in_at=None) -> dict:
         "checked_in_at": checked_in_at, "badge_printed_at": getattr(reg, "badge_printed_at", None), "admission_no": getattr(reg, "admission_no", None),
         # The ticket type, when the event sells more than one (app/api/ticketing).
         "ticket_type": getattr(reg, "ticket_label", None),
+        # The required questions they haven't validly answered: the door sees
+        # them and may fill them in (POST gate/answers); they never stop a
+        # check-in (app/api/missing_answers).
+        "missing_answers": Form(reg.event.additional_details).missing_brief(reg.additional_details) if reg.event is not None else [],
     }
 
 

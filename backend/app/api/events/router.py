@@ -224,11 +224,13 @@ async def create_event(
 
     await ticket_types.follow_event_edit(session, created)
     _follow_map_link(background_tasks, created)
+    await _form_meta_on(session, created)
     return created
 
 
 @router.put("/update/{event_id}", summary="Update an event")
 async def update_event(
+    request: Request,
     event_id: int,
     user: ClubAuth,
     background_tasks: BackgroundTasks,
@@ -236,6 +238,9 @@ async def update_event(
     event: EventEdit = Depends(),
     speaker_photos: List[UploadFile] = File([]),
 ) -> EventCreateUpdateResponse:
+    from app.api.club_access import service as club_access
+
+    member = club_access.current_member(request)
     updated = await service.update_event(
         session,
         event,
@@ -244,6 +249,7 @@ async def update_event(
         speaker_photos=speaker_photos,
         as_admin=is_admin_user(user),
         actor=user,
+        member_id=getattr(member, "id", None),
     )
     # A single ticket type shows the event's price and cap again; with
     # several, the event's fee is what they charge (app/api/ticketing).
@@ -251,7 +257,18 @@ async def update_event(
 
     await ticket_types.follow_event_edit(session, updated)
     _follow_map_link(background_tasks, updated)
+    await _form_meta_on(session, updated)
     return updated
+
+
+async def _form_meta_on(session, event) -> None:
+    """The questions' version and when they last changed, on an event the
+    response is about to send (app/api/missing_answers)."""
+    from app.api.missing_answers import service as missing_answers
+
+    version, at = (await missing_answers.form_meta(session, [event.id])).get(event.id, (None, None))
+    event.form_version = version
+    event.form_changed_at = at
 
 
 async def _hide_draft(session, event_id: str, user) -> None:
@@ -305,6 +322,13 @@ async def get_event(
 
     shell = SimpleNamespace(id=data.get("id"), club_id=(data.get("club") or {}).get("id"))
     data["viewer_role"] = await cohosts.viewer_role(session, shell, user) if shell.club_id is not None else None
+    data["form_version"] = data["form_changed_at"] = None
+    if data["viewer_role"] is not None or (user is not None and is_admin_user(user)):
+        # The club's own edit form: which version of the questions it is editing (app/api/missing_answers).
+        from app.api.missing_answers import service as missing_answers
+
+        version, at = (await missing_answers.form_meta(session, [data.get("id")])).get(data.get("id"), (None, None))
+        data["form_version"], data["form_changed_at"] = version, at
     if data.get("status") == "cancelled":
         from app.api.club_ops.cancel import public_cancellation
 
@@ -538,6 +562,18 @@ async def list_events(
                     event_dict["certificate_url"] = public_url_of(reg)
                     event_dict["certificate_no"] = number_of(reg) or None
             enhanced_events.append(event_dict)
+        # The club asking the caller for answers they're missing, on the
+        # events they're registered for (app/api/missing_answers): one
+        # statement for the page, more only for an event with an open ask.
+        from app.api.missing_answers import service as missing_answers
+
+        by_id = {e.id: e for e in events}
+        flags = await missing_answers.flags_for_registrations(
+            session, [(r.id, by_id.get(r.event_id)) for r in registrations.values() if r.ticket_revoked_at is None],
+        )
+        for event_dict in enhanced_events:
+            reg = registrations.get(event_dict.get("id"))
+            event_dict["answers_needed"] = jsonable_encoder(flags.get(reg.id)) if reg is not None else None
     else:
         enhanced_events = [jsonable_encoder(e) for e in events]
     # Each event's co-hosts (app/api/cohosts).
@@ -668,6 +704,14 @@ async def get_ticket(
     result = await service.get_ticket_details(session, ticket_id=ticket_id)
     await _assert_can_access_ticket(session, user, result)
     data = jsonable_encoder(result)
+    # The club asking its holder for answers they're missing: a note on the
+    # ticket while an ask is open (app/api/missing_answers). The holder's own.
+    data["answers_needed"] = None
+    if user is not None and result.user_id == user.id and result.event is not None and not is_revoked(result):
+        from app.api.missing_answers import service as missing_answers
+
+        flags = await missing_answers.flags_for_registrations(session, [(result.id, result.event)])
+        data["answers_needed"] = jsonable_encoder(flags.get(result.id))
     # Revoked by the organiser, under the name the event list already uses
     # for it (EventListResponse.ticket_revoked). The ticket's own page is the
     # only thing a guest reading the link from their email can ask -- there

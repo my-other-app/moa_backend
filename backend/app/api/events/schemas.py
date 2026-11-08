@@ -561,6 +561,10 @@ class EventCreateUpdateResponse(CustomBaseModel):
     requires_approval: bool = Field(False)
     #: The club's "High demand" label for the public page.
     high_demand_label: bool = Field(False)
+    #: The questions' version (event_form_revisions) and when it was saved;
+    #: null until the questions are first changed (app/api/missing_answers).
+    form_version: int | None = Field(None)
+    form_changed_at: datetime | None = Field(None)
 
 
 class EventListResponse(CustomBaseModel):
@@ -612,6 +616,9 @@ class EventListResponse(CustomBaseModel):
     #: prints it (EventRegistrationsLink.ticket_label). Null when the caller
     #: has no registration for the event, or its ticket names no type.
     ticket_label: str | None = Field(None)
+    #: While the club asks the caller for answers they're missing:
+    #: {"count", "url", "deadline"}; null otherwise (app/api/missing_answers).
+    answers_needed: dict | None = Field(None)
 
     @model_validator(mode="before")
     @classmethod
@@ -662,6 +669,10 @@ class EventListResponseSelf(CustomBaseModel):
     club: EventClubDetail | None = Field(None)
     cohosts: list[CohostRef] = Field(default_factory=list)
     viewer_role: Optional[str] = Field(None)
+    #: On the club's own list: the questions' version and when it was saved
+    #: (null until they first change; app/api/missing_answers).
+    form_version: Optional[int] = Field(None)
+    form_changed_at: Optional[datetime] = Field(None)
 
 
 class EventAdminListResponse(CustomBaseModel):
@@ -789,6 +800,11 @@ class EventDetailResponse(CustomBaseModel):
     #: The signed-in club's place on it: "host", "cohost", or null (app
     #: users, visitors, admins).
     viewer_role: Optional[str] = Field(None)
+    #: For the host, a co-host or an admin: the questions' version and when it
+    #: was saved (null until they first change; app/api/missing_answers).
+    #: Null for anyone else.
+    form_version: Optional[int] = Field(None)
+    form_changed_at: Optional[datetime] = Field(None)
     # User-specific fields (only populated when authenticated)
     is_registered: bool = Field(False)
     #: Null when the viewer is not registered. True for a free event, or a
@@ -873,6 +889,9 @@ class TicketDetailsResponse(CustomBaseModel):
     #: the event list already spells it (EventListResponse.ticket_revoked), so
     #: a client reads one name for it everywhere. False on a working ticket.
     ticket_revoked: bool = False
+    #: While the club asks the holder for answers they're missing:
+    #: {"count", "url", "deadline"}; null otherwise (app/api/missing_answers).
+    answers_needed: dict | None = None
 
 
 # ─── Networking Discovery ─────────────────────────────────────────────
