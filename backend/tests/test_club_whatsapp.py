@@ -1181,7 +1181,8 @@ async def test_templates_are_listed_from_meta_with_status_and_reason(client, ses
     assert by["old_promo"]["status"] == "REJECTED" and by["old_promo"]["rejected_reason"] == "INVALID_FORMAT"
     assert by["event_update"]["body_variables"] == 2 and by["ticket_confirmed"]["header"]["format"] == "DOCUMENT"
     assert by["event_reminder"]["buttons"][0]["variables"] == 1
-    assert out["stale"] is False and out["standard_missing"] == ["certificate_ready"]
+    # details_needed: a club asking for missing answers (app/api/missing_answers), submitted like the rest.
+    assert out["stale"] is False and out["standard_missing"] == ["certificate_ready", "details_needed"]
     meta.fail[f"GET {WABA}/message_templates"] = "network"
     stale = (await client.get(f"{API}/clubs/whatsapp/templates", headers=world.h)).json()
     assert stale["stale"] is True and {t["name"] for t in stale["items"]} == set(by)
@@ -1252,10 +1253,13 @@ async def test_myotherapps_own_templates_are_submitted_with_a_sample_document(cl
     await connected(client, session, world)
     no_app = (await client.post(f"{API}/clubs/whatsapp/templates/standard", headers=world.h)).json()["results"]
     assert no_app["ticket_confirmed"] == "exists" and "app ID" in no_app["certificate_ready"]
+    # No document header: it needs no app id.
+    assert no_app["details_needed"] == "submitted"
     await connect(client, world, app_id=APP_ID)
     out = (await client.post(f"{API}/clubs/whatsapp/templates/standard", headers=world.h)).json()["results"]
-    assert out == {"ticket_confirmed": "exists", "event_reminder": "exists", "certificate_ready": "submitted"}
-    created = meta.created[-1]
+    assert out == {"ticket_confirmed": "exists", "event_reminder": "exists", "certificate_ready": "submitted", "details_needed": "submitted"}
+    assert meta.created[-1]["name"] == "details_needed" and meta.created[-1]["category"] == "UTILITY"
+    created = next(c for c in reversed(meta.created) if c["name"] == "certificate_ready")
     assert created["name"] == "certificate_ready" and created["category"] == "UTILITY"
     assert created["components"][0] == {"type": "HEADER", "format": "DOCUMENT", "example": {"header_handle": ["4::aGFuZGxl"]}}
     upload = [c for c in meta.calls if c.url.path.endswith("upload:MTphdHRhY2htZW50")][0]
@@ -1358,7 +1362,7 @@ async def test_the_standard_templates_are_resubmitted_or_explained(client, sessi
     out = (await client.post(f"{API}/clubs/whatsapp/templates/standard", headers=world.h)).json()["results"]
     # Rejected: deleted (its name is free) and submitted again.
     assert out["event_reminder"] == "submitted" and meta.deleted[-1]["name"] == "event_reminder"
-    assert [c["name"] for c in meta.created] == ["event_reminder", "certificate_ready"]
+    assert [c["name"] for c in meta.created] == ["event_reminder", "certificate_ready", "details_needed"]
     # Approved in another shape: left, with what to do about it.
     assert "30 days" in out["ticket_confirmed"] and "ticket_confirmed" not in [c["name"] for c in meta.created]
 
