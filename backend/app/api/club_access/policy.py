@@ -112,6 +112,10 @@ _CLUB_PROFILE_WRITES = _rx(
     r"^/api/v1/clubs/(?:update|cover|logo|socials|create)(?:/|$)",
     r"^/api/v1/clubs/(?:partners|team)(?:/|$)",
 )
+# Moving answers kept under an old question onto a current one rewrites what
+# every guest answered: owners and admins (app/api/missing_answers). Asking
+# guests for missing answers is messaging them: editors too, door staff never.
+_ANSWERS_MOVE = _rx(r"^/api/v1/events/\d+/answers/move$")
 # Things that cannot be taken back.
 _DESTRUCTIVE = _rx(
     r"^/api/v1/events/delete/\d+$",
@@ -174,6 +178,8 @@ def allows(role: str, method: str, path: str) -> bool:
         return role == "admin"
     if role == "admin":
         return True
+    if _ANSWERS_MOVE.search(path):
+        return False
     if _DISCOUNT_CODES.search(path):
         return False
     if _CONTACTS.search(path):
@@ -242,6 +248,10 @@ def can(role: str) -> dict:
         # Co-hosting (app/api/cohosts): inviting, cancelling and removing
         # co-hosts on the club's events, answering invitations, leaving.
         "manage_cohosts": admin,
+        # Missing answers (app/api/missing_answers): asking guests for them,
+        # and moving answers kept under an old question onto a current one.
+        "ask_answers": editor,
+        "move_answers": admin,
     }
 
 

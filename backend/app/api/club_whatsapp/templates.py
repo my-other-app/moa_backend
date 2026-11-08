@@ -580,6 +580,9 @@ def render(definition: dict, kept: dict) -> str:
 
 TICKET_URL = "https://myotherapp.in/tickets/{{1}}"
 VERIFY_URL = "https://myotherapp.in/verify/{{1}}"
+#: The personal link to answer what a club asks (app/api/missing_answers): its
+#: suffix is `{event id}/{ref}?k={signature}`.
+ANSWERS_URL = "https://myotherapp.in/answers/{{1}}"
 
 STANDARD: dict[str, dict] = {
     "ticket_confirmed": {
@@ -600,6 +603,15 @@ STANDARD: dict[str, dict] = {
                 "Anyone can check it is genuine on myotherapp.in with the number {{4}}.",
         "examples": ["Ananya", "Build Night", "Yukthi", "CERT-2026-0001"],
         "button": ("Verify certificate", VERIFY_URL, "https://myotherapp.in/verify/CERT-2026-0001"),
+    },
+    # A club asking the people who are missing answers for them
+    # (feature-register/missing-answers-contract.md §2.6): only ever from
+    # the club's own number.
+    "details_needed": {
+        "document": False,
+        "body": "Hi {{1}}, {{2}} needs {{3}} more details for your registration. Please add them by {{4}}.",
+        "examples": ["Ananya", "Build Night", "2", "Sat 14 Nov, 6:00 PM"],
+        "button": ("Add my details", ANSWERS_URL, "https://myotherapp.in/answers/42/q0b6f3e1c-2d4a-4f7e-9c1b-5a8d3e2f6b70?k=3f9a1c"),
     },
 }
 
@@ -628,7 +640,8 @@ def standard_body(name: str, handle: Optional[str]) -> dict:
 _NOT_OURS = ("Your account has {name} ({status}), but not in the shape MyOtherApp's {kind} fills, so they go from "
              "MyOtherApp's number. Delete it in WhatsApp Manager and submit again here -- Meta won't take a deleted "
              "approved template's name again for 30 days.")
-_KIND = {"ticket_confirmed": "tickets", "event_reminder": "reminders", "certificate_ready": "certificates"}
+_KIND = {"ticket_confirmed": "tickets", "event_reminder": "reminders", "certificate_ready": "certificates",
+         "details_needed": "requests for missing answers"}
 
 
 async def install_standard(session, account: ClubWhatsAppAccounts, keys: graph.Keys) -> dict[str, str]:

@@ -47,6 +47,7 @@ from app.api.store.router import club_router as store_club_router, public_router
 from app.api.links.router import router as links_router
 from app.api.ticketing.router import public_router as ticketing_public_router, router as ticketing_router
 from app.api.approvals.router import public_router as approvals_public_router, router as approvals_router
+from app.api.missing_answers.router import router as missing_answers_router
 from app.api.discover.router import admin_router as discover_admin_router, router as discover_router
 from app.api.emails.router import (
     library_router as email_library_router,
@@ -186,6 +187,7 @@ api_router.include_router(router=certificates_router, tags=["certificates"])
 api_router.include_router(router=verify_router, tags=["certificates"])
 api_router.include_router(router=emails_router, tags=["emails"])
 api_router.include_router(router=checkins_router, tags=["check-ins"])
+api_router.include_router(router=missing_answers_router)
 api_router.include_router(router=idcards_router, tags=["id-cards"])
 api_router.include_router(router=kiosks_admin_router, tags=["kiosks"])
 api_router.include_router(router=kiosk_router, tags=["kiosks"])

@@ -28,6 +28,12 @@ Meta refuses every send with 132000.
   https://myotherapp.in/events/{{1}}/register -- the event's slug.
 - event_update: body "Hi {{1}}, {{2}} has an update about {{3}}: {{4}}. See
   the event page for details." -- first name, club, event, the update.
+- details_needed (a club's own number only, never the platform's): body "Hi
+  {{1}}, {{2}} needs {{3}} more details for your registration. Please add
+  them by {{4}}." -- first name, event, how many, the deadline or "the
+  event". URL button https://myotherapp.in/answers/{{1}} -- the person's
+  link after /answers/: `{event id}/{ref}?k={signature}`
+  (app/api/missing_answers).
 
 A document goes up to Meta first (POST /{phone number id}/media) and the
 message names its media id: the file is never put at an address anyone
@@ -245,6 +251,17 @@ def event_update(*, name: str, club: str, event: str, update: str) -> Template:
     return Template(
         "event_update",
         (first_name(name), _value(club, "The organisers"), _value(event, "your event"), _value(update, "a change", 500)),
+    )
+
+
+def details_needed(*, name: str, event: str, count: int, by: str, suffix: str) -> Template:
+    """A club asking for the answers someone is missing. The button's suffix
+    is the personal link's path and query, kept as it is (its characters are
+    a number, a uuid, "q", "/", "?k=" and hex)."""
+    return Template(
+        "details_needed",
+        (first_name(name), _value(event, "your event"), _value(count, "a few", 10), _value(by, "the event")),
+        button=quote(str(suffix or "").strip(), safe="-_.~/?=&"),
     )
 
 
