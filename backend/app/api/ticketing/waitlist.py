@@ -174,6 +174,38 @@ async def open_entry(session, event_id: int, ticket_type_id: int, *, email=None,
     )
 
 
+async def own_entry(session, event_id: int, ticket_type_id: int, user) -> Optional[WaitlistEntries]:
+    """The caller's own place in this type's line: joined signed in as them,
+    or under the address of an account that has shown the address is its
+    own (users.service.merges_into) -- what `mine` lists. Never for a caller
+    with no session: an email or a number typed proves nothing."""
+    if user is None:
+        return None
+    from app.api.users.service import merges_into
+
+    return await open_entry(
+        session, event_id, ticket_type_id, user_id=user.id, email=user.email if merges_into(user) else None,
+    )
+
+
+#: Joining with an email or number that already has a place in this type's
+#: line, by anyone it is not shown to be theirs (`own_entry`). Refused as
+#: registering refuses an address on the list: no second place, and nothing
+#: of the one there -- its id, status, position, or whose it is.
+ALREADY_ON_WAITLIST = "ALREADY_ON_WAITLIST"
+
+
+def already_on_waitlist() -> CustomHTTPException:
+    return CustomHTTPException(
+        409,
+        message=(
+            "This email or phone number is already on the waiting list for this ticket. If it's yours, "
+            "your place is kept, and the link to claim a ticket will come to it when one frees up."
+        ),
+        error_code=ALREADY_ON_WAITLIST,
+    )
+
+
 async def position(session, entry: WaitlistEntries) -> Optional[int]:
     """Their place in line (1 is next), while they wait."""
     if entry.status != WAITING:
@@ -192,7 +224,10 @@ async def join(
     session, event, *, ticket_type_id: Optional[int], full_name: str, email: Optional[str], phone: Optional[str],
     user=None, whatsapp_opt_in: bool = False,
 ) -> tuple[WaitlistEntries, bool]:
-    """Their place in line, and whether it is new (joining twice is the one place)."""
+    """Their place in line, and whether it is new (joining twice is the one
+    place). The place under the email or number sent is handed back only to
+    its own holder (`own_entry`); anyone else is refused with
+    `already_on_waitlist`, which says nothing of it."""
     if getattr(event, "requires_approval", False):
         raise off_on_approval()
     email = (email or "").strip() or None
@@ -257,9 +292,13 @@ async def join(
     from app.api.events.registration import service as registration
 
     await registration.hold_address(session, event.id, f"waitlist:{ttype.id}:{(email or phone or '').lower()}")
-    existing = await open_entry(session, event.id, ttype.id, email=email, phone=phone, user_id=user.id if user else None)
-    if existing is not None:
-        return existing, False
+    own = await own_entry(session, event.id, ttype.id, user)
+    if own is not None:
+        return own, False
+    # A place under the email or number sent that is not the caller's: no
+    # second place for it, and nothing of this one in the answer.
+    if await open_entry(session, event.id, ttype.id, email=email, phone=phone) is not None:
+        raise already_on_waitlist()
     room = await places.room_now(session, event, types)
     left = room.for_type(ttype.id)
     if left is None or left > 0:
