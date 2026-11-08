@@ -406,6 +406,9 @@ async def test_the_holders_own_sign_in_opens_it_without_k(client, world):
     ref = str(world["app_reg"].id)
     assert (await client.get(_path(world, ref), headers=world["app_h"])).status_code == 200
     assert (await client.get(_path(world, ref), headers=world["mailer_h"])).status_code == 404
+    # A club's own sign-in in the same browser is no refusal of the link, and no key either.
+    assert (await client.get(_path(world, ref, _k(world, ref)), headers=world["h"])).status_code == 200
+    assert (await client.get(_path(world, ref), headers=world["h"])).status_code == 404
     req_ref = f"q{world['req'].id}"
     assert (await client.get(_path(world, req_ref), headers=world["req_h"])).status_code == 200
 

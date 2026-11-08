@@ -34,7 +34,7 @@ from app.api.missing_answers.schemas import (
     MoveOut,
     SummaryOut,
 )
-from app.core.auth.dependencies import ClubAuth, OptionalUserAuth
+from app.core.auth.dependencies import ClubAuth, OptionalAuth
 from app.core.rate_limit import account_or_address, limiter
 from app.db.core import SessionDep
 from app.response import CustomHTTPException
@@ -126,12 +126,14 @@ async def gate_answers(request: Request, session: SessionDep, actor: GateAuth, e
 
 
 # ─── The person's (their link is the credential, or their own sign-in) ───
+# Any sign-in is read (OptionalAuth): a club's own token in the same browser
+# is simply not the person's, rather than a refusal of the link.
 
 
 @router.get("/answers/{ref}", summary="What a club is asking this person for")
 @limiter.limit("60/minute", key_func=_ref_key)
 async def public_answers(
-    request: Request, response: Response, session: SessionDep, event_id: int, ref: str, user: OptionalUserAuth,
+    request: Request, response: Response, session: SessionDep, event_id: int, ref: str, user: OptionalAuth,
     k: str = Query("", max_length=128),
 ) -> AnswersView:
     """404 for a bad ref or `k`. Opening it marks their asks opened."""
@@ -142,7 +144,7 @@ async def public_answers(
 @router.post("/answers/{ref}", summary="The person's answers")
 @limiter.limit("20/minute", key_func=_ref_key)
 async def submit_answers(
-    request: Request, response: Response, session: SessionDep, event_id: int, ref: str, body: AnswersIn, user: OptionalUserAuth,
+    request: Request, response: Response, session: SessionDep, event_id: int, ref: str, body: AnswersIn, user: OptionalAuth,
     k: str = Query("", max_length=128),
 ) -> AnswersView:
     """422 INVALID_ANSWERS naming each question; 409 CLOSED after the deadline."""

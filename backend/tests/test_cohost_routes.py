@@ -222,6 +222,8 @@ ROUTES = {
     "POST /api/v1/events/{event_id}/answers/asks/{ask_id}/remind": ALLOW,
     "POST /api/v1/events/{event_id}/answers/asks/{ask_id}/close": ALLOW,
     "POST /api/v1/events/{event_id}/gate/answers/{registration_id}": ALLOW,
+    "GET /api/v1/events/{event_id}/answers/{ref}": PUBLIC,
+    "POST /api/v1/events/{event_id}/answers/{ref}": PUBLIC,
     # idcards
     "GET /api/v1/events/{event_id}/idcards/summary": ALLOW,
     "PATCH /api/v1/events/{event_id}/idcards/settings": ALLOW,
