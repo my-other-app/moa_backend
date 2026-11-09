@@ -50,6 +50,8 @@ from app.api.users.models import Users
 from app.core import jobs, money
 from app.core.auth.dependencies import AdminAuth
 from app.core.auth.permissions import ExportDataAuth, MoneyAuth
+from app.core.utils import spreadsheet
+from app.core.utils.spreadsheet import FormatQuery
 from app.db.core import SessionDep
 from app.response import CustomHTTPException
 
@@ -363,15 +365,22 @@ def _csv(rows: list[list]) -> str:
     return buf.getvalue()
 
 
-@router.get("/clubs/{club_id}/statement.csv", summary="One club's statement as a CSV file (export)")
+#: The statement file's columns.
+STATEMENT_HEADERS = ["date", "type", "event", "reference", "amount", "balance", "note"]
+
+
+@router.get("/clubs/{club_id}/statement.csv", summary="One club's statement as a CSV or Excel file (export)")
 async def club_statement_csv(
     club_id: int, session: SessionDep, user: ExportDataAuth,
     frm: Optional[date] = Query(None, alias="from"), to: Optional[date] = Query(None),
+    fmt: FormatQuery = "csv",
 ) -> Response:
     """Every line that moved the club's balance, oldest first, with the
     running balance: a payment's gross in, its fee, a refund, a chargeback
     and a payout out. No guest's name or address: payment ids only. An
-    export, so EXPORT_DATA, as an event's finance statement is."""
+    export, so EXPORT_DATA, as an event's finance statement is.
+    `format=xlsx`: the same rows as an Excel workbook (the amounts as numbers,
+    the dates as dates)."""
     club = await _club(session, club_id)
     lines: list[tuple] = []
     for r in (await session.execute(payments_query(club_id, frm=frm, to=to))).all():
@@ -392,14 +401,21 @@ async def club_statement_csv(
         return at if at.tzinfo else at.replace(tzinfo=timezone.utc)
 
     lines.sort(key=when)
-    out = [["date", "type", "event", "reference", "amount", "balance", "note"]]
+    table = []
     balance = Decimal(0)
     for at, kind, event, ref, amount, note in lines:
         balance += amount
-        out.append([when((at,)).date().isoformat(), kind, event or "", ref or "", f"{amount:.2f}", f"{balance:.2f}", note])
-    name = f"{club.slug or club.id}-payouts{('-' + frm.isoformat()) if frm else ''}{('-' + to.isoformat()) if to else ''}.csv"
+        table.append([when((at,)).date(), kind, event or "", ref or "", amount, balance, note])
+    stem = f"{club.slug or club.id}-payouts{('-' + frm.isoformat()) if frm else ''}{('-' + to.isoformat()) if to else ''}"
+    if fmt == "xlsx":
+        path = await spreadsheet.write_xlsx(table, title="Payouts statement", headers=STATEMENT_HEADERS)
+        return spreadsheet.xlsx_response(path, f"{stem}.xlsx", cache_control="no-store")
+    out = [STATEMENT_HEADERS] + [
+        [day.isoformat(), kind, event, ref, f"{amount:.2f}", f"{balance:.2f}", note]
+        for day, kind, event, ref, amount, balance, note in table
+    ]
     return Response(content=_csv(out), media_type="text/csv; charset=utf-8",
-                    headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": "no-store"})
+                    headers={"Content-Disposition": f'attachment; filename="{stem}.csv"', "Cache-Control": "no-store"})
 
 
 # ─── Recording a payout ──────────────────────────────────────────────────

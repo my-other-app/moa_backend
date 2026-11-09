@@ -6,6 +6,8 @@ from fastapi import APIRouter, Query, Response
 from app.api.contacts import service
 from app.api.contacts.schemas import ContactsPage
 from app.core.auth.dependencies import ClubAuth
+from app.core.utils import spreadsheet
+from app.core.utils.spreadsheet import FormatQuery
 from app.db.core import SessionDep
 
 router = APIRouter(prefix="/clubs/contacts")
@@ -25,8 +27,11 @@ async def contacts(
     return ContactsPage(**await service.page(session, user.club.id, q=q, event_id=event_id, attended=attended, page=page, page_size=page_size, since=since, until=until))
 
 
-@router.get("/export.csv", summary="The contact book as a file")
+@router.get("/export.csv", summary="The contact book as a file (CSV or Excel)")
 async def export(session: SessionDep, user: ClubAuth, q: Optional[str] = Query(None, max_length=120), event_id: Optional[int] = Query(None), attended: Optional[bool] = Query(None),
-                 since: Optional[date] = Query(None), until: Optional[date] = Query(None)) -> Response:
+                 since: Optional[date] = Query(None), until: Optional[date] = Query(None), fmt: FormatQuery = "csv") -> Response:
+    if fmt == "xlsx":
+        path = await service.export_xlsx(session, user.club.id, q=q, event_id=event_id, attended=attended, since=since, until=until)
+        return spreadsheet.xlsx_response(path, "contacts.xlsx")
     body = await service.export_csv(session, user.club.id, q=q, event_id=event_id, attended=attended, since=since, until=until)
     return Response(content=body, media_type="text/csv; charset=utf-8", headers={"Content-Disposition": 'attachment; filename="contacts.csv"'})

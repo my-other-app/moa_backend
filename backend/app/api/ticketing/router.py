@@ -43,6 +43,8 @@ from app.api.ticketing.schemas import (
 )
 from app.core.auth.dependencies import ClubAuth, OptionalUserAuth
 from app.core.rate_limit import limiter
+from app.core.utils import spreadsheet
+from app.core.utils.spreadsheet import FormatQuery
 from app.db.core import SessionDep
 from app.response import CustomHTTPException
 
@@ -295,13 +297,16 @@ async def remove_entry(session: SessionDep, user: ClubAuth, event_id: int, entry
     return {"removed": True}
 
 
-@router.get("/events/{event_id}/ticketing/waitlist/export", summary="The waiting list as a CSV file")
-async def export_waitlist(session: SessionDep, user: ClubAuth, event_id: int) -> Response:
+@router.get("/events/{event_id}/ticketing/waitlist/export", summary="The waiting list as a CSV or Excel file")
+async def export_waitlist(session: SessionDep, user: ClubAuth, event_id: int, fmt: FormatQuery = "csv") -> Response:
     event = await deliveries.event_for_club(session, user, event_id)
+    stem = f"event_{event.id}_waitlist"
+    if fmt == "xlsx":
+        return spreadsheet.xlsx_response(await waitlist.export_xlsx(session, event), f"{stem}.xlsx")
     body = await waitlist.export_csv(session, event)
     return Response(
         content=body, media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="event_{event.id}_waitlist.csv"'},
+        headers={"Content-Disposition": f'attachment; filename="{stem}.csv"'},
     )
 
 

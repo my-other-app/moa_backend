@@ -58,6 +58,31 @@ async def test_the_contact_book_filters_by_event_and_date_and_exports_the_same(c
     assert rows[0].startswith("Name,Email") and len(rows) == 3 and "Chitra" not in csv.text
 
 
+async def test_the_contact_book_as_a_workbook(client, session, world):
+    import csv as csv_mod
+    import io
+
+    from tests.spreadsheet_helpers import assert_same_as_csv, records, workbook_of
+
+    h, until = world["h"], (world["now"] - timedelta(days=30)).date().isoformat()
+    as_csv = await client.get("/api/v1/clubs/contacts/export.csv", params={"until": until}, headers=h)
+    head, *rows = list(csv_mod.reader(io.StringIO(as_csv.text)))
+    r = await client.get("/api/v1/clubs/contacts/export.csv", params={"until": until, "format": "xlsx"}, headers=h)
+    sheet = workbook_of(r, "contacts.xlsx").active
+    assert [c.value for c in sheet[1]] == head
+    assert_same_as_csv(sheet, as_csv.text)
+    got = records(sheet)
+    # The filters hold: the same two, in the same order.
+    assert [g["Name"] for g in got] == [row[0] for row in rows] == ["Asha", "Bina"]
+    assert [g["Attended"] for g in got] == ["yes", "no"] and all(g["Phone"] == "9000000000" for g in got)
+    assert isinstance(got[0]["Event ended"], datetime) and isinstance(got[0]["Kept on"], datetime)
+    came = await client.get("/api/v1/clubs/contacts/export.csv", params={"event_id": world["spring"].id, "attended": True, "format": "xlsx"}, headers=h)
+    assert [g["Name"] for g in records(workbook_of(came).active)] == ["Asha"]
+    assert (await client.get("/api/v1/clubs/contacts/export.csv", params={"format": "XLSX"}, headers=h)).status_code == 422
+    door = await member_header(client, session, world["club"], "door")
+    assert (await client.get("/api/v1/clubs/contacts/export.csv", params={"format": "xlsx"}, headers=door)).status_code == 403
+
+
 async def test_editors_read_the_contact_book_door_staff_do_not(client, session, world):
     editor = await member_header(client, session, world["club"], "editor")
     door = await member_header(client, session, world["club"], "door")

@@ -76,3 +76,27 @@ async def test_the_audience_above_the_list(client, world):
     assert csv.status_code == 200 and csv.headers["content-type"].startswith("text/csv")
     lines = csv.text.lstrip("﻿").splitlines()
     assert lines[0].startswith("name,username,organisation") and len(lines) == 3
+
+
+async def test_the_followers_export_as_a_workbook(client, world):
+    import csv as csv_mod
+    import io
+    from datetime import date
+
+    from tests.spreadsheet_helpers import assert_same_as_csv, records, workbook_of
+
+    as_csv = await client.get("/api/v1/clubs/followers/export.csv", params={"segment": "never"}, headers=world["h"])
+    head, *rows = list(csv_mod.reader(io.StringIO(as_csv.text.lstrip("\ufeff"))))
+    r = await client.get("/api/v1/clubs/followers/export.csv", params={"segment": "never", "format": "xlsx"}, headers=world["h"])
+    sheet = workbook_of(r, "followers-never.xlsx").active
+    assert r.headers.get("cache-control") == as_csv.headers.get("cache-control")  # whatever the CSV gets
+    assert [c.value for c in sheet[1]] == head and sheet.title == "Followers"
+    assert_same_as_csv(sheet, as_csv.text)
+    got = records(sheet)
+    assert [g["name"] for g in got] == [row[0] for row in rows] and {g["name"] for g in got} == {"Sneha J", "Old Timer"}
+    sneha = next(g for g in got if g["name"] == "Sneha J")
+    # The day a date, the counts numbers, as the CSV writes them.
+    assert sneha["followed_on"].date() == date.fromisoformat(next(row for row in rows if row[0] == "Sneha J")[3])
+    assert (sneha["registrations"], sneha["came"]) == (1, 0)
+    assert (await client.get("/api/v1/clubs/followers/export.csv", params={"format": "ods"}, headers=world["h"])).status_code == 422
+    assert (await client.get("/api/v1/clubs/followers/export.csv", params={"segment": "vip", "format": "xlsx"}, headers=world["h"])).status_code == 422

@@ -34,6 +34,8 @@ from app.api.finance.schemas import CATEGORIES, EXPENSE_CATEGORIES, INCOME_CATEG
 from app.api.ledger import reads as ledger_reads
 from app.api.payments.models import PaymentLogs, PaymentOrders, PaymentStatus
 from app.api.store.models import EventStoreOrders
+from app.core.utils import spreadsheet
+from app.core.utils.spreadsheet import Bold
 from app.core.utils.time_buckets import utc_trunc
 from app.response import CustomHTTPException
 
@@ -559,6 +561,11 @@ async def delete_expense(session, x: ClubExpenses) -> None:
 
 
 # ─── Statements ──────────────────────────────────────────────────────────
+# Each statement is a list of rows (titles, blank lines, a table under its
+# heading, the totals), built once: written as CSV, or as a workbook
+# (app/core/utils/spreadsheet.py), whose headings are bold. Its dates are
+# dates; `guard` defuses a name in the CSV, where a cell that starts like a
+# formula would run. A workbook stores text as text, so it needs none.
 
 
 def _cell(v):
@@ -566,68 +573,84 @@ def _cell(v):
     return f"'{v}" if isinstance(v, str) and v[:1] in ("=", "+", "-", "@") else v
 
 
+def _plain(v):
+    return v
+
+
+def _day(dt: datetime) -> date:
+    """The day of a time, as the statements have always written it (UTC)."""
+    return date.fromisoformat(_iso(dt)[:10])
+
+
 def _writer():
     buf = io.StringIO()
     return buf, csv.writer(buf, lineterminator="\n")
 
 
-def _totals_section(w, f: dict) -> None:
-    w.writerow([])
-    w.writerow(["Totals"])
+def _totals_rows(f: dict):
+    yield []
+    yield Bold(["Totals"])
     for key, label in (("gross", "Gross income"), ("refunds", "Refunds"), ("tickets", "Tickets held"), ("merch", "Merchandise"), ("other_income", "Other income"), ("expenses", "Expenses"), ("net", "Net surplus"), ("outstanding", "Outstanding")):
-        w.writerow([label, f[key]])
+        yield [label, f[key]]
 
 
-def _expenses_section(w, rows: list[dict]) -> None:
+def _expenses_rows(rows: list[dict], guard):
     for kind, heading in ((EXPENSE, "Expenses"), (INCOME, "Other income")):
         mine = [x for x in rows if (x["kind"] or EXPENSE) == kind]
         if kind == INCOME and not mine:
             continue
-        w.writerow([])
-        w.writerow([heading])
-        w.writerow(["Date", "Event", "Title", "Category", "Amount", "Note"])
+        yield []
+        yield Bold([heading])
+        yield Bold(["Date", "Event", "Title", "Category", "Amount", "Note"])
         for x in mine:
-            w.writerow([x["incurred_on"], _cell(x["event_name"] or CLUB_ROW), _cell(x["title"]), x["category"], x["amount"], _cell(x["note"] or "")])
+            yield [date.fromisoformat(x["incurred_on"]), guard(x["event_name"] or CLUB_ROW), guard(x["title"]), x["category"], x["amount"], guard(x["note"] or "")]
+
+
+async def club_statement_rows(session, club, frm: date, to: date, guard=_cell) -> list[list]:
+    s = await club_summary(session, club, frm, to)
+    rows = [
+        Bold(["Statement", guard(club.name), f"{frm.isoformat()} to {to.isoformat()}"]),
+        [],
+        Bold(["Events"]),
+        Bold(["Date", "Event", "Type", "Status", "Registrations", "Paying", "Tickets", "Merchandise", "Refunds", "Expenses", "Net"]),
+    ]
+    for r in s["by_event"]:
+        rows.append([date.fromisoformat(r["starts_at"][:10]), guard(r["name"]), guard(r["type"]), r["status"], r["regs"], r["paying"], r["tickets"], r["merch"], r["refunds"], r["expenses"], r["net"]])
+    rows.extend(_expenses_rows(s["expenses"], guard))
+    rows.extend(_totals_rows(s["figures"]))
+    return rows
 
 
 async def club_statement(session, club, frm: date, to: date) -> str:
-    s = await club_summary(session, club, frm, to)
     buf, w = _writer()
-    w.writerow(["Statement", _cell(club.name), f"{frm.isoformat()} to {to.isoformat()}"])
-    w.writerow([])
-    w.writerow(["Events"])
-    w.writerow(["Date", "Event", "Type", "Status", "Registrations", "Paying", "Tickets", "Merchandise", "Refunds", "Expenses", "Net"])
-    for r in s["by_event"]:
-        w.writerow([r["starts_at"][:10], _cell(r["name"]), _cell(r["type"]), r["status"], r["regs"], r["paying"], r["tickets"], r["merch"], r["refunds"], r["expenses"], r["net"]])
-    _expenses_section(w, s["expenses"])
-    _totals_section(w, s["figures"])
-    return "﻿" + buf.getvalue()
+    w.writerows(await club_statement_rows(session, club, frm, to))
+    return "\ufeff" + buf.getvalue()
+
+
+async def club_statement_xlsx(session, club, frm: date, to: date) -> str:
+    """The club's statement as an .xlsx file on disk; the caller sends it
+    and removes it."""
+    rows = await club_statement_rows(session, club, frm, to, guard=_plain)
+    return await spreadsheet.write_xlsx(rows, title="Statement", freeze=1)
 
 
 #: Registrations read per round trip while a statement streams.
 STATEMENT_CHUNK = 1000
+#: The event statement's rows above its first registration: the title, a
+#: blank line, the heading and the table's header (frozen in the workbook).
+EVENT_STATEMENT_TOP = 4
 
 
-async def event_statement(session, event) -> AsyncIterator[str]:
-    """The event's statement as CSV, a chunk at a time: every registration
-    with whether it was refunded (a join, where an IN over every receipt
-    failed past asyncpg's 32,767 parameters), read through a server-side
-    cursor STATEMENT_CHUNK rows at a time, so neither the registrations nor
-    the file are ever all in memory."""
+async def event_statement_rows(session, event, guard=_cell) -> AsyncIterator[list]:
+    """The event's statement a row at a time: every registration with
+    whether it was refunded (a join, where an IN over every receipt failed
+    past asyncpg's 32,767 parameters), read through a server-side cursor
+    STATEMENT_CHUNK rows at a time, then the expenses and the totals."""
     s = await event_summary(session, event)
-    buf, w = _writer()
-
-    def drain() -> str:
-        chunk = buf.getvalue()
-        buf.seek(0)
-        buf.truncate(0)
-        return chunk
-
-    w.writerow(["Statement", _cell(event.name), _iso(event.event_datetime)[:10]])
-    w.writerow([])
-    w.writerow(["Registrations"])
-    w.writerow(["Date", "Guest", "Email", "Ticket", "Fee", "Paid", "Status"])
-    yield "﻿" + drain()
+    yield Bold(["Statement", guard(event.name), _day(event.event_datetime)])
+    yield []
+    yield Bold(["Registrations"])
+    yield Bold(["Date", "Guest", "Email", "Ticket", "Fee", "Paid", "Status"])
 
     refunded = _refunded_receipts()
     rows = await session.stream(
@@ -643,8 +666,32 @@ async def event_statement(session, event) -> AsyncIterator[str]:
     async for part in rows.partitions(STATEMENT_CHUNK):
         for created_at, name, email, ticket, fee, paid_amount, is_paid, was_refunded in part:
             status = "refunded" if was_refunded else "paid" if is_paid else "unpaid" if event.has_fee else "free"
-            w.writerow([_iso(created_at)[:10], _cell(name), email, ticket, _f(fee), _f(paid_amount), status])
-        yield drain()
-    _expenses_section(w, s["expenses"])
-    _totals_section(w, s["figures"])
-    yield drain()
+            yield [_day(created_at), guard(name), email, ticket, _f(fee), _f(paid_amount), status]
+    for row in _expenses_rows(s["expenses"], guard):
+        yield row
+    for row in _totals_rows(s["figures"]):
+        yield row
+
+
+async def event_statement(session, event) -> AsyncIterator[str]:
+    """The event's statement as CSV, a chunk at a time (event_statement_rows),
+    so neither the registrations nor the file are ever all in memory."""
+    buf, w = _writer()
+    lead = "\ufeff"
+    written = 0
+    async for row in event_statement_rows(session, event):
+        w.writerow(row)
+        written += 1
+        if written == EVENT_STATEMENT_TOP or written % STATEMENT_CHUNK == 0:
+            chunk, lead = lead + buf.getvalue(), ""
+            buf.seek(0)
+            buf.truncate(0)
+            yield chunk
+    yield lead + buf.getvalue()
+
+
+async def event_statement_xlsx(session, event) -> str:
+    """The event's statement as an .xlsx file on disk, the registrations'
+    header frozen; the caller sends it and removes it."""
+    rows = event_statement_rows(session, event, guard=_plain)
+    return await spreadsheet.write_xlsx(rows, title="Statement", freeze=EVENT_STATEMENT_TOP)

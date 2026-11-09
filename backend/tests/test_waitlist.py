@@ -170,6 +170,30 @@ async def test_declining_gives_the_place_to_the_next(client, session, line):
     assert (await entry(session, second["id"])).status == "offered"
 
 
+async def test_the_waiting_list_as_a_workbook(client, session, line):
+    from tests.club_ops_helpers import member_header
+    from tests.spreadsheet_helpers import assert_same_as_csv, records, workbook_of
+
+    await enable(client, line)
+    assert (await register(client, line.event, ticket_type_id=line.seat)).status_code == 200
+    for n in (1, 2):
+        assert (await join(client, line, n)).status_code == 200
+    assert (await join(client, line, 3, full_name="=1+1 Person")).status_code == 200
+    path = f"{API}/events/{line.event.id}/ticketing/waitlist/export"
+    as_csv = await client.get(path, headers=line.h)
+    r = await client.get(path, params={"format": "xlsx"}, headers=line.h)
+    sheet = workbook_of(r, f"event_{line.event.id}_waitlist.xlsx").active
+    assert sheet.title == "Waiting list" and [c.value for c in sheet[1]] == as_csv.text.splitlines()[0].split(",")
+    assert_same_as_csv(sheet, as_csv.text)
+    got = records(sheet)
+    assert [(g["Position"], g["Name"]) for g in got] == [(1, "Waiting Person 1"), (2, "Waiting Person 2"), (3, "=1+1 Person")]
+    assert sheet.cell(row=4, column=2).data_type == "s"
+    assert all(isinstance(g["Joined"], datetime) and g["WhatsApp"] == "no" and g["Offered"] is None for g in got)
+    assert (await client.get(path, params={"format": "txt"}, headers=line.h)).status_code == 422
+    door = await member_header(client, session, line.club, "door")
+    assert (await client.get(path, params={"format": "xlsx"}, headers=door)).status_code == 403
+
+
 async def test_the_clubs_list_export_offer_and_remove(client, session, line):
     await enable(client, line)
     assert (await register(client, line.event, ticket_type_id=line.seat)).status_code == 200

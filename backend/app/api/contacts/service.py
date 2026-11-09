@@ -63,13 +63,42 @@ async def page(session, club_id: int, *, q: Optional[str] = None, event_id: Opti
     return {"items": [contact_out(c) for c in rows], "total": total, "page": page, "page_size": page_size, "groups": await groups(session, club_id)}
 
 
+EXPORT_HEADERS = ["Name", "Email", "Phone", "Role", "Attended", "Event", "Event ended", "Kept on"]
+
+
+async def export_rows(session, club_id: int, *, q: Optional[str] = None, event_id: Optional[int] = None, attended: Optional[bool] = None,
+                      since: Optional[date] = None, until: Optional[date] = None):
+    """The contacts the filters keep, a row each (typed: whether they came as
+    yes or no, the times as datetimes). The CSV and the workbook are both written
+    from it."""
+    rows = list((await session.scalars(_filtered(club_id, q=q, event_id=event_id, attended=attended, since=since, until=until).order_by(ArchivedContacts.event_name, ArchivedContacts.name))).all())
+    return ([c.name, c.email or "", c.phone or "", c.role, bool(c.attended), c.event_name, c.event_ended_at, c.created_at] for c in rows)
+
+
+def _csv_cell(v):
+    if isinstance(v, bool):
+        return "yes" if v else "no"
+    if isinstance(v, datetime):
+        return v.isoformat()
+    return "" if v is None else v
+
+
 async def export_csv(session, club_id: int, *, q: Optional[str] = None, event_id: Optional[int] = None, attended: Optional[bool] = None,
                      since: Optional[date] = None, until: Optional[date] = None) -> str:
     """A table as a file: CSV opens anywhere."""
-    rows = list((await session.scalars(_filtered(club_id, q=q, event_id=event_id, attended=attended, since=since, until=until).order_by(ArchivedContacts.event_name, ArchivedContacts.name))).all())
     out = io.StringIO()
     w = csv.writer(out)
-    w.writerow(["Name", "Email", "Phone", "Role", "Attended", "Event", "Event ended", "Kept on"])
-    for c in rows:
-        w.writerow([c.name, c.email or "", c.phone or "", c.role, "yes" if c.attended else "no", c.event_name, c.event_ended_at.isoformat() if c.event_ended_at else "", c.created_at.isoformat() if c.created_at else ""])
+    w.writerow(EXPORT_HEADERS)
+    for row in await export_rows(session, club_id, q=q, event_id=event_id, attended=attended, since=since, until=until):
+        w.writerow([_csv_cell(v) for v in row])
     return out.getvalue()
+
+
+async def export_xlsx(session, club_id: int, *, q: Optional[str] = None, event_id: Optional[int] = None, attended: Optional[bool] = None,
+                      since: Optional[date] = None, until: Optional[date] = None) -> str:
+    """The same rows as an .xlsx file on disk; the caller sends it and
+    removes it (app/core/utils/spreadsheet.py)."""
+    from app.core.utils import spreadsheet
+
+    rows = await export_rows(session, club_id, q=q, event_id=event_id, attended=attended, since=since, until=until)
+    return await spreadsheet.write_xlsx(rows, title="Contacts", headers=EXPORT_HEADERS)
