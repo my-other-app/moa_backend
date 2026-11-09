@@ -609,24 +609,54 @@ async def counts(session, event_id: int) -> dict:
     return out
 
 
-async def export_csv(session, event) -> bytes:
+EXPORT_HEADERS = ["Position", "Name", "Email", "Phone", "Ticket type", "Status", "Joined", "Offered", "Offer expires", "WhatsApp"]
+
+
+async def export_rows(session, event):
+    """The event's waiting list, a row each (typed: the position as a number,
+    the times as datetimes, WhatsApp as yes or no). The CSV and the workbook are
+    both written from it."""
     rows, _ = await entries(session, event.id, limit=100_000)
     names = await types_mod.names(session, [r.ticket_type_id for r in rows])
+
+    def each():
+        line_pos: dict[int, int] = {}
+        for r in rows:
+            pos = ""
+            if r.status == WAITING:
+                line_pos[r.ticket_type_id] = line_pos.get(r.ticket_type_id, 0) + 1
+                pos = line_pos[r.ticket_type_id]
+            yield [
+                pos, r.full_name, r.email or "", r.phone or "", names.get(r.ticket_type_id, ""), r.status,
+                r.created_at, r.offered_at, r.offer_expires_at, bool(r.whatsapp_opt_in),
+            ]
+
+    return each()
+
+
+def _csv_cell(v):
+    if isinstance(v, bool):
+        return "yes" if v else "no"
+    if isinstance(v, datetime):
+        return v.isoformat()
+    return "" if v is None else v
+
+
+async def export_csv(session, event) -> bytes:
     buf = io.StringIO()
     out = csv.writer(buf)
-    out.writerow(["Position", "Name", "Email", "Phone", "Ticket type", "Status", "Joined", "Offered", "Offer expires", "WhatsApp"])
-    line_pos: dict[int, int] = {}
-    for r in rows:
-        pos = ""
-        if r.status == WAITING:
-            line_pos[r.ticket_type_id] = line_pos.get(r.ticket_type_id, 0) + 1
-            pos = line_pos[r.ticket_type_id]
-        out.writerow([
-            pos, r.full_name, r.email or "", r.phone or "", names.get(r.ticket_type_id, ""), r.status,
-            r.created_at.isoformat() if r.created_at else "", r.offered_at.isoformat() if r.offered_at else "",
-            r.offer_expires_at.isoformat() if r.offer_expires_at else "", "yes" if r.whatsapp_opt_in else "no",
-        ])
+    out.writerow(EXPORT_HEADERS)
+    for row in await export_rows(session, event):
+        out.writerow([_csv_cell(v) for v in row])
     return buf.getvalue().encode("utf-8")
+
+
+async def export_xlsx(session, event) -> str:
+    """The same rows as an .xlsx file on disk; the caller sends it and
+    removes it (app/core/utils/spreadsheet.py)."""
+    from app.core.utils import spreadsheet
+
+    return await spreadsheet.write_xlsx(await export_rows(session, event), title="Waiting list", headers=EXPORT_HEADERS)
 
 
 # ─── Telling them ────────────────────────────────────────────────────────

@@ -38,6 +38,8 @@ from app.core.auth.permissions import ContentAuth, DestroyAuth, ModerateAuth
 from app.core import jobs
 from app.core.storage import formats
 from app.core.rate_limit import limiter
+from app.core.utils import spreadsheet
+from app.core.utils.spreadsheet import FormatQuery
 from app.core.response.pagination import (
     PaginatedResponse,
     PaginationParams,
@@ -479,12 +481,15 @@ async def followers_insights_endpoint(session: SessionDep, user: ClubAuth) -> Fo
     return FollowersInsights(**await followers_insights.insights(session, user.club.id))
 
 
-@router.get("/followers/export.csv", summary="The followers in a segment, as a spreadsheet")
-async def followers_export(session: SessionDep, user: ClubAuth, segment: str = Query("all")):
+@router.get("/followers/export.csv", summary="The followers in a segment, as a spreadsheet (CSV or Excel)")
+async def followers_export(session: SessionDep, user: ClubAuth, segment: str = Query("all"), fmt: FormatQuery = "csv"):
     from fastapi.responses import Response
 
     if segment not in followers_insights.SEGMENTS:
         raise CustomHTTPException(422, message="Unknown segment.")
+    if fmt == "xlsx":
+        path = await followers_insights.export_xlsx(session, user.club.id, segment=segment)
+        return spreadsheet.xlsx_response(path, f"followers-{segment}.xlsx")
     body = await followers_insights.export_csv(session, user.club.id, segment=segment)
     return Response(content="\ufeff" + body, media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="followers-{segment}.csv"'})
 

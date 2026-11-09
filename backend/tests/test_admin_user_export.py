@@ -224,3 +224,53 @@ async def test_export_pages_past_one_chunk(
     emails = [row["Email"] for row in rows_of(response)]
     assert sorted(emails) == sorted(expected)
     assert len(emails) == len(set(emails)), "a row crossed a chunk boundary twice"
+
+
+@pytest.mark.asyncio
+async def test_export_as_a_workbook(client, session, make_admin, make_user, mint_token):
+    """format=xlsx: the CSV's columns and the filtered rows as a workbook,
+    the join time a real date; the capability and the 422 as for the CSV."""
+    from datetime import datetime
+
+    from tests.spreadsheet_helpers import assert_same_as_csv, records, workbook_of
+
+    admin = await make_admin()
+    suspended = await make_user(email="blocked-xlsx@example.com")
+    suspended.is_active = False
+    suspended.suspended_reason = "=HYPERLINK(\"http://x\")"
+    await make_user(email="active-xlsx@example.com")
+    await session.flush()
+    h = auth_header(await mint_token(admin))
+
+    as_csv = await client.get("/api/v1/user/admin/export?is_active=false", headers=h)
+    r = await client.get("/api/v1/user/admin/export?is_active=false&format=xlsx", headers=h)
+    sheet = workbook_of(r).active
+    assert r.headers["cache-control"] == "no-store"
+    assert r.headers["content-disposition"].startswith('attachment; filename="users-')
+    assert sheet.title == "Users" and [c.value for c in sheet[1]] == next(csv.reader(io.StringIO(as_csv.text.lstrip("\ufeff"))))
+    assert_same_as_csv(sheet, as_csv.text)
+    rows = records(sheet)
+    assert [row["Email"] for row in rows] == ["blocked-xlsx@example.com"]
+    assert rows[0]["Status"] == "suspended" and rows[0]["Suspended reason"] == "=HYPERLINK(\"http://x\")"
+    assert sheet["J2"].data_type == "s" and isinstance(rows[0]["Joined"], datetime) and isinstance(rows[0]["ID"], int)
+
+    assert (await client.get("/api/v1/user/admin/export?format=xls", headers=h)).status_code == 422
+    viewer = await make_admin(email="viewer-xlsx@example.com", role="viewer")
+    refused = await client.get("/api/v1/user/admin/export?format=xlsx", headers=auth_header(await mint_token(viewer)))
+    assert refused.status_code == 403 and "blocked-xlsx" not in refused.text
+
+
+@pytest.mark.asyncio
+async def test_the_workbook_pages_past_one_chunk(client, session, make_admin, make_user, mint_token, monkeypatch):
+    from app.api.users import router as users_router
+    from tests.spreadsheet_helpers import records, workbook_of
+
+    monkeypatch.setattr(users_router, "_EXPORT_CHUNK", 2)
+    admin = await make_admin()
+    for i in range(5):
+        await make_user(email=f"chunk-xlsx{i}@example.com")
+    await session.flush()
+    h = auth_header(await mint_token(admin))
+    r = await client.get("/api/v1/user/admin/export?user_type=app_user&sort=email&order=asc&format=xlsx", headers=h)
+    emails = [row["Email"] for row in records(workbook_of(r).active)]
+    assert emails == sorted(emails) and {f"chunk-xlsx{i}@example.com" for i in range(5)} <= set(emails)

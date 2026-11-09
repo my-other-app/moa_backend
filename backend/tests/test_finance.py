@@ -209,3 +209,46 @@ async def test_statements_carry_the_ledger_and_the_totals(client, world):
     guests = [ln for ln in lines if "@example.com" in ln]
     assert len(guests) == 4 and sum(ln.endswith(",refunded") for ln in guests) == 1 and sum(ln.endswith(",paid") for ln in guests) == 2 and sum(ln.endswith(",unpaid") for ln in guests) == 1
     assert "Gross income,1560.0" in lines and "Net surplus,1020.0" in lines
+
+
+async def test_statements_as_workbooks(client, world):
+    """format=xlsx: the statement's rows as the CSV has them, its headings
+    bold, a title that looks like a formula kept as text."""
+    from tests.spreadsheet_helpers import assert_same_as_csv, rows_of, workbook_of
+
+    h, past = world["h"], world["past"]
+    await _expense(client, h, event_id=past.id, title="=SUM(A1)", category="printing", amount=40)
+    await _expense(client, h, event_id=past.id, kind="income", title="Sponsor", category="sponsorship", amount=60)
+
+    as_csv = await client.get("/api/v1/clubs/finance/statement.csv", headers=h)
+    r = await client.get("/api/v1/clubs/finance/statement.csv", params={"format": "xlsx"}, headers=h)
+    name = as_csv.headers["content-disposition"].split('filename="')[1].rstrip('"')
+    sheet = workbook_of(r, name.removesuffix(".csv") + ".xlsx").active
+    assert r.headers["cache-control"] == "no-store"
+    assert_same_as_csv(sheet, as_csv.text)
+    rows = rows_of(sheet)
+    assert rows[0][:2] == ["Statement", "Yukthi"] and sheet["A1"].font.b and sheet.freeze_panes == "A2"
+    hack = next(row for row in rows if row[1:2] == ["Hack Night 04"])
+    assert isinstance(hack[0], datetime) and hack[4:] == [4, 2, 1000, 0, 500, 40, 1020]
+    expense = next(row for row in rows if row[2:3] == ["=SUM(A1)"])
+    i = rows.index(expense) + 1
+    assert sheet.cell(row=i, column=3).data_type == "s" and expense[4] == 40  # text, not a formula; the amount a number
+    headings = {row[0] for n, row in enumerate(rows, 1) if row and sheet.cell(row=n, column=1).font.b}
+    assert {"Statement", "Events", "Expenses", "Other income", "Totals", "Date"} <= headings
+    assert ["Net surplus", 1020] in rows and ["Outstanding", 500] in rows and "Rival Gala" not in str(rows)
+
+    as_csv = await client.get(f"/api/v1/events/{past.id}/finance/statement.csv", headers=h)
+    r = await client.get(f"/api/v1/events/{past.id}/finance/statement.csv", params={"format": "xlsx"}, headers=h)
+    sheet = workbook_of(r, f"{past.slug}-statement.xlsx").active
+    assert r.headers["cache-control"] == "no-store"
+    assert_same_as_csv(sheet, as_csv.text)
+    rows = rows_of(sheet)
+    assert sheet.freeze_panes == "A5" and rows[3] == ["Date", "Guest", "Email", "Ticket", "Fee", "Paid", "Status"]
+    guests = [row for row in rows if any(isinstance(v, str) and "@example.com" in v for v in row)]
+    assert len(guests) == 4 and sorted(row[-1] for row in guests) == ["paid", "paid", "refunded", "unpaid"]
+    assert all(isinstance(row[0], datetime) and row[4] == 500 for row in guests)
+    assert ["Gross income", 1560] in rows
+
+    for path in ("/api/v1/clubs/finance/statement.csv", f"/api/v1/events/{past.id}/finance/statement.csv"):
+        assert (await client.get(path, params={"format": "json"}, headers=h)).status_code == 422
+    assert (await client.get(f"/api/v1/events/{past.id}/finance/statement.csv", params={"format": "xlsx"}, headers=world["rival"])).status_code == 403

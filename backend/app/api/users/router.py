@@ -48,6 +48,8 @@ from app.api.interests.schemas import InterestPublic
 from app.api.auth import service as auth_service
 from app.core.rate_limit import limiter
 from app.core.storage import formats
+from app.core.utils import spreadsheet
+from app.core.utils.spreadsheet import FormatQuery
 
 logger = logging.getLogger(__name__)
 
@@ -359,13 +361,44 @@ _EXPORT_COLUMNS = (
     ("Phone", lambda u: u.phone),
     ("Type", lambda u: getattr(u.user_type, "value", u.user_type)),
     ("Sign-in", lambda u: getattr(u.provider, "value", u.provider)),
-    ("Joined", lambda u: u.created_at.strftime("%Y-%m-%d %H:%M:%S") if u.created_at else ""),
+    ("Joined", lambda u: u.created_at),
     ("Status", lambda u: "active" if u.is_active else "suspended"),
     ("Suspended reason", lambda u: u.suspended_reason or ""),
 )
 
 
-@router.get("/admin/export", summary="Export the filtered user list as CSV (admin)")
+def _export_csv_cell(value):
+    # Joined: to the second, as the file has always had it.
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    return value
+
+
+async def _export_rows(session, criteria, sort, order) -> AsyncIterator[list]:
+    """Every user the filters match, a row each (typed: Joined a datetime),
+    a chunk at a time. Each chunk starts where the last one ended (a keyset
+    on the sort column and id), so chunk n costs what chunk 1 did."""
+    from sqlalchemy import select
+
+    from app.api.users.models import Users
+
+    cursor = None
+    while True:
+        after = _after(sort, order, cursor)
+        query = select(Users).where(*criteria, *([after] if after is not None else [])).limit(_EXPORT_CHUNK)
+        batch = (await session.execute(_sorted_user_query(query, sort, order))).scalars().all()
+        if not batch:
+            break
+        for db_user in batch:
+            yield [value(db_user) for _, value in _EXPORT_COLUMNS]
+        if len(batch) < _EXPORT_CHUNK:
+            break
+        cursor = _cursor_of(batch[-1], sort)
+        # The rows are written: let them go rather than keep every chunk.
+        session.expunge_all()
+
+
+@router.get("/admin/export", summary="Export the filtered user list as CSV or Excel (admin)")
 async def export_users_admin(
     session: SessionDep,
     admin: ExportDataAuth,
@@ -377,7 +410,8 @@ async def export_users_admin(
     is_active: bool | None = Query(
         None, description="true for active only, false for suspended only"
     ),
-) -> StreamingResponse:
+    fmt: FormatQuery = "csv",
+) -> Response:
     """
     Stream every row matching the filters, not just the page on screen.
 
@@ -393,17 +427,23 @@ async def export_users_admin(
     sort column and id), so chunk n costs what chunk 1 did; it skipped past
     every earlier row by OFFSET, which made a large export quadratic.
 
+    `format=xlsx`: the same rows as an Excel workbook, written a chunk at a
+    time to a temporary file on a worker thread, then sent from disk.
+
     The request's own session is used while streaming, which is safe here:
     FastAPI closes the dependency exit stack after the response body has
     been sent, so a `yield` dependency outlives the generator that produced
     the body. `test_export_pages_past_one_chunk` is what actually holds that
     down -- it reads several chunks, so a session closed early fails it.
     """
-    from sqlalchemy import select
-
-    from app.api.users.models import Users
-
     criteria = await _user_list_filters(session, search, user_type, provider, is_active)
+    header = [name for name, _ in _EXPORT_COLUMNS]
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    if fmt == "xlsx":
+        path = await spreadsheet.write_xlsx(
+            _export_rows(session, criteria, sort, order), title="Users", headers=header, batch=_EXPORT_CHUNK,
+        )
+        return spreadsheet.xlsx_response(path, f"users-{stamp}.xlsx", cache_control="no-store")
 
     async def rows() -> AsyncIterator[str]:
         buffer = io.StringIO()
@@ -417,26 +457,17 @@ async def export_users_admin(
 
         # A BOM, so Excel on Windows reads the file as UTF-8 instead of
         # mangling every non-ASCII name in it.
-        writer.writerow([name for name, _ in _EXPORT_COLUMNS])
+        writer.writerow(header)
         yield "\ufeff" + drain()
 
-        cursor = None
-        while True:
-            after = _after(sort, order, cursor)
-            query = select(Users).where(*criteria, *([after] if after is not None else [])).limit(_EXPORT_CHUNK)
-            batch = (await session.execute(_sorted_user_query(query, sort, order))).scalars().all()
-            if not batch:
-                break
-            for db_user in batch:
-                writer.writerow([value(db_user) for _, value in _EXPORT_COLUMNS])
-            yield drain()
-            if len(batch) < _EXPORT_CHUNK:
-                break
-            cursor = _cursor_of(batch[-1], sort)
-            # The rows are written: let them go rather than keep every chunk.
-            session.expunge_all()
+        written = 0
+        async for row in _export_rows(session, criteria, sort, order):
+            writer.writerow([_export_csv_cell(v) for v in row])
+            written += 1
+            if written % _EXPORT_CHUNK == 0:
+                yield drain()
+        yield drain()
 
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     return StreamingResponse(
         rows(),
         media_type="text/csv; charset=utf-8",

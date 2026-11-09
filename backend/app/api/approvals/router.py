@@ -23,6 +23,8 @@ from app.api.events.access import is_admin_user
 from app.core.auth.dependencies import ClubAuth, GuestAuth
 from app.core.auth.permissions import EXPORT_DATA, ensure_admin_can
 from app.core.rate_limit import limiter
+from app.core.utils import spreadsheet
+from app.core.utils.spreadsheet import FormatQuery
 from app.db.core import SessionDep
 from app.response import CustomHTTPException
 
@@ -71,19 +73,22 @@ async def list_requests(
     )
 
 
-@router.get("/events/registration/{event_id}/requests/export", summary="Every registration request of the event, as CSV")
-async def export_requests(session: SessionDep, user: ClubAuth, event_id: int) -> Response:
+@router.get("/events/registration/{event_id}/requests/export", summary="Every registration request of the event, as CSV or Excel")
+async def export_requests(session: SessionDep, user: ClubAuth, event_id: int, fmt: FormatQuery = "csv") -> Response:
     """Every request, whatever its status: the person, the ticket type and
     code, the answers, when asked and decided and by whom, the decline note,
-    and the payment's state. Whoever may read the queue may export it; an
-    admin also needs EXPORT_DATA, as for the attendees' export."""
+    and the payment's state. `format=xlsx` for the same rows as an Excel
+    workbook. Whoever may read the queue may export it; an admin also needs
+    EXPORT_DATA, as for the attendees' export."""
     ensure_admin_can(user, EXPORT_DATA)
     event = await deliveries.event_for_club(session, user, event_id)
+    stem = f"{event.slug or event.id}-requests"
+    if fmt == "xlsx":
+        return spreadsheet.xlsx_response(await service.export_xlsx(session, event), f"{stem}.xlsx", cache_control=NO_STORE)
     body = await service.export_csv(session, event)
-    name = f"{event.slug or event.id}-requests.csv"
     return Response(
         content=body, media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": NO_STORE},
+        headers={"Content-Disposition": f'attachment; filename="{stem}.csv"', "Cache-Control": NO_STORE},
     )
 
 

@@ -1739,15 +1739,14 @@ def _payment(status: str, reg_live: bool, is_paid, actual, entry_status, expires
     return "not paid" if entry_status is not None else ""
 
 
-async def export_csv(session, event) -> bytes:
-    """Every request of the event as CSV, newest first: its status (and why
-    closed), the person, the ticket type and code, every answer (the
-    event's questions first, in their order), when asked and decided and by
-    whom, the decline note, and the payment's state. Read in batches off a
-    server-side cursor."""
-    import csv
-    import io
-
+async def export_table(session, event):
+    """Every request of the event, newest first: the header, and the rows
+    (typed: the times as datetimes, the amount as a number) as they come
+    off a server-side cursor in batches. Its status (and why closed), the
+    person, the ticket type and code, every answer (the event's questions
+    first, in their order), when asked and decided and by whom, the decline
+    note, and the payment's state. The CSV and the workbook are both
+    written from it."""
     from app.api.ticketing.models import TicketTypes
     from app.api.ticketing.models import WaitlistEntries as W
 
@@ -1763,11 +1762,9 @@ async def export_csv(session, event) -> bytes:
     from app.api.missing_answers.state import Form
 
     form = Form(event.additional_details)
-    buf = io.StringIO()
-    out = csv.writer(buf)
     # The questions by label, a key the form no longer asks by its key, and
     # last the required ones each has not validly answered (app/api/missing_answers).
-    out.writerow(EXPORT_LEAD + answer_headers(form, keys, taken=[*EXPORT_LEAD, *EXPORT_TAIL, MISSING]) + EXPORT_TAIL + [MISSING])
+    header = EXPORT_LEAD + answer_headers(form, keys, taken=[*EXPORT_LEAD, *EXPORT_TAIL, MISSING]) + EXPORT_TAIL + [MISSING]
     G = EventRegistrationsLink
     stmt = (
         select(
@@ -1784,23 +1781,50 @@ async def export_csv(session, event) -> bytes:
         .order_by(R.submitted_at.desc(), R.id.desc())
         .execution_options(include_deleted=True, yield_per=1000)
     )
-    result = await session.stream(stmt)
-    async for batch in result.partitions(1000):
-        for (status, reason, name, email, phone, type_name, code, answers, submitted, decided, by, note, amount,
-             reg_live, is_paid, actual, ticket_id, entry_status, expires, whatsapp) in batch:
-            answers = answers if isinstance(answers, dict) else {}
-            reg_live = bool(reg_live)
-            pay = _payment(status, reg_live, is_paid, actual, entry_status, expires, now)
-            out.writerow([_csv_cell(v) for v in (
-                STATUS_WORD.get(status, status), reason if status == CLOSED else None, name, email, phone, type_name, code,
-                *(answers.get(k) for k in keys),
-                submitted, decided, by, note if status == DECLINED else None,
-                float(money.rupees(amount)) if amount is not None else None, pay,
-                expires if pay == "awaiting payment" else None,
-                ticket_id if reg_live else None, bool(whatsapp),
-                missing_cell(form, answers),
-            )])
+
+    async def rows():
+        result = await session.stream(stmt)
+        async for batch in result.partitions(1000):
+            for (status, reason, name, email, phone, type_name, code, answers, submitted, decided, by, note, amount,
+                 reg_live, is_paid, actual, ticket_id, entry_status, expires, whatsapp) in batch:
+                answers = answers if isinstance(answers, dict) else {}
+                reg_live = bool(reg_live)
+                pay = _payment(status, reg_live, is_paid, actual, entry_status, expires, now)
+                yield (
+                    STATUS_WORD.get(status, status), reason if status == CLOSED else None, name, email, phone, type_name, code,
+                    *(answers.get(k) for k in keys),
+                    submitted, decided, by, note if status == DECLINED else None,
+                    float(money.rupees(amount)) if amount is not None else None, pay,
+                    expires if pay == "awaiting payment" else None,
+                    ticket_id if reg_live else None, bool(whatsapp),
+                    missing_cell(form, answers),
+                )
+
+    return header, rows()
+
+
+async def export_csv(session, event) -> bytes:
+    """The requests (export_table) as CSV: a cell that starts like a formula
+    gets an apostrophe."""
+    import csv
+    import io
+
+    header, rows = await export_table(session, event)
+    buf = io.StringIO()
+    out = csv.writer(buf)
+    out.writerow(header)
+    async for row in rows:
+        out.writerow([_csv_cell(v) for v in row])
     return buf.getvalue().encode("utf-8")
+
+
+async def export_xlsx(session, event) -> str:
+    """The requests (export_table) as an .xlsx file on disk; the caller
+    sends it and removes it (app/core/utils/spreadsheet.py)."""
+    from app.core.utils import spreadsheet
+
+    header, rows = await export_table(session, event)
+    return await spreadsheet.write_xlsx(rows, title="Registration requests", headers=header)
 
 
 # ─── Retention and the guest merge ───────────────────────────────────────

@@ -144,6 +144,32 @@ async def test_the_statement_file_has_every_line_and_the_running_balance(client,
     assert "@" not in r.text
 
 
+async def test_the_statement_file_as_a_workbook(client, make_admin, mint_token, shop):
+    from tests.spreadsheet_helpers import assert_same_as_csv, records, workbook_of
+
+    h = await role_headers(make_admin, mint_token)
+    club_id = shop["club"].id
+    await client.post(f"{API}/admin/payouts/clubs/{club_id}",
+                      json={"amount": "200", "paid_on": date.today().isoformat(), "reference": "UTR-XLSX", "note": "=cmd"}, headers=h["owner"])
+    path = f"{API}/admin/payouts/clubs/{club_id}/statement.csv"
+    for role in ("viewer", "support"):
+        assert (await client.get(path, params={"format": "xlsx"}, headers=h[role])).status_code == 403
+    as_csv = await client.get(path, headers=h["owner"])
+    r = await client.get(path, params={"format": "xlsx"}, headers=h["owner"])
+    stem = as_csv.headers["content-disposition"].split('filename="')[1].removesuffix('.csv"')
+    sheet = workbook_of(r, f"{stem}.xlsx").active
+    assert r.headers["cache-control"] == "no-store"
+    assert [c.value for c in sheet[1]] == ["date", "type", "event", "reference", "amount", "balance", "note"]
+    assert_same_as_csv(sheet, as_csv.text)
+    rows = records(sheet)
+    assert [row["type"] for row in rows].count("payment") == 3 and rows[-1]["type"] == "payout"
+    assert all(isinstance(row["date"], datetime) and isinstance(row["amount"], (int, float)) for row in rows)
+    assert Decimal(str(rows[-1]["balance"])) == Decimal("1300") - Decimal("30.68") - Decimal("600") - Decimal("50") - Decimal("200")
+    assert rows[-1]["note"] == "=cmd" and sheet.cell(row=len(rows) + 1, column=7).data_type == "s"
+    assert sheet.cell(row=2, column=5).number_format == "0.00"
+    assert (await client.get(path, params={"format": "csv2"}, headers=h["owner"])).status_code == 422
+
+
 async def test_fees_are_read_from_razorpay_by_a_job(client, session, make_admin, mint_token, shop, monkeypatch):
     h = await role_headers(make_admin, mint_token)
     asked = []

@@ -13,6 +13,8 @@ from app.api.finance.schemas import ExpenseCreate, ExpenseOut, ExpensePatch, Fin
 from app.api.subscriptions import gates
 from app.core.auth.dependencies import ClubAuth
 from app.core.auth.permissions import EXPORT_DATA, ensure_admin_can
+from app.core.utils import spreadsheet
+from app.core.utils.spreadsheet import FormatQuery
 from app.db.core import SessionDep
 from app.response import CustomHTTPException
 
@@ -40,11 +42,17 @@ async def club_finance(session: SessionDep, user: ClubAuth, frm: Optional[date] 
     return FinanceSummary(**await service.club_summary(session, club, frm, to))
 
 
-@router.get("/clubs/finance/statement.csv", summary="The same period as a statement file")
-async def club_statement(session: SessionDep, user: ClubAuth, frm: Optional[date] = Query(None, alias="from"), to: Optional[date] = Query(None)) -> Response:
+@router.get("/clubs/finance/statement.csv", summary="The same period as a statement file (CSV or Excel)")
+async def club_statement(
+    session: SessionDep, user: ClubAuth, frm: Optional[date] = Query(None, alias="from"), to: Optional[date] = Query(None),
+    fmt: FormatQuery = "csv",
+) -> Response:
     club = await _club_for(session, user)
     frm, to = service.resolve_period(frm, to)
-    return _csv(await service.club_statement(session, club, frm, to), f"{club.slug}-statement-{frm.isoformat()}-{to.isoformat()}.csv")
+    stem = f"{club.slug}-statement-{frm.isoformat()}-{to.isoformat()}"
+    if fmt == "xlsx":
+        return spreadsheet.xlsx_response(await service.club_statement_xlsx(session, club, frm, to), f"{stem}.xlsx", cache_control="no-store")
+    return _csv(await service.club_statement(session, club, frm, to), f"{stem}.csv")
 
 
 # ─── Expenses ────────────────────────────────────────────────────────────
@@ -81,14 +89,18 @@ async def event_finance(session: SessionDep, user: ClubAuth, event_id: int) -> F
     return FinanceSummary(**await service.event_summary(session, event))
 
 
-@router.get("/events/{event_id}/finance/statement.csv", summary="The event's ledger as a statement file")
-async def event_statement(session: SessionDep, user: ClubAuth, event_id: int) -> StreamingResponse:
+@router.get("/events/{event_id}/finance/statement.csv", summary="The event's ledger as a statement file (CSV or Excel)")
+async def event_statement(session: SessionDep, user: ClubAuth, event_id: int, fmt: FormatQuery = "csv") -> Response:
     """Streamed: a big event's registrations are never all in memory. The
     request's session outlives the body (FastAPI closes the dependency after
-    the response is sent), as the users export relies on."""
+    the response is sent), as the users export relies on. `format=xlsx`:
+    the same rows as a workbook, written a batch at a time to a temporary
+    file, then sent."""
     # Every guest's payment at once: for an admin, a data export.
     ensure_admin_can(user, EXPORT_DATA)
     event = await deliveries.event_for_club(session, user, event_id)
+    if fmt == "xlsx":
+        return spreadsheet.xlsx_response(await service.event_statement_xlsx(session, event), f"{event.slug}-statement.xlsx", cache_control="no-store")
     return StreamingResponse(
         service.event_statement(session, event),
         media_type="text/csv; charset=utf-8",

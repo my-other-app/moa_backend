@@ -10,7 +10,7 @@ event from.
 import csv
 import io
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import func, select
@@ -197,17 +197,38 @@ async def insights(session, club_id: int) -> dict:
     )
 
 
-async def export_csv(session, club_id: int, *, segment: str = "all") -> str:
+EXPORT_HEADERS = ["name", "username", "organisation", "followed_on", "registrations", "came", "last_registered", "interests", "source"]
+
+
+async def export_rows(session, club_id: int, *, segment: str = "all"):
+    """The followers in a segment, a row each (typed: the days as dates, the
+    counts as numbers). The CSV and the workbook are both written from it."""
     rows, _, _ = await list_followers(session, club_id, segment=segment, limit=100_000, offset=0)
+    return (
+        [
+            r["user"]["full_name"], r["user"]["username"] or "", r["org"] or "", r["followed_at"].date() if r["followed_at"] else "",
+            r["registrations"], r["attended"], r["last_registered_at"].date() if r["last_registered_at"] else "", "; ".join(r["interests"]), r["source"] or "",
+        ]
+        for r in rows
+    )
+
+
+async def export_csv(session, club_id: int, *, segment: str = "all") -> str:
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["name", "username", "organisation", "followed_on", "registrations", "came", "last_registered", "interests", "source"])
-    for r in rows:
-        w.writerow([
-            r["user"]["full_name"], r["user"]["username"] or "", r["org"] or "", r["followed_at"].date().isoformat() if r["followed_at"] else "",
-            r["registrations"], r["attended"], r["last_registered_at"].date().isoformat() if r["last_registered_at"] else "", "; ".join(r["interests"]), r["source"] or "",
-        ])
+    w.writerow(EXPORT_HEADERS)
+    for row in await export_rows(session, club_id, segment=segment):
+        w.writerow([v.isoformat() if isinstance(v, date) else v for v in row])
     return buf.getvalue()
 
 
-__all__ = ["list_followers", "insights", "export_csv", "SEGMENTS", "SORTS"]
+async def export_xlsx(session, club_id: int, *, segment: str = "all") -> str:
+    """The same rows as an .xlsx file on disk; the caller sends it and
+    removes it (app/core/utils/spreadsheet.py)."""
+    from app.core.utils import spreadsheet
+
+    rows = await export_rows(session, club_id, segment=segment)
+    return await spreadsheet.write_xlsx(rows, title="Followers", headers=EXPORT_HEADERS)
+
+
+__all__ = ["list_followers", "insights", "export_csv", "export_xlsx", "SEGMENTS", "SORTS"]

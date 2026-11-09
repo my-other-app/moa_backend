@@ -483,7 +483,7 @@ rules: editors and admins change things, door staff read.
 | PUT | `/events/{id}/ticketing/waitlist/settings` | `{enabled?, offer_hours?}` |
 | POST | `/events/{id}/ticketing/waitlist/{entry_id}/offer` | Offers this person a place now, ahead of the line or again after an offer ran out. Only a free place: 409 `WAITLIST_NO_ROOM` otherwise. Raise a cap first. |
 | DELETE | `/events/{id}/ticketing/waitlist/{entry_id}` | Takes the person off the list. |
-| GET | `/events/{id}/ticketing/waitlist/export` | The list as CSV. |
+| GET | `/events/{id}/ticketing/waitlist/export` | The list as CSV; `?format=xlsx` for an Excel workbook of the same rows. |
 
 ### Plan gates
 

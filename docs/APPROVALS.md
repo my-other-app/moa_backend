@@ -404,7 +404,8 @@ the address by email instead (at most every 10 minutes). The request's owner
   reopened request keeps its place in the queue.
 - Event settings: `POST /events/create` and `PUT /events/update/{id}` take
   `requires_approval` (form field; omitted leaves it as it is) and return it.
-- `GET …/requests/export`: every request as CSV (§7).
+- `GET …/requests/export`: every request as CSV, or `?format=xlsx` as an
+  Excel workbook (§7).
 - Overviews:
   - `GET /events/{id}/summary` (the event's overview): `requests_pending`,
     and since §7 `requests` and `places`.
@@ -536,8 +537,11 @@ lists, below).
   note, Amount, Payment, Pay by, Ticket ID, WhatsApp`. `Payment`: `free`,
   `paid`, `awaiting payment`, `not paid` (a hold that ran out),
   `not paid in time` (lapsed), or blank. A cell starting with `= + - @` is
-  quoted with `'`. Owners, admins and editors (door staff read the list but
-  download no lists: `club_access.policy` refuses every export to them);
+  quoted with `'`. `?format=xlsx`: the same columns and rows as an Excel
+  workbook (`app/core/utils/spreadsheet.py`), text stored as text (never a
+  formula, no `'`), times as UTC dates. Owners, admins and editors (door
+  staff read the list but download no lists: `club_access.policy` refuses
+  every export to them, in either format);
   another club's event is 404.
 - `closed_reason`: `registered_directly`, `event_ended`, `event_deleted`,
   `event_cancelled`. Requests closed before §7 were given theirs from their
