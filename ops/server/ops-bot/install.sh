@@ -35,7 +35,9 @@ die() { printf 'install.sh: %s\n' "$*" >&2; exit 1; }
 [ -d "$MOA_DIR" ] || die "$MOA_DIR does not exist: this is for the box ops/server/setup.sh prepared"
 command -v python3 > /dev/null || die "python3 is not installed"
 python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' || die "python3 is older than 3.10"
-[ -f "$HERE/run.py" ] && [ -f "$HERE/opsbot/main.py" ] || die "run this from ops/server/ops-bot (run.py and opsbot/ beside it)"
+for f in run.py opsbot/main.py; do
+  [ -f "$HERE/$f" ] || die "run this from ops/server/ops-bot (run.py and opsbot/ beside it)"
+done
 
 CHANGED_UNITS=no
 
