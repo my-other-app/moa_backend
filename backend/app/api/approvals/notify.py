@@ -8,7 +8,9 @@ still true: one cancelled before its "thanks for registering" mail went gets
 none, a ticket already paid gets no pay link.
 
 The emails are the club's own: the six request emails of its library
-(stages REQUEST_*, docs/APPROVALS.md), edited in Emails like any other and
+(stages REQUEST_*, docs/APPROVALS.md) -- or the event's own copy of one,
+when the club gave the event its own words (app/api/emails/review.py) --
+edited in Emails like any other and
 sent in its logo and colour, with its name as the sender, through the
 designed-email renderer (app/core/mail). A club that never opened its
 library gets MyOtherApp's defaults (app/core/mail/starters.py). The values
@@ -133,7 +135,7 @@ async def _message(session, event, kind: str, *, reason: Optional[str] = None):
         return _cancelled(reason)
     if kind not in STAGE_OF:
         raise ValueError(kind)
-    fields = await emails_service.request_template(session, event.club_id, STAGE_OF[kind])
+    fields = await emails_service.request_template(session, event.club_id, STAGE_OF[kind], event_id=event.id)
     return fields.subject, fields.design
 
 

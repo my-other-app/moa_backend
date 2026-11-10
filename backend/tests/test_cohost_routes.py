@@ -193,6 +193,13 @@ ROUTES = {
     "POST /api/v1/events/{event_id}/emails/{template_id}/save-to-library": ALLOW,
     "POST /api/v1/events/{event_id}/emails/{template_id}/reset": ALLOW,
     "POST /api/v1/events/{event_id}/emails/{template_id}/send": ALLOW,
+    # the event's own registration review emails, and sending one again
+    "GET /api/v1/events/{event_id}/emails/review": ALLOW,
+    "GET /api/v1/events/{event_id}/emails/review/resends": ALLOW,
+    "PUT /api/v1/events/{event_id}/emails/review/{stage}": ALLOW,
+    "DELETE /api/v1/events/{event_id}/emails/review/{stage}": ALLOW,
+    "POST /api/v1/events/{event_id}/emails/review/{stage}/resend/count": ALLOW,
+    "POST /api/v1/events/{event_id}/emails/review/{stage}/resend": ALLOW,
     # checkins
     "GET /api/v1/events/{event_id}/doors": ALLOW,
     "POST /api/v1/events/{event_id}/doors": ALLOW,

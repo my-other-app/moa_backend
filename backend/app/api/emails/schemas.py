@@ -186,3 +186,53 @@ class LibraryOverview(BaseModel):
     #: `key`, `group` and `when`); none are listed now, and the list stays for
     #: the clients that read it.
     automatic: list[dict] = []
+
+
+# --- an event's registration review emails (app/api/emails/review.py) -------------
+
+
+class ReviewActor(Wire):
+    id: Optional[int] = None
+    name: Optional[str] = None
+
+
+class ReviewResendOut(Wire):
+    """One press of "Send to N people"."""
+
+    id: UUID
+    stage: EmailStage
+    created_at: datetime
+    created_by: Optional[ReviewActor] = None
+    recipients: int
+    sent: int
+    failed: int
+    skipped: int
+    status: Literal["sending", "done"]
+
+
+class ReviewEmailOut(Wire):
+    stage: EmailStage
+    label: Optional[str] = None
+    #: When it goes by itself, and who a resend reaches, as the dashboard says them.
+    when: Optional[str] = None
+    who: Optional[str] = None
+    #: Whose words the event sends: its own copy, the club's library email,
+    #: or the club's still in MyOtherApp's words.
+    source: Literal["event", "club", "default"]
+    template: EmailTemplateOut
+    club_template_id: Optional[UUID] = None
+    resendable: bool
+    #: How many people a resend would reach right now.
+    eligible: int
+    last_resend: Optional[ReviewResendOut] = None
+
+
+class ReviewResendCount(Wire):
+    eligible: int
+    without_email: int
+
+
+class ReviewResendRequest(Wire):
+    """From the page, one per press: the same again sends nothing more."""
+
+    client_ref: UUID
