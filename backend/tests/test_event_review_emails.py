@@ -285,16 +285,17 @@ async def test_what_cant_be_sent_again_is_refused_and_strangers_see_nothing(clie
         await ask(client, shop.event, n)
     shop.mail.clear()
 
-    async def two_a_month(_session, club_id):
+    async def five_a_month(_session, club_id):
         return quota.Terms(
-            club_id=club_id, plan_key="free", plan_name="Free", email_limit=2, whatsapp_limit=0,
+            club_id=club_id, plan_key="free", plan_name="Free", email_limit=5, whatsapp_limit=0,
             email_rate_paise=0, whatsapp_rate_paise=0, billing=quota.NONE,
         )
 
-    monkeypatch.setattr(quota, "terms_for", two_a_month)
+    monkeypatch.setattr(quota, "terms_for", five_a_month)
     monkeypatch.setattr(settings, "PLAN_ENFORCEMENT", True)
     short = await _resend(client, shop, "REQUEST_RECEIVED")
     assert short.status_code == 402 and short.json()["error_code"] == review.QUOTA_CODE, short.text
+    # The three "thanks for registering" emails used three of the month's five.
     assert short.json()["errors"] == {"needed": 3, "available": 2}
     assert shop.mail == [] and await session.scalar(select(func.count()).select_from(ReviewResends).where(ReviewResends.event_id == event_id)) == 0
     monkeypatch.setattr(settings, "PLAN_ENFORCEMENT", False)
