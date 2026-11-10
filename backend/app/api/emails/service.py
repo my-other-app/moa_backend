@@ -79,10 +79,14 @@ logger = logging.getLogger(__name__)
 STAGE_ORDER = {EmailStage(s): i for i, s in enumerate(JOURNEY_STAGES)}
 STAGE_ORDER[EmailStage.CUSTOM] = len(JOURNEY_STAGES)
 STAGE_ORDER.update({EmailStage(s): len(JOURNEY_STAGES) + 1 + i for i, s in enumerate(REQUEST_STAGES)})
-#: The emails of an event that reviews every registration: library rows only.
+#: The emails of an event that reviews every registration: the club's
+#: library, and an event's own copy of any of them (app/api/emails/review.py).
 REQUEST_EMAIL_STAGES = frozenset(EmailStage(s) for s in REQUEST_STAGES)
-#: Where a club edits them; an event's own emails never hold one.
-LIBRARY_ONLY = "These emails belong to the club's library: edit them in Emails."
+#: Where a club edits them: never made like another email.
+LIBRARY_ONLY = (
+    "These emails belong to the club's library: edit them in Emails, "
+    "or give this event its own words in its Registration review section."
+)
 # Keeps a timer from sending an old event's reminder on the day it is deployed.
 SWEEP_GRACE = timedelta(days=2)
 SWEEP_LOCK = lock_keys.EMAIL_SWEEP
@@ -378,6 +382,9 @@ async def save_to_library(session, tpl: EmailTemplates, club_id: Optional[int] =
     event's email still comes from the host's."""
     if tpl.event_id is None:
         return tpl
+    if is_request(tpl.stage):
+        # The event's own words stay the event's; the club edits its library itself.
+        raise CustomHTTPException(422, message="An event's own registration review email can't be saved to the library. Edit the library's in Emails.")
     into = club_id or tpl.club_id
     fields = fields_of(tpl)
     target = None
@@ -443,6 +450,9 @@ async def journey(session, event: Events) -> dict:
     for tpl in templates:
         if tpl.stage is EmailStage.CUSTOM:
             custom.append(tpl)
+            continue
+        if is_request(tpl.stage):
+            # The event's own review emails: listed by GET .../emails/review.
             continue
         last = await last_message_for(session, tpl)
         scheduled_sent = last is not None and last.scheduled
@@ -628,6 +638,10 @@ async def preview(session, event, subject: str, design: EmailDesign, *, registra
     by URL and the QR as data so nothing needs the network."""
     reg = await loaded_registration(session, event.id, registration_id) if registration_id is not None and getattr(event, "id", 0) else None
     values = guest_values(event, reg) if reg is not None else sample_values(event)
+    if reg is not None:
+        # A review email's own tokens have no value on a registration: the samples.
+        for t in REQUEST_TOKENS:
+            values.setdefault(t["key"], t["sample"])
     images = {b.image_key: objects.presigned_url(b.image_key) for b in _image_blocks(design) if b.source == "upload" and b.image_key}
     brand = await brand_primary(session, event) if getattr(event, "id", 0) else layout_colors({})["primary"]
     out = render_email(
@@ -774,6 +788,10 @@ async def start_message(
 
 
 async def send_template(session, event: Events, tpl: EmailTemplates, *, scheduled: bool = False, created_by=None, client_ref=None) -> Messages:
+    if is_request(tpl.stage):
+        # Each goes to one person as their registration moves; sent again
+        # only to the people it is for (POST .../emails/review/{stage}/resend).
+        raise CustomHTTPException(422, message="A registration review email goes to each person by itself. Use Send again in Registration review.")
     if tpl.stage is EmailStage.INVITE:
         raise CustomHTTPException(
             422, message="The invite goes out with the tickets. Use Send tickets on the attendees page."
@@ -1186,10 +1204,18 @@ async def invite_for(session, event: Events) -> Optional[dict]:
 # --- the request emails -------------------------------------------------------------
 
 
-async def request_template(session, club_id: Optional[int], stage: EmailStage) -> EmailTemplateFields:
-    """One of the request emails as the club wrote it: its library row, or
-    MyOtherApp's default when the club has none yet. Read only: the row is
-    made when the club opens its library."""
+async def request_template(session, club_id: Optional[int], stage: EmailStage, event_id: Optional[int] = None) -> EmailTemplateFields:
+    """One of the request emails as it goes for this event: the event's own
+    copy (app/api/emails/review.py), else the club's library row, else
+    MyOtherApp's default when the club has none yet. Read only: the library
+    row is made when the club opens its library. Every sender passes the
+    event."""
+    if event_id is not None:
+        own = await session.scalar(
+            select(EmailTemplates).where(EmailTemplates.event_id == event_id, EmailTemplates.stage == stage).limit(1)
+        )
+        if own is not None:
+            return request_fixed(fields_of(own), stage)
     if club_id is not None:
         tpl = await session.scalar(
             select(EmailTemplates).where(
@@ -1205,7 +1231,7 @@ async def request_ticket_for(session, event: Events) -> dict:
     """The ticket email of someone the club confirmed (a registration that
     came from a request): the club's "Confirmed · ticket" email, shaped as
     `invite_for`'s, ticket attached."""
-    fields = await request_template(session, event.club_id, EmailStage.REQUEST_APPROVED)
+    fields = await request_template(session, event.club_id, EmailStage.REQUEST_APPROVED, event_id=event.id)
     return {
         "subject": fields.subject,
         "design": fields.design,
@@ -1300,9 +1326,12 @@ async def resume(session, now: Optional[datetime] = None) -> dict:
     left by a stopped process is taken again when its lease runs out.) Each
     part on its own, so one that fails does not keep the other from running."""
     out: dict = {}
+    from app.api.emails import review
+
     for name, part in (
         ("deliveries", lambda: deliveries.resume(session, now)),
         ("messages", lambda: resume_messages(session, now)),
+        ("review_resends", lambda: review.resume(session, now)),
     ):
         try:
             out[name] = await part()

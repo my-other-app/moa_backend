@@ -224,3 +224,82 @@ EMAIL_DUE_AT_SQL = (
 # On email_templates' creation: events exists by then (the foreign key orders them).
 for _sql in EMAIL_DUE_AT_SQL:
     sa_event.listen(EmailTemplates.__table__, "after_create", DDL(_sql).execute_if(dialect="postgresql"))
+
+
+# ─── An event's review email, sent again (app/api/emails/review.py) ────────
+#
+# The registration review emails go to one person at a time as their request
+# moves (app/api/approvals/notify.py). A club that edits one afterwards may
+# send the new words to the people it already went to: a resend. It reaches
+# requests, not registrations (a pending request has none), so it has tables
+# of its own rather than message_deliveries, whose rows need a registration.
+
+RESEND_SENDING, RESEND_DONE = "sending", "done"
+#: A recipient row's life, as a message delivery's (pending -> sending -> sent,
+#: or failed / skipped / dead; back to pending after the provider's "not now").
+RESEND_ROW_STATUSES = ("pending", "sending", "sent", "failed", "skipped", "dead")
+
+
+class ReviewResends(AbstractSQLModel, TimestampsMixin):
+    """One press of "Send to N people": the stage's words frozen as they were
+    then, and the counts of how it went."""
+
+    __tablename__ = "review_resends"
+    __table_args__ = (
+        # One per press, from the page: the same clientRef again is this resend.
+        UniqueConstraint("event_id", "client_ref", name="uq_review_resends_event_client_ref"),
+        # An event's resends, a stage's latest first (GET /review, /review/resends).
+        sa.Index("ix_review_resends_event", "event_id", "created_at"),
+        # The resumer's minute look for resends not yet finished.
+        sa.Index("ix_review_resends_sending", "created_at", postgresql_where=sa.text("status = 'sending'")),
+        sa.CheckConstraint("status IN ('sending', 'done')", name="ck_review_resends_status"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()"), default=uuid.uuid4)
+    event_id = Column(Integer, ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
+    #: An EmailStage value, one of the six REQUEST_* ones.
+    stage = Column(String(32), nullable=False)
+    client_ref = Column(UUID(as_uuid=True), nullable=False)
+    #: The event's own copy it was sent from, if it had one ("event"); else
+    #: the club's library email ("club") or MyOtherApp's ("default").
+    source = Column(String(8), nullable=False, default="club")
+    template_id = Column(UUID(as_uuid=True), ForeignKey("email_templates.id", ondelete="SET NULL"), nullable=True)
+    template_version = Column(Integer, nullable=True)
+    # The words as they were at the press: an edit afterwards changes nothing on its way.
+    subject = Column(String(200), nullable=False)
+    design = Column(JSON, nullable=False, default=dict)
+    status = Column(String(8), nullable=False, default=RESEND_SENDING, server_default=RESEND_SENDING)
+    recipients = Column(Integer, nullable=False, default=0, server_default="0")
+    sent_count = Column(Integer, nullable=False, default=0, server_default="0")
+    failed_count = Column(Integer, nullable=False, default=0, server_default="0")
+    skipped_count = Column(Integer, nullable=False, default=0, server_default="0")
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    #: Who pressed it, as the dashboard names them (a team member's own name).
+    created_by_name = Column(String(120), nullable=True)
+
+
+class ReviewResendRecipients(AbstractSQLModel, TimestampsMixin):
+    """One person a resend is for: claimed, checked again, sent or skipped."""
+
+    __tablename__ = "review_resend_recipients"
+    __table_args__ = (
+        UniqueConstraint("resend_id", "request_id", name="uq_review_resend_recipients_once"),
+        # A resend's workers claim from what is left of it, not from all of it.
+        sa.Index("ix_review_resend_recipients_unfinished", "resend_id", postgresql_where=sa.text("status IN ('pending', 'sending')")),
+        # A request's deletion (the foreign key's CASCADE) finds its rows.
+        sa.Index("ix_review_resend_recipients_request", "request_id"),
+        sa.CheckConstraint(
+            "status IN ('pending', 'sending', 'sent', 'failed', 'skipped', 'dead')", name="ck_review_resend_recipients_status",
+        ),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()"), default=uuid.uuid4)
+    resend_id = Column(UUID(as_uuid=True), ForeignKey("review_resends.id", ondelete="CASCADE"), nullable=False)
+    request_id = Column(UUID(as_uuid=True), ForeignKey("registration_requests.id", ondelete="CASCADE"), nullable=False)
+    status = Column(String(8), nullable=False, default="pending", server_default="pending")
+    error = Column(String(400), nullable=True)
+    provider_id = Column(String(200), nullable=True)
+    sent_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    claimed_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    next_attempt_at = Column(TZAwareDateTime(timezone=True), nullable=True)

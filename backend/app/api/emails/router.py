@@ -8,7 +8,7 @@ from fastapi import APIRouter, Body, File, Query, Request, Response, UploadFile
 from fastapi.responses import JSONResponse
 
 from app.api.deliveries import service as deliveries
-from app.api.emails import library_overview, old_links, service
+from app.api.emails import library_overview, old_links, review, service
 from app.api.emails.models import EmailStage
 from app.api.emails.schemas import (
     LibraryOverview,
@@ -24,6 +24,10 @@ from app.api.emails.schemas import (
     MessagePage,
     PreviewRequest,
     PreviewResponse,
+    ReviewEmailOut,
+    ReviewResendCount,
+    ReviewResendOut,
+    ReviewResendRequest,
     TemplateSendRequest,
     TemplatesOut,
     TestSendRequest,
@@ -103,6 +107,84 @@ async def upload_image(session: SessionDep, user: ClubAuth, event_id: int, file:
     # Decoding, shrinking and the S3 upload block: off the event loop.
     raw = await file.read()
     return ImageUpload(**await asyncio.to_thread(store_image, raw, service.image_prefix(event_id=event.id), max_width=EMAIL_IMAGE_WIDTH, name="email"))
+
+
+# --- an event's registration review emails (app/api/emails/review.py) ------------
+#
+# Before /{template_id}: "review" is no template's id.
+
+
+def _actor_name(request: Request, user) -> Optional[str]:
+    """Who pressed it, as the dashboard names them: a team member's own name."""
+    from app.api.club_access import service as club_access
+
+    member = club_access.current_member(request)
+    if member is not None:
+        return member.full_name or member.email or "A team member"
+    return getattr(user, "full_name", None) or None
+
+
+@router.get("/review", summary="The event's registration review emails: whose words, who a resend reaches, the last one")
+async def review_emails(session: SessionDep, user: ClubAuth, event_id: int) -> list[ReviewEmailOut]:
+    """The six, in the library's order. `source` says whose words the event
+    sends: its own copy (`event`), the club's (`club`), or the club's still
+    in MyOtherApp's words (`default`). `eligible` is how many people a resend
+    would reach now (0 for one that is never sent again: `resendable` false)."""
+    event = await deliveries.event_for_club(session, user, event_id)
+    out = [ReviewEmailOut(**row) for row in await review.overview(session, event)]
+    # The club's library emails made just now are kept, so their ids open.
+    await session.commit()
+    return out
+
+
+@router.get("/review/resends", summary="Every time a review email was sent again, newest first")
+async def review_resends(session: SessionDep, user: ClubAuth, event_id: int) -> list[ReviewResendOut]:
+    event = await deliveries.event_for_club(session, user, event_id)
+    return [ReviewResendOut(**review.resend_out(r)) for r in await review.list_resends(session, event)]
+
+
+@router.put("/review/{stage}", summary="This event's own words for a review email")
+async def save_review_email(session: SessionDep, user: ClubAuth, event_id: int, stage: str, body: EmailTemplateFields) -> EmailTemplateOut:
+    """The first save makes the event's copy; later ones change it (its
+    version climbs when the words do). Words only: always on, no timer, no
+    audience; the ticket goes with the ticket email alone."""
+    event = await deliveries.event_for_club(session, user, event_id)
+    tpl = await review.save(session, event, review.stage_of(stage), body, created_by=user.id)
+    return EmailTemplateOut(**service.template_out(tpl))
+
+
+@router.delete("/review/{stage}", summary="Back to the club's words for a review email")
+async def drop_review_email(session: SessionDep, user: ClubAuth, event_id: int, stage: str) -> EmailTemplateOut:
+    """Drops the event's copy and answers the email the event sends now (the
+    club's, or MyOtherApp's). No copy: nothing to drop, the same answer."""
+    event = await deliveries.event_for_club(session, user, event_id)
+    _source, tpl = await review.drop(session, event, review.stage_of(stage))
+    return EmailTemplateOut(**service.template_out(tpl))
+
+
+@router.post("/review/{stage}/resend/count", summary="How many people a resend would reach now")
+async def count_review_resend(session: SessionDep, user: ClubAuth, event_id: int, stage: str) -> ReviewResendCount:
+    event = await deliveries.event_for_club(session, user, event_id)
+    return ReviewResendCount(**await review.count(session, event, review.stage_of(stage)))
+
+
+@router.post("/review/{stage}/resend", summary="Send the email's current words to the people it already went to")
+async def resend_review_email(
+    request: Request, session: SessionDep, user: ClubAuth, event_id: int, stage: str, body: ReviewResendRequest,
+) -> ReviewResendOut:
+    """Each person once, by email only, counted against the club's emails as
+    a message to the guests is. Who it reaches is checked again for each
+    person as their copy goes: anyone whose registration moved on is skipped.
+    The same `clientRef` again answers the same resend and mails nobody.
+    422 `NOT_RESENDABLE` (an email that goes once by itself), `NOT_REVIEWED`
+    (the event doesn't review registrations), `NOBODY` (nobody to send to);
+    402 `MESSAGE_QUOTA_EXCEEDED` when the club's emails left this month
+    (plan and credits) can't cover everyone, with `errors: {needed, available}`."""
+    event = await deliveries.event_for_club(session, user, event_id)
+    resend = await review.start(
+        session, event, review.stage_of(stage), client_ref=body.client_ref, created_by=user.id, created_by_name=_actor_name(request, user),
+    )
+    return ReviewResendOut(**review.resend_out(resend))
 
 
 @router.get("/{template_id}", summary="One email")

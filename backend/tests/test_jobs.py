@@ -274,6 +274,8 @@ def test_the_platforms_jobs_have_the_priorities_and_limits_chosen(monkeypatch):
         "live.update_push": (H, 2), "live.event_started": (H, 4),
         # Sends to many. deliveries.send is HIGH for one guest's ticket or certificate (its caller says).
         "deliveries.send": (N, 2), "emails.send_message": (N, 2),
+        # A review email sent again to the people it went to (app/api/emails/review.py).
+        "emails.review_resend": (N, 2),
         "notifications.new_event": (N, 2), "notifications.interest": (N, 2), "notifications.push": (N, 2),
         # A co-host's followers told about the event, and their push (app/api/cohosts).
         "notifications.cohost_new_event": (N, 2), "notifications.cohost_push": (N, 2),

@@ -27,8 +27,9 @@ EmailStage = Literal[
 JOURNEY_STAGES: list[str] = ["INVITE", "PRE_EVENT", "REMINDER", "POST_EVENT"]
 #: The emails of an event that reviews every registration (app/api/approvals):
 #: each goes to the one person, by itself, as their registration moves. The
-#: club edits them in its library; they have no event copies, no timer and no
-#: audience. A template's key is its stage in lower case (`request_received`).
+#: club edits them in its library, and may give an event its own copy of any
+#: (app/api/emails/review.py); they have no timer and no audience. A
+#: template's key is its stage in lower case (`request_received`).
 REQUEST_STAGES: list[str] = [
     "REQUEST_RECEIVED", "REQUEST_APPROVED", "REQUEST_APPROVED_PAY", "REQUEST_DECLINED", "REQUEST_LAPSED",
     "REQUEST_UNANSWERED",

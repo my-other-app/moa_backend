@@ -4,7 +4,8 @@ The contract as built: the backend (`backend/app/api/approvals/`), and what
 the club dashboard, the website and the app read from it. Migrations:
 `registration_approval` (after `admin_ops`), then `approval_stats` for the
 full numbers and the loopholes closed (§7), then `review_emails` for the
-club's own review emails (§9). All paths are under `/api/v1`.
+club's own review emails (§9), then `review_resends` for an event's own
+review emails and sending one again (§11). All paths are under `/api/v1`.
 
 The words changed on 28 Oct 2026 (§10): it is a **normal registration**. People
 register; the club reviews the registrations, confirms some (they get their
@@ -703,9 +704,10 @@ lower case (`request_received`, …), the keys this document always used.
     the first time the library is read. The library's GET routes commit, so
     the ids they answer with stay.
   - The send path reads the club's row, else the starter. It never writes.
-- **No event copies.**
+- **No event copies** -- until §11, which gives an event its own copy of any
+  of the six through its own routes.
   - `POST /events/{id}/emails` with a request stage → 422 "These emails belong
-    to the club's library: edit them in Emails."
+    to the club's library: edit them in Emails, …" (§11's routes make them).
   - Creating one in the library by hand, duplicating one, or deleting one is
     refused too (422).
   - An event's own Emails tab never lists them.
@@ -796,3 +798,60 @@ The backend's own words:
 - **Closeout PDF.** The section is "REGISTRATION REVIEW", with rows "Received",
   "Confirmed", "Cancelled by them", "Expired (not paid in time)", "Closed …"
   and "Average time to review".
+
+
+---
+
+## 11. An event's own review emails, and sending one again (migration `review_resends`)
+
+Contract: `feature-register/event-review-emails-contract.md` (10 Nov 2026).
+Code: `app/api/emails/review.py`; routes in `app/api/emails/router.py`.
+
+- **Event copies.** An event may hold its own copy of any of the six
+  (`email_templates` with `event_id` set; `uq_email_templates_event_stage`
+  already allows one per event and stage). `emails.service.request_template(
+  session, club_id, stage, event_id)` reads the event's copy, else the club's
+  library row, else the starter; notify and `request_ticket_for` pass the
+  event. Same rules as the library's: words only (`request_fixed`), tokens
+  held to their stage. An event copy is never listed with the journey, sent to
+  an audience (`/{id}/send` → 422), copied or saved to the library (422).
+- **Routes**, under `/events/{event_id}/emails`, with the event's emails'
+  own access (`deliveries.event_for_club`: the club, its team by role, a
+  co-host):
+  - `GET /review` → the six in order: `{stage, label, when, who, source:
+    "event"|"club"|"default", template, clubTemplateId, resendable, eligible,
+    lastResend}`. `default` is the club's library email still in MyOtherApp's
+    words.
+  - `PUT /review/{stage}` (EmailTemplateFields) makes or changes the event's
+    copy; `DELETE /review/{stage}` drops it and answers the club's (no copy: the
+    same answer). A stage that is not a review email → 404 `NOT_A_REVIEW_EMAIL`.
+  - `POST /review/{stage}/resend/count` → `{eligible, withoutEmail}`.
+  - `POST /review/{stage}/resend` `{clientRef}` → `Resend = {id, stage,
+    createdAt, createdBy: {id, name}|null, recipients, sent, failed, skipped,
+    status: "sending"|"done"}`. Idempotent on (event, clientRef). Refusals:
+    422 `NOT_RESENDABLE`, 422 `NOT_REVIEWED`, 422 `NOBODY`, and 402
+    `MESSAGE_QUOTA_EXCEEDED` (`errors: {needed, available}`) when what is left
+    of the club's emails this month (plan allowance plus credits, only while
+    plans are enforced) can't cover everyone.
+  - `GET /review/resends` → every resend, newest first.
+- **Who a resend reaches** (the same SQL at the press and again for each
+  person just before their copy goes; anyone who moved on is skipped with
+  "their registration moved on"):
+  `REQUEST_RECEIVED` pending; `REQUEST_APPROVED_PAY` approved with the hold
+  still offered and not run out; `REQUEST_APPROVED` approved with a live,
+  unrevoked registration, free or paid (hold claimed) -- the "Confirmed ·
+  ticket" email with the ticket attached; `REQUEST_DECLINED` declined (their
+  own note); `REQUEST_LAPSED` lapsed. `REQUEST_UNANSWERED` is not resendable:
+  it goes once, by itself, to requests closed because the event ended or was
+  deleted, and closed requests are never mailed again. Never: withdrawn,
+  closed, no address, a bounced or suppressed address.
+- **Sending.** The words are frozen on the resend. One row per person
+  (`review_resend_recipients`, unique per resend and request), claimed before
+  it is sent through the deliveries pipeline's pace (`pipeline.pump`), with
+  the provider idempotency key `resend:{resend_id}:{request_id}`. Email only,
+  no push. Counted against the club's emails as kind `announcement` (what a
+  typed message to the guests counts as), ref the same key. The job is
+  `emails.review_resend`; the minute sweep's `resume` puts back stale claims
+  and finishes what a deploy cut off, as for messages.
+- **Migration** `review_resends` (after `missing_answers`): the two new tables;
+  downgrade drops them.
