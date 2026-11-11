@@ -1008,7 +1008,7 @@ def test_every_tool_stands_for_a_dashboard_request_under_a_known_scope():
     from app.api.mcp.scopes import ALL
     from app.api.mcp.tools import TOOLS
 
-    assert len(TOOLS) == 15 and set(TOOLS) == set(policy.MCP_TOOLS)
+    assert len(TOOLS) == 16 and set(TOOLS) == set(policy.MCP_TOOLS)
     assert all(t.scope in ALL for t in TOOLS.values())
     writes = {n for n, t in TOOLS.items() if not t.read_only}
     assert writes == {"create_event_draft", "update_event_draft", "create_store_item", "offer_store_items", "draft_announcement",

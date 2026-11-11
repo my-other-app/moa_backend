@@ -328,7 +328,10 @@ async def get_event(call: Call, args: dict) -> dict:
         "prize": _money(event.prize_amount) if event.has_prize else None,
         "about": written(event.about), "guidelines": written(event.event_guidelines),
         "questions": questions,
-        "speakers": [{"name": s.name, "designation": s.designation, "bio": written(s.bio)} for s in (event.speakers or []) if not getattr(s, "is_deleted", False)],
+        "speakers": [
+            {"name": s.name, "designation": s.designation, "bio": written(s.bio), "speaker_profile_id": s.speaker_profile_id, "talk_title": s.talk_title}
+            for s in (event.speakers or []) if not getattr(s, "is_deleted", False)
+        ],
         "store": {"enabled": bool(event.merch_enabled), "offered_item_ids": [str(i) for i in await store.offered_ids(call.session, event)]},
         **_links(event),
     }
@@ -590,6 +593,38 @@ async def list_team(call: Call, args: dict) -> dict:
         ],
         "roles": {k: v[1] for k, v in policy.ROLE_INFO.items()},
     }
+
+
+@tool(
+    "find_past_speakers",
+    title="Find past speakers",
+    scope="events:read",
+    description=(
+        "Look up the club's past speakers by name (and claimed public speaker profiles), to reuse one instead of typing them again. "
+        "Each match has its speaker_profile_id, name, headline, a short bio, how many talks and the last one. "
+        "Names are matched loosely (case, titles like Dr., small typos). No contact details."
+    ),
+    schema=obj({
+        "names": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 100}, "minItems": 1, "maxItems": 20,
+                  "description": "The names to look up, e.g. the speakers on a poster."},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 5, "default": 3, "description": "Matches per name."},
+    }, ("names",)),
+)
+async def find_past_speakers(call: Call, args: dict) -> dict:
+    from app.api.speakers import club as speakers_club
+
+    out = []
+    for name in args["names"]:
+        found = await speakers_club.suggestions(call.session, call.club.id, name, args.get("limit", 3))
+        out.append({
+            "name": name,
+            "matches": [
+                {"speaker_profile_id": m["profile_id"], "name": m["name"], "headline": m["headline"], "bio": written(m["bio"]),
+                 "talks_count": m["talks_count"], "last_talk": m["last_talk"], "own_club": m["own"], "claimed": m["claimed"]}
+                for m in found
+            ],
+        })
+    return {"results": out}
 
 
 # ─── Writes: drafts only ─────────────────────────────────────────────────

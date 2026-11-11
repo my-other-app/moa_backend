@@ -90,6 +90,19 @@ class EventSpeakerCreate(CustomBaseModel):
     # Left out, an existing speaker keeps theirs: older clients do not send these.
     bio: str | None = Field(None)
     link: str | None = Field(None)
+    # The speakers directory (app/api/speakers, docs/SPEAKERS.md). A profile
+    # picked from the club's past speakers (or a claimed one); left out, a
+    # linked row keeps its profile and a new one is matched or made. The
+    # talk's title, kept as sent; left out, the row keeps its own.
+    speaker_profile_id: int | None = Field(None, ge=1)
+    talk_title: str | None = Field(None)
+
+    @field_validator("talk_title", mode="before")
+    @classmethod
+    def _talk_title(cls, v):
+        from app.api.speakers.links import clean_title
+
+        return clean_title(v)
 
     @field_validator("bio", mode="before")
     @classmethod
@@ -130,6 +143,12 @@ class EventSpeakerPublic(CustomBaseModel):
     bio: str | None = None
     link: str | None = None
     display_order: int = 0
+    #: The speakers directory: the profile this row belongs to, what they
+    #: talk about here, and the profile's public page (/speakers/{slug};
+    #: null when the profile is hidden).
+    speaker_profile_id: int | None = None
+    talk_title: str | None = None
+    profile_slug: str | None = None
 
 
 class EventCategoryBase(CustomBaseModel):
