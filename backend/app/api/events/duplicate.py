@@ -180,6 +180,10 @@ async def duplicate_event(
             ))
             copied["agenda"] += 1
 
+    # A new event, a draft (app/api/webhooks_out).
+    from app.api.webhooks_out import signals as webhooks
+
+    await webhooks.event_created(session, new)
     await session.commit()
     if skipped:
         logger.info("Event %s copied to %s without %s (the club's plan)", source.id, new.id, ", ".join(skipped))

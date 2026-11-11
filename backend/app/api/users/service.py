@@ -495,6 +495,10 @@ async def _fold_per_event(session, model, app_user, guest_ids, archive, *, best_
         row.user_id = holder
         row.soft_delete()
     await session.flush()
+    # A duplicate folded into the one kept: cancelled (app/api/webhooks_out).
+    from app.api.webhooks_out import signals as webhooks
+
+    await webhooks.registrations_cancelled(session, losers)
     for row in winners:
         row.user_id = app_user.id
     await session.flush()
@@ -1192,8 +1196,14 @@ async def delete_user(session: AsyncSession, user_id: int):
     registrations = select(EventRegistrationsLink).where(
         EventRegistrationsLink.user_id == user_id
     )
+    gone = []
     for registration in await session.scalars(registrations):
         registration.soft_delete()
+        gone.append(registration)
+    # Each registration still on a list is cancelled with the account (app/api/webhooks_out).
+    from app.api.webhooks_out import signals as webhooks
+
+    await webhooks.registrations_cancelled(session, gone)
     await session.execute(
         update(UserInterests)
         .where(UserInterests.user_id == user_id, UserInterests.is_deleted == False)  # noqa: E712

@@ -304,7 +304,13 @@ async def create_event(
     # Published at once: its "on publish" social posts and the team's share kit (app/api/social).
     from app.api.social import hooks as social
     from app.api.social.scheduler import is_published
+    # Webhooks (app/api/webhooks_out): made, and published at once when it is.
+    from app.api.webhooks_out import signals as webhooks
 
+    await webhooks.event_created(session, created_event)
+    if is_published(created_event):
+        await webhooks.event_published(session, created_event)
+    await session.commit()
     if is_published(created_event):
         await social.event_published(session, created_event)
         await session.commit()
@@ -373,6 +379,10 @@ async def update_event(
     from app.api.social import hooks as social
 
     social_before = social.snapshot(db_event)
+    # The event as webhooks saw it, to say what changed (app/api/webhooks_out).
+    from app.api.webhooks_out import signals as webhooks
+
+    webhooks_before = await webhooks.event_before(session, db_event)
     if event.poster:
         content = io.BytesIO(await event.poster.read())
         db_event.poster = {
@@ -562,6 +572,7 @@ async def update_event(
     )
     # Social posts follow a new date, and pause when they mention what changed (app/api/social).
     await social.event_changed(session, db_event, social_before)
+    await webhooks.event_updated(session, db_event, webhooks_before)
     await session.commit()
     await _tell_speaker_followers(session, event_id)
     await _republish_site(session, event_id)
@@ -1207,8 +1218,12 @@ async def restore_event(session: AsyncSession, event_id: int):
     if not event:
         raise CustomHTTPException(404, "No deleted event with that id")
 
+    from app.api.webhooks_out import signals as webhooks
+
+    webhooks_before = await webhooks.event_before(session, event)
     event.is_deleted = False
     event.deleted_at = None
+    await webhooks.event_updated(session, event, webhooks_before)
     await session.commit()
     return event
 
@@ -1240,10 +1255,15 @@ async def delete_event(
     from app.api.approvals import service as approvals
 
     await approvals.close_for_deleted_event(session, event_id)
+    from app.api.webhooks_out.objects import event_status
+
+    was = event_status(db_event)
     db_event.soft_delete()
     from app.api.social import hooks as social
+    from app.api.webhooks_out import signals as webhooks
 
     await social.event_stopped(session, db_event, "event_deleted")
+    await webhooks.event_cancelled(session, db_event, was=was)
     await session.commit()
     return None
 

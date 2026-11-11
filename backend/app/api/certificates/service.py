@@ -130,13 +130,19 @@ async def issue(session, event: Events, audience: str, roles: list[str]) -> dict
     version = _version_of_role(versions, default)
     now = datetime.now(timezone.utc)
     total = await _count(session, *criteria)
-    issued = (await session.execute(
+    issued_ids = list((await session.execute(
         update(EventRegistrationsLink)
         .where(*criteria, EventRegistrationsLink.certificate_issued_at.is_(None))
         .values(certificate_issued_at=now, certificate_design_version=version)
+        .returning(EventRegistrationsLink.id)
         .execution_options(synchronize_session="fetch")
-    )).rowcount or 0
+    )).scalars())
+    issued = len(issued_ids)
     await give_public_ids(session, criteria)
+    # One certificate.issued each (app/api/webhooks_out); refreshed ones were issued before.
+    from app.api.webhooks_out import signals as webhooks
+
+    await webhooks.certificates_issued(session, event, issued_ids)
     refreshed = (await session.execute(
         update(EventRegistrationsLink)
         .where(

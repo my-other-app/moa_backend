@@ -685,9 +685,15 @@ async def public_post(session, event_id: int, ref: str, k: Optional[str], sent, 
     shown = qmod.visibility(form.questions, merged)
     check_some(form, merged, [k_ for k_ in accepted if shown.get(k_, True)], require=True)
     merged = answers_mod.bound(qmod.prune(form.questions, merged))
+    was = dict(person.answers or {})
     await _save_answers(session, kind, id_, merged)
     await session.flush()
     person.answers = merged
+    if kind == REGISTRATION and merged != was:
+        # The answers given later (app/api/webhooks_out).
+        from app.api.webhooks_out import signals as webhooks
+
+        await webhooks.registration_answers_changed(session, event, id_, was)
     await after_answers_changed(session, event, person, now)
     status, asked = status_of(form, person, asks, event, now)
     return _view(event, kind, person, row, status, asked, asks, now)
@@ -703,6 +709,9 @@ async def door_answers(session, event, registration_id, sent) -> dict:
     from app.api.checkins import service as checkins
 
     reg = await checkins.registration_of(session, event, registration_id)
+    from app.api.webhooks_out import signals as webhooks
+
+    webhooks_before = await webhooks.registration_before(session, reg, club_id=event.club_id)
     form = Form(event.additional_details)
     sent = answers_mod.bound(sent) if sent is not None else {}
     merged = dict(reg.additional_details) if isinstance(reg.additional_details, dict) else {}
@@ -712,6 +721,7 @@ async def door_answers(session, event, registration_id, sent) -> dict:
     check_some(form, merged, touched, require=False)
     merged = answers_mod.bound(qmod.prune(form.questions, merged))
     reg.additional_details = merged
+    await webhooks.registration_updated(session, reg, webhooks_before, club_id=event.club_id)
     await session.commit()
     person = await people_mod.load_one(session, event, REGISTRATION, reg.id)
     await after_answers_changed(session, event, person)

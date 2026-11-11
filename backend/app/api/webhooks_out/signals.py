@@ -71,6 +71,11 @@ async def event_cancelled(session, event, *, was: Optional[str] = None) -> None:
                previous={"status": was} if was else None)
 
 
+async def event_status_changed(session, event, was: str) -> None:
+    """The status the partner API shows moved by itself (the clock ending it)."""
+    await emit(session, event.club_id, "event.updated", Ref("event", event.id), previous={"status": was})
+
+
 async def event_before(session, event) -> Optional[dict]:
     """The event before a change, for event_updated (None: nobody wants it)."""
     return await before(session, event.club_id, "event", event.id, "event.updated")
@@ -98,6 +103,11 @@ async def registration_updated(session, registration, was: Optional[dict], *, cl
         return
     club_id = await _club(session, club_id, registration.event_id)
     await changed(session, club_id, "registration.updated", Ref("registration", registration.id), was)
+
+
+async def registration_answers_changed(session, event, registration_id, was: dict) -> None:
+    """Answers written by a statement (the answers asked for later): `previous` is the old answers."""
+    await emit(session, event.club_id, "registration.updated", Ref("registration", registration_id), previous={"answers": was})
 
 
 async def registrations_updated(session, event, registration_ids: Iterable) -> None:
@@ -171,6 +181,18 @@ async def certificates_issued(session, event, registration_ids: Iterable) -> Non
 async def payment_completed(session, payment_log_id, *, event_id=None, club_id: Optional[int] = None) -> None:
     club_id = await _club(session, club_id, event_id)
     await emit(session, club_id, "payment.completed", Ref("payment", payment_log_id))
+
+
+async def registration_paid(session, registration_id, *, event_id=None, club_id: Optional[int] = None) -> None:
+    """Paid for: confirmed (registration.updated, its status as it was)."""
+    await registration_payment_changed(session, registration_id, {"status": "awaiting_payment"}, event_id=event_id, club_id=club_id)
+
+
+async def registration_payment_changed(session, registration_id, previous: dict, *, event_id=None,
+                                       club_id: Optional[int] = None) -> None:
+    """Paid, or refunded in full: registration.updated with what it was."""
+    club_id = await _club(session, club_id, event_id)
+    await emit(session, club_id, "registration.updated", Ref("registration", registration_id), previous=previous)
 
 
 async def payment_refunded(session, payment_log_id, *, event_id=None, club_id: Optional[int] = None) -> None:

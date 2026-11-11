@@ -8,6 +8,7 @@ attendees page, a walk-up, the offline queue -- goes through `scan` or
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import Optional
 
 from sqlalchemy import func, or_, select
@@ -201,6 +202,11 @@ async def admit(session, event: Events, reg: EventRegistrationsLink, *, actor: G
         reg.volunteer_id = actor.volunteer.id
     # The guest's note, push and badges: a job committed with the check-in.
     await after.enqueue(session, after.Admitted(user_id=reg.user_id, event_id=event.id, event_name=event.name, club_id=event.club_id))
+    # Every check-in is made here (the gate, the scanners' offline queue, by
+    # hand, kiosks, self check-in, volunteers, walk-ups): told once (app/api/webhooks_out).
+    from app.api.webhooks_out import signals as webhooks
+
+    await webhooks.checkin_created(session, SimpleNamespace(id=row_id, event_id=event.id), club_id=event.club_id)
     await session.commit()
     return await check_in_of(session, reg.id)
 
@@ -309,6 +315,10 @@ async def undo(session, event: Events, registration_id, actor: GateActor) -> dic
     row = await check_in_of(session, reg.id)
     if row is None:
         raise CustomHTTPException(404, message="They are not checked in, so there is nothing to undo.")
+    # Described before it goes (app/api/webhooks_out).
+    from app.api.webhooks_out import signals as webhooks
+
+    await webhooks.checkin_deleted(session, row, event)
     await session.delete(row)
     reg.is_attended = False
     reg.attended_on = None
@@ -384,6 +394,9 @@ async def walkup(session, event: Events, body, actor: GateActor, background_task
         reg.is_paid = True
         reg.paid_amount = reg.actual_amount
         await ledger.sync_registration(session, reg, kind=ledger_book.DESK_SALE, channel=ledger.DESK)
+        from app.api.webhooks_out import signals as webhooks
+
+        await webhooks.registration_paid(session, reg.id, club_id=event.club_id)
         await session.commit()
     # Whatever they took from the shelf is paid at the desk too.
     from app.api.store import service as store
@@ -437,8 +450,12 @@ async def search(session, event: Events, q: str) -> list[dict]:
 
 async def capture_contact(session, event: Events, registration_id, phone: str) -> dict:
     reg = await registration_of(session, event, registration_id)
+    from app.api.webhooks_out import signals as webhooks
+
+    webhooks_before = await webhooks.registration_before(session, reg, club_id=event.club_id)
     phone = " ".join(phone.split())
     reg.phone = phone
+    await webhooks.registration_updated(session, reg, webhooks_before, club_id=event.club_id)
     await session.commit()
     shared = list(
         await session.scalars(

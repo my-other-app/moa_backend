@@ -143,6 +143,10 @@ async def update_club(session: AsyncSession, club_id: int, club: CreateClub):
         select(Clubs).where(Clubs.id == club_id).options(selectinload(Clubs.interests))
     )
     db_club = await session.scalar(db_club)
+    # The profile as webhooks saw it (app/api/webhooks_out).
+    from app.api.webhooks_out import signals as webhooks
+
+    webhooks_before = await webhooks.club_before(session, club_id)
 
     if not db_club:
         raise CustomHTTPException(404, "Club not found")
@@ -218,6 +222,7 @@ async def update_club(session: AsyncSession, club_id: int, club: CreateClub):
             )
             session.add(db_socials)
 
+    await webhooks.club_updated(session, club_id, webhooks_before)
     await session.commit()
     _drop(replaced)
     await session.refresh(db_club)
@@ -1087,12 +1092,16 @@ async def update_club_logo(
     if not club:
         raise CustomHTTPException(404, "Club not found")
 
+    from app.api.webhooks_out import signals as webhooks
+
+    webhooks_before = await webhooks.club_before(session, club_id)
     replaced = club.logo
     content = io.BytesIO(await logo.read())
     club.logo = {
         "bytes": content,
         "filename": logo.filename,
     }
+    await webhooks.club_updated(session, club_id, webhooks_before)
     await session.commit()
     _drop(replaced)
     return {"message": "Club logo updated successfully"}
@@ -1107,7 +1116,9 @@ async def create_or_update_club_socials(
     club = await session.get(Clubs, club_id)
     if not club:
         raise CustomHTTPException(404, "Club not found")
+    from app.api.webhooks_out import signals as webhooks
 
+    webhooks_before = await webhooks.club_before(session, club_id)
     db_socials = await session.scalar(
         select(ClubSocials).where(
             ClubSocials.club_id == club_id,
@@ -1128,6 +1139,7 @@ async def create_or_update_club_socials(
             website=socials.website,
         )
         session.add(db_socials)
+    await webhooks.club_updated(session, club_id, webhooks_before)
     await session.commit()
     await session.refresh(db_socials)
     return db_socials
@@ -1244,8 +1256,12 @@ async def update_club_cover(session: AsyncSession, club_id: int, cover: UploadFi
     club = await session.get(Clubs, club_id)
     if not club:
         raise CustomHTTPException(404, "Club not found")
+    from app.api.webhooks_out import signals as webhooks
+
+    webhooks_before = await webhooks.club_before(session, club_id)
     replaced = club.cover
     club.cover = {"bytes": io.BytesIO(await cover.read()), "filename": cover.filename}
+    await webhooks.club_updated(session, club_id, webhooks_before)
     await session.commit()
     _drop(replaced)
     return {"message": "Club cover updated successfully"}

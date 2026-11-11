@@ -278,6 +278,10 @@ async def _apply_part(session, log: PaymentLogs, *, kind: str, amount: Decimal, 
         await ledger.sync_registration(session, reg, kind=ledger_book.UNAPPLY, origin_at=log.created_at)
     await ledger.part_refund(session, log, order, registration=reg, paise=money.to_paise(amount), ref=refund_id,
                              refund_id=None if refund_id.startswith("admin:") else refund_id)
+    # Part of it back (app/api/webhooks_out).
+    from app.api.webhooks_out import signals as webhooks
+
+    await webhooks.payment_refunded(session, log.id, event_id=reg.event_id if reg is not None else (order.payload or {}).get("event_id"))
 
 
 # ─── A subscription's charge ─────────────────────────────────────────────

@@ -264,6 +264,9 @@ async def cancel(session, event_id: int, *, reason: str, actor, expected_registr
         )
     now = _now()
     previous = lifecycle(event).value
+    from app.api.webhooks_out import objects as webhook_objects
+
+    shown_before = webhook_objects.event_status(event)
     event.lifecycle = EventStatus.cancelled
     event.status_clock = False
     c = EventCancellations(
@@ -287,6 +290,9 @@ async def cancel(session, event_id: int, *, reason: str, actor, expected_registr
     from app.api.social import hooks as social
 
     await social.event_stopped(session, event, "event_cancelled")
+    from app.api.webhooks_out import signals as webhooks
+
+    await webhooks.event_cancelled(session, event, was=shown_before)
     await session.commit()
     return await state(session, event)
 

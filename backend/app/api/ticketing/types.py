@@ -247,6 +247,9 @@ async def _after_change(session, event, types_before_paid: bool) -> list[TicketT
 async def create(session, event, data: dict, *, actor=None) -> TicketTypes:
     await ensure(session, event, adopt_untyped=True)
     event = await lock_event(session, event.id)
+    from app.api.webhooks_out import signals as webhooks
+
+    webhooks_before = await webhooks.event_before(session, event)
     types = await live(session, event.id, fresh=True)
     await _gate_new_type(session, event, types, actor=actor)
     await _gate_paid(session, event, data.get("price") or 0, actor=actor)
@@ -265,6 +268,7 @@ async def create(session, event, data: dict, *, actor=None) -> TicketTypes:
     )
     session.add(row)
     await _after_change(session, event, was_paid)
+    await webhooks.event_updated(session, event, webhooks_before)
     await session.commit()
     from app.api.ticketing import waitlist
 
@@ -274,6 +278,9 @@ async def create(session, event, data: dict, *, actor=None) -> TicketTypes:
 
 async def update_type(session, event, ttype: TicketTypes, data: dict, *, actor=None) -> TicketTypes:
     event = await lock_event(session, event.id)
+    from app.api.webhooks_out import signals as webhooks
+
+    webhooks_before = await webhooks.event_before(session, event)
     ttype = await session.scalar(
         select(TicketTypes).where(TicketTypes.id == ttype.id).with_for_update().execution_options(populate_existing=True)
     )
@@ -302,6 +309,7 @@ async def update_type(session, event, ttype: TicketTypes, data: dict, *, actor=N
         # The event's own price and cap are this type's: written back to it.
         sync_event_fee(event, [ttype])
     await _after_change(session, event, was_paid)
+    await webhooks.event_updated(session, event, webhooks_before)
     await session.commit()
     from app.api.ticketing import waitlist
 
@@ -322,6 +330,9 @@ async def delete_type(session, event, ttype: TicketTypes) -> None:
     """Only a type nobody holds a ticket of; one that sold is hidden instead,
     so its tickets keep their type. The event always keeps one."""
     event = await lock_event(session, event.id)
+    from app.api.webhooks_out import signals as webhooks
+
+    webhooks_before = await webhooks.event_before(session, event)
     types = await live(session, event.id, fresh=True)
     if len(types) <= 1:
         raise CustomHTTPException(
@@ -355,11 +366,15 @@ async def delete_type(session, event, ttype: TicketTypes) -> None:
     types = await _after_change(session, event, was_paid)
     if follows(types) and event.max_participants is None:
         event.max_participants = types[0].capacity
+    await webhooks.event_updated(session, event, webhooks_before)
     await session.commit()
 
 
 async def reorder(session, event, ids: list[int]) -> list[TicketTypes]:
     event = await lock_event(session, event.id)
+    from app.api.webhooks_out import signals as webhooks
+
+    webhooks_before = await webhooks.event_before(session, event)
     types = await live(session, event.id, fresh=True)
     by_id = {t.id: t for t in types}
     if set(ids) != set(by_id):
@@ -369,6 +384,7 @@ async def reorder(session, event, ids: list[int]) -> list[TicketTypes]:
         )
     for n, type_id in enumerate(ids):
         by_id[type_id].sort_order = n
+    await webhooks.event_updated(session, event, webhooks_before)
     await session.commit()
     return await live(session, event.id, fresh=True)
 
@@ -385,6 +401,9 @@ async def save_all(session, event, items: list[dict], *, event_capacity="unchang
         )
     await ensure(session, event, adopt_untyped=True)
     event = await lock_event(session, event.id)
+    from app.api.webhooks_out import signals as webhooks
+
+    webhooks_before = await webhooks.event_before(session, event)
     types = await live(session, event.id, fresh=True)
     by_id = {t.id: t for t in types}
     unknown = [i.get("id") for i in items if i.get("id") is not None and i["id"] not in by_id]
@@ -456,6 +475,7 @@ async def save_all(session, event, items: list[dict], *, event_capacity="unchang
         sync_event_fee(event, types)
     if event.has_fee and not was_paid:
         await confirm_free_registrations(session, event)
+    await webhooks.event_updated(session, event, webhooks_before)
     await session.commit()
     from app.api.ticketing import waitlist
 

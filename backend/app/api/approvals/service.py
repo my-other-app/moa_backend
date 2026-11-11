@@ -1001,6 +1001,10 @@ async def _confirm_one(session, event, req: RegistrationRequests, snap: _Snap, r
     req.decided_by_name = (run.actor_name or None) and run.actor_name[:120]
     req.updated_at = now
     await session.flush()
+    # Confirmed, in this request's SAVEPOINT (app/api/webhooks_out).
+    from app.api.webhooks_out import signals as webhooks
+
+    await webhooks.request_decided(session, req, approved=True, club_id=event.club_id)
     return {"registration_id": req.registration_id, "pay_by": pay_by}
 
 
@@ -1109,6 +1113,9 @@ async def decline(
         )).scalars().all())
         if notify and done:
             await _enqueue_ids(session, done, DECLINED_NOTE, stamp=str(int(now.timestamp() * 1000)))
+        from app.api.webhooks_out import signals as webhooks
+
+        await webhooks.requests_declined(session, event, done)
     await session.commit()
     got = set(done)
     return {"declined": [i for i in wanted if i in got], "skipped": [{"id": i, "reason": NOT_PENDING} for i in wanted if i not in got]}
@@ -1538,6 +1545,10 @@ async def retire_lapsed(session, request_id, *, now: Optional[datetime] = None) 
     if pending is not None:
         await store.release(session, pending, status="cancelled")
     await session.flush()
+    # Confirmed, never paid, and its time is up: cancelled (app/api/webhooks_out).
+    from app.api.webhooks_out import signals as webhooks
+
+    await webhooks.registration_cancelled(session, reg)
     await session.commit()
     return "retired"
 

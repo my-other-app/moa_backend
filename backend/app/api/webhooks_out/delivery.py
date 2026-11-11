@@ -162,9 +162,12 @@ async def may_see_attendees(session, endpoint) -> bool:
 
 async def body_for(session, event: WebhookEvents, endpoint) -> bytes:
     data = dict(event.data or {})
+    previous = dict(event.previous) if event.previous else None
     name = object_name(event)
     if name in wtypes.WITH_CONTACTS and not await may_see_attendees(session, endpoint):
+        # What changed is redacted as the object is: an old email is still an email.
         data = objects.redact(name, data)
+        previous = objects.redact(name, previous) or None
     if "external_id" in data and endpoint.owner_client_id:
         data["external_id"] = await seams.external_id(session, endpoint.owner_client_id, name, data.get("id"))
     envelope = {
@@ -174,7 +177,7 @@ async def body_for(session, event: WebhookEvents, endpoint) -> bytes:
         "livemode": bool(event.livemode),
         "club_id": str(event.club_id),
         "origin": {"type": event.origin_type, **({"client_id": event.origin_client_id} if event.origin_client_id else {})},
-        "data": {"object": data, **({"previous": event.previous} if event.previous else {})},
+        "data": {"object": data, **({"previous": previous} if previous else {})},
     }
     return json.dumps(envelope, separators=(",", ":"), ensure_ascii=False, default=str).encode("utf-8")
 

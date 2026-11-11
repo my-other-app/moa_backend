@@ -223,6 +223,10 @@ async def update_settings(session, event: Events, body) -> dict:
     if lifecycle(event) is EventStatus.cancelled:
         # A cancelled event's guests were told and refunded: it stays cancelled.
         raise CustomHTTPException(409, message="This event was cancelled, so its status and settings stay as they are.", error_code="EVENT_CANCELLED")
+    # The event as webhooks saw it (app/api/webhooks_out): its status is part of it.
+    from app.api.webhooks_out import signals as webhooks
+
+    webhooks_before = await webhooks.event_before(session, event)
     if "status" in data and data["status"] is not None:
         new = EventStatus(data["status"])
         if new is not lifecycle(event):
@@ -244,6 +248,12 @@ async def update_settings(session, event: Events, body) -> dict:
         event.report_recipients = data["report_recipients"]
     if data.get("keep_contacts") is not None:
         event.keep_contacts = data["keep_contacts"]
+    # A draft out: event.published. Anything else that shows (unpublished,
+    # ended, live again): event.updated, its status in `previous`.
+    if was is EventStatus.draft and lifecycle(event) in (EventStatus.published, EventStatus.live):
+        await webhooks.event_published(session, event)
+    else:
+        await webhooks.event_updated(session, event, webhooks_before)
     await session.commit()
     if "status" in data:
         from app.api.sites import service as sites
@@ -477,8 +487,13 @@ async def advance_clock(session, now: Optional[datetime] = None) -> int:
         jobs = {j.event_id: j for j in (await session.scalars(select(RetentionJobs).where(RetentionJobs.event_id.in_([e.id for e in events])))).all()}
     moved = 0
     went_live: list[int] = []
+    ended: list[tuple] = []
+    from app.api.webhooks_out import objects as webhook_objects
+    from app.api.webhooks_out import signals as webhooks
+
     for e in events:
         before = lifecycle(e)
+        shown_before = webhook_objects.event_status(e)
         end = ends_at(e)
         if e.lifecycle is EventStatus.published and now >= e.event_datetime:
             e.lifecycle = EventStatus.live
@@ -493,6 +508,12 @@ async def advance_clock(session, now: Optional[datetime] = None) -> int:
             moved += 1
         if before is not EventStatus.live and e.lifecycle is EventStatus.live:
             went_live.append(e.id)
+        if webhook_objects.event_status(e) != shown_before:
+            ended.append((e, shown_before))
+    # Webhooks (app/api/webhooks_out): an event that ended (live is still
+    # "published" to the partner API, so going live is no change there).
+    for e, shown_before in ended:
+        await webhooks.event_status_changed(session, e, shown_before)
     # Everyone registered is told the event is live (app/api/live/notify.py):
     # a job each, written with the move in one statement, sent once it commits.
     await live_notify.queue_event_live(session, *went_live)

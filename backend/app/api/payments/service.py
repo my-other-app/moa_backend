@@ -411,6 +411,15 @@ async def apply_payment(
     outcome = await handle_post_payment(session, order, background_tasks=background_tasks, commit=False)
     if outcome.full:
         log.refund_reason, log.refund_requested_at = EVENT_FULL, now
+    else:
+        # Every capture comes here (verify, both Razorpay webhooks, the
+        # reconcile sweep): told once, never for one refunded at once (app/api/webhooks_out).
+        from app.api.webhooks_out import signals as webhooks
+
+        event_id = getattr(outcome, "event_id", None)
+        await webhooks.payment_completed(session, log.id, event_id=event_id)
+        if getattr(outcome, "newly_paid", False) and getattr(outcome, "registration_id", None) is not None:
+            await webhooks.registration_paid(session, outcome.registration_id, event_id=event_id)
     await session.commit()
 
     if outcome.full:
@@ -554,6 +563,17 @@ async def _apply_refund(session: AsyncSession, db_payment: PaymentLogs, *, refun
     await ledger.refund(session, db_payment, order, registration=registration, refund_id=refund_id)
     if db_payment.refund_reason in (EVENT_FULL, DUPLICATE):
         await _tell_auto_refund(session, db_payment, order, registration)
+    else:
+        # Every full refund comes here (the admin's, the club's, a cancelled
+        # event's, Razorpay's dashboard by its webhook). A payment that bought
+        # nothing (a duplicate, an event already full) was never told as
+        # completed, so its refund is not told either (app/api/webhooks_out).
+        from app.api.webhooks_out import signals as webhooks
+
+        event_id = registration.event_id if registration is not None else (order.payload or {}).get("event_id")
+        await webhooks.payment_refunded(session, db_payment.id, event_id=event_id)
+        if registration is not None:
+            await webhooks.registration_payment_changed(session, registration.id, {"status": "confirmed"}, event_id=registration.event_id)
 
     await session.commit()
 
