@@ -209,6 +209,8 @@ LOOPS = [
     Loop("social posting", "app.api.social.sweep", "sweep_loop", lock_keys.SOCIAL_SWEEP,
          [("app.api.social.scheduler", "dispatch"), ("app.api.social.sweep", "maybe_daily")], runs=("social_daily",)),
     Loop("support desk", "app.api.support.sweep", "sweep_loop", lock_keys.SUPPORT_SWEEP, [("app.api.support.sweep", "sweep")]),
+    # Outgoing webhooks: changes and deliveries past 30 days, rotated secrets' overlaps (app/api/webhooks_out).
+    Loop("webhooks", "app.api.webhooks_out.sweep", "sweep_loop", lock_keys.WEBHOOKS_SWEEP, [("app.api.webhooks_out.sweep", "purge")]),
     Loop("popularity", "app.api.discover.counters", "check_loop", lock_keys.DISCOVER_POPULARITY, [("app.api.discover.popularity", "refresh")]),
     Loop("counters", "app.api.discover.counters", "check_loop", lock_keys.DISCOVER_COUNTERS,
          [("app.api.discover.counters", "reconcile"), ("app.api.discover.counters", "reconcile_more")], runs=("counters", "counters-posts")),

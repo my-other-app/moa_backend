@@ -81,7 +81,21 @@ def _partner_owned(endpoint) -> bool:
 # ─── What is shown ───────────────────────────────────────────────────────
 
 
-def endpoint_out(endpoint, *, secret: Optional[str] = None) -> dict:
+async def last_answers(session, endpoint_ids) -> dict:
+    """Each endpoint's last try: (its answer's status, when), one query."""
+    ids = [e for e in endpoint_ids or []]
+    if not ids:
+        return {}
+    rows = (await session.execute(
+        select(WebhookDeliveries.endpoint_id, WebhookDeliveries.response_status, WebhookDeliveries.last_attempt_at)
+        .where(WebhookDeliveries.endpoint_id.in_(ids), WebhookDeliveries.last_attempt_at.isnot(None))
+        .distinct(WebhookDeliveries.endpoint_id)
+        .order_by(WebhookDeliveries.endpoint_id, WebhookDeliveries.last_attempt_at.desc())
+    )).all()
+    return {r[0]: (r[1], r[2]) for r in rows}
+
+
+def endpoint_out(endpoint, *, secret: Optional[str] = None, last: Optional[tuple] = None) -> dict:
     if _partner_owned(endpoint):
         owner = {"type": "partner_app", "client_id": endpoint.owner_client_id,
                  "partner_app_id": str(endpoint.partner_app_id) if endpoint.partner_app_id else None}
@@ -110,6 +124,8 @@ def endpoint_out(endpoint, *, secret: Optional[str] = None) -> dict:
         "consecutive_failures": int(endpoint.consecutive_failures or 0),
         "last_success_at": objects.when(endpoint.last_success_at),
         "last_failure_at": objects.when(endpoint.last_failure_at),
+        "last_response_status": last[0] if last else None,
+        "last_delivery_at": objects.when(last[1]) if last else None,
         "created_by_name": endpoint.created_by_name,
         "created_at": objects.when(endpoint.created_at),
         "updated_at": objects.when(endpoint.updated_at),
@@ -235,6 +251,17 @@ async def get(session, owner: Owner, endpoint_id, *, for_change: bool = False) -
 
 async def listing(session, owner: Owner) -> list[WebhookEndpoints]:
     return list(await session.scalars(select(WebhookEndpoints).where(_visible(owner)).order_by(WebhookEndpoints.created_at)))
+
+
+async def listing_out(session, owner: Owner) -> list[dict]:
+    rows = await listing(session, owner)
+    last = await last_answers(session, [e.id for e in rows])
+    return [endpoint_out(e, last=last.get(e.id)) for e in rows]
+
+
+async def one_out(session, owner: Owner, endpoint_id) -> dict:
+    endpoint = await get(session, owner, endpoint_id)
+    return endpoint_out(endpoint, last=(await last_answers(session, [endpoint.id])).get(endpoint.id))
 
 
 async def create(session, owner: Owner, data: dict) -> tuple[WebhookEndpoints, str]:

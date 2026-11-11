@@ -17,16 +17,18 @@ used when it has one). Every route here needs `webhooks:manage`.
 - A partner app manages only its own endpoints for the club it is acting
   for; whether they get people's details is its connection's attendees:read.
 
-`error(status, code, message, details)` makes the exception the partner API
-answers in its error shape (`{error: {code, message, details?, request_id}}`);
-by default an HTTPException whose detail is `{code, message, details}`.
+Refusals are CustomHTTPExceptions with the contract's code as `error_code`
+and the details as `errors`: what the partner API's PartnerRoute
+(app/api/partner/routing.py, `include_partner_routes`) answers in its error
+shape (`{error: {code, message, details?, request_id}}`). `error(status, code,
+message, details)` makes another exception instead.
 """
 from __future__ import annotations
 
 from typing import Callable, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, Query, Response
 
 from app.api.webhooks_out import service
 from app.api.webhooks_out import types as wtypes
@@ -34,17 +36,20 @@ from app.api.webhooks_out.models import VIA_API_KEY, VIA_PARTNER
 from app.api.webhooks_out.schemas import EndpointIn, EndpointPatch, RotateIn
 from app.api.webhooks_out.service import Owner, WebhookError
 from app.db.core import SessionDep
+from app.response import CustomHTTPException
 
 SCOPE = "webhooks:manage"
 
 
 def _default_error(status: int, code: str, message: str, details: Optional[dict] = None) -> Exception:
-    return HTTPException(status_code=status, detail={"code": code, "message": message, **({"details": details} if details else {})})
+    return CustomHTTPException(status, message=message, error_code=code, errors=details)
 
 
 def owner_of(caller) -> Owner:
     via = VIA_PARTNER if getattr(caller, "client_type", None) == "partner_app" else VIA_API_KEY
     partner_app_id = getattr(caller, "partner_app_id", None)
+    if partner_app_id is None and via == VIA_PARTNER:
+        partner_app_id = getattr(getattr(caller, "app", None), "id", None)
     if partner_app_id is None and via == VIA_PARTNER:
         try:
             partner_app_id = UUID(str(caller.client_id))
@@ -73,7 +78,7 @@ def make_router(require_scope: Callable[[str], Callable], *, error: Optional[Cal
     @router.get("/webhook-endpoints", summary="Your webhook endpoints")
     async def list_endpoints(session: SessionDep, caller=Caller) -> dict:
         owner = owner_of(caller)
-        return {"data": [service.endpoint_out(e) for e in await service.listing(session, owner)], "next_cursor": None}
+        return {"data": await service.listing_out(session, owner), "next_cursor": None}
 
     @router.post("/webhook-endpoints", status_code=201, summary="Add an endpoint; its secret (whsec_...) is in this answer only")
     async def create_endpoint(body: EndpointIn, session: SessionDep, caller=Caller) -> dict:
@@ -88,7 +93,7 @@ def make_router(require_scope: Callable[[str], Callable], *, error: Optional[Cal
     @router.get("/webhook-endpoints/{endpoint_id}", summary="One endpoint")
     async def get_endpoint(endpoint_id: str, session: SessionDep, caller=Caller) -> dict:
         try:
-            return service.endpoint_out(await service.get(session, owner_of(caller), endpoint_id))
+            return await service.one_out(session, owner_of(caller), endpoint_id)
         except WebhookError as exc:
             _raise(exc)
 

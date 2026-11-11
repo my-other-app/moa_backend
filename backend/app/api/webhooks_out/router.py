@@ -68,7 +68,7 @@ async def event_types(request: Request, session: SessionDep, user: ClubAuth) -> 
 @club_router.get("", summary="The club's webhook endpoints (a connected app's too, read-only)")
 async def list_endpoints(request: Request, session: SessionDep, user: ClubAuth) -> dict:
     owner = await _owner(session, request, user)
-    return {"data": [service.endpoint_out(e) for e in await service.listing(session, owner)], "next_cursor": None}
+    return {"data": await service.listing_out(session, owner), "next_cursor": None}
 
 
 @club_router.post("", status_code=201, summary="Add an endpoint: its signing secret is in this answer only")
@@ -106,7 +106,7 @@ async def retry_delivery(request: Request, session: SessionDep, user: ClubAuth, 
 async def get_endpoint(request: Request, session: SessionDep, user: ClubAuth, endpoint_id: str) -> dict:
     owner = await _owner(session, request, user)
     try:
-        return service.endpoint_out(await service.get(session, owner, endpoint_id))
+        return await service.one_out(session, owner, endpoint_id)
     except WebhookError as exc:
         raise _fail(exc)
 

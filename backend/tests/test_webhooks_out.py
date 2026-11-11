@@ -451,6 +451,8 @@ async def test_the_delivery_log_and_sending_again(client, session, headers, club
     r = await client.post(f"{BASE}/deliveries/{delivery_id}/retry", headers=headers)
     assert r.json()["ok"] is True and r.json()["delivery"]["attempts"] == 3
     assert len(hub.requests) == 3
+    listed = (await client.get(BASE, headers=headers)).json()["data"]
+    assert listed[0]["last_response_status"] == 200 and listed[0]["last_delivery_at"]
     # Not to an endpoint turned off.
     await client.patch(f"{BASE}/{endpoint.id}", json={"enabled": False}, headers=headers)
     r = await client.post(f"{BASE}/deliveries/{delivery_id}/retry", headers=headers)
@@ -699,3 +701,21 @@ def test_previous_names_the_fields_that_changed():
     assert objects.diff(before, after) == {"name": "A"}
     after2 = dict(after, _poster_url="k2")
     assert objects.diff(before, after2) == {"name": "A", "poster_url": "https://s/1?sig=a"}
+
+
+async def test_the_contracts_form_without_a_session_for_test_mode_objects(session, club, hub):
+    """The partner API's sandbox emits its test objects after its own commit:
+    emit(club_id, type, object, origin), the object carrying livemode false."""
+    _, c = club
+    await add_endpoint(session, c.id, url="https://live.example.com/x")
+    await add_endpoint(session, c.id, url="https://sandbox.example.com/x", livemode=False)
+    obj = {"object": "registration", "id": "test_reg_1", "event_id": "test_evt_1", "status": "confirmed", "livemode": False,
+           "person": {"name": "Test Person", "email": "t@example.com", "phone": None}, "answers": {}}
+    written = await emit(c.id, "registration.updated", obj, Origin(type="api_key", client_id="key_test_1"))
+    assert written and written.startswith("evt_")
+    await deliver_all(session)
+    assert [r.headers["Host"] for r in hub.requests] == ["sandbox.example.com"]
+    body = json.loads(hub.requests[0].content)
+    assert body["livemode"] is False and body["data"]["object"]["id"] == "test_reg_1"
+    assert "person" not in body["data"]["object"]  # no DPDP tick on that endpoint
+    assert body["origin"] == {"type": "api_key", "client_id": "key_test_1"}

@@ -34,30 +34,35 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-async def run_sweep(session, now: Optional[datetime] = None) -> Optional[dict]:
+async def purge(session, now: Optional[datetime] = None) -> dict:
+    """The hour's work (under the sweep's lock, run_sweep)."""
     now = now or _now()
+    deleted = 0
+    for _ in range(40):
+        n = (await session.execute(
+            text("DELETE FROM webhook_events WHERE id IN (SELECT id FROM webhook_events WHERE created_at < :cutoff LIMIT :batch)"),
+            {"cutoff": now - RETENTION, "batch": BATCH},
+        )).rowcount or 0
+        await session.commit()
+        deleted += n
+        if n < BATCH:
+            break
+    emptied = (await session.execute(
+        update(WebhookEndpoints)
+        .where(WebhookEndpoints.previous_secret_expires_at.is_not(None), WebhookEndpoints.previous_secret_expires_at <= now)
+        .values(previous_secret_enc=None, previous_secret_expires_at=None)
+    )).rowcount or 0
+    await session.commit()
+    if deleted or emptied:
+        logger.info("webhooks sweep: %d change(s) past 30 days deleted, %d old secret(s) emptied", deleted, emptied)
+    return {"deleted": deleted, "secrets_emptied": emptied}
+
+
+async def run_sweep(session, now: Optional[datetime] = None) -> Optional[dict]:
     async with singleton(session, SWEEP_LOCK) as mine:
         if not mine:
             return None
-        deleted = 0
-        for _ in range(40):
-            n = (await session.execute(
-                text("DELETE FROM webhook_events WHERE id IN (SELECT id FROM webhook_events WHERE created_at < :cutoff LIMIT :batch)"),
-                {"cutoff": now - RETENTION, "batch": BATCH},
-            )).rowcount or 0
-            await session.commit()
-            deleted += n
-            if n < BATCH:
-                break
-        emptied = (await session.execute(
-            update(WebhookEndpoints)
-            .where(WebhookEndpoints.previous_secret_expires_at.is_not(None), WebhookEndpoints.previous_secret_expires_at <= now)
-            .values(previous_secret_enc=None, previous_secret_expires_at=None)
-        )).rowcount or 0
-        await session.commit()
-        if deleted or emptied:
-            logger.info("webhooks sweep: %d change(s) past 30 days deleted, %d old secret(s) emptied", deleted, emptied)
-        return {"deleted": deleted, "secrets_emptied": emptied}
+        return await purge(session, now)
 
 
 async def sweep_loop(interval: int = SWEEP_INTERVAL) -> None:

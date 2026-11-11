@@ -101,7 +101,10 @@ async def test_an_event_made_edited_unpublished_published_and_cancelled_in_the_d
     r = await client.patch(f"{API}/events/{event_id}/closeout/settings", json={"status": "draft"}, headers=w.dash)
     assert r.status_code == 200, r.text
     assert sent(w.hub) == Counter({"event.updated": 1})
-    assert last(w.hub, "event.updated")["data"]["previous"] == {"status": "published"}
+    # A draft has no public page: its address goes with the status.
+    previous = last(w.hub, "event.updated")["data"]["previous"]
+    assert previous["status"] == "published" and set(previous) <= {"status", "public_url"}
+    assert last(w.hub, "event.updated")["data"]["object"]["status"] == "draft"
     w.hub.clear()
     r = await client.patch(f"{API}/events/{event_id}/closeout/settings", json={"status": "published"}, headers=w.dash)
     assert r.status_code == 200 and sent(w.hub) == Counter({"event.published": 1})
@@ -300,7 +303,7 @@ async def test_certificates_issued_once_each(session, w, make_user, make_registr
     assert sent(w.hub) == Counter({"certificate.issued": 2})
     numbers = {b["data"]["object"]["registration_id"] for b in w.hub.bodies()}
     assert numbers == {str(r.id) for r in regs}
-    assert all(b["data"]["object"]["recipient_name"] for b in w.hub.bodies())
+    assert all(b["data"]["object"]["name"] for b in w.hub.bodies())
     w.hub.clear()
     await certificates.issue(session, event, "everyone", [])
     await deliver_all(session)

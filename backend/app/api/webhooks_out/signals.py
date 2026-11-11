@@ -160,7 +160,7 @@ async def checkin_deleted(session, checkin, event=None, *, club_id: Optional[int
     if not await wanted(session, club_id, "checkin.deleted"):
         return
     try:
-        snapshot = objects.checkin_object(checkin, event, deleted=True)
+        snapshot = objects.checkin_object(checkin, deleted=True)
     except Exception:  # noqa: BLE001
         logger.exception("webhooks: could not describe check-in %s being undone", getattr(checkin, "id", None))
         return

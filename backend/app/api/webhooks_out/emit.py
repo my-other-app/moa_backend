@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, Union
 
-from sqlalchemy import select
+from sqlalchemy import event, select
 
 from app.api.webhooks_out import types as wtypes
 from app.core.api_origin import Origin
@@ -58,25 +58,87 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+_CACHE = "webhooks_out:wanted"
+
+
+def _forget(sync, *args) -> None:
+    sync.info.pop(_CACHE, None)
+
+
+def _cache(session) -> dict:
+    """club id -> (its endpoints' subscriptions, allocated), for the length of
+    the transaction: an import of thousands of rows asks once per club."""
+    sync = getattr(session, "sync_session", session)
+    cache = sync.info.get(_CACHE)
+    if cache is None:
+        cache = sync.info[_CACHE] = {}
+        if not sync.info.get(_CACHE + ":hooked"):
+            event.listen(sync, "after_commit", _forget)
+            event.listen(sync, "after_rollback", _forget)
+            sync.info[_CACHE + ":hooked"] = True
+    return cache
+
+
 async def wanted(session, club_id: Optional[int], event_type: str) -> bool:
     """The club has an endpoint on that wants this type (any mode; the
-    fan-out matches the mode), and webhooks can be signed at all."""
-    from app.api.webhooks_out import crypto
+    fan-out matches the mode), it has API access, and webhooks can be signed."""
+    from app.api.webhooks_out import crypto, seams
     from app.api.webhooks_out.models import WebhookEndpoints
 
     if club_id is None or not crypto.available():
         return False
-    subscriptions = list(await session.scalars(
-        select(WebhookEndpoints.events).where(WebhookEndpoints.club_id == club_id, WebhookEndpoints.enabled == True)  # noqa: E712
-    ))
+    cache = _cache(session)
+    if club_id not in cache:
+        subscriptions = list(await session.scalars(
+            select(WebhookEndpoints.events).where(WebhookEndpoints.club_id == club_id, WebhookEndpoints.enabled == True)  # noqa: E712
+        ))
+        cache[club_id] = (subscriptions, None)
+    subscriptions, allocated = cache[club_id]
     if not any(wtypes.wants(s, event_type) for s in subscriptions):
         return False
-    from app.api.webhooks_out import seams
+    if allocated is None:
+        allocated = await seams.club_allocated(session, club_id)
+        cache[club_id] = (subscriptions, allocated)
+    return bool(allocated)
 
-    return await seams.club_allocated(session, club_id)
+
+def _is_session(value) -> bool:
+    return hasattr(value, "execute") and hasattr(value, "flush") and hasattr(value, "begin_nested")
 
 
-async def emit(
+async def emit(*args, **kwargs) -> Optional[str]:
+    """Write a change to be sent once it has committed. Two forms:
+
+    - `await emit(session, club_id, type, object_builder, origin=None, *, previous=None, livemode=None)`:
+      in the caller's transaction, before its commit (every domain change);
+    - `await emit(club_id, type, object, origin=None, ...)`: the contract's
+      form, for a caller whose change has committed already and has no
+      transaction to share (the partner API's sandbox, whose test objects
+      are not domain rows): written in a session of its own, committed now.
+
+    Returns the change's id (evt_...), or None when nobody wants it (or it
+    could not be written). Never raises."""
+    if args and _is_session(args[0]):
+        return await emit_in(*args, **kwargs)
+    return await emit_committed(*args, **kwargs)
+
+
+async def emit_committed(club_id: Optional[int], event_type: str, object_builder: Union[Ref, dict],
+                         origin: Optional[Origin] = None, **kwargs) -> Optional[str]:
+    from app.core import jobs
+
+    try:
+        async with jobs.scope() as session:
+            written = await emit_in(session, club_id, event_type, object_builder, origin, **kwargs)
+            if written:
+                await session.commit()
+            return written
+    except Exception:  # noqa: BLE001 - see the module's doc
+        logger.exception("webhooks: %s for club %s could not be written", event_type, club_id)
+        return None
+
+
+async def emit_in(
     session,
     club_id: Optional[int],
     event_type: str,
@@ -86,8 +148,7 @@ async def emit(
     previous: Optional[dict] = None,
     livemode: Optional[bool] = None,
 ) -> Optional[str]:
-    """Write the change to be sent after the commit. Returns its event id, or
-    None when nobody wants it (or it could not be written)."""
+    """Write the change in `session`'s transaction, to be sent after its commit."""
     try:
         if event_type not in wtypes.EVENT_TYPES:
             raise ValueError(f"unknown webhook type {event_type}")
