@@ -83,6 +83,9 @@ def start_loops() -> list[asyncio.Task]:
     from app.api.ticketing.sweep import sweep_loop as waitlist_sweep_loop
     # Social posts due, stale claims, and the daily token refresh -- every minute, one worker.
     from app.api.social.sweep import sweep_loop as social_sweep_loop
+    # Outgoing webhooks: changes and deliveries past 30 days deleted, rotated
+    # secrets' overlaps emptied -- every hour, on one process.
+    from app.api.webhooks_out.sweep import sweep_loop as webhooks_sweep_loop
     # The team's support desk: the 08:00 digest, follow-ups 3 days overdue to
     # the owners, waiting and resolved cases closed, retention -- every ten minutes.
     from app.api.support.sweep import sweep_loop as support_sweep_loop
@@ -95,6 +98,7 @@ def start_loops() -> list[asyncio.Task]:
             search_sync_loop, doc_cache_sweep_loop, club_whatsapp_sweep_loop, club_mailbox_sweep_loop, waitlist_sweep_loop,
             social_sweep_loop,
             support_sweep_loop,
+            webhooks_sweep_loop,
         )
     ]
 
@@ -288,6 +292,11 @@ application.add_middleware(SecurityHeadersMiddleware)
 application.add_middleware(RateLimitMiddleware)
 # The app's X-App-Version, on the request's log lines (app/core/observability.py).
 application.add_middleware(observability.AppVersionMiddleware)
+# Where a change came from (app/api/webhooks_out/origin.py): the dashboard,
+# the app, the website, or the platform itself, for a webhook's `origin`.
+from app.api.webhooks_out.origin import SurfaceMiddleware  # noqa: E402
+
+application.add_middleware(SurfaceMiddleware)
 # Outermost, so the rate limiter and everything after it see the caller
 # rather than Docker's bridge address (app.core.net).
 from app.core.net import ClientAddressMiddleware  # noqa: E402

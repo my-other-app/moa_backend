@@ -93,6 +93,8 @@ from app.api.social.router import (
     events_public_router as social_events_router,
     public_router as social_public_router,
 )
+from app.api.webhooks_out.router import admin_router as webhooks_admin_router
+from app.api.webhooks_out.router import club_router as webhooks_club_router
 from app.api.message_quota.router import admin_router as message_quota_admin_router
 from app.api.message_quota.router import club_router as message_quota_club_router
 from app.api.message_quota.router import public_router as message_credits_public_router
@@ -184,6 +186,9 @@ api_router.include_router(router=club_alerts_router)
 api_router.include_router(router=social_club_router)
 api_router.include_router(router=social_public_router)
 api_router.include_router(router=social_events_router)
+# Outgoing webhooks (app/api/webhooks_out): /clubs/integrations/webhooks/... before club_router.
+api_router.include_router(router=webhooks_club_router)
+api_router.include_router(router=webhooks_admin_router)
 api_router.include_router(router=message_quota_club_router)
 api_router.include_router(router=message_quota_admin_router)
 api_router.include_router(router=message_credits_public_router)

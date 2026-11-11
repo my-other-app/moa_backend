@@ -312,6 +312,11 @@ CLASSIFICATION: dict[str, str] = {
     "poster_variants": WIPE,
     "social_oauth_states": WIPE,
     "social_data_deletions": WIPE,
+    # Outgoing webhooks (app/api/webhooks_out): the clubs' endpoints (their
+    # encrypted secrets with them), the changes queued to send and the log.
+    "webhook_endpoints": WIPE,
+    "webhook_events": WIPE,
+    "webhook_deliveries": WIPE,
     "messages": WIPE,
     # What clubs sent, counted by the month, its statements and Enterprise clubs' own limits.
     "message_usage": WIPE,
