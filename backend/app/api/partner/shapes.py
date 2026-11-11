@@ -1,8 +1,12 @@
 """What the Integrations API returns for the real (live) objects: one
 function per resource, the same shape every GET, POST and PATCH answers --
-and what a webhook's `data.object` carries (app/api/webhooks_out emits with
-these: `event_object`, `registration_object`, `checkin_object`,
-`certificate_object`, `club_object`).
+and what a webhook's `data.object` carries. Plain functions of a row:
+`event_object`, `registration_object` (with a `RegistrationContext`),
+`request_object` (a registration under review), `ticket_object`,
+`payment_object` (a registration's money), `payment_log_object` (an online
+payment: payment.completed / payment.refunded), `checkin_object`,
+`certificate_object`, `club_object`; and, with a session,
+`event_payload` and `registration_payload`.
 
 Contact data -- a person's name, email, phone and form answers -- is only in
 the object when the caller holds attendees:read (`contact=True`).
@@ -125,7 +129,9 @@ class RegistrationContext:
         return ctx
 
 
-def _payment(reg, event, ext) -> dict:
+def payment_object(reg, event, ext=None) -> dict:
+    """A registration's money, as its `payment` reads: `ext` is its
+    PartnerExternalPayments row when it was paid outside MyOtherApp."""
     if ext is not None:
         return {"status": "paid_externally", "amount": int(ext.amount_paise), "currency": ext.currency or CURRENCY, "reference": ext.reference}
     if not event.has_fee:
@@ -140,18 +146,48 @@ def _payment(reg, event, ext) -> dict:
     return {"status": "awaiting_payment", "amount": paise_of(reg.actual_amount), "currency": CURRENCY}
 
 
+def _owes(reg, event, ext) -> bool:
+    return bool(event.has_fee) and not reg.is_paid and ext is None
+
+
+def ticket_object(reg, event, ext=None) -> dict:
+    """A registration's ticket: its code (what the door scans), a signed QR
+    link while it is valid, and whether it is valid, awaiting payment,
+    revoked or cancelled."""
+    if getattr(reg, "is_deleted", False):
+        status = "cancelled"
+    elif reg.ticket_revoked_at is not None:
+        status = "revoked"
+    elif _owes(reg, event, ext):
+        status = "awaiting_payment"
+    else:
+        status = "valid"
+    return {"code": reg.ticket_id, "qr_url": qr_url(reg.ticket_id) if status == "valid" else None, "status": status}
+
+
+def payment_log_object(log, reg=None, *, event_id=None) -> dict:
+    """An online payment (payment.completed, payment.refunded): amounts and
+    status only, never the payer's details or the provider's ids."""
+    eid = event_id if event_id is not None else getattr(reg, "event_id", None)
+    return {
+        "id": str(log.id),
+        "object": "payment",
+        "registration_id": str(reg.id) if reg is not None else None,
+        "event_id": str(eid) if eid is not None else None,
+        "status": getattr(log.status, "value", log.status),
+        "amount": paise_of(log.amount),
+        "currency": CURRENCY,
+        "created_at": iso(log.created_at),
+        "updated_at": iso(log.updated_at),
+        "livemode": True,
+    }
+
+
 def registration_object(reg, event, ctx: RegistrationContext, *, contact: bool, external_id: Optional[str] = None) -> dict:
     deleted = bool(getattr(reg, "is_deleted", False))
-    owes = bool(event.has_fee) and not reg.is_paid and reg.id not in ctx.payments
+    ext = ctx.payments.get(reg.id)
+    owes = _owes(reg, event, ext)
     status = "cancelled" if deleted else ("awaiting_payment" if owes else "confirmed")
-    if deleted:
-        ticket_status = "cancelled"
-    elif reg.ticket_revoked_at is not None:
-        ticket_status = "revoked"
-    elif owes:
-        ticket_status = "awaiting_payment"
-    else:
-        ticket_status = "valid"
     checkin = ctx.checkins.get(reg.id)
     checked_in_at = checkin.checked_in_at if checkin is not None else (reg.attended_on if reg.is_attended else None)
     req = ctx.requests.get(reg.id)
@@ -165,14 +201,10 @@ def registration_object(reg, event, ctx: RegistrationContext, *, contact: bool, 
         "object": "registration",
         "event_id": str(reg.event_id),
         "status": status,
-        "ticket": {
-            "code": reg.ticket_id,
-            "qr_url": qr_url(reg.ticket_id) if ticket_status == "valid" else None,
-            "status": ticket_status,
-        },
+        "ticket": ticket_object(reg, event, ext),
         "ticket_type": {"id": str(reg.ticket_type_id), "name": ctx.type_names.get(reg.ticket_type_id)} if reg.ticket_type_id is not None else None,
         "approval": approval,
-        "payment": _payment(reg, event, ctx.payments.get(reg.id)),
+        "payment": payment_object(reg, event, ext),
         "checked_in_at": iso(checked_in_at),
         "request_id": str(req.id) if req is not None else None,
         "external_id": external_id,
@@ -285,3 +317,23 @@ def club_object(club, socials=None, *, external_id: Optional[str] = None) -> dic
         "livemode": True,
         "updated_at": iso(club.updated_at),
     }
+
+
+# ─── For a caller with a session and a row (webhooks_out's emitters) ────
+
+
+async def event_payload(session, event) -> dict:
+    """event_object with its ticket types read (no external_id: those are each client's own)."""
+    from app.api.ticketing import types as types_mod
+
+    return event_object(event, ticket_types=await types_mod.live(session, event.id))
+
+
+async def registration_payload(session, reg, event=None, *, contact: bool = True) -> dict:
+    """registration_object with its check-in, external payment, request and
+    type read; contact data in unless `contact=False` (strip it per endpoint)."""
+    from app.api.events.models import Events
+
+    event = event or getattr(reg, "event", None) or await session.get(Events, reg.event_id)
+    ctx = await RegistrationContext.load(session, [reg])
+    return registration_object(reg, event, ctx, contact=contact)

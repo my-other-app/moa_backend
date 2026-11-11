@@ -104,7 +104,10 @@ class EventWrite(_Body):
     capacity: Optional[int] = Field(None, ge=1, le=1_000_000)
     registration: Optional[RegistrationSettings] = None
     price: Optional[Money] = Field(None, description="null or omitted: free.")
-    external_payments_allowed: Optional[bool] = Field(None, description="Accept registrations paid outside MyOtherApp.")
+    external_payments_allowed: Optional[bool] = Field(
+        None, json_schema_extra={"readOnly": True},
+        description="Read-only here: only the club turns this on, in the dashboard. Sent, it is 422 FIELD_READ_ONLY.",
+    )
     category: Optional[str] = Field(None, max_length=50, description="An event type's name; default the first.")
     external_id: Optional[str] = EXTERNAL_ID
 
@@ -218,12 +221,15 @@ class MeOut(_Out):
     type: Literal["api_key", "partner_app"]
     club: Optional[Ref] = None
     partner: Optional[Ref] = None
+    key: Optional[dict] = Field(None, description="A club key's id, name and prefix.")
+    client_id: str = Field(..., description="What webhooks name as a change's origin.")
     scopes: list[str]
     livemode: bool
     rate_limit: RateLimitOut
 
     model_config = ConfigDict(extra="allow", json_schema_extra={"examples": [{
         "type": "api_key", "club": {"id": "42", "name": "Robotics Club", "slug": "robotics-club"}, "partner": None,
+        "key": {"id": "3f0c...", "name": "Our website", "prefix": "moa_live_Ab12Cd34"}, "client_id": "key_9a8b7c6d5e4f3a2b1c0d9e8f",
         "scopes": ["events:read", "events:write"], "livemode": True, "rate_limit": {"read_per_min": 600, "write_per_min": 120},
     }]})
 
@@ -334,10 +340,13 @@ class CheckinOut(_Out):
     registration_id: str
     event_id: str
     checked_in_at: str
+    scanned_at: Optional[str] = Field(None, description="The device's own time, when it sent one.")
     gate: Optional[str] = None
     via: Optional[str] = None
     duplicate: bool = False
+    deleted: Optional[bool] = Field(None, description="On the answer to DELETE: true.")
     livemode: bool = True
+    updated_at: Optional[str] = None
 
 
 class CertificateOut(_Out):
@@ -361,6 +370,8 @@ class CertificateJobOut(_Out):
     status: Literal["queued", "running", "completed", "failed"]
     requested: dict
     result: Optional[dict] = None
+    error: Optional[str] = None
+    deliveries: Optional[list] = Field(None, description="Live, with send: how the emails are going, by channel.")
     livemode: bool = True
     created_at: Optional[str] = None
     finished_at: Optional[str] = None
@@ -368,12 +379,15 @@ class CertificateJobOut(_Out):
 
 class CertificateVerification(_Out):
     number: str
+    object: Literal["certificate_verification"] = "certificate_verification"
     valid: bool
     reason: str
+    registration_id: Optional[str] = None
     event_id: Optional[str] = None
     event_name: Optional[str] = None
-    name: Optional[str] = None
+    name: Optional[str] = Field(None, description="Only with attendees:read.")
     issued_at: Optional[str] = None
+    revoked_at: Optional[str] = None
     verify_url: Optional[str] = None
     pdf_url: Optional[str] = None
     livemode: bool = True

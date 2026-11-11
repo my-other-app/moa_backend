@@ -109,6 +109,20 @@ async def published_event(client, raw, **over) -> str:
     return event_id
 
 
+async def club_allows_paid_outside(client, session, mint_token, owner, event_id: int):
+    """The club turns on "Accept registrations paid outside MyOtherApp" the one way it can: the dashboard's edit form."""
+    ev = await session.get(Events, event_id, populate_existing=True)
+    form = {"name": ev.name, "event_datetime": ev.event_datetime.isoformat(), "duration": str(ev.duration), "category_id": str(ev.category_id),
+            "has_fee": "true" if ev.has_fee else "false", "reg_startdate": ev.reg_startdate.isoformat(), "external_payments_allowed": "true"}
+    if ev.reg_fee is not None:
+        form["reg_fee"] = str(ev.reg_fee)
+    if ev.max_participants:
+        form["max_participants"] = str(ev.max_participants)
+    r = await client.put(f"{API}/events/update/{event_id}", data=form, headers=auth_header(await mint_token(owner)))
+    assert r.status_code == 200, r.text
+    assert r.json()["external_payments_allowed"] is True
+
+
 # ─── Who may call ────────────────────────────────────────────────────────
 
 
@@ -389,15 +403,40 @@ async def test_an_event_is_edited_through_the_dashboards_own_service(client, ses
     made = (await client.post(f"{V1}/events", json=event_body(), headers=H(raw))).json()
     r = await client.patch(f"{V1}/events/{made['id']}", json={
         "name": "Renamed Day", "starts_at": iso(NOW + timedelta(days=21)), "ends_at": iso(NOW + timedelta(days=21, hours=5)),
-        "price": {"amount": 0}, "external_payments_allowed": True, "registration": {"requires_approval": True},
+        "price": {"amount": 0}, "registration": {"requires_approval": True},
     }, headers=H(raw))
     assert r.status_code == 200, r.text
     out = r.json()
-    assert out["name"] == "Renamed Day" and out["registration"]["requires_approval"] is True and out["external_payments_allowed"] is True
+    assert out["name"] == "Renamed Day" and out["registration"]["requires_approval"] is True and out["external_payments_allowed"] is False
     row = await session.get(Events, int(made["id"]), populate_existing=True)
-    assert row.duration == 5 and row.requires_approval and row.external_payments_allowed
+    assert row.duration == 5 and row.requires_approval and not row.external_payments_allowed
     r = await client.patch(f"{V1}/events/{made['id']}", json={"ends_at": iso(NOW + timedelta(days=30))}, headers=H(raw))
     assert r.status_code == 422
+
+
+async def test_only_the_club_turns_on_payments_taken_outside(client, session, world, mint_token):
+    """Decision 5: the API reads `external_payments_allowed` but never sets it (422 FIELD_READ_ONLY), live or test."""
+    raw = await key_for(session, world.ids.club)
+    test = await key_for(session, world.ids.club, livemode=False, name="Sandbox")
+    for key in (raw, test):
+        r = await client.post(f"{V1}/events", json=event_body(external_payments_allowed=True), headers=H(key))
+        assert r.status_code == 422 and r.json()["error"]["code"] == "FIELD_READ_ONLY"
+        assert r.json()["error"]["details"]["fields"] == {"external_payments_allowed": "Read-only."}
+    for value in (True, False):
+        r = await client.patch(f"{V1}/events/{world.ids.upcoming}", json={"external_payments_allowed": value}, headers=H(raw))
+        assert r.status_code == 422 and r.json()["error"]["code"] == "FIELD_READ_ONLY"
+    assert (await session.get(Events, world.ids.upcoming, populate_existing=True)).external_payments_allowed is False
+    # The club turns it on in the dashboard; the API shows it, and a partner still can't turn it off.
+    await club_allows_paid_outside(client, session, mint_token, world.owner, world.ids.upcoming)
+    assert (await client.get(f"{V1}/events/{world.ids.upcoming}", headers=H(raw))).json()["external_payments_allowed"] is True
+    r = await client.patch(f"{V1}/events/{world.ids.upcoming}", json={"external_payments_allowed": False, "capacity": 70}, headers=H(raw))
+    assert r.status_code == 422
+    row = await session.get(Events, world.ids.upcoming, populate_existing=True)
+    assert row.external_payments_allowed is True and row.max_participants == 50
+    # An edit through the API leaves the club's setting as it is.
+    assert (await client.patch(f"{V1}/events/{world.ids.upcoming}", json={"capacity": 70}, headers=H(raw))).json()["external_payments_allowed"] is True
+    schema = (await client.get(f"{V1}/openapi.json")).json()["components"]["schemas"]
+    assert schema["EventCreate"]["properties"]["external_payments_allowed"]["readOnly"] is True
 
 
 async def test_cancelling_refuses_an_event_with_online_payments(client, session, world, monkeypatch):
@@ -459,7 +498,7 @@ async def test_the_same_address_twice_and_a_full_event_are_refused(client, sessi
     assert r.status_code == 409 and r.json()["error"]["code"] == "EVENT_FULL"
 
 
-async def test_a_paid_event_refuses_without_a_payment_and_takes_one_paid_outside(client, session, world, make_event):
+async def test_a_paid_event_refuses_without_a_payment_and_takes_one_paid_outside(client, session, world, make_event, mint_token):
     raw = await key_for(session, world.ids.club)
     paid = await make_event(club=world.club, created_by=world.owner, name="Paid Workshop", event_datetime=NOW + timedelta(days=5),
                             has_fee=True, reg_fee=499, max_participants=10)
@@ -471,7 +510,7 @@ async def test_a_paid_event_refuses_without_a_payment_and_takes_one_paid_outside
     with_pay = {**person(1), "payment": {"status": "paid_externally", "amount": 49900, "currency": "INR", "reference": "UPI-77"}}
     r = await client.post(f"{V1}/events/{paid_id}/registrations", json=with_pay, headers=H(raw))
     assert r.status_code == 409 and r.json()["error"]["code"] == "EXTERNAL_PAYMENTS_OFF"
-    await client.patch(f"{V1}/events/{paid_id}", json={"external_payments_allowed": True}, headers=H(raw))
+    await club_allows_paid_outside(client, session, mint_token, world.owner, paid_id)
     r = await client.post(f"{V1}/events/{paid_id}/registrations", json=with_pay, headers=H(raw))
     assert r.status_code == 201, r.text
     reg = r.json()
@@ -592,21 +631,26 @@ async def test_test_keys_work_on_the_sandbox_and_never_meet_live_objects(client,
     test = await key_for(session, world.ids.club, livemode=False, name="Sandbox")
     events_before = await session.scalar(select(func.count()).select_from(Events))
     regs_before = await session.scalar(select(func.count()).select_from(EventRegistrationsLink).execution_options(include_deleted=True))
-    made = await client.post(f"{V1}/events", json=event_body(price={"amount": 9900}, external_payments_allowed=True), headers=H(test))
-    assert made.status_code == 201, made.text
+    paid = await client.post(f"{V1}/events", json=event_body(price={"amount": 9900}), headers=H(test))
+    assert paid.status_code == 201, paid.text
+    assert paid.json()["external_payments_allowed"] is False and paid.json()["price"] == {"amount": 9900, "currency": "INR"}
+    # The money rules hold: no payment, and no payment from outside on a test event either (only a club turns that on).
+    r = await client.post(f"{V1}/events/{paid.json()['id']}/registrations", json=person(1), headers=H(test))
+    assert r.status_code == 409 and r.json()["error"]["code"] == "PAYMENT_REQUIRED" and r.json()["error"]["details"]["checkout_url"] is None
+    pay = {"status": "paid_externally", "amount": 9900, "currency": "INR"}
+    r = await client.post(f"{V1}/events/{paid.json()['id']}/registrations", json={**person(1), "payment": pay}, headers=H(test))
+    assert r.status_code == 409 and r.json()["error"]["code"] == "EXTERNAL_PAYMENTS_OFF"
+    made = await client.post(f"{V1}/events", json=event_body(name="Free test night"), headers=H(test))
     event = made.json()
     assert event["id"].startswith("test_evt_") and event["livemode"] is False and event["status"] == "draft"
     assert (await client.get(f"{V1}/events/{event['id']}", headers=H(live))).status_code == 404
     assert (await client.get(f"{V1}/events/{world.ids.upcoming}", headers=H(test))).status_code == 404
     assert event["id"] not in {e["id"] for e in (await client.get(f"{V1}/events", headers=H(live))).json()["data"]}
-    assert [e["id"] for e in (await client.get(f"{V1}/events", headers=H(test))).json()["data"]] == [event["id"]]
+    assert [e["id"] for e in (await client.get(f"{V1}/events", headers=H(test))).json()["data"]] == [paid.json()["id"], event["id"]]
     r = await client.post(f"{V1}/checkins", json={"ticket_code": "TEST-AAAA-BBBB"}, headers=H(test))
     assert r.status_code == 404
-    # The door refuses a draft; the money rules hold.
-    r = await client.post(f"{V1}/events/{event['id']}/registrations", json=person(1), headers=H(test))
-    assert r.status_code == 409 and r.json()["error"]["code"] == "PAYMENT_REQUIRED" and r.json()["error"]["details"]["checkout_url"] is None
-    pay = {"status": "paid_externally", "amount": 9900, "currency": "INR"}
-    reg = await client.post(f"{V1}/events/{event['id']}/registrations", json={**person(1), "payment": pay}, headers=H(test))
+    # The door refuses a draft.
+    reg = await client.post(f"{V1}/events/{event['id']}/registrations", json=person(1), headers=H(test))
     assert reg.status_code == 201 and reg.json()["id"].startswith("test_reg_") and reg.json()["livemode"] is False
     r = await client.post(f"{V1}/checkins", json={"registration_id": reg.json()["id"]}, headers=H(test))
     assert r.status_code == 409 and r.json()["error"]["code"] == "EVENT_NOT_OPEN"
@@ -614,7 +658,7 @@ async def test_test_keys_work_on_the_sandbox_and_never_meet_live_objects(client,
     first = await client.post(f"{V1}/checkins", json={"ticket_code": reg.json()["ticket"]["code"]}, headers=H(test))
     again = await client.post(f"{V1}/checkins", json={"registration_id": reg.json()["id"]}, headers=H(test))
     assert first.status_code == 201 and again.status_code == 200 and again.json()["duplicate"] is True
-    r = await client.post(f"{V1}/events/{event['id']}/registrations", json={**person(1), "payment": pay}, headers=H(test))
+    r = await client.post(f"{V1}/events/{event['id']}/registrations", json=person(1), headers=H(test))
     assert r.json()["error"]["code"] == "ALREADY_REGISTERED"
     job = (await client.post(f"{V1}/events/{event['id']}/certificates", json={"all_checked_in": True}, headers=H(test))).json()
     assert job["livemode"] is False and job["result"]["issued"] == 1
@@ -851,6 +895,8 @@ async def test_the_openapi_document_is_valid_31_for_exactly_this_surface(client,
     assert doc["paths"]["/partner/v1/events"]["post"]["x-scopes"] == ["events:write"]
     assert schemas["EventCreate"].get("examples") and schemas["EventOut"].get("examples") and schemas["ErrorBody"].get("examples")
     assert "HTTPValidationError" not in schemas
+    assert {"scanned_at", "updated_at", "duplicate", "gate", "via"} <= set(schemas["CheckinOut"]["properties"])
+    assert {"registration_id", "revoked_at", "object"} <= set(schemas["CertificateVerification"]["properties"])
     from jsonschema import Draft202012Validator
 
     for name, schema in schemas.items():
@@ -902,3 +948,26 @@ async def test_sandbox_changes_are_emitted_as_test_webhooks(client, session, wor
     await client.post(f"{V1}/checkins", json={"registration_id": reg["id"]}, headers=H(test))
     assert [c[1] for c in calls] == ["event.created", "event.published", "registration.created", "checkin.created"]
     assert all(c[0] == world.ids.club and c[2]["livemode"] is False and c[3].type == "api_key" for c in calls)
+
+
+async def test_the_builders_are_plain_functions_with_the_answers_shapes(client, session, world):
+    """What webhooks_out's emitters will call: the same shapes as the GETs."""
+    from app.api.partner import shapes
+
+    raw = await key_for(session, world.ids.club)
+    reg = (await client.post(f"{V1}/events/{world.ids.upcoming}/registrations", json=person(1), headers=H(raw))).json()
+    checkin = (await client.post(f"{V1}/checkins", json={"registration_id": reg["id"]}, headers=H(raw))).json()
+    row = await session.get(EventRegistrationsLink, reg["id"], populate_existing=True)
+    event = await session.get(Events, world.ids.upcoming, populate_existing=True)
+    payload = await shapes.registration_payload(session, row, event)
+    got = (await client.get(f"{V1}/registrations/{reg['id']}", headers=H(raw))).json()
+    assert {k: v for k, v in payload.items() if k not in ("ticket", "updated_at")} == {k: v for k, v in got.items() if k not in ("ticket", "updated_at", "external_id")} | {"external_id": None}
+    assert shapes.ticket_object(row, event)["code"] == got["ticket"]["code"] and shapes.payment_object(row, event) == got["payment"]
+    assert (await shapes.event_payload(session, event))["id"] == str(world.ids.upcoming)
+    ci = await session.scalar(select(CheckIns).where(CheckIns.registration_id == row.id))
+    assert shapes.checkin_object(ci)["id"] == checkin["id"]
+    log = SimpleNamespace(id="9b0e", status=SimpleNamespace(value="captured"), amount=499, created_at=NOW, updated_at=NOW)
+    assert shapes.payment_log_object(log, row) == {
+        "id": "9b0e", "object": "payment", "registration_id": reg["id"], "event_id": str(world.ids.upcoming), "status": "captured",
+        "amount": 49900, "currency": "INR", "created_at": iso(NOW), "updated_at": iso(NOW), "livemode": True,
+    }

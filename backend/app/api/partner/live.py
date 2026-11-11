@@ -58,6 +58,9 @@ from app.response import CustomHTTPException
 logger = logging.getLogger(__name__)
 
 MAX_HOURS = 72
+#: What an event object shows but only the club changes (decision 5: money is
+#: the club's call): "Accept registrations paid outside MyOtherApp".
+READ_ONLY_EVENT_FIELDS = frozenset({"external_payments_allowed"})
 
 
 def _uuid(value) -> Optional[uuid.UUID]:
@@ -373,6 +376,11 @@ async def get_event(caller, event_id):
 def event_fields(body, *, current=None) -> dict:
     """The domain's columns from the API's fields, checked as the dashboard's form is."""
     sent = body.model_dump(exclude_unset=True)
+    for field in READ_ONLY_EVENT_FIELDS & set(sent):
+        raise PartnerError(
+            "FIELD_READ_ONLY", f"{field} can't be set through the API: only the club turns it on, in the dashboard.",
+            details={"fields": {field: "Read-only."}},
+        )
     out: dict = {}
     starts = parse_time(sent["starts_at"], "starts_at") if "starts_at" in sent else (current.event_datetime if current is not None else None)
     if "ends_at" in sent:
@@ -431,8 +439,6 @@ def event_fields(body, *, current=None) -> dict:
             out["has_fee"], out["reg_fee"] = True, float(money_mod.from_paise(int(price["amount"])))
         else:
             out["has_fee"], out["reg_fee"] = False, None
-    if sent.get("external_payments_allowed") is not None:
-        out["external_payments_allowed"] = bool(sent["external_payments_allowed"])
     return out
 
 
@@ -476,7 +482,7 @@ async def create_event(caller, body):
             location_name=fields.get("location_name"), is_online=bool(fields.get("is_online")), url=fields.get("url"),
             reg_startdate=fields.get("reg_startdate") or now(), reg_enddate=fields.get("reg_enddate"), about=fields.get("about"),
             max_participants=fields.get("max_participants"), status="draft", pin=fields.get("pin"),
-            requires_approval=fields.get("requires_approval"), external_payments_allowed=fields.get("external_payments_allowed"),
+            requires_approval=fields.get("requires_approval"),
         )
         await ticket_types.follow_event_edit(session, created)
     except Exception:
@@ -522,7 +528,8 @@ async def _update(caller, event, changes: dict) -> None:
         event_tag=event.event_tag, speakers=None, ticket_template_id=event.ticket_template_id,
         certificate_template_id=changes.get("certificate_template_id", event.certificate_template_id),
         requires_approval=changes.get("requires_approval"), high_demand_label=None, allow_self_cancel=None,
-        external_payments_allowed=changes.get("external_payments_allowed"),
+        # Never from the API: None leaves the club's own setting as it is.
+        external_payments_allowed=None,
     )
     updated = await events_service.update_event(session, form, caller.owner.id, event_id=event.id, actor=caller.owner)
     await ticket_types.follow_event_edit(session, updated)
@@ -838,7 +845,7 @@ async def create_registration(caller, event_id, body):
             raise PartnerError("VALIDATION", "This ticket costs nothing, so no payment comes with it.", details={"fields": {"payment": "Nothing to pay."}})
         if payment is not None and not event.external_payments_allowed:
             raise PartnerError(
-                "EXTERNAL_PAYMENTS_OFF", "This event doesn't accept registrations paid outside MyOtherApp. The club can turn that on in the dashboard.",
+                "EXTERNAL_PAYMENTS_OFF", "This event doesn't accept registrations paid outside MyOtherApp. Only the club can turn that on, in the dashboard.",
                 details={"checkout_url": public_urls.event_url(event.slug)},
             )
         if payment is not None:

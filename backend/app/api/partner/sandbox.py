@@ -169,8 +169,6 @@ def _apply_event(data: dict, fields: dict, sent: dict) -> None:
     if "max_participants" in fields:
         for t in data.get("ticket_types") or []:
             t["capacity"] = fields["max_participants"]
-    if "external_payments_allowed" in fields:
-        data["external_payments_allowed"] = bool(fields["external_payments_allowed"])
     if "poster_url" in sent:
         data["poster_url"] = sent["poster_url"]
 
