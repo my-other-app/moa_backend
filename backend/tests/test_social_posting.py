@@ -200,6 +200,37 @@ async def test_a_lost_answer_that_did_not_land_is_sent_after_the_lookup(client, 
     assert calls == ["/v26.0/page-1/photos", "/v26.0/page-1/published_posts", "/v26.0/page-1/photos"]
 
 
+async def test_an_instagram_publish_whose_answer_was_lost_is_found_not_published_again(client, session, w):
+    await connect(client, w, "instagram")
+    w.fake.fail("POST", r"/media_publish$", raise_=httpx.ReadTimeout("no answer"))
+    t = await _target(session, await _post(client, w, "instagram", "{event_name} tonight"))
+    assert t.uncertain_since is not None and t.container_id, "the container is kept for the next attempt"
+    w.fake.ig_media.append({"id": "igmedia-77", "caption": "Hack Night tonight", "timestamp": "2099-01-01T00:00:00+0000",
+                            "permalink": "https://www.instagram.com/p/igmedia-77/"})
+    await _due_now(session, t)
+    assert await scheduler.run_target(session, t.id) == "posted"
+    t = await session.get(SocialPostTargets, t.id, populate_existing=True)
+    assert t.external_post_id == "igmedia-77"
+    assert len(w.fake.by("POST", r"/media_publish$")) == 1 and len(w.fake.by("POST", r"/ig-1/media$")) == 1
+
+
+async def test_an_outcome_that_stays_unknown_asks_the_club_after_six_hours(client, session, w):
+    await connect(client, w, "instagram")
+    w.fake.fail("POST", r"/media_publish$", raise_=httpx.ReadTimeout("no answer"))
+    t = await _target(session, await _post(client, w, "instagram", "{event_name} tonight"))
+    # Instagram says the container was published, yet the post is not found: it is never published again.
+    w.fake.container_status = ["PUBLISHED"]
+    await _due_now(session, t)
+    assert await scheduler.run_target(session, t.id) == "scheduled"
+    await session.execute(update(SocialPostTargets).where(SocialPostTargets.id == t.id).values(
+        first_attempt_at=datetime.now(timezone.utc) - timedelta(hours=7)))
+    await _due_now(session, t)
+    assert await scheduler.run_target(session, t.id) == "failed"
+    t = await session.get(SocialPostTargets, t.id, populate_existing=True)
+    assert (t.error_code, t.error_action) == ("unknown_outcome", "retry")
+    assert len(w.fake.by("POST", r"/media_publish$")) == 1
+
+
 async def test_a_claim_that_went_stale_mid_send_is_looked_up_first(client, session, w):
     await connect(client, w, "x")
     t = await _target(session, await _post(client, w, "x", "{event_name}", trigger={"mode": "before_start", "minutes": 30}))

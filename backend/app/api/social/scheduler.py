@@ -382,8 +382,11 @@ async def _failure(session, target, claim, account, exc: h.PlatformError, now: d
         await session.commit()
         return HELD
     if exc.kind == h.UNKNOWN:
+        if now - first >= RETRY_WINDOW:
+            return await _stop(session, target, claim, FAILED, "unknown_outcome",
+                               f"We couldn't tell whether {label} took this post. Check it there, then Retry if it isn't.", "retry")
         return await _again(session, target, claim, now + LOOKUP_AFTER, code=exc.code, message=exc.message,
-                            uncertain=_aware(target.claimed_at) or now)
+                            uncertain=_aware(target.uncertain_since) or _aware(target.claimed_at) or now)
     if exc.kind == h.RATE:
         if now - first >= LIMIT_WINDOW:
             return await _stop(session, target, claim, FAILED, exc.code or "rate_limited", f"{label}'s limit held it for a day.", "retry")
