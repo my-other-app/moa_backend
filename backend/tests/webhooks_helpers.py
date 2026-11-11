@@ -39,9 +39,9 @@ class Hub:
         self.requests.clear()
 
 
-@pytest.fixture
-def hub(monkeypatch):
-    from app.api.webhooks_out import seams, sender
+def _hub(monkeypatch) -> Hub:
+    """A key, no settle delay, DNS and HTTP caught; the seams as installed."""
+    from app.api.webhooks_out import sender
     from app.config import settings
     from app.core import net
 
@@ -63,11 +63,31 @@ def hub(monkeypatch):
 
     monkeypatch.setattr(sender, "RESOLVE", resolve)
     monkeypatch.setattr(sender, "TRANSPORT", httpx.MockTransport(handle))
+    return h
+
+
+@pytest.fixture
+def real_hub(monkeypatch):
+    """The partner API's real answers behind the seams (webhooks_out.wiring)."""
+    import doth  # noqa: F401 - installs the seams, as the API does
+    from app.api.webhooks_out import seams
+
+    seams.reset()
+    yield _hub(monkeypatch)
+    seams.reset()
+
+
+@pytest.fixture
+def hub(monkeypatch):
+    """Stand-ins behind the seams: the test says who is allocated and what a partner may read."""
+    from app.api.webhooks_out import seams
+
+    h = _hub(monkeypatch)
 
     async def allocated(session, club_id):
         return club_id in h.allocated
 
-    async def scopes(session, club_id, partner_app_id, client_id):
+    async def scopes(session, club_id, partner_app_id, client_id, *, livemode=True):
         return h.partner_scopes.get((club_id, client_id), frozenset())
 
     async def contact(session, partner_app_id, client_id):

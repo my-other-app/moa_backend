@@ -1,24 +1,22 @@
-"""The objects a webhook carries in `data.object`: the shape the partner API's
-GET returns (feature-register/integrations-api-contract.md, Resources).
+"""The objects a webhook carries in `data.object`: exactly what the partner
+API's GET returns, built by its own builders (app/api/partner/shapes.py), so
+a webhook and a GET never disagree.
 
-The partner API's own serializers (app/api/partner/shapes.py: event_object,
-registration_object with its RegistrationContext, request_object,
-checkin_object, certificate_object, club_object) are used whenever that
-module is there, so a webhook and a GET never disagree. Without it -- this
-module on its own -- the fallbacks below give the same fields. Payments are
-webhooks' own (the partner API has no payment resource): amounts and status.
-
-Each `load_<kind>(session, id)` reads what it needs by id, soft-deleted rows
-included, and returns a JSON-ready dict, with the contact fields (a person's
-name, email, phone, answers; a certificate's name) in it; `redact` takes them
+Each `load_<kind>(session, id)` reads the row by id, soft-deleted rows
+included, and returns the object with its contact fields in it (a person's
+name, email, phone and answers; a certificate's name); `redact` takes them
 out for an endpoint whose owner may not have them. `None`: no such row.
+
+A payment is `shapes.payment_log_object` (amounts and status only) with what
+a refund needs on top: `amount_refunded`, and `status` refunded or
+partially_refunded once money went back.
 
 `external_id` is per client: filled in for each endpoint's owner when it is
 sent (delivery.py, seams.external_id).
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
@@ -27,8 +25,6 @@ from sqlalchemy import func, select
 from app.core import money as money_mod
 
 IST = ZoneInfo("Asia/Kolkata")
-TIMEZONE = "Asia/Kolkata"
-CURRENCY = "INR"
 INCLUDE_DELETED = {"include_deleted": True}
 
 #: The fields `redact` takes out, per object.
@@ -37,20 +33,11 @@ CONTACT_FIELDS = {
     "certificate": ("name",),
 }
 
-_UNSET = object()
-_shapes_module: Any = _UNSET
 
+def _shapes():
+    from app.api.partner import shapes
 
-def partner_shapes():
-    """app.api.partner.shapes when the partner API is there, else None."""
-    global _shapes_module
-    if _shapes_module is _UNSET:
-        try:
-            from app.api.partner import shapes
-        except ImportError:
-            shapes = None
-        _shapes_module = shapes
-    return _shapes_module
+    return shapes
 
 
 def when(value: Optional[datetime]) -> Optional[str]:
@@ -63,20 +50,6 @@ def when(value: Optional[datetime]) -> Optional[str]:
 
 def paise(value) -> int:
     return money_mod.to_paise(value or 0)
-
-
-def _money(amount_paise: Optional[int]) -> Optional[dict]:
-    return None if amount_paise is None else {"amount": int(amount_paise), "currency": CURRENCY}
-
-
-def _sid(value) -> Optional[str]:
-    return None if value is None else str(value)
-
-
-def _picture(value) -> Optional[str]:
-    if isinstance(value, dict):
-        return value.get("original") or next(iter(value.values()), None)
-    return None
 
 
 def _stored_key(value) -> Optional[str]:
@@ -95,12 +68,10 @@ def redact(object_type: str, obj: Optional[dict]) -> Optional[dict]:
     return {k: v for k, v in obj.items() if k not in fields}
 
 
-# ─── Events ──────────────────────────────────────────────────────────────
-
-
 def event_status(event) -> str:
-    """draft | published | ended | cancelled, by the event's own status (what
-    a change moves; the partner API's GET also reads a past end as ended)."""
+    """draft | published | ended | cancelled, by the event's own status: what
+    a change moves, so what decides whether one is told (the GET also reads
+    a past end as ended, with no change behind it)."""
     from app.api.closeout.models import EventStatus
 
     if getattr(event, "is_deleted", False):
@@ -115,53 +86,7 @@ def event_status(event) -> str:
     return "published"
 
 
-def _ticket_type(t) -> dict:
-    return {
-        "id": str(t.id), "name": t.name, "price": _money(paise(t.price)), "capacity": t.capacity,
-        "sales_start": when(t.sales_start), "sales_end": when(t.sales_end), "hidden": bool(t.is_hidden),
-    }
-
-
-def event_object(event, ticket_types: list) -> dict:
-    from app.core.public_urls import event_url
-
-    shapes = partner_shapes()
-    if shapes is not None:
-        return shapes.event_object(event, ticket_types=ticket_types)
-    status = event_status(event)
-    starts = event.event_datetime
-    venue = None
-    if event.location_name or event.lat is not None:
-        venue = {"name": event.location_name, "address": None, "city": None, "lat": event.lat, "lng": event.lng, "map_url": event.location_link}
-    return {
-        "id": str(event.id),
-        "object": "event",
-        "club_id": _sid(event.club_id),
-        "name": event.name,
-        "slug": event.slug,
-        "description": event.about,
-        "status": status,
-        "starts_at": when(starts),
-        "ends_at": when(starts + timedelta(hours=float(event.duration or 0)) if starts else None),
-        "timezone": TIMEZONE,
-        "venue": venue,
-        "online": {"url": event.url} if event.is_online and event.url else None,
-        "poster_url": _picture(event.poster),
-        "capacity": event.max_participants,
-        "registration": {
-            "opens_at": when(event.reg_startdate), "closes_at": when(event.reg_enddate),
-            "requires_approval": bool(event.requires_approval),
-        },
-        "price": _money(paise(event.reg_fee)) if event.has_fee else None,
-        "ticket_types": [_ticket_type(t) for t in ticket_types],
-        "external_payments_allowed": bool(getattr(event, "external_payments_allowed", False)),
-        "registrations_count": int(event.going_count or 0),
-        "external_id": None,
-        "public_url": event_url(event.slug) if status in ("published", "ended") else None,
-        "livemode": True,
-        "created_at": when(event.created_at),
-        "updated_at": when(event.updated_at),
-    }
+# ─── Rows by id ──────────────────────────────────────────────────────────
 
 
 async def _event(session, event_id) -> Any:
@@ -172,124 +97,6 @@ async def _event(session, event_id) -> Any:
     return await session.scalar(select(Events).where(Events.id == int(event_id)).execution_options(**INCLUDE_DELETED))
 
 
-async def _ticket_types(session, event_id: int) -> list:
-    from app.api.ticketing.models import TicketTypes
-
-    return list(await session.scalars(
-        select(TicketTypes).where(TicketTypes.event_id == event_id, TicketTypes.is_deleted == False)  # noqa: E712
-        .order_by(TicketTypes.sort_order, TicketTypes.id)
-    ))
-
-
-async def load_event(session, event_id) -> Optional[dict]:
-    event = await _event(session, event_id)
-    if event is None:
-        return None
-    return event_object(event, await _ticket_types(session, event.id))
-
-
-async def compare_event(session, event_id) -> Optional[dict]:
-    """The event as `event.updated` compares it: the object, and the poster's stored key."""
-    event = await _event(session, event_id)
-    if event is None:
-        return None
-    out = event_object(event, await _ticket_types(session, event.id))
-    out["_poster_url"] = _stored_key(event.poster)
-    return out
-
-
-# ─── Registrations ───────────────────────────────────────────────────────
-
-
-def _registration_status(reg, event) -> str:
-    if reg.is_deleted:
-        return "cancelled"
-    if event is not None and event.has_fee and not reg.is_paid:
-        return "awaiting_payment"
-    return "confirmed"
-
-
-def _payment_of(reg, event) -> dict:
-    if event is None or not event.has_fee:
-        return {"status": "not_required", "amount": 0, "currency": CURRENCY}
-    if reg.is_paid:
-        paid = paise(reg.paid_amount)
-        if reg.payment_receipt:
-            return {"status": "paid_online", "amount": paid, "currency": CURRENCY}
-        if paid > 0:
-            return {"status": "paid_at_door", "amount": paid, "currency": CURRENCY}
-        return {"status": "not_required", "amount": 0, "currency": CURRENCY}
-    return {"status": "awaiting_payment", "amount": paise(reg.actual_amount), "currency": CURRENCY}
-
-
-def _answers(value) -> dict:
-    return value if isinstance(value, dict) else {}
-
-
-def registration_fallback(reg, event, request=None, type_name: Optional[str] = None) -> dict:
-    status = _registration_status(reg, event)
-    if reg.is_deleted:
-        ticket_status = "cancelled"
-    elif reg.ticket_revoked_at is not None:
-        ticket_status = "revoked"
-    elif status == "awaiting_payment":
-        ticket_status = "awaiting_payment"
-    else:
-        ticket_status = "valid"
-    approval = None
-    if request is not None:
-        approval = {"status": "approved", "decided_at": when(request.decided_at), "request_id": str(request.id)}
-    elif event is not None and event.requires_approval:
-        approval = {"status": "added_directly", "decided_at": None, "request_id": None}
-    return {
-        "id": str(reg.id),
-        "object": "registration",
-        "event_id": str(reg.event_id),
-        "status": status,
-        "ticket": {"code": reg.ticket_id, "qr_url": None, "status": ticket_status},
-        "ticket_type": {"id": str(reg.ticket_type_id), "name": type_name} if reg.ticket_type_id is not None else None,
-        "approval": approval,
-        "payment": _payment_of(reg, event),
-        "checked_in_at": when(reg.attended_on) if reg.is_attended else None,
-        "request_id": str(request.id) if request is not None else None,
-        "external_id": None,
-        "livemode": True,
-        "created_at": when(reg.created_at),
-        "updated_at": when(reg.updated_at),
-        "person": {"name": reg.full_name, "email": reg.email, "phone": reg.phone},
-        "answers": _answers(reg.additional_details),
-    }
-
-
-_REQUEST_STATUS = {"pending": "pending_approval", "approved": "pending_approval", "declined": "declined",
-                   "withdrawn": "withdrawn", "lapsed": "cancelled", "closed": "cancelled"}
-
-
-def request_fallback(request, event) -> dict:
-    status = _REQUEST_STATUS.get(request.status, "pending_approval")
-    approval = {"pending": "pending", "approved": "approved", "declined": "declined", "withdrawn": "withdrawn"}.get(request.status, request.status)
-    paid = event is not None and event.has_fee and request.amount
-    return {
-        "id": str(request.id),
-        "object": "registration",
-        "event_id": str(request.event_id),
-        "status": status,
-        "ticket": None,
-        "ticket_type": {"id": str(request.ticket_type_id), "name": None} if request.ticket_type_id is not None else None,
-        "approval": {"status": approval, "decided_at": when(request.decided_at), "request_id": str(request.id)},
-        "payment": ({"status": "awaiting_payment", "amount": paise(request.amount), "currency": CURRENCY} if paid
-                    else {"status": "not_required", "amount": 0, "currency": CURRENCY}),
-        "checked_in_at": None,
-        "request_id": str(request.id),
-        "external_id": None,
-        "livemode": True,
-        "created_at": when(request.submitted_at or request.created_at),
-        "updated_at": when(request.updated_at),
-        "person": {"name": request.full_name, "email": request.email, "phone": request.phone},
-        "answers": _answers(request.answers),
-    }
-
-
 async def _registration(session, reg_id) -> Any:
     from app.api.events.models import EventRegistrationsLink
 
@@ -298,35 +105,47 @@ async def _registration(session, reg_id) -> Any:
     )
 
 
-async def _request_of(session, reg_id) -> Any:
-    from app.api.approvals.models import RegistrationRequests
-
-    return await session.scalar(
-        select(RegistrationRequests).where(RegistrationRequests.registration_id == reg_id)
-        .order_by(RegistrationRequests.submitted_at.desc()).limit(1)
-    )
+# ─── Events ──────────────────────────────────────────────────────────────
 
 
-async def registration_object(session, reg, event) -> dict:
-    shapes = partner_shapes()
-    if shapes is not None:
-        ctx = await shapes.RegistrationContext.load(session, [reg])
-        return shapes.registration_object(reg, event, ctx, contact=True)
-    from app.api.ticketing import types as types_mod
+async def _event_object(session, event) -> dict:
+    out = await _shapes().event_payload(session, event)
+    if getattr(event, "is_deleted", False):
+        # Deleted before anyone registered (event.cancelled): the GET finds
+        # no such event any more; the webhook says what became of it.
+        out["status"] = "cancelled"
+        out["public_url"] = None
+    return out
 
-    names = await types_mod.names(session, [reg.ticket_type_id]) if reg.ticket_type_id is not None else {}
-    return registration_fallback(reg, event, await _request_of(session, reg.id), names.get(reg.ticket_type_id))
+
+async def load_event(session, event_id) -> Optional[dict]:
+    event = await _event(session, event_id)
+    return None if event is None else await _event_object(session, event)
+
+
+async def compare_event(session, event_id) -> Optional[dict]:
+    """The event as `event.updated` compares it: the object, and the poster's stored key."""
+    event = await _event(session, event_id)
+    if event is None:
+        return None
+    out = await _event_object(session, event)
+    out["_poster_url"] = _stored_key(event.poster)
+    return out
+
+
+# ─── Registrations ───────────────────────────────────────────────────────
 
 
 async def load_registration(session, reg_id) -> Optional[dict]:
     reg = await _registration(session, reg_id)
     if reg is None:
         return None
-    return await registration_object(session, reg, await _event(session, reg.event_id))
+    return await _shapes().registration_payload(session, reg, await _event(session, reg.event_id), contact=True)
 
 
 async def load_request(session, request_id) -> Optional[dict]:
-    """A request's registration when it has one, else the request itself."""
+    """A request's registration when it has one, else the request itself
+    (shaped as a registration under review, its id the request's)."""
     from app.api.approvals.models import RegistrationRequests
 
     request = await session.get(RegistrationRequests, request_id)
@@ -335,35 +154,16 @@ async def load_request(session, request_id) -> Optional[dict]:
     if request.registration_id is not None:
         reg = await _registration(session, request.registration_id)
         if reg is not None:
-            return await registration_object(session, reg, await _event(session, reg.event_id))
-    event = await _event(session, request.event_id)
-    shapes = partner_shapes()
-    if shapes is not None:
-        return shapes.request_object(request, event, contact=True)
-    return request_fallback(request, event)
+            return await _shapes().registration_payload(session, reg, await _event(session, reg.event_id), contact=True)
+    return _shapes().request_object(request, await _event(session, request.event_id), contact=True)
 
 
 # ─── Check-ins and certificates ──────────────────────────────────────────
 
 
 def checkin_object(checkin, *, deleted: bool = False) -> dict:
-    shapes = partner_shapes()
-    if shapes is not None:
-        out = shapes.checkin_object(checkin)
-    else:
-        out = {
-            "id": str(checkin.id),
-            "object": "checkin",
-            "registration_id": str(checkin.registration_id),
-            "event_id": str(checkin.event_id),
-            "checked_in_at": when(checkin.checked_in_at),
-            "scanned_at": when(checkin.scanned_at),
-            "gate": checkin.door_label,
-            "via": getattr(checkin.via, "value", checkin.via),
-            "duplicate": False,
-            "livemode": True,
-            "updated_at": when(checkin.updated_at),
-        }
+    """The check-in, with `deleted` (true for checkin.deleted: the check-in as it was)."""
+    out = _shapes().checkin_object(checkin)
     out["deleted"] = deleted
     return out
 
@@ -375,33 +175,12 @@ async def load_checkin(session, checkin_id) -> Optional[dict]:
     return None if checkin is None else checkin_object(checkin)
 
 
-def certificate_object(reg) -> dict:
-    shapes = partner_shapes()
-    if shapes is not None:
-        return shapes.certificate_object(reg, contact=True)
-    from app.api.events.certificates import number_of, public_url_of
-
-    return {
-        "number": number_of(reg),
-        "object": "certificate",
-        "registration_id": str(reg.id),
-        "event_id": str(reg.event_id),
-        "status": "revoked" if reg.certificate_revoked_at else "issued",
-        "issued_at": when(reg.certificate_issued_at),
-        "revoked_at": when(reg.certificate_revoked_at),
-        "verify_url": public_url_of(reg),
-        "pdf_url": None,
-        "livemode": True,
-        "name": reg.full_name,
-    }
-
-
 async def load_certificate(session, reg_id) -> Optional[dict]:
     reg = await _registration(session, reg_id)
-    return None if reg is None else certificate_object(reg)
+    return None if reg is None else _shapes().certificate_object(reg, contact=True)
 
 
-# ─── Payments (webhooks' own) ────────────────────────────────────────────
+# ─── Payments ────────────────────────────────────────────────────────────
 
 
 async def _refunded(session, log) -> int:
@@ -432,59 +211,18 @@ async def load_payment(session, log_id) -> Optional[dict]:
     order = await session.scalar(select(PaymentOrders).where(PaymentOrders.id == log.order_id).execution_options(**INCLUDE_DELETED))
     payload = dict((order.payload if order is not None else None) or {})
     reg_id = payload.get("event_registration_id")
-    event_id = payload.get("event_id")
     reg = await _registration(session, reg_id) if reg_id else None
-    if reg is not None:
-        event_id = reg.event_id
+    out = _shapes().payment_log_object(log, reg, event_id=reg.event_id if reg is not None else payload.get("event_id"))
     refunded = await _refunded(session, log)
-    amount = paise(log.amount)
-    status = getattr(log.status, "value", log.status)
-    if refunded >= amount and amount > 0:
-        status = "refunded"
+    out["amount_refunded"] = refunded
+    if refunded >= out["amount"] and out["amount"] > 0:
+        out["status"] = "refunded"
     elif refunded > 0:
-        status = "partially_refunded"
-    return {
-        "id": str(log.id),
-        "object": "payment",
-        "registration_id": _sid(reg_id),
-        "event_id": _sid(event_id),
-        "status": status,
-        "amount": amount,
-        "amount_refunded": refunded,
-        "currency": (order.currency if order is not None and order.currency else CURRENCY),
-        "livemode": True,
-        "created_at": when(log.created_at),
-        "updated_at": when(log.updated_at),
-    }
+        out["status"] = "partially_refunded"
+    return out
 
 
 # ─── The club ────────────────────────────────────────────────────────────
-
-
-def club_object(club, socials=None) -> dict:
-    from app.config import settings
-
-    shapes = partner_shapes()
-    if shapes is not None:
-        return shapes.club_object(club, socials)
-    return {
-        "id": str(club.id),
-        "object": "club",
-        "name": club.name,
-        "slug": club.slug,
-        "status": "active" if club.is_verified else "pending_approval",
-        "tagline": club.tagline,
-        "about": club.about,
-        "links": {
-            "website": getattr(socials, "website", None), "instagram": getattr(socials, "instagram", None),
-            "linkedin": getattr(socials, "linkedin", None), "youtube": getattr(socials, "youtube", None),
-        },
-        "logo_url": _picture(club.logo),
-        "public_url": settings.PUBLIC_CLUB_URL.format(slug=club.slug) if club.is_verified and getattr(club, "listed", False) else None,
-        "external_id": None,
-        "livemode": True,
-        "updated_at": when(club.updated_at),
-    }
 
 
 async def _club(session, club_id) -> tuple[Any, Any]:
@@ -501,14 +239,14 @@ async def _club(session, club_id) -> tuple[Any, Any]:
 
 async def load_club(session, club_id) -> Optional[dict]:
     club, socials = await _club(session, club_id)
-    return None if club is None else club_object(club, socials)
+    return None if club is None else _shapes().club_object(club, socials)
 
 
 async def compare_club(session, club_id) -> Optional[dict]:
     club, socials = await _club(session, club_id)
     if club is None:
         return None
-    out = club_object(club, socials)
+    out = _shapes().club_object(club, socials)
     out["_logo_url"] = _stored_key(club.logo)
     # Not in the object, but the profile's: a new cover is a change.
     out["_cover"] = _stored_key(club.cover)

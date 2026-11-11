@@ -261,6 +261,12 @@ from app.api.partner.router import router as partner_router  # noqa: E402
 
 application.include_router(router=partner_oauth_router)
 application.include_router(router=partner_router)
+# Outgoing webhooks ask the partner API whether a club has access, what a
+# partner's connection may read, whom to tell and each client's external ids
+# (app/api/webhooks_out/wiring.py): its real answers, before any request.
+from app.api.webhooks_out import wiring as webhooks_wiring  # noqa: E402
+
+webhooks_wiring.install()
 # Innermost: each request's plan-gate scope, so one request resolves a club's
 # entitlements once and knows whether an admin is behind it
 # (app/api/subscriptions/gates.py).

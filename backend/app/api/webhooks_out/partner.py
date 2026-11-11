@@ -46,6 +46,11 @@ def _default_error(status: int, code: str, message: str, details: Optional[dict]
 
 
 def owner_of(caller) -> Owner:
+    """The caller as an endpoints' owner. An app's own token acts for no club
+    (WebhookError FORBIDDEN_SCOPE): endpoints are per club."""
+    if getattr(caller, "club_id", None) is None:
+        raise WebhookError(403, "FORBIDDEN_SCOPE", "Webhook endpoints are a club's: use the token a club's connection gave you "
+                                                   "(or the MOA-Club-Id header with the app's own token).")
     via = VIA_PARTNER if getattr(caller, "client_type", None) == "partner_app" else VIA_API_KEY
     partner_app_id = getattr(caller, "partner_app_id", None)
     if partner_app_id is None and via == VIA_PARTNER:
@@ -77,13 +82,16 @@ def make_router(require_scope: Callable[[str], Callable], *, error: Optional[Cal
 
     @router.get("/webhook-endpoints", summary="Your webhook endpoints")
     async def list_endpoints(session: SessionDep, caller=Caller) -> dict:
-        owner = owner_of(caller)
+        try:
+            owner = owner_of(caller)
+        except WebhookError as exc:
+            _raise(exc)
         return {"data": await service.listing_out(session, owner), "next_cursor": None}
 
     @router.post("/webhook-endpoints", status_code=201, summary="Add an endpoint; its secret (whsec_...) is in this answer only")
     async def create_endpoint(body: EndpointIn, session: SessionDep, caller=Caller) -> dict:
-        owner = owner_of(caller)
         try:
+            owner = owner_of(caller)
             endpoint, secret = await service.create(session, owner, body.model_dump(exclude={"client_id"}))
         except WebhookError as exc:
             _raise(exc)

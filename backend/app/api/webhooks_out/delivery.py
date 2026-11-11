@@ -87,9 +87,10 @@ def object_name(event: WebhookEvents) -> str:
 
 
 async def _partner_scopes(session, endpoint, cache: dict) -> frozenset:
-    key = (endpoint.club_id, endpoint.partner_app_id, endpoint.owner_client_id)
+    key = (endpoint.club_id, endpoint.partner_app_id, endpoint.owner_client_id, bool(endpoint.livemode))
     if key not in cache:
-        cache[key] = frozenset(await seams.partner_scopes(session, endpoint.club_id, endpoint.partner_app_id, endpoint.owner_client_id))
+        cache[key] = frozenset(await seams.partner_scopes(session, endpoint.club_id, endpoint.partner_app_id, endpoint.owner_client_id,
+                                                          livemode=bool(endpoint.livemode)))
     return cache[key]
 
 
@@ -156,7 +157,8 @@ async def may_see_attendees(session, endpoint) -> bool:
     partner's: its connection to the club has attendees:read."""
     if endpoint.partner_app_id is None and endpoint.created_via != "partner_app":
         return bool(endpoint.share_attendee_details and endpoint.dpdp_confirmed_at is not None)
-    scopes = await seams.partner_scopes(session, endpoint.club_id, endpoint.partner_app_id, endpoint.owner_client_id)
+    scopes = await seams.partner_scopes(session, endpoint.club_id, endpoint.partner_app_id, endpoint.owner_client_id,
+                                        livemode=bool(endpoint.livemode))
     return ATTENDEES_SCOPE in set(scopes or ())
 
 
