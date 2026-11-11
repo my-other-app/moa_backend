@@ -349,8 +349,18 @@ class EventSpeakers(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     # A few lines about them, and one place to find out more; the event page shows both.
     bio = Column(String(600), nullable=True)
     link = Column(String(500), nullable=True)
+    # The person in the speakers directory (app/api/speakers): the columns
+    # above are this event's own copy, which its page shows. Null only until
+    # the backfill (speakers.backfill) or the event's next save links it.
+    speaker_profile_id = Column(Integer, ForeignKey("speaker_profiles.id", ondelete="SET NULL"), nullable=True)
+    # What they talk about at this event.
+    talk_title = Column(String(200), nullable=True)
 
     event = relationship("Events", back_populates="speakers")
+
+    __table_args__ = (
+        sa.Index("ix_event_speakers_profile", "speaker_profile_id", postgresql_where=sa.text("speaker_profile_id IS NOT NULL")),
+    )
 
 
 class EventFiles(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
