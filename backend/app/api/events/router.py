@@ -333,6 +333,10 @@ async def get_event(
         from app.api.club_ops.cancel import public_cancellation
 
         data["cancellation"] = await public_cancellation(session, data.get("id"))
+    # The link-preview picture (app/api/social): the 1200 x 630 poster, or the poster.
+    from app.api.social import posters as social_posters
+
+    data["share_image_url"] = await social_posters.share_image_url(session, result)
     return data
 
 

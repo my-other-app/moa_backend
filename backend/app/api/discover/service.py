@@ -1491,6 +1491,7 @@ async def event_page(session, ref: str, now: Optional[datetime] = None) -> dict:
     if e is None:
         raise CustomHTTPException(404, message="Event not found")
     from app.api.approvals import service as approvals
+    from app.api.social import posters as social_posters
     from app.api.ticketing import places as ticket_places
 
     club, cat = e.club, e.category
@@ -1508,6 +1509,7 @@ async def event_page(session, ref: str, now: Optional[datetime] = None) -> dict:
     event = dict(
         id=e.id, slug=e.slug, name=e.name, about=e.about,
         poster=poster, poster_thumb=_img(e.poster, "medium", "thumbnail") or poster,
+        share_image_url=await social_posters.share_image_url(session, e),
         starts_at=_aware(e.event_datetime).isoformat(), ends_at=_ends_at(e).isoformat(),
         duration_hours=float(e.duration) if e.duration is not None else None, timezone=EVENT_TIMEZONE,
         is_online=bool(e.is_online), location_name=e.location_name,

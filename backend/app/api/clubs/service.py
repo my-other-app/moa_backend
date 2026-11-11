@@ -308,9 +308,12 @@ async def reject_club(session: AsyncSession, club_id: int) -> Clubs:
 async def _stop_billing(session: AsyncSession, club: Clubs) -> None:
     """A deleted club's Razorpay subscription is cancelled with it
     (subscriptions.club_deleted); restoring the club does not restore it."""
+    from app.api.social import hooks as social
     from app.api.subscriptions.club_deleted import end_for_deleted_club
 
     await end_for_deleted_club(session, club)
+    # Its connected social accounts go with it: revoked where they can be, tokens deleted.
+    await social.club_deleted(session, club)
 
 
 async def club_for_answer(session: AsyncSession, club_id: int) -> Clubs:

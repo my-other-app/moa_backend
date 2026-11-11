@@ -274,6 +274,13 @@ async def create_event(
         logging.getLogger(__name__).error(f"Failed to send new event notifications: {e}")
 
     await _republish_site(session, created_event.id)
+    # Published at once: its "on publish" social posts and the team's share kit (app/api/social).
+    from app.api.social import hooks as social
+    from app.api.social.scheduler import is_published
+
+    if is_published(created_event):
+        await social.event_published(session, created_event)
+        await session.commit()
     return created_event
 
 
@@ -335,6 +342,10 @@ async def update_event(
             session, scope, event.store_item_ids, actor=actor, current=await store.offered_ids(session, db_event),
         )
 
+    # What social posts may say about it, before the change (app/api/social).
+    from app.api.social import hooks as social
+
+    social_before = social.snapshot(db_event)
     if event.poster:
         content = io.BytesIO(await event.poster.read())
         db_event.poster = {
@@ -502,6 +513,8 @@ async def update_event(
         session, db_event, form_before, form_after,
         user_id=getattr(actor, "id", None) or user_id, member_id=member_id,
     )
+    # Social posts follow a new date, and pause when they mention what changed (app/api/social).
+    await social.event_changed(session, db_event, social_before)
     await session.commit()
     await _republish_site(session, event_id)
     db_event = await session.execute(
@@ -1189,6 +1202,9 @@ async def delete_event(
 
     await approvals.close_for_deleted_event(session, event_id)
     db_event.soft_delete()
+    from app.api.social import hooks as social
+
+    await social.event_stopped(session, db_event, "event_deleted")
     await session.commit()
     return None
 

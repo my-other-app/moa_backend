@@ -341,6 +341,11 @@ async def end(session, event: Events, user, request, invite_id: int) -> dict:
             link="/invitations", data=dict(event_id=event.id, invite_id=row.id), dedupe_key=f"cohost_removed:{row.id}",
         )
     row.ended_at = now
+    if row.status == REMOVED:
+        # Its own social posts about the event stop waiting (app/api/social).
+        from app.api.social import hooks as social
+
+        await social.cohost_ended(session, event.id, row.club_id)
     await _audit(session, user, request, action, event, row, summary)
     await session.commit()
     names = await _invited_by_names(session, [row])
@@ -360,6 +365,9 @@ async def leave(session, event: Events, user, request) -> dict:
     if row is None:
         raise _refuse(409, "Your club isn't co-hosting this event.", "COHOST_NOT_COHOST")
     row.status, row.ended_at = LEFT, _now()
+    from app.api.social import hooks as social
+
+    await social.cohost_ended(session, event.id, club.id)
     await _audit(session, user, request, "cohost.leave", event, row, f"{club.name} left {event.name} as a co-host")
     await _alert(
         session, event.club_id, ALERT_UPDATE,
