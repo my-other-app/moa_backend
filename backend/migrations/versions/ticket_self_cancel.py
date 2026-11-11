@@ -18,14 +18,14 @@ goes; the registrations taken off the list stay off it, as the club's own
 removals do.
 
 Revision ID: ticket_self_cancel
-Revises: review_resends
+Revises: speakers_directory
 """
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "ticket_self_cancel"
-down_revision = "review_resends"
+down_revision = "speakers_directory"
 branch_labels = None
 depends_on = None
 

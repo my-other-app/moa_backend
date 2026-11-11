@@ -126,6 +126,8 @@ CLASSIFICATION: dict[str, str] = {
     # Venue lookups for the events that are going.
     "geocode_cache": WIPE,
     "agenda_items": WIPE,
+    # An agenda session's speakers, from the event's speakers (app/api/speakers).
+    "agenda_item_speakers": WIPE,
     "agenda_templates": WIPE,
     "archived_contacts": WIPE,
     "background_task_logs": WIPE,
@@ -272,6 +274,13 @@ CLASSIFICATION: dict[str, str] = {
     "review_resends": WIPE,
     # Tickets the guests gave back by their emails' link (app/api/ticket_cancel).
     "ticket_cancellations": WIPE,
+    # The speakers directory (app/api/speakers): built from the events' speakers, which go too.
+    "speaker_profiles": WIPE,
+    "speaker_contacts": WIPE,
+    "speaker_merge_candidates": WIPE,
+    "speaker_history": WIPE,
+    "speaker_follows": WIPE,
+    "speaker_claims": WIPE,
     "review_resend_recipients": WIPE,
     "messages": WIPE,
     # What clubs sent, counted by the month, its statements and Enterprise clubs' own limits.

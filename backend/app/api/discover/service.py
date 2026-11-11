@@ -1536,9 +1536,13 @@ async def event_page(session, ref: str, now: Optional[datetime] = None) -> dict:
         from app.api.club_ops.cancel import public_cancellation
 
         event.update(status="cancelled", registration_open=False, cancellation=await public_cancellation(session, e.id))
+    # Each with its speaker page (profile_slug, null when hidden) and talk title (app/api/speakers).
+    from app.api.speakers import links as speaker_links
+
     speakers = [
-        dict(id=s.id, name=s.name, designation=s.designation, photo=_img(s.photo, "medium", "thumbnail", "original"), bio=s.bio, link=s.link)
-        for s in e.speakers if not s.is_deleted
+        dict(id=s["id"], name=s["name"], designation=s["designation"], photo=s["photo"], bio=s["bio"], link=s["link"],
+             profile_slug=s["profile_slug"], talk_title=s["talk_title"])
+        for s in await speaker_links.speakers_out(session, e.speakers, photo=lambda p: _img(p, "medium", "thumbnail", "original"))
     ]
     team, team_source = await _event_team(session, e)
     more = await _rows(session, filtered(now, since, club_id=club.id).where(Events.id != e.id).limit(ALSO_ON))

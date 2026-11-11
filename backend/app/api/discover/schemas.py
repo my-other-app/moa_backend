@@ -308,6 +308,9 @@ class Speaker(BaseModel):
     photo: Optional[str] = None
     bio: Optional[str] = None
     link: Optional[str] = None
+    # The speaker's page (/speakers/{slug}); null when their profile is hidden.
+    profile_slug: Optional[str] = None
+    talk_title: Optional[str] = None
 
 
 class PageAgenda(BaseModel):
