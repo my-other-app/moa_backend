@@ -20,7 +20,8 @@ The share kit needs nothing from the owner:
   kit screen;
 - the attendees' share row on every event page, each platform with its own tracking link
   (utm_medium `share`);
-- `share_image_url` (the 1200 x 630 poster) on the public event payloads, for link previews.
+- `share_image_url` (the 1200 x 630 poster) on the public event payloads, for link previews: made
+  when the event is published, null until then (never the plain poster in its place).
 
 ## What switches on with each platform's settings
 
