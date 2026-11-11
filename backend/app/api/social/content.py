@@ -250,7 +250,7 @@ def check(platform: str, raw: str, rendered: str, *, picture_size: Optional[tupl
     if picture_size and p.aspect:
         ratio = picture_size[0] / picture_size[1]
         low, high = p.aspect
-        if ratio < low - 0.005 or ratio > high + 0.005:
+        if ratio < low - 0.001 or ratio > high + 0.001:
             warnings.append({"code": "image_shape", "message": f"{p.label} needs a picture from 4:5 to 1.91:1; pick its own size."})
     unknown = unknown_words(raw)
     if unknown:

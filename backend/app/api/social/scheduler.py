@@ -307,10 +307,10 @@ async def settle_post(session, post_id) -> None:
         )
 
 
-async def _set(session, target_id, claim, **values) -> bool:
+async def _set(session, target_id, mine, **values) -> bool:
     """Settle a claimed target, only while the claim is still ours."""
     res = await session.execute(
-        update(T).where(T.id == target_id, T.claim == claim).values(**values).execution_options(synchronize_session=False)
+        update(T).where(T.id == target_id, T.claim == mine).values(**values).execution_options(synchronize_session=False)
     )
     return bool(res.rowcount)
 
@@ -375,9 +375,10 @@ async def _failure(session, target, claim, account, exc: h.PlatformError, now: d
     label = alerts.LABELS.get(target.platform, target.platform)
     first = _aware(target.first_attempt_at) or now
     if exc.kind == h.AUTH:
-        await accounts_mod.needs_reconnect(session, account, exc.message)
+        # Held first, so the club is told it is one of the posts waiting.
         await _set(session, target.id, claim, status=HELD, claim=None, error_code="reconnect",
                    error_message=f"Reconnect {label} to send.", error_action="reconnect")
+        await accounts_mod.needs_reconnect(session, account, exc.message)
         await session.commit()
         return HELD
     if exc.kind == h.UNKNOWN:
@@ -549,7 +550,7 @@ async def run_target(session, target_id, now: Optional[datetime] = None) -> str:
     rendered = content.render(target.text, words)
     target.rendered_text = rendered
     variant = await session.get(PosterVariants, target.variant_id) if target.variant_id else None
-    if variant is None and platforms.get(target.platform).needs_image:
+    if variant is None:
         made = await posters.ensure(session, event, [platforms.get(target.platform).default_size])
         variant = made.get(platforms.get(target.platform).default_size)
         target.variant_id = variant.id if variant else None

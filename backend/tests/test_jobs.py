@@ -256,6 +256,10 @@ def test_the_platforms_jobs_have_the_priorities_and_limits_chosen(monkeypatch):
         # A mail or push someone is waiting for.
         "admin_alerts.deliver": (H, 4), "mail.billing_notice": (H, 4), "mail.club_domain_notice": (H, 4),
         "mail.club_whatsapp_notice": (H, 4),
+        # Social posting (app/api/social): a post due now, the team's share kit, an admin's alert, the owner's mail.
+        "social.post_target": (H, 2), "social.share_kit_push": (H, 4), "social.admin_push": (H, 4), "mail.social_notice": (H, 4),
+        # Its poster sizes made ahead, and the daily token refresh: nobody waits.
+        "social.posters": (L, 1), "social.refresh_tokens": (L, 1),
         # The answer to STOP or START, inside the window their message just opened.
         "club_whatsapp.auto_reply": (H, 4),
         "clubs.approved_email": (H, 4), "checkins.after": (H, 4),

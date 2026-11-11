@@ -215,6 +215,25 @@ def _whatsapp_unreachable(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _social_unreachable(monkeypatch):
+    """No test reaches Facebook, Instagram, LinkedIn or X: every call from
+    app/api/social fails as an unreachable host would, unless a test puts a
+    fake platform in its place (tests/fake_social.py). Instagram's container
+    is looked at without waiting."""
+    import httpx
+
+    from app.api.social import http as social_http
+    from app.api.social.adapters import meta
+
+    def unreachable(request):
+        raise httpx.ConnectError(f"the test suite never reaches a social platform: {request.method} {request.url.host}", request=request)
+
+    monkeypatch.setattr(social_http, "TRANSPORT", httpx.MockTransport(unreachable))
+    monkeypatch.setattr(meta, "POLL_DELAYS", (0.0, 0.0, 0.0))
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _quiet_email(monkeypatch):
     """Transactional mail never leaves the suite. A sign-in from a device the
     account has not seen sends one, which is every first login in every test;

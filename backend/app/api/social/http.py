@@ -9,6 +9,7 @@ short words about the call.
 """
 from __future__ import annotations
 
+import logging
 import re
 from typing import Optional
 
@@ -30,6 +31,25 @@ UNKNOWN = "unknown"        # sent, but no answer came back: look it up before se
 BILLING = "billing"        # X's pay-per-use account cannot pay
 
 _TOKENISH = re.compile(r"(?i)(access_token|refresh_token|client_secret|code|token)=([^&\s\"']+)")
+
+
+#: A secret in a URL's query, as httpx's own "HTTP Request: GET <url>" line would print it
+#: (Meta's documented token exchange is a GET with the secret and the token in the query).
+_QUERY_SECRET = re.compile(r"(?i)([?&](?:access_token|client_secret|fb_exchange_token|refresh_token|appsecret_proof|code|token|code_verifier)=)[^&\s\"']*")
+
+
+class _ScrubUrls(logging.Filter):
+    """httpx logs every request's URL at INFO. Production's root logger is at
+    WARNING, so it is not written there; this keeps it so wherever it is."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple) and record.args:
+            record.args = tuple(_QUERY_SECRET.sub(r"\1[filtered]", str(a)) if isinstance(a, (str, httpx.URL)) else a for a in record.args)
+        return True
+
+
+if not any(isinstance(f, _ScrubUrls) for f in logging.getLogger("httpx").filters):
+    logging.getLogger("httpx").addFilter(_ScrubUrls())
 
 
 def client(timeout: Optional[float] = None) -> httpx.AsyncClient:

@@ -171,7 +171,9 @@ async def preview(session, who: Who, event, platform: str, text: str, variant_id
         if variant is None or variant.event_id != event.id:
             raise CustomHTTPException(404, message="No such poster size for this event", error_code="POSTER_NOT_FOUND")
     elif platforms.get(platform).needs_image:
-        variant = (await posters.variants(session, event.id)).get(platforms.get(platform).default_size)
+        size = platforms.get(platform).default_size
+        variant = (await posters.ensure(session, event, [size])).get(size)
+        await session.commit()
     size = (variant.width, variant.height) if variant and variant.key else None
     warnings, counts = content.check(platform, text, rendered, picture_size=size, has_picture=bool(variant and variant.key))
     return {"platform": platform, "text_rendered": rendered, "warnings": warnings, "counts": counts,
@@ -253,7 +255,8 @@ async def _validate_for_schedule(session, who: Who, event, specs: list[dict]) ->
         await platforms.require_plan(session, who.club.id, key, actor=who.user)
         rendered = content.render(s["text"], f.words(link="https://api.myotherapp.in/l/xxxxxxxx"))
         variant = await session.get(PosterVariants, s["variant_id"]) if s.get("variant_id") else None
-        if variant is None and p.needs_image:
+        if variant is None:
+            # Not chosen: the platform's own size of the poster, when the event has one.
             variant = (await posters.ensure(session, event, [p.default_size])).get(p.default_size)
             s["variant_id"] = variant.id if variant else None
         warnings, counts = content.check(key, s["text"], rendered, picture_size=(variant.width, variant.height) if variant and variant.key else None,

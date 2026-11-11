@@ -273,6 +273,24 @@ async def test_the_owner_sees_who_is_signed_in_on_each_device(client, world):
     ("door", "GET", "/api/v1/clubs/finance/statement.csv", False),
     ("door", "POST", "/api/v1/clubs/access/me/password", True),
     ("nobody", "GET", "/api/v1/clubs/events", False),
+    # Social posting: door staff none of it; connecting, the approval setting and approving are owners' and admins'.
+    ("door", "GET", "/api/v1/clubs/social/accounts", False),
+    ("door", "GET", "/api/v1/clubs/social/events/7/posts", False),
+    ("door", "GET", "/api/v1/social/share-kit/7", True),
+    ("editor", "GET", "/api/v1/clubs/social/accounts", True),
+    ("editor", "POST", "/api/v1/clubs/social/accounts/instagram/connect", False),
+    ("editor", "DELETE", "/api/v1/clubs/social/accounts/5b0c1f2e-8a43-4f0e-9d3c-2b7f6a1e9c40", False),
+    ("editor", "GET", "/api/v1/clubs/social/accounts/pending/5b0c1f2e-8a43-4f0e-9d3c-2b7f6a1e9c40", False),
+    ("editor", "PUT", "/api/v1/clubs/social/settings", False),
+    ("editor", "GET", "/api/v1/clubs/social/settings", True),
+    ("editor", "POST", "/api/v1/clubs/social/posts/5b0c1f2e-8a43-4f0e-9d3c-2b7f6a1e9c40/approve", False),
+    ("editor", "POST", "/api/v1/clubs/social/posts/5b0c1f2e-8a43-4f0e-9d3c-2b7f6a1e9c40/schedule", True),
+    ("editor", "POST", "/api/v1/clubs/social/events/7/posts", True),
+    ("editor", "PUT", "/api/v1/clubs/social/events/7/posters/ig_portrait", True),
+    ("admin", "POST", "/api/v1/clubs/social/accounts/instagram/connect", True),
+    ("admin", "POST", "/api/v1/clubs/social/posts/5b0c1f2e-8a43-4f0e-9d3c-2b7f6a1e9c40/approve", True),
+    ("admin", "PUT", "/api/v1/clubs/social/settings", True),
+    ("nobody", "GET", "/api/v1/clubs/social/platforms", False),
 ])
 def test_the_role_rules(role, method, path, allowed):
     assert policy.allows(role, method, path) is allowed
@@ -288,3 +306,6 @@ def test_what_the_dashboard_offers_matches_the_rules():
         assert can["delete_events"] == policy.allows(role, "DELETE", "/api/v1/events/delete/1")
         assert can["see_access"] == policy.allows(role, "GET", "/api/v1/clubs/access")
         assert can["manage_access"] == policy.allows(role, "POST", "/api/v1/clubs/access/invite")
+        assert can["social_accounts"] == policy.allows(role, "POST", "/api/v1/clubs/social/accounts/x/connect")
+        assert can["social_approve"] == policy.allows(role, "POST", "/api/v1/clubs/social/posts/1/approve")
+        assert can["social_posts"] == policy.allows(role, "POST", "/api/v1/clubs/social/events/1/posts")

@@ -334,9 +334,11 @@ async def get_event(
 
         data["cancellation"] = await public_cancellation(session, data.get("id"))
     # The link-preview picture (app/api/social): the 1200 x 630 poster, or the poster.
+    from app.api.events.models import Events
     from app.api.social import posters as social_posters
 
-    data["share_image_url"] = await social_posters.share_image_url(session, result)
+    row = await session.get(Events, int(data["id"])) if data.get("id") is not None else None
+    data["share_image_url"] = await social_posters.share_image_url(session, row) if row is not None else None
     return data
 
 
