@@ -69,6 +69,9 @@ DURABLE: dict[str, tuple[str, str, str]] = {
     "app.api.club_whatsapp.alerts:_send": (
         "mail.club_whatsapp_notice", "app.api.club_whatsapp.alerts:send", "a club's own-WhatsApp-number mail to its owner",
     ),
+    "app.api.social.alerts:_send": (
+        "mail.social_notice", "app.api.social.alerts:send", "a club's social-posting mail to its owner (a disconnected account, a failed post)",
+    ),
 }
 #: The job each durable call becomes, by job name: the function it runs.
 _JOB_RUNS: dict[str, str] = {job: runs for job, runs, _what in DURABLE.values()}
@@ -220,6 +223,11 @@ async def _club_domain_notice(payload: dict) -> None:
 @jobs.handler("mail.club_whatsapp_notice", max_attempts=6, timeout=60.0, priority=jobs.HIGH)
 async def _club_whatsapp_notice(payload: dict) -> None:
     await _call("mail.club_whatsapp_notice", payload)
+
+
+@jobs.handler("mail.social_notice", max_attempts=6, timeout=60.0, priority=jobs.HIGH)
+async def _social_notice(payload: dict) -> None:
+    await _call("mail.social_notice", payload)
 
 
 # ─── The old outbox ──────────────────────────────────────────────────────

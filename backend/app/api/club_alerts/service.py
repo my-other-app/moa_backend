@@ -34,6 +34,9 @@ KINDS: dict[str, str] = {
     "mailbox_expired": "A lapsed mailbox's 30 days are over: its mail can be exported or deleted",
     "cohost_invite": "Another club invited this club to co-host its event (owners and admins only; app/api/cohosts)",
     "cohost_update": "A co-host accepted, declined or left one of the club's events, or the host removed this club as a co-host (owners and admins only)",
+    "social_disconnected": "A connected social account needs reconnecting: its posts wait (app/api/social)",
+    "social_expiring": "A connected social account's access ends within seven days (LinkedIn every 60 days)",
+    "social_failed": "A social post failed and needs a person: retry, reconnect, fix the picture or share it by hand",
 }
 
 #: How many the bell shows at most.

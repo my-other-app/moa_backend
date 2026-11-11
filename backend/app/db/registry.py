@@ -62,6 +62,8 @@ from app.api.organisers import models as _organiser_models  # noqa: F401
 from app.api.event_partners import models as _event_partner_models  # noqa: F401
 # Clubs co-hosting another club's event (app/api/cohosts).
 from app.api.cohosts import models as _cohost_models  # noqa: F401
+# Social auto-posting: connected accounts, posts, poster sizes, sign-in states (app/api/social).
+from app.api.social import models as _social_models  # noqa: F401
 from app.api.discover.geocode import GeocodeCache  # noqa: F401
 from app.api.discover.stats import DiscoverStats  # noqa: F401
 # The triggers that keep clubs.place_lat/place_lng, installed with the events table.

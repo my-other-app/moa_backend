@@ -257,6 +257,8 @@ FEATURE_GROUPS: dict[str, tuple[str, ...]] = {
         "qa",
         "polls",
         "networking",
+        "social_autopost",
+        "social_x",
     ),
     "competitions": (
         "teams",
@@ -323,6 +325,8 @@ FEATURE_CATALOG: tuple[tuple[str, str], ...] = (
     ("mcp", "Connect AI assistants (Claude, ChatGPT) to your club"),
     ("whatsapp_own", "Your own WhatsApp Business number: inbox, templates and quality"),
     ("mailbox", "A club mailbox: yourclub@mail.myotherapp.in, in the dashboard"),
+    ("social_autopost", "Automatic posting to Facebook, Instagram and LinkedIn"),
+    ("social_x", "Automatic posting to X (Twitter)"),
 )
 
 #: Flags in the editor with no feature behind them yet:
@@ -364,6 +368,12 @@ class PlanFeatures(AbstractSQLModel, TimestampsMixin):
     qa = _flag()
     polls = _flag()
     networking = _flag()
+    #: Social auto-posting (app/api/social): connecting Facebook Pages,
+    #: Instagram and LinkedIn and posting to them on a schedule. Paid plans,
+    #: from migration social_posting. The share kit needs no flag.
+    social_autopost = _flag()
+    #: The same to X, which costs MyOtherApp per post: the top plan.
+    social_x = _flag()
 
     # competitions
     teams = _flag()

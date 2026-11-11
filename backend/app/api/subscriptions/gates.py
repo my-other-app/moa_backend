@@ -83,11 +83,12 @@ EVENT_SCOPED_LIMITS = frozenset({"registrations_per_event", "merch_items_per_eve
 #: Gates about the whole club, enforced whatever its events: website and
 #: its own domain, roles, finance, AI assistants over MCP, the club's own
 #: WhatsApp number (app/api/club_whatsapp), the club's mailbox
-#: (app/api/club_mailbox), and the per-club limits (events and
+#: (app/api/club_mailbox), social auto-posting and its X part
+#: (app/api/social: connecting accounts and posting), and the per-club limits (events and
 #: announcements per month, committee seats, website templates,
 #: registrations per month -- though a registration to a grandfathered event
 #: is never refused, it still counts in `usage`).
-CLUB_WIDE_FEATURES = frozenset({"website", "custom_domain", "roles", "finance", "mcp", "whatsapp_own", "mailbox"})
+CLUB_WIDE_FEATURES = frozenset({"website", "custom_domain", "roles", "finance", "mcp", "whatsapp_own", "mailbox", "social_autopost", "social_x"})
 
 #: The limits nothing enforces, and why (see the module docstring).
 NOT_ENFORCED: dict[str, str] = {}
@@ -127,6 +128,8 @@ _SUBJECTS = {
     "mcp": ("Connecting AI assistants", "is"),
     "whatsapp_own": ("Your own WhatsApp Business number", "is"),
     "mailbox": ("A club mailbox", "is"),
+    "social_autopost": ("Automatic posting to social media", "is"),
+    "social_x": ("Automatic posting to X", "is"),
     "coupons": ("Discount codes", "are"),
     "waitlist": ("Waiting lists", "are"),
 }
