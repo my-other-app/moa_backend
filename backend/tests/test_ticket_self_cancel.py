@@ -14,7 +14,6 @@ from app.api.club_alerts.models import ClubAlerts
 from app.api.events.models import Events, EventRegistrationsLink
 from app.api.ticket_cancel import service as cancelling
 from app.api.ticket_cancel.models import TicketCancellations
-from app.core import jobs
 from tests.conftest import auth_header
 
 API = "/api/v1"
@@ -131,22 +130,25 @@ async def test_no_reason_is_needed(client, session, world, mail):
     assert (await session.scalar(select(TicketCancellations))).reason is None
 
 
-async def test_both_ways_off_the_list_free_the_seat_and_offer_it_to_the_waiting_list(client, session, world, monkeypatch, mail):
-    queued = []
-    real = jobs.enqueue
+async def test_both_ways_off_the_list_are_one_path_and_free_the_seat(client, session, world, monkeypatch, mail):
+    from app.api.events.registration import service as registrations
 
-    async def spy(session, name, payload, **kw):
-        queued.append(name)
-        return await real(session, name, payload, **kw)
+    taken = []
+    real = registrations.take_off_list
 
-    monkeypatch.setattr(jobs, "enqueue", spy)
+    async def spy(session, registration):
+        taken.append(registration.id)
+        return await real(session, registration)
+
+    monkeypatch.setattr(registrations, "take_off_list", spy)
     r = await client.delete(
         f"{API}/events/registration/{world.event.id}/info/{world.reg2.id}", params={"confirm_slug": world.event.slug}, headers=world.h,
     )
     assert r.status_code == 200, r.text
-    assert queued.count("waitlist.fill") == 1 and await _places_left(client, world.event.id) == 1
+    assert taken == [world.reg2.id] and await _places_left(client, world.event.id) == 1
     assert (await client.post(f"{API}/tickets/cancel/{world.token}", json={})).status_code == 200
-    assert queued.count("waitlist.fill") == 2 and await _places_left(client, world.event.id) == 2
+    assert taken == [world.reg2.id, world.reg.id] and await _places_left(client, world.event.id) == 2
+    assert (await _reg(session, world.reg2.id)).is_deleted and (await _reg(session, world.reg.id)).is_deleted
 
 
 # ─── Each refusal ────────────────────────────────────────────────────────

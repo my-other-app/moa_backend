@@ -15,8 +15,8 @@ email: no money ever moves here (Razorpay is live; refunds are the club's).
 
 Giving it back takes the guest off the list exactly as the club's "Take
 someone off the list" does (registration.service.take_off_list): the
-registration is soft deleted, its place is free and the waiting list is
-offered it. The club's bell says so, the guest gets a short email, and the
+registration is soft deleted and its place is free (the waiting list's
+sweep offers it within the minute, as after the club's removal). The club's bell says so, the guest gets a short email, and the
 club sees it in the event's list of tickets given back.
 """
 from __future__ import annotations

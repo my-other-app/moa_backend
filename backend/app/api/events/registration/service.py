@@ -1612,13 +1612,10 @@ async def take_off_list(session: AsyncSession, registration) -> None:
     (remove_registration) or the guest giving a free ticket back by their
     email's link (app/api/ticket_cancel): the registration is soft deleted
     with its ticket and check-in, which frees its place (places count live
-    registrations only), and the waiting list is offered the place now
-    rather than at the sweep's next minute. Commits."""
-    from app.api.ticketing import waitlist
-
+    registrations only); the waiting list's sweep offers it within the
+    minute. Commits."""
     registration.soft_delete()
     await session.commit()
-    await waitlist.fill_soon(session, registration.event_id)
 
 
 async def add_attendee(
