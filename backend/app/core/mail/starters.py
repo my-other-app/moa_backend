@@ -109,6 +109,7 @@ def _approved() -> EmailTemplateFields:
         _details([{"label": "When", "value": "{{event_start}}"}, {"label": "Where", "value": "{{venue}}"}, {"label": "Ticket", "value": "{{ticket_type}} · {{ticket_code}}"}]),
         _button("Download your ticket", "{{ticket_url}}"),
         _paragraph(CONTACT, **_QUIET),
+        _paragraph("Can't come? [Give your ticket back]({{cancel_ticket_url}}).", **_QUIET),
     ], ticket=True)
 
 

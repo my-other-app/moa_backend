@@ -272,6 +272,8 @@ CLASSIFICATION: dict[str, str] = {
     "message_deliveries": WIPE,
     # An event's review email sent again (app/api/emails/review.py).
     "review_resends": WIPE,
+    # Tickets the guests gave back by their emails' link (app/api/ticket_cancel).
+    "ticket_cancellations": WIPE,
     # The speakers directory (app/api/speakers): built from the events' speakers, which go too.
     "speaker_profiles": WIPE,
     "speaker_contacts": WIPE,

@@ -261,6 +261,8 @@ def test_the_platforms_jobs_have_the_priorities_and_limits_chosen(monkeypatch):
         "clubs.approved_email": (H, 4), "checkins.after": (H, 4),
         # An invited admin's set-password link, a turned-down applicant's reason (app/api/admin_ops).
         "admin_ops.invite_email": (H, 4), "clubs.rejected_email": (H, 4),
+        # A guest told their ticket is cancelled, as they asked by their email's link (app/api/ticket_cancel).
+        "tickets.cancelled_email": (H, 4),
         # A speaker's invite to claim their profile (app/api/speakers).
         "speakers.claim_email": (H, 4),
         "payments.receipt": (H, 2),  # a wkhtmltopdf process each

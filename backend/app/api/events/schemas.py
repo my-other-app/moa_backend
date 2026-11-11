@@ -312,10 +312,14 @@ class EventCreate:
         requires_approval: Optional[bool] = Form(None),
         # The public "High demand" label, instead of any request numbers. Omitted leaves it as it is.
         high_demand_label: Optional[bool] = Form(None),
+        # Guests may give a free ticket back by the link in their emails (app/api/ticket_cancel).
+        # Omitted: on for a new event; an edit leaves it as it is.
+        allow_self_cancel: Optional[bool] = Form(None),
     ):
         self.name = name
         self.requires_approval = requires_approval
         self.high_demand_label = high_demand_label
+        self.allow_self_cancel = allow_self_cancel
         self.poster = poster
         self.status = status
         self.event_datetime = event_datetime
@@ -429,6 +433,8 @@ class EventEdit(EventCreate):
         requires_approval: Optional[bool] = Form(None),
         # The public "High demand" label. Omitted leaves it as it is.
         high_demand_label: Optional[bool] = Form(None),
+        # "Let guests give their ticket back". Omitted leaves it as it is.
+        allow_self_cancel: Optional[bool] = Form(None),
     ):
         super().__init__(
             name=name,
@@ -467,6 +473,7 @@ class EventEdit(EventCreate):
             certificate_template_id=certificate_template_id,
             requires_approval=requires_approval,
             high_demand_label=high_demand_label,
+            allow_self_cancel=allow_self_cancel,
         )
         self.clear_location_link = clear_location_link
         self.clear_point = clear_point
@@ -580,6 +587,8 @@ class EventCreateUpdateResponse(CustomBaseModel):
     requires_approval: bool = Field(False)
     #: The club's "High demand" label for the public page.
     high_demand_label: bool = Field(False)
+    #: Guests may give a free ticket back by their emails' link (app/api/ticket_cancel).
+    allow_self_cancel: bool = Field(True)
     #: The questions' version (event_form_revisions) and when it was saved;
     #: null until the questions are first changed (app/api/missing_answers).
     form_version: int | None = Field(None)
@@ -771,6 +780,8 @@ class EventDetailResponse(CustomBaseModel):
     high_demand: bool = Field(False)
     #: The setting itself, for the club's edit form (the same as `high_demand`).
     high_demand_label: bool = Field(False)
+    #: Guests may give a free ticket back by their emails' link (app/api/ticket_cancel).
+    allow_self_cancel: bool = Field(True)
     prize_amount: float | None = Field(None)
     is_online: bool | None = Field(False)
     reg_startdate: datetime = Field(...)
