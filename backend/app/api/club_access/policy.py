@@ -36,6 +36,9 @@ _SELF = _rx(
 # The bell (app/api/club_alerts): what MyOtherApp told the club. Everyone
 # at the club reads it, and marking a notice read is no change to the club.
 _BELL = _rx(r"^/api/v1/clubs/alerts(?:/|$)")
+# Asking MyOtherApp for help (app/api/support): anyone at the club, door
+# staff too -- the request goes to the platform's desk, not into the club's records.
+_HELP = _rx(r"^/api/v1/support(?:/|$)")
 # The access list itself: an admin may read it; only the owner changes it.
 _ACCESS_LIST = _rx(r"^/api/v1/clubs/access/?$")
 _ACCESS = _rx(r"^/api/v1/clubs/access(?:/|$)")
@@ -140,6 +143,11 @@ _DESTRUCTIVE = _rx(
 # from it), so it is the same, said here so no club-wide rule ever takes it:
 # editors and admins make, change, photograph and delete items; door staff read.
 _CLUB_STORE = _rx(r"^/api/v1/clubs/store(?:/|$)")
+# The club's speakers (app/api/speakers): the picker, the list with each
+# speaker's contact and notes, its spreadsheet, and copying a profile onto
+# upcoming events. As editing the club's events: editors and admins, read
+# and write; door staff not at all (contacts are not theirs to see).
+_SPEAKERS = _rx(r"^/api/v1/clubs/speakers(?:/|$)")
 
 # Co-hosting (app/api/cohosts, docs/COHOSTS.md): who else hosts an event is
 # the club's decision, so inviting, cancelling and removing co-hosts (and
@@ -165,7 +173,7 @@ _DOOR_WRITES = _rx(
 
 def allows(role: str, method: str, path: str) -> bool:
     method = method.upper()
-    if _SELF.search(path) or _BELL.search(path):
+    if _SELF.search(path) or _BELL.search(path) or _HELP.search(path):
         return True
     if _OWNER_ACCOUNT.search(path):
         return False
@@ -207,6 +215,8 @@ def allows(role: str, method: str, path: str) -> bool:
         return role == "editor"
     if _CLUB_STORE.search(path):
         return role == "editor" or (role == "door" and method not in WRITES)
+    if _SPEAKERS.search(path):
+        return role == "editor"
     if _MONEY.search(path):
         return False
     if role == "editor":
@@ -248,6 +258,8 @@ def can(role: str) -> dict:
         "club_profile": admin,
         "edit_events": editor,
         "club_store": editor,
+        # The club's speakers: the picker, the list, contacts, the spreadsheet (`_SPEAKERS`).
+        "speakers": editor,
         "delete_events": admin,
         "door": True,
         "payment_gateway": owner,
@@ -298,6 +310,7 @@ MCP_TOOLS = {
     "list_store_items": ("GET", "/api/v1/clubs/store"),
     "list_feedback": ("GET", "/api/v1/events/ratings/0"),
     "list_team": ("GET", "/api/v1/clubs/access"),
+    "list_past_speakers": ("GET", "/api/v1/clubs/speakers"),
     "create_event_draft": ("POST", "/api/v1/events/create"),
     "update_event_draft": ("PUT", "/api/v1/events/update/0"),
     "create_store_item": ("POST", "/api/v1/clubs/store"),

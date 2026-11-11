@@ -25,6 +25,8 @@ from app.api.checkins.models import *
 from app.api.idcards.models import *
 from app.api.kiosk.models import *
 from app.api.agenda.models import *
+# The speakers directory: profiles, contacts, merges, history, follows, claims, agenda links (app/api/speakers).
+from app.api.speakers import models as _speaker_models  # noqa: F401
 from app.api.merch.models import *
 from app.api.closeout.models import *
 from app.api.auth.sessions import UserSessions  # noqa: F401
@@ -39,6 +41,8 @@ from app.api.store import models as _store_models  # noqa: F401
 from app.api.ticketing import models as _ticketing_models  # noqa: F401
 # Registration requests: "Confirm each registration" (app/api/approvals).
 from app.api.approvals import models as _approval_models  # noqa: F401
+# Tickets the guests gave back by their emails' link (app/api/ticket_cancel).
+from app.api.ticket_cancel import models as _ticket_cancel_models  # noqa: F401
 # Form versions, and asking people for the answers they are missing (app/api/missing_answers).
 from app.api.missing_answers import models as _missing_answer_models  # noqa: F401
 from app.api.live import models as _live_models  # noqa: F401
@@ -69,6 +73,9 @@ from app.api.discover.stats import DiscoverStats  # noqa: F401
 # The triggers that keep clubs.place_lat/place_lng, installed with the events table.
 from app.api.discover import places as _club_places  # noqa: F401
 from app.api.reports import models as _report_models  # noqa: F401
+# The team's support desk and sales leads (app/api/support, app/api/leads).
+from app.api.support import models as _support_models  # noqa: F401
+from app.api.leads import models as _lead_models  # noqa: F401
 from app.api.ai import models as _ai_models  # noqa: F401
 # The job queue and its runners' heartbeats (app/core/jobs.py).
 from app.core import jobs as _jobs  # noqa: F401

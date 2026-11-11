@@ -452,7 +452,7 @@ async def test_a_refresh_can_narrow_but_never_widen(client, world):
     assert r.json()["error"] == "invalid_scope"
     r = await refresh(client, c.client_id, c.refresh_token, scope="events:read")
     assert r.status_code == 200 and r.json()["scope"] == "events:read"
-    assert await tools_list(client, r.json()["access_token"]) == ["list_events", "get_event", "event_stats", "list_registrations", "list_feedback"]
+    assert await tools_list(client, r.json()["access_token"]) == ["list_events", "get_event", "event_stats", "list_registrations", "list_feedback", "list_past_speakers"]
 
 
 async def test_revocation(client, session, world):
@@ -491,7 +491,7 @@ async def _member_token(session, client, email: str) -> str:
 
 async def test_a_tool_outside_the_tokens_scopes_is_a_403_challenge(client, world):
     c = await connect(client, "robotics@example.com", scopes=["events:read"])
-    assert set(await tools_list(client, c.access_token)) == {"list_events", "get_event", "event_stats", "list_registrations", "list_feedback"}
+    assert set(await tools_list(client, c.access_token)) == {"list_events", "get_event", "event_stats", "list_registrations", "list_feedback", "list_past_speakers"}
     r = await rpc(client, c.access_token, "tools/call", {"name": "create_event_draft", "arguments": {"name": "x"}})
     assert r.status_code == 403
     challenge = r.headers["www-authenticate"]
@@ -571,7 +571,7 @@ async def test_every_tool_through_the_protocol(client, session, world, era, monk
         init = r.json()["result"]
         assert init["serverInfo"]["name"] == "myotherapp-clubs" and "user_written" in init["instructions"] and "tools" in init["capabilities"]
     listed = (await rpc(client, c.access_token, "tools/list", era=era)).json()["result"]["tools"]
-    assert len(listed) == 15
+    assert len(listed) == 16
     for t in listed:
         assert t["inputSchema"]["type"] == "object" and t["inputSchema"]["additionalProperties"] is False, t["name"]
         hints = t["annotations"]
@@ -653,7 +653,7 @@ async def test_the_official_sdk_client_connects_and_calls(client, world):
     http = httpx2.AsyncClient(transport=httpx2.ASGITransport(app=application), base_url="http://testserver", headers={"Authorization": f"Bearer {c.access_token}"})
     async with http, Client(streamable_http_client("http://testserver/mcp", http_client=http), mode="legacy") as sdk:
         tools = await sdk.list_tools()
-        assert len(tools.tools) == 15
+        assert len(tools.tools) == 16
         result = await sdk.call_tool("list_events", {"status": "all"})
         assert not result.is_error and {e["name"] for e in result.structured_content["events"]} >= {"Bot Build Night", "Draft Demo Day"}
     http = httpx2.AsyncClient(transport=httpx2.ASGITransport(app=application), base_url="http://testserver", headers={"Authorization": f"Bearer {c.access_token}"})
@@ -1008,7 +1008,7 @@ def test_every_tool_stands_for_a_dashboard_request_under_a_known_scope():
     from app.api.mcp.scopes import ALL
     from app.api.mcp.tools import TOOLS
 
-    assert len(TOOLS) == 15 and set(TOOLS) == set(policy.MCP_TOOLS)
+    assert len(TOOLS) == 16 and set(TOOLS) == set(policy.MCP_TOOLS)
     assert all(t.scope in ALL for t in TOOLS.values())
     writes = {n for n, t in TOOLS.items() if not t.read_only}
     assert writes == {"create_event_draft", "update_event_draft", "create_store_item", "offer_store_items", "draft_announcement",

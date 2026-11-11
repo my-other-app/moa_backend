@@ -35,10 +35,25 @@ class AgendaItem(BaseModel):
     by: Optional[str] = None
 
 
+class SpeakerMatch(BaseModel):
+    """A past speaker of the club (or a claimed profile) with this name."""
+
+    speaker_profile_id: int
+    name: str
+    headline: Optional[str] = None
+    photo: Optional[dict] = None
+    talks_count: int = 0
+    last_talk: Optional[dict] = None
+
+
 class Speaker(BaseModel):
     name: str
     designation: Optional[str] = None
     bio: Optional[str] = None
+    #: The club's past speaker this name matches best, when one does: the
+    #: form offers it ("Is this Dr. Rao, who spoke in March?"). Null for a new name.
+    speaker_profile_id: Optional[int] = None
+    matches: list[SpeakerMatch] = Field(default_factory=list)
 
 
 class Question(BaseModel):

@@ -78,6 +78,17 @@ async def record(session, provider_id: str, channel: str, v: Verdict, at: dateti
                 )
         except Exception:  # noqa: BLE001 - the suppression below must still happen
             pass
+        # A reply the team's desk sent (app/api/support): the case says it didn't arrive, and is open again.
+        from app.api.support import mail as desk_mail
+
+        try:
+            async with session.begin_nested():
+                touched += await desk_mail.provider_verdict(
+                    session, provider_id, bounced=v.outcome is DeliveryOutcome.bounced,
+                    complained=v.outcome is DeliveryOutcome.complained, reason=v.reason or "",
+                )
+        except Exception:  # noqa: BLE001
+            pass
     if is_permanent(v):
         if marked is not None:
             # Whoever it was, later sends must leave that address alone until it is corrected.

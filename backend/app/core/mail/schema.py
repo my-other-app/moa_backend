@@ -299,6 +299,9 @@ EMAIL_ONLY_TOKENS: list[dict] = [
     {"key": "organiser_email", "group": "Club", "label": "Organiser contact email", "sample": "hello@yukthi.example"},
     {"key": "event_start", "group": "Event", "label": "Start, date and time", "sample": "Wed 16 Sept 2026 · 09:00"},
     {"key": "doors_in", "group": "Event", "label": "Minutes until the doors open", "sample": "30"},
+    {"key": "cancel_ticket_url", "group": "Links", "label": "Link to give the ticket back",
+     "sample": "https://myotherapp.in/tickets/cancel?t=sample",
+     "note": "Free tickets only, before the event starts; a paid one's page names your email for a refund."},
     *([] if "ticket_code" in TOKEN_BY_KEY else [_TICKET_CODE]),
 ]
 #: The tokens of the request emails (REQUEST_STAGES but the ticket one), each

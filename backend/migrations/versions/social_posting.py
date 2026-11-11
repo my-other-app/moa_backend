@@ -32,14 +32,14 @@ Downgrade drops the tables (every connection, post and poster size with
 them) and the two columns.
 
 Revision ID: social_posting
-Revises: review_resends
+Revises: support_desk
 """
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "social_posting"
-down_revision = "review_resends"
+down_revision = "support_desk"
 branch_labels = None
 depends_on = None
 

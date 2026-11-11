@@ -272,6 +272,15 @@ async def update_settings(session, event: Events, body) -> dict:
             await cohosts.tell_followers(session, event)
         except Exception:  # noqa: BLE001 - telling followers must never undo the publish
             logger.exception("telling co-hosts' followers about event %s failed", event.id)
+    if "status" in data and lifecycle(event) in (EventStatus.published, EventStatus.live):
+        # Out now: the people following one of its speakers hear of it, once
+        # each (app/api/speakers/notify.py; the job finds nobody new otherwise).
+        from app.api.speakers import notify as speaker_notify
+
+        try:
+            await speaker_notify.queue_event(session, event.id)
+        except Exception:  # noqa: BLE001 - telling followers must never undo the publish
+            logger.exception("queueing the speaker followers' push for event %s failed", event.id)
     # Editing the hours re-times the job. DELETED stays terminal.
     job = await ensure_job(session, event)
     if job.state is not RetentionState.deleted:

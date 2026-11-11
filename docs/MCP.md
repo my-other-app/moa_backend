@@ -136,6 +136,7 @@ On every call each tool checks, in this order:
 | `list_store_items` | store:read | read-only | GET /clubs/store | The club catalogue: price, stock and left per size, on sale, which events offer it. |
 | `list_feedback` | events:read | read-only | GET /events/ratings/{id} | Average rating, reviews (newest first, paged), survey results. |
 | `list_team` | team:read | read-only | GET /clubs/access | The club account, and each member's role and status. |
+| `list_past_speakers` | events:read | read-only | GET /clubs/speakers | Names looked up among the club's past speakers (and claimed profiles): each match's speaker_profile_id, headline, talks. No contacts (docs/SPEAKERS.md). |
 | `create_event_draft` | events:write | write | POST /events/create | A new event, **lifecycle draft**: nobody sees it, nobody is told. Counts against `events_per_month`; a fee needs `tickets`. Returns its id and dashboard link. |
 | `update_event_draft` | events:write | write, idempotent | PUT /events/update/{id} | Changes a **draft** (`clear` empties fields). A published event returns `EVENT_NOT_DRAFT` with "edit it in the dashboard" and the link. |
 | `create_store_item` | store:write | write | POST /clubs/store | A catalogue item, created **off sale** (needs `merch`). |

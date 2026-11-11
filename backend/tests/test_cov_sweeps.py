@@ -208,6 +208,7 @@ LOOPS = [
     # Social posts due (and stale claims) queued, and the day's token refresh queued once (app/api/social).
     Loop("social posting", "app.api.social.sweep", "sweep_loop", lock_keys.SOCIAL_SWEEP,
          [("app.api.social.scheduler", "dispatch"), ("app.api.social.sweep", "maybe_daily")], runs=("social_daily",)),
+    Loop("support desk", "app.api.support.sweep", "sweep_loop", lock_keys.SUPPORT_SWEEP, [("app.api.support.sweep", "sweep")]),
     Loop("popularity", "app.api.discover.counters", "check_loop", lock_keys.DISCOVER_POPULARITY, [("app.api.discover.popularity", "refresh")]),
     Loop("counters", "app.api.discover.counters", "check_loop", lock_keys.DISCOVER_COUNTERS,
          [("app.api.discover.counters", "reconcile"), ("app.api.discover.counters", "reconcile_more")], runs=("counters", "counters-posts")),

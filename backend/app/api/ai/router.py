@@ -125,6 +125,10 @@ async def event_draft(
     )
     outcome = await access.run(session, ai, action="event_draft", request=ask, parse=draft.parse, user=user, member_id=_member_id(request))
     result, warnings = draft.build(outcome.value, tree=tree, categories=categories, today=today, text=bool(text), file=attachment is not None)
+    # Each speaker's name, matched against the club's past speakers (app/api/speakers).
+    from app.api.speakers import club as speakers_club
+
+    await speakers_club.match_draft(session, club.id, result.speakers)
     return DraftOut(draft=result, warnings=warnings)
 
 

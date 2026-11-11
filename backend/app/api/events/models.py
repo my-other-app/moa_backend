@@ -74,6 +74,9 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     # "High demand": a label the club may show on the public page instead of
     # any request numbers (docs/APPROVALS.md §7). No number, only the label.
     high_demand_label = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    # "Let guests give their ticket back": a free ticket, by the link in its
+    # emails, before the start (app/api/ticket_cancel). On unless the club turns it off.
+    allow_self_cancel = Column(Boolean, nullable=False, default=True, server_default=sa.true())
     duration = Column(Float, nullable=False)
     about = Column(String, nullable=True)
     location_name = Column(String, nullable=True)
@@ -349,8 +352,18 @@ class EventSpeakers(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     # A few lines about them, and one place to find out more; the event page shows both.
     bio = Column(String(600), nullable=True)
     link = Column(String(500), nullable=True)
+    # The person in the speakers directory (app/api/speakers): the columns
+    # above are this event's own copy, which its page shows. Null only until
+    # the backfill (speakers.backfill) or the event's next save links it.
+    speaker_profile_id = Column(Integer, ForeignKey("speaker_profiles.id", ondelete="SET NULL"), nullable=True)
+    # What they talk about at this event.
+    talk_title = Column(String(200), nullable=True)
 
     event = relationship("Events", back_populates="speakers")
+
+    __table_args__ = (
+        sa.Index("ix_event_speakers_profile", "speaker_profile_id", postgresql_where=sa.text("speaker_profile_id IS NOT NULL")),
+    )
 
 
 class EventFiles(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):

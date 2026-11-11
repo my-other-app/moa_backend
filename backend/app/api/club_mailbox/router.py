@@ -558,8 +558,20 @@ async def ses_hook(request: Request, session: SessionDep) -> Response:
     except providers.NotOurs as exc:
         logger.info("mailbox hook: a notification not for the mailbox (%s)", exc)
         return _answer(200, {"ok": True, "reason": "not_ours"})
+    # The raw mail is read at most once, for whoever it is for: the team's
+    # desk (support@ / sales@, app/api/support/inbound.py) and the clubs.
+    raw: dict = {}
+
+    def reader(r):
+        if "mail" not in raw:
+            raw["mail"] = providers.read(r)
+        return raw["mail"]
+
     try:
-        outcome = await inbound.receive(session, received)
+        from app.api.support import inbound as desk_inbound
+
+        desk = await desk_inbound.receive(session, received, reader)
+        outcome = await inbound.receive(session, received, reader=reader)
     except providers.Unreadable as exc:
         logger.warning("mailbox hook: mail %s couldn't be read from the bucket (%s); SNS will deliver again",
                        received.provider_message_id[:24], exc)
@@ -572,4 +584,5 @@ async def ses_hook(request: Request, session: SessionDep) -> Response:
     for club_id, thread_id in outcome.kept:
         await live.changed(club_id, thread_id, "message")
     await asyncio.to_thread(providers.discard, received)
-    return _answer(200, {"ok": True, "kept": len(outcome.kept), "dropped": outcome.dropped, "duplicate": outcome.duplicate})
+    return _answer(200, {"ok": True, "kept": len(outcome.kept), "dropped": outcome.dropped, "duplicate": outcome.duplicate,
+                         **({"desk": desk} if desk else {})})

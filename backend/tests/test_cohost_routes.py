@@ -328,6 +328,8 @@ ROUTES = {
     "POST /api/v1/events/registration/{event_id}/attendees": ALLOW,
     "POST /api/v1/events/registration/{event_id}/import": ALLOW,
     "GET /api/v1/events/registration/{event_id}/imports": ALLOW,
+    # The tickets guests gave back by their emails' link (app/api/ticket_cancel).
+    "GET /api/v1/events/registration/{event_id}/cancellations": ALLOW,
     "POST /api/v1/events/registration/{event_id}/attendance/{registration_id}": ALLOW,
     "GET /api/v1/events/registration/{event_id}/winners": ALLOW,
     "PUT /api/v1/events/registration/{event_id}/winners/{registration_id}": ALLOW,

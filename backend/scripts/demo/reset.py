@@ -84,6 +84,8 @@ FILTERS: dict[str, str] = {
     "event_categories": f"created_by_id IS NULL OR created_by_id IN ({ADMINS})",
     # The admins' own invitations (app/api/admin_ops).
     "admin_invites": f"user_id IN ({ADMINS})",
+    # Which admins are in the Support and Sales teams (app/api/support).
+    "admin_team_members": f"user_id IN ({ADMINS})",
 }
 
 #: Every table in the database, and what happens to it.
@@ -107,6 +109,14 @@ CLASSIFICATION: dict[str, str] = {
     "job_workers": KEEP,
     # The runtime settings an owner set in the admin portal (app/api/admin_ops).
     "platform_settings": KEEP,
+    # The team's desk (app/api/support): the two teams and the desk's
+    # settings, the topics and the lost reasons the migration inserts, and
+    # the owners' saved replies and help answers -- the platform's own words.
+    "admin_teams": KEEP,
+    "support_topics": KEEP,
+    "lead_lost_reasons": KEEP,
+    "support_saved_replies": KEEP,
+    "support_help_answers": KEEP,
     # ── Kept in part: the admins and what they sign in with ──
     **{name: FILTERED for name in FILTERS},
     # ── Wiped: everything clubs, people and their events made ──
@@ -126,6 +136,8 @@ CLASSIFICATION: dict[str, str] = {
     # Venue lookups for the events that are going.
     "geocode_cache": WIPE,
     "agenda_items": WIPE,
+    # An agenda session's speakers, from the event's speakers (app/api/speakers).
+    "agenda_item_speakers": WIPE,
     "agenda_templates": WIPE,
     "archived_contacts": WIPE,
     "background_task_logs": WIPE,
@@ -268,8 +280,28 @@ CLASSIFICATION: dict[str, str] = {
     "merch_items": WIPE,
     "merch_variants": WIPE,
     "message_deliveries": WIPE,
+    # The team's desk and the sales leads (app/api/support, app/api/leads):
+    # people's questions and the organisations we talked to. Their files'
+    # rows (the files are in the bucket under support/ and leads/).
+    "support_cases": WIPE,
+    "support_messages": WIPE,
+    "support_attachments": WIPE,
+    "leads": WIPE,
+    "lead_contacts": WIPE,
+    "lead_activities": WIPE,
+    "lead_files": WIPE,
+    "follow_ups": WIPE,
     # An event's review email sent again (app/api/emails/review.py).
     "review_resends": WIPE,
+    # Tickets the guests gave back by their emails' link (app/api/ticket_cancel).
+    "ticket_cancellations": WIPE,
+    # The speakers directory (app/api/speakers): built from the events' speakers, which go too.
+    "speaker_profiles": WIPE,
+    "speaker_contacts": WIPE,
+    "speaker_merge_candidates": WIPE,
+    "speaker_history": WIPE,
+    "speaker_follows": WIPE,
+    "speaker_claims": WIPE,
     "review_resend_recipients": WIPE,
     # Social auto-posting (app/api/social): connected accounts (their tokens with them),
     # posts, poster sizes, sign-in states and the approval setting; Meta's deletion records.

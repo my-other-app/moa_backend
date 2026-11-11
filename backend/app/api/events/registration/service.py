@@ -1603,9 +1603,19 @@ async def remove_registration(
     registration = await get_registration(session, user_id, event_id, registration_id, as_admin=as_admin)
     if (confirm_slug or "").strip() != registration.event.slug:
         raise CustomHTTPException(409, message="Type the event's slug exactly to confirm.", errors={"fields": {"confirm_slug": registration.event.slug}})
+    await take_off_list(session, registration)
+    return registration
+
+
+async def take_off_list(session: AsyncSession, registration) -> None:
+    """What taking someone off the list does, whoever asks -- the club
+    (remove_registration) or the guest giving a free ticket back by their
+    email's link (app/api/ticket_cancel): the registration is soft deleted
+    with its ticket and check-in, which frees its place (places count live
+    registrations only); the waiting list's sweep offers it within the
+    minute. Commits."""
     registration.soft_delete()
     await session.commit()
-    return registration
 
 
 async def add_attendee(
