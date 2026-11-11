@@ -185,7 +185,7 @@ def test_the_catalog_and_the_seed_only_name_flags_that_exist():
     assert len(keys) == len(set(keys))
     assert set(keys) <= set(FEATURE_KEYS)
     assert UNBUILT_FEATURES == {
-        "sessions", "nobadge", "tfa", "payouts", "sso", "api",
+        "sessions", "nobadge", "tfa", "payouts", "sso", "api", "api_access",
     }
 
     module = _migration()

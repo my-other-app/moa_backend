@@ -94,6 +94,9 @@ class PlanFeaturesIn(CustomBaseModel):
     payouts: bool = False
     sso: bool = False
     api: bool = False
+    # The Integrations API (app/api/partner): off on every plan for now; an
+    # admin's allocation always wins over it.
+    api_access: bool = False
     ai_assist: bool = False
     ai_byok: bool = False
     mcp: bool = False

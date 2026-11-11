@@ -116,7 +116,7 @@ async def issue_preview(session, event: Events, audience: str, roles: list[str])
     return {"eligible": eligible, "already_issued": issued, "to_issue": eligible - issued, "outdated": outdated}
 
 
-async def issue(session, event: Events, audience: str, roles: list[str]) -> dict:
+async def issue(session, event: Events, audience: str, roles: list[str], *, registration_ids: Optional[list] = None) -> dict:
     """Everyone in the audience who has none gets one, numbered and dated
     now; the ones issued with an older design are marked as refreshed. A
     guest is never issued twice, and a revoked one stays revoked.
@@ -124,8 +124,13 @@ async def issue(session, event: Events, audience: str, roles: list[str]) -> dict
     Two UPDATEs in the database, not a loop over every registration loaded
     as an object: an event of five thousand guests was five thousand rows
     read, changed and flushed one by one. Each row is stamped with its own
-    role's design version (`_role_versions`)."""
+    role's design version (`_role_versions`).
+
+    `registration_ids`: only these of the audience (the Integrations API's
+    issue to named registrations, app/api/partner)."""
     criteria = _audience_criteria(event.id, audience, roles)
+    if registration_ids is not None:
+        criteria = [*criteria, EventRegistrationsLink.id.in_(list(registration_ids))]
     versions, default = await _role_versions(session, event.id)
     version = _version_of_role(versions, default)
     now = datetime.now(timezone.utc)

@@ -219,6 +219,7 @@ async def create_event(
         requires_approval=event.requires_approval,
         high_demand_label=event.high_demand_label,
         allow_self_cancel=event.allow_self_cancel,
+        external_payments_allowed=event.external_payments_allowed,
     )
     # Its first ticket type, at the event's own price and cap (app/api/ticketing).
     from app.api.ticketing import types as ticket_types

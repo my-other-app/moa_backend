@@ -61,6 +61,9 @@ from app.api.club_mailbox import models as _club_mailbox_models  # noqa: F401
 from app.api.club_ops import models as _club_ops_models  # noqa: F401
 # Connected AI assistants: clients, grants, tokens, pending actions, announcement drafts (app/api/mcp).
 from app.api.mcp import models as _mcp_models  # noqa: F401
+# The Integrations API: allocations, keys, partner apps and their OAuth, external ids,
+# idempotency, external payments, certificate jobs, usage, the test-mode sandbox (app/api/partner).
+from app.api.partner import models as _partner_models  # noqa: F401
 from app.api.organisers import models as _organiser_models  # noqa: F401
 # An event's own sponsors and partners (app/api/event_partners).
 from app.api.event_partners import models as _event_partner_models  # noqa: F401

@@ -254,6 +254,13 @@ from app.api.mcp.server import router as mcp_router  # noqa: E402
 
 application.include_router(router=mcp_oauth_router)
 application.include_router(router=mcp_router)
+# The Integrations API: /partner/v1 (other platforms and clubs' own systems,
+# docs/INTEGRATIONS_API.md) and its OAuth at /partner/oauth (app/api/partner).
+from app.api.partner.oauth_router import router as partner_oauth_router  # noqa: E402
+from app.api.partner.router import router as partner_router  # noqa: E402
+
+application.include_router(router=partner_oauth_router)
+application.include_router(router=partner_router)
 # Innermost: each request's plan-gate scope, so one request resolves a club's
 # entitlements once and knows whether an admin is behind it
 # (app/api/subscriptions/gates.py).

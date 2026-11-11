@@ -43,6 +43,8 @@ from app.api.club_domains.router import (
 )
 from app.api.club_access.router import router as club_access_router
 from app.api.mcp.router import club_router as mcp_club_router
+from app.api.partner.admin_router import router as partner_admin_router
+from app.api.partner.club_router import router as partner_club_router
 from app.api.store.router import club_router as store_club_router, public_router as store_public_router, router as store_router
 from app.api.links.router import router as links_router
 from app.api.ticketing.router import public_router as ticketing_public_router, router as ticketing_router
@@ -164,6 +166,10 @@ api_router.include_router(router=speakers_admin_router)
 api_router.include_router(router=speakers_public_router)
 # Before club_router too: /clubs/connected-apps and /clubs/pending-actions are literal paths.
 api_router.include_router(router=mcp_club_router)
+# The Integrations API's dashboard sides (app/api/partner): /clubs/integrations/...
+# before club_router too, and the admin's /admin/integrations/....
+api_router.include_router(router=partner_club_router)
+api_router.include_router(router=partner_admin_router)
 # Before club_router too: /clubs/payments/gateway is a literal path.
 api_router.include_router(router=payment_gateways_club_router)
 # A club's own WhatsApp number (app/api/club_whatsapp): /clubs/whatsapp/... before club_router.

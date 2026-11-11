@@ -857,6 +857,18 @@ class AppConfig(BaseSettings):
     # first asks to connect. False: only registered (RFC 7591) clients.
     MCP_CLIENT_METADATA_DOCUMENTS: bool = True
 
+    # ─── The Integrations API (app/api/partner, docs/INTEGRATIONS_API.md) ──
+    # The kill switch. Off: /partner/v1 and /partner/oauth answer 404 (the
+    # dashboards' Integrations pages still read and revoke). Nothing reaches
+    # a club while it is on unless a platform admin allocated the club.
+    PARTNER_API_ENABLED: bool = True
+    # A partner app's access token's life, and a refresh token's (each refresh starts a new one).
+    PARTNER_ACCESS_TOKEN_MINUTES: int = 60
+    PARTNER_REFRESH_TOKEN_DAYS: int = 90
+    # The club dashboard's consent page a partner's authorize request is sent
+    # on to; empty: MCP_DASHBOARD_URL + /integrations/connect.
+    PARTNER_CONSENT_URL: str = ""
+
     @field_validator("PLAN_ENFORCEMENT_FROM")
     @classmethod
     def _aware_cutoff(cls, value: datetime) -> datetime:

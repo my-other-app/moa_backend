@@ -21,14 +21,14 @@ clubs and users, under lock_timeout 3s.
 Downgrade drops the three tables (every endpoint, change and delivery with them).
 
 Revision ID: api_webhooks
-Revises: social_posting
+Revises: partner_api
 """
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "api_webhooks"
-down_revision = "social_posting"
+down_revision = "partner_api"
 branch_labels = None
 depends_on = None
 
