@@ -129,7 +129,7 @@ async def recent_for(session, user, limit: int = 20) -> list[dict]:
     for e in rows:
         local = content._local(e.event_datetime)
         out.append({"id": e.id, "name": e.name, "date": local.isoformat() if local else None, "slug": e.slug,
-                    "image_url": await posters.share_image_url(session, e)})
+                    "image_url": await posters.share_image_url(session, e, or_poster=True)})
     return out
 
 

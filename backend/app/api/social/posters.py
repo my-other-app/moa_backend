@@ -200,12 +200,13 @@ def out(row: PosterVariants) -> dict:
     }
 
 
-async def share_image_url(session, event) -> Optional[str]:
+async def share_image_url(session, event, *, or_poster: bool = False) -> Optional[str]:
     """The link-preview picture: the 1200 x 630 made from the current poster
-    (or the club's own for that size), else the poster itself. Never made
-    here: a public read writes nothing."""
+    (or the club's own for that size); null until it is made (when the event
+    is published), or the poster itself with `or_poster`. Never made here:
+    a public read writes nothing."""
     row = await session.scalar(select(PosterVariants).where(PosterVariants.event_id == event.id, PosterVariants.size == "facebook"))
     if row is not None and row.key and (row.own or row.source_key == poster_key(event)):
         return url_of(row)
-    key = poster_key(event)
+    key = poster_key(event) if or_poster else None
     return media.public_url(key) if key else None

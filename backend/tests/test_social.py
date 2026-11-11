@@ -384,6 +384,8 @@ async def test_posters_are_made_in_every_size_by_crop_or_fit_or_from_the_clubs_o
     from PIL import Image
     import io
 
+    # Until the 1200 x 630 is made there is no link-preview picture (never the plain poster in its place).
+    assert (await client.get(f"{API}/discover/events/{world.event.slug}")).json()["event"]["share_image_url"] is None
     r = await client.get(f"{API}/clubs/social/events/{world.event.id}/posters", headers=world.h)
     sizes = {v["size"]: (v["width"], v["height"]) for v in r.json()}
     assert sizes == {"ig_portrait": (1080, 1350), "ig_square": (1080, 1080), "facebook": (1200, 630), "linkedin": (1200, 627),
