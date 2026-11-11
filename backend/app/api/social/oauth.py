@@ -158,7 +158,8 @@ async def callback(session, platform: str, params: dict) -> str:
     if state.expires_at < now:
         return _fail(back, platform, "expired_state")
     if params.get("error") or not params.get("code"):
-        return _fail(back, platform, "denied" if params.get("error") in ("access_denied", "user_cancelled_login", "user_cancelled_authorize") or params.get("error") else "no_code")
+        # The person said no on the platform (access_denied, user_cancelled_login, ...), or no code came.
+        return _fail(back, platform, "denied" if params.get("error") else "no_code")
     reason = platforms.unavailable_reason(platform)
     if reason:
         return _fail(back, platform, reason)
