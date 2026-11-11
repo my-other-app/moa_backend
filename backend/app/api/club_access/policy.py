@@ -36,6 +36,9 @@ _SELF = _rx(
 # The bell (app/api/club_alerts): what MyOtherApp told the club. Everyone
 # at the club reads it, and marking a notice read is no change to the club.
 _BELL = _rx(r"^/api/v1/clubs/alerts(?:/|$)")
+# Asking MyOtherApp for help (app/api/support): anyone at the club, door
+# staff too -- the request goes to the platform's desk, not into the club's records.
+_HELP = _rx(r"^/api/v1/support(?:/|$)")
 # The access list itself: an admin may read it; only the owner changes it.
 _ACCESS_LIST = _rx(r"^/api/v1/clubs/access/?$")
 _ACCESS = _rx(r"^/api/v1/clubs/access(?:/|$)")
@@ -152,7 +155,7 @@ _DOOR_WRITES = _rx(
 
 def allows(role: str, method: str, path: str) -> bool:
     method = method.upper()
-    if _SELF.search(path) or _BELL.search(path):
+    if _SELF.search(path) or _BELL.search(path) or _HELP.search(path):
         return True
     if _OWNER_ACCOUNT.search(path):
         return False

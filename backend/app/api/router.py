@@ -89,6 +89,9 @@ from app.api.message_quota.router import club_router as message_quota_club_route
 from app.api.message_quota.router import public_router as message_credits_public_router
 from app.api.health import admin_router as admin_jobs_router
 from app.api.admin_ops.router import router as admin_ops_router
+from app.api.support.admin_router import router as support_admin_router
+from app.api.support.public_router import router as support_public_router
+from app.api.leads.router import public_router as leads_public_router, router as leads_admin_router
 from app.api.backups.router import router as backups_router
 from app.api.subscriptions.router import (
     admin_router as subscriptions_admin_router,
@@ -221,6 +224,12 @@ api_router.include_router(router=admin_alerts_router)
 api_router.include_router(router=admin_jobs_router)
 # The admin portal's operator tools: payouts, disputes, refunds, admins, settings, jobs, mail, WhatsApp.
 api_router.include_router(router=admin_ops_router)
+# The team's support desk and sales leads (app/api/support, app/api/leads):
+# the desk's router first, so /admin/leads/lost-reasons is never read as a lead's id.
+api_router.include_router(router=support_public_router)
+api_router.include_router(router=support_admin_router)
+api_router.include_router(router=leads_public_router)
+api_router.include_router(router=leads_admin_router)
 api_router.include_router(router=backups_router)
 # Before the clubs router: these are literal paths under /clubs, and the
 # clubs router owns the parameterised ones.
