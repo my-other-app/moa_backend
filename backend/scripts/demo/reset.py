@@ -270,6 +270,8 @@ CLASSIFICATION: dict[str, str] = {
     "message_deliveries": WIPE,
     # An event's review email sent again (app/api/emails/review.py).
     "review_resends": WIPE,
+    # Tickets the guests gave back by their emails' link (app/api/ticket_cancel).
+    "ticket_cancellations": WIPE,
     "review_resend_recipients": WIPE,
     "messages": WIPE,
     # What clubs sent, counted by the month, its statements and Enterprise clubs' own limits.

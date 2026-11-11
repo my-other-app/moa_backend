@@ -520,6 +520,10 @@ def guest_values(event: Events, reg: EventRegistrationsLink) -> dict:
     v["organiser_email"] = organiser_email(event)
     v["event_start"] = f"{v['event_day'][:3]} {v['event_date']} · {v['event_time']}"
     v["doors_in"] = doors_in(event.event_datetime)
+    # "Can't come? Give your ticket back": the guest's own signed link (app/api/ticket_cancel).
+    from app.api.ticket_cancel.service import url_for as cancel_url_for
+
+    v["cancel_ticket_url"] = cancel_url_for(reg.id) if getattr(reg, "id", None) else ""
     # The code the door types when the QR will not scan (app.core.mail.schema).
     v.setdefault("ticket_code", reg.ticket_id or "")
     return v

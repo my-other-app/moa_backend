@@ -156,6 +156,7 @@ async def create_event(
         certificate_template_id=certificate_template_id,
         requires_approval=bool(kwargs.get("requires_approval")),
         high_demand_label=bool(kwargs.get("high_demand_label")),
+        allow_self_cancel=kwargs.get("allow_self_cancel") is not False,
     )
     if status:
         from app.api.closeout.models import EventStatus
@@ -387,6 +388,8 @@ async def update_event(
         db_event.requires_approval = bool(event.requires_approval)
     if getattr(event, "high_demand_label", None) is not None:
         db_event.high_demand_label = bool(event.high_demand_label)
+    if getattr(event, "allow_self_cancel", None) is not None:
+        db_event.allow_self_cancel = bool(event.allow_self_cancel)
     db_event.reg_startdate = event.reg_startdate
     db_event.reg_enddate = event.reg_enddate
     db_event.about = event.about
