@@ -81,7 +81,8 @@ async def _tell_job(p: dict) -> None:
             await s.commit()
             return
         event, club_name = found
-        followed = list((await s.scalars(
+        followed: list[str] = []
+        for name in (await s.scalars(
             select(SpeakerProfiles.name)
             .join(EventSpeakers, EventSpeakers.speaker_profile_id == SpeakerProfiles.id)
             .where(
@@ -89,8 +90,9 @@ async def _tell_job(p: dict) -> None:
                 select(SpeakerFollows.id).where(SpeakerFollows.profile_id == SpeakerProfiles.id).exists(),
             )
             .order_by(EventSpeakers.display_order, EventSpeakers.id)
-            .distinct()
-        )).all())
+        )).all():
+            if name not in followed:
+                followed.append(name)
         if not followed:
             await s.commit()
             return

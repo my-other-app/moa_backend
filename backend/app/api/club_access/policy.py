@@ -281,7 +281,7 @@ MCP_TOOLS = {
     "list_store_items": ("GET", "/api/v1/clubs/store"),
     "list_feedback": ("GET", "/api/v1/events/ratings/0"),
     "list_team": ("GET", "/api/v1/clubs/access"),
-    "find_past_speakers": ("GET", "/api/v1/clubs/speakers"),
+    "list_past_speakers": ("GET", "/api/v1/clubs/speakers"),
     "create_event_draft": ("POST", "/api/v1/events/create"),
     "update_event_draft": ("PUT", "/api/v1/events/update/0"),
     "create_store_item": ("POST", "/api/v1/clubs/store"),

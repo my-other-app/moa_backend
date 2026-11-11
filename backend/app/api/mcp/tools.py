@@ -596,7 +596,7 @@ async def list_team(call: Call, args: dict) -> dict:
 
 
 @tool(
-    "find_past_speakers",
+    "list_past_speakers",
     title="Find past speakers",
     scope="events:read",
     description=(
@@ -610,7 +610,7 @@ async def list_team(call: Call, args: dict) -> dict:
         "limit": {"type": "integer", "minimum": 1, "maximum": 5, "default": 3, "description": "Matches per name."},
     }, ("names",)),
 )
-async def find_past_speakers(call: Call, args: dict) -> dict:
+async def list_past_speakers(call: Call, args: dict) -> dict:
     from app.api.speakers import club as speakers_club
 
     out = []

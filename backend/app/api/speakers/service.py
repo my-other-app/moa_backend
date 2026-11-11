@@ -319,8 +319,9 @@ async def talks(
     public = and_(*public_event_where(t))
     q = (
         select(
-            EventSpeakers.speaker_profile_id, EventSpeakers.id.label("event_speaker_id"), EventSpeakers.talk_title,
-            Events.id.label("event_id"), Events.name, Events.slug, Events.event_datetime, Events.poster, Events.lifecycle,
+            # The event as an entity: a poster column on its own carries its
+            # type, sizes and all, into the statement's cache key, which cannot hash it.
+            EventSpeakers.speaker_profile_id, EventSpeakers.id.label("event_speaker_id"), EventSpeakers.talk_title, Events,
             ends_at_sql().label("ends_at"), Clubs.id.label("club_id"), Clubs.name.label("club_name"), Clubs.slug.label("club_slug"),
             public.label("public"),
         )
@@ -339,14 +340,15 @@ async def talks(
     seen: set = set()
     for r in (await session.execute(q)).all():
         # One talk an event, however many rows name them there.
-        if (r.speaker_profile_id, r.event_id) in seen:
+        e = r.Events
+        if (r.speaker_profile_id, e.id) in seen:
             continue
-        seen.add((r.speaker_profile_id, r.event_id))
+        seen.add((r.speaker_profile_id, e.id))
         out[r.speaker_profile_id].append({
-            "event_id": r.event_id, "event_name": r.name, "slug": r.slug, "date": r.event_datetime,
+            "event_id": e.id, "event_name": e.name, "slug": e.slug, "date": e.event_datetime,
             "ends_at": r.ends_at, "talk_title": r.talk_title, "event_speaker_id": r.event_speaker_id,
-            "status": getattr(r.lifecycle, "value", r.lifecycle) or "published", "public": bool(r.public),
-            "poster": photo_poster(r.poster),
+            "status": getattr(e.lifecycle, "value", e.lifecycle) or "published", "public": bool(r.public),
+            "poster": photo_poster(e.poster),
             "club": {"id": r.club_id, "name": r.club_name, "slug": r.club_slug},
         })
     return out

@@ -166,8 +166,9 @@ async def test_the_page_by_slug(client, session, world):
     assert page["club"] == {"id": a.id, "name": "Circuit Society", "slug": a.slug, "logo": None, "tagline": "Build things that think.", "followers": 2, "location_name": "Bengaluru",
                             "whatsapp_updates": False}
     assert page["speakers"] == [
-        {"id": world["meera"].id, "name": "Meera", "designation": None, "photo": None, "bio": None, "link": None},
-        {"id": world["rao"].id, "name": "Dr. Rao", "designation": "Professor", "photo": None, "bio": "Builds robots.", "link": "https://rao.example"},
+        {"id": world["meera"].id, "name": "Meera", "designation": None, "photo": None, "bio": None, "link": None, "profile_slug": None, "talk_title": None},
+        {"id": world["rao"].id, "name": "Dr. Rao", "designation": "Professor", "photo": None, "bio": "Builds robots.", "link": "https://rao.example",
+         "profile_slug": None, "talk_title": None},
     ]
     # The agenda exactly as the event's own agenda endpoint gives it.
     public = (await client.get(f"/api/v1/events/{main.id}/agenda")).json()

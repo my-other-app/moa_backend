@@ -347,7 +347,8 @@ async def test_a_draft_keeps_only_live_slugs_and_reads_the_date_in_india(client,
     assert draft["category"] == "Workshop"
     assert draft["topics"] == ["technology"] and draft["interests"] == ["ai-ml", "web"]
     assert draft["agenda"] == [{"at": "18:00", "title": "Doors", "by": None}, {"at": "19:15", "title": "Talk", "by": "Asha"}]
-    assert draft["speakers"] == [{"name": "Asha Menon", "designation": None, "bio": "Builds robots."}]
+    # Matched against the club's past speakers (app/api/speakers): none yet.
+    assert draft["speakers"] == [{"name": "Asha Menon", "designation": None, "bio": "Builds robots.", "speaker_profile_id": None, "matches": []}]
     assert draft["questions"] == [
         {"label": "T-shirt size", "type": "select", "options": ["S", "M"], "required": True},
         {"label": "Team name", "type": "text", "options": [], "required": False},

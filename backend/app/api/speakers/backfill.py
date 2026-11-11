@@ -47,8 +47,10 @@ GROUP_MAX = 25
 
 
 def _raw(column):
-    """A column's stored text, not what its type makes of it (an image's key, not its links)."""
-    return sa.type_coerce(column, sa.String())
+    """A column's stored text, not what its type makes of it (an image's key,
+    not its links). Written out: a cast or type_coerce carries the image
+    type into the statement's cache key, and its dict of sizes cannot be hashed."""
+    return sa.literal_column(f"{column.table.name}.{column.name}", sa.Text())
 
 
 async def _index(session):
