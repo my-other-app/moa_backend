@@ -84,6 +84,8 @@ FILTERS: dict[str, str] = {
     "event_categories": f"created_by_id IS NULL OR created_by_id IN ({ADMINS})",
     # The admins' own invitations (app/api/admin_ops).
     "admin_invites": f"user_id IN ({ADMINS})",
+    # Which admins are in the Support and Sales teams (app/api/support).
+    "admin_team_members": f"user_id IN ({ADMINS})",
 }
 
 #: Every table in the database, and what happens to it.
@@ -107,6 +109,14 @@ CLASSIFICATION: dict[str, str] = {
     "job_workers": KEEP,
     # The runtime settings an owner set in the admin portal (app/api/admin_ops).
     "platform_settings": KEEP,
+    # The team's desk (app/api/support): the two teams and the desk's
+    # settings, the topics and the lost reasons the migration inserts, and
+    # the owners' saved replies and help answers -- the platform's own words.
+    "admin_teams": KEEP,
+    "support_topics": KEEP,
+    "lead_lost_reasons": KEEP,
+    "support_saved_replies": KEEP,
+    "support_help_answers": KEEP,
     # ── Kept in part: the admins and what they sign in with ──
     **{name: FILTERED for name in FILTERS},
     # ── Wiped: everything clubs, people and their events made ──
@@ -270,6 +280,17 @@ CLASSIFICATION: dict[str, str] = {
     "merch_items": WIPE,
     "merch_variants": WIPE,
     "message_deliveries": WIPE,
+    # The team's desk and the sales leads (app/api/support, app/api/leads):
+    # people's questions and the organisations we talked to. Their files'
+    # rows (the files are in the bucket under support/ and leads/).
+    "support_cases": WIPE,
+    "support_messages": WIPE,
+    "support_attachments": WIPE,
+    "leads": WIPE,
+    "lead_contacts": WIPE,
+    "lead_activities": WIPE,
+    "lead_files": WIPE,
+    "follow_ups": WIPE,
     # An event's review email sent again (app/api/emails/review.py).
     "review_resends": WIPE,
     # Tickets the guests gave back by their emails' link (app/api/ticket_cancel).

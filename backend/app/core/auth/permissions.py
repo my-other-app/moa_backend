@@ -86,6 +86,36 @@ def ensure_can(user, capability: str) -> None:
         )
 
 
+# ─── Teams: which desk queue an admin works (app/api/support/teams.py) ──────
+# On top of the roles, never instead of them: the role says what an admin may
+# change on the platform, a team which queue they work. A viewer in the
+# support team answers cases and still cannot refund a payment -- the refund
+# keeps its own MANAGE_MONEY.
+
+
+async def teams_of(session, user) -> frozenset[str]:
+    """The teams this admin is in (`support`, `sales`); none for anyone else."""
+    if user is None or getattr(getattr(user, "user_type", None), "value", getattr(user, "user_type", None)) != "admin":
+        return frozenset()
+    from sqlalchemy import select
+
+    from app.api.support.models import AdminTeamMembers
+
+    rows = await session.scalars(select(AdminTeamMembers.team).where(AdminTeamMembers.user_id == user.id))
+    return frozenset(rows.all())
+
+
+async def in_team(session, user, team: str) -> bool:
+    """Whether this admin is a member of `team`. Admin owners are not
+    members by their role: `is_desk_owner` is that question."""
+    return team in await teams_of(session, user)
+
+
+def is_desk_owner(user) -> bool:
+    """An admin owner runs the desk: teams, topics, rules, reassigning."""
+    return can(user, MANAGE_ADMINS)
+
+
 # Reading a club's records is VIEW; changing them is MANAGE_CONTENT, the
 # capability that editing the club record itself takes (PUT /clubs/admin/{id});
 # deleting is DESTROY, as deleting a club is.

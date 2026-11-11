@@ -205,6 +205,7 @@ LOOPS = [
     Loop("club whatsapp", "app.api.club_whatsapp.sweep", "sweep_loop", lock_keys.CLUB_WHATSAPP_SWEEP, [("app.api.club_whatsapp.sweep", "sweep")]),
     Loop("club mailbox", "app.api.club_mailbox.sweep", "sweep_loop", lock_keys.CLUB_MAILBOX_SWEEP, [("app.api.club_mailbox.sweep", "sweep")]),
     Loop("waiting lists", "app.api.ticketing.sweep", "sweep_loop", lock_keys.WAITLIST_SWEEP, [("app.api.ticketing.waitlist", "expire")]),
+    Loop("support desk", "app.api.support.sweep", "sweep_loop", lock_keys.SUPPORT_SWEEP, [("app.api.support.sweep", "sweep")]),
     Loop("popularity", "app.api.discover.counters", "check_loop", lock_keys.DISCOVER_POPULARITY, [("app.api.discover.popularity", "refresh")]),
     Loop("counters", "app.api.discover.counters", "check_loop", lock_keys.DISCOVER_COUNTERS,
          [("app.api.discover.counters", "reconcile"), ("app.api.discover.counters", "reconcile_more")], runs=("counters", "counters-posts")),

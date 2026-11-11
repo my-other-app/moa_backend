@@ -288,6 +288,19 @@ class AppConfig(BaseSettings):
     MAILBOX_SEND_PER_HOUR: int = 60
     MAILBOX_SEND_PER_DAY: int = 300
     MAILBOX_MAX_RECIPIENTS: int = 50
+
+    # ─── The team's support desk and sales leads (app/api/support, app/api/leads) ─
+    # Mail to these addresses (comma-separated) that reaches the inbound hook
+    # the club mailbox uses (SES receipt rule -> bucket -> SNS) becomes a
+    # support case, or a lead's timeline entry. Empty, the default: dormant --
+    # nothing is read for them, whatever arrives. Routing support@ and
+    # sales@ to the hook is an owner step (docs/SUPPORT_AND_LEADS.md).
+    SUPPORT_INBOUND_ADDRESSES: str = ""
+    SALES_INBOUND_ADDRESSES: str = ""
+    # Who the desk's mail is from (replies, acknowledgements, the survey) and
+    # the sales team's; each must be a sender the mail provider has verified.
+    SUPPORT_FROM_ADDRESS: str = "support@myotherapp.in"
+    SALES_FROM_ADDRESS: str = "sales@myotherapp.in"
     # Meta's Embedded Signup ("Connect with Meta", app/api/club_whatsapp/
     # embedded_signup.py), once MyOtherApp is a Tech Provider: off until the
     # owner has Meta's approval (docs/OPERATIONS.md section 21). The platform
@@ -544,6 +557,19 @@ class AppConfig(BaseSettings):
     @property
     def mcp_allowed_origins(self) -> list[str]:
         return [o.strip().rstrip("/") for o in (self.MCP_ALLOWED_ORIGINS or "").split(",") if o.strip()]
+
+    @staticmethod
+    def _addresses(raw: str) -> frozenset[str]:
+        return frozenset(a.strip().lower() for a in (raw or "").replace(";", ",").split(",") if "@" in a)
+
+    @property
+    def support_inbound_addresses(self) -> frozenset[str]:
+        """SUPPORT_INBOUND_ADDRESSES, lower case; empty while the desk's mail is dormant."""
+        return self._addresses(self.SUPPORT_INBOUND_ADDRESSES)
+
+    @property
+    def sales_inbound_addresses(self) -> frozenset[str]:
+        return self._addresses(self.SALES_INBOUND_ADDRESSES)
 
     @property
     def mail_suppress_domains(self) -> frozenset[str]:
