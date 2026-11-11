@@ -40,6 +40,7 @@ from app.api.support.schemas import (
     ToLeadIn,
 )
 from app.core.auth.dependencies import AdminAuth
+from app.core.auth.permissions import ManageAdminsAuth
 from app.core.utils import spreadsheet
 from app.db.core import SessionDep
 from app.response import CustomHTTPException
@@ -93,8 +94,7 @@ async def set_me_away(request: Request, body: AwayIn, session: SessionDep, admin
 
 
 @router.put("/teams/{key}/members", summary="Set a team's members (owner)")
-async def set_members(request: Request, key: str, body: MembersIn, session: SessionDep, admin: AdminAuth) -> dict:
-    (await teams.rights_of(session, admin)).require_owner("change the teams")
+async def set_members(request: Request, key: str, body: MembersIn, session: SessionDep, admin: ManageAdminsAuth) -> dict:
     team = _team_key(key)
     result = await teams.set_members(session, team, body.user_ids)
     await _audit(session, admin, "teams.members", "admin_team", team, f"{team.title()} team: {len(result['added'])} added, "
@@ -126,8 +126,7 @@ async def _check_topic_rule(session, assign: str, assignee_id: Optional[int]) ->
 
 
 @router.post("/support/topics", summary="Add a topic (owner)", status_code=201)
-async def create_topic(request: Request, body: TopicIn, session: SessionDep, admin: AdminAuth) -> dict:
-    (await teams.rights_of(session, admin)).require_owner("change the topics")
+async def create_topic(request: Request, body: TopicIn, session: SessionDep, admin: ManageAdminsAuth) -> dict:
     if not body.key or not body.label:
         raise _refuse(422, "A topic needs a key and a label.", "INVALID_TOPIC")
     await reference.ensure(session)
@@ -144,8 +143,7 @@ async def create_topic(request: Request, body: TopicIn, session: SessionDep, adm
 
 
 @router.patch("/support/topics/{key}", summary="Change a topic or its rule (owner)")
-async def update_topic(request: Request, key: str, body: TopicIn, session: SessionDep, admin: AdminAuth) -> dict:
-    (await teams.rights_of(session, admin)).require_owner("change the topics")
+async def update_topic(request: Request, key: str, body: TopicIn, session: SessionDep, admin: ManageAdminsAuth) -> dict:
     t = await session.get(SupportTopics, key)
     if t is None:
         raise _refuse(404, "There's no such topic.", "TOPIC_NOT_FOUND")
@@ -169,8 +167,7 @@ async def update_topic(request: Request, key: str, body: TopicIn, session: Sessi
 
 
 @router.delete("/support/topics/{key}", summary="Remove a topic (archived when cases have it) (owner)")
-async def delete_topic(request: Request, key: str, session: SessionDep, admin: AdminAuth) -> dict:
-    (await teams.rights_of(session, admin)).require_owner("change the topics")
+async def delete_topic(request: Request, key: str, session: SessionDep, admin: ManageAdminsAuth) -> dict:
     t = await session.get(SupportTopics, key)
     if t is None:
         raise _refuse(404, "There's no such topic.", "TOPIC_NOT_FOUND")
@@ -204,8 +201,7 @@ async def list_saved_replies(session: SessionDep, admin: AdminAuth, topic: Optio
 
 
 @router.post("/support/saved-replies", summary="Add a saved reply (owner)", status_code=201)
-async def create_saved_reply(request: Request, body: SavedReplyIn, session: SessionDep, admin: AdminAuth) -> dict:
-    (await teams.rights_of(session, admin)).require_owner("change the saved replies")
+async def create_saved_reply(request: Request, body: SavedReplyIn, session: SessionDep, admin: ManageAdminsAuth) -> dict:
     if not body.title or not body.body:
         raise _refuse(422, "A saved reply needs a title and words.", "INVALID_SAVED_REPLY")
     r = SupportSavedReplies(title=body.title, body=body.body, topic=await _valid_topic(session, body.topic), created_by=admin.id)
@@ -217,8 +213,7 @@ async def create_saved_reply(request: Request, body: SavedReplyIn, session: Sess
 
 
 @router.patch("/support/saved-replies/{reply_id}", summary="Change a saved reply (owner)")
-async def update_saved_reply(request: Request, reply_id: int, body: SavedReplyIn, session: SessionDep, admin: AdminAuth) -> dict:
-    (await teams.rights_of(session, admin)).require_owner("change the saved replies")
+async def update_saved_reply(request: Request, reply_id: int, body: SavedReplyIn, session: SessionDep, admin: ManageAdminsAuth) -> dict:
     r = await session.get(SupportSavedReplies, reply_id)
     if r is None:
         raise _refuse(404, "There's no such saved reply.", "SAVED_REPLY_NOT_FOUND")
@@ -234,8 +229,7 @@ async def update_saved_reply(request: Request, reply_id: int, body: SavedReplyIn
 
 
 @router.delete("/support/saved-replies/{reply_id}", summary="Delete a saved reply (owner)")
-async def delete_saved_reply(request: Request, reply_id: int, session: SessionDep, admin: AdminAuth) -> dict:
-    (await teams.rights_of(session, admin)).require_owner("change the saved replies")
+async def delete_saved_reply(request: Request, reply_id: int, session: SessionDep, admin: ManageAdminsAuth) -> dict:
     r = await session.get(SupportSavedReplies, reply_id)
     if r is None:
         raise _refuse(404, "There's no such saved reply.", "SAVED_REPLY_NOT_FOUND")
@@ -257,8 +251,7 @@ async def list_help_answers(session: SessionDep, admin: AdminAuth) -> list[dict]
 
 
 @router.post("/support/help-answers", summary="Add a help answer (owner)", status_code=201)
-async def create_help_answer(request: Request, body: HelpAnswerIn, session: SessionDep, admin: AdminAuth) -> dict:
-    (await teams.rights_of(session, admin)).require_owner("change the help answers")
+async def create_help_answer(request: Request, body: HelpAnswerIn, session: SessionDep, admin: ManageAdminsAuth) -> dict:
     if not body.question or not body.answer:
         raise _refuse(422, "A help answer needs a question and an answer.", "INVALID_HELP_ANSWER")
     a = SupportHelpAnswers(topic=await _valid_topic(session, body.topic), question=body.question, answer=body.answer,
@@ -271,8 +264,7 @@ async def create_help_answer(request: Request, body: HelpAnswerIn, session: Sess
 
 
 @router.patch("/support/help-answers/{answer_id}", summary="Change a help answer (owner)")
-async def update_help_answer(request: Request, answer_id: int, body: HelpAnswerIn, session: SessionDep, admin: AdminAuth) -> dict:
-    (await teams.rights_of(session, admin)).require_owner("change the help answers")
+async def update_help_answer(request: Request, answer_id: int, body: HelpAnswerIn, session: SessionDep, admin: ManageAdminsAuth) -> dict:
     a = await session.get(SupportHelpAnswers, answer_id)
     if a is None:
         raise _refuse(404, "There's no such help answer.", "HELP_ANSWER_NOT_FOUND")
@@ -290,8 +282,7 @@ async def update_help_answer(request: Request, answer_id: int, body: HelpAnswerI
 
 
 @router.delete("/support/help-answers/{answer_id}", summary="Delete a help answer (owner)")
-async def delete_help_answer(request: Request, answer_id: int, session: SessionDep, admin: AdminAuth) -> dict:
-    (await teams.rights_of(session, admin)).require_owner("change the help answers")
+async def delete_help_answer(request: Request, answer_id: int, session: SessionDep, admin: ManageAdminsAuth) -> dict:
     a = await session.get(SupportHelpAnswers, answer_id)
     if a is None:
         raise _refuse(404, "There's no such help answer.", "HELP_ANSWER_NOT_FOUND")
@@ -316,10 +307,9 @@ async def list_lost_reasons(session: SessionDep, admin: AdminAuth) -> list[dict]
 
 
 @router.post("/leads/lost-reasons", summary="Add a lost reason (owner)", status_code=201)
-async def create_lost_reason(request: Request, body: LostReasonIn, session: SessionDep, admin: AdminAuth) -> dict:
+async def create_lost_reason(request: Request, body: LostReasonIn, session: SessionDep, admin: ManageAdminsAuth) -> dict:
     from app.api.leads.models import LeadLostReasons
 
-    (await teams.rights_of(session, admin)).require_owner("change the lost reasons")
     if not body.key or not body.label:
         raise _refuse(422, "A lost reason needs a key and a label.", "INVALID_LOST_REASON")
     if await session.scalar(select(LeadLostReasons.id).where(LeadLostReasons.key == body.key)):
@@ -333,10 +323,9 @@ async def create_lost_reason(request: Request, body: LostReasonIn, session: Sess
 
 
 @router.patch("/leads/lost-reasons/{reason_id}", summary="Change a lost reason (owner)")
-async def update_lost_reason(request: Request, reason_id: int, body: LostReasonIn, session: SessionDep, admin: AdminAuth) -> dict:
+async def update_lost_reason(request: Request, reason_id: int, body: LostReasonIn, session: SessionDep, admin: ManageAdminsAuth) -> dict:
     from app.api.leads.models import LeadLostReasons
 
-    (await teams.rights_of(session, admin)).require_owner("change the lost reasons")
     r = await session.get(LeadLostReasons, reason_id)
     if r is None:
         raise _refuse(404, "There's no such lost reason.", "LOST_REASON_NOT_FOUND")
@@ -352,10 +341,9 @@ async def update_lost_reason(request: Request, reason_id: int, body: LostReasonI
 
 
 @router.delete("/leads/lost-reasons/{reason_id}", summary="Remove a lost reason (archived when leads have it) (owner)")
-async def delete_lost_reason(request: Request, reason_id: int, session: SessionDep, admin: AdminAuth) -> dict:
+async def delete_lost_reason(request: Request, reason_id: int, session: SessionDep, admin: ManageAdminsAuth) -> dict:
     from app.api.leads.models import LeadLostReasons, Leads
 
-    (await teams.rights_of(session, admin)).require_owner("change the lost reasons")
     r = await session.get(LeadLostReasons, reason_id)
     if r is None:
         raise _refuse(404, "There's no such lost reason.", "LOST_REASON_NOT_FOUND")
@@ -376,8 +364,7 @@ async def get_settings(session: SessionDep, admin: AdminAuth) -> dict:
 
 
 @router.put("/support/settings", summary="Change the desk's settings (owner)")
-async def put_settings(request: Request, body: DeskSettingsIn, session: SessionDep, admin: AdminAuth) -> dict:
-    (await teams.rights_of(session, admin)).require_owner("change the desk's settings")
+async def put_settings(request: Request, body: DeskSettingsIn, session: SessionDep, admin: ManageAdminsAuth) -> dict:
     await reference.ensure(session)
     current = await hours.get(session)
     sent = body.model_dump(exclude_unset=True)

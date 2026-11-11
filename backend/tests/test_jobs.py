@@ -297,6 +297,11 @@ def test_the_platforms_jobs_have_the_priorities_and_limits_chosen(monkeypatch):
         "approvals.retire_lapsed": (L, 1),
         # Razorpay's fee on each payment, read for the payouts page: one batch at a time.
         "admin_ops.fetch_fees": (L, 1),
+        # The team's desk (app/api/support): a reply, its push and the receipt
+        # are waited for; the survey, the reminder, the digest and the owners'
+        # overdue note are not.
+        "support.reply_mail": (H, 4), "support.reply_push": (H, 4), "support.receipt_mail": (H, 4),
+        "support.survey_mail": (N, 4), "support.reminder_mail": (N, 4), "support.digest_mail": (N, 4), "support.overdue_mail": (N, 4),
     }
     monkeypatch.setattr(settings, "JOBS_LIMITS", "")
     found = {n: (h.priority, jobs.limit_for(h, 4)) for n, h in jobs.handlers().items() if not n.startswith("test.")}

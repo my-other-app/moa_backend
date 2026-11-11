@@ -50,7 +50,7 @@ async def test_team_membership_is_the_whole_grant(session, desk):
 
 async def test_only_owners_change_teams_and_only_admins_join(client, session, desk):
     r = await client.put(f"{API}/admin/teams/support/members", json={"user_ids": [desk.sup.id]}, headers=desk.h["sup"])
-    assert r.status_code == 403 and r.json()["error_code"] == "OWNER_REQUIRED"
+    assert r.status_code == 403 and r.json()["error_code"] == "INSUFFICIENT_ADMIN_ROLE"
     r = await client.put(f"{API}/admin/teams/support/members", json={"user_ids": [desk.person.id]}, headers=desk.h["owner"])
     assert r.status_code == 422 and r.json()["error_code"] == "NOT_AN_ADMIN"
     listed = await client.get(f"{API}/admin/teams", headers=desk.h["outsider"])

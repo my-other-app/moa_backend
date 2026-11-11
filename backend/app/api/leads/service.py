@@ -464,7 +464,7 @@ def follow_up_out(f: FollowUps, names: Optional[dict] = None) -> dict:
 async def store_file(session, lead: Leads, data: bytes, content_type: str, filename: str, actor=None) -> LeadFiles:
     from app.api.support import store
 
-    key = store.key_for("leads", lead.id, filename)
+    key = store.new_key("leads", lead.id, filename)
     await asyncio.to_thread(store.put, key, data, content_type)
     row = LeadFiles(lead_id=lead.id, storage_key=key, filename=filename, content_type=content_type, size_bytes=len(data),
                     uploaded_by=getattr(actor, "id", None))

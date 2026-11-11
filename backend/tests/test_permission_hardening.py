@@ -307,6 +307,14 @@ async def test_retention_is_never_sooner_than_a_day_after_the_end(client, sessio
 ANY_ADMIN_WRITES = {
     "POST /api/v1/admin/club-domains/{domain_id}/recheck": "reads Cloudflare again and moves the domain on as the sweep would: no change of an admin's making",
 }
+#: The team desk's writes (app/api/support, app/api/leads): what an admin may
+#: do there is decided by the team they are in and whose case or lead it is,
+#: not by their role -- a viewer-role admin in the support team answers cases
+#: (feature-register/support-leads-contract.md, "Teams and rights") -- in each
+#: handler, through app.api.support.teams.Rights; tests/test_support_desk.py and
+#: tests/test_leads.py hold every refusal. The desk's settings (teams, topics,
+#: saved replies, help answers, lost reasons) are owner-only and do ask (MANAGE_ADMINS).
+TEAM_DESK_WRITES = ("/api/v1/admin/support/cases", "/api/v1/admin/leads", "/api/v1/admin/follow-ups", "/api/v1/admin/teams/me")
 
 
 def test_every_admin_only_write_asks_for_a_capability():
@@ -320,7 +328,7 @@ def test_every_admin_only_write_asks_for_a_capability():
         if any("requires.<locals>.checker" in getattr(c, "__qualname__", "") for c in calls):
             continue
         key = f"{method} {path}"
-        if key not in ANY_ADMIN_WRITES:
+        if key not in ANY_ADMIN_WRITES and not path.startswith(TEAM_DESK_WRITES):
             missing.append(key)
     assert missing == []
 

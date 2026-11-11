@@ -70,7 +70,7 @@ async def keep_form_upload(session, upload: UploadFile, user_id: Optional[int]) 
 
 async def keep(session, data: bytes, content_type: str, filename: str, *, user_id: Optional[int] = None,
                upload: bool = False, case_id: Optional[int] = None) -> SupportAttachments:
-    key = store.key_for("support", case_id or "uploads", filename)
+    key = store.new_key("support", case_id or "uploads", filename)
     await asyncio.to_thread(store.put, key, data, content_type)
     row = SupportAttachments(
         upload_key=store.upload_key() if upload else None, storage_key=key, filename=filename, content_type=content_type,

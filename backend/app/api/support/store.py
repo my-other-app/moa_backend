@@ -27,7 +27,7 @@ def upload_key() -> str:
     return f"su_{secrets.token_hex(16)}"
 
 
-def key_for(folder: str, owner, name: str) -> str:
+def new_key(folder: str, owner, name: str) -> str:
     if folder not in ("support", "leads"):
         raise ValueError(folder)
     return f"{folder}/{owner}/{secrets.token_hex(12)}-{int(len(name or ''))}"

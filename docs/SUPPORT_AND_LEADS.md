@@ -30,6 +30,11 @@ Helpers: `app.core.auth.permissions.teams_of / in_team / is_desk_owner`;
 `app.api.support.teams.Rights` is computed once a request. Refusals:
 `403 TEAM_REQUIRED`, `OWNER_REQUIRED`, `NOT_ASSIGNED_TO_YOU`, `NOT_YOUR_LEAD`.
 Excel exports of the case and lead lists are for the teams and the owners.
+The desk's settings (team members, topics and their rules, saved replies,
+help answers, lost reasons, working hours and retention) are owner-only and
+ask for the owner's capability (`MANAGE_ADMINS`) at the door: 403
+`INSUFFICIENT_ADMIN_ROLE`. The rest is gated by team in each handler, and
+`tests/test_permission_hardening.py` lists those routes (`TEAM_DESK_WRITES`) with why.
 
 **Away.** `PATCH /admin/teams/me {away, away_until?}`: out of round robin;
 their unfinished cases go back to Unassigned. The sweep brings them back once
