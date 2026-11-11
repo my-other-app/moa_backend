@@ -32,7 +32,6 @@ from app.api.support.models import (
     CHANNELS,
     CLOSED,
     NEW,
-    NOTE,
     NOT_DELIVERED,
     OPEN,
     PRIORITIES,
@@ -178,8 +177,6 @@ async def open_case(
     if channel not in CHANNELS:
         raise _refuse(422, "Unknown channel.", "INVALID_CHANNEL")
     row = await topic_row(session, topic, required=topic_required)
-    if row is None and topic and not topic_required:
-        topic = None
     if priority is not None and priority not in PRIORITIES:
         raise _refuse(422, "Priority is low, normal, high or urgent.", "INVALID_PRIORITY", {"field": "priority"})
     desk = await hours.get(session)
@@ -291,8 +288,6 @@ async def requester_reply(
         session, case, REPLY_IN, body_text=body_text, body_html=body_html, author_name=author_name,
         author_user_id=author_user_id, mail=mail, attachment_rows=attachment_rows, now=now,
     )
-    if case.status == NEW:
-        case.status = NEW
     return case, msg, False
 
 
