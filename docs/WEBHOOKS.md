@@ -28,8 +28,9 @@ added again):
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-The migration is `api_webhooks` (three new, empty tables). Allocation is the partner API's: until it is
-wired (`webhooks_out.seams.configure`, below) no club is allocated and nothing is sent.
+The migration is `api_webhooks` (three new, empty tables), after the partner API's `partner_api`.
+Allocation is the partner API's (Admin -> Integrations, or a plan with `api_access`), and its kill switch
+`APP_PARTNER_API_ENABLED` stops webhooks too: off, nothing is queued for anyone.
 
 ## Event types
 
@@ -47,7 +48,7 @@ wired (`webhooks_out.seams.configure`, below) no club is allocated and nothing i
 | `checkin.created` | checkin | Checked in at the gate, a kiosk, by a volunteer or by hand |
 | `checkin.deleted` | checkin | A check-in undone |
 | `certificate.issued` | certificate | A certificate issued |
-| `payment.completed` | payment | A ticket's payment went through (amounts and status only) |
+| `payment.completed` | payment | A ticket's payment went through (amounts and status only: `amount`, `amount_refunded`, `status` captured / partially_refunded / refunded) |
 | `payment.refunded` | payment | Refunded, in full or in part (`amount_refunded`, `status`) |
 | `club.updated` | club | The club's public profile: name, tagline, about, links, logo, cover |
 | `webhook.test` | test | Sent by "Send test" to one endpoint only |
@@ -75,8 +76,9 @@ the event (not its co-hosts).
 - `origin.type` is `dashboard`, `app`, `website`, `api_key`, `partner_app` or `system` (a sweep, a
   Razorpay webhook); `client_id` for API changes.
 - `data.object` is the object in the shape the partner API's GET returns -- built by the partner API's
-  own serializers (app/api/partner/shapes.py) through objects.py -- as it stood a moment after the
-  change committed. `previous` (updates) names the top-level fields that changed, as
+  own builders (app/api/partner/shapes.py) through objects.py -- as it stood a moment after the
+  change committed. An event deleted before anyone registered reads `status: "cancelled"` (the GET no
+  longer finds it). `previous` (updates) names the top-level fields that changed, as
   they were.
 - Ids are strings; times are ISO 8601 in India's time with the offset; money is in paise
   (`"amount": 49900`) with `"currency": "INR"`.
@@ -209,11 +211,14 @@ Club dashboard (`/api/v1/clubs/integrations/webhooks`, the club's owner and admi
 | `GET /deliveries/{id}` | One delivery with `request_body` as it is sent |
 | `POST /deliveries/{id}/retry` | Send it again now, whatever it was (a replay); 409 on an endpoint turned off |
 
-Partner API (`/partner/v1`, `webhooks:manage`; `partner.make_router(require_scope)`, mounted by the
-partner router at `# WEBHOOKS_ROUTER_MOUNT`): `GET/POST /webhook-endpoints`, `GET/PATCH/DELETE
+Partner API (`/partner/v1`, `webhooks:manage`; `partner.make_router(require_scope)`, mounted in
+app/api/partner/router.py at `# WEBHOOKS_ROUTER_MOUNT` as PartnerRoutes -- the API's error shape, headers,
+rate limits and Idempotency-Key -- and listed in `/partner/v1/openapi.json`, which also carries every
+webhook's body under OpenAPI 3.1 `webhooks`): `GET/POST /webhook-endpoints`, `GET/PATCH/DELETE
 /webhook-endpoints/{id}`, `POST .../rotate-secret`, `POST .../test`, `GET .../deliveries`,
 `GET /webhook-deliveries/{id}`, `POST /webhook-deliveries/{id}/retry`, `GET /webhook-event-types`.
-A key manages the club's own endpoints, in the key's own mode; a partner only its own for that club.
+A key manages the club's own endpoints, in the key's own mode; a partner only its own for that club (an app's own
+token acts for no club: FORBIDDEN_SCOPE, or name the club with `MOA-Club-Id`).
 
 Admin portal (`/api/v1/admin/integrations/webhooks`): `GET /health` (endpoints on, turned off for
 failing, failing now; deliveries per day; the busiest clubs; failing endpoints with their last error),
@@ -241,8 +246,10 @@ Limits: 10 endpoints per club, 5 per partner per club.
   committed before sending, the record, the retry schedule, turning off.
 - **sender.py** sends (the SSRF guard: `app/core/net.py` `check_https_url`, `resolve_public`); tests swap
   `TRANSPORT` and `RESOLVE`.
-- **seams.py**: what is asked of the partner API, wired at the merge with `seams.configure(...)`:
-  `club_allocated`, `partner_scopes`, `partner_contact`, `external_id`. Unwired, each answers "no".
+- **seams.py** / **wiring.py**: what is asked of the partner API -- `club_allocated`, `partner_scopes` (the
+  connection's, in the endpoint's mode), `partner_contact`, `external_id` -- installed at start-up from doth
+  (`wiring.install()`; tests/test_webhooks_e2e.py fails if it is not). Tests swap them with `seams.configure`.
+- **openapi.py**: the webhooks in the partner API's OpenAPI document (one POST per type, the GET's schemas).
 - **origin.py**: `SurfaceMiddleware` labels each request's surface for `origin` (the partner API's auth
   dependency sets its own with `app.core.api_origin.set_origin`).
 - **sweep.py**: hourly, changes past 30 days deleted (their deliveries with them), rotated secrets'

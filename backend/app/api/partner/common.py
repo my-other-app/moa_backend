@@ -65,9 +65,25 @@ def paise_of(rupees) -> int:
 # ─── ETags ───────────────────────────────────────────────────────────────
 
 
+#: Links signed afresh on every read (a ticket's QR link carries the second it
+#: was signed; a picture's link is presigned when the CDN is off): left out of
+#: the ETag, or it would change by itself every second and every If-Match a
+#: client sends a moment after reading would be refused. What they point at
+#: changing moves the object's updated_at, which is in it.
+_SIGNED_LINKS = frozenset({"qr_url", "poster_url", "logo_url", "pdf_url"})
+
+
+def _stable(value):
+    if isinstance(value, dict):
+        return {k: _stable(v) for k, v in value.items() if k not in _SIGNED_LINKS}
+    if isinstance(value, list):
+        return [_stable(v) for v in value]
+    return value
+
+
 def etag_of(obj: dict) -> str:
-    """A strong ETag over the object exactly as this caller reads it."""
-    raw = json.dumps(obj, sort_keys=True, separators=(",", ":"), default=str).encode()
+    """A strong ETag over the object as this caller reads it, its signed links left out."""
+    raw = json.dumps(_stable(obj), sort_keys=True, separators=(",", ":"), default=str).encode()
     return '"' + hashlib.sha256(raw).hexdigest()[:32] + '"'
 
 
