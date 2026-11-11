@@ -261,6 +261,10 @@ def test_the_platforms_jobs_have_the_priorities_and_limits_chosen(monkeypatch):
         "clubs.approved_email": (H, 4), "checkins.after": (H, 4),
         # An invited admin's set-password link, a turned-down applicant's reason (app/api/admin_ops).
         "admin_ops.invite_email": (H, 4), "clubs.rejected_email": (H, 4),
+        # A guest told their ticket is cancelled, as they asked by their email's link (app/api/ticket_cancel).
+        "tickets.cancelled_email": (H, 4),
+        # A speaker's invite to claim their profile (app/api/speakers).
+        "speakers.claim_email": (H, 4),
         "payments.receipt": (H, 2),  # a wkhtmltopdf process each
         # A guest told their refund went through (app/api/club_ops).
         "club_ops.refund_notice": (H, 4),
@@ -280,6 +284,8 @@ def test_the_platforms_jobs_have_the_priorities_and_limits_chosen(monkeypatch):
         # A co-host's followers told about the event, and their push (app/api/cohosts).
         "notifications.cohost_new_event": (N, 2), "notifications.cohost_push": (N, 2),
         "threads.tell_followers": (N, 2),
+        # A speaker's followers told of a newly published event they speak at, and their push (app/api/speakers).
+        "speakers.tell_followers": (N, 2), "speakers.push": (N, 2),
         # A club's broadcast from its own number: paced, so long; one slot at most on a runner.
         "club_whatsapp.broadcast": (N, 1),
         # A cancelled event: every guest told (one at a time on WhatsApp), and its refunds, a Razorpay call each.
@@ -302,6 +308,8 @@ def test_the_platforms_jobs_have_the_priorities_and_limits_chosen(monkeypatch):
         # overdue note are not.
         "support.reply_mail": (H, 4), "support.reply_push": (H, 4), "support.receipt_mail": (H, 4),
         "support.survey_mail": (N, 4), "support.reminder_mail": (N, 4), "support.digest_mail": (N, 4), "support.overdue_mail": (N, 4),
+        # Every event speaker linked to a profile, once after the deploy (app/api/speakers/backfill.py).
+        "speakers.backfill": (L, 1),
     }
     monkeypatch.setattr(settings, "JOBS_LIMITS", "")
     found = {n: (h.priority, jobs.limit_for(h, 4)) for n, h in jobs.handlers().items() if not n.startswith("test.")}

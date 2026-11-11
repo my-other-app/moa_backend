@@ -54,12 +54,14 @@ def _speaker_photo_url(r: AgendaItems) -> Optional[str]:
     return objects.presigned_url(key)
 
 
-def item_out(r: AgendaItems, parallel: set) -> dict:
+def item_out(r: AgendaItems, parallel: set, speakers: Optional[dict] = None) -> dict:
+    linked = (speakers or {}).get(r.id, [])
     return {
         "id": r.id, "event_id": r.event_id, "starts_at": r.starts_at, "ends_at": r.ends_at, "title": r.title, "description": r.description,
         "speaker": r.speaker, "speaker_photo_key": r.speaker_photo_key,
         "speaker_photo_url": _speaker_photo_url(r),
         "location": r.location, "sort_order": r.sort_order, "parallel": r.id in parallel,
+        "event_speaker_ids": [s["event_speaker_id"] for s in linked], "speakers": linked,
     }
 
 
@@ -70,9 +72,24 @@ async def rows_for(session, event_id: int) -> list:
 
 
 async def list_items(session, event_id: int) -> list:
+    from app.api.speakers import links as speaker_links
+
     rows = await rows_for(session, event_id)
     par = parallel_ids(rows)
-    return [item_out(r, par) for r in rows]
+    linked = await speaker_links.agenda_links(session, [r.id for r in rows])
+    return [item_out(r, par, linked) for r in rows]
+
+
+async def _set_speakers(session, event: Events, row: AgendaItems, ids: Optional[list]) -> None:
+    """The session's speakers from the event's speakers; with some and no
+    free text, the text names them (what older clients show)."""
+    from app.api.speakers import links as speaker_links
+
+    if ids is None:
+        return
+    picked = await speaker_links.set_agenda_speakers(session, event.id, row.id, ids)
+    if picked and not row.speaker:
+        row.speaker = speaker_links.joined_names(picked)
 
 
 async def _get(session, event: Events, item_id: UUID) -> AgendaItems:
@@ -84,8 +101,12 @@ async def _get(session, event: Events, item_id: UUID) -> AgendaItems:
 
 async def create_item(session, event: Events, body) -> dict:
     top = await session.scalar(select(func.max(AgendaItems.sort_order)).where(AgendaItems.event_id == event.id))
-    row = AgendaItems(event_id=event.id, sort_order=(top if top is not None else -1) + 1, **body.model_dump())
+    data = body.model_dump()
+    speaker_ids = data.pop("event_speaker_ids", None)
+    row = AgendaItems(event_id=event.id, sort_order=(top if top is not None else -1) + 1, **data)
     session.add(row)
+    await session.flush()
+    await _set_speakers(session, event, row, speaker_ids)
     await session.commit()
     return next(i for i in await list_items(session, event.id) if i["id"] == row.id)
 
@@ -93,12 +114,14 @@ async def create_item(session, event: Events, body) -> dict:
 async def update_item(session, event: Events, item_id: UUID, body) -> dict:
     row = await _get(session, event, item_id)
     data = body.model_dump(exclude_unset=True)
+    speaker_ids = data.pop("event_speaker_ids", None)
     starts = data.get("starts_at", row.starts_at)
     ends = data["ends_at"] if "ends_at" in data else row.ends_at
     if ends is not None and ends <= starts:
         raise CustomHTTPException(422, message="A block must end after it starts.")
     for k, v in data.items():
         setattr(row, k, v)
+    await _set_speakers(session, event, row, speaker_ids)
     await session.commit()
     return next(i for i in await list_items(session, event.id) if i["id"] == row.id)
 

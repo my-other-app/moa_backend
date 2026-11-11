@@ -48,6 +48,10 @@ from app.api.links.router import router as links_router
 from app.api.ticketing.router import public_router as ticketing_public_router, router as ticketing_router
 from app.api.approvals.router import public_router as approvals_public_router, router as approvals_router
 from app.api.missing_answers.router import router as missing_answers_router
+from app.api.ticket_cancel.router import club_router as ticket_cancel_club_router, router as ticket_cancel_router
+from app.api.speakers.admin import router as speakers_admin_router
+from app.api.speakers.club import router as speakers_club_router
+from app.api.speakers.public import router as speakers_public_router
 from app.api.discover.router import admin_router as discover_admin_router, router as discover_router
 from app.api.emails.router import (
     library_router as email_library_router,
@@ -147,6 +151,10 @@ api_router.include_router(router=sites_router, tags=["site"])
 api_router.include_router(router=sites_public_router, tags=["site"])
 # Before club_router: /clubs/access would otherwise be read as /clubs/{club_id}.
 api_router.include_router(router=club_access_router, tags=["club-access"])
+# The speakers directory (app/api/speakers): /clubs/speakers before club_router too.
+api_router.include_router(router=speakers_club_router)
+api_router.include_router(router=speakers_admin_router)
+api_router.include_router(router=speakers_public_router)
 # Before club_router too: /clubs/connected-apps and /clubs/pending-actions are literal paths.
 api_router.include_router(router=mcp_club_router)
 # Before club_router too: /clubs/payments/gateway is a literal path.
@@ -179,6 +187,9 @@ api_router.include_router(router=ticketing_router)
 api_router.include_router(router=ticketing_public_router)
 # Registration requests (app/api/approvals): /events/registration/{id}/requests
 # before the events router, and /registration-requests/mine before /{token}.
+# A guest giving a free ticket back by their email's link, and the club's list of those (app/api/ticket_cancel).
+api_router.include_router(router=ticket_cancel_router)
+api_router.include_router(router=ticket_cancel_club_router)
 api_router.include_router(router=approvals_router)
 api_router.include_router(router=approvals_public_router)
 api_router.include_router(router=club_router, tags=["clubs"])

@@ -25,14 +25,14 @@ lead and follow-up goes with them, and the desk's files stay in the bucket
 (support/, leads/) unreferenced.
 
 Revision ID: support_desk
-Revises: review_resends
+Revises: ticket_self_cancel
 """
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "support_desk"
-down_revision = "review_resends"
+down_revision = "ticket_self_cancel"
 branch_labels = None
 depends_on = None
 

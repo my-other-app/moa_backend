@@ -33,6 +33,7 @@ KINDS: dict[str, str] = {
     "mailbox_lapsed": "The club's plan no longer includes its mailbox: closed, its mail readable 30 days",
     "mailbox_expired": "A lapsed mailbox's 30 days are over: its mail can be exported or deleted",
     "cohost_invite": "Another club invited this club to co-host its event (owners and admins only; app/api/cohosts)",
+    "ticket_cancelled": "A guest gave a free ticket back by the link in their email (app/api/ticket_cancel)",
     "cohost_update": "A co-host accepted, declined or left one of the club's events, or the host removed this club as a co-host (owners and admins only)",
 }
 

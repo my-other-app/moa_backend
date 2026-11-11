@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 import io
 import logging
+from types import SimpleNamespace
 from typing import Optional
 from fastapi import Request, UploadFile
 from sqlalchemy import and_, delete, exists, select, func
@@ -40,6 +41,17 @@ from app.core.notifications.triggers import (
     notify_followers_of_new_event,
     notify_users_by_interest,
 )
+
+
+async def _tell_speaker_followers(session, event_id: int) -> None:
+    """The people following one of the event's speakers hear of it once it
+    is published (a job; once per event and person). Never in the way of the save."""
+    from app.api.speakers import notify as speaker_notify
+
+    try:
+        await speaker_notify.queue_event(session, event_id)
+    except Exception:  # noqa: BLE001 - the event is saved; telling followers is extra
+        logging.getLogger(__name__).exception("queueing the speaker followers' push for event %s failed", event_id)
 
 
 async def _republish_site(session, event_id: int) -> None:
@@ -119,6 +131,10 @@ async def create_event(
 
     if not user.club:
         raise CustomHTTPException(403, message="Not authorized to create event")
+    # Speakers picked from the directory: checked before anything is saved.
+    from app.api.speakers import links as speaker_links
+
+    await speaker_links.check_picks(session, user.club.id, speakers or [])
     additional_details = additional_details or []
     # A choice question needs its options; the same check runs on every update.
     questions.check_options(additional_details)
@@ -156,6 +172,7 @@ async def create_event(
         certificate_template_id=certificate_template_id,
         requires_approval=bool(kwargs.get("requires_approval")),
         high_demand_label=bool(kwargs.get("high_demand_label")),
+        allow_self_cancel=kwargs.get("allow_self_cancel") is not False,
     )
     if status:
         from app.api.closeout.models import EventStatus
@@ -196,6 +213,7 @@ async def create_event(
     
     # Add speakers/guests if provided
     if speakers:
+        pairs = []
         for idx, speaker in enumerate(speakers):
             db_speaker = EventSpeakers(
                 event_id=event_id,
@@ -205,6 +223,7 @@ async def create_event(
                 link=speaker.link,
                 display_order=idx,
             )
+            pairs.append((db_speaker, speaker))
             
             # Handle photo upload
             # Handle photo upload
@@ -228,6 +247,12 @@ async def create_event(
                 pass
 
             session.add(db_speaker)
+        # Each row to its profile in the speakers directory (app/api/speakers).
+        from app.api.speakers import service as speaker_service
+
+        await speaker_links.link_event_speakers(
+            session, event_id=event_id, club_id=user.club.id, pairs=pairs, actor=speaker_service.club_actor(user, user.club.id),
+        )
         await session.commit()
     
     db_event = await session.execute(
@@ -272,6 +297,8 @@ async def create_event(
         # Don't fail event creation if notification fails
         import logging
         logging.getLogger(__name__).error(f"Failed to send new event notifications: {e}")
+    # Followers of its speakers, once it is out (app/api/speakers/notify.py).
+    await _tell_speaker_followers(session, created_event.id)
 
     await _republish_site(session, created_event.id)
     return created_event
@@ -387,6 +414,8 @@ async def update_event(
         db_event.requires_approval = bool(event.requires_approval)
     if getattr(event, "high_demand_label", None) is not None:
         db_event.high_demand_label = bool(event.high_demand_label)
+    if getattr(event, "allow_self_cancel", None) is not None:
+        db_event.allow_self_cancel = bool(event.allow_self_cancel)
     db_event.reg_startdate = event.reg_startdate
     db_event.reg_enddate = event.reg_enddate
     db_event.about = event.about
@@ -416,9 +445,17 @@ async def update_event(
             EventSpeakerCreate(**s) if isinstance(s, dict) else s 
             for s in event.speakers
         ]
+        # Speakers picked from the directory: checked before anything changes.
+        from app.api.speakers import links as speaker_links
+
+        await speaker_links.check_picks(
+            session, db_event.club_id, speakers_data,
+            existing={i: s.speaker_profile_id for i, s in existing_speakers_map.items()},
+        )
         
         # Track IDs to keep
         keep_ids = set()
+        pairs = []
         
         for idx, speaker in enumerate(speakers_data):
             if speaker.id and speaker.id in existing_speakers_map:
@@ -432,6 +469,7 @@ async def update_event(
                         setattr(db_speaker, field, getattr(speaker, field))
                 db_speaker.display_order = idx
                 keep_ids.add(speaker.id)
+                pairs.append((db_speaker, speaker))
                 
                 # Update photo if provided
                 if speaker.photo_index is not None and speaker_photos:
@@ -474,11 +512,20 @@ async def update_event(
                         pass
                 
                 session.add(db_speaker)
+                pairs.append((db_speaker, speaker))
         
         # Delete removed speakers
         for speaker_id, db_speaker in existing_speakers_map.items():
             if speaker_id not in keep_ids:
                 await session.delete(db_speaker)
+
+        # Each row to its profile in the speakers directory (app/api/speakers).
+        from app.api.speakers import service as speaker_service
+
+        await speaker_links.link_event_speakers(
+            session, event_id=event_id, club_id=db_event.club_id, pairs=pairs,
+            actor=speaker_service.club_actor(actor or SimpleNamespace(id=user_id), db_event.club_id),
+        )
 
     if store_item_ids is not None:
         await store.write_offers(session, event_id, store_item_ids)
@@ -503,6 +550,7 @@ async def update_event(
         user_id=getattr(actor, "id", None) or user_id, member_id=member_id,
     )
     await session.commit()
+    await _tell_speaker_followers(session, event_id)
     await _republish_site(session, event_id)
     db_event = await session.execute(
         select(Events)
@@ -605,19 +653,10 @@ async def get_event(session: AsyncSession, event_id: str | int, user_id: int | N
         for f in event.files if not f.is_deleted
     ] if event.files else []
 
-    # Get speakers
-    data["speakers"] = [
-        {
-            "id": s.id,
-            "name": s.name,
-            "designation": s.designation,
-            "photo": s.photo,
-            "bio": s.bio,
-            "link": s.link,
-            "display_order": s.display_order
-        }
-        for s in event.speakers if not s.is_deleted
-    ] if event.speakers else []
+    # Get speakers, each with its profile in the speakers directory (app/api/speakers).
+    from app.api.speakers import links as speaker_links
+
+    data["speakers"] = await speaker_links.speakers_out(session, event.speakers or [])
 
     # Its own sponsors and partners, each in its order (app/api/event_partners).
     from app.api.event_partners import service as event_partners
