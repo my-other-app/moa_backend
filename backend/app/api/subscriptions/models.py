@@ -278,6 +278,7 @@ FEATURE_GROUPS: dict[str, tuple[str, ...]] = {
         "payouts",
         "sso",
         "api",
+        "api_access",
         "ai_assist",
         "ai_byok",
         "mcp",
@@ -331,7 +332,10 @@ FEATURE_CATALOG: tuple[tuple[str, str], ...] = (
 
 #: Flags in the editor with no feature behind them yet:
 #: per-session check-in, removing the "Made with MyOtherApp"
-#: footer, enforced 2FA for a team, next-day payouts, student SSO, API access.
+#: footer, enforced 2FA for a team, next-day payouts, student SSO, API access
+#: (`api`, the old placeholder). `api_access` is built (app/api/partner) but
+#: is on no plan yet -- a platform admin allocates it -- so it stays off the
+#: public list too until a plan includes it.
 UNBUILT_FEATURES = frozenset(FEATURE_KEYS) - {key for key, _ in FEATURE_CATALOG}
 
 
@@ -394,6 +398,9 @@ class PlanFeatures(AbstractSQLModel, TimestampsMixin):
     payouts = _flag()
     sso = _flag()
     api = _flag()
+    #: The Integrations API (app/api/partner), from migration partner_api: off
+    #: on every plan. A platform admin's allocation always wins over it.
+    api_access = _flag()
     #: AI assist on the platform's key, up to `ai_actions_per_month`.
     ai_assist = _flag()
     #: AI assist on the club's own key (it pays its provider): every plan has it.

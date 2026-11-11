@@ -291,6 +291,14 @@ async def test_the_owner_sees_who_is_signed_in_on_each_device(client, world):
     ("admin", "POST", "/api/v1/clubs/social/posts/5b0c1f2e-8a43-4f0e-9d3c-2b7f6a1e9c40/approve", True),
     ("admin", "PUT", "/api/v1/clubs/social/settings", True),
     ("nobody", "GET", "/api/v1/clubs/social/platforms", False),
+    # The Integrations API: keys, partner apps, webhooks and usage are owners' and admins' alone.
+    ("admin", "GET", "/api/v1/clubs/integrations/keys", True),
+    ("admin", "POST", "/api/v1/clubs/integrations/keys", True),
+    ("admin", "POST", "/api/v1/clubs/integrations/connect", True),
+    ("editor", "GET", "/api/v1/clubs/integrations", False),
+    ("editor", "POST", "/api/v1/clubs/integrations/keys", False),
+    ("editor", "GET", "/api/v1/clubs/integrations/webhooks", False),
+    ("door", "GET", "/api/v1/clubs/integrations/usage", False),
 ])
 def test_the_role_rules(role, method, path, allowed):
     assert policy.allows(role, method, path) is allowed
@@ -309,3 +317,4 @@ def test_what_the_dashboard_offers_matches_the_rules():
         assert can["social_accounts"] == policy.allows(role, "POST", "/api/v1/clubs/social/accounts/x/connect")
         assert can["social_approve"] == policy.allows(role, "POST", "/api/v1/clubs/social/posts/1/approve")
         assert can["social_posts"] == policy.allows(role, "POST", "/api/v1/clubs/social/events/1/posts")
+        assert can["integrations"] == policy.allows(role, "POST", "/api/v1/clubs/integrations/keys")
