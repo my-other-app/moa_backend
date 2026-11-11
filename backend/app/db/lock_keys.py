@@ -60,7 +60,7 @@ CLUB_MAILBOX_SWEEP = 773_170
 #: The waiting lists' minute: offers run out, places offered (app/api/ticketing/sweep.py).
 WAITLIST_SWEEP = 773_180
 #: Social auto-posting's minute: due posts sent, the daily token refresh (app/api/social/sweep.py).
-SOCIAL_SWEEP = 773_190
+SOCIAL_SWEEP = 773_197
 #: The job queue's maintenance pass (app/core/jobs.py).
 JOBS_MAINTENANCE = 774_501
 #: The live room's sweep (app/api/live/service.py).
