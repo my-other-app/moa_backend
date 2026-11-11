@@ -150,12 +150,19 @@ def summary(p: SpeakerProfiles, catalogue: Optional[dict] = None) -> dict:
 # ─── Making and finding profiles ─────────────────────────────────────────
 
 
+#: Addresses the website and the API keep for their own pages
+#: (/speakers/me, /speakers/claim/…, /speakers/following, /speakers/sitemap):
+#: never a speaker's slug.
+RESERVED_SLUGS = frozenset({"me", "claim", "following", "sitemap", "edit", "new", "search"})
+
+
 async def new_slug(session, name: str) -> str:
-    """The profile's address: its name, and a few letters more when taken."""
+    """The profile's address: its name, and a few letters more when taken
+    (or reserved: a speaker called "Me" is never /speakers/me)."""
     base = names.slug_base(name)
     taken = set((await session.scalars(
         select(SpeakerProfiles.slug).where(or_(SpeakerProfiles.slug == base, SpeakerProfiles.slug.like(f"{base}-%")))
-    )).all())
+    )).all()) | (RESERVED_SLUGS & {base})
     if base not in taken:
         return base
     for _ in range(20):

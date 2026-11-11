@@ -636,6 +636,13 @@ def test_names_read_titles_case_and_punctuation_away():
     assert names.names_alike("meera", "meera nair") and not names.names_alike("meera", "kiran")
 
 
+async def test_a_speaker_never_takes_a_slug_the_site_keeps(session, world):
+    for name in ("Me", "Claim", "Following", "Sitemap"):
+        profile = await sp.create_profile(session, name=name, club_id=world.club_a.id)
+        assert profile.slug not in sp.RESERVED_SLUGS and profile.slug.startswith(names.slug_base(name) + "-"), profile.slug
+    assert (await sp.create_profile(session, name="Meera", club_id=world.club_a.id)).slug == "meera"
+
+
 async def test_the_ai_draft_and_the_mcp_tool_offer_the_clubs_past_speakers(client, session, world):
     from app.api.ai.schemas import Speaker
     from app.api.club_access import policy
