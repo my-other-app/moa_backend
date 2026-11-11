@@ -75,6 +75,8 @@ class PlanFeaturesIn(CustomBaseModel):
     qa: bool = False
     polls: bool = False
     networking: bool = False
+    social_autopost: bool = False
+    social_x: bool = False
     # competitions
     teams: bool = False
     judging: bool = False

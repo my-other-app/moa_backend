@@ -46,6 +46,16 @@ ROUTES = {
     # analytics
     "GET /api/v1/events/{event_id}/figures": ALLOW,
     "GET /api/v1/events/{event_id}/summary": ALLOW,
+    # social posting (app/api/social): a co-host plans the event's posts from its own accounts
+    "GET /api/v1/clubs/social/events/{event_id}/posts": ALLOW,
+    "GET /api/v1/clubs/social/events/{event_id}/drafts": ALLOW,
+    "POST /api/v1/clubs/social/events/{event_id}/drafts/rewrite": ALLOW,
+    "POST /api/v1/clubs/social/events/{event_id}/preview": ALLOW,
+    "POST /api/v1/clubs/social/events/{event_id}/posts": ALLOW,
+    "POST /api/v1/clubs/social/events/{event_id}/posts/campaign": ALLOW,
+    "GET /api/v1/clubs/social/events/{event_id}/posters": ALLOW,
+    "PUT /api/v1/clubs/social/events/{event_id}/posters/{size}": ALLOW,
+    "GET /api/v1/social/share-kit/{event_id}": ALLOW,
     # links
     "GET /api/v1/events/{event_id}/links": ALLOW,
     "GET /api/v1/events/{event_id}/links/overview": ALLOW,

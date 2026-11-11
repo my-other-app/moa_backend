@@ -303,6 +303,15 @@ CLASSIFICATION: dict[str, str] = {
     "speaker_follows": WIPE,
     "speaker_claims": WIPE,
     "review_resend_recipients": WIPE,
+    # Social auto-posting (app/api/social): connected accounts (their tokens with them),
+    # posts, poster sizes, sign-in states and the approval setting; Meta's deletion records.
+    "social_accounts": WIPE,
+    "social_settings": WIPE,
+    "social_posts": WIPE,
+    "social_post_targets": WIPE,
+    "poster_variants": WIPE,
+    "social_oauth_states": WIPE,
+    "social_data_deletions": WIPE,
     "messages": WIPE,
     # What clubs sent, counted by the month, its statements and Enterprise clubs' own limits.
     "message_usage": WIPE,

@@ -77,6 +77,19 @@ _WHATSAPP = _rx(r"^/api/v1/clubs/whatsapp(?:/|$)")
 # decides, which the routes check (club_mailbox.access).
 _MAILBOX_SETUP = _rx(r"^/api/v1/clubs/mailbox/(?:address|settings)(?:/|$)")
 _MAILBOX = _rx(r"^/api/v1/clubs/mailbox(?:/|$)")
+# Social auto-posting (app/api/social): door staff none of it, not even to
+# look. Connecting and disconnecting the club's accounts (and picking the
+# Page a sign-in found), the approval setting, and approving an editor's
+# post: owners and admins. Drafting, scheduling (with approval off) and
+# seeing results: editors too. The share kit (/api/v1/social/share-kit...)
+# is every team member's, door staff included.
+_SOCIAL = _rx(r"^/api/v1/clubs/social(?:/|$)")
+_SOCIAL_ADMIN_WRITES = _rx(
+    r"^/api/v1/clubs/social/accounts(?:/|$)",
+    r"^/api/v1/clubs/social/settings/?$",
+    r"^/api/v1/clubs/social/posts/[^/]+/approve$",
+)
+_SOCIAL_ADMIN_READS = _rx(r"^/api/v1/clubs/social/accounts/pending(?:/|$)")
 
 # Money: figures, statements, the ledger, refunds -- an event's payments and
 # its refunds, and cancelling it, which refunds everyone (app/api/club_ops).
@@ -176,6 +189,14 @@ def allows(role: str, method: str, path: str) -> bool:
         return role == "admin" or method not in WRITES
     if _MAILBOX.search(path):
         return True
+    if _SOCIAL.search(path):
+        if role == "admin":
+            return True
+        if role != "editor":
+            return False
+        if method in WRITES and _SOCIAL_ADMIN_WRITES.search(path):
+            return False
+        return not _SOCIAL_ADMIN_READS.search(path)
     if _ACCESS.search(path):
         return role == "admin" and method == "GET" and bool(_ACCESS_LIST.search(path))
     if _COHOSTS.search(path):
@@ -264,6 +285,11 @@ def can(role: str) -> dict:
         # and moving answers kept under an old question onto a current one.
         "ask_answers": editor,
         "move_answers": admin,
+        # Social auto-posting (app/api/social): the club's accounts and the
+        # approval setting, approving, and drafting and scheduling posts.
+        "social_accounts": admin,
+        "social_approve": admin,
+        "social_posts": editor,
     }
 
 

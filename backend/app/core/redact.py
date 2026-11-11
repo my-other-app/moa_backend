@@ -42,8 +42,18 @@ def query(value: str) -> str:
 _INBOX_SEARCH = re.compile(r"(/clubs/(?:whatsapp|mailbox)/[^\s\"'?#]*\?(?:[^\s\"'#]*?[&;])?q=)[^&;#\s\"']*")
 
 
+#: A platform's sign-in coming back (app/api/social/oauth.py): its one-time
+#: code and state are never logged.
+_OAUTH_CALLBACK = {
+    name: re.compile(rf"(/social/oauth/[a-z_]+/callback\?(?:[^\s\"'#]*?[&;])??{name}=)[^&;#\s\"']*")
+    for name in ("code", "state")
+}
+
+
 def path(value: str) -> str:
     value = _INBOX_SEARCH.sub(lambda m: m.group(1) + FILTERED, value)
+    for rx in _OAUTH_CALLBACK.values():
+        value = rx.sub(lambda m: m.group(1) + FILTERED, value)
     return query(_CLUB_WEBHOOK.sub(lambda m: f"{m.group(1)}{m.group(2)}…", value))
 
 

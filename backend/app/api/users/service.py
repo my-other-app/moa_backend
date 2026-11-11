@@ -918,6 +918,10 @@ async def admin_delete_user(session: AsyncSession, user_id: int):
             club.deleted_at = user.deleted_at
             # Its Razorpay subscription is cancelled with it; restoring the club does not restore it.
             await end_for_deleted_club(session, club)
+            # And its connected social accounts are disconnected (app/api/social).
+            from app.api.social import hooks as social
+
+            await social.club_deleted(session, club)
     await session.commit()
     return user
 

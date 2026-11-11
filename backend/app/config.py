@@ -313,6 +313,44 @@ class AppConfig(BaseSettings):
     META_ES_CONFIG_ID: str = ""
     META_WEBHOOK_VERIFY_TOKEN: str = ""
 
+    # ─── Social auto-posting (app/api/social, docs/SOCIAL_POSTING.md) ───────
+    # Dormant until the owner saves a platform's settings: a platform without
+    # them answers `available: false, reason: "not_configured"`, and the share
+    # kit (drafted text, posters, tracking links) works for every club either
+    # way. SOCIAL_KEYS_SECRET is the Fernet key every connected account's
+    # tokens are encrypted with -- its own secret, never PAYMENT_KEYS_SECRET,
+    # AI_KEYS_SECRET or WHATSAPP_KEYS_SECRET, so one leaked key opens one kind
+    # of credential; a comma-separated list rotates (app/core/keyring.py).
+    # Unset: nothing can be connected and nothing posts automatically.
+    SOCIAL_KEYS_SECRET: str = ""
+    # Facebook Pages and Instagram use the Meta app above (META_APP_ID and
+    # META_APP_SECRET, shared with Embedded Signup). A Facebook Login for
+    # Business configuration's id, when the app uses one; empty: the classic
+    # dialog with the permissions named (app/api/social/oauth.py).
+    META_LOGIN_CONFIG_ID: str = ""
+    # The Graph API version the social calls name. Meta retires each about two
+    # years after release (v26.0: 29 July 2026); move it on yearly.
+    SOCIAL_GRAPH_VERSION: str = "v26.0"
+    # LinkedIn: one app (Sign In with LinkedIn using OpenID Connect + Share on
+    # LinkedIn) for members' own profiles. Club Pages need the Community
+    # Management API's review: LINKEDIN_PAGES_ENABLED stays false until it
+    # passes (the platform reads `review_pending` meanwhile).
+    LINKEDIN_CLIENT_ID: str = ""
+    LINKEDIN_CLIENT_SECRET: str = ""
+    LINKEDIN_PAGES_ENABLED: bool = False
+    # The LinkedIn-Version header (YYYYMM). LinkedIn sunsets each about a year
+    # after release (202511 ends 16 Nov 2026).
+    LINKEDIN_API_VERSION: str = "202610"
+    # X (Twitter): an OAuth 2.0 confidential client (PKCE), pay-per-use.
+    X_CLIENT_ID: str = ""
+    X_CLIENT_SECRET: str = ""
+    # Posts to X across every club in one IST month, at most: each with a
+    # link costs about $0.20 (the feature list's Costs). At the cap a post
+    # fails with "share manually" until the month turns.
+    X_MONTHLY_POST_CAP: int = 100
+    # Seconds one call to a platform may take.
+    SOCIAL_TIMEOUT_SECONDS: float = 20.0
+
     GOOGLE_WEB_CLIENT_ID: str
     GOOGLE_ANDROID_CLIENT_ID: str
     GOOGLE_IOS_CLIENT_ID: str

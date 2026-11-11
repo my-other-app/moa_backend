@@ -261,6 +261,10 @@ async def remove(session, club: Clubs, member_id: int) -> ClubMembers:
     # Their open sessions end now; the dependency would refuse them anyway.
     await session.execute(update(UserSessions).where(UserSessions.member_id == member.id).values(revoked=True))
     await session.flush()
+    # The social accounts they connected are disconnected with their access (app/api/social).
+    from app.api.social import hooks as social
+
+    await social.member_removed(session, member)
     return member
 
 

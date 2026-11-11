@@ -59,6 +59,7 @@ KINDS: dict[str, str] = {
     "payment_gateway_failed": "A club's own Razorpay account stopped working, or a webhook for it had a bad signature",
     "payment_gateway_disconnected": "A club's own Razorpay account was disconnected or disabled",
     "club_whatsapp_connected": "A club connected its own WhatsApp Business number",
+    "social_failures": "Social posts to one platform failed far more than they went out in a day (data: platform, posted, failed, waiting): the platform may have changed something (app/api/social)",
     "club_whatsapp_failed": "A club's own WhatsApp number stopped working (data.code: Meta's), or a webhook for it had a bad signature",
     "club_whatsapp_disconnected": "A club's own WhatsApp number was disconnected",
     "club_whatsapp_quality": "A club's own WhatsApp number's quality rating dropped (data: previous, rating, tier)",

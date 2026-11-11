@@ -88,6 +88,11 @@ from app.api.badges.router import router as badges_router
 from app.api.audit.router import router as audit_router
 from app.api.admin_alerts.router import router as admin_alerts_router
 from app.api.club_alerts.router import router as club_alerts_router
+from app.api.social.router import (
+    club_router as social_club_router,
+    events_public_router as social_events_router,
+    public_router as social_public_router,
+)
 from app.api.message_quota.router import admin_router as message_quota_admin_router
 from app.api.message_quota.router import club_router as message_quota_club_router
 from app.api.message_quota.router import public_router as message_credits_public_router
@@ -174,6 +179,11 @@ api_router.include_router(router=ai_event_router)
 api_router.include_router(router=payment_gateways_admin_router)
 # Before club_router too: /clubs/alerts and /clubs/messages are literal paths.
 api_router.include_router(router=club_alerts_router)
+# Social auto-posting (app/api/social): /clubs/social/... before club_router,
+# /events/{event_id}/share before the events router.
+api_router.include_router(router=social_club_router)
+api_router.include_router(router=social_public_router)
+api_router.include_router(router=social_events_router)
 api_router.include_router(router=message_quota_club_router)
 api_router.include_router(router=message_quota_admin_router)
 api_router.include_router(router=message_credits_public_router)

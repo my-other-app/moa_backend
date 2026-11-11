@@ -248,6 +248,9 @@ class PageEvent(BaseModel):
     about: Optional[str] = None
     poster: Optional[str] = None
     poster_thumb: Optional[str] = None
+    #: The link-preview picture: the poster made 1200 x 630 for social posting
+    #: (app/api/social); null until it is made (when the event is published).
+    share_image_url: Optional[str] = None
     starts_at: str
     ends_at: str
     duration_hours: Optional[float] = None

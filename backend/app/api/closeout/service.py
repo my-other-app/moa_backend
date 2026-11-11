@@ -249,6 +249,20 @@ async def update_settings(session, event: Events, body) -> dict:
         from app.api.sites import service as sites
 
         await sites.republish_for_event(session, event.id)
+    # Social posting (app/api/social): published -- its "on publish" posts go and the team gets its
+    # share kit; back to a draft -- whatever was waiting is cancelled.
+    from app.api.social import hooks as social
+
+    now_status = lifecycle(event)
+    if was is EventStatus.draft and now_status in (EventStatus.published, EventStatus.live):
+        await social.event_published(session, event)
+        await session.commit()
+    elif was in (EventStatus.published, EventStatus.live) and now_status is EventStatus.draft:
+        await social.event_stopped(session, event, "event_unpublished")
+        await session.commit()
+    elif now_status is EventStatus.cancelled and was is not EventStatus.cancelled:
+        await social.event_stopped(session, event, "event_cancelled")
+        await session.commit()
     if was is EventStatus.draft and lifecycle(event) in (EventStatus.published, EventStatus.live):
         # A draft its co-hosts accepted is out: their followers hear of it
         # now, once each (app/api/cohosts).

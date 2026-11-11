@@ -205,6 +205,9 @@ LOOPS = [
     Loop("club whatsapp", "app.api.club_whatsapp.sweep", "sweep_loop", lock_keys.CLUB_WHATSAPP_SWEEP, [("app.api.club_whatsapp.sweep", "sweep")]),
     Loop("club mailbox", "app.api.club_mailbox.sweep", "sweep_loop", lock_keys.CLUB_MAILBOX_SWEEP, [("app.api.club_mailbox.sweep", "sweep")]),
     Loop("waiting lists", "app.api.ticketing.sweep", "sweep_loop", lock_keys.WAITLIST_SWEEP, [("app.api.ticketing.waitlist", "expire")]),
+    # Social posts due (and stale claims) queued, and the day's token refresh queued once (app/api/social).
+    Loop("social posting", "app.api.social.sweep", "sweep_loop", lock_keys.SOCIAL_SWEEP,
+         [("app.api.social.scheduler", "dispatch"), ("app.api.social.sweep", "maybe_daily")], runs=("social_daily",)),
     Loop("support desk", "app.api.support.sweep", "sweep_loop", lock_keys.SUPPORT_SWEEP, [("app.api.support.sweep", "sweep")]),
     Loop("popularity", "app.api.discover.counters", "check_loop", lock_keys.DISCOVER_POPULARITY, [("app.api.discover.popularity", "refresh")]),
     Loop("counters", "app.api.discover.counters", "check_loop", lock_keys.DISCOVER_COUNTERS,

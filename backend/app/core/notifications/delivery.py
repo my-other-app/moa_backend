@@ -77,6 +77,8 @@ PERSONAL: dict[str, str] = {
     "request_declined": "your registration",
     # A club asking the person for answers they're missing, with their own link (app/api/missing_answers).
     "answers_needed": "your registration",
+    # A club's team member's share kit when its event is published (app/api/social).
+    "share_kit": "your club's event, to share",
     # The team answered the person's own help request (app/api/support).
     "support_reply": "your help request",
 }

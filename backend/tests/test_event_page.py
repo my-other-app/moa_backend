@@ -35,6 +35,8 @@ EVENT_KEYS = {
     "requires_approval",
     # How many applied, where it does: every registration ever made (null elsewhere).
     "applied_count",
+    # The link-preview picture: the poster made 1200 x 630 for social posting, null until made (app/api/social).
+    "share_image_url",
 }
 
 

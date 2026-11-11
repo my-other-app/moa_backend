@@ -283,6 +283,10 @@ async def cancel(session, event_id: int, *, reason: str, actor, expected_registr
     )
     await jobs.enqueue(session, FOLLOW_UP_JOB, {"event_id": event.id}, dedupe_key=f"{FOLLOW_UP_JOB}:{event.id}")
     await _enqueue_refunds(session, ids)
+    # Every social post still waiting is cancelled; a cancellation post is offered as a draft (app/api/social).
+    from app.api.social import hooks as social
+
+    await social.event_stopped(session, event, "event_cancelled")
     await session.commit()
     return await state(session, event)
 

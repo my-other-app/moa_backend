@@ -809,6 +809,8 @@ class EventDetailResponse(CustomBaseModel):
     status_clock: bool = Field(True)
     #: When `status` is "cancelled": {"reason", "cancelled_at"} (app/api/club_ops). Null otherwise.
     cancellation: dict | None = Field(None)
+    #: The link-preview picture: the poster made 1200 x 630 for social posting; null until it is made (app/api/social).
+    share_image_url: str | None = Field(None)
     retention_mode: str = Field("keep")
     created_at: datetime | None = Field(None)
     #: Whether the club's plan leaves this event as it was when enforcement

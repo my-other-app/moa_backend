@@ -30,6 +30,7 @@ class NotificationType(PyEnum):
     volunteer_added = "volunteer_added"              # User added as volunteer
     volunteer_removed = "volunteer_removed"          # User removed as volunteer
     club_thread = "club_thread"
+    share_kit = "share_kit"                          # A team member's share kit: the event is live, share it (app/api/social)
 
     # Registration requests (app/api/approvals): confirmed (free: opens the
     # ticket; paid: opens the claim to pay), and declined (an inbox item).
