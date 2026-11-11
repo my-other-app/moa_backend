@@ -157,16 +157,18 @@ async def _threading(session, case: SupportCases) -> tuple[Optional[str], Option
     from app.api.club_mailbox import parse
 
     chain: list[str] = []
-    last_in = None
+    last_in = last_any = None
     for kind, mid, alt, refs in rows:
         if kind == REPLY_IN:
             chain += parse.message_ids(refs)
             last_in = mid
+        last_any = mid
         chain.append(mid)
         if alt:
             chain.append(alt)
     chain = list(dict.fromkeys(c for c in chain if c))[-20:]
-    return last_in, (" ".join(chain) or None)
+    # Their last mail; or, when they wrote from the app or the website, our last one.
+    return (last_in or last_any), (" ".join(chain) or None)
 
 
 @jobs.handler(REPLY_JOB, max_attempts=6, timeout=120.0, priority=jobs.HIGH)
