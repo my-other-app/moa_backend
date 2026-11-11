@@ -67,7 +67,7 @@ async def _reg(session, reg_id):
 # ─── The link ────────────────────────────────────────────────────────────
 
 
-def test_the_token_names_its_registration_and_nothing_else():
+async def test_the_token_names_its_registration_and_nothing_else(session):
     from app.core.mail import links
 
     rid = uuid.uuid4()
