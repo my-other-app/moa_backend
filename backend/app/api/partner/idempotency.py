@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import random
 from datetime import timedelta
 from typing import Optional
 
@@ -31,6 +32,8 @@ STALE = timedelta(minutes=2)
 MAX_KEY = 255
 METHODS = frozenset({"POST", "DELETE"})
 KEPT_HEADERS = ("etag", "location")
+#: How often a request also clears its client's expired keys.
+SWEEP_CHANCE = 0.02
 
 
 class Replay(Exception):
@@ -75,6 +78,9 @@ async def begin(session, request, client_id: str) -> None:
         headers["Idempotent-Replayed"] = "true"
         raise Replay(Response(content=row.response_body or "", status_code=row.status_code, headers=headers, media_type="application/json"))
     stamp = now()
+    if random.random() < SWEEP_CHANCE:
+        # Now and then, this client's keys older than a day go.
+        await sweep(session, client_id=client_id)
     inserted = (await session.execute(
         pg_insert(table).values(
             client_id=client_id, key=key, request_hash=digest, method=request.method, path=request.url.path[:500],

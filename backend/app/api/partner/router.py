@@ -79,8 +79,8 @@ async def list_clubs(limit: Optional[int] = LIMIT, cursor: Optional[str] = CURSO
 @router.post("/clubs", response_model=s.ClubOut, status_code=201, responses=WRITE_ERRORS, tags=["clubs"], summary="Create a club (pending approval)")
 async def create_club(body: s.ClubCreate, caller: PartnerCaller = Depends(require_scope("clubs:create"))):
     """`clubs:create`, granted by MyOtherApp only. The club waits for the MyOtherApp team's approval, as a
-    self-signup does; its owner is emailed; your app is connected to it (`connection` carries its tokens, which
-    work once the club is approved)."""
+    self-signup does; its owner is emailed; your app is connected to it. Once it is approved, act for it with your
+    app's own token (client credentials) and the header `MOA-Club-Id: <its id>`."""
     if not caller.livemode:
         return await sandbox.create_club(caller, body)
     return await live.create_club(caller, body)

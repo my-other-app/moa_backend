@@ -31,7 +31,7 @@ from app.api.events.models import EventCategories, EventRegistrationsLink, Event
 from app.api.partner import allocation, keys
 from app.api.partner.models import (
     PartnerAllocations, PartnerApiKeys, PartnerConnections, PartnerExternalIds, PartnerExternalPayments, PartnerIdempotency,
-    PartnerSandboxObjects, PartnerTokens, PartnerUsageDaily,
+    PartnerSandboxObjects, PartnerUsageDaily,
 )
 from app.config import settings
 from app.core.auth.authentication import get_password_hash
@@ -774,7 +774,8 @@ async def test_a_partner_creates_a_club_waiting_for_approval(client, session, wo
     r = await client.post(f"{V1}/clubs", json=body, headers=H(app_token))
     assert r.status_code == 201, r.text
     out = r.json()
-    assert out["status"] == "pending_approval" and out["external_id"] == "c-9" and out["connection"]["access_token"].startswith("moa_pat_")
+    assert out["status"] == "pending_approval" and out["external_id"] == "c-9" and "access_token" not in json.dumps(out)
+    as_club = H(app_token, **{"MOA-Club-Id": out["id"]})
     club = await session.get(Clubs, int(out["id"]))
     assert club.is_verified is False and club.tagline == "All the world's a stage"
     alloc_row = await session.get(PartnerAllocations, club.id)
@@ -783,16 +784,23 @@ async def test_a_partner_creates_a_club_waiting_for_approval(client, session, wo
 
     await after_commit.drain()
     assert invited and invited[0][0] == "drama.sec@example.com" and invited[0][1]["partner"] == "Campus ERP"
-    r = await client.get(f"{V1}/me", headers=H(out["connection"]["access_token"]))
+    r = await client.get(f"{V1}/me", headers=as_club)
     assert r.status_code == 403 and r.json()["error"]["code"] == "CLUB_NOT_ACTIVE"
+    r = await client.get(f"{V1}/me", headers=H(app_token, **{"MOA-Club-Id": str(world.ids.club)}))
+    assert r.status_code == 403 and r.json()["error"]["code"] == "NOT_CONNECTED"
     assert (await client.post(f"{V1}/clubs", json=body, headers=H(app_token))).json()["error"]["code"] == "ALREADY_EXISTS"
     listed = (await client.get(f"{V1}/clubs", headers=H(app_token))).json()["data"]
     assert [c["id"] for c in listed] == [out["id"]]
     # Approved, its connection's token acts for it.
     club.is_verified = True
     await session.commit()
-    assert (await client.get(f"{V1}/me", headers=H(out["connection"]["access_token"]))).json()["club"]["name"] == "Drama Society"
-    assert await session.scalar(select(func.count()).select_from(PartnerTokens).where(PartnerTokens.connection_id.isnot(None))) == 2
+    me = (await client.get(f"{V1}/me", headers=as_club)).json()
+    assert me["club"]["name"] == "Drama Society" and "attendees:read" not in me["scopes"] and "clubs:create" not in me["scopes"]
+    assert me["scopes"] == ["events:read", "events:write", "registrations:read"]
+    made = await client.post(f"{V1}/events", json=event_body(), headers=as_club)
+    assert made.status_code == 201 and made.json()["club_id"] == out["id"]
+    idem = await session.scalar(select(PartnerIdempotency).where(PartnerIdempotency.path == f"{V1}/clubs"))
+    assert idem is None or "moa_pat_" not in (idem.response_body or "")
 
 
 async def test_an_app_without_clubs_create_cannot_create(client, session, world, mint_token):
@@ -855,3 +863,42 @@ async def test_the_kill_switch_hides_the_surface(client, session, world, monkeyp
     assert (await client.get(f"{V1}/me", headers=H(raw))).status_code == 404
     assert (await client.get(f"{V1}/openapi.json")).status_code == 404
     assert (await client.post("/partner/oauth/token", data={"grant_type": "client_credentials"})).status_code == 404
+
+
+# ─── Origins and webhooks ────────────────────────────────────────────────
+
+
+async def test_a_change_through_the_api_carries_its_origin_and_it_is_reset(client, session, world, monkeypatch):
+    from app.api.events import service as events_service
+    from app.core import api_origin
+
+    seen = []
+    real = events_service.create_event
+
+    async def watching(*args, **kwargs):
+        seen.append(api_origin.current_origin())
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(events_service, "create_event", watching)
+    raw = await key_for(session, world.ids.club)
+    client_id = (await client.get(f"{V1}/me", headers=H(raw))).json()["client_id"]
+    assert (await client.post(f"{V1}/events", json=event_body(), headers=H(raw))).status_code == 201
+    assert seen == [api_origin.Origin(type="api_key", client_id=client_id)]
+    assert api_origin.current_origin() is None
+
+
+async def test_sandbox_changes_are_emitted_as_test_webhooks(client, session, world, monkeypatch):
+    import sys
+    import types
+
+    calls = []
+    fake = types.ModuleType("app.api.webhooks_out")
+    fake.emit = lambda club_id, type_, obj, origin: calls.append((club_id, type_, obj, origin))
+    monkeypatch.setitem(sys.modules, "app.api.webhooks_out", fake)
+    test = await key_for(session, world.ids.club, livemode=False)
+    event_id = (await client.post(f"{V1}/events", json=event_body(), headers=H(test))).json()["id"]
+    await client.post(f"{V1}/events/{event_id}/publish", headers=H(test))
+    reg = (await client.post(f"{V1}/events/{event_id}/registrations", json=person(1), headers=H(test))).json()
+    await client.post(f"{V1}/checkins", json={"registration_id": reg["id"]}, headers=H(test))
+    assert [c[1] for c in calls] == ["event.created", "event.published", "registration.created", "checkin.created"]
+    assert all(c[0] == world.ids.club and c[2]["livemode"] is False and c[3].type == "api_key" for c in calls)

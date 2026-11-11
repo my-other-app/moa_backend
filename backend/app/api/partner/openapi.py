@@ -126,6 +126,9 @@ def build() -> dict:
                 op["description"] = (op.get("description") or "").rstrip() + f"\n\nNeeds one of: {', '.join(f'`{x}`' for x in scopes)}."
                 op["security"] = [{"apiKey": []}, {"partnerOAuth": scopes}]
             params = op.setdefault("parameters", [])
+            if not path.endswith("/clubs"):
+                params.append({"name": "MOA-Club-Id", "in": "header", "required": False, "schema": {"type": "string"},
+                               "description": "With a partner app's own token (client credentials): the connected club to act for."})
             if method in ("post", "delete"):
                 params.append({"name": "Idempotency-Key", "in": "header", "required": False, "schema": {"type": "string", "maxLength": 255},
                                "description": "Any unique string: a retry with it returns the first answer (24 hours)."})

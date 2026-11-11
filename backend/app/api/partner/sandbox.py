@@ -30,6 +30,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import TIMESTAMP, cast, select, tuple_
 
 from app.api.partner import external_ids as ext_ids
+from app.api.partner.emitting import emit
 from app.api.partner.common import (
     TIMEZONE, check_if_match, check_limit, decode_cursor, encode_cursor, iso, list_response, money, now, object_response, parse_time,
 )
@@ -230,6 +231,7 @@ async def create_event(caller, body):
         await ext_ids.release(caller.session, reservation)
         raise
     await ext_ids.bind(caller.session, reservation, row.id)
+    await emit(caller, "event.created", _event_present(row.data, None))
     return object_response(caller.request, await event_out(caller, row), status=201)
 
 
@@ -254,6 +256,7 @@ async def patch_event(caller, event_id, body):
     _apply_event(data, fields, sent)
     _save(row, data)
     await caller.session.commit()
+    await emit(caller, "event.updated", _event_present(row.data, None))
     return object_response(caller.request, await event_out(caller, row))
 
 
@@ -281,6 +284,7 @@ async def publish_event(caller, event_id):
     data["status"] = "published"
     _save(row, data)
     await caller.session.commit()
+    await emit(caller, "event.published", _event_present(row.data, None))
     return object_response(caller.request, await event_out(caller, row))
 
 
@@ -296,6 +300,7 @@ async def cancel_event(caller, event_id, reason: str):
     data["_cancel_reason"] = reason
     _save(row, data)
     await caller.session.commit()
+    await emit(caller, "event.cancelled", _event_present(row.data, None))
     return object_response(caller.request, await event_out(caller, row))
 
 
@@ -414,6 +419,7 @@ async def create_registration(caller, event_id, body):
         await ext_ids.release(session, reservation)
         raise
     await ext_ids.bind(session, reservation, row.id)
+    await emit(caller, "registration.created", _strip(row.data))
     return object_response(caller.request, await registration_out(caller, row), status=202 if approval else 201)
 
 
@@ -432,6 +438,7 @@ async def patch_registration(caller, registration_id, body):
         await ext_ids.set_for(caller.session, caller, "registration", row.id, ext_ids.check(sent["external_id"]))
     _save(row, data)
     await caller.session.commit()
+    await emit(caller, "registration.updated", _strip(row.data))
     return object_response(caller.request, await registration_out(caller, row))
 
 
@@ -453,6 +460,7 @@ async def cancel_registration(caller, registration_id):
         event["registrations_count"] = max(0, int(event.get("registrations_count") or 0) - 1)
         _save(event_row, event)
     await caller.session.commit()
+    await emit(caller, "registration.cancelled", _strip(row.data))
     return object_response(caller.request, await registration_out(caller, row))
 
 
@@ -499,6 +507,7 @@ async def create_checkin(caller, body):
     reg_data["checked_in_at"] = iso(stamp)
     _save(reg, reg_data)
     await session.commit()
+    await emit(caller, "checkin.created", _strip(row.data))
     return JSONResponse(_strip(row.data), status_code=201)
 
 
@@ -512,6 +521,7 @@ async def delete_checkin(caller, checkin_id):
         data["checked_in_at"] = None
         _save(reg, data)
     await caller.session.commit()
+    await emit(caller, "checkin.deleted", out)
     return JSONResponse(out)
 
 
@@ -557,16 +567,17 @@ async def issue_certificates(caller, event_id, body):
     have = {
         r.data.get("registration_id") for r in await session.scalars(select(S).where(S.club_id == caller.club_id, S.kind == "certificate", S.parent_id == event_row.id))
     }
-    issued = 0
+    issued, created = 0, []
     for reg in regs:
         if reg.id in have:
             continue
         number = _code("TEST-CERT", 2)
-        await _new(caller, "certificate", {
+        made = await _new(caller, "certificate", {
             "id": new_id("certificate"), "number": number, "object": "certificate", "registration_id": reg.id, "event_id": event_row.id,
             "status": "issued", "issued_at": iso(now()), "revoked_at": None, "name": (reg.data.get("person") or {}).get("name"),
             "verify_url": None, "pdf_url": None, "livemode": False,
         }, parent_id=event_row.id)
+        created.append(_strip(made.data))
         issued += 1
     job = PartnerCertificateJobs(
         club_id=caller.club_id, event_ref=event_row.id, client_id=caller.client_id, livemode=False, status="completed",
@@ -575,6 +586,8 @@ async def issue_certificates(caller, event_id, body):
     )
     session.add(job)
     await session.commit()
+    for cert in created:
+        await emit(caller, "certificate.issued", cert)
     from app.api.partner.live import job_out
 
     return JSONResponse(job_out(job), status_code=202)

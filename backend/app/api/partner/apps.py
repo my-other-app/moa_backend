@@ -212,6 +212,17 @@ async def connection_counts(session, app_ids: list) -> dict:
     return dict(rows.all())
 
 
+async def last_used(session, app_ids: list) -> dict:
+    """When each app last acted for any club it is connected to."""
+    if not app_ids:
+        return {}
+    rows = await session.execute(
+        select(PartnerConnections.app_id, func.max(PartnerConnections.last_used_at))
+        .where(PartnerConnections.app_id.in_(app_ids)).group_by(PartnerConnections.app_id)
+    )
+    return dict(rows.all())
+
+
 async def disconnect(session, club_id: int, connection_id, *, by_user_id: Optional[int]) -> tuple[PartnerConnections, PartnerApps]:
     try:
         pk = UUID(str(connection_id))
@@ -225,7 +236,7 @@ async def disconnect(session, club_id: int, connection_id, *, by_user_id: Option
     return conn, app
 
 
-def app_out(app: PartnerApps, *, secret: Optional[str] = None, connections: Optional[int] = None) -> dict:
+def app_out(app: PartnerApps, *, secret: Optional[str] = None, connections: Optional[int] = None, last_used_at=None) -> dict:
     data = {
         "id": str(app.id),
         "client_id": app.client_id,
@@ -242,6 +253,7 @@ def app_out(app: PartnerApps, *, secret: Optional[str] = None, connections: Opti
         "suspended_reason": app.suspended_reason,
         "secret_rotated_at": _iso(app.secret_rotated_at),
         "created_at": _iso(app.created_at),
+        "last_used_at": _iso(last_used_at),
     }
     if connections is not None:
         data["connected_clubs"] = connections

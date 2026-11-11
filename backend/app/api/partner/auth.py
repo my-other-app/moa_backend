@@ -6,7 +6,9 @@
   expired, from an address its allowlist names (when it has one);
 - a partner app's access token (`moa_pat_...`): its app not suspended, its
   connection not ended. A connection's token acts for its club; the app's
-  own token (client credentials) acts for no club.
+  own token (client credentials) acts for no club -- or, with
+  `MOA-Club-Id: <club id>`, for that one of its connected clubs, with that
+  connection's scopes (how a partner works for the clubs it created).
 
 The club must still exist, be approved and be allocated API access, now:
 none of that is trusted from when the key was made. The caller acts as the
@@ -48,6 +50,8 @@ from app.db.core import SessionDep
 logger = logging.getLogger(__name__)
 
 WRITES = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+#: With an app's own token (client credentials): the connected club it acts for.
+CLUB_HEADER = "MOA-Club-Id"
 _TOUCH_EVERY = timedelta(minutes=1)
 
 
@@ -148,7 +152,7 @@ async def _from_key(session, request, raw: str) -> PartnerCaller:
     )
 
 
-async def _from_token(session, raw: str) -> PartnerCaller:
+async def _from_token(session, request, raw: str) -> PartnerCaller:
     found = await oauth.access_token(session, raw)
     if found is None:
         raise _unauthenticated("This access token is not valid, has expired or was revoked.")
@@ -158,12 +162,25 @@ async def _from_token(session, raw: str) -> PartnerCaller:
     allowed = set(catalogue.parse(app.allowed_scopes))
     granted = set(catalogue.parse(token.scopes)) & allowed
     if conn is None:
-        return PartnerCaller(
-            club_id=None, client_id=app.client_id, client_type="partner_app",
-            scopes=frozenset(granted & oauth.APP_TOKEN_SCOPES), livemode=bool(token.livemode), name=app.name, app=app,
-            rate_limit=allocation.limits_for(app.rate_tier),
-        )
-    granted &= set(catalogue.parse(conn.scopes))
+        club_header = (request.headers.get(CLUB_HEADER) or "").strip()
+        if not club_header:
+            return PartnerCaller(
+                club_id=None, client_id=app.client_id, client_type="partner_app",
+                scopes=frozenset(granted & oauth.APP_TOKEN_SCOPES), livemode=bool(token.livemode), name=app.name, app=app,
+                rate_limit=allocation.limits_for(app.rate_tier),
+            )
+        # The app's own token, for one of its connected clubs: that
+        # connection's scopes, as the connection's own token would carry.
+        from app.api.partner import apps as apps_mod
+
+        if not club_header.isdigit():
+            raise PartnerError("VALIDATION", f"{CLUB_HEADER} is a club's id.", details={"fields": {CLUB_HEADER: "A number."}})
+        conn = await apps_mod.live_connection(session, app.id, int(club_header), bool(token.livemode))
+        if conn is None:
+            raise PartnerError("NOT_CONNECTED", "This app is not connected to that club (in this mode).")
+        granted = set(catalogue.parse(conn.scopes)) & allowed
+    else:
+        granted &= set(catalogue.parse(conn.scopes))
     club, owner, alloc = await _club_and_owner(session, conn.club_id)
     seen = aware(conn.last_used_at)
     if seen is None or now() - seen > _TOUCH_EVERY:
@@ -212,7 +229,7 @@ async def partner_caller(request: Request, session: SessionDep) -> PartnerCaller
     if keys_mod.looks_like_key(raw):
         caller = await _from_key(session, request, raw)
     elif raw.startswith(oauth.ACCESS):
-        caller = await _from_token(session, raw)
+        caller = await _from_token(session, request, raw)
     else:
         raise _unauthenticated("That is not a MyOtherApp API key or access token.")
     caller.session = session

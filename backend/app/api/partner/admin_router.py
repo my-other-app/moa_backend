@@ -151,7 +151,8 @@ async def list_apps(session: SessionDep, user: AdminAuth) -> dict:
 
     rows = list((await session.scalars(select(PartnerApps).order_by(PartnerApps.created_at.desc()))).all())
     counts = await apps.connection_counts(session, [a.id for a in rows])
-    return {"apps": [apps.app_out(a, connections=counts.get(a.id, 0)) for a in rows], "scopes": catalogue.catalogue()}
+    used = await apps.last_used(session, [a.id for a in rows])
+    return {"apps": [apps.app_out(a, connections=counts.get(a.id, 0), last_used_at=used.get(a.id)) for a in rows], "scopes": catalogue.catalogue()}
 
 
 @router.post("/partner-apps", summary="Register a partner app (its client secret is shown once)", status_code=201)

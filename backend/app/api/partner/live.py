@@ -211,7 +211,7 @@ async def create_club(caller, body):
     owner told by email, the partner connected to it. The admin still
     approves it; its tokens work from then."""
     from app.api.clubs import service as clubs_service
-    from app.api.partner import allocation, oauth
+    from app.api.partner import allocation
     from app.api.partner import scopes as catalogue
     from app.api.partner.models import PartnerConnections
     from app.api.users import service as user_service
@@ -253,7 +253,6 @@ async def create_club(caller, body):
     )
     session.add(conn)
     await session.flush()
-    tokens = oauth._issue(session, app, conn, scopes, True)
     from app.api.admin_alerts import notify
 
     await notify(
@@ -273,7 +272,9 @@ async def create_club(caller, body):
     await session.commit()
     await ext_ids.bind(session, reservation, club.id)
     out = shapes.club_object(club, await _socials(session, club.id), external_id=external)
-    out["connection"] = {"id": str(conn.id), "scopes": scopes.split(), "via": "clubs_create", **tokens}
+    # No tokens here (an answer is kept for its Idempotency-Key): once the club
+    # is approved, the app's own token acts for it with MOA-Club-Id.
+    out["connection"] = {"id": str(conn.id), "scopes": scopes.split(), "via": "clubs_create", "act_with_header": {"MOA-Club-Id": str(club.id)}}
     return JSONResponse(out, status_code=201)
 
 
@@ -892,6 +893,12 @@ async def create_registration(caller, event_id, body):
                   summary=f"Registration added to {event.name}", registration_id=str(reg.id), paid_externally=payment is not None)
     await session.commit()
     reg, _ = await _registration_of(caller, reg.id)
+    if payment is not None:
+        # Paid outside MyOtherApp after it was made: not a domain change webhooks_out sees.
+        from app.api.partner.emitting import emit
+
+        ctx = await shapes.RegistrationContext.load(session, [reg])
+        await emit(caller, "registration.updated", shapes.registration_object(reg, reg.event, ctx, contact=True))
     return object_response(caller.request, await registration_out(caller, reg, None, count=False), status=201)
 
 
@@ -1151,6 +1158,13 @@ async def issue_certificates(caller, event_id, body):
         await session.rollback()
         job = await session.get(PartnerCertificateJobs, job.id)
         job.status, job.finished_at, job.error = "failed", now(), (e.message or "")[:500]
+    except Exception:
+        # Not left "running" for ever: failed, and the 500 says why to us.
+        await session.rollback()
+        failed = await session.get(PartnerCertificateJobs, job.id)
+        failed.status, failed.finished_at, failed.error = "failed", now(), "Something went wrong on our side."
+        await session.commit()
+        raise
     await _record(caller, "partner.certificates.issue", entity_type="event", entity_id=event.id, summary="Certificates issued", job_id=str(job.id))
     await session.commit()
     return JSONResponse(job_out(job), status_code=202)
