@@ -122,9 +122,24 @@ async def create_club(
         club=club,
         data={"requested_plan": requested_plan, "requested_cycle": requested_cycle, "contact_email": club.contact_email},
     )
+    await _signup_lead(session, club)
     await session.commit()
     _follow_map_link(background_tasks, club)
     return club
+
+
+async def _signup_lead(session, club) -> None:
+    """A club that applied by itself is a Club lead for the sales team to
+    track its onboarding (app/api/leads). Never fails the application."""
+    import logging
+
+    from app.api.leads import service as leads
+
+    try:
+        async with session.begin_nested():
+            await leads.on_club_signup(session, club)
+    except Exception:  # noqa: BLE001
+        logging.getLogger(__name__).warning("club %s: its sign-up lead couldn't be made", club.id, exc_info=True)
 
 
 @router.post("/admin/create", summary="create club as admin")
