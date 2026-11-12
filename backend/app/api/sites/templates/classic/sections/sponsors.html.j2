@@ -1,0 +1,35 @@
+{%- import "_shared/macros.html.j2" as m with context -%}
+{%- set partners = sponsors|selectattr("kind", "equalto", "partner")|list -%}
+{%- set backers = sponsors|rejectattr("kind", "equalto", "partner")|list -%}
+{%- if sponsors -%}
+<!-- SPONSORS + PARTNERS -->
+<section id="partners" class="c-pb" style="padding: 96px 0">
+<div style="max-width: 1200px; margin: 0 auto; padding: 0 24px; display: flex; flex-direction: column; gap: 40px">
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px">
+<h2 style="margin: 0; font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: clamp(30px, 4vw, 44px); line-height: 1.1; letter-spacing: -0.02em">{{ section.title }}</h2>
+{% if links.contact_mailto %}<a href="{{ links.contact_mailto }}" style="font-weight: 600; font-size: 15px; padding: 12px 0">Become a sponsor →</a>{% endif %}
+</div>
+{% if backers %}<div style="display: flex; flex-direction: column; gap: 16px">
+<div style="font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #535B6E">Principal sponsors</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 16px">
+{% for s in backers[:3] %}<div style="min-height: 140px; background: #FFFFFF; border: 1px solid #D9DEE7; border-radius: 16px; display: flex; align-items: center; justify-content: center; color: #535B6E; font-weight: 500">{% if m.real(s.logo) %}<img class="logo-img" src="{{ s.logo.url }}"{% if s.logo.srcset %} srcset="{{ s.logo.srcset }}" sizes="240px"{% endif %} width="{{ s.logo.w or 240 }}" height="{{ s.logo.h or 96 }}" alt="{{ s.name }}" loading="lazy" decoding="async" style="max-width: 70%; max-height: 88px">{% else %}{{ s.name }}{% endif %}</div>
+{% endfor %}</div>
+</div>{% endif %}
+{% if backers[3:] %}<div style="display: flex; flex-direction: column; gap: 16px">
+<div style="font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #535B6E">Supporting sponsors</div>
+<div class="c-2up-phone" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 16px">
+{% for s in backers[3:] %}<div style="min-height: 96px; background: #FFFFFF; border: 1px solid #D9DEE7; border-radius: 16px; display: flex; align-items: center; justify-content: center; color: #535B6E; font-size: 14px; font-weight: 500">{% if m.real(s.logo) %}<img class="logo-img" src="{{ s.logo.url }}"{% if s.logo.srcset %} srcset="{{ s.logo.srcset }}" sizes="160px"{% endif %} width="{{ s.logo.w or 160 }}" height="{{ s.logo.h or 64 }}" alt="{{ s.name }}" loading="lazy" decoding="async" style="max-width: 70%; max-height: 56px">{% else %}{{ s.name }}{% endif %}</div>
+{% endfor %}</div>
+</div>{% endif %}
+{% if partners %}<div style="display: flex; flex-direction: column; gap: 16px">
+<div style="font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #535B6E">Community and venue partners</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 16px">
+{% for s in partners %}<div style="padding: 20px; border: 1px dashed #A9B1C2; border-radius: 16px; display: flex; align-items: center; gap: 16px">
+<span class="{{ 'ph ph-img' if m.real(s.logo) }}" style="width: 52px; height: 52px; border-radius: 12px; background: #DCE1EA; flex: none">{% if m.real(s.logo) %}<img class="ph-contain" src="{{ s.logo.url }}" width="52" height="52" alt="" loading="lazy" decoding="async">{% endif %}</span>
+<div style="display: flex; flex-direction: column; min-width: 0"><span style="font-weight: 600">{{ s.name }}</span>{% if s.role %}<span style="font-size: 14px; color: #535B6E">{{ s.role }}</span>{% endif %}</div>
+</div>
+{% endfor %}</div>
+</div>{% endif %}
+</div>
+</section>
+{%- endif -%}

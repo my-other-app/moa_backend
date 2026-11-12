@@ -1,0 +1,23 @@
+{%- import "_shared/macros.html.j2" as m with context -%}
+{%- if past -%}
+<!-- PAST EVENTS -->
+<section id="past" style="padding: 96px 0; background: #E7EBF1">
+<div style="max-width: 1200px; margin: 0 auto; padding: 0 24px; display: flex; flex-direction: column; gap: 32px">
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px">
+<h2 style="margin: 0; font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: clamp(30px, 4vw, 44px); line-height: 1.1; letter-spacing: -0.02em">{{ section.title }}</h2>
+{% if links.events_url %}<a href="{{ links.events_url }}" style="font-weight: 600; font-size: 15px; padding: 12px 0">Browse the archive →</a>{% endif %}
+</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 24px">
+{% for e in past %}{% set pic = e.poster or images["event.fallback"] %}<article style="background: #FFFFFF; border-radius: 16px; overflow: hidden; display: flex; flex-direction: column">
+<div class="{{ m.phc(pic) }}" style="height: 170px; background: repeating-linear-gradient(135deg, #CDD4E0 0 14px, #DCE1EA 14px 28px); display: flex; align-items: flex-end; padding: 12px; box-sizing: border-box">{% if m.real(pic) %}{{ m.fill(pic, 280, 170, "(max-width: 600px) 100vw, 280px", alt=e.name, poster=(pic is sameas e.poster)) }}{% elif m.label(pic) %}<span style="background: #FFFFFF; color: #3D4558; font-size: 12px; font-weight: 500; padding: 4px 10px; border-radius: 6px">{{ m.label(pic) }}</span>{% endif %}</div>
+<div style="padding: 20px; display: flex; flex-direction: column; gap: 8px">
+<span style="font-size: 13px; font-weight: 600; color: #535B6E">{{ e.day }} {{ e.month }} {{ e.year }}{% if e.kind %} · {{ e.kind }}{% endif %}</span>
+<h3 style="margin: 0; font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 600; font-size: 19px; line-height: 1.25">{{ e.name }}</h3>
+{% if e.facts %}<span style="font-size: 14px; color: #535B6E">{{ e.facts|join(" · ") }}</span>{% endif %}
+{% if e.url %}<a href="{{ e.url }}" style="font-weight: 600; font-size: 14px; padding: 10px 0">Recap and recordings →</a>{% endif %}
+</div>
+</article>
+{% endfor %}</div>
+</div>
+</section>
+{%- endif -%}

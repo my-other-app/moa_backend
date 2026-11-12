@@ -1,0 +1,27 @@
+{%- import "_shared/macros.html.j2" as m with context -%}
+<!doctype html>
+<html lang="en"{% if site.accent %} style="--accent: {{ site.accent }}"{% endif %}>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ club.name }}{% if site.subline %} · {{ site.subline|truncate(80) }}{% endif %}</title>
+{% if site.subline or club.tagline %}<meta name="description" content="{{ site.subline or club.tagline }}">
+{% endif %}<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap">
+<style>{{ css }}</style>
+{{ head_extra }}</head>
+<body>
+<div style="font-family: Inter, system-ui, sans-serif; color: #0D1220; background: #F3F5F7; font-size: 16px; line-height: 1.5">
+
+{% include "classic/sections/nav.html.j2" %}
+
+{% include "classic/sections/hero.html.j2" %}
+
+{{ sections_html }}
+
+{% include "classic/sections/footer.html.j2" %}
+
+</div>
+{{ body_end }}</body>
+</html>

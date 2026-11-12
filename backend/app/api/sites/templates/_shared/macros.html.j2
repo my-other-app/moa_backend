@@ -1,0 +1,58 @@
+{#-
+  Helpers shared by every club-site template package. Import them with the
+  page's context (they read `sample`):
+
+      {% import "_shared/macros.html.j2" as m with context %}
+
+  Images in the render input are objects {url, srcset, alt, w, h} (srcset,
+  alt, w, h optional) or null. The designer's sample (sample.json) has no
+  pictures: there an image is {"placeholder": "label"} and the template draws
+  the designer's striped box with that label. A real page never gets
+  `placeholder`, so the stripes and labels only ever appear in the sample.
+
+  A picture box in a template keeps the designer's element and inline style
+  and adds `class="{{ m.phc(img) }}"`:
+    ph            the sample's striped placeholder, untouched;
+    ph ph-img     a real picture: the box clips it, `fill` covers the box;
+    ph ph-empty   no picture: a plain tint instead of stripes (style.css,
+                  with !important so it beats the inline background).
+-#}
+
+{#- A count with thousands separators. In the designer's sample the counts are
+    bracketed placeholders ("[1,240]"), so there they get brackets. Text passes
+    through as it is. -#}
+{%- macro num(v) -%}
+{%- if v is number -%}{%- set s = "{:,}".format(v) -%}{%- if sample -%}[{{ s }}]{%- else -%}{{ s }}{%- endif -%}{%- else -%}{{ v }}{%- endif -%}
+{%- endmacro -%}
+
+{#- True (non-empty) when `i` is a real picture. -#}
+{%- macro real(i) -%}{%- if i and i.url -%}1{%- endif -%}{%- endmacro -%}
+
+{#- The class list for a picture box (see above). -#}
+{%- macro phc(i, extra="") -%}
+ph{% if i and i.url %} ph-img{% elif not (i and i.placeholder is defined) %} ph-empty{% endif %}{% if extra %} {{ extra }}{% endif %}
+{%- endmacro -%}
+
+{#- The picture inside a box: covers it (object-fit: cover). `poster` keeps a
+    whole event poster visible over a blurred copy of itself. The hero's first
+    picture is `eager` (fetchpriority high); everything else loads lazily.
+    `w`/`h` are the slot's design size, used when the image doesn't say. -#}
+{%- macro fill(i, w, h, sizes="100vw", eager=false, alt="", poster=false) -%}
+{%- if poster -%}<img class="ph-blur" src="{{ i.url }}" alt="" aria-hidden="true" width="{{ i.w or w }}" height="{{ i.h or h }}" loading="lazy" decoding="async">{%- endif -%}
+<img class="{{ 'ph-contain' if poster else 'ph-fill' }}" src="{{ i.url }}"{% if i.srcset %} srcset="{{ i.srcset }}" sizes="{{ sizes }}"{% endif %} width="{{ i.w or w }}" height="{{ i.h or h }}" alt="{{ i.alt or alt }}"{% if eager %} fetchpriority="high"{% else %} loading="lazy"{% endif %} decoding="async">
+{%- endmacro -%}
+
+{#- A box's label in the sample (the designer's "Cover photo · 1440 × 300"). -#}
+{%- macro label(i) -%}{%- if i and not i.url and i.placeholder -%}{{ i.placeholder }}{%- endif -%}{%- endmacro -%}
+
+{#- Up to two initials for a person or a club without a picture. -#}
+{%- macro initials(name) -%}{%- for w in (name or "").split()[:2] -%}{{ w[0]|upper }}{%- endfor -%}{%- endmacro -%}
+
+{#- The club's logo inside the designer's monogram tile (which keeps its own
+    size, radius and colour): the picture when there is one, else the initial. -#}
+{%- macro logo(club, w, h) -%}
+{%- if club.logo_url -%}<img class="ph-fill" src="{{ club.logo_url }}"{% if club.logo_srcset %} srcset="{{ club.logo_srcset }}" sizes="{{ w }}px"{% endif %} width="{{ w }}" height="{{ h }}" alt="{{ club.name }}" loading="lazy" decoding="async">{%- else -%}{{ (club.name or "?")[0]|upper }}{%- endif -%}
+{%- endmacro -%}
+
+{#- "Design lead, [Company]" -#}
+{%- macro role(p) -%}{{ [p.title, p.org]|select|join(", ") }}{%- endmacro -%}

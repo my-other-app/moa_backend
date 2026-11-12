@@ -1,0 +1,18 @@
+{%- import "_shared/macros.html.j2" as m with context -%}
+{%- if team -%}
+<!-- TEAM -->
+<section id="team" style="padding: 96px 0; background: #FFFFFF">
+<div style="max-width: 1200px; margin: 0 auto; padding: 0 24px; display: flex; flex-direction: column; gap: 32px">
+<div style="display: flex; flex-direction: column; gap: 12px; max-width: 640px">
+<h2 style="margin: 0; font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: clamp(30px, 4vw, 44px); line-height: 1.1; letter-spacing: -0.02em">{{ section.title }}</h2>
+<p style="margin: 0; font-size: 17px; color: #3D4558">Volunteers who plan the events, find the speakers and keep the doors open.</p>
+</div>
+<div class="c-2up-phone" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr)); gap: 24px">
+{% for t in team %}<article style="display: flex; flex-direction: column; gap: 12px">
+<div class="{{ m.phc(t.photo) }}" style="aspect-ratio: 1 / 1; border-radius: 999px; background: repeating-linear-gradient(135deg, #DCE1EA 0 14px, #E7EBF1 14px 28px); display: flex; align-items: center; justify-content: center">{% if m.real(t.photo) %}{{ m.fill(t.photo, 180, 180, "180px", alt=t.name) }}{% elif m.label(t.photo) %}<span style="background: #FFFFFF; color: #3D4558; font-size: 12px; font-weight: 500; padding: 4px 10px; border-radius: 6px">{{ m.label(t.photo) }}</span>{% else %}<span class="ph-ini" aria-hidden="true">{{ m.initials(t.name) }}</span>{% endif %}</div>
+<div style="display: flex; flex-direction: column; gap: 2px; text-align: center"><h3 style="margin: 0; font-size: 17px; font-weight: 600">{{ t.name }}</h3>{% if t.role %}<span style="font-size: 14px; color: #535B6E">{{ t.role }}</span>{% endif %}</div>
+</article>
+{% endfor %}</div>
+</div>
+</section>
+{%- endif -%}

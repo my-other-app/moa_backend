@@ -1,0 +1,46 @@
+{%- import "_shared/macros.html.j2" as m with context -%}
+{%- if upcoming -%}
+{%- set e = upcoming[0] -%}
+{%- set pic = e.poster or images["event.fallback"] -%}
+<!-- UPCOMING EVENTS -->
+<section id="events" class="c-pb c-flush" style="padding: 0 0 96px">
+<div style="max-width: 1200px; margin: 0 auto; padding: 0 24px; display: flex; flex-direction: column; gap: 32px">
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px">
+<h2 style="margin: 0; font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: clamp(30px, 4vw, 44px); line-height: 1.1; letter-spacing: -0.02em">{{ section.title }}</h2>
+{% if links.events_url %}<a href="{{ links.events_url }}" style="font-weight: 600; font-size: 15px; padding: 12px 0">View all upcoming →</a>{% endif %}
+</div>
+<article style="display: flex; flex-wrap: wrap; border-radius: 24px; overflow: hidden; background: var(--accent); color: #FFFFFF">
+<div class="{{ m.phc(pic) }}" style="flex: 1 1 420px; min-height: 340px; background: repeating-linear-gradient(135deg, #DCE1EA 0 14px, #E7EBF1 14px 28px); display: flex; align-items: flex-end; padding: 20px; box-sizing: border-box">
+{% if m.real(pic) %}{{ m.fill(pic, 600, 340, "(max-width: 900px) 100vw, 600px", alt=e.name, poster=(pic is sameas e.poster)) }}{% elif m.label(pic) %}<span style="background: #FFFFFF; color: #3D4558; font-size: 13px; font-weight: 500; padding: 6px 12px; border-radius: 6px">{{ m.label(pic) }}</span>{% endif %}
+</div>
+<div style="flex: 1 1 420px; padding: 40px; box-sizing: border-box; display: flex; flex-direction: column; gap: 16px; justify-content: center">
+<div style="display: flex; flex-wrap: wrap; gap: 8px">
+<span style="font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; padding: 5px 12px; border-radius: 999px; background: #FFB25C; color: #0D1220">Next up</span>
+{% if e.mode %}<span style="font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; padding: 5px 12px; border-radius: 999px; background: #FFFFFF; color: #0D1220">{{ e.mode }}</span>{% endif %}
+</div>
+<h3 style="margin: 0; font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: clamp(28px, 3.4vw, 40px); line-height: 1.1; letter-spacing: -0.02em">{{ e.name }}</h3>
+<p style="margin: 0; font-size: 17px; color: #FFFFFF">{{ e.weekday }} {{ e.day }} {{ e.month }} {{ e.year }} · {{ e.time }}{% if e.end_time %} – {{ e.end_time }}{% endif %}{% if e.where %}<br>{{ e.where }}{% endif %}</p>
+{% if e.summary %}<p style="margin: 0; font-size: 15px; color: #E3E8FF">{{ e.summary }}</p>{% endif %}
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 16px; margin-top: 8px">
+<a href="{{ e.url }}" style="display: inline-flex; align-items: center; min-height: 48px; padding: 0 26px; border-radius: 999px; background: #FFFFFF; color: #0D1220; text-decoration: none; font-weight: 600">Register</a>
+{% if e.seats_left is number and e.capacity %}<span style="font-size: 15px; color: #FFFFFF">{{ m.num(e.seats_left) }} of {{ m.num(e.capacity) }} seats left</span>{% endif %}
+</div>
+</div>
+</article>
+{% if upcoming[1:] %}<div style="display: flex; flex-direction: column; gap: 16px">
+{% for e in upcoming[1:] %}<article style="display: flex; flex-wrap: wrap; align-items: center; gap: 24px; padding: 24px; background: #FFFFFF; border: 1px solid #D9DEE7; border-radius: 16px">
+<div style="width: 76px; height: 76px; border-radius: 12px; background: #0D1220; color: #FFFFFF; display: flex; flex-direction: column; align-items: center; justify-content: center; flex: none">
+<span style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em">{{ e.month|upper }}</span>
+<span style="font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: 28px; line-height: 1">{{ e.day }}</span>
+</div>
+<div style="flex: 1 1 320px; display: flex; flex-direction: column; gap: 4px">
+<h3 style="margin: 0; font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 600; font-size: 22px">{{ e.name }}</h3>
+<span style="color: #535B6E; font-size: 15px">{{ e.weekday }} {{ e.day }} {{ e.month }} {{ e.year }} · {{ e.time }}{% if e.where %} · {{ e.where }}{% endif %}</span>
+</div>
+{% if e.kind or e.mode %}<span style="font-size: 13px; font-weight: 600; padding: 5px 12px; border-radius: 999px; background: #E7EBF1; color: #0D1220">{{ [e.kind, e.mode]|select|join(" · ") }}</span>{% endif %}
+<a href="{{ e.url }}" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 22px; border-radius: 999px; border: 1.5px solid #0D1220; color: #0D1220; text-decoration: none; font-weight: 600; font-size: 15px">Register</a>
+</article>
+{% endfor %}</div>{% endif %}
+</div>
+</section>
+{%- endif -%}

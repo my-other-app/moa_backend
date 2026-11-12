@@ -1,0 +1,16 @@
+{%- import "_shared/macros.html.j2" as m with context -%}
+{%- set labels = {"about": ("#about", "About"), "upcoming": ("#events", "Events"), "speakers": ("#speakers", "Speakers"), "team": ("#team", "Team"), "sponsors": ("#partners", "Sponsors")} -%}
+{%- set place = club.address or club.location_name -%}
+<!-- FOOTER -->
+<footer style="background: #0D1220; color: #FFFFFF; padding: 56px 0">
+<div style="max-width: 1200px; margin: 0 auto; padding: 0 24px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 32px">
+<div style="display: flex; flex-direction: column; gap: 8px; max-width: 360px">
+<span style="font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: 20px">{{ club.name }}</span>
+{% if place or club.contact_email %}<span class="c-wrap" style="font-size: 14px; color: #B4BCD0">{{ place or "" }}{% if place and club.contact_email %}<br>{% endif %}{{ club.contact_email or "" }}</span>{% endif %}
+</div>
+<nav aria-label="Footer" style="display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: flex-start">
+{% for k in section_keys if k in labels %}<a href="{{ labels[k][0] }}" style="padding: 12px; color: #FFFFFF; font-size: 15px">{{ labels[k][1] }}</a>
+{% endfor %}{% if links.conduct_url %}<a href="{{ links.conduct_url }}" style="padding: 12px; color: #FFFFFF; font-size: 15px">Code of conduct</a>{% endif %}
+</nav>
+</div>
+</footer>
