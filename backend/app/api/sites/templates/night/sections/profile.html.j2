@@ -1,0 +1,34 @@
+{%- import "_shared/macros.html.j2" as m with context -%}
+{%- set join_href = "#join" if "join" in section_keys else (links.join_url or links.follow_url) -%}
+{%- set people = stats.members if stats.members is not none else stats.followers -%}
+{%- set tiles = [(people, "members" if stats.members is not none else "followers"), (stats.events_held, "events hosted"), (stats.speakers, "speakers"), (stats.sponsors, "sponsors, partners")]|selectattr(0)|list -%}
+{%- set topics = club.topics or [] -%}
+<!-- PROFILE COLUMN -->
+<aside class="n-aside" style="flex: 1 1 320px; max-width: 400px; margin-top: -64px; background: #14181D; border: 1px solid #262C35; border-radius: 20px; padding: 28px; box-sizing: border-box; display: flex; flex-direction: column; gap: 20px">
+<div class="{{ 'ph ph-img' if club.logo_url }}" style="width: 96px; height: 96px; border-radius: 20px; background: var(--accent); color: #0B0D10; display: flex; align-items: center; justify-content: center; font-family: Sora, system-ui, sans-serif; font-weight: 700; font-size: 44px">{{ m.logo(club, 96, 96) }}</div>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; color: var(--accent)">// community · open to new members</span>
+<h1 class="n-h1" style="margin: 0; font-family: Sora, system-ui, sans-serif; font-weight: 700; font-size: 32px; line-height: 1.1; letter-spacing: -0.02em">{{ site.headline or club.name }}</h1>
+{% if site.subline %}<p style="margin: 0; color: #C9D1DC">{{ site.subline }}</p>{% endif %}
+</div>
+{% if join_href or links.follow_url %}<div style="display: flex; flex-direction: column; gap: 10px">
+{% if join_href %}<a href="{{ join_href }}" style="display: flex; align-items: center; justify-content: center; min-height: 48px; border-radius: 12px; background: var(--accent); color: #0B0D10; text-decoration: none; font-weight: 600">Join community</a>{% endif %}
+{% if links.follow_url %}<a href="{{ links.follow_url }}" class="btn-a" style="min-height: 48px; border-radius: 12px; background: transparent; color: #F2F4F7; border: 1px solid #4A5361; font: 600 16px Inter, system-ui, sans-serif; cursor: pointer">Follow</a>{% endif %}
+</div>{% endif %}
+{% if tiles %}<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+{% for value, label in tiles %}<div style="background: #0B0D10; border-radius: 12px; padding: 14px"><div style="font-family: Sora, system-ui, sans-serif; font-weight: 700; font-size: 24px">{{ m.num(value) }}</div><div style="font-size: 13px; color: #9AA4B2">{{ label }}</div></div>
+{% endfor %}</div>{% endif %}
+{% if club.location_name or club.founded_year or club.website or socials %}<div class="n-wrap" style="display: flex; flex-direction: column; gap: 6px; font-size: 15px; color: #C9D1DC; border-top: 1px solid #262C35; padding-top: 20px">
+{% if club.location_name %}<span>{{ club.location_name }}</span>{% endif %}{% if club.founded_year %}<span>Founded {{ club.founded_year }}</span>{% endif %}{% if club.website %}<a href="{{ club.website.href }}" style="padding: 10px 0">{{ club.website.label }}</a>{% endif %}{% if socials %}<span style="display: flex; flex-wrap: wrap; gap: 0 18px">{% for label, href in socials %}<a href="{{ href }}" style="padding: 10px 0">{{ label }}</a>{% endfor %}</span>{% endif %}
+</div>{% endif %}
+{% if topics %}<div style="display: flex; flex-direction: column; gap: 12px; border-top: 1px solid #262C35; padding-top: 20px">
+<h2 style="margin: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-weight: 500; font-size: 13px; color: #9AA4B2">domains of expertise</h2>
+<div style="display: flex; flex-wrap: wrap; gap: 8px">
+{% for t in topics %}{% if loop.index <= 3 %}<span style="padding: 6px 12px; border-radius: 8px; background: var(--accent); color: #0B0D10; font-size: 14px; font-weight: 600">{{ t }}</span>{% else %}<span style="padding: 6px 12px; border-radius: 8px; border: 1px solid #4A5361; font-size: 14px">{{ t }}</span>{% endif %}
+{% endfor %}</div>
+</div>{% endif %}
+{% if team %}<div style="display: flex; flex-direction: column; gap: 14px; border-top: 1px solid #262C35; padding-top: 20px">
+<h2 id="team" style="margin: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-weight: 500; font-size: 13px; color: #9AA4B2">team</h2>
+{% for t in team %}<div style="display: flex; align-items: center; gap: 12px"><span class="{{ 'ph ph-img' if m.real(t.photo) }}" style="width: 44px; height: 44px; border-radius: 999px; background: #262C35; flex: none">{% if m.real(t.photo) %}{{ m.fill(t.photo, 44, 44, "44px", alt=t.name) }}{% endif %}</span><div style="display: flex; flex-direction: column; min-width: 0"><span style="font-weight: 600">{{ t.name }}</span>{% if t.role %}<span style="font-size: 13px; color: #9AA4B2">{{ t.role }}</span>{% endif %}</div></div>
+{% endfor %}</div>{% endif %}
+</aside>

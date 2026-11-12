@@ -1,0 +1,9 @@
+{%- import "_shared/macros.html.j2" as m with context -%}
+{%- if team -%}
+<section id="people" class="e-pb e-flush" style="max-width: 1240px; margin: 0 auto; padding: 0 24px 72px; display: flex; flex-direction: column; gap: 28px">
+<div style="border-bottom: 4px solid #111111; padding-bottom: 12px"><h2 style="margin: 0; font-family: 'Playfair Display', Georgia, serif; font-weight: 900; font-size: clamp(34px, 5vw, 56px); line-height: 1">{{ section.title }}</h2></div>
+<div class="e-2up-phone" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); gap: 28px">
+{% for t in team %}<div style="display: flex; flex-direction: column; gap: 6px"><div class="{{ 'ph ph-img' if m.real(t.photo) }}" style="width: 72px; height: 72px; border-radius: 999px; background: #E4E4E4">{% if m.real(t.photo) %}{{ m.fill(t.photo, 72, 72, "72px", alt=t.name) }}{% endif %}</div>{% if t.role %}<span style="font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 600; color: var(--accent); margin-top: 6px">{{ t.role }}</span>{% endif %}<span style="font-family: 'Playfair Display', Georgia, serif; font-weight: 700; font-size: 21px">{{ t.name }}</span></div>
+{% endfor %}</div>
+</section>
+{%- endif -%}

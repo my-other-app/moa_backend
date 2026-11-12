@@ -1,0 +1,7 @@
+{%- import "_shared/macros.html.j2" as m with context -%}
+<section id="top" style="max-width: 1240px; margin: 0 auto; padding: 48px 24px 0; text-align: center; display: flex; flex-direction: column; gap: 20px; align-items: center">
+<div style="font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 600; color: var(--accent)">Community · Open to new members</div>
+<h1 class="e-h1" style="margin: 0; font-family: 'Playfair Display', Georgia, serif; font-weight: 900; font-size: clamp(44px, 9vw, 128px); line-height: 0.95; letter-spacing: -0.02em">{{ site.headline or club.name }}</h1>
+{% if site.subline %}<p style="margin: 0; max-width: 720px; font-family: 'Playfair Display', Georgia, serif; font-style: italic; font-weight: 500; font-size: clamp(19px, 2.2vw, 26px); line-height: 1.4">{{ site.subline }}</p>{% endif %}
+<div style="align-self: stretch; border-top: 4px solid #111111; border-bottom: 1px solid #111111; height: 6px"></div>
+</section>

@@ -1,0 +1,9 @@
+{%- import "_shared/macros.html.j2" as m with context -%}
+{%- if past -%}
+<section id="past" style="display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 12px"><h2 style="margin: 0; font-family: Sora, system-ui, sans-serif; font-weight: 700; font-size: 30px">{{ section.title }}</h2>{% if links.events_url %}<a href="{{ links.events_url }}" style="font-weight: 600; padding: 10px 0">Full archive →</a>{% endif %}</div>
+<div style="display: flex; flex-direction: column; border-left: 2px solid #262C35; margin-left: 6px">
+{% for e in past %}<article style="display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; padding: 18px 0 18px 24px{% if not loop.last %}; border-bottom: 1px solid #262C35{% endif %}"><span style="flex: 0 0 110px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; color: #9AA4B2">{{ e.day }} {{ e.month|upper }} {{ e.year }}</span><div style="flex: 1 1 280px; display: flex; flex-direction: column"><h3 style="margin: 0; font-size: 18px; font-weight: 600">{{ e.name }}</h3>{% if e.kind or e.facts %}<span style="font-size: 14px; color: #9AA4B2">{{ ([e.kind] + (e.facts or []))|select|join(" · ") }}</span>{% endif %}</div>{% if e.url %}<a href="{{ e.url }}" style="font-weight: 600; font-size: 15px; padding: 10px 0">Recap →</a>{% endif %}</article>
+{% endfor %}</div>
+</section>
+{%- endif -%}

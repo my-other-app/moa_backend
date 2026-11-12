@@ -1,0 +1,30 @@
+{%- import "_shared/macros.html.j2" as m with context -%}
+{%- if upcoming -%}
+{%- set e = upcoming[0] -%}
+{%- set pic = e.poster or images["event.fallback"] -%}
+{%- set seats = (m.num(e.seats_left) ~ " of " ~ m.num(e.capacity) ~ " seats left") if (e.seats_left is number and e.capacity) else None -%}
+<section id="calendar" class="e-pb" style="max-width: 1240px; margin: 0 auto; padding: 72px 24px; display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 12px; border-bottom: 4px solid #111111; padding-bottom: 12px">
+<h2 style="margin: 0; font-family: 'Playfair Display', Georgia, serif; font-weight: 900; font-size: clamp(34px, 5vw, 56px); line-height: 1">{{ section.title }}</h2>
+<span style="font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 600">Upcoming events</span>
+</div>
+<article style="display: flex; flex-wrap: wrap; gap: 24px 40px; align-items: center; padding: 28px 0; border-bottom: 1px solid #111111">
+<div class="e-date" style="flex: 0 0 120px; font-family: 'Playfair Display', Georgia, serif; font-weight: 900; font-size: 72px; line-height: 0.9; color: var(--accent)">{{ e.day }}<span style="display: block; font-family: Inter, system-ui, sans-serif; font-weight: 600; font-size: 13px; letter-spacing: 0.14em; color: #111111; margin-top: 10px">{{ e.month|upper }} {{ e.year }} · {{ e.weekday|upper }}</span></div>
+<div style="flex: 2 1 340px; display: flex; flex-direction: column; gap: 8px">
+<span style="font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 600; color: var(--accent)">Next up{% if e.mode %} · {{ e.mode }}{% endif %}</span>
+<h3 style="margin: 0; font-family: 'Playfair Display', Georgia, serif; font-weight: 700; font-size: clamp(26px, 3vw, 36px); line-height: 1.15">{{ e.name }}</h3>
+<p style="margin: 0; color: #4A4A4A">{{ [e.time ~ ((" – " ~ e.end_time) if e.end_time else ""), e.where, seats]|select|join(" · ") }}</p>
+<a href="{{ e.url }}" style="align-self: flex-start; display: inline-flex; align-items: center; min-height: 44px; padding: 0 22px; background: #111111; color: #FFFFFF; text-decoration: none; font-weight: 600; font-size: 14px; letter-spacing: 0.08em; text-transform: uppercase; margin-top: 6px">Register</a>
+</div>
+<div class="{{ m.phc(pic) }}" style="flex: 1 1 300px; min-height: 220px; background: repeating-linear-gradient(135deg, #E4E4E4 0 14px, #EEEEEE 14px 28px); display: flex; align-items: flex-end; padding: 14px; box-sizing: border-box">{% if m.real(pic) %}{{ m.fill(pic, 420, 220, "(max-width: 900px) 100vw, 420px", alt=e.name, poster=(pic is sameas e.poster)) }}{% elif m.label(pic) %}<span style="background: #FFFFFF; font-size: 13px; padding: 5px 10px">{{ m.label(pic) }}</span>{% endif %}</div>
+</article>
+{% for e in upcoming[1:] %}{% set km = [e.kind, (e.mode|lower) if (e.mode and e.mode != e.where) else None]|select|join(", ") %}<article style="display: flex; flex-wrap: wrap; gap: 16px 40px; align-items: center; padding: 24px 0; border-bottom: 1px solid #111111">
+<div class="e-date" style="flex: 0 0 120px; font-family: 'Playfair Display', Georgia, serif; font-weight: 900; font-size: 48px; line-height: 0.9">{{ e.day }}<span style="display: block; font-family: Inter, system-ui, sans-serif; font-weight: 600; font-size: 13px; letter-spacing: 0.14em; margin-top: 8px">{{ e.month|upper }} {{ e.year }} · {{ e.weekday|upper }}</span></div>
+<div style="flex: 2 1 340px; display: flex; flex-direction: column; gap: 4px">
+<h3 style="margin: 0; font-family: 'Playfair Display', Georgia, serif; font-weight: 700; font-size: 24px; line-height: 1.2">{{ e.name }}</h3>
+<p style="margin: 0; color: #4A4A4A">{{ [e.time, e.where, (km[:1]|upper ~ km[1:]) if km else None]|select|join(" · ") }}</p>
+</div>
+<a href="{{ e.url }}" style="font-weight: 600; font-size: 14px; letter-spacing: 0.08em; text-transform: uppercase; padding: 12px 0">Register →</a>
+</article>
+{% endfor %}</section>
+{%- endif -%}

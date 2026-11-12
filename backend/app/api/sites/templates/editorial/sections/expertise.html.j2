@@ -1,0 +1,9 @@
+{%- import "_shared/macros.html.j2" as m with context -%}
+{%- if club.topics -%}
+<section id="expertise" style="background: #111111; color: #FFFFFF; padding: 56px 0">
+<div style="max-width: 1240px; margin: 0 auto; padding: 0 24px; display: flex; flex-direction: column; gap: 20px">
+<h2 style="margin: 0; font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 600; color: #D0D0D0">{{ section.title }}</h2>
+<p style="margin: 0; font-family: 'Playfair Display', Georgia, serif; font-weight: 700; font-size: clamp(28px, 4.4vw, 56px); line-height: 1.15">{% for t in club.topics %}{% if not loop.first %} <span style="color: #FF6B81">/</span> {% endif %}{{ t }}{% endfor %}</p>
+</div>
+</section>
+{%- endif -%}

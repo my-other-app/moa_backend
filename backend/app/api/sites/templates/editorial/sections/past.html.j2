@@ -1,0 +1,17 @@
+{%- import "_shared/macros.html.j2" as m with context -%}
+{%- if past -%}
+<section id="archive" class="e-pb e-flush" style="max-width: 1240px; margin: 0 auto; padding: 0 24px 72px; display: flex; flex-direction: column; gap: 28px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 12px; border-bottom: 4px solid #111111; padding-bottom: 12px">
+<h2 style="margin: 0; font-family: 'Playfair Display', Georgia, serif; font-weight: 900; font-size: clamp(34px, 5vw, 56px); line-height: 1">{{ section.title }}</h2>
+{% if links.events_url %}<a href="{{ links.events_url }}" style="font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 600; padding: 12px 0">All past events →</a>{% endif %}
+</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 32px">
+{% for e in past %}{% set pic = e.poster or images["event.fallback"] %}<article style="display: flex; flex-direction: column; gap: 10px">
+<div class="{{ m.phc(pic) }}" style="height: 200px; background: repeating-linear-gradient(135deg, #E4E4E4 0 14px, #EEEEEE 14px 28px); display: flex; align-items: flex-end; padding: 12px; box-sizing: border-box">{% if m.real(pic) %}{{ m.fill(pic, 280, 200, "(max-width: 600px) 100vw, 280px", alt=e.name, poster=(pic is sameas e.poster)) }}{% elif m.label(pic) %}<span style="background: #FFFFFF; font-size: 12px; padding: 4px 8px">{{ m.label(pic) }}</span>{% endif %}</div>
+<span style="font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 600; color: var(--accent)">{{ [e.kind, e.day ~ " " ~ e.month ~ " " ~ e.year]|select|join(" · ") }}</span>
+<h3 style="margin: 0; font-family: 'Playfair Display', Georgia, serif; font-weight: 700; font-size: 24px; line-height: 1.2">{{ e.name }}</h3>
+{% if e.facts or e.url %}<p style="margin: 0; color: #4A4A4A; font-size: 15px">{% if e.facts %}{{ e.facts|join(", ") }}.{% endif %}{% if e.facts and e.url %} {% endif %}{% if e.url %}<a href="{{ e.url }}">Read the recap</a>{% endif %}</p>{% endif %}
+</article>
+{% endfor %}</div>
+</section>
+{%- endif -%}
