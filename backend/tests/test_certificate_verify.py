@@ -28,7 +28,7 @@ from app.api.events.models import EventRegistrationsLink, Events
 from app.config import settings
 from app.core.layout.model import TicketLayoutFields, dump
 from app.core.layout.renderer import pdf_text
-from app.core.layout.starters import certificate_starter
+from tests.legacy_layouts import certificate_starter
 from app.core.storage import objects
 from app.core.utils import keys
 from tests.conftest import auth_header

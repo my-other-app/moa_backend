@@ -16,7 +16,7 @@ from app.api.emails import service
 from app.core import jobs
 from app.core.email import email as email_mod
 from app.core.layout.model import TicketLayoutFields, dump
-from app.core.layout.starters import ticket_starter
+from tests.legacy_layouts import ticket_starter
 from app.core.mail import links
 from tests.conftest import auth_header
 

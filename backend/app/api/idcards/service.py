@@ -39,17 +39,58 @@ REPRINT_META = {
 
 
 def badge_default_config() -> dict:
-    """What an event starts from: the conference card, as a layered design."""
-    s = badge_starter("classic")
+    """The custom card a design starts from: the CR80 card (card_cr80), as a
+    layered design."""
+    s = badge_starter("card_cr80")
     return {"accent_color": "#1db9a0", "secondary_text_color": "#aaaaaa", "layout": {**dump(TicketLayoutFields(canvas=s["canvas"], layers=s["layers"], page=s["page"])), "version": 0}}
 
 
+def badge_system_default() -> dict:
+    """What a card is when nothing is saved: the designer's default (D7,
+    the black-and-white 4 x 6 in thermal card), the CR80 card beside it as
+    the custom design."""
+    from app.api.doc_presets.config import with_default
+
+    return with_default(badge_default_config(), "badge")
+
+
 async def badge_style(session, event: Events, role: Optional[RegistrationRole]) -> dict:
+    from app.api.doc_presets.config import preset_of
+
     template = await resolve_template(session, BadgeTemplates, event_id=event.id, club_id=event.club_id, role=role)
-    style = dict(template.config or {}) if template is not None else {}
-    if not in_layout_mode(style):
+    if template is None:
+        return badge_system_default()
+    style = dict(template.config or {})
+    if preset_of(style) is None and not in_layout_mode(style):
         style = {**badge_default_config(), **{k: v for k, v in style.items() if k != "layout"}}
     return style
+
+
+def _door_of(actor: GateActor, door: Optional[str]) -> Optional[str]:
+    """Where a card prints, for a design's kiosk_id: the kiosk, else the door."""
+    if actor.kind == "kiosk":
+        return actor.name or door
+    return door or (actor.door.name if actor.door is not None else None)
+
+
+async def _preset_pdf(session, pages: list[dict]) -> bytes:
+    """Cards made from the designer's designs. The render service down (D9),
+    nothing is printed: 503, and whatever this request claimed is let go."""
+    from app.api.doc_presets import engine, jobs
+
+    try:
+        return await jobs.preset_pages_pdf(pages)
+    except engine.Unavailable as exc:
+        engine.unavailable("badge", exc)
+    except ValueError as exc:
+        # A's DesignError: the design must print something this guest has
+        # none of (a last name, a role). Not an outage: say what is missing.
+        await session.rollback()
+        raise CustomHTTPException(422, message=f"This card design cannot be printed for this guest: {exc}", error_code="DESIGN_INCOMPLETE")
+    except Exception:  # noqa: BLE001 - a card that cannot be drawn is not printed
+        logger.exception("an ID card design could not be drawn")
+    await session.rollback()
+    raise CustomHTTPException(503, message=engine.BADGE_UNAVAILABLE, error_code="RENDER_UNAVAILABLE")
 
 
 def may_print_again(policy: ReprintPolicy, printed_at, by_organiser: bool, override: bool = False) -> tuple[bool, str]:
@@ -82,10 +123,20 @@ def card_args(event: Events, reg: EventRegistrationsLink, style: dict, *, for_pr
     )
 
 
+def _person():
+    """The guest's account with its profile and organisation: a card prints
+    their organisation and their photo (doc_presets.values.subject_of). The
+    organisation used to be on a card only when something else had loaded
+    the profile."""
+    from app.api.users.models import UserProfiles, Users
+
+    return (joinedload(EventRegistrationsLink.user).joinedload(Users.profile).joinedload(UserProfiles.org),)
+
+
 async def registration_of(session, event: Events, registration_id) -> EventRegistrationsLink:
     reg = await session.scalar(
         select(EventRegistrationsLink)
-        .options(joinedload(EventRegistrationsLink.event).joinedload(Events.club), joinedload(EventRegistrationsLink.event).selectinload(Events.cohost_clubs), joinedload(EventRegistrationsLink.user))
+        .options(joinedload(EventRegistrationsLink.event).joinedload(Events.club), joinedload(EventRegistrationsLink.event).selectinload(Events.cohost_clubs), *_person())
         .where(EventRegistrationsLink.id == registration_id, EventRegistrationsLink.event_id == event.id, EventRegistrationsLink.is_deleted == False)
     )
     if reg is None:
@@ -117,8 +168,15 @@ async def card_pdf(session, event: Events, registration_id, *, actor: GateActor,
             raise CustomHTTPException(403, message=why, error_code="REPRINT_REFUSED")
         set_committed_value(reg, "badge_printed_at", claimed)
     style = await badge_style(session, event, role_of(reg))
-    # Drawn on the render pool, off the event loop.
-    pdf = await pool.run(render_layout_document, **card_args(event, reg, style, for_print=record))
+    from app.api.doc_presets.config import preset_of
+
+    if preset_of(style) is not None:
+        from app.api.doc_presets.jobs import card_page
+
+        pdf = await _preset_pdf(session, [card_page(event, reg, style, door=_door_of(actor, door), printed_at=datetime.now(timezone.utc) if record else None)])
+    else:
+        # Drawn on the render pool, off the event loop.
+        pdf = await pool.run(render_layout_document, **card_args(event, reg, style, for_print=record))
     if record:
         overrode = bool(printed_before) and override and actor.full and policy is not ReprintPolicy.anyone
         session.add(PrintJobs(id=uuid.uuid4(), event_id=event.id, registration_id=reg.id, source=source, door_label=door or (actor.door.name if actor.door else None), requested_by=actor.user_id, cards=1, design_version=design_version_of(style), overrode=overrode))
@@ -140,7 +198,7 @@ async def claim_print(session, registration_id, *, first_only: bool):
 
 
 def _active(event_id: int):
-    return select(EventRegistrationsLink).options(joinedload(EventRegistrationsLink.event).joinedload(Events.club), joinedload(EventRegistrationsLink.event).selectinload(Events.cohost_clubs), joinedload(EventRegistrationsLink.user)).where(EventRegistrationsLink.event_id == event_id, EventRegistrationsLink.is_deleted == False, EventRegistrationsLink.ticket_revoked_at.is_(None))
+    return select(EventRegistrationsLink).options(joinedload(EventRegistrationsLink.event).joinedload(Events.club), joinedload(EventRegistrationsLink.event).selectinload(Events.cohost_clubs), *_person()).where(EventRegistrationsLink.event_id == event_id, EventRegistrationsLink.is_deleted == False, EventRegistrationsLink.ticket_revoked_at.is_(None))
 
 
 async def batch_targets(session, event: Events, *, scope: str, role: Optional[str]) -> list[EventRegistrationsLink]:
@@ -164,16 +222,37 @@ async def batch_pdf(session, event: Events, *, scope: str, role: Optional[str], 
         from app.core.layout.renderer import blank_page_pdf
 
         return blank_page_pdf("No cards to print."), 0
-    # Every row read here, on the loop; then one document of a page per card,
-    # drawn on the render pool (it used to be a PDF per card, merged by pdfium).
+    # Every row read here, on the loop; then one document of a page per card:
+    # the layered ones drawn on the render pool (it used to be a PDF per card,
+    # merged by pdfium), the designer's designs by the render service, a run
+    # of them a call. A batch printing both is joined in its order.
+    from app.api.doc_presets.config import preset_of
+    from app.api.doc_presets.jobs import card_page
+
     styles: dict = {}
-    pages = []
+    runs: list[tuple[bool, list]] = []
     for reg in regs:
         key = role_of(reg)
         if key not in styles:
             styles[key] = await badge_style(session, event, key)
-        pages.append(card_args(event, reg, styles[key], for_print=record))
-    pdf = await pool.run(render_layout_pages, pages, title=f"{event.name} · ID cards")
+        preset = preset_of(styles[key]) is not None
+        page = card_page(event, reg, styles[key]) if preset else card_args(event, reg, styles[key], for_print=record)
+        if runs and runs[-1][0] == preset:
+            runs[-1][1].append(page)
+        else:
+            runs.append((preset, [page]))
+    parts = []
+    for preset, pages in runs:
+        if preset:
+            parts.append(await _preset_pdf(session, pages))
+        else:
+            parts.append(await pool.run(render_layout_pages, pages, title=f"{event.name} · ID cards"))
+    if len(parts) == 1:
+        pdf = parts[0]
+    else:
+        from app.api.doc_presets.engine import join_pdfs
+
+        pdf = await pool.run(join_pdfs, parts)
     if record:
         now = datetime.now(timezone.utc)
         version = max((design_version_of(s) for s in styles.values()), default=0)

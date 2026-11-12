@@ -14,8 +14,11 @@ from sqlalchemy import select
 
 from app.api.events.models import EventRegistrationsLink
 from app.core.layout.model import TicketLayoutFields, dump
-from app.core.layout.starters import certificate_starter
+from tests.legacy_layouts import certificate_starter
 from tests.conftest import auth_header
+
+# About the classic HTML documents and the CR80 card: the defaults as they were.
+pytestmark = pytest.mark.usefixtures("classic_defaults")
 
 
 @pytest.fixture

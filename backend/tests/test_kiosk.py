@@ -8,8 +8,11 @@ import pytest
 
 from app.core.email import email as email_mod
 from app.core.layout.model import TicketLayoutFields, dump
-from app.core.layout.starters import ticket_starter
+from tests.legacy_layouts import ticket_starter
 from tests.conftest import auth_header
+
+# A card with no saved design is the designer's default, drawn by the render service (faked).
+pytestmark = pytest.mark.usefixtures("doc_designs")
 
 START = datetime(2026, 11, 20, 18, 0, tzinfo=timezone.utc)
 

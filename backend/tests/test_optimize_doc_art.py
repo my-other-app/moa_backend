@@ -15,7 +15,7 @@ from app.api.templates_audience import TemplateAudience
 from app.api.ticket_templates.models import TicketTemplates
 from app.config import settings
 from app.core.layout.model import TicketLayoutFields, dump
-from app.core.layout.starters import ticket_starter
+from tests.legacy_layouts import ticket_starter
 from app.core.storage import objects
 from scripts import optimize_doc_art
 from tests.conftest import auth_header

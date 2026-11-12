@@ -12,6 +12,7 @@ including events whose tickets were already in people's hands.
 
 import asyncio
 import enum
+import json
 import os
 from uuid import uuid4
 from typing import Optional
@@ -26,11 +27,15 @@ from app.api.agenda import service as agenda_service
 from app.api.agenda.models import AgendaTemplates
 from app.api.agenda.service import agenda_default_config
 from app.api.idcards.models import BadgeTemplates
-from app.api.idcards.service import badge_default_config
+from app.api.idcards.service import badge_system_default
 from app.api.certificate_templates.schemas import CertificateTemplateConfig
 from app.api.certificate_templates.service import (
-    _default_config as certificate_default_config,
+    system_default_config as certificate_default_config,
 )
+from app.api.doc_presets import config as presets
+from app.api.doc_presets import engine as preset_engine
+from app.api.doc_presets import jobs as preset_jobs
+from app.api.doc_presets import values as preset_values
 from app.api.events.documents import (
     EVENT_TIMEZONE,
     apply_layers,
@@ -53,8 +58,8 @@ from app.core.public_urls import site_url
 from app.core.storage.fields import upload
 from app.core.layout.engine import layout_problems, problems_as_fields
 from app.core.layout.model import PageSpec, TicketLayoutFields, dump
-from app.core.layout.starters import agenda_starter, badge_starter, certificate_starter, ticket_starter, AGENDA_STARTERS, BADGE_STARTERS, CERTIFICATE_STARTERS, TICKET_STARTERS
-from app.core.layout.tokens import TICKET_TOKENS, field_token
+from app.core.layout.starters import agenda_starter, badge_starter, blank_layout, AGENDA_STARTERS, BADGE_STARTERS, CERTIFICATE_STARTERS, TICKET_STARTERS
+from app.core.layout.tokens import TICKET_TOKENS, field_slug, field_token
 from app.api.events.models import EventRegistrationsLink
 from app.api.events.access import ensure_event_access, is_admin_user
 from app.api.events.models import Events
@@ -63,7 +68,7 @@ from app.api.templates_resolve import fork_for_event, resolve_template
 from app.api.ticket_templates.models import TicketTemplates
 from app.api.ticket_templates.schemas import TicketTemplateConfig
 from app.core.utils.pdf import generate_image_bytes
-from app.api.ticket_templates.service import _default_config as ticket_default_config
+from app.api.ticket_templates.service import system_default_config as ticket_default_config
 from app.config import settings
 from app.core.auth.dependencies import ClubAuth
 from app.core.storage import doc_art, objects
@@ -89,7 +94,7 @@ _MODELS = {
 }
 _DEFAULTS = {
     DesignKind.ticket: ticket_default_config,
-    DesignKind.badge: badge_default_config,
+    DesignKind.badge: badge_system_default,
     DesignKind.certificate: certificate_default_config,
     DesignKind.agenda: agenda_default_config,
 }
@@ -228,6 +233,9 @@ async def save_design(
     found = style_problems(payload.config)
     if found:
         raise CustomHTTPException(422, message=f"Invalid design: {'; '.join(found[:5])}", error_code="INVALID_DESIGN", errors={"config": found})
+    if (payload.config or {}).get("preset") is not None and kind is not DesignKind.agenda:
+        # A preset rides along with the rest of the config; it is held to what PUT .../preset checks.
+        payload.config["preset"], _ = _checked_preset(kind, payload.config["preset"])
     await _plan_allows(session, event.club_id, kind, user, event)
     model = _MODELS[kind]
 
@@ -238,6 +246,7 @@ async def save_design(
         club_id=event.club_id,
         audience=audience,
         name=payload.name or f"{event.name} {kind.value}",
+        default=_DEFAULTS[kind](),
     )
     # Kept with keys, not the links the editor was shown (they last an hour).
     template.config = stored(payload.config, template, fields=_fields_of(template))
@@ -381,6 +390,7 @@ async def save_artwork(
         club_id=event.club_id,
         audience=audience,
         name=f"{event.name} {kind.value}",
+        default=_DEFAULTS[kind](),
     )
 
     uploads = {
@@ -618,17 +628,24 @@ _CATALOGUES = {DesignKind.ticket: TICKET_STARTERS, DesignKind.badge: BADGE_START
 
 
 def _starter_of(kind: DesignKind, name: str, page=None) -> dict:
-    if kind is DesignKind.ticket:
-        return ticket_starter(name)
+    """A starter by name: the CR80 card, or a programme. Tickets and
+    certificates start from the designer's designs now (doc_presets)."""
     if kind is DesignKind.badge:
         return badge_starter(name, page=page)
     if kind is DesignKind.agenda:
         return agenda_starter(name)
-    return certificate_starter(name)
+    raise KeyError(name)
 
 
 def _starter(kind: DesignKind) -> dict:
-    s = _starter_of(kind, "screen" if kind is DesignKind.agenda else "classic")
+    """What the custom canvas opens on when nothing custom is saved: a blank
+    ticket or certificate, the CR80 card, the programme screen."""
+    if kind is DesignKind.agenda:
+        s = agenda_starter("screen")
+    elif kind is DesignKind.badge:
+        s = badge_starter("card_cr80")
+    else:
+        s = blank_layout(kind.value)
     return dump(TicketLayoutFields(canvas=s["canvas"], layers=s["layers"], page=s["page"]))
 
 
@@ -697,6 +714,35 @@ def _layout_dto(event, kind: DesignKind, audience: TemplateAudience, template, s
         # The run of show an agenda layer draws on the stage: the event's own sessions, or samples while it has none.
         "agenda": agenda or [],
         "timezone": EVENT_TIMEZONE,
+        **_preset_dto(event, kind, style, layout is not None),
+    }
+
+
+def _preset_dto(event, kind: DesignKind, style: dict, has_layout: bool) -> dict:
+    """The designer's designs around the editor (contract D6): which design
+    is active, the chosen preset, the default, the gallery, the tokens a
+    binding can name, and the form's questions a binding can read."""
+    if kind is DesignKind.agenda:
+        return {"active": "custom", "preset": None, "presetDefault": None, "catalogue": [], "bindable": [], "hasLayout": has_layout, "questions": [], "hasPhotoQuestion": False}
+    preset = presets.preset_of(style)
+    questions = [
+        {
+            "key": f.get("key"), "label": f.get("label"), "type": getattr(f.get("field_type"), "value", f.get("field_type")),
+            # What a binding's `value` names: {"source": "field", "value": slug}.
+            "slug": field_slug(str(f.get("key") or f.get("label"))),
+            "token": field_token(str(f.get("key") or f.get("label"))),
+        }
+        for f in (getattr(event, "additional_details", None) or []) if isinstance(f, dict) and (f.get("key") or f.get("label"))
+    ]
+    return {
+        "active": "preset" if preset is not None else "custom",
+        "preset": preset,
+        "presetDefault": presets.default_preset(kind.value),
+        "catalogue": preset_engine.catalogue(kind.value),
+        "bindable": preset_values.bindable(kind.value),
+        "hasLayout": has_layout,
+        "questions": questions,
+        "hasPhotoQuestion": preset_values.photo_question_key(event) is not None,
     }
 
 
@@ -788,11 +834,13 @@ async def save_layout(
 
     template = await fork_for_event(
         session, _MODELS[kind], event_id=event_id, club_id=event.club_id,
-        audience=audience, name=f"{event.name} {kind.value}",
+        audience=audience, name=f"{event.name} {kind.value}", default=_DEFAULTS[kind](),
     )
     config = dict(template.config or {})
     previous = (config.get("layout") or {}).get("version", 0)
     config["layout"] = {**dump(layout), "version": previous + 1}
+    # Saving the custom design makes it the one in use (D6).
+    config.pop("preset", None)
     template.config = config
     await session.commit()
     await session.refresh(template)
@@ -839,6 +887,181 @@ def _preview_png(style: dict, values: dict, qr_text: str, title: str, entries, c
     """A layered design drawn and turned into a PNG, on the render pool."""
     pdf = render_layout_document(style, values, qr_text, title=title, agenda=entries, club=club)
     return layout_png(style, pdf)
+
+
+# --- the designer's designs ------------------------------------------------------
+#
+# A preset is one of the designer's designs with the club's options, bindings
+# and accent (contract D6, app/api/doc_presets). Choosing one makes it the
+# design in use; saving the custom canvas (PUT .../layout) or DELETE here
+# stops using it. Previews draw it exactly as the documents are drawn.
+
+
+class PresetBody(BaseModel):
+    """One of the designer's designs and how it is set."""
+
+    id: str = Field(..., max_length=80, description="<kind>/<design>, e.g. ticket/03-daylight-boarding-pass")
+    options: dict = Field(default_factory=dict)
+    bindings: dict = Field(default_factory=dict, description="token -> {source: auto|text|field|hidden, value?}")
+    accent: Optional[str] = Field(default=None, max_length=7)
+
+
+class PresetPreviewBody(PresetBody):
+    ticket_id: Optional[str] = Field(default=None, description="Preview with this registration; the sample guest without one")
+
+
+def _checked_preset(kind: DesignKind, body) -> tuple[dict, list]:
+    """The preset as it is stored, once its shape and the design accept it,
+    and the design's warnings about it (an accent hard to read): an "error"
+    is refused (422), a "warning" saves and goes back to be shown."""
+    if kind is DesignKind.agenda:
+        raise CustomHTTPException(404, message="The programme has no designer designs.")
+    raw = body.model_dump() if isinstance(body, BaseModel) else (body if isinstance(body, dict) else {})
+    raw = {k: raw.get(k) for k in ("id", "options", "bindings", "accent")}
+    shape = presets.shape_problems(kind.value, raw)
+    if shape:
+        raise CustomHTTPException(422, message="This design's settings need attention.", error_code="INVALID_PRESET", errors={"fields": shape})
+    preset = presets.normalised(raw)
+    found = preset_engine.problems(preset)
+    errors = [p for p in found if p.get("level", "error") == "error"]
+    if errors:
+        raise CustomHTTPException(
+            422, message=errors[0].get("message") or "This design's settings need attention.", error_code="INVALID_PRESET",
+            errors={"preset": errors, "fields": {p.get("field") or "id": p.get("message") for p in errors}},
+        )
+    return preset, [p for p in found if p.get("level") == "warning"]
+
+
+async def _preview_registration(session, event_id: int, ticket_id: Optional[str]):
+    """The chosen registration with everything a document prints of the
+    person: their profile's organisation and photo too."""
+    if not ticket_id:
+        return None
+    from app.api.users.models import UserProfiles, Users
+
+    registration = await session.scalar(
+        select(EventRegistrationsLink)
+        .options(
+            joinedload(EventRegistrationsLink.event).joinedload(Events.club),
+            joinedload(EventRegistrationsLink.event).selectinload(Events.cohost_clubs),
+            joinedload(EventRegistrationsLink.user).joinedload(Users.profile).joinedload(UserProfiles.org),
+        )
+        .where(EventRegistrationsLink.event_id == event_id, EventRegistrationsLink.ticket_id == ticket_id, EventRegistrationsLink.is_deleted == False)  # noqa: E712
+    )
+    if registration is None:
+        raise CustomHTTPException(404, message="No such registration on this event")
+    return registration
+
+
+async def preset_preview(kind: DesignKind, event, style: dict, preset: dict, registration, audience: TemplateAudience, fmt: str) -> Response:
+    """A preset drawn for a registration or the sample guest: its HTML for
+    the editor's iframe ({"html"}), or the exact PNG, drawn by the render
+    service as the documents are (503 when it cannot)."""
+    style = {**style, "preset": preset}
+    role = "attendee" if audience is TemplateAudience.event_default else audience.value
+    if registration is not None:
+        subject = preset_values.subject_of(registration, event)
+    else:
+        subject = preset_values.sample_subject(event, kind.value, role)
+    mapped = preset_jobs.mapped_for(kind.value, event, subject, style, preset)
+    values, _ = await asyncio.to_thread(preset_jobs.materialise, mapped, event_id=getattr(event, "id", None))
+    headers = {"Cache-Control": "no-store"}
+    try:
+        if fmt == "html":
+            html = await asyncio.to_thread(preset_engine.preview_html, preset, values)
+            return Response(content=json.dumps({"html": html}), media_type="application/json", headers=headers)
+        html = await asyncio.to_thread(preset_engine.fill, preset, values)
+        pdf = await preset_engine.pdf(html)
+    except preset_engine.Unavailable as exc:
+        preset_engine.unavailable(kind.value, exc)
+        raise CustomHTTPException(503, message=preset_engine.PREVIEW_UNAVAILABLE, error_code="RENDER_UNAVAILABLE")
+    except preset_engine.UnknownDesign:
+        raise CustomHTTPException(422, message="There is no such design.", error_code="INVALID_PRESET")
+    except ValueError as exc:
+        # A's DesignError: a value the design must print is empty (a one-word
+        # name where it prints a last name), or not of its shape.
+        raise CustomHTTPException(422, message=f"This design cannot be drawn for this guest: {exc}", error_code="DESIGN_INCOMPLETE")
+    from app.core.layout.renderer import pdf_to_png
+
+    png = await pool.run(pdf_to_png, pdf, width_px=preset_engine.png_width(preset["id"]))
+    return Response(content=png, media_type="image/png", headers=headers)
+
+
+@router.put("/{kind}/preset", summary="Use one of the designer's designs for this event")
+async def save_preset(
+    session: SessionDep,
+    user: ClubAuth,
+    event_id: int,
+    kind: DesignKind,
+    body: PresetBody,
+    audience: TemplateAudience = Query(TemplateAudience.event_default),
+) -> dict:
+    """Checked by the design itself (its options, the tokens its bindings
+    name), then made the design in use, forking the event's own design first
+    as every save does. The custom layout, if any, stays where it was.
+    Answers with what GET .../layout answers, and `warnings`: the design's
+    [{code, field, message, level: "warning"}] (an accent hard to read)."""
+    event = await _event_for_editing(session, user, event_id)
+    preset, warnings = _checked_preset(kind, body)
+    await _plan_allows(session, event.club_id, kind, user, event)
+    template = await fork_for_event(
+        session, _MODELS[kind], event_id=event_id, club_id=event.club_id,
+        audience=audience, name=f"{event.name} {kind.value}", default=_DEFAULTS[kind](),
+    )
+    template.config = {**(template.config or {}), "preset": preset}
+    await session.commit()
+    await session.refresh(template)
+    out = _layout_dto(event, kind, audience, template, shown(template.config, template, fields=_fields_of(template)), await _agenda_for(session, event, kind))
+    return {**out, "warnings": warnings}
+
+
+@router.delete("/{kind}/preset", summary="Stop using the chosen design")
+async def clear_preset(
+    session: SessionDep,
+    user: ClubAuth,
+    event_id: int,
+    kind: DesignKind,
+    audience: TemplateAudience = Query(TemplateAudience.event_default),
+) -> dict:
+    """The event's own design stops naming a preset. With a custom layout
+    saved, that is the design in use now ("Custom design": the layout
+    stays); without one the event's own copy is dropped, so it follows the
+    club's design again, or the default (D7). Answers with GET .../layout."""
+    event = await _event_for_editing(session, user, event_id)
+    model = _MODELS[kind]
+    own = await session.scalar(
+        select(model).where(model.event_id == event_id, model.audience == audience, model.is_deleted == False)  # noqa: E712
+    )
+    if own is not None:
+        config = {k: v for k, v in (own.config or {}).items() if k != "preset"}
+        if in_layout_mode(config):
+            own.config = config
+        else:
+            own.is_deleted = True
+        await session.commit()
+    template, style = await _current(session, event, kind, audience)
+    return _layout_dto(event, kind, audience, template, style, await _agenda_for(session, event, kind))
+
+
+@router.post("/{kind}/preset/preview", summary="One of the designer's designs, drawn for a guest")
+async def preview_preset(
+    session: SessionDep,
+    user: ClubAuth,
+    event_id: int,
+    kind: DesignKind,
+    body: PresetPreviewBody,
+    format: str = Query("html", pattern="^(html|png)$"),
+    audience: TemplateAudience = Query(TemplateAudience.event_default),
+) -> Response:
+    """Unsaved, for the sample guest or a chosen registration (`ticket_id`):
+    `format=html` answers {"html"} for a sandboxed iframe (fonts from
+    /static/doc-fonts), `format=png` the exact preview, drawn as the issued
+    document is (503 RENDER_UNAVAILABLE when the render service is down)."""
+    event = await _event_for_editing(session, user, event_id)
+    preset, _ = _checked_preset(kind, body)
+    registration = await _preview_registration(session, event_id, body.ticket_id)
+    _, style = await _current(session, event, kind, audience)
+    return await preset_preview(kind, event, style, preset, registration, audience, format)
 
 
 MAX_IMAGE_BYTES = doc_art.MAX_IMAGE_BYTES

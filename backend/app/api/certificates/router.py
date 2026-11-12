@@ -9,6 +9,8 @@ from limits import parse_many
 
 from app.api.certificates import service
 from app.api.certificates.schemas import (
+    ApplyDesignRequest,
+    ApplyDesignResponse,
     CertificatePage,
     CertificateState,
     CertificateSummary,
@@ -53,6 +55,22 @@ async def issue(session: SessionDep, user: ClubAuth, event_id: int, body: IssueR
     design change marks the ones made with the older design as refreshed."""
     event = await deliveries.event_for_club(session, user, event_id)
     return IssueResponse(**await service.issue(session, event, body.audience, body.roles))
+
+
+@router.post("/apply-design", summary="Apply the current design to the certificates already issued")
+async def apply_design(request: Request, session: SessionDep, user: ClubAuth, event_id: int, body: ApplyDesignRequest) -> ApplyDesignResponse:
+    """An issued certificate keeps the design it was issued with, whatever
+    the club picks later (contract §6). This is the one way to change that:
+    every certificate issued on the event takes its role's design as it is
+    now. Owners and admins only (club_access.policy), and only with
+    `{"confirm": true}`. Written to the audit log."""
+    if not body.confirm:
+        raise CustomHTTPException(
+            422, message="Confirm that every certificate already issued for this event should change to the current design.",
+            error_code="CONFIRM_REQUIRED", errors={"fields": {"confirm": "Required."}},
+        )
+    event = await deliveries.event_for_club(session, user, event_id)
+    return ApplyDesignResponse(**await service.apply_current_design(session, event, actor=user, request=request))
 
 
 @router.post("/send", summary="Email certificates to the guests issued one")

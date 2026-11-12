@@ -260,7 +260,7 @@ async def test_an_opted_out_guests_whatsapp_is_skipped_from_the_clubs_number(cli
 
 async def test_and_from_the_platforms_number_while_the_email_still_goes(client, session, world, meta, platform_number, monkeypatch):
     from app.core.layout.model import TicketLayoutFields, dump
-    from app.core.layout.starters import ticket_starter
+    from tests.legacy_layouts import ticket_starter
 
     account = await connected(client, session, world)
     await say(client, account, "unsubscribe")

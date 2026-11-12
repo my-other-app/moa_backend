@@ -18,6 +18,9 @@ from app.config import settings
 from app.core.storage import objects
 from tests.conftest import auth_header
 
+# About the classic HTML documents and the CR80 card: the defaults as they were.
+pytestmark = pytest.mark.usefixtures("classic_defaults")
+
 
 @pytest.fixture
 async def world(client, session, make_club, make_event, make_user, make_registration, mint_token):

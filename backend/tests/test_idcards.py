@@ -8,6 +8,14 @@ from app.api.events.volunteer.models import Volunteer
 from app.core.layout.model import TicketLayoutFields, dump
 from app.core.layout.starters import badge_starter
 from tests.conftest import auth_header
+from tests.doc_designs_fake import install
+
+
+@pytest.fixture(autouse=True)
+def designs(monkeypatch):
+    """The designer's designs and the render service (Backend A's), faked:
+    a card with no saved design is the default design (D7), drawn there."""
+    return install(monkeypatch)
 
 START = datetime(2026, 11, 20, 18, 0, tzinfo=timezone.utc)
 
@@ -30,23 +38,26 @@ def _url(world, path=""):
     return f"/api/v1/events/{world['event'].id}/idcards{path}"
 
 
-async def test_the_card_design_is_edited_like_a_ticket_and_starts_from_the_conference_card(client, world):
+async def test_the_card_design_is_edited_like_a_ticket_and_the_custom_card_is_the_cr80(client, world):
     h = world["club"]
     layout = await client.get(f"/api/v1/events/{world['event'].id}/designs/badge/layout", headers=h)
     assert layout.status_code == 200, layout.text
     assert layout.json()["kind"] == "badge" and layout.json()["qrRequired"] is True
+    # Unsaved, the card is the designer's default; the custom card is the CR80.
+    assert layout.json()["active"] == "preset" and layout.json()["presetDefault"]["id"] == "badge/06-thermal-mono"
     assert layout.json()["page"] == {"widthMm": 54, "heightMm": 85.6}
-    assert "classic" in layout.json()["starters"] and "label_brother" in layout.json()["starters"]
+    assert list(layout.json()["starters"]) == ["card_cr80"]
     assert any(l["id"] == "photo" for l in layout.json()["layers"])
 
-    st = badge_starter("simple", page=None)
+    st = badge_starter("card_cr80", page=None)
     saved = await client.put(f"/api/v1/events/{world['event'].id}/designs/badge/layout", json=dump(TicketLayoutFields(canvas=st["canvas"], layers=st["layers"], page=st["page"])), headers=h)
     assert saved.status_code == 200, saved.text
-    assert saved.json()["version"] == 1 and saved.json()["isOwn"] is True
-    assert saved.json()["page"] == {"widthMm": 87, "heightMm": 130}
-    # A starter asked for now is drawn for the page the design is on.
-    insert = await client.get(f"/api/v1/events/{world['event'].id}/designs/badge/layout/starters/insert", headers=h)
-    assert insert.json()["page"] == {"widthMm": 87, "heightMm": 130}
+    assert saved.json()["version"] == 1 and saved.json()["isOwn"] is True and saved.json()["active"] == "custom"
+    assert saved.json()["page"] == {"widthMm": 54, "heightMm": 85.6}
+    card = await client.get(f"/api/v1/events/{world['event'].id}/designs/badge/layout/starters/card_cr80", headers=h)
+    assert card.json()["page"] == {"widthMm": 54, "heightMm": 85.6}
+    # The other card starters are gone.
+    assert (await client.get(f"/api/v1/events/{world['event'].id}/designs/badge/layout/starters/insert", headers=h)).status_code == 404
 
     png = await client.post(f"/api/v1/events/{world['event'].id}/designs/badge/layout/preview", json=dump(TicketLayoutFields(canvas=st["canvas"], layers=st["layers"], page=st["page"])), headers=h)
     assert png.status_code == 200 and png.headers["content-type"] == "image/png"

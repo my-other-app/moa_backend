@@ -8,7 +8,7 @@ import zipfile
 from datetime import datetime, timezone
 from typing import AsyncIterator, Optional
 
-from sqlalchemy import case, func, or_, select, text, update
+from sqlalchemy import JSON, Text, case, cast, func, literal, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -72,9 +72,10 @@ def _audience_criteria(event_id: int, audience: str, roles: list[str]) -> list:
     return criteria
 
 
-async def _design_version(session, event_id: int) -> int:
-    style = await get_template_for_event(session, event_id)
-    return current_design_version(style)
+async def _role_styles(session, event_id: int) -> tuple[dict, dict]:
+    """Each role's design as it resolves now, and the event default's."""
+    default = await get_template_for_event(session, event_id)
+    return {role: await get_template_for_event(session, event_id, role=role) for role in RegistrationRole}, default
 
 
 async def _role_versions(session, event_id: int) -> tuple[dict, int]:
@@ -84,11 +85,38 @@ async def _role_versions(session, event_id: int) -> tuple[dict, int]:
     issued one carries that design's version, not the default's -- or every
     later save of the default would mark the speakers' certificates as out of
     date while theirs never changed."""
-    default = await _design_version(session, event_id)
-    versions = {}
-    for role in RegistrationRole:
-        versions[role] = current_design_version(await get_template_for_event(session, event_id, role=role))
-    return versions, default
+    styles, default = await _role_styles(session, event_id)
+    return {role: current_design_version(s) for role, s in styles.items()}, current_design_version(default)
+
+
+async def _role_pins(session, event_id: int) -> tuple[dict, dict]:
+    """What a certificate issued now to each role keeps (doc_presets.pins), and the default's."""
+    from app.api.doc_presets.pins import snapshot
+
+    styles, default = await _role_styles(session, event_id)
+    return {role: snapshot(s) for role, s in styles.items()}, snapshot(default)
+
+
+def _pin_of_role(pins: dict, default: dict):
+    """The pin a row's role stands for, as SQL: JSON written as its own text,
+    so it reads back as the same text (`_on_other_design`)."""
+    from app.api.doc_presets.pins import as_text
+
+    return case(
+        *[(EventRegistrationsLink.role == role, cast(literal(as_text(pin)), JSON)) for role, pin in pins.items()],
+        else_=cast(literal(as_text(default)), JSON),
+    )
+
+
+def _on_other_design(pins: dict, default: dict):
+    """A row whose certificate keeps another design than its role's now, as SQL."""
+    from app.api.doc_presets.pins import as_text
+
+    current = case(
+        *[(EventRegistrationsLink.role == role, literal(as_text(pin))) for role, pin in pins.items()],
+        else_=literal(as_text(default)),
+    )
+    return func.coalesce(cast(EventRegistrationsLink.certificate_design, Text), "") != current
 
 
 def _version_of_role(versions: dict, default: int):
@@ -133,12 +161,14 @@ async def issue(session, event: Events, audience: str, roles: list[str], *, regi
         criteria = [*criteria, EventRegistrationsLink.id.in_(list(registration_ids))]
     versions, default = await _role_versions(session, event.id)
     version = _version_of_role(versions, default)
+    # Each keeps the design it is issued with (contract §6).
+    pins, default_pin = await _role_pins(session, event.id)
     now = datetime.now(timezone.utc)
     total = await _count(session, *criteria)
     issued_ids = list((await session.execute(
         update(EventRegistrationsLink)
         .where(*criteria, EventRegistrationsLink.certificate_issued_at.is_(None))
-        .values(certificate_issued_at=now, certificate_design_version=version)
+        .values(certificate_issued_at=now, certificate_design_version=version, certificate_design=_pin_of_role(pins, default_pin))
         .returning(EventRegistrationsLink.id)
         .execution_options(synchronize_session="fetch")
     )).scalars())
@@ -161,6 +191,37 @@ async def issue(session, event: Events, audience: str, roles: list[str], *, regi
     )).rowcount or 0
     await session.commit()
     return {"issued": issued, "refreshed": refreshed, "already_issued": total - issued - refreshed}
+
+
+async def apply_current_design(session, event: Events, *, actor, request=None) -> dict:
+    """The club's "Apply the current design to issued certificates": every
+    certificate issued on this event, revoked or not, keeps its role's design
+    as it is now. The one way an issued certificate changes design (contract
+    §6). Their kept PDFs stay where they are, so a file handed out before
+    still checks (file_digests); the next download draws the new one. An
+    audit line says who did it. The caller has had the club confirm it."""
+    from app.api.audit import service as audit
+
+    versions, default = await _role_versions(session, event.id)
+    pins, default_pin = await _role_pins(session, event.id)
+    updated = (await session.execute(
+        update(EventRegistrationsLink)
+        .where(*_live(event.id), EventRegistrationsLink.certificate_issued_at.isnot(None))
+        .values(certificate_design=_pin_of_role(pins, default_pin), certificate_design_version=_version_of_role(versions, default))
+        .execution_options(synchronize_session="fetch")
+    )).rowcount or 0
+
+    def name(pin: dict) -> str:
+        return pin["preset"]["id"] if pin.get("mode") == "preset" else "custom"
+
+    designs = {"default": name(default_pin), **{role.value: name(pin) for role, pin in pins.items()}}
+    await audit.record(
+        session, actor=actor, action="certificates.apply_design", entity_type="event", entity_id=event.id,
+        summary=f"Applied the current certificate design to {updated} issued certificate{'s' if updated != 1 else ''} of '{event.name}'",
+        details={"updated": updated, "designs": designs}, request=request,
+    )
+    await session.commit()
+    return {"updated": updated, "designs": designs}
 
 
 #: Registrations given their certificate's public id (and number) per UPDATE.
@@ -232,6 +293,10 @@ async def summary(session, event: Events) -> dict:
         session, *live, *held,
         func.coalesce(EventRegistrationsLink.certificate_design_version, 0) < _version_of_role(versions, version),
     )
+    # Issued with another design than the one their role has now: what
+    # "Apply the current design to issued certificates" would change.
+    pins, default_pin = await _role_pins(session, event.id)
+    other_design = await _count(session, *live, EventRegistrationsLink.certificate_issued_at.isnot(None), _on_other_design(pins, default_pin))
     sends = await deliveries.summary(session, event, DeliveryKind.certificate)
     return {
         "issued": issued,
@@ -239,6 +304,7 @@ async def summary(session, event: Events) -> dict:
         "attended": await _count(session, *live, EventRegistrationsLink.is_attended == True),  # noqa: E712
         "registrations": await _count(session, *live),
         "outdated": outdated,
+        "other_design": other_design,
         "design_version": version,
         # Unsent counts against those issued, not every registration.
         "channels": [{**c, "unsent": max(0, issued - (c["sent"] + c["failed"] + c["skipped"] + c["pending"]))} for c in sends["channels"]],
@@ -345,13 +411,16 @@ async def bundle_jobs(session, event: Events) -> list[tuple[str, Optional[str], 
             .order_by(EventRegistrationsLink.ticket_id)
         )
     )
+    from app.api.doc_presets.pins import pinned_style
+
     styles: dict = {}
     jobs = []
     for reg in regs:
         role = role_of(reg)
         if role not in styles:
             styles[role] = await get_template_for_event(session, event.id, role=role)
-        job = certificate_job(reg, styles[role])
+        # The design each was issued with (contract §6).
+        job = certificate_job(reg, pinned_style(styles[role], reg))
         jobs.append((f"{number_of(reg)} {_safe_name(reg.full_name)}.pdf", job.cache_key("certificate", reg.id), job.draw))
     return jobs
 
@@ -512,6 +581,16 @@ async def preview_png(session, reg: EventRegistrationsLink) -> bytes:
     (GET /verify/certificates/{code}/image), same design, same engine."""
     style = await certificate_style(session, reg)
     job = certificate_job(reg, style)
+    if job.preset:
+        from app.api.doc_presets.config import without_preset
+        from app.api.doc_presets.jobs import png_of
+
+        pdf = await doc_cache.cached(job.cache_key("certificate", reg.id), job.draw)
+        if not job.state.get("fallback"):
+            return await png_of(job, pdf)
+        # The render service could not draw it (D9): the classic certificate's own picture.
+        style = without_preset(style)
+        job = certificate_job(reg, style)
     if in_layout_mode(style):
         pdf = await doc_cache.cached(job.cache_key("certificate", reg.id), job.draw)
         return await pool.run(layout_png, style, pdf)

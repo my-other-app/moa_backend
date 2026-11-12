@@ -48,6 +48,9 @@ from app.db.listeners import add_loader_criteria
 from app.response import CustomHTTPException
 from tests.conftest import _make_user, auth_header
 
+# A card with no saved design is the designer's default, drawn by the render service (faked).
+pytestmark = pytest.mark.usefixtures("doc_designs")
+
 START = datetime(2026, 11, 20, 18, 0, tzinfo=timezone.utc)
 API = "/api/v1"
 

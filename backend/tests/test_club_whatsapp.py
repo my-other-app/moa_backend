@@ -1464,7 +1464,7 @@ async def test_a_reminder_goes_from_the_clubs_own_number_and_shows_in_its_inbox(
 
 async def test_a_ticket_goes_from_the_clubs_number_with_its_document(client, session, world, meta):
     from app.core.layout.model import TicketLayoutFields, dump
-    from app.core.layout.starters import ticket_starter
+    from tests.legacy_layouts import ticket_starter
 
     await connected(client, session, world)
     st = ticket_starter("classic")

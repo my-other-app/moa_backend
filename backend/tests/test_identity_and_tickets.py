@@ -25,7 +25,7 @@ from app.api.events.models import EventRegistrationsLink
 from app.api.ticketing.models import WaitlistEntries
 from app.api.users.models import SigninProviders, UserTypes
 from app.core.layout.model import TicketLayoutFields, dump
-from app.core.layout.starters import certificate_starter
+from tests.legacy_layouts import certificate_starter
 from app.core.mail import links
 from app.core.utils import keys
 from tests.conftest import auth_header

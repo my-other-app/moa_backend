@@ -19,7 +19,7 @@ from PIL import Image
 from app.api.events.certificates import certificate_document
 from app.core.layout.model import TicketLayoutFields, dump
 from app.core.layout.renderer import pdf_to_png
-from app.core.layout.starters import certificate_starter
+from tests.legacy_layouts import certificate_starter
 from tests.conftest import auth_header
 
 
