@@ -20,6 +20,7 @@ from sqlalchemy import select, text
 from app.api.clubs.models import Clubs
 from app.api.discover import visitors
 from app.api.events.models import Events
+from app.api.slugs.service import event_slug_matches
 from app.core.net import client_address
 from app.response import CustomHTTPException
 
@@ -59,7 +60,7 @@ VIEWS = visitors.ViewBuffer("event page", _write)
 async def record(session, request, ref, user_id: Optional[int] = None) -> None:
     """Count a look at an event's page (`ref`: its id or slug). 404 for no such event."""
     is_id = isinstance(ref, int) or (isinstance(ref, str) and ref.isdigit())
-    cond = Events.id == int(ref) if is_id else Events.slug == ref
+    cond = Events.id == int(ref) if is_id else event_slug_matches(ref)
     if is_id and int(ref) >= 2**31:
         raise CustomHTTPException(404, message="Event not found")
     row = (await session.execute(select(Events.id, Clubs.user_id).outerjoin(Clubs, Clubs.id == Events.club_id).where(cond))).first()

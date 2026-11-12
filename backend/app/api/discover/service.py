@@ -79,6 +79,7 @@ from app.api.event_partners import service as event_partners
 from app.api.search import text as stext
 from app.api.sites import service as sites
 from app.api.sites.models import ClubSites
+from app.api.slugs.service import club_slug_matches, event_slug_matches
 from app.api.threads import service as threads
 from app.api.threads.models import ClubThreads
 from app.core import public_urls
@@ -1359,7 +1360,7 @@ async def club_events(session, slug: str, when: str, offset: int, limit: int, no
     (chosen on narrow rows by ix_events_club_start, then read in full) and the
     page's going counters and topics (card_extras)."""
     now = now or now_utc()
-    club_id = await session.scalar(select(Clubs.id).where(Clubs.slug == slug, *_club_visible()))
+    club_id = await session.scalar(select(Clubs.id).where(club_slug_matches(slug), *_club_visible()))
     if club_id is None:
         raise CustomHTTPException(404, message="Club not found")
     if when == "past":
@@ -1376,7 +1377,8 @@ async def club_events(session, slug: str, when: str, offset: int, limit: int, no
 
 async def club_page(session, slug: str, viewer_id: Optional[int], now: Optional[datetime] = None) -> dict:
     now = now or now_utc()
-    club = await session.scalar(select(Clubs).where(Clubs.slug == slug, *_club_visible()))
+    # A slug it has now or had once (app/api/slugs): the page carries the current one, and the site redirects.
+    club = await session.scalar(select(Clubs).where(club_slug_matches(slug), *_club_visible()))
     if club is None:
         raise CustomHTTPException(404, message="Club not found")
     since = await upcoming.since(session, now)
@@ -1435,11 +1437,11 @@ def _public_where(now: datetime, since: Optional[datetime] = None) -> list:
 
 
 def _ref_where(ref: str):
-    """A slug, or the id the old site's addresses carried; None for a number too big to be an id."""
+    """A slug (now or once: app/api/slugs), or the id the old site's addresses carried; None for a number too big to be an id."""
     if ref.isascii() and ref.isdigit():
         n = int(ref)
         return Events.id == n if n < 2**31 else None
-    return Events.slug == ref
+    return event_slug_matches(ref)
 
 
 def _iso(dt: Optional[datetime]) -> Optional[str]:

@@ -824,6 +824,8 @@ class EventDetailResponse(CustomBaseModel):
     share_image_url: str | None = Field(None)
     retention_mode: str = Field("keep")
     created_at: datetime | None = Field(None)
+    #: To an admin: the event's old slugs, which still answer and redirect, the most recent first (app/api/slugs). Null to anyone else.
+    slug_aliases: list[str] | None = Field(None)
     #: Whether the club's plan leaves this event as it was when enforcement
     #: began (subscriptions.gates.grandfathered, its date window included):
     #: no event-scoped lock applies to it. False whenever nothing is enforced

@@ -286,7 +286,9 @@ async def _hide_draft(session, event_id: str, user) -> None:
     from app.api.cohosts import access as cohosts
     from app.api.events.models import Events
 
-    key = Events.id == int(event_id) if str(event_id).isdigit() else Events.slug == event_id
+    from app.api.slugs.service import event_slug_matches
+
+    key = Events.id == int(event_id) if str(event_id).isdigit() else event_slug_matches(event_id)
     row = (await session.execute(select(Events.id, Events.club_id, Events.lifecycle).where(key, Events.is_deleted == False))).first()  # noqa: E712
     if row is None or row.lifecycle is not EventStatus.draft:
         return
@@ -341,6 +343,13 @@ async def get_event(
 
     row = await session.get(Events, int(data["id"])) if data.get("id") is not None else None
     data["share_image_url"] = await social_posters.share_image_url(session, row) if row is not None else None
+    # The admin's Web address card: the old slugs that still answer (app/api/slugs).
+    data["slug_aliases"] = None
+    if user is not None and is_admin_user(user) and data.get("id") is not None:
+        from app.api.slugs import service as slugs
+        from app.api.slugs.models import EVENT
+
+        data["slug_aliases"] = await slugs.aliases_of(session, EVENT, int(data["id"]))
     return data
 
 

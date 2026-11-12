@@ -364,6 +364,9 @@ class ClubAdminFullResponse(ClubPublicDetailResponse):
     requested_plan: str | None = Field(None)
     requested_cycle: str | None = Field(None)
     admin_stats: ClubAdminStats = Field(...)
+    #: The club's old slugs, which still answer and redirect (its page, its
+    #: website's old subdomain), the most recent first (app/api/slugs).
+    slug_aliases: list[str] = Field(default_factory=list)
 
 
 class ClubOrgMin(CustomBaseModel):

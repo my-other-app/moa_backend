@@ -115,6 +115,7 @@ from app.api.subscriptions.router import (
 )
 from app.api import admin_overview
 from app.api.certificate_templates.router import router as certificate_templates_router
+from app.api.slugs.router import router as slugs_admin_router
 from app.api import service
 from app.api.schemas import BackgroundTaskLogResponseSchema
 from app.db.core import SessionDep
@@ -274,6 +275,8 @@ api_router.include_router(router=subscriptions_club_router)
 api_router.include_router(router=email_library_router, tags=["emails"])
 api_router.include_router(router=subscriptions_admin_router)
 api_router.include_router(router=subscriptions_public_router)
+# An admin changing a club's or an event's slug (app/api/slugs).
+api_router.include_router(router=slugs_admin_router)
 
 
 @api_router.get("/background-task-log/{task_id}", tags=["root"])
