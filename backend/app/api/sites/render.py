@@ -122,7 +122,10 @@ def assemble(pkg: Package, data: dict, layout: dict) -> str:
         s = pkg.section(key)
         if s is None:
             continue
-        section = {"key": s.key, "title": titles[s.key], "label": s.label, "anchor": s.anchor}
+        # `index`: its 1-based place among the movable sections on the page
+        # (Night numbers its headings "01 / about"); one that renders empty
+        # takes no number.
+        section = {"key": s.key, "title": titles[s.key], "label": s.label, "anchor": s.anchor, "index": len(parts) + 1}
         out = pkg.env.get_template(f"sections/{key}.html.j2").render({**ctx, "section": section}).strip()
         if out:
             parts.append(out)
