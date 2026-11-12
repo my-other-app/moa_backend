@@ -207,6 +207,8 @@ CLASSIFICATION: dict[str, str] = {
     "guest_notices": WIPE,
     "club_password_reset_codes": WIPE,
     "club_sites": WIPE,
+    # A club site's photo library (app/api/sites/images.py).
+    "club_site_images": WIPE,
     "club_socials": WIPE,
     "club_subscriptions": WIPE,
     "club_team_members": WIPE,

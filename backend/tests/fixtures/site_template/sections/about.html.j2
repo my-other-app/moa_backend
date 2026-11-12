@@ -1,0 +1,7 @@
+{% if club.about or subline %}
+<section id="{{ section.anchor }}">
+<h2>{{ section.title }}</h2>
+<p>{{ club.about or subline }}</p>
+{% if images["about.image"] %}<img src="{{ images['about.image'].url }}" alt="{{ images['about.image'].alt }}" width="{{ images['about.image'].w }}" height="{{ images['about.image'].h }}" loading="lazy">{% endif %}
+</section>
+{% endif %}

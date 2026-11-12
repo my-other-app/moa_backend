@@ -94,12 +94,12 @@ CLUB_WIDE_FEATURES = frozenset({"website", "custom_domain", "roles", "finance", 
 NOT_ENFORCED: dict[str, str] = {}
 
 #: The website templates in catalogue order; a plan's `website_templates`
-#: allows the first N of them. Mirrors sites.models.TEMPLATES, which is also
-#: the order the dashboard lists them in.
+#: allows the first N of them. sites.registry.CATALOGUE, which is also the
+#: order the dashboard lists them in.
 def template_order() -> tuple[str, ...]:
-    from app.api.sites.models import TEMPLATES
+    from app.api.sites.registry import CATALOGUE
 
-    return tuple(TEMPLATES)
+    return tuple(CATALOGUE)
 
 
 LABELS = dict(FEATURE_CATALOG)

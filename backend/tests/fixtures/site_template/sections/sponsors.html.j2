@@ -1,0 +1,5 @@
+{% if sponsors %}
+<section id="{{ section.anchor }}"><h2>{{ section.title }}</h2>
+{% for p in sponsors %}<div class="logo">{% if p.logo %}<img src="{{ p.logo.url }}" alt="{{ p.logo.alt }}" width="{{ p.logo.w }}" height="{{ p.logo.h }}" loading="lazy">{% else %}<span>{{ p.initials }}</span>{% endif %}<span>{{ p.name }}</span>{% if p.role %}<span>{{ p.role }}</span>{% endif %}</div>{% endfor %}
+</section>
+{% endif %}

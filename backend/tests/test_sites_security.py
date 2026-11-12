@@ -4,17 +4,23 @@ the inline code it carries.
 The JSON-LD block was `json.dumps` written raw inside <script>: a club named
 `</script><script>...` closed the element and ran its own code on the page,
 which the Worker's `script-src 'unsafe-inline'` let through.
+
+Every template in the checkout is rendered here (the catalogue's and the
+tests' fixture): whatever a template's markup, the platform's guarantees hold
+-- one script, every stylesheet named by hash, no club text as markup.
 """
+import copy
 import json
 import re
-from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 
+import pytest
+
+from app.api.sites import registry
 from app.api.sites import render as site_render
-from app.api.sites.models import TEMPLATES, THEMES
+from app.api.sites.service import _social_href, safe_href
 from tests.conftest import auth_header
 
-NOW = datetime.now(timezone.utc)
 EVIL = '</script><script>alert(document.cookie)</script><!--'
 
 SCRIPT = re.compile(r"<script(?P<attrs>[^>]*)>(?P<body>.*?)</script>", re.S)
@@ -33,24 +39,20 @@ def _tags(html: str) -> list:
     return found
 
 
-def _page(template="launchpad", theme="light", **kw) -> str:
-    return site_render.render(_data(template, theme, **kw))
+def _data(template="fixture", *, name="Circuit Society", headline=None, team=(), sponsors=(), accent=None) -> dict:
+    data = copy.deepcopy(registry.get("fixture").sample)
+    data["site"] = {**data["site"], "template": template, "headline": headline, "layout": {"accent": accent}}
+    data["club"]["name"] = name
+    data["headline"] = headline or name
+    data["page"] = {"title": name, "description": "Sub", "url": "https://circuit.myotherapp.in"}
+    data["team"] = list(team)
+    data["sponsors"] = list(sponsors)
+    data["visit_url"] = "https://api.myotherapp.in/api/v1/sites/circuit/visit"
+    return data
 
 
-def _data(template="launchpad", theme="light", *, name="Circuit Society", headline=None, team=(), partners=(), upcoming=None) -> dict:
-    when = NOW + timedelta(days=3)
-    return ({
-        "site": {"template": template, "theme": theme, "font": "inter", "headline": headline, "subline": None,
-                 "sections": {k: True for k in ("hero", "upcoming", "about", "past", "team", "partners", "follow", "contact")}},
-        "club": {"name": name, "about": "About", "tagline": None, "location_name": "Pune", "contact_email": "a@b.c",
-                 "brand_primary": "#3355ff", "logo_url": None, "cover_url": None},
-        "default_headline": name, "default_subline": "Sub",
-        "upcoming": upcoming if upcoming is not None else [{"id": 1, "name": "Hack", "starts_at": when, "where": "Lab", "fee": "Free", "poster": None, "url": "https://myotherapp.in/events/hack", "upcoming": True}],
-        "past": [], "team": list(team), "partners": list(partners), "socials": [],
-        "numbers": {"followers": 3, "events": 1}, "site_url": "https://circuit.myotherapp.in",
-        "follow_url": "https://myotherapp.in/clubs/circuit?follow=1", "events_url": "https://myotherapp.in/clubs/circuit#events",
-        "visit_url": "https://api.myotherapp.in/api/v1/sites/circuit/visit",
-    })
+def _page(template="fixture", **kw) -> str:
+    return site_render.render(_data(template, **kw))
 
 
 # First in the module: a test that opens the database before the rest
@@ -64,7 +66,7 @@ async def test_the_page_is_served_with_the_policy(client, session, make_club, mi
     r = await client.get(f"/api/v1/sites/{club.slug}")
 
     assert r.status_code == 200
-    assert "script-src 'sha256-" in r.headers["content-security-policy"]
+    assert r.headers["content-security-policy"] == site_render.site_csp(frame_ancestors="")
     ld = [m.group("body") for m in SCRIPT.finditer(r.text) if "ld+json" in m.group("attrs")]
     assert json.loads(ld[0])["name"] == EVIL and "</script" not in ld[0]
 
@@ -84,44 +86,56 @@ async def test_a_club_name_cannot_close_the_json_ld_script():
 async def test_nothing_the_club_types_becomes_markup():
     html = _page(
         name='"><img src=x onerror=alert(1)>', headline="<b>bold</b>",
-        team=[{"name": "<i>x</i>", "role": '" onmouseover="alert(1)', "photo": None, "links": [("instagram", 'javascript:alert(1)"')]}],
-        partners=[{"name": "<svg onload=alert(1)>", "role": None, "logo": None}],
+        team=[{"name": "<i>x</i>", "role": '" onmouseover="alert(1)', "initials": "X", "photo": None, "links": [{"kind": "x", "label": "X", "href": safe_href(_social_href("x", 'javascript:alert(1)"'))}]}],
+        sponsors=[{"name": "<svg onload=alert(1)>", "role": None, "initials": "S", "logo": None}],
     )
 
     assert "<img src=x" not in html and "<b>bold" not in html and "<svg" not in html and "<i>x" not in html
     tags = _tags(html)
-    assert {t for t, _ in tags} <= {"html", "head", "meta", "title", "link", "style", "body", "nav", "div", "a", "span", "button", "header", "h1", "h2", "h3", "p", "i", "section", "article", "small", "b", "footer", "script", "img"}
     assert not [a for _, attrs in tags for a, _ in attrs if a.startswith("on")]  # no event handler anywhere
-    assert not [v for _, attrs in tags for a, v in attrs if a == "href" and (v or "").lower().startswith("javascript:")]
+    assert not [v for _, attrs in tags for a, v in attrs if a == "href" and not (v or "").lower().startswith(("https://", "mailto:", "tel:", "#"))]
 
 
-async def test_every_inline_script_and_style_is_named_in_the_csp():
-    """Recomputed from the pages themselves, every template in both looks: a
-    change to the page's script or stylesheet fails here until
-    SITE_*_HASHES -- and the Worker's policy -- are updated (see site_csp)."""
-    for template in TEMPLATES:
-        for theme in THEMES:
-            html = _page(template, theme)
-
-            scripts = [m.group("body") for m in SCRIPT.finditer(html) if "ld+json" not in m.group("attrs")]
-            styles = [m.group("body") for m in STYLE.finditer(html)]
-            assert scripts and styles
-            assert {site_render.csp_hash(s) for s in scripts} <= set(site_render.SITE_SCRIPT_HASHES)
-            assert {site_render.csp_hash(s) for s in styles} <= set(site_render.SITE_STYLE_HASHES)
-            # The only style attribute is the club's colour and font on <html>.
-            assert re.findall(r'\sstyle="', html) == [' style="']
-            assert re.search(r'<html lang="en" style="--brand:#3355ff;', html)
+def test_only_https_mail_and_phone_addresses_reach_a_page():
+    assert safe_href("https://circuit.org/x") == "https://circuit.org/x"
+    assert safe_href("http://circuit.org") == "https://circuit.org"
+    assert safe_href("mailto:a@b.c") == "mailto:a@b.c" and safe_href("tel:+919800000000") == "tel:+919800000000"
+    for bad in ("javascript:alert(1)", " JavaScript:alert(1)", "data:text/html,x", "//evil.com", "circuit.org", "", None, "https://"):
+        assert safe_href(bad) is None, bad
 
 
-async def test_the_hashes_are_the_code_as_it_stands():
-    assert site_render.SITE_SCRIPT_HASHES == tuple(site_render.csp_hash(s) for s in site_render.inline_scripts())
-    assert site_render.SITE_STYLE_HASHES == tuple(site_render.csp_hash(s) for s in site_render.inline_styles())
+@pytest.mark.parametrize("template", list(registry.packages()))
+async def test_every_inline_script_and_style_is_named_in_the_csp(template):
+    """Recomputed from the pages themselves, every template, with and
+    without the club's accent: a template whose page carries a stylesheet
+    or script the policy does not name fails here."""
     csp = site_render.site_csp()
-    assert "unsafe-inline" not in csp.replace("style-src-attr 'unsafe-inline'", "")
-    assert "script-src 'sha256-" in csp and "frame-ancestors 'none'" in csp
+    for accent in (None, "#3355ff"):
+        html = _page(template, accent=accent)
+
+        scripts = [m.group("body") for m in SCRIPT.finditer(html) if "ld+json" not in m.group("attrs")]
+        styles = [m.group("body") for m in STYLE.finditer(html)]
+        assert scripts == [site_render.SITE_SCRIPT] and styles
+        assert {site_render.csp_hash(s) for s in styles} <= set(site_render.style_hashes())
+        assert all(site_render.csp_hash(s) in csp for s in styles + scripts)
+        # The accent is a custom property on <html>, never in a stylesheet.
+        on_html = re.search(r"<html\b[^>]*>", html).group(0)
+        assert ("--accent:#3355ff" in on_html) is (accent is not None)
+
+
+async def test_the_policy():
+    csp = site_render.site_csp()
+    parts = dict(p.split(" ", 1) for p in csp.split("; "))
+    assert parts["script-src"] == site_render.csp_hash(site_render.SITE_SCRIPT)
+    assert "unsafe-inline" not in parts["script-src"] and "unsafe-inline" not in parts["style-src-elem"]
+    assert parts["style-src-elem"].startswith("'sha256-") and parts["style-src-attr"] == "'unsafe-inline'"
+    assert parts["frame-ancestors"] == "'none'" and parts["form-action"] == "'none'" and parts["default-src"] == "'none'"
+    # Every template's stylesheet, once.
+    hashes = site_render.style_hashes()
+    assert len(hashes) == len(set(hashes)) and {site_render.csp_hash(str(p.css)) for p in registry.packages().values()} <= set(hashes)
 
 
 async def test_a_colour_that_is_not_one_never_reaches_the_style_attribute():
-    html = site_render.render({**_data(), "club": {**_data()["club"], "brand_primary": '#1"><x'}})
+    html = _page(accent='#1"><x')
 
-    assert '<html lang="en" style="--brand:#17a58f;' in html and "<x" not in html
+    assert re.search(r"<html\b[^>]*>", html).group(0) == '<html lang="en">' and "<x" not in html

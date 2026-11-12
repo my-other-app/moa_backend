@@ -1,18 +1,20 @@
-"""The club's website: the console's side under ClubAuth, and the page and
-its images for anyone."""
+"""The club's website: the console's side under ClubAuth, and the page,
+its images and the templates' gallery pictures for anyone."""
 import json
+import re
 from urllib.parse import unquote
 
-from fastapi import APIRouter, Query, Request, Response
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import APIRouter, File, Form, Query, Request, Response, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from sqlalchemy import select
 
 from app.api.clubs.models import Clubs
 from app.api.links import service as links
-from app.api.sites import service
+from app.api.sites import images as library
+from app.api.sites import registry, service
 from app.api.sites.analytics import site_analytics
 from app.api.sites.render import site_csp
-from app.api.sites.schemas import PreviewOut, SiteOut, SitePatch
+from app.api.sites.schemas import PreviewOut, SiteImageOrder, SiteImageOut, SiteImagePatch, SiteOut, SitePatch
 from app.api.subscriptions import gates
 from app.config import settings
 from app.core.auth.dependencies import ClubAuth
@@ -25,9 +27,10 @@ from app.response import CustomHTTPException
 router = APIRouter(prefix="/clubs/site")
 public_router = APIRouter(prefix="/sites")
 
-# A club page shows its logo, banner, people and partners (clubs/) and its
-# events' posters (events/posters/; clubs/logos/ before Oct 2026).
-IMAGE_PREFIXES = ("clubs/", "events/posters/")
+# A club page shows its logo, banner, people, partners and photo library
+# (clubs/), its events' posters (events/posters/; clubs/logos/ before Oct
+# 2026) and its speakers' photos (events/speakers/).
+IMAGE_PREFIXES = ("clubs/", "events/posters/", "events/speakers/")
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".gif")
 
 
@@ -38,13 +41,13 @@ async def _club_for(session, user) -> Clubs:
     return club
 
 
-@router.get("", summary="The site's choices, what is available to show, and whether the published page is behind")
+@router.get("", summary="The site's choices, the templates, the photo library, and whether the published page is behind")
 async def get_site(session: SessionDep, user: ClubAuth) -> SiteOut:
     club = await _club_for(session, user)
     return SiteOut(**await service.out(session, club, await service.get_or_create(session, club)))
 
 
-@router.patch("", summary="Template, look, font, headline, subline, sections")
+@router.patch("", summary="Template, layout (section order, hidden, titles, photo slots, accent), headline, subline")
 async def patch_site(session: SessionDep, user: ClubAuth, body: SitePatch) -> SiteOut:
     club = await _club_for(session, user)
     await gates.require_feature(session, club.id, "website", actor=user)
@@ -52,21 +55,17 @@ async def patch_site(session: SessionDep, user: ClubAuth, body: SitePatch) -> Si
     if body.template and body.template != current.template:
         # Choosing a template: the plan allows the first N in catalogue order.
         await gates.check_template(session, club.id, body.template, actor=user)
-    s = await service.patch(session, current, body.model_dump(exclude_unset=True))
-    return SiteOut(**await service.out(session, club, s))
+    s, adjusted = await service.patch(session, club, current, body.changes())
+    return SiteOut(**await service.out(session, club, s, adjusted))
 
 
 @router.post("/preview", summary="The page as these choices would make it, without saving or publishing")
-async def preview(session: SessionDep, user: ClubAuth, body: SitePatch) -> PreviewOut:
+@limiter.limit("60/minute")
+async def preview(request: Request, session: SessionDep, user: ClubAuth, body: SitePatch) -> PreviewOut:
     club = await _club_for(session, user)
     s = await service.get_or_create(session, club)
-    choices = service._choices(s)
-    for k, v in body.model_dump(exclude_unset=True).items():
-        if k == "sections" and v is not None:
-            choices["sections"] = {**choices["sections"], **{kk: bool(vv) for kk, vv in v.items()}}
-        elif k in ("headline", "subline") or v is not None:
-            choices[k] = v
-    return PreviewOut(html=await service.preview_html(session, club, choices))
+    chosen, _ = await service.apply_choices(session, club.id, service.choices(s), body.changes())
+    return PreviewOut(html=await service.preview_html(session, club, chosen))
 
 
 @router.post("/publish", summary="Make the page from the saved choices and put it at the public address")
@@ -80,6 +79,49 @@ async def publish(session: SessionDep, user: ClubAuth) -> SiteOut:
     return SiteOut(**await service.out(session, club, s))
 
 
+# ─── The photo library ───────────────────────────────────────────────────
+
+
+async def _image_out(session, club, row) -> SiteImageOut:
+    view = await service.library_view(session, club, await service.get_or_create(session, club))
+    return SiteImageOut(**next(i for i in view if i["id"] == row.id))
+
+
+@router.post("/images", status_code=201, summary="Add a photo to the site's library (JPEG, PNG or WebP, up to 10 MB; 20 at most)")
+async def add_image(session: SessionDep, user: ClubAuth, file: UploadFile = File(...), alt: str | None = Form(None)) -> SiteImageOut:
+    club = await _club_for(session, user)
+    await gates.require_feature(session, club.id, "website", actor=user)
+    s = await service.get_or_create(session, club)
+    row = await library.upload(session, s, file, alt)
+    return await _image_out(session, club, row)
+
+
+@router.patch("/images/{image_id}", summary="A library photo's alt text")
+async def patch_image(session: SessionDep, user: ClubAuth, image_id: int, body: SiteImagePatch) -> SiteImageOut:
+    club = await _club_for(session, user)
+    row = await library.one(session, club.id, image_id)
+    if "alt" in body.model_fields_set:
+        row = await library.set_alt(session, row, body.alt)
+    return await _image_out(session, club, row)
+
+
+@router.put("/images/order", summary="The library's order: every photo's id, first to last")
+async def order_images(session: SessionDep, user: ClubAuth, body: SiteImageOrder) -> list[SiteImageOut]:
+    club = await _club_for(session, user)
+    await library.reorder(session, club.id, body.ids)
+    return [SiteImageOut(**i) for i in await service.library_view(session, club, await service.get_or_create(session, club))]
+
+
+@router.delete("/images/{image_id}", summary="Delete a library photo: out of every slot, off the live page at once")
+async def delete_image(session: SessionDep, user: ClubAuth, image_id: int) -> dict:
+    club = await _club_for(session, user)
+    row = await library.one(session, club.id, image_id)
+    s = await service.get_or_create(session, club)
+    shown = await library.delete(session, s, row)
+    republished = await service.republish_for_club(session, club.id) if shown else False
+    return {"deleted": True, "republished": republished}
+
+
 @router.get("/analytics", summary="What the website brought: visits, who sent them, the sign-ups after")
 async def analytics(session: SessionDep, user: ClubAuth, days: int = Query(30, ge=1, le=365)) -> dict:
     club = await _club_for(session, user)
@@ -87,6 +129,28 @@ async def analytics(session: SessionDep, user: ClubAuth, days: int = Query(30, g
         await links.ensure_website_link(session, club)
         await session.commit()
     return await site_analytics(session, club, days)
+
+
+# ─── For anyone ──────────────────────────────────────────────────────────
+
+#: The website templates' gallery pictures, at the root beside the document
+#: designs' (app/core/doc_designs/static.py): /static/site-templates/<key>.png
+#: and <key>-mobile.png, from the package's thumb.png and thumb-mobile.png.
+#: Linked with ?v=<the file's hash> (service.template_meta), so immutable.
+static_router = APIRouter()
+STATIC_PREFIX = "/static/site-templates"
+_THUMB = re.compile(r"^([a-z][a-z0-9_-]{0,19}?)(-mobile)?$")
+_STATIC_HEADERS = {"Cache-Control": "public, max-age=31536000, immutable", "Cross-Origin-Resource-Policy": "cross-origin"}
+
+
+@static_router.api_route(STATIC_PREFIX + "/{name}.png", methods=["GET", "HEAD"], include_in_schema=False)
+async def template_thumb(name: str):
+    m = _THUMB.match(name)
+    pkg = registry.get(m.group(1)) if m else None
+    path = pkg.thumb("mobile" if m.group(2) else "desktop") if pkg is not None else None
+    if path is None:
+        return Response(status_code=404, headers={"Cache-Control": "no-store"})
+    return FileResponse(path, media_type="image/png", headers=_STATIC_HEADERS)
 
 
 @public_router.post("/{slug}/visit", status_code=204, summary="A visit to a club's site, counted for its analytics")

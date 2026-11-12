@@ -1102,18 +1102,30 @@ class Seeder:
             self.report.counts["post_comments"] += len(t.comments)
         await self.commit()
 
-    async def publish_site(self, ctx: dict, c: Club, template: Optional[str] = None) -> None:
+    async def publish_site(self, ctx: dict, c: Club, template: Optional[str] = None, photos: int = 0) -> None:
+        from PIL import Image
+
+        from app.api.sites import registry
         from app.api.sites import service as sites
-        from app.api.sites.models import FONTS, TEMPLATES
+        from app.api.sites.models import ClubSiteImages
+        from app.core.storage.fields import upload
 
         club = ctx["club"]
-        brand = images.Brand.of(c.brand)
         s = await sites.get_or_create(self.s, club)
-        font = {"bebas": "space_grotesk", "dm-serif": "fraunces", "inter": "inter"}.get(c.brand.display_font, "inter")
-        await sites.patch(self.s, s, {
-            "template": template or TEMPLATES[sum(map(ord, c.slug)) % len(TEMPLATES)],
-            "theme": "light" if images.luminance(brand.w) > 0.6 else "dark",
-            "font": font if font in FONTS else None,
+        # The showcase's photo library: a few pictures in the club's colours, the gallery's first.
+        brand = images.Brand.of(c.brand)
+        for i in range(photos):
+            raw = images.cover(brand, f"{c.slug}-photo-{i}", size=(1440, 960))
+            with Image.open(io.BytesIO(raw)) as im:
+                width, height = im.size
+            key = await upload(ClubSiteImages.image, {"bytes": raw, "filename": f"photo-{i}.png"})
+            self.s.add(ClubSiteImages(club_id=club.id, image=key, alt=f"{c.name}, at one of its events", position=i, width=width, height=height))
+        if photos:
+            await self.s.flush()
+            self.report.counts["site_photos"] += photos
+        catalogue = [k for k in registry.CATALOGUE if registry.get(k) is not None] or list(registry.packages())
+        await sites.patch(self.s, club, s, {
+            "template": template or catalogue[sum(map(ord, c.slug)) % len(catalogue)],
             "headline": c.tagline, "subline": None,
         })
         await sites.publish(self.s, club, s)
@@ -1215,7 +1227,7 @@ class Seeder:
                 runs.append((e, ev_ctx))
             followers = await self.follow(ctx, c, registrants)
             await self.posts(ctx, c, followers)
-            await self.publish_site(ctx, c, template="campus" if sc else None)
+            await self.publish_site(ctx, c, template="classic" if sc else None, photos=4 if sc else 0)
             if sc:
                 for e, ev_ctx in runs:
                     await sc.mail_history(e, ev_ctx)

@@ -7,7 +7,12 @@ Nothing called it when:
 - an event's start went by (the event stayed under "Upcoming" with a
   "Register" button), or the status clock moved it on;
 - the club changed its name, logo, cover, about or colour, or its team or
-  partners.
+  partners;
+- the club saved a new layout, template or headline for a published site,
+  or added, re-captioned or reordered a photo in its library -- the
+  "debounce" of the site editor: a burst of edits is one page made, within
+  five minutes (a photo the page shows that is deleted is taken off at
+  once, app/api/sites/images.py; the Publish button is always at once).
 
 Rather than a hook in every one of those places (the status clock, the club
 profile, the team and partner endpoints, all owned elsewhere), the sweep asks
@@ -35,7 +40,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.api.clubs.models import ClubPartners, Clubs, ClubTeamMembers
 from app.api.events.models import Events
-from app.api.sites.models import ClubSites
+from app.api.sites.models import ClubSiteImages, ClubSites
 from app.db import lock_keys
 
 logger = logging.getLogger(__name__)
@@ -59,6 +64,9 @@ def behind(now: datetime):
     made = ClubSites.published_at
     club = ClubSites.club_id
     return or_(
+        # The club's own choices, saved since (the editor's PATCH).
+        ClubSites.settings_at > made,
+        exists().where(ClubSiteImages.club_id == club, ClubSiteImages.updated_at > made),
         exists().where(Clubs.id == club, Clubs.updated_at > made),
         exists().where(ClubTeamMembers.club_id == club, ClubTeamMembers.updated_at > made),
         exists().where(ClubPartners.club_id == club, ClubPartners.updated_at > made),

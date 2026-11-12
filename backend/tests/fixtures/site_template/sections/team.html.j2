@@ -1,0 +1,5 @@
+{% if team %}
+<section id="{{ section.anchor }}"><h2>{{ section.title }}</h2>
+{% for m in team %}<div class="person">{% if m.photo %}<img src="{{ m.photo.url }}" alt="{{ m.photo.alt }}" width="{{ m.photo.w }}" height="{{ m.photo.h }}" loading="lazy">{% else %}<span>{{ m.initials }}</span>{% endif %}<b>{{ m.name }}</b><span>{{ m.role or "" }}</span>{% for l in m.links %}<a href="{{ l.href }}" target="_blank" rel="noreferrer">{{ l.label }}</a>{% endfor %}</div>{% endfor %}
+</section>
+{% endif %}

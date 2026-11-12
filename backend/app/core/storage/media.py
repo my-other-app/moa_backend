@@ -52,6 +52,7 @@ PUBLIC_FOLDERS = (
     "clubs/team/",
     "clubs/partners/",
     "clubs/threads/",     # a post's image
+    "clubs/site/",        # a club website's photo library (app/api/sites/images.py)
     "events/speakers/",
     "events/partners/",   # an event's sponsors' and partners' logos
     "events/posters/",    # event posters uploaded since Oct 2026

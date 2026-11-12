@@ -61,23 +61,27 @@ async def campus(client, session, make_club, make_event, mint_token):
     # Keys were assigned as strings: read the rows back as production would, pictures and all.
     session.expire_all()
     h = auth_header(await mint_token(owner))
-    await client.patch("/api/v1/clubs/site", json={"template": "campus"}, headers=h)
+    # The tests' fixture template (tests/fixtures/site_template): its markup is known here.
+    await client.patch("/api/v1/clubs/site", json={"template": "fixture"}, headers=h)
     await client.post("/api/v1/clubs/site/publish", headers=h)
     return club
 
 
-async def test_the_club_page_frames_posters_4_5_whole_and_banners_3_1(client, campus, monkeypatch):
+async def test_the_club_page_draws_posters_4_5_and_banners_3_1(client, campus, monkeypatch):
+    """The template frames the pictures (each design its own way); what the
+    platform hands it is each picture's right size and its shape, as the
+    img's width and height, so nothing moves while it loads."""
     monkeypatch.setattr(settings, "MEDIA_CDN_URL", "")
     html = (await client.get(f"/api/v1/sites/{campus.slug}")).text
-    # The poster: its large size, whole, over a blurred copy of the same file.
+    # The poster: its large size, 4:5.
     poster = quote(at(f"events/posters/v-{'1' * 32}.large.jpeg"), safe="")
-    frame = re.search(r'<span class="poster"><img class="bg" src="([^"]+)"[^>]*aria-hidden="true"[^>]*><img class="fg" src="([^"]+)"', html)
-    assert frame and frame.group(1) == frame.group(2) and frame.group(1).endswith(poster)
-    assert "aspect-ratio:4/5" in html and ".poster .fg{object-fit:contain}" in html
-    # The banner: 3:1, above the words, at its large size.
-    assert "aspect-ratio:3/1" in html and 'class="cover"' in html and "covers%2Fv-" in html and ".large.jpeg" in html
-    # Logos: whole on white; one that is not square gets room around it.
-    assert ".brand img,.logo img{object-fit:contain;background:#fff}" in html and "classList.add('pad')" in html
+    found = re.search(r'<img src="([^"]+)" alt="Hack Night" width="(\d+)" height="(\d+)" loading="lazy"', html)
+    assert found and found.group(1).endswith(poster) and (found.group(2), found.group(3)) == ("1080", "1350")
+    # The banner: its large size, 3:1, the one picture fetched first.
+    cover = re.search(r'<img src="([^"]+)" alt="Pixel Society" width="1500" height="500" fetchpriority="high"', html)
+    assert cover and "covers%2Fv-" in cover.group(1) and cover.group(1).endswith(".large.jpeg")
+    # A logo is square.
+    assert re.search(r'<img src="[^"]+partners%2Fv-3{32}\.medium\.png" alt="Acme" width="400" height="400" loading="lazy"', html)
 
 
 async def test_the_club_page_serves_new_posters_through_its_image_route(client, campus, monkeypatch):

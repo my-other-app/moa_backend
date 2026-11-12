@@ -1,0 +1,1 @@
+<footer id="contact"><span>© {{ year }} {{ club.name }}</span>{% if club.contact_email %}<a href="{{ links.contact_mailto }}">{{ club.contact_email }}</a>{% endif %}{% for s in socials %}<a href="{{ s.href }}" target="_blank" rel="noreferrer">{{ s.label }}</a>{% endfor %}<span>Made with MyOtherApp</span></footer>

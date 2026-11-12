@@ -252,6 +252,10 @@ application.include_router(router=health_router)
 from app.core.doc_designs.static import router as doc_designs_static_router  # noqa: E402
 
 application.include_router(router=doc_designs_static_router)
+# The website templates' gallery pictures, the same way (app/api/sites/router.py).
+from app.api.sites.router import static_router as site_templates_static_router  # noqa: E402
+
+application.include_router(router=site_templates_static_router)
 # Clubs' AI assistants over MCP: /mcp, its OAuth endpoints and their discovery
 # documents, at the root (all 404 until APP_MCP_ENABLED; app/api/mcp).
 from app.api.mcp.router import public_router as mcp_oauth_router  # noqa: E402

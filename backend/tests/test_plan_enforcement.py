@@ -658,22 +658,22 @@ async def test_an_edit_offering_items_is_gated_by_the_date_it_is_moved_to(client
 async def test_website_templates_are_the_first_n_in_catalogue_order(client, session, world):
     from app.api.sites import service as sites
 
-    assert gates.template_order() == ("launchpad", "chapter", "campus", "arena")
+    assert gates.template_order() == ("classic", "editorial", "night", "poster", "bento", "swiss", "gala", "timeline", "portal", "zine")
     await on_plan(session, world, "starter")
     url = f"{API}/clubs/site"
-    assert (await client.patch(url, json={"template": "campus"}, headers=world.h)).status_code == 200
-    r = await client.patch(url, json={"template": "arena"}, headers=world.h)
+    assert (await client.patch(url, json={"template": "night"}, headers=world.h)).status_code == 200
+    r = await client.patch(url, json={"template": "poster"}, headers=world.h)
     assert r.status_code == 403, r.text
     assert r.json()["errors"] == {
         "limit": "website_templates", "limit_value": 3, "used": 3,
         "required_plan": "growth", "required_plan_name": "Growth", "upgrade_url": UPGRADE,
     }
-    assert r.json()["message"] == "Starter includes the first 3 website templates; Arena is not one of them."
+    assert r.json()["message"] == "Starter includes the first 3 website templates; Poster is not one of them."
     # Chosen on Growth, then down to Starter: kept, editable, not published.
     site = await sites.get_or_create(session, world.club)
-    site.template = "arena"
+    site.template = "poster"
     await session.commit()
-    assert (await client.patch(url, json={"template": "arena", "headline": "Still us"}, headers=world.h)).status_code == 200
+    assert (await client.patch(url, json={"template": "poster", "headline": "Still us"}, headers=world.h)).status_code == 200
     assert (await client.post(f"{url}/publish", headers=world.h)).status_code == 403
     await on_plan(session, world, "growth")
     assert (await client.post(f"{url}/publish", headers=world.h)).status_code == 200

@@ -62,7 +62,8 @@ async def test_publishing_gives_the_site_its_link_and_its_buttons_carry_the_code
     html = (await client.get(f"/api/v1/sites/{world['club'].slug}")).text
     # The event button leaves the frame for the whole tab, carrying the site's code as a weak ref.
     assert re.search(rf'href="{re.escape(settings.PUBLIC_SITE_URL)}/events/{world["event"].slug}\?sref={code}" target="_top">Register</a>', html)
-    assert f'data-visit="http' in html and f"/api/v1/sites/{world['club'].slug}/visit" in html
+    slug = world["club"].slug
+    assert f'<meta name="moa:visit" content="{settings.PUBLIC_API_URL}/api/v1/sites/{slug}/visit">' in html
     # Every way out of the frame goes to the whole tab.
     assert f'href="{settings.PUBLIC_SITE_URL}/clubs/' in html and html.count('target="_top"') >= 3
 
@@ -70,7 +71,7 @@ async def test_publishing_gives_the_site_its_link_and_its_buttons_carry_the_code
 async def test_a_site_published_before_tracking_gets_its_link_on_the_next_look(client, world, session):
     from app.api.sites.models import ClubSites
 
-    session.add(ClubSites(club_id=world["club"].id, published_at=NOW, html="<!doctype html><p>old</p>", sections={}))
+    session.add(ClubSites(club_id=world["club"].id, published_at=NOW, html="<!doctype html><p>old</p>"))
     await session.commit()
     site = (await client.get("/api/v1/clubs/site", headers=world["h"])).json()
     assert site["tracking"] and site["tracking"]["code"]
