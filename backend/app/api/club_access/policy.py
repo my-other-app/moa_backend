@@ -61,6 +61,11 @@ _SITE_DOMAIN = _rx(r"^/api/v1/clubs/site/domain(?:/|$)")
 # defaults: drafting and writing are changes, for editors and admins; the
 # status and an event's feedback summary are reads, door staff included.)
 _AI_KEY = _rx(r"^/api/v1/clubs/ai/key(?:/|$)")
+# The Integrations API's side of the dashboard (app/api/partner, app/api/webhooks_out):
+# API keys, connecting and disconnecting partner apps, webhook endpoints, usage.
+# Keys and connections hand the club's data to other systems, so the owner and
+# admins, read and write; nobody else, not even to look.
+_INTEGRATIONS = _rx(r"^/api/v1/clubs/integrations(?:/|$)")
 # The club's own WhatsApp number (app/api/club_whatsapp). Its connection --
 # the keys to the club's Meta account, routing, retention -- is changed by the
 # owner and admins. Everything else there (reading the connection's status,
@@ -203,7 +208,7 @@ def allows(role: str, method: str, path: str) -> bool:
         return role == "admin" or (method not in WRITES and not _COHOST_SEARCH.search(path))
     if method in WRITES and _OWNER_WRITES.search(path):
         return False
-    if _SITE_DOMAIN.search(path) or _AI_KEY.search(path):
+    if _SITE_DOMAIN.search(path) or _AI_KEY.search(path) or _INTEGRATIONS.search(path):
         return role == "admin"
     if role == "admin":
         return True
@@ -273,6 +278,8 @@ def can(role: str) -> dict:
         "mailbox_manage": admin,
         # Every connected AI assistant, not only one's own (app/api/mcp).
         "connected_apps": admin,
+        # The Integrations API: keys, partner apps, webhooks, usage (`_INTEGRATIONS`).
+        "integrations": admin,
         # Approving what an assistant asked for: publishing, sending.
         "approve_actions": editor,
         # Confirming or declining registration requests (app/api/approvals):

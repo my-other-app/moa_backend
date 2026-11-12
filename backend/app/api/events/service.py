@@ -173,6 +173,7 @@ async def create_event(
         requires_approval=bool(kwargs.get("requires_approval")),
         high_demand_label=bool(kwargs.get("high_demand_label")),
         allow_self_cancel=kwargs.get("allow_self_cancel") is not False,
+        external_payments_allowed=bool(kwargs.get("external_payments_allowed")),
     )
     if status:
         from app.api.closeout.models import EventStatus
@@ -427,6 +428,8 @@ async def update_event(
         db_event.high_demand_label = bool(event.high_demand_label)
     if getattr(event, "allow_self_cancel", None) is not None:
         db_event.allow_self_cancel = bool(event.allow_self_cancel)
+    if getattr(event, "external_payments_allowed", None) is not None:
+        db_event.external_payments_allowed = bool(event.external_payments_allowed)
     db_event.reg_startdate = event.reg_startdate
     db_event.reg_enddate = event.reg_enddate
     db_event.about = event.about

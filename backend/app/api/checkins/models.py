@@ -42,6 +42,8 @@ class CheckInVia(enum.Enum):
     phone = "phone"
     # The volunteer app.
     app = "app"
+    # The Integrations API (app/api/partner): a club's own system or a partner's.
+    api = "api"
 
 
 class Doors(AbstractSQLModel, TimestampsMixin):

@@ -77,6 +77,10 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     # "Let guests give their ticket back": a free ticket, by the link in its
     # emails, before the start (app/api/ticket_cancel). On unless the club turns it off.
     allow_self_cancel = Column(Boolean, nullable=False, default=True, server_default=sa.true())
+    # "Accept registrations paid outside MyOtherApp": the Integrations API may
+    # then register someone on this paid event with a payment the club took
+    # itself (app/api/partner). Recorded as external, never as our income.
+    external_payments_allowed = Column(Boolean, nullable=False, default=False, server_default=sa.false())
     duration = Column(Float, nullable=False)
     about = Column(String, nullable=True)
     location_name = Column(String, nullable=True)
