@@ -23,13 +23,13 @@ Downgrade drops the column, and every certificate goes back to following
 its event's design.
 
 Revision ID: certificate_design
-Revises: api_webhooks
+Revises: developer_docs_links
 """
 import sqlalchemy as sa
 from alembic import op
 
 revision = "certificate_design"
-down_revision = "api_webhooks"
+down_revision = "developer_docs_links"
 branch_labels = None
 depends_on = None
 
