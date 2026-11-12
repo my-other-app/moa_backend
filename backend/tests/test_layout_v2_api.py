@@ -589,3 +589,20 @@ async def test_issued_registrations_hold_the_snapshot_once_each(session, world, 
         await session.refresh(r)
     assert {r.certificate_design["mode"] for r in rows} == {"layout"}
     assert all(r.certificate_design["layout"] == rows[0].certificate_design["layout"] for r in rows)
+
+
+async def test_a_layer_shown_only_with_the_clubs_logo(client, session, world, store):
+    """showIf may name a picture (logo_src): the page asks whether it is there,
+    so the wiring reads it even when no image layer shows it."""
+    layout = certificate_v2()
+    layout["layers"] = [layer for layer in layout["layers"] if layer["kind"] != "image"]
+    layout["layers"].append(_text("seal", "Sealed by the club", 80, 620, 400, 30, showIf="logo_src"))
+    url = _designs(world, "certificate", "/layout/preview?format=html")
+    without = await client.post(url, json={"layout": layout}, headers=world["club"])
+    assert without.status_code == 200, without.text
+    assert "Sealed by the club" not in without.json()["html"]
+    store["clubs/logo.png"] = _png(40, 40)
+    world["club_row"].logo = "clubs/logo.png"
+    await session.commit()
+    with_logo = await client.post(url, json={"layout": layout}, headers=world["club"])
+    assert "Sealed by the club" in with_logo.json()["html"]

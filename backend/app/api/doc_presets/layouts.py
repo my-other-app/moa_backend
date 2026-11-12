@@ -294,8 +294,31 @@ def picture_refs(layout: dict, style: dict, event, mapped: Mapped, subject) -> d
     from app.api.templates_images import key_of
     from app.api.doc_presets.values import club_logo_key
 
+    from app.core.layout_v2.vocabulary import IMAGE_TOKENS, show_if_names
+
+    def ref(source: str):
+        if source == "org_logo":
+            key = key_of(style, "logo") or club_logo_key(event)
+            return ("key", key) if key else None
+        if source in ("signature_1", "signature_2"):
+            key = key_of(style, source)
+            return ("key", key) if key else None
+        if source == "event_icon":
+            url = poster_url(event)
+            return ("url", url) if url else None
+        if source == "guest_photo":
+            return ("photo", subject)
+        # Sponsor logos: none of our own yet (an upload layer carries one).
+        return None
+
     out: dict = {}
     for layer in _visible(layout):
+        # A layer shown only with a picture (showIf "logo_src", ...): P's
+        # builder asks the context whether that picture is there.
+        for name in show_if_names(layer.get("showIf")):
+            source = IMAGE_TOKENS.get(name.strip().lower())
+            if source and source not in out:
+                out[source] = ref(source)
         if layer.get("kind") != "image":
             continue
         source = layer.get("source") or "upload"
@@ -303,20 +326,8 @@ def picture_refs(layout: dict, style: dict, event, mapped: Mapped, subject) -> d
             key = layer.get("imageKey")
             if key:
                 out[f"upload:{key}"] = ("key", key)
-        elif source == "org_logo":
-            key = key_of(style, "logo") or club_logo_key(event)
-            out[source] = ("key", key) if key else None
-        elif source in ("signature_1", "signature_2"):
-            key = key_of(style, source)
-            out[source] = ("key", key) if key else None
-        elif source == "event_icon":
-            url = poster_url(event)
-            out[source] = ("url", url) if url else None
-        elif source == "guest_photo":
-            out[source] = ("photo", subject)
-        else:
-            # Sponsor logos: none of our own yet (an upload layer carries one).
-            out[source] = None
+        elif source not in out:
+            out[source] = ref(source)
     return out
 
 
