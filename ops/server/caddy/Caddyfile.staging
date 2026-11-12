@@ -21,6 +21,9 @@ import snippets.caddy
 {$MOA_API_HOST:api-staging.myotherapp.in} {
 	import origin_tls
 	import common
+	request_body /api/v1/hooks/mailbox/cloudflare {
+		max_size 26MB
+	}
 	import staging
 	reverse_proxy {$MOA_UPSTREAM_BACKEND:backend:8000} {
 		import upstream

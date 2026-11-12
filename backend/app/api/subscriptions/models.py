@@ -325,7 +325,7 @@ FEATURE_CATALOG: tuple[tuple[str, str], ...] = (
     ("ai_byok", "AI assist with your own AI key"),
     ("mcp", "Connect AI assistants (Claude, ChatGPT) to your club"),
     ("whatsapp_own", "Your own WhatsApp Business number: inbox, templates and quality"),
-    ("mailbox", "A club mailbox: yourclub@mail.myotherapp.in, in the dashboard"),
+    ("mailbox", "A club mailbox: yourclub@myotherapp.in, in the dashboard"),
     ("social_autopost", "Automatic posting to Facebook, Instagram and LinkedIn"),
     ("social_x", "Automatic posting to X (Twitter)"),
 )
@@ -411,7 +411,7 @@ class PlanFeatures(AbstractSQLModel, TimestampsMixin):
     #: inbox, its templates, and its tickets sent from it. Enterprise, from
     #: migration club_whatsapp.
     whatsapp_own = _flag()
-    #: The club's mailbox, <handle>@mail.myotherapp.in (app/api/club_mailbox):
+    #: The club's mailbox, <handle>@myotherapp.in (app/api/club_mailbox):
     #: mail received into the dashboard, answered and sent from it. Pro and
     #: Enterprise, from migration club_mailbox.
     mailbox = _flag()

@@ -586,3 +586,64 @@ async def ses_hook(request: Request, session: SessionDep) -> Response:
     await asyncio.to_thread(providers.discard, received)
     return _answer(200, {"ok": True, "kept": len(outcome.kept), "dropped": outcome.dropped, "duplicate": outcome.duplicate,
                          **({"desk": desk} if desk else {})})
+
+
+# ─── Cloudflare Email Routing's deliveries (the club-mail Worker) ────────
+
+
+@hook_router.post("/cloudflare", summary="A mail Cloudflare Email Routing received for an address on the mailbox domain (the club-mail Worker)")
+async def cloudflare_hook(request: Request, session: SessionDep) -> Response:
+    """The raw MIME, for one envelope recipient, signed by the Worker
+    (club_mailbox/cloudflare.py: the signature is checked from the headers
+    before the body is read). Kept for the club the address is (or for the
+    team's desk: support@ / sales@), and the Worker told what to do.
+
+    Answers: 200 `{"action": "accept"}` (kept, or kept before); 200
+    `{"action": "reject", "reason", "text"}` -- the Worker rejects the mail
+    in the SMTP session with `text` (no such address, a closed mailbox,
+    too large); 401 unsigned, stale or another key's; 400 a body that isn't
+    the signed size; 503 the hook isn't set up (APP_MAILBOX_HOOK_SECRET) or
+    the mail couldn't be kept now: the Worker gives the sender a temporary
+    error, and the mail comes again. Never a mail, an address or the body in
+    the log."""
+    from app.api.club_mailbox import cloudflare
+
+    delivery = cloudflare.Delivery(request.headers)
+    problem = delivery.verify()
+    if problem == "not_set_up":
+        return _answer(503, {"ok": False, "reason": "not_set_up"})
+    if problem is not None:
+        logger.warning("mailbox hook (cloudflare) refused: %s", problem)
+        return _answer(401, {"ok": False, "reason": problem})
+    limit = int(settings.MAILBOX_INBOUND_MAX_MB or 40) * 1024 * 1024
+    if delivery.size > limit:
+        return _answer(200, {"ok": True, "action": "reject", "reason": "too_large", "text": cloudflare.REJECT_TEXT["too_large"]})
+    chunks, got = [], 0
+    async for chunk in request.stream():
+        got += len(chunk)
+        if got > delivery.size:
+            return _answer(400, {"ok": False, "reason": "size"})
+        chunks.append(chunk)
+    raw = b"".join(chunks)
+    if len(raw) != delivery.size:
+        return _answer(400, {"ok": False, "reason": "size"})
+    received = cloudflare.received(delivery, raw)
+    reader = cloudflare.reader_for(raw)
+    try:
+        from app.api.support import inbound as desk_inbound
+
+        desk = await desk_inbound.receive(session, received, reader)
+        outcome = await inbound.receive(session, received, reader=reader)
+    except Exception as exc:  # noqa: BLE001 - never a mail or an address in the log
+        logger.warning("mailbox hook (cloudflare): mail %s failed (%s)", received.provider_message_id[:24], type(exc).__name__)
+        await session.rollback()
+        return _answer(503, {"ok": False, "reason": "retry"})
+    for club_id, thread_id in outcome.kept:
+        await live.changed(club_id, thread_id, "message")
+    action, why = cloudflare.decision(desk, outcome)
+    body: dict = {"ok": True, "action": action, "kept": len(outcome.kept), "duplicate": outcome.duplicate}
+    if why:
+        body.update(reason=why, text=cloudflare.REJECT_TEXT.get(why, cloudflare.REJECT_TEXT["unknown"]))
+    if desk:
+        body["desk"] = desk
+    return _answer(200, body)

@@ -21,6 +21,11 @@ import snippets.caddy
 {$MOA_API_HOST:api.myotherapp.in} {
 	import origin_tls
 	import common
+	# A mail for a club's address, from the club-mail Worker: signed, and at
+	# most Cloudflare Email Routing's 25 MiB (app/api/club_mailbox/cloudflare.py).
+	request_body /api/v1/hooks/mailbox/cloudflare {
+		max_size 26MB
+	}
 	# The live room's stream (text/event-stream) is passed through as it is
 	# written, with no timeout: Caddy flushes event streams by itself, and the
 	# API pings every 15 s, inside Cloudflare's 100 s.

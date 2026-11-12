@@ -1148,12 +1148,21 @@ async def test_no_mail_content_reaches_the_log(client, session, world, aws, capl
 
 def test_the_settings_check_warns_while_the_switch_is_on():
     s = SimpleNamespace(CLUB_MAILBOX=True, MAILBOX_DOMAIN="mail.myotherapp.in", MAILBOX_INBOUND_BUCKET="", MAILBOX_SNS_TOPIC_ARN="",
-                        MAILBOX_RECEIVING_REGION="ap-south-1", MAIL_PROVIDER="ses")
+                        MAILBOX_RECEIVING_REGION="ap-south-1", MAIL_PROVIDER="ses", MAILBOX_HOOK_SECRET="")
     found = config_checks._club_mailbox(s)
-    assert {p.setting for p in found} == {"MAILBOX_INBOUND_BUCKET", "MAILBOX_SNS_TOPIC_ARN"} and not any(p.fatal for p in found)
-    s.MAILBOX_INBOUND_BUCKET, s.MAILBOX_SNS_TOPIC_ARN = BUCKET, "arn:aws:sns:us-east-1:1:x"
+    # No way in at all: the Worker's key is the one named (the default way).
+    assert [p.setting for p in found] == ["MAILBOX_HOOK_SECRET"] and not any(p.fatal for p in found)
+    # SES half set up: what it still lacks.
+    s.MAILBOX_INBOUND_BUCKET = BUCKET
+    assert [p.setting for p in config_checks._club_mailbox(s)] == ["MAILBOX_SNS_TOPIC_ARN"]
+    s.MAILBOX_SNS_TOPIC_ARN = "arn:aws:sns:us-east-1:1:x"
     assert [p.setting for p in config_checks._club_mailbox(s)] == ["MAILBOX_SNS_TOPIC_ARN"]
     s.MAILBOX_SNS_TOPIC_ARN = TOPIC
+    assert config_checks._club_mailbox(s) == []
+    # The Worker's way alone: a long enough key is all it needs.
+    s.MAILBOX_INBOUND_BUCKET, s.MAILBOX_SNS_TOPIC_ARN, s.MAILBOX_HOOK_SECRET = "", "", "short"
+    assert [p.setting for p in config_checks._club_mailbox(s)] == ["MAILBOX_HOOK_SECRET"]
+    s.MAILBOX_HOOK_SECRET = "a" * 64
     assert config_checks._club_mailbox(s) == []
     s.CLUB_MAILBOX = False
     s.MAILBOX_INBOUND_BUCKET = ""

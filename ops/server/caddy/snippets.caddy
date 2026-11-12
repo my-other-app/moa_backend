@@ -36,8 +36,11 @@
 		Strict-Transport-Security "max-age=63072000"
 	}
 	# What nginx allowed the API (client_max_body_size 10M); the dashboards'
-	# uploads go through their gateway to the same API.
-	request_body {
+	# uploads go through their gateway to the same API. Not the club-mail
+	# Worker's deliveries: a mail is up to Cloudflare Email Routing's 25 MiB
+	# (the API site's own limit for that path, Caddyfile).
+	@not_mail_hook not path /api/v1/hooks/mailbox/cloudflare
+	request_body @not_mail_hook {
 		max_size 10MB
 	}
 }

@@ -302,7 +302,7 @@ async def test_an_unlimited_plan_never_touches_its_credits(session, world):
 
 
 async def test_the_mailbox_contract(session, world):
-    """The club mailbox (yourclub@mail.myotherapp.in) checks before each
+    """The club mailbox (yourclub@myotherapp.in) checks before each
     mail and counts it once sent: `held_back`/`check` and `record_message`
     keep their names and signatures, "mailbox" is a non-essential kind, and
     `credits.remaining` says what is left."""
