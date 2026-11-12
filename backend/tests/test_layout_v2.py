@@ -50,6 +50,24 @@ def codes(problems, level=None) -> set[str]:
 # ─── Schema ──────────────────────────────────────────────────────────────────
 
 
+async def test_render_goes_through_the_render_service(session, monkeypatch):
+    # `session`: an async test that opens no database first in a run sets the
+    # suite's loop up apart from the session's engine, and every database test
+    # after it fails (tests/conftest.py, tests/test_cohost_routes.py).
+    seen = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(request.read().decode("utf-8", "replace"))
+        return httpx.Response(200, content=b"%PDF-1.7\n")
+
+    monkeypatch.setattr(drender, "_transport", httpx.MockTransport(answer))
+    layout = v2.starter("badge/06-thermal-mono")
+    assert await v2.render_pdf(layout, {"first_name": "Meera"}, {"qr": "TK-1"}, kind="badge") == b"%PDF-1.7\n"
+    assert re.search(r'name="paperWidth"\r\n\r\n101.6mm\r\n', seen[0])
+    await v2.render_pages([(layout, {"first_name": f"P{i}"}, {"qr": "TK"}) for i in range(3)], kind="badge")
+    assert seen[1].count('<div class="moa-page"') == 3 and seen[1].count('<div class="moa-doc"') == 3
+
+
 def test_a_layout_parses_and_dumps_camel_case():
     layout = v2.parse(lay([text(letterSpacing=0.1, maxLines=2, showIf="first_name last_name"), QR],
                           vars={"accent": "#ff8a3d"}))
@@ -288,21 +306,6 @@ def test_the_fingerprint_moves_with_everything_drawn():
     assert base != v2.fingerprint(layout, {"first_name": "A"}, {"qr": "2"})
     assert base != v2.fingerprint(layout, {"first_name": "A"}, {"qr": "1", "images": {"org_logo": PNG}})
     assert base != v2.fingerprint(lay([text(size=17), QR]), {"first_name": "A"}, {"qr": "1"})
-
-
-async def test_render_goes_through_the_render_service(monkeypatch):
-    seen = []
-
-    def answer(request: httpx.Request) -> httpx.Response:
-        seen.append(request.read().decode("utf-8", "replace"))
-        return httpx.Response(200, content=b"%PDF-1.7\n")
-
-    monkeypatch.setattr(drender, "_transport", httpx.MockTransport(answer))
-    layout = v2.starter("badge/06-thermal-mono")
-    assert await v2.render_pdf(layout, {"first_name": "Meera"}, {"qr": "TK-1"}, kind="badge") == b"%PDF-1.7\n"
-    assert re.search(r'name="paperWidth"\r\n\r\n101.6mm\r\n', seen[0])
-    await v2.render_pages([(layout, {"first_name": f"P{i}"}, {"qr": "TK"}) for i in range(3)], kind="badge")
-    assert seen[1].count('<div class="moa-page"') == 3 and seen[1].count('<div class="moa-doc"') == 3
 
 
 # ─── The conformance fixtures ────────────────────────────────────────────────
@@ -559,3 +562,14 @@ def test_the_token_catalogue_gains_the_designs_tokens():
     assert vocabulary.fill("{{role}}", {"role": "SPEAKER", "ticket_type": "VIP"}, "ticket") == "VIP"
     every = {t for kind in ("ticket", "certificate", "badge") for d in dd.catalogue(kind) for t in d.tokens}
     assert every - {"accent_color", "qr_code_src", "qr_code_url"} - set(vocabulary.IMAGE_TOKENS) <= keys
+
+
+def test_a_v1_canvas_saved_twice_is_not_taken_for_v2():
+    """v1 counted saves in `version`: its second save says 2 too."""
+    from app.core.layout_v2.schema import is_v2
+
+    v1 = {"version": 2, "canvas": {"width": 638, "height": 1011, "background": "#ffffff"}, "layers": [], "page": {"widthMm": 54, "heightMm": 85.6}}
+    assert is_v2(v1) is False
+    v2 = {"version": 2, "canvas": {"width": 384, "height": 576, "background": None}, "vars": {"accent": "#FF8A3D"}, "layers": []}
+    assert is_v2(v2) is True
+    assert is_v2({**v2, "vars": None, "canvas": {"width": 384, "height": 576, "background": {"type": "solid", "color": "#FFFFFF"}}}) is True
