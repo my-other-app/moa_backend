@@ -1,0 +1,14 @@
+{%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
+{%- macro n(v) -%}{%- if v is number -%}{{ ('[' ~ '{:,}'.format(v) ~ ']') if sample else '{:,}'.format(v) }}{%- else -%}{{ v }}{%- endif -%}{%- endmacro -%}
+{%- macro iso(v) -%}{{ (v if v is string else v.isoformat()) if v else '' }}{%- endmacro -%}
+{%- set t = section.title if (section is defined and section.title) else 'About' -%}
+{%- set paras = (club.about or '').split('\n')|map('trim')|select|list -%}
+{%- set soc = [] -%}
+{%- for s in socials or [] -%}{%- set item = {'kind': (s.kind if s is mapping else (s[0]|lower)), 'label': (s.label if s is mapping else s[0]), 'href': (s.href if s is mapping else s[1])} -%}{%- if item.kind != 'website' -%}{%- set _ = soc.append(item) -%}{%- endif -%}{%- endfor -%}
+{%- if paras or soc -%}
+<section id="about" class="pt-card" style="background: #FFFFFF; border: 1px solid #D5D9DE; border-radius: 16px; padding: 22px; display: flex; flex-direction: column; gap: 10px">
+<h2 style="margin: 0; font-weight: 700; font-size: 18px">{{ t }}</h2>
+{% for p in paras %}<p style="margin: 0; color: #3B4149">{{ p }}</p>
+{% endfor %}{% if soc %}<div style="display: flex; flex-wrap: wrap; gap: 0 16px; font-weight: 600">{% for s in soc %}<a href="{{ u(s.href) }}" target="_top" style="padding: 10px 0">{{ s.label }}</a>{% endfor %}</div>
+{% endif %}</section>
+{%- endif -%}

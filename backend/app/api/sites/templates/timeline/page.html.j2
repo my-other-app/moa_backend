@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ page.title if (page is defined and page.title) else club.name }}</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&display=swap">
+<style>{{ css }}</style>
+{{ head_extra }}
+</head>
+<body>
+<div style="font-family: Manrope, system-ui, sans-serif; color: #10201F; background: #F7F9F9; font-size: 16px; line-height: 1.55">
+
+{% include "sections/nav.html.j2" %}
+
+{% include "sections/hero.html.j2" %}
+
+{{ sections_html }}
+
+{% include "sections/footer.html.j2" %}
+</div>
+{{ body_end }}
+</body>
+</html>

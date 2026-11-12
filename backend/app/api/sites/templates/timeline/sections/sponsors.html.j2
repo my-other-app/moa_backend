@@ -1,0 +1,16 @@
+{%- macro isrc(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'file://' or l[:11]|lower == 'data:image/') else '' }}{%- endmacro -%}
+{%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
+{%- macro n(v) -%}{%- if v is number -%}{{ ('[' ~ '{:,}'.format(v) ~ ']') if sample else '{:,}'.format(v) }}{%- else -%}{{ v }}{%- endif -%}{%- endmacro -%}
+{%- macro iso(v) -%}{{ (v if v is string else v.isoformat()) if v else '' }}{%- endmacro -%}
+{%- set t = section.title if (section is defined and section.title) else 'Sponsors and partners' -%}
+{%- set main = [] -%}{%- set others = [] -%}
+{%- for p in sponsors or [] -%}{%- set _ = (main if ((p.kind == 'sponsor') if p.kind else ('sponsor' in (p.role or '')|lower)) else others).append(p) -%}{%- endfor -%}
+{%- if main or others -%}
+<section id="sponsors" class="tl-sec" style="max-width: 1200px; margin: 0 auto; padding: 72px 24px; display: flex; flex-direction: column; gap: 24px">
+<h2 style="margin: 0; font-weight: 800; font-size: clamp(28px, 3.4vw, 40px); letter-spacing: -0.03em">{{ t }}</h2>
+{% if main %}<div class="tl-spons" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 14px">
+{% for p in main %}{% set lg = p.logo.url if p.logo is mapping else p.logo %}<div style="min-height: 104px; background: #FFFFFF; border: 1px solid #CBD6D5; border-radius: 16px; display: flex; align-items: center; justify-content: center; color: #4F6160; font-size: 15px">{% if lg %}<img class="tl-logo" src="{{ isrc(lg) }}" width="180" height="60" alt="{{ p.name }}" loading="lazy" decoding="async">{% else %}{{ p.name }}{% endif %}</div>
+{% endfor %}</div>
+{% endif %}{% if others %}<p style="margin: 0; color: #3A4D4C"><strong>Partners:</strong> {{ others|map(attribute='name')|join(' · ') }}</p>
+{% endif %}</section>
+{%- endif -%}

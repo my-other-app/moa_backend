@@ -1,0 +1,12 @@
+{%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
+{%- macro n(v) -%}{%- if v is number -%}{{ ('[' ~ '{:,}'.format(v) ~ ']') if sample else '{:,}'.format(v) }}{%- else -%}{{ v }}{%- endif -%}{%- endmacro -%}
+{%- macro iso(v) -%}{{ (v if v is string else v.isoformat()) if v else '' }}{%- endmacro -%}
+{%- set has_members = stats.members is defined and stats.members is not none -%}
+{%- set nums = [(stats.members if has_members else stats.followers, 'members' if has_members else 'followers'), (stats.events_held, 'events hosted'), (stats.speakers, 'speakers on stage'), (stats.sponsors, 'sponsors + partners')]|selectattr(0)|list -%}
+{%- if nums -%}
+<section id="stats" class="zn-blue" style="background: #1B2A9E; color: #FFFFFF; padding: 36px 0">
+<div class="zn-stats" style="max-width: 1240px; margin: 0 auto; padding: 0 24px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); gap: 24px">
+{% for v, label in nums %}<div><div style="font-family: Unbounded, system-ui, sans-serif; font-weight: 900; font-size: 40px; line-height: 1.1; color: var(--accent)">{{ n(v) }}</div><div style="font-weight: 700">{{ label }}</div></div>
+{% endfor %}</div>
+</section>
+{%- endif -%}

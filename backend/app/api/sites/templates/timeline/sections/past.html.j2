@@ -1,0 +1,21 @@
+{%- macro isrc(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'file://' or l[:11]|lower == 'data:image/') else '' }}{%- endmacro -%}
+{%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
+{%- macro n(v) -%}{%- if v is number -%}{{ ('[' ~ '{:,}'.format(v) ~ ']') if sample else '{:,}'.format(v) }}{%- else -%}{{ v }}{%- endif -%}{%- endmacro -%}
+{%- macro iso(v) -%}{{ (v if v is string else v.isoformat()) if v else '' }}{%- endmacro -%}
+{%- set t = section.title if (section is defined and section.title) else 'Past events' -%}
+{%- set MON = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'] -%}
+{%- set earlier = (stats.events_held - past|length) if stats.events_held is number else 0 -%}
+{%- if past -%}
+<section id="past" class="tl-past tl-sec" style="max-width: 980px; margin: 0 auto; padding: 80px 24px">
+<div class="tl-past-head" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 32px">
+<h2 style="margin: 0; font-weight: 800; font-size: clamp(34px, 4.6vw, 56px); line-height: 1.05; letter-spacing: -0.035em">{{ t }}</h2>
+</div>
+<div class="tl-today" style="display: flex; align-items: center; gap: 14px; margin: 0 0 0 54px; padding: 4px 0 4px 0"><span style="padding: 6px 14px; border-radius: 999px; background: #10201F; color: #FFFFFF; font-weight: 800; font-size: 12px; letter-spacing: 0.1em">TODAY</span><span style="flex: 1; border-top: 2px dashed #9FB3B1"></span><span style="font-size: 14px; font-weight: 700; color: #4F6160">Past events below</span></div>
+{% for e in past %}{% set s = iso(e.starts_at) %}{% set p = e.poster %}{% set facts = ([e.kind] + (e.facts or [(n(e.going) ~ ' attended') if e.going else none, ((e.speakers_count ~ (' speaker' if e.speakers_count == 1 else ' speakers')) if e.speakers_count else none)]))|select|list %}
+<div style="display: flex"><div class="tl-date" style="flex: 0 0 96px; padding-top: 30px; font-weight: 800; font-size: 13px; letter-spacing: 0.08em; color: #4F6160">{{ e.day or (s[8:10]|int) }} {{ (e.month or MON[(s[5:7]|int) - 1])|upper }}<br>{{ e.year or s[0:4] }}</div>
+<div class="tl-line" style="flex: 1; min-width: 0; border-left: 2px solid #9FB3B1; padding: 28px 0 {{ '28px' if loop.last else '0' }} 28px; position: relative"><span style="position: absolute; left: -9px; top: 32px; width: 16px; height: 16px; border-radius: 999px; background: #F7F9F9; border: 3px solid #4F6160; box-sizing: border-box"></span>
+<article style="display: flex; flex-wrap: wrap; gap: 16px; align-items: center">{% if p and p.url %}<img class="tl-thumb tl-img" src="{{ isrc(p.url) }}"{% if p.srcset %} srcset="{{ p.srcset }}" sizes="120px"{% endif %} width="120" height="84" alt="{{ p.alt or e.name }}" loading="lazy" decoding="async" style="flex: 0 0 120px; width: 120px; height: 84px; border-radius: 12px">{% elif p and p.placeholder is defined %}<div class="tl-thumb" style="flex: 0 0 120px; height: 84px; border-radius: 12px; background: repeating-linear-gradient(135deg, #DDECEB 0 10px, #E8F2F1 10px 20px)"></div>{% else %}<div class="tl-thumb" style="flex: 0 0 120px; height: 84px; border-radius: 12px; background: var(--accent-soft)"></div>{% endif %}<div style="flex: 1 1 260px; min-width: 0"><h3 style="margin: 0; font-weight: 700; font-size: 19px; line-height: 1.25">{{ e.name }}</h3><span style="color: #4F6160; font-size: 15px">{% for f in facts %}{{ f }} · {% endfor %}<a href="{{ u(e.url) }}" target="_top">Recap</a></span></div></article></div></div>
+{% endfor %}
+{% if links.events_url %}<a class="tl-more" href="{{ u(links.events_url) }}" target="_top" style="display: inline-block; margin: 16px 0 0 96px; font-weight: 700; padding: 12px 0">{% if earlier > 0 %}Load {{ n(earlier) }} earlier events ↓{% else %}All past events →{% endif %}</a>
+{% endif %}</section>
+{%- endif -%}

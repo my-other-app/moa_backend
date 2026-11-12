@@ -1,0 +1,18 @@
+{%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
+{%- macro n(v) -%}{%- if v is number -%}{{ ('[' ~ '{:,}'.format(v) ~ ']') if sample else '{:,}'.format(v) }}{%- else -%}{{ v }}{%- endif -%}{%- endmacro -%}
+{%- macro iso(v) -%}{{ (v if v is string else v.isoformat()) if v else '' }}{%- endmacro -%}
+{%- set t = section.title if (section is defined and section.title) else 'Past events' -%}
+{%- set MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] -%}
+{%- if past -%}
+<section id="past" class="pt-card" style="background: #FFFFFF; border: 1px solid #D5D9DE; border-radius: 16px; padding: 22px; display: flex; flex-direction: column; gap: 4px">
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 4px"><h2 style="margin: 0; font-weight: 700; font-size: 18px">{{ t }}{% if stats.events_held %} <span style="color: #565D66; font-weight: 500">{{ n(stats.events_held) }}</span>{% endif %}</h2>{% if links.events_url %}<a href="{{ u(links.events_url) }}" target="_top" style="font-weight: 600; padding: 10px 0">See all</a>{% endif %}</div>
+<div style="overflow-x: auto">
+<table class="pt-table" style="width: 100%; min-width: 560px; border-collapse: collapse; font-size: 14px; text-align: left">
+<thead><tr style="color: #565D66"><th style="padding: 10px 8px; font-weight: 600; border-bottom: 1px solid #D5D9DE">Date</th><th style="padding: 10px 8px; font-weight: 600; border-bottom: 1px solid #D5D9DE">Event</th><th style="padding: 10px 8px; font-weight: 600; border-bottom: 1px solid #D5D9DE">Type</th><th style="padding: 10px 8px; font-weight: 600; border-bottom: 1px solid #D5D9DE; text-align: right">Attended</th><th style="padding: 10px 8px; font-weight: 600; border-bottom: 1px solid #D5D9DE; text-align: right">Speakers</th></tr></thead>
+<tbody>
+{% for e in past %}{% set s = iso(e.starts_at) %}{% set b = '' if loop.last else ' border-bottom: 1px solid #E4E7EA;' %}<tr><td style="padding: 14px 8px;{{ b }} white-space: nowrap">{{ e.day or (s[8:10]|int) }} {{ e.month or MON[(s[5:7]|int) - 1] }} {{ e.year or s[0:4] }}</td><td style="padding: 14px 8px;{{ b }} font-weight: 600"><a href="{{ u(e.url) }}" target="_top" style="color: #1A1D21">{{ e.name }}</a></td><td style="padding: 14px 8px;{{ b }}">{{ e.kind or '' }}</td><td style="padding: 14px 8px;{{ b }} text-align: right">{{ n(e.going) if e.going else '' }}</td><td style="padding: 14px 8px;{{ b }} text-align: right">{{ e.speakers_count or '' }}</td></tr>
+{% endfor %}</tbody>
+</table>
+</div>
+</section>
+{%- endif -%}

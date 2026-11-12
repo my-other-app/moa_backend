@@ -1,0 +1,19 @@
+{%- macro isrc(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'file://' or l[:11]|lower == 'data:image/') else '' }}{%- endmacro -%}
+{%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
+{%- macro n(v) -%}{%- if v is number -%}{{ ('[' ~ '{:,}'.format(v) ~ ']') if sample else '{:,}'.format(v) }}{%- else -%}{{ v }}{%- endif -%}{%- endmacro -%}
+{%- macro iso(v) -%}{{ (v if v is string else v.isoformat()) if v else '' }}{%- endmacro -%}
+{%- set t = section.title if (section is defined and section.title) else 'Voices from our stage' -%}
+{%- set shown = (speakers or [])[:4] -%}
+{%- set names = (speakers or [])[4:]|map(attribute='name')|list -%}
+{%- set others = (stats.speakers - (speakers or [])|length) if stats.speakers is number else 0 -%}
+{%- if shown -%}
+<section id="speakers" class="gl-sec" style="max-width: 1200px; margin: 0 auto; padding: 88px 24px; display: flex; flex-direction: column; align-items: center; gap: 14px">
+<div style="font-size: 14px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--accent)">Previous speakers</div>
+<h2 style="margin: 0 0 20px; font-family: 'Cormorant Garamond', Georgia, serif; font-weight: 500; font-size: clamp(36px, 5vw, 60px); line-height: 1.05">{{ t }}</h2>
+<div class="gl-spk" style="align-self: stretch; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 32px">
+{% for s in shown %}{% set ph = s.photo.url if s.photo is mapping else s.photo %}{% set role = [s.title, s.org]|select|join(', ') %}<article style="display: flex; flex-direction: column; align-items: center; gap: 6px">{% if ph %}<img class="gl-img" src="{{ isrc(ph) }}"{% if s.photo is mapping and s.photo.srcset %} srcset="{{ s.photo.srcset }}" sizes="(min-width: 1200px) 264px, (min-width: 640px) 45vw, calc(100vw - 48px)"{% endif %} width="300" height="400" alt="{{ s.name }}" loading="lazy" decoding="async" style="align-self: stretch; aspect-ratio: 3 / 4; height: auto; border-radius: 400px 400px 0 0; margin-bottom: 10px">{% elif s.photo and s.photo.placeholder is defined %}<div style="align-self: stretch; aspect-ratio: 3 / 4; border-radius: 400px 400px 0 0; background: repeating-linear-gradient(135deg, #143329 0 14px, #193B30 14px 28px); margin-bottom: 10px"></div>{% else %}<div style="align-self: stretch; aspect-ratio: 3 / 4; border-radius: 400px 400px 0 0; background: #143329; margin-bottom: 10px; display: flex; align-items: center; justify-content: center; font-family: 'Cormorant Garamond', Georgia, serif; font-size: 64px; color: var(--accent)">{% for w in (s.name or '').split()[:2] %}{{ w[:1]|upper }}{% endfor %}</div>{% endif %}<h3 style="margin: 0; font-family: 'Cormorant Garamond', Georgia, serif; font-weight: 500; font-size: 28px">{{ s.name }}</h3>{% if role %}<span style="font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent)">{{ role }}</span>{% endif %}{% if s.talk %}<span style="color: #D5DCCF; font-style: italic">{{ s.talk }}</span>{% endif %}</article>
+{% endfor %}</div>
+{% if names or others > 0 %}<p style="margin: 24px 0 0; max-width: 760px; font-family: 'Cormorant Garamond', Georgia, serif; font-style: italic; font-size: 24px; line-height: 1.4">{% if names and others > 0 %}With {{ names|join(', ') }} and {{ n(others) }} others.{% elif names %}With {{ (names[:-1]|join(', ') ~ ' and ' ~ names[-1]) if names|length > 1 else names[0] }}.{% else %}And {{ n(others) }} more.{% endif %}</p>
+{% endif %}{% if links.speakers_url %}<a href="{{ u(links.speakers_url) }}" target="_top" style="font-size: 14px; letter-spacing: 0.14em; text-transform: uppercase; padding: 14px 0">All previous speakers →</a>
+{% endif %}</section>
+{%- endif -%}
