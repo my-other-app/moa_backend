@@ -1,0 +1,16 @@
+{%- macro isrc(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'file://' or l[:11]|lower == 'data:image/') else '' }}{%- endmacro -%}
+{%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
+{%- macro n(v) -%}{%- if v is number -%}{{ ('[' ~ '{:,}'.format(v) ~ ']') if sample else '{:,}'.format(v) }}{%- else -%}{{ v }}{%- endif -%}{%- endmacro -%}
+{%- macro iso(v) -%}{{ (v if v is string else v.isoformat()) if v else '' }}{%- endmacro -%}
+{%- set t = section.title if (section is defined and section.title) else 'The humans' -%}
+{%- set TILT = ['-2deg', '1.5deg', '-1deg', '2deg', '-1.5deg', '1deg'] -%}
+{%- if team -%}
+<section id="team" class="zn-white zn-sec" style="background: #FFFFFF; padding: 88px 0">
+<div style="max-width: 1240px; margin: 0 auto; padding: 0 24px; display: flex; flex-direction: column; gap: 32px">
+<h2 style="margin: 0; font-family: Unbounded, system-ui, sans-serif; font-weight: 900; font-size: clamp(36px, 6vw, 80px); line-height: 1; letter-spacing: -0.03em; overflow-wrap: break-word">{{ t }}</h2>
+<div class="zn-team" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr)); gap: 24px">
+{% for m in team %}{% set ph = m.photo.url if m.photo is mapping else m.photo %}{% set ss = m.photo.srcset if m.photo is mapping else m.photo_srcset %}<div style="display: flex; flex-direction: column; gap: 4px; min-width: 0">{% if ph %}<img class="zn-img" src="{{ isrc(ph) }}"{% if ss %} srcset="{{ ss }}" sizes="(min-width: 1240px) 177px, (min-width: 640px) 30vw, calc(50vw - 40px)"{% endif %} width="354" height="354" alt="{{ m.name }}" loading="lazy" decoding="async" style="aspect-ratio: 1 / 1; height: auto; border-radius: 24px; margin-bottom: 8px; transform: rotate({{ TILT[loop.index0 % 6] }})">{% elif m.photo and m.photo.placeholder is defined %}<div style="aspect-ratio: 1 / 1; border-radius: 24px; background: repeating-linear-gradient(135deg, #D9DCF2 0 14px, #E6E8F7 14px 28px); margin-bottom: 8px; transform: rotate({{ TILT[loop.index0 % 6] }})"></div>{% else %}<div style="aspect-ratio: 1 / 1; border-radius: 24px; background: #E6E8F7; margin-bottom: 8px; transform: rotate({{ TILT[loop.index0 % 6] }}); display: flex; align-items: center; justify-content: center; font-family: Unbounded, system-ui, sans-serif; font-weight: 900; font-size: 40px">{% for w in (m.name or '').split()[:2] %}{{ w[:1]|upper }}{% endfor %}</div>{% endif %}<span style="font-weight: 700; font-size: 18px">{{ m.name }}</span>{% if m.role %}<span style="font-size: 15px">{{ m.role }}</span>{% endif %}</div>
+{% endfor %}</div>
+</div>
+</section>
+{%- endif -%}

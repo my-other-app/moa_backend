@@ -1,0 +1,27 @@
+{%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
+{%- macro n(v) -%}{%- if v is number -%}{{ ('[' ~ '{:,}'.format(v) ~ ']') if sample else '{:,}'.format(v) }}{%- else -%}{{ v }}{%- endif -%}{%- endmacro -%}
+{%- macro host(h, label) -%}{%- set l = (h or '')|string -%}{{ (l.split('//')[1].split('/')[0]|replace('www.', '')) if l[:8]|lower == 'https://' else (label or l) }}{%- endmacro -%}
+{%- set keys = (nav|map(attribute='key')|list) if (nav is defined and nav) else (section_keys or []) -%}
+{%- set overrides = site.title_overrides or {} -%}
+{%- set cover = images['hero.cover'] -%}
+{%- set logo = club.logo if (club.logo and club.logo.url) else ({'url': club.logo_url, 'srcset': club.logo_srcset} if club.logo_url else none) -%}
+{%- set lead = site.subline or club.tagline or subline -%}
+{%- set platform_url = links.platform_url or 'https://myotherapp.in' -%}
+{%- set soc = [] -%}{%- set web = [] -%}
+{%- for s in socials or [] -%}{%- set item = {'kind': (s.kind if s is mapping else (s[0]|lower)), 'label': (s.label if s is mapping else s[0]), 'href': (s.href if s is mapping else s[1])} -%}{%- set _ = (web if item.kind == 'website' else soc).append(item) -%}{%- endfor -%}
+{%- if club.website and club.website.href -%}{%- set _ = web.insert(0, {'kind': 'website', 'label': club.website.label, 'href': club.website.href}) -%}{%- endif -%}
+{%- set has_members = stats.members is defined and stats.members is not none -%}
+{%- set people = stats.members if has_members else stats.followers -%}
+{%- set nums = [(people, 'Members' if has_members else 'Followers'), (stats.events_held, 'Events hosted'), (stats.speakers, 'Speakers'), (stats.sponsors, 'Sponsors, partners')]|selectattr(0)|list -%}
+{%- set topics = [] -%}{%- for x in club.topics or [] -%}{%- set _ = topics.append(x.name if x is mapping else x) -%}{%- endfor -%}
+{%- set main_sp = [] -%}{%- set partners = [] -%}
+{%- for p in sponsors or [] -%}{%- set _ = (main_sp if ((p.kind == 'sponsor') if p.kind else ('sponsor' in (p.role or '')|lower)) else partners).append(p) -%}{%- endfor -%}
+{%- set events_total = (stats.events_held + (stats.upcoming or 0)) if (stats.events_held is number and (stats.upcoming is number or not stats.upcoming)) else stats.events_held -%}
+{%- set events_key = 'upcoming' if 'upcoming' in keys else ('past' if 'past' in keys else none) -%}
+<header style="background: #FFFFFF; border-bottom: 1px solid #D5D9DE">
+<div class="pt-head" style="max-width: 1240px; margin: 0 auto; padding: 8px 20px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px">
+<a href="{{ u(platform_url) }}" target="_top" style="display: flex; align-items: center; gap: 10px; min-height: 44px; color: #1A1D21; text-decoration: none; font-weight: 700"><span style="width: 28px; height: 28px; border-radius: 8px; background: var(--accent); flex: none"></span>{{ links.platform_name or 'MyOtherApp' }}</a>
+<div role="search" class="pt-searchbox" style="flex: 1 1 260px; max-width: 420px; display: flex"><a class="pt-search" href="{{ u(links.search_url or platform_url) }}" target="_top" style="flex: 1; min-height: 44px; padding: 0 14px; border-radius: 10px; border: 1px solid #D5D9DE; background: #F6F7F8; font: 400 15px 'Plus Jakarta Sans', system-ui, sans-serif; box-sizing: border-box; display: flex; align-items: center">Search communities, events, speakers</a></div>
+<div style="display: flex; align-items: center; gap: 4px"><a href="{{ u(platform_url) }}" target="_top" style="padding: 12px; color: #1A1D21; text-decoration: none; font-weight: 600">Explore</a>{% if links.signin_url or links.follow_url %}<a href="{{ u(links.signin_url or links.follow_url) }}" target="_top" style="padding: 12px; color: #1A1D21; text-decoration: none; font-weight: 600">Sign in</a>{% endif %}</div>
+</div>
+</header>

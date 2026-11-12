@@ -1,0 +1,135 @@
+{
+  "key": "timeline",
+  "name": "Timeline",
+  "blurb": "Every event on one vertical line, today in the middle",
+  "fonts": [
+    "Manrope:wght@400;500;700;800"
+  ],
+  "layout": "single",
+  "fixed_top": [
+    "nav",
+    "hero"
+  ],
+  "fixed_side": [],
+  "fixed_bottom": [
+    "footer"
+  ],
+  "sections": [
+    {
+      "key": "stats",
+      "label": "Numbers",
+      "default_title": "In numbers",
+      "hideable": true
+    },
+    {
+      "key": "about",
+      "label": "About and expertise",
+      "default_title": "How it started",
+      "hideable": true
+    },
+    {
+      "key": "upcoming",
+      "label": "Timeline: upcoming events",
+      "default_title": "Events, on one line",
+      "hideable": true
+    },
+    {
+      "key": "past",
+      "label": "Timeline: past events",
+      "default_title": "Past events",
+      "hideable": true
+    },
+    {
+      "key": "photos",
+      "label": "Photos",
+      "default_title": "Highlights",
+      "hideable": true
+    },
+    {
+      "key": "speakers",
+      "label": "Speakers",
+      "default_title": "Previous speakers",
+      "hideable": true
+    },
+    {
+      "key": "team",
+      "label": "Team",
+      "default_title": "Team members",
+      "hideable": true
+    },
+    {
+      "key": "sponsors",
+      "label": "Sponsors and partners",
+      "default_title": "Sponsors and partners",
+      "hideable": true
+    },
+    {
+      "key": "join",
+      "label": "Join banner",
+      "default_title": "Be on the next line of the timeline.",
+      "hideable": true
+    }
+  ],
+  "slots": [
+    {
+      "key": "hero.cover",
+      "label": "Cover photo",
+      "size": [
+        556,
+        440
+      ],
+      "section": "hero"
+    },
+    {
+      "key": "photos.1",
+      "label": "Photo 1",
+      "size": [
+        278,
+        208
+      ],
+      "section": "photos"
+    },
+    {
+      "key": "photos.2",
+      "label": "Photo 2",
+      "size": [
+        278,
+        208
+      ],
+      "section": "photos"
+    },
+    {
+      "key": "photos.3",
+      "label": "Photo 3",
+      "size": [
+        278,
+        208
+      ],
+      "section": "photos"
+    },
+    {
+      "key": "photos.4",
+      "label": "Photo 4",
+      "size": [
+        278,
+        208
+      ],
+      "section": "photos"
+    },
+    {
+      "key": "event.fallback",
+      "label": "Event banner (events without a poster)",
+      "size": [
+        280,
+        240
+      ],
+      "section": "upcoming"
+    }
+  ],
+  "accent": {
+    "default": "#0E7C7B",
+    "vars": [
+      "--accent"
+    ]
+  }
+}

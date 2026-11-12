@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ page.title if (page is defined and page.title) else club.name }}</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter+Tight:wght@400;500;600&display=swap">
+<style>{{ css }}</style>
+{{ head_extra }}
+</head>
+<body>
+<div style="font-family: 'Inter Tight', system-ui, sans-serif; color: #0A0A0A; background: #FFFFFF; font-size: 16px; line-height: 1.5">
+<div class="sw-wrap" style="max-width: 1320px; margin: 0 auto; padding: 0 32px">
+
+{% include "sections/nav.html.j2" %}
+
+{% include "sections/hero.html.j2" %}
+
+{{ sections_html }}
+
+{% include "sections/footer.html.j2" %}
+
+</div>
+</div>
+{{ body_end }}
+</body>
+</html>

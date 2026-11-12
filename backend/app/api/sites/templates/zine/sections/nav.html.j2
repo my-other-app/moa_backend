@@ -1,0 +1,21 @@
+{%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
+{%- macro host(h, label) -%}{%- set l = (h or '')|string -%}{{ (l.split('//')[1].split('/')[0]|replace('www.', '')) if l[:8]|lower == 'https://' else (label or l) }}{%- endmacro -%}
+{%- set keys = (nav|map(attribute='key')|list) if (nav is defined and nav) else (section_keys or []) -%}
+{%- set overrides = site.title_overrides or {} -%}
+{%- set nav_labels = {'about': 'about', 'upcoming': 'next', 'past': 'before', 'photos': 'photos', 'speakers': 'speakers', 'team': 'team', 'sponsors': 'friends'} -%}
+{%- set items = keys|select('in', nav_labels)|list -%}
+{%- set cover = images['hero.cover'] -%}
+{%- set lead = site.subline or club.tagline or subline -%}
+{%- set join_href = '#join' if 'join' in keys else u(links.join_url) -%}
+{%- set mark = (club.name.split()|map('first')|join|upper)[:4] ~ '*' -%}
+{%- set soc = [] -%}{%- set web = [] -%}
+{%- for s in socials or [] -%}{%- set item = {'kind': (s.kind if s is mapping else (s[0]|lower)), 'label': (s.label if s is mapping else s[0]), 'href': (s.href if s is mapping else s[1])} -%}{%- set _ = (web if item.kind == 'website' else soc).append(item) -%}{%- endfor -%}
+{%- if club.website and club.website.href -%}{%- set _ = web.insert(0, {'kind': 'website', 'label': club.website.label, 'href': club.website.href}) -%}{%- endif -%}
+{%- set links_row = web[:1] + soc -%}
+<header style="max-width: 1240px; margin: 0 auto; padding: 14px 24px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px">
+<a href="#top" style="font-family: Unbounded, system-ui, sans-serif; font-weight: 900; font-size: 18px; text-decoration: none; padding: 10px 0">{{ mark }}</a>
+<nav aria-label="Sections" style="display: flex; flex-wrap: wrap; gap: 2px; font-weight: 700; font-size: 15px">
+{% for k in items %}<a href="#{{ k }}" style="padding: 12px; text-decoration: none">{{ overrides[k] or nav_labels[k] }}</a>
+{% endfor %}</nav>
+{% if links.join_url %}<a href="{{ join_href }}"{% if 'join' not in keys %} target="_top"{% endif %} style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 20px; border-radius: 999px; background: #1B2A9E; color: #FFFFFF; text-decoration: none; font-weight: 700">join in</a>{% endif %}
+</header>

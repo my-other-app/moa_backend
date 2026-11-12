@@ -1,0 +1,29 @@
+{%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
+{%- macro n(v) -%}{%- if v is number -%}{{ ('[' ~ '{:,}'.format(v) ~ ']') if sample else '{:,}'.format(v) }}{%- else -%}{{ v }}{%- endif -%}{%- endmacro -%}
+{%- macro iso(v) -%}{{ (v if v is string else v.isoformat()) if v else '' }}{%- endmacro -%}
+{%- set t = section.title if (section is defined and section.title) else 'How it started' -%}
+{%- set paras = (club.about or '').split('\n')|map('trim')|select|list -%}
+{%- set counts = club.topic_counts or {} -%}
+{%- set named = [] -%}{%- for x in club.topics or [] -%}{%- set nm = x.name if x is mapping else x -%}{%- set _ = named.append({'name': nm, 'sessions': (x.sessions if x is mapping else counts[nm])}) -%}{%- endfor -%}
+{%- set counted = named|selectattr('sessions', 'number')|selectattr('sessions')|list -%}
+{%- set top = counted[:4] -%}
+{%- set rest = named|reject('in', top)|list -%}
+{%- set peak = (top|map(attribute='sessions')|max) if top else 1 -%}
+{%- if paras or named -%}
+<section id="about" class="tl-band tl-white tl-sec" style="background: #FFFFFF; border-top: 1px solid #CBD6D5; border-bottom: 1px solid #CBD6D5; padding: 72px 0">
+<div style="max-width: 1200px; margin: 0 auto; padding: 0 24px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap: 48px">
+{% if paras %}<div style="display: flex; flex-direction: column; gap: 14px">
+<h2 style="margin: 0; font-weight: 800; font-size: clamp(28px, 3.4vw, 40px); line-height: 1.1; letter-spacing: -0.03em">{{ t }}</h2>
+{% for p in paras %}<p style="margin: 0; color: #3A4D4C; font-size: 17px">{{ p }}</p>
+{% endfor %}</div>
+{% endif %}{% if named %}<div style="display: flex; flex-direction: column; gap: 14px">
+<h2 style="margin: 0; font-weight: 800; font-size: clamp(28px, 3.4vw, 40px); line-height: 1.1; letter-spacing: -0.03em">What we know</h2>
+{% if top %}<div style="display: flex; flex-direction: column; gap: 10px">
+{% for x in top %}<div style="display: flex; align-items: center; gap: 14px"><span class="tl-bar-name" style="flex: 0 0 190px; font-weight: 700">{{ x.name }}</span><span style="flex: 1; height: 10px; border-radius: 999px; background: var(--accent-soft); display: flex"><span style="width: {{ (90 * x.sessions / peak)|round|int }}%; border-radius: 999px; background: var(--accent)"></span></span><span style="flex: 0 0 44px; font-size: 14px; color: #4F6160; text-align: right">{{ n(x.sessions) }}</span></div>
+{% endfor %}</div>
+<p style="margin: 0; font-size: 14px; color: #4F6160">Sessions hosted per domain.{% if rest %} Also: {{ rest|map(attribute='name')|map('lower')|join(', ') }}.{% endif %}</p>
+{% else %}<div style="display: flex; flex-wrap: wrap; gap: 8px; font-size: 15px; font-weight: 700">{% for x in named %}<span style="padding: 6px 14px; border-radius: 8px; background: var(--accent-soft)">{{ x.name }}</span>{% endfor %}</div>
+{% endif %}</div>
+{% endif %}</div>
+</section>
+{%- endif -%}

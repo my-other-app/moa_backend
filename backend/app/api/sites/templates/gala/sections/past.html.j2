@@ -1,0 +1,15 @@
+{%- macro isrc(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'file://' or l[:11]|lower == 'data:image/') else '' }}{%- endmacro -%}
+{%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
+{%- macro n(v) -%}{%- if v is number -%}{{ ('[' ~ '{:,}'.format(v) ~ ']') if sample else '{:,}'.format(v) }}{%- else -%}{{ v }}{%- endif -%}{%- endmacro -%}
+{%- macro iso(v) -%}{{ (v if v is string else v.isoformat()) if v else '' }}{%- endmacro -%}
+{%- set t = section.title if (section is defined and section.title) else 'Evenings to remember' -%}
+{%- set MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] -%}
+{%- if past -%}
+<section id="past" class="gl-sec" style="max-width: 1200px; margin: 0 auto; padding: 88px 24px; display: flex; flex-direction: column; align-items: center; gap: 14px">
+<div style="font-size: 14px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--accent)">Past events</div>
+<h2 style="margin: 0 0 20px; font-family: 'Cormorant Garamond', Georgia, serif; font-weight: 500; font-size: clamp(36px, 5vw, 60px); line-height: 1.05">{{ t }}</h2>
+<div style="align-self: stretch; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(250px, 100%), 1fr)); gap: 28px">
+{% for e in past %}{% set s = iso(e.starts_at) %}{% set p = e.poster %}{% set facts = (e.facts or [(n(e.going) ~ ' guests') if e.going else none, ((e.speakers_count ~ (' speaker' if e.speakers_count == 1 else ' speakers')) if e.speakers_count else none)])|select|list %}<article style="display: flex; flex-direction: column; align-items: center; gap: 8px">{% if p and p.url %}<img class="gl-img" src="{{ isrc(p.url) }}"{% if p.srcset %} srcset="{{ p.srcset }}" sizes="(min-width: 1200px) 260px, (min-width: 640px) 45vw, calc(100vw - 48px)"{% endif %} width="{{ p.w or 520 }}" height="{{ p.h or 440 }}" alt="{{ p.alt or e.name }}" loading="lazy" decoding="async" style="align-self: stretch; height: 220px; margin-bottom: 8px">{% elif p and p.placeholder is defined %}<div style="align-self: stretch; height: 220px; background: repeating-linear-gradient(135deg, #143329 0 14px, #193B30 14px 28px); margin-bottom: 8px"></div>{% else %}<div style="align-self: stretch; height: 220px; background: #143329; margin-bottom: 8px"></div>{% endif %}<span style="font-size: 13px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent)">{{ [(e.day or (s[8:10]|int)) ~ ' ' ~ (e.month or MONTHS[(s[5:7]|int) - 1]) ~ ' ' ~ (e.year or s[0:4]), e.kind]|select|join(' · ') }}</span><h3 style="margin: 0; font-family: 'Cormorant Garamond', Georgia, serif; font-weight: 500; font-size: 26px; line-height: 1.15">{{ e.name }}</h3>{% if facts %}<span style="color: #C4CDBF; font-size: 15px">{{ facts|join(' · ') }}</span>{% endif %}<a href="{{ u(e.url) }}" target="_top" style="font-size: 14px; padding: 10px 0">View the recap</a></article>
+{% endfor %}</div>
+</section>
+{%- endif -%}

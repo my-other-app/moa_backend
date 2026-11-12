@@ -1,0 +1,22 @@
+:root{--accent:#D9B56A;--on-accent:#0F2A22}
+body{margin:0;background:#0B1F19}
+a{color:#F5F0E4}a:hover{color:var(--accent)}
+.gl-btn{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;text-align:center}
+.gl-img{display:block;width:100%;object-fit:cover}
+.gl-logo{display:block;max-width:80%;max-height:72px;object-fit:contain}
+.gl-band+.gl-band{border-top:1px solid #2E4A40}
+@media (max-width:640px){
+.gl-nav{gap:0 4px !important}
+.gl-nav a{padding:10px 6px !important;letter-spacing:.12em !important;font-size:13px !important}
+.gl-nav .gl-mark{margin:0 8px !important}
+.gl-hero{padding-top:48px !important}
+.gl-arch{min-height:280px !important}
+.gl-sec{padding-top:64px !important;padding-bottom:64px !important}
+.gl-stats,.gl-team,.gl-small{grid-template-columns:repeat(2,minmax(0,1fr)) !important}
+.gl-team{gap:24px 12px !important}
+.gl-spk{grid-template-columns:repeat(2,minmax(0,1fr)) !important;gap:24px 14px !important}
+.gl-spk h3{font-size:22px !important}
+.gl-g1{flex-basis:calc(50% - 8px) !important;min-height:220px !important;height:220px !important}
+.gl-g2{flex-basis:100% !important;min-height:360px !important;height:360px !important}
+}
+@supports (color:lch(from red l c h)){html[style*="--accent"]{--on-accent:lch(from var(--accent) calc((62 - l) * 100) 0 0)}}

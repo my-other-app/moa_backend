@@ -1,0 +1,21 @@
+{%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
+{%- macro n(v) -%}{%- if v is number -%}{{ ('[' ~ '{:,}'.format(v) ~ ']') if sample else '{:,}'.format(v) }}{%- else -%}{{ v }}{%- endif -%}{%- endmacro -%}
+{%- macro host(h, label) -%}{%- set l = (h or '')|string -%}{{ (l.split('//')[1].split('/')[0]|replace('www.', '')) if l[:8]|lower == 'https://' else (label or l) }}{%- endmacro -%}
+{%- set keys = (nav|map(attribute='key')|list) if (nav is defined and nav) else (section_keys or []) -%}
+{%- set overrides = site.title_overrides or {} -%}
+{%- set cover = images['hero.cover'] -%}
+{%- set logo = club.logo if (club.logo and club.logo.url) else ({'url': club.logo_url, 'srcset': club.logo_srcset} if club.logo_url else none) -%}
+{%- set lead = site.subline or club.tagline or subline -%}
+{%- set platform_url = links.platform_url or 'https://myotherapp.in' -%}
+{%- set soc = [] -%}{%- set web = [] -%}
+{%- for s in socials or [] -%}{%- set item = {'kind': (s.kind if s is mapping else (s[0]|lower)), 'label': (s.label if s is mapping else s[0]), 'href': (s.href if s is mapping else s[1])} -%}{%- set _ = (web if item.kind == 'website' else soc).append(item) -%}{%- endfor -%}
+{%- if club.website and club.website.href -%}{%- set _ = web.insert(0, {'kind': 'website', 'label': club.website.label, 'href': club.website.href}) -%}{%- endif -%}
+{%- set has_members = stats.members is defined and stats.members is not none -%}
+{%- set people = stats.members if has_members else stats.followers -%}
+{%- set nums = [(people, 'Members' if has_members else 'Followers'), (stats.events_held, 'Events hosted'), (stats.speakers, 'Speakers'), (stats.sponsors, 'Sponsors, partners')]|selectattr(0)|list -%}
+{%- set topics = [] -%}{%- for x in club.topics or [] -%}{%- set _ = topics.append(x.name if x is mapping else x) -%}{%- endfor -%}
+{%- set main_sp = [] -%}{%- set partners = [] -%}
+{%- for p in sponsors or [] -%}{%- set _ = (main_sp if ((p.kind == 'sponsor') if p.kind else ('sponsor' in (p.role or '')|lower)) else partners).append(p) -%}{%- endfor -%}
+{%- set events_total = (stats.events_held + (stats.upcoming or 0)) if (stats.events_held is number and (stats.upcoming is number or not stats.upcoming)) else stats.events_held -%}
+{%- set events_key = 'upcoming' if 'upcoming' in keys else ('past' if 'past' in keys else none) -%}
+<footer style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; font-size: 13px; color: #565D66; padding-top: 8px"><span>{{ [club.name, club.address or club.location_name]|select|join(' · ') }}{% if club.contact_email %} · <a href="{{ u(links.contact_mailto or ('mailto:' ~ club.contact_email)) }}" style="color: inherit; text-decoration: none; overflow-wrap: anywhere">{{ club.contact_email }}</a>{% endif %}</span>{% if links.report_url %}<a href="{{ u(links.report_url) }}" target="_top" style="color: inherit; text-decoration: none">Report this profile</a>{% endif %}</footer>

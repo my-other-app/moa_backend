@@ -1,0 +1,38 @@
+{%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
+{%- macro n(v) -%}{%- if v is number -%}{{ ('[' ~ '{:,}'.format(v) ~ ']') if sample else '{:,}'.format(v) }}{%- else -%}{{ v }}{%- endif -%}{%- endmacro -%}
+{%- macro iso(v) -%}{{ (v if v is string else v.isoformat()) if v else '' }}{%- endmacro -%}
+{%- set t = section.title if (section is defined and section.title) else 'The season ahead' -%}
+{%- set MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'] -%}
+{%- set DAYS = {'Mon': 'Monday', 'Tue': 'Tuesday', 'Wed': 'Wednesday', 'Thu': 'Thursday', 'Fri': 'Friday', 'Sat': 'Saturday', 'Sun': 'Sunday'} -%}
+{%- if upcoming -%}
+<section id="upcoming" class="gl-band gl-sec" style="background: #143329; padding: 88px 0">
+<div style="max-width: 1040px; margin: 0 auto; padding: 0 24px; display: flex; flex-direction: column; align-items: center; gap: 14px">
+<div style="font-size: 14px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--accent)">Upcoming events</div>
+<h2 style="margin: 0 0 20px; font-family: 'Cormorant Garamond', Georgia, serif; font-weight: 500; font-size: clamp(36px, 5vw, 60px); line-height: 1.05">{{ t }}</h2>
+{% for e in upcoming %}
+{%- set s = iso(e.starts_at) -%}
+{%- set online = e.is_online if (e.is_online is defined and e.is_online is not none) else ((e.mode or e.where or '')|lower == 'online') -%}
+{%- set month = e.month_long or MONTHS[(s[5:7]|int) - 1] -%}
+{%- set day = e.day or (s[8:10]|int) -%}
+{%- set year = e.year or s[0:4] -%}
+{%- if loop.first -%}
+{%- set cap = e.capacity if e.capacity else ((e.seats_left + e.going) if (e.seats_left is number and e.going is number) else none) -%}
+{%- set seats = ((n(e.seats_left) ~ ' of ' ~ n(cap) ~ ' seats remain') if cap else (n(e.seats_left) ~ ' seats remain')) if (e.seats_left is defined and e.seats_left is not none) else none -%}
+{%- set when = [e.weekday_long or DAYS[e.weekday] or e.weekday, day ~ ' ' ~ month ~ ' ' ~ year]|select|join(' ') -%}
+<article style="align-self: stretch; border: 1px solid var(--accent); padding: clamp(24px, 4vw, 48px); display: flex; flex-direction: column; align-items: center; gap: 12px">
+<div style="font-size: 14px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--accent)">{{ ['Next', when, e.time]|select|join(' · ') }}</div>
+<h3 style="margin: 0; font-family: 'Cormorant Garamond', Georgia, serif; font-weight: 500; font-size: clamp(30px, 4vw, 46px); line-height: 1.1">{{ e.name }}</h3>
+{% set meta = [('Online' if online else e.where), ('In person' if not online else none), seats]|select|list %}{% if meta %}<p style="margin: 0; color: #D5DCCF">{{ meta|join(' · ') }}</p>
+{% endif %}<a href="{{ u(e.url) }}" target="_top" style="display: inline-flex; align-items: center; min-height: 50px; padding: 0 32px; background: var(--accent); color: var(--on-accent); text-decoration: none; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; font-size: 14px; margin-top: 8px">Reserve a seat</a>
+</article>
+{%- else %}
+<article style="align-self: stretch; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 24px; padding: 24px 0; border-bottom: 1px solid #2E4A40; text-align: left">
+<span style="flex: 0 0 170px; font-size: 14px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent)">{{ day }} {{ month }} {{ year }}</span>
+<div style="flex: 1 1 320px"><h3 style="margin: 0; font-family: 'Cormorant Garamond', Georgia, serif; font-weight: 500; font-size: 28px; line-height: 1.15">{{ e.name }}</h3><span style="color: #C4CDBF; font-size: 15px">{{ [e.time, ('Online' if online else e.where)]|select|join(' · ') }}</span></div>
+<a href="{{ u(e.url) }}" target="_top" style="font-size: 14px; letter-spacing: 0.14em; text-transform: uppercase; padding: 12px 0">Reserve →</a>
+</article>
+{%- endif %}
+{% endfor %}
+</div>
+</section>
+{%- endif -%}

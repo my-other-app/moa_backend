@@ -1,0 +1,21 @@
+:root{--accent:#0A7A3F;--on-accent:#FFFFFF}
+body{margin:0;background:#FFFFFF}
+a{color:#0A0A0A}a:hover{color:var(--accent)}
+.sw-wrap{counter-reset:sw}
+.sw-sec{counter-increment:sw}
+.sw-n::before{content:counter(sw,decimal-leading-zero) " — "}
+.sw-btn{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;text-align:center}
+.sw-img{display:block;width:100%;object-fit:cover}
+.sw-logo{display:block;max-width:70%;max-height:56px;object-fit:contain}
+@media (max-width:640px){
+.sw-cover{min-height:240px !important;height:240px !important}
+.sw-hero{padding-top:40px !important}
+.sw-feat{min-height:200px !important}
+.sw-nav{gap:0 !important}
+.sw-nav a{padding:10px 6px !important}
+.sw-stats,.sw-photos{grid-template-columns:repeat(2,minmax(0,1fr)) !important;gap:20px 16px !important}
+.sw-photos{gap:8px !important}
+.sw-statn{font-size:40px !important}
+.sw-topic{font-size:20px !important}
+}
+@supports (color:lch(from red l c h)){html[style*="--accent"]{--on-accent:lch(from var(--accent) calc((62 - l) * 100) 0 0)}}
