@@ -29,9 +29,7 @@
     "style": "normal"
    },
    "size": 57,
-   "color": "#141614",
    "maxLines": 2,
-   "fit": "shrink",
    "minSize": 28.5
   },
   {
@@ -49,8 +47,6 @@
     "style": "normal"
    },
    "size": 45,
-   "color": "#141614",
-   "fit": "shrink",
    "minSize": 22.5
   },
   {
@@ -70,7 +66,6 @@
    "size": 27,
    "color": "#5A5F5B",
    "align": "center",
-   "fit": "shrink",
    "minSize": 13.5
   },
   {

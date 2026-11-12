@@ -35,7 +35,6 @@
    "letterSpacing": 0.2,
    "lineHeight": 1.286,
    "transform": "upper",
-   "fit": "shrink",
    "minSize": 11.2
   },
   {
@@ -56,7 +55,6 @@
    "color": "#4A4F63",
    "lineHeight": 1.214,
    "align": "right",
-   "fit": "shrink",
    "minSize": 5.6
   },
   {
@@ -68,15 +66,9 @@
    "height": 20.02,
    "kind": "text",
    "text": "Awarded to",
-   "font": {
-    "family": "Inter",
-    "weight": 400,
-    "style": "normal"
-   },
    "size": 17,
    "color": "#4A4F63",
    "lineHeight": 1.176,
-   "fit": "shrink",
    "minSize": 13.6
   },
   {
@@ -99,7 +91,6 @@
    "lineHeight": 1.04,
    "textWrap": "balance",
    "maxLines": 2,
-   "fit": "shrink",
    "minSize": 32
   },
   {
@@ -110,7 +101,6 @@
    "width": 84,
    "height": 10,
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "var:accent"
@@ -136,17 +126,11 @@
      "text": "{% if duration_hours %}, a {{duration_hours}}-hour programme{% endif %}."
     }
    ],
-   "font": {
-    "family": "Inter",
-    "weight": 400,
-    "style": "normal"
-   },
    "size": 19,
    "color": "#10131F",
    "lineHeight": 1.55,
    "textWrap": "pretty",
    "maxLines": 3,
-   "fit": "shrink",
    "minSize": 9.5
   },
   {
@@ -158,7 +142,6 @@
    "height": 2,
    "showIf": "signatory_name",
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "#10131F"
@@ -174,7 +157,6 @@
    "showIf": "signatory_name",
    "kind": "image",
    "source": "signature_1",
-   "fit": "contain",
    "valign": "bottom"
   },
   {
@@ -192,10 +174,8 @@
     "weight": 600,
     "style": "normal"
    },
-   "size": 16,
    "color": "#10131F",
    "lineHeight": 1.25,
-   "fit": "shrink",
    "minSize": 8
   },
   {
@@ -208,15 +188,9 @@
    "showIf": "signatory_designation signatory_name",
    "kind": "text",
    "text": "{{signatory_designation}}",
-   "font": {
-    "family": "Inter",
-    "weight": 400,
-    "style": "normal"
-   },
    "size": 14,
    "color": "#4A4F63",
    "lineHeight": 1.214,
-   "fit": "shrink",
    "minSize": 9.8
   },
   {
@@ -227,7 +201,6 @@
    "width": 130,
    "height": 2,
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "#10131F"
@@ -247,11 +220,9 @@
     "weight": 600,
     "style": "normal"
    },
-   "size": 16,
    "color": "#10131F",
    "lineHeight": 1.25,
    "maxLines": 2,
-   "fit": "shrink",
    "minSize": 11.2
   },
   {
@@ -268,10 +239,8 @@
     "weight": 600,
     "style": "normal"
    },
-   "size": 16,
    "color": "#10131F",
    "lineHeight": 1.25,
-   "fit": "shrink",
    "minSize": 12.8
   },
   {
@@ -284,15 +253,9 @@
    "showIf": "issue_city",
    "kind": "text",
    "text": "{{issue_city}}",
-   "font": {
-    "family": "Inter",
-    "weight": 400,
-    "style": "normal"
-   },
    "size": 14,
    "color": "#4A4F63",
    "lineHeight": 1.214,
-   "fit": "shrink",
    "minSize": 9.8
   },
   {
@@ -303,7 +266,6 @@
    "width": 238,
    "height": 120,
    "kind": "shape",
-   "shape": "rect",
    "stroke": {
     "color": "#10131F",
     "width": 2
@@ -332,11 +294,9 @@
     "weight": 700,
     "style": "normal"
    },
-   "size": 16,
    "color": "#10131F",
    "lineHeight": 1.15,
    "maxLines": 2,
-   "fit": "shrink",
    "minSize": 12.8
   },
   {
@@ -348,16 +308,10 @@
    "height": 50.411,
    "kind": "text",
    "text": "{{verify_url}}",
-   "font": {
-    "family": "Inter",
-    "weight": 400,
-    "style": "normal"
-   },
    "size": 12,
    "color": "#4A4F63",
    "lineHeight": 1.4,
    "maxLines": 3,
-   "fit": "shrink",
    "minSize": 8.4
   },
   {
@@ -368,7 +322,6 @@
    "width": 380,
    "height": 794,
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "#1F3BFF"
@@ -383,7 +336,6 @@
    "height": 794,
    "kind": "svg",
    "markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 380 794\"><rect x=\"40\" y=\"430\" width=\"150\" height=\"150\" fill=\"#0B1B8F\"></rect><circle cx=\"150\" cy=\"290\" r=\"110\" fill=\"#FF7A1A\"></circle><path d=\"M380 380a200 200 0 0 0-200 200h200z\" fill=\"#8FA0FF\"></path><path d=\"M250 180h110M250 200h110M250 220h110M250 240h110\" fill=\"none\" stroke=\"#FFFFFF\" stroke-width=\"5\" stroke-linecap=\"round\" stroke-dasharray=\"0 20\"></path><path d=\"M40 620h300\" fill=\"none\" stroke=\"#FFFFFF\" stroke-width=\"2\"></path></svg>",
-   "fit": "contain",
    "recolor": {
     "#FF7A1A": "var:accent"
    }
@@ -396,8 +348,7 @@
    "width": 44,
    "height": 44,
    "kind": "image",
-   "source": "org_logo",
-   "fit": "contain"
+   "source": "org_logo"
   },
   {
    "id": "t-institute_name",
@@ -416,7 +367,6 @@
    "size": 17,
    "color": "#FFFFFF",
    "maxLines": 2,
-   "fit": "shrink",
    "minSize": 8.5
   },
   {
@@ -437,7 +387,6 @@
    "color": "#FFFFFF",
    "letterSpacing": -0.01,
    "lineHeight": 1,
-   "fit": "shrink",
    "minSize": 32
   },
   {
@@ -459,7 +408,6 @@
    "letterSpacing": 0.18,
    "lineHeight": 1.214,
    "transform": "upper",
-   "fit": "shrink",
    "minSize": 9.8
   }
  ],

@@ -24,7 +24,6 @@
    "width": 56,
    "height": 12,
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "#FFFFFF"
@@ -58,7 +57,6 @@
    "color": "#15130D",
    "letterSpacing": 0.12,
    "lineHeight": 1.25,
-   "fit": "shrink",
    "minSize": 7.2
   },
   {
@@ -80,7 +78,6 @@
    "letterSpacing": 0.12,
    "lineHeight": 1.25,
    "align": "right",
-   "fit": "shrink",
    "minSize": 8.4
   },
   {
@@ -100,7 +97,6 @@
    "size": 15,
    "color": "#15130D",
    "lineHeight": 1.267,
-   "fit": "shrink",
    "minSize": 12
   },
   {
@@ -122,7 +118,6 @@
    "letterSpacing": -0.04,
    "lineHeight": 0.9,
    "transform": "upper",
-   "fit": "shrink",
    "minSize": 18
   },
   {
@@ -144,7 +139,6 @@
    "color": "#15130D",
    "letterSpacing": -0.01,
    "lineHeight": 1.1,
-   "fit": "shrink",
    "minSize": 18
   },
   {
@@ -156,7 +150,6 @@
    "height": 4,
    "showIf": "organization",
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "#15130D"
@@ -190,7 +183,6 @@
    "width": 384,
    "height": 150,
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "#15130D"
@@ -214,7 +206,6 @@
    "color": "var:accent",
    "letterSpacing": 0.06,
    "lineHeight": 1,
-   "fit": "shrink",
    "minSize": 18
   },
   {
@@ -235,7 +226,6 @@
    "color": "#FFFFFF",
    "lineHeight": 1.4,
    "maxLines": 2,
-   "fit": "shrink",
    "minSize": 9.1
   },
   {
@@ -246,7 +236,6 @@
    "width": 108,
    "height": 108,
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "#FFFFFF"

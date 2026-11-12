@@ -32,7 +32,6 @@
     }
    ],
    "kind": "shape",
-   "shape": "rect",
    "radius": [
     22,
     22,
@@ -48,7 +47,6 @@
    "width": 260,
    "height": 460,
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "#F4E9D8"
@@ -98,7 +96,6 @@
    "color": "#5C3A3D",
    "letterSpacing": 0.16,
    "lineHeight": 1.333,
-   "fit": "shrink",
    "minSize": 9.6
   },
   {
@@ -120,7 +117,6 @@
    "color": "#C8102E",
    "lineHeight": 1,
    "transform": "upper",
-   "fit": "shrink",
    "minSize": 16.8
   },
   {
@@ -140,7 +136,6 @@
    "size": 18,
    "color": "#1A0507",
    "lineHeight": 1.333,
-   "fit": "shrink",
    "minSize": 10.8
   },
   {
@@ -161,7 +156,6 @@
    "color": "#1A0507",
    "letterSpacing": 0.1,
    "lineHeight": 1.286,
-   "fit": "shrink",
    "minSize": 4.2
   },
   {
@@ -172,7 +166,6 @@
    "width": 190,
    "height": 190,
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "#FFFFFF"
@@ -199,7 +192,6 @@
    "width": 880,
    "height": 460,
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "#C8102E"
@@ -219,8 +211,7 @@
    "width": 880,
    "height": 460,
    "kind": "svg",
-   "markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 880 460\"><defs><clipPath id=\"moa-clip\"><path d=\"M22 0H1118A22 22 0 0 1 1140 22V438A22 22 0 0 1 1118 460H22A22 22 0 0 1 0 438V22A22 22 0 0 1 22 0Z\"></path></clipPath></defs><g clip-path=\"url(#moa-clip)\"><circle cx=\"690\" cy=\"230\" r=\"212\" fill=\"#0B0B0B\"></circle><g fill=\"none\" stroke=\"#2E2E2E\" stroke-width=\"1.5\"><circle cx=\"690\" cy=\"230\" r=\"198\"></circle><circle cx=\"690\" cy=\"230\" r=\"184\"></circle><circle cx=\"690\" cy=\"230\" r=\"170\"></circle><circle cx=\"690\" cy=\"230\" r=\"156\"></circle><circle cx=\"690\" cy=\"230\" r=\"142\"></circle><circle cx=\"690\" cy=\"230\" r=\"128\"></circle><circle cx=\"690\" cy=\"230\" r=\"114\"></circle></g><path d=\"M690 42 A188 188 0 0 1 878 230\" fill=\"none\" stroke=\"#4A4A4A\" stroke-width=\"3\" stroke-linecap=\"round\"></path><circle cx=\"690\" cy=\"230\" r=\"86\" fill=\"#F4E9D8\"></circle><circle cx=\"690\" cy=\"230\" r=\"74\" fill=\"none\" stroke=\"#C8102E\" stroke-width=\"2\"></circle><circle cx=\"690\" cy=\"230\" r=\"8\" fill=\"#C8102E\"></circle><text x=\"690\" y=\"204\" text-anchor=\"middle\" font-family=\"DM Mono, monospace\" font-size=\"13\" letter-spacing=\"3\" fill=\"#1A0507\">SIDE A</text><text x=\"690\" y=\"268\" text-anchor=\"middle\" font-family=\"DM Mono, monospace\" font-size=\"13\" letter-spacing=\"3\" fill=\"#1A0507\">ADMIT ONE</text></g></svg>",
-   "fit": "contain"
+   "markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 880 460\"><defs><clipPath id=\"moa-clip\"><path d=\"M22 0H1118A22 22 0 0 1 1140 22V438A22 22 0 0 1 1118 460H22A22 22 0 0 1 0 438V22A22 22 0 0 1 22 0Z\"></path></clipPath></defs><g clip-path=\"url(#moa-clip)\"><circle cx=\"690\" cy=\"230\" r=\"212\" fill=\"#0B0B0B\"></circle><g fill=\"none\" stroke=\"#2E2E2E\" stroke-width=\"1.5\"><circle cx=\"690\" cy=\"230\" r=\"198\"></circle><circle cx=\"690\" cy=\"230\" r=\"184\"></circle><circle cx=\"690\" cy=\"230\" r=\"170\"></circle><circle cx=\"690\" cy=\"230\" r=\"156\"></circle><circle cx=\"690\" cy=\"230\" r=\"142\"></circle><circle cx=\"690\" cy=\"230\" r=\"128\"></circle><circle cx=\"690\" cy=\"230\" r=\"114\"></circle></g><path d=\"M690 42 A188 188 0 0 1 878 230\" fill=\"none\" stroke=\"#4A4A4A\" stroke-width=\"3\" stroke-linecap=\"round\"></path><circle cx=\"690\" cy=\"230\" r=\"86\" fill=\"#F4E9D8\"></circle><circle cx=\"690\" cy=\"230\" r=\"74\" fill=\"none\" stroke=\"#C8102E\" stroke-width=\"2\"></circle><circle cx=\"690\" cy=\"230\" r=\"8\" fill=\"#C8102E\"></circle><text x=\"690\" y=\"204\" text-anchor=\"middle\" font-family=\"DM Mono, monospace\" font-size=\"13\" letter-spacing=\"3\" fill=\"#1A0507\">SIDE A</text><text x=\"690\" y=\"268\" text-anchor=\"middle\" font-family=\"DM Mono, monospace\" font-size=\"13\" letter-spacing=\"3\" fill=\"#1A0507\">ADMIT ONE</text></g></svg>"
   },
   {
    "id": "t-app_name",
@@ -240,7 +231,6 @@
    "color": "#F4E9D8",
    "letterSpacing": 0.18,
    "lineHeight": 1.286,
-   "fit": "shrink",
    "minSize": 8.4
   },
   {
@@ -251,7 +241,6 @@
    "width": 44,
    "height": 2,
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "#F4E9D8"
@@ -275,7 +264,6 @@
    "color": "#F4E9D8",
    "letterSpacing": 0.18,
    "lineHeight": 1.286,
-   "fit": "shrink",
    "minSize": 11.2
   },
   {
@@ -307,7 +295,6 @@
    "letterSpacing": 0.01,
    "lineHeight": 0.95,
    "transform": "upper",
-   "fit": "shrink",
    "minSize": 41.6
   },
   {
@@ -348,7 +335,6 @@
    "color": "#FFD9DC",
    "letterSpacing": 0.16,
    "lineHeight": 1.333,
-   "fit": "shrink",
    "minSize": 9.6
   },
   {
@@ -389,7 +375,6 @@
    "color": "#FFD9DC",
    "letterSpacing": 0.16,
    "lineHeight": 1.333,
-   "fit": "shrink",
    "minSize": 9.6
   },
   {
@@ -431,7 +416,6 @@
    "color": "#FFD9DC",
    "letterSpacing": 0.16,
    "lineHeight": 1.333,
-   "fit": "shrink",
    "minSize": 9.6
   },
   {
@@ -473,7 +457,6 @@
    "color": "#FFD9DC",
    "letterSpacing": 0.16,
    "lineHeight": 1.333,
-   "fit": "shrink",
    "minSize": 9.6
   },
   {
@@ -515,7 +498,6 @@
    "color": "#FFD9DC",
    "letterSpacing": 0.16,
    "lineHeight": 1.333,
-   "fit": "shrink",
    "minSize": 9.6
   },
   {

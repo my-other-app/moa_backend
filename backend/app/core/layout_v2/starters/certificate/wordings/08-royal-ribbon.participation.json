@@ -25,7 +25,6 @@
    "height": 794,
    "kind": "svg",
    "markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1123 794\"><rect x=\"28\" y=\"28\" width=\"1067\" height=\"738\" fill=\"none\" stroke=\"#3B1F6B\" stroke-width=\"2\"></rect><rect x=\"38\" y=\"38\" width=\"1047\" height=\"718\" fill=\"none\" stroke=\"#B8923A\" stroke-width=\"1\"></rect><path d=\"M96 0h120v600l-60-46-60 46z\" fill=\"#3B1F6B\"></path><path d=\"M110 0v586M202 0v586\" fill=\"none\" stroke=\"#D9B65C\" stroke-width=\"2\"></path><circle cx=\"156\" cy=\"300\" r=\"82\" fill=\"#D9B65C\"></circle><circle cx=\"156\" cy=\"300\" r=\"74\" fill=\"none\" stroke=\"#F7F5FB\" stroke-width=\"2\" stroke-dasharray=\"3 5\"></circle><circle cx=\"156\" cy=\"300\" r=\"62\" fill=\"#3B1F6B\"></circle><path d=\"M55 36l5.6 11.4 12.6 1.8-9.1 8.9 2.1 12.5L55 64.7l-11.2 5.9 2.1-12.5-9.1-8.9 12.6-1.8z\" fill=\"#D9B65C\" transform=\"translate(156 300) scale(2.2) translate(-55 -54)\"></path></svg>",
-   "fit": "contain",
    "recolor": {
     "#3B1F6B": "var:accent"
    }
@@ -48,7 +47,6 @@
    "color": "#6E5210",
    "letterSpacing": 0.26,
    "transform": "upper",
-   "fit": "shrink",
    "minSize": 7.5
   },
   {
@@ -68,7 +66,6 @@
    "size": 58,
    "color": "var:accent",
    "lineHeight": 1.08,
-   "fit": "shrink",
    "minSize": 29
   },
   {
@@ -89,7 +86,6 @@
    "color": "#1D1630",
    "letterSpacing": 0.06,
    "lineHeight": 1.235,
-   "fit": "shrink",
    "minSize": 13.6
   },
   {
@@ -111,7 +107,6 @@
    "lineHeight": 1.08,
    "textWrap": "balance",
    "maxLines": 2,
-   "fit": "shrink",
    "minSize": 30
   },
   {
@@ -122,7 +117,6 @@
    "width": 120,
    "height": 3,
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "#B8923A"
@@ -158,7 +152,6 @@
    "lineHeight": 1.55,
    "textWrap": "pretty",
    "maxLines": 3,
-   "fit": "shrink",
    "minSize": 9.5
   },
   {
@@ -170,7 +163,6 @@
    "height": 1,
    "showIf": "signatory_name",
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "#1D1630"
@@ -186,7 +178,6 @@
    "showIf": "signatory_name",
    "kind": "image",
    "source": "signature_1",
-   "fit": "contain",
    "valign": "bottom"
   },
   {
@@ -204,10 +195,8 @@
     "weight": 700,
     "style": "normal"
    },
-   "size": 16,
    "color": "#1D1630",
    "lineHeight": 1.188,
-   "fit": "shrink",
    "minSize": 8
   },
   {
@@ -228,7 +217,6 @@
    "size": 14,
    "color": "#6E5210",
    "lineHeight": 1.214,
-   "fit": "shrink",
    "minSize": 9.8
   },
   {
@@ -240,7 +228,6 @@
    "height": 1,
    "showIf": "second_signatory_name",
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "#1D1630"
@@ -256,7 +243,6 @@
    "showIf": "second_signatory_name",
    "kind": "image",
    "source": "signature_2",
-   "fit": "contain",
    "valign": "bottom"
   },
   {
@@ -274,10 +260,8 @@
     "weight": 700,
     "style": "normal"
    },
-   "size": 16,
    "color": "#1D1630",
    "lineHeight": 1.188,
-   "fit": "shrink",
    "minSize": 8
   },
   {
@@ -298,7 +282,6 @@
    "size": 14,
    "color": "#6E5210",
    "lineHeight": 1.214,
-   "fit": "shrink",
    "minSize": 9.8
   },
   {
@@ -321,7 +304,6 @@
    "lineHeight": 1.231,
    "align": "right",
    "transform": "upper",
-   "fit": "shrink",
    "minSize": 10.4
   },
   {
@@ -342,7 +324,6 @@
    "color": "#1D1630",
    "lineHeight": 1.214,
    "align": "right",
-   "fit": "shrink",
    "minSize": 5.6
   },
   {
@@ -353,7 +334,6 @@
    "width": 106,
    "height": 106,
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "#FFFFFF"

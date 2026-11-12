@@ -25,7 +25,6 @@
    "height": 794,
    "kind": "svg",
    "markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1123 794\"><circle cx=\"1010\" cy=\"397\" r=\"150\" fill=\"#DCE6D2\"></circle><g transform=\"translate(1123 0) rotate(100) scale(1.9)\"><path d=\"M0 0C36-26 84-26 120 0C84 26 36 26 0 0z\" fill=\"#2F5D46\"></path><path d=\"M0 0h120\" fill=\"none\" stroke=\"#F1F4EC\" stroke-width=\"1\"></path></g><g transform=\"translate(1123 0) rotate(125) scale(1.6)\"><path d=\"M0 0C36-26 84-26 120 0C84 26 36 26 0 0z\" fill=\"#8FB49A\"></path><path d=\"M0 0h120\" fill=\"none\" stroke=\"#F1F4EC\" stroke-width=\"1\"></path></g><g transform=\"translate(1123 0) rotate(150) scale(1.9)\"><path d=\"M0 0C36-26 84-26 120 0C84 26 36 26 0 0z\" fill=\"#5E8C72\"></path><path d=\"M0 0h120\" fill=\"none\" stroke=\"#F1F4EC\" stroke-width=\"1\"></path></g><g transform=\"translate(1123 0) rotate(172) scale(1.4)\"><path d=\"M0 0C36-26 84-26 120 0C84 26 36 26 0 0z\" fill=\"#2F5D46\"></path><path d=\"M0 0h120\" fill=\"none\" stroke=\"#F1F4EC\" stroke-width=\"1\"></path></g><g transform=\"translate(1123 794) rotate(188) scale(1.4)\"><path d=\"M0 0C36-26 84-26 120 0C84 26 36 26 0 0z\" fill=\"#5E8C72\"></path><path d=\"M0 0h120\" fill=\"none\" stroke=\"#F1F4EC\" stroke-width=\"1\"></path></g><g transform=\"translate(1123 794) rotate(210) scale(1.9)\"><path d=\"M0 0C36-26 84-26 120 0C84 26 36 26 0 0z\" fill=\"#2F5D46\"></path><path d=\"M0 0h120\" fill=\"none\" stroke=\"#F1F4EC\" stroke-width=\"1\"></path></g><g transform=\"translate(1123 794) rotate(235) scale(1.6)\"><path d=\"M0 0C36-26 84-26 120 0C84 26 36 26 0 0z\" fill=\"#8FB49A\"></path><path d=\"M0 0h120\" fill=\"none\" stroke=\"#F1F4EC\" stroke-width=\"1\"></path></g><g transform=\"translate(1123 794) rotate(260) scale(1.9)\"><path d=\"M0 0C36-26 84-26 120 0C84 26 36 26 0 0z\" fill=\"#5E8C72\"></path><path d=\"M0 0h120\" fill=\"none\" stroke=\"#F1F4EC\" stroke-width=\"1\"></path></g></svg>",
-   "fit": "contain",
    "recolor": {
     "#2F5D46": "var:accent"
    }
@@ -38,8 +37,7 @@
    "width": 48,
    "height": 48,
    "kind": "image",
-   "source": "org_logo",
-   "fit": "contain"
+   "source": "org_logo"
   },
   {
    "id": "t-institute_name",
@@ -59,7 +57,6 @@
    "color": "var:accent",
    "letterSpacing": 0.2,
    "transform": "upper",
-   "fit": "shrink",
    "minSize": 7.5
   },
   {
@@ -79,7 +76,6 @@
    "size": 26,
    "color": "var:accent",
    "lineHeight": 1.231,
-   "fit": "shrink",
    "minSize": 20.8
   },
   {
@@ -96,10 +92,8 @@
     "weight": 400,
     "style": "normal"
    },
-   "size": 16,
    "color": "#4A5A4F",
    "lineHeight": 1.188,
-   "fit": "shrink",
    "minSize": 12.8
   },
   {
@@ -122,7 +116,6 @@
    "lineHeight": 1.05,
    "textWrap": "balance",
    "maxLines": 2,
-   "fit": "shrink",
    "minSize": 33
   },
   {
@@ -155,7 +148,6 @@
    "lineHeight": 1.55,
    "textWrap": "pretty",
    "maxLines": 3,
-   "fit": "shrink",
    "minSize": 9.5
   },
   {
@@ -166,7 +158,6 @@
    "width": 108,
    "height": 108,
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "#FFFFFF"
@@ -207,7 +198,6 @@
    },
    "size": 15,
    "color": "var:accent",
-   "fit": "shrink",
    "minSize": 12
   },
   {
@@ -227,7 +217,6 @@
    "size": 13,
    "color": "#4A5A4F",
    "lineHeight": 1.154,
-   "fit": "shrink",
    "minSize": 10.4
   },
   {
@@ -247,7 +236,6 @@
    "size": 15,
    "color": "#1F2A22",
    "align": "right",
-   "fit": "shrink",
    "minSize": 6
   },
   {
@@ -259,7 +247,6 @@
    "height": 2,
    "showIf": "signatory_name",
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "#1F2A22"
@@ -275,7 +262,6 @@
    "showIf": "signatory_name",
    "kind": "image",
    "source": "signature_1",
-   "fit": "contain",
    "valign": "bottom"
   },
   {
@@ -293,10 +279,8 @@
     "weight": 700,
     "style": "normal"
    },
-   "size": 16,
    "color": "#1F2A22",
    "lineHeight": 1.188,
-   "fit": "shrink",
    "minSize": 8
   },
   {
@@ -317,7 +301,6 @@
    "size": 14,
    "color": "#4A5A4F",
    "lineHeight": 1.214,
-   "fit": "shrink",
    "minSize": 9.8
   }
  ],

@@ -471,6 +471,61 @@ def dump(layout: LayoutV2) -> dict:
     return layout.model_dump(by_alias=True, exclude_none=True, mode="json")
 
 
+#: The model of each layer kind (for its own defaults).
+KIND_MODELS = {"text": TextLayer, "shape": ShapeLayer, "svg": SvgLayer, "image": ImageLayer, "qr": QrLayer}
+#: Kept in a compact layout even when they hold a default: what a layer is and where.
+ALWAYS = frozenset({"id", "name", "kind", "x", "y", "width", "height"})
+
+
+def _wire(v: Any) -> Any:
+    if isinstance(v, BaseModel):
+        return v.model_dump(by_alias=True, exclude_none=True, mode="json")
+    if isinstance(v, list):
+        return [_wire(x) for x in v]
+    return v
+
+
+def _ints(v: Any) -> Any:
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, float) and v == int(v):
+        return int(v)
+    if isinstance(v, list):
+        return [_ints(x) for x in v]
+    if isinstance(v, dict):
+        return {k: _ints(x) for k, x in v.items()}
+    return v
+
+
+def kind_defaults(kind: str) -> dict[str, Any]:
+    """A layer kind's default for each optional field, in wire form (camelCase)."""
+    out = {}
+    for name, f in KIND_MODELS[kind].model_fields.items():
+        if f.is_required():
+            continue
+        out[f.alias or name] = _ints(_wire(f.get_default(call_default_factory=True)))
+    return out
+
+
+def compact(layout: Any) -> dict:
+    """The wire form without what parsing restores: each layer's fields that
+    hold *its own kind's* default, and a text's `text` when it has spans
+    (it is their join). Lossless: `dump(parse(compact(x))) == dump(parse(x))`
+    (checked here, so a starter can never lose a field)."""
+    full = dump(parse(layout))
+    out = _ints(full)
+    for layer in out["layers"]:
+        defaults = kind_defaults(layer["kind"])
+        for key in list(layer):
+            if key not in ALWAYS and key in defaults and layer[key] == defaults[key]:
+                del layer[key]
+        if layer["kind"] == "text" and layer.get("spans"):
+            layer.pop("text", None)
+    if dump(parse(out)) != full:
+        raise AssertionError("compacting this layout would lose a field")
+    return out
+
+
 def is_v2(config_layout: Any) -> bool:
     """Whether a stored `config.layout` is a v2 layout."""
     return isinstance(config_layout, dict) and config_layout.get("version") == VERSION and "layers" in config_layout
