@@ -29,6 +29,8 @@ from app.api.club_mailbox import access, alerts, export, handles, inbound, live,
 from app.api.club_mailbox.schemas import (
     AddressIn,
     AdminMailboxOut,
+    BackfillIn,
+    BackfillOut,
     HandleCheckOut,
     MailboxOut,
     MessageOut,
@@ -42,6 +44,7 @@ from app.api.club_mailbox.schemas import (
 )
 from app.config import settings
 from app.core.auth.dependencies import AdminAuth, ClubAuth
+from app.core.auth.permissions import ContentAuth, ModerateAuth
 from app.core.rate_limit import limiter
 from app.db.core import SessionDep
 from app.response import CustomHTTPException
@@ -453,9 +456,28 @@ async def wipe(request: Request, session: SessionDep, user: ClubAuth, confirm: s
 # ─── Admin ───────────────────────────────────────────────────────────────
 
 
+@admin_router.post("/backfill", summary="Give every club without an address its automatic one (admin: owner)")
+async def admin_backfill(request: Request, session: SessionDep, admin: ContentAuth, payload: Optional[BackfillIn] = None) -> BackfillOut:
+    """`{"dry_run": true}` (the default) says what would be made and writes
+    nothing; `false` makes them, oldest club first (the older club wins a
+    name), deleted clubs skipped. Safe to run again. Audited when applied."""
+    dry_run = True if payload is None else payload.dry_run
+    return await service.backfill(session, apply=not dry_run, actor=admin, request=request)
+
+
 @admin_router.get("/{club_id}", summary="A club's mailbox: its address, whether it is open, counts (admin)")
 async def admin_get(club_id: int, session: SessionDep, admin: AdminAuth) -> AdminMailboxOut:
     """No subject, no sender, no word of any mail."""
+    return await service.admin_out(session, club_id)
+
+
+@admin_router.put("/{club_id}/address", summary="Change a club's address, when the club asks (admin: owner, support)")
+async def admin_put_address(club_id: int, payload: AddressIn, request: Request, session: SessionDep, admin: ModerateAuth) -> AdminMailboxOut:
+    """The club's own rules -- 422 HANDLE_INVALID / HANDLE_RESERVED, 409
+    HANDLE_TAKEN -- without the monthly limit or the plan. The old address
+    forwards here 90 days (`previous`). 404 CLUB_NOT_FOUND. Audited
+    (`club_mailbox.admin_address`, old -> new)."""
+    await service.admin_set_address(session, club_id, payload.handle, admin=admin, request=request)
     return await service.admin_out(session, club_id)
 
 
@@ -558,8 +580,9 @@ async def ses_hook(request: Request, session: SessionDep) -> Response:
     except providers.NotOurs as exc:
         logger.info("mailbox hook: a notification not for the mailbox (%s)", exc)
         return _answer(200, {"ok": True, "reason": "not_ours"})
-    # The raw mail is read at most once, for whoever it is for: the team's
-    # desk (support@ / sales@, app/api/support/inbound.py) and the clubs.
+    # The raw mail is read at most once, for whoever it is for: the platform's
+    # own inbox (admin@, info@, ..., app/api/platform_mail), the team's desk
+    # (support@ / sales@, app/api/support/inbound.py) and the clubs.
     raw: dict = {}
 
     def reader(r):
@@ -568,8 +591,10 @@ async def ses_hook(request: Request, session: SessionDep) -> Response:
         return raw["mail"]
 
     try:
+        from app.api.platform_mail import inbound as platform_inbound
         from app.api.support import inbound as desk_inbound
 
+        platform = await platform_inbound.receive(session, received, reader)
         desk = await desk_inbound.receive(session, received, reader)
         outcome = await inbound.receive(session, received, reader=reader)
     except providers.Unreadable as exc:
@@ -585,7 +610,7 @@ async def ses_hook(request: Request, session: SessionDep) -> Response:
         await live.changed(club_id, thread_id, "message")
     await asyncio.to_thread(providers.discard, received)
     return _answer(200, {"ok": True, "kept": len(outcome.kept), "dropped": outcome.dropped, "duplicate": outcome.duplicate,
-                         **({"desk": desk} if desk else {})})
+                         **({"desk": desk} if desk else {}), **({"platform": len(platform.kept)} if platform.addressed else {})})
 
 
 # ─── Cloudflare Email Routing's deliveries (the club-mail Worker) ────────
@@ -596,7 +621,8 @@ async def cloudflare_hook(request: Request, session: SessionDep) -> Response:
     """The raw MIME, for one envelope recipient, signed by the Worker
     (club_mailbox/cloudflare.py: the signature is checked from the headers
     before the body is read). Kept for the club the address is (or for the
-    team's desk: support@ / sales@), and the Worker told what to do.
+    team's desk: support@ / sales@; or the platform's own inbox: admin@,
+    info@, ...), and the Worker told what to do.
 
     Answers: 200 `{"action": "accept"}` (kept, or kept before); 200
     `{"action": "reject", "reason", "text"}` -- the Worker rejects the mail
@@ -630,8 +656,10 @@ async def cloudflare_hook(request: Request, session: SessionDep) -> Response:
     received = cloudflare.received(delivery, raw)
     reader = cloudflare.reader_for(raw)
     try:
+        from app.api.platform_mail import inbound as platform_inbound
         from app.api.support import inbound as desk_inbound
 
+        platform = await platform_inbound.receive(session, received, reader)
         desk = await desk_inbound.receive(session, received, reader)
         outcome = await inbound.receive(session, received, reader=reader)
     except Exception as exc:  # noqa: BLE001 - never a mail or an address in the log
@@ -640,10 +668,12 @@ async def cloudflare_hook(request: Request, session: SessionDep) -> Response:
         return _answer(503, {"ok": False, "reason": "retry"})
     for club_id, thread_id in outcome.kept:
         await live.changed(club_id, thread_id, "message")
-    action, why = cloudflare.decision(desk, outcome)
+    action, why = cloudflare.decision(desk, outcome, platform)
     body: dict = {"ok": True, "action": action, "kept": len(outcome.kept), "duplicate": outcome.duplicate}
     if why:
         body.update(reason=why, text=cloudflare.REJECT_TEXT.get(why, cloudflare.REJECT_TEXT["unknown"]))
     if desk:
         body["desk"] = desk
+    if platform.addressed:
+        body["platform"] = len(platform.kept)
     return _answer(200, body)

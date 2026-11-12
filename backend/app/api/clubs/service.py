@@ -112,6 +112,13 @@ async def create_club(
     await session.commit()
     await session.refresh(club)
 
+    # Its address on the platform's domain, made from its name
+    # (app/api/club_mailbox): reserved whatever its plan -- mail arrives
+    # only on a plan with the mailbox. Never fails the club's creation.
+    from app.api.club_mailbox import service as mailbox
+
+    await mailbox.ensure_address(session, club)
+
     links = {key: (value or "").strip() or None for key, value in (socials or {}).items()}
     if any(links.values()):
         session.add(ClubSocials(club_id=club.id, **links))

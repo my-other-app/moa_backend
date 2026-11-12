@@ -10,12 +10,18 @@ the settings each time.
 
 Unique across every club and every handle still forwarding (a changed one
 forwards 90 days, then is free again). Changed at most once a month.
+
+Every club has one from the start (`from_name`, service.ensure_address):
+the letters and digits of its name, lower case -- "GDG Cloud Trivandrum"
+is `gdgcloudtrivandrum` -- or `club<id>` when its name has fewer than three
+of them; taken or reserved, `gdgcloudtrivandrum2`, `...3`, each cut to fit 30.
 """
 from __future__ import annotations
 
 import re
+import unicodedata
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Iterator, Optional
 
 from sqlalchemy import or_, select
 
@@ -55,13 +61,14 @@ RESERVED = frozenset({
 
 def _platform_locals() -> frozenset[str]:
     """The local parts of every address the platform itself uses on the
-    mailbox domain: who its mail is from, the desk's inbound addresses."""
+    mailbox domain: who its mail is from, the desk's inbound addresses, the
+    admin inbox's (PLATFORM_INBOX_ADDRESSES)."""
     from app.config import settings
 
     domain = (settings.MAILBOX_DOMAIN or "").strip().lower()
     addresses = {
         settings.MAIL_FROM_ADDRESS, settings.SUPPORT_FROM_ADDRESS, settings.SALES_FROM_ADDRESS,
-        *settings.support_inbound_addresses, *settings.sales_inbound_addresses,
+        *settings.support_inbound_addresses, *settings.sales_inbound_addresses, *settings.platform_inbox_addresses,
     }
     out = set()
     for address in addresses:
@@ -130,3 +137,36 @@ def next_change_at(changed_at: Optional[datetime]) -> Optional[datetime]:
         return None
     changed_at = changed_at if changed_at.tzinfo else changed_at.replace(tzinfo=timezone.utc)
     return changed_at + CHANGE_EVERY
+
+
+# ─── The automatic address ───────────────────────────────────────────────
+
+#: Suffixes tried after the bare name: 2, 3, ... up to this one.
+MAX_SUFFIX = 999
+_NOT_ALNUM = re.compile(r"[^a-z0-9]+")
+
+
+def base_of(name: Optional[str], club_id: int) -> str:
+    """The letters and digits of `name` (accents dropped, NFKD to ASCII),
+    lower case, cut to 30; `club<id>` when fewer than three are left (a name
+    in a script with no ASCII form: Malayalam, say)."""
+    ascii_name = unicodedata.normalize("NFKD", name or "").encode("ascii", "ignore").decode("ascii")
+    base = _NOT_ALNUM.sub("", ascii_name.lower())[:MAX_LENGTH]
+    return base if len(base) >= MIN_LENGTH else f"club{int(club_id)}"
+
+
+def candidates(base: str) -> Iterator[str]:
+    """`base`, `base2`, `base3`, ... each cut so it fits 30, never one that
+    can't be anyone's (`problem`). Free or not is the caller's to ask."""
+    for n in range(1, MAX_SUFFIX + 1):
+        suffix = "" if n == 1 else str(n)
+        handle = base[: MAX_LENGTH - len(suffix)] + suffix
+        if problem(handle) is None:
+            yield handle
+
+
+def from_name(name: Optional[str], club_id: int) -> str:
+    """The first address a club named `name` would be offered (free or not):
+    "GDG Cloud Trivandrum" -> gdgcloudtrivandrum; a reserved one ("Support")
+    -> support2; a Malayalam-only name -> club<id>."""
+    return next(candidates(base_of(name, club_id)), f"club{int(club_id)}")
