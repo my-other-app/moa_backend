@@ -1,0 +1,88 @@
+{
+ "version": 2,
+ "page": {
+  "widthMm": 203.2,
+  "heightMm": 89.877
+ },
+ "canvas": {
+  "width": 1560,
+  "height": 690,
+  "background": {
+   "type": "solid",
+   "color": "#FFFFFF"
+  }
+ },
+ "vars": {},
+ "layers": [
+  {
+   "id": "event",
+   "name": "Event name",
+   "x": 72,
+   "y": 108.284,
+   "width": 960,
+   "height": 136.8,
+   "kind": "text",
+   "text": "{{event_name}}",
+   "font": {
+    "family": "Inter",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 57,
+   "color": "#141614",
+   "maxLines": 2,
+   "fit": "shrink",
+   "minSize": 28.5
+  },
+  {
+   "id": "guest",
+   "name": "Guest name",
+   "x": 72,
+   "y": 288.224,
+   "width": 780,
+   "height": 54,
+   "kind": "text",
+   "text": "{{attendee_name}}",
+   "font": {
+    "family": "Inter",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 45,
+   "color": "#141614",
+   "fit": "shrink",
+   "minSize": 22.5
+  },
+  {
+   "id": "code",
+   "name": "Ticket code",
+   "x": 1140,
+   "y": 521.604,
+   "width": 390,
+   "height": 32.4,
+   "kind": "text",
+   "text": "{{ticket_code}}",
+   "font": {
+    "family": "Roboto Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 27,
+   "color": "#5A5F5B",
+   "align": "center",
+   "fit": "shrink",
+   "minSize": 13.5
+  },
+  {
+   "id": "qr",
+   "name": "QR code",
+   "x": 1185,
+   "y": 168,
+   "width": 300,
+   "height": 300,
+   "kind": "qr",
+   "quietZone": 2
+  }
+ ],
+ "starter": "ticket/blank"
+}

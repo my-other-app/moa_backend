@@ -1,0 +1,48 @@
+{
+ "name": "qr",
+ "about": "The QR: its quiet zone, a background and radius round it, a shadow. (The normaliser keeps only that it is there.)",
+ "kind": "badge",
+ "layout": {
+  "version": 2,
+  "page": {
+   "widthMm": 101.6,
+   "heightMm": 152.4
+  },
+  "canvas": {
+   "width": 384,
+   "height": 576
+  },
+  "layers": [
+   {
+    "id": "qr",
+    "name": "QR code",
+    "kind": "qr",
+    "x": 250,
+    "y": 440,
+    "width": 108,
+    "height": 108,
+    "quietZone": 2,
+    "background": {
+     "type": "solid",
+     "color": "#FFFFFF"
+    },
+    "radius": 14,
+    "shadow": {
+     "x": 4,
+     "y": 4,
+     "color": "#111111"
+    }
+   }
+  ]
+ },
+ "values": {},
+ "context": {
+  "qr": "TK-48213",
+  "colors": {
+   "primary": "#1F3BD8",
+   "secondary": "#FF8A3D",
+   "ticketType": "#0B6B3A"
+  }
+ },
+ "expected": "<div class=\"moa-doc\" style=\"position:relative;width:384px;height:576px;overflow:hidden\"><div data-kind=\"qr\" data-layer=\"qr\" style=\"position:absolute;left:250px;top:440px;width:108px;height:108px;box-shadow:4px 4px 0px 0px #111111\"><div class=\"moa-qr\" style=\"width:100%;height:100%;box-sizing:border-box;background:#FFFFFF;border-radius:14px\"><svg data-qr></svg></div></div></div>"
+}

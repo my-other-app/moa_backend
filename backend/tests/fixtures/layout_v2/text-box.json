@@ -1,0 +1,124 @@
+{
+ "name": "text-box",
+ "about": "A text layer's own box: background fill, padding, radius (all and per corner), shadows (text-shadow).",
+ "kind": "badge",
+ "layout": {
+  "version": 2,
+  "page": {
+   "widthMm": 101.6,
+   "heightMm": 152.4
+  },
+  "canvas": {
+   "width": 384,
+   "height": 576
+  },
+  "layers": [
+   {
+    "id": "pill",
+    "name": "pill",
+    "kind": "text",
+    "x": 10,
+    "y": 10,
+    "width": 200,
+    "height": 30,
+    "text": "ADMIT ONE",
+    "background": {
+     "type": "solid",
+     "color": "var:accent"
+    },
+    "padding": [
+     8,
+     16,
+     8,
+     16
+    ],
+    "radius": 999,
+    "shadow": {
+     "x": 0,
+     "y": 0,
+     "blur": 6,
+     "color": "#FFFFFF"
+    }
+   },
+   {
+    "id": "tag",
+    "name": "tag",
+    "kind": "text",
+    "x": 10,
+    "y": 60,
+    "width": 200,
+    "height": 30,
+    "text": "{{ticket_type}}",
+    "background": {
+     "type": "linear",
+     "angle": 135,
+     "stops": [
+      {
+       "offset": 0,
+       "color": "var:accent"
+      },
+      {
+       "offset": 0.5,
+       "color": "#FFFFFF80"
+      },
+      {
+       "offset": 1,
+       "color": "brand.primary"
+      }
+     ]
+    },
+    "padding": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "radius": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "shadow": [
+     {
+      "x": 0,
+      "y": 0,
+      "blur": 6,
+      "spread": 3,
+      "color": "#FFFFFF"
+     },
+     {
+      "x": 5,
+      "y": 5,
+      "blur": 0,
+      "color": "#1A0507CC"
+     }
+    ]
+   }
+  ],
+  "vars": {
+   "accent": "#FF8A3D"
+  }
+ },
+ "values": {
+  "first_name": "Meera",
+  "last_name": "Pillai",
+  "full_name": "Meera Pillai",
+  "role": "SPEAKER",
+  "event_name": "DevFest <Kerala> & \"Friends\" 'tis",
+  "ticket_type": "VIP",
+  "organization": "",
+  "attendee_name": "Meera Pillai",
+  "field.t_shirt_size": "M",
+  "badge_id": "A-0417"
+ },
+ "context": {
+  "qr": "TK-48213",
+  "colors": {
+   "primary": "#1F3BD8",
+   "secondary": "#FF8A3D",
+   "ticketType": "#0B6B3A"
+  }
+ },
+ "expected": "<div class=\"moa-doc\" style=\"position:relative;width:384px;height:576px;overflow:hidden\"><div data-kind=\"text\" data-layer=\"pill\" style=\"position:absolute;left:10px;top:10px;width:200px;height:30px\"><div class=\"moa-t\" style=\"display:flex;flex-direction:column;justify-content:flex-start;box-sizing:border-box;width:100%;height:100%;padding:8px 16px 8px 16px;background:#FF8A3D;border-radius:999px\"><div data-fit=\"shrink\" data-lines=\"1\" data-min=\"8\" style=\"font-family:&#39;Inter&#39;;font-weight:400;font-style:normal;font-size:16px;line-height:1.2;letter-spacing:0em;color:#141614;text-align:left;text-transform:none;white-space:pre-wrap;overflow-wrap:anywhere;text-shadow:0px 0px 6px #FFFFFF\">ADMIT ONE</div></div></div><div data-kind=\"text\" data-layer=\"tag\" style=\"position:absolute;left:10px;top:60px;width:200px;height:30px\"><div class=\"moa-t\" style=\"display:flex;flex-direction:column;justify-content:flex-start;box-sizing:border-box;width:100%;height:100%;padding:1px 2px 3px 4px;background:linear-gradient(135deg, #FF8A3D 0%, #FFFFFF80 50%, #1F3BD8 100%);border-radius:1px 2px 3px 4px\"><div data-fit=\"shrink\" data-lines=\"1\" data-min=\"8\" style=\"font-family:&#39;Inter&#39;;font-weight:400;font-style:normal;font-size:16px;line-height:1.2;letter-spacing:0em;color:#141614;text-align:left;text-transform:none;white-space:pre-wrap;overflow-wrap:anywhere;text-shadow:0px 0px 6px #FFFFFF, 5px 5px 0px #1A0507CC\">VIP</div></div></div></div>"
+}

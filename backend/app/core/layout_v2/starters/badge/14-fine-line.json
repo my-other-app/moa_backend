@@ -1,0 +1,247 @@
+{
+ "version": 2,
+ "page": {
+  "widthMm": 101.6,
+  "heightMm": 152.4
+ },
+ "canvas": {
+  "width": 384,
+  "height": 576,
+  "background": {
+   "type": "solid",
+   "color": "#FBFBF9"
+  }
+ },
+ "vars": {
+  "accent": "#B4532A"
+ },
+ "layers": [
+  {
+   "id": "lanyard",
+   "name": "Lanyard slot",
+   "x": 164,
+   "y": 16,
+   "width": 56,
+   "height": 12,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   },
+   "stroke": {
+    "color": "#1A1A1A",
+    "width": 1
+   },
+   "radius": [
+    6,
+    6,
+    6,
+    6
+   ]
+  },
+  {
+   "id": "line-bottom",
+   "name": "Line (bottom)",
+   "x": 32,
+   "y": 77,
+   "width": 320,
+   "height": 1,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#1A1A1A"
+   }
+  },
+  {
+   "id": "t-org_name",
+   "name": "Club name",
+   "x": 32,
+   "y": 48,
+   "width": 156.77,
+   "height": 15.02,
+   "kind": "text",
+   "text": "{{org_name}}",
+   "font": {
+    "family": "Inter",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#1A1A1A",
+   "letterSpacing": 0.2,
+   "lineHeight": 1.25,
+   "fit": "shrink",
+   "minSize": 7.2
+  },
+  {
+   "id": "t-member_id",
+   "name": "Member number",
+   "x": 196.714,
+   "y": 48,
+   "width": 155.286,
+   "height": 15.02,
+   "kind": "text",
+   "text": "No. {{member_id}}",
+   "font": {
+    "family": "Inter",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#1A1A1A",
+   "letterSpacing": 0.2,
+   "lineHeight": 1.25,
+   "align": "right",
+   "fit": "shrink",
+   "minSize": 8.4
+  },
+  {
+   "id": "shape",
+   "name": "Shape",
+   "x": 32,
+   "y": 172.703,
+   "width": 12,
+   "height": 12,
+   "showIf": "membership_tier",
+   "kind": "shape",
+   "shape": "ellipse",
+   "fill": {
+    "type": "solid",
+    "color": "var:accent"
+   }
+  },
+  {
+   "id": "t-membership_tier",
+   "name": "Tier",
+   "x": 54,
+   "y": 170.703,
+   "width": 298.02,
+   "height": 16.02,
+   "showIf": "membership_tier",
+   "kind": "text",
+   "text": "{{membership_tier}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 13,
+   "color": "#1A1A1A",
+   "letterSpacing": 0.2,
+   "lineHeight": 1.231,
+   "fit": "shrink",
+   "minSize": 9.1
+  },
+  {
+   "id": "t-first_name",
+   "name": "First name",
+   "x": 32,
+   "y": 200.703,
+   "width": 320.02,
+   "height": 117.614,
+   "kind": "text",
+   "text": "{{first_name}}{% if last_name %}\n{{last_name}}{% endif %}",
+   "font": {
+    "family": "Instrument Serif",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 60,
+   "color": "#1A1A1A",
+   "letterSpacing": -0.01,
+   "lineHeight": 0.98,
+   "maxLines": 2,
+   "fit": "shrink",
+   "minSize": 18
+  },
+  {
+   "id": "line-top",
+   "name": "Line (top)",
+   "x": 32,
+   "y": 344.297,
+   "width": 320,
+   "height": 1,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#1A1A1A"
+   }
+  },
+  {
+   "id": "t-member_since_year",
+   "name": "Registered in",
+   "x": 32,
+   "y": 359.297,
+   "width": 172.801,
+   "height": 16.02,
+   "showIf": "member_since_year",
+   "kind": "text",
+   "text": "Member since {{member_since_year}}",
+   "font": {
+    "family": "Inter",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 13,
+   "color": "#1A1A1A",
+   "lineHeight": 1.231,
+   "fit": "shrink",
+   "minSize": 9.1
+  },
+  {
+   "id": "t-valid_thru",
+   "name": "Valid on",
+   "x": 212.746,
+   "y": 359.297,
+   "width": 139.254,
+   "height": 16.02,
+   "kind": "text",
+   "text": "Valid {{valid_thru}}",
+   "font": {
+    "family": "Inter",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 13,
+   "color": "#1A1A1A",
+   "lineHeight": 1.231,
+   "align": "right",
+   "fit": "shrink",
+   "minSize": 9.1
+  },
+  {
+   "id": "t-present-this-card-at-the",
+   "name": "Present this card at the front desk. Non-transferable.",
+   "x": 32,
+   "y": 508,
+   "width": 220.02,
+   "height": 36.02,
+   "kind": "text",
+   "text": "Present this card at the front desk. Non-transferable.",
+   "font": {
+    "family": "Inter",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#555555",
+   "lineHeight": 1.5,
+   "maxLines": 2,
+   "fit": "shrink",
+   "minSize": 9.6
+  },
+  {
+   "id": "qr",
+   "name": "QR code",
+   "x": 276,
+   "y": 468,
+   "width": 76,
+   "height": 76,
+   "kind": "qr"
+  }
+ ],
+ "starter": "badge/14-fine-line"
+}

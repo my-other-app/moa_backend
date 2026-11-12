@@ -30,7 +30,7 @@ from app.core.layout_v2.schema import (
 QR_KINDS = ("ticket", "badge")
 #: A QR smaller than this on paper is refused; smaller than WARN_MM, warned.
 MIN_QR_MM = 10.0
-WARN_QR_MM = 15.0
+WARN_QR_MM = 12.0
 
 
 def _p(code: str, field: str, message: str, level: str = "error", layer: str | None = None) -> dict:
@@ -90,6 +90,9 @@ def _font_problems(family: str, weight: int, style: str, field: str, name: str, 
         near = ", ".join(v2_fonts.nearest_names(family))
         return [_p("unknown_font", f"{field}.family",
                    f"{name}: there is no font called {family!r}. The nearest are {near}.", layer=lid)]
+    if style == "italic" and v2_fonts.has_face(family, weight, "normal") and not v2_fonts.has_face(family, weight, "italic"):
+        return [_p("font_slanted", f"{field}.style",
+                   f"{name}: {family} has no italic; the browser slants the upright letters.", "warning", lid)]
     if not v2_fonts.has_face(family, weight, style):
         faces = next(f for f in v2_fonts.fonts_available() if f["family"] == family)["faces"]
         have = ", ".join(f"{f['weight']}{' italic' if f['style'] == 'italic' else ''}" for f in faces)
@@ -143,7 +146,7 @@ def problems(layout: Union[LayoutV2, dict, Any], kind: str = "ticket") -> list[d
                 if s.family or s.weight or s.style:
                     out += _font_problems(s.family or layer.font.family, s.weight or layer.font.weight,
                                           s.style or layer.font.style, f"{at}.spans.{j}", name, lid)
-            if not layer.text.strip():
+            if not layer.text.strip() and not layer.hidden:
                 out.append(_p("empty_text", f"{at}.text", f"{name}: this text says nothing.", "warning", lid))
         elif isinstance(layer, ShapeLayer):
             if layer.fill is None and layer.stroke is None and not layer.shadows():

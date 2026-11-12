@@ -1,0 +1,79 @@
+{
+ "name": "text-tokens",
+ "about": "Filters, if/else, not, aliases ({{name}}), a design token ({{role}} on a badge), field answers, unknown values.",
+ "kind": "badge",
+ "layout": {
+  "version": 2,
+  "page": {
+   "widthMm": 101.6,
+   "heightMm": 152.4
+  },
+  "canvas": {
+   "width": 384,
+   "height": 576
+  },
+  "layers": [
+   {
+    "id": "a",
+    "name": "a",
+    "kind": "text",
+    "x": 10,
+    "y": 10,
+    "width": 200,
+    "height": 30,
+    "text": "{{name | upper}} · {{role | lower}} · {{field.t_shirt_size}}"
+   },
+   {
+    "id": "b",
+    "name": "b",
+    "kind": "text",
+    "x": 10,
+    "y": 50,
+    "width": 200,
+    "height": 30,
+    "text": "{% if organization %}{{organization}}{% else %}Independent{% endif %}"
+   },
+   {
+    "id": "c",
+    "name": "c",
+    "kind": "text",
+    "x": 10,
+    "y": 90,
+    "width": 200,
+    "height": 30,
+    "text": "{% if not organization %}no org{% endif %}{{missing_token}}"
+   },
+   {
+    "id": "d",
+    "name": "d",
+    "kind": "text",
+    "x": 10,
+    "y": 130,
+    "width": 200,
+    "height": 30,
+    "text": "{{first_name | title}} {{last_name | title}}"
+   }
+  ]
+ },
+ "values": {
+  "first_name": "Meera",
+  "last_name": "Pillai",
+  "full_name": "Meera Pillai",
+  "role": "SPEAKER",
+  "event_name": "DevFest <Kerala> & \"Friends\" 'tis",
+  "ticket_type": "VIP",
+  "organization": "",
+  "attendee_name": "Meera Pillai",
+  "field.t_shirt_size": "M",
+  "badge_id": "A-0417"
+ },
+ "context": {
+  "qr": "TK-48213",
+  "colors": {
+   "primary": "#1F3BD8",
+   "secondary": "#FF8A3D",
+   "ticketType": "#0B6B3A"
+  }
+ },
+ "expected": "<div class=\"moa-doc\" style=\"position:relative;width:384px;height:576px;overflow:hidden\"><div data-kind=\"text\" data-layer=\"a\" style=\"position:absolute;left:10px;top:10px;width:200px;height:30px\"><div class=\"moa-t\" style=\"display:flex;flex-direction:column;justify-content:flex-start;box-sizing:border-box;width:100%;height:100%;padding:0px 0px 0px 0px\"><div data-fit=\"shrink\" data-lines=\"1\" data-min=\"8\" style=\"font-family:&#39;Inter&#39;;font-weight:400;font-style:normal;font-size:16px;line-height:1.2;letter-spacing:0em;color:#141614;text-align:left;text-transform:none;white-space:pre-wrap;overflow-wrap:anywhere\">MEERA PILLAI · speaker · M</div></div></div><div data-kind=\"text\" data-layer=\"b\" style=\"position:absolute;left:10px;top:50px;width:200px;height:30px\"><div class=\"moa-t\" style=\"display:flex;flex-direction:column;justify-content:flex-start;box-sizing:border-box;width:100%;height:100%;padding:0px 0px 0px 0px\"><div data-fit=\"shrink\" data-lines=\"1\" data-min=\"8\" style=\"font-family:&#39;Inter&#39;;font-weight:400;font-style:normal;font-size:16px;line-height:1.2;letter-spacing:0em;color:#141614;text-align:left;text-transform:none;white-space:pre-wrap;overflow-wrap:anywhere\">Independent</div></div></div><div data-kind=\"text\" data-layer=\"c\" style=\"position:absolute;left:10px;top:90px;width:200px;height:30px\"><div class=\"moa-t\" style=\"display:flex;flex-direction:column;justify-content:flex-start;box-sizing:border-box;width:100%;height:100%;padding:0px 0px 0px 0px\"><div data-fit=\"shrink\" data-lines=\"1\" data-min=\"8\" style=\"font-family:&#39;Inter&#39;;font-weight:400;font-style:normal;font-size:16px;line-height:1.2;letter-spacing:0em;color:#141614;text-align:left;text-transform:none;white-space:pre-wrap;overflow-wrap:anywhere\">no org</div></div></div><div data-kind=\"text\" data-layer=\"d\" style=\"position:absolute;left:10px;top:130px;width:200px;height:30px\"><div class=\"moa-t\" style=\"display:flex;flex-direction:column;justify-content:flex-start;box-sizing:border-box;width:100%;height:100%;padding:0px 0px 0px 0px\"><div data-fit=\"shrink\" data-lines=\"1\" data-min=\"8\" style=\"font-family:&#39;Inter&#39;;font-weight:400;font-style:normal;font-size:16px;line-height:1.2;letter-spacing:0em;color:#141614;text-align:left;text-transform:none;white-space:pre-wrap;overflow-wrap:anywhere\">Meera Pillai</div></div></div></div>"
+}

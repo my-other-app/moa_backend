@@ -102,6 +102,11 @@ _DESIGN_TOKENS: tuple[tuple[str, str, str, str, str], ...] = (
     ("wave", "Badge", "Wave (hidden unless set)", "B", "b"),
 )
 _KIND = {"t": "ticket", "c": "certificate", "b": "badge"}
+#: Pictures a showIf may name: present when the context carries that picture.
+IMAGE_TOKENS = {
+    "logo_src": "org_logo", "photo_url": "guest_photo", "sponsor_src": "sponsor",
+    "signature_src": "signature_1", "second_signature_src": "signature_2",
+}
 KINDS = ("ticket", "certificate", "badge", "agenda")
 
 
@@ -173,7 +178,7 @@ def present(name: str, values: Mapping[str, object], kind: str = "ticket") -> bo
 
 def canonical(name: str, kind: str = "ticket") -> Optional[str]:
     n = name.strip().lower()
-    if n in design_tokens(kind):
+    if n in design_tokens(kind) or n in IMAGE_TOKENS:
         return n
     if FIELD_TOKEN.match(n):
         return n

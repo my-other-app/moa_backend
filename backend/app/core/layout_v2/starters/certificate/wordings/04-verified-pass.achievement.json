@@ -1,0 +1,634 @@
+{
+ "version": 2,
+ "page": {
+  "widthMm": 297,
+  "heightMm": 210
+ },
+ "canvas": {
+  "width": 1123,
+  "height": 794,
+  "background": {
+   "type": "solid",
+   "color": "#EFEFEA"
+  }
+ },
+ "vars": {
+  "accent": "#C8F031"
+ },
+ "layers": [
+  {
+   "id": "shape",
+   "name": "Shape",
+   "x": 48,
+   "y": 48,
+   "width": 1027,
+   "height": 698,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   },
+   "stroke": {
+    "color": "#111111",
+    "width": 2
+   },
+   "radius": [
+    20,
+    20,
+    20,
+    20
+   ]
+  },
+  {
+   "id": "shape-2",
+   "name": "Shape",
+   "x": 98,
+   "y": 94,
+   "width": 223.969,
+   "height": 40,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "var:accent"
+   },
+   "stroke": {
+    "color": "#111111",
+    "width": 2
+   },
+   "radius": [
+    20,
+    20,
+    20,
+    20
+   ]
+  },
+  {
+   "id": "art",
+   "name": "Artwork",
+   "x": 110,
+   "y": 104,
+   "width": 20,
+   "height": 20,
+   "kind": "svg",
+   "markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 20 20\"><defs><clipPath id=\"moa-clip\"><path d=\"M-42 -54H945A18 18 0 0 1 963 -36V622A18 18 0 0 1 945 640H-42A18 18 0 0 1 -60 622V-36A18 18 0 0 1 -42 -54Z\"></path></clipPath></defs><g clip-path=\"url(#moa-clip)\"><circle cx=\"10\" cy=\"10\" r=\"9\" fill=\"#111111\"></circle><path d=\"M5.8 10.4l2.8 2.8 5.6-6\" fill=\"none\" stroke=\"#FFFFFF\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"></path></g></svg>",
+   "fit": "contain"
+  },
+  {
+   "id": "t-verified-credential",
+   "name": "VERIFIED CREDENTIAL",
+   "x": 138,
+   "y": 105.5,
+   "width": 167.989,
+   "height": 17.02,
+   "kind": "text",
+   "text": "VERIFIED CREDENTIAL",
+   "font": {
+    "family": "JetBrains Mono",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 13,
+   "color": "#111111",
+   "letterSpacing": 0.08,
+   "lineHeight": 1.308,
+   "fit": "shrink",
+   "minSize": 10.4
+  },
+  {
+   "id": "t-institute_name",
+   "name": "Issuer",
+   "x": 329.949,
+   "y": 105,
+   "width": 403.051,
+   "height": 18.02,
+   "kind": "text",
+   "text": "{{institute_name}}",
+   "font": {
+    "family": "JetBrains Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 14,
+   "color": "#111111",
+   "lineHeight": 1.286,
+   "align": "right",
+   "transform": "upper",
+   "fit": "shrink",
+   "minSize": 7
+  },
+  {
+   "id": "slot-kicker",
+   "name": "CERTIFICATE OF ACHIEVEMENT",
+   "x": 98,
+   "y": 268.688,
+   "width": 635.02,
+   "height": 17.02,
+   "kind": "text",
+   "text": "CERTIFICATE OF ACHIEVEMENT",
+   "font": {
+    "family": "JetBrains Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 13,
+   "color": "#4D4D4D",
+   "letterSpacing": 0.2,
+   "lineHeight": 1.308,
+   "fit": "shrink",
+   "minSize": 10.4
+  },
+  {
+   "id": "t-recipient_name",
+   "name": "Recipient's name",
+   "x": 98,
+   "y": 299.688,
+   "width": 635.02,
+   "height": 68.645,
+   "kind": "text",
+   "text": "{{recipient_name}}",
+   "font": {
+    "family": "DM Serif Display",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 66,
+   "color": "#111111",
+   "lineHeight": 1.04,
+   "textWrap": "balance",
+   "maxLines": 2,
+   "fit": "shrink",
+   "minSize": 33
+  },
+  {
+   "id": "slot-statement",
+   "name": "Programme",
+   "x": 98,
+   "y": 382.313,
+   "width": 560.02,
+   "height": 57.02,
+   "kind": "text",
+   "spans": [
+    {
+     "text": "achieved an outstanding result in "
+    },
+    {
+     "text": "{{course_title}}",
+     "weight": 600
+    },
+    {
+     "text": "."
+    }
+   ],
+   "font": {
+    "family": "Inter",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 19,
+   "color": "#111111",
+   "lineHeight": 1.5,
+   "textWrap": "pretty",
+   "maxLines": 3,
+   "fit": "shrink",
+   "minSize": 9.5
+  },
+  {
+   "id": "line-top",
+   "name": "Line (top)",
+   "x": 98,
+   "y": 574,
+   "width": 635,
+   "height": 2,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#111111"
+   }
+  },
+  {
+   "id": "t-issued",
+   "name": "ISSUED",
+   "x": 98,
+   "y": 592,
+   "width": 146.77,
+   "height": 16.02,
+   "kind": "text",
+   "text": "ISSUED",
+   "font": {
+    "family": "JetBrains Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#4D4D4D",
+   "letterSpacing": 0.14,
+   "lineHeight": 1.333,
+   "fit": "shrink",
+   "minSize": 9.6
+  },
+  {
+   "id": "t-issue_date",
+   "name": "Issued on",
+   "x": 98,
+   "y": 614,
+   "width": 146.77,
+   "height": 20.02,
+   "kind": "text",
+   "text": "{{issue_date}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 16,
+   "color": "#111111",
+   "lineHeight": 1.25,
+   "fit": "shrink",
+   "minSize": 11.2
+  },
+  {
+   "id": "t-duration",
+   "name": "DURATION",
+   "x": 260.75,
+   "y": 592,
+   "width": 146.77,
+   "height": 16.02,
+   "showIf": "duration_hours",
+   "kind": "text",
+   "text": "DURATION",
+   "font": {
+    "family": "JetBrains Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#4D4D4D",
+   "letterSpacing": 0.14,
+   "lineHeight": 1.333,
+   "fit": "shrink",
+   "minSize": 9.6
+  },
+  {
+   "id": "t-duration_hours",
+   "name": "Duration in hours",
+   "x": 260.75,
+   "y": 614,
+   "width": 146.77,
+   "height": 20.02,
+   "showIf": "duration_hours",
+   "kind": "text",
+   "text": "{{duration_hours}} hours",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 16,
+   "color": "#111111",
+   "lineHeight": 1.25,
+   "fit": "shrink",
+   "minSize": 11.2
+  },
+  {
+   "id": "t-grade",
+   "name": "GRADE",
+   "x": 423.5,
+   "y": 592,
+   "width": 146.77,
+   "height": 16.02,
+   "showIf": "grade",
+   "kind": "text",
+   "text": "GRADE",
+   "font": {
+    "family": "JetBrains Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#4D4D4D",
+   "letterSpacing": 0.14,
+   "lineHeight": 1.333,
+   "fit": "shrink",
+   "minSize": 9.6
+  },
+  {
+   "id": "t-grade-2",
+   "name": "Grade",
+   "x": 423.5,
+   "y": 614,
+   "width": 146.77,
+   "height": 20.02,
+   "showIf": "grade",
+   "kind": "text",
+   "text": "{{grade}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 16,
+   "color": "#111111",
+   "lineHeight": 1.25,
+   "fit": "shrink",
+   "minSize": 11.2
+  },
+  {
+   "id": "t-valid-until",
+   "name": "VALID UNTIL",
+   "x": 586.25,
+   "y": 592,
+   "width": 146.77,
+   "height": 16.02,
+   "showIf": "expiry_date",
+   "kind": "text",
+   "text": "VALID UNTIL",
+   "font": {
+    "family": "JetBrains Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#4D4D4D",
+   "letterSpacing": 0.14,
+   "lineHeight": 1.333,
+   "fit": "shrink",
+   "minSize": 9.6
+  },
+  {
+   "id": "t-expiry_date",
+   "name": "Valid until",
+   "x": 586.25,
+   "y": 614,
+   "width": 146.77,
+   "height": 20.02,
+   "showIf": "expiry_date",
+   "kind": "text",
+   "text": "{{expiry_date}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 16,
+   "color": "#111111",
+   "lineHeight": 1.25,
+   "fit": "shrink",
+   "minSize": 11.2
+  },
+  {
+   "id": "line-bottom",
+   "name": "Line (bottom)",
+   "x": 98,
+   "y": 698,
+   "width": 200,
+   "height": 2,
+   "showIf": "signatory_name",
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#111111"
+   }
+  },
+  {
+   "id": "signature",
+   "name": "Signature",
+   "x": 98,
+   "y": 660,
+   "width": 200,
+   "height": 38,
+   "showIf": "signatory_name",
+   "kind": "image",
+   "source": "signature_1",
+   "fit": "contain",
+   "valign": "bottom"
+  },
+  {
+   "id": "t-signatory_name",
+   "name": "Signatory",
+   "x": 318,
+   "y": 661,
+   "width": 132.598,
+   "height": 20.02,
+   "showIf": "signatory_name",
+   "kind": "text",
+   "text": "{{signatory_name}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 16,
+   "color": "#111111",
+   "lineHeight": 1.25,
+   "fit": "shrink",
+   "minSize": 8
+  },
+  {
+   "id": "t-signatory_designation",
+   "name": "Signatory's title",
+   "x": 318,
+   "y": 683,
+   "width": 132.598,
+   "height": 17.02,
+   "showIf": "signatory_designation signatory_name",
+   "kind": "text",
+   "text": "{{signatory_designation}}",
+   "font": {
+    "family": "Inter",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 14,
+   "color": "#4D4D4D",
+   "lineHeight": 1.214,
+   "fit": "shrink",
+   "minSize": 9.8
+  },
+  {
+   "id": "shape-3",
+   "name": "Shape",
+   "x": 781,
+   "y": 50,
+   "width": 292,
+   "height": 694,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "var:accent"
+   },
+   "radius": [
+    0,
+    18,
+    18,
+    0
+   ]
+  },
+  {
+   "id": "line-left",
+   "name": "Line (left)",
+   "x": 781,
+   "y": 50,
+   "width": 2,
+   "height": 694,
+   "kind": "shape",
+   "shape": "path",
+   "path": "M1 0V694",
+   "stroke": {
+    "color": "#111111",
+    "width": 2,
+    "dash": [
+     6,
+     4.118
+    ]
+   }
+  },
+  {
+   "id": "t-scan-to-verify",
+   "name": "SCAN TO VERIFY",
+   "x": 846.084,
+   "y": 94,
+   "width": 163.833,
+   "height": 20.02,
+   "kind": "text",
+   "text": "SCAN TO VERIFY",
+   "font": {
+    "family": "JetBrains Mono",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 15,
+   "color": "#111111",
+   "letterSpacing": 0.18,
+   "lineHeight": 1.333,
+   "align": "center",
+   "fit": "shrink",
+   "minSize": 12
+  },
+  {
+   "id": "shape-4",
+   "name": "Shape",
+   "x": 828,
+   "y": 230.922,
+   "width": 200,
+   "height": 200,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   },
+   "stroke": {
+    "color": "#111111",
+    "width": 2
+   },
+   "radius": [
+    12,
+    12,
+    12,
+    12
+   ]
+  },
+  {
+   "id": "qr",
+   "name": "QR code",
+   "x": 844,
+   "y": 246.922,
+   "width": 168,
+   "height": 168,
+   "kind": "qr"
+  },
+  {
+   "id": "t-credential-id",
+   "name": "CREDENTIAL ID",
+   "x": 846.381,
+   "y": 448.922,
+   "width": 163.223,
+   "height": 16.02,
+   "kind": "text",
+   "text": "CREDENTIAL ID",
+   "font": {
+    "family": "JetBrains Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#111111",
+   "letterSpacing": 0.14,
+   "lineHeight": 1.333,
+   "align": "center",
+   "fit": "shrink",
+   "minSize": 9.6
+  },
+  {
+   "id": "t-certificate_id",
+   "name": "Certificate number",
+   "x": 846.381,
+   "y": 468.922,
+   "width": 163.223,
+   "height": 22.02,
+   "kind": "text",
+   "text": "{{certificate_id}}",
+   "font": {
+    "family": "JetBrains Mono",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 17,
+   "color": "#111111",
+   "lineHeight": 1.294,
+   "align": "center",
+   "fit": "shrink",
+   "minSize": 11.9
+  },
+  {
+   "id": "t-verify_url",
+   "name": "Verify address",
+   "x": 816.99,
+   "y": 607.828,
+   "width": 222.02,
+   "height": 32.02,
+   "kind": "text",
+   "text": "{{verify_url}}",
+   "font": {
+    "family": "JetBrains Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#111111",
+   "lineHeight": 1.333,
+   "align": "center",
+   "maxLines": 2,
+   "fit": "shrink",
+   "minSize": 8.4
+  },
+  {
+   "id": "t-valid-only-if-the-scanne",
+   "name": "Valid only if the scanned record matches the details printed",
+   "x": 816.99,
+   "y": 647.828,
+   "width": 222.02,
+   "height": 52.192,
+   "kind": "text",
+   "text": "Valid only if the scanned record matches the details printed on this certificate.",
+   "font": {
+    "family": "Inter",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#111111",
+   "lineHeight": 1.45,
+   "align": "center",
+   "maxLines": 3,
+   "fit": "shrink",
+   "minSize": 9.6
+  }
+ ],
+ "starter": "certificate/04-verified-pass"
+}

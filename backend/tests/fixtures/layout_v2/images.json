@@ -1,0 +1,134 @@
+{
+ "name": "images",
+ "about": "Pictures as data: URIs, fit, align/valign, radius, border; a missing picture; the initials tile.",
+ "kind": "badge",
+ "layout": {
+  "version": 2,
+  "page": {
+   "widthMm": 101.6,
+   "heightMm": 152.4
+  },
+  "canvas": {
+   "width": 384,
+   "height": 576
+  },
+  "layers": [
+   {
+    "id": "logo",
+    "name": "Logo",
+    "kind": "image",
+    "source": "org_logo",
+    "x": 10,
+    "y": 10,
+    "width": 52,
+    "height": 52,
+    "fit": "contain",
+    "align": "left",
+    "valign": "bottom"
+   },
+   {
+    "id": "upload",
+    "name": "Upload",
+    "kind": "image",
+    "source": "upload",
+    "imageKey": "uploads/a.png",
+    "x": 70,
+    "y": 10,
+    "width": 100,
+    "height": 50,
+    "fit": "cover",
+    "radius": [
+     4,
+     4,
+     0,
+     0
+    ],
+    "border": {
+     "color": "#FFFFFF",
+     "width": 2
+    },
+    "shadow": {
+     "x": 4,
+     "y": 4,
+     "color": "#111111"
+    }
+   },
+   {
+    "id": "gone",
+    "name": "Gone",
+    "kind": "image",
+    "source": "event_icon",
+    "x": 0,
+    "y": 0,
+    "width": 10,
+    "height": 10
+   },
+   {
+    "id": "photo",
+    "name": "Photo",
+    "kind": "image",
+    "source": "guest_photo",
+    "x": 100,
+    "y": 100,
+    "width": 180,
+    "height": 180,
+    "fit": "cover",
+    "radius": 90,
+    "placeholder": "initials",
+    "placeholderStyle": {
+     "color": "var:accent",
+     "background": {
+      "type": "solid",
+      "color": "#EEF0FF"
+     },
+     "family": "Space Grotesk",
+     "weight": 700
+    }
+   },
+   {
+    "id": "photo2",
+    "name": "Photo 2",
+    "kind": "image",
+    "source": "guest_photo",
+    "x": 10,
+    "y": 300,
+    "width": 80,
+    "height": 80,
+    "placeholder": "initials"
+   },
+   {
+    "id": "sig",
+    "name": "Signature",
+    "kind": "image",
+    "source": "signature_1",
+    "x": 10,
+    "y": 400,
+    "width": 230,
+    "height": 44,
+    "valign": "bottom"
+   }
+  ],
+  "vars": {
+   "accent": "#5B3DF5"
+  }
+ },
+ "values": {
+  "first_name": "Meera",
+  "last_name": "Pillai"
+ },
+ "context": {
+  "qr": "TK-48213",
+  "colors": {
+   "primary": "#1F3BD8",
+   "secondary": "#FF8A3D",
+   "ticketType": "#0B6B3A"
+  },
+  "images": {
+   "org_logo": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAxMCAxMCc+PHJlY3Qgd2lkdGg9JzEwJyBoZWlnaHQ9JzEwJyBmaWxsPScjODg4Jy8+PC9zdmc+",
+   "upload:uploads/a.png": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNg+M8AAAMBAQAY3Y2wAAAAAElFTkSuQmCC",
+   "event_icon": "https://evil.example/x.png",
+   "signature_1": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNg+M8AAAMBAQAY3Y2wAAAAAElFTkSuQmCC"
+  }
+ },
+ "expected": "<div class=\"moa-doc\" style=\"position:relative;width:384px;height:576px;overflow:hidden\"><div data-kind=\"image\" data-layer=\"logo\" style=\"position:absolute;left:10px;top:10px;width:52px;height:52px\"><img alt=\"\" src=\"data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAxMCAxMCc+PHJlY3Qgd2lkdGg9JzEwJyBoZWlnaHQ9JzEwJyBmaWxsPScjODg4Jy8+PC9zdmc+\" style=\"display:block;width:100%;height:100%;box-sizing:border-box;object-fit:contain;object-position:0% 100%\"></div><div data-kind=\"image\" data-layer=\"upload\" style=\"position:absolute;left:70px;top:10px;width:100px;height:50px;box-shadow:4px 4px 0px 0px #111111;border-radius:4px 4px 0px 0px\"><img alt=\"\" src=\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNg+M8AAAMBAQAY3Y2wAAAAAElFTkSuQmCC\" style=\"display:block;width:100%;height:100%;box-sizing:border-box;object-fit:cover;object-position:50% 50%;border-radius:4px 4px 0px 0px;border:2px solid #FFFFFF\"></div><div data-kind=\"image\" data-layer=\"photo\" style=\"position:absolute;left:100px;top:100px;width:180px;height:180px\"><div class=\"moa-initials\" style=\"width:100%;height:100%;box-sizing:border-box;display:flex;align-items:center;justify-content:center;container-type:size;color:#5B3DF5;background:#EEF0FF;font-family:&#39;Space Grotesk&#39;;font-weight:700;border-radius:90px\"><span style=\"font-size:42cqmin;line-height:1;letter-spacing:-0.02em\">MP</span></div></div><div data-kind=\"image\" data-layer=\"photo2\" style=\"position:absolute;left:10px;top:300px;width:80px;height:80px\"><div class=\"moa-initials\" style=\"width:100%;height:100%;box-sizing:border-box;display:flex;align-items:center;justify-content:center;container-type:size;color:#3C4257;background:#E9ECF2;font-family:&#39;Inter&#39;;font-weight:700\"><span style=\"font-size:42cqmin;line-height:1;letter-spacing:-0.02em\">MP</span></div></div><div data-kind=\"image\" data-layer=\"sig\" style=\"position:absolute;left:10px;top:400px;width:230px;height:44px\"><img alt=\"\" src=\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNg+M8AAAMBAQAY3Y2wAAAAAElFTkSuQmCC\" style=\"display:block;width:100%;height:100%;box-sizing:border-box;object-fit:contain;object-position:50% 100%\"></div></div>"
+}

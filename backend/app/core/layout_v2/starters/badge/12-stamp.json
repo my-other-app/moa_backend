@@ -1,0 +1,405 @@
+{
+ "version": 2,
+ "page": {
+  "widthMm": 101.6,
+  "heightMm": 152.4
+ },
+ "canvas": {
+  "width": 384,
+  "height": 576,
+  "background": {
+   "type": "solid",
+   "color": "#E9F0F7"
+  }
+ },
+ "vars": {
+  "accent": "#B42B22"
+ },
+ "layers": [
+  {
+   "id": "shape",
+   "name": "Shape",
+   "x": 12,
+   "y": 12,
+   "width": 360,
+   "height": 552,
+   "kind": "shape",
+   "shape": "rect",
+   "stroke": {
+    "color": "#1C2F73",
+    "width": 2
+   }
+  },
+  {
+   "id": "shape-2",
+   "name": "Shape",
+   "x": 18,
+   "y": 18,
+   "width": 348,
+   "height": 540,
+   "kind": "shape",
+   "shape": "rect",
+   "stroke": {
+    "color": "#1C2F73",
+    "width": 1
+   }
+  },
+  {
+   "id": "lanyard",
+   "name": "Lanyard slot",
+   "x": 164,
+   "y": 29,
+   "width": 56,
+   "height": 12,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   },
+   "stroke": {
+    "color": "#1C2F73",
+    "width": 1
+   },
+   "radius": [
+    6,
+    6,
+    6,
+    6
+   ]
+  },
+  {
+   "id": "t-org_name",
+   "name": "Club name",
+   "x": 138.25,
+   "y": 59,
+   "width": 206.77,
+   "height": 16.02,
+   "kind": "text",
+   "text": "{{org_name}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 13,
+   "color": "#1C2F73",
+   "letterSpacing": 0.2,
+   "lineHeight": 1.231,
+   "fit": "shrink",
+   "minSize": 7.8
+  },
+  {
+   "id": "t-membership-card",
+   "name": "Membership Card",
+   "x": 115.625,
+   "y": 79,
+   "width": 152.77,
+   "height": 26.411,
+   "kind": "text",
+   "text": "Membership Card",
+   "font": {
+    "family": "Instrument Serif",
+    "weight": 400,
+    "style": "italic"
+   },
+   "size": 24,
+   "color": "#1C2F73",
+   "lineHeight": 1.1,
+   "fit": "shrink",
+   "minSize": 19.2
+  },
+  {
+   "id": "t-full_name",
+   "name": "Full name",
+   "x": 38.99,
+   "y": 139.391,
+   "width": 306.02,
+   "height": 48.02,
+   "kind": "text",
+   "text": "{{full_name}}",
+   "font": {
+    "family": "Instrument Serif",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 48,
+   "color": "#1C2F73",
+   "lineHeight": 1,
+   "align": "center",
+   "fit": "shrink",
+   "minSize": 18
+  },
+  {
+   "id": "t-membership_tier",
+   "name": "Tier",
+   "x": 132.297,
+   "y": 197.391,
+   "width": 212.723,
+   "height": 16.02,
+   "showIf": "membership_tier",
+   "kind": "text",
+   "text": "{{membership_tier}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 13,
+   "color": "#1C2F73",
+   "letterSpacing": 0.16,
+   "lineHeight": 1.231,
+   "fit": "shrink",
+   "minSize": 9.1
+  },
+  {
+   "id": "line-top",
+   "name": "Line (top)",
+   "x": 39,
+   "y": 239.391,
+   "width": 306,
+   "height": 1,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#1C2F73"
+   }
+  },
+  {
+   "id": "line-bottom",
+   "name": "Line (bottom)",
+   "x": 39,
+   "y": 301.391,
+   "width": 306,
+   "height": 1,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#1C2F73"
+   }
+  },
+  {
+   "id": "t-member-no",
+   "name": "MEMBER NO.",
+   "x": 39,
+   "y": 252.391,
+   "width": 147.02,
+   "height": 15.02,
+   "kind": "text",
+   "text": "MEMBER NO.",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#3B4C8A",
+   "letterSpacing": 0.08,
+   "lineHeight": 1.25,
+   "fit": "shrink",
+   "minSize": 9.6
+  },
+  {
+   "id": "t-member_id",
+   "name": "Member number",
+   "x": 39,
+   "y": 269.391,
+   "width": 147.02,
+   "height": 20.02,
+   "kind": "text",
+   "text": "{{member_id}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 17,
+   "color": "#1C2F73",
+   "lineHeight": 1.176,
+   "fit": "shrink",
+   "minSize": 11.9
+  },
+  {
+   "id": "t-admitted",
+   "name": "ADMITTED",
+   "x": 198,
+   "y": 252.391,
+   "width": 147.02,
+   "height": 15.02,
+   "showIf": "joined_date",
+   "kind": "text",
+   "text": "ADMITTED",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#3B4C8A",
+   "letterSpacing": 0.08,
+   "lineHeight": 1.25,
+   "fit": "shrink",
+   "minSize": 9.6
+  },
+  {
+   "id": "t-joined_date",
+   "name": "Registered",
+   "x": 198,
+   "y": 269.391,
+   "width": 147.02,
+   "height": 20.02,
+   "showIf": "joined_date",
+   "kind": "text",
+   "text": "{{joined_date}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 17,
+   "color": "#1C2F73",
+   "lineHeight": 1.176,
+   "fit": "shrink",
+   "minSize": 11.9
+  },
+  {
+   "id": "qr",
+   "name": "QR code",
+   "x": 255,
+   "y": 449,
+   "width": 90,
+   "height": 90,
+   "kind": "qr"
+  },
+  {
+   "id": "shape-3",
+   "name": "Shape",
+   "x": 39,
+   "y": 421,
+   "width": 118,
+   "height": 118,
+   "rotation": -12,
+   "kind": "shape",
+   "shape": "ellipse",
+   "stroke": {
+    "color": "var:accent",
+    "width": 3
+   }
+  },
+  {
+   "id": "shape-4",
+   "name": "Shape",
+   "x": 47,
+   "y": 429,
+   "width": 102,
+   "height": 102,
+   "rotation": -12,
+   "kind": "shape",
+   "shape": "ellipse",
+   "stroke": {
+    "color": "var:accent",
+    "width": 1
+   }
+  },
+  {
+   "id": "t-city",
+   "name": "City",
+   "x": 73.46,
+   "y": 449.511,
+   "width": 39.333,
+   "height": 15.02,
+   "rotation": -12,
+   "showIf": "city",
+   "kind": "text",
+   "text": "{{city}}",
+   "font": {
+    "family": "Inter",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "var:accent",
+   "letterSpacing": 0.1,
+   "lineHeight": 1.25,
+   "fit": "shrink",
+   "minSize": 8.4
+  },
+  {
+   "id": "line-top-2",
+   "name": "Line (top)",
+   "x": 47.792,
+   "y": 467.276,
+   "width": 95.203,
+   "height": 1,
+   "rotation": -12,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "var:accent"
+   }
+  },
+  {
+   "id": "line-bottom-2",
+   "name": "Line (bottom)",
+   "x": 52.99,
+   "y": 491.73,
+   "width": 95.203,
+   "height": 1,
+   "rotation": -12,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "var:accent"
+   }
+  },
+  {
+   "id": "t-verified",
+   "name": "VERIFIED",
+   "x": 54.393,
+   "y": 469.999,
+   "width": 87.223,
+   "height": 20.02,
+   "rotation": -12,
+   "kind": "text",
+   "text": "VERIFIED",
+   "font": {
+    "family": "Inter",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 17,
+   "color": "var:accent",
+   "letterSpacing": 0.08,
+   "lineHeight": 1.176,
+   "fit": "shrink",
+   "minSize": 13.6
+  },
+  {
+   "id": "t-valid_year",
+   "name": "Valid year",
+   "x": 85.388,
+   "y": 495.484,
+   "width": 35.02,
+   "height": 15.02,
+   "rotation": -12,
+   "kind": "text",
+   "text": "{{valid_year}}",
+   "font": {
+    "family": "Inter",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "var:accent",
+   "letterSpacing": 0.1,
+   "lineHeight": 1.25,
+   "fit": "shrink",
+   "minSize": 8.4
+  }
+ ],
+ "starter": "badge/12-stamp"
+}
