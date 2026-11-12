@@ -9,7 +9,7 @@
   "fixed_bottom": ["footer"],
   "sections": [
     {"key": "expertise", "label": "Domains of expertise", "default_title": "What we know · Domains of expertise", "hideable": true},
-    {"key": "upcoming", "label": "Upcoming events", "default_title": "Coming up", "hideable": true},
+    {"key": "upcoming", "label": "Upcoming events", "default_title": "Coming up", "hideable": true, "anchor": "events"},
     {"key": "past", "label": "Past events", "default_title": "Already happened", "hideable": true},
     {"key": "photos", "label": "Photos", "default_title": "Highlights", "hideable": true},
     {"key": "speakers", "label": "Speakers", "default_title": "Previous speakers", "hideable": true},

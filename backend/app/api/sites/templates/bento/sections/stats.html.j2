@@ -1,4 +1,4 @@
-{%- import "_shared/macros.html.j2" as m with context -%}
+{%- import "macros.html.j2" as m with context -%}
 {%- set people = stats.members if stats.members is not none else stats.followers -%}
 {%- set tiles = [(people, "members" if stats.members is not none else "followers"), (stats.events_held, "events hosted"), (stats.speakers, "speakers on stage"), (stats.sponsors, "sponsors and partners")]|selectattr(0)|list -%}
 {%- set tints = ["#FFD9C7", "#CFF1E1", "#DCD2FF", "#FFEFB0"] -%}

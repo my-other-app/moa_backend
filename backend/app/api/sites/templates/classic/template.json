@@ -9,12 +9,12 @@
   "fixed_bottom": ["footer"],
   "sections": [
     {"key": "about", "label": "About and expertise", "default_title": "About us", "hideable": true},
-    {"key": "upcoming", "label": "Upcoming events", "default_title": "Upcoming events", "hideable": true},
+    {"key": "upcoming", "label": "Upcoming events", "default_title": "Upcoming events", "hideable": true, "anchor": "events"},
     {"key": "past", "label": "Past events", "default_title": "Past events", "hideable": true},
     {"key": "photos", "label": "Photos", "default_title": "Highlights", "hideable": true},
     {"key": "speakers", "label": "Speakers", "default_title": "Previous speakers", "hideable": true},
     {"key": "team", "label": "Team", "default_title": "The team", "hideable": true},
-    {"key": "sponsors", "label": "Sponsors and partners", "default_title": "Sponsors and partners", "hideable": true},
+    {"key": "sponsors", "label": "Sponsors and partners", "default_title": "Sponsors and partners", "hideable": true, "anchor": "partners"},
     {"key": "join", "label": "Join banner", "default_title": "Come to the next one.", "hideable": true}
   ],
   "slots": [

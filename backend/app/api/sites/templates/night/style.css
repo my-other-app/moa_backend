@@ -25,3 +25,5 @@ h1,h2,h3,p{overflow-wrap:break-word}
 .n-cover{min-height:180px!important}
 .n-h1{overflow-wrap:anywhere}
 }
+.j-pill{display:flex;align-items:center;white-space:nowrap}
+.j-row:hover .btn-a{filter:brightness(1.08)}

@@ -1,8 +1,8 @@
-{%- import "_shared/macros.html.j2" as m with context -%}
+{%- import "macros.html.j2" as m with context -%}
 {%- set photos = (images.photos or [])[:4] -%}
 {%- if photos -%}
 <section id="photos" style="display: flex; flex-direction: column; gap: 20px">
-<div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 12px"><h2 style="margin: 0; font-family: Sora, system-ui, sans-serif; font-weight: 700; font-size: 30px">{{ section.title }}</h2>{% if links.gallery_url %}<a href="{{ links.gallery_url }}" style="font-weight: 600; padding: 10px 0">All {% if stats.photos %}{{ m.num(stats.photos) }} {% endif %}photos →</a>{% endif %}</div>
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 12px"><h2 style="margin: 0; font-family: Sora, system-ui, sans-serif; font-weight: 700; font-size: 30px">{{ section.title }}</h2>{% if links.gallery_url %}<a href="{{ links.gallery_url }}" target="_top" style="font-weight: 600; padding: 10px 0">All {% if stats.photos %}{{ m.num(stats.photos) }} {% endif %}photos →</a>{% endif %}</div>
 <div class="n-photos" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); gap: 12px">
 {% for p in photos %}<div class="{{ m.phc(p) }}" style="aspect-ratio: 3 / 4; border-radius: 16px; background: repeating-linear-gradient(135deg, #14181D 0 14px, #1B2027 14px 28px); display: flex; align-items: flex-end; padding: 12px; box-sizing: border-box">{% if m.real(p) %}{{ m.fill(p, 300, 400, "(max-width: 600px) 50vw, 220px") }}{% elif m.label(p) %}<span style="background: #0B0D10; color: #C9D1DC; font-size: 12px; padding: 4px 8px; border-radius: 6px">{{ m.label(p) }}</span>{% endif %}</div>
 {% endfor %}</div>

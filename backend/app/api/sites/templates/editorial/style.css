@@ -7,6 +7,7 @@ a{color:#111111}a:hover{color:var(--accent)}
 .ph-fill{object-fit:cover}
 .ph-contain{object-fit:contain}
 .ph-blur{object-fit:cover;filter:blur(18px) saturate(1.1) brightness(.9);transform:scale(1.15)}
+.btn-a{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;text-decoration:none}
 .logo-img{object-fit:contain;height:auto;width:auto}
 .e-wrap{overflow-wrap:anywhere}
 h1,h2,h3,p{overflow-wrap:break-word}
@@ -26,3 +27,5 @@ h1,h2,h3,p{overflow-wrap:break-word}
 .e-h1{overflow-wrap:anywhere}
 .e-joinbox{margin:10px 4px!important}
 }
+.j-pill{display:flex;align-items:center;white-space:nowrap}
+.j-row:hover .btn-a{filter:brightness(1.08)}

@@ -1,4 +1,4 @@
-{%- import "_shared/macros.html.j2" as m with context -%}
+{%- import "macros.html.j2" as m with context -%}
 {%- set photos = (images.photos or [])[:4] -%}
 {%- if photos -%}
 {%- set more = (stats.photos - photos|length) if (stats.photos is number and links.gallery_url) else 0 -%}
@@ -8,7 +8,7 @@
 <div style="max-width: 1200px; margin: 0 auto; padding: 0 24px; display: flex; flex-direction: column; gap: 32px">
 <div style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px">
 <h2 style="margin: 0; font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: clamp(30px, 4vw, 44px); line-height: 1.1; letter-spacing: -0.02em">{{ section.title }}</h2>
-{% if links.gallery_url %}<a href="{{ links.gallery_url }}" style="font-weight: 600; font-size: 15px; padding: 12px 0">Open full gallery →</a>{% endif %}
+{% if links.gallery_url %}<a href="{{ links.gallery_url }}" target="_top" style="font-weight: 600; font-size: 15px; padding: 12px 0">Open full gallery →</a>{% endif %}
 </div>
 <div style="display: flex; flex-wrap: wrap; gap: 16px">
 {% set p = photos[0] %}<div class="{{ m.phc(p) }}" style="flex: 2 1 400px; min-height: 440px; border-radius: 20px; background: repeating-linear-gradient(135deg, #DCE1EA 0 14px, #E7EBF1 14px 28px); display: flex; align-items: flex-end; padding: 20px; box-sizing: border-box">
@@ -18,7 +18,7 @@
 {% for p in small %}<div class="{{ m.phc(p) }}" style="min-height: 212px; border-radius: 20px; background: repeating-linear-gradient(135deg, #DCE1EA 0 14px, #E7EBF1 14px 28px); display: flex; align-items: flex-end; padding: 14px; box-sizing: border-box">{% if m.real(p) %}{{ m.fill(p, 400, 212, "(max-width: 900px) 50vw, 330px") }}{% elif m.label(p) %}<span style="background: #FFFFFF; color: #3D4558; font-size: 12px; font-weight: 500; padding: 4px 10px; border-radius: 6px">{{ m.label(p) }}</span>{% endif %}</div>
 {% endfor %}{% if more > 0 %}<div class="c-more" style="min-height: 212px; border-radius: 20px; background: #FFB25C; color: #0D1220; display: flex; flex-direction: column; justify-content: space-between; padding: 20px; box-sizing: border-box">
 <span style="font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: 44px; line-height: 1">+{{ m.num(more) }}</span>
-<a href="{{ links.gallery_url }}" style="font-weight: 600; font-size: 15px; color: #0D1220; padding: 10px 0">more photos from members →</a>
+<a href="{{ links.gallery_url }}" target="_top" style="font-weight: 600; font-size: 15px; color: #0D1220; padding: 10px 0">more photos from members →</a>
 </div>{% endif %}
 </div>{% endif %}
 </div>

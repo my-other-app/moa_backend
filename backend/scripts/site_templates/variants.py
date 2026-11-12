@@ -45,10 +45,9 @@ def with_images(sample: dict, urls: list[str], *, srcset: bool = True) -> dict:
     data["club"]["logo_url"] = next(pool)
     data["club"]["logo_srcset"] = None
     data["stats"] = {k: _strip_brackets(v) for k, v in (data.get("stats") or {}).items()}
-    for e in data.get("upcoming", []):
-        for k in ("seats_left", "capacity"):
-            if k in e:
-                e[k] = _strip_brackets(e[k])
+    for e in data.get("past", []):
+        e.pop("facts", None)  # the line comes from `going` / `speakers_count`, as in B's data
+        e["speakers_count"] = 3
     return data
 
 
@@ -56,19 +55,23 @@ def _site(template: str) -> dict:
     return {"template": template, "title_overrides": {}, "accent": None, "headline": None, "subline": None}
 
 
+# The render input as B's site_data() builds it (contract, Changes, B 7).
+
+
 def sparse(template: str, name: str = "Chess") -> dict:
     return {
-        "sample": False,
         "site": _site(template),
+        "page": {"title": name, "description": None, "url": "https://x.myotherapp.in"},
+        "headline": name, "subline": None, "year": 2026,
         "club": {
-            "name": name, "short_name": None, "tagline": None, "about": None, "location_name": None, "address": None,
-            "contact_email": None, "logo_url": None, "logo_srcset": None, "cover": None, "founded_year": None,
-            "topics": [], "topic_counts": {}, "slug": name.lower(), "website": None,
+            "name": name, "initials": name[:1].upper(), "tagline": None, "about": None, "about_short": None, "location_name": None,
+            "contact_email": None, "slug": name.lower(), "logo": None, "logo_url": None, "logo_srcset": None, "cover": None,
+            "founded_year": None, "topics": [], "brand_colour": None,
         },
         "images": copy.deepcopy(EMPTY_IMAGES),
-        "stats": {"followers": 0, "events_held": 0, "members": None, "speakers": 0, "sponsors": 0, "photos": 0},
+        "stats": {"followers": 0, "events_held": 0, "upcoming": 0, "members": None},
         "upcoming": [], "past": [], "speakers": [], "team": [], "sponsors": [], "socials": [],
-        "links": {"follow_url": None, "events_url": None, "join_url": None, "contact_mailto": None, "share_url": None, "gallery_url": None, "speakers_url": None, "site_url": None},
+        "links": {"follow_url": None, "events_url": None, "join_url": None, "contact_mailto": None, "site_url": "https://x.myotherapp.in"},
     }
 
 
@@ -82,21 +85,21 @@ def long_names(template: str) -> dict:
         about="Supercalifragilisticexpialidocious-and-then-some-unbreakable-words-to-test-wrapping " * 3 + "\n\nA second paragraph.",
         location_name="Thiruvananthapuram, Kerala, India", contact_email="a.very.long.address.for.contact@extraordinarily-long-domain-name.example.com",
         founded_year=2019, topics=["Mechanical keyboards and the people who love them", "Soldering"],
-        website={"label": "extraordinarily-long-domain-name.example.com", "href": "https://extraordinarily-long-domain-name.example.com"},
     )
     ev = {
         "id": 1, "name": "An event with a name long enough to wrap onto three or four lines on a phone screen, at least", "starts_at": "2027-01-16T10:00:00+05:30",
         "day": "16", "month": "Jan", "year": "2027", "weekday": "Sat", "time": "10:00 AM", "end_time": "6:00 PM",
-        "where": "A venue with a long name, Some Street, Thiruvananthapuram", "mode": "In person", "kind": "Workshop",
-        "summary": "A long summary " * 6, "seats_left": 12, "capacity": 1500, "fee": "₹1,500", "poster": None, "url": "https://myotherapp.in/events/x",
-        "facts": ["1,234 attended", "14 speakers"], "number": None,
+        "where": "A venue with a long name, Some Street, Thiruvananthapuram", "is_online": False, "kind": "Workshop",
+        "blurb": "A long summary " * 6, "seats_left": 12, "going": 1488, "fee": "₹1,500", "poster": None, "poster_is_fallback": False,
+        "url": "https://myotherapp.in/events/x", "speakers_count": 14,
     }
     data["upcoming"] = [ev, dict(ev, id=2), dict(ev, id=3)]
     data["past"] = [dict(ev, id=4)]
-    data["speakers"] = [{"name": "Speaker With A Rather Long Double-Barrelled Name", "title": "Principal engineer and head of everything", "org": "A Company With A Long Name Pvt Ltd", "photo": None, "url": None, "talk": "A talk title that is long enough to wrap", "event": "An event"}]
-    data["team"] = [{"name": "Team Member With A Long Name", "role": "Head of partnerships, outreach and community", "photo": None, "links": []}]
-    data["sponsors"] = [{"name": "Sponsor With A Long Name Private Limited", "role": "Title sponsor", "kind": "sponsor", "logo": None}, {"name": "Partner With A Long Name", "role": "Venue partner", "kind": "partner", "logo": None}]
-    data["socials"] = [["LinkedIn", "https://linkedin.com/company/x"], ["Instagram", "https://instagram.com/x"]]
-    data["stats"] = {"followers": 1234567, "events_held": 48, "members": None, "speakers": 1, "sponsors": 2, "photos": 0}
+    data["speakers"] = [{"name": "Speaker With A Rather Long Double-Barrelled Name", "title": "Principal engineer and head of everything", "org": "A Company With A Long Name Pvt Ltd", "photo": None, "url": None}]
+    data["team"] = [{"name": "Team Member With A Long Name", "role": "Head of partnerships, outreach and community", "initials": "TM", "photo": None, "links": []}]
+    data["sponsors"] = [{"name": "Sponsor With A Long Name Private Limited", "role": "Title sponsor", "initials": "SW", "logo": None}, {"name": "Partner With A Long Name", "role": "Venue partner", "initials": "PW", "logo": None}]
+    data["socials"] = [{"kind": "linkedin", "label": "LinkedIn", "href": "https://linkedin.com/company/x"}, {"kind": "instagram", "label": "Instagram", "href": "https://instagram.com/x"},
+                       {"kind": "website", "label": "Website", "href": "https://www.extraordinarily-long-domain-name.example.com/about"}]
+    data["stats"] = {"followers": 1234567, "events_held": 48, "upcoming": 3, "members": None}
     data["links"].update(follow_url="https://myotherapp.in/c/x", events_url="https://myotherapp.in/c/x/events", join_url="https://myotherapp.in/c/x/join", contact_mailto="mailto:a@b.example")
     return data

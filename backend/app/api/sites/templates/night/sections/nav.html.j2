@@ -1,7 +1,8 @@
-{%- import "_shared/macros.html.j2" as m with context -%}
+{%- import "macros.html.j2" as m with context -%}
+{%- set keys = (nav or [])|map(attribute="key")|list -%}
 {%- set labels = {"upcoming": ("#upcoming", "upcoming"), "past": ("#past", "past"), "photos": ("#photos", "photos"), "speakers": ("#speakers", "speakers"), "sponsors": ("#sponsors", "sponsors")} -%}
 {%- set ns = namespace(items=[]) -%}
-{%- for k in section_keys if k in labels -%}
+{%- for k in keys if k in labels -%}
 {%- if k == "sponsors" and team -%}{%- set ns.items = ns.items + [("#team", "team")] -%}{%- endif -%}
 {%- set ns.items = ns.items + [labels[k]] -%}
 {%- endfor -%}
@@ -10,7 +11,7 @@
 <div class="n-navin" style="max-width: 1280px; margin: 0 auto; padding: 12px 24px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px">
 <a href="#top" class="n-brand" style="display: flex; align-items: center; gap: 10px; min-height: 44px; text-decoration: none; color: #F2F4F7; font-family: Sora, system-ui, sans-serif; font-weight: 700; font-size: 17px"><span class="{{ 'ph ph-img' if club.logo_url }}" style="width: 28px; height: 28px; border-radius: 6px; background: var(--accent); flex: none">{% if club.logo_url %}{{ m.logo(club, 28, 28) }}{% endif %}</span>{{ (club.short_name or club.name)|lower|replace(" ", "/") }}</a>
 {% if ns.items %}<nav aria-label="Sections" class="n-links" style="display: flex; flex-wrap: wrap; gap: 4px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 14px">
-{% for href, label in ns.items %}<a href="{{ href }}" style="padding: 12px; color: #F2F4F7; text-decoration: none">{{ label }}</a>
+{% for href, label in ns.items %}<a href="{{ href }}" target="_top" style="padding: 12px; color: #F2F4F7; text-decoration: none">{{ label }}</a>
 {% endfor %}</nav>{% endif %}
 </div>
 </header>

@@ -1,9 +1,9 @@
-{%- import "_shared/macros.html.j2" as m with context -%}
+{%- import "macros.html.j2" as m with context -%}
 {%- if speakers -%}
 <section id="speakers" class="e-pb" style="max-width: 1240px; margin: 0 auto; padding: 72px 24px; display: flex; flex-direction: column; gap: 8px">
 <div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 12px; border-bottom: 4px solid #111111; padding-bottom: 12px">
 <h2 style="margin: 0; font-family: 'Playfair Display', Georgia, serif; font-weight: 900; font-size: clamp(34px, 5vw, 56px); line-height: 1">{{ section.title }}</h2>
-{% if links.speakers_url and stats.speakers %}<a href="{{ links.speakers_url }}" style="font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 600; padding: 12px 0">Index of all {{ m.num(stats.speakers) }} →</a>{% endif %}
+{% if links.speakers_url and stats.speakers %}<a href="{{ links.speakers_url }}" target="_top" style="font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 600; padding: 12px 0">Index of all {{ m.num(stats.speakers) }} →</a>{% endif %}
 </div>
 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(480px, 100%), 1fr)); gap: 0 48px">
 {% for s in speakers %}<article style="display: flex; gap: 20px; align-items: center; padding: 20px 0; border-bottom: 1px solid #111111"><div class="{{ m.phc(s.photo) }}" style="flex: none; width: 88px; height: 108px; background: repeating-linear-gradient(135deg, #E4E4E4 0 10px, #EEEEEE 10px 20px)">{% if m.real(s.photo) %}{{ m.fill(s.photo, 88, 108, "88px", alt=s.name) }}{% endif %}</div><div style="display: flex; flex-direction: column; gap: 2px; min-width: 0"><h3 style="margin: 0; font-family: 'Playfair Display', Georgia, serif; font-weight: 700; font-size: 24px">{{ s.name }}</h3>{% if s.title or s.org %}<span style="font-size: 14px; color: #4A4A4A">{{ m.role(s) }}</span>{% endif %}{% if s.talk or s.event %}<span style="font-style: italic">{{ [("“" ~ s.talk ~ "”") if s.talk else None, s.event]|select|join(" · ") }}</span>{% endif %}</div></article>

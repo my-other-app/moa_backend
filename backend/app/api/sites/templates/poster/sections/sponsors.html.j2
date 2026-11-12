@@ -1,12 +1,13 @@
-{%- import "_shared/macros.html.j2" as m with context -%}
-{%- set partners = sponsors|selectattr("kind", "equalto", "partner")|list -%}
-{%- set backers = sponsors|rejectattr("kind", "equalto", "partner")|list -%}
+{%- import "macros.html.j2" as m with context -%}
+{%- set ns = namespace(b=[], p=[]) -%}
+{%- for s in sponsors -%}{%- if "sponsor" in (s.role or "")|lower -%}{%- set ns.b = ns.b + [s] -%}{%- else -%}{%- set ns.p = ns.p + [s] -%}{%- endif -%}{%- endfor -%}
+{%- set backers, partners = ns.b, ns.p -%}
 {%- if sponsors -%}
 <section id="sponsors" class="p-bt" style="background: #FFFFFF; border-top: 3px solid #111111; padding: 56px 0">
 <div style="max-width: 1280px; margin: 0 auto; padding: 0 24px; display: flex; flex-direction: column; gap: 20px">
 <h2 style="margin: 0; font-family: 'Archivo Black', Impact, sans-serif; font-weight: 400; font-size: 32px; text-transform: uppercase">{{ section.title }}</h2>
 <div class="p-2up-phone" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 0; border-left: 3px solid #111111; border-top: 3px solid #111111">
-{% for s in backers + partners %}<div style="min-height: 110px; border-right: 3px solid #111111; border-bottom: 3px solid #111111; display: flex; align-items: center; justify-content: center; {% if s.kind == 'partner' %}background: #FFE14A{% else %}font-weight: 700{% endif %}">{% if m.real(s.logo) %}<img class="logo-img" src="{{ s.logo.url }}"{% if s.logo.srcset %} srcset="{{ s.logo.srcset }}" sizes="150px"{% endif %} width="{{ s.logo.w or 150 }}" height="{{ s.logo.h or 60 }}" alt="{{ s.name }}" loading="lazy" decoding="async" style="max-width: 70%; max-height: 60px">{% else %}{{ s.name }}{% endif %}</div>
+{% for s in backers + partners %}{% set is_partner = loop.index > backers|length %}<div style="min-height: 110px; border-right: 3px solid #111111; border-bottom: 3px solid #111111; display: flex; align-items: center; justify-content: center; {% if is_partner %}background: #FFE14A{% else %}font-weight: 700{% endif %}">{% if m.real(s.logo) %}<img class="logo-img" src="{{ s.logo.url }}"{% if s.logo.srcset %} srcset="{{ s.logo.srcset }}" sizes="150px"{% endif %} width="{{ s.logo.w or 150 }}" height="{{ s.logo.h or 60 }}" alt="{{ s.name }}" loading="lazy" decoding="async" style="max-width: 70%; max-height: 60px">{% else %}{{ s.name }}{% endif %}</div>
 {% endfor %}</div>
 </div>
 </section>

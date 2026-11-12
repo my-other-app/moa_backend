@@ -1,4 +1,7 @@
-{%- import "_shared/macros.html.j2" as m with context -%}
+{%- import "macros.html.j2" as m with context -%}
+{%- set so_list = (socials or [])|rejectattr("kind", "equalto", "website")|list -%}
+{%- set web_href = m.web_href(club, socials) -%}
+{%- set web_label = m.web_label(club, socials) -%}
 {%- set paras = (club.about or "").split("\n")|map("trim")|select|list -%}
 {%- set cover = images["hero.cover"] or club.cover -%}
 {%- set people = stats.members if stats.members is not none else stats.followers -%}
@@ -8,8 +11,8 @@
 {% if paras %}<div style="display: flex; flex-direction: column; gap: 16px">
 <h2 style="margin: 0; font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 600">{{ section.title }}</h2>
 {% for p in paras %}{% if loop.first %}<p style="margin: 0; font-size: 17px; text-wrap: pretty"><span style="font-family: 'Playfair Display', Georgia, serif; font-weight: 900; font-size: 64px; line-height: 0.8; float: left; padding: 6px 10px 0 0">{{ p[0] }}</span>{{ p[1:] }}</p>{% else %}<p style="margin: 0; font-size: 17px">{{ p }}</p>{% endif %}
-{% endfor %}{% if socials or club.website %}<div style="display: flex; flex-wrap: wrap; gap: 8px 20px; font-weight: 600; font-size: 14px">
-{% for label, href in socials %}<a href="{{ href }}" style="padding: 12px 0">{{ label }}</a>{% endfor %}{% if club.website %}<a href="{{ club.website.href }}" class="e-wrap" style="padding: 12px 0">{{ club.website.label }}</a>{% endif %}
+{% endfor %}{% if so_list or web_href %}<div style="display: flex; flex-wrap: wrap; gap: 8px 20px; font-weight: 600; font-size: 14px">
+{% for so in so_list %}{% set label, href = so.label, so.href %}<a href="{{ href }}" target="_top" style="padding: 12px 0">{{ label }}</a>{% endfor %}{% if web_href %}<a href="{{ web_href }}" target="_top" class="e-wrap" style="padding: 12px 0">{{ web_label }}</a>{% endif %}
 </div>{% endif %}
 </div>{% endif %}
 {% if cover %}<figure style="margin: 0; display: flex; flex-direction: column; gap: 10px">

@@ -11,7 +11,7 @@
     {"key": "stats", "label": "Numbers", "default_title": "In numbers", "hideable": true},
     {"key": "about", "label": "About", "default_title": "About us", "hideable": true},
     {"key": "expertise", "label": "What we are good at", "default_title": "What we are good at", "hideable": true},
-    {"key": "upcoming", "label": "Upcoming events", "default_title": "Upcoming events", "hideable": true},
+    {"key": "upcoming", "label": "Upcoming events", "default_title": "Upcoming events", "hideable": true, "anchor": "events"},
     {"key": "past", "label": "Past events", "default_title": "Past events", "hideable": true},
     {"key": "photos", "label": "Photos", "default_title": "Highlights from our events", "hideable": true},
     {"key": "speakers", "label": "Speakers", "default_title": "Previous speakers", "hideable": true},

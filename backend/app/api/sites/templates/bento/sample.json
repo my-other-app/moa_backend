@@ -7,6 +7,14 @@
     "headline": null,
     "subline": "A friendly community for people who design and build digital products. We meet every month, share unfinished work and ship things together."
   },
+  "page": {
+    "title": "Harbour Makers Collective",
+    "description": "A friendly community for people who design and build digital products. We meet every month, share unfinished work and ship things together.",
+    "url": "https://harbour-makers.myotherapp.in"
+  },
+  "headline": "Harbour Makers Collective",
+  "subline": "A friendly community for people who design and build digital products. We meet every month, share unfinished work and ship things together.",
+  "year": 2026,
   "club": {
     "name": "Harbour Makers Collective",
     "short_name": "Harbour Makers",
@@ -17,7 +25,6 @@
     "contact_email": "[contact@email.com]",
     "logo_url": null,
     "logo_srcset": null,
-    "cover": null,
     "founded_year": "[Year]",
     "topics": [
       "Product design",
@@ -34,7 +41,9 @@
     "website": {
       "label": "[website.com]",
       "href": "#top"
-    }
+    },
+    "cover": null,
+    "initials": "HM"
   },
   "images": {
     "hero.cover": {
@@ -62,7 +71,8 @@
     "members": 1240,
     "speakers": 96,
     "sponsors": 14,
-    "photos": 216
+    "photos": 216,
+    "upcoming": 3
   },
   "upcoming": [
     {
@@ -76,16 +86,18 @@
       "time": "4:00 PM",
       "end_time": "8:00 PM",
       "where": "[Venue name], [City]",
-      "mode": "In person",
       "kind": "Showcase",
-      "summary": null,
       "seats_left": 62,
-      "capacity": 150,
       "fee": null,
       "poster": {
         "placeholder": "Event banner"
       },
-      "url": "#events"
+      "url": "#events",
+      "is_online": false,
+      "blurb": null,
+      "going": 88,
+      "poster_is_fallback": false,
+      "ends_at": null
     },
     {
       "id": 2,
@@ -98,14 +110,16 @@
       "time": "10:00 AM",
       "end_time": null,
       "where": "[Venue name], [City]",
-      "mode": "In person",
       "kind": "Workshop",
-      "summary": null,
       "seats_left": null,
-      "capacity": null,
       "fee": null,
       "poster": null,
-      "url": "#events"
+      "url": "#events",
+      "is_online": false,
+      "blurb": null,
+      "going": 40,
+      "poster_is_fallback": false,
+      "ends_at": null
     },
     {
       "id": 3,
@@ -118,14 +132,16 @@
       "time": "6:30 PM",
       "end_time": null,
       "where": "Online",
-      "mode": "Online",
       "kind": "Talk",
-      "summary": null,
       "seats_left": null,
-      "capacity": null,
       "fee": null,
       "poster": null,
-      "url": "#events"
+      "url": "#events",
+      "is_online": true,
+      "blurb": null,
+      "going": 40,
+      "poster_is_fallback": false,
+      "ends_at": null
     }
   ],
   "past": [
@@ -139,7 +155,6 @@
       "weekday": "Sat",
       "time": "6:00 PM",
       "where": "[Venue name], [City]",
-      "mode": "In person",
       "kind": "Meetup",
       "facts": [
         "[120] attended",
@@ -148,7 +163,10 @@
       "poster": {
         "placeholder": ""
       },
-      "url": "#past"
+      "url": "#past",
+      "is_online": false,
+      "going": 120,
+      "poster_is_fallback": false
     },
     {
       "id": 12,
@@ -160,7 +178,6 @@
       "weekday": "Sat",
       "time": "10:00 AM",
       "where": "[Venue name], [City]",
-      "mode": "In person",
       "kind": "Hackathon",
       "facts": [
         "[84] attended",
@@ -169,7 +186,10 @@
       "poster": {
         "placeholder": ""
       },
-      "url": "#past"
+      "url": "#past",
+      "is_online": false,
+      "going": 84,
+      "poster_is_fallback": false
     },
     {
       "id": 13,
@@ -181,7 +201,6 @@
       "weekday": "Sat",
       "time": "10:00 AM",
       "where": "[Venue name], [City]",
-      "mode": "In person",
       "kind": "Workshop",
       "facts": [
         "[40] attended",
@@ -190,7 +209,10 @@
       "poster": {
         "placeholder": ""
       },
-      "url": "#past"
+      "url": "#past",
+      "is_online": false,
+      "going": 40,
+      "poster_is_fallback": false
     },
     {
       "id": 14,
@@ -202,7 +224,6 @@
       "weekday": "Sat",
       "time": "9:00 AM",
       "where": "[Venue name], [City]",
-      "mode": "In person",
       "kind": "Conference",
       "facts": [
         "[310] attended",
@@ -211,7 +232,10 @@
       "poster": {
         "placeholder": ""
       },
-      "url": "#past"
+      "url": "#past",
+      "is_online": false,
+      "going": 310,
+      "poster_is_fallback": false
     }
   ],
   "speakers": [
@@ -275,90 +299,93 @@
       "name": "Nikhil Menon",
       "role": "Founder, lead organiser",
       "photo": null,
-      "links": []
+      "links": [],
+      "initials": "NM"
     },
     {
       "name": "Clara Jensen",
       "role": "Programme, speakers",
       "photo": null,
-      "links": []
+      "links": [],
+      "initials": "CJ"
     },
     {
       "name": "Farah Siddiqui",
       "role": "Partnerships",
       "photo": null,
-      "links": []
+      "links": [],
+      "initials": "FS"
     },
     {
       "name": "Marcus Lee",
       "role": "Venue, operations",
       "photo": null,
-      "links": []
+      "links": [],
+      "initials": "ML"
     },
     {
       "name": "Divya Pillai",
       "role": "Design, media",
       "photo": null,
-      "links": []
+      "links": [],
+      "initials": "DP"
     },
     {
       "name": "Owen Hughes",
       "role": "Member community",
       "photo": null,
-      "links": []
+      "links": [],
+      "initials": "OH"
     }
   ],
   "sponsors": [
     {
       "name": "[Sponsor logo]",
       "role": "Sponsor",
-      "kind": "sponsor",
       "logo": null
     },
     {
       "name": "[Sponsor logo]",
       "role": "Sponsor",
-      "kind": "sponsor",
       "logo": null
     },
     {
       "name": "[Sponsor logo]",
       "role": "Sponsor",
-      "kind": "sponsor",
       "logo": null
     },
     {
       "name": "[Sponsor logo]",
       "role": "Sponsor",
-      "kind": "sponsor",
       "logo": null
     },
     {
       "name": "[Venue partner]",
       "role": "Venue partner",
-      "kind": "partner",
       "logo": null
     },
     {
       "name": "[Media partner]",
       "role": "Media partner",
-      "kind": "partner",
       "logo": null
     }
   ],
   "socials": [
-    [
-      "LinkedIn",
-      "#top"
-    ],
-    [
-      "Instagram",
-      "#top"
-    ],
-    [
-      "YouTube",
-      "#top"
-    ]
+    {
+      "kind": "linkedin",
+      "label": "LinkedIn",
+      "href": "#top"
+    },
+    {
+      "kind": "instagram",
+      "label": "Instagram",
+      "href": "#top"
+    },
+    {
+      "kind": "youtube",
+      "label": "YouTube",
+      "href": "#top"
+    }
   ],
   "links": {
     "follow_url": "#top",

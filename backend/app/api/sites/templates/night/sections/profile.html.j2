@@ -1,5 +1,9 @@
-{%- import "_shared/macros.html.j2" as m with context -%}
-{%- set join_href = "#join" if "join" in section_keys else (links.join_url or links.follow_url) -%}
+{%- import "macros.html.j2" as m with context -%}
+{%- set so_list = (socials or [])|rejectattr("kind", "equalto", "website")|list -%}
+{%- set web_href = m.web_href(club, socials) -%}
+{%- set web_label = m.web_label(club, socials) -%}
+{%- set keys = (nav or [])|map(attribute="key")|list -%}
+{%- set join_href = "#join" if "join" in keys else (links.join_url or links.follow_url) -%}
 {%- set people = stats.members if stats.members is not none else stats.followers -%}
 {%- set tiles = [(people, "members" if stats.members is not none else "followers"), (stats.events_held, "events hosted"), (stats.speakers, "speakers"), (stats.sponsors, "sponsors, partners")]|selectattr(0)|list -%}
 {%- set topics = club.topics or [] -%}
@@ -9,17 +13,17 @@
 <div style="display: flex; flex-direction: column; gap: 8px">
 <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; color: var(--accent)">// community · open to new members</span>
 <h1 class="n-h1" style="margin: 0; font-family: Sora, system-ui, sans-serif; font-weight: 700; font-size: 32px; line-height: 1.1; letter-spacing: -0.02em">{{ site.headline or club.name }}</h1>
-{% if site.subline %}<p style="margin: 0; color: #C9D1DC">{{ site.subline }}</p>{% endif %}
+{% if site.subline or club.tagline or subline %}<p style="margin: 0; color: #C9D1DC">{{ site.subline or club.tagline or subline }}</p>{% endif %}
 </div>
 {% if join_href or links.follow_url %}<div style="display: flex; flex-direction: column; gap: 10px">
 {% if join_href %}<a href="{{ join_href }}" style="display: flex; align-items: center; justify-content: center; min-height: 48px; border-radius: 12px; background: var(--accent); color: #0B0D10; text-decoration: none; font-weight: 600">Join community</a>{% endif %}
-{% if links.follow_url %}<a href="{{ links.follow_url }}" class="btn-a" style="min-height: 48px; border-radius: 12px; background: transparent; color: #F2F4F7; border: 1px solid #4A5361; font: 600 16px Inter, system-ui, sans-serif; cursor: pointer">Follow</a>{% endif %}
+{% if links.follow_url %}<a href="{{ links.follow_url }}" target="_top" class="btn-a" style="min-height: 48px; border-radius: 12px; background: transparent; color: #F2F4F7; border: 1px solid #4A5361; font: 600 16px Inter, system-ui, sans-serif; cursor: pointer">Follow</a>{% endif %}
 </div>{% endif %}
 {% if tiles %}<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
 {% for value, label in tiles %}<div style="background: #0B0D10; border-radius: 12px; padding: 14px"><div style="font-family: Sora, system-ui, sans-serif; font-weight: 700; font-size: 24px">{{ m.num(value) }}</div><div style="font-size: 13px; color: #9AA4B2">{{ label }}</div></div>
 {% endfor %}</div>{% endif %}
-{% if club.location_name or club.founded_year or club.website or socials %}<div class="n-wrap" style="display: flex; flex-direction: column; gap: 6px; font-size: 15px; color: #C9D1DC; border-top: 1px solid #262C35; padding-top: 20px">
-{% if club.location_name %}<span>{{ club.location_name }}</span>{% endif %}{% if club.founded_year %}<span>Founded {{ club.founded_year }}</span>{% endif %}{% if club.website %}<a href="{{ club.website.href }}" style="padding: 10px 0">{{ club.website.label }}</a>{% endif %}{% if socials %}<span style="display: flex; flex-wrap: wrap; gap: 0 18px">{% for label, href in socials %}<a href="{{ href }}" style="padding: 10px 0">{{ label }}</a>{% endfor %}</span>{% endif %}
+{% if club.location_name or club.founded_year or web_href or so_list %}<div class="n-wrap" style="display: flex; flex-direction: column; gap: 6px; font-size: 15px; color: #C9D1DC; border-top: 1px solid #262C35; padding-top: 20px">
+{% if club.location_name %}<span>{{ club.location_name }}</span>{% endif %}{% if club.founded_year %}<span>Founded {{ club.founded_year }}</span>{% endif %}{% if web_href %}<a href="{{ web_href }}" target="_top" style="padding: 10px 0">{{ web_label }}</a>{% endif %}{% if so_list %}<span style="display: flex; flex-wrap: wrap; gap: 0 18px">{% for so in so_list %}{% set label, href = so.label, so.href %}<a href="{{ href }}" target="_top" style="padding: 10px 0">{{ label }}</a>{% endfor %}</span>{% endif %}
 </div>{% endif %}
 {% if topics %}<div style="display: flex; flex-direction: column; gap: 12px; border-top: 1px solid #262C35; padding-top: 20px">
 <h2 style="margin: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-weight: 500; font-size: 13px; color: #9AA4B2">domains of expertise</h2>

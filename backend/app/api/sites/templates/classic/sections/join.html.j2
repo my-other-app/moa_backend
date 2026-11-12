@@ -1,4 +1,7 @@
-{%- import "_shared/macros.html.j2" as m with context -%}
+{%- import "macros.html.j2" as m with context -%}
+{#- The designer's e-mail form, as a link: the page can't post anywhere (CSP
+    form-action 'none'), so the field-shaped pill and the button together
+    take the visitor to join_url (follow the club in the app). -#}
 {%- if links.join_url -%}
 <!-- JOIN CTA -->
 <section id="join" class="c-pb c-flush" style="padding: 0 0 96px">
@@ -8,13 +11,13 @@
 <h2 style="margin: 0; font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: clamp(32px, 4.6vw, 56px); line-height: 1.05; letter-spacing: -0.02em">{{ section.title }}</h2>
 <p style="margin: 0; font-size: 18px; color: #FFFFFF; max-width: 520px">Membership is free. You get event invitations first, recordings of every talk and a seat at the table.</p>
 </div>
-<form action="{{ links.join_url }}" method="get" target="_top" style="flex: 1 1 360px; display: flex; flex-direction: column; gap: 10px">
-<label for="join-email" style="font-size: 14px; font-weight: 600">Email address</label>
-<div style="display: flex; flex-wrap: wrap; gap: 10px">
-<input id="join-email" name="email" type="email" autocomplete="email" placeholder="you@example.com" style="flex: 1 1 220px; min-height: 52px; padding: 0 18px; border-radius: 999px; border: none; font: 400 16px Inter, system-ui, sans-serif; color: #0D1220; background: #FFFFFF; box-sizing: border-box">
-<button type="submit" style="min-height: 52px; padding: 0 28px; border-radius: 999px; border: none; background: #0D1220; color: #FFFFFF; font: 600 16px Inter, system-ui, sans-serif; cursor: pointer">Join community</button>
+<div style="flex: 1 1 360px; display: flex; flex-direction: column; gap: 10px">
+<span style="font-size: 14px; font-weight: 600">Free to join</span>
+<a href="{{ links.join_url }}" target="_top" class="j-row" style="display: flex; flex-wrap: wrap; gap: 10px; text-decoration: none">
+<span class="j-pill" style="flex: 1 1 220px; min-height: 52px; padding: 0 18px; border-radius: 999px; border: none; font: 400 16px Inter, system-ui, sans-serif; color: #0D1220; background: #FFFFFF; box-sizing: border-box">Follow us on MyOtherApp →</span>
+<span class="btn-a" style="min-height: 52px; padding: 0 28px; border-radius: 999px; border: none; background: #0D1220; color: #FFFFFF; font: 600 16px Inter, system-ui, sans-serif; cursor: pointer">Join community</span>
+</a>
 </div>
-</form>
 </div>
 </div>
 </section>

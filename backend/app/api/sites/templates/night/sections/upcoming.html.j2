@@ -1,17 +1,17 @@
-{%- import "_shared/macros.html.j2" as m with context -%}
+{%- import "macros.html.j2" as m with context -%}
 {%- if upcoming -%}
 {%- set e = upcoming[0] -%}
 {%- set pic = e.poster or images["event.fallback"] -%}
-{%- set seats = (m.num(e.seats_left) ~ " of " ~ m.num(e.capacity) ~ " seats left") if (e.seats_left is number and e.capacity) else None -%}
+{%- set seats = m.seats(e) -%}
 <section id="upcoming" style="display: flex; flex-direction: column; gap: 20px">
 <div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 12px"><h2 style="margin: 0; font-family: Sora, system-ui, sans-serif; font-weight: 700; font-size: 30px">{{ section.title }}</h2><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 14px; color: #9AA4B2">{{ upcoming|length }} scheduled</span></div>
 <article style="border: 1px solid var(--accent); border-radius: 20px; overflow: hidden; display: flex; flex-wrap: wrap">
-<div class="{{ m.phc(pic) }}" style="flex: 1 1 280px; min-height: 240px; background: repeating-linear-gradient(135deg, #14181D 0 14px, #1B2027 14px 28px); display: flex; align-items: flex-end; padding: 14px; box-sizing: border-box">{% if m.real(pic) %}{{ m.fill(pic, 360, 260, "(max-width: 900px) 100vw, 360px", alt=e.name, poster=(pic is sameas e.poster)) }}{% elif m.label(pic) %}<span style="background: #0B0D10; color: #C9D1DC; font-size: 13px; padding: 5px 10px; border-radius: 6px">{{ m.label(pic) }}</span>{% endif %}</div>
+<div class="{{ m.phc(pic) }}" style="flex: 1 1 280px; min-height: 240px; background: repeating-linear-gradient(135deg, #14181D 0 14px, #1B2027 14px 28px); display: flex; align-items: flex-end; padding: 14px; box-sizing: border-box">{% if m.real(pic) %}{{ m.fill(pic, 360, 260, "(max-width: 900px) 100vw, 360px", alt=e.name, poster=(pic is sameas e.poster and not e.poster_is_fallback)) }}{% elif m.label(pic) %}<span style="background: #0B0D10; color: #C9D1DC; font-size: 13px; padding: 5px 10px; border-radius: 6px">{{ m.label(pic) }}</span>{% endif %}</div>
 <div style="flex: 2 1 340px; padding: 28px; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px">
 <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; color: var(--accent)">NEXT UP · {{ e.weekday|upper }} {{ e.day }} {{ e.month|upper }} {{ e.year }} · {{ e.time|upper }}</span>
 <h3 style="margin: 0; font-family: Sora, system-ui, sans-serif; font-weight: 700; font-size: 26px; line-height: 1.2">{{ e.name }}</h3>
-<p style="margin: 0; color: #C9D1DC">{{ [e.where, e.mode if e.mode != e.where else None, seats]|select|join(" · ") }}</p>
-<a href="{{ e.url }}" style="align-self: flex-start; display: inline-flex; align-items: center; min-height: 44px; padding: 0 22px; border-radius: 12px; background: var(--accent); color: #0B0D10; text-decoration: none; font-weight: 600; margin-top: 6px">Register</a>
+<p style="margin: 0; color: #C9D1DC">{{ [e.where, m.mode(e) if m.mode(e) != e.where else None, seats]|select|join(" · ") }}</p>
+<a href="{{ e.url }}" target="_top" style="align-self: flex-start; display: inline-flex; align-items: center; min-height: 44px; padding: 0 22px; border-radius: 12px; background: var(--accent); color: #0B0D10; text-decoration: none; font-weight: 600; margin-top: 6px">Register</a>
 </div>
 </article>
 {% if upcoming[1:] %}<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 20px">
@@ -19,7 +19,7 @@
 <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; color: #9AA4B2">{{ e.weekday|upper }} {{ e.day }} {{ e.month|upper }} {{ e.year }} · {{ e.time|upper }}</span>
 <h3 style="margin: 0; font-family: Sora, system-ui, sans-serif; font-weight: 600; font-size: 20px; line-height: 1.25">{{ e.name }}</h3>
 {% if e.where or e.kind %}<span style="color: #C9D1DC; font-size: 15px">{{ [e.where, e.kind]|select|join(" · ") }}</span>{% endif %}
-<a href="{{ e.url }}" style="font-weight: 600; padding: 10px 0">Register →</a>
+<a href="{{ e.url }}" target="_top" style="font-weight: 600; padding: 10px 0">Register →</a>
 </article>
 {% endfor %}</div>{% endif %}
 </section>

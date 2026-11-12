@@ -40,6 +40,7 @@ class Checker(HTMLParser):
         self.ids: list[str] = []
         self.imgs: list[dict] = []
         self.hrefs: list[str] = []
+        self.outbound: list[dict] = []
         self.text: list[str] = []
         self._skip = 0
 
@@ -51,6 +52,10 @@ class Checker(HTMLParser):
             self.imgs.append(a)
         if tag == "a":
             self.hrefs.append(a.get("href"))
+            if (a.get("href") or "").startswith("https://"):
+                self.outbound.append(a)
+        if tag in ("script", "form", "iframe", "object", "embed"):
+            self.errors.append(f"<{tag}> in a template (the platform adds the only script; the CSP forbids forms)")
         if tag in ("style", "script"):
             self._skip += 1
         if tag not in VOID:
@@ -99,6 +104,8 @@ def check_page(html: str) -> Checker:
             assert img.get("loading") == "lazy", f"img not lazy: {img}"
     for href in c.hrefs:
         assert href and href.startswith(("https://", "mailto:", "tel:", "#")), f"bad link: {href!r}"
+    for a in c.outbound:
+        assert a.get("target") == "_top", f"a link off the page opens in the dashboard's preview frame: {a}"
     text = " ".join(" ".join(c.text).split())
     assert not re.search(r"\bNone\b|\bUndefined\b|\bnan\b", text), re.search(r".{0,40}\b(None|Undefined|nan)\b.{0,40}", text).group(0)
     return c
@@ -128,6 +135,7 @@ def test_package_files_and_meta(key):
     assert set(movable) | fixed <= CANONICAL, set(movable) | fixed - CANONICAL
     for s in m["sections"]:
         assert s["label"] and s["default_title"] and len(s["default_title"]) <= 60 and isinstance(s["hideable"], bool)
+        assert re.match(r"^[a-z][a-z0-9-]*$", s.get("anchor") or s["key"])
         assert (d / "sections" / f"{s['key']}.html.j2").is_file()
     for k in fixed:
         assert (d / "sections" / f"{k}.html.j2").is_file(), f"no sections/{k}.html.j2"
@@ -141,6 +149,11 @@ def test_package_files_and_meta(key):
     assert "--accent" in css and "</style" not in css.lower()
     for f in ("page.html.j2", "style.css", "sample.json"):
         assert (d / f).is_file()
+    # The platform renders a package with a loader rooted at its folder: no
+    # template may reach outside it.
+    for f in [d / "page.html.j2", *(d / "sections").glob("*.html.j2")]:
+        for name in re.findall(r'\{%-?\s*(?:include|import|from|extends)\s+"([^"]+)"', f.read_text(encoding="utf-8")):
+            assert ".." not in name and (d / name).is_file(), f"{f.name}: {name} is not in the package"
     assert png_size(d / "thumb.png") == (600, 400)
     assert png_size(d / "thumb-mobile.png") == (300, 600)
 
@@ -150,8 +163,11 @@ def test_sample_renders_every_section(key):
     sample = R.sample(key)
     html = R.render(key, sample)
     check_page(html)
-    shown = [k for k, _ in R.render_sections(key, sample)]
-    assert shown == [s["key"] for s in R.meta(key)["sections"]], "the designer's sample fills every section"
+    sections = R.render_sections(key, sample)
+    assert [n["key"] for n, _ in sections] == [s["key"] for s in R.meta(key)["sections"]], "the designer's sample fills every section"
+    for n, h in sections:
+        root = re.search(r"<[a-z][^>]*>", h).group(0)
+        assert f'id="{n["href"][1:]}"' in root, f"{n['key']}: the section's root carries its anchor {n['href']}"
     # The stylesheet goes in byte for byte (its CSP hash is taken from the file).
     assert f"<style>{R.stylesheet(key)}</style>" in html
 
@@ -192,11 +208,11 @@ def test_any_order_and_hiding(key):
     data = V.with_images(R.sample(key), IMG_URLS)
     movable = [s["key"] for s in R.meta(key)["sections"]]
     for order in (list(reversed(movable)), movable[1:] + movable[:1]):
-        shown = [k for k, _ in R.render_sections(key, data, order=order)]
+        shown = [n["key"] for n, _ in R.render_sections(key, data, order=order)]
         assert shown == order
         check_page(R.render(key, data, order=order))
     hidden = movable[::2]
-    shown = [k for k, _ in R.render_sections(key, data, hidden=hidden)]
+    shown = [n["key"] for n, _ in R.render_sections(key, data, hidden=hidden)]
     assert shown == [k for k in movable if k not in hidden]
     check_page(R.render(key, data, hidden=hidden))
 
@@ -205,18 +221,19 @@ def test_any_order_and_hiding(key):
 def test_titles_accent_and_escaping(key):
     sample = R.sample(key)
     defaults = {s["key"]: s["default_title"] for s in R.meta(key)["sections"]}
-    plain = dict(R.render_sections(key, sample))
+    plain = {n["key"]: h for n, h in R.render_sections(key, sample)}
     data = json.loads(json.dumps(sample))
     data["site"]["title_overrides"] = {k: f"Custom {k} title" for k in defaults}
     data["site"]["accent"] = "#123456"
-    renamed = dict(R.render_sections(key, data))
+    renamed = {n["key"]: h for n, h in R.render_sections(key, data)}
     for k, t in defaults.items():
         if t in plain[k]:
             assert f"Custom {k} title" in renamed[k], f"{k}: the club's title replaces {t!r}"
     html = R.render(key, data)
-    assert "--accent: #123456" in html or "--accent:#123456" in html
+    assert '<html style="--accent:#123456"' in html
     evil = json.loads(json.dumps(sample))
     evil["club"]["name"] = '<script>alert(1)</script>"'
     evil["club"]["short_name"] = None
+    evil["page"]["title"] = evil["club"]["name"]
     html = R.render(key, evil)
     assert "<script>alert(1)" not in html and "&lt;script&gt;" in html

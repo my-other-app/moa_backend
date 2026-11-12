@@ -10,12 +10,12 @@
   "sections": [
     {"key": "about", "label": "About, cover and numbers", "default_title": "About us", "hideable": true},
     {"key": "expertise", "label": "Domains of expertise", "default_title": "Domains of expertise", "hideable": true},
-    {"key": "upcoming", "label": "Upcoming events", "default_title": "The calendar", "hideable": true},
-    {"key": "past", "label": "Past events", "default_title": "From the archive", "hideable": true},
+    {"key": "upcoming", "label": "Upcoming events", "default_title": "The calendar", "hideable": true, "anchor": "calendar"},
+    {"key": "past", "label": "Past events", "default_title": "From the archive", "hideable": true, "anchor": "archive"},
     {"key": "photos", "label": "Photos", "default_title": "Photo essay", "hideable": true},
     {"key": "speakers", "label": "Speakers", "default_title": "Previous speakers", "hideable": true},
-    {"key": "team", "label": "Team", "default_title": "The masthead", "hideable": true},
-    {"key": "sponsors", "label": "Sponsors and partners", "default_title": "Made possible by our sponsors", "hideable": true},
+    {"key": "team", "label": "Team", "default_title": "The masthead", "hideable": true, "anchor": "people"},
+    {"key": "sponsors", "label": "Sponsors and partners", "default_title": "Made possible by our sponsors", "hideable": true, "anchor": "partners"},
     {"key": "join", "label": "Join banner", "default_title": "Come to the next one.", "hideable": true}
   ],
   "slots": [

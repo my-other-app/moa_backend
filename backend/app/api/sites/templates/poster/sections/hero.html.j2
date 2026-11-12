@@ -1,7 +1,11 @@
-{%- import "_shared/macros.html.j2" as m with context -%}
+{%- import "macros.html.j2" as m with context -%}
+{%- set so_list = (socials or [])|rejectattr("kind", "equalto", "website")|list -%}
+{%- set web_href = m.web_href(club, socials) -%}
+{%- set web_label = m.web_label(club, socials) -%}
+{%- set keys = (nav or [])|map(attribute="key")|list -%}
 {%- set cover = images["hero.cover"] or club.cover -%}
 {%- set paras = (club.about or "").split("\n")|map("trim")|select|list -%}
-{%- set join_href = "#join" if "join" in section_keys else (links.join_url or links.follow_url) -%}
+{%- set join_href = "#join" if "join" in keys else (links.join_url or links.follow_url) -%}
 {%- set people = stats.members if stats.members is not none else stats.followers -%}
 {%- set tiles = [(people, "Members" if stats.members is not none else "Followers"), (stats.events_held, "Events hosted"), (stats.speakers, "Speakers on stage"), (stats.sponsors, "Sponsors, partners")]|selectattr(0)|list -%}
 <section id="top" style="max-width: 1280px; margin: 0 auto; padding: 56px 24px 64px; display: flex; flex-direction: column; gap: 32px">
@@ -14,12 +18,12 @@
 <div style="display: flex; flex-wrap: wrap; gap: 24px; align-items: stretch">
 <div class="{{ m.phc(cover, 'p-cover') }}" style="flex: 2 1 420px; min-height: 360px; border: 3px solid #111111; box-shadow: 8px 8px 0 #111111; background: repeating-linear-gradient(135deg, #FFFFFF 0 14px, #EDEDED 14px 28px); display: flex; align-items: flex-end; padding: 16px; box-sizing: border-box">{% if m.real(cover) %}{{ m.fill(cover, 820, 360, "(max-width: 900px) 100vw, 820px", eager=true, alt=club.name) }}{% elif m.label(cover) %}<span style="background: #111111; color: #FFFFFF; font-size: 13px; padding: 5px 10px">{{ m.label(cover) }}</span>{% endif %}</div>
 <div style="flex: 1 1 320px; border: 3px solid #111111; box-shadow: 8px 8px 0 #111111; background: #FFFFFF; padding: 28px; box-sizing: border-box; display: flex; flex-direction: column; gap: 16px; justify-content: space-between">
-{% if site.subline %}<p style="margin: 0; font-size: 20px; font-weight: 700; line-height: 1.35">{{ site.subline }}</p>{% endif %}
+{% if site.subline or club.tagline %}<p style="margin: 0; font-size: 20px; font-weight: 700; line-height: 1.35">{{ site.subline or club.tagline }}</p>{% endif %}
 {% if paras %}<p style="margin: 0">{{ paras[0] }}</p>{% endif %}
-{% if socials or club.website %}<div class="p-wrap" style="display: flex; flex-wrap: wrap; gap: 0 18px; font-weight: 700; text-transform: uppercase; font-size: 14px">{% for label, href in socials %}<a href="{{ href }}" style="padding: 12px 0">{{ label }}</a>{% endfor %}{% if club.website %}<a href="{{ club.website.href }}" style="padding: 12px 0">{{ club.website.label }}</a>{% endif %}</div>{% endif %}
+{% if so_list or web_href %}<div class="p-wrap" style="display: flex; flex-wrap: wrap; gap: 0 18px; font-weight: 700; text-transform: uppercase; font-size: 14px">{% for so in so_list %}{% set label, href = so.label, so.href %}<a href="{{ href }}" target="_top" style="padding: 12px 0">{{ label }}</a>{% endfor %}{% if web_href %}<a href="{{ web_href }}" target="_top" style="padding: 12px 0">{{ web_label }}</a>{% endif %}</div>{% endif %}
 {% if join_href or links.follow_url %}<div style="display: flex; flex-wrap: wrap; gap: 10px">
 {% if join_href %}<a href="{{ join_href }}" style="display: inline-flex; align-items: center; min-height: 48px; padding: 0 24px; background: var(--accent); color: #FFFFFF; text-decoration: none; font-weight: 700; text-transform: uppercase; border: 3px solid #111111">Join community</a>{% endif %}
-{% if links.follow_url %}<a href="{{ links.follow_url }}" class="btn-a" style="min-height: 54px; padding: 0 22px; background: #FFFFFF; border: 3px solid #111111; font: 700 16px Archivo, system-ui, sans-serif; text-transform: uppercase; cursor: pointer; color: #111111">Follow</a>{% endif %}
+{% if links.follow_url %}<a href="{{ links.follow_url }}" target="_top" class="btn-a" style="min-height: 54px; padding: 0 22px; background: #FFFFFF; border: 3px solid #111111; font: 700 16px Archivo, system-ui, sans-serif; text-transform: uppercase; cursor: pointer; color: #111111">Follow</a>{% endif %}
 </div>{% endif %}
 </div>
 </div>

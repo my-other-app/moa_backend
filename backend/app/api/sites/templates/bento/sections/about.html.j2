@@ -1,4 +1,4 @@
-{%- import "_shared/macros.html.j2" as m with context -%}
+{%- import "macros.html.j2" as m with context -%}
 {%- set paras = (club.about or "").split("\n")|map("trim")|select|list -%}
 {%- if paras -%}
 <section id="about" style="flex: 1 1 380px; background: #FFFFFF; border-radius: 32px; padding: 32px; box-sizing: border-box; display: flex; flex-direction: column; gap: 12px">

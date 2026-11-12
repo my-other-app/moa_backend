@@ -1,7 +1,10 @@
-{%- import "_shared/macros.html.j2" as m with context -%}
+{%- import "macros.html.j2" as m with context -%}
+{%- set so_list = (socials or [])|rejectattr("kind", "equalto", "website")|list -%}
+{%- set web_href = m.web_href(club, socials) -%}
+{%- set web_label = m.web_label(club, socials) -%}
 {%- set paras = (club.about or "").split("\n")|map("trim")|select|list -%}
 {%- set topics = club.topics or [] -%}
-{%- set short = {"LinkedIn": "in", "Instagram": "ig", "YouTube": "yt", "X": "x", "Twitter": "x", "Facebook": "fb", "GitHub": "gh", "WhatsApp": "wa", "Website": "www"} -%}
+{%- set short = {"linkedin": "in", "instagram": "ig", "youtube": "yt", "x": "x", "twitter": "x", "facebook": "fb", "github": "gh", "whatsapp": "wa"} -%}
 {%- if paras or club.tagline or topics -%}
 <!-- ABOUT + EXPERTISE -->
 <section id="about" class="c-pb" style="padding: 96px 0">
@@ -10,8 +13,8 @@
 <div style="font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #535B6E">{{ section.title }}</div>
 {% if club.tagline %}<h2 style="margin: 0; font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: clamp(30px, 4vw, 44px); line-height: 1.1; letter-spacing: -0.02em">{{ club.tagline }}</h2>{% endif %}
 {% for p in paras %}<p style="margin: 0; font-size: 17px; color: #3D4558; text-wrap: pretty">{{ p }}</p>
-{% endfor %}{% if socials %}<div style="display: flex; flex-wrap: wrap; gap: 12px">
-{% for label, href in socials %}<a href="{{ href }}" aria-label="{{ label }}" style="width: 44px; height: 44px; border-radius: 999px; border: 1.5px solid #C5CCD9; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; font-weight: 600; font-size: 14px; color: #0D1220">{{ short.get(label, label[:2]|lower) }}</a>
+{% endfor %}{% if so_list %}<div style="display: flex; flex-wrap: wrap; gap: 12px">
+{% for so in so_list %}{% set label, href = so.label, so.href %}<a href="{{ href }}" target="_top" aria-label="{{ label }}" style="width: 44px; height: 44px; border-radius: 999px; border: 1.5px solid #C5CCD9; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; font-weight: 600; font-size: 14px; color: #0D1220">{{ short.get(so.kind, label[:2]|lower) }}</a>
 {% endfor %}</div>{% endif %}
 </div>{% endif %}
 {% if topics %}<div style="background: #0D1220; color: #FFFFFF; border-radius: 24px; padding: 40px; display: flex; flex-direction: column; gap: 24px">

@@ -1,26 +1,23 @@
-{%- import "_shared/macros.html.j2" as m with context -%}
+{%- import "macros.html.j2" as m with context -%}
 <!doctype html>
-<html lang="en"{% if site.accent %} style="--accent: {{ site.accent }}"{% endif %}>
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{ club.name }}{% if site.subline %} · {{ site.subline|truncate(80) }}{% endif %}</title>
-{% if site.subline or club.tagline %}<meta name="description" content="{{ site.subline or club.tagline }}">
-{% endif %}<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<title>{{ page.title or club.name }}</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&family=Sora:wght@600;700&display=swap">
 <style>{{ css }}</style>
-{{ head_extra }}</head>
+</head>
 <body>
 <div style="font-family: Inter, system-ui, sans-serif; color: #F2F4F7; background: #0B0D10; font-size: 16px; line-height: 1.5">
 
-{% include "night/sections/nav.html.j2" %}
+{% include "sections/nav.html.j2" %}
 
-{% include "night/sections/hero.html.j2" %}
+{% include "sections/hero.html.j2" %}
 
 <div class="n-cols" style="max-width: 1280px; margin: 0 auto; padding: 0 24px 80px; display: flex; flex-wrap: wrap; gap: 40px; align-items: flex-start">
 
-{% include "night/sections/profile.html.j2" %}
+{% include "sections/profile.html.j2" %}
 
 <!-- CONTENT COLUMN -->
 <main style="flex: 999 1 560px; min-width: 0; padding-top: 40px; display: flex; flex-direction: column; gap: 64px">
@@ -30,7 +27,7 @@
 </main>
 </div>
 
-{% include "night/sections/footer.html.j2" %}
+{% include "sections/footer.html.j2" %}
 </div>
-{{ body_end }}</body>
+</body>
 </html>
