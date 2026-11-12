@@ -16,6 +16,12 @@ capability the club records themselves take.
 - POST   /admin/integrations/partner-apps/{id}/resume
 - DELETE /admin/integrations/partner-apps/{id}/connections/{connection_id}   disconnect a club
 - GET    /admin/integrations/usage                       the platform's requests a day, and the busiest clients
+- POST   /admin/integrations/docs-links                  a private developer docs link ({purpose: self} or
+                                                         {partner_app_id, label?}): its url shown once
+- GET    /admin/integrations/docs-links                  every docs link (?partner_app_id= &kind= &club_id=)
+- DELETE /admin/integrations/docs-links/{id}             revoke any of them
+
+The docs links take MANAGE_CONTENT, reading included (docs_links.py).
 
 The webhook health routes are app/api/webhooks_out's, under /admin/integrations/webhooks.
 """
@@ -29,7 +35,7 @@ from sqlalchemy import func, select
 
 from app.api.audit import service as audit
 from app.api.clubs.models import Clubs
-from app.api.partner import allocation, apps, keys, usage
+from app.api.partner import allocation, apps, docs_links, keys, usage
 from app.api.partner import scopes as catalogue
 from app.api.partner.models import PartnerAllocations, PartnerApiKeys
 from app.core.auth.dependencies import AdminAuth
@@ -71,6 +77,12 @@ class AppPatch(BaseModel):
 
 class SuspendIn(BaseModel):
     reason: Optional[str] = Field(None, max_length=300)
+
+
+class DocsLinkIn(BaseModel):
+    purpose: Optional[str] = Field(None, pattern="^(self|share)$")
+    partner_app_id: Optional[str] = Field(None, max_length=64)
+    label: Optional[str] = Field(None, max_length=docs_links.MAX_LABEL)
 
 
 def _alloc_out(club, alloc_row, *, live_keys: int = 0) -> dict:
@@ -234,3 +246,53 @@ async def admin_disconnect(request: Request, app_id: str, connection_id: str, se
 @router.get("/usage", summary="The platform's API requests a day, and the busiest clients")
 async def platform_usage(session: SessionDep, user: AdminAuth, days: int = Query(30, ge=1, le=90)) -> dict:
     return {"days": await usage.by_day(session, days=days), "clients": await usage.by_client(session, days=days)}
+
+
+# ─── Developer docs links ────────────────────────────────────────────────
+
+
+@router.post("/docs-links", summary="A private developer docs link: yours, or for a partner app's developers (url shown once)",
+             status_code=201)
+async def create_docs_link(request: Request, body: DocsLinkIn, session: SessionDep, user: ContentAuth) -> dict:
+    """`{purpose: "self"}`: your own, 7 days. `{partner_app_id, label?}`: for that app's developers, 30 days."""
+    if body.partner_app_id is None and body.purpose != "self":
+        raise CustomHTTPException(422, message="Ask for your own link (purpose: self), or name the partner app.", error_code="VALIDATION",
+                                  errors={"partner_app_id": "Required unless purpose is self."})
+    row, raw, app = await docs_links.create_for_admin(session, user, partner_app_id=body.partner_app_id, label=body.label)
+    if app is not None:
+        await _record(session, request, user, "partner.docs_link.create", "partner_app", app.id,
+                      f"Developer docs link made for {app.name}'s developers", link_id=str(row.id), label=row.label,
+                      expires_at=row.expires_at.isoformat())
+    else:
+        await _record(session, request, user, "partner.docs_link.create", "user", user.id, "Developer docs link made for themselves",
+                      link_id=str(row.id), expires_at=row.expires_at.isoformat())
+    await session.commit()
+    return docs_links.made(row, raw, app=app)
+
+
+@router.get("/docs-links", summary="Every developer docs link (never their tokens)")
+async def list_docs_links(
+    session: SessionDep, user: ContentAuth, partner_app_id: Optional[str] = Query(None, max_length=64),
+    kind: Optional[str] = Query(None, pattern="^(club|partner_app|admin)$"), club_id: Optional[int] = Query(None),
+) -> dict:
+    rows = await docs_links.all_links(session, partner_app_id=partner_app_id, kind=kind, club_id=club_id)
+    clubs, found_apps = await docs_links.names(session, rows)
+    return {"links": [docs_links.out(r, club=clubs.get(r.club_id), app=found_apps.get(r.partner_app_id)) for r in rows]}
+
+
+@router.delete("/docs-links/{link_id}", summary="Revoke any developer docs link")
+async def revoke_docs_link(request: Request, link_id: str, session: SessionDep, user: ContentAuth) -> dict:
+    row = await docs_links.link_of(session, link_id)
+    already = row.revoked_at is not None
+    await docs_links.revoke(session, row, by_user_id=user.id)
+    if not already:
+        if row.kind == "club":
+            entity_type, entity_id = "club", row.club_id
+        elif row.kind == "partner_app":
+            entity_type, entity_id = "partner_app", row.partner_app_id
+        else:
+            entity_type, entity_id = "user", row.created_by_user_id
+        await _record(session, request, user, "partner.docs_link.revoke", entity_type, entity_id,
+                      "Developer docs link revoked by MyOtherApp", link_id=str(row.id), kind=row.kind, label=row.label)
+    await session.commit()
+    return {"revoked": True}

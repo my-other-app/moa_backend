@@ -19,6 +19,8 @@
 - `PartnerCertificateJobs`: an issue asked for through the API.
 - `PartnerUsageDaily`: requests, errors and attendee reads per client per day.
 - `PartnerSandboxObjects`: what test credentials make (sandbox.py).
+- `DeveloperDocsLinks`: signed links to the private developer docs
+  (docs_links.py; migration developer_docs_links), by their sha256 only.
 """
 import uuid
 
@@ -36,6 +38,8 @@ APP_STATUSES = ("active", "suspended")
 TOKEN_KINDS = ("access", "refresh")
 SANDBOX_KINDS = ("event", "registration", "checkin", "certificate")
 JOB_STATUSES = ("queued", "running", "completed", "failed")
+DOCS_LINK_KINDS = ("club", "partner_app", "admin")
+DOCS_LINK_PURPOSES = ("self", "share")
 
 
 def _uuid_pk() -> Column:
@@ -327,4 +331,52 @@ class PartnerSandboxObjects(AbstractSQLModel):
     __table_args__ = (
         CheckConstraint("kind IN ('event', 'registration', 'checkin', 'certificate')", name="ck_partner_sandbox_objects_kind"),
         Index("ix_partner_sandbox_objects_list", "club_id", "kind", "parent_id", "updated_at"),
+    )
+
+
+class DeveloperDocsLinks(AbstractSQLModel, TimestampsMixin):
+    """A link to the private developer docs (myotherapp.in/developers/...):
+    `moa_docs_` and 32 random bytes, kept only as a sha256 digest, so the
+    link exists in one answer (create) and nowhere else (docs_links.py).
+
+    - kind `club`: made by a club's owner or admin, for themselves (purpose
+      `self`, 7 days) or to share with their developer (`share`, 30 days);
+    - kind `partner_app`: made by a platform admin for a partner app's
+      developers (`share`, 30 days);
+    - kind `admin`: a platform admin's own (`self`, 7 days).
+
+    Each is checked afresh on every use (docs_links.check): who made it, the
+    club's API access, the app's status. A team member who made one is
+    `created_by_member_id`; deleting that member's row deletes the link, and
+    deleting the club or the app deletes theirs.
+    """
+
+    __tablename__ = "developer_docs_links"
+
+    id = _uuid_pk()
+    token_hash = Column(String(64), nullable=False)
+    kind = Column(String(12), nullable=False)
+    purpose = Column(String(8), nullable=False, default="self", server_default="self")
+    club_id = Column(Integer, ForeignKey("clubs.id", ondelete="CASCADE"), nullable=True)
+    partner_app_id = Column(PGUUID(as_uuid=True), ForeignKey("partner_apps.id", ondelete="CASCADE"), nullable=True)
+    label = Column(String(80), nullable=True)
+    created_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_by_member_id = Column(Integer, ForeignKey("club_members.id", ondelete="CASCADE"), nullable=True)
+    created_by_name = Column(String(120), nullable=True)
+    expires_at = _when(nullable=False)
+    revoked_at = _when()
+    revoked_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    last_used_at = _when()
+    use_count = Column(Integer, nullable=False, default=0, server_default="0")
+
+    __table_args__ = (
+        Index("uq_developer_docs_links_token_hash", "token_hash", unique=True),
+        Index("ix_developer_docs_links_club", "club_id", "created_at", postgresql_where=text("club_id IS NOT NULL")),
+        Index("ix_developer_docs_links_partner_app", "partner_app_id", postgresql_where=text("partner_app_id IS NOT NULL")),
+        Index("ix_developer_docs_links_created_at", "created_at"),
+        CheckConstraint("kind IN ('club', 'partner_app', 'admin')", name="ck_developer_docs_links_kind"),
+        CheckConstraint("purpose IN ('self', 'share')", name="ck_developer_docs_links_purpose"),
+        CheckConstraint("kind <> 'club' OR club_id IS NOT NULL", name="ck_developer_docs_links_club"),
+        CheckConstraint("kind <> 'partner_app' OR partner_app_id IS NOT NULL", name="ck_developer_docs_links_partner_app"),
+        CheckConstraint("use_count >= 0", name="ck_developer_docs_links_use_count"),
     )
