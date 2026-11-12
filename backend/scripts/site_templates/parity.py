@@ -109,12 +109,15 @@ def main() -> int:
         src = source_for(key, a.src)
         jobs.append({"key": key, "original": str(src) if src else None, "rendered": str(ours), "out": str(out),
                      "package": str(R.TEMPLATES_DIR / key), "thumbs": not a.no_thumbs, "extra": extra})
-    spec = a.out / "_job.json"
-    result = a.out / "_result.json"
+    # Per run: two builders may run the harness into the same folder at once.
+    spec = a.out / f"_job-{os.getpid()}.json"
+    result = a.out / f"_result-{os.getpid()}.json"
     spec.write_text(json.dumps({"jobs": jobs, "result": str(result)}), encoding="utf-8")
     env = dict(os.environ, PATH="/opt/homebrew/bin:" + os.environ.get("PATH", ""))
     subprocess.run([node_bin(), str(HERE / "shoot.cjs"), str(spec)], check=True, env=env)
     res = json.loads(result.read_text(encoding="utf-8"))
+    spec.unlink(missing_ok=True)
+    result.unlink(missing_ok=True)
 
     bad = False
     print(f"{'package':<10} {'identical %':>11} {'pixelmatch %':>12} {'height (designer/ours)':>24}  mobile")
