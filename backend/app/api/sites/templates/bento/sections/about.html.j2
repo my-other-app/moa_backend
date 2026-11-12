@@ -1,0 +1,8 @@
+{%- import "macros.html.j2" as m with context -%}
+{%- set paras = (club.about or "").split("\n")|map("trim")|select|list -%}
+{%- if paras -%}
+<section id="about" style="flex: 1 1 380px; background: #FFFFFF; border-radius: 32px; padding: 32px; box-sizing: border-box; display: flex; flex-direction: column; gap: 12px">
+<h2 style="margin: 0; font-family: 'Bricolage Grotesque', system-ui, sans-serif; font-weight: 700; font-size: 28px">{{ section.title }}</h2>
+{% for p in paras %}<p style="margin: 0; color: #4A4664; font-size: 17px">{{ p }}</p>
+{% endfor %}</section>
+{%- endif -%}

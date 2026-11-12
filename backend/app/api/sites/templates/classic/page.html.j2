@@ -1,0 +1,24 @@
+{%- import "macros.html.j2" as m with context -%}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ page.title or club.name }}</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap">
+<style>{{ css }}</style>
+</head>
+<body>
+<div style="font-family: Inter, system-ui, sans-serif; color: #0D1220; background: #F3F5F7; font-size: 16px; line-height: 1.5">
+
+{% include "sections/nav.html.j2" %}
+
+{% include "sections/hero.html.j2" %}
+
+{{ sections_html }}
+
+{% include "sections/footer.html.j2" %}
+
+</div>
+</body>
+</html>

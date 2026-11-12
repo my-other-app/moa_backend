@@ -1,0 +1,13 @@
+{%- import "macros.html.j2" as m with context -%}
+{%- set keys = (nav or [])|map(attribute="key")|list -%}
+{%- set labels = {"upcoming": ("#events", "Events"), "photos": ("#photos", "Photos"), "speakers": ("#speakers", "Speakers"), "team": ("#team", "Team"), "sponsors": ("#sponsors", "Sponsors")} -%}
+{%- set join_href = "#join" if "join" in keys else (links.join_url or links.follow_url) -%}
+<header style="border-bottom: 3px solid #111111; background: #FFFFFF">
+<div class="p-navin" style="max-width: 1280px; margin: 0 auto; padding: 10px 24px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px">
+<a href="#top" class="p-brand" style="font-family: 'Archivo Black', Impact, sans-serif; font-size: 20px; text-decoration: none; text-transform: uppercase; padding: 10px 0">{{ club.short_name or club.name }}</a>
+<nav aria-label="Sections" class="p-links" style="display: flex; flex-wrap: wrap; gap: 4px; font-weight: 700; text-transform: uppercase; font-size: 14px">
+{% for k in keys if k in labels %}<a href="{{ labels[k][0] }}" style="padding: 13px 12px; text-decoration: none">{{ labels[k][1] }}</a>
+{% endfor %}</nav>
+{% if join_href %}<a href="{{ join_href }}" class="p-navcta" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 20px; background: #111111; color: #FFFFFF; text-decoration: none; font-weight: 700; text-transform: uppercase; font-size: 14px">Join us</a>{% endif %}
+</div>
+</header>

@@ -1,0 +1,4 @@
+{%- import "macros.html.j2" as m with context -%}
+<footer style="border-top: 1px solid #262C35; padding: 32px 0">
+<div class="n-wrap" style="max-width: 1280px; margin: 0 auto; padding: 0 24px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; font-size: 14px; color: #9AA4B2"><span>{{ [club.name, club.address or club.location_name]|select|join(" · ") }}</span>{% if club.contact_email %}<span>{{ club.contact_email }}</span>{% endif %}</div>
+</footer>

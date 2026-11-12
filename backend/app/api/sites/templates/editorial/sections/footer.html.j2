@@ -1,0 +1,8 @@
+{%- import "macros.html.j2" as m with context -%}
+{%- set line = [club.address or club.location_name, club.contact_email]|select|join(" · ") -%}
+<footer style="background: #111111; color: #FFFFFF; padding: 40px 0">
+<div style="max-width: 1240px; margin: 0 auto; padding: 0 24px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px; font-size: 14px">
+<span style="font-family: 'Playfair Display', Georgia, serif; font-weight: 700; font-size: 20px">{{ club.name }}</span>
+{% if line %}<span class="e-wrap" style="color: #D0D0D0">{{ line }}</span>{% endif %}
+</div>
+</footer>

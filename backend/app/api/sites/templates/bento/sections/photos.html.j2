@@ -1,0 +1,13 @@
+{%- import "macros.html.j2" as m with context -%}
+{%- set photos = (images.photos or [])[:4] -%}
+{%- set shapes = [("2 1 320px", "#DCD2FF", "#E7E0FF"), ("1 1 220px", "#FFD9C7", "#FFE5D8"), ("1 1 220px", "#CFF1E1", "#DDF6EA"), ("2 1 320px", "#DCD2FF", "#E7E0FF")] -%}
+{%- if photos -%}
+<!-- PHOTOS -->
+<section id="photos" style="display: flex; flex-wrap: wrap; gap: 20px">
+<div style="flex: 1 1 260px; background: #FFEFB0; border-radius: 32px; padding: 32px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; gap: 20px; min-height: 260px">
+<h2 style="margin: 0; font-family: 'Bricolage Grotesque', system-ui, sans-serif; font-weight: 700; font-size: 36px; line-height: 1.05">{{ section.title }}</h2>
+{% if links.gallery_url %}<a href="{{ links.gallery_url }}" target="_top" style="font-weight: 600; color: #23203A; padding: 10px 0">Open gallery{% if stats.photos %}, {{ m.num(stats.photos) }} photos{% endif %} →</a>{% endif %}
+</div>
+{% for p in photos %}{% set flex, a, b = shapes[loop.index0] %}<div class="{{ m.phc(p, 'b-photo') }}" style="flex: {{ flex }}; min-height: 260px; border-radius: 32px; background: repeating-linear-gradient(135deg, {{ a }} 0 14px, {{ b }} 14px 28px); display: flex; align-items: flex-end; padding: 16px; box-sizing: border-box">{% if m.real(p) %}{{ m.fill(p, 480, 260, "(max-width: 900px) 100vw, 480px") }}{% elif m.label(p) %}<span style="background: #FFFFFF; font-size: 13px; padding: 6px 12px; border-radius: 999px">{{ m.label(p) }}</span>{% endif %}</div>
+{% endfor %}</section>
+{%- endif -%}

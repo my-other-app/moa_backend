@@ -1,0 +1,30 @@
+{
+  "key": "editorial",
+  "name": "Editorial",
+  "blurb": "A newspaper front page: big serif masthead, calendar and archive",
+  "fonts": ["Inter:wght@400;500;600", "Playfair+Display:ital,wght@0,700;0,900;1,500"],
+  "layout": "single",
+  "fixed_top": ["nav", "hero"],
+  "fixed_side": [],
+  "fixed_bottom": ["footer"],
+  "sections": [
+    {"key": "about", "label": "About, cover and numbers", "default_title": "About us", "hideable": true},
+    {"key": "expertise", "label": "Domains of expertise", "default_title": "Domains of expertise", "hideable": true},
+    {"key": "upcoming", "label": "Upcoming events", "default_title": "The calendar", "hideable": true, "anchor": "calendar"},
+    {"key": "past", "label": "Past events", "default_title": "From the archive", "hideable": true, "anchor": "archive"},
+    {"key": "photos", "label": "Photos", "default_title": "Photo essay", "hideable": true},
+    {"key": "speakers", "label": "Speakers", "default_title": "Previous speakers", "hideable": true},
+    {"key": "team", "label": "Team", "default_title": "The masthead", "hideable": true, "anchor": "people"},
+    {"key": "sponsors", "label": "Sponsors and partners", "default_title": "Made possible by our sponsors", "hideable": true, "anchor": "partners"},
+    {"key": "join", "label": "Join banner", "default_title": "Come to the next one.", "hideable": true}
+  ],
+  "slots": [
+    {"key": "hero.cover", "label": "Cover photo (beside the about text)", "size": [640, 400], "section": "about"},
+    {"key": "photos.1", "label": "Photo 1 (large)", "size": [640, 460], "section": "photos"},
+    {"key": "photos.2", "label": "Photo 2", "size": [360, 320], "section": "photos"},
+    {"key": "photos.3", "label": "Photo 3", "size": [360, 400], "section": "photos"},
+    {"key": "photos.4", "label": "Photo 4", "size": [360, 260], "section": "photos"},
+    {"key": "event.fallback", "label": "Event banner (events without a poster)", "size": [420, 220], "section": "upcoming"}
+  ],
+  "accent": {"default": "#C8102E", "vars": ["--accent"]}
+}

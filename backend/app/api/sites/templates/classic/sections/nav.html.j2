@@ -1,0 +1,17 @@
+{%- import "macros.html.j2" as m with context -%}
+{%- set keys = (nav or [])|map(attribute="key")|list -%}
+{%- set labels = {"about": ("#about", "About"), "upcoming": ("#events", "Events"), "photos": ("#photos", "Photos"), "speakers": ("#speakers", "Speakers"), "team": ("#team", "Team"), "sponsors": ("#partners", "Sponsors")} -%}
+{%- set join_href = "#join" if "join" in keys else (links.join_url or links.follow_url) -%}
+<!-- NAV -->
+<header class="c-nav" style="background: #FFFFFF; border-bottom: 1px solid #D9DEE7">
+<div class="c-navin" style="max-width: 1200px; margin: 0 auto; padding: 14px 24px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px">
+<a href="#top" class="c-brand" style="display: flex; align-items: center; gap: 12px; text-decoration: none; color: #0D1220; min-height: 44px">
+<span class="{{ 'ph ph-img' if club.logo_url }}" style="width: 36px; height: 36px; border-radius: 8px; background: var(--accent); color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: 16px; flex: none">{{ m.logo(club, 36, 36) }}</span>
+<span style="font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: 18px">{{ club.short_name or club.name }}</span>
+</a>
+<nav aria-label="Sections" class="c-links" style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px">
+{% for k in keys if k in labels %}<a href="{{ labels[k][0] }}" style="padding: 12px 14px; text-decoration: none; font-size: 15px; font-weight: 500; color: #0D1220">{{ labels[k][1] }}</a>
+{% endfor %}</nav>
+{% if join_href %}<a href="{{ join_href }}" class="c-navcta" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 22px; border-radius: 999px; background: #0D1220; color: #FFFFFF; text-decoration: none; font-weight: 600; font-size: 15px">Join community</a>{% endif %}
+</div>
+</header>

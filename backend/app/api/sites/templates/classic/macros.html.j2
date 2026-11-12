@@ -1,0 +1,88 @@
+{#-
+  Helpers for this package's templates (every package carries the same copy:
+  the platform renders each package with a loader rooted at its folder).
+  Import them with the page's context (they read `sample`):
+
+      {% import "macros.html.j2" as m with context %}
+
+  Images in the render input are objects {url, srcset, alt, w, h} (srcset,
+  alt, w, h optional) or null. The designer's sample (sample.json) has no
+  pictures: there an image is {"placeholder": "label"} and the template draws
+  the designer's striped box with that label. A real page never gets
+  `placeholder`, so the stripes and labels only ever appear in the sample.
+
+  A picture box in a template keeps the designer's element and inline style
+  and adds `class="{{ m.phc(img) }}"`:
+    ph            the sample's striped placeholder, untouched;
+    ph ph-img     a real picture: the box clips it, `fill` covers the box;
+    ph ph-empty   no picture: a plain tint instead of stripes (style.css,
+                  with !important so it beats the inline background).
+-#}
+
+{#- A count with thousands separators. In the designer's sample the counts are
+    bracketed placeholders ("[1,240]"), so there they get brackets. Text passes
+    through as it is. -#}
+{%- macro num(v) -%}
+{%- if v is number -%}{%- set s = "{:,}".format(v) -%}{%- if sample -%}[{{ s }}]{%- else -%}{{ s }}{%- endif -%}{%- else -%}{{ v }}{%- endif -%}
+{%- endmacro -%}
+
+{#- True (non-empty) when `i` is a real picture. -#}
+{%- macro real(i) -%}{%- if i and i.url -%}1{%- endif -%}{%- endmacro -%}
+
+{#- The class list for a picture box (see above). -#}
+{%- macro phc(i, extra="") -%}
+ph{% if i and i.url %} ph-img{% elif not (i and i.placeholder is defined) %} ph-empty{% endif %}{% if extra %} {{ extra }}{% endif %}
+{%- endmacro -%}
+
+{#- The picture inside a box: covers it (object-fit: cover). `poster` keeps a
+    whole event poster visible over a blurred copy of itself. The hero's first
+    picture is `eager` (fetchpriority high); everything else loads lazily.
+    `w`/`h` are the slot's design size, used when the image doesn't say. -#}
+{%- macro fill(i, w, h, sizes="100vw", eager=false, alt="", poster=false) -%}
+{%- if poster -%}<img class="ph-blur" src="{{ i.url }}" alt="" aria-hidden="true" width="{{ i.w or w }}" height="{{ i.h or h }}" loading="lazy" decoding="async">{%- endif -%}
+<img class="{{ 'ph-contain' if poster else 'ph-fill' }}" src="{{ i.url }}"{% if i.srcset %} srcset="{{ i.srcset }}" sizes="{{ sizes }}"{% endif %} width="{{ i.w or w }}" height="{{ i.h or h }}" alt="{{ i.alt or alt }}"{% if eager %} fetchpriority="high"{% else %} loading="lazy"{% endif %} decoding="async">
+{%- endmacro -%}
+
+{#- A box's label in the sample (the designer's "Cover photo · 1440 × 300"). -#}
+{%- macro label(i) -%}{%- if i and not i.url and i.placeholder -%}{{ i.placeholder }}{%- endif -%}{%- endmacro -%}
+
+{#- Up to two initials for a person or a club without a picture. -#}
+{%- macro initials(name) -%}{%- for w in (name or "").split()[:2] -%}{{ w[0]|upper }}{%- endfor -%}{%- endmacro -%}
+
+{#- The club's logo inside the designer's monogram tile (which keeps its own
+    size, radius and colour): the picture when there is one, else the initial. -#}
+{%- macro logo(club, w, h) -%}
+{%- if club.logo_url -%}<img class="ph-fill" src="{{ club.logo_url }}"{% if club.logo_srcset %} srcset="{{ club.logo_srcset }}" sizes="{{ w }}px"{% endif %} width="{{ w }}" height="{{ h }}" alt="{{ club.name }}" loading="lazy" decoding="async">{%- else -%}{{ (club.name or "?")[0]|upper }}{%- endif -%}
+{%- endmacro -%}
+
+{#- "Design lead, [Company]" -#}
+{%- macro role(p) -%}{{ [p.title, p.org]|select|join(", ") }}{%- endmacro -%}
+
+{#- "In person" / "Online" for an event (an explicit `mode` wins). -#}
+{%- macro mode(e) -%}{%- if e.mode -%}{{ e.mode }}{%- elif e.is_online -%}Online{%- elif e.where -%}In person{%- endif -%}{%- endmacro -%}
+
+{#- "62 of 150 seats left", when the event has a seat limit. Capacity is
+    `capacity`, else seats left + going. -#}
+{%- macro seats(e) -%}
+{%- set cap = e.capacity if e.capacity is number else ((e.seats_left + e.going) if (e.seats_left is number and e.going is number) else none) -%}
+{%- if e.seats_left is number and cap -%}{{ num(e.seats_left) }} of {{ num(cap) }} seats left{%- endif -%}
+{%- endmacro -%}
+
+{#- A past event's numbers ("120 attended · 3 speakers"), joined by `sep`.
+    `facts` (a list of strings) overrides the derived line. -#}
+{%- macro facts(e, sep=" · ") -%}
+{%- if e.facts -%}{{ e.facts|join(sep) }}{%- else -%}
+{%- set n = e.speakers_count -%}
+{{ [(num(e.going) ~ " attended") if e.going else none, (n ~ (" speaker" if n == 1 else " speakers")) if n else none]|select|join(sep) }}
+{%- endif -%}
+{%- endmacro -%}
+
+{#- The club's website as {href, label}: `club.website`, else the socials
+    entry of kind "website" (labelled with its bare host). -#}
+{%- macro web_href(club, socials) -%}{%- set w = club.website or ((socials or [])|selectattr("kind", "equalto", "website")|first) -%}{%- if w -%}{{ w.href }}{%- endif -%}{%- endmacro -%}
+{%- macro web_label(club, socials) -%}
+{%- if club.website -%}{{ club.website.label }}{%- else -%}
+{%- set w = (socials or [])|selectattr("kind", "equalto", "website")|first -%}
+{%- if w -%}{%- set host = w.href.split("//")[-1].split("/")[0] -%}{{ host[4:] if host.startswith("www.") else host }}{%- endif -%}
+{%- endif -%}
+{%- endmacro -%}
