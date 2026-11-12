@@ -170,6 +170,10 @@ ROUTES = {
     "PUT /api/v1/events/{event_id}/designs/{kind}/layout": ALLOW,
     "POST /api/v1/events/{event_id}/designs/{kind}/layout/preview": ALLOW,
     "POST /api/v1/events/{event_id}/designs/{kind}/layout/images": ALLOW,
+    # The designer's designs (app/api/doc_presets): a co-host designs as the host does.
+    "PUT /api/v1/events/{event_id}/designs/{kind}/preset": ALLOW,
+    "DELETE /api/v1/events/{event_id}/designs/{kind}/preset": ALLOW,
+    "POST /api/v1/events/{event_id}/designs/{kind}/preset/preview": ALLOW,
     # deliveries
     "POST /api/v1/events/{event_id}/tickets/send": ALLOW,
     "POST /api/v1/events/{event_id}/tickets/{registration_id}/send": ALLOW,
@@ -186,6 +190,8 @@ ROUTES = {
     "POST /api/v1/events/{event_id}/certificates/{registration_id}/send": ALLOW,
     "POST /api/v1/events/{event_id}/certificates/{registration_id}/revoke": ALLOW,
     "POST /api/v1/events/{event_id}/certificates/{registration_id}/reinstate": ALLOW,
+    # Certificates already issued take the current design (doc-designs contract §6).
+    "POST /api/v1/events/{event_id}/certificates/apply-design": ALLOW,
     "GET /api/v1/events/{event_id}/certificates/bundle.zip": ALLOW,
     "GET /api/v1/events/{event_id}/certificates": ALLOW,
     # emails

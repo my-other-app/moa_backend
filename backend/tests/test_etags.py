@@ -461,7 +461,7 @@ async def test_the_emailed_file_link_is_untouched(client, world, drawn):
     assert r.content == b"%PDF-1.4 Ananya Iyer" and "etag" not in r.headers
 
 
-async def test_the_ticket_pdf_is_tagged_with_its_kept_name_and_a_304_draws_nothing(client, session, world, bucket, drawn):
+async def test_the_ticket_pdf_is_tagged_with_its_kept_name_and_a_304_draws_nothing(client, session, world, bucket, drawn, classic_defaults):
     url = f"/api/v1/events/tickets/{world['a'].ticket_id}/pdf"
     first = await client.get(url, headers=world["a_user"])
     assert first.status_code == 200 and first.content == b"%PDF-1.4 Ananya Iyer"
@@ -567,7 +567,7 @@ def pictured(monkeypatch):
     return calls
 
 
-async def test_the_ticket_image_is_tagged_from_the_same_fingerprint_and_a_304_draws_nothing(client, session, world, drawn, pictured):
+async def test_the_ticket_image_is_tagged_from_the_same_fingerprint_and_a_304_draws_nothing(client, session, world, drawn, pictured, classic_defaults):
     base = f"/api/v1/events/tickets/{world['a'].ticket_id}"
     pdf = await client.get(f"{base}/pdf", headers=world["a_user"])
     first = await client.get(f"{base}/image", headers=world["a_user"])
