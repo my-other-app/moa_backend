@@ -11,7 +11,7 @@ register someone, check someone in or issue a certificate, MyOtherApp changes
 too (this API); when it happens on MyOtherApp, they are told (webhooks).
 
 - Base URL: `https://api.myotherapp.in/partner/v1` (versioned; v1 is additive only, a breaking change is v2 with six months' overlap).
-- The OpenAPI 3.1 document: `GET /partner/v1/openapi.json` (no sign-in). The developer docs at `https://myotherapp.in/developers` render it.
+- The OpenAPI 3.1 document: `GET /partner/v1/openapi.json`, private since 12 Nov: it needs a partner credential, a developer docs token or the website's server token (§14). The developer docs render it; only `https://myotherapp.in/developers` is public, the rest opens through a signed docs link (§14).
 - Code: `backend/app/api/partner/` (each module's docstring says what it does). Tests: `backend/tests/test_partner_api.py`.
 - Kill switch: `APP_PARTNER_API_ENABLED` (on; nothing reaches a club unless a platform admin allocated it).
 
@@ -218,3 +218,69 @@ include_partner_routes(router, _webhooks_router(require_scope), tags=["webhooks"
 - `APP_PARTNER_API_ENABLED`, `APP_PARTNER_ACCESS_TOKEN_MINUTES`, `APP_PARTNER_REFRESH_TOKEN_DAYS`, `APP_PARTNER_CONSENT_URL`.
 - Migration `partner_api` (after `social_posting`): twelve new empty tables, `events.external_payments_allowed`, `plan_features.api_access`, `checkinvia` gains `api`. Lock-safe (see its docstring).
 - Idempotency keys older than a day are cleared as clients make requests; usage is one row per client, club and day.
+
+## 14. Private developer docs
+
+Only `https://myotherapp.in/developers` is public (what the API does, the two
+ways in, how to ask). Every other docs page, the OpenAPI document and the
+Postman file need access. The shared truth is
+`feature-register/private-dev-docs-contract.md`; code
+`backend/app/api/partner/docs_links.py` and `developers_router.py`; tests
+`backend/tests/test_dev_docs_links.py`.
+
+**A docs link** is `https://myotherapp.in/developers/access?t=moa_docs_...`
+(32 random bytes; only the sha256 is stored; the url is in the one answer
+that made it). The website checks it with the backend, sets a cookie on
+`/developers` and re-checks at most every 5 minutes.
+
+| Who | Route | Lasts |
+|---|---|---|
+| A club's owner or admin, allocated clubs only | `POST /api/v1/clubs/integrations/docs-links` `{purpose: "self"\|"share", label?}` | self 7 days, share 30 |
+| An admin (manage_content) | `POST /api/v1/admin/integrations/docs-links` `{purpose: "self"}` | 7 days |
+| An admin, for a partner app's developers | `POST /api/v1/admin/integrations/docs-links` `{partner_app_id, label?}` | 30 days |
+
+Each answers 201 `{link, url}`. A link: `{id, label, kind: club|partner_app|admin,
+purpose: self|share, status: active|expired|revoked, club: {id, name}|null,
+partner_app: {id, name}|null, created_by: {id, name, member_id}, created_at,
+expires_at, last_used_at, use_count, revoked_at}` (times in UTC, never the token).
+
+- Club: `GET .../docs-links` -> `{links}` newest first, live and ended (expired
+  or revoked) in the last 30 days; `DELETE .../docs-links/{id}` -> `{revoked: true}`.
+  403 `NOT_ALLOCATED` on POST when the club has no API access (GET and DELETE
+  still work, so links can be seen and revoked); 409 `DOCS_LINK_LIMIT` at 20 live
+  links; 404 `DOCS_LINK_NOT_FOUND`; rate limit 30 created an hour per account.
+- Admin: `GET .../docs-links[?partner_app_id=&kind=&club_id=]` -> `{links}` (every
+  link, newest first, at most 500); `DELETE .../docs-links/{id}` revokes any.
+  Every admin docs-link route takes manage_content. 404 `APP_NOT_FOUND`, 409
+  `APP_SUSPENDED`, 422 `VALIDATION` (neither `purpose: self` nor an app).
+- Each create and revoke is in the audit log (`partner.docs_link.create`,
+  `partner.docs_link.revoke`; entity the club, the partner app, or the admin).
+
+**The website's check:** `GET /api/v1/developers/access?t=<token>` (or the
+token in `MOA-Docs-Token`, which keeps it out of access logs). Not in any
+OpenAPI document. 200 `{ok: true, kind, expires_at, club?: {id, name},
+partner_app?: {id, name}}`; 404 `{ok: false}` for every other token, with no
+reason. `Cache-Control: private, no-store`. 30 checks a minute per address;
+the site's server sends `X-Site-Token` and `X-Visitor-IP: <the visitor>` so
+the visitor is counted, not the site (`app/core/site.py`). A good check
+writes `last_used_at` and adds one to `use_count`, at most once a minute.
+
+A link stops working, checked on every use, when it expires; is revoked;
+for a club's, the club's API access is off, the club is not active (deleted,
+waiting for approval, its account suspended) or whoever made it is no longer
+its owner or an active admin of it; for a partner app's, the app is
+suspended or deleted; for an admin's own, they are no longer an active admin
+whose role has manage_content; and every link while `APP_PARTNER_API_ENABLED`
+is off.
+
+**The OpenAPI document** (`GET /partner/v1/openapi.json`) needs one of: a
+credential the API lets in (`Authorization: Bearer` a club key or an app or
+OAuth token, live or test); a docs token (`MOA-Docs-Token: moa_docs_...` or
+`?docs_token=`); the website's server (`X-Site-Token: <one of APP_SITE_TOKENS>`,
+the site's `API_SITE_TOKEN`). Otherwise 401 `UNAUTHENTICATED` in the error
+shape above. It answers `Cache-Control: private, no-store` and
+`Vary: Authorization, MOA-Docs-Token, X-Site-Token`. The club-facing
+`docs_url` stays `https://myotherapp.in/developers`.
+
+Migration `developer_docs_links` (after `api_webhooks`): one new empty table.
+The demo reset wipes it.

@@ -6,8 +6,13 @@ and the X-RateLimit headers (routing.PartnerRoute). Live credentials reach
 the real objects (live.py), test credentials the sandbox (sandbox.py),
 through the same routes and the same checks.
 
-GET /partner/v1/openapi.json is this surface's OpenAPI 3.1 document (no
-sign-in): the developer docs are rendered from it.
+GET /partner/v1/openapi.json is this surface's OpenAPI 3.1 document: the
+developer docs are rendered from it. It is private, as the docs are
+(feature-register/private-dev-docs-contract.md, decision 6): it needs one of
+a credential this API lets in (a club key, an app or OAuth token, live or
+test), a developer docs token (`MOA-Docs-Token` or `?docs_token=`;
+docs_links.py), or the website's own server (`X-Site-Token`, app/core/site.py).
+Without one it is 401 UNAUTHENTICATED.
 """
 from __future__ import annotations
 
@@ -16,12 +21,14 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse, Response
 
-from app.api.partner import live, sandbox
+from app.api.partner import docs_links, live, sandbox
 from app.api.partner import schemas as s
-from app.api.partner.auth import PartnerCaller, partner_caller, require_scope
+from app.api.partner.auth import PartnerCaller, credential_valid, partner_caller, require_scope
 from app.api.partner.errors import PartnerError
 from app.api.partner.routing import PartnerRoute
 from app.config import settings
+from app.core import site
+from app.db.core import SessionDep
 
 router = APIRouter(prefix="/partner/v1", route_class=PartnerRoute)
 
@@ -258,13 +265,40 @@ async def ticket_qr(code: str, request: Request, sig: str = Query(..., max_lengt
 # ─── The document ────────────────────────────────────────────────────────
 
 
+#: Every way in to the document varies the answer: no shared cache may keep it.
+SPEC_HEADERS = {
+    "Cache-Control": "private, no-store",
+    "Vary": f"Authorization, {docs_links.HEADER}, X-Site-Token",
+    "Access-Control-Allow-Origin": "*",
+}
+
+
+async def spec_reader(session, request: Request) -> Optional[str]:
+    """Who may read the document: "site", "partner" or "docs"; None for anyone else."""
+    if site.token_id(request) is not None:
+        return "site"
+    if await credential_valid(session, request):
+        return "partner"
+    found = await docs_links.check(session, docs_links.token_of(request))
+    if found is not None:
+        await docs_links.touch(session, found.link)
+        return "docs"
+    return None
+
+
 @router.get("/openapi.json", include_in_schema=False)
-async def openapi_document():
+async def openapi_document(request: Request, session: SessionDep):
     from app.api.partner.openapi import document
 
     if not settings.PARTNER_API_ENABLED:
         raise PartnerError("NOT_FOUND", "Not found.")
-    return JSONResponse(document(), headers={"Cache-Control": "public, max-age=300", "Access-Control-Allow-Origin": "*"})
+    if await spec_reader(session, request) is None:
+        raise PartnerError(
+            "UNAUTHENTICATED",
+            f"The API reference is private. Send an API key or access token (Authorization: Bearer <it>), or a developer docs token ({docs_links.HEADER}).",
+            headers={"WWW-Authenticate": 'Bearer realm="partner"', "Cache-Control": "private, no-store"},
+        )
+    return JSONResponse(document(), headers=SPEC_HEADERS)
 
 
 # WEBHOOKS_ROUTER_MOUNT

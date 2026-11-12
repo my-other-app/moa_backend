@@ -4,6 +4,10 @@ answers' examples. The developer docs (myotherapp.in/developers) render it;
 it is built once per process from the routes themselves, so a route added
 to the partner router -- the webhook endpoints included, once mounted --
 is in it, with the scopes its dependency asks for (`x-scopes`).
+
+It is private, as the docs' pages are: router.py's `spec_reader` lets in a
+partner credential, a developer docs token or the website's own server, and
+answers anyone else 401 (feature-register/private-dev-docs-contract.md).
 """
 from __future__ import annotations
 

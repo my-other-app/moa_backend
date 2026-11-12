@@ -128,11 +128,12 @@ async def test_the_partner_api_s_error_shape_and_scope(client, session, world, r
     assert len(list(await session.scalars(select(WebhookEndpoints).where(WebhookEndpoints.url == "https://once.example.com/x")))) == 1
 
 
-async def test_the_openapi_document_has_the_routes_and_every_payload(client, world):
+async def test_the_openapi_document_has_the_routes_and_every_payload(client, session, world):
     from app.api.partner import openapi
 
     openapi.reset()
-    doc = (await client.get(f"{V1}/openapi.json")).json()
+    # The document is private (tests/test_dev_docs_links.py): any key opens it.
+    doc = (await client.get(f"{V1}/openapi.json", headers=H(await key_for(session, world.ids.club, ["events:read"])))).json()
     assert doc["paths"]["/partner/v1/webhook-endpoints"]["post"]["x-scopes"] == ["webhooks:manage"]
     assert "/partner/v1/webhook-deliveries/{delivery_id}/retry" in doc["paths"]
     assert set(doc["webhooks"]) == set(EVENT_TYPES) | {"webhook.test"}

@@ -435,7 +435,7 @@ async def test_only_the_club_turns_on_payments_taken_outside(client, session, wo
     assert row.external_payments_allowed is True and row.max_participants == 50
     # An edit through the API leaves the club's setting as it is.
     assert (await client.patch(f"{V1}/events/{world.ids.upcoming}", json={"capacity": 70}, headers=H(raw))).json()["external_payments_allowed"] is True
-    schema = (await client.get(f"{V1}/openapi.json")).json()["components"]["schemas"]
+    schema = (await client.get(f"{V1}/openapi.json", headers=H(raw))).json()["components"]["schemas"]
     assert schema["EventCreate"]["properties"]["external_payments_allowed"]["readOnly"] is True
 
 
@@ -886,8 +886,9 @@ def _refs(node, found: set) -> set:
     return found
 
 
-async def test_the_openapi_document_is_valid_31_for_exactly_this_surface(client, world):
-    r = await client.get(f"{V1}/openapi.json")
+async def test_the_openapi_document_is_valid_31_for_exactly_this_surface(client, session, world):
+    # The document is private (tests/test_dev_docs_links.py): any key opens it.
+    r = await client.get(f"{V1}/openapi.json", headers=H(await key_for(session, world.ids.club, ["events:read"])))
     assert r.status_code == 200
     doc = r.json()
     assert doc["openapi"] == "3.1.0" and doc["info"]["title"] == "MyOtherApp Integrations API" and doc["info"]["version"]
