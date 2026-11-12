@@ -389,13 +389,14 @@ async def send_test(session, endpoint) -> tuple[WebhookDeliveries, sender.Result
 # ─── The jobs ────────────────────────────────────────────────────────────
 
 
-@jobs.handler(FANOUT_JOB, max_attempts=6, timeout=60.0, priority=jobs.NORMAL)
+@jobs.handler(FANOUT_JOB, max_attempts=6, timeout=60.0, concurrency=2, priority=jobs.NORMAL)
 async def _fanout_job(payload: dict) -> None:
     async with jobs.scope() as session:
         await fanout(session, str(payload["event_id"]))
 
 
-@jobs.handler(DELIVER_JOB, max_attempts=3, timeout=sender.TIMEOUT_SECONDS + 30.0, priority=jobs.NORMAL)
+# Capped at two: a slow or dead partner server must not hold a runner's slots that mail and pushes need.
+@jobs.handler(DELIVER_JOB, max_attempts=3, timeout=sender.TIMEOUT_SECONDS + 30.0, concurrency=2, priority=jobs.NORMAL)
 async def _deliver_job(payload: dict) -> None:
     async with jobs.scope() as session:
         await attempt(session, payload["delivery_id"], int(payload.get("attempt") or 0), manual=bool(payload.get("manual")))
