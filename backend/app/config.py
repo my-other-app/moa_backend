@@ -260,15 +260,26 @@ class AppConfig(BaseSettings):
     # second per number; this stays well under it).
     CLUB_WHATSAPP_BROADCAST_MPS: float = 10.0
 
-    # ─── A club's mailbox: <handle>@mail.myotherapp.in (app/api/club_mailbox) ─
-    # Pro and Enterprise (plan flag `mailbox`). Off until the owner has made
-    # the SES domain, receipt rule, bucket, topic and DNS records
-    # (docs/OPERATIONS.md section 23). Off: the dashboard hides Mail, nothing
-    # can be set up or sent, and mail that arrives is dropped (never bounced).
+    # ─── A club's mailbox: <handle>@myotherapp.in (app/api/club_mailbox) ─────
+    # Pro and Enterprise (plan flag `mailbox`). Off until mail for the domain
+    # reaches the backend: Cloudflare Email Routing's catch-all -> the
+    # club-mail Worker -> /hooks/mailbox/cloudflare (the default), or SES
+    # receiving -> bucket -> SNS -> /hooks/mailbox/ses (docs/OPERATIONS.md
+    # section 23). Off: the dashboard hides Mail, nothing can be set up or
+    # sent, and mail that arrives is refused (the Worker rejects it in the
+    # SMTP session) or dropped (SES's path; never bounced).
     CLUB_MAILBOX: bool = False
-    # The domain every club's address is on, verified in SES for sending and
-    # receiving (its MX points at SES's inbound endpoint in the receiving region).
-    MAILBOX_DOMAIN: str = "mail.myotherapp.in"
+    # The domain every club's address is on: the platform's own, so a club is
+    # `yourclub@myotherapp.in`. Verified in SES for sending (Easy DKIM);
+    # its MX is Cloudflare Email Routing's. The platform's own addresses on it
+    # (info@, support@, ...) are never a club's (club_mailbox/handles.py).
+    MAILBOX_DOMAIN: str = "myotherapp.in"
+    # The key the club-mail Worker signs each delivery with (HMAC-SHA256 over
+    # the time, the envelope and the size; app/api/club_mailbox/cloudflare.py).
+    # The same value is the Worker's MAILBOX_HOOK_SECRET secret. Empty: the
+    # Cloudflare hook answers 503 and the Worker gives the sender a temporary
+    # error, so the mail is tried again later, not lost.
+    MAILBOX_HOOK_SECRET: str = ""
     # The private S3 bucket SES's receipt rule writes each mail to (raw MIME),
     # and the SNS topic the rule tells. A notification naming another bucket or
     # topic is refused.
@@ -281,7 +292,8 @@ class AppConfig(BaseSettings):
     # the SES keys (APP_SES_ACCESS_KEY / APP_SES_SECRET_KEY).
     MAILBOX_AWS_ACCESS_KEY: str = ""
     MAILBOX_AWS_SECRET_KEY: str = ""
-    # A mail larger than this (MB) is dropped unread (SES receives up to 40 MB).
+    # A mail larger than this (MB) is dropped unread (SES receives up to 40 MB,
+    # Cloudflare Email Routing 25 MiB).
     MAILBOX_INBOUND_MAX_MB: int = 40
     # What one club may send, by the hour and by the day (abuse limits on top
     # of its email credits), and the most people one mail may go to.

@@ -1,7 +1,7 @@
 """A club's mailbox: one address on the platform's domain, its mail, its threads.
 
 Pro and Enterprise (plan flag `mailbox`). The club picks a handle and gets
-`<handle>@mail.myotherapp.in` (settings.MAILBOX_DOMAIN). Mail sent to it
+`<handle>@myotherapp.in` (settings.MAILBOX_DOMAIN). Mail sent to it
 arrives through SES (receipt rule -> S3 -> SNS -> our webhook, inbound.py)
 and is kept here; the club's team -- the owner and the members given the
 Mail permission -- reads it in the dashboard, answers it and writes new mail,

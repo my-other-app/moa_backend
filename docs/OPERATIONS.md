@@ -2779,19 +2779,71 @@ room feed.
 
 ---
 
-## 23. Clubs' mailboxes: `<handle>@mail.myotherapp.in` (Pro and Enterprise)
+## 23. Clubs' mailboxes: `<handle>@myotherapp.in` (Pro and Enterprise)
 
 A club on Pro or Enterprise (plan flag `mailbox`, migration `club_mailbox`)
-picks one address on the platform's domain -- `yukthi@mail.myotherapp.in` --
+picks one address on the platform's domain -- `yukthi@myotherapp.in` --
 in the clubs dashboard (Mail -> Settings). Mail sent to it arrives in the
 dashboard's **Mail** section; the club's owner, and the team members the owner
 gave the **Mail** permission on Access, read it, reply, reply to all, forward
 and write new mail from it. The club does not connect a mailbox of its own:
-the platform receives through SES and sends through its own provider.
+the platform receives through **Cloudflare Email Routing** (the domain's MX;
+a catch-all rule hands every mail to the `club-mail` Worker, which posts it to
+the API) -- or, the other way in, through SES receiving -- and sends through
+its own provider (SES: `myotherapp.in` is a verified domain identity there).
 
-It is **off** (`APP_CLUB_MAILBOX=false`) until the AWS and DNS steps below are
-done. Off, the dashboard hides Mail, every mailbox route but the status
-answers 404 `MAILBOX_OFF`, and a mail that arrives is dropped (never bounced).
+The domain is the platform's own (`APP_MAILBOX_DOMAIN`, default
+`myotherapp.in`), so every address the platform itself uses on it is reserved
+for no club: the list in `handles.py` (info, support, sales, appreview,
+developers, hello, ...) and, read from the settings each time, the local part
+of `APP_MAIL_FROM_ADDRESS`, `APP_SUPPORT_FROM_ADDRESS`, `APP_SALES_FROM_ADDRESS`
+and the desk's inbound addresses. The same catch-all brings `support@` and
+`sales@` to the team's desk (`APP_SUPPORT_INBOUND_ADDRESSES`, docs/SUPPORT_AND_LEADS.md).
+
+It is **off** (`APP_CLUB_MAILBOX=false`) until the steps below are done. Off,
+the dashboard hides Mail, every mailbox route but the status answers 404
+`MAILBOX_OFF`, and a mail that arrives is refused in the SMTP session by the
+Worker (SES's way: dropped, never bounced).
+
+### How a mail travels: Cloudflare (the default)
+
+```
+sender -> MX myotherapp.in (route1/2/3.mx.cloudflare.net) -> Email Routing
+       -> catch-all rule: "Send to a Worker" club-mail (once per envelope recipient)
+       -> the Worker (app repo infra/cloudflare/club-mail): the raw MIME, signed,
+          POST https://api.myotherapp.in/api/v1/hooks/mailbox/cloudflare
+       -> the API: signature checked from the headers before the body is read,
+          parsed, its HTML sanitised, its files put in the media bucket, kept
+       -> the answer: accept, or reject (the Worker rejects in the SMTP session)
+```
+
+- **The signature** (`app/api/club_mailbox/cloudflare.py`): HMAC-SHA256 with
+  `APP_MAILBOX_HOOK_SECRET` (the Worker's `MAILBOX_HOOK_SECRET` secret, the
+  same value) over `v1`, the time, the envelope's recipient and sender, the
+  size and Cloudflare's Authentication-Results, as the Worker sent them. Older
+  than five minutes, another key's, or a body that isn't the signed size: 401
+  or 400, nothing read. Without the setting: 503.
+- **Refused in the session, not bounced.** No such address, a closed mailbox,
+  mailboxes off, too large, unreadable: the API answers `{"action":
+  "reject", "text"}` and the Worker calls `setReject(text)`: the *sender's own
+  server* tells its sender, so a forged sender gets nothing (no backscatter).
+- **Never lost.** A 5xx, a 401 or no answer (a deploy restarting the API):
+  the Worker tries three times in about ten seconds (Caddy also holds a
+  request up to 30 s while the backend restarts), then throws; Cloudflare
+  gives the sending server a temporary error and it delivers again later
+  (servers keep trying for days). Kept once: the provider id is the
+  Message-ID with the envelope's sender (`cf-<sha256>`), so a retry is a
+  duplicate (`uq_club_mail_messages_provider`).
+- **Spam:** Cloudflare gives no spam or virus verdict. It checks SPF, DKIM and
+  DMARC and prepends its own `Authentication-Results` (authserv-id
+  `mx.cloudflare.net`); only that one is read, and a mail that failed DMARC is
+  kept in the club's **Spam**. The verdicts are on the message (`verdicts`).
+- **Size:** Email Routing takes up to 25 MiB; Caddy lets this one path take
+  26 MB (the API's other paths 10 MB: `ops/server/caddy`).
+- **Staff mail:** the Worker's `FORWARD` variable (JSON, `{"info":
+  "someone@gmail.com"}`) forwards a local part to an address verified in
+  Email Routing (Destination addresses) before the API is asked; empty, the
+  API decides (the desk, a club, or rejected).
 
 ### Where SES receives
 
@@ -2805,10 +2857,15 @@ identity serves both. SES's "Regions and Amazon SES" page
 says every resource a receipt rule uses -- the SNS topic included -- must be in
 the receiving region, except the S3 bucket; keep the bucket there too.
 
-### How a mail travels
+### How a mail travels: SES (the other way in)
+
+Only when SES receives for the domain instead of Cloudflare (its MX pointing
+at `inbound-smtp.ap-south-1.amazonaws.com`). Note `mail.myotherapp.in` is the
+SES custom MAIL FROM domain (its MX is `feedback-smtp`), so it can't also
+receive; SES receiving would be on the domain itself.
 
 ```
-sender -> MX mail.myotherapp.in -> SES (ap-south-1) receipt rule
+sender -> MX myotherapp.in -> SES (ap-south-1) receipt rule
        -> S3 action: raw MIME into the private bucket (SES's message id is the key)
        -> SNS topic (the S3 action's notification) -> HTTPS POST /api/v1/hooks/mailbox/ses
        -> the API: SNS signature and topic checked, the MIME read from the bucket,
@@ -2828,7 +2885,7 @@ sender -> MX mail.myotherapp.in -> SES (ap-south-1) receipt rule
   `handle+anything@` reaches `handle@`.
 - **Never a bounce.** An address that is nobody's, a club whose mailbox is
   closed, a mail past `APP_MAILBOX_INBOUND_MAX_MB` (40), a mail that can't be
-  parsed: dropped and logged (the address masked: `n***@mail.myotherapp.in`).
+  parsed: dropped and logged (the address masked: `n***@myotherapp.in`).
   A bounce to a forged sender is backscatter and gets the domain listed. The
   receipt rule has no Bounce action for the same reason.
 - **Spam and viruses:** SES's verdicts (the rule's scanning is on). A virus
@@ -2852,7 +2909,7 @@ sender -> MX mail.myotherapp.in -> SES (ap-south-1) receipt rule
 From its own current address only (the server sets From; the dashboard can't),
 named as the club (or its "Sends as" name), through the platform's provider
 (`APP_MAIL_PROVIDER`: SES, or Resend first). Each mail has our `Message-ID`
-(`<uuid@mail.myotherapp.in>`), `In-Reply-To` and `References` for a reply or a
+(`<uuid@myotherapp.in>`), `In-Reply-To` and `References` for a reply or a
 forward, a plain-text part (with the signature and the quoted mail) and an
 HTML part made from it, and files up to **10 MB together**. SES replaces a
 supplied Message-ID with its own (SES's "Amazon SES header fields" page); that
@@ -2966,21 +3023,55 @@ The address stays the club's while it is lapsed.
 | Setting (`.env`) | Default | Meaning |
 |---|---|---|
 | `APP_CLUB_MAILBOX` | `false` | the switch: Mail in the dashboard, setting up, sending, receiving |
-| `APP_MAILBOX_DOMAIN` | `mail.myotherapp.in` | the domain every address is on |
+| `APP_MAILBOX_DOMAIN` | `myotherapp.in` | the domain every address is on |
+| `APP_MAILBOX_HOOK_SECRET` | empty | the club-mail Worker's key (`openssl rand -hex 32`); the same value is the Worker's `MAILBOX_HOOK_SECRET` secret |
 | `APP_MAILBOX_INBOUND_BUCKET` | empty | the private bucket the receipt rule writes to |
 | `APP_MAILBOX_SNS_TOPIC_ARN` | empty | the topic the rule tells; any other topic is refused |
 | `APP_MAILBOX_RECEIVING_REGION` | `ap-south-1` | where SES receives, and where the bucket is read |
 | `APP_MAILBOX_AWS_ACCESS_KEY`, `APP_MAILBOX_AWS_SECRET_KEY` | empty (the SES keys) | a user that may get and delete objects in the inbound bucket |
-| `APP_MAILBOX_INBOUND_MAX_MB` | `40` | a larger mail is dropped unread (SES receives up to 40 MB) |
+| `APP_MAILBOX_INBOUND_MAX_MB` | `40` | a larger mail is refused unread (Cloudflare takes up to 25 MiB, SES 40 MB) |
 | `APP_MAILBOX_SEND_PER_HOUR`, `APP_MAILBOX_SEND_PER_DAY` | `60`, `300` | what one club may send |
 | `APP_MAILBOX_MAX_RECIPIENTS` | `50` | the most people one mail goes to |
 
 With `APP_CLUB_MAILBOX` on, the config check (section 19) warns -- never refuses
-to start -- for each of the domain, bucket, topic and region left empty, for a
-topic outside the receiving region, and when `APP_MAIL_PROVIDER` is `resend`
-(Resend must have `mail.myotherapp.in` verified too).
+to start -- for an empty domain; for no way in at all (neither the Worker's key
+nor SES's bucket and topic); for a key shorter than 32 characters; for SES half
+set up (bucket, topic or region missing, a topic outside the receiving region);
+and when `APP_MAIL_PROVIDER` is `resend` (Resend must have the domain verified too).
 
-### Turning it on: the owner's steps (AWS console and Cloudflare)
+### Turning it on with Cloudflare (the default)
+
+1. **Deploy the backend** with this code (no migration), and the stack's
+   Caddy files (`deploy.sh stack`: the 26 MB limit for the hook's path).
+2. **The key.** Make one (`openssl rand -hex 32`), put it in the server's
+   `.env` as `APP_MAILBOX_HOOK_SECRET=...`, with `APP_CLUB_MAILBOX=true`, and
+   recreate the backend (`./dc up -d --no-deps --force-recreate backend`).
+3. **The Worker** (app repo `infra/cloudflare/club-mail`): `./deploy.sh`
+   uploads it, then `./set-secret.sh <file>` gives it the same key (or
+   Workers -> club-mail -> Settings -> Variables and Secrets -> Secret
+   `MAILBOX_HOOK_SECRET`).
+4. **Email Routing** (Cloudflare dashboard -> myotherapp.in -> Email ->
+   Email Routing): Enable. It adds the MX records (`route1/2/3.mx.cloudflare.net`),
+   an SPF TXT and its DKIM TXT on the domain -- the domain had no MX before.
+   Then Routing rules -> **Catch-all address** -> Action **Send to a Worker**
+   -> `club-mail` -> Active.
+5. **Check:** a club on Pro or Enterprise sets its address (Mail -> Settings);
+   mail to it from any mailbox arrives in its Mail within seconds; mail to an
+   address nobody has comes back to the sender as "No mailbox here by that
+   name". Workers -> club-mail -> Logs shows each delivery's answer (no
+   addresses or content).
+
+Rolling back: disable the catch-all rule (mail to the domain is then refused
+by Cloudflare), or set `APP_CLUB_MAILBOX=false` (the Worker rejects
+everything); nothing else changes.
+
+### Turning it on with SES instead (AWS console and Cloudflare)
+
+Written when the addresses were to be on a separate `mail.myotherapp.in`
+domain. On the platform's own domain (the default now) the identity
+`myotherapp.in` is already verified in SES (Easy DKIM): skip its creation and
+read `myotherapp.in` wherever `mail.myotherapp.in` stands below; the MX goes
+on the domain itself, so Cloudflare Email Routing must then stay off.
 
 Everything in **ap-south-1**. `<ACCOUNT_ID>` is the AWS account's 12 digits.
 Names below are suggestions; use the same ones throughout.

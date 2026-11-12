@@ -1,9 +1,12 @@
-"""A club's address: the handle before @mail.myotherapp.in.
+"""A club's address: the handle before @myotherapp.in (settings.MAILBOX_DOMAIN).
 
 3 to 30 characters of a-z, 0-9, dots and hyphens; it starts and ends with a
 letter or a digit, and has no two dots or hyphens in a row. Lower case: what
 the club types is lowered. Names that are the platform's own, or that people
-expect a postmaster to read (RFC 2142's), are reserved for no club.
+expect a postmaster to read (RFC 2142's), are reserved for no club. The
+domain is the platform's own, so every address the platform itself uses on
+it (info@, support@, the desk's inbound ones, ...) is reserved too, read from
+the settings each time.
 
 Unique across every club and every handle still forwarding (a changed one
 forwards 90 days, then is free again). Changed at most once a month.
@@ -37,7 +40,35 @@ RESERVED = frozenset({
     "notifications", "notification", "alerts", "system", "myotherapp", "moa", "finnet", "official", "verify",
     "verification", "accounts", "account", "payments", "payment", "refunds", "careers", "jobs", "press", "news",
     "test", "null", "undefined", "api", "ses", "amazonses", "unsubscribe", "list", "owner", "owners", "moderator",
+    # The platform's own on myotherapp.in: its people, its products, its stores.
+    "appreview", "app-review", "review", "reviews", "developer", "developers", "dev", "devs", "hello", "hi", "partner",
+    "partners", "partnerships", "events", "event", "clubs", "club", "community", "founder", "founders", "ceo", "cto",
+    "coo", "hr", "people", "finance", "accounting", "invoice", "invoices", "receipt", "receipts", "ticket", "tickets",
+    "order", "orders", "status", "updates", "newsletter", "digest", "reply", "replies", "inbox", "mailbox", "dashboard",
+    "portal", "app", "apps", "ios", "android", "store", "shop", "merch", "docs", "blog", "media", "cdn", "static",
+    "assets", "feedback", "report", "reports", "trust", "safety", "ops", "devops", "it", "tech", "google", "apple",
+    "razorpay", "whatsapp", "meta", "facebook", "instagram", "linkedin", "twitter", "domains", "domain", "dns",
+    "hostmaster", "certificates", "certificate", "speakers", "speaker", "volunteer", "volunteers", "sponsor", "sponsors",
+    "myotherapp-team", "theteam", "mail-daemon", "auto", "automated", "robot", "bot",
 })
+
+
+def _platform_locals() -> frozenset[str]:
+    """The local parts of every address the platform itself uses on the
+    mailbox domain: who its mail is from, the desk's inbound addresses."""
+    from app.config import settings
+
+    domain = (settings.MAILBOX_DOMAIN or "").strip().lower()
+    addresses = {
+        settings.MAIL_FROM_ADDRESS, settings.SUPPORT_FROM_ADDRESS, settings.SALES_FROM_ADDRESS,
+        *settings.support_inbound_addresses, *settings.sales_inbound_addresses,
+    }
+    out = set()
+    for address in addresses:
+        local, at, host = (address or "").strip().lower().rpartition("@")
+        if at and host == domain and local:
+            out.add(local.split("+", 1)[0])
+    return frozenset(out)
 
 
 def _refuse(status: int, message: str, code: str, **errors) -> CustomHTTPException:
@@ -56,7 +87,7 @@ def problem(handle: str) -> Optional[tuple[str, str]]:
         return "HANDLE_INVALID", "Use letters, numbers, dots and hyphens, starting and ending with a letter or a number."
     if ".." in handle or "--" in handle or ".-" in handle or "-." in handle:
         return "HANDLE_INVALID", "No two dots or hyphens in a row."
-    if handle in RESERVED or handle.replace(".", "").replace("-", "") in RESERVED:
+    if handle in RESERVED or handle.replace(".", "").replace("-", "") in RESERVED or handle in _platform_locals():
         return "HANDLE_RESERVED", "That address is kept for the platform. Pick another."
     return None
 

@@ -442,26 +442,43 @@ def _ses_hook(settings) -> list[Problem]:
     return out
 
 
-#: What clubs' mailboxes need to receive (app/api/club_mailbox, OPERATIONS section 23).
-CLUB_MAILBOX_NEEDS = ("MAILBOX_DOMAIN", "MAILBOX_INBOUND_BUCKET", "MAILBOX_SNS_TOPIC_ARN", "MAILBOX_RECEIVING_REGION")
+#: What clubs' mailboxes need to receive through SES (OPERATIONS section 23.6),
+#: when that is the way in rather than the club-mail Worker (MAILBOX_HOOK_SECRET).
+CLUB_MAILBOX_SES_NEEDS = ("MAILBOX_INBOUND_BUCKET", "MAILBOX_SNS_TOPIC_ARN", "MAILBOX_RECEIVING_REGION")
 
 
 def _club_mailbox(settings) -> list[Problem]:
     """Warnings only: with one missing, mail to clubs' addresses can't be
-    read (it waits in the bucket, or its notification is refused); sending
-    still works once the domain is verified in SES."""
+    received (the Worker's deliveries are answered 503 and tried again; SES's
+    wait in the bucket, or their notification is refused); sending still
+    works, the domain being verified in SES."""
     if not _get(settings, "CLUB_MAILBOX"):
         return []
-    out = [
-        Problem(name, "is empty while APP_CLUB_MAILBOX is on: mail to clubs' addresses can't be received", fatal=False)
-        for name in CLUB_MAILBOX_NEEDS if not _text(_get(settings, name))
-    ]
-    topic = _text(_get(settings, "MAILBOX_SNS_TOPIC_ARN"))
-    if topic and not topic.startswith("arn:aws:sns:"):
-        out.append(Problem("MAILBOX_SNS_TOPIC_ARN", "is not an SNS topic's ARN (arn:aws:sns:<region>:<account>:<name>)", fatal=False))
-    region = _text(_get(settings, "MAILBOX_RECEIVING_REGION"))
-    if topic.startswith("arn:aws:sns:") and region and topic.split(":")[3:4] != [region]:
-        out.append(Problem("MAILBOX_SNS_TOPIC_ARN", "is not in APP_MAILBOX_RECEIVING_REGION: SES tells only a topic in its own region", fatal=False))
+    out: list[Problem] = []
+    if not _text(_get(settings, "MAILBOX_DOMAIN")):
+        out.append(Problem("MAILBOX_DOMAIN", "is empty while APP_CLUB_MAILBOX is on: clubs have no domain for their addresses", fatal=False))
+    secret = _text(_get(settings, "MAILBOX_HOOK_SECRET"))
+    if secret and len(secret) < 32:
+        out.append(Problem("MAILBOX_HOOK_SECRET", "is shorter than 32 characters: make it with `openssl rand -hex 32`", fatal=False))
+    ses = [name for name in ("MAILBOX_INBOUND_BUCKET", "MAILBOX_SNS_TOPIC_ARN") if _text(_get(settings, name))]
+    if not secret and not ses:
+        out.append(Problem(
+            "MAILBOX_HOOK_SECRET",
+            "is empty while APP_CLUB_MAILBOX is on, and so is SES's bucket and topic: mail to clubs' addresses can't be received",
+            fatal=False,
+        ))
+    if ses:
+        # SES is (also) a way in: it needs all of its own.
+        out += [
+            Problem(name, "is empty while SES receiving is half set up: mail to clubs' addresses can't be received that way", fatal=False)
+            for name in CLUB_MAILBOX_SES_NEEDS if not _text(_get(settings, name))
+        ]
+        topic = _text(_get(settings, "MAILBOX_SNS_TOPIC_ARN"))
+        if topic and not topic.startswith("arn:aws:sns:"):
+            out.append(Problem("MAILBOX_SNS_TOPIC_ARN", "is not an SNS topic's ARN (arn:aws:sns:<region>:<account>:<name>)", fatal=False))
+        region = _text(_get(settings, "MAILBOX_RECEIVING_REGION"))
+        if topic.startswith("arn:aws:sns:") and region and topic.split(":")[3:4] != [region]:
+            out.append(Problem("MAILBOX_SNS_TOPIC_ARN", "is not in APP_MAILBOX_RECEIVING_REGION: SES tells only a topic in its own region", fatal=False))
     if _text(_get(settings, "MAIL_PROVIDER")).lower() == "resend":
         out.append(Problem("MAIL_PROVIDER", "is resend: clubs' mail goes through Resend, which must have APP_MAILBOX_DOMAIN verified too", fatal=False))
     return out

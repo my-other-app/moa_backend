@@ -65,7 +65,7 @@ def on() -> bool:
 
 
 def domain() -> str:
-    return (settings.MAILBOX_DOMAIN or "mail.myotherapp.in").strip().lower()
+    return (settings.MAILBOX_DOMAIN or "myotherapp.in").strip().lower()
 
 
 def address_of(handle: str) -> str:

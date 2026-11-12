@@ -1,11 +1,11 @@
 """Mail the club's team writes: new mail, replies, reply-all and forwards.
 
-Always from the club's own current address (`"Yukthi" <yukthi@mail...>`):
+Always from the club's own current address (`"Yukthi" <yukthi@myotherapp.in>`):
 the From is the server's, never the dashboard's, so a club can send only as
 itself. Through the platform's own sending provider (app/core/email/
 transport: SES, or Resend first when the platform is set so), with:
 
-- a Message-ID of ours (`<uuid@mail.myotherapp.in>`), and In-Reply-To and
+- a Message-ID of ours (`<uuid@myotherapp.in>`), and In-Reply-To and
   References for a reply or a forward, so the other side's mail client
   threads it. SES replaces any Message-ID with its own (its "Amazon SES
   header fields" page); that one (`<ses-id@region.amazonses.com>`) is kept
