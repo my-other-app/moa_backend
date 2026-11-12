@@ -268,9 +268,9 @@ async def openapi_document():
 
 
 # WEBHOOKS_ROUTER_MOUNT
-# The webhook endpoints (feat/api-webhooks, agent B) mount here, as PartnerRoutes so they answer in this API's
-# shape with its headers and idempotency:
-#
-#     from app.api.partner.routing import include_partner_routes
-#     from app.api.webhooks_out.partner import make_router as _webhooks_router
-#     include_partner_routes(router, _webhooks_router(require_scope), tags=["webhooks"])
+# The webhook endpoints (app/api/webhooks_out/partner.py) mount here, as PartnerRoutes so they answer in this
+# API's shape with its headers and idempotency.
+from app.api.partner.routing import include_partner_routes  # noqa: E402
+from app.api.webhooks_out.partner import make_router as _webhooks_router  # noqa: E402
+
+include_partner_routes(router, _webhooks_router(require_scope), tags=["webhooks"])

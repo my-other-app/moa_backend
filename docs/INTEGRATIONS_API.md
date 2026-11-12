@@ -151,8 +151,8 @@ tokens asked with `mode=test`), work on a per-club sandbox
 never in the club's dashboard lists or the plan's monthly counts, and sends no
 email, WhatsApp or push. The rules are the live ones: drafts until published,
 registration windows, capacity, one registration per address, events that
-review registrations, the money rules (a paid test event takes payments
-outside MyOtherApp only; `checkout_url` is null), the door refusing a draft,
+review registrations, the money rules (a paid test event has no checkout and is never
+paid outside MyOtherApp, so it answers `PAYMENT_REQUIRED` with `checkout_url` null), the door refusing a draft,
 one check-in per person, certificates once each. `PATCH /club` is refused (the
 club is real). `POST /clubs` validates and answers a preview; nothing is made.
 Test-object changes are emitted as webhooks with `livemode: false`

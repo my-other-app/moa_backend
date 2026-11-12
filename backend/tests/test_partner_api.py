@@ -561,6 +561,24 @@ async def test_a_registration_is_corrected_with_if_match(client, session, world)
     assert r.status_code == 412
 
 
+async def test_an_etag_does_not_change_by_itself_when_the_clock_moves(client, session, world, monkeypatch):
+    """The ticket's QR link is signed with the second it is read: left out of
+    the ETag, so an If-Match sent seconds after the read still matches."""
+    import time as time_mod
+
+    from app.core.auth import payloads
+
+    raw = await key_for(session, world.ids.club)
+    reg = await client.post(f"{V1}/events/{world.ids.upcoming}/registrations", json=person(1), headers=H(raw))
+    later = time_mod.time() + 7
+    monkeypatch.setattr(payloads.time, "time", lambda: later)
+    got = await client.get(f"{V1}/registrations/{reg.json()['id']}", headers=H(raw))
+    assert got.json()["ticket"]["qr_url"] != reg.json()["ticket"]["qr_url"]
+    assert got.headers["ETag"] == reg.headers["ETag"]
+    r = await client.patch(f"{V1}/registrations/{reg.json()['id']}", json={"name": "Guest Later"}, headers=H(raw, **{"If-Match": reg.headers["ETag"]}))
+    assert r.status_code == 200 and r.headers["ETag"] != reg.headers["ETag"]
+
+
 # ─── Check-ins ───────────────────────────────────────────────────────────
 
 

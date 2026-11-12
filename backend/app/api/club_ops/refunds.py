@@ -403,6 +403,10 @@ async def _apply(session, r: ClubRefunds, log: PaymentLogs, rz_refund: Optional[
     await ledger.part_refund(
         session, log, log.order, registration=registration, paise=_paise(r.amount), ref=str(r.id), refund_id=rz_refund,
     )
+    # Part of it back (a refund in full is told by payments._apply_refund) (app/api/webhooks_out).
+    from app.api.webhooks_out import signals as webhooks
+
+    await webhooks.payment_refunded(session, log.id, event_id=r.event_id, club_id=r.club_id)
 
 
 # One Razorpay call each; a cancelled event queues many: two at a time on a runner.

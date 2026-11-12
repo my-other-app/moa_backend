@@ -105,7 +105,7 @@ NEEDS = (
 )
 
 #: Fernet keys, a comma-separated list each.
-FERNET_KEYS = ("PAYMENT_KEYS_SECRET", "AI_KEYS_SECRET", "APPLE_TOKENS_SECRET", "SOCIAL_KEYS_SECRET")
+FERNET_KEYS = ("PAYMENT_KEYS_SECRET", "AI_KEYS_SECRET", "APPLE_TOKENS_SECRET", "SOCIAL_KEYS_SECRET", "WEBHOOK_KEYS_SECRET")
 
 #: Revoking a deleted account's Sign in with Apple token (app/api/auth/
 #: apple_tokens.py): all of them or none. One missing and sign-in keeps no

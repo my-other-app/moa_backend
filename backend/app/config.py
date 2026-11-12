@@ -351,6 +351,19 @@ class AppConfig(BaseSettings):
     # Seconds one call to a platform may take.
     SOCIAL_TIMEOUT_SECONDS: float = 20.0
 
+    # ─── Outgoing webhooks (app/api/webhooks_out, docs/WEBHOOKS.md) ─────────
+    # The Fernet key every webhook endpoint's signing secret is encrypted with
+    # (the server must read it back to sign, so it cannot be a hash). Its own
+    # key, never PAYMENT_KEYS_SECRET, AI_KEYS_SECRET, WHATSAPP_KEYS_SECRET or
+    # SOCIAL_KEYS_SECRET; a comma-separated list rotates (app/core/keyring.py).
+    # Unset: no endpoint can be added or have its secret rotated, no change is
+    # queued to be sent, and the dashboard says why.
+    WEBHOOK_KEYS_SECRET: str = ""
+    # Seconds a change waits before its webhook is built and queued, so the
+    # steps one save makes in a row (an event, then its first ticket type) go
+    # out as the object they left, not halfway.
+    WEBHOOKS_SETTLE_SECONDS: float = 2.0
+
     GOOGLE_WEB_CLIENT_ID: str
     GOOGLE_ANDROID_CLIENT_ID: str
     GOOGLE_IOS_CLIENT_ID: str

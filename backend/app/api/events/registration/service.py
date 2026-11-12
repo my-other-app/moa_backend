@@ -87,6 +87,10 @@ async def retire_if_abandoned(session: AsyncSession, event: Events, reg: EventRe
     if pending is not None:
         await store.release(session, pending, status="cancelled")
     await session.flush()
+    # Never paid for: cancelled (app/api/webhooks_out).
+    from app.api.webhooks_out import signals as webhooks
+
+    await webhooks.registration_cancelled(session, reg, club_id=event.club_id)
     return True
 
 
@@ -397,6 +401,11 @@ async def add_registration(
     registration.admission_no = admission.number_for(db_event, seq)
     await insert_registration(session, registration)
     await ticketing.after_insert(session, db_event, registration, priced)
+    # Every registration is made here (the form, the app, the desk, imports,
+    # walk-ups, waiting-list claims, approvals): told once (app/api/webhooks_out).
+    from app.api.webhooks_out import signals as webhooks
+
+    await webhooks.registration_created(session, registration, club_id=db_event.club_id)
     from app.api.approvals import service as approvals
 
     offer = getattr(priced, "offer", None)
@@ -1498,7 +1507,11 @@ async def set_role(
         session, event_id, registration_id
     )
 
+    from app.api.webhooks_out import signals as webhooks
+
+    webhooks_before = await webhooks.registration_before(session, registration, club_id=event.club_id)
     registration.role = role
+    await webhooks.registration_updated(session, registration, webhooks_before, club_id=event.club_id)
     await session.commit()
     # No refresh, for the same reason as set_winner: expire_on_commit is off,
     # so the instance keeps the eagerly-loaded `user` the response needs.
@@ -1550,6 +1563,9 @@ async def update_registration(
     """A correction: the registration's own name, contact and answers. The
     linked user account is left alone -- it is theirs, not the event's."""
     registration = await get_registration(session, user_id, event_id, registration_id, as_admin=as_admin)
+    from app.api.webhooks_out import signals as webhooks
+
+    webhooks_before = await webhooks.registration_before(session, registration)
     if full_name is not None:
         registration.full_name = full_name.strip()
     if email is not None:
@@ -1583,6 +1599,7 @@ async def update_registration(
         from app.api.events import questions as form
 
         registration.additional_details = form.prune(registration.event.additional_details, merged)
+    await webhooks.registration_updated(session, registration, webhooks_before)
     await session.commit()
     await session.refresh(registration, attribute_names=["full_name", "email", "phone", "role", "additional_details", "updated_at", "user"])
     return registration
@@ -1615,6 +1632,9 @@ async def take_off_list(session: AsyncSession, registration) -> None:
     registrations only); the waiting list's sweep offers it within the
     minute. Commits."""
     registration.soft_delete()
+    from app.api.webhooks_out import signals as webhooks
+
+    await webhooks.registration_cancelled(session, registration)
     await session.commit()
 
 

@@ -63,6 +63,8 @@ WAITLIST_SWEEP = 773_180
 SOCIAL_SWEEP = 773_197
 #: The team's support desk: digests, overdue flags, waiting and resolved cases, retention (app/api/support/sweep.py).
 SUPPORT_SWEEP = 773_190
+#: Outgoing webhooks' retention: changes and deliveries past 30 days (app/api/webhooks_out/sweep.py).
+WEBHOOKS_SWEEP = 773_211
 #: The job queue's maintenance pass (app/core/jobs.py).
 JOBS_MAINTENANCE = 774_501
 #: The live room's sweep (app/api/live/service.py).

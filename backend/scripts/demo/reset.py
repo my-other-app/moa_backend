@@ -312,6 +312,27 @@ CLASSIFICATION: dict[str, str] = {
     "poster_variants": WIPE,
     "social_oauth_states": WIPE,
     "social_data_deletions": WIPE,
+    # Outgoing webhooks (app/api/webhooks_out): the clubs' endpoints (their
+    # encrypted secrets with them), the changes queued to send and the log.
+    "webhook_endpoints": WIPE,
+    "webhook_events": WIPE,
+    "webhook_deliveries": WIPE,
+    # The Integrations API (app/api/partner): clubs' API access, their keys,
+    # the partner apps an admin registered and their connections, tokens and
+    # codes, external ids, idempotent answers, payments taken outside, the
+    # certificate jobs, usage and the test-mode sandbox. A demo starts with none.
+    "partner_allocations": WIPE,
+    "partner_api_keys": WIPE,
+    "partner_apps": WIPE,
+    "partner_connections": WIPE,
+    "partner_auth_codes": WIPE,
+    "partner_tokens": WIPE,
+    "partner_external_ids": WIPE,
+    "partner_idempotency": WIPE,
+    "partner_external_payments": WIPE,
+    "partner_certificate_jobs": WIPE,
+    "partner_usage_daily": WIPE,
+    "partner_sandbox_objects": WIPE,
     "messages": WIPE,
     # What clubs sent, counted by the month, its statements and Enterprise clubs' own limits.
     "message_usage": WIPE,

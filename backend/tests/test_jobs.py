@@ -314,6 +314,9 @@ def test_the_platforms_jobs_have_the_priorities_and_limits_chosen(monkeypatch):
         "support.survey_mail": (N, 4), "support.reminder_mail": (N, 4), "support.digest_mail": (N, 4), "support.overdue_mail": (N, 4),
         # Every event speaker linked to a profile, once after the deploy (app/api/speakers/backfill.py).
         "speakers.backfill": (L, 1),
+        # Outgoing webhooks (app/api/webhooks_out): the owner told an endpoint was turned off is waited for;
+        # the fan-out and the deliveries to partners' servers are capped so a slow server cannot take every slot.
+        "webhooks.notice_mail": (H, 4), "webhooks.fanout": (N, 2), "webhooks.deliver": (N, 2),
     }
     monkeypatch.setattr(settings, "JOBS_LIMITS", "")
     found = {n: (h.priority, jobs.limit_for(h, 4)) for n, h in jobs.handlers().items() if not n.startswith("test.")}

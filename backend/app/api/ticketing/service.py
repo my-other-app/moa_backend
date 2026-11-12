@@ -52,6 +52,9 @@ async def requote(session, event, registration, priced) -> bool:
     True when it became confirmed (its ticket goes out)."""
     if registration.is_paid or money.rupees(registration.paid_amount) > 0:
         return False
+    from app.api.webhooks_out import signals as webhooks
+
+    webhooks_before = await webhooks.registration_before(session, registration, club_id=event.club_id)
     await types_mod.lock_event(session, event.id)
     if priced.holding:
         await places.take_room(session, event, priced, going_now=int(event.going_count or 0))
@@ -59,6 +62,8 @@ async def requote(session, event, registration, priced) -> bool:
     confirmed = bool(event.has_fee and priced.holding)
     if confirmed:
         await _book_comp(session, registration)
+    # Another ticket type or code, or confirmed as owing nothing (app/api/webhooks_out).
+    await webhooks.registration_updated(session, registration, webhooks_before, club_id=event.club_id)
     await session.commit()
     return confirmed
 

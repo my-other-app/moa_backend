@@ -38,6 +38,7 @@ KINDS: dict[str, str] = {
     "social_disconnected": "A connected social account needs reconnecting: its posts wait (app/api/social)",
     "social_expiring": "A connected social account's access ends within seven days (LinkedIn every 60 days)",
     "social_failed": "A social post failed and needs a person: retry, reconnect, fix the picture or share it by hand",
+    "webhook_disabled": "A webhook endpoint failed for three days and was turned off (app/api/webhooks_out); turn it back on once it is fixed",
 }
 
 #: How many the bell shows at most.

@@ -147,6 +147,10 @@ def build() -> dict:
     for unused in ("HTTPValidationError", "ValidationError"):
         if unused in schemas and unused not in str(doc.get("paths")):
             schemas.pop(unused, None)
+    # The webhooks themselves (OpenAPI 3.1 `webhooks`): each type's body and headers (app/api/webhooks_out/openapi.py).
+    from app.api.webhooks_out.openapi import add_to as add_webhooks
+
+    add_webhooks(doc)
     doc["info"]["x-changelog"] = [{"version": VERSION, "date": "2026-11-12", "changes": "The first version."}]
     doc["info"]["x-oauth"] = {**urls, "scopes": catalogue.catalogue()}
     return doc

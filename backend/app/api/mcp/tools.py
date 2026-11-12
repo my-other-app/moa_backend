@@ -803,6 +803,9 @@ async def create_event_draft(call: Call, args: dict) -> dict:
     call.session.add(event)
     await call.session.flush()
     await _record(call, "mcp.event.draft_created", entity_type="event", entity_id=event.id, summary=f"Draft event “{event.name}” created by {call.principal.client_name}", tool="create_event_draft")
+    from app.api.webhooks_out import signals as webhooks
+
+    await webhooks.event_created(call.session, event)
     await call.session.commit()
     return _draft_out(event)
 
@@ -830,6 +833,9 @@ async def update_event_draft(call: Call, args: dict) -> dict:
     fields = {k: v for k, v in args.items() if k != "event_id"}
     if not fields:
         raise ToolError("Give at least one field to change.", "INVALID_ARGUMENT")
+    from app.api.webhooks_out import signals as webhooks
+
+    webhooks_before = await webhooks.event_before(call.session, event)
     if fields.get("fee") and not event.has_fee:
         try:
             await gates.check_event_update(call.session, event, has_fee=True, event_datetime=_when(fields["starts_at"], "starts_at") if fields.get("starts_at") else None)
@@ -851,6 +857,7 @@ async def update_event_draft(call: Call, args: dict) -> dict:
             user_id=call.principal.user.id, member_id=getattr(call.principal.member, "id", None),
         )
     await _record(call, "mcp.event.draft_updated", entity_type="event", entity_id=event.id, summary=f"Draft event “{event.name}” edited by {call.principal.client_name}", tool="update_event_draft", fields=changed)
+    await webhooks.event_updated(call.session, event, webhooks_before)
     await call.session.commit()
     return _draft_out(event, changed)
 
