@@ -1,0 +1,393 @@
+{
+  "page": {
+    "width_px": 1123,
+    "height_px": 794,
+    "paper": "A4 landscape",
+    "token_syntax": "{{token_name}}"
+  },
+  "common_fields": [
+    "accent_color",
+    "certificate_id",
+    "institute_name",
+    "qr_code_src",
+    "recipient_name",
+    "signatory_designation",
+    "signatory_name"
+  ],
+  "fields": {
+    "accent_color": {
+      "description": "Hex accent colour, e.g. #6B1F2E. Replace every occurrence",
+      "type": "color"
+    },
+    "certificate_id": {
+      "description": "Unique certificate number; also encoded in the QR URL",
+      "type": "text"
+    },
+    "completion_date": {
+      "description": "Date the course was completed, pre-formatted",
+      "type": "text"
+    },
+    "course_title": {
+      "description": "Course or programme name",
+      "type": "text"
+    },
+    "duration_hours": {
+      "description": "Course length in hours, number only",
+      "type": "text"
+    },
+    "end_date": {
+      "description": "Course end date, pre-formatted",
+      "type": "text"
+    },
+    "event_date": {
+      "description": "Event date, pre-formatted",
+      "type": "text"
+    },
+    "event_title": {
+      "description": "Event or workshop name",
+      "type": "text"
+    },
+    "expiry_date": {
+      "description": "Date the credential expires, pre-formatted",
+      "type": "text"
+    },
+    "grade": {
+      "description": "Grade or score achieved",
+      "type": "text"
+    },
+    "institute_name": {
+      "description": "Name of the issuing organisation (pass normal casing)",
+      "type": "text"
+    },
+    "issue_city": {
+      "description": "City of issue",
+      "type": "text"
+    },
+    "issue_date": {
+      "description": "Date the certificate was issued, pre-formatted",
+      "type": "text"
+    },
+    "issue_year": {
+      "description": "Four-digit year of issue",
+      "type": "text"
+    },
+    "logo_src": {
+      "description": "Image src for the institute logo: data URI or reachable URL",
+      "type": "image_src"
+    },
+    "qr_code_src": {
+      "description": "Image src for the QR code: data URI (SVG preferred) or reachable URL. Generate with no quiet zone, error correction M or higher",
+      "type": "image_src"
+    },
+    "rank_or_grade": {
+      "description": "Rank or grade achieved, e.g. First Rank",
+      "type": "text"
+    },
+    "recipient_name": {
+      "description": "Full name of the certificate recipient",
+      "type": "text"
+    },
+    "second_signatory_designation": {
+      "description": "Job title of the second signing authority",
+      "type": "text"
+    },
+    "second_signatory_name": {
+      "description": "Name of the second signing authority",
+      "type": "text"
+    },
+    "signatory_designation": {
+      "description": "Job title of the signing authority",
+      "type": "text"
+    },
+    "signatory_name": {
+      "description": "Name of the signing authority",
+      "type": "text"
+    },
+    "start_date": {
+      "description": "Course start date, pre-formatted",
+      "type": "text"
+    },
+    "verify_url": {
+      "description": "Public verification URL for this certificate; same value the QR encodes",
+      "type": "text"
+    }
+  },
+  "templates": {
+    "01-heritage": {
+      "title": "Heritage certificate",
+      "file": "templates/01-heritage.html",
+      "default_accent_color": "#6B1F2E",
+      "suggested_accent_colors": [
+        "#6B1F2E",
+        "#123A63",
+        "#14503F",
+        "#3B2A63"
+      ],
+      "fields": [
+        "accent_color",
+        "certificate_id",
+        "course_title",
+        "duration_hours",
+        "end_date",
+        "grade",
+        "institute_name",
+        "logo_src",
+        "qr_code_src",
+        "recipient_name",
+        "signatory_designation",
+        "signatory_name",
+        "start_date"
+      ]
+    },
+    "02-midnight-deco": {
+      "title": "Midnight Deco certificate",
+      "file": "templates/02-midnight-deco.html",
+      "default_accent_color": "#E0BC6A",
+      "suggested_accent_colors": [
+        "#E0BC6A",
+        "#D9D9DE",
+        "#E8A27C",
+        "#8FD3C1"
+      ],
+      "fields": [
+        "accent_color",
+        "certificate_id",
+        "completion_date",
+        "course_title",
+        "grade",
+        "institute_name",
+        "issue_date",
+        "qr_code_src",
+        "recipient_name",
+        "signatory_designation",
+        "signatory_name"
+      ]
+    },
+    "03-bold-geometric": {
+      "title": "Bold Geometric certificate",
+      "file": "templates/03-bold-geometric.html",
+      "default_accent_color": "#FF7A1A",
+      "suggested_accent_colors": [
+        "#FF7A1A",
+        "#FFD23F",
+        "#19D3A2",
+        "#FF5C8A"
+      ],
+      "fields": [
+        "accent_color",
+        "certificate_id",
+        "course_title",
+        "duration_hours",
+        "grade",
+        "institute_name",
+        "issue_city",
+        "issue_date",
+        "issue_year",
+        "logo_src",
+        "qr_code_src",
+        "recipient_name",
+        "signatory_designation",
+        "signatory_name",
+        "verify_url"
+      ]
+    },
+    "04-verified-pass": {
+      "title": "Verified Pass certificate",
+      "file": "templates/04-verified-pass.html",
+      "default_accent_color": "#C8F031",
+      "suggested_accent_colors": [
+        "#C8F031",
+        "#FFD23F",
+        "#9BE7FF",
+        "#FFB4A2"
+      ],
+      "fields": [
+        "accent_color",
+        "certificate_id",
+        "course_title",
+        "duration_hours",
+        "expiry_date",
+        "grade",
+        "institute_name",
+        "issue_date",
+        "qr_code_src",
+        "recipient_name",
+        "signatory_designation",
+        "signatory_name",
+        "verify_url"
+      ]
+    },
+    "05-botanical": {
+      "title": "Botanical certificate",
+      "file": "templates/05-botanical.html",
+      "default_accent_color": "#2F5D46",
+      "suggested_accent_colors": [
+        "#2F5D46",
+        "#7A4B1E",
+        "#1F5A6B",
+        "#8A3B4A"
+      ],
+      "fields": [
+        "accent_color",
+        "certificate_id",
+        "completion_date",
+        "course_title",
+        "grade",
+        "institute_name",
+        "logo_src",
+        "qr_code_src",
+        "recipient_name",
+        "signatory_designation",
+        "signatory_name"
+      ]
+    },
+    "06-blueprint": {
+      "title": "Blueprint certificate",
+      "file": "templates/06-blueprint.html",
+      "default_accent_color": "#0B3A8F",
+      "suggested_accent_colors": [
+        "#0B3A8F",
+        "#0F5C5C",
+        "#5B2A86",
+        "#8A2B1D"
+      ],
+      "fields": [
+        "accent_color",
+        "certificate_id",
+        "course_title",
+        "duration_hours",
+        "grade",
+        "institute_name",
+        "issue_date",
+        "logo_src",
+        "qr_code_src",
+        "recipient_name",
+        "signatory_designation",
+        "signatory_name",
+        "verify_url"
+      ]
+    },
+    "07-swiss-minimal": {
+      "title": "Swiss Minimal certificate",
+      "file": "templates/07-swiss-minimal.html",
+      "default_accent_color": "#D90429",
+      "suggested_accent_colors": [
+        "#D90429",
+        "#0B4FD8",
+        "#0A7A4B",
+        "#0A0A0A"
+      ],
+      "fields": [
+        "accent_color",
+        "certificate_id",
+        "course_title",
+        "duration_hours",
+        "grade",
+        "institute_name",
+        "issue_date",
+        "qr_code_src",
+        "recipient_name",
+        "signatory_designation",
+        "signatory_name",
+        "verify_url"
+      ]
+    },
+    "08-royal-ribbon": {
+      "title": "Royal Ribbon certificate",
+      "file": "templates/08-royal-ribbon.html",
+      "default_accent_color": "#3B1F6B",
+      "suggested_accent_colors": [
+        "#3B1F6B",
+        "#7A1630",
+        "#0E3F66",
+        "#14503F"
+      ],
+      "fields": [
+        "accent_color",
+        "certificate_id",
+        "completion_date",
+        "course_title",
+        "institute_name",
+        "qr_code_src",
+        "rank_or_grade",
+        "recipient_name",
+        "second_signatory_designation",
+        "second_signatory_name",
+        "signatory_designation",
+        "signatory_name"
+      ]
+    },
+    "09-terminal": {
+      "title": "Terminal certificate",
+      "file": "templates/09-terminal.html",
+      "default_accent_color": "#3DDC97",
+      "suggested_accent_colors": [
+        "#3DDC97",
+        "#5CC8FF",
+        "#FFB454",
+        "#FF7AB6"
+      ],
+      "fields": [
+        "accent_color",
+        "certificate_id",
+        "course_title",
+        "duration_hours",
+        "grade",
+        "institute_name",
+        "issue_date",
+        "qr_code_src",
+        "recipient_name",
+        "signatory_designation",
+        "signatory_name",
+        "verify_url"
+      ]
+    },
+    "10-confetti": {
+      "title": "Confetti certificate",
+      "file": "templates/10-confetti.html",
+      "default_accent_color": "#FFD84D",
+      "suggested_accent_colors": [
+        "#FFD84D",
+        "#A8E6CF",
+        "#BFD7FF",
+        "#FFC2D1"
+      ],
+      "fields": [
+        "accent_color",
+        "certificate_id",
+        "event_date",
+        "event_title",
+        "institute_name",
+        "qr_code_src",
+        "recipient_name",
+        "signatory_designation",
+        "signatory_name"
+      ]
+    }
+  },
+  "sample": {
+    "institute_name": "Sample Institute of Technology",
+    "recipient_name": "Ananya R. Menon",
+    "course_title": "Full Stack Web Development",
+    "start_date": "1 June 2026",
+    "end_date": "30 October 2026",
+    "completion_date": "30 October 2026",
+    "issue_date": "12 November 2026",
+    "issue_year": "2026",
+    "issue_city": "Trivandrum",
+    "expiry_date": "12 November 2029",
+    "duration_hours": "120",
+    "grade": "A+",
+    "rank_or_grade": "First Rank",
+    "signatory_name": "Dr. Sample Name",
+    "signatory_designation": "Director",
+    "second_signatory_name": "Sample Name",
+    "second_signatory_designation": "Course Lead",
+    "certificate_id": "CERT-2026-000123",
+    "verify_url": "https://example.com/verify/CERT-2026-000123",
+    "event_title": "Robotics Weekend Workshop",
+    "event_date": "8 November 2026",
+    "qr_code_src": "<generate from verify_url>",
+    "logo_src": "<your logo>"
+  }
+}

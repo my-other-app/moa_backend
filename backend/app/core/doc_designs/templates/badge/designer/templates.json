@@ -1,0 +1,383 @@
+{
+  "card_size": {
+    "width_in": 4,
+    "height_in": 6,
+    "width_px": 384,
+    "height_px": 576,
+    "px_per_in": 96,
+    "orientation": "portrait"
+  },
+  "templates": [
+    {
+      "id": "01-ticket-stub",
+      "name": "Ticket Stub",
+      "file": "templates/01-ticket-stub.html",
+      "use": "event",
+      "has_photo": true,
+      "accent_default": "#FF8A3D",
+      "accent_suggestions": [
+        "#FF8A3D",
+        "#3DD6A3",
+        "#FFD23F",
+        "#FF7FB0"
+      ],
+      "fields": [
+        "access_level",
+        "badge_id",
+        "event_date",
+        "event_name",
+        "event_venue",
+        "first_name",
+        "job_title",
+        "last_name",
+        "organization",
+        "photo_url",
+        "qr_code_url",
+        "role"
+      ]
+    },
+    {
+      "id": "02-arch",
+      "name": "Arch",
+      "file": "templates/02-arch.html",
+      "use": "club",
+      "has_photo": true,
+      "accent_default": "#F2B441",
+      "accent_suggestions": [
+        "#F2B441",
+        "#F3EFE4",
+        "#FF9E7A",
+        "#9FE0C0"
+      ],
+      "fields": [
+        "full_name",
+        "member_id",
+        "membership_tier",
+        "org_founded_year",
+        "org_name",
+        "photo_url",
+        "qr_code_url",
+        "valid_thru"
+      ]
+    },
+    {
+      "id": "03-role-rail",
+      "name": "Role Rail",
+      "file": "templates/03-role-rail.html",
+      "use": "event",
+      "has_photo": true,
+      "accent_default": "#D63A22",
+      "accent_suggestions": [
+        "#D63A22",
+        "#1F3BD8",
+        "#0B6E6E",
+        "#7A2BD6"
+      ],
+      "fields": [
+        "access_level",
+        "event_name",
+        "event_year",
+        "first_name",
+        "job_title",
+        "last_name",
+        "organization",
+        "photo_url",
+        "qr_code_url",
+        "role",
+        "session_hall",
+        "session_time"
+      ]
+    },
+    {
+      "id": "04-big-name",
+      "name": "Big Name",
+      "file": "templates/04-big-name.html",
+      "use": "event",
+      "has_photo": false,
+      "accent_default": "#FFD83A",
+      "accent_suggestions": [
+        "#FFD83A",
+        "#7CE0B5",
+        "#FF9F7A",
+        "#A9C4FF"
+      ],
+      "fields": [
+        "access_level",
+        "badge_id",
+        "event_date",
+        "event_name",
+        "first_name",
+        "last_name",
+        "organization",
+        "qr_code_url",
+        "role"
+      ]
+    },
+    {
+      "id": "05-monogram",
+      "name": "Monogram",
+      "file": "templates/05-monogram.html",
+      "use": "club",
+      "has_photo": false,
+      "accent_default": "#0B5E5E",
+      "accent_suggestions": [
+        "#0B5E5E",
+        "#7A2BD6",
+        "#B3261E",
+        "#1F3BD8"
+      ],
+      "fields": [
+        "city",
+        "full_name",
+        "initials",
+        "joined_date",
+        "member_id",
+        "org_name",
+        "qr_code_url",
+        "role"
+      ]
+    },
+    {
+      "id": "06-thermal-mono",
+      "name": "Thermal Mono",
+      "file": "templates/06-thermal-mono.html",
+      "use": "event",
+      "has_photo": false,
+      "accent_default": null,
+      "accent_suggestions": [],
+      "fields": [
+        "access_level",
+        "badge_id",
+        "checkin_time",
+        "event_date",
+        "event_name",
+        "first_name",
+        "kiosk_id",
+        "last_name",
+        "organization",
+        "qr_code_url",
+        "role",
+        "zone"
+      ]
+    },
+    {
+      "id": "07-polaroid",
+      "name": "Polaroid",
+      "file": "templates/07-polaroid.html",
+      "use": "club",
+      "has_photo": true,
+      "accent_default": "#5B3DF5",
+      "accent_suggestions": [
+        "#5B3DF5",
+        "#C2255C",
+        "#0B6E6E",
+        "#1B1440"
+      ],
+      "fields": [
+        "city",
+        "full_name",
+        "member_id",
+        "member_since_year",
+        "org_name",
+        "photo_url",
+        "qr_code_url",
+        "role"
+      ]
+    },
+    {
+      "id": "08-full-bleed",
+      "name": "Full Bleed",
+      "file": "templates/08-full-bleed.html",
+      "use": "event",
+      "has_photo": true,
+      "accent_default": "#C6F432",
+      "accent_suggestions": [
+        "#C6F432",
+        "#FFB020",
+        "#5CE1E6",
+        "#FF8FB1"
+      ],
+      "fields": [
+        "badge_id",
+        "booth_no",
+        "event_name",
+        "event_year",
+        "full_name",
+        "job_title",
+        "organization",
+        "photo_url",
+        "qr_code_url",
+        "role"
+      ]
+    },
+    {
+      "id": "09-boarding-pass",
+      "name": "Boarding Pass",
+      "file": "templates/09-boarding-pass.html",
+      "use": "event",
+      "has_photo": false,
+      "accent_default": "#FF8A4C",
+      "accent_suggestions": [
+        "#FF8A4C",
+        "#FFD23F",
+        "#6FE3C1",
+        "#9DB8FF"
+      ],
+      "fields": [
+        "badge_id",
+        "day_label",
+        "doors_open_time",
+        "event_name",
+        "full_name",
+        "hall",
+        "organization",
+        "qr_code_url",
+        "role",
+        "zone"
+      ]
+    },
+    {
+      "id": "10-colour-blocks",
+      "name": "Colour Blocks",
+      "file": "templates/10-colour-blocks.html",
+      "use": "club",
+      "has_photo": false,
+      "accent_default": null,
+      "accent_suggestions": [],
+      "fields": [
+        "chapter",
+        "full_name",
+        "member_id",
+        "org_name",
+        "qr_code_url",
+        "role",
+        "valid_thru"
+      ]
+    },
+    {
+      "id": "11-night-grid",
+      "name": "Night Grid",
+      "file": "templates/11-night-grid.html",
+      "use": "event",
+      "has_photo": false,
+      "accent_default": "#6CF0C2",
+      "accent_suggestions": [
+        "#6CF0C2",
+        "#FFD23F",
+        "#FF8FB1",
+        "#8FB8FF"
+      ],
+      "fields": [
+        "badge_id",
+        "event_date",
+        "event_name",
+        "event_tagline",
+        "first_name",
+        "last_name",
+        "qr_code_url",
+        "role",
+        "table_no",
+        "team_name",
+        "track"
+      ]
+    },
+    {
+      "id": "12-stamp",
+      "name": "Stamp",
+      "file": "templates/12-stamp.html",
+      "use": "club",
+      "has_photo": false,
+      "accent_default": "#B42B22",
+      "accent_suggestions": [
+        "#B42B22",
+        "#1C2F73",
+        "#0B5E5E",
+        "#7A2BD6"
+      ],
+      "fields": [
+        "city",
+        "full_name",
+        "joined_date",
+        "member_id",
+        "membership_tier",
+        "org_name",
+        "qr_code_url",
+        "valid_year"
+      ]
+    },
+    {
+      "id": "13-sash",
+      "name": "Sash",
+      "file": "templates/13-sash.html",
+      "use": "event",
+      "has_photo": false,
+      "accent_default": "#1F3BD8",
+      "accent_suggestions": [
+        "#1F3BD8",
+        "#D63A22",
+        "#0B6E6E",
+        "#141414"
+      ],
+      "fields": [
+        "access_level",
+        "badge_id",
+        "event_date",
+        "event_name",
+        "first_name",
+        "last_name",
+        "organization",
+        "qr_code_url",
+        "role"
+      ]
+    },
+    {
+      "id": "14-fine-line",
+      "name": "Fine Line",
+      "file": "templates/14-fine-line.html",
+      "use": "club",
+      "has_photo": false,
+      "accent_default": "#B4532A",
+      "accent_suggestions": [
+        "#B4532A",
+        "#1F3BD8",
+        "#0B6E6E",
+        "#1A1A1A"
+      ],
+      "fields": [
+        "first_name",
+        "last_name",
+        "member_id",
+        "member_since_year",
+        "membership_tier",
+        "org_name",
+        "qr_code_url",
+        "valid_thru"
+      ]
+    },
+    {
+      "id": "15-race-bib",
+      "name": "Race Bib",
+      "file": "templates/15-race-bib.html",
+      "use": "club",
+      "has_photo": false,
+      "accent_default": "#FF6A3D",
+      "accent_suggestions": [
+        "#FF6A3D",
+        "#FFD23F",
+        "#4FD1A5",
+        "#7FB2FF"
+      ],
+      "fields": [
+        "bib_number",
+        "category",
+        "event_date",
+        "event_name",
+        "full_name",
+        "org_name",
+        "qr_code_url",
+        "start_time",
+        "wave"
+      ]
+    }
+  ]
+}

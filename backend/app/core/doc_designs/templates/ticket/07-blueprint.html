@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blueprint Ticket</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@700&family=Space+Mono:wght@400;700&display=swap">
+<style>body{margin:0}</style>
+</head>
+<body>
+<!-- Ticket template: 07-blueprint. Fixed canvas 1280x600 (ticket itself 1140x460, centred). Tokens: {{token}}. QR goes in [data-slot="qr"]. See README.md -->
+<div class="ticket-stage" style="width: 1280px; height: 600px; box-sizing: border-box; background: #06153A; display: flex; align-items: center; justify-content: center; font-family: 'Space Mono', monospace">
+<div style="position: relative; width: 1140px; height: 460px; box-sizing: border-box; padding: 16px; background-color: #0F3FB8; background-image: linear-gradient(rgba(255, 255, 255, 0.12) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.12) 1px, transparent 1px); background-size: 24px 24px; border-radius: 10px; box-shadow: 0 28px 60px rgba(0, 0, 0, 0.5); color: #FFFFFF">
+<div style="position: relative; width: 100%; height: 100%; box-sizing: border-box; border: 2px solid #FFFFFF; display: flex">
+
+<div style="position: relative; flex: 1; box-sizing: border-box; padding: 26px 34px 0; display: flex; flex-direction: column; justify-content: space-between">
+
+<svg aria-hidden="true" width="300" height="250" viewBox="0 0 300 250" style="position: absolute; right: 14px; top: 20px" fill="none" stroke="#FFFFFF" stroke-width="1.5">
+<g opacity="0.85">
+<path d="M150 30 L250 80 L250 180 L150 230 L50 180 L50 80 Z"></path>
+<path d="M50 80 L150 130 L250 80"></path><path d="M150 130 L150 230"></path>
+<path d="M150 30 L150 130" stroke-dasharray="5 6"></path><path d="M50 180 L150 130 L250 180" stroke-dasharray="5 6"></path>
+</g>
+<g stroke="#FFE14D">
+<path d="M270 80 L270 180"></path><path d="M263 80 H277"></path><path d="M263 180 H277"></path>
+<path d="M50 14 L150 -36" transform="translate(0 0)"></path>
+</g>
+<circle cx="150" cy="130" r="5" fill="#FFE14D" stroke="none"></circle>
+<text x="282" y="135" font-family="Space Mono, monospace" font-size="12" fill="#FFE14D" stroke="none">H</text>
+</svg>
+
+<div style="position: relative; display: flex; align-items: center; gap: 16px">
+<div style="font-size: 14px; font-weight: 700; letter-spacing: 0.16em">{{app_name}}</div>
+<div style="font-size: 13px; letter-spacing: 0.12em; padding: 4px 10px; background: #FFE14D; color: #06153A; font-weight: 700">REV. {{ticket_type}}</div>
+</div>
+
+<div style="position: relative; max-width: 520px; display: flex; flex-direction: column; gap: 10px">
+<div style="font-size: 13px; letter-spacing: 0.16em; color: #D3DEFF">PROJECT TITLE</div>
+<h1 style="margin: 0; font-family: 'Space Grotesk', sans-serif; font-size: 74px; line-height: 0.98; font-weight: 700; letter-spacing: -0.02em">{{event_name}}</h1>
+<div style="font-size: 17px; color: #FFE14D">// {{tagline}}</div>
+</div>
+
+<div style="position: relative; margin: 0 -34px; display: grid; grid-template-columns: 1.2fr 0.8fr 0.7fr 1.8fr 1.1fr; border-top: 2px solid #FFFFFF; background: #0F3FB8">
+<div style="padding: 12px 14px 14px 34px; display: flex; flex-direction: column; gap: 4px"><div style="font-size: 12px; letter-spacing: 0.14em; color: #D3DEFF">DATE</div><div style="font-size: 16px; font-weight: 700">{{date}}</div></div>
+<div style="padding: 12px 14px 14px; border-left: 2px solid #FFFFFF; display: flex; flex-direction: column; gap: 4px"><div style="font-size: 12px; letter-spacing: 0.14em; color: #D3DEFF">DOORS</div><div style="font-size: 16px; font-weight: 700">{{doors_time}}</div></div>
+<div style="padding: 12px 14px 14px; border-left: 2px solid #FFFFFF; display: flex; flex-direction: column; gap: 4px"><div style="font-size: 12px; letter-spacing: 0.14em; color: #D3DEFF">GATE</div><div style="font-size: 16px; font-weight: 700">{{gate}}</div></div>
+<div style="padding: 12px 14px 14px; border-left: 2px solid #FFFFFF; display: flex; flex-direction: column; gap: 4px"><div style="font-size: 12px; letter-spacing: 0.14em; color: #D3DEFF">VENUE</div><div style="font-size: 16px; font-weight: 700">{{venue}}</div></div>
+<div style="padding: 12px 14px 14px; border-left: 2px solid #FFFFFF; display: flex; flex-direction: column; gap: 4px"><div style="font-size: 12px; letter-spacing: 0.14em; color: #D3DEFF">SEAT</div><div style="font-size: 16px; font-weight: 700">{{row}} · {{seat}}</div></div>
+</div>
+</div>
+
+<div style="width: 300px; box-sizing: border-box; padding: 24px 28px; border-left: 2px dashed #FFFFFF; background: #0F3FB8; display: flex; flex-direction: column; align-items: center; justify-content: space-between">
+<div style="width: 100%; display: flex; justify-content: space-between; font-size: 13px; letter-spacing: 0.12em">
+<div style="color: #D3DEFF">FIG. 01</div>
+<div style="font-weight: 700">ENTRY CODE</div>
+</div>
+<div style="position: relative; padding: 14px">
+<div aria-hidden="true" style="position: absolute; left: 0; top: 0; width: 18px; height: 18px; border-left: 2px solid #FFE14D; border-top: 2px solid #FFE14D"></div>
+<div aria-hidden="true" style="position: absolute; right: 0; top: 0; width: 18px; height: 18px; border-right: 2px solid #FFE14D; border-top: 2px solid #FFE14D"></div>
+<div aria-hidden="true" style="position: absolute; left: 0; bottom: 0; width: 18px; height: 18px; border-left: 2px solid #FFE14D; border-bottom: 2px solid #FFE14D"></div>
+<div aria-hidden="true" style="position: absolute; right: 0; bottom: 0; width: 18px; height: 18px; border-right: 2px solid #FFE14D; border-bottom: 2px solid #FFE14D"></div>
+<div data-slot="qr" role="img" aria-label="Ticket QR code" style="position: relative; width: 178px; height: 178px; box-sizing: border-box; background: #FFFFFF; display: flex; align-items: center; justify-content: center; color: #06153A">
+<div style="position: absolute; left: 12px; top: 12px; width: 38px; height: 38px; box-sizing: border-box; border: 6px solid #06153A; display: flex; align-items: center; justify-content: center"><div style="width: 12px; height: 12px; background: #06153A"></div></div>
+<div style="position: absolute; right: 12px; top: 12px; width: 38px; height: 38px; box-sizing: border-box; border: 6px solid #06153A; display: flex; align-items: center; justify-content: center"><div style="width: 12px; height: 12px; background: #06153A"></div></div>
+<div style="position: absolute; left: 12px; bottom: 12px; width: 38px; height: 38px; box-sizing: border-box; border: 6px solid #06153A; display: flex; align-items: center; justify-content: center"><div style="width: 12px; height: 12px; background: #06153A"></div></div>
+<div style="font-size: 13px; font-weight: 700">[QR CODE]</div>
+</div>
+</div>
+<div style="width: 100%; display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; justify-content: space-between; gap: 10px; font-size: 13px"><div style="color: #D3DEFF; letter-spacing: 0.12em">HOLDER</div><div style="font-weight: 700">{{attendee_name}}</div></div>
+<div style="display: flex; justify-content: space-between; gap: 10px; font-size: 13px"><div style="color: #D3DEFF; letter-spacing: 0.12em">SERIAL</div><div style="font-weight: 700">{{ticket_id}}</div></div>
+</div>
+</div>
+
+</div>
+</div>
+</div>
+</body>
+</html>

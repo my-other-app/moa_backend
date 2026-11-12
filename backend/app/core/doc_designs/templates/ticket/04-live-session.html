@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Session Ticket</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=DM+Mono:wght@500&family=DM+Sans:wght@500;700&display=swap">
+<style>body{margin:0}</style>
+</head>
+<body>
+<!-- Ticket template: 04-live-session. Fixed canvas 1280x600 (ticket itself 1140x460, centred). Tokens: {{token}}. QR goes in [data-slot="qr"]. See README.md -->
+<div class="ticket-stage" style="width: 1280px; height: 600px; box-sizing: border-box; background: #1A0507; display: flex; align-items: center; justify-content: center; font-family: 'DM Sans', sans-serif">
+<div style="position: relative; width: 1140px; height: 460px; display: flex; border-radius: 22px; overflow: hidden; box-shadow: 0 26px 60px rgba(0, 0, 0, 0.55)">
+
+<div style="position: relative; width: 880px; box-sizing: border-box; padding: 36px 42px; background: #C8102E; color: #F4E9D8; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between">
+
+<svg aria-hidden="true" width="880" height="460" viewBox="0 0 880 460" style="position: absolute; left: 0; top: 0">
+<circle cx="690" cy="230" r="212" fill="#0B0B0B"></circle>
+<g fill="none" stroke="#2E2E2E" stroke-width="1.5">
+<circle cx="690" cy="230" r="198"></circle><circle cx="690" cy="230" r="184"></circle><circle cx="690" cy="230" r="170"></circle><circle cx="690" cy="230" r="156"></circle><circle cx="690" cy="230" r="142"></circle><circle cx="690" cy="230" r="128"></circle><circle cx="690" cy="230" r="114"></circle>
+</g>
+<path d="M690 42 A188 188 0 0 1 878 230" fill="none" stroke="#4A4A4A" stroke-width="3" stroke-linecap="round"></path>
+<circle cx="690" cy="230" r="86" fill="#F4E9D8"></circle>
+<circle cx="690" cy="230" r="74" fill="none" stroke="#C8102E" stroke-width="2"></circle>
+<circle cx="690" cy="230" r="8" fill="#C8102E"></circle>
+<text x="690" y="204" text-anchor="middle" font-family="DM Mono, monospace" font-size="13" letter-spacing="3" fill="#1A0507">SIDE A</text>
+<text x="690" y="268" text-anchor="middle" font-family="DM Mono, monospace" font-size="13" letter-spacing="3" fill="#1A0507">ADMIT ONE</text>
+</svg>
+
+<div style="position: relative; display: flex; align-items: center; gap: 14px">
+<div style="font-family: 'DM Mono', monospace; font-size: 14px; letter-spacing: 0.18em">{{app_name}}</div>
+<div style="width: 44px; height: 2px; background: #F4E9D8"></div>
+<div style="font-family: 'DM Mono', monospace; font-size: 14px; letter-spacing: 0.18em">LIVE</div>
+</div>
+
+<div style="position: relative; display: flex; flex-direction: column; gap: 10px">
+<h1 style="margin: 0; font-family: 'Anton', sans-serif; font-size: 104px; line-height: 0.95; font-weight: 400; text-transform: uppercase; letter-spacing: 0.01em; text-shadow: 5px 5px 0 #1A0507">{{event_name}}</h1>
+<div style="font-size: 20px; font-weight: 700">{{tagline}}</div>
+</div>
+
+<div style="position: relative; width: 450px; display: grid; grid-template-columns: 150px 130px 150px; column-gap: 10px; row-gap: 14px">
+<div style="display: flex; flex-direction: column; gap: 4px"><div style="font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.16em; color: #FFD9DC">DATE</div><div style="font-size: 18px; font-weight: 700">{{date}}</div></div>
+<div style="display: flex; flex-direction: column; gap: 4px"><div style="font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.16em; color: #FFD9DC">DOORS</div><div style="font-size: 18px; font-weight: 700">{{doors_time}}</div></div>
+<div style="display: flex; flex-direction: column; gap: 4px"><div style="font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.16em; color: #FFD9DC">GATE</div><div style="font-size: 18px; font-weight: 700">{{gate}}</div></div>
+<div style="grid-column: span 2; display: flex; flex-direction: column; gap: 4px"><div style="font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.16em; color: #FFD9DC">VENUE</div><div style="font-size: 18px; font-weight: 700">{{venue}}</div></div>
+<div style="display: flex; flex-direction: column; gap: 4px"><div style="font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.16em; color: #FFD9DC">SEAT</div><div style="font-size: 18px; font-weight: 700">{{row}} · {{seat}}</div></div>
+</div>
+</div>
+
+<div style="width: 260px; box-sizing: border-box; padding: 32px 28px; background: #F4E9D8; color: #1A0507; border-left: 3px dashed #1A0507; display: flex; flex-direction: column; align-items: center; justify-content: space-between">
+<div style="width: 100%; display: flex; flex-direction: column; gap: 4px">
+<div style="font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.16em; color: #5C3A3D">PASS</div>
+<div style="font-family: 'Anton', sans-serif; font-size: 28px; line-height: 1; text-transform: uppercase; color: #C8102E">{{ticket_type}}</div>
+</div>
+<div data-slot="qr" role="img" aria-label="Ticket QR code" style="position: relative; width: 190px; height: 190px; box-sizing: border-box; background: #FFFFFF; border: 3px solid #1A0507; display: flex; align-items: center; justify-content: center">
+<div style="position: absolute; left: 12px; top: 12px; width: 40px; height: 40px; box-sizing: border-box; border: 7px solid #1A0507; display: flex; align-items: center; justify-content: center"><div style="width: 12px; height: 12px; background: #1A0507"></div></div>
+<div style="position: absolute; right: 12px; top: 12px; width: 40px; height: 40px; box-sizing: border-box; border: 7px solid #1A0507; display: flex; align-items: center; justify-content: center"><div style="width: 12px; height: 12px; background: #1A0507"></div></div>
+<div style="position: absolute; left: 12px; bottom: 12px; width: 40px; height: 40px; box-sizing: border-box; border: 7px solid #1A0507; display: flex; align-items: center; justify-content: center"><div style="width: 12px; height: 12px; background: #1A0507"></div></div>
+<div style="font-family: 'DM Mono', monospace; font-size: 13px">[QR CODE]</div>
+</div>
+<div style="width: 100%; display: flex; flex-direction: column; gap: 4px">
+<div style="font-size: 18px; font-weight: 700">{{attendee_name}}</div>
+<div style="font-family: 'DM Mono', monospace; font-size: 14px; letter-spacing: 0.1em">{{ticket_id}}</div>
+</div>
+</div>
+
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Full Bleed ID card</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&display=swap">
+<style>
+@page{size:4in 6in;margin:0}
+html,body{margin:0;padding:0}
+*{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+:root{--accent:#C6F432} 
+</style>
+</head>
+<body>
+<div style="width: 384px; height: 576px; box-sizing: border-box; overflow: hidden; background: #101418; color: #FFFFFF; font-family: Inter, system-ui, sans-serif; display: flex; flex-direction: column">
+<div style="position: relative; height: 330px; flex-shrink: 0; background: #3A4654; display: flex; align-items: flex-end; justify-content: center">
+<div aria-hidden="true" style="position: absolute; left: 164px; top: 16px; width: 56px; height: 12px; border-radius: 6px; background: #FFFFFF"></div>
+<div style="position: absolute; left: 28px; top: 44px; background: #101418; color: #FFFFFF; font-size: 12px; font-weight: 600; letter-spacing: 0.12em; padding: 6px 10px; border-radius: 6px">{{event_name}} · {{event_year}}</div>
+<img src="{{photo_url}}" alt="" style="width: 100%; height: 100%; object-fit: cover; display: block">
+<div style="position: absolute; left: 28px; bottom: -18px; background: var(--accent); color: #101418; font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: 20px; letter-spacing: 0.1em; padding: 8px 14px; transform: rotate(-3deg)">{{role}}</div>
+</div>
+<div style="flex-grow: 1; box-sizing: border-box; padding: 34px 28px 24px; display: flex; flex-direction: column">
+<div style="font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: 38px; line-height: 1; letter-spacing: -0.02em">{{full_name}}</div>
+<div style="margin-top: 8px; font-size: 15px; font-weight: 500; color: #C9D1DA">{{job_title}} · {{organization}}</div>
+<div style="margin-top: auto; display: flex; justify-content: space-between; align-items: flex-end; gap: 16px">
+<div style="display: flex; gap: 24px">
+<div style="display: flex; flex-direction: column; gap: 2px">
+<div style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; color: #AAB4C0">BOOTH</div>
+<div style="font-size: 18px; font-weight: 600">{{booth_no}}</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 2px">
+<div style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; color: #AAB4C0">BADGE</div>
+<div style="font-size: 18px; font-weight: 600">{{badge_id}}</div>
+</div>
+</div>
+<div style="background: #FFFFFF; padding: 7px; border-radius: 10px; flex-shrink: 0">
+<img src="{{qr_code_url}}" alt="QR code" style="width: 80px; height: 80px; display: block; image-rendering: pixelated">
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

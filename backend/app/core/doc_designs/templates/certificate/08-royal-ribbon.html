@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Royal Ribbon certificate</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&amp;family=Marcellus&amp;display=swap">
+<style>
+@page { size: A4 landscape; margin: 0 }
+html, body { margin: 0; padding: 0 }
+body { -webkit-print-color-adjust: exact; print-color-adjust: exact }
+</style>
+</head>
+<body>
+<div style="position: relative; width: 1123px; height: 794px; box-sizing: border-box; background: #F7F5FB; color: #1D1630; font-family: 'Lato', Arial, sans-serif; overflow: hidden">
+<svg aria-hidden="true" viewBox="0 0 1123 794" width="1123" height="794" style="position: absolute; left: 0; top: 0">
+<rect x="28" y="28" width="1067" height="738" fill="none" stroke="{{accent_color}}" stroke-width="2"></rect>
+<rect x="38" y="38" width="1047" height="718" fill="none" stroke="#B8923A" stroke-width="1"></rect>
+<path d="M96 0h120v600l-60-46-60 46z" fill="{{accent_color}}"></path>
+<path d="M110 0v586M202 0v586" fill="none" stroke="#D9B65C" stroke-width="2"></path>
+<circle cx="156" cy="300" r="82" fill="#D9B65C"></circle>
+<circle cx="156" cy="300" r="74" fill="none" stroke="#F7F5FB" stroke-width="2" stroke-dasharray="3 5"></circle>
+<circle cx="156" cy="300" r="62" fill="{{accent_color}}"></circle>
+<path d="M55 36l5.6 11.4 12.6 1.8-9.1 8.9 2.1 12.5L55 64.7l-11.2 5.9 2.1-12.5-9.1-8.9 12.6-1.8z" fill="#D9B65C" transform="translate(156 300) scale(2.2) translate(-55 -54)"></path>
+</svg>
+<div style="position: relative; width: 1123px; height: 794px; box-sizing: border-box; padding: 80px 96px 72px 296px; display: flex; flex-direction: column; justify-content: space-between">
+<div style="display: flex; flex-direction: column; gap: 10px">
+<div style="font-size: 15px; font-weight: 700; letter-spacing: 0.26em; text-transform: uppercase; color: #6E5210">{{institute_name}}</div>
+<h1 style="margin: 0; font-family: 'Marcellus', Georgia, serif; font-weight: 400; font-size: 58px; line-height: 1.08; color: {{accent_color}}">Certificate of Merit</h1>
+</div>
+<div style="display: flex; flex-direction: column; gap: 12px">
+<div style="font-size: 17px; letter-spacing: 0.06em">This award is proudly presented to</div>
+<div style="font-family: 'Marcellus', Georgia, serif; font-size: 60px; line-height: 1.08; text-wrap: balance">{{recipient_name}}</div>
+<div aria-hidden="true" style="width: 120px; height: 3px; background: #B8923A"></div>
+<div style="max-width: 620px; font-size: 19px; line-height: 1.55; text-wrap: pretty">in recognition of outstanding performance in <strong style="font-weight: 700">{{course_title}}</strong>, securing {{rank_or_grade}} on {{completion_date}}.</div>
+</div>
+<div style="display: flex; justify-content: space-between; align-items: flex-end; gap: 28px">
+<div style="display: flex; align-items: flex-end; gap: 32px">
+<div style="display: flex; flex-direction: column; gap: 5px">
+<div data-slot="signature" style="width: 180px; height: 44px; box-sizing: border-box; border-bottom: 1px solid #1D1630"></div>
+<div style="font-size: 16px; font-weight: 700">{{signatory_name}}</div>
+<div style="font-size: 14px; color: #6E5210">{{signatory_designation}}</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 5px">
+<div data-slot="signature" style="width: 180px; height: 44px; box-sizing: border-box; border-bottom: 1px solid #1D1630"></div>
+<div style="font-size: 16px; font-weight: 700">{{second_signatory_name}}</div>
+<div style="font-size: 14px; color: #6E5210">{{second_signatory_designation}}</div>
+</div>
+</div>
+<div style="display: flex; align-items: flex-end; gap: 12px">
+<div style="display: flex; flex-direction: column; align-items: flex-end; gap: 3px; text-align: right">
+<div style="font-size: 13px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: {{accent_color}}">Scan to verify</div>
+<div style="font-size: 14px">No. {{certificate_id}}</div>
+</div>
+<div style="padding: 7px; background: #FFFFFF; border: 2px solid {{accent_color}}; display: flex">
+<img data-slot="qr" src="{{qr_code_src}}" width="88" height="88" alt="QR code to verify this certificate" style="display: block">
+</div>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

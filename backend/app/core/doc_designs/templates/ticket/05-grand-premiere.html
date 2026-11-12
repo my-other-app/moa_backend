@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grand Premiere Ticket</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800&family=Cormorant+Garamond:ital,wght@1,600&family=Josefin+Sans:wght@500;700&display=swap">
+<style>body{margin:0}</style>
+</head>
+<body>
+<!-- Ticket template: 05-grand-premiere. Fixed canvas 1280x600 (ticket itself 1140x460, centred). Tokens: {{token}}. QR goes in [data-slot="qr"]. See README.md -->
+<div class="ticket-stage" style="width: 1280px; height: 600px; box-sizing: border-box; background: #060606; display: flex; align-items: center; justify-content: center; font-family: 'Josefin Sans', sans-serif">
+<div style="position: relative; width: 1140px; height: 460px; display: flex; background: #121110; border: 2px solid #D4AF6A; border-radius: 6px; box-sizing: border-box; box-shadow: 0 0 0 8px #121110, 0 0 0 9px #8C7340, 0 30px 70px rgba(212, 175, 106, 0.16); color: #F5E8C8">
+
+<div style="position: relative; width: 800px; box-sizing: border-box; padding: 34px 48px 36px; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: space-between; text-align: center">
+
+<svg aria-hidden="true" width="800" height="456" viewBox="0 0 800 456" style="position: absolute; left: 0; top: 0">
+<g stroke="#D4AF6A" stroke-width="1.5" fill="none" opacity="0.75">
+<g transform="scale(1 -1)">
+<line x1="0" y1="0" x2="170" y2="0"></line><line x1="0" y1="0" x2="164" y2="-44"></line><line x1="0" y1="0" x2="147" y2="-85"></line><line x1="0" y1="0" x2="120" y2="-120"></line><line x1="0" y1="0" x2="85" y2="-147"></line><line x1="0" y1="0" x2="44" y2="-164"></line><line x1="0" y1="0" x2="0" y2="-170"></line>
+<path d="M170 0 A170 170 0 0 0 0 -170"></path><path d="M120 0 A120 120 0 0 0 0 -120"></path>
+</g>
+<g transform="translate(800 0) scale(-1 -1)">
+<line x1="0" y1="0" x2="170" y2="0"></line><line x1="0" y1="0" x2="164" y2="-44"></line><line x1="0" y1="0" x2="147" y2="-85"></line><line x1="0" y1="0" x2="120" y2="-120"></line><line x1="0" y1="0" x2="85" y2="-147"></line><line x1="0" y1="0" x2="44" y2="-164"></line><line x1="0" y1="0" x2="0" y2="-170"></line>
+<path d="M170 0 A170 170 0 0 0 0 -170"></path><path d="M120 0 A120 120 0 0 0 0 -120"></path>
+</g>
+</g>
+</svg>
+
+<div style="position: relative; display: flex; flex-direction: column; align-items: center; gap: 10px">
+<div style="font-size: 14px; font-weight: 700; letter-spacing: 0.42em; color: #E7C987">{{app_name}} PRESENTS</div>
+<div style="display: flex; align-items: center; gap: 12px">
+<div style="width: 90px; height: 1px; background: #D4AF6A"></div>
+<div style="width: 9px; height: 9px; background: #D4AF6A; transform: rotate(45deg)"></div>
+<div style="width: 90px; height: 1px; background: #D4AF6A"></div>
+</div>
+</div>
+
+<div style="position: relative; display: flex; flex-direction: column; align-items: center; gap: 10px">
+<h1 style="margin: 0; font-family: 'Cinzel', serif; font-size: 70px; line-height: 1; font-weight: 800; letter-spacing: 0.04em; color: #F3D99A">{{event_name}}</h1>
+<div style="font-family: 'Cormorant Garamond', serif; font-style: italic; font-size: 26px; font-weight: 600; color: #F5E8C8">{{tagline}}</div>
+</div>
+
+<div style="position: relative; width: 100%; display: grid; grid-template-columns: 1.1fr 0.8fr 0.7fr 1.7fr 1fr; border-top: 1px solid #D4AF6A; border-bottom: 1px solid #D4AF6A; padding: 14px 0">
+<div style="display: flex; flex-direction: column; gap: 6px"><div style="font-size: 12px; font-weight: 700; letter-spacing: 0.24em; color: #CDAE6E">DATE</div><div style="font-size: 18px; font-weight: 700">{{date}}</div></div>
+<div style="display: flex; flex-direction: column; gap: 6px; border-left: 1px solid #5E4E2C"><div style="font-size: 12px; font-weight: 700; letter-spacing: 0.24em; color: #CDAE6E">DOORS</div><div style="font-size: 18px; font-weight: 700">{{doors_time}}</div></div>
+<div style="display: flex; flex-direction: column; gap: 6px; border-left: 1px solid #5E4E2C"><div style="font-size: 12px; font-weight: 700; letter-spacing: 0.24em; color: #CDAE6E">GATE</div><div style="font-size: 18px; font-weight: 700">{{gate}}</div></div>
+<div style="display: flex; flex-direction: column; gap: 6px; border-left: 1px solid #5E4E2C"><div style="font-size: 12px; font-weight: 700; letter-spacing: 0.24em; color: #CDAE6E">VENUE</div><div style="font-size: 18px; font-weight: 700">{{venue}}</div></div>
+<div style="display: flex; flex-direction: column; gap: 6px; border-left: 1px solid #5E4E2C"><div style="font-size: 12px; font-weight: 700; letter-spacing: 0.24em; color: #CDAE6E">SEAT</div><div style="font-size: 18px; font-weight: 700">{{row}} · {{seat}}</div></div>
+</div>
+</div>
+
+<div aria-hidden="true" style="width: 28px; display: flex; flex-direction: column; align-items: center; justify-content: space-between; padding: 14px 0; background: #D4AF6A">
+<div style="width: 14px; height: 20px; border-radius: 3px; background: #060606"></div><div style="width: 14px; height: 20px; border-radius: 3px; background: #060606"></div><div style="width: 14px; height: 20px; border-radius: 3px; background: #060606"></div><div style="width: 14px; height: 20px; border-radius: 3px; background: #060606"></div><div style="width: 14px; height: 20px; border-radius: 3px; background: #060606"></div><div style="width: 14px; height: 20px; border-radius: 3px; background: #060606"></div><div style="width: 14px; height: 20px; border-radius: 3px; background: #060606"></div><div style="width: 14px; height: 20px; border-radius: 3px; background: #060606"></div><div style="width: 14px; height: 20px; border-radius: 3px; background: #060606"></div><div style="width: 14px; height: 20px; border-radius: 3px; background: #060606"></div><div style="width: 14px; height: 20px; border-radius: 3px; background: #060606"></div><div style="width: 14px; height: 20px; border-radius: 3px; background: #060606"></div>
+</div>
+
+<div style="flex: 1; box-sizing: border-box; padding: 30px 30px; display: flex; flex-direction: column; align-items: center; justify-content: space-between; text-align: center">
+<div style="display: flex; flex-direction: column; gap: 6px; align-items: center">
+<div style="font-size: 12px; font-weight: 700; letter-spacing: 0.3em; color: #CDAE6E">ADMIT ONE</div>
+<div style="font-family: 'Cinzel', serif; font-size: 22px; font-weight: 800; color: #F3D99A">{{ticket_type}}</div>
+</div>
+<div data-slot="qr" role="img" aria-label="Ticket QR code" style="position: relative; width: 180px; height: 180px; box-sizing: border-box; background: #FFFFFF; border: 3px solid #D4AF6A; display: flex; align-items: center; justify-content: center; color: #121110">
+<div style="position: absolute; left: 12px; top: 12px; width: 38px; height: 38px; box-sizing: border-box; border: 6px solid #121110; display: flex; align-items: center; justify-content: center"><div style="width: 12px; height: 12px; background: #121110"></div></div>
+<div style="position: absolute; right: 12px; top: 12px; width: 38px; height: 38px; box-sizing: border-box; border: 6px solid #121110; display: flex; align-items: center; justify-content: center"><div style="width: 12px; height: 12px; background: #121110"></div></div>
+<div style="position: absolute; left: 12px; bottom: 12px; width: 38px; height: 38px; box-sizing: border-box; border: 6px solid #121110; display: flex; align-items: center; justify-content: center"><div style="width: 12px; height: 12px; background: #121110"></div></div>
+<div style="font-size: 13px; font-weight: 700; letter-spacing: 0.1em">[QR CODE]</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px; align-items: center">
+<div style="font-size: 19px; font-weight: 700">{{attendee_name}}</div>
+<div style="font-size: 14px; font-weight: 500; letter-spacing: 0.2em; color: #E7C987">{{ticket_id}}</div>
+</div>
+</div>
+
+</div>
+</div>
+</body>
+</html>

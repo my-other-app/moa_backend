@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Arch ID card</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=Inter:wght@400;500;600&display=swap">
+<style>
+@page{size:4in 6in;margin:0}
+html,body{margin:0;padding:0}
+*{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+:root{--accent:#F2B441} 
+</style>
+</head>
+<body>
+<div style="width: 384px; height: 576px; box-sizing: border-box; background: #12382B; color: #F3EFE4; font-family: Inter, system-ui, sans-serif; padding: 16px 28px 28px; display: flex; flex-direction: column; align-items: center">
+<div aria-hidden="true" style="width: 56px; height: 12px; border-radius: 6px; background: #F3EFE4"></div>
+<div style="align-self: stretch; margin-top: 16px; display: flex; justify-content: space-between; align-items: center; font-size: 12px; font-weight: 600; letter-spacing: 0.14em">
+<div>{{org_name}}</div>
+<div style="color: var(--accent)">EST. {{org_founded_year}}</div>
+</div>
+<div style="margin-top: 16px; width: 188px; height: 212px; box-sizing: border-box; border-radius: 94px 94px 10px 10px; border: 2px solid var(--accent); padding: 6px">
+<div style="width: 100%; height: 100%; border-radius: 86px 86px 6px 6px; background: #2C5A48; overflow: hidden; display: flex; align-items: flex-end; justify-content: center">
+<img src="{{photo_url}}" alt="" style="width: 100%; height: 100%; object-fit: cover; display: block">
+</div>
+</div>
+<div style="margin-top: 16px; font-family: 'Instrument Serif', Georgia, serif; font-size: 44px; line-height: 1; text-align: center">{{full_name}}</div>
+<div style="margin-top: 8px; display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; letter-spacing: 0.14em">
+<div aria-hidden="true" style="width: 22px; height: 2px; background: var(--accent)"></div>
+<div style="color: var(--accent)">{{membership_tier}}</div>
+<div aria-hidden="true" style="width: 22px; height: 2px; background: var(--accent)"></div>
+</div>
+<div style="align-self: stretch; margin-top: auto; display: flex; justify-content: space-between; align-items: flex-end; gap: 16px">
+<div style="display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; flex-direction: column; gap: 2px">
+<div style="font-size: 12px; font-weight: 500; letter-spacing: 0.08em; color: #B9CFC3">MEMBER NO.</div>
+<div style="font-size: 18px; font-weight: 600">{{member_id}}</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 2px">
+<div style="font-size: 12px; font-weight: 500; letter-spacing: 0.08em; color: #B9CFC3">VALID THRU</div>
+<div style="font-size: 18px; font-weight: 600">{{valid_thru}}</div>
+</div>
+</div>
+<div style="background: #F3EFE4; padding: 8px; border-radius: 10px; flex-shrink: 0">
+<img src="{{qr_code_url}}" alt="QR code" style="width: 92px; height: 92px; display: block; image-rendering: pixelated">
+</div>
+</div>
+</div>
+</body>
+</html>

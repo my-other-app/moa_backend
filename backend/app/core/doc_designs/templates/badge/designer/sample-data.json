@@ -1,0 +1,13 @@
+{
+  "first_name": "Meera", "last_name": "Pillai", "full_name": "Meera Pillai", "initials": "MP",
+  "job_title": "Product Designer", "organization": "Acme Labs", "role": "ATTENDEE",
+  "photo_url": "sample-photo.svg", "qr_code_url": "sample-qr.svg",
+  "badge_id": "A-0417", "access_level": "All-access", "zone": "B2",
+  "event_name": "DevFest Kerala", "event_date": "14 Dec 2026", "event_year": "2026", "event_venue": "Trivandrum", "event_tagline": "48h build",
+  "session_hall": "Hall B", "session_time": "11:30", "hall": "HALL B", "day_label": "DAY 1", "doors_open_time": "09:00",
+  "checkin_time": "09:12", "kiosk_id": "03", "booth_no": "C-14", "table_no": "27", "team_name": "Null Pointers", "track": "FinTech",
+  "org_name": "Makers Club", "org_founded_year": "2019", "city": "Kochi", "chapter": "Design Circle",
+  "membership_tier": "GOLD MEMBER", "member_id": "CL-2291", "member_since_year": "2023", "joined_date": "Mar 2023",
+  "valid_thru": "12 / 2027", "valid_year": "2027",
+  "bib_number": "2047", "category": "10K", "wave": "B", "start_time": "06:00"
+}
