@@ -37,6 +37,7 @@ from app.core.validations.schema import validate_relations
 from app.api.interests.models import Interests
 from app.core import public_urls
 from app.core.utils.keys import generate_slug
+from app.api.slugs.service import event_slug_matches
 from app.core.notifications.triggers import (
     notify_followers_of_new_event,
     notify_users_by_interest,
@@ -628,7 +629,8 @@ async def get_event(session: AsyncSession, event_id: str | int, user_id: int | N
         )
         .filter(
             Events.is_deleted == False,
-            Events.id == event_id if is_event_id else Events.slug == event_id
+            # A slug it has now or had once (app/api/slugs): the answer carries the current one.
+            Events.id == event_id if is_event_id else event_slug_matches(event_id)
         )
         .options(
             selectinload(Events.category),

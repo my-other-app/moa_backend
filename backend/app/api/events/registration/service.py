@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 from app.api.users.models import Users
 from app.api.events.models import EventRegistrationsLink, Events
+from app.api.slugs.service import event_slug_matches
 from app.api.events.registration import answers
 from app.api.service import update_background_task_log
 from app.api.users.models import UserProfiles, UserTypes, Users
@@ -99,7 +100,7 @@ async def resolve_event(session: AsyncSession, event_id: int | str) -> Events:
     if isinstance(event_id, int) or (isinstance(event_id, str) and event_id.isdigit()):
         where = Events.id == int(event_id)
     else:
-        where = Events.slug == event_id
+        where = event_slug_matches(event_id)  # now or once (app/api/slugs)
     event = await session.scalar(select(Events).where(where, Events.is_deleted == False))
     if event is None:
         raise CustomHTTPException(404, message="Event not found")
@@ -470,6 +471,12 @@ async def register_event(
     is_event_id = (isinstance(event_id, str) and event_id.isdigit()) or isinstance(
         event_id, int
     )
+    if not is_event_id:
+        # A slug it has now or had once (app/api/slugs): a printed QR code
+        # keeps registering after an admin changes the event's address.
+        found = await session.scalar(select(Events.id).where(event_slug_matches(event_id)))
+        if found is not None:
+            event_id, is_event_id = found, True
 
     await validate_relations(
         session,
@@ -496,7 +503,7 @@ async def register_event(
         event_id = int(event_id)
         db_event = await session.scalar(select(Events).filter(Events.id == event_id))
     else:
-        db_event = await session.scalar(select(Events).filter(Events.slug == event_id))
+        db_event = await session.scalar(select(Events).filter(event_slug_matches(event_id)))
 
     if not db_event:
         raise CustomHTTPException(404, message="Event not found")

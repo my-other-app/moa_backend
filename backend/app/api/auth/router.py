@@ -719,7 +719,9 @@ async def admin_reset_password(
         user = await one(select(Users).where(Users.username == search_term), "username")
 
     if not user:
-        user = await one(select(Users).join(Clubs, Users.id == Clubs.user_id).where(Clubs.slug == search_term), "club address")
+        from app.api.slugs.service import club_slug_matches
+
+        user = await one(select(Users).join(Clubs, Users.id == Clubs.user_id).where(club_slug_matches(search_term)), "club address")
 
     if not user:
         # Search by club name (case-insensitive)

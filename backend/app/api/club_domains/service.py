@@ -477,6 +477,8 @@ async def resolve(session, raw_host: str | None) -> dict | None:
       club's subdomain.
     - `{slug}.myotherapp.in`: the club's site; canonical_host is its own
       domain while that is active, so the Worker can redirect there.
+    - `{old slug}.myotherapp.in` (app/api/slugs): the same club, club_slug
+      its current slug and canonical_host its current subdomain (or domain).
     """
     host = _bare(raw_host)
     if not host or len(host) > 253:
@@ -486,10 +488,18 @@ async def resolve(session, raw_host: str | None) -> dict | None:
         slug = host[: -len(suffix)]
         if not _LABEL.match(slug):
             return None
-        club = await session.scalar(select(Clubs.id).where(Clubs.slug == slug, Clubs.is_deleted == False))  # noqa: E712
-        if club is None:
+        from app.api.slugs.service import club_slug_matches
+
+        row = (await session.execute(
+            select(Clubs.id, Clubs.slug).where(club_slug_matches(slug), Clubs.is_deleted == False)  # noqa: E712
+        )).first()
+        if row is None:
             return None
-        return {"club_slug": slug, "status": "active", "canonical_host": await active_host(session, club) or host}
+        club, current = row
+        # A slug the club had once (app/api/slugs): its address is the
+        # current one's subdomain, which the Worker 301s to.
+        own = host if current == slug else (default_host(current) or host)
+        return {"club_slug": current, "status": "active", "canonical_host": await active_host(session, club) or own}
     row = (
         await session.execute(
             select(ClubDomains.status, Clubs.slug)

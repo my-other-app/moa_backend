@@ -190,12 +190,24 @@ async def out(session: AsyncSession, club: Clubs, s: ClubSites) -> dict:
 
 
 async def published_html(session: AsyncSession, slug: str) -> str | None:
-    """The stored page, in one query: no club row loaded (it loaded the club
-    and all its interests, which the page never used), only the HTML."""
-    html = await session.scalar(
-        select(ClubSites.html).join(Clubs, Clubs.id == ClubSites.club_id).where(Clubs.slug == slug, Clubs.is_deleted == False)  # noqa: E712
-    )
-    return html or None
+    """The stored page (`published_page` without the slug)."""
+    found = await published_page(session, slug)
+    return found[0] if found else None
+
+
+async def published_page(session: AsyncSession, slug: str) -> tuple[str, str] | None:
+    """(the stored page, the club's current slug), in one query: no club row
+    loaded (it loaded the club and all its interests, which the page never
+    used), only the HTML. `slug` may be one the club had once (app/api/slugs);
+    the current one differs then, and the caller says so."""
+    from app.api.slugs.service import club_slug_matches
+
+    row = (await session.execute(
+        select(ClubSites.html, Clubs.slug).join(Clubs, Clubs.id == ClubSites.club_id).where(club_slug_matches(slug), Clubs.is_deleted == False)  # noqa: E712
+    )).first()
+    if row is None or not row[0]:
+        return None
+    return row[0], row[1]
 
 
 async def republish_for_club(session: AsyncSession, club_id: int) -> bool:
