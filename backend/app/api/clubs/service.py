@@ -407,6 +407,10 @@ async def get_club_admin_detail(session: AsyncSession, club_id: int):
         "total_attended": total_attended or 0,
         "total_revenue": float(total_revenue or 0),
     }
+    from app.api.slugs import service as slugs
+    from app.api.slugs.models import CLUB
+
+    detail["slug_aliases"] = await slugs.aliases_of(session, CLUB, club_id)
     return detail
 
 

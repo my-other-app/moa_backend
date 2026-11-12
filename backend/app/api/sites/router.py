@@ -106,14 +106,19 @@ async def visit(request: Request, slug: str, session: SessionDep) -> Response:
 
 @public_router.get("/{slug}", summary="A club's published page", response_class=HTMLResponse)
 async def site_page(session: SessionDep, slug: str) -> HTMLResponse:
-    html = await service.published_html(session, slug)
-    if html is None:
+    """X-Site-Slug names the club's current slug: asked by one it had once
+    (app/api/slugs), the club-sites Worker 301s that subdomain to the
+    current one's instead of serving the page there."""
+    found = await service.published_page(session, slug)
+    if found is None:
         raise CustomHTTPException(404, message="This club has not published a site")
+    html, current = found
     # The same policy the club-sites Worker sends, so the page is held to it
     # at this address too (not framed: the API answers X-Frame-Options DENY).
     return HTMLResponse(html, headers={
         "Cache-Control": "public, max-age=300",
         "Content-Security-Policy": site_csp(settings.PUBLIC_API_URL, frame_ancestors=""),
+        "X-Site-Slug": current,
     })
 
 

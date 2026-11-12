@@ -50,6 +50,8 @@ from app.api.competitions import models as _competition_models  # noqa: F401
 from app.api.sites import models as _site_models  # noqa: F401
 from app.api.club_access import models as _club_access_models  # noqa: F401
 from app.api.club_domains import models as _club_domain_models  # noqa: F401
+# The slugs clubs and events were once at, still answering (app/api/slugs).
+from app.api.slugs import models as _slug_models  # noqa: F401
 # A club's own WhatsApp number: the connection, quality, templates, inbox (app/api/club_whatsapp).
 from app.api.club_whatsapp import models as _club_whatsapp_models  # noqa: F401
 from app.api.club_whatsapp import inbox_models as _club_whatsapp_inbox_models  # noqa: F401

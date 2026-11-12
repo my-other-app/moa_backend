@@ -230,7 +230,9 @@ async def record_site_visit(session, slug: str, request, *, ref=None, via=None, 
     club's own links, or it is the website's own: what reached the site some
     other way (a search, a bio, a link someone pasted). Returns what it was
     counted as, or None when it was not counted."""
-    club = await session.scalar(select(Clubs).where(Clubs.slug == slug, Clubs.is_deleted == False))  # noqa: E712
+    from app.api.slugs.service import club_slug_matches
+
+    club = await session.scalar(select(Clubs).where(club_slug_matches(slug), Clubs.is_deleted == False))  # noqa: E712
     if club is None or not await site_published(session, club.id):
         return None
     link = await by_code(session, ref) if isinstance(ref, str) and ref else None
