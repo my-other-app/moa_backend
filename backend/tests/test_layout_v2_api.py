@@ -501,11 +501,10 @@ async def test_a_ticket_with_no_saved_design_is_the_default_designs_starter(clie
 # ─── Opening a v1 canvas or a preset converts it (P's converters) ───────────
 
 
-async def test_opening_a_v1_canvas_or_a_preset_converts_it(client, world, monkeypatch):
+async def test_opening_a_v1_canvas_or_a_preset_converts_it(client, world):
+    """The real designs (A's catalogue) and P's converters: nothing is drawn."""
     from app.core import layout_v2
-    from tests.doc_designs_fake import install as install_designs
 
-    install_designs(monkeypatch)
     h = world["club"]
     await _save(client, world, "ticket", v1_layout())
     opened = (await client.get(_designs(world, "ticket", "/layout"), headers=h)).json()["v2"]
@@ -519,9 +518,12 @@ async def test_opening_a_v1_canvas_or_a_preset_converts_it(client, world, monkey
     # It still prints as the v1 canvas until the club saves it in the editor (V4).
     assert (await client.get(_designs(world, "ticket", "/layout"), headers=h)).json()["version"] == 1
 
-    assert (await client.put(_designs(world, "ticket", "/preset"), json={"id": "ticket/01-dusk-horizon", "accent": "#123456"}, headers=h)).status_code == 200
-    preset = (await client.get(_designs(world, "ticket", "/layout"), headers=h)).json()["v2"]
+    chosen = await client.put(_designs(world, "certificate", "/preset"), json={"id": "certificate/01-heritage", "accent": "#123456"}, headers=h)
+    assert chosen.status_code == 200, chosen.text
+    preset = chosen.json()["v2"]
+    # Its starter with the preset's accent applied (P's from_preset); it still prints as the preset.
     assert preset["from"] == "preset" and presets.is_v2(preset["layout"]) and preset["layout"]["vars"]["accent"] == "#123456"
+    assert chosen.json()["active"] == "preset"
 
 
 # ─── The pieces ─────────────────────────────────────────────────────────────
