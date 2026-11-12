@@ -19,13 +19,13 @@ lock not granted). The tables are new.
 Downgrade drops the three tables and the column.
 
 Revision ID: platform_mail
-Revises: certificate_design
+Revises: slug_aliases
 """
 import sqlalchemy as sa
 from alembic import op
 
 revision = "platform_mail"
-down_revision = "certificate_design"
+down_revision = "slug_aliases"
 branch_labels = None
 depends_on = None
 
