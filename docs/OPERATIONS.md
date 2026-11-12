@@ -10,7 +10,9 @@ health checks and scheduled backups honest (section 19), read the live
 room's pushes and the host's 409s (section 22), open clubs' mailboxes
 (section 23), keep media on a store of our own (section 26), and send mail
 through SES's SMTP interface with SMTP credentials only (section 27), and
-let the dashboards sign in with Google (section 28). Every command is meant to be copied.
+let the dashboards sign in with Google (section 28), and run the render
+service that prints the ticket, certificate and ID card designs (section 29).
+Every command is meant to be copied.
 Commands under **Read-only** change nothing; anything that changes something
 says so.
 
@@ -827,7 +829,8 @@ The limits (1 GB = 1,024 MB here):
 | worker | 768m | 1 | ~0.4 GB | One process of the app, and two jobs' renders, PDFs or sheet imports. `APP_JOBS_CONCURRENCY=2` (set on the service, so the API's value never reaches it) |
 | redis | 256m | 0.5 | <= 192 MB | `maxmemory 192mb`, `allkeys-lru` (when full it drops the least recently used keys, never refuses a write), `appendonly no` and no snapshots (it holds no data of record, so it never forks to write a file and never needs twice its memory); the rest is Redis's own overhead |
 | meilisearch | 768m | 1 | indexing <= 256 MiB | `MEILI_MAX_INDEXING_MEMORY=256MiB` (unset, Meilisearch takes up to two thirds of the memory it sees, which in a container can be the host's) and one indexing thread; the indexes are memory-mapped files whose pages the kernel drops under the limit. Lakhs of events and clubs fit |
-| **All five** | **5376m (5.25 GB)** | | | |
+| render | 768m | 1 | one page ~150 MB; Chromium ~300 MB idle | Gotenberg's Chromium, which prints the document designs (section 29). Two conversions at once here (three on the live box, at 1024m). **Takes meilisearch's slot on this plan**: run one or the other, or resize |
+| **All five** (render or meilisearch) | **5376m (5.25 GB)** | | | |
 
 Every container's log is also capped (`json-file`, 5 x 20 MB), since Docker
 never trims one by itself (section 11).
@@ -3738,3 +3741,61 @@ FROM sign_in_attempts
 WHERE method = 'google' AND created_at > now() - interval '1 day'
 ORDER BY created_at DESC LIMIT 50;
 ```
+
+---
+
+## 29. The render service (the ticket, certificate and ID card designs)
+
+**What it is.** `render` is Gotenberg 8's Chromium (`gotenberg/gotenberg:8.39.0-chromium`, pinned by digest in
+`backend/render/Dockerfile`), built as the image `moa-render` with every font the 35 designs use installed
+system-wide. The backend fills a design (`app/core/doc_designs`) and posts the page to
+`APP_RENDER_URL` (default `http://render:3000`) `/forms/chromium/convert/html`; Chromium waits for the page's
+fit script (`window.__moaReady`), prints it on paper of the design's size with no margins and with backgrounds,
+and answers with the PDF. PNGs are that PDF rasterised by the backend, so a PDF and its PNG never differ.
+
+- **Not public, no network, no secrets.** No published port. It sits only on an internal network
+  (`render_network` in `docker-compose.prod.yml`, `render` in `ops/server/compose.yml`), which the backend and
+  the worker join; nothing on it has a route out. Chromium may load only the page itself (`file:///tmp/...`)
+  and the `data:` URIs in it (`--chromium-allow-list`); public and private addresses are refused as well. Every
+  font, QR code, logo, signature and photo is inside the page, so a design can never make it fetch an address.
+- **Limits.** `--api-timeout=300s` (the backend gives up first: `APP_RENDER_TIMEOUT` seconds a try, plus a
+  quarter second a page for a batch, at most 280 s), `--chromium-max-concurrency` (2 here, 3 live),
+  `--chromium-max-queue-size` (16 here, 24 live; past it a 503), `--chromium-restart-after=100` (Chromium is
+  restarted every 100 conversions), `--api-body-limit=64MB`, `mem_limit` (768m here, in meilisearch's slot on
+  the 8 GB plan, section 10; 1024m on the live box).
+- **When it is down or slow** (`app/core/doc_designs/render.py`): each conversion is tried twice; then tickets
+  and certificates are drawn by the classic renderer for that request (not kept in the document cache), ID
+  cards answer 503 ("Printing is unavailable, try again"), and the admins get an alert (one per ten minutes).
+  The backend's own `/health` does not depend on it.
+
+**Build** (from the repository root; the build context is `backend/`, for the fonts):
+
+```bash
+# Changes things: builds the image (about 500 MB, mostly Chromium).
+docker build -f backend/render/Dockerfile -t moa-render:8.39.0-1 backend
+```
+
+The build fails if fontconfig does not know the designs' families by their CSS names. On the old box,
+`sudo docker-compose -f docker-compose.prod.yml up -d --build --no-deps render < /dev/null` builds and starts
+it; then recreate the backend (and the worker, if it runs) with a build so they join `render_network`
+(section 6). On the live box, build the image there (or set `RENDER_IMAGE` in `images.env`), then
+`sudo moa-dc up -d --no-deps render` and `sudo /srv/moa/deploy.sh recreate backend` (and the worker).
+
+**Health check.** Gotenberg answers `GET /health` with `{"status":"up","details":{"chromium":{"status":"up"}}}`;
+the compose health check asks it every 30 s. From the backend (read-only):
+
+```bash
+# Read-only: the render service's health, as the backend sees it.
+sudo docker exec doth-live-backend python -c "import urllib.request; print(urllib.request.urlopen('http://render:3000/health', timeout=3).read().decode())"
+```
+
+`app.core.doc_designs.render_health()` returns the same as `{ok, status, chromium, ms}` for the admin overview.
+
+**Fonts.** `backend/assets/doc-fonts/` holds every face the designs name (34 families): static TTFs for this
+image, the same faces as WOFF2 for browsers and for the pages themselves, each family's OFL licence,
+`fonts.lock.json` (every file's source and sha256) and `fonts.css`. `python scripts/doc_fonts.py` fetches them
+again from Google Fonts (review the diff), `--check` verifies the files against the lock with no network, and
+`--fontconfig` checks fontconfig finds every TTF by its CSS name. Browsers load them from
+`https://api.myotherapp.in/static/doc-fonts/` (public, `immutable`, `Access-Control-Allow-Origin: *`); a
+render never reaches Google.
+

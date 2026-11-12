@@ -20,9 +20,11 @@ COMPOSE = SERVER / "compose.yml"
 CADDY = SERVER / "caddy"
 
 #: What the services may take together, in MiB: 12 GB less the OS and
-#: Docker (about 1 GB) and room for render peaks and the page cache. The
-#: limits are caps; the 4 GB swapfile is the last resort, never the plan.
-ALL_LIMITS_MIB = 8448
+#: Docker (about 1 GB) and room for the page cache. The render service's
+#: 1 GB (Chromium, the document designs) came out of what was kept for
+#: render peaks. The limits are caps; the 4 GB swapfile is the last resort,
+#: never the plan.
+ALL_LIMITS_MIB = 9472
 
 #: The budget agreed for the move (docs/MOVE_TO_ORACLE.md, "Capacity").
 BUDGET_MIB = {
@@ -36,6 +38,7 @@ BUDGET_MIB = {
     "admin": 448,
     "caddy": 128,
     "media": 256,
+    "render": 1024,
 }
 
 #: https://www.cloudflare.com/ips/ on 2026-10-24 (ops/server/cloudflare-ips.sh
@@ -83,7 +86,7 @@ def test_the_limits_fit_a_12gb_box_and_the_api_and_postgres_come_first():
     assert sum(_mib(s["mem_limit"]) for s in services.values()) <= ALL_LIMITS_MIB
     shares = {name: int(s["cpu_shares"]) for name, s in services.items()}
     assert shares["backend"] == shares["postgres"] == max(shares.values())
-    for background in ("worker", "redis", "meilisearch", "admin", "media"):
+    for background in ("worker", "redis", "meilisearch", "admin", "media", "render"):
         assert shares[background] < shares["backend"], background
         assert float(services[background]["cpus"]) <= 1, background
 

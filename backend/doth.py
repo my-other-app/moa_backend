@@ -247,6 +247,11 @@ application.include_router(router=public_links_router, tags=["tracking-links"])
 from app.api.health import public_router as health_router  # noqa: E402
 
 application.include_router(router=health_router)
+# The document designs' fonts and preview images, for browsers: public,
+# immutable, any origin (app/core/doc_designs/static.py).
+from app.core.doc_designs.static import router as doc_designs_static_router  # noqa: E402
+
+application.include_router(router=doc_designs_static_router)
 # Clubs' AI assistants over MCP: /mcp, its OAuth endpoints and their discovery
 # documents, at the root (all 404 until APP_MCP_ENABLED; app/api/mcp).
 from app.api.mcp.router import public_router as mcp_oauth_router  # noqa: E402

@@ -516,6 +516,14 @@ class AppConfig(BaseSettings):
     # receipt is a wkhtmltopdf process besides: 6 at once, not 9.
     RENDER_THREADS: int = 2
     RENDER_TIMEOUT: float = 30.0
+    # The render service (backend/render/Dockerfile, docker-compose.prod.yml
+    # `render`; docs/OPERATIONS.md "The render service"): Gotenberg's
+    # Chromium, which prints the ticket, certificate and ID card designs
+    # (app/core/doc_designs). Internal only. One conversion may take
+    # RENDER_TIMEOUT seconds (plus a quarter second a page after the first,
+    # for a batch); a try that fails or times out is tried once more, then
+    # the caller falls back (tickets, certificates) or answers 503 (cards).
+    RENDER_URL: str = "http://render:3000"
     # Bytes of bucket images (logos, artwork, posters) each process keeps for
     # the renderer; the least recently used go first. One object larger than
     # RENDER_IMAGE_CACHE_ITEM_MB is never kept.
