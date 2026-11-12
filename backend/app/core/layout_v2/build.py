@@ -151,7 +151,8 @@ class _Paint:
         return ", ".join(parts)
 
     def drop_shadows(self, layer) -> str:
-        return " ".join(f"drop-shadow({num(s.x)}px {num(s.y)}px {num(s.blur)}px {self.color(s.color)})"
+        # drop-shadow's length is the blur's standard deviation: half a box-shadow's blur.
+        return " ".join(f"drop-shadow({num(s.x)}px {num(s.y)}px {num(s.blur / 2)}px {self.color(s.color)})"
                         for s in layer.shadows() if not s.inset)
 
 
@@ -257,8 +258,17 @@ def _span(layer: TextLayer, s, text: str, paint: _Paint) -> str:
 # ─── Shapes ─────────────────────────────────────────────────────────────────
 
 
+def clamp_radii(r: list[float], w: float, h: float) -> list[float]:
+    """CSS's rule: when two corners on a side ask for more than the side, all
+    four shrink by the same factor."""
+    r = [max(0.0, v) for v in r]
+    sides = ((r[0] + r[1], w), (r[1] + r[2], h), (r[2] + r[3], w), (r[3] + r[0], h))
+    f = min([length / total for total, length in sides if total > 0] + [1.0])
+    return [v * f for v in r] if f < 1 else r
+
+
 def _rounded_rect_path(x: float, y: float, w: float, h: float, r: list[float]) -> str:
-    tl, tr, br, bl = (max(0.0, min(v, w / 2, h / 2)) for v in r)
+    tl, tr, br, bl = clamp_radii(list(r), w, h)
     return (f"M{num(x + tl)} {num(y)}H{num(x + w - tr)}"
             + (f"A{num(tr)} {num(tr)} 0 0 1 {num(x + w)} {num(y + tr)}" if tr else "")
             + f"V{num(y + h - br)}"
@@ -464,6 +474,8 @@ def build_body(layout: Union[LayoutV2, dict], values: Mapping[str, Any], *, cont
     layout = parse(layout)
     ctx = Context.of(context)
     values = {k: ("" if v is None else str(v)) for k, v in (values or {}).items()}
+    for token, source in tk.IMAGE_TOKENS.items():
+        values.setdefault(token, "1" if ctx.image(source) else "")
     paint = _Paint(layout, ctx)
     c = layout.canvas
     root = f"position:relative;width:{num(c.width)}px;height:{num(c.height)}px;overflow:hidden"
@@ -494,7 +506,8 @@ def _runtime() -> tuple[str, str]:
 def _page_css(layout: LayoutV2) -> str:
     c, p = layout.canvas, layout.page
     key = f"{num(c.width)}x{num(c.height)}"
-    css = f'.moa-page[data-canvas="{key}"]{{width:{num(c.width)}px;height:{num(c.height)}px}}'
+    css = ("html,body{margin:0;padding:0}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}"
+           f'.moa-page[data-canvas="{key}"]{{width:{num(c.width)}px;height:{num(c.height)}px}}')
     kx = p.width_mm * PX_PER_MM / c.width
     ky = p.height_mm * PX_PER_MM / c.height
     css += (f'@media print{{.moa-page[data-canvas="{key}"]{{width:{p.width_mm:g}mm;height:{p.height_mm:g}mm}}')

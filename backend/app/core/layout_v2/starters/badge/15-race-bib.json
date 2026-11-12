@@ -1,0 +1,330 @@
+{
+ "version": 2,
+ "page": {
+  "widthMm": 101.6,
+  "heightMm": 152.4
+ },
+ "canvas": {
+  "width": 384,
+  "height": 576,
+  "background": {
+   "type": "solid",
+   "color": "#FFFFFF"
+  }
+ },
+ "vars": {
+  "accent": "#FF6A3D"
+ },
+ "layers": [
+  {
+   "id": "shape",
+   "name": "Shape",
+   "x": 0,
+   "y": 0,
+   "width": 384,
+   "height": 104,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "var:accent"
+   }
+  },
+  {
+   "id": "lanyard",
+   "name": "Lanyard slot",
+   "x": 164,
+   "y": 16,
+   "width": 56,
+   "height": 12,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   },
+   "radius": [
+    6,
+    6,
+    6,
+    6
+   ]
+  },
+  {
+   "id": "t-org_name",
+   "name": "Club name",
+   "x": 28,
+   "y": 51.406,
+   "width": 233.145,
+   "height": 24.208,
+   "kind": "text",
+   "text": "{{org_name}}",
+   "font": {
+    "family": "Space Grotesk",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 22,
+   "color": "#111111",
+   "lineHeight": 1.1,
+   "fit": "shrink",
+   "minSize": 13.2
+  },
+  {
+   "id": "t-event_name",
+   "name": "Event name",
+   "x": 217.402,
+   "y": 42,
+   "width": 138.598,
+   "height": 33.614,
+   "kind": "text",
+   "text": "{{event_name}}\n{{event_date}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#111111",
+   "lineHeight": 1.4,
+   "align": "right",
+   "maxLines": 2,
+   "fit": "shrink",
+   "minSize": 8.4
+  },
+  {
+   "id": "t-bib_number",
+   "name": "Bib number",
+   "x": 51.828,
+   "y": 114,
+   "width": 304.192,
+   "height": 128.02,
+   "kind": "text",
+   "text": "{{bib_number}}",
+   "font": {
+    "family": "Space Grotesk",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 128,
+   "color": "#111111",
+   "letterSpacing": -0.05,
+   "lineHeight": 1,
+   "fit": "shrink",
+   "minSize": 38.4
+  },
+  {
+   "id": "t-full_name",
+   "name": "Full name",
+   "x": 27.99,
+   "y": 242,
+   "width": 328.02,
+   "height": 28.614,
+   "kind": "text",
+   "text": "{{full_name}}",
+   "font": {
+    "family": "Space Grotesk",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 26,
+   "color": "#111111",
+   "letterSpacing": 0.04,
+   "lineHeight": 1.1,
+   "align": "center",
+   "transform": "upper",
+   "fit": "shrink",
+   "minSize": 18
+  },
+  {
+   "id": "shape-2",
+   "name": "Shape",
+   "x": 28,
+   "y": 290.594,
+   "width": 328,
+   "height": 58,
+   "kind": "shape",
+   "shape": "rect",
+   "stroke": {
+    "color": "#111111",
+    "width": 2
+   }
+  },
+  {
+   "id": "t-category",
+   "name": "CATEGORY",
+   "x": 40,
+   "y": 300.594,
+   "width": 88.02,
+   "height": 15.02,
+   "showIf": "category",
+   "kind": "text",
+   "text": "CATEGORY",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#555555",
+   "letterSpacing": 0.08,
+   "lineHeight": 1.25,
+   "fit": "shrink",
+   "minSize": 9.6
+  },
+  {
+   "id": "t-category-2",
+   "name": "Category",
+   "x": 40,
+   "y": 317.594,
+   "width": 88.02,
+   "height": 21.02,
+   "showIf": "category",
+   "kind": "text",
+   "text": "{{category}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 18,
+   "color": "#111111",
+   "lineHeight": 1.167,
+   "fit": "shrink",
+   "minSize": 12.6
+  },
+  {
+   "id": "line-left",
+   "name": "Line (left)",
+   "x": 138,
+   "y": 292.594,
+   "width": 2,
+   "height": 54,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#111111"
+   }
+  },
+  {
+   "id": "t-wave",
+   "name": "WAVE",
+   "x": 150,
+   "y": 300.594,
+   "width": 86.02,
+   "height": 15.02,
+   "showIf": "wave",
+   "kind": "text",
+   "text": "WAVE",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#555555",
+   "letterSpacing": 0.08,
+   "lineHeight": 1.25,
+   "fit": "shrink",
+   "minSize": 9.6
+  },
+  {
+   "id": "t-wave-2",
+   "name": "Wave",
+   "x": 150,
+   "y": 317.594,
+   "width": 86.02,
+   "height": 21.02,
+   "showIf": "wave",
+   "kind": "text",
+   "text": "{{wave}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 18,
+   "color": "#111111",
+   "lineHeight": 1.167,
+   "fit": "shrink",
+   "minSize": 12.6
+  },
+  {
+   "id": "line-left-2",
+   "name": "Line (left)",
+   "x": 246,
+   "y": 292.594,
+   "width": 2,
+   "height": 54,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#111111"
+   }
+  },
+  {
+   "id": "t-start",
+   "name": "START",
+   "x": 258,
+   "y": 300.594,
+   "width": 86.02,
+   "height": 15.02,
+   "kind": "text",
+   "text": "START",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#555555",
+   "letterSpacing": 0.08,
+   "lineHeight": 1.25,
+   "fit": "shrink",
+   "minSize": 9.6
+  },
+  {
+   "id": "t-start_time",
+   "name": "Start time",
+   "x": 258,
+   "y": 317.594,
+   "width": 86.02,
+   "height": 21.02,
+   "kind": "text",
+   "text": "{{start_time}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 18,
+   "color": "#111111",
+   "lineHeight": 1.167,
+   "fit": "shrink",
+   "minSize": 12.6
+  },
+  {
+   "id": "sponsor",
+   "name": "Sponsor logos",
+   "x": 28,
+   "y": 468,
+   "width": 228,
+   "height": 84,
+   "kind": "image",
+   "source": "sponsor",
+   "fit": "contain"
+  },
+  {
+   "id": "qr",
+   "name": "QR code",
+   "x": 272,
+   "y": 468,
+   "width": 84,
+   "height": 84,
+   "kind": "qr"
+  }
+ ],
+ "starter": "badge/15-race-bib"
+}

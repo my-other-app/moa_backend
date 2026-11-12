@@ -1,0 +1,304 @@
+{
+ "version": 2,
+ "page": {
+  "widthMm": 101.6,
+  "heightMm": 152.4
+ },
+ "canvas": {
+  "width": 384,
+  "height": 576,
+  "background": {
+   "type": "solid",
+   "color": "#101418"
+  }
+ },
+ "vars": {
+  "accent": "#C6F432"
+ },
+ "layers": [
+  {
+   "id": "t-full_name",
+   "name": "Full name",
+   "x": 28,
+   "y": 364,
+   "width": 328.02,
+   "height": 38.02,
+   "kind": "text",
+   "text": "{{full_name}}",
+   "font": {
+    "family": "Space Grotesk",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 38,
+   "color": "#FFFFFF",
+   "letterSpacing": -0.02,
+   "lineHeight": 1,
+   "fit": "shrink",
+   "minSize": 18
+  },
+  {
+   "id": "t-job_title",
+   "name": "Job title",
+   "x": 28,
+   "y": 410,
+   "width": 328.02,
+   "height": 19.02,
+   "showIf": "job_title|organization",
+   "kind": "text",
+   "text": "{% if job_title %}{{job_title}}{% endif %}{% if job_title %}{% if organization %} · {% endif %}{% endif %}{% if organization %}{{organization}}{% endif %}",
+   "font": {
+    "family": "Inter",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 15,
+   "color": "#C9D1DA",
+   "lineHeight": 1.267,
+   "fit": "ellipsis"
+  },
+  {
+   "id": "t-booth",
+   "name": "BOOTH",
+   "x": 28,
+   "y": 514,
+   "width": 47.676,
+   "height": 15.02,
+   "showIf": "booth_no",
+   "kind": "text",
+   "text": "BOOTH",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#AAB4C0",
+   "letterSpacing": 0.08,
+   "lineHeight": 1.25,
+   "fit": "shrink",
+   "minSize": 9.6
+  },
+  {
+   "id": "t-booth_no",
+   "name": "Booth",
+   "x": 28,
+   "y": 531,
+   "width": 47.676,
+   "height": 21.02,
+   "showIf": "booth_no",
+   "kind": "text",
+   "text": "{{booth_no}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 18,
+   "color": "#FFFFFF",
+   "lineHeight": 1.167,
+   "fit": "shrink",
+   "minSize": 12.6
+  },
+  {
+   "id": "t-badge",
+   "name": "BADGE",
+   "x": 99.656,
+   "y": 514,
+   "width": 62.161,
+   "height": 15.02,
+   "kind": "text",
+   "text": "BADGE",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#AAB4C0",
+   "letterSpacing": 0.08,
+   "lineHeight": 1.25,
+   "fit": "shrink",
+   "minSize": 9.6
+  },
+  {
+   "id": "t-badge_id",
+   "name": "Badge number",
+   "x": 99.656,
+   "y": 531,
+   "width": 62.161,
+   "height": 21.02,
+   "kind": "text",
+   "text": "{{badge_id}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 18,
+   "color": "#FFFFFF",
+   "lineHeight": 1.167,
+   "fit": "shrink",
+   "minSize": 5.4
+  },
+  {
+   "id": "shape",
+   "name": "Shape",
+   "x": 262,
+   "y": 458,
+   "width": 94,
+   "height": 94,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   },
+   "radius": [
+    10,
+    10,
+    10,
+    10
+   ]
+  },
+  {
+   "id": "qr",
+   "name": "QR code",
+   "x": 269,
+   "y": 465,
+   "width": 80,
+   "height": 80,
+   "kind": "qr"
+  },
+  {
+   "id": "shape-2",
+   "name": "Shape",
+   "x": 0,
+   "y": 0,
+   "width": 384,
+   "height": 330,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#3A4654"
+   }
+  },
+  {
+   "id": "photo",
+   "name": "Guest photo",
+   "x": 0,
+   "y": 0,
+   "width": 384,
+   "height": 330,
+   "kind": "image",
+   "source": "guest_photo",
+   "fit": "cover",
+   "placeholder": "initials",
+   "placeholderStyle": {
+    "color": "var:accent",
+    "family": "Space Grotesk",
+    "weight": 700
+   }
+  },
+  {
+   "id": "lanyard",
+   "name": "Lanyard slot",
+   "x": 164,
+   "y": 16,
+   "width": 56,
+   "height": 12,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   },
+   "radius": [
+    6,
+    6,
+    6,
+    6
+   ]
+  },
+  {
+   "id": "shape-3",
+   "name": "Shape",
+   "x": 28,
+   "y": 44,
+   "width": 177.547,
+   "height": 27,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#101418"
+   },
+   "radius": [
+    6,
+    6,
+    6,
+    6
+   ]
+  },
+  {
+   "id": "t-event_name",
+   "name": "Event name",
+   "x": 38,
+   "y": 50,
+   "width": 157.567,
+   "height": 15.02,
+   "kind": "text",
+   "text": "{% if event_name %}{{event_name}}{% endif %}{% if event_name %}{% if event_year %} · {% endif %}{% endif %}{% if event_year %}{{event_year}}{% endif %}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#FFFFFF",
+   "letterSpacing": 0.12,
+   "lineHeight": 1.25,
+   "fit": "shrink",
+   "minSize": 7.2
+  },
+  {
+   "id": "shape-4",
+   "name": "Shape",
+   "x": 28,
+   "y": 306,
+   "width": 138.891,
+   "height": 42,
+   "rotation": -3,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "var:accent"
+   }
+  },
+  {
+   "id": "t-role",
+   "name": "Role: ATTENDEE, SPEAKER or STAFF",
+   "x": 42,
+   "y": 313.999,
+   "width": 110.911,
+   "height": 26.02,
+   "rotation": -3,
+   "kind": "text",
+   "text": "{{role}}",
+   "font": {
+    "family": "Space Grotesk",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 20,
+   "color": "#101418",
+   "letterSpacing": 0.1,
+   "lineHeight": 1.3,
+   "fit": "shrink",
+   "minSize": 18
+  }
+ ],
+ "starter": "badge/08-full-bleed"
+}

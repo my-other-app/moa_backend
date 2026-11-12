@@ -1,0 +1,175 @@
+{
+ "name": "shape-svg",
+ "about": "A path, dashed rect/ellipse, gradient fills in SVG, drop shadows.",
+ "kind": "ticket",
+ "layout": {
+  "version": 2,
+  "page": {
+   "widthMm": 338.667,
+   "heightMm": 158.75
+  },
+  "canvas": {
+   "width": 1280,
+   "height": 600
+  },
+  "layers": [
+   {
+    "id": "path",
+    "name": "path",
+    "kind": "shape",
+    "x": 5,
+    "y": 6,
+    "width": 100,
+    "height": 50,
+    "shape": "path",
+    "path": "M0 25 L50 0 L100 25 Q50 50 0 25 Z",
+    "fill": {
+     "type": "solid",
+     "color": "#112233"
+    },
+    "stroke": {
+     "color": "#FFFFFF",
+     "width": 1.5
+    },
+    "shadow": {
+     "x": 0,
+     "y": 22,
+     "blur": 34,
+     "color": "#173F2E47"
+    }
+   },
+   {
+    "id": "dash-rect",
+    "name": "dash-rect",
+    "kind": "shape",
+    "x": 5,
+    "y": 70,
+    "width": 100,
+    "height": 50,
+    "stroke": {
+     "color": "var:accent",
+     "width": 2,
+     "dash": [
+      6,
+      4.14
+     ]
+    },
+    "radius": [
+     10,
+     10,
+     0,
+     0
+    ]
+   },
+   {
+    "id": "dash-ellipse",
+    "name": "dash-ellipse",
+    "kind": "shape",
+    "x": 5,
+    "y": 130,
+    "width": 100,
+    "height": 50,
+    "shape": "ellipse",
+    "fill": {
+     "type": "solid",
+     "color": "#112233"
+    },
+    "stroke": {
+     "color": "#000000",
+     "width": 2,
+     "dash": [
+      6,
+      4
+     ]
+    }
+   },
+   {
+    "id": "lin",
+    "name": "lin",
+    "kind": "shape",
+    "x": 5,
+    "y": 200,
+    "width": 100,
+    "height": 50,
+    "shape": "path",
+    "path": "M0 0H100V50H0Z",
+    "fill": {
+     "type": "linear",
+     "angle": 135,
+     "stops": [
+      {
+       "offset": 0,
+       "color": "var:accent"
+      },
+      {
+       "offset": 0.5,
+       "color": "#FFFFFF80"
+      },
+      {
+       "offset": 1,
+       "color": "brand.primary"
+      }
+     ]
+    }
+   },
+   {
+    "id": "rad",
+    "name": "rad",
+    "kind": "shape",
+    "x": 5,
+    "y": 260,
+    "width": 100,
+    "height": 50,
+    "shape": "path",
+    "path": "M0 0H100V50H0Z",
+    "fill": {
+     "type": "radial",
+     "cx": 0.25,
+     "cy": 0.75,
+     "stops": [
+      {
+       "offset": 0,
+       "color": "#FF0000"
+      },
+      {
+       "offset": 1,
+       "color": "#0000FF"
+      }
+     ]
+    }
+   },
+   {
+    "id": "line",
+    "name": "line",
+    "kind": "shape",
+    "x": 790,
+    "y": 0,
+    "width": 3,
+    "height": 460,
+    "shape": "path",
+    "path": "M1.5 0V460",
+    "stroke": {
+     "color": "#14122B",
+     "width": 3,
+     "dash": [
+      6,
+      3.02
+     ]
+    }
+   }
+  ],
+  "vars": {
+   "accent": "#FF2E97"
+  }
+ },
+ "values": {},
+ "context": {
+  "qr": "TK-48213",
+  "colors": {
+   "primary": "#1F3BD8",
+   "secondary": "#FF8A3D",
+   "ticketType": "#0B6B3A"
+  }
+ },
+ "expected": "<div class=\"moa-doc\" style=\"position:relative;width:1280px;height:600px;overflow:hidden\"><div data-kind=\"shape\" data-layer=\"path\" style=\"position:absolute;left:5px;top:6px;width:100px;height:50px;filter:drop-shadow(0px 22px 17px #173F2E47)\"><svg height=\"100%\" preserveaspectratio=\"none\" style=\"display:block;overflow:visible\" viewbox=\"0 0 100 50\" width=\"100%\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M0 25 L50 0 L100 25 Q50 50 0 25 Z\" fill=\"#112233\" stroke=\"#FFFFFF\" stroke-width=\"1.5\"></path></svg></div><div data-kind=\"shape\" data-layer=\"dash-rect\" style=\"position:absolute;left:5px;top:70px;width:100px;height:50px\"><svg height=\"100%\" preserveaspectratio=\"none\" style=\"display:block;overflow:visible\" viewbox=\"0 0 100 50\" width=\"100%\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M10 1H90A9 9 0 0 1 99 10V49H1V10A9 9 0 0 1 10 1Z\" fill=\"none\" stroke=\"#FF2E97\" stroke-dasharray=\"6 4.14\" stroke-width=\"2\"></path></svg></div><div data-kind=\"shape\" data-layer=\"dash-ellipse\" style=\"position:absolute;left:5px;top:130px;width:100px;height:50px\"><svg height=\"100%\" preserveaspectratio=\"none\" style=\"display:block;overflow:visible\" viewbox=\"0 0 100 50\" width=\"100%\" xmlns=\"http://www.w3.org/2000/svg\"><ellipse cx=\"50\" cy=\"25\" fill=\"#112233\" rx=\"49\" ry=\"24\" stroke=\"#000000\" stroke-dasharray=\"6 4\" stroke-width=\"2\"></ellipse></svg></div><div data-kind=\"shape\" data-layer=\"lin\" style=\"position:absolute;left:5px;top:200px;width:100px;height:50px\"><svg height=\"100%\" preserveaspectratio=\"none\" style=\"display:block;overflow:visible\" viewbox=\"0 0 100 50\" width=\"100%\" xmlns=\"http://www.w3.org/2000/svg\"><defs><lineargradient gradientunits=\"userSpaceOnUse\" id=\"lin-fill\" x1=\"12.5\" x2=\"87.5\" y1=\"-12.5\" y2=\"62.5\"><stop offset=\"0\" stop-color=\"#FF2E97\"></stop><stop offset=\"0.5\" stop-color=\"#FFFFFF80\"></stop><stop offset=\"1\" stop-color=\"#1F3BD8\"></stop></lineargradient></defs><path d=\"M0 0H100V50H0Z\" fill=\"url(#lin-fill)\"></path></svg></div><div data-kind=\"shape\" data-layer=\"rad\" style=\"position:absolute;left:5px;top:260px;width:100px;height:50px\"><svg height=\"100%\" preserveaspectratio=\"none\" style=\"display:block;overflow:visible\" viewbox=\"0 0 100 50\" width=\"100%\" xmlns=\"http://www.w3.org/2000/svg\"><defs><radialgradient cx=\"25\" cy=\"37.5\" gradientunits=\"userSpaceOnUse\" id=\"rad-fill\" r=\"83.853\"><stop offset=\"0\" stop-color=\"#FF0000\"></stop><stop offset=\"1\" stop-color=\"#0000FF\"></stop></radialgradient></defs><path d=\"M0 0H100V50H0Z\" fill=\"url(#rad-fill)\"></path></svg></div><div data-kind=\"shape\" data-layer=\"line\" style=\"position:absolute;left:790px;top:0px;width:3px;height:460px\"><svg height=\"100%\" preserveaspectratio=\"none\" style=\"display:block;overflow:visible\" viewbox=\"0 0 3 460\" width=\"100%\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M1.5 0V460\" fill=\"none\" stroke=\"#14122B\" stroke-dasharray=\"6 3.02\" stroke-width=\"3\"></path></svg></div></div>"
+}

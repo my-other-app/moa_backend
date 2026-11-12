@@ -1,0 +1,290 @@
+{
+ "version": 2,
+ "page": {
+  "widthMm": 54,
+  "heightMm": 85.6
+ },
+ "canvas": {
+  "width": 638,
+  "height": 1011,
+  "background": {
+   "type": "solid",
+   "color": "#FFFFFF"
+  }
+ },
+ "vars": {},
+ "layers": [
+  {
+   "id": "head",
+   "name": "Brand head",
+   "x": 0,
+   "y": 0,
+   "width": 638,
+   "height": 400,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "brand.primary"
+   }
+  },
+  {
+   "id": "logo",
+   "name": "Club logo",
+   "x": 44,
+   "y": 40,
+   "width": 170,
+   "height": 70,
+   "kind": "image",
+   "source": "org_logo",
+   "fit": "contain"
+  },
+  {
+   "id": "event",
+   "name": "Event name",
+   "x": 44,
+   "y": 121.664,
+   "width": 550,
+   "height": 67.2,
+   "kind": "text",
+   "text": "{{event_name | upper}}",
+   "font": {
+    "family": "Roboto Mono",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 28,
+   "color": "#FFFFFF",
+   "letterSpacing": 0.0714,
+   "maxLines": 2,
+   "fit": "shrink",
+   "minSize": 14
+  },
+  {
+   "id": "when",
+   "name": "Date",
+   "x": 44,
+   "y": 193.307,
+   "width": 300,
+   "height": 26.4,
+   "kind": "text",
+   "text": "{{event_date | upper}}",
+   "font": {
+    "family": "Roboto Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 22,
+   "color": "brand.secondary",
+   "letterSpacing": 0.0909,
+   "fit": "shrink",
+   "minSize": 11
+  },
+  {
+   "id": "accent",
+   "name": "Accent rule",
+   "x": 44,
+   "y": 236,
+   "width": 64,
+   "height": 6,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "brand.secondary"
+   }
+  },
+  {
+   "id": "photo-ring",
+   "name": "Photo ring",
+   "x": 169,
+   "y": 250,
+   "width": 300,
+   "height": 300,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   },
+   "radius": [
+    150,
+    150,
+    150,
+    150
+   ]
+  },
+  {
+   "id": "photo",
+   "name": "Guest photo",
+   "x": 184,
+   "y": 265,
+   "width": 270,
+   "height": 270,
+   "kind": "image",
+   "source": "guest_photo",
+   "fit": "cover",
+   "radius": [
+    135,
+    135,
+    135,
+    135
+   ],
+   "placeholder": "initials",
+   "placeholderStyle": {
+    "color": "brand.primary",
+    "background": {
+     "type": "solid",
+     "color": "#E9ECF2"
+    },
+    "family": "Inter",
+    "weight": 700
+   }
+  },
+  {
+   "id": "first",
+   "name": "First name",
+   "x": 44,
+   "y": 574.418,
+   "width": 550,
+   "height": 100.8,
+   "kind": "text",
+   "text": "{{first_name}}",
+   "font": {
+    "family": "Inter",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 84,
+   "color": "#141614",
+   "align": "center",
+   "fit": "shrink",
+   "minSize": 42
+  },
+  {
+   "id": "last",
+   "name": "Last name",
+   "x": 44,
+   "y": 676.199,
+   "width": 550,
+   "height": 48,
+   "kind": "text",
+   "text": "{{last_name}}",
+   "font": {
+    "family": "Inter",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 40,
+   "color": "#3C413D",
+   "align": "center",
+   "fit": "shrink",
+   "minSize": 20
+  },
+  {
+   "id": "org",
+   "name": "Organization",
+   "x": 44,
+   "y": 736.129,
+   "width": 550,
+   "height": 31.2,
+   "kind": "text",
+   "text": "{% if organization %}{{organization}}{% endif %}",
+   "font": {
+    "family": "Inter",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 26,
+   "color": "#6B716C",
+   "align": "center",
+   "fit": "shrink",
+   "minSize": 13
+  },
+  {
+   "id": "foot",
+   "name": "Role band",
+   "x": 0,
+   "y": 800,
+   "width": 638,
+   "height": 211,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "ticket_type"
+   }
+  },
+  {
+   "id": "type",
+   "name": "Ticket type",
+   "x": 44,
+   "y": 836,
+   "width": 330,
+   "height": 76.8,
+   "kind": "text",
+   "text": "{{ticket_type | upper}}",
+   "font": {
+    "family": "Bebas Neue",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 64,
+   "color": "#FFFFFF",
+   "letterSpacing": 0.0312,
+   "fit": "shrink",
+   "minSize": 32
+  },
+  {
+   "id": "code",
+   "name": "Ticket code",
+   "x": 44,
+   "y": 931.307,
+   "width": 330,
+   "height": 26.4,
+   "opacity": 0.85,
+   "kind": "text",
+   "text": "{{ticket_code}}",
+   "font": {
+    "family": "Roboto Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 22,
+   "color": "#FFFFFF",
+   "fit": "shrink",
+   "minSize": 11
+  },
+  {
+   "id": "qr-tile",
+   "name": "QR tile",
+   "x": 418,
+   "y": 818,
+   "width": 176,
+   "height": 176,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   },
+   "radius": [
+    20,
+    20,
+    20,
+    20
+   ]
+  },
+  {
+   "id": "qr",
+   "name": "QR code",
+   "x": 431,
+   "y": 831,
+   "width": 150,
+   "height": 150,
+   "kind": "qr",
+   "quietZone": 2
+  }
+ ],
+ "starter": "badge/card_cr80"
+}

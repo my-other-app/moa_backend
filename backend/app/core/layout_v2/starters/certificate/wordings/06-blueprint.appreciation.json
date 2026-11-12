@@ -1,0 +1,579 @@
+{
+ "version": 2,
+ "page": {
+  "widthMm": 297,
+  "heightMm": 210
+ },
+ "canvas": {
+  "width": 1123,
+  "height": 794
+ },
+ "vars": {
+  "accent": "#0B3A8F"
+ },
+ "layers": [
+  {
+   "id": "shape",
+   "name": "Shape",
+   "x": 0,
+   "y": 0,
+   "width": 1123,
+   "height": 794,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#F3F7FC"
+   }
+  },
+  {
+   "id": "pattern",
+   "name": "Pattern",
+   "x": 0,
+   "y": 0,
+   "width": 1123,
+   "height": 794,
+   "kind": "svg",
+   "markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1123.0 794.0\"><defs><linearGradient id=\"g\" gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1=\"12\" x2=\"24\" y2=\"12\"><stop offset=\"0.042\" stop-color=\"#D3E0F3\"></stop><stop offset=\"0.042\" stop-color=\"#000000\" stop-opacity=\"0\"></stop></linearGradient><pattern id=\"p\" patternUnits=\"userSpaceOnUse\" x=\"9\" y=\"13\" width=\"24\" height=\"24\"><rect width=\"24\" height=\"24\" fill=\"url(#g)\"></rect></pattern></defs><rect width=\"1123.0\" height=\"794.0\" fill=\"url(#p)\"></rect></svg>",
+   "fit": "stretch"
+  },
+  {
+   "id": "pattern-2",
+   "name": "Pattern",
+   "x": 0,
+   "y": 0,
+   "width": 1123,
+   "height": 794,
+   "kind": "svg",
+   "markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1123.0 794.0\"><defs><linearGradient id=\"g\" gradientUnits=\"userSpaceOnUse\" x1=\"12\" y1=\"0\" x2=\"12\" y2=\"24\"><stop offset=\"0.042\" stop-color=\"#D3E0F3\"></stop><stop offset=\"0.042\" stop-color=\"#000000\" stop-opacity=\"0\"></stop></linearGradient><pattern id=\"p\" patternUnits=\"userSpaceOnUse\" x=\"9\" y=\"13\" width=\"24\" height=\"24\"><rect width=\"24\" height=\"24\" fill=\"url(#g)\"></rect></pattern></defs><rect width=\"1123.0\" height=\"794.0\" fill=\"url(#p)\"></rect></svg>",
+   "fit": "stretch"
+  },
+  {
+   "id": "shape-2",
+   "name": "Shape",
+   "x": 32,
+   "y": 32,
+   "width": 1059,
+   "height": 730,
+   "kind": "shape",
+   "shape": "rect",
+   "stroke": {
+    "color": "var:accent",
+    "width": 2
+   }
+  },
+  {
+   "id": "art",
+   "name": "Artwork",
+   "x": 0,
+   "y": 0,
+   "width": 1123,
+   "height": 794,
+   "kind": "svg",
+   "markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1123 794\"><g fill=\"none\" stroke=\"#0B3A8F\" stroke-width=\"2\"><path d=\"M561.5 20v24M561.5 750v24M20 397h24M1079 397h24\"></path><circle cx=\"561.5\" cy=\"32\" r=\"6\"></circle><circle cx=\"561.5\" cy=\"762\" r=\"6\"></circle><circle cx=\"32\" cy=\"397\" r=\"6\"></circle><circle cx=\"1091\" cy=\"397\" r=\"6\"></circle></g></svg>",
+   "fit": "contain",
+   "recolor": {
+    "#0B3A8F": "var:accent"
+   }
+  },
+  {
+   "id": "t-institute_name",
+   "name": "Issuer",
+   "x": 76,
+   "y": 80.5,
+   "width": 867.02,
+   "height": 19.02,
+   "kind": "text",
+   "text": "{{institute_name}}",
+   "font": {
+    "family": "IBM Plex Mono",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 15,
+   "color": "var:accent",
+   "letterSpacing": 0.16,
+   "lineHeight": 1.267,
+   "transform": "upper",
+   "fit": "shrink",
+   "minSize": 7.5
+  },
+  {
+   "id": "logo",
+   "name": "Club logo",
+   "x": 951,
+   "y": 68,
+   "width": 96,
+   "height": 44,
+   "kind": "image",
+   "source": "org_logo",
+   "fit": "contain"
+  },
+  {
+   "id": "slot-kicker",
+   "name": "CERTIFICATE OF APPRECIATION",
+   "x": 76,
+   "y": 237.734,
+   "width": 971.02,
+   "height": 18.02,
+   "kind": "text",
+   "text": "CERTIFICATE OF APPRECIATION",
+   "font": {
+    "family": "IBM Plex Mono",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 14,
+   "color": "var:accent",
+   "letterSpacing": 0.24,
+   "lineHeight": 1.286,
+   "fit": "shrink",
+   "minSize": 11.2
+  },
+  {
+   "id": "t-this-drawing-certifies-t",
+   "name": "This drawing certifies that",
+   "x": 76,
+   "y": 269.734,
+   "width": 971.02,
+   "height": 20.02,
+   "kind": "text",
+   "text": "This drawing certifies that",
+   "font": {
+    "family": "IBM Plex Sans",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 16,
+   "color": "#0C1B33",
+   "lineHeight": 1.25,
+   "fit": "shrink",
+   "minSize": 12.8
+  },
+  {
+   "id": "t-recipient_name",
+   "name": "Recipient's name",
+   "x": 76,
+   "y": 303.734,
+   "width": 971.02,
+   "height": 65.114,
+   "kind": "text",
+   "text": "{{recipient_name}}",
+   "font": {
+    "family": "IBM Plex Sans",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 62,
+   "color": "var:accent",
+   "letterSpacing": -0.01,
+   "lineHeight": 1.05,
+   "textWrap": "balance",
+   "maxLines": 2,
+   "fit": "shrink",
+   "minSize": 31
+  },
+  {
+   "id": "art-2",
+   "name": "Artwork",
+   "x": 76,
+   "y": 382.828,
+   "width": 560,
+   "height": 16,
+   "kind": "svg",
+   "markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 560 16\"><path d=\"M0 8h560M0 0v16M560 0v16M1 8l12-5v10zM559 8l-12-5v10z\" fill=\"#0B3A8F\" stroke=\"#0B3A8F\" stroke-width=\"1.5\"></path></svg>",
+   "fit": "contain",
+   "recolor": {
+    "#0B3A8F": "var:accent"
+   }
+  },
+  {
+   "id": "slot-statement",
+   "name": "Programme",
+   "x": 76,
+   "y": 412.828,
+   "width": 971.02,
+   "height": 29.458,
+   "kind": "text",
+   "spans": [
+    {
+     "text": "is thanked for their contribution to "
+    },
+    {
+     "text": "{{course_title}}",
+     "weight": 600
+    },
+    {
+     "text": "."
+    }
+   ],
+   "font": {
+    "family": "IBM Plex Sans",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 19,
+   "color": "#0C1B33",
+   "lineHeight": 1.55,
+   "textWrap": "pretty",
+   "maxLines": 3,
+   "fit": "shrink",
+   "minSize": 9.5
+  },
+  {
+   "id": "line-bottom",
+   "name": "Line (bottom)",
+   "x": 76,
+   "y": 685,
+   "width": 220,
+   "height": 2,
+   "showIf": "signatory_name",
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#0C1B33"
+   }
+  },
+  {
+   "id": "signature",
+   "name": "Signature",
+   "x": 76,
+   "y": 643,
+   "width": 220,
+   "height": 42,
+   "showIf": "signatory_name",
+   "kind": "image",
+   "source": "signature_1",
+   "fit": "contain",
+   "valign": "bottom"
+  },
+  {
+   "id": "t-signatory_name",
+   "name": "Signatory",
+   "x": 76,
+   "y": 692,
+   "width": 220.02,
+   "height": 20.02,
+   "showIf": "signatory_name",
+   "kind": "text",
+   "text": "{{signatory_name}}",
+   "font": {
+    "family": "IBM Plex Sans",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 16,
+   "color": "#0C1B33",
+   "lineHeight": 1.25,
+   "fit": "shrink",
+   "minSize": 8
+  },
+  {
+   "id": "t-signatory_designation",
+   "name": "Signatory's title",
+   "x": 76,
+   "y": 717,
+   "width": 220.02,
+   "height": 17.02,
+   "showIf": "signatory_designation signatory_name",
+   "kind": "text",
+   "spans": [
+    {
+     "text": "APPROVED BY · "
+    },
+    {
+     "text": "{{signatory_designation}}",
+     "transform": "upper"
+    }
+   ],
+   "font": {
+    "family": "IBM Plex Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 13,
+   "color": "#3D4C66",
+   "lineHeight": 1.308,
+   "fit": "shrink",
+   "minSize": 9.1
+  },
+  {
+   "id": "shape-3",
+   "name": "Shape",
+   "x": 613,
+   "y": 568,
+   "width": 434,
+   "height": 166,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#F3F7FC"
+   },
+   "stroke": {
+    "color": "var:accent",
+    "width": 2
+   }
+  },
+  {
+   "id": "shape-4",
+   "name": "Shape",
+   "x": 615,
+   "y": 570,
+   "width": 130,
+   "height": 162,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   }
+  },
+  {
+   "id": "line-right",
+   "name": "Line (right)",
+   "x": 743,
+   "y": 570,
+   "width": 2,
+   "height": 162,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "var:accent"
+   }
+  },
+  {
+   "id": "qr",
+   "name": "QR code",
+   "x": 627,
+   "y": 599,
+   "width": 104,
+   "height": 104,
+   "kind": "qr"
+  },
+  {
+   "id": "line-right-2",
+   "name": "Line (right)",
+   "x": 894,
+   "y": 570,
+   "width": 1,
+   "height": 75,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "var:accent"
+   }
+  },
+  {
+   "id": "line-bottom-2",
+   "name": "Line (bottom)",
+   "x": 745,
+   "y": 644,
+   "width": 150,
+   "height": 1,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "var:accent"
+   }
+  },
+  {
+   "id": "t-cert-no",
+   "name": "CERT NO.",
+   "x": 757,
+   "y": 579,
+   "width": 125.02,
+   "height": 15.02,
+   "kind": "text",
+   "text": "CERT NO.",
+   "font": {
+    "family": "IBM Plex Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "var:accent",
+   "lineHeight": 1.25,
+   "fit": "shrink",
+   "minSize": 9.6
+  },
+  {
+   "id": "t-certificate_id",
+   "name": "Certificate number",
+   "x": 757,
+   "y": 597,
+   "width": 125.02,
+   "height": 38.02,
+   "kind": "text",
+   "text": "{{certificate_id}}",
+   "font": {
+    "family": "IBM Plex Sans",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 15,
+   "color": "#0C1B33",
+   "lineHeight": 1.267,
+   "maxLines": 2,
+   "fit": "shrink",
+   "minSize": 10.5
+  },
+  {
+   "id": "line-bottom-3",
+   "name": "Line (bottom)",
+   "x": 895,
+   "y": 644,
+   "width": 150,
+   "height": 1,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "var:accent"
+   }
+  },
+  {
+   "id": "t-issued",
+   "name": "ISSUED",
+   "x": 907,
+   "y": 579,
+   "width": 126.02,
+   "height": 15.02,
+   "kind": "text",
+   "text": "ISSUED",
+   "font": {
+    "family": "IBM Plex Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "var:accent",
+   "lineHeight": 1.25,
+   "fit": "shrink",
+   "minSize": 9.6
+  },
+  {
+   "id": "t-issue_date",
+   "name": "Issued on",
+   "x": 907,
+   "y": 597,
+   "width": 126.02,
+   "height": 38.02,
+   "kind": "text",
+   "text": "{{issue_date}}",
+   "font": {
+    "family": "IBM Plex Sans",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 15,
+   "color": "#0C1B33",
+   "lineHeight": 1.267,
+   "maxLines": 2,
+   "fit": "shrink",
+   "minSize": 10.5
+  },
+  {
+   "id": "line-right-3",
+   "name": "Line (right)",
+   "x": 894,
+   "y": 645,
+   "width": 1,
+   "height": 87,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "var:accent"
+   }
+  },
+  {
+   "id": "t-grade",
+   "name": "GRADE",
+   "x": 757,
+   "y": 654,
+   "width": 125.02,
+   "height": 15.02,
+   "showIf": "grade",
+   "kind": "text",
+   "text": "GRADE",
+   "font": {
+    "family": "IBM Plex Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "var:accent",
+   "lineHeight": 1.25,
+   "fit": "shrink",
+   "minSize": 9.6
+  },
+  {
+   "id": "t-grade-2",
+   "name": "Grade",
+   "x": 757,
+   "y": 672,
+   "width": 125.02,
+   "height": 19.02,
+   "showIf": "grade",
+   "kind": "text",
+   "text": "{{grade}}",
+   "font": {
+    "family": "IBM Plex Sans",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 15,
+   "color": "#0C1B33",
+   "lineHeight": 1.267,
+   "fit": "shrink",
+   "minSize": 10.5
+  },
+  {
+   "id": "t-scan-to-verify",
+   "name": "SCAN TO VERIFY",
+   "x": 907,
+   "y": 654,
+   "width": 126.02,
+   "height": 15.02,
+   "kind": "text",
+   "text": "SCAN TO VERIFY",
+   "font": {
+    "family": "IBM Plex Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "var:accent",
+   "lineHeight": 1.25,
+   "fit": "shrink",
+   "minSize": 9.6
+  },
+  {
+   "id": "t-verify_url",
+   "name": "Verify address",
+   "x": 907,
+   "y": 672,
+   "width": 126.02,
+   "height": 51.02,
+   "kind": "text",
+   "text": "{{verify_url}}",
+   "font": {
+    "family": "IBM Plex Sans",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 13,
+   "color": "#0C1B33",
+   "lineHeight": 1.308,
+   "maxLines": 3,
+   "fit": "shrink",
+   "minSize": 9.1
+  }
+ ],
+ "starter": "certificate/06-blueprint"
+}

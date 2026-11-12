@@ -1,0 +1,510 @@
+{
+ "version": 2,
+ "page": {
+  "widthMm": 297,
+  "heightMm": 210
+ },
+ "canvas": {
+  "width": 1123,
+  "height": 794,
+  "background": {
+   "type": "solid",
+   "color": "#FFFFFF"
+  }
+ },
+ "vars": {
+  "accent": "#D90429"
+ },
+ "layers": [
+  {
+   "id": "t-certificate",
+   "name": "Certificate",
+   "x": 64,
+   "y": 52,
+   "width": 656.629,
+   "height": 122.411,
+   "kind": "text",
+   "text": "Certificate",
+   "font": {
+    "family": "Archivo",
+    "weight": 800,
+    "style": "normal"
+   },
+   "size": 136,
+   "color": "#0A0A0A",
+   "letterSpacing": -0.045,
+   "lineHeight": 0.9,
+   "fit": "shrink",
+   "minSize": 108.8
+  },
+  {
+   "id": "shape",
+   "name": "Shape",
+   "x": 975,
+   "y": 64,
+   "width": 84,
+   "height": 84,
+   "kind": "shape",
+   "shape": "ellipse",
+   "fill": {
+    "type": "solid",
+    "color": "var:accent"
+   }
+  },
+  {
+   "id": "shape-2",
+   "name": "Shape",
+   "x": 64,
+   "y": 196.391,
+   "width": 995,
+   "height": 4,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#0A0A0A"
+   }
+  },
+  {
+   "id": "slot-kicker",
+   "name": "Of completion · Awarded to",
+   "x": 64,
+   "y": 328.703,
+   "width": 570.426,
+   "height": 17.02,
+   "kind": "text",
+   "text": "Of completion · Awarded to",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 14,
+   "color": "var:accent",
+   "letterSpacing": 0.14,
+   "lineHeight": 1.214,
+   "transform": "upper",
+   "fit": "shrink",
+   "minSize": 11.2
+  },
+  {
+   "id": "t-recipient_name",
+   "name": "Recipient's name",
+   "x": 64,
+   "y": 359.703,
+   "width": 570.426,
+   "height": 52.02,
+   "kind": "text",
+   "text": "{{recipient_name}}",
+   "font": {
+    "family": "Archivo",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 50,
+   "color": "#0A0A0A",
+   "letterSpacing": -0.02,
+   "lineHeight": 1.04,
+   "textWrap": "balance",
+   "maxLines": 2,
+   "fit": "shrink",
+   "minSize": 25
+  },
+  {
+   "id": "slot-statement",
+   "name": "Programme",
+   "x": 64,
+   "y": 425.703,
+   "width": 520.02,
+   "height": 54.02,
+   "kind": "text",
+   "spans": [
+    {
+     "text": "for completing "
+    },
+    {
+     "text": "{{course_title}}",
+     "weight": 600
+    },
+    {
+     "text": " at {{institute_name}}."
+    }
+   ],
+   "font": {
+    "family": "Inter",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 18,
+   "color": "#0A0A0A",
+   "lineHeight": 1.5,
+   "textWrap": "pretty",
+   "maxLines": 3,
+   "fit": "shrink",
+   "minSize": 9
+  },
+  {
+   "id": "line-bottom",
+   "name": "Line (bottom)",
+   "x": 658.406,
+   "y": 496.703,
+   "width": 400.594,
+   "height": 1,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#0A0A0A"
+   }
+  },
+  {
+   "id": "line-top",
+   "name": "Line (top)",
+   "x": 658.406,
+   "y": 328.703,
+   "width": 400.594,
+   "height": 1,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#0A0A0A"
+   }
+  },
+  {
+   "id": "t-certificate-no",
+   "name": "Certificate No.",
+   "x": 658.406,
+   "y": 340.703,
+   "width": 95.958,
+   "height": 19.02,
+   "kind": "text",
+   "text": "Certificate No.",
+   "font": {
+    "family": "Inter",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 14,
+   "color": "#4A4A4A",
+   "lineHeight": 1.357,
+   "fit": "shrink",
+   "minSize": 11.2
+  },
+  {
+   "id": "t-certificate_id",
+   "name": "Certificate number",
+   "x": 762.324,
+   "y": 340.703,
+   "width": 296.676,
+   "height": 19.02,
+   "kind": "text",
+   "text": "{{certificate_id}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 15,
+   "color": "#0A0A0A",
+   "lineHeight": 1.267,
+   "align": "right",
+   "fit": "shrink",
+   "minSize": 6
+  },
+  {
+   "id": "line-top-2",
+   "name": "Line (top)",
+   "x": 658.406,
+   "y": 370.703,
+   "width": 400.594,
+   "height": 1,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#0A0A0A"
+   }
+  },
+  {
+   "id": "t-issued",
+   "name": "Issued",
+   "x": 658.406,
+   "y": 382.703,
+   "width": 43.583,
+   "height": 19.02,
+   "kind": "text",
+   "text": "Issued",
+   "font": {
+    "family": "Inter",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 14,
+   "color": "#4A4A4A",
+   "lineHeight": 1.357,
+   "fit": "shrink",
+   "minSize": 11.2
+  },
+  {
+   "id": "t-issue_date",
+   "name": "Issued on",
+   "x": 709.949,
+   "y": 382.703,
+   "width": 349.051,
+   "height": 19.02,
+   "kind": "text",
+   "text": "{{issue_date}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 15,
+   "color": "#0A0A0A",
+   "lineHeight": 1.267,
+   "align": "right",
+   "fit": "shrink",
+   "minSize": 10.5
+  },
+  {
+   "id": "line-top-3",
+   "name": "Line (top)",
+   "x": 658.406,
+   "y": 412.703,
+   "width": 400.594,
+   "height": 1,
+   "showIf": "duration_hours",
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#0A0A0A"
+   }
+  },
+  {
+   "id": "t-duration",
+   "name": "Duration",
+   "x": 658.406,
+   "y": 424.703,
+   "width": 56.176,
+   "height": 19.02,
+   "showIf": "duration_hours",
+   "kind": "text",
+   "text": "Duration",
+   "font": {
+    "family": "Inter",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 14,
+   "color": "#4A4A4A",
+   "lineHeight": 1.357,
+   "fit": "shrink",
+   "minSize": 11.2
+  },
+  {
+   "id": "t-duration_hours",
+   "name": "Duration in hours",
+   "x": 722.543,
+   "y": 424.703,
+   "width": 336.458,
+   "height": 19.02,
+   "showIf": "duration_hours",
+   "kind": "text",
+   "text": "{{duration_hours}} hours",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 15,
+   "color": "#0A0A0A",
+   "lineHeight": 1.267,
+   "align": "right",
+   "fit": "shrink",
+   "minSize": 10.5
+  },
+  {
+   "id": "line-top-4",
+   "name": "Line (top)",
+   "x": 658.406,
+   "y": 454.703,
+   "width": 400.594,
+   "height": 1,
+   "showIf": "grade",
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#0A0A0A"
+   }
+  },
+  {
+   "id": "t-grade",
+   "name": "Grade",
+   "x": 658.406,
+   "y": 466.703,
+   "width": 40.333,
+   "height": 19.02,
+   "showIf": "grade",
+   "kind": "text",
+   "text": "Grade",
+   "font": {
+    "family": "Inter",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 14,
+   "color": "#4A4A4A",
+   "lineHeight": 1.357,
+   "fit": "shrink",
+   "minSize": 11.2
+  },
+  {
+   "id": "t-grade-2",
+   "name": "Grade",
+   "x": 706.699,
+   "y": 466.703,
+   "width": 352.301,
+   "height": 19.02,
+   "showIf": "grade",
+   "kind": "text",
+   "text": "{{grade}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 15,
+   "color": "#0A0A0A",
+   "lineHeight": 1.267,
+   "align": "right",
+   "fit": "shrink",
+   "minSize": 10.5
+  },
+  {
+   "id": "line-bottom-2",
+   "name": "Line (bottom)",
+   "x": 64,
+   "y": 689,
+   "width": 230,
+   "height": 2,
+   "showIf": "signatory_name",
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#0A0A0A"
+   }
+  },
+  {
+   "id": "signature",
+   "name": "Signature",
+   "x": 64,
+   "y": 647,
+   "width": 230,
+   "height": 42,
+   "showIf": "signatory_name",
+   "kind": "image",
+   "source": "signature_1",
+   "fit": "contain",
+   "valign": "bottom"
+  },
+  {
+   "id": "t-signatory_name",
+   "name": "Signatory",
+   "x": 64,
+   "y": 696,
+   "width": 230.02,
+   "height": 20.02,
+   "showIf": "signatory_name",
+   "kind": "text",
+   "text": "{{signatory_name}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 16,
+   "color": "#0A0A0A",
+   "lineHeight": 1.25,
+   "fit": "shrink",
+   "minSize": 8
+  },
+  {
+   "id": "t-signatory_designation",
+   "name": "Signatory's title",
+   "x": 64,
+   "y": 721,
+   "width": 230.02,
+   "height": 17.02,
+   "showIf": "signatory_designation signatory_name",
+   "kind": "text",
+   "text": "{{signatory_designation}}",
+   "font": {
+    "family": "Inter",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 14,
+   "color": "#4A4A4A",
+   "lineHeight": 1.214,
+   "fit": "shrink",
+   "minSize": 9.8
+  },
+  {
+   "id": "t-scan-to-verify",
+   "name": "Scan to verify",
+   "x": 815.214,
+   "y": 682,
+   "width": 115.786,
+   "height": 20.02,
+   "kind": "text",
+   "text": "Scan to verify",
+   "font": {
+    "family": "Archivo",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 18,
+   "color": "var:accent",
+   "lineHeight": 1.111,
+   "align": "right",
+   "fit": "shrink",
+   "minSize": 14.4
+  },
+  {
+   "id": "t-verify_url",
+   "name": "Verify address",
+   "x": 710.98,
+   "y": 706,
+   "width": 220.02,
+   "height": 32.02,
+   "kind": "text",
+   "text": "{{verify_url}}",
+   "font": {
+    "family": "Inter",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 13,
+   "color": "#4A4A4A",
+   "lineHeight": 1.231,
+   "align": "right",
+   "maxLines": 2,
+   "fit": "shrink",
+   "minSize": 9.1
+  },
+  {
+   "id": "qr",
+   "name": "QR code",
+   "x": 947,
+   "y": 626,
+   "width": 112,
+   "height": 112,
+   "kind": "qr"
+  }
+ ],
+ "starter": "certificate/07-swiss-minimal"
+}

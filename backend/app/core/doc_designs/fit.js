@@ -25,6 +25,10 @@
    names and codes, then single-line values widest first: the value most
    likely to be crowding the others gives way first.
 
+   A layout v2 page (a .moa-doc inside the .moa-page; app/core/layout_v2)
+   has its own modes, shrink | ellipsis | none: each text layer fits its own
+   box and nothing else is looked at (fitLayer, below).
+
    Then window.__moaReady = true: the render service waits for exactly that.
    A font that failed to load throws, so the render fails instead of printing
    in a stand-in font. */
@@ -261,7 +265,7 @@
   }
 
   function v2Over(el, lines) {
-    return v2Lines(el) > lines || el.offsetHeight > v2Room(el) + 1 || el.scrollWidth > el.clientWidth + 1;
+    return v2Lines(el) > lines || el.offsetHeight > v2Room(el) + 1;
   }
 
   function v2Clamp(el, lines) {

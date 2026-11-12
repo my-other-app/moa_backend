@@ -1,0 +1,325 @@
+{
+ "version": 2,
+ "page": {
+  "widthMm": 297,
+  "heightMm": 210
+ },
+ "canvas": {
+  "width": 1123,
+  "height": 794,
+  "background": {
+   "type": "solid",
+   "color": "#F1F4EC"
+  }
+ },
+ "vars": {
+  "accent": "#2F5D46"
+ },
+ "layers": [
+  {
+   "id": "art",
+   "name": "Artwork",
+   "x": 0,
+   "y": 0,
+   "width": 1123,
+   "height": 794,
+   "kind": "svg",
+   "markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1123 794\"><circle cx=\"1010\" cy=\"397\" r=\"150\" fill=\"#DCE6D2\"></circle><g transform=\"translate(1123 0) rotate(100) scale(1.9)\"><path d=\"M0 0C36-26 84-26 120 0C84 26 36 26 0 0z\" fill=\"#2F5D46\"></path><path d=\"M0 0h120\" fill=\"none\" stroke=\"#F1F4EC\" stroke-width=\"1\"></path></g><g transform=\"translate(1123 0) rotate(125) scale(1.6)\"><path d=\"M0 0C36-26 84-26 120 0C84 26 36 26 0 0z\" fill=\"#8FB49A\"></path><path d=\"M0 0h120\" fill=\"none\" stroke=\"#F1F4EC\" stroke-width=\"1\"></path></g><g transform=\"translate(1123 0) rotate(150) scale(1.9)\"><path d=\"M0 0C36-26 84-26 120 0C84 26 36 26 0 0z\" fill=\"#5E8C72\"></path><path d=\"M0 0h120\" fill=\"none\" stroke=\"#F1F4EC\" stroke-width=\"1\"></path></g><g transform=\"translate(1123 0) rotate(172) scale(1.4)\"><path d=\"M0 0C36-26 84-26 120 0C84 26 36 26 0 0z\" fill=\"#2F5D46\"></path><path d=\"M0 0h120\" fill=\"none\" stroke=\"#F1F4EC\" stroke-width=\"1\"></path></g><g transform=\"translate(1123 794) rotate(188) scale(1.4)\"><path d=\"M0 0C36-26 84-26 120 0C84 26 36 26 0 0z\" fill=\"#5E8C72\"></path><path d=\"M0 0h120\" fill=\"none\" stroke=\"#F1F4EC\" stroke-width=\"1\"></path></g><g transform=\"translate(1123 794) rotate(210) scale(1.9)\"><path d=\"M0 0C36-26 84-26 120 0C84 26 36 26 0 0z\" fill=\"#2F5D46\"></path><path d=\"M0 0h120\" fill=\"none\" stroke=\"#F1F4EC\" stroke-width=\"1\"></path></g><g transform=\"translate(1123 794) rotate(235) scale(1.6)\"><path d=\"M0 0C36-26 84-26 120 0C84 26 36 26 0 0z\" fill=\"#8FB49A\"></path><path d=\"M0 0h120\" fill=\"none\" stroke=\"#F1F4EC\" stroke-width=\"1\"></path></g><g transform=\"translate(1123 794) rotate(260) scale(1.9)\"><path d=\"M0 0C36-26 84-26 120 0C84 26 36 26 0 0z\" fill=\"#5E8C72\"></path><path d=\"M0 0h120\" fill=\"none\" stroke=\"#F1F4EC\" stroke-width=\"1\"></path></g></svg>",
+   "fit": "contain",
+   "recolor": {
+    "#2F5D46": "var:accent"
+   }
+  },
+  {
+   "id": "logo",
+   "name": "Club logo",
+   "x": 96,
+   "y": 72,
+   "width": 48,
+   "height": 48,
+   "kind": "image",
+   "source": "org_logo",
+   "fit": "contain"
+  },
+  {
+   "id": "t-institute_name",
+   "name": "Issuer",
+   "x": 158,
+   "y": 87,
+   "width": 662.02,
+   "height": 18.02,
+   "kind": "text",
+   "text": "{{institute_name}}",
+   "font": {
+    "family": "Karla",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 15,
+   "color": "var:accent",
+   "letterSpacing": 0.2,
+   "transform": "upper",
+   "fit": "shrink",
+   "minSize": 7.5
+  },
+  {
+   "id": "slot-title",
+   "name": "Certificate of Participation",
+   "x": 96,
+   "y": 275.141,
+   "width": 724.02,
+   "height": 32.02,
+   "kind": "text",
+   "text": "Certificate of Participation",
+   "font": {
+    "family": "Fraunces",
+    "weight": 500,
+    "style": "italic"
+   },
+   "size": 26,
+   "color": "var:accent",
+   "lineHeight": 1.231,
+   "fit": "shrink",
+   "minSize": 20.8
+  },
+  {
+   "id": "t-this-certificate-is-pres",
+   "name": "This certificate is presented to",
+   "x": 96,
+   "y": 321.141,
+   "width": 724.02,
+   "height": 19.02,
+   "kind": "text",
+   "text": "This certificate is presented to",
+   "font": {
+    "family": "Karla",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 16,
+   "color": "#4A5A4F",
+   "lineHeight": 1.188,
+   "fit": "shrink",
+   "minSize": 12.8
+  },
+  {
+   "id": "t-recipient_name",
+   "name": "Recipient's name",
+   "x": 96,
+   "y": 354.141,
+   "width": 724.02,
+   "height": 69.317,
+   "kind": "text",
+   "text": "{{recipient_name}}",
+   "font": {
+    "family": "Fraunces",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 66,
+   "color": "#1F2A22",
+   "letterSpacing": -0.01,
+   "lineHeight": 1.05,
+   "textWrap": "balance",
+   "maxLines": 2,
+   "fit": "shrink",
+   "minSize": 33
+  },
+  {
+   "id": "slot-statement",
+   "name": "Programme",
+   "x": 96,
+   "y": 437.438,
+   "width": 724.02,
+   "height": 29.458,
+   "kind": "text",
+   "spans": [
+    {
+     "text": "for taking part in "
+    },
+    {
+     "text": "{{course_title}}",
+     "weight": 700
+    },
+    {
+     "text": " on {{event_date}}."
+    }
+   ],
+   "font": {
+    "family": "Karla",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 19,
+   "color": "#1F2A22",
+   "lineHeight": 1.55,
+   "textWrap": "pretty",
+   "maxLines": 3,
+   "fit": "shrink",
+   "minSize": 9.5
+  },
+  {
+   "id": "shape",
+   "name": "Shape",
+   "x": 96,
+   "y": 622,
+   "width": 108,
+   "height": 108,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   },
+   "stroke": {
+    "color": "var:accent",
+    "width": 2
+   },
+   "radius": [
+    14,
+    14,
+    14,
+    14
+   ]
+  },
+  {
+   "id": "qr",
+   "name": "QR code",
+   "x": 106,
+   "y": 632,
+   "width": 88,
+   "height": 88,
+   "kind": "qr"
+  },
+  {
+   "id": "t-scan-to-verify",
+   "name": "Scan to verify",
+   "x": 218,
+   "y": 647.5,
+   "width": 136.114,
+   "height": 18.02,
+   "kind": "text",
+   "text": "Scan to verify",
+   "font": {
+    "family": "Karla",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 15,
+   "color": "var:accent",
+   "fit": "shrink",
+   "minSize": 12
+  },
+  {
+   "id": "t-certificate-no",
+   "name": "Certificate No.",
+   "x": 218,
+   "y": 668.5,
+   "width": 136.114,
+   "height": 15.02,
+   "kind": "text",
+   "text": "Certificate No.",
+   "font": {
+    "family": "Karla",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 13,
+   "color": "#4A5A4F",
+   "lineHeight": 1.154,
+   "fit": "shrink",
+   "minSize": 10.4
+  },
+  {
+   "id": "t-certificate_id",
+   "name": "Certificate number",
+   "x": 201.98,
+   "y": 686.5,
+   "width": 152.114,
+   "height": 18.02,
+   "kind": "text",
+   "text": "{{certificate_id}}",
+   "font": {
+    "family": "Karla",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 15,
+   "color": "#1F2A22",
+   "align": "right",
+   "fit": "shrink",
+   "minSize": 6
+  },
+  {
+   "id": "line-bottom",
+   "name": "Line (bottom)",
+   "x": 402.094,
+   "y": 682,
+   "width": 210,
+   "height": 2,
+   "showIf": "signatory_name",
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#1F2A22"
+   }
+  },
+  {
+   "id": "signature",
+   "name": "Signature",
+   "x": 402.094,
+   "y": 640,
+   "width": 210,
+   "height": 42,
+   "showIf": "signatory_name",
+   "kind": "image",
+   "source": "signature_1",
+   "fit": "contain",
+   "valign": "bottom"
+  },
+  {
+   "id": "t-signatory_name",
+   "name": "Signatory",
+   "x": 402.094,
+   "y": 689,
+   "width": 210.02,
+   "height": 19.02,
+   "showIf": "signatory_name",
+   "kind": "text",
+   "text": "{{signatory_name}}",
+   "font": {
+    "family": "Karla",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 16,
+   "color": "#1F2A22",
+   "lineHeight": 1.188,
+   "fit": "shrink",
+   "minSize": 8
+  },
+  {
+   "id": "t-signatory_designation",
+   "name": "Signatory's title",
+   "x": 402.094,
+   "y": 713,
+   "width": 210.02,
+   "height": 17.02,
+   "showIf": "signatory_designation signatory_name",
+   "kind": "text",
+   "text": "{{signatory_designation}}",
+   "font": {
+    "family": "Karla",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 14,
+   "color": "#4A5A4F",
+   "lineHeight": 1.214,
+   "fit": "shrink",
+   "minSize": 9.8
+  }
+ ],
+ "starter": "certificate/05-botanical"
+}

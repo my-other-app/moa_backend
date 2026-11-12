@@ -1,0 +1,272 @@
+{
+ "version": 2,
+ "page": {
+  "widthMm": 101.6,
+  "heightMm": 152.4
+ },
+ "canvas": {
+  "width": 384,
+  "height": 576,
+  "background": {
+   "type": "solid",
+   "color": "var:accent"
+  }
+ },
+ "vars": {
+  "accent": "#FFD83A"
+ },
+ "layers": [
+  {
+   "id": "lanyard",
+   "name": "Lanyard slot",
+   "x": 164,
+   "y": 16,
+   "width": 56,
+   "height": 12,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   },
+   "stroke": {
+    "color": "#15130D",
+    "width": 1
+   },
+   "radius": [
+    6,
+    6,
+    6,
+    6
+   ]
+  },
+  {
+   "id": "t-event_name",
+   "name": "Event name",
+   "x": 28,
+   "y": 44,
+   "width": 169.411,
+   "height": 15.02,
+   "kind": "text",
+   "text": "{{event_name}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#15130D",
+   "letterSpacing": 0.12,
+   "lineHeight": 1.25,
+   "fit": "shrink",
+   "minSize": 7.2
+  },
+  {
+   "id": "t-event_date",
+   "name": "Event date",
+   "x": 205.355,
+   "y": 44,
+   "width": 150.645,
+   "height": 15.02,
+   "kind": "text",
+   "text": "{{event_date}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#15130D",
+   "letterSpacing": 0.12,
+   "lineHeight": 1.25,
+   "align": "right",
+   "fit": "shrink",
+   "minSize": 8.4
+  },
+  {
+   "id": "t-hello-i-m",
+   "name": "Hello, I'm",
+   "x": 28,
+   "y": 150.313,
+   "width": 328.02,
+   "height": 19.02,
+   "kind": "text",
+   "text": "Hello, I'm",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 15,
+   "color": "#15130D",
+   "lineHeight": 1.267,
+   "fit": "shrink",
+   "minSize": 12
+  },
+  {
+   "id": "t-first_name",
+   "name": "First name",
+   "x": 28,
+   "y": 175.313,
+   "width": 328.02,
+   "height": 79.208,
+   "kind": "text",
+   "text": "{{first_name}}",
+   "font": {
+    "family": "Space Grotesk",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 88,
+   "color": "#15130D",
+   "letterSpacing": -0.04,
+   "lineHeight": 0.9,
+   "transform": "upper",
+   "fit": "shrink",
+   "minSize": 18
+  },
+  {
+   "id": "t-last_name",
+   "name": "Last name",
+   "x": 28,
+   "y": 260.5,
+   "width": 328.02,
+   "height": 35.208,
+   "showIf": "last_name",
+   "kind": "text",
+   "text": "{{last_name}}",
+   "font": {
+    "family": "Space Grotesk",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 32,
+   "color": "#15130D",
+   "letterSpacing": -0.01,
+   "lineHeight": 1.1,
+   "fit": "shrink",
+   "minSize": 18
+  },
+  {
+   "id": "shape",
+   "name": "Shape",
+   "x": 28,
+   "y": 323.188,
+   "width": 40,
+   "height": 4,
+   "showIf": "organization",
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#15130D"
+   }
+  },
+  {
+   "id": "t-organization",
+   "name": "Their organisation",
+   "x": 80,
+   "y": 315.688,
+   "width": 276.02,
+   "height": 19.02,
+   "showIf": "organization",
+   "kind": "text",
+   "text": "{{organization}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 15,
+   "color": "#15130D",
+   "lineHeight": 1.267,
+   "fit": "ellipsis"
+  },
+  {
+   "id": "shape-2",
+   "name": "Shape",
+   "x": 0,
+   "y": 426,
+   "width": 384,
+   "height": 150,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#15130D"
+   }
+  },
+  {
+   "id": "t-role",
+   "name": "Role: ATTENDEE, SPEAKER or STAFF",
+   "x": 28,
+   "y": 463.813,
+   "width": 220.02,
+   "height": 30.02,
+   "kind": "text",
+   "text": "{{role}}",
+   "font": {
+    "family": "Space Grotesk",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 30,
+   "color": "var:accent",
+   "letterSpacing": 0.06,
+   "lineHeight": 1,
+   "fit": "shrink",
+   "minSize": 18
+  },
+  {
+   "id": "t-access_level",
+   "name": "Access",
+   "x": 28,
+   "y": 501.813,
+   "width": 212.02,
+   "height": 36.395,
+   "kind": "text",
+   "text": "{% if access_level %}{{access_level}}\n{% endif %}ID {{badge_id}}",
+   "font": {
+    "family": "Inter",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 13,
+   "color": "#FFFFFF",
+   "lineHeight": 1.4,
+   "maxLines": 2,
+   "fit": "shrink",
+   "minSize": 9.1
+  },
+  {
+   "id": "shape-3",
+   "name": "Shape",
+   "x": 248,
+   "y": 447,
+   "width": 108,
+   "height": 108,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   },
+   "radius": [
+    10,
+    10,
+    10,
+    10
+   ]
+  },
+  {
+   "id": "qr",
+   "name": "QR code",
+   "x": 256,
+   "y": 455,
+   "width": 92,
+   "height": 92,
+   "kind": "qr"
+  }
+ ],
+ "starter": "badge/04-big-name"
+}

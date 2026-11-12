@@ -367,7 +367,12 @@ def test_the_font_lock_matches_the_files():
     assert on_disk == listed
     used = {face for d in ALL for face in d.fonts}
     locked = {(fam, f["style"], f["weight"]) for fam, info in lock["families"].items() for f in info["faces"]}
-    assert used == locked, "exactly the faces the designs use"
+    # Exactly the faces the designs use, and the layout-v2 editor's five v1 fonts (doc_fonts.EDITOR_QUERIES).
+    from app.core.layout_v2.fonts import V1_FAMILIES
+
+    assert used <= locked
+    assert {fam for fam, _s, _w in locked - used} <= set(V1_FAMILIES.values())
+    assert {fam for fam, _s, _w in locked} >= set(V1_FAMILIES.values())
 
 
 async def test_the_static_font_route_is_public_and_immutable(client):

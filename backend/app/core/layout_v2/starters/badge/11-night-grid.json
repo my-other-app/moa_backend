@@ -1,0 +1,297 @@
+{
+ "version": 2,
+ "page": {
+  "widthMm": 101.6,
+  "heightMm": 152.4
+ },
+ "canvas": {
+  "width": 384,
+  "height": 576
+ },
+ "vars": {
+  "accent": "#6CF0C2"
+ },
+ "layers": [
+  {
+   "id": "shape",
+   "name": "Shape",
+   "x": 0,
+   "y": 0,
+   "width": 384,
+   "height": 576,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#0C1022"
+   }
+  },
+  {
+   "id": "pattern",
+   "name": "Pattern",
+   "x": 0,
+   "y": 0,
+   "width": 384,
+   "height": 576,
+   "kind": "svg",
+   "markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 384.0 576.0\"><defs><radialGradient id=\"g\" gradientUnits=\"userSpaceOnUse\" cx=\"8\" cy=\"8\" r=\"11.314\"><stop offset=\"0.106\" stop-color=\"#252D55\"></stop><stop offset=\"0.124\" stop-color=\"#000000\" stop-opacity=\"0\"></stop></radialGradient><pattern id=\"p\" patternUnits=\"userSpaceOnUse\" x=\"0\" y=\"0\" width=\"16\" height=\"16\"><rect width=\"16\" height=\"16\" fill=\"url(#g)\"></rect></pattern></defs><rect width=\"384.0\" height=\"576.0\" fill=\"url(#p)\"></rect></svg>",
+   "fit": "stretch"
+  },
+  {
+   "id": "lanyard",
+   "name": "Lanyard slot",
+   "x": 164,
+   "y": 16,
+   "width": 56,
+   "height": 12,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#F4F6FA"
+   },
+   "radius": [
+    6,
+    6,
+    6,
+    6
+   ]
+  },
+  {
+   "id": "t-event_name",
+   "name": "Event name",
+   "x": 28,
+   "y": 48,
+   "width": 328.02,
+   "height": 20.817,
+   "kind": "text",
+   "text": "> {{event_name}}",
+   "font": {
+    "family": "Space Mono",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 13,
+   "color": "var:accent",
+   "lineHeight": 1.6,
+   "fit": "ellipsis"
+  },
+  {
+   "id": "t-event_tagline",
+   "name": "Tagline",
+   "x": 28,
+   "y": 68.797,
+   "width": 328.02,
+   "height": 20.817,
+   "kind": "text",
+   "text": "// {% if event_tagline %}{{event_tagline}} · {% endif %}{{event_date}}",
+   "font": {
+    "family": "Space Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 13,
+   "color": "#B4BDE0",
+   "lineHeight": 1.6,
+   "fit": "ellipsis"
+  },
+  {
+   "id": "t-first_name",
+   "name": "First name",
+   "x": 28,
+   "y": 127.594,
+   "width": 328.02,
+   "height": 114.02,
+   "kind": "text",
+   "text": "{{first_name}}{% if last_name %}\n{{last_name}}{% endif %}",
+   "font": {
+    "family": "Space Grotesk",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 60,
+   "color": "#FFFFFF",
+   "letterSpacing": -0.03,
+   "lineHeight": 0.95,
+   "maxLines": 2,
+   "fit": "shrink",
+   "minSize": 18
+  },
+  {
+   "id": "t-team_name",
+   "name": "Team",
+   "x": 28,
+   "y": 255.594,
+   "width": 328.02,
+   "height": 21.02,
+   "showIf": "team_name",
+   "kind": "text",
+   "text": "team: {{team_name}}",
+   "font": {
+    "family": "Space Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 14,
+   "color": "#B4BDE0",
+   "lineHeight": 1.5,
+   "fit": "shrink",
+   "minSize": 9.8
+  },
+  {
+   "id": "shape-2",
+   "name": "Shape",
+   "x": 28,
+   "y": 298.594,
+   "width": 160.844,
+   "height": 49,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#0C1022"
+   },
+   "stroke": {
+    "color": "var:accent",
+    "width": 2
+   }
+  },
+  {
+   "id": "t-role",
+   "name": "Role: ATTENDEE, SPEAKER or STAFF",
+   "x": 44,
+   "y": 306.594,
+   "width": 128.864,
+   "height": 33.02,
+   "kind": "text",
+   "text": "{{role}}",
+   "font": {
+    "family": "Space Mono",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 22,
+   "color": "var:accent",
+   "letterSpacing": 0.12,
+   "lineHeight": 1.5,
+   "fit": "shrink",
+   "minSize": 18
+  },
+  {
+   "id": "t-badge_id",
+   "name": "Badge number",
+   "x": 28,
+   "y": 481.719,
+   "width": 103.473,
+   "height": 22.114,
+   "kind": "text",
+   "spans": [
+    {
+     "text": "id    ",
+     "color": "#B4BDE0"
+    },
+    {
+     "text": "{{badge_id}}"
+    }
+   ],
+   "font": {
+    "family": "Space Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 13,
+   "color": "#FFFFFF",
+   "lineHeight": 1.7,
+   "fit": "shrink",
+   "minSize": 9.1
+  },
+  {
+   "id": "t-table_no",
+   "name": "Table",
+   "x": 28,
+   "y": 503.813,
+   "width": 103.473,
+   "height": 22.114,
+   "showIf": "table_no",
+   "kind": "text",
+   "spans": [
+    {
+     "text": "table ",
+     "color": "#B4BDE0"
+    },
+    {
+     "text": "{{table_no}}"
+    }
+   ],
+   "font": {
+    "family": "Space Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 13,
+   "color": "#FFFFFF",
+   "lineHeight": 1.7,
+   "fit": "shrink",
+   "minSize": 9.1
+  },
+  {
+   "id": "t-track",
+   "name": "Track",
+   "x": 28,
+   "y": 525.906,
+   "width": 103.473,
+   "height": 22.114,
+   "showIf": "track",
+   "kind": "text",
+   "spans": [
+    {
+     "text": "track ",
+     "color": "#B4BDE0"
+    },
+    {
+     "text": "{{track}}"
+    }
+   ],
+   "font": {
+    "family": "Space Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 13,
+   "color": "#FFFFFF",
+   "lineHeight": 1.7,
+   "fit": "shrink",
+   "minSize": 9.1
+  },
+  {
+   "id": "shape-3",
+   "name": "Shape",
+   "x": 256,
+   "y": 448,
+   "width": 100,
+   "height": 100,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   },
+   "radius": [
+    4,
+    4,
+    4,
+    4
+   ]
+  },
+  {
+   "id": "qr",
+   "name": "QR code",
+   "x": 264,
+   "y": 456,
+   "width": 84,
+   "height": 84,
+   "kind": "qr"
+  }
+ ],
+ "starter": "badge/11-night-grid"
+}

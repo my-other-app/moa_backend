@@ -1,0 +1,459 @@
+{
+ "version": 2,
+ "page": {
+  "widthMm": 297,
+  "heightMm": 210
+ },
+ "canvas": {
+  "width": 1123,
+  "height": 794,
+  "background": {
+   "type": "solid",
+   "color": "#0B0F14"
+  }
+ },
+ "vars": {
+  "accent": "#3DDC97"
+ },
+ "layers": [
+  {
+   "id": "art",
+   "name": "Artwork",
+   "x": 0,
+   "y": 0,
+   "width": 1123,
+   "height": 794,
+   "kind": "svg",
+   "markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1123 794\"><rect x=\"32\" y=\"32\" width=\"1059\" height=\"730\" fill=\"none\" stroke=\"#2A3440\" stroke-width=\"1\"></rect><path d=\"M32 76V32h44M1047 32h44v44M32 718v44h44M1047 762h44v-44\" fill=\"none\" stroke=\"#3DDC97\" stroke-width=\"3\"></path></svg>",
+   "fit": "contain",
+   "recolor": {
+    "#3DDC97": "var:accent"
+   }
+  },
+  {
+   "id": "t--certify-issue-signed",
+   "name": "$  certify --issue --signed",
+   "x": 80,
+   "y": 72,
+   "width": 234.02,
+   "height": 20.02,
+   "kind": "text",
+   "spans": [
+    {
+     "text": "$",
+     "color": "var:accent"
+    },
+    {
+     "text": " certify --issue --signed"
+    }
+   ],
+   "font": {
+    "family": "JetBrains Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 15,
+   "color": "#E6EDF3",
+   "lineHeight": 1.333,
+   "fit": "shrink",
+   "minSize": 12
+  },
+  {
+   "id": "t-institute_name",
+   "name": "Issuer",
+   "x": 321.98,
+   "y": 73,
+   "width": 721.02,
+   "height": 18.02,
+   "kind": "text",
+   "text": "{{institute_name}}",
+   "font": {
+    "family": "JetBrains Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 14,
+   "color": "#9AA7B4",
+   "lineHeight": 1.286,
+   "align": "right",
+   "transform": "upper",
+   "fit": "shrink",
+   "minSize": 7
+  },
+  {
+   "id": "slot-kicker",
+   "name": "> CERTIFICATE OF PARTICIPATION",
+   "x": 80,
+   "y": 227.094,
+   "width": 963.02,
+   "height": 18.02,
+   "kind": "text",
+   "text": "> CERTIFICATE OF PARTICIPATION",
+   "font": {
+    "family": "JetBrains Mono",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 14,
+   "color": "var:accent",
+   "letterSpacing": 0.22,
+   "lineHeight": 1.286,
+   "fit": "shrink",
+   "minSize": 11.2
+  },
+  {
+   "id": "t-recipient_name",
+   "name": "Recipient's name",
+   "x": 80,
+   "y": 259.094,
+   "width": 963.02,
+   "height": 68.645,
+   "kind": "text",
+   "text": "{{recipient_name}}",
+   "font": {
+    "family": "Space Grotesk",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 66,
+   "color": "#E6EDF3",
+   "letterSpacing": -0.02,
+   "lineHeight": 1.04,
+   "textWrap": "balance",
+   "maxLines": 2,
+   "fit": "shrink",
+   "minSize": 33
+  },
+  {
+   "id": "slot-statement",
+   "name": "Programme",
+   "x": 80,
+   "y": 341.719,
+   "width": 963.02,
+   "height": 27.208,
+   "kind": "text",
+   "spans": [
+    {
+     "text": "took part in "
+    },
+    {
+     "text": "{{course_title}}",
+     "weight": 700,
+     "color": "#FFFFFF"
+    },
+    {
+     "text": " on {{event_date}}"
+    }
+   ],
+   "font": {
+    "family": "JetBrains Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 17,
+   "color": "#C9D3DC",
+   "lineHeight": 1.6,
+   "maxLines": 3,
+   "fit": "shrink",
+   "minSize": 8.5
+  },
+  {
+   "id": "t-issued-on",
+   "name": "issued_on:",
+   "x": 80,
+   "y": 563,
+   "width": 150.02,
+   "height": 20.02,
+   "kind": "text",
+   "text": "issued_on:",
+   "font": {
+    "family": "JetBrains Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 15,
+   "color": "#9AA7B4",
+   "lineHeight": 1.333,
+   "fit": "shrink",
+   "minSize": 12
+  },
+  {
+   "id": "t-issue_date",
+   "name": "Issued on",
+   "x": 177.98,
+   "y": 563,
+   "width": 253.02,
+   "height": 20.02,
+   "kind": "text",
+   "text": "{{issue_date}}",
+   "font": {
+    "family": "JetBrains Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 15,
+   "color": "#E6EDF3",
+   "lineHeight": 1.333,
+   "align": "right",
+   "fit": "shrink",
+   "minSize": 10.5
+  },
+  {
+   "id": "t-duration",
+   "name": "duration:",
+   "x": 80,
+   "y": 590,
+   "width": 150.02,
+   "height": 20.02,
+   "showIf": "duration_hours",
+   "kind": "text",
+   "text": "duration:",
+   "font": {
+    "family": "JetBrains Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 15,
+   "color": "#9AA7B4",
+   "lineHeight": 1.333,
+   "fit": "shrink",
+   "minSize": 12
+  },
+  {
+   "id": "t-duration_hours",
+   "name": "Duration in hours",
+   "x": 168.98,
+   "y": 590,
+   "width": 262.02,
+   "height": 20.02,
+   "showIf": "duration_hours",
+   "kind": "text",
+   "text": "{{duration_hours}} hours",
+   "font": {
+    "family": "JetBrains Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 15,
+   "color": "#E6EDF3",
+   "lineHeight": 1.333,
+   "align": "right",
+   "fit": "shrink",
+   "minSize": 10.5
+  },
+  {
+   "id": "t-grade",
+   "name": "grade:",
+   "x": 80,
+   "y": 617,
+   "width": 150.02,
+   "height": 20.02,
+   "showIf": "grade",
+   "kind": "text",
+   "text": "grade:",
+   "font": {
+    "family": "JetBrains Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 15,
+   "color": "#9AA7B4",
+   "lineHeight": 1.333,
+   "fit": "shrink",
+   "minSize": 12
+  },
+  {
+   "id": "t-grade-2",
+   "name": "Grade",
+   "x": 141.98,
+   "y": 617,
+   "width": 289.02,
+   "height": 20.02,
+   "showIf": "grade",
+   "kind": "text",
+   "text": "{{grade}}",
+   "font": {
+    "family": "JetBrains Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 15,
+   "color": "#E6EDF3",
+   "lineHeight": 1.333,
+   "align": "right",
+   "fit": "shrink",
+   "minSize": 10.5
+  },
+  {
+   "id": "t-credential-id",
+   "name": "credential_id:",
+   "x": 80,
+   "y": 644,
+   "width": 150.02,
+   "height": 20.02,
+   "kind": "text",
+   "text": "credential_id:",
+   "font": {
+    "family": "JetBrains Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 15,
+   "color": "#9AA7B4",
+   "lineHeight": 1.333,
+   "fit": "shrink",
+   "minSize": 12
+  },
+  {
+   "id": "t-certificate_id",
+   "name": "Certificate number",
+   "x": 213.98,
+   "y": 644,
+   "width": 217.02,
+   "height": 20.02,
+   "kind": "text",
+   "text": "{{certificate_id}}",
+   "font": {
+    "family": "JetBrains Mono",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 15,
+   "color": "var:accent",
+   "lineHeight": 1.333,
+   "align": "right",
+   "fit": "shrink",
+   "minSize": 10.5
+  },
+  {
+   "id": "line-bottom",
+   "name": "Line (bottom)",
+   "x": 80,
+   "y": 725,
+   "width": 200,
+   "height": 1,
+   "showIf": "signatory_name",
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#E6EDF3"
+   }
+  },
+  {
+   "id": "signature",
+   "name": "Signature",
+   "x": 80,
+   "y": 690,
+   "width": 200,
+   "height": 35,
+   "showIf": "signatory_name",
+   "kind": "image",
+   "source": "signature_1",
+   "fit": "contain",
+   "valign": "bottom"
+  },
+  {
+   "id": "t-signatory_name",
+   "name": "Signatory",
+   "x": 296,
+   "y": 686,
+   "width": 135.02,
+   "height": 20.02,
+   "showIf": "signatory_name",
+   "kind": "text",
+   "text": "{{signatory_name}}",
+   "font": {
+    "family": "JetBrains Mono",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 15,
+   "color": "#E6EDF3",
+   "lineHeight": 1.333,
+   "fit": "shrink",
+   "minSize": 7.5
+  },
+  {
+   "id": "t-signatory_designation",
+   "name": "Signatory's title",
+   "x": 296,
+   "y": 709,
+   "width": 135.02,
+   "height": 17.02,
+   "showIf": "signatory_designation signatory_name",
+   "kind": "text",
+   "text": "{{signatory_designation}}",
+   "font": {
+    "family": "JetBrains Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 13,
+   "color": "#9AA7B4",
+   "lineHeight": 1.308,
+   "fit": "shrink",
+   "minSize": 9.1
+  },
+  {
+   "id": "shape",
+   "name": "Shape",
+   "x": 887,
+   "y": 504,
+   "width": 156,
+   "height": 156,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   },
+   "radius": [
+    8,
+    8,
+    8,
+    8
+   ]
+  },
+  {
+   "id": "qr",
+   "name": "QR code",
+   "x": 899,
+   "y": 516,
+   "width": 132,
+   "height": 132,
+   "kind": "qr"
+  },
+  {
+   "id": "t-verify_url",
+   "name": "Verify address",
+   "x": 722.98,
+   "y": 672,
+   "width": 320.02,
+   "height": 54.02,
+   "kind": "text",
+   "spans": [
+    {
+     "text": "$",
+     "color": "var:accent"
+    },
+    {
+     "text": " verify {{verify_url}}"
+    }
+   ],
+   "font": {
+    "family": "JetBrains Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 14,
+   "color": "#E6EDF3",
+   "lineHeight": 1.286,
+   "align": "right",
+   "maxLines": 3,
+   "fit": "shrink",
+   "minSize": 9.8
+  }
+ ],
+ "starter": "certificate/09-terminal"
+}

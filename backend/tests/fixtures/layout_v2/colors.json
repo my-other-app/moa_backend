@@ -1,0 +1,106 @@
+{
+ "name": "colors",
+ "values": {},
+ "kind": "ticket",
+ "about": "Every colour reference: hex6, hex8 (upper-cased), var:accent with and without vars.accent, brand and ticket type.",
+ "layout": {
+  "version": 2,
+  "page": {
+   "widthMm": 101.6,
+   "heightMm": 152.4
+  },
+  "canvas": {
+   "width": 384,
+   "height": 576
+  },
+  "layers": [
+   {
+    "id": "hex",
+    "name": "hex",
+    "kind": "shape",
+    "x": 5,
+    "y": 6,
+    "width": 100,
+    "height": 50,
+    "fill": {
+     "type": "solid",
+     "color": "#abcdef"
+    }
+   },
+   {
+    "id": "hex8",
+    "name": "hex8",
+    "kind": "shape",
+    "x": 5,
+    "y": 60,
+    "width": 100,
+    "height": 50,
+    "fill": {
+     "type": "solid",
+     "color": "#abcdef80"
+    }
+   },
+   {
+    "id": "accent",
+    "name": "accent",
+    "kind": "shape",
+    "x": 5,
+    "y": 120,
+    "width": 100,
+    "height": 50,
+    "fill": {
+     "type": "solid",
+     "color": "var:accent"
+    }
+   },
+   {
+    "id": "primary",
+    "name": "primary",
+    "kind": "shape",
+    "x": 5,
+    "y": 180,
+    "width": 100,
+    "height": 50,
+    "fill": {
+     "type": "solid",
+     "color": "brand.primary"
+    }
+   },
+   {
+    "id": "secondary",
+    "name": "secondary",
+    "kind": "shape",
+    "x": 5,
+    "y": 240,
+    "width": 100,
+    "height": 50,
+    "fill": {
+     "type": "solid",
+     "color": "brand.secondary"
+    }
+   },
+   {
+    "id": "type",
+    "name": "type",
+    "kind": "shape",
+    "x": 5,
+    "y": 300,
+    "width": 100,
+    "height": 50,
+    "fill": {
+     "type": "solid",
+     "color": "ticket_type"
+    }
+   }
+  ]
+ },
+ "context": {
+  "qr": "TK-48213",
+  "colors": {
+   "primary": "#1F3BD8",
+   "secondary": "#FF8A3D",
+   "ticketType": "#0B6B3A"
+  }
+ },
+ "expected": "<div class=\"moa-doc\" style=\"position:relative;width:384px;height:576px;overflow:hidden\"><div data-kind=\"shape\" data-layer=\"hex\" style=\"position:absolute;left:5px;top:6px;width:100px;height:50px;box-sizing:border-box;background:#ABCDEF\"></div><div data-kind=\"shape\" data-layer=\"hex8\" style=\"position:absolute;left:5px;top:60px;width:100px;height:50px;box-sizing:border-box;background:#ABCDEF80\"></div><div data-kind=\"shape\" data-layer=\"accent\" style=\"position:absolute;left:5px;top:120px;width:100px;height:50px;box-sizing:border-box;background:#000000\"></div><div data-kind=\"shape\" data-layer=\"primary\" style=\"position:absolute;left:5px;top:180px;width:100px;height:50px;box-sizing:border-box;background:#1F3BD8\"></div><div data-kind=\"shape\" data-layer=\"secondary\" style=\"position:absolute;left:5px;top:240px;width:100px;height:50px;box-sizing:border-box;background:#FF8A3D\"></div><div data-kind=\"shape\" data-layer=\"type\" style=\"position:absolute;left:5px;top:300px;width:100px;height:50px;box-sizing:border-box;background:#0B6B3A\"></div></div>"
+}

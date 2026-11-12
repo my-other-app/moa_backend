@@ -1,0 +1,440 @@
+{
+ "version": 2,
+ "page": {
+  "widthMm": 297,
+  "heightMm": 210
+ },
+ "canvas": {
+  "width": 1123,
+  "height": 794,
+  "background": {
+   "type": "solid",
+   "color": "#F6F7F9"
+  }
+ },
+ "vars": {
+  "accent": "#6B1F2E"
+ },
+ "layers": [
+  {
+   "id": "shape",
+   "name": "Shape",
+   "x": 24,
+   "y": 24,
+   "width": 1075,
+   "height": 746,
+   "kind": "shape",
+   "shape": "rect",
+   "stroke": {
+    "color": "var:accent",
+    "width": 2
+   }
+  },
+  {
+   "id": "shape-2",
+   "name": "Shape",
+   "x": 34,
+   "y": 34,
+   "width": 1055,
+   "height": 726,
+   "kind": "shape",
+   "shape": "rect",
+   "stroke": {
+    "color": "#7A5E1E",
+    "width": 1
+   }
+  },
+  {
+   "id": "art",
+   "name": "Artwork",
+   "x": 0,
+   "y": 0,
+   "width": 1123,
+   "height": 794,
+   "kind": "svg",
+   "markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1123 794\"><g fill=\"none\" stroke=\"#7A5E1E\" stroke-width=\"1\" opacity=\"0.2\"><ellipse cx=\"561.5\" cy=\"397\" rx=\"300\" ry=\"120\"></ellipse><ellipse cx=\"561.5\" cy=\"397\" rx=\"300\" ry=\"120\" transform=\"rotate(15 561.5 397)\"></ellipse><ellipse cx=\"561.5\" cy=\"397\" rx=\"300\" ry=\"120\" transform=\"rotate(30 561.5 397)\"></ellipse><ellipse cx=\"561.5\" cy=\"397\" rx=\"300\" ry=\"120\" transform=\"rotate(45 561.5 397)\"></ellipse><ellipse cx=\"561.5\" cy=\"397\" rx=\"300\" ry=\"120\" transform=\"rotate(60 561.5 397)\"></ellipse><ellipse cx=\"561.5\" cy=\"397\" rx=\"300\" ry=\"120\" transform=\"rotate(75 561.5 397)\"></ellipse><ellipse cx=\"561.5\" cy=\"397\" rx=\"300\" ry=\"120\" transform=\"rotate(90 561.5 397)\"></ellipse><ellipse cx=\"561.5\" cy=\"397\" rx=\"300\" ry=\"120\" transform=\"rotate(105 561.5 397)\"></ellipse><ellipse cx=\"561.5\" cy=\"397\" rx=\"300\" ry=\"120\" transform=\"rotate(120 561.5 397)\"></ellipse><ellipse cx=\"561.5\" cy=\"397\" rx=\"300\" ry=\"120\" transform=\"rotate(135 561.5 397)\"></ellipse><ellipse cx=\"561.5\" cy=\"397\" rx=\"300\" ry=\"120\" transform=\"rotate(150 561.5 397)\"></ellipse><ellipse cx=\"561.5\" cy=\"397\" rx=\"300\" ry=\"120\" transform=\"rotate(165 561.5 397)\"></ellipse></g><g fill=\"#6B1F2E\"><path d=\"M34 22l12 12-12 12-12-12z\"></path><path d=\"M1089 22l12 12-12 12-12-12z\"></path><path d=\"M34 748l12 12-12 12-12-12z\"></path><path d=\"M1089 748l12 12-12 12-12-12z\"></path></g></svg>",
+   "fit": "contain",
+   "recolor": {
+    "#6B1F2E": "var:accent"
+   }
+  },
+  {
+   "id": "logo",
+   "name": "Club logo",
+   "x": 535.5,
+   "y": 72,
+   "width": 52,
+   "height": 52,
+   "kind": "image",
+   "source": "org_logo",
+   "fit": "contain"
+  },
+  {
+   "id": "t-institute_name",
+   "name": "Issuer",
+   "x": 99.99,
+   "y": 134,
+   "width": 923.02,
+   "height": 19.02,
+   "kind": "text",
+   "text": "{{institute_name}}",
+   "font": {
+    "family": "EB Garamond",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 15,
+   "color": "#7A5E1E",
+   "letterSpacing": 0.32,
+   "lineHeight": 1.267,
+   "align": "center",
+   "transform": "upper",
+   "fit": "shrink",
+   "minSize": 7.5
+  },
+  {
+   "id": "t-certificate",
+   "name": "Certificate",
+   "x": 410.724,
+   "y": 192.563,
+   "width": 301.536,
+   "height": 65.114,
+   "kind": "text",
+   "text": "Certificate",
+   "font": {
+    "family": "Playfair Display",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 62,
+   "color": "var:accent",
+   "lineHeight": 1.05,
+   "align": "center",
+   "fit": "shrink",
+   "minSize": 49.6
+  },
+  {
+   "id": "slot-subtitle",
+   "name": "of Appreciation",
+   "x": 433.459,
+   "y": 263.656,
+   "width": 256.051,
+   "height": 22.02,
+   "kind": "text",
+   "text": "of Appreciation",
+   "font": {
+    "family": "EB Garamond",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 17,
+   "color": "#1E1B1C",
+   "letterSpacing": 0.42,
+   "lineHeight": 1.294,
+   "align": "center",
+   "transform": "upper",
+   "fit": "shrink",
+   "minSize": 13.6
+  },
+  {
+   "id": "t-this-is-to-certify-that",
+   "name": "This is to certify that",
+   "x": 489.334,
+   "y": 325.203,
+   "width": 144.333,
+   "height": 25.02,
+   "kind": "text",
+   "text": "This is to certify that",
+   "font": {
+    "family": "EB Garamond",
+    "weight": 400,
+    "style": "italic"
+   },
+   "size": 19,
+   "color": "#1E1B1C",
+   "lineHeight": 1.316,
+   "align": "center",
+   "fit": "shrink",
+   "minSize": 15.2
+  },
+  {
+   "id": "t-recipient_name",
+   "name": "Recipient's name",
+   "x": 99.99,
+   "y": 354.203,
+   "width": 923.02,
+   "height": 85.114,
+   "kind": "text",
+   "text": "{{recipient_name}}",
+   "font": {
+    "family": "Pinyon Script",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 74,
+   "color": "var:accent",
+   "lineHeight": 1.15,
+   "align": "center",
+   "maxLines": 2,
+   "fit": "shrink",
+   "minSize": 37
+  },
+  {
+   "id": "shape-3",
+   "name": "Shape",
+   "x": 331.5,
+   "y": 443.297,
+   "width": 460,
+   "height": 1,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#7A5E1E"
+   }
+  },
+  {
+   "id": "slot-statement",
+   "name": "is thanked with appreciation for contributing to",
+   "x": 388.396,
+   "y": 483.859,
+   "width": 346.208,
+   "height": 25.02,
+   "kind": "text",
+   "text": "is thanked with appreciation for contributing to",
+   "font": {
+    "family": "EB Garamond",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 19,
+   "color": "#1E1B1C",
+   "lineHeight": 1.316,
+   "align": "center",
+   "fit": "shrink",
+   "minSize": 15.2
+  },
+  {
+   "id": "t-course_title",
+   "name": "Programme",
+   "x": 99.99,
+   "y": 514.859,
+   "width": 923.02,
+   "height": 33.614,
+   "kind": "text",
+   "text": "{{course_title}}",
+   "font": {
+    "family": "Playfair Display",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 28,
+   "color": "#1E1B1C",
+   "align": "center",
+   "maxLines": 2,
+   "fit": "shrink",
+   "minSize": 14
+  },
+  {
+   "id": "slot-details",
+   "name": "Event date",
+   "x": 99.99,
+   "y": 554.453,
+   "width": 923.02,
+   "height": 22.02,
+   "kind": "text",
+   "text": "held on {{event_date}}",
+   "font": {
+    "family": "EB Garamond",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 17,
+   "color": "#1E1B1C",
+   "lineHeight": 1.294,
+   "align": "center",
+   "maxLines": 2,
+   "fit": "shrink",
+   "minSize": 8.5
+  },
+  {
+   "id": "line-bottom",
+   "name": "Line (bottom)",
+   "x": 100,
+   "y": 677,
+   "width": 220,
+   "height": 1,
+   "showIf": "signatory_name",
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#1E1B1C"
+   }
+  },
+  {
+   "id": "signature",
+   "name": "Signature",
+   "x": 100,
+   "y": 634,
+   "width": 220,
+   "height": 43,
+   "showIf": "signatory_name",
+   "kind": "image",
+   "source": "signature_1",
+   "fit": "contain",
+   "valign": "bottom"
+  },
+  {
+   "id": "t-signatory_name",
+   "name": "Signatory",
+   "x": 100,
+   "y": 682,
+   "width": 398.504,
+   "height": 22.02,
+   "showIf": "signatory_name",
+   "kind": "text",
+   "text": "{{signatory_name}}",
+   "font": {
+    "family": "EB Garamond",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 17,
+   "color": "#1E1B1C",
+   "lineHeight": 1.294,
+   "fit": "shrink",
+   "minSize": 8.5
+  },
+  {
+   "id": "t-signatory_designation",
+   "name": "Signatory's title",
+   "x": 100,
+   "y": 708,
+   "width": 372.848,
+   "height": 18.02,
+   "showIf": "signatory_designation signatory_name",
+   "kind": "text",
+   "text": "{{signatory_designation}}",
+   "font": {
+    "family": "EB Garamond",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 14,
+   "color": "#7A5E1E",
+   "letterSpacing": 0.08,
+   "lineHeight": 1.286,
+   "transform": "upper",
+   "fit": "shrink",
+   "minSize": 9.8
+  },
+  {
+   "id": "art-2",
+   "name": "Artwork",
+   "x": 506.484,
+   "y": 616,
+   "width": 110,
+   "height": 110,
+   "kind": "svg",
+   "markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 110 110\"><circle cx=\"55\" cy=\"55\" r=\"52\" fill=\"none\" stroke=\"#6B1F2E\" stroke-width=\"2\"></circle><circle cx=\"55\" cy=\"55\" r=\"45\" fill=\"none\" stroke=\"#6B1F2E\" stroke-width=\"1\" stroke-dasharray=\"2 4\"></circle><circle cx=\"55\" cy=\"55\" r=\"34\" fill=\"#6B1F2E\"></circle><path d=\"M55 36l5.6 11.4 12.6 1.8-9.1 8.9 2.1 12.5L55 64.7l-11.2 5.9 2.1-12.5-9.1-8.9 12.6-1.8z\" fill=\"#F6F7F9\"></path></svg>",
+   "fit": "contain",
+   "recolor": {
+    "#6B1F2E": "var:accent"
+   }
+  },
+  {
+   "id": "t-scan-to-verify",
+   "name": "Scan to verify",
+   "x": 763.605,
+   "y": 662,
+   "width": 137.379,
+   "height": 18.02,
+   "kind": "text",
+   "text": "Scan to verify",
+   "font": {
+    "family": "EB Garamond",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 14,
+   "color": "#7A5E1E",
+   "letterSpacing": 0.14,
+   "lineHeight": 1.286,
+   "align": "right",
+   "transform": "upper",
+   "fit": "shrink",
+   "minSize": 11.2
+  },
+  {
+   "id": "t-certificate-no",
+   "name": "Certificate No.",
+   "x": 815.48,
+   "y": 683,
+   "width": 85.504,
+   "height": 19.02,
+   "kind": "text",
+   "text": "Certificate No.",
+   "font": {
+    "family": "EB Garamond",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 15,
+   "color": "#1E1B1C",
+   "lineHeight": 1.267,
+   "align": "right",
+   "fit": "shrink",
+   "minSize": 12
+  },
+  {
+   "id": "t-certificate_id",
+   "name": "Certificate number",
+   "x": 731.308,
+   "y": 705,
+   "width": 169.676,
+   "height": 21.02,
+   "kind": "text",
+   "text": "{{certificate_id}}",
+   "font": {
+    "family": "EB Garamond",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 16,
+   "color": "#1E1B1C",
+   "lineHeight": 1.313,
+   "align": "right",
+   "fit": "shrink",
+   "minSize": 6.4
+  },
+  {
+   "id": "shape-4",
+   "name": "Shape",
+   "x": 914.984,
+   "y": 618,
+   "width": 108,
+   "height": 108,
+   "kind": "shape",
+   "shape": "rect",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   },
+   "stroke": {
+    "color": "#7A5E1E",
+    "width": 1
+   }
+  },
+  {
+   "id": "qr",
+   "name": "QR code",
+   "x": 922.984,
+   "y": 626,
+   "width": 92,
+   "height": 92,
+   "kind": "qr"
+  }
+ ],
+ "starter": "certificate/01-heritage"
+}
