@@ -43,8 +43,12 @@ async def test_the_card_design_is_edited_like_a_ticket_and_the_custom_card_is_th
     layout = await client.get(f"/api/v1/events/{world['event'].id}/designs/badge/layout", headers=h)
     assert layout.status_code == 200, layout.text
     assert layout.json()["kind"] == "badge" and layout.json()["qrRequired"] is True
-    # Unsaved, the card is the designer's default; the custom card is the CR80.
-    assert layout.json()["active"] == "preset" and layout.json()["presetDefault"]["id"] == "badge/06-thermal-mono"
+    # Unsaved, the card is the designer's default -- its v2 starter since layout
+    # v2 (V4), the preset in a build without starters; the custom card is the CR80.
+    from app.api.doc_presets.config import default_layout
+
+    assert layout.json()["presetDefault"]["id"] == "badge/06-thermal-mono" and layout.json()["v2"]["from"] == "default"
+    assert layout.json()["active"] == ("preset" if default_layout("badge") is None else "custom")
     assert layout.json()["page"] == {"widthMm": 54, "heightMm": 85.6}
     assert list(layout.json()["starters"]) == ["card_cr80"]
     assert any(l["id"] == "photo" for l in layout.json()["layers"])

@@ -582,14 +582,14 @@ async def preview_png(session, reg: EventRegistrationsLink) -> bytes:
     style = await certificate_style(session, reg)
     job = certificate_job(reg, style)
     if job.preset:
-        from app.api.doc_presets.config import without_preset
+        from app.api.doc_presets.config import classic
         from app.api.doc_presets.jobs import png_of
 
         pdf = await doc_cache.cached(job.cache_key("certificate", reg.id), job.draw)
         if not job.state.get("fallback"):
             return await png_of(job, pdf)
         # The render service could not draw it (D9): the classic certificate's own picture.
-        style = without_preset(style)
+        style = classic(style)
         job = certificate_job(reg, style)
     if in_layout_mode(style):
         pdf = await doc_cache.cached(job.cache_key("certificate", reg.id), job.draw)

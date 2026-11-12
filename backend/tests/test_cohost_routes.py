@@ -174,6 +174,8 @@ ROUTES = {
     "PUT /api/v1/events/{event_id}/designs/{kind}/preset": ALLOW,
     "DELETE /api/v1/events/{event_id}/designs/{kind}/preset": ALLOW,
     "POST /api/v1/events/{event_id}/designs/{kind}/preset/preview": ALLOW,
+    # A starter copied onto the board (app/core/layout_v2): a copy, nothing saved.
+    "POST /api/v1/events/{event_id}/designs/{kind}/layout/starters/{starter_id:path}": ALLOW,
     # deliveries
     "POST /api/v1/events/{event_id}/tickets/send": ALLOW,
     "POST /api/v1/events/{event_id}/tickets/{registration_id}/send": ALLOW,
@@ -464,6 +466,8 @@ def sample(schema: dict, depth: int = 0):
 
 def request_for(route: str, event_id: int) -> dict:
     method, path = route.split(" ", 1)
+    # A route's own path may carry a converter ({starter_id:path}); OpenAPI names it bare.
+    path = re.sub(r"\{([A-Za-z_]+):[a-z]+\}", r"{\1}", path)
     op = _spec()["paths"][path][method.lower()]
     url, query = path, {}
     for p in op.get("parameters", []):

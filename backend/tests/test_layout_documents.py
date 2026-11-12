@@ -51,8 +51,15 @@ async def test_an_event_with_no_design_opens_on_a_starter(client, world):
 
     assert r.status_code == 200, r.text
     body = r.json()
-    # The designer's default is in use; the custom canvas opens blank, with its QR.
-    assert body["active"] == "preset" and body["preset"]["id"] == "ticket/03-daylight-boarding-pass"
+    # The designer's default is in use -- its v2 starter since layout v2 (V4),
+    # the preset in a build without starters; the v1 canvas opens blank, with its QR.
+    from app.api.doc_presets.config import default_layout
+
+    assert body["presetDefault"]["id"] == "ticket/03-daylight-boarding-pass" and body["v2"]["from"] == "default"
+    if default_layout("ticket") is None:
+        assert body["active"] == "preset" and body["preset"]["id"] == "ticket/03-daylight-boarding-pass"
+    else:
+        assert body["active"] == "custom" and body["preset"] is None and body["v2"]["layout"]["version"] == 2
     assert body["fromStarter"] is True
     assert body["version"] == 0
     assert any(l["kind"] == "qr" for l in body["layers"])

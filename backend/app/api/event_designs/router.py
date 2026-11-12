@@ -35,6 +35,7 @@ from app.api.certificate_templates.service import (
 from app.api.doc_presets import config as presets
 from app.api.doc_presets import engine as preset_engine
 from app.api.doc_presets import jobs as preset_jobs
+from app.api.doc_presets import layouts
 from app.api.doc_presets import values as preset_values
 from app.api.events.documents import (
     EVENT_TIMEZONE,
@@ -236,6 +237,9 @@ async def save_design(
     if (payload.config or {}).get("preset") is not None and kind is not DesignKind.agenda:
         # A preset rides along with the rest of the config; it is held to what PUT .../preset checks.
         payload.config["preset"], _ = _checked_preset(kind, payload.config["preset"])
+    if presets.is_v2((payload.config or {}).get("layout")):
+        # So is a v2 layout, to what PUT .../layout checks.
+        payload.config["layout"], _ = _checked_v2(kind, payload.config["layout"], prefixes=_prefixes_for(event))
     await _plan_allows(session, event.club_id, kind, user, event)
     model = _MODELS[kind]
 
@@ -678,8 +682,10 @@ def _layout_keys(data: dict) -> dict:
 
 
 def _layout_dto(event, kind: DesignKind, audience: TemplateAudience, template, style: dict, agenda: Optional[list] = None) -> dict:
-    """The design and everything the editor needs around it."""
-    layout = style.get("layout") if in_layout_mode(style) else None
+    """The design and everything the editor needs around it: the v1 canvas
+    as before (canvas, layers, page, version, starters, tokens, ...), and
+    the editable v2 layout under `v2` (_v2_dto)."""
+    layout = presets.layout_v1_of(style)
     data = layout or {**_starter(kind), "version": 0}
     colors = layout_colors(style, getattr(event, "club", None))
     image_urls = {key: objects.presigned_url(key) for key in set(_layout_keys(data).values())}
@@ -714,8 +720,84 @@ def _layout_dto(event, kind: DesignKind, audience: TemplateAudience, template, s
         # The run of show an agenda layer draws on the stage: the event's own sessions, or samples while it has none.
         "agenda": agenda or [],
         "timezone": EVENT_TIMEZONE,
-        **_preset_dto(event, kind, style, layout is not None),
+        **_preset_dto(event, kind, style, template is not None and in_layout_mode(style)),
+        "v2": _v2_dto(event, kind, audience, style, saved=template is not None),
     }
+
+
+def _role_of_audience(audience: TemplateAudience) -> str:
+    return "attendee" if audience is TemplateAudience.event_default else audience.value
+
+
+def _v2_dto(event, kind: DesignKind, audience: TemplateAudience, style: dict, *, saved: bool) -> Optional[dict]:
+    """The editable (v2) layout and everything the board needs (layout v2
+    contract, Q): the layout to edit -- converted when what prints is a v1
+    canvas or a preset (V4) -- where it came from, the gallery, the fonts,
+    the tokens, links to the pictures it shows, and the sample guest's
+    values and context for the editor's own builder. Null for the
+    programme, which keeps its own editor. Nothing is drawn here.
+
+    `saved`: a design row answered (the event's or the club's); without one
+    the layout is the default's, whatever it holds."""
+    if kind is DesignKind.agenda:
+        return None
+    layout, source = layouts.editable(kind.value, style)
+    if not saved and source in ("saved", "v1", "preset"):
+        source = "default"
+    subject = preset_values.sample_subject(event, kind.value, _role_of_audience(audience))
+    return {
+        "layout": layout,
+        "from": source,
+        "revision": presets.revision_of(style),
+        "starters": layouts.starters(kind.value),
+        "fonts": layouts.fonts(),
+        "tokens": layouts.tokens(kind.value, event),
+        "images": layouts.picture_links(layout or {}, style, event),
+        **layouts.stage(kind.value, event, style, subject),
+    }
+
+
+def _refused(exc: "layouts.Refused") -> CustomHTTPException:
+    return CustomHTTPException(422, message=exc.message, error_code="INVALID_LAYOUT", errors={"fields": exc.fields, "layout": exc.problems})
+
+
+def _checked_v2(kind: DesignKind, body: dict, *, prefixes: tuple) -> tuple[dict, list]:
+    """A v2 layout as it is saved, or the 422 naming what to fix."""
+    if kind is DesignKind.agenda:
+        raise CustomHTTPException(422, message="The programme keeps its own editor.", error_code="INVALID_LAYOUT", errors={"fields": {"version": "The programme is a v1 canvas."}})
+    try:
+        return layouts.checked(kind.value, body, prefixes=prefixes)
+    except layouts.Refused as exc:
+        raise _refused(exc) from exc
+
+
+def _v2_body(body: dict) -> Optional[dict]:
+    """The v2 layout a preview or save sends: the body itself, or its `layout`."""
+    if presets.is_v2(body):
+        return body
+    inner = body.get("layout") if isinstance(body, dict) else None
+    return inner if presets.is_v2(inner) else None
+
+
+async def layout_v2_preview(kind: DesignKind, event, style: dict, layout: dict, registration, audience: TemplateAudience, fmt: str) -> Response:
+    """An unsaved v2 layout for a registration or the sample guest: its HTML
+    for the editor's iframe ({"html"}), or the exact PNG -- one render by
+    the render service, as the documents are (503 when it cannot)."""
+    if registration is not None:
+        subject = preset_values.subject_of(registration, event)
+    else:
+        subject = preset_values.sample_subject(event, kind.value, _role_of_audience(audience))
+    headers = {"Cache-Control": "no-store"}
+    try:
+        what, out = await layouts.preview(kind.value, event, style, layout, subject, fmt)
+    except preset_engine.Unavailable as exc:
+        preset_engine.unavailable(kind.value, exc)
+        raise CustomHTTPException(503, message=preset_engine.PREVIEW_UNAVAILABLE, error_code="RENDER_UNAVAILABLE")
+    except ValueError as exc:
+        raise CustomHTTPException(422, message=f"This design cannot be drawn for this guest: {exc}", error_code="DESIGN_INCOMPLETE")
+    if what == "html":
+        return Response(content=json.dumps({"html": out}), media_type="application/json", headers=headers)
+    return Response(content=out, media_type="image/png", headers=headers)
 
 
 def _preset_dto(event, kind: DesignKind, style: dict, has_layout: bool) -> dict:
@@ -789,7 +871,7 @@ async def get_starter(
     page = None
     if kind is DesignKind.badge:
         _, style = await _current(session, event, kind, TemplateAudience.event_default)
-        layout = style.get("layout") if in_layout_mode(style) else None
+        layout = presets.layout_v1_of(style)
         if layout and layout.get("page"):
             page = PageSpec.model_validate(layout["page"])
     s = _starter_of(kind, name, page)
@@ -827,27 +909,40 @@ async def save_layout(
     audience: TemplateAudience = Query(TemplateAudience.event_default),
 ) -> dict:
     """Forks the design onto the event on first save, like the config does,
-    and bumps the version so a document can say which design it was made from."""
+    and bumps the version so a document can say which design it was made from.
+
+    A v2 layout (`"version": 2`, app.core.layout_v2) is checked by P's
+    checks and saved as v2, clearing the preset (V4); the v1 canvas it
+    replaces is kept beside it (doc_presets.config.with_layout). Answers with
+    GET .../layout and `warnings`. A v1 canvas saves as before."""
     event = await _event_for_editing(session, user, event_id)
     await _plan_allows(session, event.club_id, kind, user, event)
+    if presets.is_v2(body):
+        layout_v2, warnings = _checked_v2(kind, body, prefixes=_prefixes_for(event))
+        template = await fork_for_event(
+            session, _MODELS[kind], event_id=event_id, club_id=event.club_id,
+            audience=audience, name=f"{event.name} {kind.value}", default=_DEFAULTS[kind](),
+        )
+        template.config = presets.with_layout(template.config or {}, layout_v2)
+        await session.commit()
+        await session.refresh(template)
+        out = _layout_dto(event, kind, audience, template, shown(template.config, template, fields=_fields_of(template)), await _agenda_for(session, event, kind))
+        return {**out, "warnings": warnings}
     layout = _validate_layout(kind, body, prefixes=_prefixes_for(event))
 
     template = await fork_for_event(
         session, _MODELS[kind], event_id=event_id, club_id=event.club_id,
         audience=audience, name=f"{event.name} {kind.value}", default=_DEFAULTS[kind](),
     )
-    config = dict(template.config or {})
-    previous = (config.get("layout") or {}).get("version", 0)
-    config["layout"] = {**dump(layout), "version": previous + 1}
-    # Saving the custom design makes it the one in use (D6).
-    config.pop("preset", None)
-    template.config = config
+    # Saving the custom design makes it the one in use (D6); its version is
+    # one past the design's last (a v2 layout's revision, not its schema's 2).
+    template.config = presets.with_v1_layout(template.config or {}, dump(layout))
     await session.commit()
     await session.refresh(template)
     return _layout_dto(event, kind, audience, template, shown(template.config, template, fields=_fields_of(template)), await _agenda_for(session, event, kind))
 
 
-@router.post("/{kind}/layout/preview", summary="The layered design rendered exactly, as a PNG")
+@router.post("/{kind}/layout/preview", summary="The layered design rendered exactly: a PNG, or HTML for an iframe")
 async def preview_layout(
     session: SessionDep,
     user: ClubAuth,
@@ -855,13 +950,25 @@ async def preview_layout(
     kind: DesignKind,
     body: dict,
     audience: TemplateAudience = Query(TemplateAudience.event_default),
+    format: str = Query("png", pattern="^(html|png)$"),
 ) -> Response:
     """The unsaved design through the real renderer, for a real attendee
     (`ticket_id`) or the sample one. A design that would be refused on save
     is refused here too, so the preview never shows something the attendee
-    could not receive."""
+    could not receive.
+
+    A v2 layout (the body, or `{"layout": ..., "ticket_id"?}`): `format=html`
+    answers {"html"} for a sandboxed iframe (fonts from /static/doc-fonts),
+    `format=png` the exact picture -- one render by the render service (503
+    RENDER_UNAVAILABLE when it is down). A v1 canvas answers its PNG."""
     event = await _event_for_editing(session, user, event_id)
     ticket_id = body.pop("ticket_id", None)
+    v2 = _v2_body(body)
+    if v2 is not None:
+        layout_v2, _ = _checked_v2(kind, v2, prefixes=_prefixes_for(event))
+        registration = await _preview_registration(session, event_id, ticket_id)
+        _, style = await _current(session, event, kind, audience)
+        return await layout_v2_preview(kind, event, style, layout_v2, registration, audience, format)
     layout = _validate_layout(kind, body, prefixes=_prefixes_for(event))
     template, style = await _current(session, event, kind, audience)
     style = {**style, "layout": dump(layout)}
@@ -887,6 +994,24 @@ def _preview_png(style: dict, values: dict, qr_text: str, title: str, entries, c
     """A layered design drawn and turned into a PNG, on the render pool."""
     pdf = render_layout_document(style, values, qr_text, title=title, agenda=entries, club=club)
     return layout_png(style, pdf)
+
+
+def starter_answer(kind: DesignKind, starter_id: str) -> dict:
+    """A v2 starter as the editor uses it: {id, name, layout} -- a copy of
+    its own (copy-on-use: nothing is saved until the club saves)."""
+    found = layouts.starter_copy(kind.value, starter_id) if kind is not DesignKind.agenda else None
+    if found is None:
+        raise CustomHTTPException(404, message="No such starter")
+    return found
+
+
+@router.post("/{kind}/layout/starters/{starter_id:path}", summary="A v2 starter to begin a design from (nothing is saved)")
+async def use_starter(session: SessionDep, user: ClubAuth, event_id: int, kind: DesignKind, starter_id: str) -> dict:
+    """One of the gallery's designs (or the CR80 card, or a blank canvas) as
+    an editable v2 layout, for the board to load: {id, name, layout}. Saving
+    it is PUT .../layout."""
+    await _event_for_editing(session, user, event_id)
+    return starter_answer(kind, starter_id)
 
 
 # --- the designer's designs ------------------------------------------------------

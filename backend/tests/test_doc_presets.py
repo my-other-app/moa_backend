@@ -4,6 +4,12 @@
 The designs themselves and the render service are Backend A's
 (app.core.doc_designs): here they are tests/doc_designs_fake.py, which
 records what each document was filled with and renders a PDF of it.
+
+Since layout v2 (feature-register/layout-v2-contract.md, V4) the defaults
+are the default designs' v2 starters (tests/test_layout_v2_api.py); a
+saved preset keeps this path. Here the default is the D7 preset, as it is
+in a build without the starters (`preset_defaults`), so these stay tests of
+the preset path.
 """
 import base64
 import io
@@ -36,6 +42,12 @@ FORM = [
     {"key": "job_title", "label": "Job title", "field_type": "text", "required": False},
     {"key": "photo", "label": "Photo", "field_type": "image", "required": False},
 ]
+
+
+@pytest.fixture(autouse=True)
+def preset_defaults(monkeypatch):
+    """The defaults as the D7 presets (doc_presets.config.with_default without a v2 starter)."""
+    monkeypatch.setattr(presets, "default_layout", lambda kind: None)
 
 
 @pytest.fixture

@@ -527,5 +527,14 @@ def compact(layout: Any) -> dict:
 
 
 def is_v2(config_layout: Any) -> bool:
-    """Whether a stored `config.layout` is a v2 layout."""
-    return isinstance(config_layout, dict) and config_layout.get("version") == VERSION and "layers" in config_layout
+    """Whether a stored `config.layout` is a v2 layout: its `version` says 2
+    and its shape does too. A v1 canvas counted its saves in `version`, so a
+    v1 saved twice says 2 as well; but its background is always a hex string,
+    where a v2 layout's is a fill or null, and it never has `vars`. (The same
+    test as app/api/doc_presets/config.is_v2.)"""
+    if not isinstance(config_layout, dict) or config_layout.get("version") != VERSION:
+        return False
+    if not isinstance(config_layout.get("layers"), list):
+        return False
+    canvas = config_layout.get("canvas") if isinstance(config_layout.get("canvas"), dict) else {}
+    return "vars" in config_layout or not isinstance(canvas.get("background"), str)

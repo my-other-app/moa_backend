@@ -21,6 +21,14 @@ The QR is A's to draw: `Mapped.qr_text` goes in as values["qr"]. The other
 pictures (the club's logo, a signature, the guest's photo) are named as
 references (`Mapped.images`) and become `data:` URIs when the document is
 drawn (jobs.materialise): never a URL, so a design never fetches anything (D1).
+
+**One values function** (layout v2, V5: feature-register/layout-v2-contract.md):
+`document_values(kind, event, subject, ...)` is what every document made
+from a designer's design or an editable (v2) layout is filled with: the
+custom canvas's own tokens (app.core.layout.tokens: {{name}},
+{{ticket_code}}, {{event_time}}, ...) and, over them, the designer's tokens
+for the kind with the meanings below. A v2 layout can print any of them; a
+preset reads its own.
 """
 from __future__ import annotations
 
@@ -87,6 +95,8 @@ class Subject:
     #: The bucket key of the person's own profile photo, if they have one.
     profile_photo_key: Optional[str] = None
     team: str = ""
+    #: Their email, for the canvas's {{email}} token.
+    email: Optional[str] = None
 
 
 @dataclass
@@ -256,6 +266,7 @@ def subject_of(registration, event=None) -> Subject:
         photo_answer=str(details.get(question)) if question and details.get(question) else None,
         profile_photo_key=photo_key,
         team=str(details.get("team_name") or details.get("team") or ""),
+        email=getattr(registration, "email", None),
     )
 
 
@@ -282,6 +293,7 @@ def sample_subject(event, kind: str, role: str = "attendee") -> Subject:
         organisation="Sahyadri Systems",
         answers=answers,
         team="Team Nova",
+        email="aisha.rahman@example.com",
     )
 
 
@@ -412,6 +424,77 @@ def badge_values(event, subject: Subject, *, door: Optional[str] = None, printed
         **subject.answers,
     }
     return Mapped(values=values, images={"photo_url": ("photo", subject)}, qr_text=subject.ticket_code)
+
+
+# ─── One function for every document (V5) ───────────────────────────────────
+
+
+def club_logo_key(event) -> Optional[str]:
+    """The club's logo in the bucket: its large variant, else the original."""
+    club = getattr(event, "club", None)
+    logo = getattr(club, "logo", None) if club is not None else None
+    variations = getattr(logo, "variations", None)
+    if isinstance(variations, dict):
+        return variations.get("large") or variations.get("original")
+    return logo if isinstance(logo, str) and logo else None
+
+
+def canvas_values(kind: str, event, subject: Subject) -> dict:
+    """The custom canvas's tokens (app.core.layout.tokens), from a Subject:
+    what `documents.layout_values` gives a registration, and the sample guest
+    too. On a certificate the code under the QR is its number, never the
+    ticket's (as layout_values)."""
+    from app.api.events.documents import token_event
+    from app.core.layout.tokens import TokenAttendee, TokenCertificate, ticket_token_values
+
+    code = subject.certificate_no if kind == "certificate" else subject.ticket_code
+    certificate = None
+    if kind == "certificate":
+        certificate = TokenCertificate(
+            number=subject.certificate_no,
+            issued_at=subject.issued_at or datetime.now(timezone.utc),
+            checked_in_at=subject.checked_in_at,
+            placing=PLACINGS.get(subject.position or 0, ""),
+        )
+    values = ticket_token_values(
+        token_event(event), _club_name(event),
+        TokenAttendee(name=subject.full_name, organization=subject.organisation, email=subject.email, team=subject.team or None),
+        subject.admission_no or code, ticket_type_of(subject), certificate=certificate, ticket_code=code,
+    )
+    values.update(subject.answers)
+    return values
+
+
+def designer_values(kind: str, event, subject: Subject, *, style: Optional[dict] = None,
+                    door: Optional[str] = None, printed_at: Optional[datetime] = None) -> Mapped:
+    """The designer's tokens for a kind (D5) and the pictures they name. A
+    certificate's logo is its design's own, else the club's; its signatures
+    are its design's."""
+    if kind == "ticket":
+        return ticket_values(event, subject)
+    if kind == "certificate":
+        from app.api.templates_images import key_of
+
+        style = style or {}
+        return certificate_values(
+            event, subject,
+            logo_key=key_of(style, "logo") or club_logo_key(event),
+            signatures=(key_of(style, "signature_1"), key_of(style, "signature_2")),
+        )
+    return badge_values(event, subject, door=door, printed_at=printed_at)
+
+
+def document_values(kind: str, event, subject: Subject, *, style: Optional[dict] = None,
+                    door: Optional[str] = None, printed_at: Optional[datetime] = None) -> Mapped:
+    """V5: every value a document of `kind` is filled with, in one place:
+    the canvas's tokens (`canvas_values`), the designer's over them where a
+    name is both (`designer_values`: theirs win, so a starter prints what its
+    design printed), and the registration's answers as field.<slug>. The
+    pictures stay references (Mapped.images) until the document is drawn
+    (jobs.materialise)."""
+    designer = designer_values(kind, event, subject, style=style, door=door, printed_at=printed_at)
+    values = {**canvas_values(kind, event, subject), **designer.values}
+    return Mapped(values=values, images=dict(designer.images), qr_text=designer.qr_text)
 
 
 # ─── For the editor ─────────────────────────────────────────────────────────

@@ -73,13 +73,27 @@ def _door_of(actor: GateActor, door: Optional[str]) -> Optional[str]:
     return door or (actor.door.name if actor.door is not None else None)
 
 
-async def _preset_pdf(session, pages: list[dict]) -> bytes:
-    """Cards made from the designer's designs. The render service down (D9),
-    nothing is printed: 503, and whatever this request claimed is let go."""
-    from app.api.doc_presets import engine, jobs
+#: How a card is drawn: one of the designer's designs, a v2 layout (both by
+#: the render service), or the v1 canvas (reportlab, on the render pool).
+PRESET, LAYOUT_V2, LAYOUT_V1 = "preset", "v2", "v1"
+
+
+def drawn_by(style: dict) -> str:
+    from app.api.doc_presets.config import layout_v2_of, preset_of
+
+    if preset_of(style) is not None:
+        return PRESET
+    return LAYOUT_V2 if layout_v2_of(style) is not None else LAYOUT_V1
+
+
+async def _preset_pdf(session, pages: list[dict], *, v2: bool = False) -> bytes:
+    """Cards made from the designer's designs or a v2 layout. The render
+    service down (D9), nothing is printed: 503, and whatever this request
+    claimed is let go."""
+    from app.api.doc_presets import engine, jobs, layouts
 
     try:
-        return await jobs.preset_pages_pdf(pages)
+        return await (layouts.pages_pdf(pages) if v2 else jobs.preset_pages_pdf(pages))
     except engine.Unavailable as exc:
         engine.unavailable("badge", exc)
     except ValueError as exc:
@@ -168,12 +182,17 @@ async def card_pdf(session, event: Events, registration_id, *, actor: GateActor,
             raise CustomHTTPException(403, message=why, error_code="REPRINT_REFUSED")
         set_committed_value(reg, "badge_printed_at", claimed)
     style = await badge_style(session, event, role_of(reg))
-    from app.api.doc_presets.config import preset_of
-
-    if preset_of(style) is not None:
+    how = drawn_by(style)
+    printed_at = datetime.now(timezone.utc) if record else None
+    if how == PRESET:
         from app.api.doc_presets.jobs import card_page
 
-        pdf = await _preset_pdf(session, [card_page(event, reg, style, door=_door_of(actor, door), printed_at=datetime.now(timezone.utc) if record else None)])
+        pdf = await _preset_pdf(session, [card_page(event, reg, style, door=_door_of(actor, door), printed_at=printed_at)])
+    elif how == LAYOUT_V2:
+        from app.api.doc_presets import layouts
+
+        page = layouts.card_page(event, reg, style, door=_door_of(actor, door), printed_at=printed_at, skip_preprinted=record and skip_preprinted_for(event, style))
+        pdf = await _preset_pdf(session, [page], v2=True)
     else:
         # Drawn on the render pool, off the event loop.
         pdf = await pool.run(render_layout_document, **card_args(event, reg, style, for_print=record))
@@ -223,30 +242,36 @@ async def batch_pdf(session, event: Events, *, scope: str, role: Optional[str], 
 
         return blank_page_pdf("No cards to print."), 0
     # Every row read here, on the loop; then one document of a page per card:
-    # the layered ones drawn on the render pool (it used to be a PDF per card,
-    # merged by pdfium), the designer's designs by the render service, a run
-    # of them a call. A batch printing both is joined in its order.
-    from app.api.doc_presets.config import preset_of
+    # the v1 canvases drawn on the render pool (it used to be a PDF per card,
+    # merged by pdfium), the designer's designs and v2 layouts by the render
+    # service, a run of them a call. A batch printing several is joined in
+    # its order.
+    from app.api.doc_presets import layouts
     from app.api.doc_presets.jobs import card_page
 
     styles: dict = {}
-    runs: list[tuple[bool, list]] = []
+    runs: list[tuple[str, list]] = []
     for reg in regs:
         key = role_of(reg)
         if key not in styles:
             styles[key] = await badge_style(session, event, key)
-        preset = preset_of(styles[key]) is not None
-        page = card_page(event, reg, styles[key]) if preset else card_args(event, reg, styles[key], for_print=record)
-        if runs and runs[-1][0] == preset:
+        how = drawn_by(styles[key])
+        if how == PRESET:
+            page = card_page(event, reg, styles[key])
+        elif how == LAYOUT_V2:
+            page = layouts.card_page(event, reg, styles[key], skip_preprinted=record and skip_preprinted_for(event, styles[key]))
+        else:
+            page = card_args(event, reg, styles[key], for_print=record)
+        if runs and runs[-1][0] == how:
             runs[-1][1].append(page)
         else:
-            runs.append((preset, [page]))
+            runs.append((how, [page]))
     parts = []
-    for preset, pages in runs:
-        if preset:
-            parts.append(await _preset_pdf(session, pages))
-        else:
+    for how, pages in runs:
+        if how == LAYOUT_V1:
             parts.append(await pool.run(render_layout_pages, pages, title=f"{event.name} · ID cards"))
+        else:
+            parts.append(await _preset_pdf(session, pages, v2=how == LAYOUT_V2))
     if len(parts) == 1:
         pdf = parts[0]
     else:
