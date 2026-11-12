@@ -1,0 +1,21 @@
+{%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
+{%- macro n(v) -%}{%- if v is number -%}{{ ('[' ~ '{:,}'.format(v) ~ ']') if sample else '{:,}'.format(v) }}{%- else -%}{{ v }}{%- endif -%}{%- endmacro -%}
+{%- macro iso(v) -%}{{ (v if v is string else v.isoformat()) if v else '' }}{%- endmacro -%}
+{%- set t = section.title if (section is defined and section.title) else 'Who we are' -%}
+{%- set paras = (club.about or '').split('\n')|map('trim')|select|list -%}
+{%- set topics = [] -%}{%- for x in club.topics or [] -%}{%- set _ = topics.append(x.name if x is mapping else x) -%}{%- endfor -%}
+{%- set CHIPS = ['background: var(--accent); color: var(--on-accent); transform: rotate(-2deg)', 'background: #1B2A9E; color: #FFFFFF; transform: rotate(1.5deg)', 'background: #FFFFFF; border: 2px solid #1B2A9E; transform: rotate(-1deg)', 'background: var(--accent); color: var(--on-accent); transform: rotate(2deg)', 'background: #FFFFFF; border: 2px solid #1B2A9E; transform: rotate(-1.5deg)', 'background: #1B2A9E; color: #FFFFFF; transform: rotate(1deg)'] -%}
+{%- if paras or topics -%}
+<section id="about" class="zn-sec" style="max-width: 1240px; margin: 0 auto; padding: 88px 24px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap: 56px; align-items: start">
+{% if paras %}<div style="display: flex; flex-direction: column; gap: 16px">
+<h2 style="margin: 0; font-family: Unbounded, system-ui, sans-serif; font-weight: 900; font-size: clamp(28px, 3.6vw, 44px); line-height: 1.08; letter-spacing: -0.02em">{{ t }}</h2>
+{% for p in paras %}<p style="margin: 0; font-size: 19px">{{ p }}</p>
+{% endfor %}</div>
+{% endif %}{% if topics %}<div class="zn-about-box" style="border: 2px dashed #1B2A9E; border-radius: 28px; padding: 32px; display: flex; flex-direction: column; gap: 18px">
+<h2 style="margin: 0; font-family: Unbounded, system-ui, sans-serif; font-weight: 700; font-size: 20px">Things we are good at</h2>
+<div class="zn-chips" style="display: flex; flex-wrap: wrap; gap: 12px; font-weight: 700; font-size: 19px">
+{% for x in topics %}<span style="padding: 10px 20px; border-radius: 999px; {{ CHIPS[loop.index0 % 6] }}">{{ x }}</span>
+{% endfor %}</div>
+</div>
+{% endif %}</section>
+{%- endif -%}

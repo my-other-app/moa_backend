@@ -1,0 +1,29 @@
+{%- macro isrc(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'file://' or l[:11]|lower == 'data:image/') else '' }}{%- endmacro -%}
+{%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
+{%- macro host(h, label) -%}{%- set l = (h or '')|string -%}{{ (l.split('//')[1].split('/')[0]|replace('www.', '')) if l[:8]|lower == 'https://' else (label or l) }}{%- endmacro -%}
+{%- set keys = (nav|map(attribute='key')|list) if (nav is defined and nav) else (section_keys or []) -%}
+{%- set overrides = site.title_overrides or {} -%}
+{%- set nav_labels = {'about': 'About', 'upcoming': 'Events', 'past': 'Events', 'photos': 'Photos', 'speakers': 'Speakers', 'team': 'Team', 'sponsors': 'Sponsors'} -%}
+{%- set items = keys|select('in', nav_labels)|list -%}
+{%- if 'upcoming' in items -%}{%- set items = items|reject('equalto', 'past')|list -%}{%- endif -%}
+{%- set cover = images['hero.cover'] -%}
+{%- set lead = site.subline or club.tagline or subline -%}
+{%- set join_href = '#join' if 'join' in keys else u(links.join_url) -%}
+{%- set soc = [] -%}{%- set web = [] -%}
+{%- for s in socials or [] -%}{%- set item = {'kind': (s.kind if s is mapping else (s[0]|lower)), 'label': (s.label if s is mapping else s[0]), 'href': (s.href if s is mapping else s[1])} -%}{%- set _ = (web if item.kind == 'website' else soc).append(item) -%}{%- endfor -%}
+{%- if club.website and club.website.href -%}{%- set _ = web.insert(0, {'kind': 'website', 'label': club.website.label, 'href': club.website.href}) -%}{%- endif -%}
+{%- set links_row = web[:1] + soc -%}
+<section id="top" class="tl-hero" style="max-width: 1200px; margin: 0 auto; padding: 40px 24px 72px; display: flex; flex-wrap: wrap; gap: 40px; align-items: center">
+<div style="flex: 1 1 440px; min-width: 0; display: flex; flex-direction: column; gap: 20px">
+{% set chips = [club.kind, club.location_name, ('Since ' ~ club.founded_year) if club.founded_year else none]|select|list %}{% if chips %}<div style="display: flex; flex-wrap: wrap; gap: 8px; font-size: 13px; font-weight: 700">{% for c in chips %}<span style="padding: 5px 12px; border-radius: 8px; background: var(--accent-soft)">{{ c }}</span>{% endfor %}</div>
+{% endif %}<h1 style="margin: 0; font-weight: 800; font-size: clamp(40px, 5.6vw, 72px); line-height: 1.02; letter-spacing: -0.035em; overflow-wrap: break-word">{{ (site.headline or club.name)|trim|replace('\n', ' ') }}</h1>
+{% if lead %}<p style="margin: 0; font-size: 19px; color: #3A4D4C; max-width: 520px">{{ lead }}</p>
+{% endif %}{% if links.join_url or links.follow_url %}<div style="display: flex; flex-wrap: wrap; gap: 10px">
+{% if links.join_url %}<a href="{{ join_href }}"{% if 'join' not in keys %} target="_top"{% endif %} style="display: inline-flex; align-items: center; min-height: 50px; padding: 0 26px; border-radius: 10px; background: var(--accent); color: var(--on-accent); text-decoration: none; font-weight: 700">Join community</a>
+{% endif %}{% if links.follow_url %}<a class="tl-btn" href="{{ u(links.follow_url) }}" target="_top" style="min-height: 50px; padding: 0 24px; border-radius: 10px; background: #FFFFFF; border: 1.5px solid #10201F; color: #10201F; font: 700 16px Manrope, system-ui, sans-serif; cursor: pointer; text-decoration: none">Follow</a>
+{% endif %}</div>
+{% endif %}{% if links_row %}<div style="display: flex; flex-wrap: wrap; gap: 0 18px; font-weight: 500; font-size: 15px">{% for s in links_row %}<a href="{{ u(s.href) }}" target="_top" style="padding: 10px 0">{{ host(s.href, s.label) if s.kind == 'website' else s.label }}</a>{% endfor %}</div>
+{% endif %}</div>
+{% if cover and cover.url %}<img class="tl-cover tl-img" src="{{ isrc(cover.url) }}"{% if cover.srcset %} srcset="{{ cover.srcset }}" sizes="(min-width: 1200px) 556px, (min-width: 1000px) 46vw, calc(100vw - 48px)"{% endif %} width="{{ cover.w or 556 }}" height="{{ cover.h or 440 }}" alt="{{ cover.alt or '' }}" fetchpriority="high" decoding="async" style="flex: 1 1 440px; min-width: 0; height: 440px; border-radius: 24px">
+{% elif cover and cover.placeholder is defined %}<div class="tl-cover" style="flex: 1 1 440px; min-height: 440px; border-radius: 24px; background: repeating-linear-gradient(135deg, #DDECEB 0 14px, #E8F2F1 14px 28px); display: flex; align-items: flex-end; padding: 18px; box-sizing: border-box">{% if cover.placeholder %}<span style="background: #FFFFFF; font-size: 13px; padding: 6px 12px; border-radius: 8px">{{ cover.placeholder }}</span>{% endif %}</div>
+{% endif %}</section>

@@ -1,0 +1,15 @@
+{%- macro isrc(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'file://' or l[:11]|lower == 'data:image/') else '' }}{%- endmacro -%}
+{%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
+{%- macro n(v) -%}{%- if v is number -%}{{ ('[' ~ '{:,}'.format(v) ~ ']') if sample else '{:,}'.format(v) }}{%- else -%}{{ v }}{%- endif -%}{%- endmacro -%}
+{%- macro iso(v) -%}{{ (v if v is string else v.isoformat()) if v else '' }}{%- endmacro -%}
+{%- set t = section.title if (section is defined and section.title) else 'Team members' -%}
+{%- if team -%}
+<section id="team" class="tl-band tl-white tl-sec" style="background: #FFFFFF; border-top: 1px solid #CBD6D5; border-bottom: 1px solid #CBD6D5; padding: 72px 0">
+<div style="max-width: 1200px; margin: 0 auto; padding: 0 24px; display: flex; flex-direction: column; gap: 24px">
+<h2 style="margin: 0; font-weight: 800; font-size: clamp(28px, 3.4vw, 40px); letter-spacing: -0.03em">{{ t }}</h2>
+<div class="tl-team" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr)); gap: 20px">
+{% for m in team %}{% set ph = m.photo.url if m.photo is mapping else m.photo %}{% set ss = m.photo.srcset if m.photo is mapping else m.photo_srcset %}<div style="display: flex; flex-direction: column; gap: 4px">{% if ph %}<img class="tl-img" src="{{ isrc(ph) }}"{% if ss %} srcset="{{ ss }}" sizes="(min-width: 1200px) 176px, (min-width: 640px) 30vw, calc(50vw - 32px)"{% endif %} width="352" height="352" alt="{{ m.name }}" loading="lazy" decoding="async" style="aspect-ratio: 1 / 1; height: auto; border-radius: 16px; margin-bottom: 8px">{% elif m.photo and m.photo.placeholder is defined %}<div style="aspect-ratio: 1 / 1; border-radius: 16px; background: repeating-linear-gradient(135deg, #DDECEB 0 14px, #E8F2F1 14px 28px); margin-bottom: 8px"></div>{% else %}<div style="aspect-ratio: 1 / 1; border-radius: 16px; background: var(--accent-soft); margin-bottom: 8px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 40px; color: var(--accent-ink)">{% for w in (m.name or '').split()[:2] %}{{ w[:1]|upper }}{% endfor %}</div>{% endif %}<span style="font-weight: 700">{{ m.name }}</span>{% if m.role %}<span style="font-size: 14px; color: #4F6160">{{ m.role }}</span>{% endif %}</div>
+{% endfor %}</div>
+</div>
+</section>
+{%- endif -%}

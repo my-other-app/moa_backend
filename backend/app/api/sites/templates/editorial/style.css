@@ -27,5 +27,7 @@ h1,h2,h3,p{overflow-wrap:break-word}
 .e-h1{overflow-wrap:anywhere}
 .e-joinbox{margin:10px 4px!important}
 }
-.j-pill{display:flex;align-items:center;white-space:nowrap}
-.j-row:hover .btn-a{filter:brightness(1.08)}
+@media (max-width:600px){
+.j-col{min-height:0!important}
+.j-cta{justify-content:flex-start!important}
+}

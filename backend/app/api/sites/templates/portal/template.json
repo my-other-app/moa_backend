@@ -1,0 +1,122 @@
+{
+  "key": "portal",
+  "name": "Portal",
+  "blurb": "A platform profile page: cover card, tabs, a content column and a side rail",
+  "fonts": [
+    "Plus+Jakarta+Sans:wght@400;500;600;700"
+  ],
+  "layout": "two_column",
+  "fixed_top": [
+    "nav",
+    "hero"
+  ],
+  "fixed_side": [
+    "profile"
+  ],
+  "fixed_bottom": [
+    "footer"
+  ],
+  "sections": [
+    {
+      "key": "about",
+      "label": "About",
+      "default_title": "About",
+      "hideable": true
+    },
+    {
+      "key": "upcoming",
+      "label": "Upcoming events",
+      "default_title": "Upcoming events",
+      "hideable": true
+    },
+    {
+      "key": "past",
+      "label": "Past events table",
+      "default_title": "Past events",
+      "hideable": true
+    },
+    {
+      "key": "photos",
+      "label": "Photos",
+      "default_title": "Highlighted photos",
+      "hideable": true
+    },
+    {
+      "key": "speakers",
+      "label": "Speakers",
+      "default_title": "Previous speakers",
+      "hideable": true
+    }
+  ],
+  "slots": [
+    {
+      "key": "hero.cover",
+      "label": "Cover photo",
+      "size": [
+        1198,
+        200
+      ],
+      "section": "hero"
+    },
+    {
+      "key": "photos.1",
+      "label": "Photo 1",
+      "size": [
+        156,
+        156
+      ],
+      "section": "photos"
+    },
+    {
+      "key": "photos.2",
+      "label": "Photo 2",
+      "size": [
+        156,
+        156
+      ],
+      "section": "photos"
+    },
+    {
+      "key": "photos.3",
+      "label": "Photo 3",
+      "size": [
+        156,
+        156
+      ],
+      "section": "photos"
+    },
+    {
+      "key": "photos.4",
+      "label": "Photo 4",
+      "size": [
+        156,
+        156
+      ],
+      "section": "photos"
+    },
+    {
+      "key": "photos.5",
+      "label": "Photo 5",
+      "size": [
+        156,
+        156
+      ],
+      "section": "photos"
+    },
+    {
+      "key": "event.fallback",
+      "label": "Event picture (events without a poster)",
+      "size": [
+        180,
+        120
+      ],
+      "section": "upcoming"
+    }
+  ],
+  "accent": {
+    "default": "#C2410C",
+    "vars": [
+      "--accent"
+    ]
+  }
+}

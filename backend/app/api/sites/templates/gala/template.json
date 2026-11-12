@@ -1,0 +1,145 @@
+{
+  "key": "gala",
+  "name": "Gala",
+  "blurb": "Evening-dress serif on deep green, arches and gold rules",
+  "fonts": [
+    "Cormorant+Garamond:ital,wght@0,500;0,600;1,500",
+    "Jost:wght@400;500"
+  ],
+  "layout": "single",
+  "fixed_top": [
+    "nav",
+    "hero"
+  ],
+  "fixed_side": [],
+  "fixed_bottom": [
+    "footer"
+  ],
+  "sections": [
+    {
+      "key": "stats",
+      "label": "Numbers band",
+      "default_title": "In numbers",
+      "hideable": true
+    },
+    {
+      "key": "about",
+      "label": "Story and expertise",
+      "default_title": "Our story",
+      "hideable": true
+    },
+    {
+      "key": "upcoming",
+      "label": "Upcoming events",
+      "default_title": "The season ahead",
+      "hideable": true
+    },
+    {
+      "key": "past",
+      "label": "Past events",
+      "default_title": "Evenings to remember",
+      "hideable": true
+    },
+    {
+      "key": "photos",
+      "label": "Gallery",
+      "default_title": "The gallery",
+      "hideable": true
+    },
+    {
+      "key": "speakers",
+      "label": "Speakers",
+      "default_title": "Voices from our stage",
+      "hideable": true
+    },
+    {
+      "key": "team",
+      "label": "Team",
+      "default_title": "The committee",
+      "hideable": true
+    },
+    {
+      "key": "sponsors",
+      "label": "Sponsors and partners",
+      "default_title": "Our patrons",
+      "hideable": true
+    },
+    {
+      "key": "join",
+      "label": "Invitation",
+      "default_title": "You are invited.",
+      "hideable": true
+    }
+  ],
+  "slots": [
+    {
+      "key": "hero.cover",
+      "label": "Cover photo (arch)",
+      "size": [
+        1152,
+        420
+      ],
+      "section": "hero"
+    },
+    {
+      "key": "photos.1",
+      "label": "Photo 1",
+      "size": [
+        230,
+        300
+      ],
+      "section": "photos"
+    },
+    {
+      "key": "photos.2",
+      "label": "Photo 2",
+      "size": [
+        230,
+        400
+      ],
+      "section": "photos"
+    },
+    {
+      "key": "photos.3",
+      "label": "Photo 3 (featured)",
+      "size": [
+        460,
+        480
+      ],
+      "section": "photos"
+    },
+    {
+      "key": "photos.4",
+      "label": "Photo 4",
+      "size": [
+        230,
+        400
+      ],
+      "section": "photos"
+    },
+    {
+      "key": "photos.5",
+      "label": "Photo 5",
+      "size": [
+        230,
+        300
+      ],
+      "section": "photos"
+    },
+    {
+      "key": "event.fallback",
+      "label": "Event picture (events without a poster)",
+      "size": [
+        260,
+        220
+      ],
+      "section": "past"
+    }
+  ],
+  "accent": {
+    "default": "#D9B56A",
+    "vars": [
+      "--accent"
+    ]
+  }
+}

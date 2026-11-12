@@ -1,0 +1,24 @@
+{%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
+{%- macro n(v) -%}{%- if v is number -%}{{ ('[' ~ '{:,}'.format(v) ~ ']') if sample else '{:,}'.format(v) }}{%- else -%}{{ v }}{%- endif -%}{%- endmacro -%}
+{%- macro iso(v) -%}{{ (v if v is string else v.isoformat()) if v else '' }}{%- endmacro -%}
+{%- macro host(h, label) -%}{%- set l = (h or '')|string -%}{{ (l.split('//')[1].split('/')[0]|replace('www.', '')) if l[:8]|lower == 'https://' else (label or l) }}{%- endmacro -%}
+{%- set t = section.title if (section is defined and section.title) else 'Our story' -%}
+{%- set paras = (club.about or '').split('\n')|map('trim')|select|list -%}
+{%- set h2 = club.tagline if site.subline else none -%}
+{%- set topics = [] -%}
+{%- for x in club.topics or [] -%}{%- set _ = topics.append(x.name if x is mapping else x) -%}{%- endfor -%}
+{%- set soc = [] -%}{%- set web = [] -%}
+{%- for s in socials or [] -%}{%- set item = {'kind': (s.kind if s is mapping else (s[0]|lower)), 'label': (s.label if s is mapping else s[0]), 'href': (s.href if s is mapping else s[1])} -%}{%- set _ = (web if item.kind == 'website' else soc).append(item) -%}{%- endfor -%}
+{%- if club.website and club.website.href -%}{%- set _ = web.insert(0, club.website) -%}{%- endif -%}
+{%- set links_row = soc + web[:1] -%}
+{%- if paras or h2 or topics or links_row -%}
+<section id="about" class="gl-sec" style="max-width: 820px; margin: 0 auto; padding: 88px 24px; display: flex; flex-direction: column; align-items: center; gap: 22px">
+{% if paras or h2 %}<div style="font-size: 14px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--accent)">{{ t }}</div>
+{% endif %}{% if h2 %}<h2 style="margin: 0; font-family: 'Cormorant Garamond', Georgia, serif; font-weight: 500; font-size: clamp(32px, 4.4vw, 52px); line-height: 1.1">{{ h2 }}</h2>
+{% endif %}{% for p in paras %}<p style="margin: 0; color: #D5DCCF">{{ p }}</p>
+{% endfor %}{% if topics %}{% if paras or h2 %}<div style="width: 80px; height: 1px; background: var(--accent); margin: 12px 0"></div>
+{% endif %}<div style="font-size: 14px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--accent)">Domains of expertise</div>
+<p style="margin: 0; font-family: 'Cormorant Garamond', Georgia, serif; font-style: italic; font-weight: 500; font-size: clamp(24px, 3vw, 34px); line-height: 1.35">{{ topics|join(' · ') }}</p>
+{% endif %}{% if links_row %}<div style="display: flex; flex-wrap: wrap; justify-content: center; gap: 0 22px; font-size: 14px; letter-spacing: 0.14em; text-transform: uppercase">{% for s in links_row %}<a href="{{ u(s.href) }}" target="_top" style="padding: 12px 0">{{ host(s.href, s.label) if s.kind == 'website' else s.label }}</a>{% endfor %}</div>
+{% endif %}</section>
+{%- endif -%}

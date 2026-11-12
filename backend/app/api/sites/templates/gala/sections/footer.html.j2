@@ -1,0 +1,14 @@
+{%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
+{%- set keys = (nav|map(attribute='key')|list) if (nav is defined and nav) else (section_keys or []) -%}
+{%- set overrides = site.title_overrides or {} -%}
+{%- set nav_labels = {'about': 'About', 'upcoming': 'Events', 'past': 'Past', 'photos': 'Gallery', 'speakers': 'Speakers', 'team': 'Committee', 'sponsors': 'Patrons'} -%}
+{%- set items = keys|select('in', nav_labels)|list -%}
+{%- if 'upcoming' in items and 'past' in items -%}{%- set items = items|reject('equalto', 'past')|list -%}{%- endif -%}
+{%- set half = (items|length + 1) // 2 -%}
+{%- set cover = images['hero.cover'] -%}
+{%- set logo = club.logo if (club.logo and club.logo.url) else ({'url': club.logo_url, 'srcset': club.logo_srcset} if club.logo_url else none) -%}
+{%- set h1 = (site.headline or club.name)|trim|replace('\n', ' ') -%}
+{%- set words = h1.split(' ') -%}
+{%- set lead = (site.subline or club.tagline or subline) if (site.subline or club.tagline or subline) else none -%}
+{%- set join_href = '#join' if 'join' in keys else u(links.join_url) -%}
+<footer style="background: #0B1F19; padding: 36px 24px; font-size: 14px; color: #C4CDBF">{{ [club.name, club.address or club.location_name]|select|join(' · ') }}{% if club.contact_email %} · <a href="{{ u(links.contact_mailto or ('mailto:' ~ club.contact_email)) }}" style="color: inherit; text-decoration: none; overflow-wrap: anywhere">{{ club.contact_email }}</a>{% endif %}</footer>

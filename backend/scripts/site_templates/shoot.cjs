@@ -48,11 +48,17 @@ function browserPath() {
 }
 
 async function settle(page) {
-  // Fonts come from Google Fonts on both pages; wait for them and for images.
+  // Fonts come from Google Fonts on both pages. Lazy pictures below the fold
+  // would stay blank in a full-page shot, and a picture that has loaded may
+  // not be decoded yet: load everything eagerly, then wait for the fonts and
+  // for every <img> to decode (each capped, so a broken picture can't hang).
+  await page.evaluate(() => document.querySelectorAll('img[loading="lazy"]').forEach((i) => i.setAttribute("loading", "eager")));
   await page.waitForLoadState("networkidle").catch(() => {});
   await page.evaluate(async () => {
     await document.fonts.ready;
-    await Promise.all(Array.from(document.images).map((i) => (i.complete ? null : new Promise((r) => { i.onload = i.onerror = r; }))));
+    const capped = (p) => Promise.race([p.catch(() => {}), new Promise((r) => setTimeout(r, 10000))]);
+    await Promise.all(Array.from(document.images).map((i) => capped(i.decode())));
+    await document.fonts.ready;
   });
   await page.waitForTimeout(150);
 }
@@ -60,10 +66,6 @@ async function settle(page) {
 async function shot(context, file, opts = {}) {
   const page = await context.newPage();
   await page.goto("file://" + file, { waitUntil: "load" });
-  if (opts.eager) {
-    // Lazy images below the fold would stay blank in a full-page shot.
-    await page.evaluate(() => document.querySelectorAll('img[loading="lazy"]').forEach((i) => i.setAttribute("loading", "eager")));
-  }
   await settle(page);
   const metrics = opts.metrics ? await page.evaluate(overflowReport) : null;
   const buf = await page.screenshot({ fullPage: opts.fullPage !== false, animations: "disabled", caret: "hide" });
@@ -147,7 +149,7 @@ async function main() {
       }
       for (const extra of job.extra || []) {
         // Other renders of the same package (real images, sparse club, reordered).
-        const e = await shot(desk, extra.file, { eager: true });
+        const e = await shot(desk, extra.file);
         fs.writeFileSync(path.join(job.out, extra.name + "-1440.png"), e.buf);
       }
       await desk.close();
@@ -159,7 +161,7 @@ async function main() {
         r.mobile[width] = s.metrics;
         for (const extra of job.extra || []) {
           if (!extra.mobile) continue;
-          const e = await shot(ctx, extra.file, { metrics: true, eager: true });
+          const e = await shot(ctx, extra.file, { metrics: true });
           fs.writeFileSync(path.join(job.out, `${extra.name}-m${width}.png`), e.buf);
           r.mobile[`${extra.name}-${width}`] = e.metrics;
         }

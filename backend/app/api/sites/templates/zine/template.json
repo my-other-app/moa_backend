@@ -1,0 +1,136 @@
+{
+  "key": "zine",
+  "name": "Zine",
+  "blurb": "Playful cut-and-paste: tilted cards, pink and ink-blue, a photo wall",
+  "fonts": [
+    "Space+Grotesk:wght@400;500;700",
+    "Unbounded:wght@700;900"
+  ],
+  "layout": "single",
+  "fixed_top": [
+    "nav",
+    "hero"
+  ],
+  "fixed_side": [],
+  "fixed_bottom": [
+    "footer"
+  ],
+  "sections": [
+    {
+      "key": "stats",
+      "label": "Numbers band",
+      "default_title": "In numbers",
+      "hideable": true
+    },
+    {
+      "key": "about",
+      "label": "Who we are and what we are good at",
+      "default_title": "Who we are",
+      "hideable": true
+    },
+    {
+      "key": "upcoming",
+      "label": "Upcoming events",
+      "default_title": "What is next",
+      "hideable": true
+    },
+    {
+      "key": "past",
+      "label": "Past events",
+      "default_title": "What came before",
+      "hideable": true
+    },
+    {
+      "key": "photos",
+      "label": "Photo wall",
+      "default_title": "Photo wall",
+      "hideable": true
+    },
+    {
+      "key": "speakers",
+      "label": "Speakers",
+      "default_title": "Previous speakers",
+      "hideable": true
+    },
+    {
+      "key": "team",
+      "label": "Team",
+      "default_title": "The humans",
+      "hideable": true
+    },
+    {
+      "key": "sponsors",
+      "label": "Sponsors and partners",
+      "default_title": "Sponsors, partners and other friends",
+      "hideable": true
+    },
+    {
+      "key": "join",
+      "label": "Join banner",
+      "default_title": "Come to the next one.",
+      "hideable": true
+    }
+  ],
+  "slots": [
+    {
+      "key": "hero.cover",
+      "label": "Cover photo (polaroid)",
+      "size": [
+        440,
+        550
+      ],
+      "section": "hero"
+    },
+    {
+      "key": "photos.1",
+      "label": "Photo 1",
+      "size": [
+        262,
+        262
+      ],
+      "section": "photos"
+    },
+    {
+      "key": "photos.2",
+      "label": "Photo 2",
+      "size": [
+        262,
+        262
+      ],
+      "section": "photos"
+    },
+    {
+      "key": "photos.3",
+      "label": "Photo 3",
+      "size": [
+        262,
+        262
+      ],
+      "section": "photos"
+    },
+    {
+      "key": "photos.4",
+      "label": "Photo 4",
+      "size": [
+        262,
+        262
+      ],
+      "section": "photos"
+    },
+    {
+      "key": "event.fallback",
+      "label": "Event banner (events without a poster)",
+      "size": [
+        530,
+        280
+      ],
+      "section": "upcoming"
+    }
+  ],
+  "accent": {
+    "default": "#FF8FB3",
+    "vars": [
+      "--accent"
+    ]
+  }
+}

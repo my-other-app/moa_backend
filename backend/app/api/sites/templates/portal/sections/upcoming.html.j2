@@ -1,0 +1,30 @@
+{%- macro isrc(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'file://' or l[:11]|lower == 'data:image/') else '' }}{%- endmacro -%}
+{%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
+{%- macro n(v) -%}{%- if v is number -%}{{ ('[' ~ '{:,}'.format(v) ~ ']') if sample else '{:,}'.format(v) }}{%- else -%}{{ v }}{%- endif -%}{%- endmacro -%}
+{%- macro iso(v) -%}{{ (v if v is string else v.isoformat()) if v else '' }}{%- endmacro -%}
+{%- set t = section.title if (section is defined and section.title) else 'Upcoming events' -%}
+{%- set MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] -%}
+{%- if upcoming -%}
+<section id="upcoming" class="pt-card" style="background: #FFFFFF; border: 1px solid #D5D9DE; border-radius: 16px; padding: 22px; display: flex; flex-direction: column; gap: 4px">
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px"><h2 style="margin: 0; font-weight: 700; font-size: 18px">{{ t }} <span style="color: #565D66; font-weight: 500">{{ upcoming|length }}</span></h2>{% if links.events_url %}<a href="{{ u(links.events_url) }}" target="_top" style="font-weight: 600; padding: 10px 0">See all</a>{% endif %}</div>
+{% for e in upcoming %}
+{%- set s = iso(e.starts_at) -%}
+{%- set online = e.is_online if (e.is_online is defined and e.is_online is not none) else ((e.mode or e.where or '')|lower == 'online') -%}
+{%- set mon = e.month or MON[(s[5:7]|int) - 1] -%}
+{%- set day = e.day or (s[8:10]|int) -%}
+{%- if loop.first -%}
+{%- set p = e.poster -%}
+{%- set cap = e.capacity if e.capacity else ((e.seats_left + e.going) if (e.seats_left is number and e.going is number) else none) -%}
+{%- set seats = ((n(e.seats_left) ~ ' of ' ~ n(cap) ~ ' seats left') if cap else (n(e.seats_left) ~ ' seats left')) if (e.seats_left is defined and e.seats_left is not none) else none -%}
+<article style="display: flex; flex-wrap: wrap; gap: 16px; padding: 14px; border-radius: 12px; background: var(--accent-soft); border: 1px solid var(--accent-line)">
+{% if p and p.url %}<div class="pt-feat-img" style="flex: 0 0 180px; min-height: 120px; border-radius: 10px; position: relative; overflow: hidden"><img src="{{ isrc(p.url) }}"{% if p.srcset %} srcset="{{ p.srcset }}" sizes="(min-width: 640px) 180px, calc(100vw - 100px)"{% endif %} width="{{ p.w or 360 }}" height="{{ p.h or 240 }}" alt="{{ p.alt or e.name }}" loading="lazy" decoding="async" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block"></div>
+{% elif p and p.placeholder is defined %}<div class="pt-feat-img" style="flex: 0 0 180px; min-height: 120px; border-radius: 10px; background: repeating-linear-gradient(135deg, #F1D9CB 0 12px, #F7E5DA 12px 24px)"></div>
+{% endif %}<div style="flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 4px"><span style="font-weight: 700; font-size: 13px; color: var(--accent-ink)">{{ ['NEXT UP', ([e.weekday, day ~ ' ' ~ mon, e.year or s[0:4]]|select|join(' '))|upper, e.time]|select|join(' · ') }}</span><h3 style="margin: 0; font-weight: 700; font-size: 19px; line-height: 1.25">{{ e.name }}</h3>{% set meta = [('Online' if online else e.where), ('In person' if not online else none), seats]|select|list %}{% if meta %}<span style="color: #3B4149; font-size: 14px">{{ meta|join(' · ') }}</span>{% endif %}</div>
+<a href="{{ u(e.url) }}" target="_top" style="align-self: center; display: inline-flex; align-items: center; min-height: 44px; padding: 0 22px; border-radius: 10px; background: var(--accent); color: var(--on-accent); text-decoration: none; font-weight: 700">Register</a>
+</article>
+{%- else %}
+<article style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 14px 4px{% if not loop.last %}; border-bottom: 1px solid #E4E7EA{% endif %}"><div style="flex: 0 0 52px; text-align: center; line-height: 1.15"><div style="font-size: 12px; font-weight: 700; color: var(--accent-ink)">{{ mon|upper }}</div><div style="font-size: 22px; font-weight: 700">{{ day }}</div></div><div style="flex: 1 1 280px; min-width: 0"><h3 style="margin: 0; font-weight: 600; font-size: 16px">{{ e.name }}</h3><span style="color: #565D66; font-size: 14px">{{ [([e.weekday, e.time]|select|join(' ')) or none, ('Online' if online else ((e.where or '').split(',')[0]|trim or none)), e.kind]|select|join(' · ') }}</span></div><a href="{{ u(e.url) }}" target="_top" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid #9AA1AA; color: #1A1D21; text-decoration: none; font-weight: 600">Register</a></article>
+{%- endif %}
+{% endfor %}
+</section>
+{%- endif -%}

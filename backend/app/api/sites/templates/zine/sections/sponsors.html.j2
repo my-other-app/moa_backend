@@ -1,0 +1,16 @@
+{%- macro isrc(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'file://' or l[:11]|lower == 'data:image/') else '' }}{%- endmacro -%}
+{%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
+{%- macro n(v) -%}{%- if v is number -%}{{ ('[' ~ '{:,}'.format(v) ~ ']') if sample else '{:,}'.format(v) }}{%- else -%}{{ v }}{%- endif -%}{%- endmacro -%}
+{%- macro iso(v) -%}{{ (v if v is string else v.isoformat()) if v else '' }}{%- endmacro -%}
+{%- set t = section.title if (section is defined and section.title) else 'Sponsors, partners and other friends' -%}
+{%- set main = [] -%}{%- set others = [] -%}
+{%- for p in sponsors or [] -%}{%- set _ = (main if ((p.kind == 'sponsor') if p.kind else ('sponsor' in (p.role or '')|lower)) else others).append(p) -%}{%- endfor -%}
+{%- if main or others -%}
+<section id="sponsors" class="zn-sec" style="max-width: 1240px; margin: 0 auto; padding: 88px 24px; display: flex; flex-direction: column; gap: 28px">
+<h2 style="margin: 0; font-family: Unbounded, system-ui, sans-serif; font-weight: 900; font-size: clamp(28px, 3.6vw, 44px); line-height: 1.08; letter-spacing: -0.02em">{{ t }}</h2>
+<div class="zn-friends" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 16px">
+{% for p in main %}{% set lg = p.logo.url if p.logo is mapping else p.logo %}<div style="min-height: 110px; border-radius: 999px; background: #FFFFFF; border: 2px solid #1B2A9E; display: flex; align-items: center; justify-content: center; font-weight: 700">{% if lg %}<img class="zn-logo" src="{{ isrc(lg) }}" width="160" height="56" alt="{{ p.name }}" loading="lazy" decoding="async">{% else %}{{ p.name }}{% endif %}</div>
+{% endfor %}{% for p in others %}{% set lg = p.logo.url if p.logo is mapping else p.logo %}<div style="min-height: 110px; border-radius: 999px; border: 2px dashed #1B2A9E; display: flex; align-items: center; justify-content: center">{% if lg %}<img class="zn-logo" src="{{ isrc(lg) }}" width="160" height="56" alt="{{ p.name }}" loading="lazy" decoding="async">{% else %}{{ p.name }}{% endif %}</div>
+{% endfor %}</div>
+</section>
+{%- endif -%}

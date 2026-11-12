@@ -1,0 +1,20 @@
+{%- macro isrc(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'file://' or l[:11]|lower == 'data:image/') else '' }}{%- endmacro -%}
+{%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
+{%- macro n(v) -%}{%- if v is number -%}{{ ('[' ~ '{:,}'.format(v) ~ ']') if sample else '{:,}'.format(v) }}{%- else -%}{{ v }}{%- endif -%}{%- endmacro -%}
+{%- macro iso(v) -%}{{ (v if v is string else v.isoformat()) if v else '' }}{%- endmacro -%}
+{%- set t = section.title if (section is defined and section.title) else 'The gallery' -%}
+{%- set photos = (images.photos or [])|select|list -%}
+{%- set mid = photos|length // 2 -%}
+{%- if photos -%}
+<section id="photos" class="gl-sec" style="background: #0B1F19; padding: 88px 0">
+<div style="max-width: 1280px; margin: 0 auto; padding: 0 24px; display: flex; flex-direction: column; align-items: center; gap: 14px">
+<div style="font-size: 14px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--accent)">Highlights</div>
+<h2 style="margin: 0 0 20px; font-family: 'Cormorant Garamond', Georgia, serif; font-weight: 500; font-size: clamp(36px, 5vw, 60px); line-height: 1.05">{{ t }}</h2>
+<div style="align-self: stretch; display: flex; flex-wrap: wrap; gap: 16px; align-items: center">
+{% for ph in photos %}{% set d = (loop.index0 - mid)|abs %}{% if d == 0 %}<div class="gl-g2" style="flex: 2 1 340px; min-height: 500px; border: 1px solid var(--accent); padding: 10px; box-sizing: border-box; display: flex">{% if ph.url %}<div style="flex: 1; position: relative; overflow: hidden"><img src="{{ isrc(ph.url) }}"{% if ph.srcset %} srcset="{{ ph.srcset }}" sizes="(min-width: 1280px) 460px, (min-width: 640px) 40vw, calc(100vw - 70px)"{% endif %} width="{{ ph.w or 920 }}" height="{{ ph.h or 960 }}" alt="{{ ph.alt or '' }}" loading="lazy" decoding="async" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block"></div>{% else %}<div style="flex: 1; background: repeating-linear-gradient(135deg, #143329 0 14px, #193B30 14px 28px); display: flex; align-items: flex-end; justify-content: center; padding: 16px">{% if ph.placeholder %}<span style="background: #0F2A22; font-size: 13px; padding: 5px 12px">{{ ph.placeholder }}</span>{% endif %}</div>{% endif %}</div>
+{% else %}{% set hgt = 400 if d == 1 else 300 %}{% if ph.url %}<img class="gl-g1" src="{{ isrc(ph.url) }}"{% if ph.srcset %} srcset="{{ ph.srcset }}" sizes="(min-width: 1280px) 230px, (min-width: 640px) 20vw, calc(50vw - 32px)"{% endif %} width="{{ ph.w or 460 }}" height="{{ ph.h or (hgt * 2) }}" alt="{{ ph.alt or '' }}" loading="lazy" decoding="async" style="flex: 1 1 200px; min-width: 0; height: {{ hgt }}px; object-fit: cover; display: block">{% else %}<div class="gl-g1" style="flex: 1 1 200px; min-height: {{ hgt }}px; background: repeating-linear-gradient(135deg, #143329 0 14px, #193B30 14px 28px)"></div>{% endif %}
+{% endif %}{% endfor %}</div>
+{% if links.gallery_url %}<a href="{{ u(links.gallery_url) }}" target="_top" style="font-size: 14px; letter-spacing: 0.14em; text-transform: uppercase; padding: 14px 0; margin-top: 8px">View all{% if stats.photos %} {{ n(stats.photos) }}{% endif %} photographs →</a>
+{% endif %}</div>
+</section>
+{%- endif -%}

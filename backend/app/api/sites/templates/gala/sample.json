@@ -1,0 +1,410 @@
+{
+ "join_text": "Membership is free. Invitations first, recordings of every talk and a seat at the table.",
+ "site": {
+  "template": "gala",
+  "title_overrides": {},
+  "accent": null,
+  "headline": null,
+  "subline": "A community for people who design and build digital products. We gather every month to share work in progress and learn from practitioners."
+ },
+ "club": {
+  "name": "Harbour Makers Collective",
+  "tagline": "Built by practitioners, open to anyone who wants to learn.",
+  "about": "Harbour Makers started as six people sharing side projects around one table. Today it is a volunteer-run community of designers, engineers and founders. Every event is free for members, every talk is recorded, and every speaker stays for questions.",
+  "kind": "A community",
+  "location_name": "[City, Country]",
+  "address": "[Address line], [City, Country]",
+  "contact_email": "[contact@email.com]",
+  "logo_url": null,
+  "logo_srcset": null,
+  "cover": null,
+  "founded_year": "[Year]",
+  "verified": false,
+  "topics": [
+   "Product design",
+   "Frontend engineering",
+   "Applied AI",
+   "Open source",
+   "Design systems",
+   "Accessibility"
+  ],
+  "slug": "harbour-makers",
+  "topic_counts": {},
+  "initials": "HM",
+  "logo": null
+ },
+ "images": {
+  "hero.cover": {
+   "placeholder": "Cover photo"
+  },
+  "photos": [
+   {
+    "placeholder": ""
+   },
+   {
+    "placeholder": ""
+   },
+   {
+    "placeholder": "Featured · Harbour Summit 2026"
+   },
+   {
+    "placeholder": ""
+   },
+   {
+    "placeholder": ""
+   }
+  ],
+  "event.fallback": null
+ },
+ "stats": {
+  "followers": 1240,
+  "members": 1240,
+  "events_held": 48,
+  "speakers": 96,
+  "sponsors": 14,
+  "photos": 216,
+  "upcoming": 3
+ },
+ "upcoming": [
+  {
+   "id": 1,
+   "name": "Winter Showcase: ten projects, five minutes each",
+   "starts_at": "2026-12-12T16:00:00+05:30",
+   "ends_at": "2026-12-12T20:00:00+05:30",
+   "weekday": "Sat",
+   "time": "4:00 PM",
+   "end_time": "8:00 PM",
+   "where": "[Venue name], [City]",
+   "kind": "Showcase",
+   "seats_left": 62,
+   "fee": "Free",
+   "poster": null,
+   "url": "#upcoming",
+   "is_online": false,
+   "going": 88
+  },
+  {
+   "id": 2,
+   "name": "Workshop: design tokens from scratch",
+   "starts_at": "2027-01-16T10:00:00+05:30",
+   "ends_at": null,
+   "weekday": "Sat",
+   "time": "10:00 AM",
+   "end_time": null,
+   "where": "[Venue name], [City]",
+   "kind": "Workshop",
+   "fee": "Free",
+   "poster": null,
+   "url": "#upcoming",
+   "is_online": false
+  },
+  {
+   "id": 3,
+   "name": "Fireside: shipping AI features people trust",
+   "starts_at": "2027-02-20T18:30:00+05:30",
+   "ends_at": null,
+   "weekday": "Sat",
+   "time": "6:30 PM",
+   "end_time": null,
+   "where": "Online",
+   "kind": "Talk",
+   "fee": "Free",
+   "poster": null,
+   "url": "#upcoming",
+   "is_online": true
+  }
+ ],
+ "past": [
+  {
+   "id": 11,
+   "name": "The craft of onboarding",
+   "starts_at": "2026-10-17T18:00:00+05:30",
+   "weekday": "Sat",
+   "time": "6:00 PM",
+   "where": "[Venue name], [City]",
+   "kind": "Meetup",
+   "speakers_count": 3,
+   "number": 47,
+   "poster": {
+    "placeholder": ""
+   },
+   "url": "#past",
+   "is_online": false,
+   "going": 120
+  },
+  {
+   "id": 12,
+   "name": "Weekend build: tools for local shops",
+   "starts_at": "2026-09-19T10:00:00+05:30",
+   "weekday": "Sat",
+   "time": "10:00 AM",
+   "where": "[Venue name], [City]",
+   "kind": "Hackathon",
+   "speakers_count": 4,
+   "number": 46,
+   "poster": {
+    "placeholder": ""
+   },
+   "url": "#past",
+   "is_online": false,
+   "going": 84,
+   "facts": [
+    "[84] guests",
+    "12 teams"
+   ]
+  },
+  {
+   "id": 13,
+   "name": "Accessible forms, hands on",
+   "starts_at": "2026-08-22T10:00:00+05:30",
+   "weekday": "Sat",
+   "time": "10:00 AM",
+   "where": "[Venue name], [City]",
+   "kind": "Workshop",
+   "speakers_count": 1,
+   "number": 45,
+   "poster": {
+    "placeholder": ""
+   },
+   "url": "#past",
+   "is_online": false,
+   "going": 40
+  },
+  {
+   "id": 14,
+   "name": "Harbour Summit 2026",
+   "starts_at": "2026-06-20T09:00:00+05:30",
+   "weekday": "Sat",
+   "time": "9:00 AM",
+   "where": "[Venue name], [City]",
+   "kind": "Conference",
+   "speakers_count": 14,
+   "number": 44,
+   "poster": {
+    "placeholder": ""
+   },
+   "url": "#past",
+   "is_online": false,
+   "going": 310
+  }
+ ],
+ "speakers": [
+  {
+   "name": "Ananya Rao",
+   "title": "Design lead",
+   "org": "[Company]",
+   "talk": "Onboarding as a conversation",
+   "event": "Summit 2026",
+   "photo": {
+    "placeholder": ""
+   },
+   "url": null
+  },
+  {
+   "name": "Daniel Okafor",
+   "title": "Staff engineer",
+   "org": "[Company]",
+   "talk": "What we deleted to go faster",
+   "event": "Meetup #47",
+   "photo": {
+    "placeholder": ""
+   },
+   "url": null
+  },
+  {
+   "name": "Mei Tanaka",
+   "title": "Founder",
+   "org": "[Company]",
+   "talk": "The first hundred customers",
+   "event": "Summit 2026",
+   "photo": {
+    "placeholder": ""
+   },
+   "url": null
+  },
+  {
+   "name": "Lucas Ferreira",
+   "title": "ML engineer",
+   "org": "[Company]",
+   "talk": "Evaluating models without a lab",
+   "event": "Meetup #46",
+   "photo": {
+    "placeholder": ""
+   },
+   "url": null
+  },
+  {
+   "name": "Priya Nair",
+   "title": null,
+   "org": null,
+   "photo": null,
+   "url": null
+  },
+  {
+   "name": "Tomás Blanco",
+   "title": null,
+   "org": null,
+   "photo": null,
+   "url": null
+  },
+  {
+   "name": "Sara Haddad",
+   "title": null,
+   "org": null,
+   "photo": null,
+   "url": null
+  },
+  {
+   "name": "Jonas Keller",
+   "title": null,
+   "org": null,
+   "photo": null,
+   "url": null
+  },
+  {
+   "name": "Aisha Mwangi",
+   "title": null,
+   "org": null,
+   "photo": null,
+   "url": null
+  },
+  {
+   "name": "Rahul Varma",
+   "title": null,
+   "org": null,
+   "photo": null,
+   "url": null
+  }
+ ],
+ "team": [
+  {
+   "name": "Nikhil Menon",
+   "role": "Founder, lead organiser",
+   "photo": {
+    "placeholder": ""
+   },
+   "links": []
+  },
+  {
+   "name": "Clara Jensen",
+   "role": "Programme, speakers",
+   "photo": {
+    "placeholder": ""
+   },
+   "links": []
+  },
+  {
+   "name": "Farah Siddiqui",
+   "role": "Partnerships",
+   "photo": {
+    "placeholder": ""
+   },
+   "links": []
+  },
+  {
+   "name": "Marcus Lee",
+   "role": "Venue, operations",
+   "photo": {
+    "placeholder": ""
+   },
+   "links": []
+  },
+  {
+   "name": "Divya Pillai",
+   "role": "Design, media",
+   "photo": {
+    "placeholder": ""
+   },
+   "links": []
+  },
+  {
+   "name": "Owen Hughes",
+   "role": "Member community",
+   "photo": {
+    "placeholder": ""
+   },
+   "links": []
+  }
+ ],
+ "sponsors": [
+  {
+   "name": "[Principal sponsor logo]",
+   "role": "Principal sponsor",
+   "logo": null
+  },
+  {
+   "name": "[Principal sponsor logo]",
+   "role": "Principal sponsor",
+   "logo": null
+  },
+  {
+   "name": "[Principal sponsor logo]",
+   "role": "Principal sponsor",
+   "logo": null
+  },
+  {
+   "name": "[Sponsor logo]",
+   "role": "Sponsor",
+   "logo": null
+  },
+  {
+   "name": "[Sponsor logo]",
+   "role": "Sponsor",
+   "logo": null
+  },
+  {
+   "name": "[Venue partner]",
+   "role": "Venue partner",
+   "logo": null
+  },
+  {
+   "name": "[Media partner]",
+   "role": "Media partner",
+   "logo": null
+  },
+  {
+   "name": "[University partner]",
+   "role": "University partner",
+   "logo": null
+  }
+ ],
+ "socials": [
+  {
+   "kind": "linkedin",
+   "label": "LinkedIn",
+   "href": "#about"
+  },
+  {
+   "kind": "instagram",
+   "label": "Instagram",
+   "href": "#about"
+  },
+  {
+   "kind": "youtube",
+   "label": "YouTube",
+   "href": "#about"
+  },
+  {
+   "kind": "website",
+   "label": "[website.com]",
+   "href": "#about"
+  }
+ ],
+ "links": {
+  "follow_url": "#top",
+  "events_url": "#past",
+  "join_url": "#join",
+  "contact_mailto": "mailto:contact@example.com",
+  "speakers_url": "#speakers",
+  "gallery_url": "#photos",
+  "site_url": "https://harbour-makers.myotherapp.in"
+ },
+ "page": {
+  "title": "Harbour Makers Collective",
+  "description": "A community for people who design and build digital products.",
+  "url": "https://harbour-makers.myotherapp.in"
+ },
+ "headline": "Harbour Makers Collective",
+ "subline": "A community for people who design and build digital products.",
+ "sample": true
+}

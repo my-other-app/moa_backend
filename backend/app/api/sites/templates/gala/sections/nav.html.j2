@@ -1,0 +1,21 @@
+{%- macro isrc(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'file://' or l[:11]|lower == 'data:image/') else '' }}{%- endmacro -%}
+{%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
+{%- set keys = (nav|map(attribute='key')|list) if (nav is defined and nav) else (section_keys or []) -%}
+{%- set overrides = site.title_overrides or {} -%}
+{%- set nav_labels = {'about': 'About', 'upcoming': 'Events', 'past': 'Past', 'photos': 'Gallery', 'speakers': 'Speakers', 'team': 'Committee', 'sponsors': 'Patrons'} -%}
+{%- set items = keys|select('in', nav_labels)|list -%}
+{%- if 'upcoming' in items and 'past' in items -%}{%- set items = items|reject('equalto', 'past')|list -%}{%- endif -%}
+{%- set half = (items|length + 1) // 2 -%}
+{%- set cover = images['hero.cover'] -%}
+{%- set logo = club.logo if (club.logo and club.logo.url) else ({'url': club.logo_url, 'srcset': club.logo_srcset} if club.logo_url else none) -%}
+{%- set h1 = (site.headline or club.name)|trim|replace('\n', ' ') -%}
+{%- set words = h1.split(' ') -%}
+{%- set lead = (site.subline or club.tagline or subline) if (site.subline or club.tagline or subline) else none -%}
+{%- set join_href = '#join' if 'join' in keys else u(links.join_url) -%}
+<header style="border-bottom: 1px solid #2E4A40">
+<nav aria-label="Sections" class="gl-nav" style="max-width: 1200px; margin: 0 auto; padding: 10px 24px; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px 12px; font-size: 14px; letter-spacing: 0.16em; text-transform: uppercase">
+{% for k in items[:half] %}<a href="#{{ k }}" style="padding: 14px 10px; text-decoration: none">{{ overrides[k] or nav_labels[k] }}</a>
+{% endfor %}<a href="#top" class="gl-mark" aria-label="{{ club.name }}, home" style="width: 48px; height: 48px; border-radius: 999px; border: 1px solid var(--accent); color: var(--accent); display: inline-flex; align-items: center; justify-content: center; text-decoration: none; font-family: 'Cormorant Garamond', Georgia, serif; font-size: 24px; letter-spacing: 0; margin: 0 16px; overflow: hidden">{% if logo %}<img src="{{ isrc(logo.url) }}"{% if logo.srcset %} srcset="{{ logo.srcset }}" sizes="48px"{% endif %} width="48" height="48" alt="" loading="lazy" decoding="async" style="width: 100%; height: 100%; object-fit: cover">{% else %}{{ club.name[:1]|upper }}{% endif %}</a>
+{% for k in items[half:] %}<a href="#{{ k }}" style="padding: 14px 10px; text-decoration: none">{{ overrides[k] or nav_labels[k] }}</a>
+{% endfor %}</nav>
+</header>

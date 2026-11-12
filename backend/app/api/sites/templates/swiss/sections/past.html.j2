@@ -1,0 +1,12 @@
+{%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
+{%- macro n(v) -%}{%- if v is number -%}{{ ('[' ~ '{:,}'.format(v) ~ ']') if sample else '{:,}'.format(v) }}{%- else -%}{{ v }}{%- endif -%}{%- endmacro -%}
+{%- macro iso(v) -%}{{ (v if v is string else v.isoformat()) if v else '' }}{%- endmacro -%}
+{%- set t = section.title if (section is defined and section.title) else 'Past events' -%}
+{%- if past -%}
+<section id="past" class="sw-sec" style="display: flex; flex-wrap: wrap; gap: 24px 32px; padding: 40px 0; border-top: 1px solid #0A0A0A">
+<div style="flex: 1 1 220px; display: flex; flex-direction: column; gap: 8px"><h2 class="sw-n" style="margin: 0; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-weight: 500; font-size: 13px">{{ t }}</h2>{% if links.events_url %}<a href="{{ u(links.events_url) }}" target="_top" style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 13px; padding: 10px 0">Archive{% if stats.events_held %}, {{ n(stats.events_held) }}{% endif %} ↗</a>{% endif %}</div>
+<div style="flex: 4 1 560px; min-width: 0; display: flex; flex-direction: column">
+{% for e in past %}{% set s = iso(e.starts_at) %}{% set meta = ([e.kind] + (e.facts or [((n(e.going) ~ ' attended') if e.going else none)]))|select|list %}<article style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 24px; padding: 16px 0; border-bottom: 1px solid #D4D4D4"><span style="flex: 0 0 110px; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 13px">{{ s[8:10] }}.{{ s[5:7] }}.{{ s[0:4] }}</span><h3 style="flex: 2 1 300px; margin: 0; font-size: 20px; font-weight: 500; letter-spacing: -0.01em">{{ e.name }}</h3><span style="flex: 1 1 180px; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 13px; color: #5C5C5C">{{ meta|join(' · ') }}</span><a href="{{ u(e.url) }}" target="_top" style="font-weight: 500; padding: 10px 0">Recap ↗</a></article>
+{% endfor %}</div>
+</section>
+{%- endif -%}
