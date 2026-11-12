@@ -20,7 +20,7 @@ from app.api.interests.models import Interests
 from app.api.links import service as links
 from app.api.sites import layout as layouts
 from app.api.sites import registry
-from app.api.sites.models import DEFAULT_TEMPLATE, ClubSiteImages, ClubSites
+from app.api.sites.models import DEFAULT_TEMPLATE, IMAGE_MB, MAX_IMAGES, ClubSiteImages, ClubSites
 from app.api.sites.render import IST, image_srcset, image_url, render, titles_for
 from app.api.speakers.models import ACTIVE, HIDDEN, SpeakerProfiles
 from app.config import settings
@@ -441,8 +441,6 @@ async def library_view(session: AsyncSession, club: Clubs, s: ClubSites) -> list
 
 
 async def out(session: AsyncSession, club: Clubs, s: ClubSites, adjusted: dict | None = None) -> dict:
-    from app.api.sites.models import IMAGE_MB, MAX_IMAGES
-
     link = await links.website_link(session, club.id)
     if link is None and s.published_at:
         # Published before sites had a link: give it one now.

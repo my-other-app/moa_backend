@@ -21,6 +21,7 @@ CATALOGUE is the order the dashboard lists them in, and the order a plan's
 """
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import logging
@@ -323,5 +324,7 @@ def resolve(key: Optional[str]) -> Package:
     return pkg
 
 
+@functools.lru_cache(maxsize=128)
 def file_version(path: Path) -> str:
+    """A short hash of a package file, for its address's ?v= (read once per process, like the packages)."""
     return hashlib.sha256(path.read_bytes()).hexdigest()[:10]

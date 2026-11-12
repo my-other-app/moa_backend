@@ -28,7 +28,7 @@ from tests.conftest import SITE_FIXTURE, auth_header
 
 NOW = datetime.now(timezone.utc)
 API = "/api/v1/clubs/site"
-FX = registry.load_package(SITE_FIXTURE)
+FX = registry.load_package(SITE_FIXTURE, key="fixture")
 DEFAULT_ORDER = ["upcoming", "about", "expertise", "stats", "past", "photos", "speakers", "team", "sponsors", "join"]
 
 
@@ -209,7 +209,8 @@ async def test_switching_template_through_the_api_carries_the_layout(client, wor
     h = world["h"]
     await client.patch(API, json={"layout": {"order": ["join", "team", "upcoming"], "titles": {"stats": "Numbers!"}}}, headers=h)
     s = (await client.patch(API, json={"template": "other"}, headers=h)).json()
-    assert s["template"] == "other" and s["layout"]["order"] == ["join", "team", "upcoming", "photos", "about"] and s["layout"]["titles"] == {}
+    # The shared sections keep the order they had (about and photos followed upcoming there too).
+    assert s["template"] == "other" and s["layout"]["order"] == ["join", "team", "upcoming", "about", "photos"] and s["layout"]["titles"] == {}
     s = (await client.patch(API, json={"template": "fixture"}, headers=h)).json()
     assert s["layout"]["order"][:3] == ["join", "team", "upcoming"] and s["layout"]["titles"] == {"stats": "Numbers!"}
 

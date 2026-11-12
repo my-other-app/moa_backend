@@ -245,7 +245,8 @@ def _package_styles(pkg: Package) -> list[str]:
     found = [str(pkg.css)]
     if pkg.sample:
         try:
-            found += inline_styles(assemble(pkg, pkg.sample, normalise((pkg.sample.get("site") or {}), pkg)))
+            site = pkg.sample.get("site") or {}
+            found += inline_styles(assemble(pkg, pkg.sample, normalise(site.get("layout") or site, pkg)))
         except Exception:  # noqa: BLE001 -- a sample that does not render only costs its extra hashes
             logger.exception("site template %s: its sample.json did not render", pkg.key)
     return found

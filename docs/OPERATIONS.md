@@ -4023,3 +4023,73 @@ again from Google Fonts (review the diff), `--check` verifies the files against 
 `https://api.myotherapp.in/static/doc-fonts/` (public, `immutable`, `Access-Control-Allow-Origin: *`); a
 render never reaches Google.
 
+
+---
+
+## 30. Club websites: the designer's templates, the club's layout, the photo library
+
+A club's website (`{slug}.myotherapp.in`, or its own domain) is one stored HTML page per club
+(`club_sites.html`), made by `app/api/sites` from the club's data in one of the designer's ten templates
+(feature-register/site-templates-contract.md). Since migration `site_templates_v2` the first version's four
+templates (launchpad, chapter, campus, arena) and their light/dark looks and fonts are gone; every site moved to
+`classic`, keeping its headline and subline, with the sections it had turned off hidden.
+
+**The templates** are packages in `backend/app/api/sites/templates/<key>/` (`template.json`, `page.html.j2`,
+`sections/*.html.j2`, `style.css`, `sample.json`, `thumb.png`, `thumb-mobile.png`), in the catalogue order
+`classic, editorial, night, poster, bento, swiss, gala, timeline, portal, zine` (`registry.CATALOGUE`; a plan's
+`website_templates` allows the first N). Each process reads them once, on first use: validated, every Jinja2
+template compiled (autoescape on, `auto_reload` off: a changed file is read on the next start, not before). A
+package that is not right is left out and logged (`site template <key> left out`); a site on it is drawn in
+`classic` meanwhile. `tests/test_sites_layout.py` loads them strictly. The gallery pictures are served at
+`/static/site-templates/<key>.png` and `<key>-mobile.png` (immutable, `?v=<hash>`).
+
+**What the club arranges** (`club_sites.layout`, `app/api/sites/layout.py`): the movable sections' order, which
+are hidden (only those the template marks hideable), a title for each (60 characters at most), which library
+photo goes in which image slot (`hero.cover`, `hero.image`, `about.image`, `photos.1…N`, `join.image`,
+`event.fallback`; the same names in every template, so the choices carry over when it switches), and the accent
+(the template's own colour, or one of the club's, set as `--accent` on `<html>`). An unassigned gallery slot shows
+the next library photo no other slot uses; an unassigned cover shows the club's banner.
+
+**The photo library** (`club_site_images`): up to 20 photos a club (409 `SITE_IMAGES_FULL` past it), JPEG,
+PNG or WebP (HEIC and the like converted) up to 10 MB, through the same upload pipeline as every picture
+(upright, metadata stripped, versioned names), stored under `clubs/site/` with 480/960/1440/2400-px-wide sizes
+for the page's `srcset`. Deleting a photo takes it out of every slot and its files out of the bucket.
+
+**API** (club dashboard, owner/admin/editor like the rest of the website; door staff read only):
+
+| Route | What |
+|---|---|
+| `GET /api/v1/clubs/site` | the choices, `layout` (for the current template), `titles`, `sections`, `available`, `templates` (each with its sections, slots, accent, thumbnails), `images` (each with `used_in`), `limits`, `stale`, `tracking` |
+| `PATCH /api/v1/clubs/site` | `{template?, layout?: {order?, hidden?, titles?, slots?, accent?}, headline?, subline?}`; says what it adjusted in `adjusted` |
+| `POST /api/v1/clubs/site/preview` | the same body, not saved: `{html}` for the editor's iframe (60 a minute) |
+| `POST /api/v1/clubs/site/publish` | make the page now |
+| `POST /api/v1/clubs/site/images` | multipart `file`, `alt?` |
+| `PATCH /api/v1/clubs/site/images/{id}` | `{alt}` |
+| `PUT /api/v1/clubs/site/images/order` | `{ids: [...]}`, every photo once |
+| `DELETE /api/v1/clubs/site/images/{id}` | `{deleted, republished}` |
+
+**Keeping the page current.** Publish makes it at once; so does deleting a photo the live page shows, and an
+event saved through the API. Everything else -- a saved layout, template or headline, a photo added,
+re-captioned or reordered, the profile, team or partners changed, an event's start gone by -- is caught by the
+sites sweep within five minutes (`app/api/sites/sweep.py`, every published page behind something it shows, 20
+a run), and every page is made again overnight. The dashboard's "Unpublished changes" (`stale`) is the window
+before that.
+
+**Security.** Jinja2 escapes everything; every address in the data is https, mailto or tel; colours are
+`#rrggbb`; a club writes no HTML. The page's CSP (`render.site_csp`, sent with `/api/v1/sites/{slug}`) names
+each template's stylesheet and the one script (the visit beacon) by hash, computed from the packages when they
+are read: nothing to copy by hand when a template changes. `style-src-attr 'unsafe-inline'` lets the designs'
+inline styles through.
+
+**Deploying v2** (once): `migrate=true` (migration `site_templates_v2`; no new packages in requirements), and
+then make every published page again so none waits for the sweep with the old stylesheet:
+
+```bash
+# Changes things: makes every published club site again (each committed on its own).
+sudo docker exec doth-live-backend python scripts/republish_sites.py < /dev/null
+```
+
+The media Worker (`infra/cloudflare/media/media.js` in the app repo) must list `clubs/site/` among its public
+folders, as `app/core/storage/media.py` PUBLIC_FOLDERS now does: with `APP_MEDIA_CDN_URL` set, the pages link
+library photos on the CDN, which refuses a folder it does not list. Deploy that Worker change first (with the CDN
+off, the photos go through the API's image route and need nothing).

@@ -2,10 +2,11 @@
 
     docker compose exec -T backend python scripts/republish_sites.py
 
-Run once after deploying the hashed Content-Security-Policy (app/api/sites/
-render.py, SITE_CSP), before the club-sites Worker starts sending it: a page
-stored before then carries its stylesheet in the old, per-club form, which
-the new policy does not name, so it would show unstyled until the nightly
+Run once after deploying a change to the website templates or their
+renderer (app/api/sites: the v2 templates of migration site_templates_v2, a
+template's stylesheet, the hashed Content-Security-Policy): a page stored
+before then carries the old markup and stylesheet, which the new policy may
+not name, so it would show unstyled until the sites sweep or the nightly
 refresh reached it. Safe to run again; each page is committed on its own.
 Prints {"published": ..., "made": ...}.
 """
