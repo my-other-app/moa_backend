@@ -80,15 +80,13 @@ async def test_an_event_slug_changes_the_same_way(client, session, world):
     assert (await session.scalar(select(AdminAuditLogs.action).where(AdminAuditLogs.entity_type == "event"))) == "event.slug_change"
 
 
-async def test_a_viewer_and_a_club_cannot_change_a_slug(client, world):
-    for who in ("viewer", "club_h"):
-        url, kw = _club(world, "gdg-cloud-tvm", who=who)
-        r = await client.patch(url, **kw)
-        assert r.status_code in (401, 403), (who, r.text)
-        url, kw = _event(world, "devfest-kochi-2026", who=who)
-        assert (await client.patch(url, **kw)).status_code in (401, 403)
-    url, kw = _club(world, "gdg-cloud-tvm", who="viewer")
-    assert (await client.patch(url, **kw)).json()["error_code"] == "INSUFFICIENT_ADMIN_ROLE"
+async def test_a_viewer_a_club_and_nobody_cannot_change_a_slug(client, session, world):
+    for who, code in (("viewer", "INSUFFICIENT_ADMIN_ROLE"), ("club_h", "INSUFFICIENT_PERMISSIONS")):
+        for url, kw in (_club(world, "gdg-cloud-tvm", who=who), _event(world, "devfest-kochi-2026", who=who)):
+            r = await client.patch(url, **kw)
+            assert r.status_code == 403 and r.json()["error_code"] == code, (who, r.text)
+    assert (await client.patch(f"{API}/admin/clubs/{world['club'].id}/slug", json={"slug": "gdg-cloud-tvm"})).status_code == 401
+    assert await session.scalar(select(SlugAliases.id)) is None
 
 
 async def test_bad_reserved_and_taken_slugs_are_refused(client, session, world):
