@@ -1,0 +1,29 @@
+{
+  "key": "poster",
+  "name": "Poster",
+  "blurb": "Loud and graphic: huge type, hard shadows, yellow and blue",
+  "fonts": ["Archivo:wght@500;700", "Archivo+Black"],
+  "layout": "single",
+  "fixed_top": ["nav", "hero"],
+  "fixed_side": [],
+  "fixed_bottom": ["footer"],
+  "sections": [
+    {"key": "expertise", "label": "Domains of expertise", "default_title": "What we know · Domains of expertise", "hideable": true},
+    {"key": "upcoming", "label": "Upcoming events", "default_title": "Coming up", "hideable": true},
+    {"key": "past", "label": "Past events", "default_title": "Already happened", "hideable": true},
+    {"key": "photos", "label": "Photos", "default_title": "Highlights", "hideable": true},
+    {"key": "speakers", "label": "Speakers", "default_title": "Previous speakers", "hideable": true},
+    {"key": "team", "label": "Team", "default_title": "The crew", "hideable": true},
+    {"key": "sponsors", "label": "Sponsors and partners", "default_title": "Sponsors and partners", "hideable": true},
+    {"key": "join", "label": "Join banner", "default_title": "Come to the next one.", "hideable": true}
+  ],
+  "slots": [
+    {"key": "hero.cover", "label": "Cover photo", "size": [820, 360], "section": "hero"},
+    {"key": "photos.1", "label": "Photo 1", "size": [300, 300], "section": "photos"},
+    {"key": "photos.2", "label": "Photo 2", "size": [300, 300], "section": "photos"},
+    {"key": "photos.3", "label": "Photo 3", "size": [300, 300], "section": "photos"},
+    {"key": "photos.4", "label": "Photo 4", "size": [300, 300], "section": "photos"},
+    {"key": "event.fallback", "label": "Event picture (past events without a poster)", "size": [300, 170], "section": "past"}
+  ],
+  "accent": {"default": "#1F3BFF", "vars": ["--accent"]}
+}

@@ -1,0 +1,29 @@
+{%- import "_shared/macros.html.j2" as m with context -%}
+<!doctype html>
+<html lang="en"{% if site.accent %} style="--accent: {{ site.accent }}"{% endif %}>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ club.name }}{% if site.subline %} · {{ site.subline|truncate(80) }}{% endif %}</title>
+{% if site.subline or club.tagline %}<meta name="description" content="{{ site.subline or club.tagline }}">
+{% endif %}<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=DM+Sans:wght@400;500;600&display=swap">
+<style>{{ css }}</style>
+{{ head_extra }}</head>
+<body>
+<div style="font-family: 'DM Sans', system-ui, sans-serif; color: #23203A; background: #F4EFFA; font-size: 16px; line-height: 1.5; padding: 20px 0 48px">
+<div class="b-stack" style="max-width: 1280px; margin: 0 auto; padding: 0 20px; display: flex; flex-direction: column; gap: 20px">
+
+{% include "bento/sections/nav.html.j2" %}
+
+{% include "bento/sections/hero.html.j2" %}
+
+{{ sections_html }}
+
+{% include "bento/sections/footer.html.j2" %}
+
+</div>
+</div>
+{{ body_end }}</body>
+</html>

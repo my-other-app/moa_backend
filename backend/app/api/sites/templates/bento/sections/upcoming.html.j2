@@ -1,0 +1,24 @@
+{%- import "_shared/macros.html.j2" as m with context -%}
+{%- if upcoming -%}
+{%- set e = upcoming[0] -%}
+{%- set pic = e.poster or images["event.fallback"] -%}
+{%- set tints = ["#CFF1E1", "#FFD9C7"] -%}
+<!-- EVENTS -->
+<section id="events" class="{{ 'b-many' if upcoming|length > 3 }}" style="display: flex; flex-wrap: wrap; gap: 20px">
+<div class="b-feature" style="flex: 3 1 480px; background: var(--accent); color: #FFFFFF; border-radius: 32px; padding: clamp(24px, 4vw, 40px); box-sizing: border-box; display: flex; flex-direction: column; gap: 14px">
+<span style="align-self: flex-start; padding: 6px 14px; border-radius: 999px; background: #FFEFB0; color: #23203A; font-weight: 600; font-size: 14px">Next event{% if e.mode %} · {{ e.mode }}{% endif %}</span>
+<h2 style="margin: 0; font-family: 'Bricolage Grotesque', system-ui, sans-serif; font-weight: 700; font-size: clamp(30px, 4vw, 48px); line-height: 1.05; letter-spacing: -0.02em">{{ e.name }}</h2>
+<p style="margin: 0; font-size: 18px">{{ [e.weekday ~ " " ~ e.day ~ " " ~ e.month ~ " " ~ e.year, e.time ~ ((" – " ~ e.end_time) if e.end_time else ""), e.where]|select|join(" · ") }}</p>
+<div class="{{ m.phc(pic, 'b-on-accent') }}" style="min-height: 180px; border-radius: 22px; background: repeating-linear-gradient(135deg, rgba(255,255,255,0.14) 0 14px, rgba(255,255,255,0.22) 14px 28px); display: flex; align-items: flex-end; padding: 14px; box-sizing: border-box">{% if m.real(pic) %}{{ m.fill(pic, 640, 220, "(max-width: 900px) 100vw, 640px", alt=e.name, poster=(pic is sameas e.poster)) }}{% elif m.label(pic) %}<span style="background: #FFFFFF; color: #23203A; font-size: 13px; padding: 6px 12px; border-radius: 999px">{{ m.label(pic) }}</span>{% endif %}</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 16px"><a href="{{ e.url }}" style="display: inline-flex; align-items: center; min-height: 50px; padding: 0 28px; border-radius: 999px; background: #FFFFFF; color: #23203A; text-decoration: none; font-weight: 600">Register</a>{% if e.seats_left is number and e.capacity %}<span>{{ m.num(e.seats_left) }} of {{ m.num(e.capacity) }} seats left</span>{% endif %}</div>
+</div>
+{% if upcoming[1:] %}<div style="flex: 2 1 320px; display: flex; flex-direction: column; gap: 20px">
+{% for e in upcoming[1:] %}<article style="flex: 1; background: #FFFFFF; border-radius: 28px; padding: 26px; display: flex; flex-direction: column; gap: 8px">
+<span style="align-self: flex-start; padding: 5px 12px; border-radius: 999px; background: {{ tints[loop.index0 % 2] }}; font-weight: 600; font-size: 14px">{{ e.weekday }} {{ e.day }} {{ e.month }} {{ e.year }} · {{ e.time }}</span>
+<h3 style="margin: 0; font-family: 'Bricolage Grotesque', system-ui, sans-serif; font-weight: 600; font-size: 23px; line-height: 1.2">{{ e.name }}</h3>
+{% if e.where or e.kind %}<span style="color: #5D5878">{{ [e.where, e.kind]|select|join(" · ") }}</span>{% endif %}
+<a href="{{ e.url }}" style="font-weight: 600; padding: 10px 0; margin-top: auto">Register →</a>
+</article>
+{% endfor %}</div>{% endif %}
+</section>
+{%- endif -%}

@@ -1,0 +1,10 @@
+{%- import "_shared/macros.html.j2" as m with context -%}
+{#- The designer's page ends on the join band, which carries the address. When
+    that band isn't the last thing on the page (hidden or moved up), the page
+    ends on this strip instead. -#}
+{%- set line = [club.name, club.address or club.location_name, club.contact_email]|select|join(" · ") -%}
+{%- if section_keys[-1:] != ["join"] -%}
+<footer style="background: #111111; color: #E0E0E0; padding: 32px 0; border-top: 3px solid #111111">
+<div class="p-wrap" style="max-width: 1280px; margin: 0 auto; padding: 0 24px; font-size: 14px; font-weight: 700">{{ line }}</div>
+</footer>
+{%- endif -%}

@@ -1,0 +1,31 @@
+{
+  "key": "bento",
+  "name": "Bento",
+  "blurb": "Friendly pastel cards: profile, numbers, events and people in a bento grid",
+  "fonts": ["Bricolage+Grotesque:wght@600;700", "DM+Sans:wght@400;500;600"],
+  "layout": "single",
+  "fixed_top": ["nav", "hero"],
+  "fixed_side": [],
+  "fixed_bottom": ["footer"],
+  "sections": [
+    {"key": "stats", "label": "Numbers", "default_title": "In numbers", "hideable": true},
+    {"key": "about", "label": "About", "default_title": "About us", "hideable": true},
+    {"key": "expertise", "label": "What we are good at", "default_title": "What we are good at", "hideable": true},
+    {"key": "upcoming", "label": "Upcoming events", "default_title": "Upcoming events", "hideable": true},
+    {"key": "past", "label": "Past events", "default_title": "Past events", "hideable": true},
+    {"key": "photos", "label": "Photos", "default_title": "Highlights from our events", "hideable": true},
+    {"key": "speakers", "label": "Speakers", "default_title": "Previous speakers", "hideable": true},
+    {"key": "team", "label": "Team", "default_title": "The team", "hideable": true},
+    {"key": "sponsors", "label": "Sponsors and partners", "default_title": "Sponsors and partners", "hideable": true},
+    {"key": "join", "label": "Join banner", "default_title": "Come to the next one.", "hideable": true}
+  ],
+  "slots": [
+    {"key": "hero.cover", "label": "Cover photo", "size": [640, 480], "section": "hero"},
+    {"key": "photos.1", "label": "Photo 1 (wide)", "size": [480, 260], "section": "photos"},
+    {"key": "photos.2", "label": "Photo 2", "size": [320, 260], "section": "photos"},
+    {"key": "photos.3", "label": "Photo 3", "size": [320, 260], "section": "photos"},
+    {"key": "photos.4", "label": "Photo 4 (wide)", "size": [480, 260], "section": "photos"},
+    {"key": "event.fallback", "label": "Event banner (events without a poster)", "size": [640, 220], "section": "upcoming"}
+  ],
+  "accent": {"default": "#5B3FD6", "vars": ["--accent"]}
+}

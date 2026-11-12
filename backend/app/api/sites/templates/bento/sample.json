@@ -1,0 +1,374 @@
+{
+  "sample": true,
+  "site": {
+    "template": "bento",
+    "title_overrides": {},
+    "accent": null,
+    "headline": null,
+    "subline": "A friendly community for people who design and build digital products. We meet every month, share unfinished work and ship things together."
+  },
+  "club": {
+    "name": "Harbour Makers Collective",
+    "short_name": "Harbour Makers",
+    "tagline": null,
+    "about": "Harbour Makers started as six people sharing side projects around one table. Today it is a volunteer-run community of designers, engineers and founders who believe the fastest way to get better is to show unfinished work to people who care.\nEvery event is free for members, every talk is recorded, and every speaker stays for questions.",
+    "location_name": "[City, Country]",
+    "address": "[Address line], [City, Country]",
+    "contact_email": "[contact@email.com]",
+    "logo_url": null,
+    "logo_srcset": null,
+    "cover": null,
+    "founded_year": "[Year]",
+    "topics": [
+      "Product design",
+      "Frontend engineering",
+      "Applied AI",
+      "Open source",
+      "Design systems",
+      "Accessibility",
+      "Developer tooling",
+      "Community building"
+    ],
+    "topic_counts": {},
+    "slug": "harbour-makers",
+    "website": {
+      "label": "[website.com]",
+      "href": "#top"
+    }
+  },
+  "images": {
+    "hero.cover": {
+      "placeholder": "Cover photo"
+    },
+    "photos": [
+      {
+        "placeholder": "Summit 2026"
+      },
+      {
+        "placeholder": "Weekend build"
+      },
+      {
+        "placeholder": "Meetup #47"
+      },
+      {
+        "placeholder": "Workshop"
+      }
+    ],
+    "event.fallback": null
+  },
+  "stats": {
+    "followers": 1240,
+    "events_held": 48,
+    "members": 1240,
+    "speakers": 96,
+    "sponsors": 14,
+    "photos": 216
+  },
+  "upcoming": [
+    {
+      "id": 1,
+      "name": "Winter Showcase: ten projects, five minutes each",
+      "starts_at": "2026-12-12T16:00:00+05:30",
+      "day": "12",
+      "month": "Dec",
+      "year": "2026",
+      "weekday": "Sat",
+      "time": "4:00 PM",
+      "end_time": "8:00 PM",
+      "where": "[Venue name], [City]",
+      "mode": "In person",
+      "kind": "Showcase",
+      "summary": null,
+      "seats_left": 62,
+      "capacity": 150,
+      "fee": null,
+      "poster": {
+        "placeholder": "Event banner"
+      },
+      "url": "#events"
+    },
+    {
+      "id": 2,
+      "name": "Workshop: design tokens from scratch",
+      "starts_at": "2027-01-16T10:00:00+05:30",
+      "day": "16",
+      "month": "Jan",
+      "year": "2027",
+      "weekday": "Sat",
+      "time": "10:00 AM",
+      "end_time": null,
+      "where": "[Venue name], [City]",
+      "mode": "In person",
+      "kind": "Workshop",
+      "summary": null,
+      "seats_left": null,
+      "capacity": null,
+      "fee": null,
+      "poster": null,
+      "url": "#events"
+    },
+    {
+      "id": 3,
+      "name": "Fireside: shipping AI features people trust",
+      "starts_at": "2027-02-20T18:30:00+05:30",
+      "day": "20",
+      "month": "Feb",
+      "year": "2027",
+      "weekday": "Sat",
+      "time": "6:30 PM",
+      "end_time": null,
+      "where": "Online",
+      "mode": "Online",
+      "kind": "Talk",
+      "summary": null,
+      "seats_left": null,
+      "capacity": null,
+      "fee": null,
+      "poster": null,
+      "url": "#events"
+    }
+  ],
+  "past": [
+    {
+      "id": 11,
+      "name": "Monthly meetup #47: the craft of onboarding",
+      "starts_at": "2026-10-17T18:00:00+05:30",
+      "day": "17",
+      "month": "Oct",
+      "year": "2026",
+      "weekday": "Sat",
+      "time": "6:00 PM",
+      "where": "[Venue name], [City]",
+      "mode": "In person",
+      "kind": "Meetup",
+      "facts": [
+        "[120] attended",
+        "3 speakers"
+      ],
+      "poster": {
+        "placeholder": ""
+      },
+      "url": "#past"
+    },
+    {
+      "id": 12,
+      "name": "Weekend build: tools for local shops",
+      "starts_at": "2026-09-19T10:00:00+05:30",
+      "day": "19",
+      "month": "Sep",
+      "year": "2026",
+      "weekday": "Sat",
+      "time": "10:00 AM",
+      "where": "[Venue name], [City]",
+      "mode": "In person",
+      "kind": "Hackathon",
+      "facts": [
+        "[84] attended",
+        "12 teams"
+      ],
+      "poster": {
+        "placeholder": ""
+      },
+      "url": "#past"
+    },
+    {
+      "id": 13,
+      "name": "Accessible forms, hands on",
+      "starts_at": "2026-08-22T10:00:00+05:30",
+      "day": "22",
+      "month": "Aug",
+      "year": "2026",
+      "weekday": "Sat",
+      "time": "10:00 AM",
+      "where": "[Venue name], [City]",
+      "mode": "In person",
+      "kind": "Workshop",
+      "facts": [
+        "[40] attended",
+        "1 speaker"
+      ],
+      "poster": {
+        "placeholder": ""
+      },
+      "url": "#past"
+    },
+    {
+      "id": 14,
+      "name": "Harbour Summit 2026",
+      "starts_at": "2026-06-20T09:00:00+05:30",
+      "day": "20",
+      "month": "Jun",
+      "year": "2026",
+      "weekday": "Sat",
+      "time": "9:00 AM",
+      "where": "[Venue name], [City]",
+      "mode": "In person",
+      "kind": "Conference",
+      "facts": [
+        "[310] attended",
+        "14 speakers"
+      ],
+      "poster": {
+        "placeholder": ""
+      },
+      "url": "#past"
+    }
+  ],
+  "speakers": [
+    {
+      "name": "Ananya Rao",
+      "title": "Design lead",
+      "org": "[Company]",
+      "photo": null,
+      "url": null,
+      "talk": "Onboarding as a conversation",
+      "event": "Summit 2026"
+    },
+    {
+      "name": "Daniel Okafor",
+      "title": "Staff engineer",
+      "org": "[Company]",
+      "photo": null,
+      "url": null,
+      "talk": "What we deleted to go faster",
+      "event": "Meetup #47"
+    },
+    {
+      "name": "Mei Tanaka",
+      "title": "Founder",
+      "org": "[Company]",
+      "photo": null,
+      "url": null,
+      "talk": "The first hundred customers",
+      "event": "Summit 2026"
+    },
+    {
+      "name": "Lucas Ferreira",
+      "title": "ML engineer",
+      "org": "[Company]",
+      "photo": null,
+      "url": null,
+      "talk": "Evaluating models without a lab",
+      "event": "Meetup #46"
+    },
+    {
+      "name": "Priya Nair",
+      "title": "Research lead",
+      "org": "[Company]",
+      "photo": null,
+      "url": null,
+      "talk": "Five interviews are enough",
+      "event": "Summit 2026"
+    },
+    {
+      "name": "Sara Haddad",
+      "title": "Accessibility consultant",
+      "org": null,
+      "photo": null,
+      "url": null,
+      "talk": "Accessible forms, hands on",
+      "event": "Workshop"
+    }
+  ],
+  "team": [
+    {
+      "name": "Nikhil Menon",
+      "role": "Founder, lead organiser",
+      "photo": null,
+      "links": []
+    },
+    {
+      "name": "Clara Jensen",
+      "role": "Programme, speakers",
+      "photo": null,
+      "links": []
+    },
+    {
+      "name": "Farah Siddiqui",
+      "role": "Partnerships",
+      "photo": null,
+      "links": []
+    },
+    {
+      "name": "Marcus Lee",
+      "role": "Venue, operations",
+      "photo": null,
+      "links": []
+    },
+    {
+      "name": "Divya Pillai",
+      "role": "Design, media",
+      "photo": null,
+      "links": []
+    },
+    {
+      "name": "Owen Hughes",
+      "role": "Member community",
+      "photo": null,
+      "links": []
+    }
+  ],
+  "sponsors": [
+    {
+      "name": "[Sponsor logo]",
+      "role": "Sponsor",
+      "kind": "sponsor",
+      "logo": null
+    },
+    {
+      "name": "[Sponsor logo]",
+      "role": "Sponsor",
+      "kind": "sponsor",
+      "logo": null
+    },
+    {
+      "name": "[Sponsor logo]",
+      "role": "Sponsor",
+      "kind": "sponsor",
+      "logo": null
+    },
+    {
+      "name": "[Sponsor logo]",
+      "role": "Sponsor",
+      "kind": "sponsor",
+      "logo": null
+    },
+    {
+      "name": "[Venue partner]",
+      "role": "Venue partner",
+      "kind": "partner",
+      "logo": null
+    },
+    {
+      "name": "[Media partner]",
+      "role": "Media partner",
+      "kind": "partner",
+      "logo": null
+    }
+  ],
+  "socials": [
+    [
+      "LinkedIn",
+      "#top"
+    ],
+    [
+      "Instagram",
+      "#top"
+    ],
+    [
+      "YouTube",
+      "#top"
+    ]
+  ],
+  "links": {
+    "follow_url": "#top",
+    "share_url": null,
+    "events_url": "#past",
+    "join_url": "#join",
+    "contact_mailto": "#join",
+    "gallery_url": "#photos",
+    "speakers_url": "#speakers",
+    "conduct_url": null,
+    "site_url": null
+  }
+}

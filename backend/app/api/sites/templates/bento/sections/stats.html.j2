@@ -1,0 +1,9 @@
+{%- import "_shared/macros.html.j2" as m with context -%}
+{%- set people = stats.members if stats.members is not none else stats.followers -%}
+{%- set tiles = [(people, "members" if stats.members is not none else "followers"), (stats.events_held, "events hosted"), (stats.speakers, "speakers on stage"), (stats.sponsors, "sponsors and partners")]|selectattr(0)|list -%}
+{%- set tints = ["#FFD9C7", "#CFF1E1", "#DCD2FF", "#FFEFB0"] -%}
+{%- if tiles -%}
+<section id="stats" class="b-stats" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 20px">
+{% for value, label in tiles %}<div style="background: {{ tints[loop.index0 % 4] }}; border-radius: 28px; padding: 24px"><div style="font-family: 'Bricolage Grotesque', system-ui, sans-serif; font-weight: 700; font-size: 40px; line-height: 1.1">{{ m.num(value) }}</div><div style="font-weight: 500">{{ label }}</div></div>
+{% endfor %}</section>
+{%- endif -%}
