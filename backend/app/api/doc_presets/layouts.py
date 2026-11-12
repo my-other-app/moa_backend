@@ -212,10 +212,21 @@ def starters(kind: str) -> list[dict]:
     blank: P's [{id, kind, name, use, hasPhoto, colour, accent, preview}],
     never the layouts -- that is POST .../layout/starters/{id} (copy-on-use)."""
     try:
-        return list(_lib().starters(kind, with_layout=False))
+        found = list(_lib().starters(kind, with_layout=False))
     except Exception:  # noqa: BLE001 - a broken starter must not close the editor
         logger.exception("the %s starters could not be read", kind)
         return []
+    from app.core.layout_v2 import gallery
+
+    for meta in found:
+        # Its paper, for the gallery (the badge 4 x 6 in or the CR80): read from
+        # P's cached starter, not a copy of it.
+        if "page" not in meta:
+            try:
+                meta["page"] = dict(gallery._load(meta["id"]).get("page") or {})
+            except Exception:  # noqa: BLE001
+                meta["page"] = None
+    return found
 
 
 def starter_copy(kind: str, starter_id: str) -> Optional[dict]:
