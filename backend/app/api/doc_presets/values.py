@@ -347,6 +347,13 @@ def certificate_values(event, subject: Subject, *, logo_key: Optional[str], sign
     return Mapped(values=values, images=images, qr_text=verify)
 
 
+def _bib(subject: Subject) -> str:
+    if subject.admission_no:
+        return str(subject.admission_no)
+    code = "".join(ch for ch in (subject.ticket_code or "") if ch.isalnum())
+    return code[-4:] if code else "-"
+
+
 def badge_values(event, subject: Subject, *, door: Optional[str] = None, printed_at: Optional[datetime] = None) -> Mapped:
     """`door` names the kiosk or door printing it; `printed_at` is now when a
     card is printed at a door (a batch printed ahead has neither)."""
@@ -394,7 +401,11 @@ def badge_values(event, subject: Subject, *, door: Optional[str] = None, printed
         "table_no": "",
         "track": "",
         "team_name": subject.team or "",
-        "bib_number": "",
+        # The race bib's big number: the admission number when the event
+        # numbers its guests, else the ticket code's last four characters
+        # (MOA-ZEN5Y-K6VRN -> K6VR... -> "6VRN"), never empty: the design
+        # requires it, and an empty one dropped the card to the classic look.
+        "bib_number": _bib(subject),
         "category": "",
         "wave": "",
         "start_time": fmt_time(start),
@@ -424,5 +435,6 @@ def bindable(kind: str) -> list[dict]:
         "signatory_name": "Hidden unless you set it", "signatory_designation": "Hidden unless you set it",
         "second_signatory_name": "Hidden unless you set it", "second_signatory_designation": "Hidden unless you set it",
         "duration_hours": "Hidden unless you set it", "expiry_date": "Hidden unless you set it",
+        "bib_number": "The admission number, else the last four characters of the ticket code",
     }
     return [{"token": t, "auto": meaning.get(t)} for t in tokens_for(kind)]
