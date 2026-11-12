@@ -1652,7 +1652,7 @@ Meta refuses a send whose values do not match (132000).
 
 1. `ticket_confirmed`. Header: Document. Body: `Hi {{1}}, you're registered for {{2}} on {{3}}. Your ticket ({{4}}) is attached. Show its QR code at the entry.` Button: Visit website, dynamic, `https://myotherapp.in/tickets/{{1}}`.
 2. `event_reminder`. Body: `Hi {{1}}, a reminder that {{2}} starts {{3}} at {{4}}. Keep your ticket ready at the entry.` Button: Visit website, dynamic, `https://myotherapp.in/tickets/{{1}}`.
-3. `certificate_ready`. Header: Document. Body: `Hi {{1}}, thank you for attending {{2}}. Your certificate from {{3}} is attached. Anyone can check it is genuine on myotherapp.in with the number {{4}}.` Button: Visit website, dynamic, `https://myotherapp.in/verify/{{1}}`.
+3. `certificate_ready`. Header: Document. Body: `Hi {{1}}, your certificate for {{2}}, issued by {{3}}, is attached. Certificate number: {{4}}. Anyone can confirm it is genuine on myotherapp.in.` Button: Visit website, dynamic, `https://myotherapp.in/verify/{{1}}`.
 4. `payment_pending`. Body: `Hi {{1}}, your registration for {{2}} is waiting for a payment of ₹{{3}}. Complete it to keep your spot.` Button: Visit website, dynamic, `https://myotherapp.in/events/{{1}}/register`.
 5. `event_update`. Body: `Hi {{1}}, {{2}} has an update about {{3}}: {{4}}. See the event page for details.`
 
