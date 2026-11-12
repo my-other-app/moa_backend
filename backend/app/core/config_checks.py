@@ -424,6 +424,7 @@ def _warnings(settings) -> list[Problem]:
         out.append(Problem("CORS_ORIGINS", "includes *: any site may call the API from a browser", fatal=False))
     out.extend(_embedded_signup(settings))
     out.extend(_club_mailbox(settings))
+    out.extend(_platform_inbox(settings))
     return out
 
 
@@ -481,6 +482,34 @@ def _club_mailbox(settings) -> list[Problem]:
             out.append(Problem("MAILBOX_SNS_TOPIC_ARN", "is not in APP_MAILBOX_RECEIVING_REGION: SES tells only a topic in its own region", fatal=False))
     if _text(_get(settings, "MAIL_PROVIDER")).lower() == "resend":
         out.append(Problem("MAIL_PROVIDER", "is resend: clubs' mail goes through Resend, which must have APP_MAILBOX_DOMAIN verified too", fatal=False))
+    return out
+
+
+def _addresses(raw: Any) -> set[str]:
+    out = set()
+    for item in _text(raw).replace(";", ",").split(","):
+        local, at, host = item.strip().lower().partition("@")
+        if at and local and host:
+            out.add(f"{local.split('+', 1)[0]}@{host}")
+    return out
+
+
+def _platform_inbox(settings) -> list[Problem]:
+    """The admin inbox's addresses (app/api/platform_mail): a warning when one
+    is also the desk's (each mail would be kept twice, as a case and in the
+    inbox) or off the mailbox domain (its mail never reaches the hooks)."""
+    mine = _addresses(_get(settings, "PLATFORM_INBOX_ADDRESSES"))
+    if not mine:
+        return []
+    out: list[Problem] = []
+    desk = _addresses(_get(settings, "SUPPORT_INBOUND_ADDRESSES")) | _addresses(_get(settings, "SALES_INBOUND_ADDRESSES"))
+    if mine & desk:
+        out.append(Problem("PLATFORM_INBOX_ADDRESSES", "names an address the desk also reads (APP_SUPPORT_/SALES_INBOUND_ADDRESSES): "
+                                                       "its mail is kept twice", fatal=False))
+    domain = _text(_get(settings, "MAILBOX_DOMAIN")).lower()
+    if domain and any(a.rpartition("@")[2] != domain for a in mine):
+        out.append(Problem("PLATFORM_INBOX_ADDRESSES", "names an address off APP_MAILBOX_DOMAIN: mail to it never reaches the mailbox hooks",
+                           fatal=False))
     return out
 
 
