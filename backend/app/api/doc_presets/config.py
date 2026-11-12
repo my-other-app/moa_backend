@@ -153,6 +153,19 @@ def with_layout(config: dict, layout: dict) -> dict:
     return out
 
 
+def with_v1_layout(config: dict, layout: dict) -> dict:
+    """A config saving this v1 canvas (the old editor's save): its version
+    one past the design's last revision -- never past a v2 layout's schema
+    number -- the preset cleared (D6), no v2 layout or kept canvas left."""
+    out = dict(config or {})
+    previous = out.get("layout")
+    before = revision_of(out) if is_v2(previous) else int((previous or {}).get("version") or 0) if isinstance(previous, dict) else 0
+    out["layout"] = {**layout, "version": before + 1}
+    for key in ("preset", V1_KEPT, REVISION):
+        out.pop(key, None)
+    return out
+
+
 def default_layout(kind: str) -> Optional[dict]:
     """The v2 starter of the kind's default design (D7, V4), a copy of its
     own; None for agenda, or when this build has no such starter (the D7

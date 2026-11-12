@@ -40,7 +40,7 @@ from app.api.event_designs.router import (
     layout_v2_preview,
     starter_answer,
 )
-from app.api.doc_presets.config import is_v2, preset_of, with_layout
+from app.api.doc_presets.config import is_v2, preset_of, with_layout, with_v1_layout
 from app.api.events.documents import in_layout_mode, layout_sample_values
 from app.api.templates_audience import TemplateAudience
 from app.api.templates_images import shown
@@ -141,14 +141,8 @@ async def save_layout(session: SessionDep, user: ClubAuth, kind: DesignKind, bod
         )
         session.add(template)
     config = dict(template.config or {})
-    if v2:
-        config = with_layout(config, layout_v2)
-    else:
-        previous = (config.get("layout") or {}).get("version", 0)
-        config["layout"] = {**dump(layout), "version": previous + 1}
-        # Saving the custom design makes it the one in use (D6).
-        config.pop("preset", None)
-    template.config = config
+    # Saving the custom design makes it the one in use (D6, V4).
+    template.config = with_layout(config, layout_v2) if v2 else with_v1_layout(config, dump(layout))
     await session.commit()
     await session.refresh(template)
     out = _dto(club, kind, template, shown(template.config, template, fields=_fields_of(template)), await _agenda(session, club, kind))

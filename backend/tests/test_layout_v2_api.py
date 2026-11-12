@@ -542,6 +542,15 @@ def test_the_classic_design_is_the_kept_v1_canvas_or_the_template():
     assert presets.classic(plain) == {"accent_color": "#123456"} and plain["layout_revision"] == 1
 
 
+def test_a_v1_canvas_saved_over_a_v2_layout_counts_on_from_its_revision():
+    """The old editor saving over a v2 layout (or over the default starter a
+    fork copied in): one past the revision, never the schema's 2 plus one."""
+    over_default = presets.with_v1_layout({"layout": ticket_v2()}, v1_layout())
+    assert over_default["layout"]["version"] == 1 and "layout_revision" not in over_default
+    over_saved = presets.with_v1_layout(presets.with_layout(presets.with_layout({}, ticket_v2()), ticket_v2()), v1_layout())
+    assert over_saved["layout"]["version"] == 3 and not presets.is_v2(over_saved["layout"]) and "layout_v1" not in over_saved
+
+
 def test_the_values_function_merges_both_vocabularies():
     from types import SimpleNamespace
 

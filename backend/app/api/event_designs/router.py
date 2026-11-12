@@ -934,12 +934,9 @@ async def save_layout(
         session, _MODELS[kind], event_id=event_id, club_id=event.club_id,
         audience=audience, name=f"{event.name} {kind.value}", default=_DEFAULTS[kind](),
     )
-    config = dict(template.config or {})
-    previous = (config.get("layout") or {}).get("version", 0)
-    config["layout"] = {**dump(layout), "version": previous + 1}
-    # Saving the custom design makes it the one in use (D6).
-    config.pop("preset", None)
-    template.config = config
+    # Saving the custom design makes it the one in use (D6); its version is
+    # one past the design's last (a v2 layout's revision, not its schema's 2).
+    template.config = presets.with_v1_layout(template.config or {}, dump(layout))
     await session.commit()
     await session.refresh(template)
     return _layout_dto(event, kind, audience, template, shown(template.config, template, fields=_fields_of(template)), await _agenda_for(session, event, kind))
