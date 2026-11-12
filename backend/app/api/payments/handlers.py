@@ -56,6 +56,31 @@ async def _pays_for(session: AsyncSession, registration: EventRegistrationsLink,
     return await may_reuse(session, registration, payer_id)
 
 
+def _typed_registration_ids(payload: dict) -> tuple[int, uuid.UUID]:
+    """The payload's `event_id` and `event_registration_id` as the columns'
+    own types, written back into `payload` so the order keeps them typed.
+
+    The payload is a free-form `Dict[str, str | int]`, so a client may send
+    the event id as text ("3", the website does) and the registration id as
+    text. Compared as sent, Postgres refuses `integer = character varying`
+    and the order is a 500. A value that is not an id answers the same 404
+    as an id nobody has."""
+    try:
+        event_id = int(str(payload["event_id"]).strip())
+    except (TypeError, ValueError):
+        raise CodedRequestError(404, "Event not found", "EVENT_NOT_FOUND", event_id="event_id is invalid")
+    try:
+        registration_id = uuid.UUID(str(payload["event_registration_id"]).strip())
+    except (TypeError, ValueError, AttributeError):
+        raise CodedRequestError(
+            404, "Registration not found", "REGISTRATION_NOT_FOUND",
+            event_registration_id="event_registration_id is invalid",
+        )
+    payload["event_id"] = event_id
+    payload["event_registration_id"] = str(registration_id)
+    return event_id, registration_id
+
+
 async def validate_event_registration_payload(session: AsyncSession, payload: dict, *, payer_id: int):
     """
     validate payment payload of an event registration. Returns (amount in
@@ -75,15 +100,16 @@ async def validate_event_registration_payload(session: AsyncSession, payload: di
     if errors:
         raise RequestValidationError(**errors)
 
+    event_id, registration_id = _typed_registration_ids(payload)
     event_exists = await session.scalar(
-        select(exists().where(Events.id == payload["event_id"]))
+        select(exists().where(Events.id == event_id))
     )
     if not event_exists:
         raise CodedRequestError(404, "Event not found", "EVENT_NOT_FOUND", event_id="event_id is invalid")
 
     event_registration = await session.scalar(
         select(EventRegistrationsLink).where(
-            EventRegistrationsLink.id == payload["event_registration_id"]
+            EventRegistrationsLink.id == registration_id
         )
     )
 
@@ -296,9 +322,13 @@ async def event_for_payload(session: AsyncSession, source: str, payload: dict) -
     wrote). Its club's Razorpay account takes the money.
     """
     if source == "event_registration":
+        try:
+            registration_id = uuid.UUID(str(payload.get("event_registration_id")).strip())
+        except (TypeError, ValueError, AttributeError):
+            return None
         registration_event = (
             select(EventRegistrationsLink.event_id)
-            .where(EventRegistrationsLink.id == payload["event_registration_id"])
+            .where(EventRegistrationsLink.id == registration_id)
             .scalar_subquery()
         )
         return await session.scalar(select(Events).where(Events.id == registration_event))
