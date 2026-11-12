@@ -1,0 +1,323 @@
+{
+ "version": 2,
+ "page": {
+  "widthMm": 101.6,
+  "heightMm": 152.4
+ },
+ "canvas": {
+  "width": 384,
+  "height": 576,
+  "background": {
+   "type": "solid",
+   "color": "#E6E1FF"
+  }
+ },
+ "vars": {
+  "accent": "#5B3DF5"
+ },
+ "layers": [
+  {
+   "id": "lanyard",
+   "name": "Lanyard slot",
+   "x": 164,
+   "y": 16,
+   "width": 56,
+   "height": 12,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   },
+   "stroke": {
+    "color": "#1B1440",
+    "width": 1
+   },
+   "radius": [
+    6,
+    6,
+    6,
+    6
+   ]
+  },
+  {
+   "id": "t-org_name",
+   "name": "Club name",
+   "x": 28,
+   "y": 44,
+   "width": 185.098,
+   "height": 15.02,
+   "kind": "text",
+   "text": "{{org_name}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#1B1440",
+   "letterSpacing": 0.14,
+   "lineHeight": 1.25,
+   "minSize": 7.2
+  },
+  {
+   "id": "t-city",
+   "name": "City",
+   "x": 221.043,
+   "y": 44,
+   "width": 134.958,
+   "height": 15.02,
+   "showIf": "city",
+   "kind": "text",
+   "text": "{{city}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#1B1440",
+   "letterSpacing": 0.14,
+   "lineHeight": 1.25,
+   "align": "right",
+   "minSize": 8.4
+  },
+  {
+   "id": "t-full_name",
+   "name": "Full name",
+   "x": 27.99,
+   "y": 339,
+   "width": 328.004,
+   "height": 36.02,
+   "kind": "text",
+   "text": "{{full_name}}",
+   "font": {
+    "family": "Space Grotesk",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 36,
+   "color": "#1B1440",
+   "letterSpacing": -0.02,
+   "lineHeight": 1,
+   "align": "center",
+   "minSize": 18
+  },
+  {
+   "id": "shape",
+   "name": "Shape",
+   "x": 134.531,
+   "y": 387,
+   "width": 114.922,
+   "height": 30,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "var:accent"
+   },
+   "radius": [
+    15,
+    15,
+    15,
+    15
+   ]
+  },
+  {
+   "id": "t-role",
+   "name": "Role: ATTENDEE, SPEAKER or STAFF",
+   "x": 150.531,
+   "y": 394,
+   "width": 82.942,
+   "height": 16.02,
+   "kind": "text",
+   "text": "{{role}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 13,
+   "color": "#FFFFFF",
+   "letterSpacing": 0.14,
+   "lineHeight": 1.231,
+   "minSize": 7.8
+  },
+  {
+   "id": "t-member-no",
+   "name": "MEMBER NO.",
+   "x": 28,
+   "y": 487,
+   "width": 113.145,
+   "height": 15.02,
+   "kind": "text",
+   "text": "MEMBER NO.",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#453C78",
+   "letterSpacing": 0.08,
+   "lineHeight": 1.25,
+   "minSize": 9.6
+  },
+  {
+   "id": "t-member_id",
+   "name": "Member number",
+   "x": 28,
+   "y": 504,
+   "width": 113.145,
+   "height": 21.02,
+   "kind": "text",
+   "text": "{{member_id}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 18,
+   "color": "#1B1440",
+   "lineHeight": 1.167,
+   "minSize": 5.4
+  },
+  {
+   "id": "t-scan-to-view-profile",
+   "name": "Scan to view profile",
+   "x": 28,
+   "y": 533,
+   "width": 113.145,
+   "height": 15.02,
+   "kind": "text",
+   "text": "Scan to view profile",
+   "font": {
+    "family": "Inter",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#453C78",
+   "lineHeight": 1.25,
+   "minSize": 9.6
+  },
+  {
+   "id": "shape-2",
+   "name": "Shape",
+   "x": 264,
+   "y": 456,
+   "width": 92,
+   "height": 92,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   },
+   "radius": [
+    10,
+    10,
+    10,
+    10
+   ]
+  },
+  {
+   "id": "qr",
+   "name": "QR code",
+   "x": 271,
+   "y": 463,
+   "width": 78,
+   "height": 78,
+   "kind": "qr"
+  },
+  {
+   "id": "shape-3",
+   "name": "Shape",
+   "x": 94,
+   "y": 83,
+   "width": 196,
+   "height": 226,
+   "rotation": -4,
+   "shadow": [
+    {
+     "x": 6,
+     "y": 6,
+     "blur": 0,
+     "spread": 0,
+     "color": "#1B1440",
+     "inset": false
+    }
+   ],
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   }
+  },
+  {
+   "id": "shape-4",
+   "name": "Shape",
+   "x": 102.814,
+   "y": 93.041,
+   "width": 176,
+   "height": 172,
+   "rotation": -4,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#CFC8F5"
+   }
+  },
+  {
+   "id": "photo",
+   "name": "Guest photo",
+   "x": 102.814,
+   "y": 93.041,
+   "width": 176,
+   "height": 172,
+   "rotation": -4,
+   "kind": "image",
+   "source": "guest_photo",
+   "fit": "cover",
+   "placeholder": "initials",
+   "placeholderStyle": {
+    "color": "var:accent",
+    "family": "Space Grotesk",
+    "weight": 700
+   }
+  },
+  {
+   "id": "t-member_since_year",
+   "name": "Registered in",
+   "x": 118.989,
+   "y": 274.778,
+   "width": 158.739,
+   "height": 24.02,
+   "rotation": -4,
+   "showIf": "member_since_year",
+   "kind": "text",
+   "text": "member since {{member_since_year}}",
+   "font": {
+    "family": "Caveat",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 24,
+   "color": "#1B1440",
+   "lineHeight": 1,
+   "minSize": 16.8
+  },
+  {
+   "id": "shape-5",
+   "name": "Shape",
+   "x": 156.048,
+   "y": 72.278,
+   "width": 56,
+   "height": 20,
+   "rotation": -1,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFD95A"
+   }
+  }
+ ],
+ "starter": "badge/07-polaroid"
+}

@@ -1,0 +1,173 @@
+{
+ "name": "shape-css",
+ "about": "rect and ellipse as CSS: solid (hex6, hex8), gradients, border, radius, box shadows (inset, list), rotation, opacity.",
+ "kind": "ticket",
+ "layout": {
+  "version": 2,
+  "page": {
+   "widthMm": 338.667,
+   "heightMm": 158.75
+  },
+  "canvas": {
+   "width": 1280,
+   "height": 600,
+   "background": {
+    "type": "radial",
+    "cx": 0.25,
+    "cy": 0.75,
+    "stops": [
+     {
+      "offset": 0,
+      "color": "#FF0000"
+     },
+     {
+      "offset": 1,
+      "color": "#0000FF"
+     }
+    ]
+   }
+  },
+  "layers": [
+   {
+    "id": "a",
+    "name": "a",
+    "kind": "shape",
+    "x": 5,
+    "y": 6,
+    "width": 100,
+    "height": 50,
+    "fill": {
+     "type": "solid",
+     "color": "#112233"
+    },
+    "radius": 12
+   },
+   {
+    "id": "b",
+    "name": "b",
+    "kind": "shape",
+    "x": 5,
+    "y": 70,
+    "width": 100,
+    "height": 50,
+    "fill": {
+     "type": "solid",
+     "color": "#00000080"
+    },
+    "stroke": {
+     "color": "#FFFFFF",
+     "width": 2
+    },
+    "radius": [
+     28,
+     0,
+     0,
+     28
+    ]
+   },
+   {
+    "id": "c",
+    "name": "c",
+    "kind": "shape",
+    "x": 5,
+    "y": 130,
+    "width": 100,
+    "height": 50,
+    "shape": "ellipse",
+    "fill": {
+     "type": "linear",
+     "angle": 135,
+     "stops": [
+      {
+       "offset": 0,
+       "color": "var:accent"
+      },
+      {
+       "offset": 0.5,
+       "color": "#FFFFFF80"
+      },
+      {
+       "offset": 1,
+       "color": "brand.primary"
+      }
+     ]
+    },
+    "rotation": -12.5,
+    "opacity": 0.25
+   },
+   {
+    "id": "d",
+    "name": "d",
+    "kind": "shape",
+    "x": 5,
+    "y": 200,
+    "width": 100,
+    "height": 50,
+    "fill": {
+     "type": "radial",
+     "cx": 0.25,
+     "cy": 0.75,
+     "stops": [
+      {
+       "offset": 0,
+       "color": "#FF0000"
+      },
+      {
+       "offset": 1,
+       "color": "#0000FF"
+      }
+     ]
+    },
+    "shadow": [
+     {
+      "x": 0,
+      "y": 0,
+      "spread": 4,
+      "color": "#FFFFFF"
+     },
+     {
+      "x": 0,
+      "y": 0,
+      "spread": 6,
+      "color": "var:accent"
+     },
+     {
+      "x": 0,
+      "y": 0,
+      "blur": 30,
+      "color": "#2DE2E6B3",
+      "inset": true
+     }
+    ]
+   },
+   {
+    "id": "e",
+    "name": "e",
+    "kind": "shape",
+    "x": 5,
+    "y": 270,
+    "width": 100,
+    "height": 50,
+    "shape": "ellipse",
+    "stroke": {
+     "color": "ticket_type",
+     "width": 3
+    },
+    "rotation": 45
+   }
+  ],
+  "vars": {
+   "accent": "#C6F432"
+  }
+ },
+ "values": {},
+ "context": {
+  "qr": "TK-48213",
+  "colors": {
+   "primary": "#1F3BD8",
+   "secondary": "#FF8A3D",
+   "ticketType": "#0B6B3A"
+  }
+ },
+ "expected": "<div class=\"moa-doc\" style=\"position:relative;width:1280px;height:600px;overflow:hidden;background:radial-gradient(circle at 25% 75%, #FF0000 0%, #0000FF 100%)\"><div data-kind=\"shape\" data-layer=\"a\" style=\"position:absolute;left:5px;top:6px;width:100px;height:50px;box-sizing:border-box;background:#112233;border-radius:12px\"></div><div data-kind=\"shape\" data-layer=\"b\" style=\"position:absolute;left:5px;top:70px;width:100px;height:50px;box-sizing:border-box;background:#00000080;border:2px solid #FFFFFF;border-radius:28px 0px 0px 28px\"></div><div data-kind=\"shape\" data-layer=\"c\" style=\"position:absolute;left:5px;top:130px;width:100px;height:50px;transform:rotate(-12.5deg);transform-origin:center;opacity:0.25;box-sizing:border-box;background:linear-gradient(135deg, #C6F432 0%, #FFFFFF80 50%, #1F3BD8 100%);border-radius:50%\"></div><div data-kind=\"shape\" data-layer=\"d\" style=\"position:absolute;left:5px;top:200px;width:100px;height:50px;box-sizing:border-box;background:radial-gradient(circle at 25% 75%, #FF0000 0%, #0000FF 100%);box-shadow:0px 0px 0px 4px #FFFFFF, 0px 0px 0px 6px #C6F432, inset 0px 0px 30px 0px #2DE2E6B3\"></div><div data-kind=\"shape\" data-layer=\"e\" style=\"position:absolute;left:5px;top:270px;width:100px;height:50px;transform:rotate(45deg);transform-origin:center;box-sizing:border-box;border:3px solid #0B6B3A;border-radius:50%\"></div></div>"
+}

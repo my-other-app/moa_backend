@@ -25,6 +25,10 @@
    names and codes, then single-line values widest first: the value most
    likely to be crowding the others gives way first.
 
+   A layout v2 page (a .moa-doc inside the .moa-page; app/core/layout_v2)
+   has its own modes, shrink | ellipsis | none: each text layer fits its own
+   box and nothing else is looked at (fitLayer, below).
+
    Then window.__moaReady = true: the render service waits for exactly that.
    A font that failed to load throws, so the render fails instead of printing
    in a stand-in font. */
@@ -228,6 +232,73 @@
     }
   }
 
+  /* Layout v2 (app/core/layout_v2/build.py): a text layer fits its own box,
+     and nothing else is looked at (layers may overlap by design).
+       shrink    1 px at a time, down to data-min, while the text has more
+                 than data-lines lines or is taller than its box; then, if it
+                 still does not fit, as ellipsis.
+       ellipsis  clamped to data-lines lines (fewer if the box is shorter),
+                 the last one ending in an ellipsis.
+       none      as it is.
+     Heights are the layer's own pixels (offsetHeight), so a page printed at
+     another scale fits the same. */
+  function v2LineHeight(el) {
+    var s = css(el);
+    return s.lineHeight === "normal" ? 1.2 * num(s.fontSize) : num(s.lineHeight);
+  }
+
+  function v2Lines(el) {
+    var scale = el.offsetHeight ? el.getBoundingClientRect().height / el.offsetHeight : 1;
+    var lh = v2LineHeight(el) * (scale || 1);
+    var range = document.createRange();
+    range.selectNodeContents(el);
+    var tops = Array.prototype.map.call(range.getClientRects(), function (r) { return r.height > 0 ? r.top : null; })
+      .filter(function (t) { return t !== null; }).sort(function (a, b) { return a - b; });
+    var count = 0, last = -Infinity;
+    tops.forEach(function (t) { if (t - last > lh * 0.5) { count += 1; last = t; } });
+    return count;
+  }
+
+  function v2Room(el) {
+    var box = el.parentElement, s = css(box);
+    return box.clientHeight - num(s.paddingTop) - num(s.paddingBottom);
+  }
+
+  function v2Over(el, lines) {
+    return v2Lines(el) > lines || el.offsetHeight > v2Room(el) + 1;
+  }
+
+  function v2Clamp(el, lines) {
+    var fit = Math.max(1, Math.min(lines, Math.floor((v2Room(el) + 1) / v2LineHeight(el))));
+    el.style.display = "-webkit-box";
+    el.style.webkitBoxOrient = "vertical";
+    el.style.webkitLineClamp = String(fit);
+    el.style.overflow = "hidden";
+  }
+
+  function fitLayer(el) {
+    var mode = el.getAttribute("data-fit");
+    if (mode === "none") { return; }
+    var lines = parseInt(el.getAttribute("data-lines") || "1", 10) || 1;
+    if (!v2Over(el, lines)) { return; }
+    mark(el, mode);
+    if (mode === "shrink") {
+      var size = num(css(el).fontSize), min = num(el.getAttribute("data-min")) || size;
+      while (size - 1 >= min && v2Over(el, lines)) { size -= 1; el.style.fontSize = size + "px"; }
+      if (v2Over(el, lines) && size > min) { size = min; el.style.fontSize = size + "px"; }
+      if (!v2Over(el, lines)) { return; }
+    }
+    v2Clamp(el, lines);
+  }
+
+  var V2 = { shrink: 1, ellipsis: 1, none: 1 };
+
+  function fitV2(p) {
+    Array.prototype.forEach.call(p.querySelectorAll("[data-fit]"), function (el) {
+      if (V2[el.getAttribute("data-fit")]) { fitLayer(el); }
+    });
+  }
+
   var ORDER = { title: 0, wrap: 1, name: 2, code: 3, line: 4 };
 
   function inOrder(p) {
@@ -261,6 +332,7 @@
   };
 
   function fitPage(p) {
+    if (p.querySelector(".moa-doc")) { fitV2(p); return; }
     page = p;
     leaves = textLeaves();
     var order = inOrder(p);

@@ -1,0 +1,324 @@
+{
+ "version": 2,
+ "page": {
+  "widthMm": 101.6,
+  "heightMm": 152.4
+ },
+ "canvas": {
+  "width": 384,
+  "height": 576,
+  "background": {
+   "type": "solid",
+   "color": "#F7F7F2"
+  }
+ },
+ "vars": {},
+ "layers": [
+  {
+   "id": "lanyard",
+   "name": "Lanyard slot",
+   "x": 164,
+   "y": 16,
+   "width": 56,
+   "height": 12,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   },
+   "stroke": {
+    "color": "#141414",
+    "width": 1
+   },
+   "radius": [
+    6,
+    6,
+    6,
+    6
+   ]
+  },
+  {
+   "id": "shape",
+   "name": "Shape",
+   "x": 0,
+   "y": 44,
+   "width": 128,
+   "height": 128,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#E4432D"
+   }
+  },
+  {
+   "id": "shape-2",
+   "name": "Shape",
+   "x": 0,
+   "y": 44,
+   "width": 128,
+   "height": 128,
+   "kind": "shape",
+   "shape": "ellipse",
+   "fill": {
+    "type": "solid",
+    "color": "#F5B921"
+   }
+  },
+  {
+   "id": "shape-3",
+   "name": "Shape",
+   "x": 128,
+   "y": 44,
+   "width": 128,
+   "height": 128,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#F7F7F2"
+   }
+  },
+  {
+   "id": "shape-4",
+   "name": "Shape",
+   "x": 128,
+   "y": 44,
+   "width": 128,
+   "height": 128,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#2447C9"
+   },
+   "radius": [
+    0,
+    128,
+    0,
+    0
+   ]
+  },
+  {
+   "id": "shape-5",
+   "name": "Shape",
+   "x": 256,
+   "y": 44,
+   "width": 128,
+   "height": 128,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#141414"
+   }
+  },
+  {
+   "id": "shape-6",
+   "name": "Shape",
+   "x": 256,
+   "y": 108,
+   "width": 128,
+   "height": 64,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#F7F7F2"
+   },
+   "radius": [
+    64,
+    64,
+    0,
+    0
+   ]
+  },
+  {
+   "id": "shape-7",
+   "name": "Shape",
+   "x": 0,
+   "y": 172,
+   "width": 128,
+   "height": 128,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#2447C9"
+   }
+  },
+  {
+   "id": "shape-8",
+   "name": "Shape",
+   "x": 0,
+   "y": 172,
+   "width": 128,
+   "height": 128,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#F7F7F2"
+   },
+   "radius": [
+    0,
+    0,
+    0,
+    128
+   ]
+  },
+  {
+   "id": "shape-9",
+   "name": "Shape",
+   "x": 128,
+   "y": 172,
+   "width": 128,
+   "height": 128,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#F5B921"
+   }
+  },
+  {
+   "id": "shape-10",
+   "name": "Shape",
+   "x": 160,
+   "y": 204,
+   "width": 64,
+   "height": 64,
+   "kind": "shape",
+   "shape": "ellipse",
+   "fill": {
+    "type": "solid",
+    "color": "#141414"
+   }
+  },
+  {
+   "id": "shape-11",
+   "name": "Shape",
+   "x": 256,
+   "y": 172,
+   "width": 128,
+   "height": 128,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#F7F7F2"
+   }
+  },
+  {
+   "id": "shape-12",
+   "name": "Shape",
+   "x": 256,
+   "y": 172,
+   "width": 128,
+   "height": 128,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#E4432D"
+   },
+   "radius": [
+    128,
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "id": "t-full_name",
+   "name": "Full name",
+   "x": 28,
+   "y": 322,
+   "width": 328.02,
+   "height": 36.02,
+   "kind": "text",
+   "text": "{{full_name}}",
+   "font": {
+    "family": "Space Grotesk",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 36,
+   "color": "#141414",
+   "letterSpacing": -0.02,
+   "lineHeight": 1,
+   "minSize": 18
+  },
+  {
+   "id": "t-org_name",
+   "name": "Club name",
+   "x": 28,
+   "y": 366,
+   "width": 328.02,
+   "height": 19.02,
+   "kind": "text",
+   "text": "{% if org_name %}{{org_name}}{% endif %}{% if org_name %}{% if chapter %} · {% endif %}{% endif %}{% if chapter %}{{chapter}}{% endif %}",
+   "font": {
+    "family": "Inter",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 15,
+   "color": "#3A3A36",
+   "lineHeight": 1.267,
+   "fit": "ellipsis"
+  },
+  {
+   "id": "shape-13",
+   "name": "Shape",
+   "x": 28,
+   "y": 484,
+   "width": 138.891,
+   "height": 42,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#141414"
+   }
+  },
+  {
+   "id": "t-role",
+   "name": "Role: ATTENDEE, SPEAKER or STAFF",
+   "x": 42,
+   "y": 492,
+   "width": 110.911,
+   "height": 26.02,
+   "kind": "text",
+   "text": "{{role}}",
+   "font": {
+    "family": "Space Grotesk",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 20,
+   "color": "#FFFFFF",
+   "letterSpacing": 0.1,
+   "lineHeight": 1.3,
+   "minSize": 18
+  },
+  {
+   "id": "t-member_id",
+   "name": "Member number",
+   "x": 28,
+   "y": 536,
+   "width": 232.02,
+   "height": 16.02,
+   "kind": "text",
+   "text": "No. {{member_id}}{% if valid_thru %} · Valid {{valid_thru}}{% endif %}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 13,
+   "color": "#141414",
+   "lineHeight": 1.231,
+   "minSize": 9.1
+  },
+  {
+   "id": "qr",
+   "name": "QR code",
+   "x": 268,
+   "y": 464,
+   "width": 88,
+   "height": 88,
+   "kind": "qr"
+  }
+ ],
+ "starter": "badge/10-colour-blocks"
+}

@@ -1,0 +1,248 @@
+{
+ "version": 2,
+ "page": {
+  "widthMm": 101.6,
+  "heightMm": 152.4
+ },
+ "canvas": {
+  "width": 384,
+  "height": 576,
+  "background": {
+   "type": "solid",
+   "color": "#FFFFFF"
+  }
+ },
+ "vars": {
+  "accent": "#1F3BD8"
+ },
+ "layers": [
+  {
+   "id": "lanyard",
+   "name": "Lanyard slot",
+   "x": 164,
+   "y": 16,
+   "width": 56,
+   "height": 12,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   },
+   "stroke": {
+    "color": "#141414",
+    "width": 1
+   },
+   "radius": [
+    6,
+    6,
+    6,
+    6
+   ]
+  },
+  {
+   "id": "t-event_name",
+   "name": "Event name",
+   "x": 28,
+   "y": 44,
+   "width": 169.411,
+   "height": 15.02,
+   "kind": "text",
+   "text": "{{event_name}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#141414",
+   "letterSpacing": 0.12,
+   "lineHeight": 1.25,
+   "minSize": 7.2
+  },
+  {
+   "id": "t-event_date",
+   "name": "Event date",
+   "x": 205.355,
+   "y": 44,
+   "width": 150.645,
+   "height": 15.02,
+   "kind": "text",
+   "text": "{{event_date}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#141414",
+   "letterSpacing": 0.12,
+   "lineHeight": 1.25,
+   "align": "right",
+   "minSize": 8.4
+  },
+  {
+   "id": "t-first_name",
+   "name": "First name",
+   "x": 28,
+   "y": 85,
+   "width": 328.02,
+   "height": 106.395,
+   "kind": "text",
+   "text": "{{first_name}}{% if last_name %}\n{{last_name}}{% endif %}",
+   "font": {
+    "family": "Space Grotesk",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 56,
+   "color": "#141414",
+   "letterSpacing": -0.03,
+   "lineHeight": 0.95,
+   "maxLines": 2,
+   "minSize": 18
+  },
+  {
+   "id": "t-organization",
+   "name": "Their organisation",
+   "x": 28,
+   "y": 201.375,
+   "width": 328.02,
+   "height": 19.02,
+   "showIf": "organization",
+   "kind": "text",
+   "text": "{{organization}}",
+   "font": {
+    "family": "Inter",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 15,
+   "color": "#3A3A3A",
+   "lineHeight": 1.267,
+   "fit": "ellipsis"
+  },
+  {
+   "id": "t-access",
+   "name": "ACCESS",
+   "x": 28,
+   "y": 468,
+   "width": 82.348,
+   "height": 15.02,
+   "showIf": "access_level",
+   "kind": "text",
+   "text": "ACCESS",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#555555",
+   "letterSpacing": 0.08,
+   "lineHeight": 1.25,
+   "minSize": 9.6
+  },
+  {
+   "id": "t-access_level",
+   "name": "Access",
+   "x": 28,
+   "y": 485,
+   "width": 82.348,
+   "height": 20.02,
+   "showIf": "access_level",
+   "kind": "text",
+   "text": "{{access_level}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "color": "#141414",
+   "lineHeight": 1.25,
+   "minSize": 11.2
+  },
+  {
+   "id": "t-badge",
+   "name": "BADGE",
+   "x": 28,
+   "y": 515,
+   "width": 82.348,
+   "height": 15.02,
+   "kind": "text",
+   "text": "BADGE",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#555555",
+   "letterSpacing": 0.08,
+   "lineHeight": 1.25,
+   "minSize": 9.6
+  },
+  {
+   "id": "t-badge_id",
+   "name": "Badge number",
+   "x": 28,
+   "y": 532,
+   "width": 82.348,
+   "height": 20.02,
+   "kind": "text",
+   "text": "{{badge_id}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "color": "#141414",
+   "lineHeight": 1.25,
+   "minSize": 4.8
+  },
+  {
+   "id": "qr",
+   "name": "QR code",
+   "x": 264,
+   "y": 460,
+   "width": 92,
+   "height": 92,
+   "kind": "qr"
+  },
+  {
+   "id": "shape",
+   "name": "Shape",
+   "x": -60,
+   "y": 280,
+   "width": 504,
+   "height": 64,
+   "rotation": -12,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "var:accent"
+   }
+  },
+  {
+   "id": "t-role",
+   "name": "Role: ATTENDEE, SPEAKER or STAFF",
+   "x": 94.439,
+   "y": 292.498,
+   "width": 195.145,
+   "height": 39.02,
+   "rotation": -12,
+   "kind": "text",
+   "text": "{{role}}",
+   "font": {
+    "family": "Space Grotesk",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 30,
+   "color": "#FFFFFF",
+   "letterSpacing": 0.22,
+   "lineHeight": 1.3,
+   "minSize": 18
+  }
+ ],
+ "starter": "badge/13-sash"
+}

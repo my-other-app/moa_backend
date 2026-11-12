@@ -4,6 +4,7 @@
     python scripts/doc_fonts.py --check         # no network: every file in the lock is there with its sha256
     python scripts/doc_fonts.py --fontconfig    # no network: fc-match finds every TTF by the CSS family name
     python scripts/doc_fonts.py --scan DIR...   # take the requests from <link>s in the HTML files under DIR
+    python scripts/doc_fonts.py --add           # download only the faces the lock lacks (keeps every file it has)
 
 What is fetched is exactly what the designer's templates asked Google for:
 each design's manifest keeps its original stylesheet query (`google_fonts`,
@@ -131,12 +132,20 @@ def merged_requests(queries: list[str]) -> dict[str, str]:
     return specs
 
 
+#: Faces the layout-v2 editor offers besides the designs' own: the v1
+#: editor's five fonts, by their CSS names (layout-v2 contract, Fonts).
+EDITOR_QUERIES = [
+    "family=Inter:wght@400;500;600;700&family=Google+Sans:wght@400;500;600;700"
+    "&family=Roboto+Mono:wght@400;700&family=DM+Serif+Display&family=Bebas+Neue",
+]
+
+
 def queries_from_manifests() -> list[str]:
     out = []
     for path in MANIFESTS:
         for design in json.loads(path.read_text())["designs"]:
             out.append(design["google_fonts"])
-    return out
+    return out + EDITOR_QUERIES
 
 
 def queries_from_html(dirs: list[str]) -> list[str]:
@@ -348,6 +357,48 @@ def regenerate(queries: list[str]) -> None:
     print(f"{len(families)} families, {n_ttf} TTF faces, {n_woff} WOFF2 files, {size / 1e6:.1f} MB", file=sys.stderr)
 
 
+def add(queries: list[str]) -> None:
+    """Download only the faces the lock does not have yet, and merge them in.
+    Every file already in the lock stays byte for byte (a refresh of those is
+    `regenerate`, reviewed with the parity renders)."""
+    lock = json.loads((OUT / LOCK).read_text())
+    families = lock["families"]
+    wanted: dict[str, set] = defaultdict(set)
+    for query in queries:
+        for family, tuples in parse_query(query).items():
+            for ital, wght, _op in tuples:
+                wanted[family].add((ital, wght))
+    missing: dict[str, str] = {}
+    for family, faces in sorted(wanted.items()):
+        have = {(1 if f["style"] == "italic" else 0, f["weight"]) for f in families.get(family, {}).get("faces", [])}
+        need = sorted(faces - have)
+        if need:
+            name = family.replace(" ", "+")
+            missing[family] = merged_requests([f"family={name}:ital,wght@" + ";".join(f"{i},{w}" for i, w in need)])[family]
+    if not missing:
+        print("nothing to add", file=sys.stderr)
+        return
+    print(f"adding {len(missing)} families: {', '.join(missing)}", file=sys.stderr)
+    got = download(missing)
+    tmp = got["tmp"]
+    for family, info in got["families"].items():
+        for sub in ("ttf", "woff2", "licenses"):
+            for f in (tmp / sub).iterdir():
+                if not (OUT / sub / f.name).exists():
+                    shutil.copy2(f, OUT / sub / f.name)
+        if family in families:
+            faces = {(f["style"], f["weight"]): f for f in families[family]["faces"]}
+            faces.update({(f["style"], f["weight"]): f for f in info["faces"]})
+            families[family]["faces"] = sorted(faces.values(), key=lambda x: (x["style"], x["weight"]))
+        else:
+            families[family] = info
+    shutil.rmtree(tmp, ignore_errors=True)
+    lock["families"] = dict(sorted(families.items()))
+    lock["digest"] = lock_digest(lock["families"])
+    write_css(lock["families"], OUT)
+    (OUT / LOCK).write_text(json.dumps(lock, indent=1, sort_keys=False) + "\n")
+
+
 def check() -> int:
     lock = json.loads((OUT / LOCK).read_text())
     bad = []
@@ -407,6 +458,7 @@ def main() -> int:
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--fontconfig", action="store_true")
     ap.add_argument("--scan", nargs="+", metavar="DIR")
+    ap.add_argument("--add", action="store_true")
     ap.add_argument("--repatch", action="store_true", help=argparse.SUPPRESS)
     args = ap.parse_args()
     if args.repatch:
@@ -414,6 +466,9 @@ def main() -> int:
         return 0
     if args.check:
         return check()
+    if args.add:
+        add(queries_from_manifests())
+        return 0
     if args.fontconfig:
         return fontconfig()
     regenerate(queries_from_html(args.scan) if args.scan else queries_from_manifests())

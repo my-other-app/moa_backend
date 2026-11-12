@@ -1,0 +1,764 @@
+{
+ "version": 2,
+ "page": {
+  "widthMm": 338.667,
+  "heightMm": 158.75
+ },
+ "canvas": {
+  "width": 1280,
+  "height": 600,
+  "background": {
+   "type": "solid",
+   "color": "#06153A"
+  }
+ },
+ "vars": {},
+ "layers": [
+  {
+   "id": "shape",
+   "name": "Shape",
+   "x": 70,
+   "y": 70,
+   "width": 1140,
+   "height": 460,
+   "shadow": [
+    {
+     "x": 0,
+     "y": 28,
+     "blur": 60,
+     "spread": 0,
+     "color": "#00000080",
+     "inset": false
+    }
+   ],
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#0F3FB8"
+   },
+   "radius": [
+    10,
+    10,
+    10,
+    10
+   ]
+  },
+  {
+   "id": "pattern",
+   "name": "Pattern",
+   "x": 70,
+   "y": 70,
+   "width": 1140,
+   "height": 460,
+   "kind": "svg",
+   "markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1140.0 460.0\"><defs><linearGradient id=\"g\" gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1=\"12\" x2=\"24\" y2=\"12\"><stop offset=\"0.042\" stop-color=\"#FFFFFF\" stop-opacity=\"0.12\"></stop><stop offset=\"0.042\" stop-color=\"#000000\" stop-opacity=\"0\"></stop></linearGradient><pattern id=\"p\" patternUnits=\"userSpaceOnUse\" x=\"0\" y=\"0\" width=\"24\" height=\"24\"><rect width=\"24\" height=\"24\" fill=\"url(#g)\"></rect></pattern></defs><path d=\"M10 0H1130A10 10 0 0 1 1140 10V450A10 10 0 0 1 1130 460H10A10 10 0 0 1 0 450V10A10 10 0 0 1 10 0Z\" fill=\"url(#p)\"></path></svg>",
+   "fit": "stretch"
+  },
+  {
+   "id": "pattern-2",
+   "name": "Pattern",
+   "x": 70,
+   "y": 70,
+   "width": 1140,
+   "height": 460,
+   "kind": "svg",
+   "markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1140.0 460.0\"><defs><linearGradient id=\"g\" gradientUnits=\"userSpaceOnUse\" x1=\"12\" y1=\"0\" x2=\"12\" y2=\"24\"><stop offset=\"0.042\" stop-color=\"#FFFFFF\" stop-opacity=\"0.12\"></stop><stop offset=\"0.042\" stop-color=\"#000000\" stop-opacity=\"0\"></stop></linearGradient><pattern id=\"p\" patternUnits=\"userSpaceOnUse\" x=\"0\" y=\"0\" width=\"24\" height=\"24\"><rect width=\"24\" height=\"24\" fill=\"url(#g)\"></rect></pattern></defs><path d=\"M10 0H1130A10 10 0 0 1 1140 10V450A10 10 0 0 1 1130 460H10A10 10 0 0 1 0 450V10A10 10 0 0 1 10 0Z\" fill=\"url(#p)\"></path></svg>",
+   "fit": "stretch"
+  },
+  {
+   "id": "shape-2",
+   "name": "Shape",
+   "x": 86,
+   "y": 86,
+   "width": 1108,
+   "height": 428,
+   "kind": "shape",
+   "stroke": {
+    "color": "#FFFFFF",
+    "width": 2
+   }
+  },
+  {
+   "id": "shape-3",
+   "name": "Shape",
+   "x": 892,
+   "y": 88,
+   "width": 300,
+   "height": 424,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#0F3FB8"
+   }
+  },
+  {
+   "id": "line-left",
+   "name": "Line (left)",
+   "x": 892,
+   "y": 88,
+   "width": 2,
+   "height": 424,
+   "kind": "shape",
+   "shape": "path",
+   "path": "M1 0V424",
+   "stroke": {
+    "color": "#FFFFFF",
+    "width": 2,
+    "dash": [
+     6,
+     4.195
+    ]
+   }
+  },
+  {
+   "id": "t-fig-01",
+   "name": "FIG. 01",
+   "x": 922,
+   "y": 112,
+   "width": 66.645,
+   "height": 20.02,
+   "kind": "text",
+   "text": "FIG. 01",
+   "font": {
+    "family": "Space Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 13,
+   "color": "#D3DEFF",
+   "letterSpacing": 0.12,
+   "lineHeight": 1.538,
+   "minSize": 10.4
+  },
+  {
+   "id": "t-entry-code",
+   "name": "ENTRY CODE",
+   "x": 1068.828,
+   "y": 112,
+   "width": 95.192,
+   "height": 20.02,
+   "kind": "text",
+   "text": "ENTRY CODE",
+   "font": {
+    "family": "Space Mono",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 13,
+   "color": "#FFFFFF",
+   "letterSpacing": 0.12,
+   "lineHeight": 1.538,
+   "minSize": 10.4
+  },
+  {
+   "id": "t-holder",
+   "name": "HOLDER",
+   "x": 922,
+   "y": 442,
+   "width": 57.129,
+   "height": 20.02,
+   "kind": "text",
+   "text": "HOLDER",
+   "font": {
+    "family": "Space Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 13,
+   "color": "#D3DEFF",
+   "letterSpacing": 0.12,
+   "lineHeight": 1.538,
+   "minSize": 10.4
+  },
+  {
+   "id": "t-attendee_name",
+   "name": "Guest name",
+   "x": 987.089,
+   "y": 442,
+   "width": 176.911,
+   "height": 20.02,
+   "kind": "text",
+   "text": "{{attendee_name}}",
+   "font": {
+    "family": "Space Mono",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 13,
+   "color": "#FFFFFF",
+   "lineHeight": 1.538,
+   "align": "right",
+   "minSize": 7.8
+  },
+  {
+   "id": "t-serial",
+   "name": "SERIAL",
+   "x": 922,
+   "y": 468,
+   "width": 57.129,
+   "height": 20.02,
+   "kind": "text",
+   "text": "SERIAL",
+   "font": {
+    "family": "Space Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 13,
+   "color": "#D3DEFF",
+   "letterSpacing": 0.12,
+   "lineHeight": 1.538,
+   "minSize": 10.4
+  },
+  {
+   "id": "t-ticket_id",
+   "name": "Ticket code",
+   "x": 987.089,
+   "y": 468,
+   "width": 176.911,
+   "height": 20.02,
+   "kind": "text",
+   "text": "{{ticket_id}}",
+   "font": {
+    "family": "Space Mono",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 13,
+   "color": "#FFFFFF",
+   "lineHeight": 1.538,
+   "align": "right",
+   "minSize": 3.9
+  },
+  {
+   "id": "line-top",
+   "name": "Line (top)",
+   "x": 940,
+   "y": 184,
+   "width": 20,
+   "height": 2,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFE14D"
+   }
+  },
+  {
+   "id": "line-left-2",
+   "name": "Line (left)",
+   "x": 940,
+   "y": 184,
+   "width": 2,
+   "height": 20,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFE14D"
+   }
+  },
+  {
+   "id": "line-top-2",
+   "name": "Line (top)",
+   "x": 1126,
+   "y": 184,
+   "width": 20,
+   "height": 2,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFE14D"
+   }
+  },
+  {
+   "id": "line-right",
+   "name": "Line (right)",
+   "x": 1144,
+   "y": 184,
+   "width": 2,
+   "height": 20,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFE14D"
+   }
+  },
+  {
+   "id": "line-bottom",
+   "name": "Line (bottom)",
+   "x": 940,
+   "y": 388,
+   "width": 20,
+   "height": 2,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFE14D"
+   }
+  },
+  {
+   "id": "line-left-3",
+   "name": "Line (left)",
+   "x": 940,
+   "y": 370,
+   "width": 2,
+   "height": 20,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFE14D"
+   }
+  },
+  {
+   "id": "line-right-2",
+   "name": "Line (right)",
+   "x": 1144,
+   "y": 370,
+   "width": 2,
+   "height": 20,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFE14D"
+   }
+  },
+  {
+   "id": "line-bottom-2",
+   "name": "Line (bottom)",
+   "x": 1126,
+   "y": 388,
+   "width": 20,
+   "height": 2,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFE14D"
+   }
+  },
+  {
+   "id": "shape-4",
+   "name": "Shape",
+   "x": 954,
+   "y": 198,
+   "width": 178,
+   "height": 178,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   }
+  },
+  {
+   "id": "qr",
+   "name": "QR code",
+   "x": 966,
+   "y": 210,
+   "width": 154,
+   "height": 154,
+   "kind": "qr"
+  },
+  {
+   "id": "art",
+   "name": "Artwork",
+   "x": 578,
+   "y": 108,
+   "width": 300,
+   "height": 250,
+   "kind": "svg",
+   "markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 300 250\" fill=\"none\" stroke=\"#FFFFFF\" stroke-width=\"1.5\"><g opacity=\"0.85\"><path d=\"M150 30 L250 80 L250 180 L150 230 L50 180 L50 80 Z\"></path><path d=\"M50 80 L150 130 L250 80\"></path><path d=\"M150 130 L150 230\"></path><path d=\"M150 30 L150 130\" stroke-dasharray=\"5 6\"></path><path d=\"M50 180 L150 130 L250 180\" stroke-dasharray=\"5 6\"></path></g><g stroke=\"#FFE14D\"><path d=\"M270 80 L270 180\"></path><path d=\"M263 80 H277\"></path><path d=\"M263 180 H277\"></path><path d=\"M50 14 L150 -36\" transform=\"translate(0 0)\"></path></g><circle cx=\"150\" cy=\"130\" r=\"5\" fill=\"#FFE14D\" stroke=\"none\"></circle><text x=\"282\" y=\"135\" font-family=\"Space Mono, monospace\" font-size=\"12\" fill=\"#FFE14D\" stroke=\"none\">H</text></svg>"
+  },
+  {
+   "id": "t-app_name",
+   "name": "Organiser",
+   "x": 122,
+   "y": 117.5,
+   "width": 83.676,
+   "height": 21.02,
+   "kind": "text",
+   "text": "{{app_name}}",
+   "font": {
+    "family": "Space Mono",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 14,
+   "color": "#FFFFFF",
+   "letterSpacing": 0.16,
+   "lineHeight": 1.5,
+   "minSize": 8.4
+  },
+  {
+   "id": "shape-5",
+   "name": "Shape",
+   "x": 213.656,
+   "y": 114,
+   "width": 96.156,
+   "height": 28,
+   "showIf": "ticket_type",
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFE14D"
+   }
+  },
+  {
+   "id": "t-ticket_type",
+   "name": "Ticket type",
+   "x": 223.656,
+   "y": 118,
+   "width": 76.176,
+   "height": 20.02,
+   "showIf": "ticket_type",
+   "kind": "text",
+   "text": "REV. {{ticket_type}}",
+   "font": {
+    "family": "Space Mono",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 13,
+   "color": "#06153A",
+   "letterSpacing": 0.12,
+   "lineHeight": 1.538,
+   "minSize": 7.8
+  },
+  {
+   "id": "t-project-title",
+   "name": "PROJECT TITLE",
+   "x": 122,
+   "y": 185.484,
+   "width": 520.02,
+   "height": 20.02,
+   "kind": "text",
+   "text": "PROJECT TITLE",
+   "font": {
+    "family": "Space Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 13,
+   "color": "#D3DEFF",
+   "letterSpacing": 0.16,
+   "lineHeight": 1.538,
+   "minSize": 10.4
+  },
+  {
+   "id": "t-event_name",
+   "name": "Event name",
+   "x": 122,
+   "y": 215.484,
+   "width": 520.02,
+   "height": 145.051,
+   "kind": "text",
+   "text": "{{event_name}}",
+   "font": {
+    "family": "Space Grotesk",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 74,
+   "color": "#FFFFFF",
+   "letterSpacing": -0.02,
+   "lineHeight": 0.98,
+   "maxLines": 2,
+   "minSize": 29.6
+  },
+  {
+   "id": "t-tagline",
+   "name": "Tagline",
+   "x": 122,
+   "y": 370.516,
+   "width": 520.02,
+   "height": 25.02,
+   "showIf": "tagline",
+   "kind": "text",
+   "text": "// {{tagline}}",
+   "font": {
+    "family": "Space Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 17,
+   "color": "#FFE14D",
+   "lineHeight": 1.471,
+   "fit": "ellipsis"
+  },
+  {
+   "id": "shape-6",
+   "name": "Shape",
+   "x": 88,
+   "y": 439,
+   "width": 804,
+   "height": 73,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#0F3FB8"
+   }
+  },
+  {
+   "id": "line-top-3",
+   "name": "Line (top)",
+   "x": 88,
+   "y": 439,
+   "width": 804,
+   "height": 2,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   }
+  },
+  {
+   "id": "t-date",
+   "name": "DATE",
+   "x": 122,
+   "y": 453,
+   "width": 116.036,
+   "height": 17.02,
+   "kind": "text",
+   "text": "DATE",
+   "font": {
+    "family": "Space Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#D3DEFF",
+   "letterSpacing": 0.14,
+   "lineHeight": 1.417,
+   "minSize": 9.6
+  },
+  {
+   "id": "t-date-2",
+   "name": "Date",
+   "x": 122,
+   "y": 474,
+   "width": 116.036,
+   "height": 24.02,
+   "kind": "text",
+   "text": "{{date}}",
+   "font": {
+    "family": "Space Mono",
+    "weight": 700,
+    "style": "normal"
+   },
+   "color": "#FFFFFF",
+   "lineHeight": 1.5,
+   "fit": "ellipsis"
+  },
+  {
+   "id": "line-left-4",
+   "name": "Line (left)",
+   "x": 252.016,
+   "y": 441,
+   "width": 2,
+   "height": 71,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   }
+  },
+  {
+   "id": "t-doors",
+   "name": "DOORS",
+   "x": 268.016,
+   "y": 453,
+   "width": 79.364,
+   "height": 17.02,
+   "showIf": "doors_time",
+   "kind": "text",
+   "text": "DOORS",
+   "font": {
+    "family": "Space Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#D3DEFF",
+   "letterSpacing": 0.14,
+   "lineHeight": 1.417,
+   "minSize": 9.6
+  },
+  {
+   "id": "t-doors_time",
+   "name": "Doors open",
+   "x": 268.016,
+   "y": 474,
+   "width": 79.364,
+   "height": 24.02,
+   "showIf": "doors_time",
+   "kind": "text",
+   "text": "{{doors_time}}",
+   "font": {
+    "family": "Space Mono",
+    "weight": 700,
+    "style": "normal"
+   },
+   "color": "#FFFFFF",
+   "lineHeight": 1.5,
+   "fit": "ellipsis"
+  },
+  {
+   "id": "line-left-5",
+   "name": "Line (left)",
+   "x": 361.359,
+   "y": 441,
+   "width": 2,
+   "height": 71,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   }
+  },
+  {
+   "id": "t-gate",
+   "name": "GATE",
+   "x": 377.359,
+   "y": 453,
+   "width": 65.708,
+   "height": 17.02,
+   "showIf": "gate",
+   "kind": "text",
+   "text": "GATE",
+   "font": {
+    "family": "Space Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#D3DEFF",
+   "letterSpacing": 0.14,
+   "lineHeight": 1.417,
+   "minSize": 9.6
+  },
+  {
+   "id": "t-gate-2",
+   "name": "Gate",
+   "x": 377.359,
+   "y": 474,
+   "width": 65.708,
+   "height": 24.02,
+   "showIf": "gate",
+   "kind": "text",
+   "text": "{{gate}}",
+   "font": {
+    "family": "Space Mono",
+    "weight": 700,
+    "style": "normal"
+   },
+   "color": "#FFFFFF",
+   "lineHeight": 1.5,
+   "fit": "ellipsis"
+  },
+  {
+   "id": "line-left-6",
+   "name": "Line (left)",
+   "x": 457.047,
+   "y": 441,
+   "width": 2,
+   "height": 71,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   }
+  },
+  {
+   "id": "t-venue",
+   "name": "VENUE",
+   "x": 473.047,
+   "y": 453,
+   "width": 254.614,
+   "height": 17.02,
+   "showIf": "venue",
+   "kind": "text",
+   "text": "VENUE",
+   "font": {
+    "family": "Space Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#D3DEFF",
+   "letterSpacing": 0.14,
+   "lineHeight": 1.417,
+   "minSize": 9.6
+  },
+  {
+   "id": "t-venue-2",
+   "name": "Venue",
+   "x": 473.047,
+   "y": 474,
+   "width": 254.614,
+   "height": 24.02,
+   "showIf": "venue",
+   "kind": "text",
+   "text": "{{venue}}",
+   "font": {
+    "family": "Space Mono",
+    "weight": 700,
+    "style": "normal"
+   },
+   "color": "#FFFFFF",
+   "lineHeight": 1.5,
+   "fit": "ellipsis"
+  },
+  {
+   "id": "line-left-7",
+   "name": "Line (left)",
+   "x": 741.641,
+   "y": 441,
+   "width": 2,
+   "height": 71,
+   "showIf": "row|seat",
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   }
+  },
+  {
+   "id": "t-seat",
+   "name": "SEAT",
+   "x": 757.641,
+   "y": 453,
+   "width": 120.379,
+   "height": 17.02,
+   "showIf": "row|seat",
+   "kind": "text",
+   "text": "SEAT",
+   "font": {
+    "family": "Space Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#D3DEFF",
+   "letterSpacing": 0.14,
+   "lineHeight": 1.417,
+   "minSize": 9.6
+  },
+  {
+   "id": "t-row",
+   "name": "Row",
+   "x": 757.641,
+   "y": 474,
+   "width": 120.379,
+   "height": 24.02,
+   "showIf": "row|seat",
+   "kind": "text",
+   "text": "{% if row %}{{row}}{% endif %}{% if row %}{% if seat %} · {% endif %}{% endif %}{% if seat %}{{seat}}{% endif %}",
+   "font": {
+    "family": "Space Mono",
+    "weight": 700,
+    "style": "normal"
+   },
+   "color": "#FFFFFF",
+   "lineHeight": 1.5,
+   "fit": "ellipsis"
+  }
+ ],
+ "starter": "ticket/07-blueprint"
+}

@@ -1,0 +1,612 @@
+{
+ "version": 2,
+ "page": {
+  "widthMm": 338.667,
+  "heightMm": 158.75
+ },
+ "canvas": {
+  "width": 1280,
+  "height": 600,
+  "background": {
+   "type": "solid",
+   "color": "#05010D"
+  }
+ },
+ "vars": {},
+ "layers": [
+  {
+   "id": "shape",
+   "name": "Shape",
+   "x": 70,
+   "y": 70,
+   "width": 1140,
+   "height": 460,
+   "shadow": [
+    {
+     "x": 0,
+     "y": 0,
+     "blur": 44,
+     "spread": 0,
+     "color": "#FF2E9780",
+     "inset": false
+    },
+    {
+     "x": 0,
+     "y": 0,
+     "blur": 30,
+     "spread": 0,
+     "color": "#2DE2E61F",
+     "inset": true
+    }
+   ],
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#0D0221"
+   },
+   "stroke": {
+    "color": "#FF2E97",
+    "width": 2
+   },
+   "radius": [
+    24,
+    24,
+    24,
+    24
+   ]
+  },
+  {
+   "id": "art",
+   "name": "Artwork",
+   "x": 72,
+   "y": 72,
+   "width": 1140,
+   "height": 460,
+   "kind": "svg",
+   "markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1140 460\"><defs><clipPath id=\"moa-clip\"><path d=\"M22 0H1114A22 22 0 0 1 1136 22V434A22 22 0 0 1 1114 456H22A22 22 0 0 1 0 434V22A22 22 0 0 1 22 0Z\"></path></clipPath></defs><g clip-path=\"url(#moa-clip)\"><g stroke=\"#2DE2E6\" stroke-width=\"1.5\" opacity=\"0.55\"><line x1=\"0\" y1=\"280\" x2=\"1140\" y2=\"280\"></line><line x1=\"0\" y1=\"290\" x2=\"1140\" y2=\"290\"></line><line x1=\"0\" y1=\"306\" x2=\"1140\" y2=\"306\"></line><line x1=\"0\" y1=\"330\" x2=\"1140\" y2=\"330\"></line><line x1=\"0\" y1=\"366\" x2=\"1140\" y2=\"366\"></line><line x1=\"0\" y1=\"420\" x2=\"1140\" y2=\"420\"></line><line x1=\"570\" y1=\"280\" x2=\"-830\" y2=\"460\"></line><line x1=\"570\" y1=\"280\" x2=\"-550\" y2=\"460\"></line><line x1=\"570\" y1=\"280\" x2=\"-270\" y2=\"460\"></line><line x1=\"570\" y1=\"280\" x2=\"10\" y2=\"460\"></line><line x1=\"570\" y1=\"280\" x2=\"290\" y2=\"460\"></line><line x1=\"570\" y1=\"280\" x2=\"570\" y2=\"460\"></line><line x1=\"570\" y1=\"280\" x2=\"850\" y2=\"460\"></line><line x1=\"570\" y1=\"280\" x2=\"1130\" y2=\"460\"></line><line x1=\"570\" y1=\"280\" x2=\"1410\" y2=\"460\"></line><line x1=\"570\" y1=\"280\" x2=\"1690\" y2=\"460\"></line><line x1=\"570\" y1=\"280\" x2=\"1970\" y2=\"460\"></line></g><g fill=\"none\" stroke=\"#FF2E97\" stroke-width=\"2\" opacity=\"0.8\"><path d=\"M640 280 A110 110 0 0 1 860 280\"></path><path d=\"M664 280 A86 86 0 0 1 836 280\"></path><path d=\"M688 280 A62 62 0 0 1 812 280\"></path></g></g></svg>"
+  },
+  {
+   "id": "t-app_name",
+   "name": "Organiser",
+   "x": 112,
+   "y": 114.5,
+   "width": 443.473,
+   "height": 18.02,
+   "kind": "text",
+   "text": "{{app_name}}",
+   "font": {
+    "family": "Share Tech Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "color": "#8FF3F5",
+   "letterSpacing": 0.2,
+   "lineHeight": 1.125,
+   "minSize": 9.6
+  },
+  {
+   "id": "shape-2",
+   "name": "Shape",
+   "x": 728.75,
+   "y": 108,
+   "width": 123.25,
+   "height": 31,
+   "shadow": [
+    {
+     "x": 0,
+     "y": 0,
+     "blur": 12,
+     "spread": 0,
+     "color": "#2DE2E680",
+     "inset": false
+    }
+   ],
+   "kind": "shape",
+   "stroke": {
+    "color": "#2DE2E6",
+    "width": 1
+   },
+   "radius": [
+    6,
+    6,
+    6,
+    6
+   ]
+  },
+  {
+   "id": "t-admit-one",
+   "name": "ADMIT ONE",
+   "x": 743.75,
+   "y": 116,
+   "width": 93.27,
+   "height": 15.02,
+   "kind": "text",
+   "text": "ADMIT ONE",
+   "font": {
+    "family": "Share Tech Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 14,
+   "color": "#8FF3F5",
+   "letterSpacing": 0.2,
+   "lineHeight": 1.071,
+   "minSize": 11.2
+  },
+  {
+   "id": "t-event_name",
+   "name": "Event name",
+   "x": 112,
+   "y": 231,
+   "width": 740.02,
+   "height": 62.02,
+   "shadow": [
+    {
+     "x": 0,
+     "y": 0,
+     "blur": 6,
+     "spread": 0,
+     "color": "#FFFFFF",
+     "inset": false
+    },
+    {
+     "x": 0,
+     "y": 0,
+     "blur": 22,
+     "spread": 0,
+     "color": "#FF2E97",
+     "inset": false
+    },
+    {
+     "x": 0,
+     "y": 0,
+     "blur": 44,
+     "spread": 0,
+     "color": "#FF2E97",
+     "inset": false
+    }
+   ],
+   "kind": "text",
+   "text": "{{event_name}}",
+   "font": {
+    "family": "Orbitron",
+    "weight": 800,
+    "style": "normal"
+   },
+   "size": 62,
+   "color": "#FFFFFF",
+   "letterSpacing": 0.02,
+   "lineHeight": 1,
+   "minSize": 24.8
+  },
+  {
+   "id": "t-tagline",
+   "name": "Tagline",
+   "x": 112,
+   "y": 307,
+   "width": 740.02,
+   "height": 23.02,
+   "showIf": "tagline",
+   "kind": "text",
+   "text": "{{tagline}}",
+   "font": {
+    "family": "Share Tech Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 20,
+   "color": "#FF8AC4",
+   "letterSpacing": 0.08,
+   "lineHeight": 1.15,
+   "fit": "ellipsis"
+  },
+  {
+   "id": "shape-3",
+   "name": "Shape",
+   "x": 112,
+   "y": 422,
+   "width": 740,
+   "height": 70,
+   "shadow": [
+    {
+     "x": 0,
+     "y": 0,
+     "blur": 18,
+     "spread": 0,
+     "color": "#2DE2E659",
+     "inset": false
+    }
+   ],
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#0D0221"
+   },
+   "stroke": {
+    "color": "#2DE2E6",
+    "width": 1
+   },
+   "radius": [
+    12,
+    12,
+    12,
+    12
+   ]
+  },
+  {
+   "id": "t-date",
+   "name": "DATE",
+   "x": 131,
+   "y": 437,
+   "width": 124.208,
+   "height": 14.02,
+   "kind": "text",
+   "text": "DATE",
+   "font": {
+    "family": "Share Tech Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#8FF3F5",
+   "letterSpacing": 0.18,
+   "lineHeight": 1.167,
+   "minSize": 9.6
+  },
+  {
+   "id": "t-date-2",
+   "name": "Date",
+   "x": 131,
+   "y": 457,
+   "width": 124.208,
+   "height": 20.02,
+   "kind": "text",
+   "text": "{{date}}",
+   "font": {
+    "family": "Share Tech Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 18,
+   "color": "#FFFFFF",
+   "lineHeight": 1.111,
+   "fit": "ellipsis"
+  },
+  {
+   "id": "t-doors",
+   "name": "DOORS",
+   "x": 269.188,
+   "y": 437,
+   "width": 82.801,
+   "height": 14.02,
+   "showIf": "doors_time",
+   "kind": "text",
+   "text": "DOORS",
+   "font": {
+    "family": "Share Tech Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#8FF3F5",
+   "letterSpacing": 0.18,
+   "lineHeight": 1.167,
+   "minSize": 9.6
+  },
+  {
+   "id": "t-doors_time",
+   "name": "Doors open",
+   "x": 269.188,
+   "y": 457,
+   "width": 82.801,
+   "height": 20.02,
+   "showIf": "doors_time",
+   "kind": "text",
+   "text": "{{doors_time}}",
+   "font": {
+    "family": "Share Tech Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 18,
+   "color": "#FFFFFF",
+   "lineHeight": 1.111,
+   "fit": "ellipsis"
+  },
+  {
+   "id": "t-gate",
+   "name": "GATE",
+   "x": 365.969,
+   "y": 437,
+   "width": 82.817,
+   "height": 14.02,
+   "showIf": "gate",
+   "kind": "text",
+   "text": "GATE",
+   "font": {
+    "family": "Share Tech Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#8FF3F5",
+   "letterSpacing": 0.18,
+   "lineHeight": 1.167,
+   "minSize": 9.6
+  },
+  {
+   "id": "t-gate-2",
+   "name": "Gate",
+   "x": 365.969,
+   "y": 457,
+   "width": 82.817,
+   "height": 20.02,
+   "showIf": "gate",
+   "kind": "text",
+   "text": "{{gate}}",
+   "font": {
+    "family": "Share Tech Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 18,
+   "color": "#FFFFFF",
+   "lineHeight": 1.111,
+   "fit": "ellipsis"
+  },
+  {
+   "id": "t-venue",
+   "name": "VENUE",
+   "x": 462.766,
+   "y": 437,
+   "width": 252.754,
+   "height": 14.02,
+   "showIf": "venue",
+   "kind": "text",
+   "text": "VENUE",
+   "font": {
+    "family": "Share Tech Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#8FF3F5",
+   "letterSpacing": 0.18,
+   "lineHeight": 1.167,
+   "minSize": 9.6
+  },
+  {
+   "id": "t-venue-2",
+   "name": "Venue",
+   "x": 462.766,
+   "y": 457,
+   "width": 252.754,
+   "height": 20.02,
+   "showIf": "venue",
+   "kind": "text",
+   "text": "{{venue}}",
+   "font": {
+    "family": "Share Tech Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 18,
+   "color": "#FFFFFF",
+   "lineHeight": 1.111,
+   "fit": "ellipsis"
+  },
+  {
+   "id": "t-seat",
+   "name": "SEAT",
+   "x": 729.5,
+   "y": 437,
+   "width": 103.52,
+   "height": 14.02,
+   "showIf": "row|seat",
+   "kind": "text",
+   "text": "SEAT",
+   "font": {
+    "family": "Share Tech Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#8FF3F5",
+   "letterSpacing": 0.18,
+   "lineHeight": 1.167,
+   "minSize": 9.6
+  },
+  {
+   "id": "t-row",
+   "name": "Row",
+   "x": 729.5,
+   "y": 457,
+   "width": 103.52,
+   "height": 20.02,
+   "showIf": "row|seat",
+   "kind": "text",
+   "text": "{% if row %}{{row}}{% endif %}{% if row %}{% if seat %} · {% endif %}{% endif %}{% if seat %}{{seat}}{% endif %}",
+   "font": {
+    "family": "Share Tech Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 18,
+   "color": "#FFFFFF",
+   "lineHeight": 1.111,
+   "fit": "ellipsis"
+  },
+  {
+   "id": "shape-4",
+   "name": "Shape",
+   "x": 892,
+   "y": 72,
+   "width": 316,
+   "height": 456,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#0D0221DB"
+   },
+   "radius": [
+    0,
+    22,
+    22,
+    0
+   ]
+  },
+  {
+   "id": "line-left",
+   "name": "Line (left)",
+   "x": 892,
+   "y": 72,
+   "width": 2,
+   "height": 456,
+   "kind": "shape",
+   "shape": "path",
+   "path": "M1 0V456",
+   "stroke": {
+    "color": "#FF2E97",
+    "width": 2,
+    "dash": [
+     6,
+     4
+    ]
+   }
+  },
+  {
+   "id": "t-ticket_type",
+   "name": "Ticket type",
+   "x": 924,
+   "y": 104,
+   "width": 109.848,
+   "height": 21.02,
+   "showIf": "ticket_type",
+   "kind": "text",
+   "text": "{{ticket_type}}",
+   "font": {
+    "family": "Orbitron",
+    "weight": 800,
+    "style": "normal"
+   },
+   "size": 17,
+   "color": "#FF8AC4",
+   "lineHeight": 1.235,
+   "minSize": 10.2
+  },
+  {
+   "id": "t-ticket_id",
+   "name": "Ticket code",
+   "x": 1041.808,
+   "y": 109,
+   "width": 136.192,
+   "height": 15.02,
+   "kind": "text",
+   "text": "{{ticket_id}}",
+   "font": {
+    "family": "Share Tech Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 14,
+   "color": "#8FF3F5",
+   "lineHeight": 1.071,
+   "align": "right",
+   "minSize": 4.2
+  },
+  {
+   "id": "t-player-one",
+   "name": "PLAYER ONE",
+   "x": 1007.781,
+   "y": 453,
+   "width": 86.426,
+   "height": 14.02,
+   "kind": "text",
+   "text": "PLAYER ONE",
+   "font": {
+    "family": "Share Tech Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#8FF3F5",
+   "letterSpacing": 0.18,
+   "lineHeight": 1.167,
+   "minSize": 9.6
+  },
+  {
+   "id": "t-attendee_name",
+   "name": "Guest name",
+   "x": 1002.391,
+   "y": 473,
+   "width": 175.629,
+   "height": 23.02,
+   "kind": "text",
+   "text": "{{attendee_name}}",
+   "font": {
+    "family": "Share Tech Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 20,
+   "color": "#FFFFFF",
+   "lineHeight": 1.15,
+   "minSize": 12
+  },
+  {
+   "id": "shape-5",
+   "name": "Shape",
+   "x": 956,
+   "y": 194,
+   "width": 190,
+   "height": 190,
+   "shadow": [
+    {
+     "x": 0,
+     "y": 0,
+     "blur": 0,
+     "spread": 3,
+     "color": "#0D0221",
+     "inset": false
+    },
+    {
+     "x": 0,
+     "y": 0,
+     "blur": 0,
+     "spread": 5,
+     "color": "#2DE2E6",
+     "inset": false
+    },
+    {
+     "x": 0,
+     "y": 0,
+     "blur": 30,
+     "spread": 0,
+     "color": "#2DE2E6B2",
+     "inset": false
+    }
+   ],
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   },
+   "radius": [
+    12,
+    12,
+    12,
+    12
+   ]
+  },
+  {
+   "id": "qr",
+   "name": "QR code",
+   "x": 968,
+   "y": 206,
+   "width": 166,
+   "height": 166,
+   "kind": "qr"
+  }
+ ],
+ "starter": "ticket/02-midnight-arcade"
+}

@@ -1,0 +1,66 @@
+{
+ "version": 2,
+ "page": {
+  "widthMm": 297,
+  "heightMm": 210
+ },
+ "canvas": {
+  "width": 1754,
+  "height": 1240,
+  "background": {
+   "type": "solid",
+   "color": "#FFFFFF"
+  }
+ },
+ "vars": {},
+ "layers": [
+  {
+   "id": "guest",
+   "name": "Guest name",
+   "x": 160,
+   "y": 489.405,
+   "width": 1434,
+   "height": 264,
+   "kind": "text",
+   "text": "{{attendee_name}}",
+   "font": {
+    "family": "DM Serif Display",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 110,
+   "align": "center",
+   "maxLines": 2,
+   "minSize": 55
+  },
+  {
+   "id": "no",
+   "name": "Certificate number",
+   "x": 120,
+   "y": 1131.307,
+   "width": 700,
+   "height": 26.4,
+   "kind": "text",
+   "text": "{{certificate_no}}",
+   "font": {
+    "family": "Roboto Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 22,
+   "color": "#8C918C",
+   "minSize": 11
+  },
+  {
+   "id": "qr",
+   "name": "QR code",
+   "x": 1464,
+   "y": 950,
+   "width": 170,
+   "height": 170,
+   "kind": "qr",
+   "quietZone": 2
+  }
+ ],
+ "starter": "certificate/blank"
+}

@@ -1,0 +1,316 @@
+{
+ "version": 2,
+ "page": {
+  "widthMm": 101.6,
+  "heightMm": 152.4
+ },
+ "canvas": {
+  "width": 384,
+  "height": 576,
+  "background": {
+   "type": "solid",
+   "color": "#FFFFFF"
+  }
+ },
+ "vars": {},
+ "layers": [
+  {
+   "id": "shape",
+   "name": "Shape",
+   "x": 12,
+   "y": 12,
+   "width": 360,
+   "height": 552,
+   "kind": "shape",
+   "stroke": {
+    "color": "#000000",
+    "width": 3
+   },
+   "radius": [
+    10,
+    10,
+    10,
+    10
+   ]
+  },
+  {
+   "id": "lanyard",
+   "name": "Lanyard slot",
+   "x": 164,
+   "y": 25,
+   "width": 56,
+   "height": 12,
+   "kind": "shape",
+   "stroke": {
+    "color": "#000000",
+    "width": 2
+   },
+   "radius": [
+    6,
+    6,
+    6,
+    6
+   ]
+  },
+  {
+   "id": "shape-2",
+   "name": "Shape",
+   "x": 15,
+   "y": 47,
+   "width": 354,
+   "height": 47,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#000000"
+   }
+  },
+  {
+   "id": "t-event_name",
+   "name": "Event name",
+   "x": 35,
+   "y": 59,
+   "width": 179.083,
+   "height": 23.02,
+   "kind": "text",
+   "text": "{{event_name}}",
+   "font": {
+    "family": "Space Grotesk",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 18,
+   "color": "#FFFFFF",
+   "letterSpacing": 0.02,
+   "lineHeight": 1.278,
+   "minSize": 10.8
+  },
+  {
+   "id": "t-event_date",
+   "name": "Event date",
+   "x": 222.027,
+   "y": 62,
+   "width": 126.973,
+   "height": 17.02,
+   "kind": "text",
+   "text": "{{event_date}}",
+   "font": {
+    "family": "Space Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#FFFFFF",
+   "lineHeight": 1.417,
+   "align": "right",
+   "minSize": 8.4
+  },
+  {
+   "id": "t-first_name",
+   "name": "First name",
+   "x": 35,
+   "y": 116,
+   "width": 314.02,
+   "height": 66.614,
+   "kind": "text",
+   "text": "{{first_name}}",
+   "font": {
+    "family": "Space Grotesk",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 74,
+   "color": "#000000",
+   "letterSpacing": -0.04,
+   "lineHeight": 0.9,
+   "transform": "upper",
+   "minSize": 18
+  },
+  {
+   "id": "t-last_name",
+   "name": "Last name",
+   "x": 35,
+   "y": 188.594,
+   "width": 314.02,
+   "height": 35.208,
+   "showIf": "last_name",
+   "kind": "text",
+   "text": "{{last_name}}",
+   "font": {
+    "family": "Space Grotesk",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 32,
+   "color": "#000000",
+   "lineHeight": 1.1,
+   "minSize": 18
+  },
+  {
+   "id": "t-organization",
+   "name": "Their organisation",
+   "x": 35,
+   "y": 237.781,
+   "width": 314.02,
+   "height": 21.02,
+   "showIf": "organization",
+   "kind": "text",
+   "text": "{{organization}}",
+   "font": {
+    "family": "Space Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 14,
+   "color": "#000000",
+   "lineHeight": 1.5,
+   "fit": "ellipsis"
+  },
+  {
+   "id": "line-top",
+   "name": "Line (top)",
+   "x": 35,
+   "y": 278.781,
+   "width": 314,
+   "height": 2,
+   "kind": "shape",
+   "shape": "path",
+   "path": "M0 1H314",
+   "stroke": {
+    "color": "#000000",
+    "width": 2,
+    "dash": [
+     6,
+     4.267
+    ]
+   }
+  },
+  {
+   "id": "t-checkin_time",
+   "name": "Checked in at",
+   "x": 35,
+   "y": 298.781,
+   "width": 127.348,
+   "height": 39.02,
+   "showIf": "checkin_time|kiosk_id",
+   "kind": "text",
+   "spans": [
+    {
+     "text": "CHECK-IN\n{% if checkin_time %}{% endif %}",
+     "weight": 700
+    },
+    {
+     "text": "{% if checkin_time %}{{checkin_time}}{% endif %}{% if checkin_time %}{% if kiosk_id %} · {% endif %}{% endif %}{% if kiosk_id %}KIOSK {{kiosk_id}}{% endif %}"
+    }
+   ],
+   "font": {
+    "family": "Space Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 13,
+   "color": "#000000",
+   "lineHeight": 1.5,
+   "maxLines": 2,
+   "minSize": 9.1
+  },
+  {
+   "id": "t-badge_id",
+   "name": "Badge number",
+   "x": 35,
+   "y": 345.781,
+   "width": 127.348,
+   "height": 39.02,
+   "kind": "text",
+   "spans": [
+    {
+     "text": "BADGE\n",
+     "weight": 700
+    },
+    {
+     "text": "{{badge_id}}"
+    }
+   ],
+   "font": {
+    "family": "Space Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 13,
+   "color": "#000000",
+   "lineHeight": 1.5,
+   "maxLines": 2,
+   "minSize": 9.1
+  },
+  {
+   "id": "qr",
+   "name": "QR code",
+   "x": 241,
+   "y": 298.781,
+   "width": 108,
+   "height": 108,
+   "kind": "qr"
+  },
+  {
+   "id": "shape-3",
+   "name": "Shape",
+   "x": 15,
+   "y": 495,
+   "width": 354,
+   "height": 66,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#000000"
+   },
+   "radius": [
+    0,
+    0,
+    7,
+    7
+   ]
+  },
+  {
+   "id": "t-role",
+   "name": "Role: ATTENDEE, SPEAKER or STAFF",
+   "x": 35,
+   "y": 510,
+   "width": 232.567,
+   "height": 36.02,
+   "kind": "text",
+   "text": "{{role}}",
+   "font": {
+    "family": "Space Grotesk",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 36,
+   "color": "#FFFFFF",
+   "letterSpacing": 0.14,
+   "lineHeight": 1,
+   "minSize": 18
+  },
+  {
+   "id": "t-access_level",
+   "name": "Access",
+   "x": 264.808,
+   "y": 511.203,
+   "width": 84.192,
+   "height": 33.614,
+   "kind": "text",
+   "text": "{% if access_level %}{{access_level}}{% endif %}{% if access_level %}{% if zone %}\n{% endif %}{% endif %}{% if zone %}ZONE {{zone}}{% endif %}",
+   "font": {
+    "family": "Space Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#FFFFFF",
+   "lineHeight": 1.4,
+   "align": "right",
+   "maxLines": 2,
+   "minSize": 8.4
+  }
+ ],
+ "starter": "badge/06-thermal-mono"
+}

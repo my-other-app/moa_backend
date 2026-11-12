@@ -1,0 +1,69 @@
+{
+ "name": "text-spans",
+ "about": "Styled runs: each span writes only what it sets; size as em of the layer's.",
+ "kind": "certificate",
+ "layout": {
+  "version": 2,
+  "page": {
+   "widthMm": 297,
+   "heightMm": 210
+  },
+  "canvas": {
+   "width": 1123,
+   "height": 794
+  },
+  "layers": [
+   {
+    "id": "s",
+    "name": "s",
+    "kind": "text",
+    "x": 10,
+    "y": 10,
+    "width": 520,
+    "height": 81,
+    "text": "",
+    "size": 18,
+    "lineHeight": 1.5,
+    "maxLines": 3,
+    "fit": "shrink",
+    "minSize": 9,
+    "spans": [
+     {
+      "text": "for completing "
+     },
+     {
+      "text": "{{course_title}}",
+      "weight": 600
+     },
+     {
+      "text": " at "
+     },
+     {
+      "text": "{{institute_name | upper}}",
+      "family": "Inter",
+      "style": "italic",
+      "size": 13.5,
+      "color": "var:accent",
+      "letterSpacing": 0.1,
+      "transform": "upper"
+     },
+     {
+      "text": "{% if grade %}, grade {{grade}}{% endif %}."
+     }
+    ]
+   }
+  ],
+  "vars": {
+   "accent": "#6B1F2E"
+  }
+ },
+ "values": {
+  "course_title": "Full Stack Web Development",
+  "institute_name": "Sample Institute",
+  "grade": "A+"
+ },
+ "context": {
+  "qr": "https://example.com/verify/C-1"
+ },
+ "expected": "<div class=\"moa-doc\" style=\"position:relative;width:1123px;height:794px;overflow:hidden\"><div data-kind=\"text\" data-layer=\"s\" style=\"position:absolute;left:10px;top:10px;width:520px;height:81px\"><div class=\"moa-t\" style=\"display:flex;flex-direction:column;justify-content:flex-start;box-sizing:border-box;width:100%;height:100%;padding:0px 0px 0px 0px\"><div data-fit=\"shrink\" data-lines=\"3\" data-min=\"9\" style=\"font-family:&#39;Inter&#39;;font-weight:400;font-style:normal;font-size:18px;line-height:1.5;letter-spacing:0em;color:#141614;text-align:left;text-transform:none;white-space:pre-wrap;overflow-wrap:anywhere\"><span>for completing </span><span style=\"font-weight:600\">Full Stack Web Development</span><span> at </span><span style=\"font-family:&#39;Inter&#39;;font-style:italic;font-size:0.75em;color:#6B1F2E;letter-spacing:0.1em;text-transform:uppercase\">SAMPLE INSTITUTE</span><span>, grade A+.</span></div></div></div></div>"
+}

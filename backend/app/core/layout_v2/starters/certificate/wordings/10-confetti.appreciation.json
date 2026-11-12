@@ -1,0 +1,333 @@
+{
+ "version": 2,
+ "page": {
+  "widthMm": 297,
+  "heightMm": 210
+ },
+ "canvas": {
+  "width": 1123,
+  "height": 794,
+  "background": {
+   "type": "solid",
+   "color": "var:accent"
+  }
+ },
+ "vars": {
+  "accent": "#FFD84D"
+ },
+ "layers": [
+  {
+   "id": "shape",
+   "name": "Shape",
+   "x": 56,
+   "y": 56,
+   "width": 1011,
+   "height": 682,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   },
+   "stroke": {
+    "color": "#1B1B3A",
+    "width": 3
+   },
+   "radius": [
+    36,
+    36,
+    36,
+    36
+   ]
+  },
+  {
+   "id": "art",
+   "name": "Artwork",
+   "x": 0,
+   "y": 0,
+   "width": 1123,
+   "height": 794,
+   "kind": "svg",
+   "markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1123 794\"><circle cx=\"72\" cy=\"84\" r=\"46\" fill=\"#FF5C7A\" stroke=\"#1B1B3A\" stroke-width=\"3\"></circle><path d=\"M1034 28l48 76h-96z\" fill=\"#2D7FF9\" stroke=\"#1B1B3A\" stroke-width=\"3\" stroke-linejoin=\"round\"></path><circle cx=\"64\" cy=\"716\" r=\"32\" fill=\"#19B38A\" stroke=\"#1B1B3A\" stroke-width=\"3\"></circle><path d=\"M55 36l5.6 11.4 12.6 1.8-9.1 8.9 2.1 12.5L55 64.7l-11.2 5.9 2.1-12.5-9.1-8.9 12.6-1.8z\" fill=\"#FF5C7A\" stroke=\"#1B1B3A\" stroke-width=\"1\" stroke-linejoin=\"round\" transform=\"translate(1058 716) scale(2.6) translate(-55 -54)\"></path><g fill=\"none\" stroke=\"#1B1B3A\" stroke-width=\"5\" stroke-linecap=\"round\"><path d=\"M250 28q14-16 28 0t28 0t28 0t28 0\"></path><path d=\"M760 766q14-16 28 0t28 0t28 0t28 0\"></path></g><g stroke=\"#1B1B3A\" stroke-width=\"2\"><circle cx=\"470\" cy=\"28\" r=\"9\" fill=\"#2D7FF9\"></circle><circle cx=\"700\" cy=\"26\" r=\"7\" fill=\"#FF5C7A\"></circle><circle cx=\"860\" cy=\"30\" r=\"10\" fill=\"#19B38A\"></circle><circle cx=\"200\" cy=\"766\" r=\"9\" fill=\"#FF5C7A\"></circle><circle cx=\"420\" cy=\"768\" r=\"7\" fill=\"#2D7FF9\"></circle><circle cx=\"600\" cy=\"764\" r=\"10\" fill=\"#FFFFFF\"></circle><circle cx=\"26\" cy=\"300\" r=\"8\" fill=\"#2D7FF9\"></circle><circle cx=\"28\" cy=\"480\" r=\"10\" fill=\"#FFFFFF\"></circle><circle cx=\"1096\" cy=\"260\" r=\"9\" fill=\"#19B38A\"></circle><circle cx=\"1094\" cy=\"470\" r=\"7\" fill=\"#FF5C7A\"></circle><rect x=\"1084\" y=\"352\" width=\"18\" height=\"18\" fill=\"#FFFFFF\" transform=\"rotate(20 1093 361)\"></rect><rect x=\"18\" y=\"380\" width=\"18\" height=\"18\" fill=\"#FF5C7A\" transform=\"rotate(-18 27 389)\"></rect></g></svg>"
+  },
+  {
+   "id": "t-institute_name",
+   "name": "Issuer",
+   "x": 135.99,
+   "y": 108,
+   "width": 851.02,
+   "height": 22.02,
+   "kind": "text",
+   "text": "{{institute_name}}",
+   "font": {
+    "family": "Nunito",
+    "weight": 700,
+    "style": "normal"
+   },
+   "color": "#1B1B3A",
+   "letterSpacing": 0.16,
+   "lineHeight": 1.375,
+   "align": "center",
+   "transform": "upper",
+   "minSize": 8
+  },
+  {
+   "id": "slot-title",
+   "name": "Certificate of Appreciation",
+   "x": 270.724,
+   "y": 138,
+   "width": 581.551,
+   "height": 52.817,
+   "kind": "text",
+   "text": "Certificate of Appreciation",
+   "font": {
+    "family": "Fredoka",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 48,
+   "color": "#1B1B3A",
+   "lineHeight": 1.1,
+   "align": "center",
+   "minSize": 24
+  },
+  {
+   "id": "t-this-certificate-goes-to",
+   "name": "This certificate goes to",
+   "x": 469.428,
+   "y": 280.406,
+   "width": 184.145,
+   "height": 24.02,
+   "kind": "text",
+   "text": "This certificate goes to",
+   "font": {
+    "family": "Nunito",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 18,
+   "color": "#1B1B3A",
+   "lineHeight": 1.333,
+   "align": "center",
+   "minSize": 14.4
+  },
+  {
+   "id": "t-recipient_name",
+   "name": "Recipient's name",
+   "x": 135.99,
+   "y": 308.406,
+   "width": 851.02,
+   "height": 77.02,
+   "kind": "text",
+   "text": "{{recipient_name}}",
+   "font": {
+    "family": "Fredoka",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 70,
+   "color": "#1F5FD0",
+   "lineHeight": 1.1,
+   "align": "center",
+   "maxLines": 2,
+   "minSize": 35
+  },
+  {
+   "id": "art-2",
+   "name": "Artwork",
+   "x": 379.5,
+   "y": 389.406,
+   "width": 364,
+   "height": 20,
+   "kind": "svg",
+   "markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 364 20\"><path d=\"M4 10q14-12 28 0t28 0t28 0t28 0t28 0t28 0t28 0t28 0t28 0t28 0t28 0t28 0t28 0\" fill=\"none\" stroke=\"#FF5C7A\" stroke-width=\"5\" stroke-linecap=\"round\"></path></svg>"
+  },
+  {
+   "id": "slot-statement",
+   "name": "Event name",
+   "x": 241.49,
+   "y": 423.406,
+   "width": 640.02,
+   "height": 57.02,
+   "kind": "text",
+   "spans": [
+    {
+     "text": "with big thanks for helping make "
+    },
+    {
+     "text": "{{event_title}}",
+     "weight": 700
+    },
+    {
+     "text": " happen on {{event_date}}."
+    }
+   ],
+   "font": {
+    "family": "Nunito",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 19,
+   "color": "#1B1B3A",
+   "lineHeight": 1.5,
+   "align": "center",
+   "textWrap": "pretty",
+   "maxLines": 3,
+   "minSize": 9.5
+  },
+  {
+   "id": "line-bottom",
+   "name": "Line (bottom)",
+   "x": 136,
+   "y": 640,
+   "width": 210,
+   "height": 3,
+   "showIf": "signatory_name",
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#1B1B3A"
+   }
+  },
+  {
+   "id": "signature",
+   "name": "Signature",
+   "x": 136,
+   "y": 599,
+   "width": 210,
+   "height": 41,
+   "showIf": "signatory_name",
+   "kind": "image",
+   "source": "signature_1",
+   "valign": "bottom"
+  },
+  {
+   "id": "t-signatory_name",
+   "name": "Signatory",
+   "x": 136,
+   "y": 648,
+   "width": 398.723,
+   "height": 22.02,
+   "showIf": "signatory_name",
+   "kind": "text",
+   "text": "{{signatory_name}}",
+   "font": {
+    "family": "Nunito",
+    "weight": 700,
+    "style": "normal"
+   },
+   "color": "#1B1B3A",
+   "lineHeight": 1.375,
+   "minSize": 8
+  },
+  {
+   "id": "t-signatory_designation",
+   "name": "Signatory's title",
+   "x": 136,
+   "y": 675,
+   "width": 851.02,
+   "height": 19.02,
+   "showIf": "signatory_designation signatory_name",
+   "kind": "text",
+   "text": "{{signatory_designation}}",
+   "font": {
+    "family": "Nunito",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 14,
+   "color": "#1B1B3A",
+   "lineHeight": 1.357,
+   "minSize": 9.8
+  },
+  {
+   "id": "shape-2",
+   "name": "Shape",
+   "x": 686.047,
+   "y": 570,
+   "width": 300.953,
+   "height": 124,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "var:accent"
+   },
+   "stroke": {
+    "color": "#1B1B3A",
+    "width": 3
+   },
+   "radius": [
+    20,
+    20,
+    20,
+    20
+   ]
+  },
+  {
+   "id": "shape-3",
+   "name": "Shape",
+   "x": 699.047,
+   "y": 583,
+   "width": 98,
+   "height": 98,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   },
+   "radius": [
+    10,
+    10,
+    10,
+    10
+   ]
+  },
+  {
+   "id": "qr",
+   "name": "QR code",
+   "x": 706.047,
+   "y": 590,
+   "width": 84,
+   "height": 84,
+   "kind": "qr"
+  },
+  {
+   "id": "t-scan-me-to-verify",
+   "name": "Scan me to verify!",
+   "x": 811.047,
+   "y": 610,
+   "width": 154.504,
+   "height": 23.02,
+   "kind": "text",
+   "text": "Scan me to verify!",
+   "font": {
+    "family": "Fredoka",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 19,
+   "color": "#1B1B3A",
+   "lineHeight": 1.211,
+   "minSize": 15.2
+  },
+  {
+   "id": "t-certificate_id",
+   "name": "Certificate number",
+   "x": 811.047,
+   "y": 635,
+   "width": 175.973,
+   "height": 19.02,
+   "kind": "text",
+   "text": "No. {{certificate_id}}",
+   "font": {
+    "family": "Nunito",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 14,
+   "color": "#1B1B3A",
+   "lineHeight": 1.357,
+   "minSize": 5.6
+  }
+ ],
+ "starter": "certificate/10-confetti"
+}

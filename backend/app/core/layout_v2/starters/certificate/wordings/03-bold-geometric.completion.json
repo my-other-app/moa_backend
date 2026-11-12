@@ -1,0 +1,415 @@
+{
+ "version": 2,
+ "page": {
+  "widthMm": 297,
+  "heightMm": 210
+ },
+ "canvas": {
+  "width": 1123,
+  "height": 794,
+  "background": {
+   "type": "solid",
+   "color": "#FFFFFF"
+  }
+ },
+ "vars": {
+  "accent": "#FF7A1A"
+ },
+ "layers": [
+  {
+   "id": "slot-heading",
+   "name": "Certificate of Completion",
+   "x": 444,
+   "y": 60,
+   "width": 260.911,
+   "height": 18.02,
+   "kind": "text",
+   "text": "Certificate of Completion",
+   "font": {
+    "family": "Space Grotesk",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 14,
+   "color": "#1F3BFF",
+   "letterSpacing": 0.2,
+   "lineHeight": 1.286,
+   "transform": "upper",
+   "minSize": 11.2
+  },
+  {
+   "id": "t-certificate_id",
+   "name": "Certificate number",
+   "x": 712.871,
+   "y": 60.5,
+   "width": 346.129,
+   "height": 17.02,
+   "kind": "text",
+   "text": "No. {{certificate_id}}",
+   "font": {
+    "family": "Inter",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 14,
+   "color": "#4A4F63",
+   "lineHeight": 1.214,
+   "align": "right",
+   "minSize": 5.6
+  },
+  {
+   "id": "t-awarded-to",
+   "name": "Awarded to",
+   "x": 444,
+   "y": 245.297,
+   "width": 615.02,
+   "height": 20.02,
+   "kind": "text",
+   "text": "Awarded to",
+   "size": 17,
+   "color": "#4A4F63",
+   "lineHeight": 1.176,
+   "minSize": 13.6
+  },
+  {
+   "id": "t-recipient_name",
+   "name": "Recipient's name",
+   "x": 444,
+   "y": 283.297,
+   "width": 615.02,
+   "height": 66.567,
+   "kind": "text",
+   "text": "{{recipient_name}}",
+   "font": {
+    "family": "Space Grotesk",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 64,
+   "color": "#10131F",
+   "letterSpacing": -0.02,
+   "lineHeight": 1.04,
+   "textWrap": "balance",
+   "maxLines": 2,
+   "minSize": 32
+  },
+  {
+   "id": "shape",
+   "name": "Shape",
+   "x": 444,
+   "y": 367.844,
+   "width": 84,
+   "height": 10,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "var:accent"
+   }
+  },
+  {
+   "id": "slot-statement",
+   "name": "Programme",
+   "x": 444,
+   "y": 395.844,
+   "width": 520.02,
+   "height": 58.895,
+   "kind": "text",
+   "spans": [
+    {
+     "text": "for completing "
+    },
+    {
+     "text": "{{course_title}}{% if duration_hours %}{% endif %}",
+     "weight": 600
+    },
+    {
+     "text": "{% if duration_hours %}, a {{duration_hours}}-hour programme{% endif %}."
+    }
+   ],
+   "size": 19,
+   "color": "#10131F",
+   "lineHeight": 1.55,
+   "textWrap": "pretty",
+   "maxLines": 3,
+   "minSize": 9.5
+  },
+  {
+   "id": "line-bottom",
+   "name": "Line (bottom)",
+   "x": 444,
+   "y": 691,
+   "width": 168,
+   "height": 2,
+   "showIf": "signatory_name",
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#10131F"
+   }
+  },
+  {
+   "id": "signature",
+   "name": "Signature",
+   "x": 444,
+   "y": 649,
+   "width": 168,
+   "height": 42,
+   "showIf": "signatory_name",
+   "kind": "image",
+   "source": "signature_1",
+   "valign": "bottom"
+  },
+  {
+   "id": "t-signatory_name",
+   "name": "Signatory",
+   "x": 444,
+   "y": 699,
+   "width": 168.02,
+   "height": 20.02,
+   "showIf": "signatory_name",
+   "kind": "text",
+   "text": "{{signatory_name}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "color": "#10131F",
+   "lineHeight": 1.25,
+   "minSize": 8
+  },
+  {
+   "id": "t-signatory_designation",
+   "name": "Signatory's title",
+   "x": 444,
+   "y": 725,
+   "width": 168.02,
+   "height": 17.02,
+   "showIf": "signatory_designation signatory_name",
+   "kind": "text",
+   "text": "{{signatory_designation}}",
+   "size": 14,
+   "color": "#4A4F63",
+   "lineHeight": 1.214,
+   "minSize": 9.8
+  },
+  {
+   "id": "line-bottom-2",
+   "name": "Line (bottom)",
+   "x": 644,
+   "y": 691,
+   "width": 130,
+   "height": 2,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#10131F"
+   }
+  },
+  {
+   "id": "t-issue_date",
+   "name": "Issued on",
+   "x": 644,
+   "y": 643,
+   "width": 130.02,
+   "height": 40.02,
+   "kind": "text",
+   "text": "{{issue_date}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "color": "#10131F",
+   "lineHeight": 1.25,
+   "maxLines": 2,
+   "minSize": 11.2
+  },
+  {
+   "id": "t-date-of-issue",
+   "name": "Date of issue",
+   "x": 644,
+   "y": 699,
+   "width": 130.02,
+   "height": 20.02,
+   "kind": "text",
+   "text": "Date of issue",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "color": "#10131F",
+   "lineHeight": 1.25,
+   "minSize": 12.8
+  },
+  {
+   "id": "t-issue_city",
+   "name": "City of issue",
+   "x": 644,
+   "y": 725,
+   "width": 130.02,
+   "height": 17.02,
+   "showIf": "issue_city",
+   "kind": "text",
+   "text": "{{issue_city}}",
+   "size": 14,
+   "color": "#4A4F63",
+   "lineHeight": 1.214,
+   "minSize": 9.8
+  },
+  {
+   "id": "shape-2",
+   "name": "Shape",
+   "x": 821,
+   "y": 622,
+   "width": 238,
+   "height": 120,
+   "kind": "shape",
+   "stroke": {
+    "color": "#10131F",
+    "width": 2
+   }
+  },
+  {
+   "id": "qr",
+   "name": "QR code",
+   "x": 835,
+   "y": 636,
+   "width": 92,
+   "height": 92,
+   "kind": "qr"
+  },
+  {
+   "id": "t-scan-to-verify",
+   "name": "Scan to verify",
+   "x": 941,
+   "y": 636.406,
+   "width": 104.02,
+   "height": 36.801,
+   "kind": "text",
+   "text": "Scan to verify",
+   "font": {
+    "family": "Space Grotesk",
+    "weight": 700,
+    "style": "normal"
+   },
+   "color": "#10131F",
+   "lineHeight": 1.15,
+   "maxLines": 2,
+   "minSize": 12.8
+  },
+  {
+   "id": "t-verify_url",
+   "name": "Verify address",
+   "x": 941,
+   "y": 677.188,
+   "width": 104.02,
+   "height": 50.411,
+   "kind": "text",
+   "text": "{{verify_url}}",
+   "size": 12,
+   "color": "#4A4F63",
+   "lineHeight": 1.4,
+   "maxLines": 3,
+   "minSize": 8.4
+  },
+  {
+   "id": "shape-3",
+   "name": "Shape",
+   "x": 0,
+   "y": 0,
+   "width": 380,
+   "height": 794,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#1F3BFF"
+   }
+  },
+  {
+   "id": "art",
+   "name": "Artwork",
+   "x": 0,
+   "y": 0,
+   "width": 380,
+   "height": 794,
+   "kind": "svg",
+   "markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 380 794\"><rect x=\"40\" y=\"430\" width=\"150\" height=\"150\" fill=\"#0B1B8F\"></rect><circle cx=\"150\" cy=\"290\" r=\"110\" fill=\"#FF7A1A\"></circle><path d=\"M380 380a200 200 0 0 0-200 200h200z\" fill=\"#8FA0FF\"></path><path d=\"M250 180h110M250 200h110M250 220h110M250 240h110\" fill=\"none\" stroke=\"#FFFFFF\" stroke-width=\"5\" stroke-linecap=\"round\" stroke-dasharray=\"0 20\"></path><path d=\"M40 620h300\" fill=\"none\" stroke=\"#FFFFFF\" stroke-width=\"2\"></path></svg>",
+   "recolor": {
+    "#FF7A1A": "var:accent"
+   }
+  },
+  {
+   "id": "logo",
+   "name": "Club logo",
+   "x": 40,
+   "y": 56,
+   "width": 44,
+   "height": 44,
+   "kind": "image",
+   "source": "org_logo"
+  },
+  {
+   "id": "t-institute_name",
+   "name": "Issuer",
+   "x": 96,
+   "y": 57.609,
+   "width": 244.02,
+   "height": 40.801,
+   "kind": "text",
+   "text": "{{institute_name}}",
+   "font": {
+    "family": "Space Grotesk",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 17,
+   "color": "#FFFFFF",
+   "maxLines": 2,
+   "minSize": 8.5
+  },
+  {
+   "id": "t-certificate",
+   "name": "Certificate",
+   "x": 40,
+   "y": 679,
+   "width": 300.02,
+   "height": 40.02,
+   "kind": "text",
+   "text": "Certificate",
+   "font": {
+    "family": "Space Grotesk",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 40,
+   "color": "#FFFFFF",
+   "letterSpacing": -0.01,
+   "lineHeight": 1,
+   "minSize": 32
+  },
+  {
+   "id": "slot-panel_title",
+   "name": "Year of issue",
+   "x": 40,
+   "y": 725,
+   "width": 300.02,
+   "height": 17.02,
+   "kind": "text",
+   "text": "of Completion · {{issue_year}}",
+   "font": {
+    "family": "Inter",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 14,
+   "color": "#FFFFFF",
+   "letterSpacing": 0.18,
+   "lineHeight": 1.214,
+   "transform": "upper",
+   "minSize": 9.8
+  }
+ ],
+ "starter": "certificate/03-bold-geometric"
+}

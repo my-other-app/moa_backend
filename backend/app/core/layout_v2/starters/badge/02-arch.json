@@ -1,0 +1,318 @@
+{
+ "version": 2,
+ "page": {
+  "widthMm": 101.6,
+  "heightMm": 152.4
+ },
+ "canvas": {
+  "width": 384,
+  "height": 576,
+  "background": {
+   "type": "solid",
+   "color": "#12382B"
+  }
+ },
+ "vars": {
+  "accent": "#F2B441"
+ },
+ "layers": [
+  {
+   "id": "lanyard",
+   "name": "Lanyard slot",
+   "x": 164,
+   "y": 16,
+   "width": 56,
+   "height": 12,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#F3EFE4"
+   },
+   "radius": [
+    6,
+    6,
+    6,
+    6
+   ]
+  },
+  {
+   "id": "t-org_name",
+   "name": "Club name",
+   "x": 28,
+   "y": 44,
+   "width": 169.473,
+   "height": 15.02,
+   "kind": "text",
+   "text": "{{org_name}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#F3EFE4",
+   "letterSpacing": 0.14,
+   "lineHeight": 1.25,
+   "minSize": 7.2
+  },
+  {
+   "id": "t-org_founded_year",
+   "name": "Club founded",
+   "x": 205.433,
+   "y": 44,
+   "width": 150.567,
+   "height": 15.02,
+   "showIf": "org_founded_year",
+   "kind": "text",
+   "text": "EST. {{org_founded_year}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "var:accent",
+   "letterSpacing": 0.14,
+   "lineHeight": 1.25,
+   "align": "right",
+   "minSize": 8.4
+  },
+  {
+   "id": "shape",
+   "name": "Shape",
+   "x": 98,
+   "y": 75,
+   "width": 188,
+   "height": 212,
+   "kind": "shape",
+   "stroke": {
+    "color": "var:accent",
+    "width": 2
+   },
+   "radius": [
+    94,
+    94,
+    10,
+    10
+   ]
+  },
+  {
+   "id": "shape-2",
+   "name": "Shape",
+   "x": 106,
+   "y": 83,
+   "width": 172,
+   "height": 196,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#2C5A48"
+   },
+   "radius": [
+    86,
+    86,
+    6,
+    6
+   ]
+  },
+  {
+   "id": "photo",
+   "name": "Guest photo",
+   "x": 106,
+   "y": 83,
+   "width": 172,
+   "height": 196,
+   "kind": "image",
+   "source": "guest_photo",
+   "fit": "cover",
+   "radius": [
+    86,
+    86,
+    6,
+    6
+   ],
+   "placeholder": "initials",
+   "placeholderStyle": {
+    "color": "#F3EFE4",
+    "family": "Instrument Serif",
+    "weight": 400
+   }
+  },
+  {
+   "id": "t-full_name",
+   "name": "Full name",
+   "x": 27.99,
+   "y": 303,
+   "width": 328.02,
+   "height": 44.02,
+   "kind": "text",
+   "text": "{{full_name}}",
+   "font": {
+    "family": "Instrument Serif",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 44,
+   "color": "#F3EFE4",
+   "lineHeight": 1,
+   "align": "center",
+   "minSize": 18
+  },
+  {
+   "id": "shape-3",
+   "name": "Shape",
+   "x": 101.719,
+   "y": 362,
+   "width": 22,
+   "height": 2,
+   "showIf": "membership_tier",
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "var:accent"
+   }
+  },
+  {
+   "id": "t-membership_tier",
+   "name": "Tier",
+   "x": 133.719,
+   "y": 355,
+   "width": 118.567,
+   "height": 16.02,
+   "showIf": "membership_tier",
+   "kind": "text",
+   "text": "{{membership_tier}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 13,
+   "color": "var:accent",
+   "letterSpacing": 0.14,
+   "lineHeight": 1.231,
+   "minSize": 9.1
+  },
+  {
+   "id": "shape-4",
+   "name": "Shape",
+   "x": 260.266,
+   "y": 362,
+   "width": 22,
+   "height": 2,
+   "showIf": "membership_tier",
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "var:accent"
+   }
+  },
+  {
+   "id": "t-member-no",
+   "name": "MEMBER NO.",
+   "x": 28,
+   "y": 460,
+   "width": 86.239,
+   "height": 15.02,
+   "kind": "text",
+   "text": "MEMBER NO.",
+   "font": {
+    "family": "Inter",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#B9CFC3",
+   "letterSpacing": 0.08,
+   "lineHeight": 1.25,
+   "minSize": 9.6
+  },
+  {
+   "id": "t-member_id",
+   "name": "Member number",
+   "x": 28,
+   "y": 477,
+   "width": 86.239,
+   "height": 21.02,
+   "kind": "text",
+   "text": "{{member_id}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 18,
+   "color": "#F3EFE4",
+   "lineHeight": 1.167,
+   "minSize": 5.4
+  },
+  {
+   "id": "t-valid-thru",
+   "name": "VALID THRU",
+   "x": 28,
+   "y": 510,
+   "width": 86.239,
+   "height": 15.02,
+   "kind": "text",
+   "text": "VALID THRU",
+   "font": {
+    "family": "Inter",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#B9CFC3",
+   "letterSpacing": 0.08,
+   "lineHeight": 1.25,
+   "minSize": 9.6
+  },
+  {
+   "id": "t-valid_thru",
+   "name": "Valid on",
+   "x": 28,
+   "y": 527,
+   "width": 86.239,
+   "height": 21.02,
+   "kind": "text",
+   "text": "{{valid_thru}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 18,
+   "color": "#F3EFE4",
+   "lineHeight": 1.167,
+   "fit": "ellipsis"
+  },
+  {
+   "id": "shape-5",
+   "name": "Shape",
+   "x": 248,
+   "y": 440,
+   "width": 108,
+   "height": 108,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#F3EFE4"
+   },
+   "radius": [
+    10,
+    10,
+    10,
+    10
+   ]
+  },
+  {
+   "id": "qr",
+   "name": "QR code",
+   "x": 256,
+   "y": 448,
+   "width": 92,
+   "height": 92,
+   "kind": "qr"
+  }
+ ],
+ "starter": "badge/02-arch"
+}

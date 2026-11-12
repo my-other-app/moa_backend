@@ -1,0 +1,525 @@
+{
+ "version": 2,
+ "page": {
+  "widthMm": 338.667,
+  "heightMm": 158.75
+ },
+ "canvas": {
+  "width": 1280,
+  "height": 600,
+  "background": {
+   "type": "solid",
+   "color": "#1A0507"
+  }
+ },
+ "vars": {},
+ "layers": [
+  {
+   "id": "shape",
+   "name": "Shape",
+   "x": 70,
+   "y": 70,
+   "width": 1140,
+   "height": 460,
+   "shadow": [
+    {
+     "x": 0,
+     "y": 26,
+     "blur": 60,
+     "spread": 0,
+     "color": "#0000008C",
+     "inset": false
+    }
+   ],
+   "kind": "shape",
+   "radius": [
+    22,
+    22,
+    22,
+    22
+   ]
+  },
+  {
+   "id": "shape-2",
+   "name": "Shape",
+   "x": 950,
+   "y": 70,
+   "width": 260,
+   "height": 460,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#F4E9D8"
+   },
+   "radius": [
+    0,
+    22,
+    22,
+    0
+   ]
+  },
+  {
+   "id": "line-left",
+   "name": "Line (left)",
+   "x": 950,
+   "y": 70,
+   "width": 3,
+   "height": 460,
+   "kind": "shape",
+   "shape": "path",
+   "path": "M1.5 0V460",
+   "stroke": {
+    "color": "#1A0507",
+    "width": 3,
+    "dash": [
+     6,
+     3.08
+    ]
+   }
+  },
+  {
+   "id": "t-pass",
+   "name": "PASS",
+   "x": 981,
+   "y": 102,
+   "width": 201.02,
+   "height": 16.02,
+   "showIf": "ticket_type",
+   "kind": "text",
+   "text": "PASS",
+   "font": {
+    "family": "DM Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#5C3A3D",
+   "letterSpacing": 0.16,
+   "lineHeight": 1.333,
+   "minSize": 9.6
+  },
+  {
+   "id": "t-ticket_type",
+   "name": "Ticket type",
+   "x": 981,
+   "y": 122,
+   "width": 201.02,
+   "height": 28.02,
+   "showIf": "ticket_type",
+   "kind": "text",
+   "text": "{{ticket_type}}",
+   "font": {
+    "family": "Anton",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 28,
+   "color": "#C8102E",
+   "lineHeight": 1,
+   "transform": "upper",
+   "minSize": 16.8
+  },
+  {
+   "id": "t-attendee_name",
+   "name": "Guest name",
+   "x": 981,
+   "y": 452,
+   "width": 201.02,
+   "height": 24.02,
+   "kind": "text",
+   "text": "{{attendee_name}}",
+   "font": {
+    "family": "DM Sans",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 18,
+   "color": "#1A0507",
+   "lineHeight": 1.333,
+   "minSize": 10.8
+  },
+  {
+   "id": "t-ticket_id",
+   "name": "Ticket code",
+   "x": 981,
+   "y": 480,
+   "width": 201.02,
+   "height": 18.02,
+   "kind": "text",
+   "text": "{{ticket_id}}",
+   "font": {
+    "family": "DM Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 14,
+   "color": "#1A0507",
+   "letterSpacing": 0.1,
+   "lineHeight": 1.286,
+   "minSize": 4.2
+  },
+  {
+   "id": "shape-3",
+   "name": "Shape",
+   "x": 986.5,
+   "y": 206,
+   "width": 190,
+   "height": 190,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   },
+   "stroke": {
+    "color": "#1A0507",
+    "width": 3
+   }
+  },
+  {
+   "id": "qr",
+   "name": "QR code",
+   "x": 1001.5,
+   "y": 221,
+   "width": 160,
+   "height": 160,
+   "kind": "qr"
+  },
+  {
+   "id": "shape-4",
+   "name": "Shape",
+   "x": 70,
+   "y": 70,
+   "width": 880,
+   "height": 460,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#C8102E"
+   },
+   "radius": [
+    22,
+    0,
+    0,
+    22
+   ]
+  },
+  {
+   "id": "art",
+   "name": "Artwork",
+   "x": 70,
+   "y": 70,
+   "width": 880,
+   "height": 460,
+   "kind": "svg",
+   "markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 880 460\"><defs><clipPath id=\"moa-clip\"><path d=\"M22 0H1118A22 22 0 0 1 1140 22V438A22 22 0 0 1 1118 460H22A22 22 0 0 1 0 438V22A22 22 0 0 1 22 0Z\"></path></clipPath></defs><g clip-path=\"url(#moa-clip)\"><circle cx=\"690\" cy=\"230\" r=\"212\" fill=\"#0B0B0B\"></circle><g fill=\"none\" stroke=\"#2E2E2E\" stroke-width=\"1.5\"><circle cx=\"690\" cy=\"230\" r=\"198\"></circle><circle cx=\"690\" cy=\"230\" r=\"184\"></circle><circle cx=\"690\" cy=\"230\" r=\"170\"></circle><circle cx=\"690\" cy=\"230\" r=\"156\"></circle><circle cx=\"690\" cy=\"230\" r=\"142\"></circle><circle cx=\"690\" cy=\"230\" r=\"128\"></circle><circle cx=\"690\" cy=\"230\" r=\"114\"></circle></g><path d=\"M690 42 A188 188 0 0 1 878 230\" fill=\"none\" stroke=\"#4A4A4A\" stroke-width=\"3\" stroke-linecap=\"round\"></path><circle cx=\"690\" cy=\"230\" r=\"86\" fill=\"#F4E9D8\"></circle><circle cx=\"690\" cy=\"230\" r=\"74\" fill=\"none\" stroke=\"#C8102E\" stroke-width=\"2\"></circle><circle cx=\"690\" cy=\"230\" r=\"8\" fill=\"#C8102E\"></circle><text x=\"690\" y=\"204\" text-anchor=\"middle\" font-family=\"DM Mono, monospace\" font-size=\"13\" letter-spacing=\"3\" fill=\"#1A0507\">SIDE A</text><text x=\"690\" y=\"268\" text-anchor=\"middle\" font-family=\"DM Mono, monospace\" font-size=\"13\" letter-spacing=\"3\" fill=\"#1A0507\">ADMIT ONE</text></g></svg>"
+  },
+  {
+   "id": "t-app_name",
+   "name": "Organiser",
+   "x": 112,
+   "y": 106,
+   "width": 82.473,
+   "height": 18.02,
+   "kind": "text",
+   "text": "{{app_name}}",
+   "font": {
+    "family": "DM Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 14,
+   "color": "#F4E9D8",
+   "letterSpacing": 0.18,
+   "lineHeight": 1.286,
+   "minSize": 8.4
+  },
+  {
+   "id": "shape-5",
+   "name": "Shape",
+   "x": 202.453,
+   "y": 114,
+   "width": 44,
+   "height": 2,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#F4E9D8"
+   }
+  },
+  {
+   "id": "t-live",
+   "name": "LIVE",
+   "x": 260.453,
+   "y": 106,
+   "width": 43.708,
+   "height": 18.02,
+   "kind": "text",
+   "text": "LIVE",
+   "font": {
+    "family": "DM Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 14,
+   "color": "#F4E9D8",
+   "letterSpacing": 0.18,
+   "lineHeight": 1.286,
+   "minSize": 11.2
+  },
+  {
+   "id": "t-event_name",
+   "name": "Event name",
+   "x": 112,
+   "y": 190.609,
+   "width": 796.02,
+   "height": 98.817,
+   "shadow": [
+    {
+     "x": 5,
+     "y": 5,
+     "blur": 0,
+     "spread": 0,
+     "color": "#1A0507",
+     "inset": false
+    }
+   ],
+   "kind": "text",
+   "text": "{{event_name}}",
+   "font": {
+    "family": "Anton",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 104,
+   "color": "#F4E9D8",
+   "letterSpacing": 0.01,
+   "lineHeight": 0.95,
+   "transform": "upper",
+   "minSize": 41.6
+  },
+  {
+   "id": "t-tagline",
+   "name": "Tagline",
+   "x": 112,
+   "y": 299.406,
+   "width": 796.02,
+   "height": 26.02,
+   "showIf": "tagline",
+   "kind": "text",
+   "text": "{{tagline}}",
+   "font": {
+    "family": "DM Sans",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 20,
+   "color": "#F4E9D8",
+   "lineHeight": 1.3,
+   "fit": "ellipsis"
+  },
+  {
+   "id": "t-date",
+   "name": "DATE",
+   "x": 112,
+   "y": 392,
+   "width": 150.02,
+   "height": 16.02,
+   "kind": "text",
+   "text": "DATE",
+   "font": {
+    "family": "DM Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#FFD9DC",
+   "letterSpacing": 0.16,
+   "lineHeight": 1.333,
+   "minSize": 9.6
+  },
+  {
+   "id": "t-date-2",
+   "name": "Date",
+   "x": 112,
+   "y": 412,
+   "width": 150.02,
+   "height": 24.02,
+   "kind": "text",
+   "text": "{{date}}",
+   "font": {
+    "family": "DM Sans",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 18,
+   "color": "#F4E9D8",
+   "lineHeight": 1.333,
+   "fit": "ellipsis"
+  },
+  {
+   "id": "t-doors",
+   "name": "DOORS",
+   "x": 272,
+   "y": 392,
+   "width": 130.02,
+   "height": 16.02,
+   "showIf": "doors_time",
+   "kind": "text",
+   "text": "DOORS",
+   "font": {
+    "family": "DM Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#FFD9DC",
+   "letterSpacing": 0.16,
+   "lineHeight": 1.333,
+   "minSize": 9.6
+  },
+  {
+   "id": "t-doors_time",
+   "name": "Doors open",
+   "x": 272,
+   "y": 412,
+   "width": 130.02,
+   "height": 24.02,
+   "showIf": "doors_time",
+   "kind": "text",
+   "text": "{{doors_time}}",
+   "font": {
+    "family": "DM Sans",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 18,
+   "color": "#F4E9D8",
+   "lineHeight": 1.333,
+   "fit": "ellipsis"
+  },
+  {
+   "id": "t-gate",
+   "name": "GATE",
+   "x": 412,
+   "y": 392,
+   "width": 150.02,
+   "height": 16.02,
+   "showIf": "gate",
+   "kind": "text",
+   "text": "GATE",
+   "font": {
+    "family": "DM Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#FFD9DC",
+   "letterSpacing": 0.16,
+   "lineHeight": 1.333,
+   "minSize": 9.6
+  },
+  {
+   "id": "t-gate-2",
+   "name": "Gate",
+   "x": 412,
+   "y": 412,
+   "width": 150.02,
+   "height": 24.02,
+   "showIf": "gate",
+   "kind": "text",
+   "text": "{{gate}}",
+   "font": {
+    "family": "DM Sans",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 18,
+   "color": "#F4E9D8",
+   "lineHeight": 1.333,
+   "fit": "ellipsis"
+  },
+  {
+   "id": "t-venue",
+   "name": "VENUE",
+   "x": 112,
+   "y": 450,
+   "width": 290.02,
+   "height": 16.02,
+   "showIf": "venue",
+   "kind": "text",
+   "text": "VENUE",
+   "font": {
+    "family": "DM Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#FFD9DC",
+   "letterSpacing": 0.16,
+   "lineHeight": 1.333,
+   "minSize": 9.6
+  },
+  {
+   "id": "t-venue-2",
+   "name": "Venue",
+   "x": 112,
+   "y": 470,
+   "width": 290.02,
+   "height": 24.02,
+   "showIf": "venue",
+   "kind": "text",
+   "text": "{{venue}}",
+   "font": {
+    "family": "DM Sans",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 18,
+   "color": "#F4E9D8",
+   "lineHeight": 1.333,
+   "fit": "ellipsis"
+  },
+  {
+   "id": "t-seat",
+   "name": "SEAT",
+   "x": 412,
+   "y": 450,
+   "width": 150.02,
+   "height": 16.02,
+   "showIf": "row|seat",
+   "kind": "text",
+   "text": "SEAT",
+   "font": {
+    "family": "DM Mono",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#FFD9DC",
+   "letterSpacing": 0.16,
+   "lineHeight": 1.333,
+   "minSize": 9.6
+  },
+  {
+   "id": "t-row",
+   "name": "Row",
+   "x": 412,
+   "y": 470,
+   "width": 150.02,
+   "height": 24.02,
+   "showIf": "row|seat",
+   "kind": "text",
+   "text": "{% if row %}{{row}}{% endif %}{% if row %}{% if seat %} · {% endif %}{% endif %}{% if seat %}{{seat}}{% endif %}",
+   "font": {
+    "family": "DM Sans",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 18,
+   "color": "#F4E9D8",
+   "lineHeight": 1.333,
+   "fit": "ellipsis"
+  }
+ ],
+ "starter": "ticket/04-live-session"
+}

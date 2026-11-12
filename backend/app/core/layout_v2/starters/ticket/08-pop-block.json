@@ -1,0 +1,771 @@
+{
+ "version": 2,
+ "page": {
+  "widthMm": 338.667,
+  "heightMm": 158.75
+ },
+ "canvas": {
+  "width": 1280,
+  "height": 600,
+  "background": {
+   "type": "solid",
+   "color": "#F4EFE6"
+  }
+ },
+ "vars": {},
+ "layers": [
+  {
+   "id": "shape",
+   "name": "Shape",
+   "x": 66,
+   "y": 66,
+   "width": 1136,
+   "height": 456,
+   "shadow": [
+    {
+     "x": 12,
+     "y": 12,
+     "blur": 0,
+     "spread": 0,
+     "color": "#111111",
+     "inset": false
+    }
+   ],
+   "kind": "shape",
+   "stroke": {
+    "color": "#111111",
+    "width": 4
+   },
+   "radius": [
+    20,
+    20,
+    20,
+    20
+   ]
+  },
+  {
+   "id": "shape-2",
+   "name": "Shape",
+   "x": 870,
+   "y": 70,
+   "width": 328,
+   "height": 448,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#2B59FF"
+   },
+   "radius": [
+    0,
+    16,
+    16,
+    0
+   ]
+  },
+  {
+   "id": "line-left",
+   "name": "Line (left)",
+   "x": 870,
+   "y": 70,
+   "width": 4,
+   "height": 448,
+   "kind": "shape",
+   "shape": "path",
+   "path": "M2 0V448",
+   "stroke": {
+    "color": "#111111",
+    "width": 4,
+    "dash": [
+     8,
+     4.222
+    ]
+   }
+  },
+  {
+   "id": "t-ticket_type",
+   "name": "Ticket type",
+   "x": 904,
+   "y": 100.5,
+   "width": 106.786,
+   "height": 22.02,
+   "showIf": "ticket_type",
+   "kind": "text",
+   "text": "{{ticket_type}}",
+   "font": {
+    "family": "Archivo Black",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 20,
+   "color": "#FFFFFF",
+   "lineHeight": 1.1,
+   "transform": "upper",
+   "minSize": 12
+  },
+  {
+   "id": "shape-3",
+   "name": "Shape",
+   "x": 1075.75,
+   "y": 98,
+   "width": 92.25,
+   "height": 27,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFD400"
+   },
+   "stroke": {
+    "color": "#111111",
+    "width": 2
+   },
+   "radius": [
+    6,
+    6,
+    6,
+    6
+   ]
+  },
+  {
+   "id": "t-ticket_id",
+   "name": "Ticket code",
+   "x": 1087.75,
+   "y": 104,
+   "width": 68.27,
+   "height": 15.02,
+   "kind": "text",
+   "text": "{{ticket_id}}",
+   "font": {
+    "family": "Archivo",
+    "weight": 800,
+    "style": "normal"
+   },
+   "size": 14,
+   "color": "#111111",
+   "lineHeight": 1.071,
+   "minSize": 4.2
+  },
+  {
+   "id": "t-this-one-belongs-to",
+   "name": "THIS ONE BELONGS TO",
+   "x": 946.031,
+   "y": 452,
+   "width": 179.958,
+   "height": 14.02,
+   "kind": "text",
+   "text": "THIS ONE BELONGS TO",
+   "font": {
+    "family": "Archivo",
+    "weight": 800,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#FFFFFF",
+   "letterSpacing": 0.16,
+   "lineHeight": 1.167,
+   "minSize": 9.6
+  },
+  {
+   "id": "t-attendee_name",
+   "name": "Guest name",
+   "x": 985,
+   "y": 468,
+   "width": 183.02,
+   "height": 22.02,
+   "kind": "text",
+   "text": "{{attendee_name}}",
+   "font": {
+    "family": "Archivo",
+    "weight": 800,
+    "style": "normal"
+   },
+   "size": 21,
+   "color": "#FFFFFF",
+   "lineHeight": 1.048,
+   "minSize": 12.6
+  },
+  {
+   "id": "shape-4",
+   "name": "Shape",
+   "x": 944,
+   "y": 196.5,
+   "width": 184,
+   "height": 184,
+   "shadow": [
+    {
+     "x": 8,
+     "y": 8,
+     "blur": 0,
+     "spread": 0,
+     "color": "#111111",
+     "inset": false
+    }
+   ],
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   },
+   "stroke": {
+    "color": "#111111",
+    "width": 4
+   },
+   "radius": [
+    12,
+    12,
+    12,
+    12
+   ]
+  },
+  {
+   "id": "qr",
+   "name": "QR code",
+   "x": 960,
+   "y": 212.5,
+   "width": 152,
+   "height": 152,
+   "kind": "qr"
+  },
+  {
+   "id": "shape-5",
+   "name": "Shape",
+   "x": 70,
+   "y": 70,
+   "width": 800,
+   "height": 448,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFD400"
+   },
+   "radius": [
+    16,
+    0,
+    0,
+    16
+   ]
+  },
+  {
+   "id": "art",
+   "name": "Artwork",
+   "x": 70,
+   "y": 70,
+   "width": 800,
+   "height": 440,
+   "kind": "svg",
+   "markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 800 440\"><defs><clipPath id=\"moa-clip\"><path d=\"M16 0H1112A16 16 0 0 1 1128 16V432A16 16 0 0 1 1112 448H16A16 16 0 0 1 0 432V16A16 16 0 0 1 16 0Z\"></path></clipPath></defs><g clip-path=\"url(#moa-clip)\"><circle cx=\"700\" cy=\"70\" r=\"110\" fill=\"#FF5DA2\" stroke=\"#111111\" stroke-width=\"4\"></circle><rect x=\"610\" y=\"150\" width=\"130\" height=\"130\" rx=\"10\" fill=\"#2B59FF\" stroke=\"#111111\" stroke-width=\"4\" transform=\"rotate(14 675 215)\"></rect><path d=\"M560 60 L620 150 L500 150 Z\" fill=\"#FFFFFF\" stroke=\"#111111\" stroke-width=\"4\" stroke-linejoin=\"round\"></path><path d=\"M600 330 q20 -30 40 0 t40 0 t40 0 t40 0 t40 0\" fill=\"none\" stroke=\"#111111\" stroke-width=\"6\" stroke-linecap=\"round\"></path><g fill=\"#111111\"><circle cx=\"540\" cy=\"220\" r=\"5\"></circle><circle cx=\"562\" cy=\"220\" r=\"5\"></circle><circle cx=\"584\" cy=\"220\" r=\"5\"></circle><circle cx=\"540\" cy=\"242\" r=\"5\"></circle><circle cx=\"562\" cy=\"242\" r=\"5\"></circle><circle cx=\"584\" cy=\"242\" r=\"5\"></circle><circle cx=\"540\" cy=\"264\" r=\"5\"></circle><circle cx=\"562\" cy=\"264\" r=\"5\"></circle><circle cx=\"584\" cy=\"264\" r=\"5\"></circle></g><path d=\"M760 250 l8 20 l20 8 l-20 8 l-8 20 l-8 -20 l-20 -8 l20 -8 z\" fill=\"#FFFFFF\" stroke=\"#111111\" stroke-width=\"3\" stroke-linejoin=\"round\"></path></g></svg>"
+  },
+  {
+   "id": "shape-6",
+   "name": "Shape",
+   "x": 108,
+   "y": 103,
+   "width": 110.672,
+   "height": 30,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#111111"
+   },
+   "radius": [
+    8,
+    8,
+    8,
+    8
+   ]
+  },
+  {
+   "id": "t-app_name",
+   "name": "Organiser",
+   "x": 122,
+   "y": 110,
+   "width": 82.692,
+   "height": 16.02,
+   "kind": "text",
+   "text": "{{app_name}}",
+   "font": {
+    "family": "Archivo",
+    "weight": 800,
+    "style": "normal"
+   },
+   "size": 15,
+   "color": "#FFD400",
+   "letterSpacing": 0.1,
+   "lineHeight": 1.067,
+   "minSize": 9
+  },
+  {
+   "id": "shape-7",
+   "name": "Shape",
+   "x": 230.672,
+   "y": 102,
+   "width": 136.063,
+   "height": 32,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   },
+   "stroke": {
+    "color": "#111111",
+    "width": 3
+   },
+   "radius": [
+    8,
+    8,
+    8,
+    8
+   ]
+  },
+  {
+   "id": "t-admit-one",
+   "name": "ADMIT ONE",
+   "x": 247.672,
+   "y": 110,
+   "width": 102.083,
+   "height": 16.02,
+   "kind": "text",
+   "text": "ADMIT ONE",
+   "font": {
+    "family": "Archivo",
+    "weight": 800,
+    "style": "normal"
+   },
+   "size": 15,
+   "color": "#111111",
+   "letterSpacing": 0.1,
+   "lineHeight": 1.067,
+   "minSize": 12
+  },
+  {
+   "id": "t-event_name",
+   "name": "Event name",
+   "x": 108,
+   "y": 186.906,
+   "width": 520.02,
+   "height": 148.208,
+   "kind": "text",
+   "text": "{{event_name}}",
+   "font": {
+    "family": "Archivo Black",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 78,
+   "color": "#111111",
+   "letterSpacing": -0.02,
+   "lineHeight": 0.95,
+   "transform": "upper",
+   "maxLines": 2,
+   "minSize": 31.2
+  },
+  {
+   "id": "shape-8",
+   "name": "Shape",
+   "x": 108,
+   "y": 345.094,
+   "width": 250.531,
+   "height": 29,
+   "rotation": -2,
+   "showIf": "tagline",
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#111111"
+   }
+  },
+  {
+   "id": "t-tagline",
+   "name": "Tagline",
+   "x": 120,
+   "y": 349.093,
+   "width": 226.551,
+   "height": 21.02,
+   "rotation": -2,
+   "showIf": "tagline",
+   "kind": "text",
+   "text": "{{tagline}}",
+   "font": {
+    "family": "Archivo",
+    "weight": 800,
+    "style": "normal"
+   },
+   "size": 19,
+   "color": "#FFFFFF",
+   "lineHeight": 1.105,
+   "fit": "ellipsis"
+  },
+  {
+   "id": "shape-9",
+   "name": "Shape",
+   "x": 108,
+   "y": 427,
+   "width": 133.781,
+   "height": 59,
+   "shadow": [
+    {
+     "x": 4,
+     "y": 4,
+     "blur": 0,
+     "spread": 0,
+     "color": "#111111",
+     "inset": false
+    }
+   ],
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   },
+   "stroke": {
+    "color": "#111111",
+    "width": 3
+   },
+   "radius": [
+    10,
+    10,
+    10,
+    10
+   ]
+  },
+  {
+   "id": "t-date",
+   "name": "DATE",
+   "x": 124,
+   "y": 439,
+   "width": 101.801,
+   "height": 14.02,
+   "kind": "text",
+   "text": "DATE",
+   "font": {
+    "family": "Archivo",
+    "weight": 800,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#444444",
+   "letterSpacing": 0.12,
+   "lineHeight": 1.167,
+   "minSize": 9.6
+  },
+  {
+   "id": "t-date-2",
+   "name": "Date",
+   "x": 124,
+   "y": 455,
+   "width": 101.801,
+   "height": 19.02,
+   "kind": "text",
+   "text": "{{date}}",
+   "font": {
+    "family": "Archivo",
+    "weight": 800,
+    "style": "normal"
+   },
+   "size": 17,
+   "color": "#111111",
+   "lineHeight": 1.118,
+   "fit": "ellipsis"
+  },
+  {
+   "id": "shape-10",
+   "name": "Shape",
+   "x": 251.781,
+   "y": 427,
+   "width": 85.078,
+   "height": 59,
+   "showIf": "doors_time",
+   "shadow": [
+    {
+     "x": 4,
+     "y": 4,
+     "blur": 0,
+     "spread": 0,
+     "color": "#111111",
+     "inset": false
+    }
+   ],
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   },
+   "stroke": {
+    "color": "#111111",
+    "width": 3
+   },
+   "radius": [
+    10,
+    10,
+    10,
+    10
+   ]
+  },
+  {
+   "id": "t-doors",
+   "name": "DOORS",
+   "x": 267.781,
+   "y": 439,
+   "width": 53.098,
+   "height": 14.02,
+   "showIf": "doors_time",
+   "kind": "text",
+   "text": "DOORS",
+   "font": {
+    "family": "Archivo",
+    "weight": 800,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#444444",
+   "letterSpacing": 0.12,
+   "lineHeight": 1.167,
+   "minSize": 9.6
+  },
+  {
+   "id": "t-doors_time",
+   "name": "Doors open",
+   "x": 267.781,
+   "y": 455,
+   "width": 53.098,
+   "height": 19.02,
+   "showIf": "doors_time",
+   "kind": "text",
+   "text": "{{doors_time}}",
+   "font": {
+    "family": "Archivo",
+    "weight": 800,
+    "style": "normal"
+   },
+   "size": 17,
+   "color": "#111111",
+   "lineHeight": 1.118,
+   "fit": "ellipsis"
+  },
+  {
+   "id": "shape-11",
+   "name": "Shape",
+   "x": 346.859,
+   "y": 427,
+   "width": 72,
+   "height": 59,
+   "showIf": "gate",
+   "shadow": [
+    {
+     "x": 4,
+     "y": 4,
+     "blur": 0,
+     "spread": 0,
+     "color": "#111111",
+     "inset": false
+    }
+   ],
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   },
+   "stroke": {
+    "color": "#111111",
+    "width": 3
+   },
+   "radius": [
+    10,
+    10,
+    10,
+    10
+   ]
+  },
+  {
+   "id": "t-gate",
+   "name": "GATE",
+   "x": 362.859,
+   "y": 439,
+   "width": 40.02,
+   "height": 14.02,
+   "showIf": "gate",
+   "kind": "text",
+   "text": "GATE",
+   "font": {
+    "family": "Archivo",
+    "weight": 800,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#444444",
+   "letterSpacing": 0.12,
+   "lineHeight": 1.167,
+   "minSize": 9.6
+  },
+  {
+   "id": "t-gate-2",
+   "name": "Gate",
+   "x": 362.859,
+   "y": 455,
+   "width": 40.02,
+   "height": 19.02,
+   "showIf": "gate",
+   "kind": "text",
+   "text": "{{gate}}",
+   "font": {
+    "family": "Archivo",
+    "weight": 800,
+    "style": "normal"
+   },
+   "size": 17,
+   "color": "#111111",
+   "lineHeight": 1.118,
+   "fit": "ellipsis"
+  },
+  {
+   "id": "shape-12",
+   "name": "Shape",
+   "x": 428.859,
+   "y": 427,
+   "width": 267.453,
+   "height": 59,
+   "showIf": "venue",
+   "shadow": [
+    {
+     "x": 4,
+     "y": 4,
+     "blur": 0,
+     "spread": 0,
+     "color": "#111111",
+     "inset": false
+    }
+   ],
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FFFFFF"
+   },
+   "stroke": {
+    "color": "#111111",
+    "width": 3
+   },
+   "radius": [
+    10,
+    10,
+    10,
+    10
+   ]
+  },
+  {
+   "id": "t-venue",
+   "name": "VENUE",
+   "x": 444.859,
+   "y": 439,
+   "width": 235.473,
+   "height": 14.02,
+   "showIf": "venue",
+   "kind": "text",
+   "text": "VENUE",
+   "font": {
+    "family": "Archivo",
+    "weight": 800,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#444444",
+   "letterSpacing": 0.12,
+   "lineHeight": 1.167,
+   "minSize": 9.6
+  },
+  {
+   "id": "t-venue-2",
+   "name": "Venue",
+   "x": 444.859,
+   "y": 455,
+   "width": 235.473,
+   "height": 19.02,
+   "showIf": "venue",
+   "kind": "text",
+   "text": "{{venue}}",
+   "font": {
+    "family": "Archivo",
+    "weight": 800,
+    "style": "normal"
+   },
+   "size": 17,
+   "color": "#111111",
+   "lineHeight": 1.118,
+   "fit": "ellipsis"
+  },
+  {
+   "id": "shape-13",
+   "name": "Shape",
+   "x": 706.313,
+   "y": 427,
+   "width": 75.828,
+   "height": 59,
+   "showIf": "row|seat",
+   "shadow": [
+    {
+     "x": 4,
+     "y": 4,
+     "blur": 0,
+     "spread": 0,
+     "color": "#111111",
+     "inset": false
+    }
+   ],
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#FF5DA2"
+   },
+   "stroke": {
+    "color": "#111111",
+    "width": 3
+   },
+   "radius": [
+    10,
+    10,
+    10,
+    10
+   ]
+  },
+  {
+   "id": "t-seat",
+   "name": "SEAT",
+   "x": 722.313,
+   "y": 439,
+   "width": 43.848,
+   "height": 14.02,
+   "showIf": "row|seat",
+   "kind": "text",
+   "text": "SEAT",
+   "font": {
+    "family": "Archivo",
+    "weight": 800,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#111111",
+   "letterSpacing": 0.12,
+   "lineHeight": 1.167,
+   "minSize": 9.6
+  },
+  {
+   "id": "t-row",
+   "name": "Row",
+   "x": 722.313,
+   "y": 455,
+   "width": 43.848,
+   "height": 19.02,
+   "showIf": "row|seat",
+   "kind": "text",
+   "text": "{% if row %}{{row}}{% endif %}{% if row %}{% if seat %} · {% endif %}{% endif %}{% if seat %}{{seat}}{% endif %}",
+   "font": {
+    "family": "Archivo",
+    "weight": 800,
+    "style": "normal"
+   },
+   "size": 17,
+   "color": "#111111",
+   "lineHeight": 1.118,
+   "fit": "ellipsis"
+  }
+ ],
+ "starter": "ticket/08-pop-block"
+}

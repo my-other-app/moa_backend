@@ -1,0 +1,106 @@
+{
+ "version": 2,
+ "page": {
+  "widthMm": 101.6,
+  "heightMm": 152.4
+ },
+ "canvas": {
+  "width": 384,
+  "height": 576,
+  "background": {
+   "type": "solid",
+   "color": "#FFFFFF"
+  }
+ },
+ "vars": {},
+ "layers": [
+  {
+   "id": "t-first_name",
+   "name": "First name",
+   "x": 28,
+   "y": 120,
+   "width": 328,
+   "height": 64,
+   "kind": "text",
+   "text": "{{first_name}}",
+   "font": {
+    "family": "Inter",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 56,
+   "color": "#111111",
+   "lineHeight": 1.1,
+   "align": "center",
+   "minSize": 24
+  },
+  {
+   "id": "t-last_name",
+   "name": "Last name",
+   "x": 28,
+   "y": 190,
+   "width": 328,
+   "height": 34,
+   "showIf": "last_name",
+   "kind": "text",
+   "text": "{{last_name}}",
+   "font": {
+    "family": "Inter",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 26,
+   "color": "#3C413D",
+   "align": "center",
+   "minSize": 14
+  },
+  {
+   "id": "t-role",
+   "name": "Role",
+   "x": 28,
+   "y": 250,
+   "width": 328,
+   "height": 24,
+   "kind": "text",
+   "text": "{{role}}",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "color": "#6B716C",
+   "letterSpacing": 0.12,
+   "align": "center",
+   "minSize": 10
+  },
+  {
+   "id": "qr",
+   "name": "QR code",
+   "x": 132,
+   "y": 380,
+   "width": 120,
+   "height": 120,
+   "kind": "qr"
+  },
+  {
+   "id": "t-badge_id",
+   "name": "Badge number",
+   "x": 28,
+   "y": 512,
+   "width": 328,
+   "height": 20,
+   "kind": "text",
+   "text": "{{badge_id}}",
+   "font": {
+    "family": "Roboto Mono",
+    "weight": 400,
+    "style": "normal"
+   },
+   "size": 14,
+   "color": "#5A5F5B",
+   "align": "center",
+   "minSize": 8
+  }
+ ],
+ "starter": "badge/blank"
+}

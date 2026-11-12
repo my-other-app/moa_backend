@@ -1,0 +1,337 @@
+{
+ "version": 2,
+ "page": {
+  "widthMm": 101.6,
+  "heightMm": 152.4
+ },
+ "canvas": {
+  "width": 384,
+  "height": 576,
+  "background": {
+   "type": "solid",
+   "color": "#F4F6FA"
+  }
+ },
+ "vars": {
+  "accent": "#FF8A3D"
+ },
+ "layers": [
+  {
+   "id": "shape",
+   "name": "Shape",
+   "x": 0,
+   "y": 0,
+   "width": 384,
+   "height": 150,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#1F3BD8"
+   }
+  },
+  {
+   "id": "lanyard",
+   "name": "Lanyard slot",
+   "x": 164,
+   "y": 16,
+   "width": 56,
+   "height": 12,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#F4F6FA"
+   },
+   "radius": [
+    6,
+    6,
+    6,
+    6
+   ]
+  },
+  {
+   "id": "t-event_name",
+   "name": "Event name",
+   "x": 28,
+   "y": 42,
+   "width": 248.036,
+   "height": 24.208,
+   "kind": "text",
+   "text": "{{event_name}}",
+   "font": {
+    "family": "Space Grotesk",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 22,
+   "color": "#FFFFFF",
+   "letterSpacing": -0.01,
+   "lineHeight": 1.1,
+   "maxLines": 2,
+   "minSize": 11
+  },
+  {
+   "id": "t-event_date",
+   "name": "Event date",
+   "x": 236.574,
+   "y": 42,
+   "width": 119.426,
+   "height": 33.614,
+   "kind": "text",
+   "text": "{{event_date}}{% if event_venue %}\n{{event_venue}}{% endif %}",
+   "font": {
+    "family": "Inter",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#FFFFFF",
+   "lineHeight": 1.4,
+   "align": "right",
+   "maxLines": 2,
+   "minSize": 7.2
+  },
+  {
+   "id": "shape-2",
+   "name": "Shape",
+   "x": 28,
+   "y": 100,
+   "width": 132,
+   "height": 132,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "#C9D2F5"
+   },
+   "stroke": {
+    "color": "#F4F6FA",
+    "width": 5
+   },
+   "radius": [
+    20,
+    20,
+    20,
+    20
+   ]
+  },
+  {
+   "id": "photo",
+   "name": "Guest photo",
+   "x": 33,
+   "y": 105,
+   "width": 122,
+   "height": 122,
+   "kind": "image",
+   "source": "guest_photo",
+   "fit": "cover",
+   "radius": [
+    15,
+    15,
+    15,
+    15
+   ],
+   "placeholder": "initials",
+   "placeholderStyle": {
+    "color": "#1F3BD8",
+    "family": "Space Grotesk",
+    "weight": 700
+   }
+  },
+  {
+   "id": "t-badge-no",
+   "name": "BADGE NO.",
+   "x": 276.527,
+   "y": 166,
+   "width": 79.473,
+   "height": 15.02,
+   "kind": "text",
+   "text": "BADGE NO.",
+   "font": {
+    "family": "Inter",
+    "weight": 600,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#4A5170",
+   "letterSpacing": 0.08,
+   "lineHeight": 1.25,
+   "align": "right",
+   "minSize": 9.6
+  },
+  {
+   "id": "t-badge_id",
+   "name": "Badge number",
+   "x": 162.98,
+   "y": 183,
+   "width": 193.02,
+   "height": 31.02,
+   "kind": "text",
+   "text": "{{badge_id}}",
+   "font": {
+    "family": "Space Grotesk",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 24,
+   "color": "#0E1330",
+   "lineHeight": 1.292,
+   "align": "right",
+   "minSize": 7.2
+  },
+  {
+   "id": "t-first_name",
+   "name": "First name",
+   "x": 28,
+   "y": 252,
+   "width": 356.02,
+   "height": 90.176,
+   "kind": "text",
+   "text": "{{first_name}}{% if last_name %}\n{{last_name}}{% endif %}",
+   "font": {
+    "family": "Space Grotesk",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 46,
+   "color": "#0E1330",
+   "letterSpacing": -0.03,
+   "lineHeight": 0.98,
+   "maxLines": 2,
+   "minSize": 18
+  },
+  {
+   "id": "t-job_title",
+   "name": "Job title",
+   "x": 28,
+   "y": 352.156,
+   "width": 356.02,
+   "height": 20.02,
+   "showIf": "job_title|organization",
+   "kind": "text",
+   "text": "{% if job_title %}{{job_title}}{% endif %}{% if job_title %}{% if organization %} · {% endif %}{% endif %}{% if organization %}{{organization}}{% endif %}",
+   "font": {
+    "family": "Inter",
+    "weight": 500,
+    "style": "normal"
+   },
+   "color": "#333A5C",
+   "lineHeight": 1.25,
+   "fit": "ellipsis"
+  },
+  {
+   "id": "line-top",
+   "name": "Line (top)",
+   "x": 0,
+   "y": 428,
+   "width": 384,
+   "height": 2,
+   "kind": "shape",
+   "shape": "path",
+   "path": "M0 1H384",
+   "stroke": {
+    "color": "#9AA3C7",
+    "width": 2,
+    "dash": [
+     6,
+     4.216
+    ]
+   }
+  },
+  {
+   "id": "shape-3",
+   "name": "Shape",
+   "x": 28,
+   "y": 456.203,
+   "width": 159.672,
+   "height": 50,
+   "kind": "shape",
+   "fill": {
+    "type": "solid",
+    "color": "var:accent"
+   },
+   "radius": [
+    8,
+    8,
+    8,
+    8
+   ]
+  },
+  {
+   "id": "t-role",
+   "name": "Role: ATTENDEE, SPEAKER or STAFF",
+   "x": 42,
+   "y": 464.203,
+   "width": 131.692,
+   "height": 34.02,
+   "kind": "text",
+   "text": "{{role}}",
+   "font": {
+    "family": "Space Grotesk",
+    "weight": 700,
+    "style": "normal"
+   },
+   "size": 26,
+   "color": "#0E1330",
+   "letterSpacing": 0.04,
+   "lineHeight": 1.308,
+   "minSize": 18
+  },
+  {
+   "id": "t-access_level",
+   "name": "Access",
+   "x": 28,
+   "y": 516.203,
+   "width": 224.02,
+   "height": 33.614,
+   "kind": "text",
+   "text": "{% if access_level %}{{access_level}}\n{% endif %}Scan the code at every gate",
+   "font": {
+    "family": "Inter",
+    "weight": 500,
+    "style": "normal"
+   },
+   "size": 12,
+   "color": "#4A5170",
+   "lineHeight": 1.4,
+   "maxLines": 2,
+   "minSize": 8.4
+  },
+  {
+   "id": "qr",
+   "name": "QR code",
+   "x": 260,
+   "y": 455,
+   "width": 96,
+   "height": 96,
+   "kind": "qr"
+  },
+  {
+   "id": "shape-4",
+   "name": "Shape",
+   "x": -12,
+   "y": 417,
+   "width": 24,
+   "height": 24,
+   "kind": "shape",
+   "shape": "ellipse",
+   "fill": {
+    "type": "solid",
+    "color": "#1F3BD8"
+   }
+  },
+  {
+   "id": "shape-5",
+   "name": "Shape",
+   "x": 372,
+   "y": 417,
+   "width": 24,
+   "height": 24,
+   "kind": "shape",
+   "shape": "ellipse",
+   "fill": {
+    "type": "solid",
+    "color": "#1F3BD8"
+   }
+  }
+ ],
+ "starter": "badge/01-ticket-stub"
+}
