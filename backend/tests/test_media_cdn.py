@@ -440,24 +440,28 @@ async def test_every_public_response_hands_out_cdn_addresses_only_when_on(client
 
 async def test_the_club_site_uses_the_cdn_with_srcsets_and_the_image_route_without(client, monkeypatch, world):
     h, club = world["h"], world["club"]
-    await client.patch("/api/v1/clubs/site", json={"template": "campus"}, headers=h)
+    # The tests' fixture template (tests/fixtures/site_template): its markup is known here.
+    await client.patch("/api/v1/clubs/site", json={"template": "fixture"}, headers=h)
 
     monkeypatch.setattr(settings, "MEDIA_CDN_URL", "")
     await client.post("/api/v1/clubs/site/publish", headers=h)
     off = (await client.get(f"/api/v1/sites/{club.slug}")).text
     assert f"/api/v1/sites/{club.slug}/i?k=" in off and "srcset=" not in off and CDN not in off
+    # The speaker's photo comes through the page's route too.
+    assert "events%2Fspeakers%2Fv-" in off
 
     monkeypatch.setattr(settings, "MEDIA_CDN_URL", CDN)
     await client.post("/api/v1/clubs/site/publish", headers=h)
     on = (await client.get(f"/api/v1/sites/{club.slug}")).text
     assert "/i?k=" not in on
-    # The brand mark and the poster card, each size in a srcset with how wide it is drawn.
+    # The logo, at the size the template draws it from; its link preview's picture is the banner.
     assert f'src="{CDN}/clubs/logos/v-{HEX}.medium.png"' in on
-    assert f"{CDN}/clubs/logos/v-{HEX}.thumbnail.png 150w, {CDN}/clubs/logos/v-{HEX}.medium.png 500w, {CDN}/clubs/logos/v-{HEX}.large.png 1080w" in on
-    assert 'sizes="34px"' in on and 'sizes="(max-width: 720px) calc(100vw - 40px), 380px"' in on
-    assert f"{CDN}/events/posters/v-{'1' * 32}.large.png 1080w" in on  # the poster's card
+    # The poster's card: each size in a srcset with how wide it is.
+    one = "1" * 32
+    assert f'src="{CDN}/events/posters/v-{one}.large.png" srcset="{CDN}/events/posters/v-{one}.thumbnail.png 240w, ' in on
+    assert f"{CDN}/events/posters/v-{'1' * 32}.large.png 1080w" in on
     # The banner is its large size (3:1, up to 3000 x 1000), and the link preview's picture.
-    assert f'<img class="cover" src="{CDN}/clubs/covers/{LEGACY}.large.png"' in on
+    assert f'<img src="{CDN}/clubs/covers/{LEGACY}.large.png"' in on and 'width="1500" height="500" fetchpriority="high"' in on
     assert f'<meta property="og:image" content="{CDN}/clubs/covers/{LEGACY}.large.png">' in on
     assert "amazonaws.com" not in on
 

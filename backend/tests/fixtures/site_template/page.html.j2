@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ page.title }}</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap">
+<style>{{ css }}</style>
+</head>
+<body>
+<header style="background: #FFFFFF">
+<a href="#top" style="color: #0D1220">{% if club.logo %}<img src="{{ club.logo.url }}" alt="{{ club.logo.alt }}" width="36" height="36" loading="lazy">{% else %}<span>{{ club.initials }}</span>{% endif %}<span>{{ club.name }}</span></a>
+<nav class="fx-nav" aria-label="Sections">{% for n in nav %}<a href="{{ n.href }}">{{ n.label }}</a>{% endfor %}</nav>
+<a href="{{ links.follow_url }}" target="_top" style="background: var(--accent); color: #FFFFFF">Follow</a>
+</header>
+{% include "sections/hero.html.j2" %}
+{{ sections_html }}
+{% include "sections/footer.html.j2" %}
+</body>
+</html>

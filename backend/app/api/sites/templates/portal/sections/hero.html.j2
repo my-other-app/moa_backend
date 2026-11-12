@@ -1,0 +1,43 @@
+{%- macro isrc(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'file://' or l[:11]|lower == 'data:image/') else '' }}{%- endmacro -%}
+{%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
+{%- macro n(v) -%}{%- if v is number -%}{{ ('[' ~ '{:,}'.format(v) ~ ']') if sample else '{:,}'.format(v) }}{%- else -%}{{ v }}{%- endif -%}{%- endmacro -%}
+{%- macro host(h, label) -%}{%- set l = (h or '')|string -%}{{ (l.split('//')[1].split('/')[0]|replace('www.', '')) if l[:8]|lower == 'https://' else (label or l) }}{%- endmacro -%}
+{%- set keys = (nav|map(attribute='key')|list) if (nav is defined and nav) else (section_keys or []) -%}
+{%- set overrides = site.title_overrides or {} -%}
+{%- set cover = images['hero.cover'] -%}
+{%- set logo = club.logo if (club.logo and club.logo.url) else ({'url': club.logo_url, 'srcset': club.logo_srcset} if club.logo_url else none) -%}
+{%- set lead = site.subline or club.tagline or subline -%}
+{%- set platform_url = links.platform_url or 'https://myotherapp.in' -%}
+{%- set soc = [] -%}{%- set web = [] -%}
+{%- for s in socials or [] -%}{%- set item = {'kind': (s.kind if s is mapping else (s[0]|lower)), 'label': (s.label if s is mapping else s[0]), 'href': (s.href if s is mapping else s[1])} -%}{%- set _ = (web if item.kind == 'website' else soc).append(item) -%}{%- endfor -%}
+{%- if club.website and club.website.href -%}{%- set _ = web.insert(0, {'kind': 'website', 'label': club.website.label, 'href': club.website.href}) -%}{%- endif -%}
+{%- set has_members = stats.members is defined and stats.members is not none -%}
+{%- set people = stats.members if has_members else stats.followers -%}
+{%- set nums = [(people, 'Members' if has_members else 'Followers'), (stats.events_held, 'Events hosted'), (stats.speakers, 'Speakers'), (stats.sponsors, 'Sponsors, partners')]|selectattr(0)|list -%}
+{%- set topics = [] -%}{%- for x in club.topics or [] -%}{%- set _ = topics.append(x.name if x is mapping else x) -%}{%- endfor -%}
+{%- set main_sp = [] -%}{%- set partners = [] -%}
+{%- for p in sponsors or [] -%}{%- set _ = (main_sp if ((p.kind == 'sponsor') if p.kind else ('sponsor' in (p.role or '')|lower)) else partners).append(p) -%}{%- endfor -%}
+{%- set events_total = (stats.events_held + (stats.upcoming or 0)) if (stats.events_held is number and (stats.upcoming is number or not stats.upcoming)) else stats.events_held -%}
+{%- set events_key = 'upcoming' if 'upcoming' in keys else ('past' if 'past' in keys else none) -%}
+<section style="background: #FFFFFF; border: 1px solid #D5D9DE; border-radius: 16px; overflow: hidden">
+{% if cover and cover.url %}<img class="pt-cover pt-img" src="{{ isrc(cover.url) }}"{% if cover.srcset %} srcset="{{ cover.srcset }}" sizes="(min-width: 1240px) 1198px, calc(100vw - 42px)"{% endif %} width="{{ cover.w or 1198 }}" height="{{ cover.h or 200 }}" alt="{{ cover.alt or '' }}" fetchpriority="high" decoding="async" style="height: 200px">
+{% elif cover and cover.placeholder is defined %}<div class="pt-cover" style="min-height: 200px; background: repeating-linear-gradient(135deg, #DDE1E6 0 14px, #E7EAEE 14px 28px); display: flex; align-items: flex-start; justify-content: flex-end; padding: 14px; box-sizing: border-box">{% if cover.placeholder %}<span style="background: #FFFFFF; font-size: 12px; padding: 4px 10px; border-radius: 6px">{{ cover.placeholder }}</span>{% endif %}</div>
+{% else %}<div style="min-height: 96px; background: var(--accent-soft)"></div>
+{% endif %}<div style="padding: 0 24px 20px; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px 20px">
+<div class="pt-avatar" style="width: 112px; height: 112px; margin-top: -44px; border-radius: 20px; background: {{ '#FFFFFF' if logo else 'var(--accent)' }}; border: 4px solid #FFFFFF; box-sizing: border-box; color: var(--on-accent); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 44px; flex: none; overflow: hidden">{% if logo %}<img src="{{ isrc(logo.url) }}"{% if logo.srcset %} srcset="{{ logo.srcset }}" sizes="104px"{% endif %} width="104" height="104" alt="{{ club.name }}" loading="lazy" decoding="async" style="display: block; width: 100%; height: 100%; object-fit: cover; border-radius: 16px">{% else %}{{ club.name[:1]|upper }}{% endif %}</div>
+<div style="flex: 1 1 360px; min-width: 0; display: flex; flex-direction: column; gap: 4px; padding-top: 14px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px"><h1 style="margin: 0; font-weight: 700; font-size: clamp(24px, 3vw, 32px); line-height: 1.15; letter-spacing: -0.02em; overflow-wrap: break-word; min-width: 0">{{ (site.headline or club.name)|trim|replace('\n', ' ') }}</h1>{% if club.kind %}<span style="padding: 3px 10px; border-radius: 6px; background: #E3F1E8; color: #14532D; font-weight: 600; font-size: 13px">{{ club.kind }}</span>{% endif %}{% if club.verified %}<span style="padding: 3px 10px; border-radius: 6px; background: #EEF0F2; font-weight: 600; font-size: 13px">Verified organiser</span>{% endif %}</div>
+{% if lead %}<p style="margin: 0; color: #3B4149">{{ lead }}</p>
+{% endif %}{% set meta = [club.location_name, ('Founded ' ~ club.founded_year) if club.founded_year else none, (n(people) ~ (' members' if has_members else ' followers')) if people else none]|select|list %}{% if meta or web %}<div style="display: flex; flex-wrap: wrap; gap: 2px 16px; color: #565D66; font-size: 14px">{% for m in meta %}<span>{{ m }}</span>{% endfor %}{% if web %}<a href="{{ u(web[0].href) }}" target="_top" style="overflow-wrap: anywhere">{{ host(web[0].href, web[0].label) }}</a>{% endif %}</div>
+{% endif %}</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px">{% if links.join_url %}<a href="#join" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 22px; border-radius: 10px; background: var(--accent); color: var(--on-accent); text-decoration: none; font-weight: 700">Join</a>{% endif %}{% if links.follow_url %}<a class="pt-btn" href="{{ u(links.follow_url) }}" target="_top" style="min-height: 44px; padding: 0 18px; border-radius: 10px; background: #FFFFFF; border: 1px solid #9AA1AA; color: #1A1D21; font: 600 15px 'Plus Jakarta Sans', system-ui, sans-serif; cursor: pointer; text-decoration: none">Follow</a>{% endif %}{% if links.share_url %}<a class="pt-btn" href="{{ u(links.share_url) }}" target="_top" style="min-height: 44px; padding: 0 18px; border-radius: 10px; background: #FFFFFF; border: 1px solid #9AA1AA; color: #1A1D21; font: 600 15px 'Plus Jakarta Sans', system-ui, sans-serif; cursor: pointer; text-decoration: none">Share</a>{% endif %}</div>
+</div>
+<nav aria-label="Profile sections" class="pt-tabs" style="display: flex; flex-wrap: wrap; gap: 0 4px; padding: 0 16px; border-top: 1px solid #D5D9DE; font-weight: 600">
+<a href="#top" aria-current="page" style="padding: 14px 12px 11px; color: #1A1D21; text-decoration: none; border-bottom: 3px solid var(--accent)">Overview</a>
+{% if events_key %}<a href="#{{ events_key }}" style="padding: 14px 12px; color: #565D66; text-decoration: none">Events{% if events_total %} <span style="font-weight: 500">{{ n(events_total) }}</span>{% endif %}</a>
+{% endif %}{% if 'speakers' in keys %}<a href="#speakers" style="padding: 14px 12px; color: #565D66; text-decoration: none">{{ overrides.speakers or 'Speakers' }}{% if stats.speakers %} <span style="font-weight: 500">{{ n(stats.speakers) }}</span>{% endif %}</a>
+{% endif %}{% if 'photos' in keys %}<a href="#photos" style="padding: 14px 12px; color: #565D66; text-decoration: none">Photos{% if stats.photos %} <span style="font-weight: 500">{{ n(stats.photos) }}</span>{% endif %}</a>
+{% endif %}{% if team %}<a href="#team" style="padding: 14px 12px; color: #565D66; text-decoration: none">Team</a>
+{% endif %}{% if sponsors %}<a href="#sponsors" style="padding: 14px 12px; color: #565D66; text-decoration: none">Sponsors</a>
+{% endif %}</nav>
+</section>

@@ -1,0 +1,5 @@
+{% if speakers %}
+<section id="{{ section.anchor }}"><h2>{{ section.title }}</h2>
+{% for s in speakers %}<div class="speaker">{% if s.photo %}<img src="{{ s.photo.url }}" alt="{{ s.photo.alt }}" width="{{ s.photo.w }}" height="{{ s.photo.h }}" loading="lazy">{% endif %}<b>{{ s.name }}</b>{% if s.title %}<span>{{ s.title }}</span>{% endif %}{% if s.org %}<span>{{ s.org }}</span>{% endif %}{% if s.url %}<a href="{{ s.url }}" target="_top">Profile</a>{% endif %}</div>{% endfor %}
+</section>
+{% endif %}

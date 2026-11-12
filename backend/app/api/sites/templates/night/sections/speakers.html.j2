@@ -1,0 +1,9 @@
+{%- import "macros.html.j2" as m with context -%}
+{%- if speakers -%}
+<section id="speakers" style="display: flex; flex-direction: column; gap: 20px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 12px"><h2 style="margin: 0; font-family: Sora, system-ui, sans-serif; font-weight: 700; font-size: 30px">{{ section.title }}</h2>{% if links.speakers_url and stats.speakers %}<a href="{{ links.speakers_url }}" target="_top" style="font-weight: 600; padding: 10px 0">All {{ m.num(stats.speakers) }} →</a>{% endif %}</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 16px">
+{% for s in speakers %}<article style="background: #14181D; border: 1px solid #262C35; border-radius: 16px; padding: 18px; display: flex; gap: 14px; align-items: center"><span class="{{ 'ph ph-img' if m.real(s.photo) }}" style="width: 64px; height: 64px; border-radius: 12px; background: #262C35; flex: none">{% if m.real(s.photo) %}{{ m.fill(s.photo, 64, 64, "64px", alt=s.name) }}{% endif %}</span><div style="display: flex; flex-direction: column; min-width: 0"><h3 style="margin: 0; font-size: 17px; font-weight: 600">{{ s.name }}</h3>{% if s.title or s.org %}<span style="font-size: 13px; color: #9AA4B2">{{ m.role(s) }}</span>{% endif %}{% if s.talk %}<span style="font-size: 14px; color: #C9D1DC">{{ s.talk }}</span>{% endif %}</div></article>
+{% endfor %}</div>
+</section>
+{%- endif -%}

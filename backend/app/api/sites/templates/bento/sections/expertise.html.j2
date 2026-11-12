@@ -1,0 +1,10 @@
+{%- import "macros.html.j2" as m with context -%}
+{%- set tints = ["#FFD9C7", "#CFF1E1", "#DCD2FF", "#FFEFB0"] -%}
+{%- if club.topics -%}
+<section id="expertise" style="flex: 1 1 380px; background: #23203A; color: #FFFFFF; border-radius: 32px; padding: 32px; box-sizing: border-box; display: flex; flex-direction: column; gap: 16px">
+<h2 style="margin: 0; font-family: 'Bricolage Grotesque', system-ui, sans-serif; font-weight: 700; font-size: 28px">{{ section.title }}</h2>
+<div style="display: flex; flex-wrap: wrap; gap: 10px">
+{% for t in club.topics %}{% if loop.index <= 4 %}<span style="padding: 10px 18px; border-radius: 999px; background: {{ tints[loop.index0] }}; color: #23203A; font-weight: 600; font-size: 17px">{{ t }}</span>{% else %}<span style="padding: 10px 18px; border-radius: 999px; border: 1.5px solid #8F89B3; font-weight: 500">{{ t }}</span>{% endif %}
+{% endfor %}</div>
+</section>
+{%- endif -%}

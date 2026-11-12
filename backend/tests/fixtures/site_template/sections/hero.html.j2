@@ -1,0 +1,6 @@
+<section id="top" style="background: #FFFFFF">
+{% if images["hero.cover"] %}<img src="{{ images['hero.cover'].url }}"{% if images['hero.cover'].srcset %} srcset="{{ images['hero.cover'].srcset }}" sizes="100vw"{% endif %} alt="{{ images['hero.cover'].alt }}" width="{{ images['hero.cover'].w }}" height="{{ images['hero.cover'].h }}" fetchpriority="high" class="fx-cover">{% endif %}
+<h1 style="color: #0D1220">{{ headline }}</h1>
+{% if subline %}<p class="sub">{{ subline }}</p>{% endif %}
+{% if upcoming %}<p class="next">Next up · {{ upcoming[0].name }} · {{ upcoming[0].date_label }} · {{ upcoming[0].time }}</p>{% endif %}
+</section>

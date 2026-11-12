@@ -64,6 +64,19 @@ import razorpay.client as _razorpay_client
 #: (on a faked requests session).
 REAL_RAZORPAY_REQUEST = _razorpay_client.Client.request
 
+# Club websites (app/api/sites/registry.py): the fixture package stands in for
+# every catalogue template whose real package is not in this checkout, and
+# answers as "fixture" too, for the tests that read its markup.
+from pathlib import Path as _Path  # noqa: E402
+
+from app.api.sites import registry as _site_registry  # noqa: E402
+
+SITE_FIXTURE = _Path(__file__).resolve().parent / "fixtures" / "site_template"
+for _key in _site_registry.CATALOGUE:
+    if not (_site_registry.ROOT / _key / "template.json").is_file():
+        _site_registry.add(_key, SITE_FIXTURE)
+_site_registry.add("fixture", SITE_FIXTURE)
+
 
 @pytest.fixture(scope="session")
 def event_loop():

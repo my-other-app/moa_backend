@@ -1,0 +1,64 @@
+{
+  "site": {
+    "template": "fixture",
+    "headline": null,
+    "subline": null,
+    "accent": null,
+    "title_overrides": {}
+  },
+  "page": {
+    "title": "Harbour Makers",
+    "description": "A community for people who build.",
+    "url": "https://harbour.myotherapp.in"
+  },
+  "headline": "Harbour Makers",
+  "subline": "A community for people who build.",
+  "join_text": "Membership is free. You get event invitations first, recordings of every talk and a seat at the table.",
+  "club": {
+    "name": "Harbour Makers",
+    "initials": "HM",
+    "tagline": null,
+    "about": "Six people around one table.",
+    "about_short": "Six people around one table.",
+    "location_name": "Kochi",
+    "contact_email": "hello@example.com",
+    "slug": "harbour",
+    "logo": null,
+    "logo_url": null,
+    "logo_srcset": null,
+    "cover": null,
+    "founded_year": null,
+    "topics": [
+      "Design",
+      "Hardware"
+    ],
+    "brand_colour": null
+  },
+  "images": {
+    "hero.cover": null,
+    "hero.image": null,
+    "about.image": null,
+    "join.image": null,
+    "event.fallback": null,
+    "photos": []
+  },
+  "stats": {
+    "followers": 1240,
+    "events_held": 48,
+    "upcoming": 0,
+    "members": null
+  },
+  "upcoming": [],
+  "past": [],
+  "speakers": [],
+  "team": [],
+  "sponsors": [],
+  "socials": [],
+  "links": {
+    "follow_url": "https://myotherapp.in/clubs/harbour?follow=1",
+    "events_url": "https://myotherapp.in/clubs/harbour#events",
+    "join_url": "https://myotherapp.in/clubs/harbour?follow=1",
+    "contact_mailto": "mailto:hello@example.com",
+    "site_url": "https://harbour.myotherapp.in"
+  }
+}

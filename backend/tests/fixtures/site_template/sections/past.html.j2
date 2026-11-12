@@ -1,0 +1,10 @@
+{% if past %}
+<section id="{{ section.anchor }}">
+<h2>{{ section.title }}</h2>
+{% for e in past %}<article class="event">
+{% if e.poster %}<img src="{{ e.poster.url }}"{% if e.poster.srcset %} srcset="{{ e.poster.srcset }}" sizes="380px"{% endif %} alt="{{ e.poster.alt }}" width="{{ e.poster.w }}" height="{{ e.poster.h }}" loading="lazy">{% endif %}
+<h3>{{ e.name }}</h3><p>{{ e.date_label }}{% if e.kind %} · {{ e.kind }}{% endif %}</p>
+<a href="{{ e.url }}" target="_top">See the event</a>
+</article>{% endfor %}
+</section>
+{% endif %}

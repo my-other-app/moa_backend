@@ -1,0 +1,14 @@
+{%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
+{%- macro n(v) -%}{%- if v is number -%}{{ ('[' ~ '{:,}'.format(v) ~ ']') if sample else '{:,}'.format(v) }}{%- else -%}{{ v }}{%- endif -%}{%- endmacro -%}
+{%- macro iso(v) -%}{{ (v if v is string else v.isoformat()) if v else '' }}{%- endmacro -%}
+{%- set jt = join_text or "Joining is free. Follow us to hear about every event first." -%}
+{%- set custom = section.title if (section is defined and section.title and section.title != 'You are invited.') else none -%}
+{%- if links.join_url -%}
+<section id="join" class="gl-band gl-sec" style="border-top: 1px solid var(--accent); background: #143329; padding: 88px 24px; display: flex; flex-direction: column; align-items: center; gap: 18px">
+<h2 style="margin: 0; font-family: 'Cormorant Garamond', Georgia, serif; font-weight: 500; font-size: clamp(40px, 6vw, 76px); line-height: 1">{% if custom %}{{ custom }}{% else %}You are <span style="font-style: italic">invited</span>.{% endif %}</h2>
+<p style="margin: 0; max-width: 520px; color: #D5DCCF">{{ jt }}</p>
+<div style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; align-items: flex-end; min-height: 76px">
+<a class="gl-btn" href="{{ u(links.join_url) }}" target="_top" style="min-height: 50px; padding: 0 30px; border: none; background: var(--accent); color: var(--on-accent); font: 500 14px Jost, system-ui, sans-serif; letter-spacing: 0.12em; text-transform: uppercase; cursor: pointer; text-decoration: none">Join</a>
+</div>
+</section>
+{%- endif -%}

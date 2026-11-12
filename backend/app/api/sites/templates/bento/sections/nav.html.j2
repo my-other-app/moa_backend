@@ -1,0 +1,11 @@
+{%- import "macros.html.j2" as m with context -%}
+{%- set keys = (nav or [])|map(attribute="key")|list -%}
+{%- set labels = {"upcoming": ("#events", "Events"), "photos": ("#photos", "Photos"), "speakers": ("#speakers", "Speakers"), "team": ("#team", "Team"), "sponsors": ("#sponsors", "Sponsors")} -%}
+{%- set join_href = "#join" if "join" in keys else (links.join_url or links.follow_url) -%}
+<header class="b-nav" style="background: #FFFFFF; border-radius: 999px; padding: 8px 8px 8px 24px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px">
+<a href="#top" class="b-brand" style="font-family: 'Bricolage Grotesque', system-ui, sans-serif; font-weight: 700; font-size: 19px; color: #23203A; text-decoration: none; padding: 10px 0">{{ club.short_name or club.name }}</a>
+<nav aria-label="Sections" class="b-links" style="display: flex; flex-wrap: wrap; gap: 2px; font-weight: 500">
+{% for k in keys if k in labels %}<a href="{{ labels[k][0] }}" style="padding: 11px 14px; color: #23203A; text-decoration: none; border-radius: 999px">{{ labels[k][1] }}</a>
+{% endfor %}</nav>
+{% if join_href %}<a href="{{ join_href }}" class="b-navcta" style="display: inline-flex; align-items: center; min-height: 46px; padding: 0 22px; border-radius: 999px; background: var(--accent); color: #FFFFFF; text-decoration: none; font-weight: 600">Join us</a>{% endif %}
+</header>

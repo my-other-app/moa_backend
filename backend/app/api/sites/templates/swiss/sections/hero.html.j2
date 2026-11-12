@@ -1,0 +1,27 @@
+{%- macro isrc(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'file://' or l[:11]|lower == 'data:image/') else '' }}{%- endmacro -%}
+{%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
+{%- macro host(h, label) -%}{%- set l = (h or '')|string -%}{{ (l.split('//')[1].split('/')[0]|replace('www.', '')) if l[:8]|lower == 'https://' else (label or l) }}{%- endmacro -%}
+{%- set keys = (nav|map(attribute='key')|list) if (nav is defined and nav) else (section_keys or []) -%}
+{%- set numbered = keys|reject('equalto', 'join')|list -%}
+{%- set overrides = site.title_overrides or {} -%}
+{%- set nav_labels = {'about': 'About', 'upcoming': 'Upcoming', 'past': 'Past', 'speakers': 'Speakers', 'team': 'Team', 'sponsors': 'Sponsors'} -%}
+{%- set cover = images['hero.cover'] -%}
+{%- set initials = (club.name.split()|map('first')|join|upper)[:4] -%}
+{%- set soc = [] -%}{%- set web = [] -%}
+{%- for s in socials or [] -%}{%- set item = {'kind': (s.kind if s is mapping else (s[0]|lower)), 'label': (s.label if s is mapping else s[0]), 'href': (s.href if s is mapping else s[1])} -%}{%- set _ = (web if item.kind == 'website' else soc).append(item) -%}{%- endfor -%}
+{%- set web = (club.website if (club.website and club.website.href) else (web|first)) -%}
+<section id="top" class="sw-hero" style="padding: 72px 0 40px; display: flex; flex-direction: column; gap: 40px">
+<h1 style="margin: 0; font-weight: 600; font-size: clamp(44px, 9vw, 132px); line-height: 0.92; letter-spacing: -0.045em; max-width: 1100px; overflow-wrap: break-word">{{ (site.headline or club.name)|trim|replace('\n', ' ') }}<span style="color: var(--accent)">.</span></h1>
+{%- if club.kind or club.location_name or club.founded_year or web or soc %}
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 24px 32px; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 13px">
+{% if club.kind %}<div style="display: flex; flex-direction: column; gap: 4px; border-top: 1px solid #0A0A0A; padding-top: 10px"><span style="color: #5C5C5C">Type</span><span>{{ club.kind }}</span></div>
+{% endif %}{% if club.location_name %}<div style="display: flex; flex-direction: column; gap: 4px; border-top: 1px solid #0A0A0A; padding-top: 10px"><span style="color: #5C5C5C">Location</span><span>{{ club.location_name }}</span></div>
+{% endif %}{% if club.founded_year %}<div style="display: flex; flex-direction: column; gap: 4px; border-top: 1px solid #0A0A0A; padding-top: 10px"><span style="color: #5C5C5C">Founded</span><span>{{ club.founded_year }}</span></div>
+{% endif %}{% if web %}<div style="display: flex; flex-direction: column; gap: 4px; border-top: 1px solid #0A0A0A; padding-top: 10px"><span style="color: #5C5C5C">Web</span><a href="{{ u(web.href) }}" target="_top" style="overflow-wrap: anywhere">{{ host(web.href, web.label) }}</a></div>
+{% endif %}{% if soc %}<div style="display: flex; flex-direction: column; gap: 4px; border-top: 1px solid #0A0A0A; padding-top: 10px"><span style="color: #5C5C5C">Social</span><span style="display: flex; flex-wrap: wrap; gap: 0 14px">{% for s in soc %}<a href="{{ u(s.href) }}" target="_top">{{ s.label }}</a>{% endfor %}</span></div>
+{% endif %}</div>
+{%- endif %}
+{% if cover and cover.url %}<img class="sw-cover sw-img" src="{{ isrc(cover.url) }}"{% if cover.srcset %} srcset="{{ cover.srcset }}" sizes="(min-width: 1320px) 1256px, calc(100vw - 64px)"{% endif %} width="{{ cover.w or 1256 }}" height="{{ cover.h or 420 }}" alt="{{ cover.alt or '' }}" fetchpriority="high" decoding="async" style="height: 420px">
+{% elif cover and cover.placeholder is defined %}<div class="sw-cover" style="min-height: 420px; background: repeating-linear-gradient(135deg, #EAEAEA 0 14px, #F3F3F3 14px 28px); display: flex; align-items: flex-end; padding: 16px; box-sizing: border-box">{% if cover.placeholder %}<span style="background: #FFFFFF; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12px; padding: 5px 10px">{{ cover.placeholder }}</span>{% endif %}</div>
+{% endif %}
+</section>

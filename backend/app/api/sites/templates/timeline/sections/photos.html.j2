@@ -1,0 +1,16 @@
+{%- macro isrc(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'file://' or l[:11]|lower == 'data:image/') else '' }}{%- endmacro -%}
+{%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
+{%- macro n(v) -%}{%- if v is number -%}{{ ('[' ~ '{:,}'.format(v) ~ ']') if sample else '{:,}'.format(v) }}{%- else -%}{{ v }}{%- endif -%}{%- endmacro -%}
+{%- macro iso(v) -%}{{ (v if v is string else v.isoformat()) if v else '' }}{%- endmacro -%}
+{%- set t = section.title if (section is defined and section.title) else 'Highlights' -%}
+{%- set photos = (images.photos or [])|select|list -%}
+{%- if photos -%}
+<section id="photos" class="tl-band tl-dark tl-sec" style="background: #10201F; color: #FFFFFF; padding: 72px 0">
+<div style="max-width: 1200px; margin: 0 auto; padding: 0 24px; display: flex; flex-direction: column; gap: 24px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 12px"><h2 style="margin: 0; font-weight: 800; font-size: clamp(28px, 3.4vw, 40px); letter-spacing: -0.03em">{{ t }}</h2>{% if links.gallery_url %}<a href="{{ u(links.gallery_url) }}" target="_top" style="font-weight: 700; color: #FFFFFF; padding: 12px 0">All{% if stats.photos %} {{ n(stats.photos) }}{% endif %} photos →</a>{% endif %}</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 14px">
+{% for ph in photos %}{% if ph.url %}<img class="tl-img" src="{{ isrc(ph.url) }}"{% if ph.srcset %} srcset="{{ ph.srcset }}" sizes="(min-width: 1200px) 278px, (min-width: 640px) 45vw, calc(100vw - 48px)"{% endif %} width="{{ ph.w or 556 }}" height="{{ ph.h or 417 }}" alt="{{ ph.alt or '' }}" loading="lazy" decoding="async" style="aspect-ratio: 4 / 3; height: auto; border-radius: 16px">{% else %}<div style="aspect-ratio: 4 / 3; border-radius: 16px; background: repeating-linear-gradient(135deg, #1B3331 0 14px, #223D3B 14px 28px); display: flex; align-items: flex-end; padding: 12px; box-sizing: border-box">{% if ph.placeholder %}<span style="background: #10201F; color: #D9E4E3; font-size: 12px; padding: 4px 10px; border-radius: 8px">{{ ph.placeholder }}</span>{% endif %}</div>{% endif %}
+{% endfor %}</div>
+</div>
+</section>
+{%- endif -%}

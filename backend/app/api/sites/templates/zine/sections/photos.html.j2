@@ -1,0 +1,17 @@
+{%- macro isrc(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'file://' or l[:11]|lower == 'data:image/') else '' }}{%- endmacro -%}
+{%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
+{%- macro n(v) -%}{%- if v is number -%}{{ ('[' ~ '{:,}'.format(v) ~ ']') if sample else '{:,}'.format(v) }}{%- else -%}{{ v }}{%- endif -%}{%- endmacro -%}
+{%- macro iso(v) -%}{{ (v if v is string else v.isoformat()) if v else '' }}{%- endmacro -%}
+{%- set t = section.title if (section is defined and section.title) else 'Photo wall' -%}
+{%- set photos = (images.photos or [])|select|list -%}
+{%- set TILT = ['-3deg', '2deg', '-1.5deg', '3deg'] -%}
+{%- if photos -%}
+<section id="photos" class="zn-blue zn-sec" style="background: #1B2A9E; color: #FFFFFF; padding: 88px 0 104px">
+<div style="max-width: 1240px; margin: 0 auto; padding: 0 24px; display: flex; flex-direction: column; gap: 40px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 12px"><h2 style="margin: 0; font-family: Unbounded, system-ui, sans-serif; font-weight: 900; font-size: clamp(36px, 6vw, 80px); line-height: 1; letter-spacing: -0.03em; overflow-wrap: break-word; max-width: 100%">{{ t }}</h2>{% if links.gallery_url %}<a href="{{ u(links.gallery_url) }}" target="_top" style="font-weight: 700; color: #FFFFFF; padding: 12px 0">all{% if stats.photos %} {{ n(stats.photos) }}{% endif %} photos →</a>{% endif %}</div>
+<div class="zn-wall" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(250px, 100%), 1fr)); gap: 32px">
+{% for ph in photos %}{% set cap = ph.caption or ph.alt %}<figure style="margin: 0; background: #FFFFFF; color: #1B2A9E; padding: 12px 12px 16px; transform: rotate({{ TILT[loop.index0 % 4] }}); display: flex; flex-direction: column; gap: 10px">{% if ph.url %}<img class="zn-img" src="{{ isrc(ph.url) }}"{% if ph.srcset %} srcset="{{ ph.srcset }}" sizes="(min-width: 1240px) 270px, (min-width: 640px) 40vw, calc(50vw - 40px)"{% endif %} width="{{ ph.w or 540 }}" height="{{ ph.h or 540 }}" alt="{{ ph.alt or '' }}" loading="lazy" decoding="async" style="aspect-ratio: 1 / 1; height: auto">{% else %}<div style="aspect-ratio: 1 / 1; background: repeating-linear-gradient(135deg, #D9DCF2 0 14px, #E6E8F7 14px 28px)"></div>{% endif %}{% if cap %}<figcaption style="font-weight: 700; font-size: 15px">{{ cap }}</figcaption>{% endif %}</figure>
+{% endfor %}</div>
+</div>
+</section>
+{%- endif -%}

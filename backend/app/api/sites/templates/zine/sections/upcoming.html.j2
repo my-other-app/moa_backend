@@ -1,0 +1,33 @@
+{%- macro isrc(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'file://' or l[:11]|lower == 'data:image/') else '' }}{%- endmacro -%}
+{%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
+{%- macro n(v) -%}{%- if v is number -%}{{ ('[' ~ '{:,}'.format(v) ~ ']') if sample else '{:,}'.format(v) }}{%- else -%}{{ v }}{%- endif -%}{%- endmacro -%}
+{%- macro iso(v) -%}{{ (v if v is string else v.isoformat()) if v else '' }}{%- endmacro -%}
+{%- set t = section.title if (section is defined and section.title) else 'What is next' -%}
+{%- set MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] -%}
+{%- if upcoming -%}
+<section id="upcoming" class="zn-pink zn-sec" style="background: var(--accent); color: var(--on-accent); padding: 88px 0">
+<div style="max-width: 1240px; margin: 0 auto; padding: 0 24px; display: flex; flex-direction: column; gap: 32px">
+<h2 style="margin: 0; font-family: Unbounded, system-ui, sans-serif; font-weight: 900; font-size: clamp(36px, 6vw, 80px); line-height: 1; letter-spacing: -0.03em; overflow-wrap: break-word">{{ t }}</h2>
+{%- set e = upcoming[0] -%}
+{%- set s = iso(e.starts_at) -%}
+{%- set online = e.is_online if (e.is_online is defined and e.is_online is not none) else ((e.mode or e.where or '')|lower == 'online') -%}
+{%- set p = e.poster -%}
+{%- set cap = e.capacity if e.capacity else ((e.seats_left + e.going) if (e.seats_left is number and e.going is number) else none) -%}
+{%- set seats = ((n(e.seats_left) ~ ' of ' ~ n(cap) ~ ' seats left') if cap else (n(e.seats_left) ~ ' seats left')) if (e.seats_left is defined and e.seats_left is not none) else none -%}
+{%- set dl = e.date_label or ([e.weekday, (e.day or (s[8:10]|int)) ~ ' ' ~ (e.month or MON[(s[5:7]|int) - 1]), e.year or s[0:4]]|select|join(' ')) %}
+<article style="background: #FFFFFF; color: #1B2A9E; border-radius: 28px; overflow: hidden; display: flex; flex-wrap: wrap; box-shadow: 10px 10px 0 #1B2A9E">
+{% if p and p.url %}<div style="flex: 1 1 320px; min-height: 280px; position: relative; overflow: hidden"><img src="{{ isrc(p.url) }}"{% if p.srcset %} srcset="{{ p.srcset }}" sizes="(min-width: 1240px) 520px, (min-width: 760px) 45vw, calc(100vw - 48px)"{% endif %} width="{{ p.w or 640 }}" height="{{ p.h or 400 }}" alt="{{ p.alt or e.name }}" loading="lazy" decoding="async" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block"></div>
+{% elif p and p.placeholder is defined %}<div style="flex: 1 1 320px; min-height: 280px; background: repeating-linear-gradient(135deg, #D9DCF2 0 14px, #E6E8F7 14px 28px); display: flex; align-items: flex-end; padding: 16px; box-sizing: border-box">{% if p and p.placeholder %}<span style="background: #FFFFFF; font-size: 13px; font-weight: 700; padding: 5px 12px; border-radius: 999px">{{ p.placeholder }}</span>{% endif %}</div>
+{% endif %}<div style="flex: 1 1 380px; min-width: 0; padding: clamp(24px, 4vw, 40px); box-sizing: border-box; display: flex; flex-direction: column; gap: 12px; align-items: flex-start">
+<span style="padding: 6px 14px; border-radius: 999px; background: #1B2A9E; color: #FFFFFF; font-weight: 700; font-size: 14px">{{ ['next up', dl, e.time]|select|join(' · ') }}</span>
+<h3 style="margin: 0; font-family: Unbounded, system-ui, sans-serif; font-weight: 700; font-size: clamp(22px, 2.8vw, 32px); line-height: 1.15; overflow-wrap: break-word; max-width: 100%">{{ e.name }}</h3>
+{% set meta = [('Online' if online else e.where), ('in person' if not online else none), seats]|select|list %}{% if meta %}<p style="margin: 0">{{ meta|join(' · ') }}</p>
+{% endif %}<a href="{{ u(e.url) }}" target="_top" style="display: inline-flex; align-items: center; min-height: 50px; padding: 0 28px; border-radius: 999px; background: #1B2A9E; color: #FFFFFF; text-decoration: none; font-weight: 700; margin-top: 6px">Register</a>
+</div>
+</article>
+{% if upcoming|length > 1 %}<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr)); gap: 24px">
+{% for e in upcoming[1:] %}{% set s = iso(e.starts_at) %}{% set online = e.is_online if (e.is_online is defined and e.is_online is not none) else ((e.mode or e.where or '')|lower == 'online') %}{% set dl = e.date_label or ([e.weekday, (e.day or (s[8:10]|int)) ~ ' ' ~ (e.month or MON[(s[5:7]|int) - 1]), e.year or s[0:4]]|select|join(' ')) %}<article style="background: #F2F2EE; color: #1B2A9E; border-radius: 24px; padding: 26px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; transform: rotate({{ '-1deg' if loop.index is odd else '1deg' }})"><span style="font-weight: 700; font-size: 14px">{{ [dl, e.time, (e.kind|lower if e.kind else none)]|select|join(' · ') }}</span><h3 style="margin: 0; font-family: Unbounded, system-ui, sans-serif; font-weight: 700; font-size: 20px; line-height: 1.25; overflow-wrap: break-word; max-width: 100%">{{ e.name }}</h3>{% if online or e.where %}<span>{{ 'Online' if online else e.where }}</span>{% endif %}<a href="{{ u(e.url) }}" target="_top" style="font-weight: 700; padding: 10px 0">Register →</a></article>
+{% endfor %}</div>
+{% endif %}</div>
+</section>
+{%- endif -%}

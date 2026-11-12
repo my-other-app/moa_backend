@@ -1,0 +1,14 @@
+{%- macro isrc(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'file://' or l[:11]|lower == 'data:image/') else '' }}{%- endmacro -%}
+{%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
+{%- macro n(v) -%}{%- if v is number -%}{{ ('[' ~ '{:,}'.format(v) ~ ']') if sample else '{:,}'.format(v) }}{%- else -%}{{ v }}{%- endif -%}{%- endmacro -%}
+{%- macro iso(v) -%}{{ (v if v is string else v.isoformat()) if v else '' }}{%- endmacro -%}
+{%- set t = section.title if (section is defined and section.title) else 'Highlighted photos' -%}
+{%- set photos = (images.photos or [])|select|list -%}
+{%- if photos -%}
+<section id="photos" class="pt-card" style="background: #FFFFFF; border: 1px solid #D5D9DE; border-radius: 16px; padding: 22px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px"><h2 style="margin: 0; font-weight: 700; font-size: 18px">{{ t }}</h2>{% if links.gallery_url %}<a href="{{ u(links.gallery_url) }}" target="_top" style="font-weight: 600; padding: 10px 0">All{% if stats.photos %} {{ n(stats.photos) }}{% endif %}</a>{% endif %}</div>
+<div class="pt-photos" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); gap: 8px">
+{% for ph in photos %}{% if ph.url %}<img class="pt-img" src="{{ isrc(ph.url) }}"{% if ph.srcset %} srcset="{{ ph.srcset }}" sizes="(min-width: 1240px) 156px, (min-width: 640px) 25vw, calc(50vw - 40px)"{% endif %} width="{{ ph.w or 312 }}" height="{{ ph.h or 312 }}" alt="{{ ph.alt or '' }}" loading="lazy" decoding="async" style="aspect-ratio: 1 / 1; height: auto; border-radius: 10px">{% else %}<div style="aspect-ratio: 1 / 1; border-radius: 10px; background: repeating-linear-gradient(135deg, #DDE1E6 0 12px, #E7EAEE 12px 24px)"></div>{% endif %}
+{% endfor %}</div>
+</section>
+{%- endif -%}

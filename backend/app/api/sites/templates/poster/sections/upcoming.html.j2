@@ -1,0 +1,23 @@
+{%- import "macros.html.j2" as m with context -%}
+{%- if upcoming -%}
+{%- set e = upcoming[0] -%}
+{%- set seats = m.seats(e) -%}
+<section id="events" style="max-width: 1280px; margin: 0 auto; padding: 72px 24px; display: flex; flex-direction: column; gap: 28px">
+<h2 class="p-h2" style="margin: 0; font-family: 'Archivo Black', Impact, sans-serif; font-weight: 400; font-size: clamp(40px, 7vw, 88px); line-height: 0.9; text-transform: uppercase; letter-spacing: -0.02em">{{ section.title }}</h2>
+<article class="p-feature" style="display: flex; flex-wrap: wrap; border: 3px solid #111111; box-shadow: 8px 8px 0 #111111; background: #FFFFFF">
+<div class="p-fdate" style="flex: 0 0 200px; background: var(--accent); color: #FFFFFF; padding: 24px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center"><span style="font-weight: 700; text-transform: uppercase">{{ e.weekday }} · {{ e.month }}</span><span style="font-family: 'Archivo Black', Impact, sans-serif; font-size: 96px; line-height: 0.9">{{ e.day }}</span><span style="font-weight: 700">{{ e.year }} · {{ e.time }}</span></div>
+<div class="p-fbody" style="flex: 2 1 360px; padding: 28px; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; border-left: 3px dashed #111111">
+<span style="align-self: flex-start; padding: 4px 10px; background: #FFE14A; border: 2px solid #111111; font-weight: 700; text-transform: uppercase; font-size: 13px">Next up{% if m.mode(e) %} · {{ m.mode(e) }}{% endif %}</span>
+<h3 style="margin: 0; font-family: 'Archivo Black', Impact, sans-serif; font-weight: 400; font-size: clamp(26px, 3.4vw, 40px); line-height: 1.05; text-transform: uppercase">{{ e.name }}</h3>
+{% if e.where or seats %}<p style="margin: 0; font-weight: 700">{{ [e.where, seats]|select|join(" · ") }}</p>{% endif %}
+</div>
+<div class="p-fcta" style="flex: 1 1 200px; padding: 28px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; border-left: 3px dashed #111111"><a href="{{ e.url }}" target="_top" style="display: inline-flex; align-items: center; min-height: 56px; padding: 0 30px; background: #111111; color: #FFFFFF; text-decoration: none; font-weight: 700; text-transform: uppercase; font-size: 18px">Register</a></div>
+</article>
+{% if upcoming[1:] %}<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(440px, 100%), 1fr)); gap: 24px">
+{% for e in upcoming[1:] %}<article style="display: flex; border: 3px solid #111111; background: #FFFFFF">
+<div style="flex: 0 0 110px; background: #111111; color: #FFFFFF; padding: 16px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; align-items: center"><span style="font-weight: 700; text-transform: uppercase; font-size: 13px">{{ e.month }} {{ e.year }}</span><span style="font-family: 'Archivo Black', Impact, sans-serif; font-size: 48px; line-height: 1">{{ e.day }}</span></div>
+<div style="padding: 20px; display: flex; flex-direction: column; gap: 6px; min-width: 0"><h3 style="margin: 0; font-weight: 700; font-size: 21px; line-height: 1.2">{{ e.name }}</h3><span>{{ [e.time, e.where]|select|join(" · ") }}</span><a href="{{ e.url }}" target="_top" style="font-weight: 700; text-transform: uppercase; font-size: 14px; padding: 10px 0">Register →</a></div>
+</article>
+{% endfor %}</div>{% endif %}
+</section>
+{%- endif -%}

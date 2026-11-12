@@ -1,0 +1,5 @@
+{% if images.photos %}
+<section id="{{ section.anchor }}"><h2>{{ section.title }}</h2>
+{% for p in images.photos %}<img src="{{ p.url }}"{% if p.srcset %} srcset="{{ p.srcset }}" sizes="(max-width: 720px) 50vw, 480px"{% endif %} alt="{{ p.alt }}" width="{{ p.w }}" height="{{ p.h }}" loading="lazy" class="photo">{% endfor %}
+</section>
+{% endif %}

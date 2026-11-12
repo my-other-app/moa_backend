@@ -1,0 +1,39 @@
+{%- macro isrc(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'file://' or l[:11]|lower == 'data:image/') else '' }}{%- endmacro -%}
+{%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
+{%- macro n(v) -%}{%- if v is number -%}{{ ('[' ~ '{:,}'.format(v) ~ ']') if sample else '{:,}'.format(v) }}{%- else -%}{{ v }}{%- endif -%}{%- endmacro -%}
+{%- macro iso(v) -%}{{ (v if v is string else v.isoformat()) if v else '' }}{%- endmacro -%}
+{%- set t = section.title if (section is defined and section.title) else 'Events, on one line' -%}
+{%- set MON = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'] -%}
+{%- if upcoming -%}
+<section id="upcoming" class="tl-up tl-sec" style="max-width: 980px; margin: 0 auto; padding: 80px 24px">
+<div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 40px">
+<h2 style="margin: 0; font-weight: 800; font-size: clamp(34px, 4.6vw, 56px); line-height: 1.05; letter-spacing: -0.035em">{{ t }}</h2>
+<p style="margin: 0; color: #3A4D4C; font-size: 17px">What is coming, and everything that came before.</p>
+</div>
+{% for e in upcoming[1:]|reverse %}{% set s = iso(e.starts_at) %}{% set online = e.is_online if (e.is_online is defined and e.is_online is not none) else ((e.mode or e.where or '')|lower == 'online') %}
+<div style="display: flex"><div class="tl-date" style="flex: 0 0 96px; padding-top: 2px; font-weight: 800; font-size: 13px; letter-spacing: 0.08em; color: #4F6160">{{ e.day or (s[8:10]|int) }} {{ (e.month or MON[(s[5:7]|int) - 1])|upper }}<br>{{ e.year or s[0:4] }}</div>
+<div class="tl-line" style="flex: 1; min-width: 0; border-left: 2px solid var(--accent); padding: 0 0 28px 28px; position: relative"><span style="position: absolute; left: -9px; top: 4px; width: 16px; height: 16px; border-radius: 999px; background: var(--accent)"></span>
+<article style="background: #FFFFFF; border: 1px solid #CBD6D5; border-radius: 16px; padding: 20px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 20px"><div style="flex: 1 1 280px; min-width: 0"><h3 style="margin: 0; font-weight: 700; font-size: 20px; line-height: 1.25">{{ e.name }}</h3><span style="color: #4F6160; font-size: 15px">{{ [e.time, ('Online' if online else e.where), e.kind]|select|join(' · ') }}</span></div><a href="{{ u(e.url) }}" target="_top" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 18px; border-radius: 10px; border: 1.5px solid #10201F; color: #10201F; text-decoration: none; font-weight: 700; font-size: 15px">Register</a></article></div></div>
+{% endfor %}
+{%- set e = upcoming[0] -%}
+{%- set s = iso(e.starts_at) -%}
+{%- set online = e.is_online if (e.is_online is defined and e.is_online is not none) else ((e.mode or e.where or '')|lower == 'online') -%}
+{%- set p = e.poster -%}
+{%- set cap = e.capacity if e.capacity else ((e.seats_left + e.going) if (e.seats_left is number and e.going is number) else none) -%}
+{%- set seats = ((n(e.seats_left) ~ ' of ' ~ n(cap) ~ ' seats left') if cap else (n(e.seats_left) ~ ' seats left')) if (e.seats_left is defined and e.seats_left is not none) else none -%}
+{%- set times = (e.time ~ (' – ' ~ e.end_time if e.end_time else '')) if e.time else none %}
+
+<div style="display: flex"><div class="tl-date" style="flex: 0 0 96px; padding-top: 2px; font-weight: 800; font-size: 13px; letter-spacing: 0.08em; color: var(--accent-ink)">{{ e.day or (s[8:10]|int) }} {{ (e.month or MON[(s[5:7]|int) - 1])|upper }}<br>{{ e.year or s[0:4] }}</div>
+<div class="tl-line" style="flex: 1; min-width: 0; border-left: 2px solid var(--accent); padding: 0 0 36px 28px; position: relative"><span style="position: absolute; left: -13px; top: 0; width: 24px; height: 24px; border-radius: 999px; background: var(--accent); border: 4px solid #F7F9F9; box-sizing: border-box"></span>
+<article style="background: #10201F; color: #FFFFFF; border-radius: 20px; overflow: hidden; display: flex; flex-wrap: wrap">
+{% if p and p.url %}<div style="flex: 1 1 240px; min-height: 220px; position: relative; overflow: hidden"><img src="{{ isrc(p.url) }}"{% if p.srcset %} srcset="{{ p.srcset }}" sizes="(min-width: 980px) 280px, (min-width: 640px) 40vw, calc(100vw - 140px)"{% endif %} width="{{ p.w or 560 }}" height="{{ p.h or 440 }}" alt="{{ p.alt or e.name }}" loading="lazy" decoding="async" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block"></div>
+{% elif p and p.placeholder is defined %}<div style="flex: 1 1 240px; min-height: 220px; background: repeating-linear-gradient(135deg, #1B3331 0 14px, #223D3B 14px 28px); display: flex; align-items: flex-end; padding: 14px; box-sizing: border-box">{% if p and p.placeholder %}<span style="background: #10201F; color: #D9E4E3; font-size: 13px; padding: 5px 10px; border-radius: 8px">{{ p.placeholder }}</span>{% endif %}</div>
+{% endif %}<div style="flex: 2 1 320px; min-width: 0; padding: 28px; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px">
+<span style="align-self: flex-start; padding: 4px 10px; border-radius: 8px; background: #FFFFFF; color: #10201F; font-weight: 800; font-size: 12px; letter-spacing: 0.08em">NEXT UP · {{ 'ONLINE' if online else 'IN PERSON' }}</span>
+<h3 style="margin: 0; font-weight: 800; font-size: clamp(24px, 3vw, 32px); line-height: 1.12; letter-spacing: -0.02em">{{ e.name }}</h3>
+{% set meta = [e.weekday, times, (none if online else e.where)]|select|list %}{% if meta %}<span style="color: #D9E4E3">{{ meta|join(' · ') }}</span>
+{% endif %}<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-top: 6px"><a href="{{ u(e.url) }}" target="_top" style="display: inline-flex; align-items: center; min-height: 46px; padding: 0 24px; border-radius: 10px; background: #FFFFFF; color: #10201F; text-decoration: none; font-weight: 700">Register</a>{% if seats %}<span style="font-size: 15px; color: #D9E4E3">{{ seats }}</span>{% endif %}</div>
+</div>
+</article></div></div>
+</section>
+{%- endif -%}

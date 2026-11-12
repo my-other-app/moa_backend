@@ -1,0 +1,14 @@
+{%- import "macros.html.j2" as m with context -%}
+{#- The designer's e-mail form becomes its button alone, a link to join_url (the page can't post: CSP form-action 'none'); the form's column keeps its height. join_text replaces the designer's promise line. -#}
+{%- set jt = join_text or "Joining is free. Follow us to hear about every event first." -%}
+{%- if links.join_url -%}
+<section id="join" class="e-pb e-flush" style="max-width: 1240px; margin: 0 auto; padding: 0 24px 80px">
+<div class="e-joinbox" style="border: 1px solid #111111; outline: 4px solid #111111; outline-offset: 6px; margin: 10px; padding: clamp(32px, 6vw, 64px); display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center">
+<h2 style="margin: 0; font-family: 'Playfair Display', Georgia, serif; font-weight: 900; font-size: clamp(32px, 5vw, 60px); line-height: 1.05">{{ section.title }}</h2>
+<p style="margin: 0; max-width: 520px; font-size: 17px">{{ jt }}</p>
+<div class="j-col" style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; align-items: flex-end; min-height: 74.15px">
+<a href="{{ links.join_url }}" target="_top" class="btn-a" style="min-height: 48px; padding: 0 26px; border: none; background: var(--accent); color: #FFFFFF; font: 600 14px Inter, system-ui, sans-serif; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer">Join community</a>
+</div>
+</div>
+</section>
+{%- endif -%}

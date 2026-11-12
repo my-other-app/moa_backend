@@ -1,0 +1,12 @@
+{%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
+{%- macro n(v) -%}{%- if v is number -%}{{ ('[' ~ '{:,}'.format(v) ~ ']') if sample else '{:,}'.format(v) }}{%- else -%}{{ v }}{%- endif -%}{%- endmacro -%}
+{%- macro iso(v) -%}{{ (v if v is string else v.isoformat()) if v else '' }}{%- endmacro -%}
+{%- set has_members = stats.members is defined and stats.members is not none -%}
+{%- set nums = [(stats.members if has_members else stats.followers, 'Members' if has_members else 'Followers'), (stats.events_held, 'Events hosted'), (stats.speakers, 'Speakers'), (stats.sponsors, 'Patrons and partners')]|selectattr(0)|list -%}
+{%- if nums -%}
+<section id="stats" class="gl-band" style="background: #143329; border-top: 1px solid var(--accent); border-bottom: 1px solid #2E4A40">
+<div class="gl-stats" style="max-width: 1200px; margin: 0 auto; padding: 36px 24px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 24px">
+{% for v, label in nums %}<div><div style="font-family: 'Cormorant Garamond', Georgia, serif; font-weight: 500; font-size: 52px; line-height: 1; color: var(--accent)">{{ n(v) }}</div><div style="font-size: 13px; letter-spacing: 0.18em; text-transform: uppercase; margin-top: 8px">{{ label }}</div></div>
+{% endfor %}</div>
+</section>
+{%- endif -%}

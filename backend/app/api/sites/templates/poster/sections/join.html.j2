@@ -1,0 +1,16 @@
+{%- import "macros.html.j2" as m with context -%}
+{#- The designer's e-mail form becomes its button alone, a link to join_url (the page can't post: CSP form-action 'none'); the form's column keeps its height. join_text replaces the designer's promise line. -#}
+{%- set jt = join_text or "Joining is free. Follow us to hear about every event first." -%}
+{%- set line = [club.address or club.location_name, club.contact_email]|select|join(" · ") -%}
+{%- if links.join_url -%}
+<section id="join" style="background: #111111; color: #FFFFFF; padding: 72px 0">
+<div style="max-width: 1280px; margin: 0 auto; padding: 0 24px; display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 32px">
+<h2 class="p-h2" style="flex: 1 1 420px; margin: 0; font-family: 'Archivo Black', Impact, sans-serif; font-weight: 400; font-size: clamp(44px, 8vw, 112px); line-height: 0.88; text-transform: uppercase; color: #FFE14A">{{ section.title }}</h2>
+<div style="flex: 1 1 340px; display: flex; flex-direction: column; gap: 10px">
+<span style="font-weight: 700; text-transform: uppercase; font-size: 14px">{{ jt }}</span>
+<a href="{{ links.join_url }}" target="_top" class="btn-a" style="min-height: 54px; border: 3px solid #FFE14A; background: #FFE14A; color: #111111; font: 700 17px Archivo, system-ui, sans-serif; text-transform: uppercase; cursor: pointer">Join community, it is free</a>
+{% if line %}<span class="p-wrap" style="font-size: 14px; color: #E0E0E0">{{ line }}</span>{% endif %}
+</div>
+</div>
+</section>
+{%- endif -%}

@@ -1,0 +1,27 @@
+{%- import "macros.html.j2" as m with context -%}
+{%- set so_list = (socials or [])|rejectattr("kind", "equalto", "website")|list -%}
+{%- set web_href = m.web_href(club, socials) -%}
+{%- set web_label = m.web_label(club, socials) -%}
+{%- set paras = (club.about or "").split("\n")|map("trim")|select|list -%}
+{%- set cover = images["hero.cover"] or club.cover -%}
+{%- set people = stats.members if stats.members is not none else stats.followers -%}
+{%- set rows = [("Members" if stats.members is not none else "Followers", people), ("Events hosted", stats.events_held), ("Speakers on stage", stats.speakers), ("Sponsors and partners", stats.sponsors)]|selectattr(1)|list -%}
+{%- if paras or cover or rows -%}
+<section id="about" class="e-pb" style="max-width: 1240px; margin: 0 auto; padding: 40px 24px 72px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 40px">
+{% if paras %}<div style="display: flex; flex-direction: column; gap: 16px">
+<h2 style="margin: 0; font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 600">{{ section.title }}</h2>
+{% for p in paras %}{% if loop.first %}<p style="margin: 0; font-size: 17px; text-wrap: pretty"><span style="font-family: 'Playfair Display', Georgia, serif; font-weight: 900; font-size: 64px; line-height: 0.8; float: left; padding: 6px 10px 0 0">{{ p[0] }}</span>{{ p[1:] }}</p>{% else %}<p style="margin: 0; font-size: 17px">{{ p }}</p>{% endif %}
+{% endfor %}{% if so_list or web_href %}<div style="display: flex; flex-wrap: wrap; gap: 8px 20px; font-weight: 600; font-size: 14px">
+{% for so in so_list %}{% set label, href = so.label, so.href %}<a href="{{ href }}" target="_top" style="padding: 12px 0">{{ label }}</a>{% endfor %}{% if web_href %}<a href="{{ web_href }}" target="_top" class="e-wrap" style="padding: 12px 0">{{ web_label }}</a>{% endif %}
+</div>{% endif %}
+</div>{% endif %}
+{% if cover %}<figure style="margin: 0; display: flex; flex-direction: column; gap: 10px">
+<div class="{{ m.phc(cover) }}" style="min-height: 400px; background: repeating-linear-gradient(135deg, #E4E4E4 0 14px, #EEEEEE 14px 28px); display: flex; align-items: flex-end; padding: 16px; box-sizing: border-box">{% if m.real(cover) %}{{ m.fill(cover, 640, 400, "(max-width: 900px) 100vw, 400px", eager=true, alt=club.name) }}{% elif m.label(cover) %}<span style="background: #FFFFFF; font-size: 13px; padding: 5px 10px">{{ m.label(cover) }}</span>{% endif %}</div>
+{% if cover.alt %}<figcaption style="font-size: 14px; font-style: italic; color: #4A4A4A">{{ cover.alt }}</figcaption>{% endif %}
+</figure>{% endif %}
+{% if rows %}<div style="display: flex; flex-direction: column">
+<h2 style="margin: 0 0 12px; font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 600">At a glance</h2>
+{% for label, value in rows %}<div style="display: flex; align-items: baseline; justify-content: space-between; padding: 14px 0; border-top: 1px solid #111111{% if loop.last %}; border-bottom: 1px solid #111111{% endif %}"><span>{{ label }}</span><span style="font-family: 'Playfair Display', Georgia, serif; font-weight: 700; font-size: 34px; line-height: 1">{{ m.num(value) }}</span></div>
+{% endfor %}</div>{% endif %}
+</section>
+{%- endif -%}

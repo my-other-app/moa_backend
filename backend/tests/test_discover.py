@@ -579,8 +579,8 @@ async def test_a_club_page(client, session, world):
     assert page["partners"] == [{"name": "Acme Labs", "role": "Title partner", "logo": None}]
 
     # The website address only once the site is published.
-    session.add(ClubSites(club_id=a.id, sections={}, published_at=now))
-    session.add(ClubSites(club_id=world["b"].id, sections={}))
+    session.add(ClubSites(club_id=a.id, published_at=now))
+    session.add(ClubSites(club_id=world["b"].id))
     await session.commit()
     assert (await client.get(f"{API}/clubs/{a.slug}")).json()["club"]["website_url"] == sites.public_url(a)
     assert (await client.get(f"{API}/clubs/{world['b'].slug}")).json()["club"]["website_url"] is None

@@ -25,6 +25,8 @@ async def world(client, session, make_club, make_event, mint_token):
     soon = await make_event(club=club, created_by=owner, name="Hack Night", event_datetime=NOW + timedelta(days=9))
     await session.commit()
     h = auth_header(await mint_token(owner))
+    # The tests' fixture template (tests/fixtures/site_template): the markup read below is its.
+    assert (await client.patch("/api/v1/clubs/site", json={"template": "fixture"}, headers=h)).status_code == 200
     assert (await client.post("/api/v1/clubs/site/publish", headers=h)).status_code == 200
     return dict(owner=owner, club=club, soon=soon, h=h)
 
@@ -34,8 +36,12 @@ async def _site(session, club) -> ClubSites:
 
 
 async def _made_at(session, club, when: datetime) -> None:
+    """The page as made at `when`, from the choices saved before it (the
+    template chosen in `world` is no change it is behind)."""
     site = await _site(session, club)
     site.published_at = when
+    if site.settings_at is not None and site.settings_at > when:
+        site.settings_at = when - timedelta(seconds=1)
     await session.commit()
 
 

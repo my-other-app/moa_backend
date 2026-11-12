@@ -1,0 +1,33 @@
+{%- import "macros.html.j2" as m with context -%}
+{%- set so_list = (socials or [])|rejectattr("kind", "equalto", "website")|list -%}
+{%- set web_href = m.web_href(club, socials) -%}
+{%- set web_label = m.web_label(club, socials) -%}
+{%- set paras = (club.about or "").split("\n")|map("trim")|select|list -%}
+{%- set topics = club.topics or [] -%}
+{%- set short = {"linkedin": "in", "instagram": "ig", "youtube": "yt", "x": "x", "twitter": "x", "facebook": "fb", "github": "gh", "whatsapp": "wa"} -%}
+{%- if paras or club.tagline or topics -%}
+<!-- ABOUT + EXPERTISE -->
+<section id="about" class="c-pb" style="padding: 96px 0">
+<div style="max-width: 1200px; margin: 0 auto; padding: 0 24px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap: 64px">
+{% if paras or club.tagline %}<div style="display: flex; flex-direction: column; gap: 20px">
+<div style="font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #535B6E">{{ section.title }}</div>
+{% if club.tagline %}<h2 style="margin: 0; font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: clamp(30px, 4vw, 44px); line-height: 1.1; letter-spacing: -0.02em">{{ club.tagline }}</h2>{% endif %}
+{% for p in paras %}<p style="margin: 0; font-size: 17px; color: #3D4558; text-wrap: pretty">{{ p }}</p>
+{% endfor %}{% if so_list %}<div style="display: flex; flex-wrap: wrap; gap: 12px">
+{% for so in so_list %}{% set label, href = so.label, so.href %}<a href="{{ href }}" target="_top" aria-label="{{ label }}" style="width: 44px; height: 44px; border-radius: 999px; border: 1.5px solid #C5CCD9; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; font-weight: 600; font-size: 14px; color: #0D1220">{{ short.get(so.kind, label[:2]|lower) }}</a>
+{% endfor %}</div>{% endif %}
+</div>{% endif %}
+{% if topics %}<div style="background: #0D1220; color: #FFFFFF; border-radius: 24px; padding: 40px; display: flex; flex-direction: column; gap: 24px">
+<div style="font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #B4BCD0">Domains of expertise</div>
+<div style="display: flex; flex-direction: column">
+{% for t in topics[:4] %}{% set n = (club.topic_counts or {}).get(t) %}<div style="display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 16px 0; border-top: 1px solid #2A3147">
+<span style="font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 600; font-size: 22px">{{ t }}</span>{% if n %}<span style="color: #B4BCD0; font-size: 14px; flex: none">{{ m.num(n) }} session{{ "" if n == 1 else "s" }}</span>{% endif %}
+</div>
+{% endfor %}</div>
+{% if topics[4:] %}<div style="display: flex; flex-wrap: wrap; gap: 8px">
+{% for t in topics[4:] %}<span style="padding: 7px 14px; border-radius: 999px; border: 1px solid #4A5370; font-size: 14px; color: #FFFFFF">{{ t }}</span>
+{% endfor %}</div>{% endif %}
+</div>{% endif %}
+</div>
+</section>
+{%- endif -%}

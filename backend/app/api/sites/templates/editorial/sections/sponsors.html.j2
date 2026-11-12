@@ -1,0 +1,13 @@
+{%- import "macros.html.j2" as m with context -%}
+{%- set ns = namespace(b=[], p=[]) -%}
+{%- for s in sponsors -%}{%- if "sponsor" in (s.role or "")|lower -%}{%- set ns.b = ns.b + [s] -%}{%- else -%}{%- set ns.p = ns.p + [s] -%}{%- endif -%}{%- endfor -%}
+{%- set backers, partners = ns.b, ns.p -%}
+{%- if sponsors -%}
+<section id="partners" class="e-pb e-flush" style="max-width: 1240px; margin: 0 auto; padding: 0 24px 72px; display: flex; flex-direction: column; gap: 20px">
+<h2 style="margin: 0; font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 600; text-align: center">{{ section.title }}</h2>
+{% if backers %}<div class="e-2up-phone" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); border-top: 1px solid #111111; border-bottom: 1px solid #111111">
+{% for s in backers %}<div style="min-height: 120px; display: flex; align-items: center; justify-content: center; color: #4A4A4A">{% if m.real(s.logo) %}<img class="logo-img" src="{{ s.logo.url }}"{% if s.logo.srcset %} srcset="{{ s.logo.srcset }}" sizes="160px"{% endif %} width="{{ s.logo.w or 160 }}" height="{{ s.logo.h or 64 }}" alt="{{ s.name }}" loading="lazy" decoding="async" style="max-width: 70%; max-height: 64px">{% else %}{{ s.name }}{% endif %}</div>
+{% endfor %}</div>{% endif %}
+{% if partners %}<p style="margin: 0; text-align: center; font-size: 15px; color: #4A4A4A"><strong style="color: #111111">Partners:</strong> {{ partners|map(attribute="name")|join(" · ") }}</p>{% endif %}
+</section>
+{%- endif -%}

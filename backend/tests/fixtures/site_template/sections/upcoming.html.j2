@@ -1,0 +1,12 @@
+{% if upcoming %}
+<section id="{{ section.anchor }}">
+<h2>{{ section.title }}</h2>
+{% for e in upcoming %}<article class="event">
+{% if e.poster %}<img src="{{ e.poster.url }}"{% if e.poster.srcset %} srcset="{{ e.poster.srcset }}" sizes="(max-width: 720px) 100vw, 380px"{% endif %} alt="{{ e.poster.alt }}" width="{{ e.poster.w }}" height="{{ e.poster.h }}" loading="lazy" class="poster">{% endif %}
+<h3>{{ e.name }}</h3>
+<p>{{ e.date_label }} · {{ e.time }}{% if e.where %} · {{ e.where }}{% endif %} · {{ e.fee }}</p>
+<a href="{{ e.url }}" target="_top">Register</a>
+</article>{% endfor %}
+<a href="{{ links.events_url }}" target="_top">View all →</a>
+</section>
+{% endif %}

@@ -1,0 +1,14 @@
+{%- import "macros.html.j2" as m with context -%}
+{%- set keys = (nav or [])|map(attribute="key")|list -%}
+{%- set labels = {"about": ("#about", "About"), "upcoming": ("#calendar", "Calendar"), "past": ("#archive", "Archive"), "speakers": ("#speakers", "Speakers"), "team": ("#people", "People")} -%}
+{%- set join_href = "#join" if "join" in keys else (links.join_url or links.follow_url) -%}
+{%- set dateline = [("Est. " ~ club.founded_year) if club.founded_year else None, club.location_name]|select|join(" · ") -%}
+<header style="border-bottom: 1px solid #111111">
+<div class="e-navin" style="max-width: 1240px; margin: 0 auto; padding: 8px 24px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600">
+<span class="e-dateline">{{ dateline or club.name }}</span>
+<nav aria-label="Sections" class="e-links" style="display: flex; flex-wrap: wrap; gap: 4px">
+{% for k in keys if k in labels %}<a href="{{ labels[k][0] }}" style="padding: 14px 10px; text-decoration: none">{{ labels[k][1] }}</a>
+{% endfor %}</nav>
+{% if join_href %}<a href="{{ join_href }}" class="e-navcta" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 20px; background: var(--accent); color: #FFFFFF; text-decoration: none">Join</a>{% endif %}
+</div>
+</header>

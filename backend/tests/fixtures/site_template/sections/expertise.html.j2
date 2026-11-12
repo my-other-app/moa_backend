@@ -1,0 +1,3 @@
+{% if club.topics %}
+<section id="{{ section.anchor }}"><h2>{{ section.title }}</h2><ul>{% for t in club.topics %}<li>{{ t }}</li>{% endfor %}</ul></section>
+{% endif %}
