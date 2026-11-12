@@ -84,6 +84,10 @@ x-backend: &backend
       condition: service_healthy
     redis:
       condition: service_started
+  # The box's network, and the render service's internal one.
+  networks:
+    - default
+    - render
   restart: unless-stopped
   logging: *logging
 
@@ -314,6 +318,46 @@ services:
     cpus: 1
     cpu_shares: 512
 
+  # The render service (backend/render/Dockerfile, app/core/doc_designs):
+  # Gotenberg's Chromium prints the ticket, certificate and ID card designs
+  # the API sends it (APP_RENDER_URL=http://render:3000, the default). Only on
+  # the internal `render` network: no published port, no route out; Chromium
+  # may load only the page itself (file:///tmp/...) and the data: URIs in it,
+  # never an address. Holds no secrets. The image is built on the box:
+  #   docker build -f backend/render/Dockerfile -t moa-render:8.39.0-1 backend
+  # (docs/OPERATIONS.md, "The render service"). Three conversions at once, a
+  # queue of 24 (then a 503: the API tries once more, then falls back),
+  # Chromium restarted every 100 conversions.
+  render:
+    image: ${RENDER_IMAGE:-moa-render:8.39.0-1}
+    restart: unless-stopped
+    command:
+      - gotenberg
+      - --api-timeout=300s
+      - --api-body-limit=64MB
+      - --api-disable-download-from=true
+      - --chromium-auto-start=true
+      - --chromium-max-concurrency=3
+      - --chromium-max-queue-size=24
+      - --chromium-restart-after=100
+      - "--chromium-allow-list=^file:///tmp/"
+      - "--chromium-allow-list=^data:"  # quoted: a trailing colon would make it a mapping
+      - --chromium-deny-public-ips=true
+      - --chromium-deny-private-ips=true
+    networks:
+      - render
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    # Chromium with three pages open, and a batch of a few hundred cards.
+    mem_limit: 1024m
+    cpus: 1
+    cpu_shares: 512
+    logging: *logging
+
   # The public site, https://myotherapp.in (repo moa_events).
   website:
     image: ${WEBSITE_IMAGE:-ghcr.io/my-other-app/moa-website:latest}
@@ -368,6 +412,12 @@ services:
     cpus: 1
     cpu_shares: 256
     logging: *logging
+
+networks:
+  default: {}
+  # Internal: whatever joins it reaches only the others on it.
+  render:
+    internal: true
 
 volumes:
   postgres_data:

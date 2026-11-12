@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Swiss Minimal certificate</title>
+<style>
+@page { size: A4 landscape; margin: 0 }
+html, body { margin: 0; padding: 0 }
+body { -webkit-print-color-adjust: exact; print-color-adjust: exact }
+</style>
+</head>
+<body>
+<div style="width: 1123px; height: 794px; box-sizing: border-box; padding: 52px 64px 56px; background: #FFFFFF; color: #0A0A0A; font-family: 'Inter', Arial, sans-serif; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden">
+<div style="display: flex; flex-direction: column; gap: 22px">
+<div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 24px">
+<h1 style="margin: 0; font-family: 'Archivo', Arial, sans-serif; font-weight: 800; font-size: 136px; line-height: 0.9; letter-spacing: -0.045em">Certificate</h1>
+<div aria-hidden="true" style="width: 84px; height: 84px; flex-shrink: 0; margin-top: 12px; border-radius: 50%; background: {{accent_color}}"></div>
+</div>
+<div aria-hidden="true" style="height: 4px; background: #0A0A0A"></div>
+</div>
+<div style="display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: 24px; align-items: start">
+<div style="grid-column: span 7; display: flex; flex-direction: column; gap: 14px">
+<div data-option="kicker" style="font-size: 14px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: {{accent_color}}">Of completion &middot; Awarded to</div>
+<div data-fit="wrap" data-fit-lines="2" style="font-family: 'Archivo', Arial, sans-serif; font-weight: 700; font-size: 50px; line-height: 1.04; letter-spacing: -0.02em; text-wrap: balance">{{recipient_name}}</div>
+<div data-fit="wrap" data-fit-lines="3" data-option="statement" style="max-width: 520px; font-size: 18px; line-height: 1.5; text-wrap: pretty">for completing <strong style="font-weight: 600">{{course_title}}</strong> at {{institute_name}}.</div>
+</div>
+<div style="grid-column: span 5; display: flex; flex-direction: column; border-bottom: 1px solid #0A0A0A">
+<div data-fit-box style="display: flex; justify-content: space-between; gap: 16px; padding: 11px 0; border-top: 1px solid #0A0A0A">
+<div style="font-size: 14px; color: #4A4A4A">Certificate No.</div>
+<div data-fit="wrap" data-fit-lines="1" data-fit-min="40%" style="font-size: 15px; font-weight: 600; text-align: right">{{certificate_id}}</div>
+</div>
+<div style="display: flex; justify-content: space-between; gap: 16px; padding: 11px 0; border-top: 1px solid #0A0A0A">
+<div style="font-size: 14px; color: #4A4A4A">Issued</div>
+<div style="font-size: 15px; font-weight: 600; text-align: right">{{issue_date}}</div>
+</div>
+<div data-optional="duration_hours" style="display: flex; justify-content: space-between; gap: 16px; padding: 11px 0; border-top: 1px solid #0A0A0A">
+<div style="font-size: 14px; color: #4A4A4A">Duration</div>
+<div style="font-size: 15px; font-weight: 600; text-align: right">{{duration_hours}} hours</div>
+</div>
+<div data-optional="grade" style="display: flex; justify-content: space-between; gap: 16px; padding: 11px 0; border-top: 1px solid #0A0A0A">
+<div style="font-size: 14px; color: #4A4A4A">Grade</div>
+<div style="font-size: 15px; font-weight: 600; text-align: right">{{grade}}</div>
+</div>
+</div>
+</div>
+<div style="display: flex; justify-content: space-between; align-items: flex-end; gap: 32px">
+<div data-optional="signatory_name" style="display: flex; flex-direction: column; gap: 5px">
+<div data-slot="signature" style="width: 230px; height: 44px; box-sizing: border-box; border-bottom: 2px solid #0A0A0A"></div>
+<div data-fit="wrap" data-fit-lines="1" style="font-size: 16px; font-weight: 600">{{signatory_name}}</div>
+<div data-optional="signatory_designation" style="font-size: 14px; color: #4A4A4A">{{signatory_designation}}</div>
+</div>
+<div style="display: flex; align-items: flex-end; gap: 16px">
+<div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px; text-align: right">
+<div style="font-family: 'Archivo', Arial, sans-serif; font-weight: 700; font-size: 18px; color: {{accent_color}}">Scan to verify</div>
+<div style="max-width: 220px; font-size: 13px; color: #4A4A4A; overflow-wrap: anywhere">{{verify_url}}</div>
+</div>
+<img data-slot="qr" src="{{qr_code_src}}" width="112" height="112" alt="QR code to verify this certificate" style="display: block">
+</div>
+</div>
+</div>
+</body>
+</html>

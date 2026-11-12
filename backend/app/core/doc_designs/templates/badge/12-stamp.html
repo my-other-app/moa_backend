@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Stamp ID card</title>
+<style>
+@page{size:4in 6in;margin:0}
+html,body{margin:0;padding:0}
+*{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+:root{--accent:#B42B22} 
+</style>
+</head>
+<body>
+<div style="width: 384px; height: 576px; box-sizing: border-box; background: #E9F0F7; color: #1C2F73; font-family: Inter, system-ui, sans-serif; padding: 12px">
+<div style="width: 100%; height: 100%; box-sizing: border-box; border: 2px solid #1C2F73; padding: 4px">
+<div style="width: 100%; height: 100%; box-sizing: border-box; border: 1px solid #1C2F73; padding: 10px 20px 18px; display: flex; flex-direction: column; align-items: center">
+<div data-lanyard aria-hidden="true" style="width: 56px; height: 12px; border-radius: 6px; background: #FFFFFF; border: 1.5px solid #1C2F73; box-sizing: border-box"></div>
+<div data-fit="name" style="margin-top: 18px; font-size: 13px; font-weight: 600; letter-spacing: 0.2em">{{org_name}}</div>
+<div style="margin-top: 4px; font-family: 'Instrument Serif', Georgia, serif; font-style: italic; font-size: 24px; line-height: 1.1">Membership Card</div>
+<div data-fit="name" data-fit-min="18" style="margin-top: 34px; font-family: 'Instrument Serif', Georgia, serif; font-size: 48px; line-height: 1; text-align: center">{{full_name}}</div>
+<div data-optional="membership_tier" style="margin-top: 10px; font-size: 13px; font-weight: 600; letter-spacing: 0.16em">{{membership_tier}}</div>
+<div style="align-self: stretch; margin-top: 26px; border-top: 1px solid #1C2F73; border-bottom: 1px solid #1C2F73; padding: 12px 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+<div style="display: flex; flex-direction: column; gap: 2px">
+<div style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; color: #3B4C8A">MEMBER NO.</div>
+<div style="font-size: 17px; font-weight: 600">{{member_id}}</div>
+</div>
+<div data-optional="joined_date" style="display: flex; flex-direction: column; gap: 2px">
+<div style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; color: #3B4C8A">ADMITTED</div>
+<div style="font-size: 17px; font-weight: 600">{{joined_date}}</div>
+</div>
+</div>
+<div style="align-self: stretch; margin-top: auto; display: flex; justify-content: space-between; align-items: flex-end; gap: 16px">
+<div style="width: 118px; height: 118px; box-sizing: border-box; border-radius: 50%; border: 3px solid var(--accent); padding: 5px; transform: rotate(-12deg); color: var(--accent)">
+<div style="width: 100%; height: 100%; box-sizing: border-box; border-radius: 50%; border: 1.5px solid var(--accent); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px">
+<div data-optional="city" style="font-size: 12px; font-weight: 700; letter-spacing: 0.1em">{{city}}</div>
+<div style="font-size: 17px; font-weight: 700; letter-spacing: 0.08em; border-top: 1.5px solid var(--accent); border-bottom: 1.5px solid var(--accent); padding: 2px 4px">VERIFIED</div>
+<div style="font-size: 12px; font-weight: 700; letter-spacing: 0.1em">{{valid_year}}</div>
+</div>
+</div>
+<img src="{{qr_code_url}}" alt="QR code" style="width: 90px; height: 90px; display: block; flex-shrink: 0; image-rendering: pixelated">
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

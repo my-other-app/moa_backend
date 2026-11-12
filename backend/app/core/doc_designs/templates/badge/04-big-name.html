@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Big Name ID card</title>
+<style>
+@page{size:4in 6in;margin:0}
+html,body{margin:0;padding:0}
+*{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+:root{--accent:#FFD83A} 
+</style>
+</head>
+<body>
+<div style="width: 384px; height: 576px; box-sizing: border-box; background: var(--accent); color: #15130D; font-family: Inter, system-ui, sans-serif; display: flex; flex-direction: column">
+<div style="padding: 16px 28px 0; display: flex; flex-direction: column; align-items: center; gap: 16px">
+<div data-lanyard aria-hidden="true" style="width: 56px; height: 12px; border-radius: 6px; background: #FFFFFF; border: 1.5px solid #15130D; box-sizing: border-box"></div>
+<div data-fit-box style="align-self: stretch; display: flex; justify-content: space-between; align-items: center; font-size: 12px; font-weight: 600; letter-spacing: 0.12em">
+<div data-fit="name">{{event_name}}</div>
+<div>{{event_date}}</div>
+</div>
+</div>
+<div style="flex-grow: 1; padding: 0 28px; display: flex; flex-direction: column; justify-content: center; gap: 6px">
+<div style="font-size: 15px; font-weight: 600">Hello, I&#39;m</div>
+<div data-fit="name" data-fit-min="18" style="font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: 88px; line-height: 0.9; letter-spacing: -0.04em; text-transform: uppercase">{{first_name}}</div>
+<div data-fit="name" data-fit-min="18" data-optional="last_name" style="font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 500; font-size: 32px; line-height: 1.1; letter-spacing: -0.01em">{{last_name}}</div>
+<div data-optional="organization" style="margin-top: 14px; display: flex; align-items: center; gap: 12px">
+<div aria-hidden="true" style="width: 40px; height: 4px; background: #15130D"></div>
+<div data-fit="line" style="font-size: 15px; font-weight: 600">{{organization}}</div>
+</div>
+</div>
+<div data-fit-box style="height: 150px; box-sizing: border-box; background: #15130D; color: #FFFFFF; padding: 0 28px; display: flex; justify-content: space-between; align-items: center; gap: 16px">
+<div style="display: flex; flex-direction: column; gap: 8px">
+<div data-fit="name" data-fit-min="18" style="font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: 30px; letter-spacing: 0.06em; line-height: 1; color: var(--accent)">{{role}}</div>
+<div style="font-size: 13px; font-weight: 500; line-height: 1.4"><span data-optional="access_level">{{access_level}}<br></span>ID {{badge_id}}</div>
+</div>
+<div style="background: #FFFFFF; padding: 8px; border-radius: 10px; flex-shrink: 0">
+<img src="{{qr_code_url}}" alt="QR code" style="width: 92px; height: 92px; display: block; image-rendering: pixelated">
+</div>
+</div>
+</div>
+</body>
+</html>

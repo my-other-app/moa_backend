@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dusk Horizon Ticket</title>
+<style>body{margin:0}</style>
+</head>
+<body>
+<!-- Ticket template: 01-dusk-horizon. Fixed canvas 1280x600 (ticket itself 1140x460, centred). Tokens: {{token}}. QR goes in [data-slot="qr"]. See README.md -->
+<div class="ticket-stage" style="width: 1280px; height: 600px; box-sizing: border-box; background: #08070F; display: flex; align-items: center; justify-content: center; font-family: 'Bricolage Grotesque', 'Inter', sans-serif">
+<div style="position: relative; width: 1140px; height: 460px; display: flex; filter: drop-shadow(0 24px 40px rgba(255, 107, 61, 0.18))">
+
+<div style="position: relative; width: 790px; height: 460px; box-sizing: border-box; padding: 40px 44px; background: #14122B; color: #F6F1E7; border-radius: 28px 0 0 28px; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between">
+
+<svg aria-hidden="true" width="790" height="460" viewBox="0 0 790 460" style="position: absolute; left: 0; top: 0">
+<g style="fill: #F6F1E7">
+<circle cx="300" cy="52" r="1.6"></circle><circle cx="372" cy="96" r="1.2"></circle><circle cx="446" cy="38" r="2"></circle><circle cx="520" cy="118" r="1.3"></circle><circle cx="602" cy="64" r="1.8"></circle><circle cx="668" cy="150" r="1.2"></circle><circle cx="716" cy="92" r="2.2"></circle><circle cx="752" cy="188" r="1.4"></circle><circle cx="566" cy="182" r="1.1"></circle><circle cx="640" cy="24" r="1.2"></circle><circle cx="486" cy="210" r="1.2"></circle><circle cx="764" cy="36" r="1.5"></circle>
+</g>
+<path d="M716 78 l4 10 l10 4 l-10 4 l-4 10 l-4 -10 l-10 -4 l10 -4 z" style="fill: #FF6B3D"></path>
+<circle cx="630" cy="400" r="170" style="fill: #FF6B3D"></circle>
+<rect x="450" y="300" width="360" height="5" style="fill: #14122B"></rect>
+<rect x="450" y="322" width="360" height="8" style="fill: #14122B"></rect>
+<rect x="450" y="348" width="360" height="11" style="fill: #14122B"></rect>
+<rect x="450" y="378" width="360" height="14" style="fill: #14122B"></rect>
+<path d="M430 460 C500 410 560 380 630 396 S740 420 790 384 V460 Z" fill="#2A2560"></path>
+<path d="M500 460 C580 424 660 420 790 438 V460 Z" fill="#0A0916"></path>
+</svg>
+
+<div data-fit-box style="position: relative; display: flex; align-items: center; justify-content: space-between">
+<div style="display: flex; align-items: center; gap: 12px">
+<div style="width: 14px; height: 14px; border-radius: 50%; background: #FF6B3D"></div>
+<div data-fit="name" style="font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 700; letter-spacing: 0.14em">{{app_name}}</div>
+</div>
+<div style="font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700; letter-spacing: 0.18em; padding: 8px 16px; background: #FF6B3D; border-radius: 999px; color: #14122B">ADMIT ONE</div>
+</div>
+
+<div style="position: relative; display: flex; flex-direction: column; gap: 12px">
+<h1 data-fit="title" style="margin: 0; font-size: 80px; line-height: 0.95; font-weight: 800; letter-spacing: -0.02em">{{event_name}}</h1>
+<div data-optional="tagline" data-fit="line" style="font-size: 20px; font-weight: 500; color: #FF6B3D">{{tagline}}</div>
+</div>
+
+<div style="position: relative; width: 440px; display: grid; grid-template-columns: 140px 140px 140px; column-gap: 10px; row-gap: 18px; font-family: 'JetBrains Mono', monospace">
+<div style="display: flex; flex-direction: column; gap: 6px"><div style="font-size: 11px; font-weight: 700; letter-spacing: 0.16em; color: #B9B5DA">DATE</div><div data-fit="line" style="font-size: 16px; font-weight: 700">{{date}}</div></div>
+<div data-optional="doors_time" style="display: flex; flex-direction: column; gap: 6px"><div style="font-size: 11px; font-weight: 700; letter-spacing: 0.16em; color: #B9B5DA">DOORS</div><div data-fit="line" style="font-size: 16px; font-weight: 700">{{doors_time}}</div></div>
+<div data-optional="gate" style="display: flex; flex-direction: column; gap: 6px"><div style="font-size: 11px; font-weight: 700; letter-spacing: 0.16em; color: #B9B5DA">GATE</div><div data-fit="line" style="font-size: 16px; font-weight: 700">{{gate}}</div></div>
+<div data-optional="venue" style="grid-column: span 2; display: flex; flex-direction: column; gap: 6px"><div style="font-size: 11px; font-weight: 700; letter-spacing: 0.16em; color: #B9B5DA">VENUE</div><div data-fit="line" style="font-size: 16px; font-weight: 700">{{venue}}</div></div>
+<div data-optional-any="row seat" style="display: flex; flex-direction: column; gap: 6px"><div style="font-size: 11px; font-weight: 700; letter-spacing: 0.16em; color: #B9B5DA">SEAT</div><div data-fit="line" style="font-size: 16px; font-weight: 700"><span data-optional="row">{{row}}</span><span data-optional="row seat"> · </span><span data-optional="seat">{{seat}}</span></div></div>
+</div>
+
+</div>
+
+<div style="width: 350px; height: 460px; box-sizing: border-box; background: #F6F1E7; color: #14122B; border-radius: 0 28px 28px 0; border-left: 3px dashed #14122B; overflow: hidden; display: flex; flex-direction: column">
+<div style="height: 14px; background: #FF6B3D"></div>
+<div data-fit-box style="flex: 1; box-sizing: border-box; padding: 22px 32px 30px; display: flex; flex-direction: column; align-items: center; justify-content: space-between">
+
+<div data-fit-box style="width: 100%; display: flex; align-items: flex-end; justify-content: space-between">
+<div data-optional="ticket_type" style="display: flex; flex-direction: column; gap: 4px">
+<div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; letter-spacing: 0.16em; color: #55516F">PASS</div>
+<div data-fit="name" style="font-size: 20px; font-weight: 800">{{ticket_type}}</div>
+</div>
+<div data-fit="code" style="font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700">{{ticket_id}}</div>
+</div>
+
+<div data-slot="qr" role="img" aria-label="QR code for ticket {{ticket_id}}" style="padding: 12px; position: relative; width: 186px; height: 186px; box-sizing: border-box; background: #FFFFFF; border: 2px solid #14122B; border-radius: 14px; display: flex; align-items: center; justify-content: center"><img src="{{qr_code_src}}" alt="" style="display: block; width: 100%; height: 100%"></div>
+
+<div style="display: flex; flex-direction: column; align-items: center; gap: 4px">
+<div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; letter-spacing: 0.16em; color: #55516F">ISSUED TO</div>
+<div data-fit="name" style="font-size: 18px; font-weight: 700">{{attendee_name}}</div>
+</div>
+
+<div style="width: 100%; height: 44px; border-radius: 12px; background: #14122B; color: #F6F1E7; display: flex; align-items: center; justify-content: center; font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700; letter-spacing: 0.2em">SCAN AT ENTRY</div>
+
+</div>
+</div>
+
+<div aria-hidden="true" style="position: absolute; left: 773px; top: -18px; width: 36px; height: 36px; border-radius: 50%; background: #08070F"></div>
+<div aria-hidden="true" style="position: absolute; left: 773px; bottom: -18px; width: 36px; height: 36px; border-radius: 50%; background: #08070F"></div>
+
+</div>
+</div>
+</body>
+</html>

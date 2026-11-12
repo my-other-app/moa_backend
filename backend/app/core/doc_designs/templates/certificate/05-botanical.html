@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Botanical certificate</title>
+<style>
+@page { size: A4 landscape; margin: 0 }
+html, body { margin: 0; padding: 0 }
+body { -webkit-print-color-adjust: exact; print-color-adjust: exact }
+</style>
+</head>
+<body>
+<div style="position: relative; width: 1123px; height: 794px; box-sizing: border-box; background: #F1F4EC; color: #1F2A22; font-family: 'Karla', Arial, sans-serif; overflow: hidden">
+<svg aria-hidden="true" viewBox="0 0 1123 794" width="1123" height="794" style="position: absolute; left: 0; top: 0">
+<circle cx="1010" cy="397" r="150" fill="#DCE6D2"></circle>
+<g transform="translate(1123 0) rotate(100) scale(1.9)"><path d="M0 0C36-26 84-26 120 0C84 26 36 26 0 0z" fill="{{accent_color}}"></path><path d="M0 0h120" fill="none" stroke="#F1F4EC" stroke-width="1"></path></g>
+<g transform="translate(1123 0) rotate(125) scale(1.6)"><path d="M0 0C36-26 84-26 120 0C84 26 36 26 0 0z" fill="#8FB49A"></path><path d="M0 0h120" fill="none" stroke="#F1F4EC" stroke-width="1"></path></g>
+<g transform="translate(1123 0) rotate(150) scale(1.9)"><path d="M0 0C36-26 84-26 120 0C84 26 36 26 0 0z" fill="#5E8C72"></path><path d="M0 0h120" fill="none" stroke="#F1F4EC" stroke-width="1"></path></g>
+<g transform="translate(1123 0) rotate(172) scale(1.4)"><path d="M0 0C36-26 84-26 120 0C84 26 36 26 0 0z" fill="{{accent_color}}"></path><path d="M0 0h120" fill="none" stroke="#F1F4EC" stroke-width="1"></path></g>
+<g transform="translate(1123 794) rotate(188) scale(1.4)"><path d="M0 0C36-26 84-26 120 0C84 26 36 26 0 0z" fill="#5E8C72"></path><path d="M0 0h120" fill="none" stroke="#F1F4EC" stroke-width="1"></path></g>
+<g transform="translate(1123 794) rotate(210) scale(1.9)"><path d="M0 0C36-26 84-26 120 0C84 26 36 26 0 0z" fill="{{accent_color}}"></path><path d="M0 0h120" fill="none" stroke="#F1F4EC" stroke-width="1"></path></g>
+<g transform="translate(1123 794) rotate(235) scale(1.6)"><path d="M0 0C36-26 84-26 120 0C84 26 36 26 0 0z" fill="#8FB49A"></path><path d="M0 0h120" fill="none" stroke="#F1F4EC" stroke-width="1"></path></g>
+<g transform="translate(1123 794) rotate(260) scale(1.9)"><path d="M0 0C36-26 84-26 120 0C84 26 36 26 0 0z" fill="#5E8C72"></path><path d="M0 0h120" fill="none" stroke="#F1F4EC" stroke-width="1"></path></g>
+</svg>
+<div style="position: relative; width: 820px; height: 794px; box-sizing: border-box; padding: 72px 0 64px 96px; display: flex; flex-direction: column; justify-content: space-between">
+<div data-fit-box style="display: flex; align-items: center; gap: 14px">
+<img data-optional="logo_src" data-slot="logo" src="{{logo_src}}" alt="" style="width: 48px; height: 48px; object-fit: contain; flex-shrink: 0">
+<div data-fit="wrap" data-fit-lines="1" style="font-size: 15px; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: {{accent_color}}">{{institute_name}}</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 14px">
+<div data-option="title" style="font-family: 'Fraunces', Georgia, serif; font-style: italic; font-weight: 500; font-size: 26px; color: {{accent_color}}">Certificate of Completion</div>
+<div style="font-size: 16px; color: #4A5A4F">This certificate is presented to</div>
+<div data-fit="wrap" data-fit-lines="2" style="font-family: 'Fraunces', Georgia, serif; font-weight: 600; font-size: 66px; line-height: 1.05; letter-spacing: -0.01em; text-wrap: balance">{{recipient_name}}</div>
+<div data-fit="wrap" data-fit-lines="3" data-option="statement" style="max-width: 600px; font-size: 19px; line-height: 1.55; text-wrap: pretty">for growing through every module of <strong style="font-weight: 700">{{course_title}}</strong>, completed on {{completion_date}}<span data-optional="grade"> with grade {{grade}}</span>.</div>
+</div>
+<div style="display: flex; align-items: flex-end; gap: 48px">
+<div data-fit-box style="display: flex; align-items: center; gap: 14px">
+<div style="padding: 8px; background: #FFFFFF; border-radius: 14px; border: 2px solid {{accent_color}}; display: flex">
+<img data-slot="qr" src="{{qr_code_src}}" width="88" height="88" alt="QR code to verify this certificate" style="display: block">
+</div>
+<div style="display: flex; flex-direction: column; gap: 3px">
+<div style="font-size: 15px; font-weight: 700; color: {{accent_color}}">Scan to verify</div>
+<div style="font-size: 13px; color: #4A5A4F">Certificate No.</div>
+<div data-fit="wrap" data-fit-lines="1" data-fit-min="40%" style="font-size: 15px; font-weight: 700">{{certificate_id}}</div>
+</div>
+</div>
+<div data-optional="signatory_name" style="display: flex; flex-direction: column; gap: 5px">
+<div data-slot="signature" style="width: 210px; height: 44px; box-sizing: border-box; border-bottom: 2px solid #1F2A22"></div>
+<div data-fit="wrap" data-fit-lines="1" style="font-size: 16px; font-weight: 700">{{signatory_name}}</div>
+<div data-optional="signatory_designation" style="font-size: 14px; color: #4A5A4F">{{signatory_designation}}</div>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

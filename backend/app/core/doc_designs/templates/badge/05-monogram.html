@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Monogram ID card</title>
+<style>
+@page{size:4in 6in;margin:0}
+html,body{margin:0;padding:0}
+*{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+:root{--accent:#0B5E5E} 
+</style>
+</head>
+<body>
+<div style="width: 384px; height: 576px; box-sizing: border-box; background: #EEF1EC; color: #10201F; font-family: Inter, system-ui, sans-serif; padding: 16px 28px 28px; display: flex; flex-direction: column; align-items: center">
+<div data-lanyard aria-hidden="true" style="width: 56px; height: 12px; border-radius: 6px; background: #FFFFFF; border: 1.5px solid #10201F; box-sizing: border-box"></div>
+<div data-fit-box style="align-self: stretch; margin-top: 16px; display: flex; justify-content: space-between; align-items: center; font-size: 12px; font-weight: 600; letter-spacing: 0.14em">
+<div data-fit="name">{{org_name}}</div>
+<div style="color: var(--accent)">MEMBER</div>
+</div>
+<div style="margin-top: 22px; width: 212px; height: 212px; box-sizing: border-box; border-radius: 50%; border: 3px solid var(--accent); padding: 10px">
+<div style="width: 100%; height: 100%; box-sizing: border-box; border-radius: 50%; border: 2px dashed var(--accent); background: #FFFFFF; display: flex; align-items: center; justify-content: center">
+<div style="font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: 96px; line-height: 1; letter-spacing: -0.05em; color: var(--accent)">{{initials}}</div>
+</div>
+</div>
+<div data-fit="name" data-fit-min="18" style="margin-top: 22px; font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: 32px; line-height: 1; letter-spacing: -0.02em; text-align: center">{{full_name}}</div>
+<div data-fit="name" data-fit-min="18" style="margin-top: 12px; background: var(--accent); color: #FFFFFF; font-size: 13px; font-weight: 600; letter-spacing: 0.12em; padding: 7px 16px; border-radius: 999px"><span data-optional="role">{{role}}</span><span data-optional="role city"> · </span><span data-optional="city">{{city}}</span></div>
+<div style="align-self: stretch; margin-top: auto; border-top: 2px solid #10201F; padding-top: 16px; display: flex; justify-content: space-between; align-items: flex-end; gap: 16px">
+<div style="display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; flex-direction: column; gap: 2px">
+<div style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; color: #47594F">MEMBER NO.</div>
+<div data-fit="code" style="font-size: 17px; font-weight: 600">{{member_id}}</div>
+</div>
+<div data-optional="joined_date" style="display: flex; flex-direction: column; gap: 2px">
+<div style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; color: #47594F">JOINED</div>
+<div style="font-size: 17px; font-weight: 600">{{joined_date}}</div>
+</div>
+</div>
+<img src="{{qr_code_url}}" alt="QR code" style="width: 92px; height: 92px; display: block; flex-shrink: 0; image-rendering: pixelated">
+</div>
+</div>
+</body>
+</html>

@@ -31,6 +31,10 @@ networks:
     ipam:
       config:
         - subnet: 192.168.5.0/24
+  # The render service's own network: internal, so nothing on it reaches the
+  # internet or the host. The backend and the worker join it to call render.
+  render_network:
+    internal: true
 
 services:
   postgres:
@@ -166,6 +170,7 @@ services:
     networks:
       doth_network:
         ipv4_address: 192.168.5.100
+      render_network: {}
 
   # The job queue's worker (backend/app/worker.py): the same image, code, env
   # and mounts as the backend, running jobs instead of serving requests. Not
@@ -207,6 +212,7 @@ services:
     networks:
       doth_network:
         ipv4_address: 192.168.5.103
+      render_network: {}
 
   # Shared state for several API processes (backend/app/core/redis.py): the
   # rate limits' counts, the discover cache's second level, publish/subscribe
@@ -296,6 +302,52 @@ services:
     networks:
       doth_network:
         ipv4_address: 192.168.5.104
+
+  # The render service (backend/render/Dockerfile, app/core/doc_designs):
+  # Gotenberg's Chromium prints the ticket, certificate and ID card designs
+  # the backend sends it (APP_RENDER_URL=http://render:3000, the default).
+  # Not public: no published port, and only on render_network, which is
+  # internal -- Chromium has no route out, and may load only the page itself
+  # (file:///tmp/...) and the data: URIs in it (fonts, QR codes, logos,
+  # photos), never an address. Holds no secrets. Started once, on purpose:
+  #   sudo docker-compose -f docker-compose.prod.yml up -d --build --no-deps render < /dev/null
+  # then the backend (and worker) recreated with a build, so they join
+  # render_network (docs/OPERATIONS.md, "The render service").
+  # On this box's 8 GB plan it takes meilisearch's slot (768m, section 10):
+  # run one or the other, or resize. Two conversions at once, a queue of 16
+  # (the 17th is a 503, which the backend tries once more, then falls back),
+  # Chromium restarted every 100 conversions so a leak never builds up.
+  render:
+    build:
+      context: backend/
+      dockerfile: render/Dockerfile
+    image: moa-render:8.39.0-1
+    container_name: doth-live-render
+    restart: unless-stopped
+    command:
+      - gotenberg
+      - --api-timeout=300s
+      - --api-body-limit=64MB
+      - --api-disable-download-from=true
+      - --chromium-auto-start=true
+      - --chromium-max-concurrency=2
+      - --chromium-max-queue-size=16
+      - --chromium-restart-after=100
+      - "--chromium-allow-list=^file:///tmp/"
+      - "--chromium-allow-list=^data:"  # quoted: a trailing colon would make it a mapping
+      - --chromium-deny-public-ips=true
+      - --chromium-deny-private-ips=true
+    mem_limit: 768m
+    cpus: 1
+    logging: *logging
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      render_network: {}
 
   # nginx:
   #   container_name: bcards-nginx
