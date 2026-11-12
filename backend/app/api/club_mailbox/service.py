@@ -129,6 +129,17 @@ async def plan_allows(session, club_id: int, actor=None) -> bool:
     return await gates.allows(session, club_id, FEATURE, actor=actor)
 
 
+async def club_plan_allows(session, club_id: int) -> bool:
+    """What the club's own plan allows, whoever asks: an admin's request is
+    never gated (gates.bypassed), but the admin's card must say what the
+    club has."""
+    from app.api.subscriptions import gates
+
+    if FEATURE in gates.ALWAYS_ALLOWED or not gates.enforcing():
+        return True
+    return (await gates.entitlements(session, club_id)).allows(FEATURE)
+
+
 async def require_plan(session, club_id: int, actor=None) -> None:
     from app.api.subscriptions import gates
 
@@ -238,6 +249,11 @@ async def set_address(session, club, user, handle: str, *, member=None, request=
     return mailbox
 
 
+def _held(row: ClubMailboxAddresses, now: datetime) -> bool:
+    """Whether an address row still holds its handle: current, or forwarding."""
+    return row.retired_at is None or (row.forward_until is not None and _aware(row.forward_until) > now)
+
+
 async def _move_to(session, club_id: int, mailbox: Optional[ClubMailboxes], current: Optional[ClubMailboxAddresses],
                    value: str, now: datetime, *, created_by: Optional[int] = None,
                    created_by_member_id: Optional[int] = None) -> ClubMailboxes:
@@ -267,6 +283,9 @@ async def _move_to(session, club_id: int, mailbox: Optional[ClubMailboxes], curr
                 stale.retired_at, stale.forward_until, stale.automatic = None, None, False
             else:
                 if stale is not None:
+                    if _held(stale, now):
+                        # Another club's, taken between the check and here.
+                        raise IntegrityError("handle taken", None, Exception("handle taken"))
                     # Another club's, whose forwarding has ended (the sweep had not let it go yet).
                     await session.delete(stale)
                     await session.flush()
@@ -347,6 +366,9 @@ async def ensure_address(session, club, now: Optional[datetime] = None) -> Optio
                             await session.flush()
                         stale = await session.scalar(select(ClubMailboxAddresses).where(ClubMailboxAddresses.handle == handle))
                         if stale is not None:
+                            if _held(stale, now):
+                                # Someone's after all: taken since the look.
+                                raise IntegrityError("handle taken", None, Exception("handle taken"))
                             # A handle whose forwarding has ended, not let go by the sweep yet.
                             await session.delete(stale)
                             await session.flush()
@@ -529,8 +551,9 @@ async def status_out(session, club_id: int, *, manage: bool, mail: bool, owner: 
 
 async def admin_out(session, club_id: int) -> dict:
     """A platform admin's card: the address, whether it is open, counts.
-    Never a subject, an address someone wrote from, or a word of any mail."""
-    allowed = await plan_allows(session, club_id)
+    Never a subject, an address someone wrote from, or a word of any mail.
+    `plan_allows` and `state` are the club's own, though an admin asks."""
+    allowed = await club_plan_allows(session, club_id)
     mailbox = await mailbox_of(session, club_id)
     current = await current_address(session, club_id) if mailbox is not None else None
     out = {
