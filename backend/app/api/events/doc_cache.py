@@ -11,8 +11,10 @@ printed, the design (with its image keys, never its expiring links), the
 renderer's version and, for the HTML templates, the template file itself;
 for one of the designer's designs (app/api/doc_presets), the design's own
 fingerprint -- its template's digest, its manifest's version, the font
-lock's digest, the options, bindings and accent (D8).
-Change any of them and the key changes, so a cached file is never stale;
+lock's digest, the options, bindings and accent (D8); for an editable (v2)
+layout (doc_presets.layouts), P's fingerprint of the layout and its values
+(the builder, the fonts and the fit script with it), the QR's text, the
+pictures by key and the brand colours. Change any of them and the key changes, so a cached file is never stale;
 nothing is ever invalidated, an old one just stops being asked for (and the
 sweep in doc_cache_sweep.py deletes it once it is APP_DOC_CACHE_DAYS old).
 
@@ -75,7 +77,9 @@ logger = logging.getLogger(__name__)
 
 #: Bump when the renderer changes what an existing design prints like.
 #: 2026-11-12.1: the designer's designs (app/api/doc_presets) and the new defaults.
-RENDER_VERSION = "2026-11-12.1"
+#: 2026-11-12.2: editable (v2) layouts, the v2 starters as the defaults, and one
+#: values function for presets and layouts (doc_presets.values.document_values).
+RENDER_VERSION = "2026-11-12.2"
 
 #: What the code keeps under docs/: these kinds, these extensions (the sweep
 #: deletes nothing else).

@@ -15,10 +15,19 @@ not when the club picks another one, and not when the defaults change.
                          issued with one of the designer's designs: that
                          design, with these options, bindings and accent,
                          and the logo and signatures it had then.
+    {"mode": "layout", "layout": {...v2...}, "revision": n, "images": {...}}
+                         issued with an editable (v2) layout: a snapshot of
+                         the layout itself (layout v2 contract, Q), and the
+                         logo and signatures its design row had then. A
+                         later save of the layout changes no issued one.
 
 A certificate with none (issued by code before the column, in the moment a
 deploy takes) is a legacy one. A guest not yet issued one has no pin; the
 designer's previews draw the event's current design.
+
+"legacy" and "custom" are drawn by the classic paths (config.classic): when
+the event's design has become a v2 layout since, the v1 canvas it replaced
+(kept beside it) or the HTML template draws them, as they were.
 
 The club's "Apply the current design to issued certificates" (per event,
 confirmed) writes the current design over every issued certificate's pin.
@@ -28,21 +37,27 @@ from __future__ import annotations
 import json
 from typing import Optional
 
-from app.api.doc_presets.config import preset_of, without_preset
+from app.api.doc_presets.config import REVISION, classic, layout_v2_of, preset_of, revision_of, without_preset
 
 #: The images a preset certificate prints from its design row, kept with its pin.
 PINNED_IMAGES = ("logo_key", "signature_1_key", "signature_2_key")
 LEGACY = {"mode": "legacy"}
 
 
+def _images(style: dict) -> dict:
+    from app.api.templates_images import key_of
+
+    return {f"{f}_key": key_of(style, f) for f in ("logo", "signature_1", "signature_2")}
+
+
 def snapshot(style: dict) -> dict:
     """What a certificate issued now keeps, from the design it resolves to."""
     preset = preset_of(style)
     if preset is not None:
-        from app.api.templates_images import key_of
-
-        images = {f"{f}_key": key_of(style, f) for f in ("logo", "signature_1", "signature_2")}
-        return {"mode": "preset", "preset": preset, "images": images}
+        return {"mode": "preset", "preset": preset, "images": _images(style)}
+    layout = layout_v2_of(style)
+    if layout is not None:
+        return {"mode": "layout", "layout": layout, "revision": revision_of(style), "images": _images(style)}
     from app.api.events.tickets import design_version_of
 
     return {"mode": "custom", "version": design_version_of(style)}
@@ -73,4 +88,12 @@ def pinned_style(style: dict, registration) -> dict:
             out[key] = (pin.get("images") or {}).get(key)
         out["preset"] = pin["preset"]
         return out
-    return without_preset(style)
+    if pin.get("mode") == "layout" and layout_v2_of(pin) is not None:
+        # Its own snapshot; the D9 fallback (classic) is the event's as now.
+        out = without_preset(style)
+        for key in PINNED_IMAGES:
+            out[key] = (pin.get("images") or {}).get(key)
+        out["layout"] = pin["layout"]
+        out[REVISION] = pin.get("revision") or 0
+        return out
+    return classic(style)

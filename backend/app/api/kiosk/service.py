@@ -124,7 +124,9 @@ async def update_kiosk_settings(session, event: Events, body) -> dict:
 
 def _brand_primary(style: dict, club) -> str:
     """The kiosk's colour: the card design's accent when it is one of the
-    designer's designs and has one, else the layered design's or the club's."""
+    designer's designs or a v2 layout and has one (vars.accent), else the
+    layered design's or the club's."""
+    from app.api.doc_presets import layouts
     from app.api.doc_presets.config import preset_of
     from app.api.doc_presets.jobs import accent_of
 
@@ -133,6 +135,8 @@ def _brand_primary(style: dict, club) -> str:
         accent = accent_of(preset)
         if accent:
             return accent
+    elif (accent := layouts.accent_of(style)) is not None:
+        return accent[:7]
     return layout_colors(style, club)["primary"]
 
 

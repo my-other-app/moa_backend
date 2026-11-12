@@ -123,12 +123,16 @@ def poster_url(event) -> Optional[str]:
 
 
 def design_version_of(style: dict) -> int:
-    """The layered design's version; 0 for an HTML design and for one of the
-    designer's designs (whose own fingerprint names it: doc_presets)."""
-    from app.api.doc_presets.config import preset_of
+    """The layered design's version: a v1 canvas's saves, a v2 layout's
+    revision (its `version` is the schema's 2: doc_presets.config); 0 for an
+    HTML design and for one of the designer's designs (whose own
+    fingerprint names it: doc_presets)."""
+    from app.api.doc_presets.config import layout_v2_of, preset_of, revision_of
 
     if not in_layout_mode(style) or preset_of(style) is not None:
         return 0
+    if layout_v2_of(style) is not None:
+        return revision_of(style)
     return int((style.get("layout") or {}).get("version", 0) or 0)
 
 
@@ -174,14 +178,20 @@ def ticket_job(registration, style: dict) -> RenderJob:
     # certificate's revocation does for its cache seed. Reinstating it gives
     # back the old fingerprint, so the kept PDF is read, not drawn again.
     revoked_at = getattr(registration, "ticket_revoked_at", None)
-    from app.api.doc_presets.config import preset_of, without_preset
+    from app.api.doc_presets.config import classic, layout_v2_of, preset_of
 
     if preset_of(style) is not None:
         # One of the designer's designs, drawn by the render service; the
         # classic ticket (this design without its preset) when it cannot be.
         from app.api.doc_presets.jobs import preset_job
 
-        return preset_job("ticket", registration, style, fallback=ticket_job(registration, without_preset(style)), revoked_at=revoked_at)
+        return preset_job("ticket", registration, style, fallback=ticket_job(registration, classic(style)), revoked_at=revoked_at)
+    if layout_v2_of(style) is not None:
+        # An editable (v2) layout, drawn by the render service; the classic
+        # ticket when it cannot be (D9).
+        from app.api.doc_presets import layouts
+
+        return layouts.job("ticket", registration, style, fallback=ticket_job(registration, classic(style)), revoked_at=revoked_at)
     if in_layout_mode(style):
         # Drawn by the layout renderer with the editor's own fonts and layout
         # code, so the ticket is what the canvas showed. No HTML, no browser.

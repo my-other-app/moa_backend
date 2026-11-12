@@ -127,7 +127,7 @@ def certificate_job(registration, style: dict) -> RenderJob:
     (certificate_style, doc_presets.pins)."""
     event = registration.event
     version = design_version_of(style)
-    from app.api.doc_presets.config import preset_of, without_preset
+    from app.api.doc_presets.config import classic, layout_v2_of, preset_of
 
     if preset_of(style) is not None:
         # One of the designer's designs; the classic certificate when the
@@ -136,7 +136,16 @@ def certificate_job(registration, style: dict) -> RenderJob:
         from app.api.doc_presets.jobs import preset_job
 
         return preset_job(
-            "certificate", registration, style, fallback=certificate_job(registration, without_preset(style)),
+            "certificate", registration, style, fallback=certificate_job(registration, classic(style)),
+            revoked_at=getattr(registration, "certificate_revoked_at", None),
+        )
+    if layout_v2_of(style) is not None:
+        # An editable (v2) layout; the classic certificate when the render
+        # service cannot draw it (D9). An issued one's layout is its pin's.
+        from app.api.doc_presets import layouts
+
+        return layouts.job(
+            "certificate", registration, style, fallback=certificate_job(registration, classic(style)),
             revoked_at=getattr(registration, "certificate_revoked_at", None),
         )
     if in_layout_mode(style):

@@ -23,48 +23,26 @@ import logging
 from typing import Optional
 
 from app.api.doc_presets import engine
-from app.api.doc_presets.config import preset_of
+from app.api.doc_presets.config import classic, preset_of
 from app.api.doc_presets.photos import photo_uri
-from app.api.doc_presets.values import (
-    Mapped,
-    badge_values,
-    certificate_values,
-    subject_of,
-    ticket_values,
-)
+from app.api.doc_presets.values import Mapped, club_logo_key, document_values, subject_of
 
 logger = logging.getLogger(__name__)
 
 #: A PNG of a document drawn by the classic renderer instead (D9), in px.
 FALLBACK_PNG_WIDTH = 1200
 
-def club_logo_key(event) -> Optional[str]:
-    """The club's logo in the bucket: its large variant, else the original."""
-    club = getattr(event, "club", None)
-    logo = getattr(club, "logo", None) if club is not None else None
-    variations = getattr(logo, "variations", None)
-    if isinstance(variations, dict):
-        return variations.get("large") or variations.get("original")
-    return logo if isinstance(logo, str) and logo else None
+__all__ = ["club_logo_key", "accent_of", "mapped_for", "image_refs", "materialise", "preset_job", "png_of", "card_page", "preset_pages_pdf"]
 
 
 def accent_of(preset: dict) -> Optional[str]:
     return preset.get("accent") or engine.accent_default(preset["id"])
 
 
-def mapped_for(kind: str, event, subject, style: dict, preset: dict, *, door: Optional[str] = None, printed_at=None) -> Mapped:
-    """The document's data (D5). The bindings are A's fill's to apply."""
-    if kind == "ticket":
-        return ticket_values(event, subject)
-    if kind == "certificate":
-        from app.api.templates_images import key_of
-
-        return certificate_values(
-            event, subject,
-            logo_key=key_of(style, "logo") or club_logo_key(event),
-            signatures=(key_of(style, "signature_1"), key_of(style, "signature_2")),
-        )
-    return badge_values(event, subject, door=door, printed_at=printed_at)
+def mapped_for(kind: str, event, subject, style: dict, preset: Optional[dict] = None, *, door: Optional[str] = None, printed_at=None) -> Mapped:
+    """The document's data: the one values function (values.document_values,
+    D5 and layout v2's V5). A preset's bindings are A's fill's to apply."""
+    return document_values(kind, event, subject, style=style, door=door, printed_at=printed_at)
 
 
 def image_refs(mapped: Mapped) -> dict:

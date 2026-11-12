@@ -30,13 +30,17 @@ from app.api.event_designs.router import (
     _club_layout_prefix,
     _fields_of,
     _layout_dto,
+    _checked_v2,
     _plan_allows,
     _preview_png,
     _starter_of,
     _store_layout_image,
+    _v2_body,
     _validate_layout,
+    layout_v2_preview,
+    starter_answer,
 )
-from app.api.doc_presets.config import preset_of
+from app.api.doc_presets.config import is_v2, preset_of, with_layout
 from app.api.events.documents import in_layout_mode, layout_sample_values
 from app.api.templates_audience import TemplateAudience
 from app.api.templates_images import shown
@@ -119,10 +123,15 @@ async def get_starter(session: SessionDep, user: ClubAuth, kind: DesignKind, nam
 @router.put("/{kind}/layout", summary="Save the club's default design")
 async def save_layout(session: SessionDep, user: ClubAuth, kind: DesignKind, body: dict) -> dict:
     """Becomes the one default of its kind for the club; the version climbs so
-    an event forked later can say which design it came from."""
+    an event forked later can say which design it came from. A v2 layout is
+    checked and saved as the event's is (V4); answers with `warnings` then."""
     club = await _club_for(session, user)
     await _plan_allows(session, club.id, kind, user)
-    layout = _validate_layout(kind, body, prefixes=(_club_layout_prefix(club.id),))
+    v2 = is_v2(body)
+    if v2:
+        layout_v2, warnings = _checked_v2(kind, body, prefixes=(_club_layout_prefix(club.id),))
+    else:
+        layout = _validate_layout(kind, body, prefixes=(_club_layout_prefix(club.id),))
     model = _MODELS[kind]
     template = await _default_row(session, club.id, kind)
     if template is None:
@@ -132,14 +141,18 @@ async def save_layout(session: SessionDep, user: ClubAuth, kind: DesignKind, bod
         )
         session.add(template)
     config = dict(template.config or {})
-    previous = (config.get("layout") or {}).get("version", 0)
-    config["layout"] = {**dump(layout), "version": previous + 1}
-    # Saving the custom design makes it the one in use (D6).
-    config.pop("preset", None)
+    if v2:
+        config = with_layout(config, layout_v2)
+    else:
+        previous = (config.get("layout") or {}).get("version", 0)
+        config["layout"] = {**dump(layout), "version": previous + 1}
+        # Saving the custom design makes it the one in use (D6).
+        config.pop("preset", None)
     template.config = config
     await session.commit()
     await session.refresh(template)
-    return _dto(club, kind, template, shown(template.config, template, fields=_fields_of(template)), await _agenda(session, club, kind))
+    out = _dto(club, kind, template, shown(template.config, template, fields=_fields_of(template)), await _agenda(session, club, kind))
+    return {**out, "warnings": warnings} if v2 else out
 
 
 @router.delete("/{kind}/layout", summary="Drop the club's default; events without their own follow the system design")
@@ -154,10 +167,16 @@ async def reset_layout(session: SessionDep, user: ClubAuth, kind: DesignKind) ->
     return {"deleted": True}
 
 
-@router.post("/{kind}/layout/preview", summary="The unsaved design rendered exactly, as a PNG")
-async def preview_layout(session: SessionDep, user: ClubAuth, kind: DesignKind, body: dict) -> Response:
+@router.post("/{kind}/layout/preview", summary="The unsaved design rendered exactly: a PNG, or HTML for an iframe")
+async def preview_layout(session: SessionDep, user: ClubAuth, kind: DesignKind, body: dict, format: str = Query("png", pattern="^(html|png)$")) -> Response:
+    """As the event's, on a stand-in event with the club's details and the sample guest."""
     club = await _club_for(session, user)
     body.pop("ticket_id", None)
+    v2 = _v2_body(body)
+    if v2 is not None:
+        layout_v2, _ = _checked_v2(kind, v2, prefixes=(_club_layout_prefix(club.id),))
+        _, style = await _current(session, club, kind)
+        return await layout_v2_preview(kind, _sample_event(club), style, layout_v2, None, TemplateAudience.event_default, format)
     layout = _validate_layout(kind, body, prefixes=(_club_layout_prefix(club.id),))
     _, style = await _current(session, club, kind)
     style = {**style, "layout": dump(layout)}
@@ -170,6 +189,12 @@ async def preview_layout(session: SessionDep, user: ClubAuth, kind: DesignKind, 
         content=await pool.run(_preview_png, style, values, qr_text, f"{kind.value} preview", entries, club),
         media_type="image/png", headers={"Cache-Control": "no-store"},
     )
+
+
+@router.post("/{kind}/layout/starters/{starter_id:path}", summary="A v2 starter to begin the club's design from (nothing is saved)")
+async def use_starter(session: SessionDep, user: ClubAuth, kind: DesignKind, starter_id: str) -> dict:
+    await _club_for(session, user)
+    return starter_answer(kind, starter_id)
 
 
 @router.put("/{kind}/preset", summary="Use one of the designer's designs as the club's default")

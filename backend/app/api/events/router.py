@@ -784,9 +784,9 @@ async def get_ticket_image(
 
     tag = True
     if job.preset:
-        # One of the designer's designs: the PDF the download is, at twice
-        # its pixels (D2).
-        from app.api.doc_presets.config import without_preset
+        # One of the designer's designs or a v2 layout (drawn by the render
+        # service): the PDF the download is, at twice its pixels (D2).
+        from app.api.doc_presets.config import classic
         from app.api.doc_presets.jobs import png_of
 
         pdf, whole = await _drawn(job, job.cache_key("ticket", registration.id))
@@ -794,7 +794,7 @@ async def get_ticket_image(
             return Response(content=await png_of(job, pdf), media_type="image/png", headers=tagged(whole))
         # The render service could not draw it (D9): the classic ticket's
         # own picture, untagged, as its PDF was.
-        style, tag = without_preset(style), False
+        style, tag = classic(style), False
         job = ticket_job(registration, style)
 
     if in_layout_mode(style):
@@ -1103,7 +1103,7 @@ async def get_certificate_image(
         return unchanged
 
     if job.preset:
-        from app.api.doc_presets.config import without_preset
+        from app.api.doc_presets.config import classic
         from app.api.doc_presets.jobs import png_of
 
         pdf, whole = await _drawn(job, job.cache_key("certificate", registration.id))
@@ -1112,7 +1112,7 @@ async def get_certificate_image(
         if not job.state.get("fallback"):
             return Response(content=await png_of(job, pdf), media_type="image/png", headers=headers)
         # The render service could not draw it (D9): the classic certificate's own picture.
-        style = without_preset(style)
+        style = classic(style)
         job = certificate_job(registration, style)
 
     if in_layout_mode(style):
