@@ -454,37 +454,48 @@ async def _receipt_job(p: dict) -> None:
         )
         if order is None or not order.user:
             return
+        # Everything the mail needs is read now, BEFORE `_log_with_order`: it
+        # reloads the order with populate_existing and without its user, which
+        # resets `order.user` to unloaded; the User row, held by nothing else,
+        # leaves the identity map, and reading `order.user.full_name` after
+        # that is a lazy load outside the greenlet -- MissingGreenlet, so every
+        # receipt failed its four tries (12 Nov 2026).
+        user = order.user
+        receipt = {
+            "payer_name": user.full_name,
+            "payer_email": user.email,
+            "payer_phone": user.phone or "N/A",
+            "amount": f"₹{order.amount}",
+            "receipt_id": order.receipt,
+            "purpose": "Event Registration",
+            "notes": "N/A",
+            "current_year": datetime.now().year,
+        }
+        source, payload = order.source, dict(order.payload or {})
         log = await _log_with_order(session, p["payment_id"])
+        receipt["payment_method"] = log.payment_method if log is not None else None
+        receipt["timestamp"] = log.created_at if log is not None else None
         await session.commit()
         await asyncio.to_thread(
             send_payment_confirmation_email,
             subject="Payment Receipt",
-            payload={
-                "payer_name": order.user.full_name,
-                "payer_email": order.user.email,
-                "payer_phone": order.user.phone or "N/A",
-                "amount": f"₹{order.amount}",
-                "receipt_id": order.receipt,
-                "payment_method": log.payment_method if log is not None else None,
-                "timestamp": log.created_at if log is not None else None,
-                "purpose": "Event Registration",
-                "notes": "N/A",
-                "current_year": datetime.now().year,
-            },
-            recipients=[order.user.email],
+            payload=receipt,
+            recipients=[receipt["payer_email"]],
         )
-        await _count_receipt(session, order, p["payment_id"])
+        await _count_receipt(session, source, payload, p["payment_id"])
 
 
-async def _count_receipt(session, order, payment_id: str) -> None:
+async def _count_receipt(session, source: str, payload: dict, payment_id: str) -> None:
     """The receipt is a payment message the club's attendee was sent: it
     counts against the club's monthly emails (app/api/message_quota), once
-    per payment. Never held back, and never fails the receipt."""
+    per payment. Never held back, and never fails the receipt. Takes the
+    order's source and payload as plain values: the order row is expired by
+    then."""
     from app.api.message_quota import service as quota
     from app.api.payments.handlers import event_for_payload
 
     try:
-        event = await event_for_payload(session, order.source, order.payload or {})
+        event = await event_for_payload(session, source, payload)
     except Exception:  # noqa: BLE001
         await session.rollback()
         return
