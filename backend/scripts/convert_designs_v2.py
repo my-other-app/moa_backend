@@ -1248,44 +1248,10 @@ def convert_design(browser, design_id: str, wording: str | None = None) -> tuple
     return compact(v2schema.dump(parsed)), warnings
 
 
-#: Fields left out of a starter's JSON when they hold their default.
-_DEFAULTS = {
-    "rotation": 0, "opacity": 1, "hidden": False, "locked": False, "preprinted": False, "letterSpacing": 0,
-    "lineHeight": 1.2, "align": "left", "valign": "top", "transform": "none", "textWrap": "normal", "maxLines": 1,
-    "fit": None, "padding": [0, 0, 0, 0], "radius": [0, 0, 0, 0], "quietZone": 0, "dark": "#000000",
-    "light": "#FFFFFF", "placeholder": "none",
-}
-
-
-def _ints(v):
-    if isinstance(v, float) and v == int(v):
-        return int(v)
-    if isinstance(v, list):
-        return [_ints(x) for x in v]
-    if isinstance(v, dict):
-        return {k: _ints(x) for k, x in v.items()}
-    return v
-
-
 def compact(layout: dict) -> dict:
-    layout = _ints(layout)
-    out = dict(layout)
-    layers = []
-    for layer in layout["layers"]:
-        lay = {}
-        for k, v in layer.items():
-            if k in _DEFAULTS and _DEFAULTS[k] is not None and v == _DEFAULTS[k]:
-                continue
-            if k == "text" and layer.get("spans"):
-                continue
-            if k == "valign" and layer["kind"] == "image" and v == "middle":
-                continue
-            if k == "align" and layer["kind"] == "image" and v == "center":
-                continue
-            lay[k] = v
-        layers.append(lay)
-    out["layers"] = layers
-    return out
+    """The starter as written: without what parsing restores (each kind's own
+    defaults), checked lossless (app.core.layout_v2.schema.compact)."""
+    return v2schema.compact(layout)
 
 
 def write_json(path: Path, data: dict) -> None:

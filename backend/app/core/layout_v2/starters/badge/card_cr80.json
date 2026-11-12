@@ -22,7 +22,6 @@
    "width": 638,
    "height": 400,
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "brand.primary"
@@ -37,7 +36,7 @@
    "height": 70,
    "kind": "image",
    "source": "org_logo",
-   "fit": "contain"
+   "align": "left"
   },
   {
    "id": "event",
@@ -57,7 +56,6 @@
    "color": "#FFFFFF",
    "letterSpacing": 0.0714,
    "maxLines": 2,
-   "fit": "shrink",
    "minSize": 14
   },
   {
@@ -77,7 +75,6 @@
    "size": 22,
    "color": "brand.secondary",
    "letterSpacing": 0.0909,
-   "fit": "shrink",
    "minSize": 11
   },
   {
@@ -88,7 +85,6 @@
    "width": 64,
    "height": 6,
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "brand.secondary"
@@ -102,7 +98,6 @@
    "width": 300,
    "height": 300,
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "#FFFFFF"
@@ -156,9 +151,7 @@
     "style": "normal"
    },
    "size": 84,
-   "color": "#141614",
    "align": "center",
-   "fit": "shrink",
    "minSize": 42
   },
   {
@@ -170,15 +163,9 @@
    "height": 48,
    "kind": "text",
    "text": "{{last_name}}",
-   "font": {
-    "family": "Inter",
-    "weight": 400,
-    "style": "normal"
-   },
    "size": 40,
    "color": "#3C413D",
    "align": "center",
-   "fit": "shrink",
    "minSize": 20
   },
   {
@@ -190,15 +177,9 @@
    "height": 31.2,
    "kind": "text",
    "text": "{% if organization %}{{organization}}{% endif %}",
-   "font": {
-    "family": "Inter",
-    "weight": 400,
-    "style": "normal"
-   },
    "size": 26,
    "color": "#6B716C",
    "align": "center",
-   "fit": "shrink",
    "minSize": 13
   },
   {
@@ -209,7 +190,6 @@
    "width": 638,
    "height": 211,
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "ticket_type"
@@ -232,7 +212,6 @@
    "size": 64,
    "color": "#FFFFFF",
    "letterSpacing": 0.0312,
-   "fit": "shrink",
    "minSize": 32
   },
   {
@@ -252,7 +231,6 @@
    },
    "size": 22,
    "color": "#FFFFFF",
-   "fit": "shrink",
    "minSize": 11
   },
   {
@@ -263,7 +241,6 @@
    "width": 176,
    "height": 176,
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "#FFFFFF"

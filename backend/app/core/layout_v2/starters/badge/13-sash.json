@@ -24,7 +24,6 @@
    "width": 56,
    "height": 12,
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "#FFFFFF"
@@ -58,7 +57,6 @@
    "color": "#141414",
    "letterSpacing": 0.12,
    "lineHeight": 1.25,
-   "fit": "shrink",
    "minSize": 7.2
   },
   {
@@ -80,7 +78,6 @@
    "letterSpacing": 0.12,
    "lineHeight": 1.25,
    "align": "right",
-   "fit": "shrink",
    "minSize": 8.4
   },
   {
@@ -102,7 +99,6 @@
    "letterSpacing": -0.03,
    "lineHeight": 0.95,
    "maxLines": 2,
-   "fit": "shrink",
    "minSize": 18
   },
   {
@@ -144,7 +140,6 @@
    "color": "#555555",
    "letterSpacing": 0.08,
    "lineHeight": 1.25,
-   "fit": "shrink",
    "minSize": 9.6
   },
   {
@@ -162,10 +157,8 @@
     "weight": 600,
     "style": "normal"
    },
-   "size": 16,
    "color": "#141414",
    "lineHeight": 1.25,
-   "fit": "shrink",
    "minSize": 11.2
   },
   {
@@ -186,7 +179,6 @@
    "color": "#555555",
    "letterSpacing": 0.08,
    "lineHeight": 1.25,
-   "fit": "shrink",
    "minSize": 9.6
   },
   {
@@ -203,10 +195,8 @@
     "weight": 600,
     "style": "normal"
    },
-   "size": 16,
    "color": "#141414",
    "lineHeight": 1.25,
-   "fit": "shrink",
    "minSize": 4.8
   },
   {
@@ -227,7 +217,6 @@
    "height": 64,
    "rotation": -12,
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "var:accent"
@@ -252,7 +241,6 @@
    "color": "#FFFFFF",
    "letterSpacing": 0.22,
    "lineHeight": 1.3,
-   "fit": "shrink",
    "minSize": 18
   }
  ],

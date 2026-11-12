@@ -21,7 +21,7 @@ from app.core import doc_designs as dd
 from app.core import layout_v2 as v2
 from app.core.doc_designs import qr as dqr
 from app.core.doc_designs import render as drender
-from app.core.layout_v2 import build, gallery, sanitize, vocabulary
+from app.core.layout_v2 import build, gallery, sanitize, schema, vocabulary
 from app.core.layout_v2.schema import MAX_LAYERS
 from tests.layout_v2_cases import CASES, normalise
 
@@ -435,6 +435,71 @@ def test_every_starter_is_valid_and_names_only_known_tokens(sid):
         assert sum(1 for layer in parsed.layers if layer.kind == "qr") == 1
     html = v2.build_html(layout, vocabulary.samples(kind), context={"qr": "TK-1"}, kind=kind)
     assert "{{" not in html and "{%" not in html
+
+
+STARTER_FILES = sorted((Path(gallery.__file__).parent / "starters").rglob("*.json"))
+
+
+@pytest.mark.parametrize("path", STARTER_FILES, ids=lambda p: str(p.relative_to(p.parents[1])))
+def test_every_starter_file_round_trips(path):
+    """A starter is its full form compacted, and compacting loses nothing:
+    parsing it gives back every field of every layer, whatever its kind."""
+    on_disk = json.loads(path.read_text())
+    full = v2.dump(v2.parse(on_disk))
+    assert schema.compact(full) == on_disk
+    assert v2.dump(v2.parse(schema.compact(full))) == full
+
+
+def _every_field_off_default() -> dict:
+    """A layer of each kind with every optional field set away from its own
+    kind's default, and fields set to *other* kinds' defaults."""
+    fill = {"type": "solid", "color": "#123456"}
+    common = {"rotation": 5, "opacity": 0.5, "hidden": True, "locked": True, "showIf": "first_name",
+              "preprinted": True, "shadow": [{"x": 1, "y": 2, "blur": 3, "spread": 4, "color": "#000000", "inset": True}]}
+    box = {"x": 1, "y": 2, "width": 30, "height": 40}
+    return lay([
+        {"id": "t", "name": "t", "kind": "text", **box, **common, "text": "a", "font": {"family": "Fraunces", "weight": 500,
+         "style": "italic"}, "size": 20, "color": "#111111", "letterSpacing": 0.1, "lineHeight": 1.5, "align": "right",
+         "valign": "bottom", "transform": "upper", "textWrap": "balance", "maxLines": 3, "fit": "none", "minSize": 9,
+         "background": fill, "padding": [1, 2, 3, 4], "radius": [4, 3, 2, 1]},
+        {"id": "t2", "name": "t2", "kind": "text", **box, "text": "b", "align": "center", "valign": "middle", "fit": "ellipsis"},
+        {"id": "s", "name": "s", "kind": "shape", **box, **common, "shape": "ellipse", "fill": fill,
+         "stroke": {"color": "#222222", "width": 2, "dash": [3, 1]}, "radius": [1, 1, 1, 1]},
+        {"id": "s2", "name": "s2", "kind": "shape", **box, "shape": "path", "path": "M0 0H9V9Z"},
+        {"id": "v", "name": "v", "kind": "svg", **box, **common, "markup": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"></svg>',
+         "fit": "stretch", "recolor": {"#ABCDEF": "var:accent"}},
+        {"id": "v2", "name": "v2", "kind": "svg", **box, "markup": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"></svg>',
+         "fit": "cover"},
+        {"id": "i", "name": "i", "kind": "image", **box, **common, "source": "upload", "imageKey": "k", "fit": "cover",
+         "align": "left", "valign": "top", "radius": [2, 2, 2, 2], "border": {"color": "#333333", "width": 1},
+         "placeholder": "initials", "placeholderStyle": {"color": "#444444", "background": fill, "family": "Inter", "weight": 400}},
+        {"id": "i2", "name": "i2", "kind": "image", **box, "align": "right", "valign": "bottom"},
+        {"id": "q", "name": "q", "kind": "qr", **box, **common, "quietZone": 4, "background": fill, "radius": [5, 5, 5, 5]},
+    ], vars={"accent": "#ABCDEF"}, starter="badge/x")
+
+
+def test_compacting_keeps_each_kinds_own_values():
+    layout = _every_field_off_default()
+    full = v2.dump(v2.parse(layout))
+    small = schema.compact(layout)
+    assert v2.dump(v2.parse(small)) == full
+    by_id = {layer["id"]: layer for layer in small["layers"]}
+    # An image's left/top are not its defaults (center/middle), whatever a text's are.
+    assert by_id["i"]["align"] == "left" and by_id["i"]["valign"] == "top"
+    assert by_id["i2"]["align"] == "right" and by_id["i2"]["valign"] == "bottom"
+    # A text's center/middle are not its defaults; an svg's cover is not its default.
+    assert by_id["t2"]["align"] == "center" and by_id["t2"]["valign"] == "middle" and by_id["v2"]["fit"] == "cover"
+    # What a kind's own default is, is left out.
+    assert "align" not in schema.compact(lay([{"id": "i", "name": "i", "kind": "image", "x": 0, "y": 0, "width": 1,
+                                                "height": 1, "align": "center"}]))["layers"][0]
+    for kind in schema.KIND_MODELS:
+        assert set(schema.kind_defaults(kind)) >= {"rotation", "opacity", "hidden"}
+
+
+def test_the_card_keeps_its_left_aligned_logo():
+    logo = next(layer for layer in v2.starter("badge/card_cr80")["layers"] if layer["id"] == "logo")
+    assert logo["align"] == "left"
+    assert v2.parse(v2.starter("badge/card_cr80")).layers[1].align == "left"
 
 
 def test_a_starter_is_a_copy_and_the_gallery_says_what_each_is():

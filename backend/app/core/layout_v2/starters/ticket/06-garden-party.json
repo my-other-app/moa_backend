@@ -32,7 +32,6 @@
     }
    ],
    "kind": "shape",
-   "shape": "rect",
    "radius": [
     30,
     30,
@@ -48,7 +47,6 @@
    "width": 320,
    "height": 460,
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "#FBF3E0"
@@ -80,7 +78,6 @@
    "height": 31,
    "showIf": "ticket_type",
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "#173F2E"
@@ -111,7 +108,6 @@
    "color": "#FBF3E0",
    "letterSpacing": 0.16,
    "lineHeight": 1.308,
-   "fit": "shrink",
    "minSize": 7.8
   },
   {
@@ -133,7 +129,6 @@
    "letterSpacing": 0.08,
    "lineHeight": 1.286,
    "align": "right",
-   "fit": "shrink",
    "minSize": 4.2
   },
   {
@@ -154,7 +149,6 @@
    "color": "#4B6657",
    "letterSpacing": 0.18,
    "lineHeight": 1.333,
-   "fit": "shrink",
    "minSize": 9.6
   },
   {
@@ -174,7 +168,6 @@
    "size": 24,
    "color": "#173F2E",
    "lineHeight": 1.208,
-   "fit": "shrink",
    "minSize": 14.4
   },
   {
@@ -185,7 +178,6 @@
    "width": 190,
    "height": 190,
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "#FFFFFF"
@@ -218,7 +210,6 @@
    "width": 820,
    "height": 460,
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "#173F2E"
@@ -238,8 +229,7 @@
    "width": 820,
    "height": 460,
    "kind": "svg",
-   "markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 820 460\"><defs><clipPath id=\"moa-clip\"><path d=\"M0 0H790A30 30 0 0 1 820 30V430A30 30 0 0 1 790 460H0V0Z\"></path></clipPath></defs><g clip-path=\"url(#moa-clip)\"><g transform=\"translate(700 90) rotate(-35)\"><path d=\"M0 0 C50 -70 150 -70 200 0 C150 70 50 70 0 0 Z\" fill=\"#2B7350\"></path><path d=\"M0 0 H200\" stroke=\"#173F2E\" stroke-width=\"3\"></path></g><g transform=\"translate(610 20) rotate(20)\"><path d=\"M0 0 C40 -56 120 -56 160 0 C120 56 40 56 0 0 Z\" fill=\"#1F5A40\"></path><path d=\"M0 0 H160\" stroke=\"#173F2E\" stroke-width=\"3\"></path></g><g transform=\"translate(830 250) rotate(-150)\"><path d=\"M0 0 C55 -78 165 -78 220 0 C165 78 55 78 0 0 Z\" fill=\"#3C8F63\"></path><path d=\"M0 0 H220\" stroke=\"#173F2E\" stroke-width=\"3\"></path></g><g transform=\"translate(840 470) rotate(-125)\"><path d=\"M0 0 C50 -70 150 -70 200 0 C150 70 50 70 0 0 Z\" fill=\"#1F5A40\"></path><path d=\"M0 0 H200\" stroke=\"#173F2E\" stroke-width=\"3\"></path></g><g transform=\"translate(560 500) rotate(-70)\"><path d=\"M0 0 C36 -50 104 -50 140 0 C104 50 36 50 0 0 Z\" fill=\"#2B7350\"></path><path d=\"M0 0 H140\" stroke=\"#173F2E\" stroke-width=\"3\"></path></g><g transform=\"translate(690 330)\"><circle cx=\"0\" cy=\"-26\" r=\"22\" fill=\"#FF9EB5\"></circle><circle cx=\"25\" cy=\"-8\" r=\"22\" fill=\"#FF9EB5\"></circle><circle cx=\"15\" cy=\"21\" r=\"22\" fill=\"#FF9EB5\"></circle><circle cx=\"-15\" cy=\"21\" r=\"22\" fill=\"#FF9EB5\"></circle><circle cx=\"-25\" cy=\"-8\" r=\"22\" fill=\"#FF9EB5\"></circle><circle cx=\"0\" cy=\"0\" r=\"16\" fill=\"#F5B83D\"></circle></g><g transform=\"translate(772 176) scale(0.55)\"><circle cx=\"0\" cy=\"-26\" r=\"22\" fill=\"#FBF3E0\"></circle><circle cx=\"25\" cy=\"-8\" r=\"22\" fill=\"#FBF3E0\"></circle><circle cx=\"15\" cy=\"21\" r=\"22\" fill=\"#FBF3E0\"></circle><circle cx=\"-15\" cy=\"21\" r=\"22\" fill=\"#FBF3E0\"></circle><circle cx=\"-25\" cy=\"-8\" r=\"22\" fill=\"#FBF3E0\"></circle><circle cx=\"0\" cy=\"0\" r=\"16\" fill=\"#F5B83D\"></circle></g></g></svg>",
-   "fit": "contain"
+   "markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 820 460\"><defs><clipPath id=\"moa-clip\"><path d=\"M0 0H790A30 30 0 0 1 820 30V430A30 30 0 0 1 790 460H0V0Z\"></path></clipPath></defs><g clip-path=\"url(#moa-clip)\"><g transform=\"translate(700 90) rotate(-35)\"><path d=\"M0 0 C50 -70 150 -70 200 0 C150 70 50 70 0 0 Z\" fill=\"#2B7350\"></path><path d=\"M0 0 H200\" stroke=\"#173F2E\" stroke-width=\"3\"></path></g><g transform=\"translate(610 20) rotate(20)\"><path d=\"M0 0 C40 -56 120 -56 160 0 C120 56 40 56 0 0 Z\" fill=\"#1F5A40\"></path><path d=\"M0 0 H160\" stroke=\"#173F2E\" stroke-width=\"3\"></path></g><g transform=\"translate(830 250) rotate(-150)\"><path d=\"M0 0 C55 -78 165 -78 220 0 C165 78 55 78 0 0 Z\" fill=\"#3C8F63\"></path><path d=\"M0 0 H220\" stroke=\"#173F2E\" stroke-width=\"3\"></path></g><g transform=\"translate(840 470) rotate(-125)\"><path d=\"M0 0 C50 -70 150 -70 200 0 C150 70 50 70 0 0 Z\" fill=\"#1F5A40\"></path><path d=\"M0 0 H200\" stroke=\"#173F2E\" stroke-width=\"3\"></path></g><g transform=\"translate(560 500) rotate(-70)\"><path d=\"M0 0 C36 -50 104 -50 140 0 C104 50 36 50 0 0 Z\" fill=\"#2B7350\"></path><path d=\"M0 0 H140\" stroke=\"#173F2E\" stroke-width=\"3\"></path></g><g transform=\"translate(690 330)\"><circle cx=\"0\" cy=\"-26\" r=\"22\" fill=\"#FF9EB5\"></circle><circle cx=\"25\" cy=\"-8\" r=\"22\" fill=\"#FF9EB5\"></circle><circle cx=\"15\" cy=\"21\" r=\"22\" fill=\"#FF9EB5\"></circle><circle cx=\"-15\" cy=\"21\" r=\"22\" fill=\"#FF9EB5\"></circle><circle cx=\"-25\" cy=\"-8\" r=\"22\" fill=\"#FF9EB5\"></circle><circle cx=\"0\" cy=\"0\" r=\"16\" fill=\"#F5B83D\"></circle></g><g transform=\"translate(772 176) scale(0.55)\"><circle cx=\"0\" cy=\"-26\" r=\"22\" fill=\"#FBF3E0\"></circle><circle cx=\"25\" cy=\"-8\" r=\"22\" fill=\"#FBF3E0\"></circle><circle cx=\"15\" cy=\"21\" r=\"22\" fill=\"#FBF3E0\"></circle><circle cx=\"-15\" cy=\"21\" r=\"22\" fill=\"#FBF3E0\"></circle><circle cx=\"-25\" cy=\"-8\" r=\"22\" fill=\"#FBF3E0\"></circle><circle cx=\"0\" cy=\"0\" r=\"16\" fill=\"#F5B83D\"></circle></g></g></svg>"
   },
   {
    "id": "art-2",
@@ -249,8 +239,7 @@
    "width": 22,
    "height": 22,
    "kind": "svg",
-   "markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#F5B83D\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><defs><clipPath id=\"moa-clip\"><path d=\"M-50.182 -41.455H811.636A32.727 32.727 0 0 1 844.364 -8.727V427.636A32.727 32.727 0 0 1 811.636 460.364H-50.182V-41.455Z\"></path></clipPath></defs><g clip-path=\"url(#moa-clip)\"><path d=\"M11 20A7 7 0 0 1 9.800 6.100C15.500 5 17 4.480 19 2c1 2 2 4.180 2 8 0 5.500-4.780 10-10 10Z\"></path><path d=\"M2 21c0-3 1.850-5.360 5.080-6C9.500 14.520 12 13 13 12\"></path></g></svg>",
-   "fit": "contain"
+   "markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#F5B83D\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><defs><clipPath id=\"moa-clip\"><path d=\"M-50.182 -41.455H811.636A32.727 32.727 0 0 1 844.364 -8.727V427.636A32.727 32.727 0 0 1 811.636 460.364H-50.182V-41.455Z\"></path></clipPath></defs><g clip-path=\"url(#moa-clip)\"><path d=\"M11 20A7 7 0 0 1 9.800 6.100C15.500 5 17 4.480 19 2c1 2 2 4.180 2 8 0 5.500-4.780 10-10 10Z\"></path><path d=\"M2 21c0-3 1.850-5.360 5.080-6C9.500 14.520 12 13 13 12\"></path></g></svg>"
   },
   {
    "id": "t-app_name",
@@ -270,7 +259,6 @@
    "color": "#FBF3E0",
    "letterSpacing": 0.18,
    "lineHeight": 1.333,
-   "fit": "shrink",
    "minSize": 9
   },
   {
@@ -291,7 +279,6 @@
    "color": "#F5B83D",
    "letterSpacing": 0.22,
    "lineHeight": 1.286,
-   "fit": "shrink",
    "minSize": 11.2
   },
   {
@@ -313,7 +300,6 @@
    "letterSpacing": -0.01,
    "lineHeight": 0.98,
    "maxLines": 2,
-   "fit": "shrink",
    "minSize": 32
   },
   {
@@ -354,7 +340,6 @@
    "color": "#BFD9C8",
    "letterSpacing": 0.18,
    "lineHeight": 1.333,
-   "fit": "shrink",
    "minSize": 9.6
   },
   {
@@ -395,7 +380,6 @@
    "color": "#BFD9C8",
    "letterSpacing": 0.18,
    "lineHeight": 1.333,
-   "fit": "shrink",
    "minSize": 9.6
   },
   {
@@ -437,7 +421,6 @@
    "color": "#BFD9C8",
    "letterSpacing": 0.18,
    "lineHeight": 1.333,
-   "fit": "shrink",
    "minSize": 9.6
   },
   {
@@ -479,7 +462,6 @@
    "color": "#BFD9C8",
    "letterSpacing": 0.18,
    "lineHeight": 1.333,
-   "fit": "shrink",
    "minSize": 9.6
   },
   {
@@ -521,7 +503,6 @@
    "color": "#BFD9C8",
    "letterSpacing": 0.18,
    "lineHeight": 1.333,
-   "fit": "shrink",
    "minSize": 9.6
   },
   {

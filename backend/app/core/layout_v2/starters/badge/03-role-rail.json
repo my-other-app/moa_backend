@@ -24,7 +24,6 @@
    "width": 76,
    "height": 576,
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "var:accent"
@@ -49,7 +48,6 @@
    "color": "#FFFFFF",
    "letterSpacing": 0.12,
    "lineHeight": 1,
-   "fit": "shrink",
    "minSize": 18
   },
   {
@@ -146,7 +144,6 @@
    "letterSpacing": -0.02,
    "lineHeight": 1,
    "maxLines": 2,
-   "fit": "shrink",
    "minSize": 18
   },
   {
@@ -177,7 +174,6 @@
    "width": 260,
    "height": 2,
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "#17130F"
@@ -202,7 +198,6 @@
    "color": "#55504A",
    "letterSpacing": 0.08,
    "lineHeight": 1.25,
-   "fit": "shrink",
    "minSize": 9.6
   },
   {
@@ -244,7 +239,6 @@
    "color": "#55504A",
    "letterSpacing": 0.08,
    "lineHeight": 1.25,
-   "fit": "shrink",
    "minSize": 9.6
   },
   {
@@ -284,7 +278,6 @@
    "width": 56,
    "height": 12,
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "#FFFFFF"

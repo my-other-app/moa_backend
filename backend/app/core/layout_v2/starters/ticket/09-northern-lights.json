@@ -32,7 +32,6 @@
     }
    ],
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "#04141F"
@@ -56,8 +55,7 @@
    "width": 1140,
    "height": 460,
    "kind": "svg",
-   "markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1140 460\"><defs><clipPath id=\"moa-clip\"><path d=\"M31 0H1107A31 31 0 0 1 1138 31V427A31 31 0 0 1 1107 458H31A31 31 0 0 1 0 427V31A31 31 0 0 1 31 0Z\"></path></clipPath></defs><g clip-path=\"url(#moa-clip)\"><g style=\"filter: blur(26px)\" fill=\"none\" stroke-linecap=\"round\"><path d=\"M380 30 C520 150 640 -20 780 90 S1010 150 1160 40\" stroke=\"#3DFFC0\" stroke-width=\"70\" opacity=\"0.6\"></path><path d=\"M460 140 C600 60 720 210 860 120 S1060 60 1160 150\" stroke=\"#6A7BFF\" stroke-width=\"60\" opacity=\"0.6\"></path><path d=\"M620 220 C740 150 860 270 980 200 S1100 190 1160 240\" stroke=\"#C86BFF\" stroke-width=\"46\" opacity=\"0.5\"></path></g><g fill=\"#FFFFFF\"><circle cx=\"120\" cy=\"60\" r=\"1.4\"></circle><circle cx=\"220\" cy=\"120\" r=\"1.1\"></circle><circle cx=\"330\" cy=\"50\" r=\"1.6\"></circle><circle cx=\"470\" cy=\"80\" r=\"1.2\"></circle><circle cx=\"560\" cy=\"34\" r=\"1.5\"></circle><circle cx=\"690\" cy=\"60\" r=\"1.1\"></circle><circle cx=\"760\" cy=\"26\" r=\"1.6\"></circle><circle cx=\"60\" cy=\"170\" r=\"1.1\"></circle><circle cx=\"640\" cy=\"170\" r=\"1.2\"></circle><circle cx=\"280\" cy=\"24\" r=\"1.1\"></circle></g><path d=\"M520 460 L548 396 L576 460 Z M560 460 L596 372 L632 460 Z M618 460 L644 404 L670 460 Z M656 460 L698 356 L740 460 Z M726 460 L754 398 L782 460 Z M770 460 L800 384 L830 460 Z\" fill=\"#010A11\"></path><path d=\"M480 460 Q650 432 830 460 Z\" fill=\"#010A11\"></path></g></svg>",
-   "fit": "contain"
+   "markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1140 460\"><defs><clipPath id=\"moa-clip\"><path d=\"M31 0H1107A31 31 0 0 1 1138 31V427A31 31 0 0 1 1107 458H31A31 31 0 0 1 0 427V31A31 31 0 0 1 31 0Z\"></path></clipPath></defs><g clip-path=\"url(#moa-clip)\"><g style=\"filter: blur(26px)\" fill=\"none\" stroke-linecap=\"round\"><path d=\"M380 30 C520 150 640 -20 780 90 S1010 150 1160 40\" stroke=\"#3DFFC0\" stroke-width=\"70\" opacity=\"0.6\"></path><path d=\"M460 140 C600 60 720 210 860 120 S1060 60 1160 150\" stroke=\"#6A7BFF\" stroke-width=\"60\" opacity=\"0.6\"></path><path d=\"M620 220 C740 150 860 270 980 200 S1100 190 1160 240\" stroke=\"#C86BFF\" stroke-width=\"46\" opacity=\"0.5\"></path></g><g fill=\"#FFFFFF\"><circle cx=\"120\" cy=\"60\" r=\"1.4\"></circle><circle cx=\"220\" cy=\"120\" r=\"1.1\"></circle><circle cx=\"330\" cy=\"50\" r=\"1.6\"></circle><circle cx=\"470\" cy=\"80\" r=\"1.2\"></circle><circle cx=\"560\" cy=\"34\" r=\"1.5\"></circle><circle cx=\"690\" cy=\"60\" r=\"1.1\"></circle><circle cx=\"760\" cy=\"26\" r=\"1.6\"></circle><circle cx=\"60\" cy=\"170\" r=\"1.1\"></circle><circle cx=\"640\" cy=\"170\" r=\"1.2\"></circle><circle cx=\"280\" cy=\"24\" r=\"1.1\"></circle></g><path d=\"M520 460 L548 396 L576 460 Z M560 460 L596 372 L632 460 Z M618 460 L644 404 L670 460 Z M656 460 L698 356 L740 460 Z M726 460 L754 398 L782 460 Z M770 460 L800 384 L830 460 Z\" fill=\"#010A11\"></path><path d=\"M480 460 Q650 432 830 460 Z\" fill=\"#010A11\"></path></g></svg>"
   },
   {
    "id": "art-2",
@@ -67,8 +65,7 @@
    "width": 22,
    "height": 22,
    "kind": "svg",
-   "markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" fill=\"#9FFFE0\"><defs><clipPath id=\"moa-clip\"><path d=\"M-14.182 -41.455H1159.636A33.818 33.818 0 0 1 1193.455 -7.636V424.364A33.818 33.818 0 0 1 1159.636 458.182H-14.182A33.818 33.818 0 0 1 -48 424.364V-7.636A33.818 33.818 0 0 1 -14.182 -41.455Z\"></path></clipPath></defs><g clip-path=\"url(#moa-clip)\"><path d=\"M12 2 l2.600 7.400 L22 12 l-7.400 2.600 L12 22 l-2.600 -7.400 L2 12 l7.400 -2.600 Z\"></path></g></svg>",
-   "fit": "contain"
+   "markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" fill=\"#9FFFE0\"><defs><clipPath id=\"moa-clip\"><path d=\"M-14.182 -41.455H1159.636A33.818 33.818 0 0 1 1193.455 -7.636V424.364A33.818 33.818 0 0 1 1159.636 458.182H-14.182A33.818 33.818 0 0 1 -48 424.364V-7.636A33.818 33.818 0 0 1 -14.182 -41.455Z\"></path></clipPath></defs><g clip-path=\"url(#moa-clip)\"><path d=\"M12 2 l2.600 7.400 L22 12 l-7.400 2.600 L12 22 l-2.600 -7.400 L2 12 l7.400 -2.600 Z\"></path></g></svg>"
   },
   {
    "id": "t-app_name",
@@ -88,7 +85,6 @@
    "color": "#FFFFFF",
    "letterSpacing": 0.22,
    "lineHeight": 1.267,
-   "fit": "shrink",
    "minSize": 9
   },
   {
@@ -109,7 +105,6 @@
    "color": "#9FFFE0",
    "letterSpacing": 0.28,
    "lineHeight": 1.286,
-   "fit": "shrink",
    "minSize": 11.2
   },
   {
@@ -140,7 +135,6 @@
    "color": "#FFFFFF",
    "letterSpacing": -0.03,
    "lineHeight": 1,
-   "fit": "shrink",
    "minSize": 28.8
   },
   {
@@ -191,7 +185,6 @@
    "color": "#9FFFE0",
    "letterSpacing": 0.2,
    "lineHeight": 1.25,
-   "fit": "shrink",
    "minSize": 9.6
   },
   {
@@ -232,7 +225,6 @@
    "color": "#9FFFE0",
    "letterSpacing": 0.2,
    "lineHeight": 1.25,
-   "fit": "shrink",
    "minSize": 9.6
   },
   {
@@ -274,7 +266,6 @@
    "color": "#9FFFE0",
    "letterSpacing": 0.2,
    "lineHeight": 1.25,
-   "fit": "shrink",
    "minSize": 9.6
   },
   {
@@ -316,7 +307,6 @@
    "color": "#9FFFE0",
    "letterSpacing": 0.2,
    "lineHeight": 1.25,
-   "fit": "shrink",
    "minSize": 9.6
   },
   {
@@ -358,7 +348,6 @@
    "color": "#9FFFE0",
    "letterSpacing": 0.2,
    "lineHeight": 1.25,
-   "fit": "shrink",
    "minSize": 9.6
   },
   {
@@ -389,7 +378,6 @@
    "width": 295.406,
    "height": 414,
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "#04141F9E"
@@ -414,7 +402,6 @@
    "height": 29,
    "showIf": "ticket_type",
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "#9FFFE0"
@@ -445,7 +432,6 @@
    "color": "#04141F",
    "letterSpacing": 0.12,
    "lineHeight": 1.308,
-   "fit": "shrink",
    "minSize": 7.8
   },
   {
@@ -467,7 +453,6 @@
    "letterSpacing": 0.06,
    "lineHeight": 1.286,
    "align": "right",
-   "fit": "shrink",
    "minSize": 4.2
   },
   {
@@ -488,7 +473,6 @@
    "color": "#9FFFE0",
    "letterSpacing": 0.2,
    "lineHeight": 1.25,
-   "fit": "shrink",
    "minSize": 9.6
   },
   {
@@ -508,7 +492,6 @@
    "size": 19,
    "color": "#FFFFFF",
    "lineHeight": 1.263,
-   "fit": "shrink",
    "minSize": 11.4
   },
   {
@@ -519,7 +502,6 @@
    "width": 190,
    "height": 190,
    "kind": "shape",
-   "shape": "rect",
    "fill": {
     "type": "solid",
     "color": "#FFFFFF"
