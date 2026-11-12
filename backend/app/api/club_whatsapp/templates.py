@@ -599,8 +599,8 @@ STANDARD: dict[str, dict] = {
     },
     "certificate_ready": {
         "document": True,
-        "body": "Hi {{1}}, thank you for attending {{2}}. Your certificate from {{3}} is attached. "
-                "Anyone can check it is genuine on myotherapp.in with the number {{4}}.",
+        "body": "Hi {{1}}, your certificate for {{2}}, issued by {{3}}, is attached. "
+                "Certificate number: {{4}}. Anyone can confirm it is genuine on myotherapp.in.",
         "examples": ["Ananya", "Build Night", "Yukthi", "CERT-2026-0001"],
         "button": ("Verify certificate", VERIFY_URL, "https://myotherapp.in/verify/CERT-2026-0001"),
     },

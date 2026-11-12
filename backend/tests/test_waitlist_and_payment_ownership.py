@@ -264,3 +264,29 @@ async def test_the_holder_still_gets_an_order(client, session, w, rzp_fake, make
     assert back.json()["event_registration_id"] == left.json()["event_registration_id"], back.text
     r = await _order(client, w.paid.id, left.json()["event_registration_id"], oh)
     assert r.status_code == 200 and r.json()["razorpay_order_id"] in rzp_fake.orders, r.text
+
+
+async def test_an_event_id_sent_as_text_still_gets_an_order(client, w, rzp_fake):  # noqa: F811
+    """The website sends `event_id` as text ("3"). Compared as sent, Postgres
+    refused `integer = character varying` and every website checkout was a
+    500 (12 Nov 2026). It is read as the number it is; the order keeps it typed."""
+    guest = await _register(client, w.paid.id, "text-id-payer@example.com")
+    assert guest.status_code == 200, guest.text
+    h = auth_header(guest.json()["auth_token"]["access_token"])
+    r = await _order(client, str(w.paid.id), guest.json()["event_registration_id"], h)
+    assert r.status_code == 200, r.text
+    assert rzp_fake.orders[r.json()["razorpay_order_id"]] == 20000
+    # The same order comes back for the same registration, whichever way the id is sent.
+    again = await _order(client, w.paid.id, guest.json()["event_registration_id"], h)
+    assert again.status_code == 200 and again.json()["razorpay_order_id"] == r.json()["razorpay_order_id"], again.text
+
+
+async def test_ids_that_are_not_ids_get_the_unknown_id_404_not_a_500(client, w, rzp_fake):  # noqa: F811
+    guest = await _register(client, w.paid.id, "bad-id-payer@example.com")
+    assert guest.status_code == 200, guest.text
+    h = auth_header(guest.json()["auth_token"]["access_token"])
+    r = await _order(client, "three", guest.json()["event_registration_id"], h)
+    assert r.status_code == 404 and r.json()["error_code"] == "EVENT_NOT_FOUND", r.text
+    r = await _order(client, w.paid.id, "not-a-registration", h)
+    assert r.status_code == 404 and r.json()["error_code"] == "REGISTRATION_NOT_FOUND", r.text
+    assert not rzp_fake.orders

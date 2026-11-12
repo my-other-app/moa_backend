@@ -19,8 +19,8 @@ Meta refuses every send with 132000.
   {{4}}. Keep your ticket ready at the entry." -- first name, event, date and
   time, the venue or "online". URL button .../tickets/{{1}}.
 - certificate_ready: header DOCUMENT (the certificate PDF). Body "Hi {{1}},
-  thank you for attending {{2}}. Your certificate from {{3}} is attached.
-  Anyone can check it is genuine on myotherapp.in with the number {{4}}." --
+  your certificate for {{2}}, issued by {{3}}, is attached. Certificate
+  number: {{4}}. Anyone can confirm it is genuine on myotherapp.in." --
   first name, event, club, certificate number. URL button
   https://myotherapp.in/verify/{{1}} -- the certificate number.
 - payment_pending: body "Hi {{1}}, your registration for {{2}} is waiting

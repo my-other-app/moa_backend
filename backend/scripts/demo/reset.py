@@ -333,6 +333,8 @@ CLASSIFICATION: dict[str, str] = {
     "partner_certificate_jobs": WIPE,
     "partner_usage_daily": WIPE,
     "partner_sandbox_objects": WIPE,
+    # The private developer docs' signed links (app/api/partner/docs_links.py).
+    "developer_docs_links": WIPE,
     "messages": WIPE,
     # What clubs sent, counted by the month, its statements and Enterprise clubs' own limits.
     "message_usage": WIPE,

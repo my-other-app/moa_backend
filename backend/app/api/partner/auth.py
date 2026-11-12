@@ -220,18 +220,35 @@ def _limit(request: Request, caller: PartnerCaller) -> None:
         )
 
 
+async def _resolve(session, request, raw: str) -> PartnerCaller:
+    if keys_mod.looks_like_key(raw):
+        return await _from_key(session, request, raw)
+    if raw.startswith(oauth.ACCESS):
+        return await _from_token(session, request, raw)
+    raise _unauthenticated("That is not a MyOtherApp API key or access token.")
+
+
+async def credential_valid(session, request: Request) -> bool:
+    """Whether the request's bearer is a credential /partner/v1 would let in
+    now (a club key, or an app or OAuth token, live or test), without
+    counting it as a request: how the OpenAPI document opens to callers."""
+    raw = _bearer(request)
+    if not raw:
+        return False
+    try:
+        await _resolve(session, request, raw)
+    except PartnerError:
+        return False
+    return True
+
+
 async def partner_caller(request: Request, session: SessionDep) -> PartnerCaller:
     if not settings.PARTNER_API_ENABLED:
         raise PartnerError("NOT_FOUND", "Not found.")
     raw = _bearer(request)
     if not raw:
         raise _unauthenticated("Send an API key or access token: Authorization: Bearer <it>.")
-    if keys_mod.looks_like_key(raw):
-        caller = await _from_key(session, request, raw)
-    elif raw.startswith(oauth.ACCESS):
-        caller = await _from_token(session, request, raw)
-    else:
-        raise _unauthenticated("That is not a MyOtherApp API key or access token.")
+    caller = await _resolve(session, request, raw)
     caller.session = session
     caller.request = request
     request.state.partner_caller = caller

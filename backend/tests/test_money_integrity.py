@@ -527,3 +527,34 @@ async def test_the_sweep_runs_on_one_worker_every_ten_minutes(session, rzp_fake)
     assert await sweep.run_if_due(session, now) is not None
     assert await sweep.run_if_due(session, now + timedelta(minutes=5)) is None
     assert await sweep.run_if_due(session, now + timedelta(minutes=11)) is not None
+
+
+# ─── The receipt ─────────────────────────────────────────────────────────
+
+
+async def test_the_receipt_mail_goes_after_a_capture(session, rzp_fake, monkeypatch, make_club, make_event, make_user, make_registration):
+    """The `payments.receipt` job read the payer's name after committing, on
+    rows the commit had expired: a lazy load outside the greenlet
+    (MissingGreenlet), so every receipt failed its four tries (12 Nov 2026).
+    It now reads what the mail needs first."""
+    from app.core import jobs
+
+    sent = []
+    monkeypatch.setattr(payments, "send_payment_confirmation_email", lambda **kw: sent.append(kw))
+    _, _, event = await _paid_event(make_club, make_event, session, fee="1.00")
+    payer, reg = await _guest(session, make_user, make_registration, event)
+    order = await _order(session, payer, event, reg)
+    payment = rzp_fake.pay(order.razorpay_order_id)
+    await payments.verify_razorpay_payment(session, order.razorpay_order_id, payment["id"])
+    # As in production, where the job's session is fresh: nothing else holds
+    # the payer's row, so once `_log_with_order` resets `order.user` it is
+    # gone from the identity map and reading it would go to the database.
+    email = payer.email
+    session.expunge(payer)
+    del payer
+    await jobs.settle()
+    assert len(sent) == 1, sent
+    mail = sent[0]
+    assert mail["recipients"] == [email]
+    assert mail["payload"]["payer_email"] == email and mail["payload"]["amount"] == "₹1.00"
+    assert mail["payload"]["payment_method"] == "upi"

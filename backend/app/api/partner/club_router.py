@@ -11,6 +11,9 @@
 - GET    /clubs/integrations/usage                 requests, errors and attendee reads a day, 30 days
 - GET    /clubs/integrations/connect               the consent page's request, checked
 - POST   /clubs/integrations/connect               allow (or deny) it: the redirect back to the partner
+- POST   /clubs/integrations/docs-links            a link to the private developer docs ({purpose: self|share, label?}): its url shown once
+- GET    /clubs/integrations/docs-links            the club's docs links (live, and ended in the last 30 days)
+- DELETE /clubs/integrations/docs-links/{id}       revoke one
 
 The webhook endpoints' dashboard routes are app/api/webhooks_out's, under
 /clubs/integrations/webhooks.
@@ -25,7 +28,7 @@ from pydantic import BaseModel, Field
 
 from app.api.audit import service as audit
 from app.api.club_access import service as club_access
-from app.api.partner import allocation, apps, keys, oauth, usage
+from app.api.partner import allocation, apps, docs_links, keys, oauth, usage
 from app.api.partner import scopes as catalogue
 from app.core.auth.dependencies import ClubAuth
 from app.core.rate_limit import account_or_address, limiter
@@ -44,6 +47,11 @@ class KeyCreate(BaseModel):
     expires_at: Optional[datetime] = None
     ip_allowlist: Optional[list[str]] = Field(None, max_length=keys.MAX_ALLOWLIST)
     attendees_disclosure_ack: bool = False
+
+
+class DocsLinkCreate(BaseModel):
+    purpose: str = Field(..., pattern="^(self|share)$")
+    label: Optional[str] = Field(None, max_length=docs_links.MAX_LABEL)
 
 
 class Consent(BaseModel):
@@ -152,6 +160,41 @@ async def disconnect_app(request: Request, connection_id: str, session: SessionD
                  connection_id=str(conn.id), client_id=app.client_id if app else None)
     await session.commit()
     return {"disconnected": True, "id": str(conn.id)}
+
+
+@router.post("/docs-links", summary="A link to the private developer docs (its url is shown once)", status_code=201)
+@limiter.limit("30/hour", key_func=account_or_address)
+async def create_docs_link(request: Request, body: DocsLinkCreate, session: SessionDep, user: ClubAuth) -> dict:
+    """`self`: for you, 7 days ("Open developer docs"). `share`: for your developer, 30 days."""
+    club = await _club(session, user)
+    member_id, by = _who(request, user)
+    row, raw = await docs_links.create_for_club(
+        session, club.id, purpose=body.purpose, label=body.label, user_id=user.id, member_id=member_id, by_name=by,
+    )
+    await _audit(session, request, user, "partner.docs_link.create", club.id,
+                 f"Developer docs link made ({'to share' if row.purpose == 'share' else 'for themselves'})",
+                 link_id=str(row.id), purpose=row.purpose, label=row.label, expires_at=row.expires_at.isoformat())
+    await session.commit()
+    return docs_links.made(row, raw, club=club)
+
+
+@router.get("/docs-links", summary="The club's developer docs links (never their tokens)")
+async def list_docs_links(session: SessionDep, user: ClubAuth) -> dict:
+    club = await _club(session, user)
+    return {"links": [docs_links.out(r, club=club) for r in await docs_links.club_links(session, club.id)]}
+
+
+@router.delete("/docs-links/{link_id}", summary="Revoke a developer docs link")
+async def revoke_docs_link(request: Request, link_id: str, session: SessionDep, user: ClubAuth) -> dict:
+    club = await _club(session, user)
+    row = await docs_links.link_of(session, link_id, club_id=club.id)
+    already = row.revoked_at is not None
+    await docs_links.revoke(session, row, by_user_id=user.id)
+    if not already:
+        await _audit(session, request, user, "partner.docs_link.revoke", club.id, "Developer docs link revoked",
+                     link_id=str(row.id), label=row.label)
+    await session.commit()
+    return {"revoked": True}
 
 
 @router.get("/usage", summary="API requests a day, the last 30 days")
