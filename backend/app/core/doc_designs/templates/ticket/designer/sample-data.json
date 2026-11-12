@@ -1,0 +1,18 @@
+{
+  "_note": "Example values only, for testing the templates. Replace with real ticket data.",
+  "design": "01-dusk-horizon",
+  "app_name": "EVENTLY",
+  "event_name": "Sunset Sessions",
+  "tagline": "An evening of live music",
+  "date": "14 Feb 2027",
+  "doors_time": "18:30",
+  "start_time": "19:30",
+  "venue": "Tagore Theatre, Trivandrum",
+  "gate": "B2",
+  "row": "F",
+  "seat": "12",
+  "ticket_type": "VIP",
+  "ticket_id": "TK-48213",
+  "attendee_name": "Asha Nair",
+  "qr": "<signed ticket token used by entry validation>"
+}

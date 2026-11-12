@@ -46,8 +46,12 @@ def test_every_service_has_a_memory_and_cpu_limit_and_comes_back_after_a_restart
 
 def test_the_limits_fit_an_8gb_box_and_the_background_ones_leave_the_api_a_cpu():
     services = _services()
-    assert sum(_mib(s["mem_limit"]) for s in services.values()) <= OURS_ON_8GB_MIB
-    for background in ("worker", "redis", "meilisearch"):
+    # The render service and Meilisearch share one slot on the 8 GB plan: the
+    # box runs one or the other (docs/OPERATIONS.md, section 10).
+    assert _mib(services["render"]["mem_limit"]) <= _mib(services["meilisearch"]["mem_limit"])
+    for left_out in ("render", "meilisearch"):
+        assert sum(_mib(s["mem_limit"]) for n, s in services.items() if n != left_out) <= OURS_ON_8GB_MIB
+    for background in ("worker", "redis", "meilisearch", "render"):
         assert float(services[background]["cpus"]) <= 1, background
 
 

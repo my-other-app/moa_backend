@@ -1,0 +1,586 @@
+{
+ "kind": "badge",
+ "version": "2026-11-12.1",
+ "source": {
+  "package": "id-card-handoff",
+  "received": "2026-11-12",
+  "readme": "designer/README.md",
+  "templates": "designer/templates.json"
+ },
+ "page": {
+  "width_px": 384,
+  "height_px": 576,
+  "width_mm": 101.6,
+  "height_mm": 152.4
+ },
+ "qr": {
+  "token": "qr_code_url",
+  "ecc": "M",
+  "border": 0,
+  "note": "The ticket's code (what the gates scan), black on white, no quiet zone (as the sample)."
+ },
+ "accent_mode": "var",
+ "options": {
+  "lanyard": {
+   "type": "bool",
+   "default": true,
+   "label": "Lanyard slot",
+   "help": "Off for pre-punched card stock: the pill is hidden, nothing moves."
+  }
+ },
+ "designs": [
+  {
+   "key": "01-ticket-stub",
+   "name": "Ticket Stub",
+   "use": "event",
+   "has_photo": true,
+   "colour": "colour",
+   "file": "01-ticket-stub.html",
+   "preview": "previews/01-ticket-stub.png",
+   "source_sha256": "c8c9b04380f6bf0e9d426fe1be40d64168c1f19cdab4475ed6dfd89f413d6044",
+   "google_fonts": "family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600",
+   "tokens": {
+    "access_level": "optional",
+    "badge_id": "required",
+    "event_date": "required",
+    "event_name": "required",
+    "event_venue": "optional",
+    "first_name": "required",
+    "initials": "required",
+    "job_title": "optional",
+    "last_name": "optional",
+    "organization": "optional",
+    "photo_url": "optional",
+    "qr_code_url": "required",
+    "role": "required"
+   },
+   "accent": {
+    "default": "#FF8A3D",
+    "suggestions": [
+     "#FF8A3D",
+     "#3DD6A3",
+     "#FFD23F",
+     "#FF7FB0"
+    ],
+    "against": [
+     "#0E1330"
+    ],
+    "min_contrast": 4.5,
+    "note": "Dark text sits on the accent (the role): keep it light."
+   },
+   "initials": {
+    "color": "#1F3BD8",
+    "font": "'Space Grotesk', system-ui, sans-serif",
+    "weight": 700
+   }
+  },
+  {
+   "key": "02-arch",
+   "name": "Arch",
+   "use": "club",
+   "has_photo": true,
+   "colour": "colour",
+   "file": "02-arch.html",
+   "preview": "previews/02-arch.png",
+   "source_sha256": "1e8ff0a3836194da0bd7ba9661d486277bcee89276ef00c3686994ac0548a1c1",
+   "google_fonts": "family=Instrument+Serif&family=Inter:wght@400;500;600",
+   "tokens": {
+    "full_name": "required",
+    "initials": "required",
+    "member_id": "required",
+    "membership_tier": "optional",
+    "org_founded_year": "optional",
+    "org_name": "required",
+    "photo_url": "optional",
+    "qr_code_url": "required",
+    "valid_thru": "required"
+   },
+   "accent": {
+    "default": "#F2B441",
+    "suggestions": [
+     "#F2B441",
+     "#F3EFE4",
+     "#FF9E7A",
+     "#9FE0C0"
+    ],
+    "against": [
+     "#12382B"
+    ],
+    "min_contrast": 4.5,
+    "note": "The accent is text on dark green: keep it light."
+   },
+   "initials": {
+    "color": "#F3EFE4",
+    "font": "'Instrument Serif', Georgia, serif",
+    "weight": 400
+   },
+   "printer": "Large dark areas: needs a printer that handles heavy ink."
+  },
+  {
+   "key": "03-role-rail",
+   "name": "Role Rail",
+   "use": "event",
+   "has_photo": true,
+   "colour": "colour",
+   "file": "03-role-rail.html",
+   "preview": "previews/03-role-rail.png",
+   "source_sha256": "56e00a8367c2b49f978b01ad471a178e54202adb76616c7b4ed4dd0c45f6483d",
+   "google_fonts": "family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600",
+   "tokens": {
+    "access_level": "optional",
+    "event_name": "required",
+    "event_year": "required",
+    "first_name": "required",
+    "initials": "required",
+    "job_title": "optional",
+    "last_name": "optional",
+    "organization": "optional",
+    "photo_url": "optional",
+    "qr_code_url": "required",
+    "role": "required",
+    "session_hall": "optional",
+    "session_time": "optional"
+   },
+   "accent": {
+    "default": "#D63A22",
+    "suggestions": [
+     "#D63A22",
+     "#1F3BD8",
+     "#0B6E6E",
+     "#7A2BD6"
+    ],
+    "against": [
+     "#FFFFFF"
+    ],
+    "min_contrast": 3.0,
+    "note": "White text (the role) sits on the accent: keep it dark."
+   },
+   "initials": {
+    "color": "var(--accent)",
+    "font": "'Space Grotesk', system-ui, sans-serif",
+    "weight": 700
+   }
+  },
+  {
+   "key": "04-big-name",
+   "name": "Big Name",
+   "use": "event",
+   "has_photo": false,
+   "colour": "colour",
+   "file": "04-big-name.html",
+   "preview": "previews/04-big-name.png",
+   "source_sha256": "ab9ffe84158bf9353f4b6e83be066eb28c1a46e9f7dd18ef33cc7d65e0fdcc3e",
+   "google_fonts": "family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600",
+   "tokens": {
+    "access_level": "optional",
+    "badge_id": "required",
+    "event_date": "required",
+    "event_name": "required",
+    "first_name": "required",
+    "last_name": "optional",
+    "organization": "optional",
+    "qr_code_url": "required",
+    "role": "required"
+   },
+   "accent": {
+    "default": "#FFD83A",
+    "suggestions": [
+     "#FFD83A",
+     "#7CE0B5",
+     "#FF9F7A",
+     "#A9C4FF"
+    ],
+    "against": [
+     "#15130D"
+    ],
+    "min_contrast": 4.5,
+    "note": "The whole card is the accent under dark text: keep it light."
+   }
+  },
+  {
+   "key": "05-monogram",
+   "name": "Monogram",
+   "use": "club",
+   "has_photo": false,
+   "colour": "colour",
+   "file": "05-monogram.html",
+   "preview": "previews/05-monogram.png",
+   "source_sha256": "61fb9c869a200a79a03722df326237a3473a32f5fb0f00aaeb5a2578303784fb",
+   "google_fonts": "family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600",
+   "tokens": {
+    "city": "optional",
+    "full_name": "required",
+    "initials": "required",
+    "joined_date": "optional",
+    "member_id": "required",
+    "org_name": "required",
+    "qr_code_url": "required",
+    "role": "required"
+   },
+   "accent": {
+    "default": "#0B5E5E",
+    "suggestions": [
+     "#0B5E5E",
+     "#7A2BD6",
+     "#B3261E",
+     "#1F3BD8"
+    ],
+    "against": [
+     "#FFFFFF"
+    ],
+    "min_contrast": 4.5,
+    "note": "White text sits on the accent: keep it dark."
+   }
+  },
+  {
+   "key": "06-thermal-mono",
+   "name": "Thermal Mono",
+   "use": "event",
+   "has_photo": false,
+   "colour": "mono",
+   "file": "06-thermal-mono.html",
+   "preview": "previews/06-thermal-mono.png",
+   "source_sha256": "4d1d6b9f7136e8a6f704b56dae36f04a63c260bcb6bbfe8712345d031c1e90ac",
+   "google_fonts": "family=Space+Grotesk:wght@500;700&family=Space+Mono:wght@400;700",
+   "tokens": {
+    "access_level": "optional",
+    "badge_id": "required",
+    "checkin_time": "optional",
+    "event_date": "required",
+    "event_name": "required",
+    "first_name": "required",
+    "kiosk_id": "optional",
+    "last_name": "optional",
+    "organization": "optional",
+    "qr_code_url": "required",
+    "role": "required",
+    "zone": "optional"
+   },
+   "printer": "Pure black on white: prints on single-colour direct-thermal kiosk printers."
+  },
+  {
+   "key": "07-polaroid",
+   "name": "Polaroid",
+   "use": "club",
+   "has_photo": true,
+   "colour": "colour",
+   "file": "07-polaroid.html",
+   "preview": "previews/07-polaroid.png",
+   "source_sha256": "369510f22d8d06d7542de8040c9f3d8dceb05e179c7518c06b758d741635c5c9",
+   "google_fonts": "family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=Caveat:wght@600",
+   "tokens": {
+    "city": "optional",
+    "full_name": "required",
+    "initials": "required",
+    "member_id": "required",
+    "member_since_year": "optional",
+    "org_name": "required",
+    "photo_url": "optional",
+    "qr_code_url": "required",
+    "role": "required"
+   },
+   "accent": {
+    "default": "#5B3DF5",
+    "suggestions": [
+     "#5B3DF5",
+     "#C2255C",
+     "#0B6E6E",
+     "#1B1440"
+    ],
+    "against": [
+     "#FFFFFF"
+    ],
+    "min_contrast": 4.5,
+    "note": "White text sits on the accent: keep it dark."
+   },
+   "initials": {
+    "color": "var(--accent)",
+    "font": "'Space Grotesk', system-ui, sans-serif",
+    "weight": 700
+   }
+  },
+  {
+   "key": "08-full-bleed",
+   "name": "Full Bleed",
+   "use": "event",
+   "has_photo": true,
+   "colour": "colour",
+   "file": "08-full-bleed.html",
+   "preview": "previews/08-full-bleed.png",
+   "source_sha256": "2db1e546be683115c06a27107dfbcec68ec8b9826285cc5e2f7e7dd793b16f1e",
+   "google_fonts": "family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600",
+   "tokens": {
+    "badge_id": "required",
+    "booth_no": "optional",
+    "event_name": "required",
+    "event_year": "required",
+    "full_name": "required",
+    "initials": "required",
+    "job_title": "optional",
+    "organization": "optional",
+    "photo_url": "optional",
+    "qr_code_url": "required",
+    "role": "required"
+   },
+   "accent": {
+    "default": "#C6F432",
+    "suggestions": [
+     "#C6F432",
+     "#FFB020",
+     "#5CE1E6",
+     "#FF8FB1"
+    ],
+    "against": [
+     "#101418"
+    ],
+    "min_contrast": 4.5,
+    "note": "Dark text (the role) sits on the accent: keep it light."
+   },
+   "initials": {
+    "color": "var(--accent)",
+    "font": "'Space Grotesk', system-ui, sans-serif",
+    "weight": 700
+   },
+   "printer": "Large dark areas: needs a printer that handles heavy ink."
+  },
+  {
+   "key": "09-boarding-pass",
+   "name": "Boarding Pass",
+   "use": "event",
+   "has_photo": false,
+   "colour": "colour",
+   "file": "09-boarding-pass.html",
+   "preview": "previews/09-boarding-pass.png",
+   "source_sha256": "15d2c69c2de73ba9d52c0a361b87fac7ee267f97970751e1ac5cdf9c5b662213",
+   "google_fonts": "family=Space+Grotesk:wght@500;700&family=Space+Mono:wght@400;700",
+   "tokens": {
+    "badge_id": "required",
+    "day_label": "optional",
+    "doors_open_time": "optional",
+    "event_name": "required",
+    "full_name": "required",
+    "hall": "optional",
+    "organization": "optional",
+    "qr_code_url": "required",
+    "role": "required",
+    "zone": "optional"
+   },
+   "accent": {
+    "default": "#FF8A4C",
+    "suggestions": [
+     "#FF8A4C",
+     "#FFD23F",
+     "#6FE3C1",
+     "#9DB8FF"
+    ],
+    "against": [
+     "#0F2440"
+    ],
+    "min_contrast": 4.5,
+    "note": "Dark text sits on the accent: keep it light."
+   }
+  },
+  {
+   "key": "10-colour-blocks",
+   "name": "Colour Blocks",
+   "use": "club",
+   "has_photo": false,
+   "colour": "colour",
+   "file": "10-colour-blocks.html",
+   "preview": "previews/10-colour-blocks.png",
+   "source_sha256": "582c0d7f4de951c9ba5d61679a532aa2c04e1313b5e75504d629ceef1995a699",
+   "google_fonts": "family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600",
+   "tokens": {
+    "chapter": "optional",
+    "full_name": "required",
+    "member_id": "required",
+    "org_name": "required",
+    "qr_code_url": "required",
+    "role": "required",
+    "valid_thru": "required"
+   }
+  },
+  {
+   "key": "11-night-grid",
+   "name": "Night Grid",
+   "use": "event",
+   "has_photo": false,
+   "colour": "colour",
+   "file": "11-night-grid.html",
+   "preview": "previews/11-night-grid.png",
+   "source_sha256": "6f1147a9bc18a8d26ff3a988a3f9eb57639d344e0af0df7b20564133f666c9e6",
+   "google_fonts": "family=Space+Grotesk:wght@500;700&family=Space+Mono:wght@400;700",
+   "tokens": {
+    "badge_id": "required",
+    "event_date": "required",
+    "event_name": "required",
+    "event_tagline": "optional",
+    "first_name": "required",
+    "last_name": "optional",
+    "qr_code_url": "required",
+    "role": "required",
+    "table_no": "optional",
+    "team_name": "optional",
+    "track": "optional"
+   },
+   "accent": {
+    "default": "#6CF0C2",
+    "suggestions": [
+     "#6CF0C2",
+     "#FFD23F",
+     "#FF8FB1",
+     "#8FB8FF"
+    ],
+    "against": [
+     "#0C1022"
+    ],
+    "min_contrast": 4.5,
+    "note": "The accent is text on a dark card: keep it light."
+   },
+   "printer": "Large dark areas: needs a printer that handles heavy ink."
+  },
+  {
+   "key": "12-stamp",
+   "name": "Stamp",
+   "use": "club",
+   "has_photo": false,
+   "colour": "colour",
+   "file": "12-stamp.html",
+   "preview": "previews/12-stamp.png",
+   "source_sha256": "80566a0a4b1b548d6683f148ae1a28edb8714628c3316175467fef7ace5021e9",
+   "google_fonts": "family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700",
+   "tokens": {
+    "city": "optional",
+    "full_name": "required",
+    "joined_date": "optional",
+    "member_id": "required",
+    "membership_tier": "optional",
+    "org_name": "required",
+    "qr_code_url": "required",
+    "valid_year": "required"
+   },
+   "accent": {
+    "default": "#B42B22",
+    "suggestions": [
+     "#B42B22",
+     "#1C2F73",
+     "#0B5E5E",
+     "#7A2BD6"
+    ],
+    "against": [
+     "#E9F0F7"
+    ],
+    "min_contrast": 4.5,
+    "note": "The stamp's text is the accent on a pale card: keep it dark."
+   }
+  },
+  {
+   "key": "13-sash",
+   "name": "Sash",
+   "use": "event",
+   "has_photo": false,
+   "colour": "colour",
+   "file": "13-sash.html",
+   "preview": "previews/13-sash.png",
+   "source_sha256": "458c2192838f0240da9c176ab5ebe573e1dcf0b7ae09c58e10d3c5112ccf5ca6",
+   "google_fonts": "family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600",
+   "tokens": {
+    "access_level": "optional",
+    "badge_id": "required",
+    "event_date": "required",
+    "event_name": "required",
+    "first_name": "required",
+    "last_name": "optional",
+    "organization": "optional",
+    "qr_code_url": "required",
+    "role": "required"
+   },
+   "accent": {
+    "default": "#1F3BD8",
+    "suggestions": [
+     "#1F3BD8",
+     "#D63A22",
+     "#0B6E6E",
+     "#141414"
+    ],
+    "against": [
+     "#FFFFFF"
+    ],
+    "min_contrast": 3.0,
+    "note": "White text (the role) sits on the sash: keep it dark."
+   }
+  },
+  {
+   "key": "14-fine-line",
+   "name": "Fine Line",
+   "use": "club",
+   "has_photo": false,
+   "colour": "colour",
+   "file": "14-fine-line.html",
+   "preview": "previews/14-fine-line.png",
+   "source_sha256": "c2a004839f4db1f78e2afde19ce08b37dcbbe97d7da05987701593a84255219e",
+   "google_fonts": "family=Instrument+Serif&family=Inter:wght@400;500;600",
+   "tokens": {
+    "first_name": "required",
+    "last_name": "optional",
+    "member_id": "required",
+    "member_since_year": "optional",
+    "membership_tier": "optional",
+    "org_name": "required",
+    "qr_code_url": "required",
+    "valid_thru": "required"
+   },
+   "accent": {
+    "default": "#B4532A",
+    "suggestions": [
+     "#B4532A",
+     "#1F3BD8",
+     "#0B6E6E",
+     "#1A1A1A"
+    ],
+    "against": [
+     "#FBFBF9"
+    ],
+    "min_contrast": 1.5,
+    "note": "Decorative: one dot beside the tier."
+   }
+  },
+  {
+   "key": "15-race-bib",
+   "name": "Race Bib",
+   "use": "club",
+   "has_photo": false,
+   "colour": "colour",
+   "file": "15-race-bib.html",
+   "preview": "previews/15-race-bib.png",
+   "source_sha256": "d251350ec6c15dad55282ee4ff49c6c2339c3ab274e7f43d7ca0089b7b64f4f9",
+   "google_fonts": "family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600",
+   "tokens": {
+    "bib_number": "required",
+    "category": "optional",
+    "event_date": "required",
+    "event_name": "required",
+    "full_name": "required",
+    "org_name": "required",
+    "qr_code_url": "required",
+    "sponsor_src": "optional",
+    "start_time": "required",
+    "wave": "optional"
+   },
+   "accent": {
+    "default": "#FF6A3D",
+    "suggestions": [
+     "#FF6A3D",
+     "#FFD23F",
+     "#4FD1A5",
+     "#7FB2FF"
+    ],
+    "against": [
+     "#111111"
+    ],
+    "min_contrast": 4.5,
+    "note": "Dark text sits on the accent band: keep it light."
+   }
+  }
+ ]
+}

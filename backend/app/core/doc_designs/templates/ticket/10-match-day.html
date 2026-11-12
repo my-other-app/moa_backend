@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Match Day Ticket</title>
+<style>body{margin:0}</style>
+</head>
+<body>
+<!-- Ticket template: 10-match-day. Fixed canvas 1280x600 (ticket itself 1140x460, centred). Tokens: {{token}}. QR goes in [data-slot="qr"]. See README.md -->
+<div class="ticket-stage" style="width: 1280px; height: 600px; box-sizing: border-box; background: #04100A; display: flex; align-items: center; justify-content: center; font-family: 'Saira', sans-serif">
+<div style="position: relative; width: 1140px; height: 460px; display: flex; border-radius: 24px; overflow: hidden; box-shadow: 0 28px 64px rgba(200, 255, 46, 0.14); color: #FFFFFF">
+
+<div style="position: relative; width: 820px; box-sizing: border-box; padding: 34px 42px; background: repeating-linear-gradient(90deg, #0B6B3A 0 82px, #0A5F34 82px 164px); overflow: hidden; display: flex; flex-direction: column; justify-content: space-between">
+
+<svg aria-hidden="true" width="820" height="460" viewBox="0 0 820 460" style="position: absolute; left: 0; top: 0" fill="none" stroke="#FFFFFF" stroke-width="3" opacity="0.26">
+<rect x="18" y="18" width="1000" height="424"></rect>
+<line x1="560" y1="18" x2="560" y2="442"></line>
+<circle cx="560" cy="230" r="92"></circle>
+<rect x="18" y="120" width="110" height="220"></rect>
+<rect x="18" y="176" width="44" height="108"></rect>
+</svg>
+<svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" style="position: absolute; left: 554px; top: 224px"><circle cx="6" cy="6" r="6" fill="#FFFFFF" opacity="0.4"></circle></svg>
+
+<div data-fit-box style="position: relative; display: flex; align-items: center; justify-content: space-between">
+<div style="display: flex; align-items: center; gap: 12px">
+<div data-fit="name" style="font-family: 'Saira Condensed', sans-serif; font-size: 22px; font-weight: 800; letter-spacing: 0.1em">{{app_name}}</div>
+<div style="font-family: 'Saira Condensed', sans-serif; font-size: 18px; font-weight: 800; letter-spacing: 0.14em; padding: 2px 12px; background: #C8FF2E; color: #04100A; transform: skewX(-10deg)">MATCH DAY</div>
+</div>
+<div data-fit="name" style="font-size: 15px; font-weight: 700; letter-spacing: 0.1em">{{date}}<span data-optional="start_time"> · KICK-OFF {{start_time}}</span></div>
+</div>
+
+<div style="position: relative; display: flex; flex-direction: column; gap: 6px">
+<h1 data-fit="title" style="margin: 0; font-family: 'Saira Condensed', sans-serif; font-size: 108px; line-height: 0.9; font-weight: 800; text-transform: uppercase; font-style: italic; text-shadow: 4px 4px 0 #04100A">{{event_name}}</h1>
+<div data-optional="tagline" data-fit="line" style="font-size: 20px; font-weight: 700; color: #E4FF9A">{{tagline}}</div>
+</div>
+
+<div style="position: relative; display: flex; align-items: stretch; gap: 12px">
+<div data-optional="gate" style="width: 108px; padding: 10px 0; background: #C8FF2E; color: #04100A; border-radius: 12px; display: flex; flex-direction: column; align-items: center; gap: 0"><div style="font-size: 12px; font-weight: 700; letter-spacing: 0.18em">GATE</div><div style="font-family: 'Saira Condensed', sans-serif; font-size: 32px; font-weight: 800; line-height: 1.1">{{gate}}</div></div>
+<div data-optional="row" style="width: 108px; padding: 10px 0; background: #C8FF2E; color: #04100A; border-radius: 12px; display: flex; flex-direction: column; align-items: center; gap: 0"><div style="font-size: 12px; font-weight: 700; letter-spacing: 0.18em">ROW</div><div style="font-family: 'Saira Condensed', sans-serif; font-size: 32px; font-weight: 800; line-height: 1.1">{{row}}</div></div>
+<div data-optional="seat" style="width: 108px; padding: 10px 0; background: #C8FF2E; color: #04100A; border-radius: 12px; display: flex; flex-direction: column; align-items: center; gap: 0"><div style="font-size: 12px; font-weight: 700; letter-spacing: 0.18em">SEAT</div><div style="font-family: 'Saira Condensed', sans-serif; font-size: 32px; font-weight: 800; line-height: 1.1">{{seat}}</div></div>
+<div data-optional-any="venue doors_time" style="flex: 1; padding: 10px 18px; background: #04100A; border-radius: 12px; display: flex; flex-direction: column; justify-content: center; gap: 2px"><div data-optional="venue" style="font-size: 12px; font-weight: 700; letter-spacing: 0.18em; color: #C8FF2E">VENUE</div><div data-optional="venue" data-fit="line" style="font-size: 20px; font-weight: 700">{{venue}}</div><div data-fit="line" data-optional="doors_time" style="font-size: 14px; font-weight: 500; color: #D5F5E0">Doors {{doors_time}}</div></div>
+</div>
+</div>
+
+<div data-fit-box style="flex: 1; box-sizing: border-box; padding: 30px 30px; background: #04100A; border-left: 3px dashed #C8FF2E; display: flex; flex-direction: column; align-items: center; justify-content: space-between">
+<div data-fit-box style="width: 100%; display: flex; align-items: baseline; justify-content: space-between">
+<div data-optional="ticket_type" data-fit="name" style="font-family: 'Saira Condensed', sans-serif; font-size: 26px; font-weight: 800; text-transform: uppercase; color: #C8FF2E">{{ticket_type}}</div>
+<div data-fit="code" style="font-size: 14px; font-weight: 700; letter-spacing: 0.08em">{{ticket_id}}</div>
+</div>
+<div data-slot="qr" role="img" aria-label="QR code for ticket {{ticket_id}}" style="padding: 12px; position: relative; width: 190px; height: 190px; box-sizing: border-box; background: #FFFFFF; border-radius: 14px; box-shadow: 0 0 0 4px #04100A, 0 0 0 7px #C8FF2E; display: flex; align-items: center; justify-content: center; color: #04100A"><img src="{{qr_code_src}}" alt="" style="display: block; width: 100%; height: 100%"></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 2px">
+<div style="font-size: 12px; font-weight: 700; letter-spacing: 0.18em; color: #C8FF2E">SUPPORTER</div>
+<div data-fit="name" style="font-size: 20px; font-weight: 700">{{attendee_name}}</div>
+</div>
+</div>
+
+</div>
+</div>
+</body>
+</html>
