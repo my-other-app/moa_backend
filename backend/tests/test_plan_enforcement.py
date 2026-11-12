@@ -912,7 +912,7 @@ async def test_the_clubs_own_links_and_card_design_stay_gated(client, session, w
     assert r.status_code == 422, r.text
 
 
-async def test_a_grandfathered_events_door_keeps_printing_cards(client, session, world, monkeypatch, make_user, make_registration):
+async def test_a_grandfathered_events_door_keeps_printing_cards(client, session, world, monkeypatch, make_user, make_registration, classic_defaults):
     guest = await make_user(email="door-card@example.com")
     reg = await make_registration(event=world.event, user=guest)
     await grandfather(session, monkeypatch, world.event)
