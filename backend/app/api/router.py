@@ -25,6 +25,7 @@ from app.api.events.duplicate_router import router as duplicate_router
 from app.api.admission.router import router as admission_router
 from app.api.analytics.router import router as analytics_router
 from app.api.club_designs.router import router as club_designs_router
+from app.api.doc_presets.router import router as doc_presets_router
 from app.api.finance.router import router as finance_router
 from app.api.security.router import router as security_router
 from app.api.threads.router import public_router as threads_public_router, router as threads_router
@@ -133,6 +134,7 @@ api_router.include_router(router=cohosts_router, tags=["cohosts"])
 api_router.include_router(router=cohost_invitations_router, tags=["cohosts"])
 api_router.include_router(router=analytics_router, tags=["analytics"])
 api_router.include_router(router=club_designs_router, tags=["club-designs"])
+api_router.include_router(router=doc_presets_router)
 api_router.include_router(router=links_router, tags=["tracking-links"])
 api_router.include_router(router=discover_router, tags=["discover"])
 api_router.include_router(router=discover_admin_router, tags=["discover"])

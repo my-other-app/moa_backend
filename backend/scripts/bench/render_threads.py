@@ -37,7 +37,8 @@ def _documents():
     from PIL import Image
 
     from app.core.layout.renderer import RenderInput, pdf_to_png, render_pdf
-    from app.core.layout.starters import certificate_starter, ticket_starter
+    # The old starters: what clubs' saved custom designs look like.
+    from tests.legacy_layouts import certificate_starter, ticket_starter
 
     def png(w, h, color):
         b = io.BytesIO()

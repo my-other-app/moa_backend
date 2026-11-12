@@ -83,6 +83,7 @@ KINDS: dict[str, str] = {
     "message_overage_failed": "(retired with overage billing) Razorpay did not take a month's extra-messages add-on; the sweep tries again, then gives up for an admin to invoice (data: period, error)",
     "message_overage_manual": "(retired with overage billing) A club went past its message limits on a plan nothing bills automatically (complimentary, Enterprise, a deal by hand, a subscription that ended): invoice it by hand (data: period, amount_paise)",
     "doc_cache_unknown": "The kept-documents sweep found objects under docs/ that are not kept documents, and left them alone (data: unknown, listed, percent, samples)",
+    "render_unavailable": "The render service (moa-render) did not draw a document: tickets and certificates fell back to the classic design, ID cards could not print (data: kind, error; app/api/doc_presets/engine.py)",
 }
 
 DEDUPE_WINDOW = timedelta(minutes=10)

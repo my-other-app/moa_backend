@@ -11,7 +11,7 @@ from sqlalchemy import select
 from app.api.clubs.models import ClubUsersLink
 from app.api.ticket_templates.models import TicketTemplates
 from app.core.layout.model import TicketLayoutFields, dump
-from app.core.layout.starters import ticket_starter
+from tests.legacy_layouts import ticket_starter
 from app.core.storage import objects
 from tests.conftest import auth_header
 
@@ -94,11 +94,13 @@ async def test_an_events_fork_may_keep_the_clubs_pictures(client, designing):
 
 async def test_starters_and_the_preview_render_for_the_club(client, designing):
     h = designing["h"]
-    starters = (await client.get("/api/v1/clubs/designs/certificate/layout", headers=h)).json()["starters"]
+    # Certificates start from the designer's designs now; the CR80 card is the card starter left.
+    assert (await client.get("/api/v1/clubs/designs/certificate/layout", headers=h)).json()["starters"] == {}
+    starters = (await client.get("/api/v1/clubs/designs/badge/layout", headers=h)).json()["starters"]
     name = next(iter(starters))
-    s = await client.get(f"/api/v1/clubs/designs/certificate/layout/starters/{name}", headers=h)
+    s = await client.get(f"/api/v1/clubs/designs/badge/layout/starters/{name}", headers=h)
     assert s.status_code == 200 and s.json()["layers"] and s.json()["page"]
-    assert (await client.get("/api/v1/clubs/designs/certificate/layout/starters/nope", headers=h)).status_code == 404
+    assert (await client.get("/api/v1/clubs/designs/certificate/layout/starters/classic", headers=h)).status_code == 404
 
     png = await client.post("/api/v1/clubs/designs/ticket/layout/preview", json=_body(), headers=h)
     assert png.status_code == 200, png.text
@@ -108,8 +110,12 @@ async def test_starters_and_the_preview_render_for_the_club(client, designing):
 async def test_every_kind_has_its_own_default_and_resetting_drops_it(client, designing):
     h = designing["h"]
     for kind in ("ticket", "badge", "certificate", "agenda"):
-        starters = (await client.get(f"/api/v1/clubs/designs/{kind}/layout", headers=h)).json()["starters"]
-        body = (await client.get(f"/api/v1/clubs/designs/{kind}/layout/starters/{next(iter(starters))}", headers=h)).json()
+        opened = (await client.get(f"/api/v1/clubs/designs/{kind}/layout", headers=h)).json()
+        if opened["starters"]:
+            body = (await client.get(f"/api/v1/clubs/designs/{kind}/layout/starters/{next(iter(opened['starters']))}", headers=h)).json()
+        else:
+            # No starters: the custom canvas the editor opened on.
+            body = {"canvas": opened["canvas"], "layers": opened["layers"], "page": opened["page"]}
         saved = await client.put(f"/api/v1/clubs/designs/{kind}/layout", json=body, headers=h)
         assert saved.status_code == 200, (kind, saved.text)
         assert saved.json()["isOwn"] is True and saved.json()["kind"] == kind

@@ -10,7 +10,7 @@ from app.api.checkins import service as checkins
 from app.api.events.documents import layout_values
 from app.api.events.models import EventRegistrationsLink
 from app.core.layout.model import TicketLayoutFields, dump
-from app.core.layout.starters import ticket_starter
+from tests.legacy_layouts import ticket_starter
 from tests.conftest import auth_header
 
 

@@ -125,13 +125,15 @@ def _documents():
     from PIL import Image
 
     from app.core.layout.renderer import RenderInput, render_pdf
-    from app.core.layout.starters import badge_starter, certificate_starter, ticket_starter
+    from app.core.layout.starters import badge_starter
+    # The old starters: what clubs' saved custom designs look like.
+    from tests.legacy_layouts import certificate_starter, ticket_starter
 
     def png(w, h, color):
         return _encode(Image.new("RGB", (w, h), color), "PNG")
 
     logo, icon = png(512, 512, (20, 120, 200)), png(800, 800, (200, 80, 40))
-    starters = {"ticket": ticket_starter("classic"), "certificate": certificate_starter("classic"), "idcard": badge_starter("classic")}
+    starters = {"ticket": ticket_starter("classic"), "certificate": certificate_starter("classic"), "idcard": badge_starter("card_cr80")}
 
     def drawer(s, art: bytes):
         def draw() -> bytes:

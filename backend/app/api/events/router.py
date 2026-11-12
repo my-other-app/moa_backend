@@ -782,11 +782,26 @@ async def get_ticket_image(
     def tagged(whole: bool) -> dict:
         return {**headers, "ETag": etag} if whole else headers
 
+    tag = True
+    if job.preset:
+        # One of the designer's designs: the PDF the download is, at twice
+        # its pixels (D2).
+        from app.api.doc_presets.config import without_preset
+        from app.api.doc_presets.jobs import png_of
+
+        pdf, whole = await _drawn(job, job.cache_key("ticket", registration.id))
+        if not job.state.get("fallback"):
+            return Response(content=await png_of(job, pdf), media_type="image/png", headers=tagged(whole))
+        # The render service could not draw it (D9): the classic ticket's
+        # own picture, untagged, as its PDF was.
+        style, tag = without_preset(style), False
+        job = ticket_job(registration, style)
+
     if in_layout_mode(style):
         # The PDF the download is (kept in the bucket once drawn), as a PNG.
         pdf, whole = await _drawn(job, job.cache_key("ticket", registration.id))
         png = await pool.run(layout_png, style, pdf)
-        return Response(content=png, media_type="image/png", headers=tagged(whole))
+        return Response(content=png, media_type="image/png", headers=tagged(whole and tag))
 
     payload = ticket_payload(registration)
     styled = apply_layers(style, document_values(registration, registration.event))
@@ -804,7 +819,7 @@ async def get_ticket_image(
         ).getvalue()
 
     png = await pool.run(draw)
-    return Response(content=png, media_type="image/png", headers=tagged(complete[0]))
+    return Response(content=png, media_type="image/png", headers=tagged(complete[0] and tag))
 
 
 @router.get("/count-view/{event_id}", summary="Increment event view count")
@@ -845,6 +860,14 @@ async def _drawn(job, key: Optional[str]) -> tuple[bytes, bool]:
     its logo would be told it is current until the design changed. A kept
     one is always whole."""
     whole = [True]
+
+    if job.preset:
+        async def draw_preset() -> tuple[bytes, bool]:
+            pdf, complete = await job.draw()
+            whole[0] = complete
+            return pdf, complete
+
+        return await doc_cache.cached(key, draw_preset), whole[0]
 
     def draw() -> tuple[bytes, bool]:
         pdf, complete = job.draw()
@@ -1078,6 +1101,19 @@ async def get_certificate_image(
     headers = _certificate_headers(registration, job, "png", ticket_id)
     if (unchanged := _not_modified(request, headers)) is not None:
         return unchanged
+
+    if job.preset:
+        from app.api.doc_presets.config import without_preset
+        from app.api.doc_presets.jobs import png_of
+
+        pdf, whole = await _drawn(job, job.cache_key("certificate", registration.id))
+        if not whole:
+            del headers["ETag"]
+        if not job.state.get("fallback"):
+            return Response(content=await png_of(job, pdf), media_type="image/png", headers=headers)
+        # The render service could not draw it (D9): the classic certificate's own picture.
+        style = without_preset(style)
+        job = certificate_job(registration, style)
 
     if in_layout_mode(style):
         pdf = await doc_cache.cached(job.cache_key("certificate", registration.id), job.draw)

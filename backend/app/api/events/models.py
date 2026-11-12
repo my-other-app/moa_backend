@@ -475,6 +475,12 @@ class EventRegistrationsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin)
     certificate_issued_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     certificate_revoked_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     certificate_design_version = Column(Integer, nullable=False, default=0, server_default="0")
+    # The design an issued certificate keeps (app/api/doc_presets/pins.py):
+    # {"mode": "legacy"} for those issued before the designer's designs,
+    # {"mode": "custom", ...} or {"mode": "preset", "preset": {...}, ...} from
+    # the design at issue. Null until issued. Only the club's "apply the
+    # current design" changes it after that.
+    certificate_design = Column(JSON, nullable=True)
     # The certificate's number (CERT-XXXXX-XXXXX), drawn at registration and
     # unrelated to the ticket id. Every registration has one (the migration
     # certificate_public_ids drew one for the older ones, whose number used

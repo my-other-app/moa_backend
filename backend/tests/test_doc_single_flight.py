@@ -25,6 +25,9 @@ from app.api.events import doc_cache, tickets
 from app.config import settings
 from app.core.storage import objects
 
+# About the classic HTML documents and the CR80 card: the defaults as they were.
+pytestmark = pytest.mark.usefixtures("classic_defaults")
+
 KEY = f"{settings.S3_BASE_PATH}/docs/ticket/3f1c2b4a-0000-4000-8000-000000000001/0-{'a' * 24}.pdf"
 
 

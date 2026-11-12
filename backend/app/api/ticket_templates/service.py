@@ -168,7 +168,7 @@ async def get_template_for_event(
         select(Events).where(Events.id == event_id, Events.is_deleted == False)
     )
     if not event:
-        return _default_config()
+        return system_default_config()
 
     template = await resolve_template(
         session,
@@ -194,13 +194,22 @@ async def get_template_for_event(
         if assigned is not None:
             return shown(assigned.config, assigned, fields=FIELDS)
 
-    return _default_config()
+    return system_default_config()
 
 
 
 def _default_config() -> dict:
     """Return the default ticket config."""
     return TicketTemplateConfig().model_dump()
+
+
+def system_default_config() -> dict:
+    """What a ticket is when nothing is saved anywhere up the chain: the
+    designer's default design (app/api/doc_presets/config.py, D7), with the
+    classic config beside it for the renderer to fall back on (D9)."""
+    from app.api.doc_presets.config import with_default
+
+    return with_default(_default_config(), "ticket")
 
 
 FIELDS = TICKET_FIELDS

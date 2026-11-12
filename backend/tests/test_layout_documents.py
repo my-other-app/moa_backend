@@ -11,7 +11,7 @@ import pytest
 
 from app.core.layout.model import TicketLayoutFields, dump
 from app.core.layout.renderer import pdf_text
-from app.core.layout.starters import certificate_starter, ticket_starter
+from tests.legacy_layouts import certificate_starter, ticket_starter
 from tests.conftest import auth_header
 
 
@@ -51,6 +51,8 @@ async def test_an_event_with_no_design_opens_on_a_starter(client, world):
 
     assert r.status_code == 200, r.text
     body = r.json()
+    # The designer's default is in use; the custom canvas opens blank, with its QR.
+    assert body["active"] == "preset" and body["preset"]["id"] == "ticket/03-daylight-boarding-pass"
     assert body["fromStarter"] is True
     assert body["version"] == 0
     assert any(l["kind"] == "qr" for l in body["layers"])
@@ -136,12 +138,15 @@ async def test_the_preview_without_an_attendee_uses_the_sample_guest(client, wor
 
 
 async def test_a_starter_can_be_fetched_to_start_from(client, world):
+    """The ticket starters gave way to the designer's designs; the CR80 card
+    is the one card starter left (app/core/layout/starters.py)."""
     e = world["event"].id
-    r = await client.get(f"/api/v1/events/{e}/designs/ticket/layout/starters/stub", headers=world["club"])
+    r = await client.get(f"/api/v1/events/{e}/designs/badge/layout/starters/card_cr80", headers=world["club"])
 
     assert r.status_code == 200, r.text
-    assert r.json()["canvas"]["background"] == "#141614"
-    assert (await client.get(f"/api/v1/events/{e}/designs/ticket/layout/starters/nope", headers=world["club"])).status_code == 404
+    assert r.json()["page"] == {"widthMm": 54, "heightMm": 85.6}
+    for gone in ("ticket/layout/starters/stub", "ticket/layout/starters/classic", "certificate/layout/starters/modern", "badge/layout/starters/simple"):
+        assert (await client.get(f"/api/v1/events/{e}/designs/{gone}", headers=world["club"])).status_code == 404
 
 
 async def test_saving_colours_does_not_wipe_the_design(client, world):

@@ -122,9 +122,23 @@ def with_qr(context: dict) -> dict:
 
 
 def certificate_job(registration, style: dict) -> RenderJob:
-    """The certificate's render, prepared on the loop (see tickets.ticket_job)."""
+    """The certificate's render, prepared on the loop (see tickets.ticket_job).
+    `style` is the design it is drawn from: for an issued one, its pin
+    (certificate_style, doc_presets.pins)."""
     event = registration.event
     version = design_version_of(style)
+    from app.api.doc_presets.config import preset_of, without_preset
+
+    if preset_of(style) is not None:
+        # One of the designer's designs; the classic certificate when the
+        # render service cannot draw it (doc_presets.jobs). Revoking it is
+        # part of its name, as its availability is (the ETag seeds it too).
+        from app.api.doc_presets.jobs import preset_job
+
+        return preset_job(
+            "certificate", registration, style, fallback=certificate_job(registration, without_preset(style)),
+            revoked_at=getattr(registration, "certificate_revoked_at", None),
+        )
     if in_layout_mode(style):
         values = layout_values(registration, event, "certificate")
         qr = qr_text(registration)
@@ -160,9 +174,13 @@ def certificate_job(registration, style: dict) -> RenderJob:
 
 
 async def certificate_style(session, registration) -> dict:
+    """The design this registration's certificate is drawn from: the one it
+    was issued with (contract §6: doc_presets.pins), else the event's current
+    one for its role."""
     from app.api.certificate_templates.service import get_template_for_event
+    from app.api.doc_presets.pins import pinned_style
 
-    return await get_template_for_event(session, registration.event_id, role=role_of(registration))
+    return pinned_style(await get_template_for_event(session, registration.event_id, role=role_of(registration)), registration)
 
 
 async def certificate_document(session, registration, style: Optional[dict] = None) -> Document:

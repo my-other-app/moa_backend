@@ -15,7 +15,8 @@ import pytest
 
 from app.core.layout.model import TicketLayoutFields, dump
 from app.core.layout.renderer import pdf_text
-from app.core.layout.starters import BADGE_STARTERS, TICKET_STARTERS, badge_starter, ticket_starter
+from app.core.layout.starters import BADGE_STARTERS, badge_starter
+from tests.legacy_layouts import TICKET_STARTERS, ticket_starter
 from app.core.layout.tokens import TOKEN_BY_KEY, canonical_token, parse_ticket_template
 from tests.conftest import auth_header
 

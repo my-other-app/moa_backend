@@ -11,8 +11,9 @@ the request's own loop (`ticket_job`), and the drawing runs on the render pool
 the bucket (app.api.events.doc_cache), so the next download or resend of the
 same ticket is a read, not a render.
 """
+import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Callable, Optional
 
@@ -47,12 +48,24 @@ class Document:
 @dataclass
 class RenderJob:
     """One document's render, prepared on the loop: `draw` touches no
-    database, and `fingerprint` names everything it prints."""
+    database, and `fingerprint` names everything it prints.
 
-    draw: Callable[[], tuple[bytes, bool]]
+    `draw` is a plain function for the layered and HTML designs (run on the
+    render pool), and a coroutine function for one of the designer's designs
+    (app/api/doc_presets/jobs.py), which asks the render service;
+    doc_cache.run_draw runs either. Such a job knows its PNG's width, and
+    `state["fallback"]` says its last drawing was the classic one (D9)."""
+
+    draw: Callable
     fingerprint: str
     design_version: int
     style: dict
+    png_width: Optional[int] = None
+    state: dict = field(default_factory=dict)
+
+    @property
+    def preset(self) -> bool:
+        return asyncio.iscoroutinefunction(self.draw)
 
     def cache_key(self, kind: str, registration_id) -> Optional[str]:
         if registration_id is None:
@@ -110,7 +123,11 @@ def poster_url(event) -> Optional[str]:
 
 
 def design_version_of(style: dict) -> int:
-    if not in_layout_mode(style):
+    """The layered design's version; 0 for an HTML design and for one of the
+    designer's designs (whose own fingerprint names it: doc_presets)."""
+    from app.api.doc_presets.config import preset_of
+
+    if not in_layout_mode(style) or preset_of(style) is not None:
         return 0
     return int((style.get("layout") or {}).get("version", 0) or 0)
 
@@ -157,6 +174,14 @@ def ticket_job(registration, style: dict) -> RenderJob:
     # certificate's revocation does for its cache seed. Reinstating it gives
     # back the old fingerprint, so the kept PDF is read, not drawn again.
     revoked_at = getattr(registration, "ticket_revoked_at", None)
+    from app.api.doc_presets.config import preset_of, without_preset
+
+    if preset_of(style) is not None:
+        # One of the designer's designs, drawn by the render service; the
+        # classic ticket (this design without its preset) when it cannot be.
+        from app.api.doc_presets.jobs import preset_job
+
+        return preset_job("ticket", registration, style, fallback=ticket_job(registration, without_preset(style)), revoked_at=revoked_at)
     if in_layout_mode(style):
         # Drawn by the layout renderer with the editor's own fonts and layout
         # code, so the ticket is what the canvas showed. No HTML, no browser.
@@ -200,9 +225,13 @@ def ticket_job(registration, style: dict) -> RenderJob:
 
 def render_ticket_pdf(registration, style: dict) -> bytes:
     """The ticket PDF from a resolved design: the layer renderer when the
-    design has layers, the HTML template otherwise. Blocks while it renders;
-    async code uses ticket_document, which renders on the render pool."""
-    return ticket_job(registration, style).draw()[0]
+    design has layers, the HTML template otherwise. Blocks while it renders,
+    so it is for code with no event loop (scripts); async code uses
+    ticket_document."""
+    job = ticket_job(registration, style)
+    if job.preset:
+        return asyncio.run(job.draw())[0]
+    return job.draw()[0]
 
 
 async def ticket_style(session, registration) -> dict:

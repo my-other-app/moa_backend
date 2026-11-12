@@ -225,10 +225,10 @@ def _from_starter(starter: dict, brand, *, mark_key: str, ground: str | None = N
 
 
 def badge_layout(brand, *, mark_key: str) -> dict:
-    """The ID card (CR80 portrait), from the conference starter, in the brand."""
+    """The ID card (CR80 portrait), from the card_cr80 starter, in the brand."""
     from app.core.layout.starters import badge_starter
 
-    return _from_starter(badge_starter("classic"), brand, mark_key=mark_key)
+    return _from_starter(badge_starter("card_cr80"), brand, mark_key=mark_key)
 
 
 def agenda_layout(brand, *, mark_key: str) -> dict:

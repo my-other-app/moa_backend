@@ -23,6 +23,10 @@ from app.api.event_designs.router import (
     _DEFAULTS,
     _MODELS,
     DesignKind,
+    PresetBody,
+    PresetPreviewBody,
+    _checked_preset,
+    preset_preview,
     _club_layout_prefix,
     _fields_of,
     _layout_dto,
@@ -32,6 +36,7 @@ from app.api.event_designs.router import (
     _store_layout_image,
     _validate_layout,
 )
+from app.api.doc_presets.config import preset_of
 from app.api.events.documents import in_layout_mode, layout_sample_values
 from app.api.templates_audience import TemplateAudience
 from app.api.templates_images import shown
@@ -57,6 +62,7 @@ def _sample_event(club):
     return SimpleNamespace(
         id=0, name="Sample event", club=club, club_id=club.id, additional_details=[], location_name="Main Hall",
         event_datetime=start, duration=2.0, admission_prefix=None, admission_digits=4, admission_include_code=True,
+        is_online=False,
     )
 
 
@@ -82,8 +88,9 @@ async def _agenda(session, club, kind: DesignKind):
 def _dto(club, kind: DesignKind, template, style: dict, agenda) -> dict:
     out = _layout_dto(_sample_event(club), kind, TemplateAudience.event_default, template, style, agenda)
     out["eventId"] = 0
-    # The club owns a design once it has saved one in the editor.
-    out["isOwn"] = template is not None and in_layout_mode(style)
+    # The club owns a design once it has saved one in the editor, or chosen
+    # one of the designer's designs.
+    out["isOwn"] = template is not None and (in_layout_mode(style) or preset_of(style) is not None)
     return out
 
 
@@ -127,6 +134,8 @@ async def save_layout(session: SessionDep, user: ClubAuth, kind: DesignKind, bod
     config = dict(template.config or {})
     previous = (config.get("layout") or {}).get("version", 0)
     config["layout"] = {**dump(layout), "version": previous + 1}
+    # Saving the custom design makes it the one in use (D6).
+    config.pop("preset", None)
     template.config = config
     await session.commit()
     await session.refresh(template)
@@ -161,6 +170,55 @@ async def preview_layout(session: SessionDep, user: ClubAuth, kind: DesignKind, 
         content=await pool.run(_preview_png, style, values, qr_text, f"{kind.value} preview", entries, club),
         media_type="image/png", headers={"Cache-Control": "no-store"},
     )
+
+
+@router.put("/{kind}/preset", summary="Use one of the designer's designs as the club's default")
+async def save_preset(session: SessionDep, user: ClubAuth, kind: DesignKind, body: PresetBody) -> dict:
+    """What every event of the club without its own design uses. The
+    custom layout, if any, stays where it was. Answers with GET .../layout."""
+    club = await _club_for(session, user)
+    preset, warnings = _checked_preset(kind, body)
+    await _plan_allows(session, club.id, kind, user)
+    model = _MODELS[kind]
+    template = await _default_row(session, club.id, kind)
+    if template is None:
+        template = model(
+            club_id=club.id, event_id=None, audience=TemplateAudience.event_default,
+            name=f"{club.name} {kind.value}", is_default=True, config=_DEFAULTS[kind](),
+        )
+        session.add(template)
+    template.config = {**(template.config or {}), "preset": preset}
+    await session.commit()
+    await session.refresh(template)
+    out = _dto(club, kind, template, shown(template.config, template, fields=_fields_of(template)), await _agenda(session, club, kind))
+    return {**out, "warnings": warnings}
+
+
+@router.delete("/{kind}/preset", summary="Stop using the chosen design as the club's default")
+async def clear_preset(session: SessionDep, user: ClubAuth, kind: DesignKind) -> dict:
+    """With a custom layout saved, that is the club's default now; without
+    one the club's default is dropped and its events use the system's (D7)."""
+    club = await _club_for(session, user)
+    template = await _default_row(session, club.id, kind)
+    if template is not None:
+        config = {k: v for k, v in (template.config or {}).items() if k != "preset"}
+        if in_layout_mode(config):
+            template.config = config
+        else:
+            template.is_default = False
+            template.is_deleted = True
+        await session.commit()
+    template, style = await _current(session, club, kind)
+    return _dto(club, kind, template, style, await _agenda(session, club, kind))
+
+
+@router.post("/{kind}/preset/preview", summary="One of the designer's designs, drawn for the sample guest")
+async def preview_preset(session: SessionDep, user: ClubAuth, kind: DesignKind, body: PresetPreviewBody, format: str = Query("html", pattern="^(html|png)$")) -> Response:
+    """As the event's preview, on a stand-in event with the club's details."""
+    club = await _club_for(session, user)
+    preset, _ = _checked_preset(kind, body)
+    _, style = await _current(session, club, kind)
+    return await preset_preview(kind, _sample_event(club), style, preset, None, TemplateAudience.event_default, format)
 
 
 @router.post("/{kind}/layout/images", summary="A template or a picture for the club's design")

@@ -137,6 +137,9 @@ _CLUB_PROFILE_WRITES = _rx(
 # every guest answered: owners and admins (app/api/missing_answers). Asking
 # guests for missing answers is messaging them: editors too, door staff never.
 _ANSWERS_MOVE = _rx(r"^/api/v1/events/\d+/answers/move$")
+# Putting the current design on every certificate already issued (contract
+# §6): it changes documents people hold, so owners and admins only.
+_CERTIFICATES_REDESIGN = _rx(r"^/api/v1/events/\d+/certificates/apply-design$")
 # Things that cannot be taken back.
 _DESTRUCTIVE = _rx(
     r"^/api/v1/events/delete/\d+$",
@@ -212,7 +215,7 @@ def allows(role: str, method: str, path: str) -> bool:
         return role == "admin"
     if role == "admin":
         return True
-    if _ANSWERS_MOVE.search(path):
+    if _ANSWERS_MOVE.search(path) or _CERTIFICATES_REDESIGN.search(path):
         return False
     if _DISCOUNT_CODES.search(path):
         return False
@@ -292,6 +295,8 @@ def can(role: str) -> dict:
         # and moving answers kept under an old question onto a current one.
         "ask_answers": editor,
         "move_answers": admin,
+        # Putting the current design on certificates already issued (`_CERTIFICATES_REDESIGN`).
+        "redesign_issued_certificates": admin,
         # Social auto-posting (app/api/social): the club's accounts and the
         # approval setting, approving, and drafting and scheduling posts.
         "social_accounts": admin,

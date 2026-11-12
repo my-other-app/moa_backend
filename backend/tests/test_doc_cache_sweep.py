@@ -24,6 +24,9 @@ from app.core.storage import objects
 from scripts import doc_cache_report
 from tests.conftest import auth_header
 
+# About the classic HTML documents and the CR80 card: the defaults as they were.
+pytestmark = pytest.mark.usefixtures("classic_defaults")
+
 NOW = datetime(2026, 10, 19, 12, 0, tzinfo=timezone.utc)
 HEX = "0123456789abcdef01234567"
 

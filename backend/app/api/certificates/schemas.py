@@ -40,8 +40,23 @@ class CertificateSummary(BaseModel):
     attended: int
     registrations: int
     outdated: int
+    #: Issued (revoked or not) with another design than their role's now:
+    #: what POST .../certificates/apply-design would change (contract §6).
+    other_design: int = 0
     design_version: int
     channels: list[ChannelSummary]
+
+
+class ApplyDesignRequest(BaseModel):
+    """The club's confirmation: true, or nothing changes."""
+
+    confirm: bool = False
+
+
+class ApplyDesignResponse(BaseModel):
+    updated: int
+    #: The design each role's certificates now keep: a design id, or "custom".
+    designs: dict[str, str]
 
 
 class CertificateRow(BaseModel):

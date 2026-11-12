@@ -10,7 +10,7 @@ from app.api.closeout.models import ArchivedContacts
 from app.api.events.models import Events
 from app.api.events.volunteer.models import Volunteer
 from app.core.layout.model import TicketLayoutFields, dump
-from app.core.layout.starters import ticket_starter
+from tests.legacy_layouts import ticket_starter
 from tests.conftest import auth_header
 
 START = datetime(2026, 11, 20, 3, 30, tzinfo=timezone.utc)

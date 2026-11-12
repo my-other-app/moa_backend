@@ -11,7 +11,7 @@ from app.api.deliveries import service as deliveries
 from app.api.events.volunteer.models import Volunteer
 from app.core.email import email as email_mod
 from app.core.layout.model import TicketLayoutFields, dump
-from app.core.layout.starters import ticket_starter
+from tests.legacy_layouts import ticket_starter
 from tests.conftest import auth_header
 
 START = datetime(2026, 11, 20, 18, 0, tzinfo=timezone.utc)

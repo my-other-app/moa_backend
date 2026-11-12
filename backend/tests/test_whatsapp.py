@@ -23,7 +23,7 @@ from app.config import settings
 from app.core import jobs, providers, whatsapp
 from app.core.email import email as email_mod
 from app.core.layout.model import TicketLayoutFields, dump
-from app.core.layout.starters import certificate_starter, ticket_starter
+from tests.legacy_layouts import certificate_starter, ticket_starter
 from tests.conftest import auth_header
 
 NOW = datetime.now(timezone.utc)

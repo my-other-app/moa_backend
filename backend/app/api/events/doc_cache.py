@@ -8,7 +8,10 @@ PDF is now kept at
 
 where the fingerprint is a hash of everything the drawing reads: the values
 printed, the design (with its image keys, never its expiring links), the
-renderer's version and, for the HTML templates, the template file itself.
+renderer's version and, for the HTML templates, the template file itself;
+for one of the designer's designs (app/api/doc_presets), the design's own
+fingerprint -- its template's digest, its manifest's version, the font
+lock's digest, the options, bindings and accent (D8).
 Change any of them and the key changes, so a cached file is never stale;
 nothing is ever invalidated, an old one just stops being asked for (and the
 sweep in doc_cache_sweep.py deletes it once it is APP_DOC_CACHE_DAYS old).
@@ -71,7 +74,8 @@ from app.db import lock_keys
 logger = logging.getLogger(__name__)
 
 #: Bump when the renderer changes what an existing design prints like.
-RENDER_VERSION = "2026-10-18.1"
+#: 2026-11-12.1: the designer's designs (app/api/doc_presets) and the new defaults.
+RENDER_VERSION = "2026-11-12.1"
 
 #: What the code keeps under docs/: these kinds, these extensions (the sweep
 #: deletes nothing else).
@@ -133,8 +137,17 @@ async def lookup(key: str) -> Optional[bytes]:
     return await asyncio.to_thread(objects.fetch, key, quiet_if_missing=True)
 
 
+async def run_draw(draw: Callable) -> tuple[bytes, bool]:
+    """`draw()`: on the render pool when it is a plain function (it draws in
+    this process), awaited when it is a coroutine function (a preset's,
+    which asks the render service: app/api/doc_presets/jobs.py)."""
+    if asyncio.iscoroutinefunction(draw):
+        return await draw()
+    return await pool.run(draw)
+
+
 async def _draw_and_keep(key: str, draw: Callable[[], tuple[bytes, bool]]) -> bytes:
-    pdf, complete = await pool.run(draw)
+    pdf, complete = await run_draw(draw)
     if complete:
         await asyncio.to_thread(_put, key, pdf)
     return pdf
@@ -145,7 +158,7 @@ async def cached(key: Optional[str], draw: Callable[[], tuple[bytes, bool]]) -> 
     many ask at the same moment -- kept when complete. No key (a document for
     no saved registration), or the cache off: drawn, not kept."""
     if not key or not settings.RENDER_DOC_CACHE:
-        return (await pool.run(draw))[0]
+        return (await run_draw(draw))[0]
     hit = await lookup(key)
     if hit:
         return hit

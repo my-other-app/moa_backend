@@ -26,7 +26,7 @@ from app.api.emails import old_links
 from app.config import settings
 from app.core.email import email as email_mod
 from app.core.layout.model import TicketLayoutFields, dump
-from app.core.layout.starters import certificate_starter, ticket_starter
+from tests.legacy_layouts import certificate_starter, ticket_starter
 from app.core.mail import links
 from tests.conftest import auth_header
 

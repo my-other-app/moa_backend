@@ -528,3 +528,44 @@ def _check_in_hooks_on_the_test_session(request, monkeypatch):
 
     monkeypatch.setattr(after, "session_scope", scope)
     yield
+
+
+@pytest.fixture(autouse=True)
+def _render_service_offline(monkeypatch):
+    """The suite has no render service (moa-render): a document made from one
+    of the designer's designs takes the classic renderer (D9,
+    app/api/doc_presets) unless a test puts a fake engine in place
+    (tests/doc_designs_fake.py). The admins' alert about it is recorded here,
+    not written: `engine.alerts` is the list."""
+    from app.api.doc_presets import engine
+
+    seen: list = []
+    monkeypatch.setattr(engine, "_last_alert", None)
+    monkeypatch.setattr(engine, "alerts", seen, raising=False)
+
+    def unavailable(kind, error):
+        seen.append((kind, str(error)))
+
+    monkeypatch.setattr(engine, "unavailable", unavailable)
+    yield seen
+
+
+@pytest.fixture
+def doc_designs(monkeypatch):
+    """The designer's designs and the render service faked
+    (tests/doc_designs_fake.py), for a test that prints a card with no saved
+    design: the default card is one of the designer's designs (D7), and with
+    no render service a card cannot print (D9)."""
+    from tests.doc_designs_fake import install
+
+    return install(monkeypatch)
+
+
+@pytest.fixture
+def classic_defaults(monkeypatch):
+    """The defaults as they were before the designer's designs: the HTML
+    ticket and certificate, the CR80 card (app/api/doc_presets/config.py).
+    For a test about those paths, which saved designs still take."""
+    from app.api.doc_presets import config
+
+    monkeypatch.setattr(config, "DEFAULT_IDS", {})

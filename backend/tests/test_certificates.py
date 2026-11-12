@@ -17,7 +17,7 @@ from app.api.deliveries import service as deliveries
 from app.core.email import email as email_mod
 from app.core.layout.model import TicketLayoutFields, dump
 from app.core.layout.renderer import pdf_text
-from app.core.layout.starters import certificate_starter
+from tests.legacy_layouts import certificate_starter
 from app.core.mail import links
 from tests.conftest import auth_header
 

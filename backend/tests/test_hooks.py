@@ -17,7 +17,7 @@ from app.api.deliveries.models import Deliveries, DeliveryChannel, DeliveryKind,
 from app.api.hooks import sns
 from app.config import settings
 from app.core.layout.model import TicketLayoutFields, dump
-from app.core.layout.starters import ticket_starter
+from tests.legacy_layouts import ticket_starter
 from app.core.email import email as email_mod
 from tests.conftest import auth_header
 

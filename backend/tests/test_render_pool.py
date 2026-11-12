@@ -19,7 +19,8 @@ import pytest
 from app.config import settings
 from app.core.layout import pool
 from app.core.layout.model import TicketLayoutFields, dump
-from app.core.layout.starters import badge_starter, certificate_starter, ticket_starter
+from app.core.layout.starters import badge_starter
+from tests.legacy_layouts import certificate_starter, ticket_starter
 from tests.conftest import auth_header
 
 START = datetime(2026, 11, 20, 18, 0, tzinfo=timezone.utc)
@@ -102,7 +103,7 @@ def _body(starter) -> dict:
 
 
 async def _layered(client, world, kind: str):
-    starter = {"ticket": ticket_starter, "certificate": certificate_starter}[kind]("classic") if kind != "badge" else badge_starter("classic", page=None)
+    starter = {"ticket": ticket_starter, "certificate": certificate_starter}[kind]("classic") if kind != "badge" else badge_starter("card_cr80", page=None)
     r = await client.put(f"/api/v1/events/{world['event'].id}/designs/{kind}/layout", json=_body(starter), headers=world["club"])
     assert r.status_code == 200, r.text
 
@@ -128,7 +129,20 @@ async def test_a_layered_certificate_and_its_png_are_drawn_on_the_pool(client, w
     assert {kind for kind, _ in threads} == {"layout", "png"} and _on_pool(threads)
 
 
-async def test_the_ticket_and_certificate_images_are_drawn_on_the_pool(client, world, threads):
+async def _html_designs(session, world):
+    """The event's own HTML designs (a config with neither a layout nor one of
+    the designer's designs): drawn by the HTML templates, as before."""
+    from app.api.certificate_templates.models import CertificateTemplates
+    from app.api.templates_audience import TemplateAudience
+    from app.api.ticket_templates.models import TicketTemplates
+
+    for model in (TicketTemplates, CertificateTemplates):
+        session.add(model(club_id=None, event_id=world["event"].id, audience=TemplateAudience.event_default, name="HTML", is_default=False, config={}))
+    await session.commit()
+
+
+async def test_the_ticket_and_certificate_images_are_drawn_on_the_pool(client, session, world, threads):
+    await _html_designs(session, world)
     t = await client.get(f"/api/v1/events/tickets/{world['reg'].ticket_id}/image", headers=world["guest"])
     c = await client.get(f"/api/v1/events/certificates/{world['reg'].ticket_id}/image", headers=world["guest"])
     p = await client.get(f"/api/v1/events/certificates/{world['reg'].ticket_id}/pdf", headers=world["guest"])
@@ -148,6 +162,8 @@ async def test_the_designers_previews_are_drawn_on_the_pool(client, world, threa
 
 
 async def test_id_cards_one_and_a_batch_are_drawn_on_the_pool(client, world, threads):
+    # The CR80 card, a layered design (the designer's are drawn by the render service).
+    await _layered(client, world, "badge")
     url = f"/api/v1/events/{world['event'].id}/idcards"
     one = await client.get(f"{url}/{world['reg'].id}.pdf", params={"record": "false"}, headers=world["club"])
     batch = await client.get(f"{url}/batch.pdf", params={"scope": "all"}, headers=world["club"])

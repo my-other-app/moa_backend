@@ -24,7 +24,7 @@ from app.config import settings
 from app.core import jobs, whatsapp
 from app.core.email import email as email_mod
 from app.core.layout.model import TicketLayoutFields, dump
-from app.core.layout.starters import ticket_starter
+from tests.legacy_layouts import ticket_starter
 from tests.conftest import auth_header
 from tests.test_billing_alerts import _alerts, mail  # noqa: F401  (mail is a fixture)
 from tests.test_club_billing import make_plan

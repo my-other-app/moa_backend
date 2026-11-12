@@ -86,6 +86,7 @@ async def fork_for_event(
     club_id: Optional[int],
     audience: TemplateAudience,
     name: str,
+    default: Optional[dict] = None,
 ):
     """Give this event its own copy of whatever it is currently using.
 
@@ -93,7 +94,9 @@ async def fork_for_event(
     copy starts as what they were already looking at, so editing changes
     nothing until they change something -- and from then on the club's
     template can be edited freely without reaching back into an event that
-    has already been designed.
+    has already been designed. With nothing up the chain the copy is
+    `default`, the kind's system default (the designer's default design), so
+    a first upload or option set on an event keeps the design it showed.
 
     Returns the existing row untouched if the event already owns one for
     this audience, so a second edit does not fork again.
@@ -120,7 +123,7 @@ async def fork_for_event(
         audience=audience,
         name=name,
         is_default=False,
-        config=dict(source.config) if source is not None else {},
+        config=dict(source.config) if source is not None else dict(default or {}),
     )
     for field in ("logo", "secondary_logo", "background_image"):
         if source is not None and hasattr(source, field):
