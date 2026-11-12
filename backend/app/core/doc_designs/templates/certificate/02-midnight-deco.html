@@ -3,7 +3,6 @@
 <head>
 <meta charset="utf-8">
 <title>Midnight Deco certificate</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&amp;family=Cormorant+Garamond:ital,wght@1,500&amp;family=Josefin+Sans:wght@400;600&amp;display=swap">
 <style>
 @page { size: A4 landscape; margin: 0 }
 html, body { margin: 0; padding: 0 }
@@ -29,26 +28,26 @@ body { -webkit-print-color-adjust: exact; print-color-adjust: exact }
 </g>
 </g>
 </svg>
-<div style="position: relative; width: 1123px; height: 794px; box-sizing: border-box; padding: 184px 120px 76px; display: flex; flex-direction: column; align-items: center; justify-content: space-between; text-align: center">
+<div data-fit-box style="position: relative; width: 1123px; height: 794px; box-sizing: border-box; padding: 184px 120px 76px; display: flex; flex-direction: column; align-items: center; justify-content: space-between; text-align: center">
 <div style="display: flex; flex-direction: column; align-items: center; gap: 12px">
-<div style="font-family: 'Cinzel', Georgia, serif; font-weight: 500; font-size: 14px; letter-spacing: 0.4em; color: {{accent_color}}"><span style="text-transform: uppercase">{{institute_name}}</span></div>
+<div data-fit="wrap" data-fit-lines="1" style="font-family: 'Cinzel', Georgia, serif; font-weight: 500; font-size: 14px; letter-spacing: 0.4em; color: {{accent_color}}"><span style="text-transform: uppercase">{{institute_name}}</span></div>
 <h1 style="margin: 0; font-family: 'Cinzel', Georgia, serif; font-weight: 700; font-size: 58px; line-height: 1.05; letter-spacing: 0.16em">CERTIFICATE</h1>
 <div style="display: flex; align-items: center; gap: 18px">
 <div aria-hidden="true" style="width: 90px; height: 1px; background: {{accent_color}}"></div>
-<div style="font-size: 15px; font-weight: 600; letter-spacing: 0.44em; color: {{accent_color}}">OF EXCELLENCE</div>
+<div data-option="subtitle" style="font-size: 15px; font-weight: 600; letter-spacing: 0.44em; color: {{accent_color}}">OF EXCELLENCE</div>
 <div aria-hidden="true" style="width: 90px; height: 1px; background: {{accent_color}}"></div>
 </div>
 </div>
 <div style="display: flex; flex-direction: column; align-items: center; gap: 6px">
 <div style="font-size: 16px; letter-spacing: 0.2em; text-transform: uppercase">Proudly presented to</div>
-<div style="font-family: 'Cormorant Garamond', Georgia, serif; font-style: italic; font-weight: 500; font-size: 66px; line-height: 1.1; color: {{accent_color}}">{{recipient_name}}</div>
-<div style="max-width: 680px; font-size: 17px; line-height: 1.55">for outstanding achievement in {{course_title}}, completed on {{completion_date}} with grade {{grade}}.</div>
+<div data-fit="wrap" data-fit-lines="2" style="font-family: 'Cormorant Garamond', Georgia, serif; font-style: italic; font-weight: 500; font-size: 66px; line-height: 1.1; color: {{accent_color}}">{{recipient_name}}</div>
+<div data-fit="wrap" data-fit-lines="3" data-option="statement" style="max-width: 680px; font-size: 17px; line-height: 1.55">for outstanding achievement in {{course_title}}, completed on {{completion_date}}<span data-optional="grade"> with grade {{grade}}</span>.</div>
 </div>
 <div style="width: 100%; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; align-items: end">
-<div style="display: flex; flex-direction: column; align-items: center; gap: 6px">
+<div data-optional="signatory_name" style="display: flex; flex-direction: column; align-items: center; gap: 6px">
 <div data-slot="signature" style="width: 220px; height: 40px; box-sizing: border-box; border-bottom: 1px solid {{accent_color}}"></div>
-<div style="font-size: 16px; font-weight: 600">{{signatory_name}}</div>
-<div style="font-size: 13px; letter-spacing: 0.2em; text-transform: uppercase; color: {{accent_color}}">{{signatory_designation}}</div>
+<div data-fit="wrap" data-fit-lines="1" style="font-size: 16px; font-weight: 600">{{signatory_name}}</div>
+<div data-optional="signatory_designation" style="font-size: 13px; letter-spacing: 0.2em; text-transform: uppercase; color: {{accent_color}}">{{signatory_designation}}</div>
 </div>
 <div style="display: flex; flex-direction: column; align-items: center; gap: 8px">
 <div style="padding: 8px; background: #FFFFFF; border: 2px solid {{accent_color}}; outline: 1px solid {{accent_color}}; outline-offset: 4px; display: flex">
@@ -57,7 +56,7 @@ body { -webkit-print-color-adjust: exact; print-color-adjust: exact }
 <div style="margin-top: 4px; font-size: 13px; letter-spacing: 0.24em; text-transform: uppercase; color: {{accent_color}}">Scan to verify</div>
 </div>
 <div style="display: flex; flex-direction: column; align-items: center; gap: 6px">
-<div style="width: 220px; height: 40px; box-sizing: border-box; border-bottom: 1px solid {{accent_color}}; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 6px; font-size: 16px; font-weight: 600">{{certificate_id}}</div>
+<div data-fit="wrap" data-fit-lines="1" data-fit-min="40%" style="width: 220px; height: 40px; box-sizing: border-box; border-bottom: 1px solid {{accent_color}}; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 6px; font-size: 16px; font-weight: 600">{{certificate_id}}</div>
 <div style="font-size: 16px; font-weight: 600">{{issue_date}}</div>
 <div style="font-size: 13px; letter-spacing: 0.2em; text-transform: uppercase; color: {{accent_color}}">Certificate No. &middot; Issued</div>
 </div>

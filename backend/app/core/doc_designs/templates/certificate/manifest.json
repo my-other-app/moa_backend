@@ -1,0 +1,602 @@
+{
+ "kind": "certificate",
+ "version": "2026-11-12.1",
+ "source": {
+  "package": "certificate-templates",
+  "received": "2026-11-12",
+  "readme": "designer/README.md",
+  "fields": "designer/fields.json"
+ },
+ "page": {
+  "width_px": 1123,
+  "height_px": 794,
+  "width_mm": 297,
+  "height_mm": 210
+ },
+ "qr": {
+  "token": "qr_code_src",
+  "ecc": "M",
+  "border": 0,
+  "note": "The certificate's verify URL, black on white, no quiet zone (each template pads it)."
+ },
+ "accent_mode": "token",
+ "options": {},
+ "designs": [
+  {
+   "key": "01-heritage",
+   "name": "Heritage",
+   "use": "Classic: double frame, script name, seal. Formal programmes",
+   "tone": "light",
+   "has_photo": false,
+   "colour": "colour",
+   "file": "01-heritage.html",
+   "preview": "previews/01-heritage.png",
+   "source_sha256": "3d8007da72ec5d74af3b4dcb3322decfee5883a824f86d8e1dff47b024efc830",
+   "google_fonts": "family=EB+Garamond:ital,wght@0,400;0,500;1,400&family=Pinyon+Script&family=Playfair+Display:wght@500;700",
+   "accent": {
+    "default": "#6B1F2E",
+    "suggestions": [
+     "#6B1F2E",
+     "#123A63",
+     "#14503F",
+     "#3B2A63"
+    ],
+    "against": [
+     "#F6F7F9"
+    ],
+    "min_contrast": 3.0,
+    "note": "The accent is the headline and name on a light page: keep it dark."
+   },
+   "tokens": {
+    "accent_color": "required",
+    "certificate_id": "required",
+    "course_title": "required",
+    "duration_hours": "optional",
+    "end_date": "required",
+    "event_date": "required",
+    "grade": "optional",
+    "institute_name": "required",
+    "logo_src": "optional",
+    "qr_code_src": "required",
+    "recipient_name": "required",
+    "signatory_designation": "optional",
+    "signatory_name": "optional",
+    "start_date": "required"
+   },
+   "default_wording": "participation",
+   "wordings": {
+    "participation": {
+     "subtitle": "of Participation",
+     "statement": "has participated in",
+     "details": "held on {{event_date}}<span data-optional=\"duration_hours\"> &middot; {{duration_hours}} hours</span>"
+    },
+    "achievement": {
+     "subtitle": "of Achievement",
+     "statement": "has achieved distinction in",
+     "details": "held on {{event_date}}<span data-optional=\"grade\"> &middot; Grade {{grade}}</span>"
+    },
+    "appreciation": {
+     "subtitle": "of Appreciation",
+     "statement": "is thanked with appreciation for contributing to",
+     "details": "held on {{event_date}}"
+    },
+    "completion": null
+   }
+  },
+  {
+   "key": "02-midnight-deco",
+   "name": "Midnight Deco",
+   "use": "Dark navy and gold art deco. Awards, digital sharing",
+   "tone": "dark",
+   "has_photo": false,
+   "colour": "colour",
+   "file": "02-midnight-deco.html",
+   "preview": "previews/02-midnight-deco.png",
+   "source_sha256": "8d9e55bdd3cc8337ade56e5a05fb07a382ba37b2f60e1d7eb8a7e88d6e4c2a11",
+   "google_fonts": "family=Cinzel:wght@500;700&family=Cormorant+Garamond:ital,wght@1,500&family=Josefin+Sans:wght@400;600",
+   "accent": {
+    "default": "#E0BC6A",
+    "suggestions": [
+     "#E0BC6A",
+     "#D9D9DE",
+     "#E8A27C",
+     "#8FD3C1"
+    ],
+    "against": [
+     "#0D111C"
+    ],
+    "min_contrast": 4.5,
+    "note": "The page is dark navy and small text is in the accent: keep it light."
+   },
+   "tokens": {
+    "accent_color": "required",
+    "certificate_id": "required",
+    "completion_date": "required",
+    "course_title": "required",
+    "event_date": "required",
+    "grade": "optional",
+    "institute_name": "required",
+    "issue_date": "required",
+    "qr_code_src": "required",
+    "recipient_name": "required",
+    "signatory_designation": "optional",
+    "signatory_name": "optional"
+   },
+   "default_wording": "achievement",
+   "wordings": {
+    "participation": {
+     "subtitle": "OF PARTICIPATION",
+     "statement": "for taking part in {{course_title}} on {{event_date}}."
+    },
+    "achievement": null,
+    "appreciation": {
+     "subtitle": "OF APPRECIATION",
+     "statement": "in grateful appreciation of their contribution to {{course_title}} on {{event_date}}."
+    },
+    "completion": {
+     "subtitle": "OF COMPLETION",
+     "statement": "for completing {{course_title}} on {{completion_date}}<span data-optional=\"grade\"> with grade {{grade}}</span>."
+    }
+   }
+  },
+  {
+   "key": "03-bold-geometric",
+   "name": "Bold Geometric",
+   "use": "Modern split layout, cobalt panel. Achievements",
+   "tone": "light",
+   "has_photo": false,
+   "colour": "colour",
+   "file": "03-bold-geometric.html",
+   "preview": "previews/03-bold-geometric.png",
+   "source_sha256": "35aa33e5ffef75d07bb4b01fac623b331e8b9f48c4f76179441a8004da220a4a",
+   "google_fonts": "family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;700",
+   "accent": {
+    "default": "#FF7A1A",
+    "suggestions": [
+     "#FF7A1A",
+     "#FFD23F",
+     "#19D3A2",
+     "#FF5C8A"
+    ],
+    "against": [
+     "#1F3BFF"
+    ],
+    "min_contrast": 1.5,
+    "note": "Decorative: a circle on the blue panel and a bar under the name."
+   },
+   "tokens": {
+    "accent_color": "required",
+    "certificate_id": "required",
+    "course_title": "required",
+    "duration_hours": "optional",
+    "event_date": "required",
+    "grade": "optional",
+    "institute_name": "required",
+    "issue_city": "optional",
+    "issue_date": "required",
+    "issue_year": "required",
+    "logo_src": "optional",
+    "qr_code_src": "required",
+    "recipient_name": "required",
+    "signatory_designation": "optional",
+    "signatory_name": "optional",
+    "verify_url": "required"
+   },
+   "default_wording": "participation",
+   "wordings": {
+    "participation": {
+     "panel_title": "of Participation &middot; {{issue_year}}",
+     "heading": "Certificate of Participation",
+     "statement": "for taking part in <strong style=\"font-weight: 600\">{{course_title}}</strong> on {{event_date}}."
+    },
+    "achievement": null,
+    "appreciation": {
+     "panel_title": "of Appreciation &middot; {{issue_year}}",
+     "heading": "Certificate of Appreciation",
+     "statement": "with thanks for their contribution to <strong style=\"font-weight: 600\">{{course_title}}</strong> on {{event_date}}."
+    },
+    "completion": {
+     "panel_title": "of Completion &middot; {{issue_year}}",
+     "heading": "Certificate of Completion",
+     "statement": "for completing <strong style=\"font-weight: 600\">{{course_title}}</strong><span data-optional=\"duration_hours\">, a {{duration_hours}}-hour programme</span>."
+    }
+   }
+  },
+  {
+   "key": "04-verified-pass",
+   "name": "Verified Pass",
+   "use": "Ticket style with a large QR stub. Verification first",
+   "tone": "light",
+   "has_photo": false,
+   "colour": "colour",
+   "file": "04-verified-pass.html",
+   "preview": "previews/04-verified-pass.png",
+   "source_sha256": "943ac9008d36e6a94c178a4195b9695f21893b999cf7856c9c85aef99313be4b",
+   "google_fonts": "family=DM+Serif+Display&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;700",
+   "accent": {
+    "default": "#C8F031",
+    "suggestions": [
+     "#C8F031",
+     "#FFD23F",
+     "#9BE7FF",
+     "#FFB4A2"
+    ],
+    "against": [
+     "#111111"
+    ],
+    "min_contrast": 4.5,
+    "note": "Dark text sits on the accent: keep it light."
+   },
+   "tokens": {
+    "accent_color": "required",
+    "certificate_id": "required",
+    "course_title": "required",
+    "duration_hours": "optional",
+    "event_date": "required",
+    "expiry_date": "optional",
+    "grade": "optional",
+    "institute_name": "required",
+    "issue_date": "required",
+    "qr_code_src": "required",
+    "recipient_name": "required",
+    "signatory_designation": "optional",
+    "signatory_name": "optional",
+    "verify_url": "required"
+   },
+   "default_wording": "participation",
+   "wordings": {
+    "participation": {
+     "kicker": "CERTIFICATE OF PARTICIPATION",
+     "statement": "took part in <strong style=\"font-weight: 600\">{{course_title}}</strong> on {{event_date}}."
+    },
+    "achievement": {
+     "kicker": "CERTIFICATE OF ACHIEVEMENT",
+     "statement": "achieved an outstanding result in <strong style=\"font-weight: 600\">{{course_title}}</strong>."
+    },
+    "appreciation": {
+     "kicker": "CERTIFICATE OF APPRECIATION",
+     "statement": "is thanked for their contribution to <strong style=\"font-weight: 600\">{{course_title}}</strong>."
+    },
+    "completion": null
+   }
+  },
+  {
+   "key": "05-botanical",
+   "name": "Botanical",
+   "use": "Soft green with leaf shapes. Wellness, arts, general",
+   "tone": "light",
+   "has_photo": false,
+   "colour": "colour",
+   "file": "05-botanical.html",
+   "preview": "previews/05-botanical.png",
+   "source_sha256": "dd524f021fd8cad047bc96635e4e00c2f0bb2736ea7415f17f4d8712a6accece",
+   "google_fonts": "family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&family=Karla:wght@400;500;700",
+   "accent": {
+    "default": "#2F5D46",
+    "suggestions": [
+     "#2F5D46",
+     "#7A4B1E",
+     "#1F5A6B",
+     "#8A3B4A"
+    ],
+    "against": [
+     "#F1F4EC"
+    ],
+    "min_contrast": 4.5,
+    "note": "Small text is in the accent on a pale page: keep it dark."
+   },
+   "tokens": {
+    "accent_color": "required",
+    "certificate_id": "required",
+    "completion_date": "required",
+    "course_title": "required",
+    "event_date": "required",
+    "grade": "optional",
+    "institute_name": "required",
+    "logo_src": "optional",
+    "qr_code_src": "required",
+    "recipient_name": "required",
+    "signatory_designation": "optional",
+    "signatory_name": "optional"
+   },
+   "default_wording": "participation",
+   "wordings": {
+    "participation": {
+     "title": "Certificate of Participation",
+     "statement": "for taking part in <strong style=\"font-weight: 700\">{{course_title}}</strong> on {{event_date}}."
+    },
+    "achievement": {
+     "title": "Certificate of Achievement",
+     "statement": "for an outstanding achievement in <strong style=\"font-weight: 700\">{{course_title}}</strong><span data-optional=\"grade\">, with grade {{grade}}</span>."
+    },
+    "appreciation": {
+     "title": "Certificate of Appreciation",
+     "statement": "with heartfelt thanks for their contribution to <strong style=\"font-weight: 700\">{{course_title}}</strong>."
+    },
+    "completion": null
+   }
+  },
+  {
+   "key": "06-blueprint",
+   "name": "Blueprint",
+   "use": "Graph paper and a title block. Technical events",
+   "tone": "light",
+   "has_photo": false,
+   "colour": "colour",
+   "file": "06-blueprint.html",
+   "preview": "previews/06-blueprint.png",
+   "source_sha256": "eb9b277263467957275cf1fbbe300d8510f603b3ef958993cdfcb4823cba5a72",
+   "google_fonts": "family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;600",
+   "accent": {
+    "default": "#0B3A8F",
+    "suggestions": [
+     "#0B3A8F",
+     "#0F5C5C",
+     "#5B2A86",
+     "#8A2B1D"
+    ],
+    "against": [
+     "#F3F7FC"
+    ],
+    "min_contrast": 4.5,
+    "note": "The name and small labels are in the accent on a pale page: keep it dark."
+   },
+   "tokens": {
+    "accent_color": "required",
+    "certificate_id": "required",
+    "course_title": "required",
+    "duration_hours": "optional",
+    "event_date": "required",
+    "grade": "optional",
+    "institute_name": "required",
+    "issue_date": "required",
+    "logo_src": "optional",
+    "qr_code_src": "required",
+    "recipient_name": "required",
+    "signatory_designation": "optional",
+    "signatory_name": "optional",
+    "verify_url": "required"
+   },
+   "default_wording": "participation",
+   "wordings": {
+    "participation": {
+     "kicker": "CERTIFICATE OF PARTICIPATION",
+     "statement": "took part in <strong style=\"font-weight: 600\">{{course_title}}</strong> on {{event_date}}."
+    },
+    "achievement": {
+     "kicker": "CERTIFICATE OF ACHIEVEMENT",
+     "statement": "designed, built and delivered outstanding work in <strong style=\"font-weight: 600\">{{course_title}}</strong>."
+    },
+    "appreciation": {
+     "kicker": "CERTIFICATE OF APPRECIATION",
+     "statement": "is thanked for their contribution to <strong style=\"font-weight: 600\">{{course_title}}</strong>."
+    },
+    "completion": null
+   }
+  },
+  {
+   "key": "07-swiss-minimal",
+   "name": "Swiss Minimal",
+   "use": "Large headline, minimal grid. Professional events",
+   "tone": "light",
+   "has_photo": false,
+   "colour": "colour",
+   "file": "07-swiss-minimal.html",
+   "preview": "previews/07-swiss-minimal.png",
+   "source_sha256": "d3f61c99b8cf9e4921e2cacdf270787e587bd70a21e96f65f54b87a5a3b246b2",
+   "google_fonts": "family=Archivo:wght@500;700;800&family=Inter:wght@400;500;600",
+   "accent": {
+    "default": "#D90429",
+    "suggestions": [
+     "#D90429",
+     "#0B4FD8",
+     "#0A7A4B",
+     "#0A0A0A"
+    ],
+    "against": [
+     "#FFFFFF"
+    ],
+    "min_contrast": 4.5,
+    "note": "Small text is in the accent on white: keep it dark enough to read."
+   },
+   "tokens": {
+    "accent_color": "required",
+    "certificate_id": "required",
+    "course_title": "required",
+    "duration_hours": "optional",
+    "event_date": "required",
+    "grade": "optional",
+    "institute_name": "required",
+    "issue_date": "required",
+    "qr_code_src": "required",
+    "recipient_name": "required",
+    "signatory_designation": "optional",
+    "signatory_name": "optional",
+    "verify_url": "required"
+   },
+   "default_wording": "participation",
+   "wordings": {
+    "participation": {
+     "kicker": "Of participation &middot; Awarded to",
+     "statement": "for taking part in <strong style=\"font-weight: 600\">{{course_title}}</strong>, held by {{institute_name}} on {{event_date}}."
+    },
+    "achievement": {
+     "kicker": "Of achievement &middot; Awarded to",
+     "statement": "for outstanding achievement in <strong style=\"font-weight: 600\">{{course_title}}</strong> at {{institute_name}}."
+    },
+    "appreciation": {
+     "kicker": "Of appreciation &middot; Presented to",
+     "statement": "with thanks for their contribution to <strong style=\"font-weight: 600\">{{course_title}}</strong> at {{institute_name}}."
+    },
+    "completion": null
+   }
+  },
+  {
+   "key": "08-royal-ribbon",
+   "name": "Royal Ribbon",
+   "use": "Ribbon and medal, two signatures. Merit and ranks",
+   "tone": "light",
+   "has_photo": false,
+   "colour": "colour",
+   "file": "08-royal-ribbon.html",
+   "preview": "previews/08-royal-ribbon.png",
+   "source_sha256": "3b689b95f4732d9bec03a16d677dd410003d45ce7ea8035a490d8c34c827ab51",
+   "google_fonts": "family=Lato:wght@400;700&family=Marcellus",
+   "accent": {
+    "default": "#3B1F6B",
+    "suggestions": [
+     "#3B1F6B",
+     "#7A1630",
+     "#0E3F66",
+     "#14503F"
+    ],
+    "against": [
+     "#F7F5FB"
+    ],
+    "min_contrast": 4.5,
+    "note": "The title and small text are in the accent on a pale page: keep it dark."
+   },
+   "tokens": {
+    "accent_color": "required",
+    "certificate_id": "required",
+    "completion_date": "required",
+    "course_title": "required",
+    "event_date": "required",
+    "institute_name": "required",
+    "qr_code_src": "required",
+    "rank_or_grade": "optional",
+    "recipient_name": "required",
+    "second_signatory_designation": "optional",
+    "second_signatory_name": "optional",
+    "signatory_designation": "optional",
+    "signatory_name": "optional"
+   },
+   "default_wording": "achievement",
+   "wordings": {
+    "participation": {
+     "title": "Certificate of Participation",
+     "statement": "in recognition of taking part in <strong style=\"font-weight: 700\">{{course_title}}</strong> on {{event_date}}."
+    },
+    "achievement": null,
+    "appreciation": {
+     "title": "Certificate of Appreciation",
+     "statement": "in grateful recognition of their contribution to <strong style=\"font-weight: 700\">{{course_title}}</strong> on {{event_date}}."
+    },
+    "completion": {
+     "title": "Certificate of Completion",
+     "statement": "in recognition of completing <strong style=\"font-weight: 700\">{{course_title}}</strong> on {{completion_date}}."
+    }
+   }
+  },
+  {
+   "key": "09-terminal",
+   "name": "Terminal",
+   "use": "Dark, code style. Programming and IT",
+   "tone": "dark",
+   "has_photo": false,
+   "colour": "colour",
+   "file": "09-terminal.html",
+   "preview": "previews/09-terminal.png",
+   "source_sha256": "e275cce2fc1f32c21cd95cdca03bded261b9f4616dacdc3a3afd03fcb254f6d9",
+   "google_fonts": "family=JetBrains+Mono:wght@500;700&family=Space+Grotesk:wght@700",
+   "accent": {
+    "default": "#3DDC97",
+    "suggestions": [
+     "#3DDC97",
+     "#5CC8FF",
+     "#FFB454",
+     "#FF7AB6"
+    ],
+    "against": [
+     "#0B0F14"
+    ],
+    "min_contrast": 4.5,
+    "note": "The page is near black and text is in the accent: keep it light."
+   },
+   "tokens": {
+    "accent_color": "required",
+    "certificate_id": "required",
+    "course_title": "required",
+    "duration_hours": "optional",
+    "event_date": "required",
+    "grade": "optional",
+    "institute_name": "required",
+    "issue_date": "required",
+    "qr_code_src": "required",
+    "recipient_name": "required",
+    "signatory_designation": "optional",
+    "signatory_name": "optional",
+    "verify_url": "required"
+   },
+   "default_wording": "participation",
+   "wordings": {
+    "participation": {
+     "kicker": "&gt; CERTIFICATE OF PARTICIPATION",
+     "statement": "took part in <span style=\"color: #FFFFFF; font-weight: 700\">{{course_title}}</span> on {{event_date}}"
+    },
+    "achievement": {
+     "kicker": "&gt; CERTIFICATE OF ACHIEVEMENT",
+     "statement": "shipped outstanding work in <span style=\"color: #FFFFFF; font-weight: 700\">{{course_title}}</span>"
+    },
+    "appreciation": {
+     "kicker": "&gt; CERTIFICATE OF APPRECIATION",
+     "statement": "is thanked for contributing to <span style=\"color: #FFFFFF; font-weight: 700\">{{course_title}}</span>"
+    },
+    "completion": null
+   }
+  },
+  {
+   "key": "10-confetti",
+   "name": "Confetti",
+   "use": "Bright and playful. Workshops and participation",
+   "tone": "light",
+   "has_photo": false,
+   "colour": "colour",
+   "file": "10-confetti.html",
+   "preview": "previews/10-confetti.png",
+   "source_sha256": "dbdd5d5267e53ac07f91fa3a72b2199482b1fdb10ad4e817a8ee7b2e660a9bb7",
+   "google_fonts": "family=Fredoka:wght@500;600&family=Nunito:wght@500;700",
+   "accent": {
+    "default": "#FFD84D",
+    "suggestions": [
+     "#FFD84D",
+     "#A8E6CF",
+     "#BFD7FF",
+     "#FFC2D1"
+    ],
+    "against": [
+     "#1B1B3A"
+    ],
+    "min_contrast": 4.5,
+    "note": "Dark text sits on the accent: keep it light."
+   },
+   "tokens": {
+    "accent_color": "required",
+    "certificate_id": "required",
+    "event_date": "required",
+    "event_title": "required",
+    "institute_name": "required",
+    "qr_code_src": "required",
+    "recipient_name": "required",
+    "signatory_designation": "optional",
+    "signatory_name": "optional"
+   },
+   "default_wording": "participation",
+   "wordings": {
+    "participation": null,
+    "achievement": {
+     "title": "Certificate of Achievement",
+     "statement": "for a brilliant achievement at <strong style=\"font-weight: 700\">{{event_title}}</strong> on {{event_date}}."
+    },
+    "appreciation": {
+     "title": "Certificate of Appreciation",
+     "statement": "with big thanks for helping make <strong style=\"font-weight: 700\">{{event_title}}</strong> happen on {{event_date}}."
+    },
+    "completion": {
+     "title": "Certificate of Completion",
+     "statement": "for completing <strong style=\"font-weight: 700\">{{event_title}}</strong> on {{event_date}}."
+    }
+   }
+  }
+ ]
+}

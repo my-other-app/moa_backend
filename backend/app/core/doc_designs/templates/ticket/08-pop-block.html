@@ -4,7 +4,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pop Block Ticket</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@600;800&display=swap">
 <style>body{margin:0}</style>
 </head>
 <body>
@@ -23,39 +22,34 @@
 <path d="M760 250 l8 20 l20 8 l-20 8 l-8 20 l-8 -20 l-20 -8 l20 -8 z" fill="#FFFFFF" stroke="#111111" stroke-width="3" stroke-linejoin="round"></path>
 </svg>
 
-<div style="position: relative; display: flex; align-items: center; gap: 12px">
-<div style="font-size: 15px; font-weight: 800; letter-spacing: 0.1em; padding: 7px 14px; background: #111111; color: #FFD400; border-radius: 8px">{{app_name}}</div>
+<div data-fit-box style="position: relative; display: flex; align-items: center; gap: 12px">
+<div data-fit="name" style="font-size: 15px; font-weight: 800; letter-spacing: 0.1em; padding: 7px 14px; background: #111111; color: #FFD400; border-radius: 8px">{{app_name}}</div>
 <div style="font-size: 15px; font-weight: 800; letter-spacing: 0.1em; padding: 5px 14px; background: #FFFFFF; border: 3px solid #111111; border-radius: 8px">ADMIT ONE</div>
 </div>
 
 <div style="position: relative; max-width: 520px; display: flex; flex-direction: column; gap: 10px">
-<h1 style="margin: 0; font-family: 'Archivo Black', sans-serif; font-size: 78px; line-height: 0.95; font-weight: 400; text-transform: uppercase; letter-spacing: -0.02em">{{event_name}}</h1>
-<div style="align-self: flex-start; font-size: 19px; font-weight: 800; padding: 4px 12px; background: #111111; color: #FFFFFF; transform: rotate(-2deg)">{{tagline}}</div>
+<h1 data-fit-wrap data-fit="title" style="margin: 0; font-family: 'Archivo Black', sans-serif; font-size: 78px; line-height: 0.95; font-weight: 400; text-transform: uppercase; letter-spacing: -0.02em">{{event_name}}</h1>
+<div data-optional="tagline" data-fit="line" style="align-self: flex-start; font-size: 19px; font-weight: 800; padding: 4px 12px; background: #111111; color: #FFFFFF; transform: rotate(-2deg)">{{tagline}}</div>
 </div>
 
-<div style="position: relative; display: flex; gap: 10px">
-<div style="padding: 9px 13px; background: #FFFFFF; border: 3px solid #111111; border-radius: 10px; box-shadow: 4px 4px 0 #111111; display: flex; flex-direction: column; gap: 2px"><div style="font-size: 12px; font-weight: 800; letter-spacing: 0.12em; color: #444444">DATE</div><div style="font-size: 17px; font-weight: 800">{{date}}</div></div>
-<div style="padding: 9px 13px; background: #FFFFFF; border: 3px solid #111111; border-radius: 10px; box-shadow: 4px 4px 0 #111111; display: flex; flex-direction: column; gap: 2px"><div style="font-size: 12px; font-weight: 800; letter-spacing: 0.12em; color: #444444">DOORS</div><div style="font-size: 17px; font-weight: 800">{{doors_time}}</div></div>
-<div style="padding: 9px 13px; background: #FFFFFF; border: 3px solid #111111; border-radius: 10px; box-shadow: 4px 4px 0 #111111; display: flex; flex-direction: column; gap: 2px"><div style="font-size: 12px; font-weight: 800; letter-spacing: 0.12em; color: #444444">GATE</div><div style="font-size: 17px; font-weight: 800">{{gate}}</div></div>
-<div style="padding: 9px 13px; background: #FFFFFF; border: 3px solid #111111; border-radius: 10px; box-shadow: 4px 4px 0 #111111; display: flex; flex-direction: column; gap: 2px"><div style="font-size: 12px; font-weight: 800; letter-spacing: 0.12em; color: #444444">VENUE</div><div style="font-size: 17px; font-weight: 800">{{venue}}</div></div>
-<div style="padding: 9px 13px; background: #FF5DA2; border: 3px solid #111111; border-radius: 10px; box-shadow: 4px 4px 0 #111111; display: flex; flex-direction: column; gap: 2px"><div style="font-size: 12px; font-weight: 800; letter-spacing: 0.12em; color: #111111">SEAT</div><div style="font-size: 17px; font-weight: 800">{{row}} · {{seat}}</div></div>
+<div data-fit-box style="position: relative; display: flex; gap: 10px">
+<div style="padding: 9px 13px; background: #FFFFFF; border: 3px solid #111111; border-radius: 10px; box-shadow: 4px 4px 0 #111111; display: flex; flex-direction: column; gap: 2px"><div style="font-size: 12px; font-weight: 800; letter-spacing: 0.12em; color: #444444">DATE</div><div data-fit="line" style="font-size: 17px; font-weight: 800">{{date}}</div></div>
+<div data-optional="doors_time" style="padding: 9px 13px; background: #FFFFFF; border: 3px solid #111111; border-radius: 10px; box-shadow: 4px 4px 0 #111111; display: flex; flex-direction: column; gap: 2px"><div style="font-size: 12px; font-weight: 800; letter-spacing: 0.12em; color: #444444">DOORS</div><div data-fit="line" style="font-size: 17px; font-weight: 800">{{doors_time}}</div></div>
+<div data-optional="gate" style="padding: 9px 13px; background: #FFFFFF; border: 3px solid #111111; border-radius: 10px; box-shadow: 4px 4px 0 #111111; display: flex; flex-direction: column; gap: 2px"><div style="font-size: 12px; font-weight: 800; letter-spacing: 0.12em; color: #444444">GATE</div><div data-fit="line" style="font-size: 17px; font-weight: 800">{{gate}}</div></div>
+<div data-optional="venue" style="padding: 9px 13px; background: #FFFFFF; border: 3px solid #111111; border-radius: 10px; box-shadow: 4px 4px 0 #111111; display: flex; flex-direction: column; gap: 2px"><div style="font-size: 12px; font-weight: 800; letter-spacing: 0.12em; color: #444444">VENUE</div><div data-fit="line" style="font-size: 17px; font-weight: 800">{{venue}}</div></div>
+<div data-optional-any="row seat" style="padding: 9px 13px; background: #FF5DA2; border: 3px solid #111111; border-radius: 10px; box-shadow: 4px 4px 0 #111111; display: flex; flex-direction: column; gap: 2px"><div style="font-size: 12px; font-weight: 800; letter-spacing: 0.12em; color: #111111">SEAT</div><div data-fit="line" style="font-size: 17px; font-weight: 800"><span data-optional="row">{{row}}</span><span data-optional="row seat"> · </span><span data-optional="seat">{{seat}}</span></div></div>
 </div>
 </div>
 
-<div style="flex: 1; box-sizing: border-box; padding: 28px 30px; background: #2B59FF; color: #FFFFFF; border-left: 4px dashed #111111; display: flex; flex-direction: column; align-items: center; justify-content: space-between">
-<div style="width: 100%; display: flex; align-items: center; justify-content: space-between">
-<div style="font-family: 'Archivo Black', sans-serif; font-size: 20px; text-transform: uppercase">{{ticket_type}}</div>
-<div style="font-size: 14px; font-weight: 800; padding: 4px 10px; background: #FFD400; color: #111111; border: 2px solid #111111; border-radius: 6px">{{ticket_id}}</div>
+<div data-fit-box style="flex: 1; box-sizing: border-box; padding: 28px 30px; background: #2B59FF; color: #FFFFFF; border-left: 4px dashed #111111; display: flex; flex-direction: column; align-items: center; justify-content: space-between">
+<div data-fit-box style="width: 100%; display: flex; align-items: center; justify-content: space-between">
+<div data-optional="ticket_type" data-fit="name" style="font-family: 'Archivo Black', sans-serif; font-size: 20px; text-transform: uppercase">{{ticket_type}}</div>
+<div data-fit="code" style="font-size: 14px; font-weight: 800; padding: 4px 10px; background: #FFD400; color: #111111; border: 2px solid #111111; border-radius: 6px">{{ticket_id}}</div>
 </div>
-<div data-slot="qr" role="img" aria-label="Ticket QR code" style="position: relative; width: 184px; height: 184px; box-sizing: border-box; background: #FFFFFF; border: 4px solid #111111; border-radius: 12px; box-shadow: 8px 8px 0 #111111; display: flex; align-items: center; justify-content: center; color: #111111">
-<div style="position: absolute; left: 12px; top: 12px; width: 38px; height: 38px; box-sizing: border-box; border: 6px solid #111111; display: flex; align-items: center; justify-content: center"><div style="width: 12px; height: 12px; background: #111111"></div></div>
-<div style="position: absolute; right: 12px; top: 12px; width: 38px; height: 38px; box-sizing: border-box; border: 6px solid #111111; display: flex; align-items: center; justify-content: center"><div style="width: 12px; height: 12px; background: #111111"></div></div>
-<div style="position: absolute; left: 12px; bottom: 12px; width: 38px; height: 38px; box-sizing: border-box; border: 6px solid #111111; display: flex; align-items: center; justify-content: center"><div style="width: 12px; height: 12px; background: #111111"></div></div>
-<div style="font-size: 14px; font-weight: 800">[QR CODE]</div>
-</div>
+<div data-slot="qr" role="img" aria-label="QR code for ticket {{ticket_id}}" style="padding: 12px; position: relative; width: 184px; height: 184px; box-sizing: border-box; background: #FFFFFF; border: 4px solid #111111; border-radius: 12px; box-shadow: 8px 8px 0 #111111; display: flex; align-items: center; justify-content: center; color: #111111"><img src="{{qr_code_src}}" alt="" style="display: block; width: 100%; height: 100%"></div>
 <div style="display: flex; flex-direction: column; align-items: center; gap: 2px">
 <div style="font-size: 12px; font-weight: 800; letter-spacing: 0.16em">THIS ONE BELONGS TO</div>
-<div style="font-size: 21px; font-weight: 800">{{attendee_name}}</div>
+<div data-fit="name" style="font-size: 21px; font-weight: 800">{{attendee_name}}</div>
 </div>
 </div>
 

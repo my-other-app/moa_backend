@@ -3,7 +3,6 @@
 <head>
 <meta charset="utf-8">
 <title>Terminal certificate</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&amp;family=Space+Grotesk:wght@700&amp;display=swap">
 <style>
 @page { size: A4 landscape; margin: 0 }
 html, body { margin: 0; padding: 0 }
@@ -17,32 +16,32 @@ body { -webkit-print-color-adjust: exact; print-color-adjust: exact }
 <path d="M32 76V32h44M1047 32h44v44M32 718v44h44M1047 762h44v-44" fill="none" stroke="{{accent_color}}" stroke-width="3"></path>
 </svg>
 <div style="position: relative; width: 1123px; height: 794px; box-sizing: border-box; padding: 72px 80px 68px; display: flex; flex-direction: column; justify-content: space-between">
-<div style="display: flex; justify-content: space-between; align-items: center; gap: 24px">
+<div data-fit-box style="display: flex; justify-content: space-between; align-items: center; gap: 24px">
 <div style="font-size: 15px"><span style="color: {{accent_color}}">$</span> certify --issue --signed</div>
-<div style="font-size: 14px; color: #9AA7B4"><span style="text-transform: uppercase">{{institute_name}}</span></div>
+<div data-fit="wrap" data-fit-lines="1" style="font-size: 14px; color: #9AA7B4"><span style="text-transform: uppercase">{{institute_name}}</span></div>
 </div>
 <div style="display: flex; flex-direction: column; gap: 14px">
-<div style="font-weight: 700; font-size: 14px; letter-spacing: 0.22em; color: {{accent_color}}">&gt; CERTIFICATE OF COMPLETION</div>
-<div style="font-family: 'Space Grotesk', Arial, sans-serif; font-weight: 700; font-size: 66px; line-height: 1.04; letter-spacing: -0.02em; text-wrap: balance">{{recipient_name}}</div>
-<div style="max-width: 680px; font-size: 17px; line-height: 1.6; color: #C9D3DC">has shipped every requirement of <span style="color: #FFFFFF; font-weight: 700">{{course_title}}</span></div>
+<div data-option="kicker" style="font-weight: 700; font-size: 14px; letter-spacing: 0.22em; color: {{accent_color}}">&gt; CERTIFICATE OF COMPLETION</div>
+<div data-fit="wrap" data-fit-lines="2" style="font-family: 'Space Grotesk', Arial, sans-serif; font-weight: 700; font-size: 66px; line-height: 1.04; letter-spacing: -0.02em; text-wrap: balance">{{recipient_name}}</div>
+<div data-fit="wrap" data-fit-lines="3" data-option="statement" style="max-width: 680px; font-size: 17px; line-height: 1.6; color: #C9D3DC">has shipped every requirement of <span style="color: #FFFFFF; font-weight: 700">{{course_title}}</span></div>
 </div>
 <div style="display: flex; justify-content: space-between; align-items: flex-end; gap: 32px">
 <div style="display: flex; flex-direction: column; gap: 22px">
 <div style="display: grid; grid-template-columns: 150px 1fr; column-gap: 12px; row-gap: 7px; font-size: 15px">
 <div style="color: #9AA7B4">issued_on:</div>
 <div>{{issue_date}}</div>
-<div style="color: #9AA7B4">duration:</div>
-<div>{{duration_hours}} hours</div>
-<div style="color: #9AA7B4">grade:</div>
-<div>{{grade}}</div>
+<div data-optional="duration_hours" style="color: #9AA7B4">duration:</div>
+<div data-optional="duration_hours">{{duration_hours}} hours</div>
+<div data-optional="grade" style="color: #9AA7B4">grade:</div>
+<div data-optional="grade">{{grade}}</div>
 <div style="color: #9AA7B4">credential_id:</div>
 <div style="color: {{accent_color}}; font-weight: 700">{{certificate_id}}</div>
 </div>
-<div style="display: flex; align-items: flex-end; gap: 16px">
+<div data-optional="signatory_name" style="display: flex; align-items: flex-end; gap: 16px">
 <div data-slot="signature" style="width: 200px; height: 36px; box-sizing: border-box; border-bottom: 1px solid #E6EDF3"></div>
 <div style="display: flex; flex-direction: column; gap: 3px">
-<div style="font-size: 15px; font-weight: 700">{{signatory_name}}</div>
-<div style="font-size: 13px; color: #9AA7B4">{{signatory_designation}}</div>
+<div data-fit="wrap" data-fit-lines="1" style="font-size: 15px; font-weight: 700">{{signatory_name}}</div>
+<div data-optional="signatory_designation" style="font-size: 13px; color: #9AA7B4">{{signatory_designation}}</div>
 </div>
 </div>
 </div>

@@ -3,7 +3,6 @@
 <head>
 <meta charset="utf-8">
 <title>Bold Geometric certificate</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@500;700&amp;display=swap">
 <style>
 @page { size: A4 landscape; margin: 0 }
 html, body { margin: 0; padding: 0 }
@@ -22,37 +21,37 @@ body { -webkit-print-color-adjust: exact; print-color-adjust: exact }
 </svg>
 <div style="position: relative; width: 380px; height: 794px; box-sizing: border-box; padding: 56px 40px 52px; display: flex; flex-direction: column; justify-content: space-between">
 <div style="display: flex; align-items: center; gap: 12px">
-<img data-slot="logo" src="{{logo_src}}" alt="" style="width: 44px; height: 44px; object-fit: contain; flex-shrink: 0">
-<div style="font-family: 'Space Grotesk', Arial, sans-serif; font-weight: 700; font-size: 17px; line-height: 1.2">{{institute_name}}</div>
+<img data-optional="logo_src" data-slot="logo" src="{{logo_src}}" alt="" style="width: 44px; height: 44px; object-fit: contain; flex-shrink: 0">
+<div data-fit="wrap" data-fit-lines="2" style="font-family: 'Space Grotesk', Arial, sans-serif; font-weight: 700; font-size: 17px; line-height: 1.2">{{institute_name}}</div>
 </div>
 <div style="display: flex; flex-direction: column; gap: 6px">
 <div style="font-family: 'Space Grotesk', Arial, sans-serif; font-weight: 700; font-size: 40px; line-height: 1; letter-spacing: -0.01em">Certificate</div>
-<div style="font-size: 14px; font-weight: 500; letter-spacing: 0.18em; text-transform: uppercase">of Achievement &middot; {{issue_year}}</div>
+<div data-option="panel_title" style="font-size: 14px; font-weight: 500; letter-spacing: 0.18em; text-transform: uppercase">of Achievement &middot; {{issue_year}}</div>
 </div>
 </div>
 </div>
 <div style="flex-grow: 1; height: 794px; box-sizing: border-box; padding: 60px 64px 52px; display: flex; flex-direction: column; justify-content: space-between">
-<div style="display: flex; justify-content: space-between; align-items: center; gap: 24px">
-<div style="font-family: 'Space Grotesk', Arial, sans-serif; font-weight: 700; font-size: 14px; letter-spacing: 0.2em; text-transform: uppercase; color: #1F3BFF">Certificate of Achievement</div>
-<div style="font-size: 14px; font-weight: 500; color: #4A4F63">No. {{certificate_id}}</div>
+<div data-fit-box style="display: flex; justify-content: space-between; align-items: center; gap: 24px">
+<div data-option="heading" style="font-family: 'Space Grotesk', Arial, sans-serif; font-weight: 700; font-size: 14px; letter-spacing: 0.2em; text-transform: uppercase; color: #1F3BFF">Certificate of Achievement</div>
+<div data-fit="wrap" data-fit-lines="1" data-fit-min="40%" style="font-size: 14px; font-weight: 500; color: #4A4F63">No. {{certificate_id}}</div>
 </div>
 <div style="display: flex; flex-direction: column; gap: 18px">
 <div style="font-size: 17px; color: #4A4F63">Awarded to</div>
-<div style="font-family: 'Space Grotesk', Arial, sans-serif; font-weight: 700; font-size: 64px; line-height: 1.04; letter-spacing: -0.02em; text-wrap: balance">{{recipient_name}}</div>
+<div data-fit="wrap" data-fit-lines="2" style="font-family: 'Space Grotesk', Arial, sans-serif; font-weight: 700; font-size: 64px; line-height: 1.04; letter-spacing: -0.02em; text-wrap: balance">{{recipient_name}}</div>
 <div aria-hidden="true" style="width: 84px; height: 10px; background: {{accent_color}}"></div>
-<div style="max-width: 520px; font-size: 19px; line-height: 1.55; text-wrap: pretty">for successfully completing <strong style="font-weight: 600">{{course_title}}</strong>, a {{duration_hours}}-hour programme, with grade {{grade}}.</div>
+<div data-fit="wrap" data-fit-lines="3" data-option="statement" style="max-width: 520px; font-size: 19px; line-height: 1.55; text-wrap: pretty">for successfully completing <strong style="font-weight: 600">{{course_title}}</strong><span data-optional="duration_hours">, a {{duration_hours}}-hour programme</span><span data-optional="grade">, with grade {{grade}}</span>.</div>
 </div>
 <div style="display: flex; justify-content: space-between; align-items: flex-end; gap: 28px">
 <div style="display: flex; align-items: flex-end; gap: 32px">
-<div style="display: flex; flex-direction: column; gap: 6px">
+<div data-optional="signatory_name" style="display: flex; flex-direction: column; gap: 6px">
 <div data-slot="signature" style="width: 168px; height: 44px; box-sizing: border-box; border-bottom: 2px solid #10131F"></div>
-<div style="font-size: 16px; font-weight: 600">{{signatory_name}}</div>
-<div style="font-size: 14px; color: #4A4F63">{{signatory_designation}}</div>
+<div data-fit="wrap" data-fit-lines="1" style="font-size: 16px; font-weight: 600">{{signatory_name}}</div>
+<div data-optional="signatory_designation" style="font-size: 14px; color: #4A4F63">{{signatory_designation}}</div>
 </div>
 <div style="display: flex; flex-direction: column; gap: 6px">
 <div style="width: 130px; height: 44px; box-sizing: border-box; border-bottom: 2px solid #10131F; display: flex; align-items: flex-end; padding-bottom: 8px; font-size: 16px; font-weight: 600">{{issue_date}}</div>
 <div style="font-size: 16px; font-weight: 600">Date of issue</div>
-<div style="font-size: 14px; color: #4A4F63">{{issue_city}}</div>
+<div data-optional="issue_city" style="font-size: 14px; color: #4A4F63">{{issue_city}}</div>
 </div>
 </div>
 <div style="display: flex; align-items: center; gap: 14px; padding: 12px; border: 2px solid #10131F">

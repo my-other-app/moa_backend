@@ -3,7 +3,6 @@
 <head>
 <meta charset="utf-8">
 <title>Boarding Pass ID card</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Space+Mono:wght@400;700&display=swap">
 <style>
 @page{size:4in 6in;margin:0}
 html,body{margin:0;padding:0}
@@ -14,14 +13,14 @@ html,body{margin:0;padding:0}
 <body>
 <div style="width: 384px; height: 576px; box-sizing: border-box; overflow: hidden; background: #EAF0F6; color: #0F2440; font-family: 'Space Grotesk', system-ui, sans-serif; display: flex; flex-direction: column">
 <div style="padding: 16px 24px 0; display: flex; flex-direction: column; align-items: center; gap: 16px">
-<div aria-hidden="true" style="width: 56px; height: 12px; border-radius: 6px; background: #FFFFFF; border: 1.5px solid #0F2440; box-sizing: border-box"></div>
-<div style="align-self: stretch; display: flex; justify-content: space-between; align-items: center; gap: 12px">
-<div style="font-weight: 700; font-size: 18px">{{event_name}}</div>
+<div data-lanyard aria-hidden="true" style="width: 56px; height: 12px; border-radius: 6px; background: #FFFFFF; border: 1.5px solid #0F2440; box-sizing: border-box"></div>
+<div data-fit-box style="align-self: stretch; display: flex; justify-content: space-between; align-items: center; gap: 12px">
+<div data-fit="name" style="font-weight: 700; font-size: 18px">{{event_name}}</div>
 <div style="font-family: 'Space Mono', ui-monospace, monospace; font-size: 12px; font-weight: 700; background: var(--accent); color: #0F2440; padding: 4px 8px; border-radius: 4px">ENTRY PASS</div>
 </div>
 </div>
-<div style="margin: 26px 24px 0; display: flex; align-items: center; gap: 12px">
-<div style="display: flex; flex-direction: column; gap: 2px">
+<div data-optional-any="day_label hall" style="margin: 26px 24px 0; display: flex; align-items: center; gap: 12px">
+<div data-optional="day_label" style="display: flex; flex-direction: column; gap: 2px">
 <div style="font-family: 'Space Mono', ui-monospace, monospace; font-size: 12px; color: #3D5270">FROM</div>
 <div style="font-weight: 700; font-size: 44px; line-height: 1; letter-spacing: -0.02em">{{day_label}}</div>
 </div>
@@ -29,35 +28,35 @@ html,body{margin:0;padding:0}
 <div aria-hidden="true" style="flex-grow: 1; border-top: 2px dashed #0F2440"></div>
 <svg aria-hidden="true" viewBox="0 0 24 24" style="width: 22px; height: 22px; display: block" fill="none" stroke="#0F2440" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"></path></svg>
 </div>
-<div style="display: flex; flex-direction: column; gap: 2px; text-align: right">
+<div data-optional="hall" style="display: flex; flex-direction: column; gap: 2px; text-align: right">
 <div style="font-family: 'Space Mono', ui-monospace, monospace; font-size: 12px; color: #3D5270">TO</div>
 <div style="font-weight: 700; font-size: 44px; line-height: 1; letter-spacing: -0.02em">{{hall}}</div>
 </div>
 </div>
 <div style="margin: 30px 24px 0; display: flex; flex-direction: column; gap: 4px">
 <div style="font-family: 'Space Mono', ui-monospace, monospace; font-size: 12px; color: #3D5270">PASSENGER</div>
-<div style="font-weight: 700; font-size: 34px; line-height: 1.05; letter-spacing: -0.02em">{{full_name}}</div>
-<div style="font-family: 'Space Mono', ui-monospace, monospace; font-size: 13px">{{organization}}</div>
+<div data-fit="name" data-fit-min="18" style="font-weight: 700; font-size: 34px; line-height: 1.05; letter-spacing: -0.02em">{{full_name}}</div>
+<div data-fit="line" data-optional="organization" style="font-family: 'Space Mono', ui-monospace, monospace; font-size: 13px">{{organization}}</div>
 </div>
 <div style="margin: 24px 24px 0; border-top: 2px solid #0F2440; padding-top: 14px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px">
 <div style="display: flex; flex-direction: column; gap: 2px">
 <div style="font-family: 'Space Mono', ui-monospace, monospace; font-size: 12px; color: #3D5270">CLASS</div>
-<div style="font-weight: 700; font-size: 20px">{{role}}</div>
+<div data-fit="name" data-fit-min="18" style="font-weight: 700; font-size: 20px">{{role}}</div>
 </div>
-<div style="display: flex; flex-direction: column; gap: 2px">
+<div data-optional-hide="zone" style="display: flex; flex-direction: column; gap: 2px">
 <div style="font-family: 'Space Mono', ui-monospace, monospace; font-size: 12px; color: #3D5270">ZONE</div>
 <div style="font-weight: 700; font-size: 20px">{{zone}}</div>
 </div>
 <div style="display: flex; flex-direction: column; gap: 2px">
 <div style="font-family: 'Space Mono', ui-monospace, monospace; font-size: 12px; color: #3D5270">SEQ</div>
-<div style="font-weight: 700; font-size: 20px">{{badge_id}}</div>
+<div data-fit="code" style="font-weight: 700; font-size: 20px">{{badge_id}}</div>
 </div>
 </div>
 <div style="position: relative; margin-top: auto; height: 140px; box-sizing: border-box; border-top: 2px dashed #0F2440; background: #FFFFFF; padding: 0 24px; display: flex; justify-content: space-between; align-items: center; gap: 16px">
 <div aria-hidden="true" style="position: absolute; left: -12px; top: -13px; width: 24px; height: 24px; border-radius: 50%; background: #0F2440"></div>
 <div aria-hidden="true" style="position: absolute; right: -12px; top: -13px; width: 24px; height: 24px; border-radius: 50%; background: #0F2440"></div>
 <div style="display: flex; flex-direction: column; gap: 10px">
-<div style="display: flex; flex-direction: column; gap: 2px">
+<div data-optional="doors_open_time" style="display: flex; flex-direction: column; gap: 2px">
 <div style="font-family: 'Space Mono', ui-monospace, monospace; font-size: 12px; color: #3D5270">DOORS OPEN</div>
 <div style="font-weight: 700; font-size: 24px; line-height: 1">{{doors_open_time}}</div>
 </div>

@@ -3,7 +3,6 @@
 <head>
 <meta charset="utf-8">
 <title>Blueprint certificate</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&amp;family=IBM+Plex+Sans:wght@400;600&amp;display=swap">
 <style>
 @page { size: A4 landscape; margin: 0 }
 html, body { margin: 0; padding: 0 }
@@ -23,24 +22,24 @@ body { -webkit-print-color-adjust: exact; print-color-adjust: exact }
 </g>
 </svg>
 <div style="position: relative; width: 1123px; height: 794px; box-sizing: border-box; padding: 68px 76px 60px; display: flex; flex-direction: column; justify-content: space-between">
-<div style="display: flex; justify-content: space-between; align-items: center; gap: 24px">
-<div style="font-family: 'IBM Plex Mono', Menlo, monospace; font-weight: 600; font-size: 15px; letter-spacing: 0.16em; color: {{accent_color}}"><span style="text-transform: uppercase">{{institute_name}}</span></div>
-<img data-slot="logo" src="{{logo_src}}" alt="" style="width: 96px; height: 44px; object-fit: contain; flex-shrink: 0">
+<div data-fit-box style="display: flex; justify-content: space-between; align-items: center; gap: 24px">
+<div data-fit="wrap" data-fit-lines="1" style="font-family: 'IBM Plex Mono', Menlo, monospace; font-weight: 600; font-size: 15px; letter-spacing: 0.16em; color: {{accent_color}}"><span style="text-transform: uppercase">{{institute_name}}</span></div>
+<img data-optional="logo_src" data-slot="logo" src="{{logo_src}}" alt="" style="width: 96px; height: 44px; object-fit: contain; flex-shrink: 0">
 </div>
 <div style="display: flex; flex-direction: column; gap: 14px">
-<div style="font-family: 'IBM Plex Mono', Menlo, monospace; font-weight: 600; font-size: 14px; letter-spacing: 0.24em; color: {{accent_color}}">CERTIFICATE OF COMPLETION</div>
+<div data-option="kicker" style="font-family: 'IBM Plex Mono', Menlo, monospace; font-weight: 600; font-size: 14px; letter-spacing: 0.24em; color: {{accent_color}}">CERTIFICATE OF COMPLETION</div>
 <div style="font-size: 16px">This drawing certifies that</div>
-<div style="font-weight: 600; font-size: 62px; line-height: 1.05; letter-spacing: -0.01em; color: {{accent_color}}; text-wrap: balance">{{recipient_name}}</div>
+<div data-fit="wrap" data-fit-lines="2" style="font-weight: 600; font-size: 62px; line-height: 1.05; letter-spacing: -0.01em; color: {{accent_color}}; text-wrap: balance">{{recipient_name}}</div>
 <svg aria-hidden="true" viewBox="0 0 560 16" width="560" height="16">
 <path d="M0 8h560M0 0v16M560 0v16M1 8l12-5v10zM559 8l-12-5v10z" fill="{{accent_color}}" stroke="{{accent_color}}" stroke-width="1.5"></path>
 </svg>
-<div style="max-width: 640px; font-size: 19px; line-height: 1.55; text-wrap: pretty">has built, tested and completed <strong style="font-weight: 600">{{course_title}}</strong> to specification over {{duration_hours}} hours.</div>
+<div data-fit="wrap" data-fit-lines="3" data-option="statement" style="max-width: 640px; font-size: 19px; line-height: 1.55; text-wrap: pretty">has built, tested and completed <strong style="font-weight: 600">{{course_title}}</strong> to specification<span data-optional="duration_hours"> over {{duration_hours}} hours</span>.</div>
 </div>
 <div style="display: flex; justify-content: space-between; align-items: flex-end; gap: 32px">
-<div style="display: flex; flex-direction: column; gap: 5px">
+<div data-optional="signatory_name" style="display: flex; flex-direction: column; gap: 5px">
 <div data-slot="signature" style="width: 220px; height: 44px; box-sizing: border-box; border-bottom: 2px solid #0C1B33"></div>
-<div style="font-size: 16px; font-weight: 600">{{signatory_name}}</div>
-<div style="font-family: 'IBM Plex Mono', Menlo, monospace; font-weight: 500; font-size: 13px; color: #3D4C66">APPROVED BY &middot; <span style="text-transform: uppercase">{{signatory_designation}}</span></div>
+<div data-fit="wrap" data-fit-lines="1" style="font-size: 16px; font-weight: 600">{{signatory_name}}</div>
+<div data-optional="signatory_designation" style="font-family: 'IBM Plex Mono', Menlo, monospace; font-weight: 500; font-size: 13px; color: #3D4C66">APPROVED BY &middot; <span style="text-transform: uppercase">{{signatory_designation}}</span></div>
 </div>
 <div style="display: flex; border: 2px solid {{accent_color}}; background: #F3F7FC">
 <div style="padding: 12px; background: #FFFFFF; border-right: 2px solid {{accent_color}}; display: flex; align-items: center">
@@ -56,8 +55,8 @@ body { -webkit-print-color-adjust: exact; print-color-adjust: exact }
 <div style="font-size: 15px; font-weight: 600">{{issue_date}}</div>
 </div>
 <div style="padding: 9px 12px; border-right: 1px solid {{accent_color}}; display: flex; flex-direction: column; gap: 3px">
-<div style="font-family: 'IBM Plex Mono', Menlo, monospace; font-weight: 500; font-size: 12px; color: {{accent_color}}">GRADE</div>
-<div style="font-size: 15px; font-weight: 600">{{grade}}</div>
+<div data-optional-hide="grade" style="font-family: 'IBM Plex Mono', Menlo, monospace; font-weight: 500; font-size: 12px; color: {{accent_color}}">GRADE</div>
+<div data-optional-hide="grade" style="font-size: 15px; font-weight: 600">{{grade}}</div>
 </div>
 <div style="padding: 9px 12px; display: flex; flex-direction: column; gap: 3px">
 <div style="font-family: 'IBM Plex Mono', Menlo, monospace; font-weight: 500; font-size: 12px; color: {{accent_color}}">SCAN TO VERIFY</div>

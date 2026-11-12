@@ -4,7 +4,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Daylight Boarding Pass Ticket</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;800&family=Barlow:wght@500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
 <style>body{margin:0}</style>
 </head>
 <body>
@@ -12,14 +11,14 @@
 <div class="ticket-stage" style="width: 1280px; height: 600px; box-sizing: border-box; background: #DCE8F5; display: flex; align-items: center; justify-content: center; font-family: 'Barlow', sans-serif">
 <div style="position: relative; width: 1140px; height: 460px; background: #FFFFFF; border-radius: 26px; box-shadow: 0 26px 60px rgba(11, 77, 216, 0.22); display: flex; flex-direction: column; color: #0A1F44">
 
-<div style="height: 84px; box-sizing: border-box; padding: 0 40px; background: #0B4DD8; border-radius: 26px 26px 0 0; display: flex; align-items: center; justify-content: space-between; color: #FFFFFF">
+<div data-fit-box style="height: 84px; box-sizing: border-box; padding: 0 40px; background: #0B4DD8; border-radius: 26px 26px 0 0; display: flex; align-items: center; justify-content: space-between; color: #FFFFFF">
 <div style="display: flex; align-items: center; gap: 14px">
 <svg aria-hidden="true" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.500 1.500L13 8 4.800 6.200c-.5-.1-.9.1-1.100.5l-.3.5c-.2.5-.1 1 .3 1.300L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.500 5.300c.3.4.8.5 1.300.3l.5-.2c.4-.3.6-.7.5-1.200z"></path></svg>
-<div style="font-family: 'Barlow Condensed', sans-serif; font-size: 28px; font-weight: 800; letter-spacing: 0.06em">{{app_name}}</div>
+<div data-fit="name" style="font-family: 'Barlow Condensed', sans-serif; font-size: 28px; font-weight: 800; letter-spacing: 0.06em">{{app_name}}</div>
 </div>
 <div style="display: flex; align-items: center; gap: 18px">
 <div style="font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 600; letter-spacing: 0.16em">EVENT PASS</div>
-<div style="font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 600; letter-spacing: 0.1em; padding: 7px 14px; border-radius: 999px; background: #FFB020; color: #0A1F44">{{ticket_type}}</div>
+<div data-optional="ticket_type" data-fit="name" style="font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 600; letter-spacing: 0.1em; padding: 7px 14px; border-radius: 999px; background: #FFB020; color: #0A1F44">{{ticket_type}}</div>
 </div>
 </div>
 
@@ -28,11 +27,11 @@
 <div style="width: 800px; box-sizing: border-box; padding: 30px 40px 34px; display: flex; flex-direction: column; justify-content: space-between">
 <div style="display: flex; flex-direction: column; gap: 6px">
 <div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600; letter-spacing: 0.16em; color: #52627D">DESTINATION</div>
-<h1 style="margin: 0; font-family: 'Barlow Condensed', sans-serif; font-size: 84px; line-height: 0.92; font-weight: 800; text-transform: uppercase">{{event_name}}</h1>
+<h1 data-fit="title" style="margin: 0; font-family: 'Barlow Condensed', sans-serif; font-size: 84px; line-height: 0.92; font-weight: 800; text-transform: uppercase">{{event_name}}</h1>
 </div>
 
 <div style="display: flex; align-items: center; gap: 18px">
-<div style="display: flex; flex-direction: column; gap: 2px">
+<div data-optional-hide="doors_time" style="display: flex; flex-direction: column; gap: 2px">
 <div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600; letter-spacing: 0.16em; color: #52627D">DOORS</div>
 <div style="font-family: 'Barlow Condensed', sans-serif; font-size: 40px; font-weight: 800; line-height: 1">{{doors_time}}</div>
 </div>
@@ -42,34 +41,29 @@
 <circle cx="352" cy="46" r="6" fill="none" stroke="#0B4DD8" stroke-width="2.5"></circle>
 <g transform="translate(168 0) rotate(45 12 12)" fill="#FF7A1A"><path d="M17.8 19.2 16 11l3.500-3.500C21 6 21.500 4 21 3c-1-.5-3 0-4.500 1.500L13 8 4.800 6.200c-.5-.1-.9.1-1.100.5l-.3.5c-.2.5-.1 1 .3 1.300L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.500 5.300c.3.4.8.5 1.300.3l.5-.2c.4-.3.6-.7.5-1.200z"></path></g>
 </svg>
-<div style="display: flex; flex-direction: column; gap: 2px; align-items: flex-end">
+<div data-optional-hide="start_time" style="display: flex; flex-direction: column; gap: 2px; align-items: flex-end">
 <div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600; letter-spacing: 0.16em; color: #52627D">STARTS</div>
 <div style="font-family: 'Barlow Condensed', sans-serif; font-size: 40px; font-weight: 800; line-height: 1">{{start_time}}</div>
 </div>
 </div>
 
 <div style="display: grid; grid-template-columns: 1.1fr 1.7fr 0.7fr 1fr; column-gap: 16px; padding-top: 18px; border-top: 2px solid #DCE8F5">
-<div style="display: flex; flex-direction: column; gap: 4px"><div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600; letter-spacing: 0.16em; color: #52627D">DATE</div><div style="font-size: 20px; font-weight: 700">{{date}}</div></div>
-<div style="display: flex; flex-direction: column; gap: 4px"><div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600; letter-spacing: 0.16em; color: #52627D">VENUE</div><div style="font-size: 20px; font-weight: 700">{{venue}}</div></div>
-<div style="display: flex; flex-direction: column; gap: 4px"><div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600; letter-spacing: 0.16em; color: #52627D">GATE</div><div style="font-size: 20px; font-weight: 700; color: #0B4DD8">{{gate}}</div></div>
-<div style="display: flex; flex-direction: column; gap: 4px"><div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600; letter-spacing: 0.16em; color: #52627D">SEAT</div><div style="font-size: 20px; font-weight: 700; color: #0B4DD8">{{row}} · {{seat}}</div></div>
+<div style="display: flex; flex-direction: column; gap: 4px"><div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600; letter-spacing: 0.16em; color: #52627D">DATE</div><div data-fit="line" style="font-size: 20px; font-weight: 700">{{date}}</div></div>
+<div data-optional-hide="venue" style="display: flex; flex-direction: column; gap: 4px"><div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600; letter-spacing: 0.16em; color: #52627D">VENUE</div><div data-fit="line" style="font-size: 20px; font-weight: 700">{{venue}}</div></div>
+<div data-optional-hide="gate" style="display: flex; flex-direction: column; gap: 4px"><div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600; letter-spacing: 0.16em; color: #52627D">GATE</div><div data-fit="line" style="font-size: 20px; font-weight: 700; color: #0B4DD8">{{gate}}</div></div>
+<div data-optional-any="row seat" style="display: flex; flex-direction: column; gap: 4px"><div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600; letter-spacing: 0.16em; color: #52627D">SEAT</div><div data-fit="line" style="font-size: 20px; font-weight: 700; color: #0B4DD8"><span data-optional="row">{{row}}</span><span data-optional="row seat"> · </span><span data-optional="seat">{{seat}}</span></div></div>
 </div>
 </div>
 
 <div style="width: 340px; box-sizing: border-box; padding: 26px 34px 30px; border-left: 3px dashed #B9CBE4; background: #F3F8FE; border-radius: 0 0 26px 0; display: flex; flex-direction: column; align-items: center; justify-content: space-between">
 <div style="width: 100%; display: flex; flex-direction: column; gap: 2px">
 <div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600; letter-spacing: 0.16em; color: #52627D">PASSENGER</div>
-<div style="font-size: 20px; font-weight: 700">{{attendee_name}}</div>
+<div data-fit="name" style="font-size: 20px; font-weight: 700">{{attendee_name}}</div>
 </div>
-<div data-slot="qr" role="img" aria-label="Ticket QR code" style="position: relative; width: 168px; height: 168px; box-sizing: border-box; background: #FFFFFF; border: 2px solid #0A1F44; border-radius: 12px; display: flex; align-items: center; justify-content: center">
-<div style="position: absolute; left: 12px; top: 12px; width: 36px; height: 36px; box-sizing: border-box; border: 6px solid #0A1F44; display: flex; align-items: center; justify-content: center"><div style="width: 10px; height: 10px; background: #0A1F44"></div></div>
-<div style="position: absolute; right: 12px; top: 12px; width: 36px; height: 36px; box-sizing: border-box; border: 6px solid #0A1F44; display: flex; align-items: center; justify-content: center"><div style="width: 10px; height: 10px; background: #0A1F44"></div></div>
-<div style="position: absolute; left: 12px; bottom: 12px; width: 36px; height: 36px; box-sizing: border-box; border: 6px solid #0A1F44; display: flex; align-items: center; justify-content: center"><div style="width: 10px; height: 10px; background: #0A1F44"></div></div>
-<div style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 600">[QR CODE]</div>
-</div>
+<div data-slot="qr" role="img" aria-label="QR code for ticket {{ticket_id}}" style="padding: 12px; position: relative; width: 168px; height: 168px; box-sizing: border-box; background: #FFFFFF; border: 2px solid #0A1F44; border-radius: 12px; display: flex; align-items: center; justify-content: center"><img src="{{qr_code_src}}" alt="" style="display: block; width: 100%; height: 100%"></div>
 <div style="width: 100%; display: flex; flex-direction: column; gap: 8px; align-items: center">
 <div aria-hidden="true" style="width: 100%; height: 34px; background: repeating-linear-gradient(90deg, #0A1F44 0 3px, transparent 3px 6px, #0A1F44 6px 7px, transparent 7px 12px, #0A1F44 12px 16px, transparent 16px 19px)"></div>
-<div style="font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 600; letter-spacing: 0.14em">{{ticket_id}}</div>
+<div data-fit="code" style="font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 600; letter-spacing: 0.14em">{{ticket_id}}</div>
 </div>
 </div>
 

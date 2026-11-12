@@ -3,7 +3,6 @@
 <head>
 <meta charset="utf-8">
 <title>Sash ID card</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&display=swap">
 <style>
 @page{size:4in 6in;margin:0}
 html,body{margin:0;padding:0}
@@ -13,23 +12,23 @@ html,body{margin:0;padding:0}
 </head>
 <body>
 <div style="width: 384px; height: 576px; box-sizing: border-box; position: relative; overflow: hidden; background: #FFFFFF; color: #141414; font-family: Inter, system-ui, sans-serif; padding: 16px 28px 24px; display: flex; flex-direction: column">
-<div aria-hidden="true" style="align-self: center; width: 56px; height: 12px; border-radius: 6px; background: #FFFFFF; border: 1.5px solid #141414; box-sizing: border-box"></div>
-<div style="margin-top: 16px; display: flex; justify-content: space-between; align-items: center; font-size: 12px; font-weight: 600; letter-spacing: 0.12em">
-<div>{{event_name}}</div>
+<div data-lanyard aria-hidden="true" style="align-self: center; width: 56px; height: 12px; border-radius: 6px; background: #FFFFFF; border: 1.5px solid #141414; box-sizing: border-box"></div>
+<div data-fit-box style="margin-top: 16px; display: flex; justify-content: space-between; align-items: center; font-size: 12px; font-weight: 600; letter-spacing: 0.12em">
+<div data-fit="name">{{event_name}}</div>
 <div>{{event_date}}</div>
 </div>
-<div style="margin-top: 26px; font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: 56px; line-height: 0.95; letter-spacing: -0.03em">{{first_name}}<br>{{last_name}}</div>
-<div style="margin-top: 10px; font-size: 15px; font-weight: 500; color: #3A3A3A">{{organization}}</div>
-<div style="position: absolute; left: -60px; top: 280px; width: 504px; height: 64px; background: var(--accent); color: #FFFFFF; transform: rotate(-12deg); display: flex; align-items: center; justify-content: center; font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: 30px; letter-spacing: 0.22em">{{role}}</div>
+<div data-fit="name" data-fit-min="18" style="margin-top: 26px; font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: 56px; line-height: 0.95; letter-spacing: -0.03em">{{first_name}}<span data-optional="last_name"><br>{{last_name}}</span></div>
+<div data-fit="line" data-optional="organization" style="margin-top: 10px; font-size: 15px; font-weight: 500; color: #3A3A3A">{{organization}}</div>
+<div data-fit-box data-fit="name" data-fit-min="18" style="position: absolute; left: -60px; top: 280px; width: 504px; height: 64px; background: var(--accent); color: #FFFFFF; transform: rotate(-12deg); display: flex; align-items: center; justify-content: center; font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: 30px; letter-spacing: 0.22em">{{role}}</div>
 <div style="margin-top: auto; display: flex; justify-content: space-between; align-items: flex-end; gap: 16px">
 <div style="display: flex; flex-direction: column; gap: 10px">
-<div style="display: flex; flex-direction: column; gap: 2px">
+<div data-optional="access_level" style="display: flex; flex-direction: column; gap: 2px">
 <div style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; color: #555555">ACCESS</div>
 <div style="font-size: 16px; font-weight: 600">{{access_level}}</div>
 </div>
 <div style="display: flex; flex-direction: column; gap: 2px">
 <div style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; color: #555555">BADGE</div>
-<div style="font-size: 16px; font-weight: 600">{{badge_id}}</div>
+<div data-fit="code" style="font-size: 16px; font-weight: 600">{{badge_id}}</div>
 </div>
 </div>
 <img src="{{qr_code_url}}" alt="QR code" style="width: 92px; height: 92px; display: block; flex-shrink: 0; image-rendering: pixelated">

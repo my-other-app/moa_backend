@@ -3,7 +3,6 @@
 <head>
 <meta charset="utf-8">
 <title>Ticket Stub ID card</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&display=swap">
 <style>
 @page{size:4in 6in;margin:0}
 html,body{margin:0;padding:0}
@@ -12,31 +11,31 @@ html,body{margin:0;padding:0}
 </style>
 </head>
 <body>
-<div style="width: 384px; height: 576px; box-sizing: border-box; position: relative; overflow: hidden; background: #F4F6FA; color: #0E1330; font-family: Inter, system-ui, sans-serif">
+<div data-fit-box style="width: 384px; height: 576px; box-sizing: border-box; position: relative; overflow: hidden; background: #F4F6FA; color: #0E1330; font-family: Inter, system-ui, sans-serif">
 <div style="height: 150px; box-sizing: border-box; background: #1F3BD8; color: #FFFFFF; padding: 16px 28px 0; display: flex; flex-direction: column; align-items: center; gap: 14px">
-<div aria-hidden="true" style="width: 56px; height: 12px; border-radius: 6px; background: #F4F6FA"></div>
-<div style="align-self: stretch; display: flex; justify-content: space-between; align-items: flex-start; gap: 12px">
-<div style="font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: 22px; line-height: 1.1; letter-spacing: -0.01em">{{event_name}}</div>
-<div style="font-size: 12px; font-weight: 500; line-height: 1.4; text-align: right; white-space: nowrap">{{event_date}}<br>{{event_venue}}</div>
+<div data-lanyard aria-hidden="true" style="width: 56px; height: 12px; border-radius: 6px; background: #F4F6FA"></div>
+<div data-fit-box style="align-self: stretch; display: flex; justify-content: space-between; align-items: flex-start; gap: 12px">
+<div data-fit="wrap" data-fit-lines="2" style="font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: 22px; line-height: 1.1; letter-spacing: -0.01em">{{event_name}}</div>
+<div data-fit="name" style="font-size: 12px; font-weight: 500; line-height: 1.4; text-align: right; white-space: nowrap">{{event_date}}<span data-optional="event_venue"><br>{{event_venue}}</span></div>
 </div>
 </div>
 <div style="position: absolute; left: 28px; top: 100px; width: 132px; height: 132px; box-sizing: border-box; border-radius: 20px; border: 5px solid #F4F6FA; background: #C9D2F5; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; overflow: hidden">
-<img src="{{photo_url}}" alt="" style="width: 100%; height: 100%; object-fit: cover; display: block">
+<img data-slot="photo" src="{{photo_url}}" alt="" style="width: 100%; height: 100%; object-fit: cover; display: block">
 </div>
 <div style="position: absolute; right: 28px; top: 166px; text-align: right; display: flex; flex-direction: column; gap: 2px">
 <div style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; color: #4A5170">BADGE NO.</div>
-<div style="font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: 24px">{{badge_id}}</div>
+<div data-fit="code" style="font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: 24px">{{badge_id}}</div>
 </div>
 <div style="position: absolute; left: 28px; right: 28px; top: 252px; display: flex; flex-direction: column; gap: 10px">
-<div style="font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: 46px; line-height: 0.98; letter-spacing: -0.03em">{{first_name}}<br>{{last_name}}</div>
-<div style="font-size: 16px; font-weight: 500; color: #333A5C">{{job_title}} · {{organization}}</div>
+<div data-fit="name" data-fit-min="18" style="font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: 46px; line-height: 0.98; letter-spacing: -0.03em">{{first_name}}<span data-optional="last_name"><br>{{last_name}}</span></div>
+<div data-optional-any="job_title organization" data-fit="line" style="font-size: 16px; font-weight: 500; color: #333A5C"><span data-optional="job_title">{{job_title}}</span><span data-optional="job_title organization"> · </span><span data-optional="organization">{{organization}}</span></div>
 </div>
-<div style="position: absolute; left: 0; right: 0; bottom: 0; height: 148px; box-sizing: border-box; border-top: 2px dashed #9AA3C7; padding: 0 28px; display: flex; justify-content: space-between; align-items: center; gap: 16px">
+<div data-fit-box style="position: absolute; left: 0; right: 0; bottom: 0; height: 148px; box-sizing: border-box; border-top: 2px dashed #9AA3C7; padding: 0 28px; display: flex; justify-content: space-between; align-items: center; gap: 16px">
 <div aria-hidden="true" style="position: absolute; left: -12px; top: -13px; width: 24px; height: 24px; border-radius: 50%; background: #1F3BD8"></div>
 <div aria-hidden="true" style="position: absolute; right: -12px; top: -13px; width: 24px; height: 24px; border-radius: 50%; background: #1F3BD8"></div>
 <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px">
-<div style="background: var(--accent); color: #0E1330; font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: 26px; letter-spacing: 0.04em; padding: 8px 14px; border-radius: 8px">{{role}}</div>
-<div style="font-size: 12px; font-weight: 500; color: #4A5170; line-height: 1.4">{{access_level}}<br>Scan the code at every gate</div>
+<div data-fit="name" data-fit-min="18" style="background: var(--accent); color: #0E1330; font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: 26px; letter-spacing: 0.04em; padding: 8px 14px; border-radius: 8px">{{role}}</div>
+<div style="font-size: 12px; font-weight: 500; color: #4A5170; line-height: 1.4"><span data-optional="access_level">{{access_level}}<br></span>Scan the code at every gate</div>
 </div>
 <img src="{{qr_code_url}}" alt="QR code" style="width: 96px; height: 96px; display: block; flex-shrink: 0; image-rendering: pixelated">
 </div>
