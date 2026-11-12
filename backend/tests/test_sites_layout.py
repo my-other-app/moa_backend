@@ -60,104 +60,8 @@ def other(tmp_path):
     registry.reset()
 
 
-# ─── The packages ────────────────────────────────────────────────────────
-
-
-def test_every_package_in_the_checkout_loads_strictly():
-    """A broken package is left out (and logged) in production; here it fails."""
-    loaded = registry.load(strict=True)
-    assert list(loaded)[:len(registry.CATALOGUE)] == list(registry.CATALOGUE)
-    for pkg in loaded.values():
-        assert pkg.env.auto_reload is False and pkg.env.autoescape is True
-        assert pkg.movable and all(k not in registry.FRAME for k in pkg.movable)
-
-
-def _broken(tmp_path, change) -> None:
-    dst = tmp_path / "broken"
-    if dst.exists():
-        shutil.rmtree(dst)
-    shutil.copytree(SITE_FIXTURE, dst)
-    meta = json.loads((dst / "template.json").read_text())
-    change(meta, dst)
-    (dst / "template.json").write_text(json.dumps(meta))
-    with pytest.raises(registry.PackageError):
-        registry.load_package(dst, key="broken")
-
-
-def test_a_package_that_is_not_right_is_refused(tmp_path):
-    _broken(tmp_path, lambda m, d: m["sections"].append({"key": "gallery", "label": "G", "default_title": "G"}))
-    _broken(tmp_path, lambda m, d: m["sections"].append({"key": "footer", "label": "F", "default_title": "F"}))
-    _broken(tmp_path, lambda m, d: m["sections"].append(dict(m["sections"][0])))
-    _broken(tmp_path, lambda m, d: m["slots"].append({"key": "sidebar.image", "label": "S", "size": [10, 10]}))
-    _broken(tmp_path, lambda m, d: m["slots"].append({"key": "photos.9", "label": "S", "size": [10, "x"]}))
-    _broken(tmp_path, lambda m, d: m.update(accent={"default": "blue"}))
-    _broken(tmp_path, lambda m, d: m.update(layout="three_column"))
-    _broken(tmp_path, lambda m, d: m["sections"][0].update(default_title="x" * 61))
-    _broken(tmp_path, lambda m, d: m["sections"][0].update(anchor="a b"))
-    _broken(tmp_path, lambda m, d: (d / "sections" / "team.html.j2").unlink())
-    _broken(tmp_path, lambda m, d: (d / "sections" / "team.html.j2").write_text("{% if %}"))
-    _broken(tmp_path, lambda m, d: (d / "style.css").write_text("a{}</style><script>x</script>"))
-
-
-# ─── The layout ──────────────────────────────────────────────────────────
-
-
-def test_a_stored_layout_is_read_as_valid_for_the_template():
-    got = layouts.normalise({
-        "order": ["team", "bogus", "upcoming", "team"], "hidden": ["about", "past", "nope"],
-        "titles": {"team": "  The   crew ", "nav": "x", "past": "", "photos": "p" * 80}, "slots": {"hero.cover": 4, "hero.image": 5, "photos.1": "6", "photos.2": True},
-        "accent": "#ABC",
-    }, FX)
-    assert got["order"] == ["team", "upcoming", *[k for k in DEFAULT_ORDER if k not in ("team", "upcoming")]]
-    assert got["hidden"] == ["past"]  # about is never hidden in this template; nope is no section
-    assert got["titles"] == {"team": "The crew", "photos": "p" * 60}
-    assert got["slots"] == {"hero.cover": 4}  # the fixture has no hero.image; ids are numbers
-    assert got["accent"] == "#aabbcc"
-    assert layouts.normalise(None, FX) == {"order": DEFAULT_ORDER, "hidden": [], "titles": {}, "slots": {}, "accent": None}
-
-
-def test_a_layout_change_says_what_it_adjusted_and_refuses_what_cannot_be():
-    stored, adjusted = layouts.apply({}, {"order": ["team", "bogus", "upcoming"], "titles": {"team": " Crew ", "bogus": "x"}, "accent": "#3355FF"}, FX, {1, 2})
-    assert stored["order"][:2] == ["team", "upcoming"] and sorted(stored["order"]) == sorted(DEFAULT_ORDER)
-    assert adjusted == {"order_dropped": ["bogus"], "order_appended": [k for k in DEFAULT_ORDER if k not in ("team", "upcoming")], "titles_dropped": ["bogus"]}
-    assert stored["titles"] == {"team": "Crew"} and stored["accent"] == "#3355ff"
-    # Titles and slots merge; null clears one.
-    stored, _ = layouts.apply(stored, {"titles": {"team": None, "past": "Done"}, "slots": {"hero.cover": 1, "photos.1": 2}}, FX, {1, 2})
-    assert stored["titles"] == {"past": "Done"} and stored["slots"] == {"hero.cover": 1, "photos.1": 2} and stored["order"][0] == "team"
-    stored, _ = layouts.apply(stored, {"slots": {"hero.cover": None}, "accent": None}, FX, {1, 2})
-    assert stored["slots"] == {"photos.1": 2} and stored["accent"] is None
-
-    def refused(patch, code):
-        with pytest.raises(CustomHTTPException) as e:
-            layouts.apply(stored, patch, FX, {1, 2})
-        assert e.value.status_code == 422 and e.value.error_code == code, e.value.error_code
-
-    refused({"hidden": ["about"]}, "SITE_SECTION_NOT_HIDEABLE")
-    refused({"hidden": ["hero"]}, "SITE_SECTION_NOT_HIDEABLE")
-    refused({"titles": {"team": "x" * 61}}, "SITE_TITLE_TOO_LONG")
-    refused({"slots": {"hero.image": 1}}, "SITE_SLOT_UNKNOWN")
-    refused({"slots": {"photos.1": 99}}, "SITE_IMAGE_NOT_FOUND")
-    refused({"accent": "red"}, "SITE_ACCENT_INVALID")
-
-
-def test_switching_template_keeps_the_shared_order_and_everything_by_key(tmp_path):
-    other = registry.load_package(_other_package(tmp_path), key="other")
-    stored, _ = layouts.apply({}, {"order": ["join", "team", "photos", "upcoming"], "hidden": ["team", "past"], "titles": {"past": "Before"}, "slots": {"hero.cover": 1, "about.image": 2}}, FX, {1, 2})
-    moved = layouts.switch(stored, FX, other)
-    assert moved["order"] == ["join", "team", "photos", "upcoming", "about"] and moved["hidden"] == ["team"]
-    # Titles and slots are kept by key, used where the template has them.
-    assert moved["titles"] == {"past": "Before"} and moved["slots"] == {"hero.cover": 1, "about.image": 2}
-    assert layouts.normalise(moved, other)["slots"] == {"hero.cover": 1}
-    back = layouts.normalise(layouts.switch(moved, other, FX), FX)
-    assert back["order"][:4] == ["join", "team", "photos", "upcoming"] and back["titles"] == {"past": "Before"} and back["slots"] == {"hero.cover": 1, "about.image": 2}
-
-
-def test_the_gallery_fills_from_the_library_with_photos_no_other_slot_uses():
-    lib = [ClubSiteImages(id=i, club_id=1, position=i, width=10, height=10) for i in (10, 11, 12, 13, 14)]
-    placed = resolve_slots(FX, {"hero.cover": 10, "photos.2": 13}, lib)
-    assert {k: r.id for k, r in placed.items()} == {"hero.cover": 10, "photos.1": 11, "photos.2": 13, "photos.3": 12}
-    assert {k: r.id for k, r in resolve_slots(FX, {}, lib[:2]).items()} == {"photos.1": 10, "photos.2": 11}
-    assert resolve_slots(FX, {"hero.cover": 99}, []) == {}
+# The tests that use the database come first: run on its own, a module whose
+# first test does not leaves the suite's event loop unusable for the rest (conftest).
 
 
 # ─── The API ─────────────────────────────────────────────────────────────
@@ -213,6 +117,28 @@ async def test_switching_template_through_the_api_carries_the_layout(client, wor
     assert s["template"] == "other" and s["layout"]["order"] == ["join", "team", "upcoming", "about", "photos"] and s["layout"]["titles"] == {}
     s = (await client.patch(API, json={"template": "fixture"}, headers=h)).json()
     assert s["layout"]["order"][:3] == ["join", "team", "upcoming"] and s["layout"]["titles"] == {"stats": "Numbers!"}
+
+
+async def test_the_join_line_is_the_clubs_own_or_one_true_of_every_club(client, world, other):
+    h = world["h"]
+    s = (await client.get(API, headers=h)).json()
+    assert s["layout"]["join_text"] is None
+    html = (await client.post(f"{API}/preview", json={}, headers=h)).json()["html"]
+    assert f"<p>{layouts.DEFAULT_JOIN_TEXT}</p>" in html
+    s = (await client.patch(API, json={"layout": {"join_text": "  Members get   the <first> seat. "}}, headers=h)).json()
+    assert s["layout"]["join_text"] == "Members get the <first> seat."
+    html = (await client.post(f"{API}/preview", json={}, headers=h)).json()["html"]
+    assert "<p>Members get the &lt;first&gt; seat.</p>" in html and layouts.DEFAULT_JOIN_TEXT not in html
+    # Unsent, it stays; across a template switch too.
+    assert (await client.patch(API, json={"layout": {"accent": "#ff0055"}}, headers=h)).json()["layout"]["join_text"] == "Members get the <first> seat."
+    assert (await client.patch(API, json={"template": "other"}, headers=h)).json()["layout"]["join_text"] == "Members get the <first> seat."
+    await client.patch(API, json={"template": "fixture"}, headers=h)
+    r = await client.patch(API, json={"layout": {"join_text": "x" * 241}}, headers=h)
+    assert r.status_code == 422 and r.json()["error_code"] == "SITE_JOIN_TEXT_TOO_LONG"
+    assert (await client.patch(API, json={"layout": {"join_text": "x " * 120}}, headers=h)).status_code == 200  # 239 once trimmed
+    for clear in ("", None, "   "):
+        await client.patch(API, json={"layout": {"join_text": "Something"}}, headers=h)
+        assert (await client.patch(API, json={"layout": {"join_text": clear}}, headers=h)).json()["layout"]["join_text"] is None
 
 
 async def _upload(client, h, *, alt=None, size=(1200, 800), name="p.png", content=None, kind="image/png"):
@@ -362,7 +288,8 @@ async def test_the_render_input_has_the_contracts_shape(client, session, world):
     await session.commit()
     site = await service.get_or_create(session, club)
     data = await service.site_data(session, club, service.choices(site), "abc123")
-    assert {"site", "page", "headline", "subline", "club", "images", "stats", "upcoming", "past", "speakers", "team", "sponsors", "socials", "links"} <= set(data)
+    assert {"site", "page", "headline", "subline", "join_text", "club", "images", "stats", "upcoming", "past", "speakers", "team", "sponsors", "socials", "links"} <= set(data)
+    assert data["join_text"] == "Joining is free. Follow us to hear about every event first."
     assert set(data["site"]) == {"template", "headline", "subline", "accent", "title_overrides", "layout"}
     assert set(data["club"]) == {"name", "initials", "tagline", "about", "about_short", "location_name", "contact_email", "slug", "logo", "logo_url", "logo_srcset", "cover", "founded_year", "topics", "brand_colour"}
     assert set(data["images"]) == {"hero.cover", "hero.image", "about.image", "join.image", "event.fallback", "photos"}
@@ -404,3 +331,110 @@ def test_a_full_clubs_page_keeps_to_the_budget(template):
     for tag in imgs:
         assert re.search(r'\swidth="\d+"', tag) and re.search(r'\sheight="\d+"', tag) and re.search(r'\salt="', tag), tag
         assert ('loading="lazy"' in tag) != ('fetchpriority="high"' in tag), tag
+
+
+# ─── The packages ────────────────────────────────────────────────────────
+
+
+def test_every_package_in_the_checkout_loads_strictly():
+    """A broken package is left out (and logged) in production; here it fails."""
+    loaded = registry.load(strict=True)
+    assert list(loaded)[:len(registry.CATALOGUE)] == list(registry.CATALOGUE)
+    for pkg in loaded.values():
+        assert pkg.env.auto_reload is False and pkg.env.autoescape is True
+        assert pkg.movable and all(k not in registry.FRAME for k in pkg.movable)
+
+
+def _broken(tmp_path, change) -> None:
+    dst = tmp_path / "broken"
+    if dst.exists():
+        shutil.rmtree(dst)
+    shutil.copytree(SITE_FIXTURE, dst)
+    meta = json.loads((dst / "template.json").read_text())
+    change(meta, dst)
+    (dst / "template.json").write_text(json.dumps(meta))
+    with pytest.raises(registry.PackageError):
+        registry.load_package(dst, key="broken")
+
+
+def test_a_package_that_is_not_right_is_refused(tmp_path):
+    _broken(tmp_path, lambda m, d: m["sections"].append({"key": "gallery", "label": "G", "default_title": "G"}))
+    _broken(tmp_path, lambda m, d: m["sections"].append({"key": "footer", "label": "F", "default_title": "F"}))
+    _broken(tmp_path, lambda m, d: m["sections"].append(dict(m["sections"][0])))
+    _broken(tmp_path, lambda m, d: m["slots"].append({"key": "sidebar.image", "label": "S", "size": [10, 10]}))
+    _broken(tmp_path, lambda m, d: m["slots"].append({"key": "photos.9", "label": "S", "size": [10, "x"]}))
+    _broken(tmp_path, lambda m, d: m.update(accent={"default": "blue"}))
+    _broken(tmp_path, lambda m, d: m.update(layout="three_column"))
+    _broken(tmp_path, lambda m, d: m["sections"][0].update(default_title="x" * 61))
+    _broken(tmp_path, lambda m, d: m["sections"][0].update(anchor="a b"))
+    _broken(tmp_path, lambda m, d: (d / "sections" / "team.html.j2").unlink())
+    _broken(tmp_path, lambda m, d: (d / "sections" / "team.html.j2").write_text("{% if %}"))
+    _broken(tmp_path, lambda m, d: (d / "style.css").write_text("a{}</style><script>x</script>"))
+
+
+# ─── The layout ──────────────────────────────────────────────────────────
+
+
+def test_a_stored_layout_is_read_as_valid_for_the_template():
+    got = layouts.normalise({
+        "order": ["team", "bogus", "upcoming", "team"], "hidden": ["about", "past", "nope"],
+        "titles": {"team": "  The   crew ", "nav": "x", "past": "", "photos": "p" * 80}, "slots": {"hero.cover": 4, "hero.image": 5, "photos.1": "6", "photos.2": True},
+        "accent": "#ABC",
+    }, FX)
+    assert got["order"] == ["team", "upcoming", *[k for k in DEFAULT_ORDER if k not in ("team", "upcoming")]]
+    assert got["hidden"] == ["past"]  # about is never hidden in this template; nope is no section
+    assert got["titles"] == {"team": "The crew", "photos": "p" * 60}
+    assert got["slots"] == {"hero.cover": 4}  # the fixture has no hero.image; ids are numbers
+    assert got["accent"] == "#aabbcc"
+    assert layouts.normalise(None, FX) == {"order": DEFAULT_ORDER, "hidden": [], "titles": {}, "slots": {}, "accent": None, "join_text": None}
+
+
+def test_a_layout_change_says_what_it_adjusted_and_refuses_what_cannot_be():
+    stored, adjusted = layouts.apply({}, {"order": ["team", "bogus", "upcoming"], "titles": {"team": " Crew ", "bogus": "x"}, "accent": "#3355FF"}, FX, {1, 2})
+    assert stored["order"][:2] == ["team", "upcoming"] and sorted(stored["order"]) == sorted(DEFAULT_ORDER)
+    assert adjusted == {"order_dropped": ["bogus"], "order_appended": [k for k in DEFAULT_ORDER if k not in ("team", "upcoming")], "titles_dropped": ["bogus"]}
+    assert stored["titles"] == {"team": "Crew"} and stored["accent"] == "#3355ff"
+    # Titles and slots merge; null clears one.
+    stored, _ = layouts.apply(stored, {"titles": {"team": None, "past": "Done"}, "slots": {"hero.cover": 1, "photos.1": 2}}, FX, {1, 2})
+    assert stored["titles"] == {"past": "Done"} and stored["slots"] == {"hero.cover": 1, "photos.1": 2} and stored["order"][0] == "team"
+    stored, _ = layouts.apply(stored, {"slots": {"hero.cover": None}, "accent": None}, FX, {1, 2})
+    assert stored["slots"] == {"photos.1": 2} and stored["accent"] is None
+
+    def refused(patch, code):
+        with pytest.raises(CustomHTTPException) as e:
+            layouts.apply(stored, patch, FX, {1, 2})
+        assert e.value.status_code == 422 and e.value.error_code == code, e.value.error_code
+
+    refused({"hidden": ["about"]}, "SITE_SECTION_NOT_HIDEABLE")
+    refused({"hidden": ["hero"]}, "SITE_SECTION_NOT_HIDEABLE")
+    refused({"titles": {"team": "x" * 61}}, "SITE_TITLE_TOO_LONG")
+    refused({"slots": {"hero.image": 1}}, "SITE_SLOT_UNKNOWN")
+    refused({"slots": {"photos.1": 99}}, "SITE_IMAGE_NOT_FOUND")
+    refused({"accent": "red"}, "SITE_ACCENT_INVALID")
+    refused({"join_text": "y" * 241}, "SITE_JOIN_TEXT_TOO_LONG")
+    stored, _ = layouts.apply(stored, {"join_text": " Free,\n always. "}, FX, {1, 2})
+    assert stored["join_text"] == "Free, always." and layouts.normalise(stored, FX)["join_text"] == "Free, always."
+    stored, _ = layouts.apply(stored, {"join_text": ""}, FX, {1, 2})
+    assert stored["join_text"] is None
+
+
+def test_switching_template_keeps_the_shared_order_and_everything_by_key(tmp_path):
+    other = registry.load_package(_other_package(tmp_path), key="other")
+    stored, _ = layouts.apply({}, {"order": ["join", "team", "photos", "upcoming"], "hidden": ["team", "past"], "titles": {"past": "Before"}, "slots": {"hero.cover": 1, "about.image": 2}}, FX, {1, 2})
+    moved = layouts.switch(stored, FX, other)
+    assert moved["order"] == ["join", "team", "photos", "upcoming", "about"] and moved["hidden"] == ["team"]
+    # Titles and slots are kept by key, used where the template has them.
+    assert moved["titles"] == {"past": "Before"} and moved["slots"] == {"hero.cover": 1, "about.image": 2}
+    assert layouts.normalise(moved, other)["slots"] == {"hero.cover": 1}
+    back = layouts.normalise(layouts.switch(moved, other, FX), FX)
+    assert back["order"][:4] == ["join", "team", "photos", "upcoming"] and back["titles"] == {"past": "Before"} and back["slots"] == {"hero.cover": 1, "about.image": 2}
+
+
+def test_the_gallery_fills_from_the_library_with_photos_no_other_slot_uses():
+    lib = [ClubSiteImages(id=i, club_id=1, position=i, width=10, height=10) for i in (10, 11, 12, 13, 14)]
+    placed = resolve_slots(FX, {"hero.cover": 10, "photos.2": 13}, lib)
+    assert {k: r.id for k, r in placed.items()} == {"hero.cover": 10, "photos.1": 11, "photos.2": 13, "photos.3": 12}
+    assert {k: r.id for k, r in resolve_slots(FX, {}, lib[:2]).items()} == {"photos.1": 10, "photos.2": 11}
+    assert resolve_slots(FX, {"hero.cover": 99}, []) == {}
+
+

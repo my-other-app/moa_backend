@@ -14,13 +14,15 @@ def _trim(v):
 class LayoutPatch(BaseModel):
     """Only the fields sent change (layout.apply): `order` and `hidden`
     replace, `titles` and `slots` merge by key (null or "" clears one),
-    `accent` sets or (null) clears."""
+    `accent` and `join_text` set or (null, "") clear."""
 
     order: Optional[list[str]] = Field(None, max_length=40)
     hidden: Optional[list[str]] = Field(None, max_length=40)
     titles: Optional[dict[str, Optional[str]]] = None
     slots: Optional[dict[str, Optional[int]]] = None
     accent: Optional[str] = Field(None, max_length=7)
+    #: The join section's line, plain text (240 characters at most: SITE_JOIN_TEXT_TOO_LONG past it).
+    join_text: Optional[str] = Field(None, max_length=2000)
 
     @field_validator("titles", "slots")
     @classmethod
@@ -73,7 +75,7 @@ class SiteOut(BaseModel):
     #: What the hero says when the headline is left empty: the tagline, else the name.
     default_headline: str
     default_subline: Optional[str]
-    #: The layout for the current template: {order, hidden, titles, slots, accent}.
+    #: The layout for the current template: {order, hidden, titles, slots, accent, join_text}.
     layout: dict
     #: Every movable section's title as the page shows it (the club's, else the template's).
     titles: dict[str, str]

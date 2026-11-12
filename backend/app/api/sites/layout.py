@@ -1,11 +1,11 @@
 """How a club arranges its template: the movable sections' order, which are
-hidden, their titles, which library photo goes in which image slot, and the
-accent colour.
+hidden, their titles, which library photo goes in which image slot, the
+accent colour, and the join section's line.
 
 Stored on club_sites.layout as
 
     {"order": [section, ...], "hidden": [section, ...], "titles": {section: title},
-     "slots": {slot: image id}, "accent": null | "#rrggbb"}
+     "slots": {slot: image id}, "accent": null | "#rrggbb", "join_text": null | str}
 
 `order` and `hidden` are kept for the current template (switching carries
 the shared sections' order over); `titles` and `slots` are kept by key
@@ -22,6 +22,10 @@ from app.api.sites.registry import CANONICAL, FRAME, SLOT_KEY, TITLE_MAX, Packag
 from app.response import CustomHTTPException
 
 _HEX = re.compile(r"^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{3})$")
+#: The join section's line, as the club words it (what membership gives, if anything).
+JOIN_TEXT_MAX = 240
+#: What the join section says when the club wrote nothing: true of every club.
+DEFAULT_JOIN_TEXT = "Joining is free. Follow us to hear about every event first."
 
 
 def hex_colour(v: Any) -> Optional[str]:
@@ -34,18 +38,24 @@ def hex_colour(v: Any) -> Optional[str]:
     return h
 
 
-def _title(v: Any) -> Optional[str]:
+def _plain(v: Any) -> Optional[str]:
+    """One line of plain text: whitespace runs as one space, trimmed; None when empty."""
     if not isinstance(v, str):
         return None
-    v = " ".join(v.split())
-    return v[:TITLE_MAX] or None
+    return " ".join(v.split()) or None
+
+
+def _title(v: Any) -> Optional[str]:
+    v = _plain(v)
+    return v[:TITLE_MAX] if v else None
 
 
 def normalise(stored: Optional[dict], pkg: Package) -> dict:
     """The layout as it applies to `pkg`: `order` a permutation of its
     movable sections (unknown ones dropped, missing ones appended in its
     default order), `hidden` within its hideable ones, `titles` and `slots`
-    for its own keys only, `accent` a colour or None."""
+    for its own keys only, `accent` a colour or None, `join_text` the
+    club's line or None."""
     stored = stored if isinstance(stored, dict) else {}
     movable = pkg.movable
     order = [k for k in dict.fromkeys(stored.get("order") or []) if k in movable]
@@ -60,7 +70,11 @@ def normalise(stored: Optional[dict], pkg: Package) -> dict:
     for k, v in (stored.get("slots") or {}).items():
         if k in pkg.slot_keys and isinstance(v, int) and not isinstance(v, bool):
             slots[k] = v
-    return {"order": order, "hidden": hidden, "titles": titles, "slots": slots, "accent": hex_colour(stored.get("accent"))}
+    join = _plain(stored.get("join_text"))
+    return {
+        "order": order, "hidden": hidden, "titles": titles, "slots": slots, "accent": hex_colour(stored.get("accent")),
+        "join_text": join[:JOIN_TEXT_MAX] if join else None,
+    }
 
 
 def switch(stored: Optional[dict], old: Optional[Package], new: Package) -> dict:
@@ -91,6 +105,8 @@ def apply(stored: Optional[dict], patch: dict, pkg: Package, image_ids: set[int]
     - slots: merged by slot; null empties it. A slot the template does not
       have, or a photo that is not in the club's library, is a 422.
     - accent: a #rrggbb colour (#rgb accepted), or null for the template's own.
+    - join_text: the join section's line, plain text up to 240 characters
+      (a 422 past it); null or "" for the default (DEFAULT_JOIN_TEXT).
     """
     out = dict(stored or {})
     adjusted: dict[str, list[str]] = {}
@@ -162,6 +178,14 @@ def apply(stored: Optional[dict], patch: dict, pkg: Package, image_ids: set[int]
             if colour is None:
                 raise CustomHTTPException(422, message="The accent is a colour like #2b4bff.", error_code="SITE_ACCENT_INVALID", errors={"accent": v})
             out["accent"] = colour
+    if "join_text" in patch:
+        v = patch["join_text"]
+        if v is not None and not isinstance(v, str):
+            raise CustomHTTPException(422, message="The join text is text.", error_code="SITE_JOIN_TEXT_INVALID")
+        line = _plain(v)
+        if line and len(line) > JOIN_TEXT_MAX:
+            raise CustomHTTPException(422, message=f"The join text is at most {JOIN_TEXT_MAX} characters.", error_code="SITE_JOIN_TEXT_TOO_LONG", errors={"join_text": len(line)})
+        out["join_text"] = line
     return out, adjusted
 
 

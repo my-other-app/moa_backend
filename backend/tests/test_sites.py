@@ -109,6 +109,64 @@ async def test_the_templates_pictures_are_served_from_their_packages(client, wor
         assert (await client.get(f"/static/site-templates/{bad}")).status_code == 404, bad
 
 
+@pytest.mark.parametrize("template", list(registry.packages()))
+async def test_every_template_shows_what_the_club_has(client, session, world, make_event, template):
+    """Whatever the design: the platform's head and beacon, the events with
+    the site's code on their links, and each kind of thing the club has in
+    the sections the template declares. A template that drops one fails here."""
+    import re
+
+    from app.api.clubs.models import ClubPartners, ClubTeamMembers
+    from app.api.events.models import EventSpeakers
+    from app.api.sites.models import ClubSiteImages
+    from app.config import settings
+
+    h, club = world["h"], world["club"]
+    session.add_all([
+        ClubTeamMembers(club_id=club.id, name="Asha Rao", role="Lead"),
+        ClubPartners(club_id=club.id, name="Acme Labs", role="Sponsor"),
+        EventSpeakers(event_id=world["soon"].id, name="Dr. Meera Iyer", designation="Researcher · IISc"),
+        ClubSiteImages(club_id=club.id, image=f"clubs/site/v-{'a' * 32}.png", alt="Demo night", position=0, width=1200, height=800),
+    ])
+    await session.commit()
+    pkg = registry.get(template)
+    assert (await client.patch("/api/v1/clubs/site", json={"template": template}, headers=h)).status_code == 200
+    code = (await client.post("/api/v1/clubs/site/publish", headers=h)).json()["tracking"]["code"]
+    html = (await client.get(f"/api/v1/sites/{club.slug}")).text
+    site = f"https://{club.slug}.myotherapp.in"
+
+    missing = []
+
+    def has(what: str, ok: bool) -> None:
+        if not ok:
+            missing.append(what)
+
+    has("canonical", f'<link rel="canonical" href="{site}">' in html)
+    has("og:url", f'<meta property="og:url" content="{site}">' in html)
+    has("visit beacon", f'<meta name="moa:visit" content="{settings.PUBLIC_API_URL}/api/v1/sites/{club.slug}/visit">' in html and html.count("<script>") == 1)
+    has("headline", "Build things that think." in html)
+    soon = world["soon"].slug
+    links = re.findall(rf'<a\b[^>]*href="{re.escape(settings.PUBLIC_SITE_URL)}/events/{soon}[^"]*"[^>]*>', html)
+    has("the upcoming event", "Hack Night 04: Edge AI" in html)
+    has("its link with ?sref=", bool(links) and all(f"?sref={code}" in a for a in links))
+    has("its link to the whole tab", bool(links) and all('target="_top"' in a for a in links))
+    has("follow / join link", f"{settings.PUBLIC_SITE_URL}/clubs/{club.slug}?follow=1" in html)
+    sections = set(pkg.movable) | set(pkg.fixed_top) | set(pkg.fixed_side) | set(pkg.fixed_bottom)
+    if "past" in sections:
+        has("the past event", "Intro to KiCad" in html)
+    if "team" in sections:
+        has("the team", "Asha Rao" in html)
+    if "sponsors" in sections:
+        has("the sponsors", "Acme Labs" in html)
+    if "speakers" in sections:
+        has("the speakers", "Dr. Meera Iyer" in html)
+    if "photos" in sections and pkg.photo_slots:
+        has("the library photo", f"v-{'a' * 32}" in html and 'alt="Demo night"' in html)
+    if "about" in sections:
+        has("the about", "Hack nights, build weekends" in html)
+    assert not missing, f"{template} drops: {', '.join(missing)}"
+
+
 def test_the_site_address_is_the_clubs_subdomain_when_the_slug_can_be_one():
     from types import SimpleNamespace
 

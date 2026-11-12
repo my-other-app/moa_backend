@@ -60,8 +60,12 @@ async def test_publishing_gives_the_site_its_link_and_its_buttons_carry_the_code
     assert (await _publish(client, world))["tracking"]["code"] == code
 
     html = (await client.get(f"/api/v1/sites/{world['club'].slug}")).text
-    # The event button leaves the frame for the whole tab, carrying the site's code as a weak ref.
-    assert re.search(rf'href="{re.escape(settings.PUBLIC_SITE_URL)}/events/{world["event"].slug}\?sref={code}" target="_top">Register</a>', html)
+    # The event button leaves the frame for the whole tab, carrying the site's code as a weak ref --
+    # whatever the template (this is the club's default one), however it orders its attributes.
+    event_link = rf'<a\b[^>]*href="{re.escape(settings.PUBLIC_SITE_URL)}/events/{world["event"].slug}\?sref={code}"[^>]*>'
+    found = re.findall(event_link, html)
+    assert found and all('target="_top"' in a for a in found)
+    assert f'/events/{world["event"].slug}"' not in html  # never one without the code
     slug = world["club"].slug
     assert f'<meta name="moa:visit" content="{settings.PUBLIC_API_URL}/api/v1/sites/{slug}/visit">' in html
     # Every way out of the frame goes to the whole tab.

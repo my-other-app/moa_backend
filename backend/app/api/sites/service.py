@@ -343,6 +343,8 @@ async def site_data(session: AsyncSession, club: Clubs, choices: dict, ref_code:
         site=dict(template=pkg.key, headline=choices.get("headline"), subline=choices.get("subline"), accent=lay["accent"], title_overrides=lay["titles"], layout=lay),
         page=dict(title=club.name if headline == club.name else f"{club.name} · {headline}", description=subline or f"{club.name} on MyOtherApp.", url=site_url),
         headline=headline, subline=subline,
+        # The join section's line: the club's own, else one true of every club (no promises it did not make).
+        join_text=lay["join_text"] or layouts.DEFAULT_JOIN_TEXT,
         club=dict(
             name=club.name, initials=initials(club.name), tagline=club.tagline, about=club.about, about_short=_first_sentence(club.about),
             location_name=club.location_name, contact_email=email or None, slug=club.slug,
