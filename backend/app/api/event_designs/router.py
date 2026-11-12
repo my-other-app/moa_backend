@@ -871,7 +871,7 @@ async def get_starter(
     page = None
     if kind is DesignKind.badge:
         _, style = await _current(session, event, kind, TemplateAudience.event_default)
-        layout = style.get("layout") if in_layout_mode(style) else None
+        layout = presets.layout_v1_of(style)
         if layout and layout.get("page"):
             page = PageSpec.model_validate(layout["page"])
     s = _starter_of(kind, name, page)

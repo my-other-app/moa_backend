@@ -40,7 +40,7 @@ from app.api.event_designs.router import (
     layout_v2_preview,
     starter_answer,
 )
-from app.api.doc_presets.config import is_v2, preset_of, with_layout, with_v1_layout
+from app.api.doc_presets.config import is_v2, layout_v1_of, preset_of, with_layout, with_v1_layout
 from app.api.events.documents import in_layout_mode, layout_sample_values
 from app.api.templates_audience import TemplateAudience
 from app.api.templates_images import shown
@@ -113,7 +113,7 @@ async def get_starter(session: SessionDep, user: ClubAuth, kind: DesignKind, nam
     page = None
     if kind is DesignKind.badge:
         _, style = await _current(session, club, kind)
-        layout = style.get("layout") if in_layout_mode(style) else None
+        layout = layout_v1_of(style)
         if layout and layout.get("page"):
             page = PageSpec.model_validate(layout["page"])
     s = _starter_of(kind, name, page)
