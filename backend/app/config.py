@@ -301,6 +301,18 @@ class AppConfig(BaseSettings):
     MAILBOX_SEND_PER_DAY: int = 300
     MAILBOX_MAX_RECIPIENTS: int = 50
 
+    # ─── The platform's own inbox (app/api/platform_mail) ────────────────────
+    # Mail to these addresses (comma-separated, lower-cased; `info+x@` reaches
+    # `info@`) that reaches the mailbox hooks is kept in the admin portal's
+    # Mail, read and answered by admins with the owner or support role. They
+    # are never a club's (club_mailbox/handles.py). Empty: none is kept (the
+    # Worker rejects it as no such address, unless its FORWARD sends it on).
+    PLATFORM_INBOX_ADDRESSES: str = (
+        "admin@myotherapp.in,developer@myotherapp.in,developers@myotherapp.in,info@myotherapp.in"
+    )
+    # What the admins may send from it, together, in an hour.
+    PLATFORM_MAIL_SEND_PER_HOUR: int = 200
+
     # ─── The team's support desk and sales leads (app/api/support, app/api/leads) ─
     # Mail to these addresses (comma-separated) that reaches the inbound hook
     # the club mailbox uses (SES receipt rule -> bucket -> SNS) becomes a
@@ -641,6 +653,17 @@ class AppConfig(BaseSettings):
     @property
     def sales_inbound_addresses(self) -> frozenset[str]:
         return self._addresses(self.SALES_INBOUND_ADDRESSES)
+
+    @property
+    def platform_inbox_addresses(self) -> frozenset[str]:
+        """PLATFORM_INBOX_ADDRESSES, lower case, without plus-tags; empty: no platform inbox."""
+        out = set()
+        for address in self._addresses(self.PLATFORM_INBOX_ADDRESSES):
+            local, _, host = address.partition("@")
+            local = local.split("+", 1)[0]
+            if local and host:
+                out.add(f"{local}@{host}")
+        return frozenset(out)
 
     @property
     def mail_suppress_domains(self) -> frozenset[str]:

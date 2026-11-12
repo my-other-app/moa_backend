@@ -30,6 +30,8 @@ class MailboxOut(BaseModel):
     set_up: bool
     address: Optional[str] = None
     handle: Optional[str] = None
+    #: Made from the club's name by the platform; its first change can be made at once.
+    automatic: bool = False
     previous: list[PreviousAddress] = []
     display_name: Optional[str] = None
     #: Only to those who may write mail.
@@ -37,7 +39,9 @@ class MailboxOut(BaseModel):
     retention_months: int = 12
     #: The address can't change again before this.
     next_change_at: Optional[datetime] = None
-    #: open; lapsed (the plan dropped it: readable until `readable_until`); expired (export or delete).
+    #: open; reserved (the plan lacks it and it holds no mail: the address is
+    #: kept for the club, mail to it is refused, upgrading opens it); lapsed
+    #: (the plan dropped it: readable until `readable_until`); expired (export or delete).
     state: str = "open"
     lapsed_at: Optional[datetime] = None
     readable_until: Optional[datetime] = None
@@ -156,6 +160,12 @@ class AdminMailboxOut(BaseModel):
     plan_allows: bool
     set_up: bool
     address: Optional[str] = None
+    handle: Optional[str] = None
+    #: Made from the club's name by the platform, not picked.
+    automatic: bool = False
+    #: Its earlier addresses still forwarding into it.
+    previous: list[PreviousAddress] = []
+    #: open, reserved, lapsed or expired (MailboxOut.state).
     state: str
     lapsed_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
@@ -171,3 +181,25 @@ class AdminMailboxOut(BaseModel):
     dropped_while_closed: int = 0
     last_received_at: Optional[datetime] = None
     last_sent_at: Optional[datetime] = None
+
+
+class BackfillIn(BaseModel):
+    #: True (the default): say what would be made, write nothing.
+    dry_run: bool = True
+
+
+class BackfillSample(BaseModel):
+    club_id: int
+    handle: str
+
+
+class BackfillOut(BaseModel):
+    dry_run: bool
+    #: Clubs given an address (or that would be, in a dry run).
+    created: int
+    #: Clubs that had one already.
+    skipped: int
+    #: Clubs no address could be made for (logged).
+    failed: int = 0
+    #: The first 20 made, oldest club first.
+    sample: list[BackfillSample] = []

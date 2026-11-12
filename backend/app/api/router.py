@@ -82,6 +82,7 @@ from app.api.club_whatsapp.router import (
     hook_router as club_whatsapp_hook_router,
 )
 from app.api.club_whatsapp.inbox_router import router as club_whatsapp_inbox_router
+from app.api.platform_mail.router import router as platform_mail_router
 from app.api.club_mailbox.router import (
     admin_router as club_mailbox_admin_router,
     club_router as club_mailbox_club_router,
@@ -146,6 +147,8 @@ api_router.include_router(router=finance_router, tags=["finance"])
 api_router.include_router(router=club_mailbox_club_router)
 api_router.include_router(router=club_mailbox_admin_router)
 api_router.include_router(router=club_mailbox_hook_router)
+# The platform's own inbox in the admin portal (app/api/platform_mail).
+api_router.include_router(router=platform_mail_router)
 api_router.include_router(router=threads_router, tags=["threads"])
 api_router.include_router(router=security_router, tags=["security"])
 api_router.include_router(router=threads_public_router, tags=["threads"])

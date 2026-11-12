@@ -181,6 +181,11 @@ CLASSIFICATION: dict[str, str] = {
     # Old slugs of clubs and events (app/api/slugs): they point at rows a
     # reset wipes.
     "slug_aliases": WIPE,
+    # The team's own inbox (app/api/platform_mail: admin@, developer@,
+    # developers@, info@): people's mail, like the desk's cases -- wiped.
+    "platform_mail_threads": WIPE,
+    "platform_mail_messages": WIPE,
+    "platform_mail_attachments": WIPE,
     # The club tools (app/api/club_ops): results, cancellations, refunds, the
     # guests told, and the dashboard's password reset codes.
     "competition_placings": WIPE,

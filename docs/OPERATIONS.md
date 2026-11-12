@@ -2781,9 +2781,13 @@ room feed.
 
 ## 23. Clubs' mailboxes: `<handle>@myotherapp.in` (Pro and Enterprise)
 
-A club on Pro or Enterprise (plan flag `mailbox`, migration `club_mailbox`)
-picks one address on the platform's domain -- `yukthi@myotherapp.in` --
-in the clubs dashboard (Mail -> Settings). Mail sent to it arrives in the
+Every club has one address on the platform's domain from the day it is
+created -- made from its name, `gdgcloudtrivandrum@myotherapp.in` (see
+"Every club's address, from its name" below; migration `platform_mail`). On
+Pro or Enterprise (plan flag `mailbox`, migration `club_mailbox`) the
+mailbox is open; on any other plan the address is only reserved (state
+`reserved`), and the club sees it locked with the upgrade. A club may change
+it in the clubs dashboard (Mail -> Settings) on Pro or Enterprise. Mail sent to it arrives in the
 dashboard's **Mail** section; the club's owner, and the team members the owner
 gave the **Mail** permission on Access, read it, reply, reply to all, forward
 and write new mail from it. The club does not connect a mailbox of its own:
@@ -2796,8 +2800,9 @@ The domain is the platform's own (`APP_MAILBOX_DOMAIN`, default
 `myotherapp.in`), so every address the platform itself uses on it is reserved
 for no club: the list in `handles.py` (info, support, sales, appreview,
 developers, hello, ...) and, read from the settings each time, the local part
-of `APP_MAIL_FROM_ADDRESS`, `APP_SUPPORT_FROM_ADDRESS`, `APP_SALES_FROM_ADDRESS`
-and the desk's inbound addresses. The same catch-all brings `support@` and
+of `APP_MAIL_FROM_ADDRESS`, `APP_SUPPORT_FROM_ADDRESS`, `APP_SALES_FROM_ADDRESS`,
+the desk's inbound addresses and the admin inbox's (`APP_PLATFORM_INBOX_ADDRESSES`,
+below). The same catch-all brings `support@` and
 `sales@` to the team's desk (`APP_SUPPORT_INBOUND_ADDRESSES`, docs/SUPPORT_AND_LEADS.md).
 
 It is **off** (`APP_CLUB_MAILBOX=false`) until the steps below are done. Off,
@@ -2937,6 +2942,60 @@ team can send it again (`POST /clubs/mailbox/messages/{id}/retry`). A later
 bounce or complaint marks it in its thread and puts the address on the
 suppression list, through the platform's own SES hook (step 8 below).
 
+### Every club's address, from its name
+
+`app/api/club_mailbox/handles.py` `from_name` and `service.ensure_address`:
+
+- **The rule:** the letters and digits of the club's name (accents dropped,
+  NFKD to ASCII), lower case, cut to 30: "GDG Cloud Trivandrum" ->
+  `gdgcloudtrivandrum`. Fewer than three left (a name only in Malayalam,
+  say): `club<id>`. Taken (by a club's current address, or an old one still
+  forwarding) or reserved: `gdgcloudtrivandrum2`, `...3`, each cut so it
+  fits 30. "Support" gets `support2`.
+- **When:** as the club is created (`app/api/clubs/service.py`
+  `create_club`: the public application, the admin's "create club", the
+  partner API), **whatever its plan and whatever `APP_CLUB_MAILBOX` says**
+  -- reserving a name is harmless. A failure is logged and never fails the
+  club's creation. The address is marked `automatic`: its first change by the
+  club is not the month's change (it can be made at once; after that, once a
+  month).
+- **The clubs from before** get theirs from the backfill, oldest club first
+  (the older club wins a name), deleted clubs skipped, a club that already
+  has an address left alone. Dry run first, then apply; safe to run again:
+
+  ```
+  $DC exec -T backend python -m scripts.mailbox_backfill            # counts and the first 20 handles, nothing kept
+  $DC exec -T backend python -m scripts.mailbox_backfill --apply    # makes them (audited: club_mailbox.backfill)
+  ```
+
+  or the admin portal's `POST /api/v1/admin/club-mailbox/backfill`
+  (owner role; body `{"dry_run": true}` by default, `false` to apply) ->
+  `{"dry_run", "created", "skipped", "failed", "sample": [{"club_id", "handle"}]}`.
+- **Reserved:** a club whose plan lacks `mailbox` and whose mailbox holds no
+  mail is `state: "reserved"` (`GET /clubs/mailbox`: `set_up: true`, the
+  address, `plan_allows: false`, `upgrade`). Mail to it is refused as for a
+  closed mailbox ("This mailbox is not receiving mail"), nothing is kept,
+  the sweep tells nobody and lapses nothing, and the address is never let go
+  (only a changed, retired one is). The club can't change it on its plan
+  (403 `PLAN_FEATURE_LOCKED`); an admin can. Upgrading opens it with no
+  step. The rule is "the plan lacks it and no mail is kept": a mailbox that
+  holds mail lapses as before (below); one whose mail is all gone (exported
+  and deleted, or past retention) is reserved again.
+
+### An admin changes a club's address
+
+When a club asks: `PUT /api/v1/admin/club-mailbox/{club_id}/address`
+`{"handle": "gdgcloudtvm"}`, admins with the owner or support role. The
+club's own rules (422 `HANDLE_INVALID` / `HANDLE_RESERVED`, 409
+`HANDLE_TAKEN`; 404 `CLUB_NOT_FOUND`) without the monthly limit or the plan,
+whatever `APP_CLUB_MAILBOX` says; a club with no address yet gets one. The old
+address forwards 90 days as usual. It counts as the club's change of the
+month (the club's own next change waits 30 days). Answers the admin card
+(`AdminMailboxOut`, now with `handle`, `automatic` and `previous`: the old
+addresses still forwarding, each with `forward_until`; its `plan_allows` and
+`state` are the club's own, though an admin asks). Audited
+`club_mailbox.admin_address` (old -> new).
+
 ### The address
 
 3 to 30 characters, `a-z 0-9 . -`, starting and ending with a letter or a
@@ -2973,7 +3032,8 @@ are marked sensitive (`app/core/redact.py`: an error report withholds the
 exception's message), the search term `q` is `[Filtered]` in the access log,
 and the audit log keeps only who did what and how many
 (`club_mailbox.address`, `.settings`, `.send` with the number of recipients
-and files, `.delete`, `.export`, `.wipe`, `.permission`).
+and files, `.delete`, `.export`, `.wipe`, `.permission`, `.admin_address`,
+`.backfill`).
 
 Files are kept in the media bucket under `mailbox/<club>/<message>/<n>` (not a
 CDN folder, server-side encrypted), served only through
@@ -3016,7 +3076,8 @@ The sweep finds the plan no longer has `mailbox` and the mailbox **lapses**:
    Otherwise retention deletes it in its time.
 5. Upgrading again opens it as it was (the sweep, within 15 minutes).
 
-The address stays the club's while it is lapsed.
+The address stays the club's while it is lapsed. A mailbox that holds no mail
+never lapses: it is only reserved (above), and nobody is told anything.
 
 ### Settings
 
@@ -3031,13 +3092,85 @@ The address stays the club's while it is lapsed.
 | `APP_MAILBOX_AWS_ACCESS_KEY`, `APP_MAILBOX_AWS_SECRET_KEY` | empty (the SES keys) | a user that may get and delete objects in the inbound bucket |
 | `APP_MAILBOX_INBOUND_MAX_MB` | `40` | a larger mail is refused unread (Cloudflare takes up to 25 MiB, SES 40 MB) |
 | `APP_MAILBOX_SEND_PER_HOUR`, `APP_MAILBOX_SEND_PER_DAY` | `60`, `300` | what one club may send |
-| `APP_MAILBOX_MAX_RECIPIENTS` | `50` | the most people one mail goes to |
+| `APP_MAILBOX_MAX_RECIPIENTS` | `50` | the most people one mail goes to (the admin inbox's too) |
+| `APP_PLATFORM_INBOX_ADDRESSES` | `admin@myotherapp.in,developer@myotherapp.in,developers@myotherapp.in,info@myotherapp.in` | the admin inbox's addresses (below); empty: none is kept |
+| `APP_PLATFORM_MAIL_SEND_PER_HOUR` | `200` | what the admins may send from it, together, an hour |
 
 With `APP_CLUB_MAILBOX` on, the config check (section 19) warns -- never refuses
 to start -- for an empty domain; for no way in at all (neither the Worker's key
 nor SES's bucket and topic); for a key shorter than 32 characters; for SES half
 set up (bucket, topic or region missing, a topic outside the receiving region);
 and when `APP_MAIL_PROVIDER` is `resend` (Resend must have the domain verified too).
+
+### The platform's own inbox: admin@, developer@, developers@, info@
+
+Mail to the addresses in `APP_PLATFORM_INBOX_ADDRESSES` (the four above by
+default; `info+press@` reaches `info@`) is kept in the admin portal's **Mail**
+(`app/api/platform_mail`, its own tables `platform_mail_threads`,
+`_messages`, `_attachments`; migration `platform_mail`). `support@` is not one:
+it is the team's desk (`APP_SUPPORT_INBOUND_ADDRESSES=support@myotherapp.in`,
+docs/SUPPORT_AND_LEADS.md).
+
+- **Arriving:** through both hooks (`/hooks/mailbox/cloudflare` and
+  `/hooks/mailbox/ses`), asked **before** the desk and the clubs; a mail also
+  to a club is kept by both, a mail to two platform addresses once in each.
+  The Worker is told `accept`. Kept once per (provider, provider's id,
+  mailbox): a delivery again is a duplicate. A DMARC failure (Cloudflare's
+  verdict; SES's under a reject or quarantine policy) or SES's spam verdict:
+  kept in **Spam**. A virus: dropped unread. The hooks' answer gains
+  `"platform": n` (kept) whenever a recipient was a platform address.
+  Threads as the clubs': by `In-Reply-To`/`References`, else by subject and
+  sender within 30 days, inside the mailbox the mail came to (a conversation
+  belongs to the address it started at).
+- **Who:** admins with the **owner** or **support** role read and answer it
+  (a viewer: 403 `INSUFFICIENT_ADMIN_ROLE`); deleting a conversation is the
+  owner's. Read state is shared by the admins; opening a conversation does not
+  mark it read.
+- **The API** (`/api/v1/admin/mail`): `GET ""` (the addresses, unread in each,
+  `unread_total`, `can_delete`); `GET /threads?mailbox=&folder=inbox|sent|archive|spam&q=&page=&page_size=`;
+  `GET /threads/{id}` (with `own_addresses`); `POST /threads/{id}/read`,
+  `/unread`; `PATCH /threads/{id}` `{"folder"}`; `DELETE /threads/{id}`
+  (owner); `POST /messages` (multipart, the clubs' fields plus
+  `from_mailbox`; a reply defaults to the address it came to);
+  `POST /messages/{id}/retry`; `GET /attachments/{id}` (served as the clubs'
+  files are).
+- **Sending:** from `"MyOtherApp" <info@myotherapp.in>` (`APP_MAIL_FROM_NAME`
+  and the picked address; the server sets it), through the platform's
+  provider, with none of a club's credits or plan: at most
+  `APP_MAILBOX_MAX_RECIPIENTS` (50) people, none suppressed (422
+  `RECIPIENT_SUPPRESSED`), files 10 MB together, and
+  `APP_PLATFORM_MAIL_SEND_PER_HOUR` (200) an hour across every admin (429
+  `PLATFORM_MAIL_RATE_LIMITED`). A bounce or complaint marks the message,
+  through the SES hook. Audited `platform_mail.send` (who, from which
+  address, to how many; never to whom or what), `platform_mail.delete`.
+- **Files** in the media bucket under `platform-mail/<message>/<n>` (not a CDN
+  folder). Nothing a mail says reaches a log: `/admin/mail` is marked
+  sensitive in `app/core/redact.py` and its `q` is filtered from the access
+  log.
+- **No bell entry** for new mail: an admin alert mails `APP_ADMIN_ALERT_EMAILS`
+  and posts to Discord, which would show senders beyond the owner and support
+  admins, and loop if an alert address were one of these. The portal's Mail
+  shows the unread count.
+- **Replies to the platform's own mail:** `APP_MAIL_FROM_ADDRESS` is
+  `info@myotherapp.in`, so people answering a ticket or a reminder now reach
+  this inbox (and out-of-office answers with them) instead of being refused.
+- The config check (section 19) warns when one of these is also a desk
+  address (kept twice) or is off `APP_MAILBOX_DOMAIN` (never reaches the hooks).
+
+**Going live** (owner steps, after the deploy with `migrate=true`):
+
+1. The club-mail Worker's `FORWARD` variable must not name `admin`,
+   `developer`, `developers` or `info` (it forwards before the API is asked);
+   remove those keys if set, and redeploy the Worker.
+2. For the desk: `APP_SUPPORT_INBOUND_ADDRESSES=support@myotherapp.in` in the
+   server's `.env`, then recreate the backend.
+3. Run the backfill (dry run, then `--apply`) so every existing club has its
+   address.
+4. Check: mail `info@myotherapp.in` from any mailbox; it shows in the admin
+   portal's Mail within seconds.
+
+Rolling back the inbox: `APP_PLATFORM_INBOX_ADDRESSES=` (empty) and recreate
+the backend: mail to those addresses is refused again as no such address.
 
 ### Turning it on with Cloudflare (the default)
 

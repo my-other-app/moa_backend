@@ -83,7 +83,12 @@ async def receive(session, received: providers.Received, reader: Optional[Callab
         logger.info("mailbox: mail %s dropped (club mailboxes are off)", received.provider_message_id[:24])
         return out
     targets: dict[int, str] = {}
+    from app.api.platform_mail import service as platform
+
     for recipient in received.recipients:
+        if platform.mailbox_for(recipient) is not None:
+            # The platform's own inbox keeps it (app/api/platform_mail), never a club.
+            continue
         found = await _club_for(session, recipient)
         if found is None:
             if recipient.endswith("@" + service.domain()):

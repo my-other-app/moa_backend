@@ -177,13 +177,16 @@ REJECT_TEXT = {
 }
 
 
-def decision(desk: dict, outcome) -> tuple[str, Optional[str]]:
-    """("accept", None) when the desk or a club kept it (or had it already);
-    else ("reject", why)."""
+def decision(desk: dict, outcome, platform=None) -> tuple[str, Optional[str]]:
+    """("accept", None) when the platform's inbox, the desk or a club kept it
+    (or had it already); else ("reject", why)."""
     desk_kept = any(k in desk for k in ("support", "sales"))
-    if desk_kept or outcome.kept or outcome.duplicate:
+    platform_kept = platform is not None and bool(platform.kept or platform.duplicate)
+    if platform_kept or desk_kept or outcome.kept or outcome.duplicate:
         return "accept", None
     reasons = list(outcome.dropped) + ([desk["dropped"]] if desk.get("dropped") else [])
+    if platform is not None:
+        reasons += list(platform.dropped)
     for why in ("too_large", "unparseable", "virus", "closed", "off", "unknown"):
         if why in reasons:
             return "reject", why

@@ -78,6 +78,17 @@ async def record(session, provider_id: str, channel: str, v: Verdict, at: dateti
                 )
         except Exception:  # noqa: BLE001 - the suppression below must still happen
             pass
+        # A mail the admins sent from the platform inbox (app/api/platform_mail).
+        from app.api.platform_mail import outbound as platform_outbound
+
+        try:
+            async with session.begin_nested():
+                touched += await platform_outbound.provider_verdict(
+                    session, provider_id, bounced=v.outcome is DeliveryOutcome.bounced,
+                    complained=v.outcome is DeliveryOutcome.complained, reason=v.reason or "",
+                )
+        except Exception:  # noqa: BLE001
+            pass
         # A reply the team's desk sent (app/api/support): the case says it didn't arrive, and is open again.
         from app.api.support import mail as desk_mail
 

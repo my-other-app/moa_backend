@@ -15,7 +15,9 @@ which goes through the platform's own sending provider from that address.
   has `retired_at` null; a changed one keeps forwarding into the same mailbox
   until `forward_until` (90 days), and holds its handle until the sweep lets
   it go. A handle is unique across every row, so no club can take another's
-  address, or an old one still forwarding.
+  address, or an old one still forwarding. Every club has one from the start,
+  made from its name (`automatic`), whatever its plan: on a plan without the
+  mailbox it is only reserved (service.py, state `reserved`).
 - `club_mail_threads`: a conversation: its folder (inbox, sent, archive,
   spam), subject, the outside people in it, what is unread.
 - `club_mail_messages`: each mail in or out: headers for threading
@@ -113,6 +115,9 @@ class ClubMailboxAddresses(AbstractSQLModel):
     retired_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     #: Mail to it still arrives in the mailbox until then.
     forward_until = Column(TZAwareDateTime(timezone=True), nullable=True)
+    #: Given by the platform from the club's name (service.ensure_address),
+    #: not picked: changing it the first time is not the month's change.
+    automatic = Column(Boolean, nullable=False, default=False, server_default="false")
 
     __table_args__ = (
         Index("uq_club_mailbox_addresses_current", "club_id", unique=True, postgresql_where=text("retired_at IS NULL")),

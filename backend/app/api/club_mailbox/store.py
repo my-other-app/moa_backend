@@ -1,6 +1,7 @@
 """Where a mailbox's files live: the media bucket, in a private folder.
 
-`mailbox/<club>/<message>/<n>`: never one of the CDN's public folders
+`mailbox/<club>/<message>/<n>` -- and the platform inbox's
+(app/api/platform_mail) `platform-mail/<message>/<n>`: never one of the CDN's public folders
 (app/core/storage/media.PUBLIC_FOLDERS), never signed into a public link.
 The dashboard reads a file only through the API's attachment proxy, as the
 signed-in team. Deleted with its message (retention, a thread deleted, the
@@ -19,10 +20,17 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 PREFIX = "mailbox"
+PLATFORM_PREFIX = "platform-mail"
+#: The folders `delete` may delete from.
+_OURS = (f"{PREFIX}/", f"{PLATFORM_PREFIX}/")
 
 
 def key_for(club_id: int, message_id: int, n: int) -> str:
     return f"{PREFIX}/{int(club_id)}/{int(message_id)}/{int(n)}"
+
+
+def platform_key_for(message_id: int, n: int) -> str:
+    return f"{PLATFORM_PREFIX}/{int(message_id)}/{int(n)}"
 
 
 def _client():
@@ -55,7 +63,7 @@ def get(key: str) -> Optional[bytes]:
 def delete(keys: Iterable[str]) -> int:
     """Delete these objects, a thousand a request. Never raises: a file left
     behind is deleted by the next sweep's retention run of its folder."""
-    keys = [k for k in keys if k and k.startswith(f"{PREFIX}/")]
+    keys = [k for k in keys if k and k.startswith(_OURS)]
     done = 0
     for i in range(0, len(keys), 1000):
         chunk = keys[i:i + 1000]

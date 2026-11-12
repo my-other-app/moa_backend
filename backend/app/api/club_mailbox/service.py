@@ -15,6 +15,14 @@ mailbox lapses (`lapsed_at`, found by the sweep or the first look after):
 
 Upgrading again opens it as it was. The feature switch (APP_CLUB_MAILBOX)
 off hides it all: every route but the status answers 404 MAILBOX_OFF.
+
+Every club has its address from the start (`ensure_address`: made from its
+name when the club is created, and for the clubs before that by the
+backfill), whatever its plan. On a plan without the mailbox the address is
+only **reserved** (state `reserved`): no mail is kept for it (the hook
+refuses it, as for a closed mailbox), nothing is told, nothing lapses. The
+rule: the plan lacks the mailbox and the mailbox holds no mail. One that
+holds mail lapses as above. Upgrading opens it with no step.
 """
 from __future__ import annotations
 
@@ -22,7 +30,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
 
 from app.api.club_mailbox import handles
 from app.api.club_mailbox.models import (
@@ -121,6 +129,17 @@ async def plan_allows(session, club_id: int, actor=None) -> bool:
     return await gates.allows(session, club_id, FEATURE, actor=actor)
 
 
+async def club_plan_allows(session, club_id: int) -> bool:
+    """What the club's own plan allows, whoever asks: an admin's request is
+    never gated (gates.bypassed), but the admin's card must say what the
+    club has."""
+    from app.api.subscriptions import gates
+
+    if FEATURE in gates.ALWAYS_ALLOWED or not gates.enforcing():
+        return True
+    return (await gates.entitlements(session, club_id)).allows(FEATURE)
+
+
 async def require_plan(session, club_id: int, actor=None) -> None:
     from app.api.subscriptions import gates
 
@@ -133,13 +152,29 @@ async def upgrade_payload(session) -> dict:
     return (await gates.feature_locked(session, FEATURE)).errors or {}
 
 
-def lapse_state(mailbox: Optional[ClubMailboxes], allowed: bool, now: Optional[datetime] = None) -> str:
-    """`open` (the plan has it), `lapsed` (it doesn't; the mail readable for
-    30 days from the lapse), `expired` (past those: export or delete)."""
+async def has_mail(session, club_id: int) -> bool:
+    """Whether the club's mailbox holds any mail (received or sent)."""
+    return bool(await session.scalar(select(exists().where(ClubMailMessages.club_id == club_id))))
+
+
+def lapse_state(mailbox: Optional[ClubMailboxes], allowed: bool, now: Optional[datetime] = None, *, holds_mail: bool = True) -> str:
+    """`open` (the plan has it), `reserved` (it doesn't, and the mailbox
+    holds no mail: the address is kept for the club, nothing more),
+    `lapsed` (it doesn't; the mail readable for 30 days from the lapse),
+    `expired` (past those: export or delete)."""
     if allowed or mailbox is None:
         return "open"
+    if not holds_mail:
+        return "reserved"
     since = _aware(mailbox.lapsed_at) or (now or _now())
     return "expired" if (now or _now()) >= since + LAPSE_READABLE else "lapsed"
+
+
+async def state_of(session, club_id: int, mailbox: Optional[ClubMailboxes], allowed: bool) -> str:
+    """lapse_state, asking whether there is mail only when it matters."""
+    if allowed or mailbox is None:
+        return "open"
+    return lapse_state(mailbox, allowed, holds_mail=await has_mail(session, club_id))
 
 
 async def require_readable(session, club_id: int, mailbox: Optional[ClubMailboxes]) -> None:
@@ -147,7 +182,7 @@ async def require_readable(session, club_id: int, mailbox: Optional[ClubMailboxe
     if mailbox is None:
         return
     allowed = await plan_allows(session, club_id)
-    if lapse_state(mailbox, allowed) == "expired":
+    if await state_of(session, club_id, mailbox, allowed) == "expired":
         raise _refuse(
             403, "Your plan no longer includes the mailbox and its 30 days are over. The club's owner can export the mail, "
                  "or delete it, from Mail settings.", "MAILBOX_LAPSED",
@@ -175,9 +210,9 @@ async def set_address(session, club, user, handle: str, *, member=None, request=
 
     422 HANDLE_INVALID / HANDLE_RESERVED, 409 HANDLE_TAKEN, 429
     HANDLE_CHANGED_RECENTLY (`errors.next_change_at`), 403
-    PLAN_FEATURE_LOCKED. A changed address forwards 90 days. Audited."""
-    from sqlalchemy.exc import IntegrityError
-
+    PLAN_FEATURE_LOCKED. A changed address forwards 90 days. Audited.
+    The automatic address (ensure_address) never set `handle_changed_at`, so
+    its first change can be made straight away."""
     from app.api.audit import service as audit
 
     require_on()
@@ -198,34 +233,10 @@ async def set_address(session, club, user, handle: str, *, member=None, request=
     holder = await handles.holder(session, value, now)
     if holder is not None and holder.club_id != club.id:
         raise _refuse(409, "That address is taken. Pick another.", "HANDLE_TAKEN", {"field": "handle"})
-    try:
-        async with session.begin_nested():
-            if mailbox is None:
-                mailbox = ClubMailboxes(
-                    club_id=club.id, created_by=getattr(user, "id", None) if member is None else None,
-                    created_by_member_id=getattr(member, "id", None), retention_months=DEFAULT_RETENTION_MONTHS,
-                )
-                session.add(mailbox)
-                await session.flush()
-            if current is not None:
-                current.retired_at = now
-                current.forward_until = now + handles.FORWARD_FOR
-                mailbox.handle_changed_at = now
-            await session.flush()
-            stale = await session.scalar(select(ClubMailboxAddresses).where(ClubMailboxAddresses.handle == value))
-            if stale is not None and stale.club_id == club.id:
-                # The club's own old handle, still forwarding, becomes its address again.
-                stale.retired_at, stale.forward_until = None, None
-            else:
-                if stale is not None:
-                    # Another club's, whose forwarding has ended (the sweep had not let it go yet).
-                    await session.delete(stale)
-                    await session.flush()
-                session.add(ClubMailboxAddresses(club_id=club.id, mailbox_id=mailbox.id, handle=value, created_at=now))
-            await session.flush()
-    except IntegrityError:
-        # Taken by another club between the check and the write.
-        raise _refuse(409, "That address is taken. Pick another.", "HANDLE_TAKEN", {"field": "handle"}) from None
+    mailbox = await _move_to(
+        session, club.id, mailbox, current, value, now,
+        created_by=getattr(user, "id", None) if member is None else None, created_by_member_id=getattr(member, "id", None),
+    )
     await audit.record(
         session, actor=user, action=f"{ACTION}.address", entity_type="club", entity_id=club.id,
         summary=(f"Changed the club's address to {address_of(value)}" if current is not None
@@ -236,6 +247,204 @@ async def set_address(session, club, user, handle: str, *, member=None, request=
     )
     await session.commit()
     return mailbox
+
+
+def _held(row: ClubMailboxAddresses, now: datetime) -> bool:
+    """Whether an address row still holds its handle: current, or forwarding."""
+    return row.retired_at is None or (row.forward_until is not None and _aware(row.forward_until) > now)
+
+
+async def _move_to(session, club_id: int, mailbox: Optional[ClubMailboxes], current: Optional[ClubMailboxAddresses],
+                   value: str, now: datetime, *, created_by: Optional[int] = None,
+                   created_by_member_id: Optional[int] = None) -> ClubMailboxes:
+    """Make `value` (checked, and free or the club's own) the club's address,
+    in a savepoint: the mailbox made when there is none, the current address
+    retired to forward 90 days (and the month's change counted). 409
+    HANDLE_TAKEN when another club took it between the check and the write."""
+    from sqlalchemy.exc import IntegrityError
+
+    try:
+        async with session.begin_nested():
+            if mailbox is None:
+                mailbox = ClubMailboxes(
+                    club_id=club_id, created_by=created_by, created_by_member_id=created_by_member_id,
+                    retention_months=DEFAULT_RETENTION_MONTHS,
+                )
+                session.add(mailbox)
+                await session.flush()
+            if current is not None:
+                current.retired_at = now
+                current.forward_until = now + handles.FORWARD_FOR
+                mailbox.handle_changed_at = now
+            await session.flush()
+            stale = await session.scalar(select(ClubMailboxAddresses).where(ClubMailboxAddresses.handle == value))
+            if stale is not None and stale.club_id == club_id:
+                # The club's own old handle, still forwarding, becomes its address again.
+                stale.retired_at, stale.forward_until, stale.automatic = None, None, False
+            else:
+                if stale is not None:
+                    if _held(stale, now):
+                        # Another club's, taken between the check and here.
+                        raise IntegrityError("handle taken", None, Exception("handle taken"))
+                    # Another club's, whose forwarding has ended (the sweep had not let it go yet).
+                    await session.delete(stale)
+                    await session.flush()
+                session.add(ClubMailboxAddresses(club_id=club_id, mailbox_id=mailbox.id, handle=value, created_at=now))
+            await session.flush()
+    except IntegrityError:
+        # Taken by another club between the check and the write.
+        raise _refuse(409, "That address is taken. Pick another.", "HANDLE_TAKEN", {"field": "handle"}) from None
+    return mailbox
+
+
+async def admin_set_address(session, club_id: int, handle: str, *, admin, request=None) -> None:
+    """A platform admin changes a club's address (the club asked): the same
+    rules as the club's own change -- 422 HANDLE_INVALID / HANDLE_RESERVED,
+    409 HANDLE_TAKEN -- but no monthly limit and no plan needed, whatever
+    APP_CLUB_MAILBOX says. The old one forwards 90 days. It counts as the
+    club's change of the month. Audited (`club_mailbox.admin_address`, old
+    -> new). 404 CLUB_NOT_FOUND for no such club (or a deleted one)."""
+    from app.api.audit import service as audit
+    from app.api.clubs.models import Clubs
+
+    value = handles.check(handle)
+    found = await session.scalar(select(Clubs.id).where(Clubs.id == club_id, Clubs.is_deleted.is_(False)))
+    if found is None:
+        raise _refuse(404, "No such club.", "CLUB_NOT_FOUND")
+    now = _now()
+    mailbox = await mailbox_of(session, club_id)
+    current = await current_address(session, club_id) if mailbox is not None else None
+    if current is not None and current.handle == value:
+        return
+    holder = await handles.holder(session, value, now)
+    if holder is not None and holder.club_id != club_id:
+        raise _refuse(409, "That address is taken. Pick another.", "HANDLE_TAKEN", {"field": "handle"})
+    previous = current.handle if current is not None else None
+    await _move_to(session, club_id, mailbox, current, value, now, created_by=getattr(admin, "id", None))
+    await audit.record(
+        session, actor=admin, action=f"{ACTION}.admin_address", entity_type="club", entity_id=club_id,
+        summary=(f"Changed the club's address from {address_of(previous)} to {address_of(value)}" if previous
+                 else f"Gave the club the address {address_of(value)}"),
+        details={"handle": value, "previous": previous},
+        request=request,
+    )
+    await session.commit()
+
+
+# ─── Every club's address, from its name ─────────────────────────────────
+
+
+async def ensure_address(session, club, now: Optional[datetime] = None) -> Optional[ClubMailboxAddresses]:
+    """The club's current address, made from its name when it has none
+    (handles.from_name: `base`, then `base2`, `base3`, ... the first free).
+
+    Whatever the plan and APP_CLUB_MAILBOX: reserving a name is harmless,
+    and the mail is let in only by a plan with the mailbox. A club with a
+    current address is left alone. The new one is `automatic`: it doesn't
+    count as the club's change of the month. In a savepoint; the caller
+    commits. Never raises: a failure is logged (no name, no address) and
+    None returned, so what called it carries on."""
+    from sqlalchemy.exc import IntegrityError
+
+    club_id = club.id
+    now = now or _now()
+    try:
+        async with session.begin_nested():
+            mailbox = await mailbox_of(session, club_id)
+            if mailbox is not None:
+                current = await current_address(session, club_id)
+                if current is not None:
+                    return current
+            for handle in handles.candidates(handles.base_of(getattr(club, "name", None), club_id)):
+                if await handles.holder(session, handle, now) is not None:
+                    continue
+                try:
+                    async with session.begin_nested():
+                        if mailbox is None:
+                            mailbox = ClubMailboxes(club_id=club_id, retention_months=DEFAULT_RETENTION_MONTHS)
+                            session.add(mailbox)
+                            await session.flush()
+                        stale = await session.scalar(select(ClubMailboxAddresses).where(ClubMailboxAddresses.handle == handle))
+                        if stale is not None:
+                            if _held(stale, now):
+                                # Someone's after all: taken since the look.
+                                raise IntegrityError("handle taken", None, Exception("handle taken"))
+                            # A handle whose forwarding has ended, not let go by the sweep yet.
+                            await session.delete(stale)
+                            await session.flush()
+                        row = ClubMailboxAddresses(
+                            club_id=club_id, mailbox_id=mailbox.id, handle=handle, created_at=now, automatic=True,
+                        )
+                        session.add(row)
+                        await session.flush()
+                    return row
+                except IntegrityError:
+                    # Taken between the look and the write -- or the club's
+                    # mailbox made beside this: then that one's address stands.
+                    mailbox = await mailbox_of(session, club_id)
+                    if mailbox is not None:
+                        current = await current_address(session, club_id)
+                        if current is not None:
+                            return current
+            logger.warning("club %s: no free automatic address was found", club_id)
+            return None
+    except Exception:  # noqa: BLE001 - never fails the club's creation or the backfill
+        logger.warning("club %s: its automatic address could not be made", club_id, exc_info=True)
+        return None
+
+
+async def backfill(session, *, apply: bool, actor=None, request=None, sample_size: int = 20) -> dict:
+    """Every club without an address gets its automatic one, oldest club
+    first (the older club wins a name). Deleted clubs are skipped. A dry run
+    (`apply` false) writes nothing and says what would be made. Applied,
+    committed every 50 clubs and audited (`club_mailbox.backfill`, counts).
+    {"dry_run", "created", "skipped", "failed", "sample": [{"club_id", "handle"}]}."""
+    from types import SimpleNamespace
+
+    from app.api.audit import service as audit
+    from app.api.clubs.models import Clubs
+
+    A = ClubMailboxAddresses
+    now = _now()
+    has_one = exists().where(A.club_id == Clubs.id, A.retired_at.is_(None))
+    rows = (await session.execute(
+        select(Clubs.id, Clubs.name, has_one).where(Clubs.is_deleted.is_(False)).order_by(Clubs.created_at.asc(), Clubs.id.asc())
+    )).all()
+    created = skipped = failed = 0
+    sample: list[dict] = []
+    taken: set[str] = set()
+    if not apply:
+        taken = set((await session.scalars(
+            select(A.handle).where((A.retired_at.is_(None)) | (A.forward_until > now))
+        )).all())
+    for n, (club_id, name, has_address) in enumerate(rows, start=1):
+        if has_address:
+            skipped += 1
+            continue
+        if apply:
+            row = await ensure_address(session, SimpleNamespace(id=club_id, name=name), now=now)
+            handle = row.handle if row is not None else None
+            if n % 50 == 0:
+                await session.commit()
+        else:
+            handle = next((h for h in handles.candidates(handles.base_of(name, club_id)) if h not in taken), None)
+            if handle is not None:
+                taken.add(handle)
+        if handle is None:
+            failed += 1
+            continue
+        created += 1
+        if len(sample) < sample_size:
+            sample.append({"club_id": club_id, "handle": handle})
+    out = {"dry_run": not apply, "created": created, "skipped": skipped, "failed": failed, "sample": sample}
+    if apply:
+        await audit.record(
+            session, actor=actor, action=f"{ACTION}.backfill", entity_type="club_mailbox", entity_id=None,
+            summary=f"Gave {created} club{'s' if created != 1 else ''} its address", details={k: v for k, v in out.items() if k != "sample"},
+            request=request,
+        )
+        await session.commit()
+    return out
 
 
 async def update_settings(session, club, user, *, display_name: Optional[str], retention_months: Optional[int],
@@ -296,9 +505,11 @@ async def status_out(session, club_id: int, *, manage: bool, mail: bool, owner: 
     allowed = await plan_allows(session, club_id, actor=actor)
     mailbox = await mailbox_of(session, club_id) if on() else None
     current = await current_address(session, club_id) if mailbox is not None else None
-    state = lapse_state(mailbox, allowed)
+    state = await state_of(session, club_id, mailbox, allowed)
     lapsed_at = _aware(mailbox.lapsed_at) if mailbox is not None else None
-    if mailbox is not None and not allowed and lapsed_at is None:
+    if state == "reserved":
+        lapsed_at = None
+    elif mailbox is not None and not allowed and lapsed_at is None:
         lapsed_at = _now()
     out = {
         "available": on(),
@@ -308,14 +519,15 @@ async def status_out(session, club_id: int, *, manage: bool, mail: bool, owner: 
         "set_up": current is not None,
         "address": address_of(current.handle) if current is not None else None,
         "handle": current.handle if current is not None else None,
+        "automatic": bool(current.automatic) if current is not None else False,
         "previous": [],
         "display_name": mailbox.display_name if mailbox is not None else None,
         "signature": (mailbox.signature if mailbox is not None else None) if mail else None,
         "retention_months": mailbox.retention_months if mailbox is not None else DEFAULT_RETENTION_MONTHS,
         "next_change_at": None,
         "state": state,
-        "lapsed_at": lapsed_at if state != "open" else None,
-        "readable_until": (lapsed_at + LAPSE_READABLE) if (state != "open" and lapsed_at) else None,
+        "lapsed_at": lapsed_at if state in ("lapsed", "expired") else None,
+        "readable_until": (lapsed_at + LAPSE_READABLE) if (state in ("lapsed", "expired") and lapsed_at) else None,
         "can_manage": bool(manage and on()),
         "can_mail": bool(mail and on()),
         "is_owner": bool(owner),
@@ -339,8 +551,9 @@ async def status_out(session, club_id: int, *, manage: bool, mail: bool, owner: 
 
 async def admin_out(session, club_id: int) -> dict:
     """A platform admin's card: the address, whether it is open, counts.
-    Never a subject, an address someone wrote from, or a word of any mail."""
-    allowed = await plan_allows(session, club_id)
+    Never a subject, an address someone wrote from, or a word of any mail.
+    `plan_allows` and `state` are the club's own, though an admin asks."""
+    allowed = await club_plan_allows(session, club_id)
     mailbox = await mailbox_of(session, club_id)
     current = await current_address(session, club_id) if mailbox is not None else None
     out = {
@@ -349,7 +562,10 @@ async def admin_out(session, club_id: int) -> dict:
         "plan_allows": allowed,
         "set_up": current is not None,
         "address": address_of(current.handle) if current is not None else None,
-        "state": lapse_state(mailbox, allowed),
+        "handle": current.handle if current is not None else None,
+        "automatic": bool(current.automatic) if current is not None else False,
+        "previous": [],
+        "state": await state_of(session, club_id, mailbox, allowed),
         "lapsed_at": _aware(mailbox.lapsed_at) if mailbox is not None else None,
         "created_at": _aware(mailbox.created_at) if mailbox is not None else None,
         "retention_months": mailbox.retention_months if mailbox is not None else None,
@@ -367,7 +583,9 @@ async def admin_out(session, club_id: int) -> dict:
     }
     if mailbox is None:
         return out
-    out["forwarding"] = len(await forwarding(session, club_id))
+    old = await forwarding(session, club_id)
+    out["forwarding"] = len(old)
+    out["previous"] = [{"address": address_of(a.handle), "forward_until": _aware(a.forward_until)} for a in old]
     M, T = ClubMailMessages, ClubMailThreads
     month = _now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     row = (await session.execute(
@@ -428,6 +646,9 @@ async def check_lapse(session, mailbox: ClubMailboxes, now: Optional[datetime] =
         if mailbox.lapsed_at is not None:
             mailbox.lapsed_at = mailbox.lapse_told_at = mailbox.expiry_told_at = None
             return "reopened"
+        return None
+    if not await has_mail(session, mailbox.club_id):
+        # Only reserved: nothing to read, export or tell anyone about.
         return None
     if mailbox.lapsed_at is None:
         mailbox.lapsed_at = now

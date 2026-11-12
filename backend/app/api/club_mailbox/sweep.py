@@ -10,6 +10,11 @@
 - Old addresses: a changed handle whose 90 days of forwarding are over is
   let go, so another club may take it.
 
+Every club has a mailbox row now (its automatic address), most of them
+holding no mail; those are only reserved and nothing here touches them:
+the plan pass and the retention pass read only the mailboxes that hold
+mail (or were found lapsed), and a current address is never let go.
+
 Each club in its own transaction: one bad row can't stop the rest. One
 worker at a time, by a Postgres advisory lock on its own connection, as the
 WhatsApp sweep does.
@@ -22,11 +27,11 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from dateutil.relativedelta import relativedelta
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, exists, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.api.club_mailbox import live, mail, service, store
-from app.api.club_mailbox.models import DEFAULT_RETENTION_MONTHS, ClubMailboxAddresses, ClubMailboxes
+from app.api.club_mailbox.models import DEFAULT_RETENTION_MONTHS, ClubMailboxAddresses, ClubMailboxes, ClubMailMessages
 from app.db import lock_keys
 
 logger = logging.getLogger(__name__)
@@ -47,7 +52,9 @@ async def lapses(session, now: Optional[datetime] = None) -> dict:
     """Each mailbox's lapse brought in line with its plan. {what changed: how many}."""
     now = now or _now()
     out: dict = {}
-    ids = (await session.scalars(select(ClubMailboxes.id).order_by(ClubMailboxes.id))).all()
+    B = ClubMailboxes
+    holds_mail = exists().where(ClubMailMessages.club_id == B.club_id)
+    ids = (await session.scalars(select(B.id).where(or_(B.lapsed_at.isnot(None), holds_mail)).order_by(B.id))).all()
     for mailbox_id in ids:
         try:
             mailbox = await session.get(ClubMailboxes, mailbox_id)
@@ -66,7 +73,10 @@ async def lapses(session, now: Optional[datetime] = None) -> dict:
 async def retention(session, now: Optional[datetime] = None) -> int:
     """Each club's mail past its retention period, deleted. Returns how many mails."""
     now = now or _now()
-    rows = (await session.execute(select(ClubMailboxes.club_id, ClubMailboxes.retention_months))).all()
+    B = ClubMailboxes
+    rows = (await session.execute(
+        select(B.club_id, B.retention_months).where(exists().where(ClubMailMessages.club_id == B.club_id))
+    )).all()
     deleted = 0
     for club_id, months in rows:
         try:
