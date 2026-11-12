@@ -31,5 +31,7 @@ h1,h2,h3,p{overflow-wrap:break-word}
 .b-2up-phone>article>div:first-child{width:96px!important;height:96px!important}
 .b-h1{overflow-wrap:anywhere}
 }
-.j-pill{display:flex;align-items:center;white-space:nowrap}
-.j-row:hover .btn-a{filter:brightness(1.08)}
+@media (max-width:600px){
+.j-col{min-height:0!important}
+.j-cta{justify-content:flex-start!important}
+}

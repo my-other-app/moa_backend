@@ -1,11 +1,11 @@
 {%- import "macros.html.j2" as m with context -%}
-{#- The designer's e-mail form, as a link (see classic/sections/join.html.j2). -#}
+{#- The designer's e-mail form becomes its button alone, a link to join_url (the page can't post: CSP form-action 'none'); the form's column keeps its height. join_text replaces the designer's promise line. -#}
+{%- set jt = join_text or "Joining is free. Follow us to hear about every event first." -%}
 {%- if links.join_url -%}
 <section id="join" style="background: var(--accent); color: #0B0D10; border-radius: 24px; padding: clamp(28px, 5vw, 48px); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 24px">
-<div style="flex: 1 1 300px; display: flex; flex-direction: column; gap: 6px"><h2 style="margin: 0; font-family: Sora, system-ui, sans-serif; font-weight: 700; font-size: clamp(28px, 3.6vw, 40px); line-height: 1.1">{{ section.title }}</h2><p style="margin: 0">Membership is free. Invitations first, every talk recorded.</p></div>
-<div style="flex: 1 1 320px; display: flex; flex-direction: column; gap: 8px">
-<span style="font-size: 14px; font-weight: 600">Free to join</span>
-<a href="{{ links.join_url }}" target="_top" class="j-row" style="display: flex; flex-wrap: wrap; gap: 8px; text-decoration: none"><span class="j-pill" style="flex: 1 1 200px; min-height: 48px; padding: 0 14px; border-radius: 12px; border: 1.5px solid #0B0D10; background: #FFFFFF; color: #0B0D10; font: 400 16px Inter, system-ui, sans-serif; box-sizing: border-box">Follow us on MyOtherApp →</span><span class="btn-a" style="min-height: 48px; padding: 0 22px; border-radius: 12px; border: none; background: #0B0D10; color: #FFFFFF; font: 600 16px Inter, system-ui, sans-serif; cursor: pointer">Join</span></a>
+<div style="flex: 1 1 300px; display: flex; flex-direction: column; gap: 6px"><h2 style="margin: 0; font-family: Sora, system-ui, sans-serif; font-weight: 700; font-size: clamp(28px, 3.6vw, 40px); line-height: 1.1">{{ section.title }}</h2><p style="margin: 0">{{ jt }}</p></div>
+<div class="j-col" style="flex: 1 1 320px; display: flex; flex-direction: column; justify-content: flex-end; gap: 8px; min-height: 77px">
+<div class="j-cta" style="display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end"><a href="{{ links.join_url }}" target="_top" class="btn-a" style="min-height: 48px; padding: 0 22px; border-radius: 12px; border: none; background: #0B0D10; color: #FFFFFF; font: 600 16px Inter, system-ui, sans-serif; cursor: pointer">Join</a></div>
 </div>
 </section>
 {%- endif -%}

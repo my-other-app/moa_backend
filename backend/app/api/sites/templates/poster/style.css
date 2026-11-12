@@ -34,5 +34,7 @@ h1,h2,h3,p{overflow-wrap:break-word}
 .p-fcta{justify-content:flex-start!important;padding-top:20px!important}
 .p-cover{min-height:240px!important}
 }
-.j-pill{display:flex;align-items:center;white-space:nowrap}
-.j-row:hover .btn-a{filter:brightness(1.08)}
+@media (max-width:600px){
+.j-col{min-height:0!important}
+.j-cta{justify-content:flex-start!important}
+}

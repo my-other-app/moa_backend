@@ -1,16 +1,15 @@
 {%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
 {%- macro n(v) -%}{%- if v is number -%}{{ ('[' ~ '{:,}'.format(v) ~ ']') if sample else '{:,}'.format(v) }}{%- else -%}{{ v }}{%- endif -%}{%- endmacro -%}
 {%- macro iso(v) -%}{{ (v if v is string else v.isoformat()) if v else '' }}{%- endmacro -%}
+{%- set jt = join_text or "Joining is free. Follow us to hear about every event first." -%}
 {%- set t = section.title if (section is defined and section.title) else 'Come to the next one.' -%}
-{%- set nxt = upcoming[0] if upcoming else none -%}
 {%- if links.join_url -%}
 <section id="join" class="zn-pink zn-sec" style="background: var(--accent); color: var(--on-accent); padding: 88px 0">
 <div style="max-width: 1240px; margin: 0 auto; padding: 0 24px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 36px">
 <h2 style="flex: 1 1 420px; min-width: 0; margin: 0; font-family: Unbounded, system-ui, sans-serif; font-weight: 900; font-size: clamp(36px, 6vw, 84px); line-height: 1; letter-spacing: -0.03em; overflow-wrap: break-word">{{ t }}</h2>
-<div class="zn-joincard" style="flex: 1 1 340px; background: #FFFFFF; color: #1B2A9E; border-radius: 28px; padding: 28px; box-shadow: 10px 10px 0 #1B2A9E; display: flex; flex-direction: column; gap: 10px; transform: rotate(1.5deg)">
-{% if nxt %}<span style="font-weight: 700">next up</span>
-<a href="{{ u(nxt.url) }}" target="_top" style="display: block; min-height: 52px; padding: 0 18px; border-radius: 999px; border: 2px solid #1B2A9E; background: #FFFFFF; color: #1B2A9E; font: 500 17px/48px 'Space Grotesk', system-ui, sans-serif; box-sizing: border-box; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{ nxt.name }}</a>
-{% endif %}<a class="zn-btn" href="{{ u(links.join_url) }}" target="_top" style="min-height: 52px; border-radius: 999px; border: none; background: #1B2A9E; color: #FFFFFF; font: 700 17px 'Space Grotesk', system-ui, sans-serif; cursor: pointer; text-decoration: none">Join community, it is free</a>
+<div class="zn-joincard" style="flex: 1 1 340px; background: #FFFFFF; color: #1B2A9E; border-radius: 28px; padding: 28px; box-shadow: 10px 10px 0 #1B2A9E; display: flex; flex-direction: column; justify-content: center; gap: 10px; min-height: 149.5px; transform: rotate(1.5deg)">
+<span style="font-weight: 700">{{ jt }}</span>
+<a class="zn-btn" href="{{ u(links.join_url) }}" target="_top" style="min-height: 52px; border-radius: 999px; border: none; background: #1B2A9E; color: #FFFFFF; font: 700 17px 'Space Grotesk', system-ui, sans-serif; cursor: pointer; text-decoration: none">Join community, it is free</a>
 </div>
 </div>
 </section>

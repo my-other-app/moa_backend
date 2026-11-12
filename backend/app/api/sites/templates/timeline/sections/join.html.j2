@@ -1,11 +1,12 @@
 {%- macro u(h) -%}{%- set l = (h or '')|string|trim -%}{{ l if (l[:8]|lower == 'https://' or l[:7]|lower == 'mailto:' or l[:4]|lower == 'tel:' or l[:1] == '#') else '#' }}{%- endmacro -%}
 {%- macro n(v) -%}{%- if v is number -%}{{ ('[' ~ '{:,}'.format(v) ~ ']') if sample else '{:,}'.format(v) }}{%- else -%}{{ v }}{%- endif -%}{%- endmacro -%}
 {%- macro iso(v) -%}{{ (v if v is string else v.isoformat()) if v else '' }}{%- endmacro -%}
+{%- set jt = join_text or "Joining is free. Follow us to hear about every event first." -%}
 {%- set t = section.title if (section is defined and section.title) else 'Be on the next line of the timeline.' -%}
 {%- if links.join_url -%}
 <section id="join" class="tl-join" style="max-width: 1200px; margin: 0 auto; padding: 0 24px 72px">
 <div style="background: var(--accent); color: var(--on-accent); border-radius: 24px; padding: clamp(28px, 5vw, 56px); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 28px">
-<div style="flex: 1 1 360px; min-width: 0"><h2 style="margin: 0; font-weight: 800; font-size: clamp(30px, 4.4vw, 52px); line-height: 1.05; letter-spacing: -0.035em">{{ t }}</h2><p style="margin: 10px 0 0">Membership is free. Invitations first, every talk recorded.</p></div>
+<div style="flex: 1 1 360px; min-width: 0"><h2 style="margin: 0; font-weight: 800; font-size: clamp(30px, 4.4vw, 52px); line-height: 1.05; letter-spacing: -0.035em">{{ t }}</h2><p style="margin: 10px 0 0">{{ jt }}</p></div>
 <div style="flex: 1 1 340px; display: flex; flex-direction: column; justify-content: flex-end; gap: 8px; min-height: 80px"><div style="display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end"><a class="tl-btn" href="{{ u(links.join_url) }}" target="_top" style="min-height: 50px; padding: 0 24px; border-radius: 10px; border: none; background: #10201F; color: #FFFFFF; font: 700 16px Manrope, system-ui, sans-serif; cursor: pointer; text-decoration: none">Join</a></div></div>
 </div>
 </section>
