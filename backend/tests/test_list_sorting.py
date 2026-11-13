@@ -107,3 +107,26 @@ async def test_the_waiting_list_sorts_searches_and_corrects(client, session, lin
 
     assert not policy.allows("door", "PATCH", f"/api/v1/events/{line.event.id}/ticketing/waitlist/{first['id']}")
     assert policy.allows("editor", "PATCH", f"/api/v1/events/{line.event.id}/ticketing/waitlist/{first['id']}")
+
+
+def test_the_order_builders_for_contacts_certificates_and_store_orders():
+    """Each list's ORDER BY: the column asked for, its direction, and a
+    tie-break, so pages never overlap."""
+    from sqlalchemy.dialects import postgresql
+
+    from app.api.certificates.service import _certificate_order
+    from app.api.contacts.service import contact_order
+    from app.api.store.service import _orders_order
+
+    def sql(parts) -> str:
+        return ", ".join(str(p.compile(dialect=postgresql.dialect())) for p in parts)
+
+    assert "created_at DESC" in sql(contact_order(None, None))
+    assert "lower(archived_contacts.name) ASC" in sql(contact_order("name", None))
+    assert "lower(archived_contacts.event_name) DESC" in sql(contact_order("event", "desc"))
+    assert "ticket_id ASC" in sql(_certificate_order(None, None))
+    assert "certificate_issued_at DESC" in sql(_certificate_order("issued", None))
+    assert "lower(event_registrations_link.full_name) ASC" in sql(_certificate_order("name", "asc"))
+    assert "event_store_orders.created_at DESC" in sql(_orders_order(None, None))
+    assert "event_store_orders.total ASC" in sql(_orders_order("total", "asc"))
+    assert "lower(event_registrations_link.full_name) ASC" in sql(_orders_order("name", None))

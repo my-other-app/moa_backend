@@ -386,6 +386,8 @@ async def list_cases(
     q: Optional[str] = Query(None, max_length=200), age_days: Optional[int] = Query(None, ge=1, le=3650),
     status: Optional[str] = None, page: int = Query(1, ge=1, le=10000), page_size: int = Query(25, ge=1, le=200),
     fmt: ListFormat = Query("json", alias="format"),
+    sort: Optional[str] = Query(None, pattern="^(number|subject|requester|priority|status|created|updated|due)$", description="A column; unset: the tab's own order"),
+    order: Optional[str] = Query(None, pattern="^(asc|desc)$"),
 ):
     """`tab`: mine, unassigned, open, waiting, resolved, all, or spam (mail
     SES called spam, kept out of every other tab). `format=xlsx`: every case
@@ -400,7 +402,7 @@ async def list_cases(
         header = await rows.__anext__()
         path = await spreadsheet.write_xlsx(rows, title="Support cases", headers=header)
         return spreadsheet.xlsx_response(path, f"support-cases-{date.today().isoformat()}.xlsx", cache_control="no-store")
-    out = await cases.list_cases(session, admin.id, tab=tab, page=page, page_size=page_size, **f)
+    out = await cases.list_cases(session, admin.id, tab=tab, page=page, page_size=page_size, sort=sort, order=order, **f)
     out["reads_bodies"] = rights.reads_bodies
     return out
 

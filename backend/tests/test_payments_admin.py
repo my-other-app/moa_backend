@@ -185,3 +185,22 @@ async def test_the_payments_list_is_admin_only(client, make_user, mint_token):
     for path in ("/api/v1/payments/admin/list", "/api/v1/payments/admin/totals"):
         response = await client.get(path, headers=auth_header(token))
         assert response.status_code in (401, 403), f"{path} -> {response.status_code}"
+
+
+@pytest.mark.asyncio
+async def test_payments_sort_by_date_amount_or_status(client, make_admin, make_user, make_payment, mint_token):
+    admin = await make_admin()
+    payer = await make_user(email="sorter@example.com")
+    for amount in (100, 500, 250):
+        await make_payment(user=payer, amount=amount)
+    h = auth_header(await mint_token(admin))
+
+    async def amounts(query):
+        r = await client.get(f"/api/v1/payments/admin/list?{query}", headers=h)
+        assert r.status_code == 200, r.text
+        return [row["amount"] for row in r.json()["items"]]
+
+    assert await amounts("sort=amount") == [500, 250, 100]
+    assert await amounts("sort=amount&order=asc") == [100, 250, 500]
+    assert sorted(await amounts("")) == [100, 250, 500]
+    assert (await client.get("/api/v1/payments/admin/list?sort=colour", headers=h)).status_code == 422

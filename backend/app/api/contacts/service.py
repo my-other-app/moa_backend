@@ -53,13 +53,25 @@ async def groups(session, club_id: int) -> list:
     return [{"event_id": eid, "event_name": name, "event_ended_at": ended, "archived_at": archived, "contacts": n} for eid, name, ended, archived, n in rows]
 
 
+#: The contact book's orders: newest event first (the default), name, email, event.
+CONTACT_SORTS = ("recent", "name", "email", "event")
+
+
+def contact_order(sort: Optional[str], order: Optional[str]) -> tuple:
+    A = ArchivedContacts
+    if sort not in CONTACT_SORTS or sort == "recent":
+        return (A.created_at.asc(), A.name) if order == "asc" else (A.created_at.desc(), A.name)
+    column = {"name": func.lower(A.name), "email": func.lower(A.email), "event": func.lower(A.event_name)}[sort]
+    return (column.desc().nulls_last(), A.id.desc()) if order == "desc" else (column.asc().nulls_last(), A.id.asc())
+
+
 async def page(session, club_id: int, *, q: Optional[str] = None, event_id: Optional[int] = None, attended: Optional[bool] = None, page: int = 1, page_size: int = 50,
-               since: Optional[date] = None, until: Optional[date] = None) -> dict:
+               since: Optional[date] = None, until: Optional[date] = None, sort: Optional[str] = None, order: Optional[str] = None) -> dict:
     s = _filtered(club_id, q=q, event_id=event_id, attended=attended, since=since, until=until)
     total = await session.scalar(select(func.count()).select_from(s.subquery())) or 0
     page = max(1, page)
     page_size = max(1, min(page_size, 200))
-    rows = list((await session.scalars(s.order_by(ArchivedContacts.created_at.desc(), ArchivedContacts.name).limit(page_size).offset((page - 1) * page_size))).all())
+    rows = list((await session.scalars(s.order_by(*contact_order(sort, order)).limit(page_size).offset((page - 1) * page_size))).all())
     return {"items": [contact_out(c) for c in rows], "total": total, "page": page, "page_size": page_size, "groups": await groups(session, club_id)}
 
 

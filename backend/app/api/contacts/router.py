@@ -20,11 +20,13 @@ async def contacts(
     page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=200),
     since: Optional[date] = Query(None, description="Events that ended on or after this day"),
     until: Optional[date] = Query(None, description="Events that ended on or before this day"),
+    sort: Optional[str] = Query(None, pattern="^(recent|name|email|event)$", description="recent (default), name, email or event"),
+    order: Optional[str] = Query(None, pattern="^(asc|desc)$"),
 ) -> ContactsPage:
     """What retention kept of each event's guests -- only events whose club
     switched on "keep contacts" at close-out: name, email, phone, role, and
     whether they came."""
-    return ContactsPage(**await service.page(session, user.club.id, q=q, event_id=event_id, attended=attended, page=page, page_size=page_size, since=since, until=until))
+    return ContactsPage(**await service.page(session, user.club.id, q=q, event_id=event_id, attended=attended, page=page, page_size=page_size, since=since, until=until, sort=sort, order=order))
 
 
 @router.get("/export.csv", summary="The contact book as a file (CSV or Excel)")
