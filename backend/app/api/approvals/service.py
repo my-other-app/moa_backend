@@ -501,6 +501,40 @@ async def viewer_request(session, event_id: int, user) -> Optional[dict]:
     return None
 
 
+async def viewer_last_request(session, event_id: int, user) -> Optional[dict]:
+    """The viewer's latest request for the event once none is open: declined,
+    cancelled by them (withdrawn), expired unpaid (lapsed) or closed. The
+    event page says where it stands instead of offering "Register" as if they
+    never had. A separate field from `viewer_request`, which apps already
+    read as "open": an older app keeps its behaviour. Only someone declined
+    is refused again (REQUEST_DECLINED); everyone else may register again.
+    None while one is open, or when they never asked."""
+    from app.api.users.service import merges_into, same_email
+
+    if await viewer_request(session, event_id, user) is not None:
+        return None
+    who = [R.user_id == user.id]
+    if merges_into(user):
+        who.append(same_email(R.email, user.email))
+    req = await session.scalar(
+        select(R).where(R.event_id == event_id, R.status.not_in(OPEN), or_(*who))
+        .order_by(R.submitted_at.desc(), R.id.desc()).limit(1)
+    )
+    if req is None:
+        return None
+    declined = await session.scalar(
+        select(R.id).where(R.event_id == event_id, R.status == DECLINED, or_(*who)).limit(1)
+    )
+    return {
+        "id": req.id, "status": req.status, "token": req.token, "status_url": status_url(req.token),
+        "submitted_at": req.submitted_at, "decided_at": req.decided_at,
+        "decline_note": req.decline_note if req.status == DECLINED else None,
+        "closed_reason": req.closed_reason if req.status == CLOSED else None,
+        # Declined once is final for this event (_declined); the rest may ask again.
+        "can_register_again": declined is None,
+    }
+
+
 # ─── Withdrawing ─────────────────────────────────────────────────────────
 
 
