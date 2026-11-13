@@ -1,8 +1,17 @@
 name: Lint & Test
 
 on:
+  # master on every push; any other branch through its pull request, so a
+  # PR's commits are not tested twice (once as a push, once as the PR).
   push:
+    branches: [master]
   pull_request:
+  workflow_dispatch:
+
+concurrency:
+  # A newer commit on the same branch or PR supersedes the run in flight.
+  group: lint-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   ruff:
@@ -24,7 +33,16 @@ jobs:
       - run: python scripts/check_migrations.py
 
   test:
+    # The suite (~5,900 tests) took 55-65 minutes on one runner. Four shards,
+    # each on its own runner with its own Postgres and Redis, finish in about
+    # a quarter of that. Files are dealt out by their number of tests, largest
+    # first, so the shards are even and stable.
+    name: test (shard ${{ matrix.shard }} of 4)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
     defaults:
       run:
         working-directory: backend
@@ -99,8 +117,31 @@ jobs:
       # Fails here, not as a dozen quiet skips, if the service is not up.
       - name: Redis answers
         run: python -c "import os, redis; assert redis.from_url(os.environ['APP_TEST_REDIS_URL'], socket_timeout=5).ping()"
-      - run: pytest -rs
+      - name: Pick this shard's test files
+        run: |
+          python - "${{ matrix.shard }}" 4 > "$RUNNER_TEMP/shard.txt" <<'PY'
+          import os, re, sys
+          shard, shards = int(sys.argv[1]), int(sys.argv[2])
+          files = []
+          for root, _, names in os.walk("tests"):
+              for name in names:
+                  if name.startswith("test_") and name.endswith(".py"):
+                      path = os.path.join(root, name)
+                      count = len(re.findall(r"^\s*(?:async\s+)?def test_", open(path).read(), re.M))
+                      files.append((count, path))
+          files.sort(key=lambda f: (-f[0], f[1]))
+          bins = [[0, []] for _ in range(shards)]
+          for count, path in files:
+              lightest = min(bins, key=lambda b: b[0])
+              lightest[0] += count
+              lightest[1].append(path)
+          print("\n".join(bins[shard][1]))
+          PY
+          echo "$(wc -l < "$RUNNER_TEMP/shard.txt") files in this shard"
+      - name: pytest
+        run: xargs -a "$RUNNER_TEMP/shard.txt" pytest -rs
       # The Telegram ops bot: standard library only, no services, no network.
       - name: Ops bot tests
+        if: matrix.shard == 0
         working-directory: ops/server/ops-bot
         run: python -m pytest -q -p no:cacheprovider tests
