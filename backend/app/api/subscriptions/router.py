@@ -541,6 +541,17 @@ async def revenue_backfill(session: SessionDep, user: MoneyAuth, request: Reques
     return done
 
 
+def _subscription_order(sort: Optional[str], order: Optional[str]) -> tuple:
+    """The admin list's ORDER BY: highest value first unless a column is asked."""
+    S = ClubSubscriptions
+    column = {
+        "club": select(func.lower(Clubs.name)).where(Clubs.id == S.club_id).scalar_subquery(),
+        "status": S.status, "renews": S.current_period_end, "created": S.created_at,
+    }.get(sort or "", S.mrr_paise)
+    descending = order == "desc" if order in ("asc", "desc") else sort in (None, "", "mrr", "created")
+    return (column.desc().nulls_last(), S.id.desc()) if descending else (column.asc().nulls_last(), S.id.asc())
+
+
 @admin_router.get("/subscriptions", summary="List club subscriptions (admin)")
 async def list_subscriptions(
     request: Request,
@@ -552,6 +563,8 @@ async def list_subscriptions(
     search: Optional[str] = Query(None, description="Club name"),
     complimentary: Optional[bool] = Query(None, description="Only complimentary plans (true) or none of them (false)"),
     club_id: Optional[int] = Query(None, description="One club's row"),
+    sort: Optional[str] = Query(None, pattern="^(mrr|club|status|renews|created)$", description="mrr (default, highest first), club, status, renews or created"),
+    order: Optional[str] = Query(None, pattern="^(asc|desc)$"),
 ) -> PaginatedResponse[AdminSubscriptionOut]:
     criteria = [ClubSubscriptions.is_deleted == False]
     if club_id is not None:
@@ -592,7 +605,7 @@ async def list_subscriptions(
                 # Highest value first: the subscriptions worth attention are
                 # the expensive ones and the broken ones, and `past_due`
                 # sorts near the top of a revenue-ordered list anyway.
-                .order_by(ClubSubscriptions.mrr_paise.desc(), ClubSubscriptions.id.desc())
+                .order_by(*_subscription_order(sort, order))
                 .offset(pagination.offset)
                 .limit(pagination.limit)
             )

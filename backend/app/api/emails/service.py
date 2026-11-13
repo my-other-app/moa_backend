@@ -1121,12 +1121,13 @@ async def resume_messages(session, now: Optional[datetime] = None) -> dict:
     return {"stale": len(stale), "dead": len(gave_up), "started": started, "late": late}
 
 
-async def list_messages(session, event: Events, *, page: int = 1, page_size: int = 20) -> dict:
+async def list_messages(session, event: Events, *, page: int = 1, page_size: int = 20, order: Optional[str] = None) -> dict:
     base = select(Messages).where(Messages.event_id == event.id, Messages.kind != MessageKind.TEST)
     total = await session.scalar(select(func.count()).select_from(base.subquery())) or 0
     page = max(1, page)
     page_size = max(1, min(page_size, 100))
-    rows = list(await session.scalars(base.order_by(Messages.created_at.desc()).limit(page_size).offset((page - 1) * page_size)))
+    ordering = (Messages.created_at.asc(), Messages.id.asc()) if order == "asc" else (Messages.created_at.desc(), Messages.id.desc())
+    rows = list(await session.scalars(base.order_by(*ordering).limit(page_size).offset((page - 1) * page_size)))
     return {"items": rows, "total": total, "page": page, "page_size": page_size}
 
 

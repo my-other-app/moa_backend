@@ -251,9 +251,12 @@ async def send_template(
 
 
 @messages_router.get("", summary="Every message sent to this event's guests")
-async def list_messages(session: SessionDep, user: ClubAuth, event_id: int, page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)) -> MessagePage:
+async def list_messages(
+    session: SessionDep, user: ClubAuth, event_id: int, page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100),
+    order: Optional[str] = Query(None, pattern="^(asc|desc)$", description="unset: newest first"),
+) -> MessagePage:
     event = await deliveries.event_for_club(session, user, event_id)
-    data = await service.list_messages(session, event, page=page, page_size=page_size)
+    data = await service.list_messages(session, event, page=page, page_size=page_size, order=order)
     return MessagePage(items=[service.message_out(m) for m in data["items"]], total=data["total"], page=data["page"], page_size=data["page_size"])
 
 

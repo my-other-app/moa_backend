@@ -108,10 +108,12 @@ async def deliveries_log(
     search: Optional[str] = Query(None, max_length=100),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
+    order: Optional[str] = Query(None, pattern="^(asc|desc)$", description="unset: newest first"),
 ) -> DeliveryLog:
     event = await service.event_for_club(session, user, event_id)
     return DeliveryLog(
         **await service.log(
-            session, event, kind=kind, channel=channel, problem=problem, search=search, page=page, page_size=page_size
+            session, event, kind=kind, channel=channel, problem=problem, search=search, page=page, page_size=page_size,
+            order=order,
         )
     )

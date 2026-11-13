@@ -59,6 +59,8 @@ async def list_audit_log(
     entity_id: Optional[str] = Query(None),
     actor_id: Optional[int] = Query(None),
     q: Optional[str] = Query(None, max_length=200, description="Words to find in who acted, the summary, the record or the reason"),
+    sort: Optional[str] = Query(None, pattern="^(date|action)$", description="date (default) or action"),
+    order: Optional[str] = Query(None, pattern="^(asc|desc)$", description="unset: newest first"),
 ) -> AuditLogPage:
     """
     Who did what, newest first.
@@ -81,6 +83,8 @@ async def list_audit_log(
         q=q,
         limit=pagination.limit,
         offset=pagination.offset,
+        sort=sort,
+        order=order,
     )
     items = [
         AuditLogResponse(

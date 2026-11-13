@@ -203,6 +203,16 @@ async def _context(session, rows: list[PaymentDisputes]) -> tuple[dict, dict]:
     return clubs, events
 
 
+def _dispute_order(sort: Optional[str], order: Optional[str], status: str) -> tuple:
+    """A column asked for, or the list's own: open ones by deadline, the rest latest first."""
+    D = PaymentDisputes
+    if sort is None:
+        return (D.respond_by.asc().nulls_last() if status == "open" else D.updated_at.desc(), D.id.desc())
+    column = {"deadline": D.respond_by, "amount": D.amount_paise, "status": D.status, "updated": D.updated_at}[sort]
+    descending = order == "desc" if order in ("asc", "desc") else sort in ("amount", "updated")
+    return (column.desc().nulls_last(), D.id.desc()) if descending else (column.asc().nulls_last(), D.id.asc())
+
+
 @router.get("", summary="Razorpay disputes on the platform's account (admin)")
 async def list_disputes(
     session: SessionDep,
@@ -211,6 +221,8 @@ async def list_disputes(
     q: Optional[str] = Query(None, max_length=80, description="A dispute or payment id"),
     offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
+    sort: Optional[str] = Query(None, pattern="^(deadline|amount|status|updated)$", description="unset: open by deadline, others latest first"),
+    order: Optional[str] = Query(None, pattern="^(asc|desc)$"),
 ) -> dict:
     where = []
     if status == "open":
@@ -225,8 +237,7 @@ async def list_disputes(
     total = int(await session.scalar(select(func.count()).select_from(PaymentDisputes).where(*where)) or 0)
     rows = list((await session.scalars(
         select(PaymentDisputes).where(*where)
-        .order_by(PaymentDisputes.respond_by.asc().nulls_last() if status == "open" else PaymentDisputes.updated_at.desc(),
-                  PaymentDisputes.id.desc())
+        .order_by(*_dispute_order(sort, order, status))
         .offset(offset).limit(limit)
     )).all())
     clubs, events = await _context(session, rows)
