@@ -189,6 +189,11 @@ class PublicTicketing(CustomBaseModel):
     #: The signed-in viewer's own open request for it -- pending, or
     #: confirmed and not paid yet -- {id, status, token, status_url}; else null.
     viewer_request: Optional[dict[str, Any]] = None
+    #: Once none is open, their latest request and how it ended:
+    #: {id, status (declined | withdrawn | lapsed | closed), token, status_url,
+    #: submitted_at, decided_at, decline_note, closed_reason,
+    #: can_register_again}; else null. Declined is final for the event.
+    viewer_last_request: Optional[dict[str, Any]] = None
 
 
 # ─── Discount codes ─────────────────────────────────────────────────────

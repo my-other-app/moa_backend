@@ -85,6 +85,11 @@ async def public(session, event, *, include_hidden: Optional[int] = None, viewer
         from app.api.approvals import service as approvals
 
         out["viewer_request"] = await approvals.viewer_request(session, event.id, viewer)
+        # And, once none is open, how the last one ended (declined, cancelled,
+        # expired), so the page doesn't offer "Register" as if they never had.
+        out["viewer_last_request"] = (
+            await approvals.viewer_last_request(session, event.id, viewer) if out["viewer_request"] is None else None
+        )
     return out
 
 
