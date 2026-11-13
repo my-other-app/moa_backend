@@ -138,4 +138,4 @@ async def test_the_policy():
 async def test_a_colour_that_is_not_one_never_reaches_the_style_attribute():
     html = _page(accent='#1"><x')
 
-    assert re.search(r"<html\b[^>]*>", html).group(0) == '<html lang="en">' and "<x" not in html
+    assert re.search(r"<html\b[^>]*>", html).group(0) == '<html lang="en-IN">' and "<x" not in html

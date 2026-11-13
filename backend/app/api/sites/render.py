@@ -136,9 +136,17 @@ def assemble(pkg: Package, data: dict, layout: dict) -> str:
 _HEAD_OPEN = re.compile(r"<head\b[^>]*>", re.I)
 _TITLE = re.compile(r"<title\b[^>]*>.*?</title\s*>", re.I | re.S)
 _HTML_OPEN = re.compile(r"<html\b([^>]*)>", re.I)
+_LANG_ATTR = re.compile(r'\slang="[^"]*"', re.I)
+LANG = "en-IN"
 _STYLE_ATTR = re.compile(r"""\sstyle\s*=\s*(["'])(.*?)\1""", re.I | re.S)
 
 PRECONNECT = '<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
+
+
+def _with_lang(attrs: str) -> str:
+    """The <html> element's attributes with lang="en-IN", like the rest of
+    myotherapp.in (the designs say "en")."""
+    return _LANG_ATTR.sub(f' lang="{LANG}"', attrs, count=1) if _LANG_ATTR.search(attrs) else f' lang="{LANG}"{attrs}'
 
 
 def _head(data: dict) -> str:
@@ -157,13 +165,23 @@ def _head(data: dict) -> str:
         ld["logo"] = logo["url"]
     if socials:
         ld["sameAs"] = socials
+    # A wide picture (the cover) previews as a large card; the logo alone as a small one.
+    card = "summary_large_image" if (cover or {}).get("url") else "summary"
+    name = club.get("name") or title
     parts = [
         f'<meta name="description" content="{esc(desc)}">',
         f'<meta property="og:title" content="{esc(title)}">',
         f'<meta property="og:description" content="{esc(desc)}">',
         f'<meta property="og:image" content="{esc(preview)}">' if preview else "",
+        f'<meta property="og:image:alt" content="{esc(name)}">' if preview else "",
         f'<meta property="og:url" content="{esc(url)}">',
         '<meta property="og:type" content="website">',
+        f'<meta property="og:site_name" content="{esc(name)}">',
+        '<meta property="og:locale" content="en_IN">',
+        f'<meta name="twitter:card" content="{card}">',
+        f'<meta name="twitter:title" content="{esc(title)}">',
+        f'<meta name="twitter:description" content="{esc(desc)}">',
+        f'<meta name="twitter:image" content="{esc(preview)}">' if preview else "",
         f'<link rel="canonical" href="{esc(url)}">' if url else "",
         f'<link rel="icon" href="{esc(logo["url"])}">' if logo and logo.get("url") else "",
         f'<meta name="moa:visit" content="{esc(data.get("visit_url"))}">' if data.get("visit_url") else "",
@@ -183,6 +201,7 @@ def finish(page: str, pkg: Package, data: dict, accent: str | None) -> str:
     m = _HEAD_OPEN.search(page)
     if m:
         page = page[:m.end()] + PRECONNECT + page[m.end():]
+    page = _HTML_OPEN.sub(lambda m: f"<html{_with_lang(m.group(1))}>", page, count=1)
     at = page.lower().find("</head>")
     if at >= 0:
         page = page[:at] + head + page[at:]
