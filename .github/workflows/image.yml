@@ -18,12 +18,9 @@ name: Image
 # settings -> Change visibility), or log the box in to ghcr.io with a
 # read:packages token (docs/MOVE_TO_ORACLE.md, "Images").
 
+# The live server builds its own images from the source (ops/server, the
+# build script on the box), so nothing pulls these any more. By hand only.
 on:
-  push:
-    branches: [master]
-    paths:
-      - "backend/**"
-      - ".github/workflows/image.yml"
   workflow_dispatch:
 
 permissions:
