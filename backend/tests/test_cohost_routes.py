@@ -147,6 +147,7 @@ ROUTES = {
     "PUT /api/v1/events/{event_id}/ticketing/waitlist/settings": ALLOW,
     "POST /api/v1/events/{event_id}/ticketing/waitlist/{entry_id}/offer": ALLOW,
     "DELETE /api/v1/events/{event_id}/ticketing/waitlist/{entry_id}": ALLOW,
+    "PATCH /api/v1/events/{event_id}/ticketing/waitlist/{entry_id}": ALLOW,
     "GET /api/v1/events/{event_id}/ticketing/waitlist/export": ALLOW,
     # approvals
     "GET /api/v1/events/registration/{event_id}/requests": ALLOW,
@@ -154,6 +155,7 @@ ROUTES = {
     "POST /api/v1/events/registration/{event_id}/requests/approve": ALLOW,
     "POST /api/v1/events/registration/{event_id}/requests/decline": ALLOW,
     "POST /api/v1/events/registration/{event_id}/requests/reopen": ALLOW,
+    "PATCH /api/v1/events/registration/{event_id}/requests/{request_id}": ALLOW,
     # clubs
     "POST /api/v1/clubs/notifications/events/{event_id}/send": ALLOW,
     "GET /api/v1/clubs/notifications/events/{event_id}/stats": ALLOW,
