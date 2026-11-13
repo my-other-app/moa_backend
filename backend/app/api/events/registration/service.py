@@ -1639,6 +1639,19 @@ async def take_off_list(session: AsyncSession, registration) -> None:
     registrations only); the waiting list's sweep offers it within the
     minute. Commits."""
     registration.soft_delete()
+    # A registration the club confirmed from a request: the request is
+    # withdrawn with it. Left "approved", it would still count as the
+    # person's open request -- they could not register again (one open
+    # request per person per event), and their status page would still say
+    # Confirmed for a ticket that no longer exists.
+    from app.api.approvals.models import APPROVED, WITHDRAWN, RegistrationRequests
+
+    await session.execute(
+        update(RegistrationRequests)
+        .where(RegistrationRequests.registration_id == registration.id, RegistrationRequests.status == APPROVED)
+        .values(status=WITHDRAWN, updated_at=datetime.now(timezone.utc))
+        .execution_options(synchronize_session=False)
+    )
     from app.api.webhooks_out import signals as webhooks
 
     await webhooks.registration_cancelled(session, registration)
