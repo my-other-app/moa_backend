@@ -1256,8 +1256,9 @@ async def log(
     search: Optional[str] = None,
     page: int = 1,
     page_size: int = 50,
+    order: Optional[str] = None,
 ) -> dict:
-    """Every send to every guest, newest first: tickets, certificates and
+    """Every send to every guest, newest first (`order=asc`: oldest first): tickets, certificates and
     messages together. The tally is always the whole event's, so narrowing
     to the failures never makes the number look smaller than it is."""
     s = _sends(event.id)
@@ -1281,7 +1282,10 @@ async def log(
     page_size = max(1, min(page_size, 200))
     rows = (
         await session.execute(
-            base.order_by(s.c.sent_at.desc().nulls_last(), s.c.created_at.desc())
+            base.order_by(
+                *((s.c.sent_at.asc().nulls_last(), s.c.created_at.asc()) if order == "asc"
+                  else (s.c.sent_at.desc().nulls_last(), s.c.created_at.desc()))
+            )
             .limit(page_size)
             .offset((page - 1) * page_size)
         )

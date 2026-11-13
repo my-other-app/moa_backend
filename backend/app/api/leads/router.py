@@ -79,6 +79,8 @@ async def list_leads(
     due: Optional[Literal["today", "overdue", "week"]] = None, q: Optional[str] = Query(None, max_length=200),
     page: int = Query(1, ge=1, le=10000), page_size: Optional[int] = Query(None, ge=1, le=500),
     fmt: ListFormat = Query("json", alias="format"),
+    sort: Optional[str] = Query(None, pattern="^(name|type|stage|city|value|close|created|updated)$", description="The table's column; unset: latest activity first"),
+    order: Optional[str] = Query(None, pattern="^(asc|desc)$"),
 ):
     f = dict(type=type, stage=stage, owner=owner, city=city, due=due, q=q)
     if fmt == "xlsx":
@@ -89,7 +91,7 @@ async def list_leads(
         path = await spreadsheet.write_xlsx(rows, title="Leads", headers=header)
         return spreadsheet.xlsx_response(path, f"leads-{date.today().isoformat()}.xlsx", cache_control="no-store")
     size = page_size or (300 if view == "board" else 50)
-    return await service.list_leads(session, admin.id, view=view, page=page, page_size=size, **f)
+    return await service.list_leads(session, admin.id, view=view, page=page, page_size=size, sort=sort, order=order, **f)
 
 
 @router.post("/leads", summary="Add a lead (409 DUPLICATE_LEAD unless force)", status_code=201)

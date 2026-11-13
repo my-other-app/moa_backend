@@ -92,6 +92,13 @@ def _like(word: str) -> str:
     return f"%{escaped}%"
 
 
+def _audit_order(sort: str | None, order: str | None) -> tuple:
+    A = AdminAuditLogs
+    if sort == "action":
+        return (A.action.desc(), A.id.desc()) if order == "desc" else (A.action.asc(), A.created_at.desc(), A.id.desc())
+    return (A.created_at.asc(), A.id.asc()) if order == "asc" else (A.created_at.desc(), A.id.desc())
+
+
 async def list_entries(
     session: AsyncSession,
     *,
@@ -102,8 +109,11 @@ async def list_entries(
     q: str | None = None,
     limit: int = 20,
     offset: int = 0,
+    sort: str | None = None,
+    order: str | None = None,
 ):
-    """A page of the log, newest first, and how many rows match in all.
+    """A page of the log, newest first (or `order=asc`; `sort=action` for
+    the action's name), and how many rows match in all.
 
     `q`: every word must appear, in any case, somewhere in who acted (name or
     address), the summary, the record ("club #12") or the reason given --
@@ -133,7 +143,7 @@ async def list_entries(
         # With what the actor's picture needs (reports.avatar), loaded for
         # the whole page at once rather than per row.
         .options(joinedload(AdminAuditLogs.actor).options(*picture_options()))
-        .order_by(AdminAuditLogs.created_at.desc(), AdminAuditLogs.id.desc())
+        .order_by(*_audit_order(sort, order))
         .limit(limit)
         .offset(offset)
     )

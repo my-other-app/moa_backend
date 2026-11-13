@@ -550,7 +550,27 @@ def list_filters(*, user_id: int, type=None, stage=None, owner=None, city=None, 
     return out
 
 
-async def list_leads(session, user_id: int, *, view: str = "table", page: int = 1, page_size: int = 50, **f) -> dict:
+#: The table's orders besides its own (latest activity first): the column clicked.
+LEAD_SORTS = ("name", "type", "stage", "city", "value", "close", "created", "updated")
+
+
+def lead_order(sort: Optional[str], order: Optional[str]) -> Optional[tuple]:
+    """ORDER BY for a column clicked (None: the view's own). Blanks last; id breaks ties."""
+    if sort not in LEAD_SORTS:
+        return None
+    L = Leads
+    column = {
+        "name": func.lower(L.name), "type": L.type, "stage": L.stage, "city": func.lower(L.city),
+        "value": L.value_inr, "close": L.expected_close, "created": L.created_at, "updated": L.updated_at,
+    }[sort]
+    descending = order == "desc" if order in ("asc", "desc") else sort in ("value", "created", "updated")
+    return (column.desc().nulls_last(), L.id.desc()) if descending else (column.asc().nulls_last(), L.id.asc())
+
+
+async def list_leads(
+    session, user_id: int, *, view: str = "table", page: int = 1, page_size: int = 50,
+    sort: Optional[str] = None, order: Optional[str] = None, **f,
+) -> dict:
     now = _now()
     L = Leads
     where = list_filters(user_id=user_id, now=now, **f)
@@ -559,7 +579,8 @@ async def list_leads(session, user_id: int, *, view: str = "table", page: int = 
     by_stage = {s: 0 for s in STAGES}
     for s, n in (await session.execute(select(L.stage, func.count()).where(*no_stage).group_by(L.stage))).all():
         by_stage[s] = int(n)
-    order = (L.stage, L.updated_at.desc(), L.id.desc()) if view == "board" else (L.updated_at.desc(), L.id.desc())
+    clicked = lead_order(sort, order) if view == "table" else None
+    order = clicked or ((L.stage, L.updated_at.desc(), L.id.desc()) if view == "board" else (L.updated_at.desc(), L.id.desc()))
     rows = (await session.scalars(select(L).where(*where).order_by(*order).limit(page_size).offset((page - 1) * page_size))).all()
     ids = [r.id for r in rows]
     names = await teams.names(session, [r.owner_id for r in rows])

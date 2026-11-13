@@ -263,6 +263,8 @@ async def payouts_overview(
     owing: bool = Query(False, description="Only clubs with something outstanding"),
     offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
+    sort: Optional[str] = Query(None, pattern="^(outstanding|club|net|paid_out|gross)$", description="unset: most outstanding first"),
+    order: Optional[str] = Query(None, pattern="^(asc|desc)$"),
 ) -> dict:
     totals = await club_totals(session)
     ids = list(totals)
@@ -275,7 +277,14 @@ async def payouts_overview(
     rows = [(clubs[i], totals[i]) for i in ids if i in clubs]
     if owing:
         rows = [(c, t) for c, t in rows if t["outstanding"] > 0]
-    rows.sort(key=lambda ct: (-ct[1]["outstanding"], ct[0].name.lower()))
+    if sort == "club":
+        rows.sort(key=lambda ct: ct[0].name.lower(), reverse=order == "desc")
+    elif sort in ("net", "paid_out", "gross"):
+        rows.sort(key=lambda ct: (ct[1][sort], ct[0].name.lower()), reverse=order != "asc")
+    elif order == "asc":
+        rows.sort(key=lambda ct: (ct[1]["outstanding"], ct[0].name.lower()))
+    else:
+        rows.sort(key=lambda ct: (-ct[1]["outstanding"], ct[0].name.lower()))
     sums = _blank()
     for _, t in rows:
         for k in ("gross", "fees", "refunds", "chargebacks", "net", "paid_out", "outstanding"):
