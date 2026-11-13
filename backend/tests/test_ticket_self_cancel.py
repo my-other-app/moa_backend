@@ -257,3 +257,41 @@ async def test_the_ticket_emails_carry_the_cancel_link(session, world):
     # The confirmed-ticket starter has the quiet line; the rest of it is as it was.
     approved = request_starter("REQUEST_APPROVED").model_dump_json()
     assert "Can't come?" in approved and "{{cancel_ticket_url}}" in approved and "{{ticket_url}}" in approved
+
+
+# ─── The request a registration came from ───────────────────────────────
+
+
+async def test_off_the_list_by_either_way_withdraws_the_confirmed_request(client, session, world, mail):
+    """Confirmed from a request, then given back (the guest's link) or removed
+    (the club): the request is withdrawn with it, so it no longer counts as
+    the person's open request -- they may register again, and their status
+    page says Cancelled, not Confirmed."""
+    import secrets
+
+    from app.api.approvals import service as approvals
+    from app.api.approvals.models import APPROVED, PENDING, WITHDRAWN, RegistrationRequests
+
+    def request_for(reg, status=APPROVED):
+        return RegistrationRequests(
+            id=uuid.uuid4(), event_id=world.event.id, user_id=reg.user_id, full_name=reg.full_name, email=reg.email,
+            phone="9876543210", answers={}, status=status, token=secrets.token_urlsafe(16), registration_id=reg.id,
+        )
+
+    mine, theirs = request_for(world.reg), request_for(world.reg2)
+    session.add_all([mine, theirs])
+    await session.commit()
+    assert await approvals.open_request(session, world.event.id, email=world.reg.email) is not None
+
+    assert (await client.post(f"{API}/tickets/cancel/{world.token}", json={})).status_code == 200
+    r = await client.delete(
+        f"{API}/events/registration/{world.event.id}/info/{world.reg2.id}", params={"confirm_slug": world.event.slug}, headers=world.h,
+    )
+    assert r.status_code == 200, r.text
+    for req in (mine, theirs):
+        await session.refresh(req)
+        assert req.status == WITHDRAWN, req.status
+    assert await approvals.open_request(session, world.event.id, email=world.reg.email) is None
+    assert await approvals.open_request(session, world.event.id, email=world.reg2.email) is None
+    # Only an approved request is touched: a pending one of someone else stays as it was.
+    assert PENDING not in {mine.status, theirs.status}
