@@ -97,7 +97,7 @@ async def test_the_page_follows_the_clubs_order_titles_and_hidden_sections(clien
     assert "Before now" in html and '<a href="#past">Past</a><a href="#events">Events</a>' in html
     # A preview with its own layout changes nothing saved.
     p = (await client.post(f"{API}/preview", json={"layout": {"order": ["upcoming", "past"], "accent": "#ff0055"}}, headers=h)).json()["html"]
-    assert _sections_in(p)[:3] == ["top", "events", "past"] and '<html lang="en" style="--accent:#ff0055">' in p
+    assert _sections_in(p)[:3] == ["top", "events", "past"] and '<html lang="en-IN" style="--accent:#ff0055">' in p
     assert (await client.get(API, headers=h)).json()["layout"]["accent"] is None
     for bad, code in (
         ({"hidden": ["about"]}, "SITE_SECTION_NOT_HIDEABLE"), ({"titles": {"team": "x" * 61}}, "SITE_TITLE_TOO_LONG"),
@@ -438,3 +438,20 @@ def test_the_gallery_fills_from_the_library_with_photos_no_other_slot_uses():
     assert resolve_slots(FX, {"hero.cover": 99}, []) == {}
 
 
+
+
+@pytest.mark.parametrize("template", list(registry.packages()))
+def test_every_page_reads_right_to_search_engines_and_link_previews(template):
+    """English as written in India on <html>; Open Graph with the site's name
+    and locale; an X/Twitter card: large with a cover, small with the logo alone."""
+    pkg = registry.get(template)
+    data = _full(pkg)
+    html = site_render.render(data)
+    assert re.search(r'<html\b[^>]*\slang="en-IN"', html) and len(re.findall(r"\slang=", re.search(r"<html\b[^>]*>", html).group(0))) == 1
+    for tag in ('property="og:locale" content="en_IN"', 'name="twitter:card" content="summary_large_image"',
+                'name="twitter:title"', 'name="twitter:description"', 'name="twitter:image"', 'property="og:site_name"', 'property="og:image:alt"'):
+        assert tag in html, (template, tag)
+    data["images"]["hero.cover"] = None
+    data["club"]["cover"] = None
+    small = site_render.render(data)
+    assert 'name="twitter:card" content="summary"' in small
