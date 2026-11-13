@@ -280,6 +280,14 @@ class WaitlistJoinOut(WaitlistEntryPublic):
     created: bool = True
 
 
+class WaitlistEntryCorrectionIn(CustomBaseModel):
+    """The organiser's correction of a place in line: given fields only."""
+
+    full_name: Optional[str] = Field(None, min_length=1, max_length=100)
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = Field(None, max_length=20)
+
+
 class WaitlistSettingsIn(CustomBaseModel):
     enabled: Optional[bool] = Field(None)
     #: How long a claim link holds the place: 1 to 168 hours.

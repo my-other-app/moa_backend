@@ -583,19 +583,43 @@ async def decline(session, entry: WaitlistEntries) -> None:
 # ─── The club's list ─────────────────────────────────────────────────────
 
 
-async def entries(session, event_id: int, *, status: Optional[str] = None, limit: int = 200, offset: int = 0):
+#: The club's list's orders: the line (the default), name, email, joined.
+ENTRY_SORTS = ("line", "name", "email", "joined")
+
+
+def _entry_order(sort: Optional[str], order: Optional[str]) -> tuple:
+    W = WaitlistEntries
+    if sort not in ENTRY_SORTS or sort == "line":
+        # Those still in line first, in the line's order; then the rest.
+        line = ((W.status.in_(OPEN_STATUSES)).desc(), W.created_at.asc(), W.id)
+        if order == "desc":
+            return ((W.status.in_(OPEN_STATUSES)).desc(), W.created_at.desc(), W.id.desc())
+        return line
+    column = {"name": func.lower(W.full_name), "email": func.lower(W.email), "joined": W.created_at}[sort]
+    descending = (order == "desc") if order in ("asc", "desc") else sort == "joined"
+    return (column.desc().nulls_last(), W.id.desc()) if descending else (column.asc().nulls_last(), W.id.asc())
+
+
+async def entries(
+    session, event_id: int, *, status: Optional[str] = None, limit: int = 200, offset: int = 0,
+    q: Optional[str] = None, sort: Optional[str] = None, order: Optional[str] = None,
+):
+    """The event's waiting list for the club. `q`: name, email or phone
+    contains. `sort`: line (the default: those still in line first, in the
+    line's order), name, email or joined (newest first); `order` turns it."""
     W = WaitlistEntries
     # The line itself: never the holds a club's confirmations gave (app/api/approvals).
-    q = select(W).where(W.event_id == event_id, W.via_request == False)  # noqa: E712
+    stmt = select(W).where(W.event_id == event_id, W.via_request == False)  # noqa: E712
     if status:
-        q = q.where(W.status == status)
-    total = int(await session.scalar(select(func.count()).select_from(q.subquery())) or 0)
-    rows = list((await session.scalars(
-        q.order_by(
-            # Those still in line first, in the line's order; then the rest, newest first.
-            (W.status.in_(OPEN_STATUSES)).desc(), W.created_at.asc(), W.id,
-        ).limit(limit).offset(offset)
-    )).all())
+        stmt = stmt.where(W.status == status)
+    text_ = (q or "").strip()[:100]
+    if text_:
+        pattern = "%" + text_.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        stmt = stmt.where(
+            W.full_name.ilike(pattern, escape="\\") | W.email.ilike(pattern, escape="\\") | W.phone.ilike(pattern, escape="\\")
+        )
+    total = int(await session.scalar(select(func.count()).select_from(stmt.subquery())) or 0)
+    rows = list((await session.scalars(stmt.order_by(*_entry_order(sort, order)).limit(limit).offset(offset))).all())
     return rows, total
 
 
@@ -758,3 +782,61 @@ async def _offer_job(p: dict) -> None:
                     )
                 except Exception:  # noqa: BLE001
                     logger.warning("waitlist offer %s: WhatsApp could not be sent", entry.id, exc_info=True)
+
+
+# ─── Correcting an entry ─────────────────────────────────────────────────
+
+
+async def correct_entry(
+    session, event_id: int, entry_id, *, full_name: Optional[str] = None, email: Optional[str] = None,
+    phone: Optional[str] = None,
+) -> WaitlistEntries:
+    """The organiser's correction of someone's place in line: their name,
+    email or phone, whatever its status; nothing is sent and their place is
+    kept. An email another open place in the same ticket type's line uses is
+    a 409 (uq_waitlist_open_email); an entry left with neither email nor
+    phone is a 422 (ck_waitlist_contact)."""
+    import uuid as _uuid_mod
+
+    W = WaitlistEntries
+    try:
+        eid = entry_id if isinstance(entry_id, _uuid_mod.UUID) else _uuid_mod.UUID(str(entry_id))
+    except ValueError:
+        raise CustomHTTPException(404, message="Not on this waiting list") from None
+    entry = await session.scalar(
+        select(W).where(W.id == eid, W.event_id == event_id, W.via_request == False).with_for_update()  # noqa: E712
+    )
+    if entry is None:
+        raise CustomHTTPException(404, message="Not on this waiting list")
+    if full_name is not None:
+        full_name = full_name.strip()
+        if not full_name:
+            raise CustomHTTPException(422, message="Enter their name.", errors={"full_name": "Required."})
+        entry.full_name = full_name[:100]
+    new_email = entry.email
+    if email is not None:
+        new_email = email.strip() or None
+    new_phone = entry.phone
+    if phone is not None:
+        new_phone = phone.strip() or None
+        if new_phone and len(new_phone) > 20:
+            raise CustomHTTPException(422, message="Enter a valid phone number.", errors={"phone": "At most 20 characters."})
+    if not new_email and not new_phone:
+        raise CustomHTTPException(422, message="Keep an email or a phone number to reach them.", errors={"email": "Email or phone required."})
+    if new_email and entry.status in OPEN_STATUSES and new_email.lower() != (entry.email or "").strip().lower():
+        clash = await session.scalar(
+            select(W.id).where(
+                W.ticket_type_id == entry.ticket_type_id, W.id != entry.id, W.status.in_(OPEN_STATUSES),
+                W.email.isnot(None), func.lower(func.btrim(W.email)) == new_email.lower(),
+            ).limit(1)
+        )
+        if clash is not None:
+            raise CustomHTTPException(
+                409, message="Someone else in this line already uses that email.",
+                errors={"email": "Already in this ticket type's line."},
+            )
+    entry.email, entry.phone = new_email, new_phone
+    entry.updated_at = datetime.now(timezone.utc)
+    await session.commit()
+    await session.refresh(entry)
+    return entry
