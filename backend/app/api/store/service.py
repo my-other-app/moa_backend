@@ -833,13 +833,24 @@ def order_out(o: EventStoreOrders, reg: Reg | None) -> dict:
 _LISTED = ["paid", "refunded", "oversold"]
 
 
-async def orders(session, event: Events, *, q: str | None, status: str | None, page: int, page_size: int) -> dict:
+def _orders_order(sort: str | None, order: str | None) -> tuple:
+    """newest (the default), name, total or handed (handed over first/last)."""
+    O = EventStoreOrders
+    column = {"name": func.lower(Reg.full_name), "total": O.total, "handed": O.handed_over_at}.get(sort or "", O.created_at)
+    descending = order == "desc" if order in ("asc", "desc") else sort in (None, "", "newest", "total", "handed")
+    return (column.desc().nulls_last(), O.id.desc()) if descending else (column.asc().nulls_last(), O.id.asc())
+
+
+async def orders(
+    session, event: Events, *, q: str | None, status: str | None, page: int, page_size: int,
+    sort: str | None = None, order: str | None = None,
+) -> dict:
     base = select(EventStoreOrders, Reg).join(Reg, Reg.id == EventStoreOrders.registration_id).where(EventStoreOrders.event_id == event.id, EventStoreOrders.status.in_(_LISTED if status is None else [status]))
     if q:
         like = f"%{q.strip()}%"
         base = base.where(or_(Reg.full_name.ilike(like), Reg.email.ilike(like), Reg.ticket_id.ilike(like)))
     total = await session.scalar(select(func.count()).select_from(base.subquery()))
-    rows = (await session.execute(base.order_by(EventStoreOrders.created_at.desc()).offset((page - 1) * page_size).limit(page_size))).all()
+    rows = (await session.execute(base.order_by(*_orders_order(sort, order)).offset((page - 1) * page_size).limit(page_size))).all()
     return dict(items=[order_out(o, r) for o, r in rows], total=total or 0, page=page, page_size=page_size)
 
 

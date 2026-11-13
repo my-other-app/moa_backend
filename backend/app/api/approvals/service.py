@@ -556,20 +556,45 @@ async def _not_withdrawable(session, req) -> CustomHTTPException:
 # ─── The club's list ─────────────────────────────────────────────────────
 
 
-def encode_cursor(submitted_at: datetime, rid) -> str:
-    raw = f"{submitted_at.isoformat()}|{rid}".encode()
+#: The orders the club's list can take: when they asked (the default), name, email.
+SORTS = ("submitted", "name", "email")
+#: A cursor's tag for each order but the default, whose cursors stay as they were.
+_CURSOR_TAG = {"name": "n:", "email": "e:"}
+
+
+def _sort_value(r: RegistrationRequests, sort: str):
+    if sort == "name":
+        return (r.full_name or "").lower()
+    if sort == "email":
+        return (r.email or "").lower()
+    return r.submitted_at
+
+
+def encode_cursor(value, rid, sort: str = "submitted") -> str:
+    """The key of a page's last row: (submitted_at, id) for the default
+    order, (lower(name or email), id) tagged with the order otherwise."""
+    shown = value.isoformat() if isinstance(value, datetime) else str(value)
+    raw = f"{_CURSOR_TAG.get(sort, '')}{shown}|{rid}".encode()
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
 
-def decode_cursor(value: Optional[str]) -> Optional[tuple[datetime, uuid.UUID]]:
+def decode_cursor(value: Optional[str], sort: str = "submitted") -> Optional[tuple]:
     if not value:
         return None
+    bad = CustomHTTPException(422, message="That page link is not valid.", errors={"after": "Not a cursor."})
     try:
         raw = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4)).decode()
-        when, rid = raw.split("|", 1)
-        return datetime.fromisoformat(when), uuid.UUID(rid)
+        key, rid = raw.rsplit("|", 1)
+        tag = _CURSOR_TAG.get(sort, "")
+        if tag:
+            if not key.startswith(tag):
+                raise bad
+            return key[len(tag):], uuid.UUID(rid)
+        if any(key.startswith(t) for t in _CURSOR_TAG.values()):
+            raise bad
+        return datetime.fromisoformat(key), uuid.UUID(rid)
     except (ValueError, UnicodeDecodeError):
-        raise CustomHTTPException(422, message="That page link is not valid.", errors={"after": "Not a cursor."}) from None
+        raise bad from None
 
 
 def _search(q: Optional[str]):
@@ -580,25 +605,37 @@ def _search(q: Optional[str]):
     return or_(R.full_name.ilike(pattern, escape="\\"), R.email.ilike(pattern, escape="\\"), R.phone.ilike(pattern, escape="\\"))
 
 
-def list_query(event_id: int, *, status: Optional[str], q: Optional[str], after=None, limit: int = 50, only_ids=None):
-    """A page of the event's requests from the cursor: the queue (pending)
-    oldest first, walking ix_registration_requests_pending; any other status
-    newest first, walking ix_registration_requests_queue backwards.
-    (submitted_at, id) is the key; a page reads `limit + 1` rows. `only_ids`:
-    just these (the missing-answers filter)."""
+def descending_by_default(sort: str, status: Optional[str]) -> bool:
+    """By when they asked: the queue (pending) oldest first, any other
+    status newest first. By name or email: A to Z."""
+    return sort == "submitted" and status != PENDING
+
+
+def list_query(
+    event_id: int, *, status: Optional[str], q: Optional[str], after=None, limit: int = 50, only_ids=None,
+    sort: str = "submitted", descending: Optional[bool] = None,
+):
+    """A page of the event's requests from the cursor. By when they asked
+    (the default): the queue (pending) oldest first, walking
+    ix_registration_requests_pending; any other status newest first, walking
+    ix_registration_requests_queue backwards. By name or email (case
+    ignored), A to Z unless `descending`. (sort value, id) is the key; a page
+    reads `limit + 1` rows. `only_ids`: just these (the missing-answers filter)."""
     stmt = select(R).where(R.event_id == event_id)
     if only_ids is not None:
         stmt = stmt.where(R.id.in_(list(only_ids)))
-    newest_first = status != PENDING
+    if descending is None:
+        descending = descending_by_default(sort, status)
     if status in STATUSES:
         stmt = stmt.where(R.status == status)
     match = _search(q)
     if match is not None:
         stmt = stmt.where(match)
+    column = func.lower(R.full_name) if sort == "name" else func.lower(R.email) if sort == "email" else R.submitted_at
     if after is not None:
-        key = tuple_(R.submitted_at, R.id)
-        stmt = stmt.where(key < tuple_(*after) if newest_first else key > tuple_(*after))
-    order = (R.submitted_at.desc(), R.id.desc()) if newest_first else (R.submitted_at.asc(), R.id.asc())
+        key = tuple_(column, R.id)
+        stmt = stmt.where(key < tuple_(*after) if descending else key > tuple_(*after))
+    order = (column.desc(), R.id.desc()) if descending else (column.asc(), R.id.asc())
     return stmt.order_by(*order).limit(limit + 1)
 
 
@@ -688,45 +725,151 @@ async def places_left(session, event) -> Optional[int]:
     return (await places.summary(session, event)).left
 
 
+def _club_item(r: RegistrationRequests, ctx: dict, form, now: datetime) -> dict:
+    """One row of the club's list (RequestClubItem)."""
+    pay = _pay(r, ctx, now)
+    return {
+        "id": r.id, "status": r.status, "full_name": r.full_name, "email": r.email, "phone": r.phone,
+        "ticket_type": {"id": r.ticket_type_id, "name": ctx["names"].get(r.ticket_type_id)} if r.ticket_type_id is not None else None,
+        "answers": r.answers or {},
+        "submitted_at": r.submitted_at, "decided_at": r.decided_at,
+        "decided_by": {"id": r.decided_by_id, "name": r.decided_by_name} if r.decided_at is not None else None,
+        "decline_note": r.decline_note, "registration_id": r.registration_id,
+        "closed_reason": r.closed_reason if r.status == CLOSED else None,
+        "pay_by": pay["pay_by"] if pay else None,
+        "amount": float(money.rupees(r.amount)) if r.amount is not None else None,
+        "discount_code": r.discount_code,
+        "whatsapp_opt_in": bool(r.whatsapp_opt_in),
+        # The required questions they haven't validly answered (app/api/missing_answers).
+        "missing_answers": form.missing(r.answers),
+    }
+
+
 async def club_list(
     session, event, *, status: Optional[str], q: Optional[str], after: Optional[str], limit: int, missing: Optional[str] = None,
+    sort: str = "submitted", order: Optional[str] = None,
 ) -> dict:
+    """A page of the club's list. `sort`: submitted (the default), name or
+    email; `order`: asc or desc (None: the sort's own, descending_by_default)."""
     from app.api.missing_answers import service as missing_answers
     from app.api.missing_answers.state import Form
 
+    sort = sort if sort in SORTS else "submitted"
+    descending = None if order is None else order == "desc"
     form = Form(event.additional_details)
     wanted = missing_answers.check_missing_filter(form, missing)
     only = await missing_answers.missing_request_ids(session, event, wanted) if wanted is not None else None
-    cursor = decode_cursor(after)
-    rows = list((await session.scalars(list_query(event.id, status=status, q=q, after=cursor, limit=limit, only_ids=only))).all())
+    cursor = decode_cursor(after, sort)
+    rows = list((await session.scalars(list_query(
+        event.id, status=status, q=q, after=cursor, limit=limit, only_ids=only, sort=sort, descending=descending,
+    ))).all())
     more = len(rows) > limit
     rows = rows[:limit]
     ctx = await _context(session, rows)
     now = _now()
-    items = []
-    for r in rows:
-        pay = _pay(r, ctx, now)
-        items.append({
-            "id": r.id, "status": r.status, "full_name": r.full_name, "email": r.email, "phone": r.phone,
-            "ticket_type": {"id": r.ticket_type_id, "name": ctx["names"].get(r.ticket_type_id)} if r.ticket_type_id is not None else None,
-            "answers": r.answers or {},
-            "submitted_at": r.submitted_at, "decided_at": r.decided_at,
-            "decided_by": {"id": r.decided_by_id, "name": r.decided_by_name} if r.decided_at is not None else None,
-            "decline_note": r.decline_note, "registration_id": r.registration_id,
-            "closed_reason": r.closed_reason if r.status == CLOSED else None,
-            "pay_by": pay["pay_by"] if pay else None,
-            "amount": float(money.rupees(r.amount)) if r.amount is not None else None,
-            "discount_code": r.discount_code,
-            "whatsapp_opt_in": bool(r.whatsapp_opt_in),
-            # The required questions they haven't validly answered (app/api/missing_answers).
-            "missing_answers": form.missing(r.answers),
-        })
+    last = rows[-1] if rows else None
     return {
-        "items": items,
-        "next": encode_cursor(rows[-1].submitted_at, rows[-1].id) if more and rows else None,
+        "items": [_club_item(r, ctx, form, now) for r in rows],
+        "next": encode_cursor(_sort_value(last, sort), last.id, sort) if more and last is not None else None,
         "counts": await counts(session, event.id),
         "places_left": await places_left(session, event),
     }
+
+
+# ─── Correcting ──────────────────────────────────────────────────────────
+
+
+async def correct(
+    session, event, request_id, *, user, full_name: Optional[str] = None, email: Optional[str] = None,
+    phone: Optional[str] = None, answers: Optional[dict] = None,
+) -> dict:
+    """The organiser's correction of a request -- a name misspelt, a typo in
+    the email, a wrong phone, an answer -- whatever its status; nothing is
+    emailed and nothing is decided. Given fields only. Answers merge into
+    theirs (as a registration's correction does) and the ones a changed
+    answer hides go. An email another open request or a registration of the
+    event already uses is a 409. A confirmed request whose registration is
+    still on the list is corrected there too, through the registration's own
+    correction (its checks, its webhook), so the person has one set of
+    details. Returns the list's row."""
+    from app.api.events import questions as form_mod
+    from app.api.events.registration import answers as answers_mod
+    from app.api.events.registration import service as registration
+    from app.api.missing_answers import people, service as missing_answers
+    from app.api.missing_answers.models import REQUEST
+    from app.api.missing_answers.state import Form
+    from app.api.users import service as user_service
+    from app.api.events.access import is_admin_user
+
+    rid = _uuid(request_id)
+    req = await session.scalar(select(R).where(R.id == rid, R.event_id == event.id).with_for_update()) if rid else None
+    if req is None:
+        raise CustomHTTPException(404, message="Request not found")
+
+    if full_name is not None:
+        full_name = full_name.strip()
+        if not full_name:
+            raise CustomHTTPException(422, message="Enter their name.", errors={"full_name": "Required."})
+        req.full_name = full_name[:100]
+    if email is not None:
+        email = email.strip()
+        if email.lower() != (req.email or "").strip().lower():
+            clash = await session.scalar(
+                select(R.id).where(
+                    R.event_id == event.id, R.id != req.id, R.status.in_(OPEN),
+                    func.lower(func.btrim(R.email)) == email.lower(),
+                ).limit(1)
+            )
+            if clash is not None:
+                raise CustomHTTPException(
+                    409, message="Another request on this event already uses that email.",
+                    errors={"email": "Already used by another request on this event."},
+                )
+            taken = select(EventRegistrationsLink.id).where(
+                EventRegistrationsLink.event_id == event.id, EventRegistrationsLink.is_deleted == False,  # noqa: E712
+                user_service.same_email(EventRegistrationsLink.email, email),
+            )
+            if req.registration_id is not None:
+                taken = taken.where(EventRegistrationsLink.id != req.registration_id)
+            if await session.scalar(taken.limit(1)) is not None:
+                raise CustomHTTPException(
+                    409, message="Someone registered for this event already uses that email.",
+                    errors={"email": "Already used by a registration on this event."},
+                )
+        req.email = email
+    if phone is not None:
+        phone = phone.strip() or None
+        if phone and len(phone) > 15:
+            raise CustomHTTPException(422, message="Enter a valid phone number.", errors={"phone": "At most 15 characters."})
+        req.phone = phone
+    if answers is not None:
+        merged = answers_mod.bound({**(req.answers if isinstance(req.answers, dict) else {}), **answers})
+        req.answers = form_mod.prune(event.additional_details, merged) or None
+    req.updated_at = _now()
+
+    reg_id = req.registration_id
+    linked = None
+    if reg_id is not None:
+        linked = await session.scalar(
+            select(EventRegistrationsLink.id).where(
+                EventRegistrationsLink.id == reg_id, EventRegistrationsLink.is_deleted == False,  # noqa: E712
+            )
+        )
+    if linked is not None:
+        # Commits both: the request's change rides in the registration's commit.
+        await registration.update_registration(
+            session, user_id=user.id, event_id=event.id, registration_id=str(linked),
+            full_name=full_name, email=email, phone=phone, additional_details=answers,
+            as_admin=is_admin_user(user),
+        )
+    else:
+        await session.commit()
+
+    if answers is not None:
+        await missing_answers.after_answers_changed(session, event, await people.load_one(session, event, REQUEST, req.id))
+    await session.refresh(req)
+    ctx = await _context(session, [req])
+    return _club_item(req, ctx, Form(event.additional_details), _now())
 
 
 # ─── Confirming ──────────────────────────────────────────────────────────

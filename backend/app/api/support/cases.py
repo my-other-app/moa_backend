@@ -521,15 +521,46 @@ def row_out(case: SupportCases, names: dict, now: datetime) -> dict:
     }
 
 
-async def list_cases(session, user_id: int, *, tab: str = "open", page: int = 1, page_size: int = 25, **f) -> dict:
+#: The queue's orders besides its own (each tab's): the column clicked.
+CASE_SORTS = ("number", "subject", "requester", "priority", "status", "created", "updated", "due")
+
+
+def case_order(sort: Optional[str], order: Optional[str]) -> Optional[tuple]:
+    """ORDER BY for a column the agent clicked (None: the tab's own order).
+    Priority runs low → urgent; due is the first reply's, else the
+    resolution's. Blanks last either way; id breaks ties."""
+    if sort not in CASE_SORTS:
+        return None
+    C = SupportCases
+    from sqlalchemy import case as sql_case
+
+    columns = {
+        "number": C.number,
+        "subject": func.lower(C.subject),
+        "requester": func.lower(func.coalesce(C.requester_name, C.requester_email)),
+        "priority": sql_case({p: i for i, p in enumerate(PRIORITIES)}, value=C.priority, else_=-1),
+        "status": C.status,
+        "created": C.created_at,
+        "updated": C.updated_at,
+        "due": func.coalesce(C.first_reply_due, C.resolution_due),
+    }
+    column = columns[sort]
+    descending = order == "desc" if order in ("asc", "desc") else sort in ("created", "updated", "priority", "number")
+    return (column.desc().nulls_last(), C.id.desc()) if descending else (column.asc().nulls_last(), C.id.asc())
+
+
+async def list_cases(
+    session, user_id: int, *, tab: str = "open", page: int = 1, page_size: int = 25,
+    sort: Optional[str] = None, order: Optional[str] = None, **f,
+) -> dict:
     if tab not in TABS:
         raise _refuse(422, f"tab is one of {', '.join(TABS)}.", "INVALID_FILTER", {"field": "tab"})
     now = _now()
     C = SupportCases
     where = [tab_clause(tab, user_id), *filters(now=now, **f)]
     total = int(await session.scalar(select(func.count()).select_from(C).where(*where)) or 0)
-    order = (C.updated_at.desc(), C.id.desc()) if tab in ("resolved", "all", "spam") else (
-        func.coalesce(C.first_reply_due, C.created_at).asc(), C.id.asc()) if tab in ("unassigned",) else (C.updated_at.desc(), C.id.desc())
+    order = case_order(sort, order) or ((C.updated_at.desc(), C.id.desc()) if tab in ("resolved", "all", "spam") else (
+        func.coalesce(C.first_reply_due, C.created_at).asc(), C.id.asc()) if tab in ("unassigned",) else (C.updated_at.desc(), C.id.desc()))
     rows = (await session.scalars(
         select(C).where(*where).order_by(*order).limit(page_size).offset((page - 1) * page_size)
     )).all()

@@ -14,6 +14,8 @@ from app.api.approvals.schemas import (
     DeclineOut,
     ReopenIn,
     ReopenOut,
+    RequestClubItem,
+    RequestCorrectionIn,
     RequestPublic,
     RequestsMine,
     RequestsPage,
@@ -64,12 +66,35 @@ async def list_requests(
     after: str | None = Query(None, max_length=200, description="The `next` of the page before"),
     limit: int = Query(50, ge=1, le=200),
     missing: str | None = Query(None, max_length=100, description="Missing answers: 1 for any, or a question's key"),
+    sort: str = Query("submitted", pattern="^(" + "|".join(service.SORTS) + ")$", description="submitted, name or email"),
+    order: str | None = Query(None, pattern="^(asc|desc)$", description="asc or desc; unset: the queue oldest first, others newest first, names A-Z"),
 ) -> RequestsPage:
-    """Pending: the queue, oldest first. Any other status: newest first.
-    Keyset pages (`next`), the counts by status, and the places left."""
+    """By when they asked (the default): pending -- the queue -- oldest first,
+    any other status newest first. By name or email, A to Z; `order` turns
+    any of them round. Keyset pages (`next`, valid for the same sort and
+    order), the counts by status, and the places left."""
     event = await deliveries.event_for_club(session, user, event_id)
     return await service.club_list(
         session, event, status=None if status == "all" else status, q=q, after=after, limit=limit, missing=missing,
+        sort=sort, order=order,
+    )
+
+
+@router.patch("/events/registration/{event_id}/requests/{request_id}", summary="Correct a registration request")
+async def correct_request(
+    session: SessionDep, user: ClubAuth, event_id: int, request_id: str, body: RequestCorrectionIn,
+) -> RequestClubItem:
+    """Fix a person's name, email, phone or answers while their request is
+    under review (or after it was decided): nothing is decided or emailed.
+    A confirmed request whose registration is on the list is corrected there
+    too. Owner, admin and editor (door staff read only: club_access.policy);
+    a platform admin too, as they correct a registration -- a support case
+    is often exactly this."""
+    event = await deliveries.event_for_club(session, user, event_id)
+    return await service.correct(
+        session, event, request_id, user=user,
+        full_name=body.full_name, email=str(body.email) if body.email is not None else None,
+        phone=body.phone, answers=body.answers,
     )
 
 

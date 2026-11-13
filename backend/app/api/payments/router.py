@@ -274,6 +274,8 @@ async def list_payments_admin(
     search: str | None = Query(None, description="Payment, order or receipt id"),
     user_id: int | None = Query(None),
     gateway: str | None = Query(None, description="platform or club: whose Razorpay account took it"),
+    sort: str | None = Query(None, pattern="^(date|amount|status)$", description="date (default, newest first), amount or status"),
+    order: str | None = Query(None, pattern="^(asc|desc)$"),
 ) -> PaginatedResponse[AdminPaymentResponse]:
     """
     Every payment. There was no list endpoint at all, so the refund route
@@ -287,6 +289,8 @@ async def list_payments_admin(
         limit=pagination.limit,
         offset=pagination.offset,
         gateway=gateway,
+        sort=sort,
+        order=order,
     )
     items = [
         AdminPaymentResponse(

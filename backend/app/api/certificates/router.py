@@ -134,9 +134,11 @@ async def list_certificates(
     search: Optional[str] = Query(None, max_length=100),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
+    sort: Optional[str] = Query(None, pattern="^(ticket|name|number|issued)$", description="ticket (default), name, number or issued"),
+    order: Optional[str] = Query(None, pattern="^(asc|desc)$"),
 ) -> CertificatePage:
     event = await deliveries.event_for_club(session, user, event_id)
-    return CertificatePage(**await service.list_certificates(session, event, status=status, search=search, page=page, page_size=page_size))
+    return CertificatePage(**await service.list_certificates(session, event, status=status, search=search, page=page, page_size=page_size, sort=sort, order=order))
 
 
 # ─── The public verifier ────────────────────────────────────────────────────

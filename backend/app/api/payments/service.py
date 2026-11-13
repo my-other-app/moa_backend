@@ -738,9 +738,12 @@ async def list_payments(
     limit: int = 20,
     offset: int = 0,
     gateway: str | None = None,
+    sort: str | None = None,
+    order: str | None = None,
 ):
     """
-    Every payment, for an admin. `gateway`: "platform" for those paid into
+    Every payment, for an admin. `sort`: date (the default, newest first),
+    amount (largest first) or status; `order` turns it round. `gateway`: "platform" for those paid into
     the platform's Razorpay account, "club" for those paid into a club's own.
 
     There was no way to list these at all: the only payment route an admin had
@@ -797,9 +800,10 @@ async def list_payments(
         count_query = count_query.where(condition)
 
     total = await session.scalar(count_query)
-    rows = await session.scalars(
-        query.order_by(PaymentLogs.created_at.desc()).limit(limit).offset(offset)
-    )
+    column = {"amount": PaymentLogs.amount, "status": PaymentLogs.status}.get(sort or "", PaymentLogs.created_at)
+    descending = order == "desc" if order in ("asc", "desc") else sort != "status"
+    ordering = (column.desc(), PaymentLogs.id.desc()) if descending else (column.asc(), PaymentLogs.id.asc())
+    rows = await session.scalars(query.order_by(*ordering).limit(limit).offset(offset))
     return list(rows), (total or 0)
 
 

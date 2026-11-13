@@ -104,9 +104,11 @@ async def delete_item(session: SessionDep, user: ClubAuth, event_id: int, item_i
 
 
 @router.get("/orders", summary="Who bought what, and whether they have it yet")
-async def orders(session: SessionDep, user: ClubAuth, event_id: int, q: Optional[str] = Query(None, max_length=120), status: Optional[str] = Query(None, pattern="^(paid|refunded|pending|oversold)$"), page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)) -> OrdersPage:
+async def orders(session: SessionDep, user: ClubAuth, event_id: int, q: Optional[str] = Query(None, max_length=120), status: Optional[str] = Query(None, pattern="^(paid|refunded|pending|oversold)$"), page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100),
+                 sort: Optional[str] = Query(None, pattern="^(newest|name|total|handed)$", description="newest (default), name, total or handed"),
+                 order: Optional[str] = Query(None, pattern="^(asc|desc)$")) -> OrdersPage:
     event = await deliveries.event_for_club(session, user, event_id)
-    return OrdersPage(**await service.orders(session, event, q=q, status=status, page=page, page_size=page_size))
+    return OrdersPage(**await service.orders(session, event, q=q, status=status, page=page, page_size=page_size, sort=sort, order=order))
 
 
 @router.post("/orders/{order_id}/handover", summary="Mark an order handed over")

@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID
 
-from pydantic import Field, model_validator
+from pydantic import EmailStr, Field, model_validator
 
 from app.api.auth.schemas import Token
 from app.core.response.base_model import CustomBaseModel
@@ -120,6 +120,16 @@ class RequestsPage(CustomBaseModel):
     counts: RequestCounts
     #: Null: no cap.
     places_left: Optional[int] = None
+
+
+class RequestCorrectionIn(CustomBaseModel):
+    """The organiser's correction of a request: given fields only. Answers
+    merge into theirs, by question key."""
+
+    full_name: Optional[str] = Field(None, min_length=1, max_length=100)
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = Field(None, max_length=15)
+    answers: Optional[dict[str, Any]] = None
 
 
 class ApproveIn(CustomBaseModel):

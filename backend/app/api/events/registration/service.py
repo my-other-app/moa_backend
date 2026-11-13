@@ -709,6 +709,28 @@ async def register_event(
     }
 
 
+#: The guest list's orders: the column, and whether it runs newest first unasked.
+REGISTRATION_SORTS = ("name", "email", "registered", "checked_in")
+
+
+def registration_order(sort: str | None, order: str | None) -> tuple:
+    """ORDER BY for the guest list: the sort's column (nulls last either
+    way), then id, so pages never overlap or skip."""
+    L = EventRegistrationsLink
+    columns = {
+        "name": func.lower(L.full_name),
+        "email": func.lower(L.email),
+        "registered": L.created_at,
+        "checked_in": L.attended_on,
+    }
+    sort = sort if sort in columns else "name"
+    descending = (order == "desc") if order in ("asc", "desc") else sort in ("registered", "checked_in")
+    column = columns[sort]
+    if descending:
+        return column.desc().nulls_last(), L.id.desc()
+    return column.asc().nulls_last(), L.id.asc()
+
+
 async def list_event_registrations(
     session: AsyncSession,
     user_id: int,
@@ -722,7 +744,12 @@ async def list_event_registrations(
     role: RegistrationRole | None = None,
     delivery: str | None = None,
     missing: str | None = None,
+    sort: str = "name",
+    order: str | None = None,
 ):
+    """A page of the event's guest list. `sort`: name (the default, A to Z),
+    email, registered (newest first) or checked_in (latest first, the not
+    yet checked in last); `order` (asc or desc) turns any of them round."""
     event = await session.execute(
         select(Events).filter(Events.id == event_id).options(joinedload(Events.club))
     )
@@ -794,10 +821,10 @@ async def list_event_registrations(
 
     for condition in conditions:
         query = query.where(condition)
-    # By name, as a list somebody reads from top to bottom: lower(name), id,
-    # which ix_registrations_event_name walks in order, so a page reads its
-    # rows rather than sorting the whole event first.
-    query = query.order_by(func.lower(EventRegistrationsLink.full_name), EventRegistrationsLink.id)
+    # By name (the default), as a list somebody reads from top to bottom:
+    # lower(name), id, which ix_registrations_event_name walks in order, so a
+    # page reads its rows rather than sorting the whole event first.
+    query = query.order_by(*registration_order(sort, order))
 
     # Get total count before pagination
     # Use a separate count query to avoid issues with joinedload in subqueries

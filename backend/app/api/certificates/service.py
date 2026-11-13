@@ -330,8 +330,22 @@ def _row(reg: EventRegistrationsLink, sends: list) -> dict:
     }
 
 
+def _certificate_order(sort: Optional[str], order: Optional[str]) -> tuple:
+    L = EventRegistrationsLink
+    column = {
+        "name": func.lower(L.full_name), "number": L.certificate_no, "issued": L.certificate_issued_at,
+    }.get(sort or "", L.ticket_id)
+    descending = order == "desc" if order in ("asc", "desc") else sort == "issued"
+    return (column.desc().nulls_last(), L.id.desc()) if descending else (column.asc().nulls_last(), L.id.asc())
+
+
+#: The certificates list's orders: ticket (the default), name, number, issued.
+CERTIFICATE_SORTS = ("ticket", "name", "number", "issued")
+
+
 async def list_certificates(
-    session, event: Events, *, status: Optional[str], search: Optional[str], page: int, page_size: int
+    session, event: Events, *, status: Optional[str], search: Optional[str], page: int, page_size: int,
+    sort: Optional[str] = None, order: Optional[str] = None,
 ) -> dict:
     q = _active(event.id).where(EventRegistrationsLink.certificate_issued_at.isnot(None))
     if status == "issued":
@@ -355,7 +369,7 @@ async def list_certificates(
     page_size = max(1, min(page_size, 200))
     regs = list(
         await session.scalars(
-            q.order_by(EventRegistrationsLink.ticket_id).limit(page_size).offset((page - 1) * page_size)
+            q.order_by(*_certificate_order(sort, order)).limit(page_size).offset((page - 1) * page_size)
         )
     )
     sends = await deliveries.by_registration(session, event.id, DeliveryKind.certificate, [r.id for r in regs])

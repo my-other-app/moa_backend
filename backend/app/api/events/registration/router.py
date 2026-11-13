@@ -260,6 +260,8 @@ async def list_event_registration(
     role: RegistrationRole | None = Query(None),
     delivery: str | None = Query(None, pattern="^(not_delivered)$", description="Only guests not reached on any channel"),
     missing: str | None = Query(None, max_length=100, description="Missing answers: 1 for any, or a question's key"),
+    sort: str = Query("name", pattern="^(name|email|registered|checked_in)$", description="name, email, registered or checked_in"),
+    order: str | None = Query(None, pattern="^(asc|desc)$", description="asc or desc; unset: names A-Z, dates newest first"),
     session: SessionDep = SessionDep,
 ) -> PaginatedResponse[EventRegistrationPublicMin]:
     result, total = await service.list_event_registrations(
@@ -275,6 +277,8 @@ async def list_event_registration(
         role=role,
         delivery=delivery,
         missing=missing,
+        sort=sort,
+        order=order,
     )
     return paginated_response(result, request, EventRegistrationPublicMin, total=total)
 
@@ -286,6 +290,8 @@ async def list_event_attendees(
     pagination: PaginationParams,
     event_id: int,
     search: str | None = Query(None, description="Search by name, email or ticket ID"),
+    sort: str = Query("name", pattern="^(name|email|registered|checked_in)$", description="name, email, registered or checked_in"),
+    order: str | None = Query(None, pattern="^(asc|desc)$", description="asc or desc; unset: names A-Z, dates newest first"),
     session: SessionDep = SessionDep,
 ) -> PaginatedResponse[EventRegistrationPublicMin]:
     """List only attendees who have checked in (is_attended=True)."""
@@ -299,6 +305,8 @@ async def list_event_attendees(
         offset=pagination.offset,
         search=search,
         as_admin=is_admin_user(user),
+        sort=sort,
+        order=order,
     )
     return paginated_response(result, request, EventRegistrationPublicMin, total=total)
 

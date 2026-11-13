@@ -35,6 +35,7 @@ from app.api.ticketing.schemas import (
     TicketTypesSave,
     WaitlistClubOut,
     WaitlistEntryClub,
+    WaitlistEntryCorrectionIn,
     WaitlistEntryPublic,
     WaitlistJoinIn,
     WaitlistJoinOut,
@@ -244,9 +245,14 @@ async def club_waitlist(
     session: SessionDep, user: ClubAuth, event_id: int,
     status: str | None = Query(None, pattern="^(waiting|offered|claimed|expired|removed|left)$"),
     limit: int = Query(200, ge=1, le=1000), offset: int = Query(0, ge=0),
+    q: str | None = Query(None, max_length=100, description="Name, email or phone contains"),
+    sort: str = Query("line", pattern="^(line|name|email|joined)$", description="line, name, email or joined"),
+    order: str | None = Query(None, pattern="^(asc|desc)$", description="asc or desc; unset: the line's order, names A-Z, joined newest first"),
 ) -> WaitlistClubOut:
     event = await deliveries.event_for_club(session, user, event_id)
-    rows, total = await waitlist.entries(session, event.id, status=status, limit=limit, offset=offset)
+    rows, total = await waitlist.entries(
+        session, event.id, status=status, limit=limit, offset=offset, q=q, sort=sort, order=order,
+    )
     names = await types_mod.names(session, [r.ticket_type_id for r in rows])
     positions = {r.id: await waitlist.position(session, r) for r in rows if r.status == "waiting"}
     return {
@@ -255,6 +261,21 @@ async def club_waitlist(
         "entries": [await _entry_club(session, r, names, positions) for r in rows],
         "total": total,
     }
+
+
+@router.patch("/events/{event_id}/ticketing/waitlist/{entry_id}", summary="Correct someone's place in line")
+async def correct_waitlist_entry(
+    session: SessionDep, user: ClubAuth, event_id: int, entry_id: str, body: WaitlistEntryCorrectionIn,
+) -> WaitlistEntryClub:
+    """Their name, email or phone; their place is kept and nothing is sent."""
+    event = await deliveries.event_for_club(session, user, event_id)
+    entry = await waitlist.correct_entry(
+        session, event.id, entry_id, full_name=body.full_name,
+        email=str(body.email) if body.email is not None else None, phone=body.phone,
+    )
+    names = await types_mod.names(session, [entry.ticket_type_id])
+    positions = {entry.id: await waitlist.position(session, entry)} if entry.status == "waiting" else {}
+    return await _entry_club(session, entry, names, positions)
 
 
 @router.put("/events/{event_id}/ticketing/waitlist/settings", summary="Turn the waiting list on or off; how long an offer holds")

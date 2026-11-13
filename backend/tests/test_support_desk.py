@@ -503,3 +503,20 @@ def test_working_hours_count_monday_to_saturday_0930_to_1830_ist():
     assert hours.add_working_hours(early, 2).astimezone(ist) == datetime(2026, 11, 11, 11, 30, tzinfo=ist)
     with pytest.raises(Exception):
         hours.validate({"working_hours": {"days": [], "start": "09:30", "end": "18:30"}})
+
+
+async def test_the_queue_sorts_by_a_column_either_way(client, session, desk):
+    a = (await ask(client, email="s1@example.org", subject="Zebra crossing", topic="account")).json()
+    b = (await ask(client, email="s2@example.org", subject="apple pay", topic="account")).json()
+    url = f"{API}/admin/support/cases?tab=all"
+
+    def ids(r):
+        return [i["id"] for i in r.json()["items"]]
+
+    assert ids(await client.get(f"{url}&sort=subject", headers=desk.h["sup"])) == [b["id"], a["id"]]
+    assert ids(await client.get(f"{url}&sort=subject&order=desc", headers=desk.h["sup"])) == [a["id"], b["id"]]
+    # Numbers: newest (highest) first unasked.
+    assert ids(await client.get(f"{url}&sort=number", headers=desk.h["sup"])) == [b["id"], a["id"]]
+    assert ids(await client.get(f"{url}&sort=number&order=asc", headers=desk.h["sup"])) == [a["id"], b["id"]]
+    assert (await client.get(f"{url}&sort=height", headers=desk.h["sup"])).status_code == 422
+    assert (await client.get(f"{url}&sort=subject&order=up", headers=desk.h["sup"])).status_code == 422
