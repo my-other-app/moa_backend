@@ -42,16 +42,22 @@ def parallel_ids(rows: list) -> set:
 def _speaker_photo_url(r: AgendaItems) -> Optional[str]:
     """The event page shows it, so a photo from the event's own uploads is a
     public picture: signed for a week (objects.public_url). The key is the
-    organiser's to give and is not checked on save, so any other key keeps
-    the hour it always had rather than a week of anyone's file."""
+    organiser's to give, so only a picture has a link at all: a designer's
+    upload (an earlier event's, on a copied agenda: the hour it always had)
+    or a public picture (a speaker's photo). Any other key shows no photo."""
     key = r.speaker_photo_key
     if not key:
         return None
     from app.api.event_designs.router import _layout_prefix
+    from app.core.storage import bucket, media
 
-    if r.event_id is not None and key.startswith(_layout_prefix(r.event_id)) and ".." not in key:
+    if r.event_id is not None and key.startswith(_layout_prefix(r.event_id)) and bucket.is_design_upload(key):
         return objects.public_url(key)
-    return objects.presigned_url(key)
+    if media.is_public(key):
+        return objects.public_url(key)
+    if bucket.is_design_upload(key):
+        return objects.presigned_url(key)
+    return None
 
 
 def item_out(r: AgendaItems, parallel: set, speakers: Optional[dict] = None) -> dict:

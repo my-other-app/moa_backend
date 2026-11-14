@@ -118,10 +118,33 @@ def image_prefix(*, event_id: Optional[int] = None, club_id: Optional[int] = Non
     return bucket.prefix("clubs", str(club_id), "email")
 
 
-def _own_key(key: str, *, event_id: Optional[int], club_id: int) -> bool:
-    if key.startswith(image_prefix(club_id=club_id)):
-        return True
-    return event_id is not None and key.startswith(image_prefix(event_id=event_id))
+def _own_key(key: str, *, event_id: Optional[int], club_id: Optional[int]) -> bool:
+    """Whether an uploaded picture's key is in the club's email folder or
+    the event's own folder (bucket.under: no `..` segments)."""
+    folders = []
+    if club_id is not None:
+        folders.append(image_prefix(club_id=club_id))
+    if event_id:
+        folders.append(image_prefix(event_id=event_id))
+    return bucket.under(key, folders)
+
+
+def own_design(design: EmailDesign, *, event_id: Optional[int], club_id: Optional[int]) -> EmailDesign:
+    """The design as a preview, a test send or a typed message may use it:
+    an uploaded picture outside the club's email folder and the event's own
+    folder is left out, and its block draws as no image, just as saving the
+    design refuses it. Every request that brings a design of its own goes
+    through this; a kept template was checked when it was saved."""
+    def foreign(b) -> bool:
+        return b.source == "upload" and bool(b.image_key) and not _own_key(b.image_key, event_id=event_id, club_id=club_id)
+
+    if not any(foreign(b) for b in _image_blocks(design)):
+        return design
+    out = design.model_copy(deep=True)
+    for b in _image_blocks(out):
+        if foreign(b):
+            b.image_key = None
+    return out
 
 
 # --- templates ------------------------------------------------------------------
@@ -639,7 +662,10 @@ async def loaded_registration(session, event_id: int, registration_id) -> EventR
 
 async def preview(session, event, subject: str, design: EmailDesign, *, registration_id=None, club_id: Optional[int] = None) -> dict:
     """What the editor shows: sample values, or a real guest's, with pictures
-    by URL and the QR as data so nothing needs the network."""
+    by URL and the QR as data so nothing needs the network. Only the club's
+    and the event's own uploads are shown (own_design); the library's sample
+    event has no id, so its preview shows the club's alone."""
+    design = own_design(design, event_id=getattr(event, "id", None), club_id=club_id if club_id is not None else getattr(event, "club_id", None))
     reg = await loaded_registration(session, event.id, registration_id) if registration_id is not None and getattr(event, "id", 0) else None
     values = guest_values(event, reg) if reg is not None else sample_values(event)
     if reg is not None:
@@ -659,6 +685,7 @@ async def preview(session, event, subject: str, design: EmailDesign, *, registra
 
 async def send_test(session, event: Events, *, to: str, subject: str, design: EmailDesign, attachments: EmailAttachments, registration_id=None) -> dict:
     reg = await loaded_registration(session, event.id, registration_id) if registration_id is not None else None
+    design = own_design(design, event_id=event.id, club_id=event.club_id)
     out = await compose(session, event, reg, subject, design, attachments, brand=await brand_primary(session, event), logo_url=logo_url_of(event))
     club = getattr(event, "club", None)
     # Nothing to write: the request's connection goes back before SES answers.
@@ -826,7 +853,7 @@ async def design_for_broadcast(session, event: Events, body: str, design: Option
 async def send_broadcast(session, event: Events, *, subject: str, body: str, design: Optional[EmailDesign], attachments: EmailAttachments, audience: EmailAudience, client_ref=None, created_by=None) -> Messages:
     if not body.strip() and not (design is not None and design.blocks):
         raise CustomHTTPException(422, message="Write something to send.", errors={"fields": {"body": "Write something to send."}})
-    full = await design_for_broadcast(session, event, body, design)
+    full = own_design(await design_for_broadcast(session, event, body, design), event_id=event.id, club_id=event.club_id)
     problems = design_problems(subject, full)
     if problems:
         raise CustomHTTPException(422, message=problems[0], errors={"fields": {"body": problems}})

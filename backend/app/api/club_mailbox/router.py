@@ -25,7 +25,7 @@ from typing import Optional
 from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from app.api.club_mailbox import access, alerts, export, handles, inbound, live, mail, outbound, providers, service, store
+from app.api.club_mailbox import access, alerts, export, handles, inbound, incoming, live, mail, outbound, providers, service, store
 from app.api.club_mailbox.schemas import (
     AddressIn,
     AdminMailboxOut,
@@ -580,23 +580,18 @@ async def ses_hook(request: Request, session: SessionDep) -> Response:
     except providers.NotOurs as exc:
         logger.info("mailbox hook: a notification not for the mailbox (%s)", exc)
         return _answer(200, {"ok": True, "reason": "not_ours"})
-    # The raw mail is read at most once, for whoever it is for: the platform's
-    # own inbox (admin@, info@, ..., app/api/platform_mail), the team's desk
-    # (support@ / sales@, app/api/support/inbound.py) and the clubs.
-    raw: dict = {}
-
-    def reader(r):
-        if "mail" not in raw:
-            raw["mail"] = providers.read(r)
-        return raw["mail"]
-
+    # The raw mail is read and parsed at most once, off the event loop, for
+    # whoever it is for: the platform's own inbox (admin@, info@, ...,
+    # app/api/platform_mail), the team's desk (support@ / sales@,
+    # app/api/support/inbound.py) and the clubs (incoming.py).
+    shared = incoming.Incoming(received, providers.read)
     try:
         from app.api.platform_mail import inbound as platform_inbound
         from app.api.support import inbound as desk_inbound
 
-        platform = await platform_inbound.receive(session, received, reader)
-        desk = await desk_inbound.receive(session, received, reader)
-        outcome = await inbound.receive(session, received, reader=reader)
+        platform = await platform_inbound.receive(session, received, shared)
+        desk = await desk_inbound.receive(session, received, shared)
+        outcome = await inbound.receive(session, received, shared)
     except providers.Unreadable as exc:
         logger.warning("mailbox hook: mail %s couldn't be read from the bucket (%s); SNS will deliver again",
                        received.provider_message_id[:24], exc)
@@ -641,7 +636,7 @@ async def cloudflare_hook(request: Request, session: SessionDep) -> Response:
     if problem is not None:
         logger.warning("mailbox hook (cloudflare) refused: %s", problem)
         return _answer(401, {"ok": False, "reason": problem})
-    limit = int(settings.MAILBOX_INBOUND_MAX_MB or 40) * 1024 * 1024
+    limit = int(settings.MAILBOX_INBOUND_MAX_MB or 15) * 1024 * 1024
     if delivery.size > limit:
         return _answer(200, {"ok": True, "action": "reject", "reason": "too_large", "text": cloudflare.REJECT_TEXT["too_large"]})
     chunks, got = [], 0
@@ -653,15 +648,18 @@ async def cloudflare_hook(request: Request, session: SessionDep) -> Response:
     raw = b"".join(chunks)
     if len(raw) != delivery.size:
         return _answer(400, {"ok": False, "reason": "size"})
-    received = cloudflare.received(delivery, raw)
-    reader = cloudflare.reader_for(raw)
+    # Its id from the headers alone (the Message-ID), so a delivery kept
+    # before is known without parsing it; the parse itself is made once, off
+    # the event loop, for all three inboxes (incoming.py).
+    received = await asyncio.to_thread(cloudflare.received, delivery, raw)
+    shared = incoming.Incoming(received, cloudflare.reader_for(raw))
     try:
         from app.api.platform_mail import inbound as platform_inbound
         from app.api.support import inbound as desk_inbound
 
-        platform = await platform_inbound.receive(session, received, reader)
-        desk = await desk_inbound.receive(session, received, reader)
-        outcome = await inbound.receive(session, received, reader=reader)
+        platform = await platform_inbound.receive(session, received, shared)
+        desk = await desk_inbound.receive(session, received, shared)
+        outcome = await inbound.receive(session, received, shared)
     except Exception as exc:  # noqa: BLE001 - never a mail or an address in the log
         logger.warning("mailbox hook (cloudflare): mail %s failed (%s)", received.provider_message_id[:24], type(exc).__name__)
         await session.rollback()

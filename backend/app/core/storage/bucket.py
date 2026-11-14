@@ -8,6 +8,7 @@ configs saved before that rule existed.
 from __future__ import annotations
 
 import os
+import re
 from typing import Iterable, Optional
 from urllib.parse import unquote, urlsplit
 
@@ -86,3 +87,38 @@ def under(key: Optional[str], prefixes: Iterable[str]) -> bool:
 def prefix(*parts: str) -> str:
     """A folder under the bucket's base path, ending in a slash."""
     return os.path.join(settings.S3_BASE_PATH, *parts).rstrip("/") + "/"
+
+
+# One file directly inside one of these folders. Matched after whatever base
+# path the key was stored under (as templates_images' folders are), so a key
+# kept before S3_BASE_PATH changed still reads; never with a `..` segment.
+_FILE = r"[A-Za-z0-9][A-Za-z0-9_.-]{0,199}"
+_DESIGN_UPLOAD = re.compile(rf"(?:^|/)(?:events|clubs)/[0-9]{{1,12}}/layout/{_FILE}$")
+_PRODUCT_PHOTO = re.compile(rf"(?:^|/)(?:events|clubs)/[0-9]{{1,12}}/merch/{_FILE}$")
+_PUBLIC_PICTURE = re.compile(rf"(?:^|/)(?:{media._FOLDERS})/{_FILE}\.(?:{media._EXTS})$")
+
+
+def _matches(pattern: "re.Pattern", key: Optional[str]) -> bool:
+    return bool(key) and isinstance(key, str) and ".." not in key.split("/") and bool(pattern.search(key))
+
+
+def is_design_upload(key: Optional[str]) -> bool:
+    """Whether `key` is one of the designers' uploads: a file in an event's
+    or a club's `layout` folder (event_designs, club_designs). A design names
+    its pictures by key, and only these are read or signed for it."""
+    return _matches(_DESIGN_UPLOAD, key)
+
+
+def is_product_photo(key: Optional[str]) -> bool:
+    """Whether `key` is a product photo: a file in an event's or a club's
+    `merch` folder (merch.service.store_photo, store.service.club_photo)."""
+    return _matches(_PRODUCT_PHOTO, key)
+
+
+def is_design_picture(key: Optional[str]) -> bool:
+    """Whether a design may draw `key` when it names it by address: a public
+    picture (a logo, a poster: media.PUBLIC_FOLDERS), a template's image
+    (templates_images), or a designer's upload."""
+    from app.api.templates_images import allowed
+
+    return media.is_public(key) or _matches(_PUBLIC_PICTURE, key) or allowed(key) or is_design_upload(key)

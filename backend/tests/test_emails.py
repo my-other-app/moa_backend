@@ -502,3 +502,131 @@ async def test_an_email_picture_is_stored_off_the_event_loop(client, world, monk
     assert (await client.post(_url(world, "/images"), files=png, headers=world["club"])).status_code == 200
     assert (await client.post("/api/v1/clubs/me/emails/images", files=png, headers=world["club"])).status_code == 200
     assert len(threads) == 2 and all(t is not threading.main_thread() for t in threads)
+
+
+# --- uploaded pictures: only the club's and the event's own ----------------------
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"\0" * 16
+
+
+@pytest.fixture
+def bucket_reads(monkeypatch):
+    """Every key the email code signs or reads, without S3."""
+    from app.core.storage import objects
+
+    seen = {"signed": [], "read": []}
+
+    def sign(key, expires=3600):
+        seen["signed"].append(key)
+        return f"https://store.test/{key}?sig=1"
+
+    def read(key):
+        seen["read"].append(key)
+        return PNG
+
+    monkeypatch.setattr(objects, "presigned_url", sign)
+    monkeypatch.setattr(objects, "get_bytes", read)
+    return seen
+
+
+def _picture_keys(world):
+    event, club = world["event"], world["club_row"]
+    own = [f"{service.image_prefix(event_id=event.id)}email-own.png", f"{service.image_prefix(club_id=club.id)}email-lib.png"]
+    other = [
+        f"{service.image_prefix(club_id=club.id + 1000)}email-x.png",
+        f"{service.image_prefix(event_id=event.id + 1000)}email-y.png",
+        "docs/ticket/1/0-abc.pdf",
+        f"{service.image_prefix(event_id=event.id)}../../../docs/ticket/1/0-abc.pdf",
+    ]
+    return own, other
+
+
+def _design_with(design: dict, keys: list[str]) -> dict:
+    out = dict(design)
+    out["blocks"] = list(design["blocks"]) + [
+        {"kind": "image", "id": f"pic{i}", "source": "upload", "imageKey": k} for i, k in enumerate(keys)
+    ]
+    return out
+
+
+async def test_previews_and_test_sends_show_only_the_clubs_own_pictures(client, world, outbox, bucket_reads):
+    invite = _stage(await _journey(client, world), "INVITE")["template"]
+    own, other = _picture_keys(world)
+    design = _design_with(invite["design"], own + other)
+
+    preview = await client.post(_url(world, "/preview"), json={"subject": "Hi", "design": design}, headers=world["club"])
+    assert preview.status_code == 200, preview.text
+    assert bucket_reads["signed"] == own
+    html = preview.json()["html"]
+    assert all(f"https://store.test/{k}" in html for k in own)
+    assert not any(k in html for k in other)
+
+    test = await client.post(_url(world, "/test"), json={"subject": "Hi", "design": design, "to": "me@example.com"}, headers=world["club"])
+    assert test.status_code == 200, test.text
+    assert bucket_reads["read"] == own
+    (mail,) = outbox["sent"]
+    pictures = [a for a in mail["attachments"] if str(a.get("content_id", "")).startswith("img-")]
+    assert len(pictures) == 2
+    assert mail["html"].count('src="cid:img-') == 2
+
+
+async def test_the_library_preview_shows_only_the_clubs_own_pictures(client, world, bucket_reads):
+    library = await client.get("/api/v1/clubs/me/emails", headers=world["club"])
+    assert library.status_code == 200, library.text
+    design = library.json()[0]["design"]
+    own, other = _picture_keys(world)
+    club_key, event_key = own[1], own[0]
+    body = {"subject": "Hi", "design": _design_with(design, [club_key, event_key] + other)}
+    r = await client.post("/api/v1/clubs/me/emails/preview", json=body, headers=world["club"])
+    assert r.status_code == 200, r.text
+    # The library has no event: only the club's own email folder.
+    assert bucket_reads["signed"] == [club_key]
+    assert event_key not in r.json()["html"] and not any(k in r.json()["html"] for k in other)
+
+
+async def test_a_broadcast_carries_only_the_events_own_pictures(client, world, outbox, background, bucket_reads):
+    invite = _stage(await _journey(client, world), "INVITE")["template"]
+    own, other = _picture_keys(world)
+    body = {
+        "subject": "Doors at six", "body": "", "design": _design_with(invite["design"], own + other),
+        "audience": {"who": "CHECKED_IN", "roles": []},
+    }
+    r = await client.post(f"/api/v1/events/{world['event'].id}/messages", json=body, headers=world["club"])
+    assert r.status_code == 200, r.text
+    assert len(outbox["sent"]) == 2
+    assert set(bucket_reads["read"]) == set(own)
+    for mail in outbox["sent"]:
+        assert len([a for a in mail["attachments"] if str(a.get("content_id", "")).startswith("img-")]) == 2
+
+
+async def test_a_kept_template_sends_its_pictures(client, session, world, outbox, background, bucket_reads):
+    """A template kept by the club (a copied event's, say, whose pictures
+    are in the first event's folder) was checked when it was saved, and
+    sends as it is."""
+    from app.api.emails.models import EmailTemplates
+
+    reminder = _stage(await _journey(client, world), "REMINDER")["template"]
+    copied = f"{service.image_prefix(event_id=world['event'].id - 1)}email-earlier.png"
+    row = await session.get(EmailTemplates, reminder["id"])
+    row.design = _design_with(reminder["design"], [copied])
+    row.audience = {"who": "ALL", "roles": []}
+    await session.commit()
+    sent = await client.post(_url(world, f"/{reminder['id']}/send"), headers=world["club"])
+    assert sent.status_code == 200, sent.text
+    assert set(bucket_reads["read"]) == {copied} and len(outbox["sent"]) == 3
+
+
+def test_own_design_keeps_the_club_and_event_folders_only():
+    ev, club, other = service.image_prefix(event_id=7), service.image_prefix(club_id=3), service.image_prefix(club_id=4)
+    keys = [f"{ev}a.png", f"{club}b.png", f"{other}c.png", f"{ev}../../8/layout/d.png"]
+    blocks = [{"kind": "image", "id": f"b{i}", "source": "upload", "imageKey": k} for i, k in enumerate(keys)]
+    design = service.EmailDesign.model_validate({"blocks": blocks + [{"kind": "image", "id": "logo", "source": "org_logo"}]})
+
+    def kept(d):
+        return [b.image_key for b in d.blocks if b.kind == "image" and b.source == "upload"]
+
+    assert kept(service.own_design(design, event_id=7, club_id=3)) == [f"{ev}a.png", f"{club}b.png", None, None]
+    assert kept(service.own_design(design, event_id=None, club_id=3)) == [None, f"{club}b.png", None, None]
+    assert kept(service.own_design(design, event_id=0, club_id=None)) == [None, None, None, None]
+    # The design asked about is left as it was.
+    assert kept(design) == keys

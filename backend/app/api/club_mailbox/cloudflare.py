@@ -156,7 +156,7 @@ def received(delivery: Delivery, raw: bytes) -> providers.Received:
 
 def reader_for(raw: bytes):
     """The inbound pipeline's reader: the mail is already here."""
-    limit = int(settings.MAILBOX_INBOUND_MAX_MB or 40) * 1024 * 1024
+    limit = int(settings.MAILBOX_INBOUND_MAX_MB or 15) * 1024 * 1024
 
     def read(_received: providers.Received) -> bytes:
         if len(raw) > limit:

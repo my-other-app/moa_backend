@@ -46,7 +46,7 @@ def _event_key(answer: Optional[str], event_id) -> Optional[str]:
         return None
     base = (settings.S3_BASE_PATH or "").strip("/")
     rest = key[len(base):].lstrip("/") if base and key.startswith(base) else key.lstrip("/")
-    return key if rest.startswith(f"events/{event_id}/") else None
+    return key if rest.startswith(f"events/{event_id}/") and ".." not in rest.split("/") else None
 
 
 def _read(key: Optional[str]) -> Optional[bytes]:

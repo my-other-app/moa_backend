@@ -123,7 +123,7 @@ def _s3():
 def read(received: Received) -> bytes:
     """The raw MIME. Blocking (a worker thread's). TooLarge past the limit,
     Unreadable when the bucket can't be read now."""
-    limit = int(settings.MAILBOX_INBOUND_MAX_MB or 40) * 1024 * 1024
+    limit = int(settings.MAILBOX_INBOUND_MAX_MB or 15) * 1024 * 1024
     try:
         obj = _s3().get_object(Bucket=received.bucket, Key=received.key)
     except Exception as exc:  # noqa: BLE001

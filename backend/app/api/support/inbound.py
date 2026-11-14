@@ -21,20 +21,22 @@ each lead with a contact among the people on the mail (ours left out: the
 desk's addresses and the admins'), or a new lead (source `inbound_email`).
 
 The HTML is cleaned and the files kept privately as the club mailbox does
-(its parse and sanitise); card-like numbers are masked. Each mail is kept
-once, however often SNS delivers its notice. Nothing a mail says reaches a
-log.
+(its parse and sanitise, read and parsed once for every inbox it is for:
+club_mailbox/incoming.py); card-like numbers are masked. Each mail is kept
+once, however often SNS delivers its notice, and a delivery kept before is
+recognised by its provider's id before it is parsed again. Nothing a mail
+says reaches a log.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Callable, Optional
+from typing import Optional, Union
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 
-from app.api.club_mailbox import parse, providers
+from app.api.club_mailbox import incoming, parse, providers
 from app.api.support import cases, files, text
 from app.api.support.models import (
     CLOSED,
@@ -67,10 +69,11 @@ def ours() -> set[str]:
             (settings.SALES_FROM_ADDRESS or "").strip().lower()} - {""}
 
 
-async def receive(session, received: providers.Received, reader: Callable[[providers.Received], bytes]) -> dict:
+async def receive(session, received: providers.Received, reader: Union[incoming.Incoming, incoming.Reader, None] = None) -> dict:
     """Keep the mail for the desk and the sales team, as its recipients say.
     {"support": outcome, "sales": outcome} for the parts that applied; {}
-    when it is for neither (or the desk's mail is dormant). Raises
+    when it is for neither (or the desk's mail is dormant). `reader` is the
+    delivery's shared Incoming (or a reader to make one). Raises
     providers.Unreadable when the raw mail can't be read now."""
     support, sales = settings.support_inbound_addresses, settings.sales_inbound_addresses
     if not support and not sales:
@@ -82,21 +85,28 @@ async def receive(session, received: providers.Received, reader: Callable[[provi
     if received.virus:
         logger.warning("desk: mail %s dropped: SES found a virus", received.provider_message_id[:24])
         return {"dropped": "virus"}
+    # Kept before (the same delivery again): answered before it is read or parsed.
+    seen: dict = {}
+    if for_support and await _seen(session, received):
+        seen["support"] = "duplicate"
+    if for_sales and await _sales_seen(session, received):
+        seen["sales"] = "duplicate"
+    if len(seen) == for_support + for_sales:
+        return seen
+    mail = incoming.shared(received, reader)
     try:
-        raw = await asyncio.to_thread(reader, received)
+        parsed = await mail.parsed()
     except providers.TooLarge:
         logger.warning("desk: mail %s dropped: too large", received.provider_message_id[:24])
         return {"dropped": "too_large"}
-    try:
-        parsed = parse.parse(raw)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("desk: mail %s couldn't be parsed (%s); dropped", received.provider_message_id[:24], type(exc).__name__)
+    except incoming.Unparseable as exc:
+        logger.warning("desk: mail %s couldn't be parsed (%s); dropped", received.provider_message_id[:24], exc)
         return {"dropped": "unparseable"}
     out: dict = {}
     if for_support:
-        out["support"] = await keep_support(session, received, parsed)
+        out["support"] = seen.get("support") or await keep_support(session, received, parsed)
     if for_sales:
-        out["sales"] = await keep_sales(session, received, parsed)
+        out["sales"] = seen.get("sales") or await keep_sales(session, received, parsed)
     return out
 
 
@@ -109,6 +119,18 @@ async def _seen(session, received: providers.Received) -> bool:
             SupportMessages.kind == REPLY_IN, SupportMessages.provider == received.provider,
             SupportMessages.provider_message_id == received.provider_message_id,
         )
+    ) is not None
+
+
+async def _sales_seen(session, received: providers.Received) -> bool:
+    """Whether this delivery was logged on a lead already (all its leads
+    are logged in one transaction)."""
+    from app.api.leads.models import LeadActivities
+
+    return await session.scalar(
+        select(LeadActivities.id).where(
+            LeadActivities.provider == received.provider, LeadActivities.provider_message_id == received.provider_message_id,
+        ).limit(1)
     ) is not None
 
 
