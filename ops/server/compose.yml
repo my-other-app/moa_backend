@@ -17,13 +17,14 @@
 # Run it through ./dc (docker compose with both env files) or deploy.sh. A
 # bare `docker compose up` falls back to each app's :latest image.
 #
-# Memory and CPU, on 2 cores and 12 GB (docs/MOVE_TO_ORACLE.md, "Capacity";
+# Memory and CPU, on the 4 vCPU / 15 GB box the stack runs on since 28 Oct
+# (first planned for 2 cores and 12 GB, docs/MOVE_TO_ORACLE.md, "Capacity";
 # tests/test_oracle_stack.py holds these numbers):
 #   - mem_limit caps every service, so a leak or a spike is killed and
 #     restarted inside its own container, never Postgres by the kernel's OOM
-#     killer. Together they are 8 GB; the OS and Docker take about 1; the
-#     rest, and the 4 GB swapfile, absorb render and build-free spikes.
-#   - cpus caps what one service may take of the two cores.
+#     killer. Together they are about 10.5 GB; the OS and Docker take about
+#     1; the rest, and the swapfile, absorb render and build-free spikes.
+#   - cpus caps what one service may take of the four cores.
 #   - cpu_shares decides who gets them when they are contended: the API and
 #     Postgres first, the indexer and the admin portal last.
 #
@@ -51,11 +52,14 @@ x-backend: &backend
     APP_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:?POSTGRES_USER must be set in .env}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB must be set in .env}
     APP_DATABASE_URL_SYNC: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
     # Fixed by this stack, whatever the .env copied from the old box says:
-    # Caddy and the healthcheck reach the API on 8000; two uvicorn workers and
-    # one render thread each fit two cores (MOA_* in .env to change them).
+    # Caddy and the healthcheck reach the API on 8000; three uvicorn workers
+    # with two render threads each fit the API's three cores (MOA_* in .env
+    # to change them). Each worker keeps 10 connections and may open 15 more,
+    # so 3 workers stay inside Postgres's budget (see postgres below).
     APP_PORT: "8000"
-    APP_WORKERS: ${MOA_API_WORKERS:-2}
-    APP_RENDER_THREADS: ${MOA_RENDER_THREADS:-1}
+    APP_WORKERS: ${MOA_API_WORKERS:-3}
+    APP_RENDER_THREADS: ${MOA_RENDER_THREADS:-2}
+    APP_DB_MAX_OVERFLOW: ${APP_DB_MAX_OVERFLOW:-15}
     # Only Caddy and the Next servers can reach the API (it publishes no
     # port), so uvicorn may believe their X-Forwarded-Proto: the API then
     # knows it was asked over HTTPS (cookies marked Secure).
@@ -135,9 +139,10 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set in .env}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
       POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB must be set in .env}
-    # Tuned for a 2.5 GB share of a 12 GB, 2-core box. Connections: the API's
-    # 2 workers x (10 + 20) and the worker's 4 + 8 are 72 of the 97 left
-    # after the superuser's 3 (docs/OPERATIONS.md, section 10).
+    # Tuned for a 2.5 GB share (memory unchanged on the 15 GB box: the data
+    # is small). Connections: the API's 3 workers x (10 + 15) and the
+    # worker's 4 + 8 are 87 of the 97 left after the superuser's 3
+    # (docs/OPERATIONS.md, section 10).
     # log_parameter_max_length=0: a slow statement is logged without its
     # values, which are personal data.
     command:
@@ -191,7 +196,7 @@ services:
     # A clean shutdown (a checkpoint) rather than a crash recovery next time.
     stop_grace_period: 60s
     mem_limit: 2560m
-    cpus: 2
+    cpus: 3
     cpu_shares: 1024
     logging: *logging
 
@@ -296,10 +301,10 @@ services:
         soft: 65536
         hard: 65536
     stop_grace_period: 15s
-    # 2 workers at 0.35-0.4 GB each once imported, plus the render pool's
+    # 3 workers at 0.35-0.4 GB each once imported, plus the render pools'
     # peaks (wkhtmltopdf, tickets, certificates, wallet passes).
-    mem_limit: 2048m
-    cpus: 2
+    mem_limit: 3072m
+    cpus: 3
     cpu_shares: 1024
 
   # The job queue's worker (app/worker.py): the API's image and settings,
@@ -311,11 +316,15 @@ services:
     command: ["python", "-m", "app.worker"]
     environment:
       <<: *backend-environment
-      # Two jobs at once on two cores shared with the API.
-      APP_JOBS_CONCURRENCY: "2"
+      # Six jobs at once, and no single kind of long job may take more than
+      # one of them, so one bulk send, import or broadcast alone never holds
+      # back approval mails, receipts, pushes and waitlist offers
+      # (MOA_JOBS_CONCURRENCY and APP_JOBS_LIMITS in .env to change them).
+      APP_JOBS_CONCURRENCY: ${MOA_JOBS_CONCURRENCY:-6}
+      APP_JOBS_LIMITS: ${APP_JOBS_LIMITS:-deliveries.send=1,emails.send_message=1,emails.review_resend=1,notifications.push=1,threads.tell_followers=1,club_whatsapp.broadcast=1,registrations.import=1}
     stop_grace_period: 35s
-    mem_limit: 768m
-    cpus: 1
+    mem_limit: 1024m
+    cpus: 1.5
     cpu_shares: 512
 
   # The render service (backend/render/Dockerfile, app/core/doc_designs):
