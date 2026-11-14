@@ -488,14 +488,58 @@ async def refresh_access_token(
     return Token(access_token=access_token, refresh_token=refresh_token, token_type="Bearer")
 
 
-@router.post("/logout", summary="clear auth cookies")
-async def logout(response: Response):
-    """Clears the httpOnly auth cookies set by /auth/token and /auth/refresh.
-    Needed since client-side JS can't clear httpOnly cookies itself (used by
-    the cookie-auth web frontends; a no-op for clients that never received
-    these cookies in the first place)."""
+@router.post("/logout", summary="Sign out: end this session and clear the auth cookies")
+async def logout(
+    request: Request,
+    response: Response,
+    session: SessionDep,
+    token: Optional[str] = Form(None),
+):
+    """Ends the session on the server, then clears the httpOnly auth cookies
+    set by /auth/token and /auth/refresh (client-side JS can't clear those
+    itself).
+
+    The session is named by the refresh token -- the `token` form field, as
+    /auth/refresh takes it, or the `refresh_token` cookie -- and by a live
+    access token when one is sent too. The refresh token is what matters: it
+    outlives the access token, so a sign-out after the access token expired
+    (a dashboard tab left open, a phone back from the background) still ends
+    the session, and a copied cookie stops working at once instead of when
+    it would have expired. Always 200, whatever was or wasn't sent."""
+    from app.api.auth import sessions as session_store
+
+    sent = [token, request.cookies.get(REFRESH_TOKEN_COOKIE_NAME)]
+    auth = request.headers.get("authorization") or ""
+    sent.append(auth[7:] if auth.lower().startswith("bearer ") else request.cookies.get(ACCESS_TOKEN_COOKIE_NAME))
+    ended: set = set()
+    for raw in sent:
+        named = _session_named(raw)
+        if named is None or named in ended:
+            continue
+        ended.add(named)
+        sid, user_id = named
+        try:
+            await session_store.revoke(session, sid, user_id)
+        except Exception:  # noqa: BLE001 - the cookies are cleared whatever happens here
+            await session.rollback()
+            logger.warning("sign-out could not end session %s", sid, exc_info=True)
     _clear_auth_cookies(response)
     return {"success": True}
+
+
+def _session_named(raw: Optional[str]) -> Optional[tuple[str, int]]:
+    """(session id, user id) from one of our tokens, signature and expiry
+    checked; None for nothing, a forged or expired token, or one from
+    before sessions (it names none)."""
+    if not raw:
+        return None
+    try:
+        payload = AuthTokenData(**decode_jwt_token(raw))
+    except Exception:  # noqa: BLE001 - expired, forged, malformed: nothing to end
+        return None
+    if not payload.sid or payload.token_type not in ("refresh_token", "access_token"):
+        return None
+    return str(payload.sid), int(payload.user_id)
 
 
 @router.get("/me", response_model=AuthUser, summary="get current user info")

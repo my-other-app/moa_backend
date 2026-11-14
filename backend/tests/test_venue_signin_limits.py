@@ -60,3 +60,44 @@ async def test_the_address_is_only_a_ceiling_for_a_hall(client, make_user, monke
     tokens = [(await _sign_in(client, "ceiling@example.com"))["refresh_token"] for _ in range(4)]
     client.cookies.clear()
     assert [(await _refresh(client, t)).status_code for t in tokens] == [200, 200, 200, 429]
+
+
+async def test_signing_out_with_an_expired_access_token_ends_the_session(client, make_user):
+    await make_user(email="signout-expired@example.com", password="Password123!")
+    signed_in = await _sign_in(client, "signout-expired@example.com")
+    client.cookies.clear()
+    # Only the refresh token, as a client whose access token has expired sends it.
+    out = await client.post(f"{API}/auth/logout", data={"token": signed_in["refresh_token"]})
+    assert out.status_code == 200 and out.json() == {"success": True}
+    again = await _refresh(client, signed_in["refresh_token"])
+    assert again.status_code == 401
+    assert (await client.get(f"{API}/auth/me", headers=auth_header(signed_in["access_token"]))).status_code == 401
+
+
+async def test_signing_out_by_the_refresh_cookie_alone_ends_the_session(client, make_user):
+    await make_user(email="signout-cookie@example.com", password="Password123!")
+    signed_in = await _sign_in(client, "signout-cookie@example.com")
+    copied = client.cookies.get("refresh_token")
+    assert copied == signed_in["refresh_token"]
+    # The access cookie has expired; the refresh cookie is still there.
+    client.cookies.delete("access_token")
+    assert (await client.post(f"{API}/auth/logout")).status_code == 200
+    assert client.cookies.get("refresh_token") is None
+    # The copied cookie no longer renews anything.
+    client.cookies.set("refresh_token", copied)
+    assert (await client.post(f"{API}/auth/refresh")).status_code == 401
+
+
+async def test_signing_out_ends_only_this_session(client, make_user):
+    await make_user(email="two-devices@example.com", password="Password123!")
+    laptop = await _sign_in(client, "two-devices@example.com")
+    phone = await _sign_in(client, "two-devices@example.com")
+    client.cookies.clear()
+    assert (await client.post(f"{API}/auth/logout", headers=auth_header(laptop["access_token"]))).status_code == 200
+    assert (await _refresh(client, laptop["refresh_token"])).status_code == 401
+    assert (await _refresh(client, phone["refresh_token"])).status_code == 200
+
+
+async def test_signing_out_with_nothing_or_a_bad_token_still_clears_cookies(client):
+    assert (await client.post(f"{API}/auth/logout")).json() == {"success": True}
+    assert (await client.post(f"{API}/auth/logout", data={"token": "not.a.token"})).json() == {"success": True}
