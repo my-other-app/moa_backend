@@ -350,6 +350,8 @@ ROUTES = {
     "GET /api/v1/events/ratings/{event_id}": ALLOW,
     "GET /api/v1/events/count-view/{event_id}": PUBLIC,
     "GET /api/v1/events/{event_id}/networking": PUBLIC,
+    # profiles and the Network: the event's networking numbers, counts only
+    "GET /api/v1/events/{event_id}/networking/stats": ALLOW,
 }
 
 
