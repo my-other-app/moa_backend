@@ -310,9 +310,11 @@ async def _merch(session, event: Events) -> list:
     ]
 
 
-async def _frozen(session, event: Events) -> Optional[dict]:
-    """The analytics the closeout report froze, when the guest list is gone."""
-    job = await session.scalar(select(RetentionJobs).where(RetentionJobs.event_id == event.id))
+async def _frozen(session, event: Events, job: Optional[RetentionJobs] = None) -> Optional[dict]:
+    """The analytics the closeout report froze, when the guest list is gone.
+    `job`: the event's retention job, when the caller has read it."""
+    if job is None:
+        job = await session.scalar(select(RetentionJobs).where(RetentionJobs.event_id == event.id))
     if job is None or job.state is not RetentionState.deleted:
         return None
     reports = await session.scalars(select(CloseoutReports).where(CloseoutReports.event_id == event.id).order_by(CloseoutReports.generated_at.desc()))
@@ -325,13 +327,25 @@ async def _frozen(session, event: Events) -> Optional[dict]:
 
 async def summary(session, event: Events, now: Optional[datetime] = None) -> dict:
     """Everything the event's overview shows, in one response, so no figure on
-    the page can describe a different moment from the one beside it."""
+    the page can describe a different moment from the one beside it.
+
+    The console polls it every 15 s per open tab while the door is open: one
+    answer per event is kept 5 s and shared by every tab (app/api/hot_reads).
+    A `now` given (a test, a report) is always worked out afresh."""
+    if now is not None:
+        return await _summary(session, event, now)
+    from app.api import hot_reads
+
+    return await hot_reads.kept(("console", event.id), hot_reads.CONSOLE_SECONDS, lambda: _summary(session, event, None))
+
+
+async def _summary(session, event: Events, now: Optional[datetime]) -> dict:
     from app.api.ticketing import places as ticket_places
 
     now = _now(now)
     registered, checked_in = await _head_count(session, event.id)
-    frozen = await _frozen(session, event)
     job = await session.scalar(select(RetentionJobs).where(RetentionJobs.event_id == event.id))
+    frozen = await _frozen(session, event, job)
     room = await ticket_places.summary(session, event)
     return {
         "event_id": event.id,
@@ -484,7 +498,20 @@ async def _attention(session, scope, now: datetime, *, failed: list, requests: b
 
 async def dashboard(session, club, now: Optional[datetime] = None) -> dict:
     """The club's home page: where its events stand, what needs a decision,
-    and which doors are open right now."""
+    and which doors are open right now.
+
+    Polled every 15 s by each team tab while an event is live, and about a
+    hundred statements for a club with a dozen events: one answer per club
+    is kept 10 s and shared by every tab (app/api/hot_reads). A `now` given
+    is always worked out afresh."""
+    if now is not None:
+        return await _dashboard(session, club, now)
+    from app.api import hot_reads
+
+    return await hot_reads.kept(("dashboard", club.id), hot_reads.DASHBOARD_SECONDS, lambda: _dashboard(session, club, None))
+
+
+async def _dashboard(session, club, now: Optional[datetime]) -> dict:
     now = _now(now)
     scope = and_(Events.club_id == club.id, Events.is_deleted == False)  # noqa: E712
     counts = await _status_counts(session, scope)
