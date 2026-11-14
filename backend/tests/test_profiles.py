@@ -42,6 +42,10 @@ async def test_my_profile_starts_with_the_defaults_and_says_what_is_missing(clie
     }
     assert body["completeness"] == {"score": 0, "missing": ["headline", "links", "projects", "photo"]}
     assert body["email"] == "fresh@example.com" and body["hidden_sections"] == []
+    # A profile row made on first use is public (existing profiles were made private by the migration).
+    r = await client.patch(f"{API}/me/profile", json={"headline": "New here"}, headers=auth_header(await mint_token(user)))
+    assert r.json()["settings"]["is_private"] is False
+    assert (await profile_row(session, user)).is_private is False
 
 
 async def test_patch_changes_only_what_is_sent(client, world):
@@ -281,12 +285,17 @@ async def test_every_section_obeys_its_level_for_every_viewer(client, session, m
     assert anon["relation"] is None
     assert stranger["relation"] == {"saved_by_me": False, "saved_me": False, "mutual": False, "network_id": None}
 
-    for headers, rel in ((sh, (True, False)), (svh, (False, True))):
-        b = await seen(headers)
-        assert (b["relation"]["saved_by_me"], b["relation"]["saved_me"], b["relation"]["mutual"]) == (*rel, False)
-        assert [l["url"] for l in b["links"]] == ["https://github.com/asha"] and b["org"]["name"] == "COEP Tech"
-        assert b["projects"] == [] and b["contact"] == {"email": "asha@example.com", "phone": None}
-        assert set(b["hidden_sections"]) == {"projects", "achievements"}
+    # Their own save grants nothing (owner decision, 14 Nov): what a stranger sees.
+    b = await seen(sh)
+    assert (b["relation"]["saved_by_me"], b["relation"]["saved_me"], b["relation"]["mutual"]) == (True, False, False)
+    assert b["links"] == [] and b["org"] is None and b["contact"] == {"email": None, "phone": None}
+    assert set(b["hidden_sections"]) == {"links", "projects", "achievements", "org"}
+    # The owner saved them: `met`.
+    b = await seen(svh)
+    assert (b["relation"]["saved_by_me"], b["relation"]["saved_me"], b["relation"]["mutual"]) == (False, True, False)
+    assert [l["url"] for l in b["links"]] == ["https://github.com/asha"] and b["org"]["name"] == "COEP Tech"
+    assert b["projects"] == [] and b["contact"] == {"email": "asha@example.com", "phone": None}
+    assert set(b["hidden_sections"]) == {"projects", "achievements"}
 
     m = await seen(bh)
     assert m["relation"]["mutual"] is True and m["relation"]["network_id"] is not None

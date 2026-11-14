@@ -199,6 +199,56 @@ async def test_an_offline_scan_keeps_its_time_up_to_72_hours(client, session, wo
     assert r.json()["new_encounter"] is True and len(await _encounters(session, a, c)) == 2
 
 
+async def test_a_strangers_save_grants_nothing_until_the_owner_saves_back(client, session, world, make_user, mint_token):
+    """Owner decision, 14 Nov: `met` is the owner's to grant. A save by
+    handle, link or QR shows a stranger only the `everyone` sections, in the
+    JSON, the vCard and the save's own answer."""
+    bh = world["bh"]
+    await client.patch(f"{API}/me/profile", json={
+        "share_email": "met", "share_phone": "mutual", "visibility": {"links": "met", "projects": "mutual"},
+    }, headers=bh)
+    world["b"].phone = "+919800000002"
+    await session.commit()
+    await client.put(f"{API}/me/profile/links", json={"links": [{"type": "github", "url": "https://github.com/bala"}]}, headers=bh)
+    await client.post(f"{API}/me/profile/projects", json={"title": "Type specimen"}, headers=bh)
+    _, dh = await person(session, make_user, mint_token, "deepa", "Deepa Rao")
+    await session.commit()
+
+    def stranger_view(p):
+        assert p["contact"] == {"email": None, "phone": None} and p["links"] == [] and p["projects"] == []
+        assert set(p["hidden_sections"]) == {"links", "projects"}
+
+    saves = (
+        (world["ah"], {"handle": "bala", "method": "search"}),
+        (world["ch"], {"handle": "bala", "method": "link"}),
+        (dh, {"code": await code_of(client, bh), "method": "qr"}),
+    )
+    for headers, body in saves:
+        r = await client.post(f"{API}/network", json=body, headers=headers)
+        assert r.status_code == 200, r.text
+        stranger_view(r.json()["profile"])
+        stranger_view((await client.get(f"{API}/profiles/bala", headers=headers)).json())
+        card = (await client.get(f"{API}/profiles/bala/vcard", headers=headers)).text
+        assert "EMAIL" not in card and "TEL" not in card and "github" not in card
+
+    # Bala saves Chitra back: `met` for her -- the email and the links, not the mutual-only number or projects.
+    await save(client, bh, handle="chitra")
+    p = (await client.get(f"{API}/profiles/bala", headers=world["ch"])).json()
+    assert (p["relation"]["saved_me"], p["relation"]["mutual"]) == (True, True)
+    assert p["contact"] == {"email": "bala@example.com", "phone": "+919800000002"}
+    # One-way from Bala (Chitra's own save removed): `met` without `mutual`.
+    await client.delete(f"{API}/network/{(await row(session, world['c'], world['b'])).id}", headers=world["ch"])
+    p = (await client.get(f"{API}/profiles/bala", headers=world["ch"])).json()
+    assert p["relation"] == {"saved_by_me": False, "saved_me": True, "mutual": False, "network_id": None}
+    assert p["contact"] == {"email": "bala@example.com", "phone": None} and [l["url"] for l in p["links"]] == ["https://github.com/bala"]
+    assert p["projects"] == [] and p["hidden_sections"] == ["projects"]
+    # Mutual: the `mutual` sections and number too.
+    await save(client, bh, handle="ananya")
+    p = (await client.get(f"{API}/profiles/bala", headers=world["ah"])).json()
+    assert p["relation"]["mutual"] is True and p["contact"]["phone"] == "+919800000002"
+    assert [x["title"] for x in p["projects"]] == ["Type specimen"]
+
+
 async def test_saves_are_rate_limited_per_person(client, world, monkeypatch):
     assert limits.SAVES == ("60/minute", "300/hour")
     monkeypatch.setattr(limits, "SAVES", ("3/minute", "300/hour"))
@@ -325,7 +375,7 @@ async def test_the_export_holds_only_what_each_person_shares_and_never_a_formula
     by_name = {r_[0]: r_ for r_ in rows[1:]}
     bala, chitra = by_name["Bala Krishnan"], by_name["Chitra Menon"]
     assert bala[1] == "'=HYPERLINK(\"http://evil\")" and bala[3] == "https://myotherapp.in/u/bala" and bala[4] == "https://github.com/bala"
-    assert bala[5] == "bala@example.com" and bala[6] == ""  # the number is for the mutual only
+    assert bala[5] == "" and bala[6] == ""  # Bala has not saved Ananya: her own save grants no `met`
     assert chitra[5] == "" and chitra[4] == ""  # private, and Chitra has not saved Ananya
     assert chitra[9] == "'+1 for the talk" and chitra[10] == "'@lead, -x"
     for cell in (c for r_ in rows for c in r_):
@@ -336,15 +386,16 @@ async def test_the_export_holds_only_what_each_person_shares_and_never_a_formula
     cards = v.text.split("END:VCARD\r\n")
     assert v.text.count("BEGIN:VCARD") == 2
     bala_card = next(card for card in cards if "FN:Bala Krishnan" in card)
-    assert "EMAIL;TYPE=INTERNET:bala@example.com" in bala_card and "TEL" not in bala_card and "URL:https://github.com/bala" in bala_card
+    assert "EMAIL" not in bala_card and "TEL" not in bala_card and "URL:https://github.com/bala" in bala_card
     chitra_card = next(card for card in cards if "FN:Chitra Menon" in card)
     assert "EMAIL" not in chitra_card and "CATEGORIES:@lead\\,-x" not in chitra_card and "CATEGORIES:@lead,-x" in chitra_card
     assert "NOTE:+1 for the talk\\nMet " in chitra_card
     # Mutual now: the number too.
     await save(client, world["bh"], handle="ananya")
     v = await client.get(f"{API}/network/export", headers=ah)
-    assert "TEL;TYPE=CELL:+919800000002" in v.text
-    assert "+919800000002" in (await client.get(f"{API}/network/export", params={"format": "csv"}, headers=ah)).text
+    assert "TEL;TYPE=CELL:+919800000002" in v.text and "EMAIL;TYPE=INTERNET:bala@example.com" in v.text
+    csv_text = (await client.get(f"{API}/network/export", params={"format": "csv"}, headers=ah)).text
+    assert "+919800000002" in csv_text and "bala@example.com" in csv_text
     assert (await client.get(f"{API}/network/export", params={"format": "xls"}, headers=ah)).status_code == 422
 
 
@@ -396,7 +447,7 @@ async def test_removing_a_save_within_the_batch_does_not_cancel_its_notice(clien
     """Save, look, remove at once: the person is still told who saved them."""
     await client.patch(f"{API}/me/profile", json={"share_email": "met"}, headers=world["bh"])
     saved = (await save(client, world["ah"], handle="bala")).json()
-    assert saved["profile"]["contact"]["email"] == "bala@example.com"
+    assert saved["profile"]["contact"]["email"] is None  # her own save grants no `met`
     assert (await client.delete(f"{API}/network/{saved['person']['id']}", headers=world["ah"])).status_code == 204
     n = await session.scalar(select(NetworkSaveNotices).where(NetworkSaveNotices.person_id == world["b"].id))
     assert n is not None and n.saver_ids == [world["a"].id]

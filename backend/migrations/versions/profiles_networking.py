@@ -6,6 +6,9 @@
   scanning_enabled, show_events/_certificates/_talks/_clubs) and the
   admin's hide (`suspended_at`). Every one nullable or with a constant
   default: a catalogue change, no rewrite.
+- Every profile that exists now starts private (is_private true: the
+  owner's decision of 14 Nov); the column's default is false, so a profile
+  made after this (a new sign-up, a row made on first use) is public.
 - New tables: profile_links, profile_projects, profile_codes,
   network_people, network_encounters, network_save_notices, network_recaps,
   released_handles, each with the indexes the contract lists and the ones
@@ -70,6 +73,14 @@ def upgrade() -> None:
     op.execute("SET LOCAL lock_timeout = '3s'")
     for name, type_, default in PROFILE_COLUMNS:
         # Without a default: nullable (the texts, the hide). With one: NOT NULL.
+        if name == "is_private":
+            # Everyone here before this migration starts private (the owner's
+            # decision, 14 Nov): added with true, every existing row reads
+            # true; then the default is false, for the rows made from now on.
+            # Both are catalogue changes: no rewrite, no UPDATE of the table.
+            op.add_column("user_profiles", sa.Column(name, type_, nullable=False, server_default=sa.true()))
+            op.alter_column("user_profiles", name, server_default=sa.false())
+            continue
         op.add_column("user_profiles", sa.Column(name, type_, nullable=default is None, server_default=default))
 
     op.create_table(

@@ -6,10 +6,12 @@ and when neither of the two has blocked the other: every other case is the
 same 404 NOT_FOUND, so a stranger cannot tell a blocked person from one who
 is not there.
 
-Levels (the contract's "Visibility levels"), for a section of the profile:
-`everyone`; `met` = either has saved the other; `mutual` = both have; `me`
-= the owner only. The address and the number have their own: `nobody`,
-`met`, `mutual`. The owner sees everything of their own.
+Levels (the contract's "Visibility levels" and the owner's decision of 14
+Nov), for a section of the profile: `everyone`; `met` = the owner saved the
+viewer (or they saved each other) -- the viewer's own save never counts;
+`mutual` = both saved; `me` = the owner only. The address and the number
+have their own: `nobody`, `met`, `mutual`, read the same way. The owner sees
+everything of their own.
 
 A private profile shows a stranger -- anyone the owner has not saved --
 only the handle, name, picture and headline (`minimal`). An older account
@@ -56,7 +58,11 @@ class Relation:
 
     @property
     def met(self) -> bool:
-        return self.saved_by_me or self.saved_me
+        """The owner saved the viewer (or they saved each other): the owner
+        grants it. The viewer's own save never does (owner decision, 14 Nov:
+        a stranger who saves someone by handle, link or QR sees their
+        `everyone` sections until they are saved back)."""
+        return self.saved_me
 
     @property
     def mutual(self) -> bool:
