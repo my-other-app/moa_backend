@@ -43,6 +43,12 @@ class AppConfig(BaseSettings):
     # anyway. "enforce": the process refuses to start. Set enforce once
     # `python -m app.core.config_checks` prints no FATAL line.
     CONFIG_CHECKS: str = "warn"
+    # The API's own docs and whole route map: /docs, /redoc and /openapi.json
+    # (app/api/api_docs.py). Unset: off in production (as ENV and DEBUG say,
+    # app.core.config_checks.is_production), on anywhere else -- the suite
+    # and development. true or false says so outright. While off,
+    # /openapi.json still answers the website's server (a valid X-Site-Token).
+    API_DOCS: bool | None = None
     # uvicorn's line per request. nginx in front already logs every request,
     # so this is a second copy, written on every request; false drops it.
     ACCESS_LOG: bool = True

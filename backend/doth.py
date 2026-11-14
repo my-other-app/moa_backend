@@ -236,7 +236,9 @@ class Application(FastAPI):
         return observability.RequestIdMiddleware(stack) if observability.request_ids_enabled() else stack
 
 
-application = Application(lifespan=lifespan)
+# FastAPI's own /docs, /redoc and /openapi.json are off: app/api/api_docs.py
+# serves them where they belong (not production), deciding per request.
+application = Application(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
 application.state.limiter = limiter
 application.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
@@ -250,6 +252,10 @@ application.include_router(router=public_links_router, tags=["tracking-links"])
 from app.api.health import public_router as health_router  # noqa: E402
 
 application.include_router(router=health_router)
+# The API's docs and route map, off in production (app/api/api_docs.py).
+from app.api.api_docs import router as api_docs_router  # noqa: E402
+
+application.include_router(router=api_docs_router)
 # The document designs' fonts and preview images, for browsers: public,
 # immutable, any origin (app/core/doc_designs/static.py).
 from app.core.doc_designs.static import router as doc_designs_static_router  # noqa: E402
