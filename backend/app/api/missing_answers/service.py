@@ -171,7 +171,7 @@ async def record_revision(session, event, before, after, *, user_id: Optional[in
     after = list(after or [])
     if _normal(before) == _normal(after):
         return None
-    await session.execute(select(Events.id).where(Events.id == event.id).with_for_update())
+    await session.execute(select(Events.id).where(Events.id == event.id).with_for_update(key_share=True))
     latest = await session.scalar(select(func.max(EventFormRevisions.version)).where(EventFormRevisions.event_id == event.id))
     everyone = await people_mod.load(session, event)
     if latest is None:

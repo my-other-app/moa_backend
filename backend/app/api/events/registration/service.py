@@ -588,7 +588,7 @@ async def register_event(
         # the stock at once). `store: []` drops the earlier order and gives
         # back what it held, so the payment is the ticket's alone.
         if store_picks is not None:
-            await session.execute(select(Events.id).where(Events.id == db_event.id).with_for_update())
+            await session.execute(select(Events.id).where(Events.id == db_event.id).with_for_update(key_share=True))
             await store.place_order(session, db_event, registration, store_picks, role=(registration.role.value if getattr(registration, "role", None) else "attendee"))
             await session.commit()
         if whatsapp_opt_in and not registration.whatsapp_opt_in:

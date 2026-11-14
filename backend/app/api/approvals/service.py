@@ -71,8 +71,10 @@ logger = logging.getLogger(__name__)
 
 R = RegistrationRequests
 
-#: Rows confirmed in one transaction: the event's row is held while they go.
-CHUNK = 100
+#: Rows confirmed in one transaction: the event's row is held while they
+#: go, so other writers of it (public registrations, captures, waiting-list
+#: fills) wait for at most a chunk: 25 is about 0.4 s at a time.
+CHUNK = 25
 #: Rows one call may name (or `all_pending` take).
 MAX_IDS = 500
 #: The job that tells people (emails, pushes).
