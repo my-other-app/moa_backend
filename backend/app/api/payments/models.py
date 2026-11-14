@@ -86,8 +86,11 @@ class PaymentLogs(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     payment_method = Column(String, nullable=True)
     payment_details = Column(JSON, nullable=True)
     #: Why this captured payment is being given back without anyone asking:
-    #: "event_full" (the last place went while it was being paid) or
-    #: "duplicate" (a second payment on an order already paid). Set, with
+    #: "event_full" (the last place went while it was being paid),
+    #: "duplicate" (a second payment on an order already paid),
+    #: "already_paid" (a payment on another order of a registration already
+    #: paid in full, that bought nothing) or "registration_removed" (its
+    #: registration was taken off the list while it was paid). Set, with
     #: `refund_requested_at`, in the transaction that finds it, before
     #: Razorpay is asked; the refund sweep retries until Razorpay has done it.
     refund_reason = Column(String(40), nullable=True)
