@@ -424,6 +424,11 @@ class AppConfig(BaseSettings):
     FIREBASE_SERVICE_ACCOUNT_PATH: str = ""
     # Option 2: Base64 encoded service account JSON (for environment variable)
     FIREBASE_SERVICE_ACCOUNT_BASE64: str = ""
+    # Seconds one HTTP call to FCM may take (firebase-admin's httpTimeout; its
+    # own default is 120 s, as long as a job's whole timeout). A send waits at
+    # most three times this, covering the SDK's one retry and a credentials
+    # refresh, then is given up on (app/core/notifications/service.py).
+    FIREBASE_TIMEOUT: float = 10.0
 
     RAZORPAY_KEY_ID: str
     RAZORPAY_KEY_SECRET: str

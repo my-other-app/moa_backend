@@ -9,13 +9,12 @@ Either way it is one push, and nothing about it can undo the check-in.
 None of it is the door's business, so none of it holds the door up. The
 scan answers first; this runs afterwards as a job (`checkins.after`, written
 in the check-in's own transaction: app.core.jobs), on a session of its own,
-with the push sent from a worker thread so a slow FCM never stalls the event
-loop. Run twice (the queue is at least once), the guest still has one note:
+with FCM's blocking call on a worker thread so a slow FCM never stalls the
+event loop. Run twice (the queue is at least once), the guest still has one note:
 it is not written again for a check-in that already has one.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -110,8 +109,9 @@ async def _notify(session, a: Admitted) -> None:
         if not token:
             return
         dead: list[str] = []
-        # The FCM client blocks on its HTTP call: a thread, with a loop of its own.
-        await asyncio.to_thread(_send_blocking, token, title, body, data, dead, badge)
+        # The send offloads FCM's blocking call to a thread itself, bounded
+        # by FIREBASE_TIMEOUT (app/core/notifications/service.py).
+        await _send(token, title, body, data, dead, badge)
         if dead:
             await push.prune_tokens(session, dead)
     except Exception:  # noqa: BLE001
@@ -140,10 +140,12 @@ async def _people_like_you(session, event_id: int) -> bool:
         return False
 
 
-def _send_blocking(token: str, title: str, body: str, data: dict, dead: list, badge: Optional[int] = None) -> bool:
+async def _send(token: str, title: str, body: str, data: dict, dead: list, badge: Optional[int] = None) -> bool:
+    """The welcome push, awaited on this loop. It used to run asyncio.run in
+    a thread per check-in: a new event loop and thread pool for one call."""
     from app.core.notifications import service as push
 
-    return asyncio.run(push._send_to_token(token, title, body, data, dead=dead, badge=badge))
+    return await push._send_to_token(token, title, body, data, dead=dead, badge=badge)
 
 
 async def _badges(session, a: Admitted) -> None:
