@@ -294,11 +294,11 @@ async def handle_event_registration_payment(
 
     if payment is not None:
         new = money.rupees(payment.amount)
-        if was_paid:
-            # The ticket stands. This payment can buy only the picks waiting
-            # on the shelf: a later checkout's payment for a ticket already
-            # paid (another order, made when the amount or the account
-            # changed) bought nothing.
+        if was_paid or ticket_due == 0:
+            # The ticket stands, or has all its money. This payment can buy
+            # only the picks waiting on the shelf: a later checkout's payment
+            # for a ticket already paid (another order, made when the amount
+            # or the account changed) bought nothing.
             covers_store = pending is not None and new >= pending_total
             if not covers_store:
                 outcome.surplus = True

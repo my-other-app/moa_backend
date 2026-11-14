@@ -93,6 +93,25 @@ async def test_a_real_checkout_still_verifies(client, session, rzp_fake, make_cl
     assert paid is True
 
 
+async def test_verify_for_a_registration_taken_off_the_list_is_not_a_success(
+    client, session, rzp_fake, make_club, make_event, make_user, make_registration  # noqa: F811
+):
+    """Checkout shows any 2xx as paid: the guest whose registration went is
+    told it did, while the payment is recorded and refunded."""
+    from app.api.events.registration.service import take_off_list
+
+    _, reg, order = await _paid_guest(session, make_club, make_event, make_user, make_registration)
+    await take_off_list(session, await session.get(EventRegistrationsLink, reg.id))
+    pay = rzp_fake.pay(order.razorpay_order_id)
+    body = {"razorpay_order_id": order.razorpay_order_id, "razorpay_payment_id": pay["id"]}
+    for _ in range(2):
+        r = await client.post(f"{API}/payments/verify", json=body)
+        assert r.status_code == 409 and r.json()["error_code"] == "REGISTRATION_REMOVED", r.text
+    row = await session.scalar(select(PaymentLogs).where(PaymentLogs.razorpay_payment_id == pay["id"]).execution_options(populate_existing=True))
+    assert (row.status, row.refund_reason) == (PaymentStatus.refunded, "registration_removed")
+    assert rzp_fake.refunded() == [pay["id"]]
+
+
 # ─── The webhook's signature comes first ─────────────────────────────────
 
 

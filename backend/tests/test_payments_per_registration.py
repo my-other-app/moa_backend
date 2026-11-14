@@ -322,6 +322,33 @@ async def test_a_store_only_orders_payment_with_nothing_left_to_buy_goes_back(
     assert (reg.is_paid, reg.paid_amount) == (True, Decimal("500.00"))
 
 
+async def test_on_a_free_ticket_a_payment_too_small_for_the_picks_now_waiting_goes_back(
+    session, rzp_fake, make_club, make_event, make_user, make_registration  # noqa: F811
+):
+    """Nothing is owed on the ticket itself: a payment that cannot pay for
+    the picks bought nothing (it was kept, and the free ticket marked paid)."""
+    owner, club = await make_club(name=f"Free Shelf Club {next(_n)}", email=f"freeshelf{next(_n)}@example.com")
+    event = await make_event(club=club, created_by=owner, has_fee=False, reg_fee=0, event_datetime=NOW + timedelta(days=5), merch_enabled=True)
+    payer = await make_user(email=f"freeshelf-guest{next(_n)}@example.com")
+    reg = await make_registration(event=event, user=payer, actual_amount=Decimal("0.00"), paid_amount=0)
+    tee = shelf_item(session, event, name="Tee", price=Decimal("300.00"), stock=5)
+    await session.commit()
+    w = SimpleNamespace(owner=owner, club=club, event=event, payer=payer, reg=reg, tee=tee)
+    await _pick_tee(session, w)
+    one_tee = await _order(session, w)
+    await _pick_tee(session, w, qty=2)
+    two_tees = await _order(session, w)
+    assert (one_tee.amount, two_tees.amount) == (Decimal("300.00"), Decimal("600.00"))
+    late = rzp_fake.pay(one_tee.razorpay_order_id)
+    log = await payments.verify_razorpay_payment(session, one_tee.razorpay_order_id, late["id"])
+    assert (log.status, log.refund_reason) == (PaymentStatus.refunded, "already_paid")
+    assert await _store_statuses(session, reg.id) == ["cancelled", "pending"]
+    # The order for what is waiting still buys it.
+    await payments.verify_razorpay_payment(session, two_tees.razorpay_order_id, rzp_fake.pay(two_tees.razorpay_order_id)["id"])
+    assert await _store_statuses(session, reg.id) == ["cancelled", "paid"]
+    assert rzp_fake.refunded() == [late["id"]]
+
+
 async def test_a_payment_on_the_clubs_account_for_a_ticket_paid_on_ours_goes_back_through_the_clubs(
     session, rzp_fake, monkeypatch, make_club, make_event, make_user, make_registration  # noqa: F811
 ):

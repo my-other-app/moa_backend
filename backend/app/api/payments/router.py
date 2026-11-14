@@ -159,6 +159,15 @@ async def verify_payment(
 
     if not payment:
         raise CustomHTTPException(404, message="Payment not found", error_code="PAYMENT_NOT_FOUND")
+    if payment.refund_reason == service.REGISTRATION_REMOVED:
+        # Recorded and given back (service.apply_payment), but there is no
+        # ticket: not an answer a checkout may show as a success, as it once
+        # was a 400 before the money was recorded at all.
+        raise CustomHTTPException(
+            409, message="This registration was cancelled before the payment went through. "
+            "The payment is being refunded in full.",
+            error_code="REGISTRATION_REMOVED", errors={"payment_status": payment.status.value},
+        )
 
     return {
         "payment_status": payment.status.value,
