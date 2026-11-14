@@ -2889,8 +2889,9 @@ sender -> MX myotherapp.in -> SES (ap-south-1) receipt rule
   a club's -- its current address, or an old one still forwarding (below);
   `handle+anything@` reaches `handle@`.
 - **Never a bounce.** An address that is nobody's, a club whose mailbox is
-  closed, a mail past `APP_MAILBOX_INBOUND_MAX_MB` (40), a mail that can't be
-  parsed: dropped and logged (the address masked: `n***@myotherapp.in`).
+  closed, a mail past `APP_MAILBOX_INBOUND_MAX_MB` (15), a mail that can't be
+  parsed or has more than `APP_MAILBOX_INBOUND_MAX_PARTS` (300) MIME parts:
+  dropped and logged (the address masked: `n***@myotherapp.in`).
   A bounce to a forged sender is backscatter and gets the domain listed. The
   receipt rule has no Bounce action for the same reason.
 - **Spam and viruses:** SES's verdicts (the rule's scanning is on). A virus
@@ -3090,7 +3091,8 @@ never lapses: it is only reserved (above), and nobody is told anything.
 | `APP_MAILBOX_SNS_TOPIC_ARN` | empty | the topic the rule tells; any other topic is refused |
 | `APP_MAILBOX_RECEIVING_REGION` | `ap-south-1` | where SES receives, and where the bucket is read |
 | `APP_MAILBOX_AWS_ACCESS_KEY`, `APP_MAILBOX_AWS_SECRET_KEY` | empty (the SES keys) | a user that may get and delete objects in the inbound bucket |
-| `APP_MAILBOX_INBOUND_MAX_MB` | `40` | a larger mail is refused unread (Cloudflare takes up to 25 MiB, SES 40 MB) |
+| `APP_MAILBOX_INBOUND_MAX_MB` | `15` | a larger mail is refused unread (Cloudflare takes up to 25 MiB, SES 40 MB; the club-mail Worker refuses past 15 MB) |
+| `APP_MAILBOX_INBOUND_MAX_PARTS` | `300` | a mail with more MIME parts is answered as unparseable without being parsed |
 | `APP_MAILBOX_SEND_PER_HOUR`, `APP_MAILBOX_SEND_PER_DAY` | `60`, `300` | what one club may send |
 | `APP_MAILBOX_MAX_RECIPIENTS` | `50` | the most people one mail goes to (the admin inbox's too) |
 | `APP_PLATFORM_INBOX_ADDRESSES` | `admin@myotherapp.in,developer@myotherapp.in,developers@myotherapp.in,info@myotherapp.in` | the admin inbox's addresses (below); empty: none is kept |

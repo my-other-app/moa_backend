@@ -8,13 +8,15 @@ address (plus-addressing reaches its base):
 - a virus (SES's verdict): dropped unread, logged;
 - spam (SES's verdict) or a DMARC failure (Cloudflare's, or SES's under a
   reject or quarantine policy): kept, in Spam;
-- otherwise kept: parsed once (club_mailbox/parse.py), its HTML sanitised,
+- otherwise kept: parsed once for every inbox it is for (club_mailbox/
+  incoming.py: off the event loop, its parts bounded first), its HTML sanitised,
   its files in the private folder `platform-mail/`, and the conversation
   found by its headers or its subject (as the club mailbox does,
   club_mailbox/threads.py), within the mailbox it came to.
 
 A mail to two platform addresses is kept in each; the same mail delivered
-again is kept once per mailbox (`uq_platform_mail_messages_provider`).
+again is kept once per mailbox (`uq_platform_mail_messages_provider`), and
+is recognised by its provider's id before it is read or parsed again.
 Nothing a mail says reaches a log: counts, the provider's id at most.
 """
 from __future__ import annotations
@@ -23,12 +25,12 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Callable, Optional
+from typing import Optional, Union
 
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 
-from app.api.club_mailbox import parse, providers, sanitise, store, threads
+from app.api.club_mailbox import incoming, parse, providers, sanitise, store, threads
 from app.api.club_mailbox.models import ARCHIVE, IN, INBOX, RECEIVED, SENT, SPAM
 from app.api.platform_mail import mail, service
 from app.api.platform_mail.models import PlatformMailAttachments, PlatformMailMessages, PlatformMailThreads
@@ -63,10 +65,20 @@ def targets_of(recipients: list[str]) -> dict[str, str]:
     return out
 
 
-async def receive(session, received: providers.Received, reader: Callable[[providers.Received], bytes]) -> Outcome:
+async def _seen(session, mailbox: str, received: providers.Received) -> bool:
+    """Whether the mailbox kept this delivery already."""
+    M = PlatformMailMessages
+    return await session.scalar(
+        select(M.id).where(M.mailbox == mailbox, M.provider == received.provider, M.provider_message_id == received.provider_message_id)
+    ) is not None
+
+
+async def receive(session, received: providers.Received, reader: Union[incoming.Incoming, incoming.Reader, None] = None) -> Outcome:
     """Keep the mail in each platform mailbox it is for. Each copy is
-    committed by itself. Raises providers.Unreadable when the raw mail
+    committed by itself. `reader` is the delivery's shared Incoming (or a
+    reader to make one). Raises providers.Unreadable when the raw mail
     can't be read now (the hook answers so it comes again)."""
+    mail = incoming.shared(received, reader)
     out = Outcome()
     targets = targets_of(received.recipients)
     if not targets:
@@ -76,20 +88,25 @@ async def receive(session, received: providers.Received, reader: Callable[[provi
         logger.warning("platform mail: mail %s dropped: SES found a virus", received.provider_message_id[:24])
         out.drop("virus")
         return out
+    # A delivery a mailbox kept already: answered before anything is read or parsed.
+    for mailbox in list(targets):
+        if await _seen(session, mailbox, received):
+            out.duplicate += 1
+            del targets[mailbox]
+    if not targets:
+        return out
     try:
-        raw = await asyncio.to_thread(reader, received)
+        parsed = await mail.parsed()
     except providers.TooLarge:
         logger.warning("platform mail: mail %s dropped: larger than APP_MAILBOX_INBOUND_MAX_MB", received.provider_message_id[:24])
         out.drop("too_large")
         return out
-    try:
-        parsed = parse.parse(raw)
-    except Exception as exc:  # noqa: BLE001 - a mail that can't be read at all
-        logger.warning("platform mail: mail %s couldn't be parsed (%s); dropped", received.provider_message_id[:24], type(exc).__name__)
+    except incoming.Unparseable as exc:
+        logger.warning("platform mail: mail %s couldn't be parsed (%s); dropped", received.provider_message_id[:24], exc)
         out.drop("unparseable")
         return out
     for mailbox, delivered_to in targets.items():
-        thread_id = await keep(session, mailbox, delivered_to, received, parsed, size=len(raw))
+        thread_id = await keep(session, mailbox, delivered_to, received, parsed, size=mail.size)
         if thread_id is None:
             out.duplicate += 1
         else:
@@ -144,10 +161,7 @@ async def keep(session, mailbox: str, delivered_to: str, received: providers.Rec
     """Keep one mailbox's copy and commit it. Returns its thread's id, or
     None when it was kept before (a delivery again)."""
     M = PlatformMailMessages
-    seen = await session.scalar(
-        select(M.id).where(M.mailbox == mailbox, M.provider == received.provider, M.provider_message_id == received.provider_message_id)
-    )
-    if seen is not None:
+    if await _seen(session, mailbox, received):
         return None
     now = _now()
     people = threads.outside([parsed.from_address, *parsed.to, *parsed.cc], service.own_addresses())

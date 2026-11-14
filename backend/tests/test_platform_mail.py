@@ -11,6 +11,7 @@ deletes. What is checked is what the admins, the sender and the logs see.
 """
 import json
 import logging
+import threading
 import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -19,16 +20,18 @@ import pytest
 from sqlalchemy import select
 
 from app.api.audit.models import AdminAuditLogs
-from app.api.club_mailbox import cloudflare, handles
+from app.api.club_mailbox import cloudflare, handles, incoming, parse
 from app.api.club_mailbox.inbound import Outcome as ClubOutcome
 from app.api.platform_mail import inbound as platform_inbound
 from app.api.platform_mail.models import PlatformMailAttachments, PlatformMailMessages, PlatformMailThreads
 from app.api.subscriptions import gates
+from app.api.support.models import SupportCases
 from app.api.users.models import AdminRoles
 from app.config import settings
 from app.core import redact
 from app.core.mail import suppression
 from tests.conftest import auth_header
+from tests.support_desk_helpers import _reference_fresh, desk, desk_files, outbox, pushes  # noqa: F401 - fixtures
 from tests.test_club_mailbox import (  # noqa: F401 - fixtures
     BUCKET,
     LONG_AGO,
@@ -403,3 +406,90 @@ def test_cloudflare_accepts_what_the_platform_kept():
 def test_the_settings_lower_and_strip_plus_tags(monkeypatch):
     monkeypatch.setattr(settings, "PLATFORM_INBOX_ADDRESSES", " Info@MyOtherApp.in ; ops+desk@myotherapp.in, not-an-address ")
     assert settings.platform_inbox_addresses == frozenset({"info@myotherapp.in", "ops@myotherapp.in"})
+
+
+# ─── One delivery: read and parsed once, off the event loop ──────────────
+
+
+@pytest.fixture
+def parses(monkeypatch):
+    """The thread each full parse of a mail ran on."""
+    real = parse.parse
+    seen: list = []
+
+    def counted(raw):
+        seen.append(threading.current_thread())
+        return real(raw)
+
+    monkeypatch.setattr(parse, "parse", counted)
+    return seen
+
+
+def many_parts(n: int, to: str = INFO) -> bytes:
+    return a_mail(to=to, attachments=[(f"f{i}.txt", "application/octet-stream", b"x", None) for i in range(n)])
+
+
+async def test_one_delivery_is_parsed_once_off_the_loop_for_every_inbox(client, session, world, aws, desk, parses, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(settings, "SUPPORT_INBOUND_ADDRESSES", f"support@{DOMAIN}")
+    await set_up(client, world, "yukthi")
+    to = [INFO, f"support@{DOMAIN}", f"yukthi@{DOMAIN}"]
+    r = await ses(client, aws, a_mail(to=", ".join(to)), to)
+    assert r.status_code == 200, r.text
+    # Every inbox still has it: the platform's, the desk's and the club's.
+    assert r.json()["platform"] == 1 and r.json()["desk"] == {"support": "opened"} and r.json()["kept"] == 1
+    [msg] = await messages(session)
+    assert msg.mailbox == "info" and msg.subject == "Partnership"
+    assert len(await messages_of(session, world.club.id)) == 1
+    assert len((await session.scalars(select(SupportCases))).all()) == 1
+    assert len(aws.read) == 1
+    assert len(parses) == 1 and parses[0] is not threading.main_thread()
+
+
+async def test_a_delivery_kept_before_is_answered_without_a_parse(client, session, world, aws, desk, parses, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(settings, "SUPPORT_INBOUND_ADDRESSES", f"support@{DOMAIN}")
+    await set_up(client, world, "yukthi")
+    for to in (INFO, f"support@{DOMAIN}", f"yukthi@{DOMAIN}"):
+        raw = a_mail(to=to, message_id=f"<again-{to}>")
+        first = await post(client, raw, to=to, sender="asha@example.org")
+        assert first.json()["action"] == "accept", first.text
+        parsed = len(parses)
+        again = await post(client, raw, to=to, sender="asha@example.org")
+        assert again.json()["action"] == "accept", again.text
+        assert len(parses) == parsed, f"{to}: the delivery again was parsed"
+    assert len(await messages(session)) == 1 and len(await messages_of(session, world.club.id)) == 1
+    assert len((await session.scalars(select(SupportCases))).all()) == 1
+    # SNS delivering its notice again: neither read from the bucket nor parsed.
+    to = [INFO, f"yukthi@{DOMAIN}"]
+    aws.bucket["ses-again"] = a_mail(to=", ".join(to), message_id="<ses-again@example.org>")
+    notice = envelope(ses_notice("ses-again", to))
+    assert (await client.post(SES_HOOK, json=notice)).json()["kept"] == 1
+    reads, parsed = len(aws.read), len(parses)
+    again = (await client.post(SES_HOOK, json=notice)).json()
+    assert again["duplicate"] == 1 and again["platform"] == 0
+    assert len(aws.read) == reads and len(parses) == parsed
+
+
+async def test_a_mail_with_too_many_parts_is_unparseable_unparsed(client, session, world, aws, parses, monkeypatch):
+    monkeypatch.setattr(settings, "MAILBOX_INBOUND_MAX_PARTS", 5)
+    await set_up(client, world, "yukthi")
+    for to in (INFO, f"yukthi@{DOMAIN}"):
+        r = await post(client, many_parts(10, to), to=to)
+        assert r.json()["action"] == "reject" and r.json()["reason"] == "unparseable", r.text
+        assert r.json()["text"] == "Message could not be read"
+    to = [INFO, f"yukthi@{DOMAIN}"]
+    r = await ses(client, aws, many_parts(10, ", ".join(to)), to)
+    assert r.status_code == 200 and r.json()["dropped"] == {"unparseable": 1} and r.json()["platform"] == 0
+    assert parses == [] and await messages(session) == [] and await messages_of(session, world.club.id) == []
+    # Under the limit, the same mail is kept.
+    r = await post(client, many_parts(3, f"yukthi@{DOMAIN}"), to=f"yukthi@{DOMAIN}")
+    assert r.json()["action"] == "accept" and len(parses) == 1
+
+
+def test_part_lines_count_every_line_a_boundary_could_be():
+    assert incoming.part_lines(b"Subject: x\r\n\r\nhello") == 0
+    assert incoming.part_lines(b"--a\r\nx\r\n--a\nx\n--a\rx\r--a--") == 4
+    assert incoming.part_lines(b"\n--a" * 1000, stop=10) > 10
+    raw = many_parts(4)
+    assert incoming.part_lines(raw) >= 5
+    assert type(settings).model_fields["MAILBOX_INBOUND_MAX_MB"].default == 15
+    assert type(settings).model_fields["MAILBOX_INBOUND_MAX_PARTS"].default == 300

@@ -9,13 +9,15 @@ For each envelope recipient on the mailbox domain:
 - SES found a virus: dropped and logged, never read;
 - SES called it spam (or it failed DMARC under a reject or quarantine
   policy): kept, in the club's Spam;
-- otherwise kept: the raw MIME read once (providers.read), parsed
-  (parse.py), its HTML sanitised, its files put in the private folder,
-  and the thread found (threads.py) or started.
+- otherwise kept: the raw MIME read and parsed once for every inbox it
+  is for (incoming.py: off the event loop, its parts bounded first), its
+  HTML sanitised, its files put in the private folder, and the thread
+  found (threads.py) or started.
 
 One mail addressed to two clubs is kept by each, separately. The same mail
 delivered twice (SNS retries a notification it got no 200 for) is kept once
-per club (`uq_club_mail_messages_provider`).
+per club (`uq_club_mail_messages_provider`), and is recognised by its
+provider's id before it is read or parsed again.
 
 Nothing a mail says reaches a log: counts, the provider's id, and a masked
 address at most.
@@ -26,12 +28,12 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Callable, Optional
+from typing import Optional, Union
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from app.api.club_mailbox import alerts, handles, parse, providers, sanitise, service, store, threads
+from app.api.club_mailbox import alerts, handles, incoming, parse, providers, sanitise, service, store, threads
 from app.api.club_mailbox.models import (
     ARCHIVE,
     IN,
@@ -71,12 +73,23 @@ async def _club_for(session, recipient: str) -> Optional[tuple[int, str]]:
     return row.club_id, service.address_of(row.handle)
 
 
-async def receive(session, received: providers.Received, reader: Optional[Callable[[providers.Received], bytes]] = None) -> Outcome:
+async def _seen(session, club_id: int, received: providers.Received) -> bool:
+    """Whether the club kept this delivery already."""
+    M = ClubMailMessages
+    return await session.scalar(
+        select(M.id).where(M.club_id == club_id, M.provider == received.provider, M.provider_message_id == received.provider_message_id)
+    ) is not None
+
+
+async def receive(session, received: providers.Received,
+                  reader: Union[incoming.Incoming, incoming.Reader, None] = None) -> Outcome:
     """Keep (or drop) one received mail for each club it is addressed to.
     The caller commits nothing: each club's copy is committed here, so one
-    club's failure doesn't lose another's. Raises providers.Unreadable when
-    the raw mail can't be read now (the webhook answers so SNS retries)."""
-    reader = reader or providers.read
+    club's failure doesn't lose another's. `reader` is the delivery's
+    shared Incoming (or a reader to make one). Raises providers.Unreadable
+    when the raw mail can't be read now (the webhook answers so SNS
+    retries)."""
+    mail = incoming.shared(received, reader)
     out = Outcome()
     if not service.on():
         out.drop("off")
@@ -114,23 +127,26 @@ async def receive(session, received: providers.Received, reader: Optional[Callab
             continue
         open_targets[club_id] = address
     await session.commit()
+    # A delivery a club kept already: answered before anything is read or parsed.
+    for club_id in list(open_targets):
+        if await _seen(session, club_id, received):
+            out.duplicate += 1
+            del open_targets[club_id]
     if not open_targets:
         return out
     try:
-        raw = await asyncio.to_thread(reader, received)
+        parsed = await mail.parsed()
     except providers.TooLarge:
         for club_id in open_targets:
             logger.warning("mailbox: mail for club %s dropped: larger than APP_MAILBOX_INBOUND_MAX_MB", club_id)
             out.drop("too_large")
         return out
-    try:
-        parsed = parse.parse(raw)
-    except Exception as exc:  # noqa: BLE001 - a mail that can't be read at all
-        logger.warning("mailbox: mail %s couldn't be parsed (%s); dropped", received.provider_message_id[:24], type(exc).__name__)
+    except incoming.Unparseable as exc:
+        logger.warning("mailbox: mail %s couldn't be parsed (%s); dropped", received.provider_message_id[:24], exc)
         out.drop("unparseable")
         return out
     for club_id, address in open_targets.items():
-        thread_id = await keep(session, club_id, address, received, parsed, size=len(raw))
+        thread_id = await keep(session, club_id, address, received, parsed, size=mail.size)
         if thread_id is None:
             out.duplicate += 1
         else:
@@ -143,10 +159,7 @@ async def keep(session, club_id: int, delivered_to: str, received: providers.Rec
     """Keep one club's copy and commit it. Returns its thread's id, or None
     when it was kept before (a delivery again)."""
     M = ClubMailMessages
-    seen = await session.scalar(
-        select(M.id).where(M.club_id == club_id, M.provider == received.provider, M.provider_message_id == received.provider_message_id)
-    )
-    if seen is not None:
+    if await _seen(session, club_id, received):
         return None
     now = _now()
     ours = await service.own_addresses(session, club_id)

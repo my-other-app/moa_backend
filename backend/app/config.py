@@ -293,8 +293,11 @@ class AppConfig(BaseSettings):
     MAILBOX_AWS_ACCESS_KEY: str = ""
     MAILBOX_AWS_SECRET_KEY: str = ""
     # A mail larger than this (MB) is dropped unread (SES receives up to 40 MB,
-    # Cloudflare Email Routing 25 MiB).
-    MAILBOX_INBOUND_MAX_MB: int = 40
+    # Cloudflare Email Routing 25 MiB; the club-mail Worker refuses past 15).
+    MAILBOX_INBOUND_MAX_MB: int = 15
+    # A mail with more MIME parts than this is not parsed: it is answered as
+    # unparseable (club_mailbox/incoming.py counts its part lines first).
+    MAILBOX_INBOUND_MAX_PARTS: int = 300
     # What one club may send, by the hour and by the day (abuse limits on top
     # of its email credits), and the most people one mail may go to.
     MAILBOX_SEND_PER_HOUR: int = 60
