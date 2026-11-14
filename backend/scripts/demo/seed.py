@@ -426,7 +426,9 @@ class Seeder:
         def extras_of(user_id: int, name: str, joined: datetime) -> tuple[dict, list[dict]]:
             profile = dict(user_id=user_id, full_name=name, org_id=self.rnd.choice(college_ids),
                            avatar_id=self.rnd.choice(self.avatars) if self.avatars and self.rnd.random() < 0.55 else None,
-                           created_at=joined, updated_at=joined, is_deleted=False)
+                           created_at=joined, updated_at=joined, is_deleted=False,
+                           # Invented people chose nothing: private, as every row not made by onboarding.
+                           is_private=True)
             picks = self.rnd.sample(all_interests, k=min(len(all_interests), self.rnd.randint(2, 4)))
             return profile, [dict(user_id=user_id, interest_id=self.interests[s], created_at=joined, updated_at=joined, is_deleted=False) for s in picks]
 
@@ -488,7 +490,7 @@ class Seeder:
             values["username"] = m.username
         await self.s.execute(update(Users).where(Users.id == user.id).values(**values))
         org_id = await self._org(m.college) if m.college else None
-        self.s.add(UserProfiles(user_id=user.id, full_name=m.name, org_id=org_id, created_at=joined, updated_at=joined))
+        self.s.add(UserProfiles(user_id=user.id, full_name=m.name, org_id=org_id, created_at=joined, updated_at=joined, is_private=True))
         for slug in m.interests:
             self.s.add(UserInterests(user_id=user.id, interest_id=self.interests[slug], created_at=joined, updated_at=joined))
         await self.commit()

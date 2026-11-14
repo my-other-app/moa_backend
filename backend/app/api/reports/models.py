@@ -19,7 +19,7 @@ from app.core.utils.db_fields import TZAwareDateTime
 from app.db.base import AbstractSQLModel
 from app.db.mixins import TimestampsMixin
 
-TARGET_TYPES = ("thread", "comment", "user", "club")
+TARGET_TYPES = ("thread", "comment", "user", "club", "profile")
 REASONS = ("spam", "harassment", "hate", "sexual", "violence", "misinformation", "other")
 STATUSES = ("open", "resolved")
 ACTIONS = ("dismiss", "remove_content", "suspend_author")

@@ -950,6 +950,10 @@ class NetworkingInterestItem(BaseModel):
 
 class NetworkingAttendeeResponse(BaseModel):
     user_id: int
+    #: Their profile's handle (GET /profiles/{handle}).
+    handle: str | None = None
+    #: The caller has saved them to their Network.
+    saved: bool = False
     name: str
     profile_pic_url: str | None = None
     organization: str | None = None

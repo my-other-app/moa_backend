@@ -128,17 +128,19 @@ def send_email(
     reply_to: Optional[str] = None,
     idempotency_key: Optional[str] = None,
     check_suppression: bool = True,
+    headers: Optional[Dict[str, str]] = None,
 ) -> Dict:
     """A designed email: a text and an HTML body, files attached, and pictures
     inline by Content-ID (`{"filename", "content", "content_id"}`) so the
     guest's QR shows in the message rather than hanging off it. Sent through
-    whichever provider is configured (see `transport`)."""
+    whichever provider is configured (see `transport`). `headers`: further
+    header fields (a List-Unsubscribe, for one)."""
     files = [
         transport.Attachment(filename=a.get("filename") or "attachment", content=transport.as_bytes(a["content"]), content_id=a.get("content_id"))
         for a in attachments or []
     ]
     mail = transport.Mail(
         to=list(recipients), subject=subject, text=text, html=html, from_name=sender_name, from_address=sender, reply_to=reply_to,
-        attachments=files, idempotency_key=idempotency_key, check_suppression=check_suppression,
+        attachments=files, idempotency_key=idempotency_key, check_suppression=check_suppression, headers=dict(headers or {}),
     )
     return transport.deliver(mail)

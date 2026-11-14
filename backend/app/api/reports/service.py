@@ -165,8 +165,9 @@ def normalise_id(target_type: str, target_id) -> str:
     raise _not_found()
 
 
-async def live_target(session, target_type: str, key: str) -> Target:
-    """The thing being reported, as it is now: refused when it is gone."""
+async def live_target(session, target_type: str, key: str, reporter_id: int | None = None) -> Target:
+    """The thing being reported, as it is now: refused when it is gone (a
+    profile: when the reporter could not find it, blocked either way included)."""
     if target_type == "thread":
         t = await session.scalar(select(ClubThreads).where(ClubThreads.id == uuid.UUID(key), ClubThreads.is_deleted == False))  # noqa: E712
         club = await session.get(Clubs, t.club_id) if t is not None else None
@@ -184,6 +185,15 @@ async def live_target(session, target_type: str, key: str) -> Target:
         if u is None:
             raise _not_found()
         return Target("user", key, u.id, None, u.full_name or u.username or "")
+    if target_type == "profile":
+        # A profile anyone may find now (app/api/profiles/access.py); its owner is the author.
+        from app.api.profiles import access as profiles, admin as profiles_admin
+
+        try:
+            u = await profiles.visible_person(session, reporter_id, user_id=int(key))
+        except CustomHTTPException:
+            raise _not_found()
+        return Target("profile", key, u.id, None, _clip(profiles_admin.preview(u, u.profile)))
     club = await session.scalar(select(Clubs).where(Clubs.id == int(key), Clubs.is_deleted == False))  # noqa: E712
     if club is None:
         raise _not_found()
@@ -214,7 +224,17 @@ async def _previews(session, rows: list[ContentReports]) -> dict[tuple[str, str]
     if by_type.get("club"):
         for c in (await session.scalars(select(Clubs).where(Clubs.id.in_([int(k) for k in by_type["club"]])).execution_options(**seen))).all():
             out[("club", str(c.id))] = (c.name, bool(c.is_deleted))
+    if by_type.get("profile"):
+        # Removed: the profile is hidden (or its account deleted).
+        for uid, p in (await _profiles(session, by_type["profile"])).items():
+            out[("profile", str(uid))] = (_clip(p["preview"]), p["removed"])
     return out
+
+
+async def _profiles(session, keys) -> dict[int, dict]:
+    from app.api.profiles import admin as profiles_admin
+
+    return await profiles_admin.reported(session, [int(k) for k in keys])
 
 
 async def open_counts(session, pairs) -> dict[tuple[str, str], int]:
@@ -273,9 +293,9 @@ async def report(session, reporter, *, target_type: str, target_id, reason: str,
     """The reporter's open report on this thing: made now (True), or the one
     they already had (False)."""
     key = normalise_id(target_type, target_id)
-    if target_type == "user" and int(key) == reporter.id:
+    if target_type in ("user", "profile") and int(key) == reporter.id:
         raise CustomHTTPException(422, message="You can't report yourself.", error_code="CANNOT_REPORT_SELF")
-    target = await live_target(session, target_type, key)
+    target = await live_target(session, target_type, key, reporter.id)
 
     async def mine() -> ContentReports | None:
         return await session.scalar(
@@ -331,7 +351,7 @@ async def report(session, reporter, *, target_type: str, target_id, reason: str,
     count = (await open_counts(session, [(target_type, key)])).get((target_type, key), 1)
     from app.api.admin_alerts import service as admin_alerts
 
-    what = {"thread": "A post", "comment": "A comment", "user": "A user", "club": "A club"}[target_type]
+    what = {"thread": "A post", "comment": "A comment", "user": "A user", "club": "A club", "profile": "A profile"}[target_type]
     await admin_alerts.notify(
         session,
         "content_reported",
@@ -376,6 +396,7 @@ async def items(session, rows: list[ContentReports]) -> list[dict]:
     )
     previews = await _previews(session, rows)
     counts = await open_counts(session, [(r.target_type, r.target_id) for r in rows])
+    profiles = await _profiles(session, {r.target_id for r in rows if r.target_type == "profile"})
     out = []
     for r in rows:
         reporter = found.get(r.reporter_id)
@@ -405,6 +426,7 @@ async def items(session, rows: list[ContentReports]) -> list[dict]:
                 "resolved_at": r.resolved_at,
                 "resolution": r.resolution,
                 "resolution_note": r.resolution_note,
+                "profile": profiles.get(int(r.target_id), {}).get("profile") if r.target_type == "profile" else None,
             }
         )
     return out
@@ -438,7 +460,9 @@ async def resolve(session, admin, report_id: int, *, action: str, note: str | No
     the same thing.
 
     dismiss         nothing is taken down; a hidden comment shows again.
-    remove_content  the thread or comment is removed (not for a user or a club).
+    remove_content  the thread or comment is removed; a profile is hidden
+                    (its suspended_at: it, its vCard and its code 404). Not
+                    for a user or a club.
     suspend_author  its author's account is suspended, as the Users page
                     does (sign-in and every token refused, ACCOUNT_SUSPENDED),
                     and a reported thread or comment is removed too.
@@ -448,9 +472,9 @@ async def resolve(session, admin, report_id: int, *, action: str, note: str | No
         raise CustomHTTPException(404, message="Report not found", error_code="REPORT_NOT_FOUND")
     if row.status != "open":
         raise CustomHTTPException(409, message="This report is already resolved.", error_code="ALREADY_RESOLVED")
-    if action == "remove_content" and row.target_type not in ("thread", "comment"):
+    if action == "remove_content" and row.target_type not in ("thread", "comment", "profile"):
         raise CustomHTTPException(
-            422, message="Only a thread or a comment can be removed. Suspend the account instead.", error_code="NOT_REMOVABLE"
+            422, message="Only a thread, a comment or a profile can be removed. Suspend the account instead.", error_code="NOT_REMOVABLE"
         )
     author_id = row.target_author_id
     if action == "suspend_author":
@@ -465,7 +489,12 @@ async def resolve(session, admin, report_id: int, *, action: str, note: str | No
             raise CustomHTTPException(422, message="You cannot suspend your own account", error_code="CANNOT_SUSPEND_SELF")
 
     removed = False
-    if action in ("remove_content", "suspend_author"):
+    if action == "remove_content" and row.target_type == "profile":
+        # "Hide profile": it, its vCard and its code 404 until an admin shows it again.
+        from app.api.profiles import admin as profiles_admin
+
+        removed = await profiles_admin.hide(session, int(row.target_id))
+    elif action in ("remove_content", "suspend_author"):
         removed = await _remove(session, row.target_type, row.target_id)
 
     note = (note or "").strip() or None

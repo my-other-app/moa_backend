@@ -40,6 +40,8 @@ from zoneinfo import ZoneInfo
 from app.core.layout.tokens import field_slug
 
 EVENT_TIMEZONE = "Asia/Kolkata"
+#: The badge value a Personal QR layer encodes (profiles-networking contract: holder.profile_qr_url).
+PROFILE_QR_VALUE = "holder.profile_qr_url"
 PLACINGS = {1: "First", 2: "Second", 3: "Third"}
 ROLE_LABELS = {"attendee": "Attendee", "speaker": "Speaker", "staff": "Staff"}
 
@@ -97,6 +99,10 @@ class Subject:
     team: str = ""
     #: Their email, for the canvas's {{email}} token.
     email: Optional[str] = None
+    #: The holder's personal QR (https://myotherapp.in/p/<code>): their live
+    #: code when the registration is an app user's with scanning on, else
+    #: None. A badge's Personal QR layer draws it (values "holder.profile_qr_url").
+    profile_qr_url: Optional[str] = None
 
 
 @dataclass
@@ -267,7 +273,35 @@ def subject_of(registration, event=None) -> Subject:
         profile_photo_key=photo_key,
         team=str(details.get("team_name") or details.get("team") or ""),
         email=getattr(registration, "email", None),
+        profile_qr_url=profile_qr_url_of(user, profile),
     )
+
+
+#: The editor's sample guest's personal QR: a code that can never be real
+#: (it holds letters the codes leave out), so the board can draw the layer.
+SAMPLE_PROFILE_QR = "https://myotherapp.in/p/samplecode"
+
+
+def profile_qr_url_of(user, profile) -> Optional[str]:
+    """The holder's live /p/ address when their account (an app user, live)
+    and its live code were loaded with the registration (idcards does), the
+    profile is not hidden and scanning is on; else None."""
+    if user is None or not _loaded(user, "active_profile_code"):
+        return None
+    kind = getattr(user.user_type, "value", user.user_type)
+    if kind != "app_user" or getattr(user, "is_deleted", False) or getattr(user, "is_active", True) is False:
+        return None
+    if _loaded(user, "profile") and profile is not None and not getattr(profile, "is_deleted", False):
+        if getattr(profile, "suspended_at", None) is not None or getattr(profile, "scanning_enabled", True) is False:
+            return None
+    elif not _loaded(user, "profile"):
+        return None
+    code = user.active_profile_code
+    if code is None:
+        return None
+    from app.core import public_urls
+
+    return public_urls.site_url(f"/p/{code.token}")
 
 
 def sample_subject(event, kind: str, role: str = "attendee") -> Subject:
@@ -294,6 +328,7 @@ def sample_subject(event, kind: str, role: str = "attendee") -> Subject:
         answers=answers,
         team="Team Nova",
         email="aisha.rahman@example.com",
+        profile_qr_url=SAMPLE_PROFILE_QR,
     )
 
 
@@ -422,6 +457,9 @@ def badge_values(event, subject: Subject, *, door: Optional[str] = None, printed
         "wave": "",
         "start_time": fmt_time(start),
         **subject.answers,
+        # The Personal QR layer's payload (a v2 qr layer with bind
+        # "holder.profile_qr_url"); empty: the layer is not drawn.
+        PROFILE_QR_VALUE: subject.profile_qr_url or "",
     }
     return Mapped(values=values, images={"photo_url": ("photo", subject)}, qr_text=subject.ticket_code)
 

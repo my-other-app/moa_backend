@@ -317,6 +317,11 @@ def test_the_platforms_jobs_have_the_priorities_and_limits_chosen(monkeypatch):
         # Outgoing webhooks (app/api/webhooks_out): the owner told an endpoint was turned off is waited for;
         # the fan-out and the deliveries to partners' servers are capped so a slow server cannot take every slot.
         "webhooks.notice_mail": (H, 4), "webhooks.fanout": (N, 2), "webhooks.deliver": (N, 2),
+        # Profiles and the Network (app/api/profiles): "X saved your profile" is
+        # the push someone waits for; the morning recap (the event's fan-out,
+        # each person's push, each email) is not.
+        "network.save_notice": (H, 4),
+        "network.recap": (N, 4), "network.recap_send": (N, 4), "network.recap_email": (N, 4),
     }
     monkeypatch.setattr(settings, "JOBS_LIMITS", "")
     found = {n: (h.priority, jobs.limit_for(h, 4)) for n, h in jobs.handlers().items() if not n.startswith("test.")}

@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.core.response.base_model import CustomBaseModel
 
-TargetType = Literal["thread", "comment", "user", "club"]
+TargetType = Literal["thread", "comment", "user", "club", "profile"]
 Reason = Literal["spam", "harassment", "hate", "sexual", "violence", "misinformation", "other"]
 Action = Literal["dismiss", "remove_content", "suspend_author"]
 
@@ -13,7 +13,8 @@ Action = Literal["dismiss", "remove_content", "suspend_author"]
 class ReportCreate(BaseModel):
     target_type: TargetType
     #: A thread's or a comment's id (the UUID string the threads API hands
-    #: out), or a user's or a club's id (a number, or its digits as a string).
+    #: out), or a user's, a club's or a profile's owner's id (a number, or
+    #: its digits as a string).
     target_id: int | str
     reason: Reason
     note: Optional[str] = Field(None, max_length=500)
@@ -56,6 +57,31 @@ class ReportClub(CustomBaseModel):
     slug: str
 
 
+class ReportProfileLink(CustomBaseModel):
+    id: int
+    type: str
+    url: str
+    label: Optional[str] = None
+
+
+class ReportProfileProject(CustomBaseModel):
+    id: int
+    title: str
+    url: Optional[str] = None
+
+
+class ReportProfile(CustomBaseModel):
+    """A reported profile as it stands, for the queue's "remove a link or
+    project" (DELETE /admin/profiles/{user_id}/links|projects/{id})."""
+
+    user_id: int
+    handle: str
+    #: Hidden by an admin (a report's "hide profile").
+    suspended: bool
+    links: list[ReportProfileLink] = []
+    projects: list[ReportProfileProject] = []
+
+
 class AdminReport(CustomBaseModel):
     id: int
     target_type: TargetType
@@ -79,6 +105,8 @@ class AdminReport(CustomBaseModel):
     resolved_at: Optional[datetime] = None
     resolution: Optional[Action] = None
     resolution_note: Optional[str] = None
+    #: Set only for a profile report.
+    profile: Optional[ReportProfile] = None
 
 
 class AdminReportsPage(CustomBaseModel):

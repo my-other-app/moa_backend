@@ -198,6 +198,14 @@ async def get_networking_attendees(
     for uid, interest in attendee_interests_result.all():
         user_interests_map.setdefault(uid, []).append(interest)
 
+    # Whom the caller has saved to their Network already (app/api/profiles):
+    # the list's Save button reads "Saved" for them.
+    from app.api.profiles.models import NetworkPeople
+
+    saved = set((await session.scalars(
+        select(NetworkPeople.person_id).where(NetworkPeople.owner_id == user_id, NetworkPeople.person_id.in_(attendee_user_ids))
+    )).all())
+
     # 7. Build response with match counts
     attendees = []
     for uid in attendee_user_ids:
@@ -212,6 +220,9 @@ async def get_networking_attendees(
 
         attendees.append({
             "user_id": uid,
+            # Their profile's handle (/profiles/{handle}), and whether the caller saved them.
+            "handle": user_data.username,
+            "saved": uid in saved,
             "name": user_data.full_name,
             "profile_pic_url": _picture(profile_data),
             "organization": org_name,

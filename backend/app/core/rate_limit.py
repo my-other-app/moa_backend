@@ -57,10 +57,15 @@ class SiteAwareLimiter(Limiter):
                 return
         super()._check_request_limit(request, endpoint_func, in_middleware)
 
-    def _hit_site_bucket(self, request, bucket: str) -> None:
+    def site_args(self, bucket: str) -> list:
+        """The site bucket's counter key: one for every public read the site makes."""
         args = [bucket, SITE_SCOPE]
         if self._key_prefix:
             args = [self._key_prefix, *args]
+        return args
+
+    def _hit_site_bucket(self, request, bucket: str) -> None:
+        args = self.site_args(bucket)
         for item in _site_limits(settings.SITE_RATE_LIMIT or _DEFAULT_SITE_LIMIT):
             request.state.view_rate_limit = (item, args)
             if not self.limiter.hit(item, *args):
@@ -170,6 +175,19 @@ _uri = storage_uri()
 limiter = SharedLimiter(
     key_func=get_remote_address, storage_uri=_uri, storage_options=storage_options(_uri), in_memory_fallback_enabled=True,
 )
+
+
+def site_bucket_spent(bucket: str) -> bool:
+    """Count one public read of the site's own server (a valid X-Site-Token:
+    app.core.site.token_id) in the site's bucket, the same counter its
+    routed reads use (SITE_RATE_LIMIT). True when the bucket is spent. For a
+    route that keeps its own limits by hand (app/api/profiles/limits.py)."""
+    args = limiter.site_args(bucket)
+    spent = False
+    for item in _site_limits(settings.SITE_RATE_LIMIT or _DEFAULT_SITE_LIMIT):
+        if not limiter.limiter.hit(item, *args):
+            spent = True
+    return spent
 
 
 def signed_in_key(request) -> Optional[str]:

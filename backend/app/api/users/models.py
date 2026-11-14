@@ -8,11 +8,17 @@ from sqlalchemy import (
     Integer,
     String,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from app.db.mixins import SoftDeleteMixin, TimestampsMixin
 from sqlalchemy.orm import deferred, relationship
 from app.db.base import AbstractSQLModel
 from app.core.storage.fields import S3ImageField
 from app.core.utils.db_fields import TZAwareDateTime
+
+#: Who sees each section of a public profile, unless the person says
+#: otherwise (app/api/profiles/models.py has the sections and levels).
+DEFAULT_VISIBILITY = {"links": "everyone", "projects": "everyone", "achievements": "everyone", "interests": "everyone", "org": "everyone"}
+DEFAULT_VISIBILITY_SQL = '{"links": "everyone", "projects": "everyone", "achievements": "everyone", "interests": "everyone", "org": "everyone"}'
 
 
 class UserAvatarTypes(enum.Enum):
@@ -136,6 +142,16 @@ class Users(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     search_text = deferred(Column(sa.Text, nullable=True))
 
     profile = relationship("UserProfiles", uselist=False)
+    # The person's QR code now (app/api/profiles: one live code a person,
+    # the ones replaced keep `replaced_at`). Read only where it was loaded
+    # with the account (idcards loads it for a badge's personal QR).
+    active_profile_code = relationship(
+        "ProfileCodes",
+        primaryjoin="and_(Users.id == foreign(ProfileCodes.user_id), ProfileCodes.replaced_at.is_(None))",
+        uselist=False,
+        viewonly=True,
+        lazy="raise",
+    )
     club = relationship("Clubs", uselist=False)
     notifications = relationship(
         "Notifications", back_populates="user", foreign_keys="Notifications.user_id"
@@ -180,6 +196,8 @@ class Users(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         # Addresses are matched trimmed and case-blind, and the merge looks
         # for guests this way on every app launch.
         sa.Index("ix_users_email_normalised", sa.func.lower(sa.func.btrim(email))),
+        # A profile's handle is the username, matched case-blind (/profiles/{handle}).
+        sa.Index("ix_users_username_lower", sa.func.lower(username)),
         # The admin's user list: newest first, a page at a time by keyset.
         sa.Index(
             "ix_users_created_id",
@@ -214,6 +232,37 @@ class UserProfiles(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         nullable=True,
     )
 
+    # The public profile and the Network (app/api/profiles, feature-register/
+    # profiles-networking-contract.md). Who sees each section, and the
+    # person's switches; every one has a default here and in the database,
+    # so a profile made anywhere else (sign-up, the old /profile/create)
+    # starts with them.
+    headline = Column(String(120), nullable=True)
+    bio = Column(String(300), nullable=True)
+    city = Column(String(80), nullable=True)
+    #: section -> everyone | met | mutual | me (app/api/profiles/models.py SECTIONS).
+    visibility = Column(
+        JSONB, nullable=False, default=lambda: dict(DEFAULT_VISIBILITY),
+        server_default=sa.text(f"'{DEFAULT_VISIBILITY_SQL}'::jsonb"),
+    )
+    #: nobody | mutual | met: who of the people they met sees their address and number.
+    share_email = Column(String(12), nullable=False, default="nobody", server_default="nobody")
+    share_phone = Column(String(12), nullable=False, default="nobody", server_default="nobody")
+    #: Strangers see only the name, picture and headline until the person saves them.
+    is_private = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    #: Search engines may list the public page (off: noindex).
+    indexable = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    notify_saves = Column(Boolean, nullable=False, default=True, server_default=sa.true())
+    recap_emails = Column(Boolean, nullable=False, default=True, server_default=sa.true())
+    #: Others may save them by their QR code (the code answers 403 PROFILE_SCANNING_OFF when off).
+    scanning_enabled = Column(Boolean, nullable=False, default=True, server_default=sa.true())
+    show_events = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    show_certificates = Column(Boolean, nullable=False, default=True, server_default=sa.true())
+    show_talks = Column(Boolean, nullable=False, default=True, server_default=sa.true())
+    show_clubs = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    #: An admin hid the profile (a report's "hide profile"): it, its vCard and its code all 404.
+    suspended_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+
     user = relationship("Users", back_populates="profile")
     org = relationship("Organizations")
     avatar = relationship("UserAvatars")
@@ -224,6 +273,9 @@ class UserProfiles(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         # once used to make two, and which one an account showed was then
         # whichever Postgres returned first.
         sa.Index("ux_user_profiles_user_live", "user_id", unique=True, postgresql_where=sa.text("NOT is_deleted")),
+        # The few profiles an admin hid: the Network's lists leave them out by
+        # a probe of this (app/api/profiles/access.py shown_person_where).
+        sa.Index("ix_user_profiles_hidden", "user_id", postgresql_where=sa.text("suspended_at IS NOT NULL AND NOT is_deleted")),
     )
 
     def __repr__(self):
