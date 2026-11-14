@@ -31,9 +31,12 @@ from app.api.reports.models import UserBlocks
 from app.api.users.models import DEFAULT_VISIBILITY, UserProfiles, Users, UserTypes
 from app.response import CustomHTTPException
 
-#: A profile's switches when the person has no profile row yet (the columns' defaults).
+#: A profile's switches when the person has no profile row yet: the
+#: columns' defaults, but private -- no row means they have chosen nothing
+#: (an account from before profiles, or one that skipped onboarding), and
+#: the lazy path makes the row private too (users.service._ensure_profile).
 DEFAULTS = {
-    "share_email": "nobody", "share_phone": "nobody", "is_private": False, "indexable": False,
+    "share_email": "nobody", "share_phone": "nobody", "is_private": True, "indexable": False,
     "notify_saves": True, "recap_emails": True, "scanning_enabled": True,
     "show_events": False, "show_certificates": True, "show_talks": True, "show_clubs": False,
 }
@@ -130,7 +133,9 @@ def live_person_where():
 
 async def load_person(session, *, user_id: Optional[int] = None, handle: Optional[str] = None) -> Optional[Users]:
     """The live person by id or by handle (case-blind), with their profile; None when there is none."""
-    q = select(Users).where(*live_person_where()).options(*person_options())
+    # populate_existing: the account may already be in the session with its
+    # profile read as missing (the auth step loads it), and the row made since.
+    q = select(Users).where(*live_person_where()).options(*person_options()).execution_options(populate_existing=True)
     if handle is not None:
         q = q.where(func.lower(Users.username) == handle.lower()).order_by(Users.id)
     else:
@@ -140,7 +145,9 @@ async def load_person(session, *, user_id: Optional[int] = None, handle: Optiona
 
 async def load_person_any(session, user_id: int) -> Users:
     """The signed-in person's own account, with their profile, whatever its state."""
-    return await session.scalar(select(Users).where(Users.id == user_id).options(*person_options()))
+    # populate_existing: the auth step loaded the account with its profile as
+    # it was then; a row made in this request (the lazy path) must be read.
+    return await session.scalar(select(Users).where(Users.id == user_id).options(*person_options()).execution_options(populate_existing=True))
 
 
 def reserved_name(user: Users) -> bool:

@@ -37,15 +37,15 @@ async def test_my_profile_starts_with_the_defaults_and_says_what_is_missing(clie
     assert body["handle"] == "fresh" and body["is_me"] is True and body["relation"] is None
     assert body["settings"] == {
         "visibility": {"links": "everyone", "projects": "everyone", "achievements": "everyone", "interests": "everyone", "org": "everyone"},
-        "share_email": "nobody", "share_phone": "nobody", "is_private": False, "indexable": False, "notify_saves": True,
+        "share_email": "nobody", "share_phone": "nobody", "is_private": True, "indexable": False, "notify_saves": True,
         "recap_emails": True, "scanning_enabled": True, "show_events": False, "show_certificates": True, "show_talks": True, "show_clubs": False,
     }
     assert body["completeness"] == {"score": 0, "missing": ["headline", "links", "projects", "photo"]}
     assert body["email"] == "fresh@example.com" and body["hidden_sections"] == []
-    # A profile row made on first use is public (existing profiles were made private by the migration).
+    # No row means private (they chose nothing), and the row made on first use is private too.
     r = await client.patch(f"{API}/me/profile", json={"headline": "New here"}, headers=auth_header(await mint_token(user)))
-    assert r.json()["settings"]["is_private"] is False
-    assert (await profile_row(session, user)).is_private is False
+    assert r.json()["settings"]["is_private"] is True and r.json()["headline"] == "New here"  # the new row, read in the same answer
+    assert (await profile_row(session, user)).is_private is True
 
 
 async def test_patch_changes_only_what_is_sent(client, world):
@@ -626,3 +626,69 @@ async def test_the_site_counts_each_visitor_it_names_on_every_profile_read(clien
     assert got == [200, 200, 200, 429]
     # Another visitor through the same server is their own.
     assert (await client.get(f"{API}/profiles/asha", headers=from_site("49.37.20.2"))).status_code == 200
+
+
+
+async def test_an_account_without_a_profile_row_reads_as_private(client, session, make_user, mint_token, world):
+    """An account from before profiles (rows are made lazily) has chosen
+    nothing: strangers get the minimal shape and no contact everywhere."""
+    from app.api.users.models import UserProfiles
+
+    old = await make_user(email="old-timer@example.com", username="old.timer")
+    old.full_name, old.phone = "Old Timer", "+919800000009"
+    await session.commit()
+    oth = auth_header(await mint_token(old))
+    code = (await client.get(f"{API}/me/qr", headers=oth)).json()["code"]
+
+    def minimal(p):
+        assert p["private"] is True and p["full_name"] == "Old Timer" and p["contact"] == {"email": None, "phone": None}
+        assert p["bio"] is None and set(p["hidden_sections"]) == {"links", "projects", "achievements", "interests", "org"}
+
+    minimal((await client.get(f"{API}/profiles/old.timer")).json())
+    minimal((await client.get(f"{API}/profiles/old.timer", headers=world["vh"])).json())
+    minimal((await client.get(f"{API}/profiles/by-code/{code}")).json()["profile"])
+    card = (await client.get(f"{API}/profiles/old.timer/vcard", headers=world["vh"])).text
+    assert "FN:Old Timer" in card and "EMAIL" not in card and "TEL" not in card
+    saved = await save(client, world["vh"], handle="old.timer")
+    assert saved.status_code == 200
+    minimal(saved.json()["profile"])
+    assert saved.json()["person"]["person"]["org_name"] is None
+    # Reading and being saved make no row.
+    from sqlalchemy import func
+
+    assert await session.scalar(select(func.count()).select_from(UserProfiles).where(UserProfiles.user_id == old.id)) == 0
+    # They see themselves as private, with the switch to make it public.
+    assert (await client.get(f"{API}/me/profile", headers=oth)).json()["settings"]["is_private"] is True
+
+
+async def test_only_onboarding_makes_a_public_row_every_other_path_a_private_one(client, session, make_user, mint_token, fake_s3):
+    from app.api.users.service import _ensure_profile
+
+    async def fresh(name):
+        u = await make_user(email=f"{name}@example.com", username=name)
+        await session.commit()
+        return u, auth_header(await mint_token(u))
+
+    # Onboarding: the person setting up their own profile.
+    new, nh = await fresh("newbie")
+    r = await client.post(f"{API}/user/profile/create", data={"full_name": "New Bie"}, headers=nh)
+    assert r.status_code == 200, r.text
+    assert (await profile_row(session, new)).is_private is False
+    assert (await client.get(f"{API}/profiles/newbie")).json()["private"] is False
+
+    # The lazy paths: the old profile form on an account with no row, a new
+    # profile's edits (PATCH /me/profile), and the row made for anything else.
+    a, ah = await fresh("lazy.form")
+    assert (await client.post(f"{API}/user/profile/update", data={"full_name": "Lazy Form"}, headers=ah)).status_code == 200
+    b, bh = await fresh("lazy.patch")
+    assert (await client.patch(f"{API}/me/profile", json={"city": "Kochi"}, headers=bh)).status_code == 200
+    c, _ = await fresh("lazy.direct")
+    await _ensure_profile(session, c.id)
+    await session.commit()
+    for u in (a, b, c):
+        assert (await profile_row(session, u)).is_private is True, u.username
+    assert (await client.get(f"{API}/profiles/lazy.form")).json()["private"] is True
+    # Making it public is theirs.
+    r = await client.patch(f"{API}/me/profile", json={"is_private": False}, headers=bh)
+    assert r.json()["settings"]["is_private"] is False and (await client.get(f"{API}/profiles/lazy.patch")).json()["bio"] is None
+    assert (await client.get(f"{API}/profiles/lazy.patch")).json()["private"] is False

@@ -656,8 +656,10 @@ async def create_user_profile(
         session,
         unique_together=[{"whatsapp": (UserProfiles, whatsapp)}],
     )
+    # The person setting up their own profile (onboarding): the one row
+    # made public by default. Every other path makes it private (_ensure_profile).
     profile = UserProfiles(
-        user_id=user_id, org_id=org_id, whatsapp=whatsapp, full_name=full_name
+        user_id=user_id, org_id=org_id, whatsapp=whatsapp, full_name=full_name, is_private=False,
     )
     # Two of these at once both found no profile; one live profile per
     # account (ux_user_profiles_user_live) now decides, and the second hears
@@ -677,7 +679,12 @@ async def create_user_profile(
 
 async def _ensure_profile(session: AsyncSession, user_id: int, full_name: str | None = None) -> UserProfiles:
     """The account's live profile, made first if it has none: an INSERT ...
-    ON CONFLICT DO NOTHING, so two requests making it at once make one."""
+    ON CONFLICT DO NOTHING, so two requests making it at once make one.
+
+    Made private (is_private): the person has chosen nothing yet, and an
+    account from before profiles had no row (the owner's decision: existing
+    users start private). Only onboarding's create_user_profile makes a
+    public one."""
     profile = await session.scalar(select(UserProfiles).where(UserProfiles.user_id == user_id))
     if profile is not None:
         return profile
@@ -686,7 +693,7 @@ async def _ensure_profile(session: AsyncSession, user_id: int, full_name: str | 
     now = datetime.now(timezone.utc)
     await session.execute(
         pg_insert(UserProfiles)
-        .values(user_id=user_id, full_name=full_name, is_deleted=False, created_at=now, updated_at=now)
+        .values(user_id=user_id, full_name=full_name, is_deleted=False, created_at=now, updated_at=now, is_private=True)
         .on_conflict_do_nothing(index_elements=["user_id"], index_where=sa.text("NOT is_deleted"))
     )
     return await session.scalar(
