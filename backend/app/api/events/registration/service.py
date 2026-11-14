@@ -1050,6 +1050,28 @@ async def _import_job(p: dict) -> None:
         await bulk_import_event_registrations(session, int(p["event_id"]), df, log, bool(p.get("notify", True)))
 
 
+#: An import log's levels: INFO a row added; WARNING a guest already on the
+#: list, skipped; ERROR a row that could not be added; CRITICAL the whole
+#: import stopped. Every level but INFO is a row the panel lists as not used.
+NOT_ADDED = ("WARNING", "ERROR", "CRITICAL")
+
+
+async def _undo_row(session: AsyncSession, savepoint) -> None:
+    """A failed row's work undone, and its transaction ended so the address
+    lock register_event took is let go.
+
+    Inside the row's savepoint (a failed flush leaves it inactive, not
+    closed) only the row's own work goes. A row that failed after a commit
+    of its own keeps what it committed; what came after is rolled back, and
+    that expires every object the session holds, so the import carries ids
+    from row to row, never loaded objects."""
+    if session.in_nested_transaction():
+        await savepoint.rollback()
+        await session.commit()
+    else:
+        await session.rollback()
+
+
 async def bulk_import_event_registrations(
     session: AsyncSession,
     event_id: Events,
@@ -1057,6 +1079,17 @@ async def bulk_import_event_registrations(
     background_log: BackgroundTaskLogs,
     notify: bool = True,
 ):
+    """Every row of the sheet onto the event's list, each on its own: a row
+    that cannot be registered is undone and logged, and the rows after it
+    still go. A guest already on the list is skipped and said so, so a sheet
+    imported again with new rows added brings in just the new ones.
+
+    The log always ends COMPLETED, PARTIAL or FAILED with the reason. Before,
+    the first row that failed (an address already on the list, most often)
+    expired the event and the log with its rollback: every later row failed,
+    the import never finished, and the log stayed at STARTED."""
+    log_id = background_log.id
+    registration_logs: list[dict] = []
     try:
         # Use select to properly load the event with joined club
         event_query = (
@@ -1069,7 +1102,7 @@ async def bulk_import_event_registrations(
         if not event:
             await update_background_task_log(
                 session,
-                background_log.id,
+                log_id,
                 new_logs=[
                     {
                         "level": "ERROR",
@@ -1079,16 +1112,19 @@ async def bulk_import_event_registrations(
                 new_status="FAILED",
             )
             return
+        event_id, event_name = event.id, event.name
 
-        # Prepare registration logs
-        registration_logs = []
+        if df.empty:
+            await update_background_task_log(
+                session, log_id, new_logs=[{"level": "ERROR", "message": "The file has no rows to import."}], new_status="FAILED",
+            )
+            return
 
         for index, row in df.iterrows():
             full_name = row.get("full_name")
             email = row.get("email")
             # A blank cell arrives as NaN, not "". Said plainly, before any
-            # query runs: a bad value reaching the database aborts the
-            # transaction and takes every later row down with it.
+            # query runs.
             if not isinstance(email, str) or not email.strip() or not isinstance(full_name, str) or not full_name.strip():
                 registration_logs.append(
                     {"level": "ERROR", "message": f"Row {int(index) + 2}: a name and an email are both required"}
@@ -1096,6 +1132,8 @@ async def bulk_import_event_registrations(
                 continue
             email = email.strip()
             full_name = full_name.strip()
+            # The row's own savepoint: a failure undoes this row alone.
+            savepoint = await session.begin_nested()
             try:
                 phone_cell = row.get("phone")
                 phone = str(phone_cell).strip() if isinstance(phone_cell, str) and phone_cell.strip() else None
@@ -1126,6 +1164,7 @@ async def bulk_import_event_registrations(
                     )
 
                 if not user:
+                    await _undo_row(session, savepoint)
                     registration_logs.append(
                         {
                             "level": "ERROR",
@@ -1141,26 +1180,33 @@ async def bulk_import_event_registrations(
                     email=email,
                     phone=phone,
                     user_id=user.id,
-                    event_id=event.id,
+                    event_id=event_id,
                     additional_details=additional_details,
-                    background_task_log_id=background_log.id,
+                    background_task_log_id=log_id,
                     role=role,
                     notify=notify,
                     by_organiser=True,
                 )
+                # Registering commits, which ends the savepoint with the
+                # transaction; a row that changed nothing releases it here.
+                if savepoint.is_active:
+                    await savepoint.commit()
 
                 registration_logs.append(
                     {
                         "level": "INFO",
-                        "message": f"Registered '{full_name}' <{email}> for '{event.name}'",
+                        "message": f"Registered '{full_name}' <{email}> for '{event_name}'",
                     }
                 )
 
             except Exception as row_error:
-                # The failed statement left the transaction aborted; roll it
-                # back so the next row, and the log itself, can be written.
-                # Rows already registered were committed and stay.
-                await session.rollback()
+                await _undo_row(session, savepoint)
+                if getattr(row_error, "error_code", None) == "ALREADY_REGISTERED":
+                    registration_logs.append(
+                        {"level": "WARNING", "message": f"Row {int(index) + 2}: '{full_name}' <{email}> is already on the list"}
+                    )
+                    continue
+                logger.warning("import %s on event %s: row %d could not be registered", log_id, event_id, int(index) + 2, exc_info=True)
                 registration_logs.append(
                     {
                         "level": "ERROR",
@@ -1169,39 +1215,38 @@ async def bulk_import_event_registrations(
                     }
                 )
 
-        # Update background log with all collected logs
-        if registration_logs:
-            await update_background_task_log(
-                session,
-                background_log.id,
-                new_logs=registration_logs,
-                new_status=(
-                    "COMPLETED"
-                    if all(log["level"] == "INFO" for log in registration_logs)
-                    else "PARTIAL"
-                ),
-            )
-
-        # Commit the session
-        await session.commit()
-
-    except Exception as global_error:
-        # Handle any global unexpected errors
+        imported = sum(1 for e in registration_logs if e["level"] == "INFO")
+        skipped = sum(1 for e in registration_logs if e["level"] == "WARNING")
+        failed = len(registration_logs) - imported - skipped
         await update_background_task_log(
             session,
-            background_log.id,
+            log_id,
+            new_logs=registration_logs,
+            new_status="PARTIAL" if failed else "COMPLETED",
+        )
+        logger.info("import %s on event %s: %d registered, %d already on the list, %d failed", log_id, event_id, imported, skipped, failed)
+
+    except Exception as global_error:
+        # Said on the log, first so the panel shows it, with the rows done
+        # so far. Should even that fail (the database gone), the error goes
+        # up and the job tries again: the log is still STARTED, and the rows
+        # already in are skipped.
+        logger.exception("import %s on event %s stopped after %d row(s)", log_id, event_id, len(registration_logs))
+        await session.rollback()
+        imported = sum(1 for e in registration_logs if e["level"] == "INFO")
+        await update_background_task_log(
+            session,
+            log_id,
             new_logs=[
                 {
                     "level": "CRITICAL",
-                    "message": "Bulk import failed",
-                    "metadata": {"error": str(global_error)},
-                }
+                    "message": "The import stopped before the end of the file. Upload it again to add the rest.",
+                    "metadata": {"error": str(global_error)[:500]},
+                },
+                *registration_logs,
             ],
-            new_status="FAILED",
+            new_status="PARTIAL" if imported else "FAILED",
         )
-
-        # Re-raise the error for upper-level handling
-        # raise
 
 
 async def get_event_analytics(
@@ -1726,8 +1771,9 @@ def summarise_import(log) -> dict:
     """What an import did, in the words the panel shows."""
     entries = log.logs or []
     imported = sum(1 for e in entries if e.get("level") == "INFO")
-    failed = sum(1 for e in entries if e.get("level") in ("ERROR", "CRITICAL"))
-    issues = [e.get("message", "") for e in entries if e.get("level") in ("ERROR", "CRITICAL")][:50]
+    # Not used: refused, or already on the list (each says which).
+    failed = sum(1 for e in entries if e.get("level") in NOT_ADDED)
+    issues = [e.get("message", "") for e in entries if e.get("level") in NOT_ADDED][:50]
     return {
         "id": log.id, "task_name": log.task_name, "status": log.status, "created_at": log.created_at,
         "imported": imported, "failed": failed, "issues": issues,
