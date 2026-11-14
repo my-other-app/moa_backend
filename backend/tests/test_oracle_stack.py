@@ -1,5 +1,5 @@
 """The one-box Oracle stack (ops/server, docs/MOVE_TO_ORACLE.md): every
-service's memory and CPU fit a 2-core, 12 GB box with room to spare; only
+service's memory and CPU fit the 4 vCPU, 15 GB box with room to spare; only
 Caddy faces the internet; the API's connections fit Postgres; Caddy trusts
 Cloudflare alone for the visitor's address, writes no access log and keeps
 every old name redirecting; and the scripts parse.
@@ -19,18 +19,16 @@ SERVER = REPO / "ops" / "server"
 COMPOSE = SERVER / "compose.yml"
 CADDY = SERVER / "caddy"
 
-#: What the services may take together, in MiB: 12 GB less the OS and
-#: Docker (about 1 GB) and room for the page cache. The render service's
-#: 1 GB (Chromium, the document designs) came out of what was kept for
-#: render peaks. The limits are caps; the 4 GB swapfile is the last resort,
-#: never the plan.
-ALL_LIMITS_MIB = 9472
+#: What the services may take together, in MiB: 15 GB less the OS and
+#: Docker (about 1 GB) and a few GB for the page cache. The limits are caps;
+#: the swapfile is the last resort, never the plan.
+ALL_LIMITS_MIB = 11264
 
 #: The budget agreed for the move (docs/MOVE_TO_ORACLE.md, "Capacity").
 BUDGET_MIB = {
     "postgres": 2560,
-    "backend": 2048,
-    "worker": 768,
+    "backend": 3072,
+    "worker": 1024,
     "redis": 300,
     "meilisearch": 768,
     "website": 640,
@@ -65,6 +63,11 @@ def _mib(limit) -> int:
     return int(number) * (1024 if unit == "g" else 1)
 
 
+def _default(expr: str) -> int:
+    """The default a compose `${VAR:-n}` falls back to."""
+    return int(re.fullmatch(r"\$\{\w+:-(\d+)\}", expr).group(1))
+
+
 def _pg_settings() -> dict:
     command = _services()["postgres"]["command"]
     return dict(arg.split("=", 1) for arg in command if "=" in arg)
@@ -73,7 +76,7 @@ def _pg_settings() -> dict:
 def test_every_service_has_limits_a_share_a_rotated_log_and_comes_back():
     for name, service in _services().items():
         assert _mib(service["mem_limit"]) == BUDGET_MIB[name], name
-        assert 0 < float(service["cpus"]) <= 2, f"{name}: the box has two cores"
+        assert 0 < float(service["cpus"]) <= 3, f"{name}: the box has four cores; none may take them all"
         assert 0 < int(service["cpu_shares"]) <= 1024, name
         assert service.get("restart") == "unless-stopped", name
         assert "resources" not in (service.get("deploy") or {}), name
@@ -81,14 +84,14 @@ def test_every_service_has_limits_a_share_a_rotated_log_and_comes_back():
         assert options["max-size"] and options["max-file"], name
 
 
-def test_the_limits_fit_a_12gb_box_and_the_api_and_postgres_come_first():
+def test_the_limits_fit_the_box_and_the_api_and_postgres_come_first():
     services = _services()
     assert sum(_mib(s["mem_limit"]) for s in services.values()) <= ALL_LIMITS_MIB
     shares = {name: int(s["cpu_shares"]) for name, s in services.items()}
     assert shares["backend"] == shares["postgres"] == max(shares.values())
     for background in ("worker", "redis", "meilisearch", "admin", "media", "render"):
         assert shares[background] < shares["backend"], background
-        assert float(services[background]["cpus"]) <= 1, background
+        assert float(services[background]["cpus"]) <= (1.5 if background == "worker" else 1), background
 
 
 def test_only_caddy_faces_the_internet_and_postgres_listens_on_loopback():
@@ -113,21 +116,36 @@ def test_the_apps_run_pinned_images_from_variables():
 def test_the_api_settings_this_stack_fixes():
     env = _services()["backend"]["environment"]
     assert env["APP_PORT"] == "8000"
-    assert env["APP_WORKERS"] == "${MOA_API_WORKERS:-2}"
-    assert env["APP_RENDER_THREADS"] == "${MOA_RENDER_THREADS:-1}"
+    assert env["APP_WORKERS"] == "${MOA_API_WORKERS:-3}"
+    assert env["APP_RENDER_THREADS"] == "${MOA_RENDER_THREADS:-2}"
+    assert env["APP_DB_MAX_OVERFLOW"] == "${APP_DB_MAX_OVERFLOW:-15}"
     assert env["WALLET_CERTS_DIR"] == "/secrets/walletethings"
     assert "@postgres:5432/" in env["APP_DATABASE_URL"]
     assert env["APP_REDIS_URL"].endswith("redis://redis:6379/0}")
     worker = _services()["worker"]
-    assert worker["environment"]["APP_JOBS_CONCURRENCY"] == "2"
+    assert worker["environment"]["APP_JOBS_CONCURRENCY"] == "${MOA_JOBS_CONCURRENCY:-6}"
     assert worker["environment"]["APP_DATABASE_URL"] == env["APP_DATABASE_URL"]
     assert int(re.fullmatch(r"(\d+)s", worker["stop_grace_period"]).group(1)) > 25
+
+
+def test_no_long_job_kind_may_hold_more_than_one_worker_slot():
+    """A bulk send, an import or a broadcast takes at most one of the worker's
+    slots, so one of them alone never starves approval mails, receipts and
+    offers. (Several different long kinds at once can still fill the slots;
+    priority lanes in the queue are the fix for that.)"""
+    env = _services()["worker"]["environment"]
+    limits = re.fullmatch(r"\$\{APP_JOBS_LIMITS:-(.+)\}", env["APP_JOBS_LIMITS"]).group(1)
+    pairs = dict(item.split("=") for item in limits.split(","))
+    assert {"deliveries.send", "emails.send_message", "registrations.import", "notifications.push"} <= set(pairs)
+    assert all(int(v) == 1 for v in pairs.values())
+    assert _default(env["APP_JOBS_CONCURRENCY"]) >= 6
 
 
 def test_the_connections_fit_postgres():
     pg = _pg_settings()
     room = int(pg["max_connections"]) - 3  # superuser_reserved_connections
-    api_workers, api_pool, worker_pool = 2, 10 + 20, 4 + 8
+    env = _services()["backend"]["environment"]
+    api_workers, api_pool, worker_pool = _default(env["APP_WORKERS"]), 10 + _default(env["APP_DB_MAX_OVERFLOW"]), 4 + 8
     assert api_workers * api_pool + worker_pool <= room - 5, "and a migration, a backup and a psql besides"
 
 
