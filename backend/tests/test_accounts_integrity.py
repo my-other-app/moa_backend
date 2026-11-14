@@ -810,6 +810,9 @@ async def test_google_sign_in_is_rate_limited(client, monkeypatch):
     from app.api.auth import service as auth_service
 
     monkeypatch.setattr(auth_service.id_token, "verify_oauth2_token", lambda t, r, c: {"email": "ratelimited-google@example.com", "email_verified": True, "name": "R"})
+    # Per address, a ceiling for a full hall (600 a minute); here 30, to count to.
+    assert settings.AUTH_SIGN_IN_PER_ADDRESS == "600/minute"
+    monkeypatch.setattr(settings, "AUTH_SIGN_IN_PER_ADDRESS", "30/minute")
     codes = [(await client.post(f"{API}/auth/google", json={"id_token": "t", "platform": "android"})).status_code for _ in range(31)]
     assert codes[:30] == [200] * 30 and codes[30] == 429
 

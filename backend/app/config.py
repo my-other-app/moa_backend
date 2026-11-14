@@ -752,6 +752,20 @@ class AppConfig(BaseSettings):
     # REDIS_URL set, the limits use REDIS_URL (app/core/rate_limit.py); a
     # URI here other than memory:// wins over that.
     RATE_LIMIT_STORAGE: str = "memory://"
+    # Sign-in and refresh limits sized for a venue (app/api/auth/limits.py):
+    # a hall's Wi-Fi or a carrier's NAT is one address for hundreds of
+    # phones, so a refresh is limited per session (the id inside the refresh
+    # token, the same across rotations), and the per-address limits are only
+    # a ceiling for a full hall. Any limit rule at the edge (Cloudflare) on
+    # /auth must be at least this loose, or it brings the shared-address
+    # problem back.
+    AUTH_REFRESH_PER_SESSION: str = "10/minute"
+    AUTH_REFRESH_PER_ADDRESS: str = "3000/minute"
+    # Google and Apple sign-in from the app and the website.
+    AUTH_SIGN_IN_PER_ADDRESS: str = "600/minute"
+    # Password sign-in and the dashboards' Google sign-in: guessing one
+    # account's password is stopped by the per-account lockout (LOGIN_LOCKED).
+    AUTH_PASSWORD_PER_ADDRESS: str = "300/minute"
     # An admin's session as someone else ends this many minutes after it
     # starts, with no refresh (30 to 60).
     IMPERSONATION_SESSION_MINUTES: int = 30
