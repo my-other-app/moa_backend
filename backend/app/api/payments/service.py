@@ -476,7 +476,7 @@ async def _send_receipt(session, order_id, payment_id: str, background_tasks) ->
         logger.exception("Error queueing the payment confirmation email")
 
 
-@jobs.handler("payments.receipt", max_attempts=4, timeout=180.0, concurrency=2, priority=jobs.HIGH)
+@jobs.handler("payments.receipt", max_attempts=4, timeout=180.0, concurrency=2, priority=jobs.HIGH, urgent=True)
 async def _receipt_job(p: dict) -> None:
     async with jobs.scope() as session:
         order = await session.scalar(

@@ -794,6 +794,13 @@ class AppConfig(BaseSettings):
     # "deliveries.send=2,notifications.followers=1".
     JOBS_CONCURRENCY: int = 4
     JOBS_LIMITS: str = ""
+    # Of each runner's JOBS_CONCURRENCY slots, how many only the short jobs
+    # someone is waiting on (handlers registered urgent=True: approval and
+    # review mails, receipts, waiting-list offers, check-in pushes, the
+    # Network's save notice, one guest's ticket) may take, so they never wait
+    # behind long sends. Never every slot: one is always left for the rest.
+    # 0 keeps none.
+    JOBS_URGENT_SLOTS: int = 2
     # How long a runner with nothing to do waits before looking again (a
     # commit in the same process, or a finished job, wakes it sooner).
     JOBS_POLL_SECONDS: float = 1.0

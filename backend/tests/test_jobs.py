@@ -65,6 +65,22 @@ jobs.handler("test.slow", max_attempts=3, timeout=0.2)(_record("test.slow"))
 # As the real ones are: a mail someone waits for, and a close-out nobody watches (one at a time).
 jobs.handler("test.urgent", max_attempts=3, timeout=5.0, priority=jobs.HIGH)(_record("test.urgent"))
 jobs.handler("test.later", max_attempts=3, timeout=5.0, concurrency=1, priority=jobs.LOW)(_record("test.later"))
+# Four different long sends, each capped at two a runner as the real ones are,
+# and a short job someone waits for: it may take the slots kept for it.
+for _name in ("test.long_a", "test.long_b", "test.long_c", "test.long_d"):
+    jobs.handler(_name, max_attempts=3, timeout=60.0, concurrency=2)(_record(_name))
+#: When each urgent test job started (loop time), and how many long ones were then in hand.
+STARTED: list = []
+
+
+async def _quick(payload: dict) -> None:
+    STARTED.append((asyncio.get_running_loop().time(), sum(LIVE[n] for n in LIVE if n.startswith("test.long"))))
+    if payload.get("hold") and STATE["gate"] is not None:
+        await STATE["gate"].wait()
+    SEEN.setdefault("test.quick", []).append(payload)
+
+
+jobs.handler("test.quick", max_attempts=3, timeout=30.0, priority=jobs.HIGH, urgent=True)(_quick)
 
 
 @pytest.fixture(autouse=True)
@@ -74,6 +90,7 @@ def _fresh():
     LIVE.clear()
     PEAK.clear()
     STATE.update(fail=0, delay=0.0, in_flight=0, most=0, gate=None)
+    STARTED.clear()
     yield
     SEEN.clear()
 
@@ -235,7 +252,8 @@ async def test_per_name_limits_hold_while_other_names_run(queue):
             await jobs.enqueue(s, "test.record", {"n": i})
         await s.commit()
     STATE["delay"] = 0.05
-    r = queue.runner(concurrency=4)
+    # Six slots, two kept for urgent jobs: four for these.
+    r = queue.runner(concurrency=6)
 
     async def settled():
         return r.handled >= 10
@@ -349,8 +367,11 @@ async def test_two_runners_never_run_one_job_twice(queue):
     STATE["gate"] = asyncio.Event()
     a, b = queue.runner(concurrency=8), queue.runner(concurrency=8)
 
+    # Each holds every slot but those kept for urgent jobs (none of these is one).
+    full = 8 - jobs.kept_for_urgent(8)
+
     async def both_busy():
-        return a.in_hand == 8 and b.in_hand == 8
+        return a.in_hand == full and b.in_hand == full
 
     assert await _until(both_busy)
     STATE["gate"].set()
@@ -671,3 +692,104 @@ def test_every_job_the_code_enqueues_has_a_handler():
     assert names, "no enqueue found: the pattern above is out of date"
     missing = sorted(n for n in names if n not in jobs.handlers())
     assert missing == []
+
+
+# ─── Slots kept for urgent jobs ──────────────────────────────────────────
+
+
+def test_the_slots_kept_for_urgent_jobs_never_take_every_slot(monkeypatch):
+    monkeypatch.setattr(settings, "JOBS_URGENT_SLOTS", 2)
+    assert [jobs.kept_for_urgent(n) for n in (1, 2, 3, 6, 8)] == [0, 1, 2, 2, 2]
+    monkeypatch.setattr(settings, "JOBS_URGENT_SLOTS", 0)
+    assert jobs.kept_for_urgent(6) == 0
+
+
+def test_an_urgent_job_must_be_short():
+    async def fn(payload):
+        return None
+
+    with pytest.raises(ValueError):
+        jobs.handler("test.urgent_but_long", timeout=jobs.URGENT_MAX_TIMEOUT + 1, urgent=True)(fn)
+    assert "test.urgent_but_long" not in jobs.handlers()
+
+
+async def test_an_urgent_job_starts_at_once_while_long_sends_hold_every_other_slot(queue, monkeypatch):
+    """Six slots, two kept. Four different long sends, two of each waiting,
+    fill the four others and are held there; a waiting-list offer queued
+    after them still starts within a claim, beside them, not after them."""
+    monkeypatch.setattr(settings, "JOBS_URGENT_SLOTS", 2)
+    STATE["gate"] = asyncio.Event()
+    async with queue.make() as s:
+        for name in ("test.long_a", "test.long_b", "test.long_c", "test.long_d"):
+            for i in range(2):
+                await jobs.enqueue(s, name, {"n": i})
+        await s.commit()
+    r = queue.runner(concurrency=6)
+
+    async def long_ones_in_hand():
+        return r.in_hand == 4
+
+    assert await _until(long_ones_in_hand)
+    await asyncio.sleep(0.2)  # several polls: still four, never the kept two
+    assert r.in_hand == 4 and sum(LIVE[n] for n in LIVE if n.startswith("test.long")) == 4
+    loop = asyncio.get_running_loop()
+    async with queue.make() as s:
+        await jobs.enqueue(s, "test.quick", {"n": "offer"})
+        await s.commit()
+    queued_at = loop.time()
+
+    async def started():
+        return bool(STARTED)
+
+    assert await _until(started, timeout=5.0)
+    began, long_running = STARTED[0]
+    assert began - queued_at < 3.0 and long_running == 4
+    STATE["gate"].set()
+
+    async def all_done():
+        return r.handled >= 9
+
+    assert await _until(all_done, timeout=10.0)
+
+
+async def test_urgent_jobs_may_use_every_slot(queue, monkeypatch):
+    """A backlog of urgent jobs (a bulk confirm's 500 approval mails) is not
+    held to the kept slots: it takes all of them, and long sends wait."""
+    monkeypatch.setattr(settings, "JOBS_URGENT_SLOTS", 2)
+    STATE["gate"] = asyncio.Event()
+    async with queue.make() as s:
+        for i in range(6):
+            await jobs.enqueue(s, "test.quick", {"n": i, "hold": True})
+        await jobs.enqueue(s, "test.long_a", {"n": "later"})
+        await s.commit()
+    r = queue.runner(concurrency=6)
+
+    async def full():
+        return r.in_hand == 6
+
+    assert await _until(full)
+    assert LIVE["test.long_a"] == 0
+    STATE["gate"].set()
+
+    async def all_done():
+        return r.handled >= 7
+
+    assert await _until(all_done, timeout=10.0)
+
+
+def test_the_urgent_jobs_are_the_short_ones_someone_waits_for():
+    import doth  # noqa: F401
+
+    urgent = {n for n, h in jobs.handlers().items() if h.urgent and not n.startswith("test.")}
+    assert urgent == {
+        # A registration request's email (received, confirmed, declined...).
+        "approvals.notify",
+        "payments.receipt",
+        # A place offered from the waiting list.
+        "waitlist.offer",
+        # The welcome push after a scan at the door.
+        "checkins.after",
+        # "X saved your profile" (app/api/profiles).
+        "network.save_notice",
+    }
+    assert all(jobs.handlers()[n].timeout <= jobs.URGENT_MAX_TIMEOUT for n in urgent)

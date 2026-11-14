@@ -717,7 +717,7 @@ def offer_template(*, name: str, event: str, ticket: str, until: str, token: str
 MESSAGE_KIND = "ticket"
 
 
-@jobs.handler("waitlist.offer", max_attempts=4, timeout=120.0, priority=jobs.HIGH)
+@jobs.handler("waitlist.offer", max_attempts=4, timeout=120.0, priority=jobs.HIGH, urgent=True)
 async def _offer_job(p: dict) -> None:
     """One offer, told: email (retried until it goes), then a push and a
     WhatsApp message, each once and best effort. The email and the WhatsApp

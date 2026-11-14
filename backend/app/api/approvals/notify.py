@@ -318,7 +318,7 @@ async def _after_registered(session, req) -> None:
             logger.warning("request %s: badges could not be checked", req.id, exc_info=True)
 
 
-@jobs.handler(service.NOTIFY_JOB, max_attempts=5, timeout=120.0, priority=jobs.HIGH)
+@jobs.handler(service.NOTIFY_JOB, max_attempts=5, timeout=120.0, priority=jobs.HIGH, urgent=True)
 async def _notify_job(p: dict) -> None:
     async with jobs.scope() as session:
         await tell(session, uuid.UUID(str(p["request_id"])), str(p["kind"]), str(p.get("stamp") or ""))
