@@ -165,8 +165,9 @@ def normalise_id(target_type: str, target_id) -> str:
     raise _not_found()
 
 
-async def live_target(session, target_type: str, key: str) -> Target:
-    """The thing being reported, as it is now: refused when it is gone."""
+async def live_target(session, target_type: str, key: str, reporter_id: int | None = None) -> Target:
+    """The thing being reported, as it is now: refused when it is gone (a
+    profile: when the reporter could not find it, blocked either way included)."""
     if target_type == "thread":
         t = await session.scalar(select(ClubThreads).where(ClubThreads.id == uuid.UUID(key), ClubThreads.is_deleted == False))  # noqa: E712
         club = await session.get(Clubs, t.club_id) if t is not None else None
@@ -188,8 +189,9 @@ async def live_target(session, target_type: str, key: str) -> Target:
         # A profile anyone may find now (app/api/profiles/access.py); its owner is the author.
         from app.api.profiles import access as profiles, admin as profiles_admin
 
-        u = await profiles.load_person(session, user_id=int(key))
-        if u is None or profiles.is_hidden(u):
+        try:
+            u = await profiles.visible_person(session, reporter_id, user_id=int(key))
+        except CustomHTTPException:
             raise _not_found()
         return Target("profile", key, u.id, None, _clip(profiles_admin.preview(u, u.profile)))
     club = await session.scalar(select(Clubs).where(Clubs.id == int(key), Clubs.is_deleted == False))  # noqa: E712
@@ -293,7 +295,7 @@ async def report(session, reporter, *, target_type: str, target_id, reason: str,
     key = normalise_id(target_type, target_id)
     if target_type in ("user", "profile") and int(key) == reporter.id:
         raise CustomHTTPException(422, message="You can't report yourself.", error_code="CANNOT_REPORT_SELF")
-    target = await live_target(session, target_type, key)
+    target = await live_target(session, target_type, key, reporter.id)
 
     async def mine() -> ContentReports | None:
         return await session.scalar(

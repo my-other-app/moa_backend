@@ -49,3 +49,8 @@ async def live_event(make_club, make_event, make_registration, *guests, name="De
     for g in guests:
         await make_registration(event=event, user=g, is_attended=True)
     return owner, club, event
+
+
+async def code_of(client, headers) -> str:
+    """The person's live QR code (made on the first ask)."""
+    return (await client.get(f"{API}/me/qr", headers=headers)).json()["code"]

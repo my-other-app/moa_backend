@@ -52,6 +52,12 @@ async def generate_username(user: Users, session: AsyncSession, is_guest: bool =
     taken = await session.scalar(
         select(exists().where(Users.username == base)).execution_options(include_deleted=True)
     )
+    if not taken and not is_guest:
+        # A handle someone gave up in the last 30 days is not a newcomer's:
+        # old /u/ links must not open their page (app/api/profiles).
+        from app.api.profiles.service import handle_held
+
+        taken = await handle_held(session, base)
     user.username = f"{base}_{secrets.token_hex(3)}" if taken else base
     return user.username
 
@@ -1182,6 +1188,11 @@ async def delete_user(session: AsyncSession, user_id: int):
     user.email = f"deleted-{user.id}-{secrets.token_hex(4)}@{DELETED_EMAIL_DOMAIN}"
     user.phone = None
     user.full_name = "Deleted user"
+    # The handle is held 30 days (app/api/profiles): links to it must not
+    # open someone else's page the moment it is free.
+    from app.api.profiles.service import release_handle
+
+    release_handle(session, user.id, user.username)
     user.username = f"deleted_{user.id}_{secrets.token_hex(3)}"
     user.password = None
     user.email_verified_at = None

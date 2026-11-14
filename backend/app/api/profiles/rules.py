@@ -6,7 +6,7 @@ import re
 import secrets
 import unicodedata
 from typing import Iterable, Optional
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from app.response import CustomHTTPException
 
@@ -57,6 +57,15 @@ def normal_handle(raw) -> str:
     return text.lower()
 
 
+def handle_ok(handle: Optional[str]) -> bool:
+    """Whether a stored handle (a username) keeps today's rules: an older
+    account's may not (a reserved word, too long, other characters)."""
+    try:
+        return check_handle(handle) == (handle or "").lower()
+    except CustomHTTPException:
+        return False
+
+
 def check_handle(raw) -> str:
     """The handle to store, or 422 HANDLE_INVALID / HANDLE_RESERVED."""
     handle = normal_handle(raw)
@@ -88,14 +97,42 @@ def normal_code(raw) -> Optional[str]:
 # ─── Links ──────────────────────────────────────────────────────────────
 
 
+#: Dots that are not ".": IDNA reads them as label separators, so
+#: "example.com。evil.com" would open example.com.evil.com.
+_LOOKALIKE_DOTS = frozenset("\u3002\uff0e\uff61")
+
+
+def _script(ch: str) -> Optional[str]:
+    """The script a letter is written in (LATIN, CYRILLIC, GREEK, ...);
+    None for a digit, a hyphen or anything that is not a letter."""
+    if not ch.isalpha():
+        return None
+    name = unicodedata.name(ch, "")
+    return name.split(" ", 1)[0] if name else "UNKNOWN"
+
+
+def _mixed_script(host: str) -> bool:
+    """A label that mixes scripts ("аpple": a Cyrillic а with Latin letters)."""
+    for label in host.split("."):
+        scripts = {s for s in (_script(ch) for ch in label) if s is not None}
+        if len(scripts) > 1:
+            return True
+    return False
+
+
 def check_url(raw, *, field: str = "url") -> str:
     """A link a page may show: http(s) only, a real host, no user name or
     password, no spaces, quotes or angle brackets, at most 500 characters.
-    `javascript:`, `data:` and every other scheme are refused. 422 LINK_INVALID."""
+    `javascript:`, `data:` and every other scheme are refused. The host is
+    kept in its ASCII form (IDNA: bücher.example -> xn--bcher-kva.example),
+    lower case, so a client shows what it opens; a host with a look-alike
+    dot or a label mixing scripts is refused. 422 LINK_INVALID."""
     if not isinstance(raw, str):
         raise _bad("LINK_INVALID", "A link must be a web address.", **{field: "not text"})
     url = raw.strip()
     why = None
+    ascii_host = ""
+    parts = None
     if not url:
         why = "empty"
     elif len(url) > LINK_URL_MAX:
@@ -113,19 +150,24 @@ def check_url(raw, *, field: str = "url") -> str:
                 why = "only https:// and http:// links"
             elif "@" in parts.netloc or parts.username is not None or parts.password is not None:
                 why = "a link may not carry a user name or password"
+            elif any(ch in _LOOKALIKE_DOTS for ch in parts.netloc):
+                why = "its address has a dot that is not a dot"
             else:
                 host = (parts.hostname or "").rstrip(".")
-                try:
-                    ascii_host = host.encode("idna").decode("ascii").lower() if host else ""
-                except UnicodeError:
-                    ascii_host = ""
-                if not ascii_host or (not _HOST_RX.match(ascii_host) and not _IPV4_RX.match(ascii_host)):
-                    why = "not a web address"
+                if _mixed_script(host):
+                    why = "its address mixes alphabets"
+                else:
+                    try:
+                        ascii_host = host.encode("idna").decode("ascii").lower() if host else ""
+                    except UnicodeError:
+                        ascii_host = ""
+                    if not ascii_host or (not _HOST_RX.match(ascii_host) and not _IPV4_RX.match(ascii_host)):
+                        why = "not a web address"
     if why is not None:
         raise _bad("LINK_INVALID", f"That link can't be used: {why}.", **{field: why})
-    # The scheme as browsers write it; the rest as typed.
-    scheme, _, rest = url.partition(":")
-    return f"{scheme.lower()}:{rest}"
+    # The scheme and host as browsers write them; the rest as typed.
+    netloc = ascii_host if parts.port is None else f"{ascii_host}:{parts.port}"
+    return urlunsplit((parts.scheme.lower(), netloc, parts.path, parts.query, parts.fragment))
 
 
 # ─── Texts and tags ─────────────────────────────────────────────────────

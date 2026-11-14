@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.api.profiles import rules
 from app.api.profiles.models import (
-    LEVELS, LINK_TYPES, MAX_LINKS, MAX_NETWORK_TAGS, MAX_PROJECT_TAGS, MAX_TAG_CHARS, METHODS, SECTIONS, SHARE_LEVELS,
+    LEVELS, LINK_TYPES, MAX_NETWORK_TAGS, MAX_PROJECT_TAGS, MAX_TAG_CHARS, METHODS, SECTIONS, SHARE_LEVELS,
 )
 from app.core.response.base_model import CustomBaseModel
 
@@ -157,6 +157,10 @@ class MyProfile(PublicProfile):
     completeness: Completeness
     email: Optional[str] = None
     phone: Optional[str] = None
+    #: Their handle (an older account's username) breaks today's handle
+    #: rules: the editor should ask them to pick one. A reserved word has no
+    #: public page until they do.
+    handle_needs_change: bool = False
 
 
 class QrOut(CustomBaseModel):
@@ -243,6 +247,9 @@ class NetworkingStats(CustomBaseModel):
     saves: int
     mutual_pairs: int
     by_hour: list[HourSaves]
+    #: Fewer than 5 people checked in: every number is 0 and by_hour empty,
+    #: so a small event's numbers never say who saved whom.
+    too_few: bool = False
 
 
 class NetworkingSummary(CustomBaseModel):
@@ -299,7 +306,8 @@ class LinkIn(BaseModel):
 
 
 class LinksIn(BaseModel):
-    links: list[LinkIn] = Field(max_length=MAX_LINKS)
+    #: More than MAX_LINKS is the service's 422 LINK_INVALID; this only bounds the body.
+    links: list[LinkIn] = Field(max_length=50)
 
 
 def _project_tags(v):

@@ -391,6 +391,7 @@ CLASSIFICATION: dict[str, str] = {
     "network_encounters": WIPE,
     "network_save_notices": WIPE,
     "network_recaps": WIPE,
+    "released_handles": WIPE,
 }
 
 #: Triggers that refuse a removal in normal life, lifted for this transaction

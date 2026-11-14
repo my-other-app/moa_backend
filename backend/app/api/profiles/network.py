@@ -10,10 +10,13 @@ side's `mutual` false the same way.
 An encounter is where and when a save happened. It names the event only
 when both people are checked in to it and `met_at` falls in its networking
 window -- People Like You's rule (app/api/events/networking.py): from the
-start to an hour after the end. One encounter a pair per event (a partial
-unique index; a second scan there is the same meeting); without an event,
-one a pair per India day. An offline scan's `met_at` is kept when it is at
-most 72 hours old, otherwise it is now.
+start to an hour after the end -- and only for a save by code, or a
+`discovery` save (People Like You) of someone who shows there; a save by
+handle never says whether someone was checked in. One encounter a pair per
+event (a partial unique index; a second scan there is the same meeting);
+without an event, one a pair per India day. A QR save's `met_at` (an
+offline scan) is kept when it is at most 72 hours old; every other save is
+made now.
 
 Lists leave out anyone deleted, suspended, hidden by an admin, or blocked
 either way; their rows stay, and show again if that changes.
@@ -149,8 +152,15 @@ async def save(session, viewer: Users, body) -> dict:
     if target.id == viewer.id:
         raise CustomHTTPException(422, message="That's you.", error_code="CANNOT_SAVE_SELF")
 
-    met_at = clamp_met_at(body.met_at)
-    event = await event_for(session, body.event_id, viewer.id, target.id, met_at)
+    # An offline scan's own time is kept for a QR save only: a save by
+    # handle is made now (no claiming a meeting after the fact).
+    met_at = clamp_met_at(body.met_at if body.method == "qr" else None)
+    # The event is named only on a save by code (they were in front of each
+    # other), or from People Like You for someone who shows there: a save by
+    # handle must not tell whether a person who hid was checked in.
+    event = None
+    if body.code or (body.method == "discovery" and target.networking_visible):
+        event = await event_for(session, body.event_id, viewer.id, target.id, met_at)
 
     NP = NetworkPeople
     await lock_pair(session, viewer.id, target.id)

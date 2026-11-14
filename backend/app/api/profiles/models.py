@@ -14,6 +14,9 @@ people they saved at events (feature-register/profiles-networking-contract.md).
   pushes, one open row per (person, event).
 - network_recaps: the morning-after recap each person got for an event, so a
   second run of the job sends none (recap.py).
+- released_handles: a handle given up by a rename or an account's own
+  deletion, held HANDLE_HOLD (30 days) so old /u/ links (vCards, recap
+  mails) never open someone else's page.
 
 The person's switches and section levels are columns of user_profiles
 (app/api/users/models.py).
@@ -38,6 +41,8 @@ LINK_TYPES = ("linkedin", "github", "behance", "dribbble", "medium", "youtube", 
 METHODS = ("qr", "discovery", "link", "search")
 
 MAX_LINKS = 10
+#: How long a handle given up stays out of reach of anyone else.
+HANDLE_HOLD_DAYS = 30
 MAX_PROJECTS = 12
 MAX_PROJECT_TAGS = 5
 MAX_NETWORK_TAGS = 10
@@ -183,3 +188,16 @@ class NetworkRecaps(AbstractSQLModel):
     sent_at = Column(TZAwareDateTime(timezone=True), nullable=True)
 
     __table_args__ = (sa.Index("ix_network_recaps_event", "event_id"),)
+
+
+class ReleasedHandles(AbstractSQLModel):
+    __tablename__ = "released_handles"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    #: Lower case, as handles are matched.
+    handle = Column(String(100), nullable=False)
+    #: Who gave it up (they may take it back).
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    released_at = Column(TZAwareDateTime(timezone=True), nullable=False, default=_now, server_default=sa.text("now()"))
+
+    __table_args__ = (sa.Index("ix_released_handles_handle_released", "handle", "released_at"),)

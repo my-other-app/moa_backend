@@ -113,5 +113,6 @@ async def remove_project(session, admin, user_id: int, project_id: int, request=
         summary=f"Removed the project “{row.title}” from the profile of user {user_id}", details=details, request=request,
     )
     await session.commit()
-    if image is not None and hasattr(image, "delete"):
-        image.delete()
+    from app.api.profiles.service import drop_image
+
+    await drop_image(image)

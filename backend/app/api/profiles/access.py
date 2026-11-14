@@ -12,7 +12,9 @@ Levels (the contract's "Visibility levels"), for a section of the profile:
 `met`, `mutual`. The owner sees everything of their own.
 
 A private profile shows a stranger -- anyone the owner has not saved --
-only the handle, name, picture and headline (`minimal`).
+only the handle, name, picture and headline (`minimal`). An older account
+whose username is a reserved word has no public page (404) until it picks
+a handle.
 """
 from __future__ import annotations
 
@@ -20,7 +22,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from sqlalchemy import and_, exists, func, or_, select
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import aliased, selectinload
 
 from app.api.profiles.models import LEVELS, NetworkPeople
 from app.api.reports.models import UserBlocks
@@ -135,6 +137,15 @@ async def load_person_any(session, user_id: int) -> Users:
     return await session.scalar(select(Users).where(Users.id == user_id).options(*person_options()))
 
 
+def reserved_name(user: Users) -> bool:
+    """An older account whose username is one of the site's reserved words
+    ("support", "admin"): no public page until they pick a handle (MyProfile
+    says handle_needs_change)."""
+    from app.api.profiles import rules
+
+    return (user.username or "").lower() in rules.RESERVED
+
+
 def is_hidden(user: Users) -> bool:
     profile = user.profile
     return profile is not None and getattr(profile, "suspended_at", None) is not None
@@ -163,7 +174,7 @@ async def visible_person(session, viewer_id: Optional[int], *, user_id: Optional
     """The person, if this viewer may find them at all; else 404 NOT_FOUND
     (unknown, deleted, suspended, hidden, or blocked either way)."""
     user = await load_person(session, user_id=user_id, handle=handle)
-    if user is None or is_hidden(user):
+    if user is None or is_hidden(user) or reserved_name(user):
         raise not_found()
     if viewer_id is not None and await blocked_between(session, viewer_id, user.id):
         raise not_found()
@@ -211,18 +222,21 @@ async def relations(session, viewer_id: int, owner_ids) -> dict[int, Relation]:
     return out
 
 
-def blocked_ids(viewer_id: int):
-    """The people this viewer blocked or who blocked them, as subqueries to leave out."""
-    return (
-        select(UserBlocks.blocked_id).where(UserBlocks.blocker_id == viewer_id),
-        select(UserBlocks.blocker_id).where(UserBlocks.blocked_id == viewer_id),
-    )
-
-
 def shown_person_where(column, viewer_id: int):
     """The people a list may show this viewer by `column` (a user id): live
-    app users, profile not hidden, no block either way."""
-    blocked, blocked_me = blocked_ids(viewer_id)
-    hidden = select(UserProfiles.user_id).where(UserProfiles.suspended_at.isnot(None), UserProfiles.is_deleted == False)  # noqa: E712
-    live = select(Users.id).where(*live_person_where())
-    return (column.in_(live), column.not_in(blocked), column.not_in(blocked_me), column.not_in(hidden))
+    app users, profile not hidden, no block either way.
+
+    Each is a correlated EXISTS, a probe per row by an index: the user by
+    its primary key, a block by user_blocks' primary key or
+    ix_user_blocks_blocked, a hidden profile by ix_user_profiles_hidden
+    (partial: only hidden profiles are in it). As NOT IN subqueries they
+    read every live profile on every call."""
+    # Aliases: a query that joins users or user_profiles itself must not
+    # have these probes correlate to its own rows.
+    u, p, b = aliased(Users), aliased(UserProfiles), aliased(UserBlocks)
+    return (
+        exists().where(u.id == column, u.user_type == UserTypes.app_user, u.is_deleted == False, u.is_active == True),  # noqa: E712
+        ~exists().where(b.blocker_id == viewer_id, b.blocked_id == column),
+        ~exists().where(b.blocker_id == column, b.blocked_id == viewer_id),
+        ~exists().where(p.user_id == column, p.suspended_at.isnot(None), p.is_deleted == False),  # noqa: E712
+    )

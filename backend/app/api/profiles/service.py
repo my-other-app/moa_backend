@@ -8,17 +8,18 @@ from __future__ import annotations
 
 import io
 import logging
-from datetime import datetime, timezone
+import asyncio
+from datetime import datetime, timedelta, timezone
 from typing import Iterable, Optional
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
 from app.api.profiles import access, rules
 from app.api.profiles.access import Relation
 from app.api.profiles.models import (
-    MAX_LINKS, MAX_PROJECTS, SECTIONS, ProfileCodes, ProfileLinks, ProfileProjects,
+    HANDLE_HOLD_DAYS, MAX_LINKS, MAX_PROJECTS, SECTIONS, ProfileCodes, ProfileLinks, ProfileProjects, ReleasedHandles,
 )
 from app.api.users.models import UserProfiles, Users
 from app.core import public_urls
@@ -243,6 +244,10 @@ async def my_profile(session, user_id: int) -> dict:
     out["completeness"] = completeness(user, has_links=bool(out["links"]), has_projects=bool(out["projects"]))
     out["email"] = user.email
     out["phone"] = user.phone
+    # An older account's username may not keep today's handle rules (a
+    # reserved word, too long): the editor offers to change it (a reserved
+    # one has no public page until then).
+    out["handle_needs_change"] = not rules.handle_ok(user.username)
     return out
 
 
@@ -285,9 +290,27 @@ async def own_profile_locked(session, user_id: int) -> UserProfiles:
     )
 
 
+async def handle_held(session, handle: str, user_id: Optional[int] = None) -> bool:
+    """Someone else gave this handle up less than HANDLE_HOLD_DAYS ago (a
+    rename or their own account's deletion): it is not anyone else's yet."""
+    since = _now() - timedelta(days=HANDLE_HOLD_DAYS)
+    q = select(ReleasedHandles.id).where(ReleasedHandles.handle == handle.lower(), ReleasedHandles.released_at >= since)
+    if user_id is not None:
+        q = q.where(or_(ReleasedHandles.user_id.is_(None), ReleasedHandles.user_id != user_id))
+    return await session.scalar(q.limit(1)) is not None
+
+
+def release_handle(session, user_id: int, handle: Optional[str]) -> None:
+    """Hold a handle someone gives up (in the caller's transaction)."""
+    if handle:
+        session.add(ReleasedHandles(handle=handle.lower(), user_id=user_id, released_at=_now()))
+
+
 async def set_handle(session, user: Users, raw) -> None:
     """The person's handle (their username): 422 HANDLE_INVALID or
-    HANDLE_RESERVED, 409 HANDLE_TAKEN (case-blind, deleted accounts' too)."""
+    HANDLE_RESERVED; 409 HANDLE_TAKEN when another account has it (case-
+    blind, deleted accounts' too) or gave it up in the last 30 days. Their
+    old handle is held the same 30 days for everyone but them."""
     handle = rules.check_handle(raw)
     if handle == user.username:
         return
@@ -295,8 +318,9 @@ async def set_handle(session, user: Users, raw) -> None:
         select(Users.id).where(func.lower(Users.username) == handle, Users.id != user.id).limit(1)
         .execution_options(include_deleted=True)
     )
-    if taken is not None:
+    if taken is not None or await handle_held(session, handle, user.id):
         raise CustomHTTPException(409, message="That handle is taken.", error_code="HANDLE_TAKEN")
+    old = user.username
     try:
         async with session.begin_nested():
             await session.execute(update(Users).where(Users.id == user.id).values(username=handle).execution_options(synchronize_session=False))
@@ -304,6 +328,7 @@ async def set_handle(session, user: Users, raw) -> None:
         # Someone took it between the look and the write.
         raise CustomHTTPException(409, message="That handle is taken.", error_code="HANDLE_TAKEN")
     user.username = handle
+    release_handle(session, user.id, old)
 
 
 async def update_profile(session, user: Users, body) -> dict:
@@ -354,6 +379,13 @@ async def put_links(session, user: Users, links) -> dict:
         await session.execute(pg_insert(ProfileLinks).values(rows))
     await session.commit()
     return await my_profile(session, user.id)
+
+
+async def drop_image(image) -> None:
+    """A stored picture and its sizes out of the bucket, on a worker thread
+    (S3 calls never run on the event loop)."""
+    if image is not None and hasattr(image, "delete"):
+        await asyncio.to_thread(image.delete)
 
 
 def _project_not_found() -> CustomHTTPException:
@@ -411,8 +443,7 @@ async def remove_project(session, user_id: int, project_id: int) -> bool:
     image = row.image_key
     await session.delete(row)
     await session.commit()
-    if image is not None and hasattr(image, "delete"):
-        image.delete()
+    await drop_image(image)
     return True
 
 
@@ -440,8 +471,7 @@ async def set_project_image(session, user: Users, project_id: int, upload) -> di
     # here, before the row changes.
     row.image_key = await store_upload(ProfileProjects.image_key, {"bytes": io.BytesIO(await upload.read()), "filename": upload.filename})
     await session.commit()
-    if previous is not None and hasattr(previous, "delete"):
-        previous.delete()
+    await drop_image(previous)
     await session.refresh(row)
     return project_out(row)
 
@@ -451,8 +481,7 @@ async def clear_project_image(session, user: Users, project_id: int) -> dict:
     previous = row.image_key
     row.image_key = None
     await session.commit()
-    if previous is not None and hasattr(previous, "delete"):
-        previous.delete()
+    await drop_image(previous)
     return project_out(row)
 
 

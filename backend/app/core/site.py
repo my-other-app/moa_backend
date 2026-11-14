@@ -16,9 +16,10 @@ settings.SITE_TOKENS>`. With a valid token, and only then:
   * `X-Visitor-IP: <the visitor's address>` is believed for placing the
     visitor ("near you", /discover/locate; app/api/discover/geo.py), and
     as the person the certificate verifier counts (app/api/certificates/
-    router.py), inside a bucket of the site's own there so a leaked token
-    buys no more checks. It is never used for any other rate-limit key, a
-    sign-in record or an audit row.
+    router.py) and the profiles' reads count (app/api/profiles/limits.py),
+    each inside a bucket of the site's own there so a leaked token buys no
+    more reads. It is never used for any other rate-limit key, a sign-in
+    record or an audit row.
 
 Without a valid token neither header means anything: the request is limited
 and placed by its own address exactly as before.

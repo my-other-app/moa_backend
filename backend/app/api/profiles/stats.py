@@ -11,6 +11,8 @@ from app.api.profiles.models import NetworkEncounters, NetworkPeople, ProfileCod
 from app.api.users.models import UserProfiles, Users, UserTypes
 
 IST_ZONE = literal_column("'Asia/Kolkata'")
+#: Below this many people checked in, an event's stats are all zeros (too_few).
+MIN_CHECKED_IN = 5
 
 
 def _now() -> datetime:
@@ -20,11 +22,16 @@ def _now() -> datetime:
 async def event_stats(session, event_id: int) -> dict:
     """GET /events/{id}/networking/stats: who is checked in, how many took
     part, the saves made there, the pairs both of whom saved the other
-    there, and the saves by hour (India time)."""
+    there, and the saves by hour (India time). Under MIN_CHECKED_IN people
+    checked in, zeros and `too_few` (checked_in included: the door list
+    already says who came; the numbers would say who saved whom)."""
     NP, E = NetworkPeople, NetworkEncounters
     checked_in = int(await session.scalar(
         select(func.count(func.distinct(R.user_id))).where(R.event_id == event_id, R.is_attended == True, R.is_deleted == False)  # noqa: E712
     ) or 0)
+    if checked_in < MIN_CHECKED_IN:
+        # Among a handful of people the numbers say who saved whom, and when.
+        return {"checked_in": 0, "people_networked": 0, "saves": 0, "mutual_pairs": 0, "by_hour": [], "too_few": True}
     at = select(NP.owner_id, NP.person_id).join(E, E.network_person_id == NP.id).where(E.event_id == event_id).subquery()
     saves = int(await session.scalar(select(func.count()).select_from(at)) or 0)
     people = int(await session.scalar(
@@ -42,7 +49,7 @@ async def event_stats(session, event_id: int) -> dict:
         select(hour.label("h"), func.count()).where(E.event_id == event_id).group_by(hour).order_by(hour)
     )).all()
     by_hour = [{"hour": h.strftime("%Y-%m-%dT%H:00:00+05:30"), "saves": int(n)} for h, n in rows]
-    return {"checked_in": checked_in, "people_networked": people, "saves": saves, "mutual_pairs": mutual, "by_hour": by_hour}
+    return {"checked_in": checked_in, "people_networked": people, "saves": saves, "mutual_pairs": mutual, "by_hour": by_hour, "too_few": False}
 
 
 async def summary(session) -> dict:

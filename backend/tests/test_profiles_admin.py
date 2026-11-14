@@ -67,6 +67,19 @@ async def test_a_profile_is_reported_by_its_owners_id_in_digits(client, world):
     assert all(("profile" not in i) or i["profile"] is None or i["target_type"] == "profile" for i in others)
 
 
+async def test_a_profile_cannot_be_reported_across_a_block(client, session, world):
+    from app.api.reports.models import UserBlocks
+
+    session.add(UserBlocks(blocker_id=world["owner"].id, blocked_id=world["fan"].id))
+    await session.commit()
+    r = await _report(client, world["fh"], str(world["owner"].id))
+    assert (r.status_code, r.json()["error_code"]) == (404, "TARGET_NOT_FOUND")
+    await session.execute(UserBlocks.__table__.delete())
+    session.add(UserBlocks(blocker_id=world["fan"].id, blocked_id=world["owner"].id))
+    await session.commit()
+    assert (await _report(client, world["fh"], str(world["owner"].id))).status_code == 404
+
+
 async def test_hide_profile_takes_the_profile_its_vcard_and_its_code_down(client, session, world):
     uid = world["owner"].id
     rid = (await _report(client, world["fh"], str(uid))).json()["id"]

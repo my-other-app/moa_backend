@@ -8,10 +8,11 @@ for its `due_at`, ten minutes after its first save (the job's dedupe key is
 the row's, so the second save writes nothing). Saving twice is saving once.
 
 The job claims the row (`sent_at`, under FOR UPDATE) in the transaction
-that decides what to say, so a second run of it sends nothing. It leaves
-out savers who since removed their save, are deleted, suspended or hidden,
-or are blocked either way; nothing goes when the person turned
-`notify_saves` off or nobody is left. Push type `network_saves`, data
+that decides what to say, so a second run of it sends nothing. Every save
+in the batch is told, one removed within the ten minutes included; it
+leaves out only savers who are deleted, suspended or hidden, or blocked
+either way; nothing goes when the person turned `notify_saves` off or
+nobody is left. Push type `network_saves`, data
 {type, event_id}.
 """
 from __future__ import annotations
@@ -24,7 +25,8 @@ from sqlalchemy import case, func, literal_column, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.api.profiles import access, service
-from app.api.profiles.models import NetworkPeople, NetworkSaveNotices
+from app.api.profiles.models import NetworkSaveNotices
+from app.api.users.models import Users
 from app.core import jobs
 
 logger = logging.getLogger(__name__)
@@ -68,7 +70,7 @@ async def send(session, notice_id: int) -> bool:
     """Send one batch, once. True when a push went."""
     from app.api.events.models import Events
 
-    N, NP = NetworkSaveNotices, NetworkPeople
+    N = NetworkSaveNotices
     row = await session.scalar(select(N).where(N.id == notice_id).with_for_update().execution_options(populate_existing=True))
     if row is None or row.sent_at is not None:
         await session.commit()
@@ -79,10 +81,13 @@ async def send(session, notice_id: int) -> bool:
         await session.commit()
         return False
     wanted = [int(i) for i in (row.saver_ids or [])]
-    still = set((await session.scalars(
-        select(NP.owner_id).where(NP.person_id == person.id, NP.owner_id.in_(wanted), *access.shown_person_where(NP.owner_id, person.id))
+    # Every save that happened, a save removed since included: what a saver
+    # saw while they had it is the person's to know. Only savers they may
+    # not see now (blocked either way, deleted, suspended, hidden) are left out.
+    shown = set((await session.scalars(
+        select(Users.id).where(Users.id.in_(wanted), *access.shown_person_where(Users.id, person.id))
     )).all()) if wanted else set()
-    savers = [i for i in wanted if i in still]
+    savers = [i for i in wanted if i in shown]
     event = await session.scalar(select(Events).where(Events.id == row.event_id)) if row.event_id else None
     if not savers:
         await session.commit()

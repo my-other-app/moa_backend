@@ -14,7 +14,7 @@ from app.api.reports.models import UserBlocks
 from app.core import jobs
 from app.core.jobs import Jobs
 from tests.conftest import auth_header
-from tests.profiles_world import API, NOW, live_event, person, profile_row, row, save
+from tests.profiles_world import API, NOW, code_of, live_event, person, profile_row, row, save
 
 
 @pytest.fixture
@@ -132,23 +132,41 @@ async def test_an_encounter_names_the_event_only_when_both_are_checked_in_inside
     for g in (a, b):
         await make_registration(event=later, user=g, is_attended=True)
     await session.commit()
+    b_code = await code_of(client, world["bh"])
 
-    r = (await save(client, world["ah"], handle="bala", event_id=event.id, method="qr")).json()
+    r = (await save(client, world["ah"], code=b_code, event_id=event.id, method="qr")).json()
     e = r["person"]["encounters"][0]["event"]
     assert e == {"id": event.id, "slug": event.slug, "name": "DevFest", "starts_at": e["starts_at"]}
     # The same event again: the same encounter.
-    assert (await save(client, world["ah"], handle="bala", event_id=event.id)).json()["new_encounter"] is False
+    assert (await save(client, world["ah"], code=b_code, event_id=event.id, method="qr")).json()["new_encounter"] is False
+    # From People Like You (discovery) too, for someone who shows there.
+    r = (await save(client, world["bh"], handle="ananya", event_id=event.id, method="discovery")).json()
+    assert r["person"]["encounters"][0]["event"]["id"] == event.id
     # C registered but never came in: no event.
-    r = (await save(client, world["ah"], handle="chitra", event_id=event.id)).json()
+    r = (await save(client, world["ah"], code=await code_of(client, world["ch"]), event_id=event.id, method="qr")).json()
     assert r["person"]["encounters"][0]["event"] is None
     # Both checked in, but now is outside that event's window: no event.
-    r = (await save(client, world["bh"], handle="ananya", event_id=later.id)).json()
+    r = (await save(client, world["bh"], code=await code_of(client, world["ah"]), event_id=later.id, method="qr")).json()
     assert r["person"]["encounters"][0]["event"] is None
-    # An event that does not exist, or one neither is at: no event, no error.
-    assert (await save(client, world["ch"], handle="bala", event_id=999999)).json()["person"]["encounters"][0]["event"] is None
-    # Before the start (an offline scan from the morning): no event.
-    assert (await save(client, world["ch"], handle="ananya", event_id=event.id, met_at=(NOW - timedelta(hours=3)).isoformat())).status_code == 200
-    assert (await _encounters(session, world["c"], world["a"]))[0].event_id is None
+    # An event that does not exist: no event, no error.
+    assert (await save(client, world["ch"], code=b_code, event_id=999999, method="qr")).json()["person"]["encounters"][0]["event"] is None
+
+
+async def test_a_save_by_handle_never_says_whether_someone_was_checked_in(client, session, world, make_club, make_event, make_registration):
+    """The attendance oracle: a save by handle with an event_id must not
+    reveal a check-in -- above all of someone hidden from People Like You."""
+    a, b, c = world["a"], world["b"], world["c"]
+    _, _, event = await live_event(make_club, make_event, make_registration, a, b, c)
+    b.networking_visible = False
+    await session.commit()
+    for method in ("search", "link"):
+        r = (await save(client, world["ah"], handle="bala", event_id=event.id, method=method)).json()
+        assert r["person"]["encounters"][-1]["event"] is None, method
+    # Discovery names the event only for someone who shows in People Like You.
+    r = (await save(client, world["ch"], handle="bala", event_id=event.id, method="discovery")).json()
+    assert r["person"]["encounters"][0]["event"] is None
+    r = (await save(client, world["ch"], handle="ananya", event_id=event.id, method="discovery")).json()
+    assert r["person"]["encounters"][0]["event"]["id"] == event.id
 
 
 async def test_an_offline_scan_keeps_its_time_up_to_72_hours(client, session, world, make_club, make_event, make_registration):
@@ -156,22 +174,28 @@ async def test_an_offline_scan_keeps_its_time_up_to_72_hours(client, session, wo
     two_hours = NOW - timedelta(hours=2)
     _, _, event = await live_event(make_club, make_event, make_registration, a, b, starts=NOW - timedelta(hours=3), duration=2.0)
     await session.commit()
-    r = (await save(client, world["ah"], handle="bala", event_id=event.id, met_at=two_hours.isoformat())).json()
+    b_code, c_code = await code_of(client, world["bh"]), await code_of(client, world["ch"])
+    r = (await save(client, world["ah"], code=b_code, method="qr", event_id=event.id, met_at=two_hours.isoformat())).json()
     enc = r["person"]["encounters"][0]
     assert enc["event"]["id"] == event.id  # the scan's time is in the window, though now is not
     assert abs(datetime.fromisoformat(enc["met_at"]) - two_hours) < timedelta(seconds=1)
 
     seventy_one = NOW - timedelta(hours=71)
-    await save(client, world["ah"], handle="chitra", met_at=seventy_one.isoformat())
+    await save(client, world["ah"], code=c_code, method="qr", met_at=seventy_one.isoformat())
     assert abs((await _encounters(session, a, c))[0].met_at - seventy_one) < timedelta(seconds=1)
     before = datetime.now(timezone.utc)
-    await save(client, world["bh"], handle="chitra", met_at=(NOW - timedelta(hours=73)).isoformat())
+    await save(client, world["bh"], code=c_code, method="qr", met_at=(NOW - timedelta(hours=73)).isoformat())
     assert (await _encounters(session, b, c))[0].met_at >= before - timedelta(seconds=1)
     # A time in the future is now, too.
-    await save(client, world["ch"], handle="bala", met_at=(NOW + timedelta(days=1)).isoformat())
+    await save(client, world["ch"], code=b_code, method="qr", met_at=(NOW + timedelta(days=1)).isoformat())
     assert (await _encounters(session, c, b))[0].met_at <= datetime.now(timezone.utc)
+    # A save by handle is made now, whatever met_at it sends: no claiming a meeting after the fact.
+    before = datetime.now(timezone.utc)
+    r = (await save(client, world["bh"], handle="ananya", method="search", event_id=event.id, met_at=two_hours.isoformat())).json()
+    assert datetime.fromisoformat(r["person"]["encounters"][0]["met_at"]) >= before - timedelta(seconds=1)
+    assert r["person"]["encounters"][0]["event"] is None
     # Without an event, one encounter a day: yesterday's scan and today's are two.
-    r = await save(client, world["ah"], handle="chitra")
+    r = await save(client, world["ah"], code=c_code, method="qr")
     assert r.json()["new_encounter"] is True and len(await _encounters(session, a, c)) == 2
 
 
@@ -194,7 +218,7 @@ async def test_the_list_filters_sorts_pages_and_counts(client, session, world, m
     _, _, event = await live_event(make_club, make_event, make_registration, a, world["b"])
     dee, dh = await person(session, make_user, mint_token, "deepa", "Deepa Rao", headline="Rust person")
     await session.commit()
-    await save(client, ah, handle="bala", event_id=event.id, method="qr")
+    await save(client, ah, handle="bala", event_id=event.id, method="discovery")
     await save(client, ah, handle="chitra")
     await save(client, ah, handle="deepa")
     await save(client, dh, handle="ananya")  # mutual with Deepa
@@ -264,7 +288,7 @@ async def test_saved_me_lists_who_saved_me_that_i_have_not_saved(client, session
     a, b, c = world["a"], world["b"], world["c"]
     _, _, event = await live_event(make_club, make_event, make_registration, a, b)
     await session.commit()
-    await save(client, world["bh"], handle="ananya", event_id=event.id)
+    await save(client, world["bh"], handle="ananya", event_id=event.id, method="discovery")
     await save(client, world["ch"], handle="ananya")
     r = (await client.get(f"{API}/network/saved-me", headers=world["ah"])).json()
     assert [i["person"]["handle"] for i in r["items"]] == ["chitra", "bala"] and r["total"] == 2
@@ -334,8 +358,8 @@ async def test_saves_are_batched_into_one_notice_sent_once(client, session, worl
     _, _, event = await live_event(make_club, make_event, make_registration, a, b, d, e)
     await session.commit()
     for h in (world["bh"], dh, eh):
-        await save(client, h, handle="ananya", event_id=event.id)
-    await save(client, world["bh"], handle="ananya", event_id=event.id)  # a second save is no second saver
+        await save(client, h, handle="ananya", event_id=event.id, method="discovery")
+    await save(client, world["bh"], handle="ananya", event_id=event.id, method="discovery")  # a second save is no second saver
     await save(client, world["ch"], handle="ananya")  # no event: its own batch
 
     rows = list((await session.scalars(select(NetworkSaveNotices).where(NetworkSaveNotices.person_id == a.id).order_by(NetworkSaveNotices.id))).all())
@@ -346,14 +370,15 @@ async def test_saves_are_batched_into_one_notice_sent_once(client, session, worl
     assert sorted(j.dedupe_key for j in queued) == sorted(f"{notices.NOTICE_JOB}:{r.id}" for r in rows)
     assert world["pushes"] == []  # nothing before the ten minutes
 
-    # Deepa removed her save; Esha was blocked by Ananya since: neither is named.
+    # Deepa removed her save within the ten minutes: she is still told of.
+    # Esha was blocked by Ananya since: she is not named.
     await client.delete(f"{API}/network/{(await row(session, d, a)).id}", headers=dh)
     session.add(UserBlocks(blocker_id=a.id, blocked_id=e.id))
     await session.commit()
     assert await notices.send(session, rows[0].id) is True
     assert await notices.send(session, rows[0].id) is False  # the job running twice sends once
     assert world["pushes"] == [{
-        "user_id": a.id, "title": "Bala saved your profile at DevFest", "body": world["pushes"][0]["body"],
+        "user_id": a.id, "title": "Bala and 1 other saved your profile at DevFest", "body": world["pushes"][0]["body"],
         "data": {"type": "network_saves", "event_id": str(event.id)},
     }]
     # A save after the batch went starts a new one.
@@ -362,9 +387,21 @@ async def test_saves_are_batched_into_one_notice_sent_once(client, session, worl
     f, fh = await person(session, make_user, mint_token, "farah", "Farah Khan")
     await make_registration(event=event, user=f, is_attended=True)
     await session.commit()
-    await save(client, fh, handle="ananya", event_id=event.id)
+    await save(client, fh, handle="ananya", event_id=event.id, method="discovery")
     open_ = await session.scalar(select(NetworkSaveNotices).where(NetworkSaveNotices.person_id == a.id, NetworkSaveNotices.sent_at.is_(None), NetworkSaveNotices.event_id == event.id))
     assert open_ is not None and open_.saver_ids == [f.id]
+
+
+async def test_removing_a_save_within_the_batch_does_not_cancel_its_notice(client, session, world):
+    """Save, look, remove at once: the person is still told who saved them."""
+    await client.patch(f"{API}/me/profile", json={"share_email": "met"}, headers=world["bh"])
+    saved = (await save(client, world["ah"], handle="bala")).json()
+    assert saved["profile"]["contact"]["email"] == "bala@example.com"
+    assert (await client.delete(f"{API}/network/{saved['person']['id']}", headers=world["ah"])).status_code == 204
+    n = await session.scalar(select(NetworkSaveNotices).where(NetworkSaveNotices.person_id == world["b"].id))
+    assert n is not None and n.saver_ids == [world["a"].id]
+    assert await notices.send(session, n.id) is True
+    assert world["pushes"][-1]["user_id"] == world["b"].id and world["pushes"][-1]["title"] == "Ananya saved your profile"
 
 
 async def test_notice_wording_and_switching_notices_off(client, session, world):
@@ -403,9 +440,11 @@ async def test_the_recap_goes_once_per_person_the_morning_after(client, session,
     _, _, event = await live_event(make_club, make_event, make_registration, a, b, c, starts=NOW - timedelta(hours=3), duration=1.0)
     await session.commit()
     met = (NOW - timedelta(hours=2, minutes=30)).isoformat()
-    await save(client, world["ah"], handle="bala", event_id=event.id, met_at=met)
-    await save(client, world["ah"], handle="chitra", event_id=event.id, met_at=met)
-    await save(client, world["bh"], handle="ananya", event_id=event.id, met_at=met)
+    codes = {k: await code_of(client, world[f"{k}h"]) for k in ("a", "b", "c")}
+    # Offline scans at the event, synced after it.
+    await save(client, world["ah"], code=codes["b"], method="qr", event_id=event.id, met_at=met)
+    await save(client, world["ah"], code=codes["c"], method="qr", event_id=event.id, met_at=met)
+    await save(client, world["bh"], code=codes["a"], method="qr", event_id=event.id, met_at=met)
     await client.patch(f"{API}/me/profile", json={"recap_emails": False}, headers=world["bh"])
 
     # 09:00 India time, the first after the window closed (an hour after the end).
@@ -441,7 +480,7 @@ async def test_the_recap_goes_once_per_person_the_morning_after(client, session,
 
     # A late offline save for someone with no recap yet: theirs alone, at once.
     world["pushes"].clear()
-    await save(client, world["ch"], handle="bala", event_id=event.id, met_at=met)
+    await save(client, world["ch"], code=codes["b"], method="qr", event_id=event.id, met_at=met)
     await recap.run_event(session, event.id, now=due + timedelta(hours=1))
     await jobs.settle()
     assert [p["user_id"] for p in world["pushes"]] == [c.id]
@@ -487,21 +526,23 @@ async def _door_session(client, owner_headers, email, monkeypatch):
     return auth_header(signed.json()["access_token"])
 
 
-async def test_stats_count_for_the_clubs_team_and_its_cohosts_only(client, session, world, make_club, make_event, make_registration, make_admin, mint_token, monkeypatch):
+async def test_stats_count_for_the_clubs_team_and_its_cohosts_only(client, session, world, make_user, make_club, make_event, make_registration, make_admin, mint_token, monkeypatch):
     from app.api.cohosts.models import ACCEPTED, EventCohosts
     from app.core.rate_limit import limiter
 
     monkeypatch.setattr(limiter, "enabled", False)
     a, b, c = world["a"], world["b"], world["c"]
-    host, club, event = await live_event(make_club, make_event, make_registration, a, b, c)
+    d, _ = await person(session, make_user, mint_token, "deepa", "Deepa Rao")
+    e, _ = await person(session, make_user, mint_token, "esha", "Esha Paul")
+    host, club, event = await live_event(make_club, make_event, make_registration, a, b, c, d, e)
     co_owner, co = await make_club(name="Co Club", email="co-club@example.com")
     outsider, _ = await make_club(name="Other Club", email="other-club@example.com")
     session.add(EventCohosts(event_id=event.id, club_id=co.id, status=ACCEPTED, invited_at=NOW, expires_at=NOW + timedelta(days=1), responded_at=NOW))
     viewer = await make_admin(email="stats-viewer@example.com")
     await session.commit()
-    await save(client, world["ah"], handle="bala", event_id=event.id)
-    await save(client, world["bh"], handle="ananya", event_id=event.id)
-    await save(client, world["ch"], handle="ananya", event_id=event.id)
+    await save(client, world["ah"], handle="bala", event_id=event.id, method="discovery")
+    await save(client, world["bh"], handle="ananya", event_id=event.id, method="discovery")
+    await save(client, world["ch"], handle="ananya", event_id=event.id, method="discovery")
     await save(client, world["ch"], handle="bala")  # not at the event
 
     path = f"{API}/events/{event.id}/networking/stats"
@@ -509,7 +550,9 @@ async def test_stats_count_for_the_clubs_team_and_its_cohosts_only(client, sessi
     r = await client.get(path, headers=host_h)
     assert r.status_code == 200, r.text
     body = r.json()
-    assert {k: body[k] for k in ("checked_in", "people_networked", "saves", "mutual_pairs")} == {"checked_in": 3, "people_networked": 3, "saves": 3, "mutual_pairs": 1}
+    assert {k: body[k] for k in ("checked_in", "people_networked", "saves", "mutual_pairs", "too_few")} == {
+        "checked_in": 5, "people_networked": 3, "saves": 3, "mutual_pairs": 1, "too_few": False,
+    }
     assert sum(h["saves"] for h in body["by_hour"]) == 3 and all(h["hour"].endswith(":00:00+05:30") for h in body["by_hour"])
     assert "ananya" not in r.text and "Ananya" not in r.text  # counts, never names
     door = await _door_session(client, host_h, "door-staff@example.com", monkeypatch)
@@ -523,11 +566,21 @@ async def test_stats_count_for_the_clubs_team_and_its_cohosts_only(client, sessi
     assert (await client.get(f"{API}/events/999999/networking/stats", headers=host_h)).status_code == 404
 
 
+async def test_a_small_events_stats_are_only_zeros(client, session, world, make_club, make_event, make_registration, mint_token):
+    """Under five people checked in, the numbers would say who saved whom."""
+    host, _, event = await live_event(make_club, make_event, make_registration, world["a"], world["b"])
+    await session.commit()
+    await save(client, world["ah"], handle="bala", event_id=event.id, method="discovery")
+    r = await client.get(f"{API}/events/{event.id}/networking/stats", headers=auth_header(await mint_token(host)))
+    assert r.status_code == 200
+    assert r.json() == {"checked_in": 0, "people_networked": 0, "saves": 0, "mutual_pairs": 0, "by_hour": [], "too_few": True}
+
+
 async def test_people_like_you_says_each_persons_handle_and_whether_i_saved_them(client, session, world, make_club, make_event, make_registration):
     a, b, c = world["a"], world["b"], world["c"]
     _, _, event = await live_event(make_club, make_event, make_registration, a, b, c)
     await session.commit()
-    await save(client, world["ah"], handle="bala", event_id=event.id)
+    await save(client, world["ah"], handle="bala", event_id=event.id, method="discovery")
     r = await client.get(f"{API}/events/{event.id}/networking", headers=world["ah"])
     assert r.status_code == 200, r.text
     got = {x["name"]: (x["handle"], x["saved"]) for x in r.json()["attendees"]}

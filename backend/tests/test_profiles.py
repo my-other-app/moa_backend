@@ -124,7 +124,8 @@ async def test_links_are_the_whole_ordered_list_and_only_safe_ones(client, world
         assert (r.status_code, r.json()["error_code"]) == (422, "LINK_INVALID"), url
     assert (await client.put(f"{API}/me/profile/links", json={"links": [{"type": "myspace", "url": "https://x.com"}]}, headers=h)).status_code == 422
     eleven = [{"type": "other", "url": f"https://site{i}.example.com"} for i in range(11)]
-    assert (await client.put(f"{API}/me/profile/links", json={"links": eleven}, headers=h)).status_code == 422
+    r = await client.put(f"{API}/me/profile/links", json={"links": eleven}, headers=h)
+    assert (r.status_code, r.json()["error_code"]) == (422, "LINK_INVALID")
     # Nothing changed by the refusals.
     assert [l["type"] for l in (await client.get(f"{API}/me/profile", headers=h)).json()["links"]] == ["website"]
 
@@ -528,3 +529,91 @@ def limiter_reset():
     from app.core.rate_limit import limiter
 
     limiter.reset()
+
+
+
+async def test_link_hosts_are_kept_in_ascii_and_look_alikes_are_refused(client, world):
+    h = world["oh"]
+    r = await client.put(f"{API}/me/profile/links", json={"links": [
+        {"type": "website", "url": "https://Bücher.Example/kaufen?q=ä"},
+        {"type": "website", "url": "https://пример.рф/"},
+        {"type": "website", "url": "https://Example.COM:8443/a"},
+    ]}, headers=h)
+    assert r.status_code == 200, r.text
+    assert [l["url"] for l in r.json()["links"]] == [
+        "https://xn--bcher-kva.example/kaufen?q=ä", "https://xn--e1afmkfd.xn--p1ai/", "https://example.com:8443/a",
+    ]
+    for url in ("https://example.com\u3002evil.com/", "https://evil\uff0ecom/", "https://evil\uff61com/", "https://\u0430pple.com/", "https://paypa\u04cf.com/"):
+        r = await client.put(f"{API}/me/profile/links", json={"links": [{"type": "website", "url": url}]}, headers=h)
+        assert (r.status_code, r.json()["error_code"]) == (422, "LINK_INVALID"), url
+
+
+async def test_an_old_reserved_username_has_no_public_page_until_it_changes(client, session, make_user, mint_token):
+    user, uh = await person(session, make_user, mint_token, "support", "Support Desk")
+    long_, lh = await person(session, make_user, mint_token, "a" * 40, "Long Name")
+    await session.commit()
+    code = (await client.get(f"{API}/me/qr", headers=uh)).json()["code"]
+    for path in (f"{API}/profiles/support", f"{API}/profiles/support/vcard", f"{API}/profiles/by-code/{code}"):
+        assert (await client.get(path)).status_code == 404, path
+    assert (await save(client, lh, handle="support")).status_code == 404
+    me = (await client.get(f"{API}/me/profile", headers=uh)).json()
+    assert me["handle"] == "support" and me["handle_needs_change"] is True
+    # A long old username still has its page, and is offered a change too.
+    assert (await client.get(f"{API}/profiles/{'a' * 40}")).status_code == 200
+    assert (await client.get(f"{API}/me/profile", headers=lh)).json()["handle_needs_change"] is True
+    # Changed: the page is theirs again.
+    r = await client.patch(f"{API}/me/profile", json={"handle": "help.desk"}, headers=uh)
+    assert r.status_code == 200 and r.json()["handle_needs_change"] is False
+    assert (await client.get(f"{API}/profiles/help.desk")).status_code == 200
+    assert (await client.get(f"{API}/profiles/by-code/{code}")).status_code == 200
+
+
+async def test_a_handle_given_up_is_held_for_30_days(client, session, make_user, mint_token, world):
+    from app.api.profiles.models import ReleasedHandles
+    from app.api.users import service as users
+
+    oh, vh = world["oh"], world["vh"]
+    assert (await client.patch(f"{API}/me/profile", json={"handle": "asha.n"}, headers=oh)).status_code == 200
+    # Someone else can't take it, now or in 29 days...
+    r = await client.patch(f"{API}/me/profile", json={"handle": "asha"}, headers=vh)
+    assert (r.status_code, r.json()["error_code"]) == (409, "HANDLE_TAKEN")
+    assert (await client.get(f"{API}/profiles/asha")).status_code == 404
+    # ...nor is it a newcomer's generated username.
+    newcomer = users.Users(full_name="Asha", email="asha2@example.com")
+    assert await users.generate_username(newcomer, session) != "asha"
+    # Its owner may take it back.
+    assert (await client.patch(f"{API}/me/profile", json={"handle": "asha"}, headers=oh)).status_code == 200
+    assert (await client.patch(f"{API}/me/profile", json={"handle": "asha.n"}, headers=oh)).status_code == 200
+    # After 30 days it is free.
+    await session.execute(ReleasedHandles.__table__.update().values(released_at=datetime.now(timezone.utc) - timedelta(days=31)))
+    await session.commit()
+    assert (await client.patch(f"{API}/me/profile", json={"handle": "asha"}, headers=vh)).status_code == 200
+
+    # An account's own deletion holds its handle too.
+    gone, gh = await person(session, make_user, mint_token, "leaving", "Leaving Soon")
+    await session.commit()
+    assert (await client.delete(f"{API}/user/delete", headers=gh)).status_code in (200, 204)
+    r = await client.patch(f"{API}/me/profile", json={"handle": "leaving"}, headers=oh)
+    assert (r.status_code, r.json()["error_code"]) == (409, "HANDLE_TAKEN")
+
+
+async def test_the_site_counts_each_visitor_it_names_on_every_profile_read(client, world, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "SITE_TOKENS", SITE_TOKEN)
+    monkeypatch.setattr(limits, "PROFILE_READS", "3/minute")
+
+    def from_site(visitor):
+        return {"X-Forwarded-For": SITE_ADDR, "X-Site-Token": SITE_TOKEN, "X-Visitor-IP": visitor}
+
+    # The page, its vCard and the picture reads (the same profile read, fresh) share one visitor's 3 a minute.
+    one = from_site("49.37.20.1")
+    got = [
+        (await client.get(f"{API}/profiles/asha", headers=one)).status_code,
+        (await client.get(f"{API}/profiles/asha/vcard", headers=one)).status_code,
+        (await client.get(f"{API}/profiles/asha", headers=one)).status_code,
+        (await client.get(f"{API}/profiles/asha/vcard", headers=one)).status_code,
+    ]
+    assert got == [200, 200, 200, 429]
+    # Another visitor through the same server is their own.
+    assert (await client.get(f"{API}/profiles/asha", headers=from_site("49.37.20.2"))).status_code == 200

@@ -6,11 +6,14 @@
   scanning_enabled, show_events/_certificates/_talks/_clubs) and the
   admin's hide (`suspended_at`). Every one nullable or with a constant
   default: a catalogue change, no rewrite.
-- users: an index on lower(username), the handle's case-blind lookup,
-  built CONCURRENTLY in an autocommit block at the end (users is hot).
 - New tables: profile_links, profile_projects, profile_codes,
   network_people, network_encounters, network_save_notices, network_recaps,
-  each with the indexes the contract lists and the ones its queries need.
+  released_handles, each with the indexes the contract lists and the ones
+  its queries need.
+- The two indexes on hot tables (users' lower(username), user_profiles'
+  hidden ones) are the next revision's, profiles_networking_indexes: built
+  CONCURRENTLY outside a transaction, so this one is stamped first and a
+  failed build there is simply run again.
 - content_reports.target_type may be `profile` (target_id = the owner's
   user id in digits): ck_content_reports_target_type is dropped and made
   again with it. content_reports is small; the check reads it once.
@@ -164,25 +167,28 @@ def upgrade() -> None:
     )
     op.create_index("ix_network_recaps_event", "network_recaps", ["event_id"])
 
+    op.create_table(
+        "released_handles",
+        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
+        sa.Column("handle", sa.String(100), nullable=False),
+        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
+        sa.Column("released_at", sa.DateTime(timezone=True), nullable=False, server_default=_now()),
+    )
+    op.create_index("ix_released_handles_handle_released", "released_handles", ["handle", "released_at"])
+
     op.drop_constraint("ck_content_reports_target_type", "content_reports", type_="check")
     op.create_check_constraint("ck_content_reports_target_type", "content_reports", NEW_TARGETS)
 
-    # users is hot: its index is built without blocking its writes, after
-    # everything above has committed. A build that failed half way leaves
-    # an invalid index behind; it is dropped first.
-    with op.get_context().autocommit_block():
-        op.drop_index("ix_users_username_lower", table_name="users", postgresql_concurrently=True, if_exists=True)
-        op.create_index("ix_users_username_lower", "users", [sa.text("lower(username)")], postgresql_concurrently=True)
-
 
 def downgrade() -> None:
-    with op.get_context().autocommit_block():
-        op.drop_index("ix_users_username_lower", table_name="users", postgresql_concurrently=True, if_exists=True)
     op.execute("SET LOCAL lock_timeout = '3s'")
     op.execute("DELETE FROM content_reports WHERE target_type = 'profile'")
     op.drop_constraint("ck_content_reports_target_type", "content_reports", type_="check")
     op.create_check_constraint("ck_content_reports_target_type", "content_reports", OLD_TARGETS)
-    for table in ("network_recaps", "network_save_notices", "network_encounters", "network_people", "profile_codes", "profile_projects", "profile_links"):
+    for table in (
+        "released_handles", "network_recaps", "network_save_notices", "network_encounters", "network_people",
+        "profile_codes", "profile_projects", "profile_links",
+    ):
         op.drop_table(table)
     for name, _, _ in reversed(PROFILE_COLUMNS):
         op.drop_column("user_profiles", name)

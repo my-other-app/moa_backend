@@ -273,6 +273,9 @@ class UserProfiles(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         # once used to make two, and which one an account showed was then
         # whichever Postgres returned first.
         sa.Index("ux_user_profiles_user_live", "user_id", unique=True, postgresql_where=sa.text("NOT is_deleted")),
+        # The few profiles an admin hid: the Network's lists leave them out by
+        # a probe of this (app/api/profiles/access.py shown_person_where).
+        sa.Index("ix_user_profiles_hidden", "user_id", postgresql_where=sa.text("suspended_at IS NOT NULL AND NOT is_deleted")),
     )
 
     def __repr__(self):
