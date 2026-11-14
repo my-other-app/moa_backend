@@ -49,6 +49,12 @@ class AppConfig(BaseSettings):
     # and development. true or false says so outright. While off,
     # /openapi.json still answers the website's server (a valid X-Site-Token).
     API_DOCS: bool | None = None
+    # /readyz's details (the migration heads, Redis, the job runners) for a
+    # caller from outside the box: `X-Health-Token: <this>`, at least 32
+    # characters (`openssl rand -hex 32`). Empty: only a request made inside
+    # the API's own container (127.0.0.1, through no proxy) sees them.
+    # Everyone else gets ok or not ok (the status code, and {"ok": ...}).
+    HEALTH_TOKEN: str = ""
     # uvicorn's line per request. nginx in front already logs every request,
     # so this is a second copy, written on every request; false drops it.
     ACCESS_LOG: bool = True

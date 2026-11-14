@@ -1849,10 +1849,22 @@ first; it exits 1 when there is a `FATAL` line.
 
 Both take GET or HEAD, need no sign-in, are never rate limited, answer
 `Cache-Control: no-store`, and carry nothing but the status, the checks and
-the short sha. `/healthz` and `/readyz` stay as they were (`/readyz` also
-compares the database's migration with the code's, for the deploy's smoke
-check: set the repository variable `PROD_SMOKE_URL` to
-`https://api.myotherapp.in/readyz`).
+the short sha. `/healthz` stays as it was. `/readyz` also compares the
+database's migration with the code's (503 when the code is ahead), for the
+deploy's smoke check: set the repository variable `PROD_SMOKE_URL` to
+`https://api.myotherapp.in/readyz`. From outside the box it answers only
+`{"ok":true}` or `{"ok":false}`; the details (each check, the migration
+heads, the job runners) go to a request made inside the backend container
+(`./dc exec -T backend python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/readyz').read().decode())"`),
+or to one with `X-Health-Token: <APP_HEALTH_TOKEN>` when that is set (32
+characters at least). A keyword monitor on `/readyz` looks for `"ok":true`.
+
+The API's own docs (`/docs`, `/redoc`, `/openapi.json`) are off in
+production and staging (404), on in development and the suite;
+`APP_API_DOCS=true` or `false` says so outright. While off, `/openapi.json`
+still answers the website's server (a valid `X-Site-Token`). The partner
+API's document, `/partner/v1/openapi.json`, has its own gate and is
+unaffected.
 
 Monitor `/health/ready` every minute (UptimeRobot, Better Stack...): alert
 on a non-200 or on `"status":"fail"`, after 3 failures in a row -- a deploy

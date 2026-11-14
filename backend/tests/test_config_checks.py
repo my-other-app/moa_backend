@@ -524,3 +524,9 @@ def test_checking_a_dotenv_by_hand():
         input=dotenv + bad_lines + "APP_CONFIG_CHECKS=enforce\n", capture_output=True, text=True, timeout=60,
     )
     assert enforced.returncode == 1 and "APP_CONFIG_CHECKS=enforce: a start with these settings is refused" in enforced.stdout
+
+
+def test_a_short_health_token_is_said():
+    assert "HEALTH_TOKEN" in warnings(make(HEALTH_TOKEN="short"))
+    assert "HEALTH_TOKEN" not in warnings(make(HEALTH_TOKEN="h" * 32))
+    assert "HEALTH_TOKEN" not in warnings(make(HEALTH_TOKEN=""))

@@ -121,3 +121,53 @@ async def test_an_app_user_cannot_see_the_queue(client, make_user, mint_token):
     user = await make_user(email="not-admin@example.com")
     r = await client.get("/api/v1/admin/jobs", headers=auth_header(await mint_token(user)))
     assert r.status_code in (401, 403)
+
+
+# ─── /readyz: ok or not ok for the public, details for the box ─────────────
+
+OUTSIDE = {"X-Forwarded-For": "203.0.113.7"}
+HEALTH_TOKEN = "h" * 40
+
+
+async def test_readyz_tells_a_caller_from_outside_only_ok_or_not(client, heads):
+    """Through the proxy: the status and {"ok": ...}, nothing about
+    migrations, Redis or the job runners."""
+    r = await client.get("/readyz", headers=OUTSIDE)
+    assert r.status_code == 200 and r.json() == {"ok": True}
+    heads["db"] = {"topics"}
+    r = await client.get("/readyz", headers=OUTSIDE)
+    assert r.status_code == 503 and r.json() == {"ok": False}
+    assert r.headers["cache-control"] == "no-store"
+
+
+async def test_readyz_from_another_address_on_the_network_is_outside_too(client, heads):
+    """Caddy and the Next servers reach the API from their own addresses, with
+    no forwarding header of their own: still only ok or not ok."""
+    from httpx import ASGITransport, AsyncClient
+
+    from doth import application
+
+    transport = ASGITransport(app=application, client=("172.18.0.5", 41000))
+    async with AsyncClient(transport=transport, base_url="http://backend:8000") as other:
+        r = await other.get("/readyz")
+    assert r.status_code == 200 and r.json() == {"ok": True}
+
+
+async def test_readyz_details_from_inside_the_container(client, heads):
+    """deploy.sh and a shell on the box ask 127.0.0.1 directly, through no proxy."""
+    r = await client.get("/readyz")
+    assert r.status_code == 200 and set(r.json()["checks"]) >= {"database", "migrations", "jobs"}
+
+
+async def test_readyz_details_with_the_health_token(client, heads, monkeypatch):
+    monkeypatch.setattr(settings, "HEALTH_TOKEN", HEALTH_TOKEN)
+    r = await client.get("/readyz", headers={**OUTSIDE, "X-Health-Token": HEALTH_TOKEN})
+    assert r.status_code == 200 and r.json()["checks"]["migrations"]["ok"] is True
+    for wrong in ("h" * 39, "x" * 40, ""):
+        assert (await client.get("/readyz", headers={**OUTSIDE, "X-Health-Token": wrong})).json() == {"ok": True}, wrong
+
+
+async def test_a_short_health_token_opens_nothing(client, heads, monkeypatch):
+    monkeypatch.setattr(settings, "HEALTH_TOKEN", "short")
+    r = await client.get("/readyz", headers={**OUTSIDE, "X-Health-Token": "short"})
+    assert r.json() == {"ok": True}
