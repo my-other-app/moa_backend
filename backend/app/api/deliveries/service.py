@@ -195,8 +195,11 @@ async def queue(
     sent here. With `send`, the job that sends them (`start`) is written in
     the same transaction as the rows, so the rows cannot be committed without
     it; otherwise the caller sends them (`run`, `deliver`). A send for one
-    guest -- their ticket at registration or payment, one sent again -- is
-    someone waiting, and goes before a send to the whole event (HIGH).
+    guest -- their ticket at registration or payment, at the door, one sent
+    again -- is someone waiting: a short urgent job of its own for just
+    those rows (SEND_IDS_JOB), never a pump of the event's whole backlog. A
+    send to many is the event's job (`start`), deduped, so the minute
+    resumer cannot add a second one beside it while it runs.
 
     One statement per channel: INSERT ... ON CONFLICT DO UPDATE ... WHERE the
     row may be queued again. Two clicks at once both succeed and queue each
@@ -273,7 +276,10 @@ async def queue(
         ids.extend((await session.execute(stmt)).scalars().all())
     if send and ids:
         one_guest = registration_ids is not None and len(registration_ids) == 1
-        await start(session, event.id, kind, priority=jobs.HIGH if one_guest else None)
+        if one_guest:
+            await jobs.enqueue(session, SEND_IDS_JOB, {"ids": [str(i) for i in ids]}, priority=jobs.HIGH)
+        else:
+            await start(session, event.id, kind, dedupe=True)
     await session.commit()
     return {
         "queued": len(ids) + in_flight,
@@ -537,16 +543,23 @@ class _Run:
 
 
 def _claim_stmt(where: list, n: int, at: datetime):
+    # Oldest queued first: a send goes out in the order it was asked for, and
+    # a guest queued during a long send is not left to chance among the rest.
+    # Picked once, in a CTE of its own: as `id IN (subquery)` the planner may
+    # run the locking subquery again for each row it joins, and each run
+    # skips the rows this statement already took -- more than n came back.
     picked = (
         select(Deliveries.id)
         .where(*where, Deliveries.status == DeliveryStatus.pending)
+        .order_by(Deliveries.queued_at, Deliveries.id)
         .limit(n)
         .with_for_update(skip_locked=True)
-        .scalar_subquery()
+        .cte("picked")
+        .prefix_with("MATERIALIZED")
     )
     return (
         update(Deliveries)
-        .where(Deliveries.id.in_(picked), Deliveries.status == DeliveryStatus.pending)
+        .where(Deliveries.id == picked.c.id, Deliveries.status == DeliveryStatus.pending)
         .values(
             status=DeliveryStatus.sending, claimed_at=at, attempts=Deliveries.attempts + 1, tries=Deliveries.tries + 1, updated_at=at,
         )
@@ -872,11 +885,25 @@ async def _send_job(payload: dict) -> None:
     await pipeline.run(("delivery-job", uuid.uuid4()), lambda: _run_due(event_id, kind))
 
 
+#: One guest's rows, by id: short, and someone is waiting on it.
+SEND_IDS_JOB = "deliveries.send_ids"
+
+
+@jobs.handler(SEND_IDS_JOB, max_attempts=6, timeout=300.0, priority=jobs.HIGH, urgent=True)
+async def _send_ids_job(payload: dict) -> None:
+    """These rows only (one guest's ticket or certificate, by email and
+    WhatsApp): each claimed before it is sent, so a run beside the event's
+    own job, or a second run, sends nobody twice. A row left to try again
+    later is the resumer's, through the event's job."""
+    await run([uuid.UUID(str(i)) for i in payload.get("ids") or []])
+
+
 async def start(session, event_id: int, kind: DeliveryKind, *, dedupe: bool = False, priority: Optional[int] = None) -> None:
     """Have the event's pending sends of this kind sent after the caller's
     commit -- by this process's job runner, or the worker's. `dedupe`: not
-    if a job for them is already waiting or running (the resumer's minute).
-    `priority`: the job's, NORMAL unless said (jobs.HIGH for one guest's)."""
+    if a job for them is already waiting or running (a send to many, and the
+    resumer's minute: one job an event and kind at a time). `priority`: the
+    job's, NORMAL unless said."""
     await jobs.enqueue(
         session, "deliveries.send", {"event_id": int(event_id), "kind": kind.value},
         dedupe_key=f"deliveries:{int(event_id)}:{kind.value}" if dedupe else None, priority=priority,

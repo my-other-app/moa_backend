@@ -298,8 +298,10 @@ def test_the_platforms_jobs_have_the_priorities_and_limits_chosen(monkeypatch):
         "live.join_push": (H, 2),
         # An update pushed to the room, and the event going live told to everyone registered.
         "live.update_push": (H, 2), "live.event_started": (H, 4),
-        # Sends to many. deliveries.send is HIGH for one guest's ticket or certificate (its caller says).
+        # Sends to many: an event's tickets or certificates. One guest's is deliveries.send_ids.
         "deliveries.send": (N, 2), "emails.send_message": (N, 2),
+        # One guest's ticket or certificate, by its rows' ids: a walk-in, a payment, a confirmed request.
+        "deliveries.send_ids": (H, 4),
         # A review email sent again to the people it went to (app/api/emails/review.py).
         "emails.review_resend": (N, 2),
         "notifications.new_event": (N, 2), "notifications.interest": (N, 2), "notifications.push": (N, 2),
@@ -791,5 +793,7 @@ def test_the_urgent_jobs_are_the_short_ones_someone_waits_for():
         "checkins.after",
         # "X saved your profile" (app/api/profiles).
         "network.save_notice",
+        # One guest's ticket or certificate (a walk-in, a payment, a confirmed request).
+        "deliveries.send_ids",
     }
     assert all(jobs.handlers()[n].timeout <= jobs.URGENT_MAX_TIMEOUT for n in urgent)
