@@ -29,7 +29,11 @@ async def test_check_in_hooks_leave_one_note_however_often_they_run(session, mak
     from app.api.checkins import after
 
     pushed: list = []
-    monkeypatch.setattr(after, "_send_blocking", lambda *a, **k: pushed.append(a) or True)
+    async def send(*a, **k):
+        pushed.append(a)
+        return True
+
+    monkeypatch.setattr(after, "_send", send)
     from app.core.notifications import service as push
 
     monkeypatch.setattr(push, "get_fcm_token_for_user", lambda *a, **k: _token())

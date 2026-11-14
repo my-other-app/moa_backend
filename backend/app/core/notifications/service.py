@@ -46,6 +46,7 @@ sent: when a count cannot be read, the push goes without one.
 
 import asyncio
 import logging
+import threading
 from typing import Iterable, Mapping, Optional
 
 import firebase_admin
@@ -69,6 +70,31 @@ LOOKUP_BATCH = 5000
 
 # Initialize Firebase Admin SDK
 _firebase_app = None
+#: Pushes start from the event loop and from threads (a check-in's welcome
+#: used to run on its own loop in a thread), so the first two sends of a
+#: fresh process could both find no app and both call initialize_app: the
+#: second raised ValueError and its push was dropped. Made once, under this.
+_firebase_lock = threading.Lock()
+
+
+def http_timeout() -> float:
+    """Seconds one HTTP call to FCM may take (firebase-admin's httpTimeout)."""
+    return max(1.0, float(settings.FIREBASE_TIMEOUT))
+
+
+def send_wait() -> float:
+    """The longest a caller waits for one send: the SDK retries a timed-out
+    call once and may refresh its credentials first, each bounded by
+    http_timeout, so three of them. Well under a job's timeout, so a slow
+    FCM fails the push and never the job that sent an email before it."""
+    return 3 * http_timeout()
+
+
+async def _bounded(fn, /, *args):
+    """`fn(*args)` on a worker thread, waited for at most send_wait()
+    seconds (asyncio.TimeoutError past it; the thread ends at its own
+    httpTimeout)."""
+    return await asyncio.wait_for(asyncio.to_thread(fn, *args), send_wait())
 
 
 def initialize_firebase():
@@ -78,6 +104,14 @@ def initialize_firebase():
     if _firebase_app is not None:
         return _firebase_app
 
+    with _firebase_lock:
+        if _firebase_app is not None:
+            return _firebase_app
+        _firebase_app = _initialize()
+        return _firebase_app
+
+
+def _initialize():
     try:
         cred = None
 
@@ -101,7 +135,11 @@ def initialize_firebase():
             cred = credentials.Certificate(service_account_info)
 
         if cred:
-            _firebase_app = firebase_admin.initialize_app(cred)
+            try:
+                app = firebase_admin.initialize_app(cred, options={"httpTimeout": http_timeout()})
+            except ValueError:
+                # Made already in this process (by another module): use it.
+                app = firebase_admin.get_app()
             logger.info("Firebase Admin SDK initialized successfully")
         else:
             logger.warning(
@@ -110,7 +148,7 @@ def initialize_firebase():
             )
             return None
 
-        return _firebase_app
+        return app
     except Exception as e:
         logger.error(f"Failed to initialize Firebase Admin SDK: {e}")
         return None
@@ -293,6 +331,9 @@ async def send_notification_to_user(
         return False
 
     badge = await unread_badge(session, user_id)
+    # End the reads (and whatever the caller wrote before, its inbox line)
+    # before the network call: no pooled connection waits on FCM.
+    await session.commit()
     dead: list[str] = []
     if len(tokens) == 1:
         sent = 1 if await _send_to_token(tokens[0], title, body, data, dead=dead, badge=badge) else 0
@@ -328,6 +369,8 @@ async def send_notification_to_users(
         if devices:
             counts = await unread_badges(session, {user_id for user_id, _ in devices})
             tokens = [token for _, token in devices]
+            # No connection held while FCM answers (send_notification_to_user).
+            await session.commit()
             sent += await _send_to_tokens(
                 tokens, title, body, data, image_url, dead=dead, badges=badges_by_token(devices, counts),
             )
@@ -415,9 +458,12 @@ async def _send_to_token(
         return False
 
     try:
-        response = await asyncio.to_thread(messaging.send, _message(token, title, body, data, badge=badge))
+        response = await _bounded(messaging.send, _message(token, title, body, data, badge=badge))
         logger.info(f"Successfully sent notification: {response}")
         return True
+    except asyncio.TimeoutError:
+        logger.error("Push not sent: FCM did not answer within %g s", send_wait())
+        return False
     except Exception as e:
         if is_dead_token(e):
             logger.warning(f"Token is dead ({type(e).__name__}), removing it: {token[:20]}...")
@@ -476,14 +522,17 @@ async def _send_to_tokens(
         counts = {badges.get(token) for token in batch} if badges else {None}
         try:
             if len(counts) == 1:
-                response = await asyncio.to_thread(
+                response = await _bounded(
                     messaging.send_each_for_multicast, _multicast(batch, title, body, data, image_url, badge=counts.pop())
                 )
             else:
-                response = await asyncio.to_thread(
+                response = await _bounded(
                     messaging.send_each,
                     [_message(token, title, body, data, image_url, badge=badges.get(token)) for token in batch],
                 )
+        except asyncio.TimeoutError:
+            logger.error("A batch of %d pushes not sent: FCM did not answer within %g s", len(batch), send_wait())
+            continue
         except Exception:  # noqa: BLE001
             logger.exception("A batch of %d pushes could not be sent", len(batch))
             continue
@@ -546,7 +595,9 @@ async def send_to_topic(
         apns=_apns(image_url, tag),
     )
     try:
-        message_id = await asyncio.to_thread(messaging.send, message)
+        message_id = await _bounded(messaging.send, message)
+    except asyncio.TimeoutError as e:
+        raise TopicSendFailed(f"FCM did not answer within {send_wait():g} s") from e
     except _PERMANENT as e:
         logger.error("PUSH FAILED: FCM refused %r to %s: %s", title, topic or condition, e)
         return None

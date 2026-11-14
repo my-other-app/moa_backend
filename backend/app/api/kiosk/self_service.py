@@ -11,8 +11,10 @@ import logging
 import re
 import secrets
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from typing import Optional
 
+from limits import parse
 from sqlalchemy import select, update
 from sqlalchemy.orm import joinedload
 from sqlalchemy.orm.attributes import set_committed_value
@@ -28,6 +30,8 @@ from app.api.kiosk.models import KioskDevices, SelfCheckInSessions, SelfCheckInV
 from app.config import settings
 from app.core.auth.payloads import sign_payload, verify_payload
 from app.core.email import email as email_mod
+from app.core.email import pace
+from app.core.rate_limit import limiter
 from app.response import CustomHTTPException
 
 logger = logging.getLogger(__name__)
@@ -39,6 +43,30 @@ CODE_TTL = timedelta(minutes=10)
 CODE_ATTEMPTS = 3
 LOOKUP_ATTEMPTS = 5
 ROLE_LABEL = {"attendee": "Attendee", "speaker": "Speaker", "staff": "Staff"}
+#: Sessions one kiosk's QR may open, and one address (a hall's Wi-Fi is one
+#: address for every phone in the queue, so that one is a ceiling, not a
+#: per-person limit). A photo of the kiosk's screen cannot mint sessions
+#: without end.
+START_PER_KIOSK = "60/minute"
+START_PER_ADDRESS = "600/minute"
+#: Code mails one guest may be sent, over every session at every kiosk: a
+#: lookup sends a fresh code each time, so without this a stranger could
+#: fill a guest's inbox from a few sessions.
+CODE_MAILS_PER_GUEST = "3/10 minutes"
+
+
+@lru_cache(maxsize=None)
+def _rate(text: str):
+    return parse(text)
+
+
+def _limit(rate: str, scope: str, who: str, message: str) -> None:
+    """One more against `rate` for `who`, in the limiter's shared store;
+    429 when it is spent."""
+    if not limiter.enabled:
+        return
+    if not limiter.limiter.hit(_rate(rate), scope, who):
+        raise CustomHTTPException(429, message=message, error_code="RATE_LIMITED")
 
 
 def normalize_name(s: str) -> str:
@@ -128,10 +156,13 @@ def _event_block(event: Events, device: KioskDevices) -> dict:
     }
 
 
-async def start(session, token: str) -> dict:
+async def start(session, token: str, address: Optional[str] = None) -> dict:
     v = verify_payload(token or "")
     if not v or v.get("t") != "selfqr":
         raise CustomHTTPException(410, message="That QR code has expired. Scan the one on the kiosk again.", error_code="QR_EXPIRED")
+    busy = "Lots of phones are starting here at once. Wait a moment and scan again."
+    _limit(START_PER_ADDRESS, "kiosk:start:address", address or "unknown", busy)
+    _limit(START_PER_KIOSK, "kiosk:start:kiosk", str(v["k"]), busy)
     device = await session.scalar(select(KioskDevices).options(joinedload(KioskDevices.event).joinedload(Events.club), joinedload(KioskDevices.door)).where(KioskDevices.id == v["k"], KioskDevices.event_id == v["e"], KioskDevices.revoked_at.is_(None)))
     if device is None:
         raise CustomHTTPException(404, message="That kiosk is no longer paired.")
@@ -152,25 +183,35 @@ def _none(outcome: str) -> dict:
 
 
 async def _send_code(session, s: SelfCheckInSessions, reg: EventRegistrationsLink, event: Events) -> Optional[dict]:
+    """A fresh code to the guest's email. What the caller counted (_take)
+    and found is committed first, so no connection or row lock is held
+    while the mail goes; the send itself runs on the mail threads, never on
+    the event loop (it blocks on the provider for as long as it takes)."""
     if not reg.email or reg.email.endswith("walkup.myotherapp.in"):
         return None
+    to, reg_id, event_name = reg.email, reg.id, event.name
+    sender_name = (event.club.name if event.club else None) or None
+    await session.commit()
+    _limit(CODE_MAILS_PER_GUEST, "kiosk:code-mail", str(reg_id), "Several codes have gone to this guest's email already. Please see the desk.")
     code = f"{secrets.randbelow(1_000_000):06d}"
-    body = f"{code} is your check-in code for {event.name}. It works for ten minutes, at the kiosk you scanned."
+    body = f"{code} is your check-in code for {event_name}. It works for ten minutes, at the kiosk you scanned."
     try:
-        email_mod.send_email(
-            recipients=[reg.email], subject=f"{code} — your {event.name} check-in code", text=body,
+        await pace.bucket().take()
+        await pace.blocking(
+            email_mod.send_email,
+            recipients=[to], subject=f"{code} — your {event_name} check-in code", text=body,
             html=f'<p style="font-size:28px;letter-spacing:6px;font-family:monospace"><strong>{code}</strong></p><p>{body}</p>',
-            sender_name=(event.club.name if event.club else None) or None,
+            sender_name=sender_name,
         )
     except Exception as exc:
-        logger.warning("check-in code by email failed for %s: %s", reg.id, exc)
+        logger.warning("check-in code by email failed for %s: %s", reg_id, exc)
         return None
     s.code_hash = _code_hash(code)
     s.code_channel = "EMAIL"
     s.code_attempts = 0
     s.code_sent_at = datetime.now(timezone.utc)
     s.verified = False
-    return {"channel": "EMAIL", "masked": mask_email(reg.email)}
+    return {"channel": "EMAIL", "masked": mask_email(to)}
 
 
 async def lookup(session, session_id: str, name: str, contact: Optional[str]) -> dict:

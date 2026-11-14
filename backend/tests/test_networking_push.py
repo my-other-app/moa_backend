@@ -32,7 +32,11 @@ def pushes(monkeypatch):
         return "tok-guest"
 
     monkeypatch.setattr(push, "get_fcm_token_for_user", token)
-    monkeypatch.setattr(after, "_send_blocking", lambda tok, title, body, data, dead, badge=None: sent.append((title, body, dict(data))) or True)
+    async def send(tok, title, body, data, dead, badge=None):
+        sent.append((title, body, dict(data)))
+        return True
+
+    monkeypatch.setattr(after, "_send", send)
     return sent
 
 
@@ -82,11 +86,11 @@ async def test_a_push_that_fails_never_fails_the_check_in(session, door, monkeyp
     async def token(_session, _user_id):
         return "tok-guest"
 
-    def broken(*_args, **_kwargs):
+    async def broken(*_args, **_kwargs):
         raise RuntimeError("FCM is down")
 
     monkeypatch.setattr(push, "get_fcm_token_for_user", token)
-    monkeypatch.setattr(after, "_send_blocking", broken)
+    monkeypatch.setattr(after, "_send", broken)
     out = await _check_in(session, door)
     assert out["outcome"] == "CHECKED_IN"
     await session.refresh(door["reg"])
