@@ -144,7 +144,11 @@ def _person():
     the profile."""
     from app.api.users.models import UserProfiles, Users
 
-    return (joinedload(EventRegistrationsLink.user).joinedload(Users.profile).joinedload(UserProfiles.org),)
+    return (
+        joinedload(EventRegistrationsLink.user).joinedload(Users.profile).joinedload(UserProfiles.org),
+        # Their live QR code, for a badge's Personal QR layer (profiles-networking).
+        joinedload(EventRegistrationsLink.user).selectinload(Users.active_profile_code),
+    )
 
 
 async def registration_of(session, event: Events, registration_id) -> EventRegistrationsLink:

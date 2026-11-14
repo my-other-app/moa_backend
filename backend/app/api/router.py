@@ -251,6 +251,24 @@ api_router.include_router(router=duplicate_router, tags=["events"])
 api_router.include_router(router=admission_router, tags=["admission"])
 api_router.include_router(router=messages_router, tags=["emails"])
 api_router.include_router(router=files_router, tags=["emails"])
+# Profiles, QR codes and the Network (app/api/profiles): before the events
+# router, whose /events/{event_id}/... routes would otherwise be tried first.
+from app.api.profiles import notices as _profile_notices, recap as _profile_recap  # noqa: E402,F401 (their jobs)
+from app.api.profiles.router import (  # noqa: E402
+    admin_router as profiles_admin_router,
+    events_router as profiles_events_router,
+    me_router as profiles_me_router,
+    network_router as profiles_network_router,
+    profiles_router,
+    recap_router as profiles_recap_router,
+)
+
+api_router.include_router(router=profiles_me_router)
+api_router.include_router(router=profiles_router)
+api_router.include_router(router=profiles_recap_router)
+api_router.include_router(router=profiles_network_router)
+api_router.include_router(router=profiles_events_router)
+api_router.include_router(router=profiles_admin_router)
 api_router.include_router(router=events_router, tags=["events"])
 api_router.include_router(router=interests_router, tags=["interests"])
 api_router.include_router(router=home_router, tags=["home"])

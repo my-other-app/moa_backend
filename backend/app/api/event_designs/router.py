@@ -1070,6 +1070,7 @@ async def _preview_registration(session, event_id: int, ticket_id: Optional[str]
             joinedload(EventRegistrationsLink.event).joinedload(Events.club),
             joinedload(EventRegistrationsLink.event).selectinload(Events.cohost_clubs),
             joinedload(EventRegistrationsLink.user).joinedload(Users.profile).joinedload(UserProfiles.org),
+            joinedload(EventRegistrationsLink.user).selectinload(Users.active_profile_code),
         )
         .where(EventRegistrationsLink.event_id == event_id, EventRegistrationsLink.ticket_id == ticket_id, EventRegistrationsLink.is_deleted == False)  # noqa: E712
     )

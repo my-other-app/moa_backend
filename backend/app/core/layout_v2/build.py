@@ -52,7 +52,9 @@ or without a picture (a guest photo with placeholder "initials") an
 initials tile.
 
 **QR.** `<div class="moa-qr" …>` with the QR of the context's payload as
-black-on-white SVG, quietZone modules round it (doc_designs/qr.py).
+black-on-white SVG, quietZone modules round it (doc_designs/qr.py). A
+Personal QR (`source: "profile"`) encodes values["holder.profile_qr_url"]
+instead, and is left out when that is empty.
 """
 from __future__ import annotations
 
@@ -422,7 +424,17 @@ def qr_svg(payload: str, quiet_zone: int) -> str:
     return svg.replace("<svg", '<svg width="100%" height="100%" style="display:block"', 1)
 
 
-def _qr(layer: QrLayer, ctx: Context, paint: _Paint) -> str:
+#: The value a Personal QR layer (`source: "profile"`) encodes (doc_presets.values.PROFILE_QR_VALUE).
+PROFILE_QR_VALUE = "holder.profile_qr_url"
+
+
+def _qr(layer: QrLayer, ctx: Context, paint: _Paint, values: Optional[Mapping[str, Any]] = None) -> str:
+    payload = ctx.qr
+    if layer.source == "profile":
+        # The holder's own profile code; none (no code, scanning off): not drawn.
+        payload = str((values or {}).get(PROFILE_QR_VALUE) or "")
+        if not payload:
+            return ""
     look = ""
     if layer.background is not None:
         look += f";background:{paint.fill(layer.background)}"
@@ -433,7 +445,7 @@ def _qr(layer: QrLayer, ctx: Context, paint: _Paint) -> str:
     extra = f";box-shadow:{shadows}" if shadows else ""
     return (_open(layer, _outer(layer, extra))
             + f'<div class="moa-qr" style="width:100%;height:100%;box-sizing:border-box{look}">'
-            + qr_svg(ctx.qr, layer.quiet_zone) + "</div></div>")
+            + qr_svg(payload, layer.quiet_zone) + "</div></div>")
 
 
 # ─── The body and the page ──────────────────────────────────────────────────
@@ -442,6 +454,8 @@ def _qr(layer: QrLayer, ctx: Context, paint: _Paint) -> str:
 def _on_stock(layer) -> bool:
     if not layer.preprinted:
         return False
+    if isinstance(layer, QrLayer) and layer.source == "profile":
+        return False  # the holder's own: never on the stock
     if isinstance(layer, TextLayer) and carries_per_guest_token(layer.text):
         return False
     return True
@@ -462,7 +476,7 @@ def _layers(layout: LayoutV2, values, ctx: Context, kind: str, paint: _Paint, sk
         elif isinstance(layer, ImageLayer):
             out = _image(layer, values, ctx, paint)
         else:
-            out = _qr(layer, ctx, paint)
+            out = _qr(layer, ctx, paint, values)
         if out:
             yield out
 

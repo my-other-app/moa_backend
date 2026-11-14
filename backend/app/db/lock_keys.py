@@ -121,6 +121,9 @@ LEDGER = 7_420_455
 #: One "tell the room" at a time per event, so two hosts pressing at once send
 #: one push (app/api/live/notify.py).
 LIVE_NOTIFY = 7_301_011
+#: Two people saving or removing each other at once take turns, so both rows
+#: end with the right `mutual`: (this, a 32-bit hash of the pair) (app/api/profiles/network.py).
+NETWORK_PAIR = 7_420_501
 
 
 def all_keys() -> dict[str, int]:

@@ -114,11 +114,17 @@ def problems(layout: Union[LayoutV2, dict, Any], kind: str = "ticket") -> list[d
                       f"The canvas is {c.width:g} × {c.height:g}, which is not the shape of a "
                       f"{page.width_mm:g} × {page.height_mm:g} mm page. Resize it, or change the page."))
     px_per_mm = c.width / page.width_mm
-    qrs = [i for i, l in enumerate(lay.layers) if isinstance(l, QrLayer)]
+    qrs = [i for i, l in enumerate(lay.layers) if isinstance(l, QrLayer) and l.source != "profile"]
+    personal = [i for i, l in enumerate(lay.layers) if isinstance(l, QrLayer) and l.source == "profile"]
     if kind in QR_KINDS and not qrs:
         out.append(_p("qr_missing", "layers", "This design needs its QR code: it is what the gate scans."))
     if len(qrs) > 1:
         out.append(_p("qr_extra", f"layers.{qrs[1]}", "A design has one QR code.", layer=lay.layers[qrs[1]].id))
+    # The Personal QR: an ID card's, at most one, beside the check-in code.
+    if personal and kind != "badge":
+        out.append(_p("qr_profile_kind", f"layers.{personal[0]}", "A personal QR code is for ID cards only.", layer=lay.layers[personal[0]].id))
+    if len(personal) > 1:
+        out.append(_p("qr_extra", f"layers.{personal[1]}", "A design has one personal QR code.", layer=lay.layers[personal[1]].id))
     ids: set[str] = set()
     uses_accent = False
     for i, layer in enumerate(lay.layers):
@@ -170,7 +176,7 @@ def problems(layout: Union[LayoutV2, dict, Any], kind: str = "ticket") -> list[d
             if st:
                 out += _font_problems(st.family, st.weight, "normal", f"{at}.placeholderStyle", name, lid)
         elif isinstance(layer, QrLayer):
-            if layer.hidden or layer.show_if:
+            if layer.source != "profile" and (layer.hidden or layer.show_if):
                 out.append(_p("qr_hidden", f"{at}.hidden", f"{name}: the QR code is always printed.", layer=lid))
             side_mm = min(layer.width, layer.height) / px_per_mm
             if side_mm < MIN_QR_MM:

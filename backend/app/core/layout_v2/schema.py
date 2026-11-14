@@ -400,9 +400,16 @@ class ImageLayer(LayerBase):
 
 class QrLayer(LayerBase):
     """What it encodes is the kind's: a ticket's or badge's ticket code, a
-    certificate's verify address. Never editable; always black on white."""
+    certificate's verify address. Never editable; always black on white.
+
+    `source: "profile"` (badges only) is the Personal QR instead: the
+    holder's own profile code (values "holder.profile_qr_url",
+    profiles-networking contract), beside the check-in code. Not drawn
+    when the holder has none. Absent (null) is the kind's code, so every
+    layout saved before reads and dumps as it did."""
 
     kind: Literal["qr"] = "qr"
+    source: Optional[Literal["profile"]] = None
     dark: Literal["#000000"] = "#000000"
     light: Literal["#FFFFFF"] = "#FFFFFF"
     quiet_zone: int = Field(default=0, ge=0, le=4)
