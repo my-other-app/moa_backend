@@ -390,7 +390,9 @@ def pdf_to_png(pdf: bytes, *, width_px: int) -> bytes:
         finally:
             doc.close()
     out = io.BytesIO()
-    image.save(out, format="PNG", optimize=True)
+    # compress_level 6, not optimize=True: a ticket PNG encodes about 6x
+    # faster for about 1% more bytes, and the encode holds a render thread.
+    image.save(out, format="PNG", compress_level=6)
     return out.getvalue()
 
 

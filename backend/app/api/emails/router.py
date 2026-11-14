@@ -33,9 +33,9 @@ from app.api.emails.schemas import (
     TestSendRequest,
     TestSendResponse,
 )
-from app.api.events.certificates import availability, certificate_document
+from app.api.events.certificates import availability, certificate_document, certificate_style
 from app.api.events.models import EventRegistrationsLink, Events
-from app.api.events.tickets import ticket_document
+from app.api.events.tickets import ticket_document, ticket_style
 from app.core.auth.dependencies import ClubAuth
 from app.core.mail import links
 from app.core.mail.schema import EmailTemplateFields
@@ -415,7 +415,10 @@ async def ticket_file(request: Request, session: SessionDep, ticket_id: str, s: 
         return _refused(request, "ticket", ticket_id, 404, "No such ticket", "invalid")
     if reg.ticket_revoked_at is not None:
         return _refused(request, "ticket", ticket_id, 410, "This ticket has been revoked.", "revoked")
-    doc = await ticket_document(session, reg)
+    style = await ticket_style(session, reg)
+    # Read: no connection held while it is drawn (or waits for its render).
+    await session.commit()
+    doc = await ticket_document(session, reg, style)
     return Response(content=doc.content, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{doc.filename}"'})
 
 
@@ -433,7 +436,9 @@ async def certificate_file(request: Request, session: SessionDep, public_id: str
         return _refused(request, "certificate", public_id, 404, "No such certificate", "invalid")
     if not availability(reg).available:
         return _refused(request, "certificate", public_id, 410, "This certificate is not available.", "unavailable")
-    doc = await certificate_document(session, reg)
+    style = await certificate_style(session, reg)
+    await session.commit()
+    doc = await certificate_document(session, reg, style)
     return Response(content=doc.content, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{doc.filename}"'})
 
 

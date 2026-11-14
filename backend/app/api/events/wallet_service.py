@@ -325,7 +325,7 @@ def strip_png(data: Optional[bytes]) -> Optional[bytes]:
             if image.width > 1125:
                 image = image.resize((1125, round(image.height * 1125 / image.width)), Image.Resampling.LANCZOS)
             out = io.BytesIO()
-            image.save(out, format="PNG", optimize=True)
+            image.save(out, format="PNG", compress_level=6)
             return out.getvalue()
     except Exception as e:
         logger.warning(f"Wallet strip image could not be made: {e}")

@@ -146,7 +146,9 @@ def target_size(size: tuple[int, int], longest: Optional[int] = None) -> tuple[i
 
 def _png(image: Image.Image) -> bytes:
     out = io.BytesIO()
-    image.save(out, "PNG", optimize=True)
+    # compress_level 6, not optimize=True: several times faster on a render
+    # thread, for a percent or so more bytes.
+    image.save(out, "PNG", compress_level=6)
     return out.getvalue()
 
 

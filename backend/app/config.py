@@ -540,6 +540,12 @@ class AppConfig(BaseSettings):
     # receipt is a wkhtmltopdf process besides: 6 at once, not 9.
     RENDER_THREADS: int = 2
     RENDER_TIMEOUT: float = 30.0
+    # A ticket's or certificate's on-screen picture (the PNG the app and the
+    # website show) waits at most this many seconds for its render, and at
+    # most 4 x RENDER_THREADS of them wait or draw at once per process; past
+    # either the answer is 503, and the app and website show the card they
+    # draw themselves (app/core/layout/pool.py, `picture`).
+    RENDER_PICTURE_WAIT: float = 10.0
     # The render service (backend/render/Dockerfile, docker-compose.prod.yml
     # `render`; docs/OPERATIONS.md "The render service"): Gotenberg's
     # Chromium, which prints the ticket, certificate and ID card designs

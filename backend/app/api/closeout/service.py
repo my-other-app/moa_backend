@@ -180,7 +180,8 @@ async def report_file(session, event: Events, report_id: UUID) -> tuple:
     r = await session.get(CloseoutReports, report_id)
     if r is None or r.event_id != event.id:
         raise CustomHTTPException(404, message="That report could not be found.")
-    pdf = objects.get_bytes(r.pdf_key)
+    # The bucket read blocks: off the event loop.
+    pdf = await asyncio.to_thread(objects.get_bytes, r.pdf_key)
     if not pdf:
         raise CustomHTTPException(404, message="The report file is missing from storage.")
     return pdf, r.filename
