@@ -138,6 +138,7 @@ async def list_all_notifications(
     pagination: PaginationParams,
     user: AdminAuth,
     club_id: Optional[int] = Query(None),
+    days: int = Query(90, ge=1, le=3650, description="How far back to look, in days"),
 ) -> PaginatedResponse[AdminNotificationResponse]:
     """
     Announcements could be sent and never reviewed: the only history endpoint
@@ -147,7 +148,7 @@ async def list_all_notifications(
     from app.api.audit import notifications
 
     items, total = await notifications.list_sent_announcements(
-        session, club_id=club_id, limit=pagination.limit, offset=pagination.offset
+        session, club_id=club_id, limit=pagination.limit, offset=pagination.offset, days=days
     )
     return paginated_response(
         [AdminNotificationResponse(**item) for item in items],

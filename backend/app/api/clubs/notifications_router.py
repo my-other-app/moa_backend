@@ -17,6 +17,7 @@ from app.api.events.models import Events
 from app.api.notifications.models import Notifications, NotificationStatus
 from app.api.clubs.models import Clubs
 from sqlalchemy import select, func, distinct, String
+from sqlalchemy.dialects.postgresql import aggregate_order_by, array_agg
 
 from app.api.clubs import announcements_page
 from app.response import CustomHTTPException
@@ -258,87 +259,65 @@ async def get_notification_history(
     if not club:
         return NotificationHistoryResponse(items=[], total=0)
     
-    # Get all events for this club with their notifications
-    events_query = select(Events).where(
-        Events.club_id == club.id,
-        Events.is_deleted == False,
-    )
-    events_result = await session.execute(events_query)
-    events = {e.id: e for e in events_result.scalars().all()}
-    
-    if not events:
-        return NotificationHistoryResponse(items=[], total=0)
-    
-    event_ids = list(events.keys())
-    
-    # Get all club_announcement notifications for these events
-    # Simple query - get all notifications and process in Python
-    notifications_query = (
-        select(Notifications)
-        .where(
-            Notifications.event_id.in_(event_ids),
-            Notifications.type == "club_announcement",
-            Notifications.is_deleted == False,
+    # One row per send, grouped in SQL by title, event and hour (IST, as the
+    # rows read back), and paged there: every recipient's row was read into
+    # Python and grouped there, for each page.
+    N = Notifications
+    hour = func.date_trunc("hour", func.timezone("Asia/Kolkata", N.created_at))
+    sends = (
+        select(
+            N.title.label("title"),
+            N.event_id.label("event_id"),
+            # The latest row's words and time, as when the rows were walked newest first.
+            array_agg(aggregate_order_by(N.description, N.created_at.desc()))[1].label("description"),
+            func.max(N.created_at).label("created_at"),
+            func.count().label("sent_count"),
+            func.count().filter(N.status == NotificationStatus.read).label("read_count"),
         )
-        .order_by(Notifications.created_at.desc())
+        .join(Events, Events.id == N.event_id)
+        .where(Events.club_id == club.id, Events.is_deleted == False, N.type == "club_announcement", N.is_deleted == False)  # noqa: E712
+        .group_by(N.title, N.event_id, hour)
+        .subquery("sends")
     )
-    
-    result = await session.execute(notifications_query)
-    all_notifications = result.scalars().all()
-    
-    # Group notifications by (title, event_id, hour)
-    groups = {}
-    for n in all_notifications:
-        # Group key: title + event_id + hour (rounded)
-        hour_key = n.created_at.replace(minute=0, second=0, microsecond=0)
-        key = (n.title, n.event_id, hour_key)
-        
-        if key not in groups:
-            groups[key] = {
-                "title": n.title,
-                "description": n.description,
-                "event_id": n.event_id,
-                "created_at": n.created_at,
-                "sent_count": 0,
-                "read_count": 0,
-            }
-        
-        groups[key]["sent_count"] += 1
-        if n.status == NotificationStatus.read:
-            groups[key]["read_count"] += 1
-    
-    # Convert to list and sort
-    grouped_list = sorted(groups.values(), key=lambda x: x["created_at"], reverse=True)
-    total = len(grouped_list)
-    
-    # Apply pagination
-    paginated = grouped_list[offset:offset + limit]
-    
-    # Build response
+    rows = (await session.execute(
+        select(sends, func.count().over().label("total"))
+        .order_by(sends.c.created_at.desc(), sends.c.event_id.desc(), sends.c.title)
+        .limit(limit)
+        .offset(offset)
+    )).all()
+    if rows:
+        total = int(rows[0].total)
+    elif offset:
+        total = int(await session.scalar(select(func.count()).select_from(sends)) or 0)
+    else:
+        total = 0
+    ids = {g.event_id for g in rows}
+    events = {e.id: e for e in (await session.scalars(select(Events).where(Events.id.in_(ids)))).all()} if ids else {}
+
     items = []
-    for idx, g in enumerate(paginated):
-        event = events.get(g["event_id"])
-        sent = g["sent_count"]
-        read = g["read_count"]
+    for idx, g in enumerate(rows):
+        event = events.get(g.event_id)
+        sent = int(g.sent_count)
+        read = int(g.read_count)
         read_pct = round((read / sent * 100), 1) if sent > 0 else 0
-        
+
         # The place in the whole list, not the page: two sends of one event
         # on different pages had the same id.
-        unique_id = f"{g['event_id']}-{offset + idx}"
-        
+        unique_id = f"{g.event_id}-{offset + idx}"
+
         items.append(NotificationHistoryItem(
             id=unique_id,
-            title=g["title"],
-            description=g["description"],
-            event_id=g["event_id"],
+            title=g.title,
+            description=g.description,
+            event_id=g.event_id,
             event_name=event.name if event else "Unknown Event",
             event_poster=event.poster if event else None,
             sent_count=sent,
             read_count=read,
             read_percentage=read_pct,
-            created_at=g["created_at"],
+            created_at=g.created_at,
         ))
-    
+
     return NotificationHistoryResponse(items=items, total=total)
 
 
