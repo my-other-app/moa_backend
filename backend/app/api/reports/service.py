@@ -458,7 +458,9 @@ async def resolve(session, admin, report_id: int, *, action: str, note: str | No
     the same thing.
 
     dismiss         nothing is taken down; a hidden comment shows again.
-    remove_content  the thread or comment is removed (not for a user or a club).
+    remove_content  the thread or comment is removed; a profile is hidden
+                    (its suspended_at: it, its vCard and its code 404). Not
+                    for a user or a club.
     suspend_author  its author's account is suspended, as the Users page
                     does (sign-in and every token refused, ACCOUNT_SUSPENDED),
                     and a reported thread or comment is removed too.
