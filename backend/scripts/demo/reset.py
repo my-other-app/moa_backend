@@ -382,6 +382,15 @@ CLASSIFICATION: dict[str, str] = {
     "user_badges": WIPE,
     "user_blocks": WIPE,
     "volunteers": WIPE,
+    # Profiles and the Network (app/api/profiles): people's links, projects,
+    # QR codes, saves and their encounters, notices and recaps.
+    "profile_links": WIPE,
+    "profile_projects": WIPE,
+    "profile_codes": WIPE,
+    "network_people": WIPE,
+    "network_encounters": WIPE,
+    "network_save_notices": WIPE,
+    "network_recaps": WIPE,
 }
 
 #: Triggers that refuse a removal in normal life, lifted for this transaction
