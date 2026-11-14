@@ -21,6 +21,14 @@ class AppConfig(BaseSettings):
 
     SECRET_KEY: str
     WORKERS: int = 1
+    # Threads in each process's default pool (app/core/threads.py): what
+    # bcrypt, uploads to the bucket, after-commit mail, site revalidation and
+    # FCM sends wait in. Python's own default is cpu_count + 4 (8 on a 4-vCPU
+    # box) shared by all of them. These threads mostly wait on the network,
+    # so 32 per process (3 API workers and the job worker: 128 at most, made
+    # only as they are needed) costs little and keeps a slow provider from
+    # queueing everything else behind it.
+    DEFAULT_THREADS: int = 32
     PORT: int = 8000
     DEBUG: bool = False
     # Which deployment this is: production, staging, development, test...
@@ -424,6 +432,11 @@ class AppConfig(BaseSettings):
     # up on (app/api/payments/rzp.py). The SDK is synchronous: every call
     # runs in a worker thread, so the event loop keeps serving meanwhile.
     RAZORPAY_TIMEOUT: float = 20.0
+    # Razorpay calls run on threads of their own (app/core/threads.py), this
+    # many per process, so a Razorpay slowdown -- each call waiting up to
+    # RAZORPAY_TIMEOUT -- can only hold up payments, never sign-ins, uploads
+    # or anything else that waits in the default pool.
+    RAZORPAY_THREADS: int = 8
     # A club's own Razorpay account (app/api/payment_gateways): the Fernet key
     # its saved key secret and webhook secret are encrypted with. A
     # comma-separated list rotates: the first encrypts, every one decrypts.

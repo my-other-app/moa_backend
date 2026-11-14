@@ -46,16 +46,18 @@ async def _wake_on_redis(runner) -> None:
 async def main() -> None:
     import doth  # noqa: F401 - registers every handler, as the API does
     from app.config import settings
-    from app.core import config_checks, jobs, redis
+    from app.core import config_checks, jobs, redis, threads
     from app.db.core import check_connection_budget, engine
 
     # The settings check's findings, now that Sentry is on (doth started
     # it); under APP_CONFIG_CHECKS=enforce a fatal one already stopped the
     # process before the app was imported (below).
     config_checks.enforce()
+    loop = asyncio.get_running_loop()
+    # The default thread pool, sized as the API's is (app/core/threads.py).
+    threads.install_default_executor(loop)
     await check_connection_budget()
     stop = asyncio.Event()
-    loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, stop.set)
 

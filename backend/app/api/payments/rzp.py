@@ -7,8 +7,10 @@ held the worker's event loop -- every other request on that worker -- for as
 long as Razorpay took to answer, and with no timeout a hung connection held
 it for good.
 
-Now every call goes through `call`: it runs in a worker thread, and the
-caller stops waiting after RAZORPAY_TIMEOUT seconds (RazorpayTimeout). The
+Now every call goes through `call`: it runs on Razorpay's own threads
+(app/core/threads.py, RAZORPAY_THREADS of them), so a slow gateway cannot
+take the threads sign-ins and uploads wait in, and the caller stops waiting
+after RAZORPAY_TIMEOUT seconds (RazorpayTimeout). The
 clients made here also give requests that timeout, so a thread whose caller
 has given up does not hang on for ever either.
 
@@ -19,6 +21,7 @@ fake is still the one called.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 from functools import partial
 from typing import Any, Callable, Optional
 
@@ -26,6 +29,7 @@ import razorpay
 import requests
 
 from app.config import settings
+from app.core import threads
 
 
 class RazorpayTimeout(TimeoutError):
@@ -54,8 +58,10 @@ async def call(fn: Callable[..., Any], *args, timeout: Optional[float] = None, *
     has not answered in `timeout` seconds (RAZORPAY_TIMEOUT by default).
     Whatever the SDK raises is raised here unchanged."""
     limit = timeout if timeout is not None else settings.RAZORPAY_TIMEOUT
+    loop = asyncio.get_running_loop()
+    ctx = contextvars.copy_context()
     try:
-        return await asyncio.wait_for(asyncio.to_thread(partial(fn, *args, **kwargs)), limit)
+        return await asyncio.wait_for(loop.run_in_executor(threads.razorpay_pool(), partial(ctx.run, fn, *args, **kwargs)), limit)
     except asyncio.TimeoutError:
         name = getattr(fn, "__qualname__", None) or getattr(fn, "__name__", None) or "call"
         raise RazorpayTimeout(f"Razorpay did not answer {name} within {limit:g} s") from None

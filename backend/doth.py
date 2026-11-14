@@ -123,9 +123,12 @@ async def lifespan(app: FastAPI):
     # APP_CONFIG_CHECKS=warn, the default, one ERROR line naming every
     # missing, placeholder or half-set secret -- Sentry is on by now, so it is
     # reported -- and the app starts; under enforce it does not start.
-    from app.core import config_checks
+    from app.core import config_checks, threads
 
     config_checks.enforce()
+    # The default thread pool, sized for this process (APP_DEFAULT_THREADS),
+    # before anything below offloads a blocking call to it.
+    threads.install_default_executor()
     # Startup: seed badge definitions
     try:
         from app.db.core import AsyncSessionLocal
