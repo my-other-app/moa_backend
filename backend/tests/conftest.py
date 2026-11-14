@@ -42,8 +42,10 @@ os.environ.setdefault("APP_REFRESH_TOKEN_EXPIRE_DAYS", "7")
 os.environ.setdefault("APP_RENDER_DOC_CACHE", "false")
 
 import asyncio
+import functools
 from datetime import datetime, timezone
 
+import bcrypt
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -141,6 +143,27 @@ def _reset_rate_limiter():
     limiter.reset()
     yield
     limiter.reset()
+
+
+#: bcrypt's lowest cost. Production hashes at bcrypt's default, 12.
+TEST_BCRYPT_ROUNDS = 4
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _cheap_password_hashes():
+    """Password hashes at 4 rounds (about 1 ms each) instead of production's
+    12 (about a quarter of a second). Most tests make an account or two, and
+    hashing their passwords was two thirds of the suite's run time.
+
+    Only the salt maker the suite sees changes: app.core.auth.authentication
+    is untouched, and tests/test_password_hashing.py checks that it still
+    hashes at 12. A fixture rather than a patch at import, because tests
+    import this module a second time (as tests.conftest). Yields bcrypt's
+    own salt maker, for that test."""
+    production = bcrypt.gensalt
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(bcrypt, "gensalt", functools.partial(production, rounds=TEST_BCRYPT_ROUNDS))
+        yield production
 
 
 @pytest.fixture(autouse=True)
