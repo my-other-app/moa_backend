@@ -243,3 +243,45 @@ async def test_whatsapp_goes_once_per_guest_even_when_the_follow_up_runs_again(c
     assert sent == ["9876543210"]
     rows = (await session.scalars(select(GuestNotices).where(GuestNotices.event_id == world.event.id))).all()
     assert [(r.channel, r.status) for r in rows] == [("whatsapp", "sent")]
+
+
+async def test_a_channel_that_fails_stops_none_of_the_others_and_the_follow_up_runs_again(client, session, world, monkeypatch, fail_once):
+    from app.core import jobs
+
+    sent: list[str] = []
+
+    async def fake_send(number, template, document=None, meter=None, sender=None):
+        sent.append(number)
+        return {"MessageId": "wamid.1", "Via": "platform"}
+
+    monkeypatch.setattr(whatsapp, "configured", lambda: True)
+    monkeypatch.setattr(whatsapp, "send", fake_send)
+    event_id = world.event.id
+    # The first channel, closing the open requests, fails with a broken statement.
+    failed = fail_once(cancel_service, "_requests")
+    r = await _cancel(client, world)
+    assert r.status_code == 200, r.text
+    assert len(failed) == 1
+
+    # The channels after it still went: the email, the push, WhatsApp.
+    c = await session.scalar(select(EventCancellations).where(EventCancellations.event_id == event_id))
+    assert c.message_id is not None and c.push_at is not None
+    assert sent == ["9876543210"]
+    # And the job failed, so it runs again for the one that did not go.
+    (job,) = (await session.scalars(select(jobs.Jobs).where(jobs.Jobs.name == cancel_service.FOLLOW_UP_JOB))).all()
+    assert job.attempts == 1 and job.finished_at is None and not job.dead
+    assert "_requests" in job.last_error
+
+    ran: list[int] = []
+    real = cancel_service._requests
+
+    async def requests_again(session, event, c):
+        ran.append(event.id)
+        await real(session, event, c)
+
+    monkeypatch.setattr(cancel_service, "_requests", requests_again)
+    await cancel_service.follow_up(session, event_id)
+    assert ran == [event_id]
+    # Nothing that went is sent twice.
+    assert sent == ["9876543210"]
+    assert await session.scalar(select(func.count()).select_from(Messages).where(Messages.event_id == event_id)) == 1

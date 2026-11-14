@@ -30,7 +30,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import func, inspect, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import joinedload
 
@@ -440,18 +440,46 @@ async def _requests(session, event: Events, c: EventCancellations) -> None:
     await session.commit()
 
 
-async def follow_up(session, event_id: int) -> None:
-    """Tell everyone: each channel once, whatever else failed."""
+class FollowUpIncomplete(RuntimeError):
+    """A channel of the cancellation follow-up did not go: the job runs again."""
+
+
+async def _cancelled(session, event_id: int):
     event = await session.scalar(select(Events).options(joinedload(Events.club)).where(Events.id == event_id))
-    c = await cancellation_of(session, event_id)
+    return event, await cancellation_of(session, event_id)
+
+
+def _expired(*rows) -> bool:
+    return any(inspect(row).expired_attributes for row in rows)
+
+
+async def follow_up(session, event_id: int) -> None:
+    """Tell everyone: each channel once, whatever else failed.
+
+    A channel that fails is rolled back and the next one still goes, on the
+    event and the cancellation read again: a rollback expires every row the
+    session holds, and the next channel used to fail on them too. Then the
+    job fails, so it runs again for the channel that did not go; each
+    channel goes once, so the ones that went are not sent twice."""
+    event, c = await _cancelled(session, event_id)
     if event is None or c is None:
         return
-    for step in (_requests, _email, _push, _whatsapp):
+    steps = (_requests, _email, _push, _whatsapp)
+    failed: list[str] = []
+    for step in steps:
         try:
+            if _expired(event, c):
+                event, c = await _cancelled(session, event_id)
+                if event is None or c is None:
+                    return
             await step(session, event, c)
         except Exception:  # noqa: BLE001 - one channel failing must not stop the others
             logger.exception("event %s: cancellation %s failed", event_id, step.__name__)
+            failed.append(step.__name__)
             await session.rollback()
+    if failed:
+        logger.warning("event %s: cancellation follow-up, %d of %d steps failed (%s)", event_id, len(failed), len(steps), ", ".join(failed))
+        raise FollowUpIncomplete(f"event {event_id}: the cancellation's {', '.join(failed)} did not go")
 
 
 # A send to every guest (WhatsApp one by one): as other sends to many, one slot at most.
