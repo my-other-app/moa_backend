@@ -28,6 +28,7 @@ from app.config import settings
 from app.core import site
 from app.core.auth.dependencies import ClubAuth
 from app.core.auth.permissions import EXPORT_DATA, ensure_admin_can
+from app.core.layout import pool
 from app.core.net import client_address
 from app.core.rate_limit import limiter
 from app.db.core import SessionDep
@@ -206,7 +207,10 @@ async def verify_image(request: Request, session: SessionDep, code: str) -> Resp
     reg = await service.held_certificate(session, code)
     if reg is None:
         raise CustomHTTPException(404, message="No certificate has this number.")
-    png = await service.preview_png(session, reg)
+    try:
+        png = await service.preview_png(session, reg)
+    except pool.RenderBusy:
+        raise CustomHTTPException(503, message="The picture is taking too long. Try again in a moment.", error_code="RENDER_BUSY")
     return Response(content=png, media_type="image/png", headers={**NO_STORE, "X-Content-Type-Options": "nosniff"})
 
 
@@ -219,9 +223,12 @@ async def verify_pdf(request: Request, session: SessionDep, code: str) -> Respon
     reg = await service.held_certificate(session, code)
     if reg is None:
         raise CustomHTTPException(404, message="No certificate has this number.")
-    from app.api.events.certificates import certificate_document
+    from app.api.events.certificates import certificate_document, certificate_style
 
-    doc = await certificate_document(session, reg)
+    style = await certificate_style(session, reg)
+    # Read: no connection held while it is drawn.
+    await session.commit()
+    doc = await certificate_document(session, reg, style)
     return Response(
         content=doc.content, media_type="application/pdf",
         headers={**NO_STORE, "X-Content-Type-Options": "nosniff", "Content-Disposition": f'attachment; filename="{doc.filename}"'},

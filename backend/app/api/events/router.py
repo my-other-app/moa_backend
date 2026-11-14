@@ -787,48 +787,53 @@ async def get_ticket_image(
     headers = {"Cache-Control": "private, max-age=300"}
     if matches(_if_none_match(request), etag):
         return Response(status_code=304, headers={**headers, "ETag": etag})
+    await _done_reading(session)
 
     def tagged(whole: bool) -> dict:
         return {**headers, "ETag": etag} if whole else headers
 
-    tag = True
-    if job.preset:
-        # One of the designer's designs or a v2 layout (drawn by the render
-        # service): the PDF the download is, at twice its pixels (D2).
-        from app.api.doc_presets.config import classic
-        from app.api.doc_presets.jobs import png_of
+    async def render() -> Response:
+        nonlocal style, job
+        tag = True
+        if job.preset:
+            # One of the designer's designs or a v2 layout (drawn by the render
+            # service): the PDF the download is, at twice its pixels (D2).
+            from app.api.doc_presets.config import classic
+            from app.api.doc_presets.jobs import png_of
 
-        pdf, whole = await _drawn(job, job.cache_key("ticket", registration.id))
-        if not job.state.get("fallback"):
-            return Response(content=await png_of(job, pdf), media_type="image/png", headers=tagged(whole))
-        # The render service could not draw it (D9): the classic ticket's
-        # own picture, untagged, as its PDF was.
-        style, tag = classic(style), False
-        job = ticket_job(registration, style)
+            pdf, whole = await _drawn(job, job.cache_key("ticket", registration.id))
+            if not job.state.get("fallback"):
+                return Response(content=await png_of(job, pdf), media_type="image/png", headers=tagged(whole))
+            # The render service could not draw it (D9): the classic ticket's
+            # own picture, untagged, as its PDF was.
+            style, tag = classic(style), False
+            job = ticket_job(registration, style)
 
-    if in_layout_mode(style):
-        # The PDF the download is (kept in the bucket once drawn), as a PNG.
-        pdf, whole = await _drawn(job, job.cache_key("ticket", registration.id))
-        png = await pool.run(layout_png, style, pdf)
-        return Response(content=png, media_type="image/png", headers=tagged(whole and tag))
+        if in_layout_mode(style):
+            # The PDF the download is (kept in the bucket once drawn), as a PNG.
+            pdf, whole = await _drawn(job, job.cache_key("ticket", registration.id))
+            png = await pool.run(layout_png, style, pdf)
+            return Response(content=png, media_type="image/png", headers=tagged(whole and tag))
 
-    payload = ticket_payload(registration)
-    styled = apply_layers(style, document_values(registration, registration.event))
-    # The built-in card is 600px wide; a layered design is its artwork.
-    width = image_width(styled, default=600)
-    qr_url = qr_data_url(registration.ticket_id)
-    complete = [True]
+        payload = ticket_payload(registration)
+        styled = apply_layers(style, document_values(registration, registration.event))
+        # The built-in card is 600px wide; a layered design is its artwork.
+        width = image_width(styled, default=600)
+        qr_url = qr_data_url(registration.ticket_id)
+        complete = [True]
 
-    def draw() -> bytes:
-        inline, complete[0] = embedded(styled, fields=TICKET_FIELDS)
-        return generate_image_bytes(
-            template_path="events/ticket.html",
-            context={"email_payload": payload, "style": inline, "qr_code_url": qr_url},
-            width=width,
-        ).getvalue()
+        def draw() -> bytes:
+            inline, complete[0] = embedded(styled, fields=TICKET_FIELDS)
+            return generate_image_bytes(
+                template_path="events/ticket.html",
+                context={"email_payload": payload, "style": inline, "qr_code_url": qr_url},
+                width=width,
+            ).getvalue()
 
-    png = await pool.run(draw)
-    return Response(content=png, media_type="image/png", headers=tagged(complete[0] and tag))
+        png = await pool.run(draw)
+        return Response(content=png, media_type="image/png", headers=tagged(complete[0] and tag))
+
+    return await _picture(render)
 
 
 @router.get("/count-view/{event_id}", summary="Increment event view count")
@@ -860,6 +865,25 @@ def _document_etag(job, kind: str = "") -> str:
 
 def _if_none_match(request: Request) -> str:
     return ", ".join(request.headers.getlist("if-none-match"))
+
+
+async def _done_reading(session) -> None:
+    """End the request's transaction once everything a document needs is
+    read: its connection goes back to the pool before the drawing, which can
+    take seconds (or queue behind other renders), instead of sitting idle in
+    a transaction the whole time. The rows read stay usable (the session
+    keeps them: expire_on_commit is off) and nothing after this queries."""
+    await session.commit()
+
+
+async def _picture(render) -> Response:
+    """An on-screen picture, its wait bounded (pool.picture): 503 when the
+    renders are too busy, so the app and the website show their own card."""
+    try:
+        return await pool.picture(render)
+    except pool.RenderBusy:
+        logger.warning("an on-screen picture was not drawn within %g s; answered 503", pool.picture_wait())
+        raise CustomHTTPException(503, message="The picture is taking too long. Try again in a moment.", error_code="RENDER_BUSY")
 
 
 async def _drawn(job, key: Optional[str]) -> tuple[bytes, bool]:
@@ -913,6 +937,7 @@ async def get_ticket_pdf(
     etag = _document_etag(job)
     if matches(_if_none_match(request), etag):
         return Response(status_code=304, headers={"ETag": etag})
+    await _done_reading(session)
     content, whole = await _drawn(job, job.cache_key("ticket", registration.id))
     headers = {"Content-Disposition": f'attachment; filename="ticket-{registration.ticket_id}.pdf"'}
     if whole:
@@ -1110,37 +1135,42 @@ async def get_certificate_image(
     headers = _certificate_headers(registration, job, "png", ticket_id)
     if (unchanged := _not_modified(request, headers)) is not None:
         return unchanged
+    await _done_reading(session)
 
-    if job.preset:
-        from app.api.doc_presets.config import classic
-        from app.api.doc_presets.jobs import png_of
+    async def render() -> Response:
+        nonlocal style, job
+        if job.preset:
+            from app.api.doc_presets.config import classic
+            from app.api.doc_presets.jobs import png_of
 
-        pdf, whole = await _drawn(job, job.cache_key("certificate", registration.id))
-        if not whole:
-            del headers["ETag"]
-        if not job.state.get("fallback"):
-            return Response(content=await png_of(job, pdf), media_type="image/png", headers=headers)
-        # The render service could not draw it (D9): the classic certificate's own picture.
-        style = classic(style)
-        job = certificate_job(registration, style)
+            pdf, whole = await _drawn(job, job.cache_key("certificate", registration.id))
+            if not whole:
+                del headers["ETag"]
+            if not job.state.get("fallback"):
+                return Response(content=await png_of(job, pdf), media_type="image/png", headers=headers)
+            # The render service could not draw it (D9): the classic certificate's own picture.
+            style = classic(style)
+            job = certificate_job(registration, style)
 
-    if in_layout_mode(style):
-        pdf = await doc_cache.cached(job.cache_key("certificate", registration.id), job.draw)
-        png = await pool.run(layout_png, style, pdf)
-        return Response(content=png, media_type="image/png", headers=headers)
+        if in_layout_mode(style):
+            pdf = await doc_cache.cached(job.cache_key("certificate", registration.id), job.draw)
+            png = await pool.run(layout_png, style, pdf)
+            return Response(content=png, media_type="image/png", headers=headers)
 
-    context = certificate_context(registration, style)
-    width = image_width(context["style"], default=1400)
+        context = certificate_context(registration, style)
+        width = image_width(context["style"], default=1400)
 
-    def draw() -> bytes:
-        inline, _ = embedded(context["style"], fields=CERTIFICATE_FIELDS)
-        return generate_image_bytes(
-            template_path="events/certificate.html",
-            context={**context, "style": inline},
-            width=width,
-        ).getvalue()
+        def draw() -> bytes:
+            inline, _ = embedded(context["style"], fields=CERTIFICATE_FIELDS)
+            return generate_image_bytes(
+                template_path="events/certificate.html",
+                context={**context, "style": inline},
+                width=width,
+            ).getvalue()
 
-    return Response(content=await pool.run(draw), media_type="image/png", headers=headers)
+        return Response(content=await pool.run(draw), media_type="image/png", headers=headers)
+
+    return await _picture(render)
 
 
 @router.get("/certificates/{ticket_id}/pdf", summary="Get certificate PDF")
@@ -1164,6 +1194,7 @@ async def get_certificate_pdf(
     headers = {"Cache-Control": _certificate_cache(ticket_id), "ETag": _document_etag(job)}
     if (unchanged := _not_modified(request, headers)) is not None:
         return unchanged
+    await _done_reading(session)
 
     content, whole = await _drawn(job, job.cache_key("certificate", registration.id))
     if not whole:

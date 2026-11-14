@@ -20,8 +20,9 @@ import asyncio
 import contextvars
 import functools
 import threading
+import weakref
 from concurrent.futures import ThreadPoolExecutor
-from typing import Callable, Optional, TypeVar
+from typing import Awaitable, Callable, Optional, TypeVar
 
 from app.config import settings
 
@@ -52,6 +53,51 @@ async def run(fn: Callable[..., T], /, *args, **kwargs) -> T:
     loop = asyncio.get_running_loop()
     call = functools.partial(contextvars.copy_context().run, fn, *args, **kwargs)
     return await loop.run_in_executor(executor(), call)
+
+
+# ─── On-screen pictures: a bounded wait ────────────────────────────────────
+
+#: Pictures waiting or drawing at once per process, per render thread.
+PICTURE_QUEUE_PER_THREAD = 4
+
+
+class RenderBusy(Exception):
+    """An on-screen picture did not get drawn in time: the caller answers
+    503 and the app or the website shows the card it draws itself."""
+
+
+_picture_slots: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore]" = weakref.WeakKeyDictionary()
+
+
+def _slots() -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()
+    slots = _picture_slots.get(loop)
+    if slots is None:
+        slots = _picture_slots[loop] = asyncio.Semaphore(size() * PICTURE_QUEUE_PER_THREAD)
+    return slots
+
+
+def picture_wait() -> float:
+    return max(0.1, float(settings.RENDER_PICTURE_WAIT))
+
+
+async def picture(make: Callable[[], Awaitable[T]]) -> T:
+    """`await make()` -- a ticket's or certificate's PNG, drawn for a screen
+    -- with its wait bounded. The render queue had no end: in a rush at the
+    doors every phone opening its ticket queued behind the others, and a
+    slow answer was worse than none, since the app shows its own card when
+    the picture fails. Now at most PICTURE_QUEUE_PER_THREAD x RENDER_THREADS
+    are waiting or drawing at once, and each gets RENDER_PICTURE_WAIT
+    seconds, the wait for a slot included: past it, RenderBusy."""
+
+    async def bounded() -> T:
+        async with _slots():
+            return await make()
+
+    try:
+        return await asyncio.wait_for(bounded(), picture_wait())
+    except asyncio.TimeoutError as exc:
+        raise RenderBusy(f"no picture within {picture_wait():g} s") from exc
 
 
 def shutdown() -> None:

@@ -306,6 +306,6 @@ def _tighten_png(raw: bytes) -> io.BytesIO:
         # Flat artwork with few colours, so a palette costs nothing visually
         # and saves most of the bytes. Transparency is kept: the card behind
         # it in the app supplies the colour around the certificate.
-        image.save(out, format="PNG", optimize=True)
+        image.save(out, format="PNG", compress_level=6)
         out.seek(0)
         return out

@@ -592,30 +592,40 @@ async def verify(session, code: str) -> dict:
 
 async def preview_png(session, reg: EventRegistrationsLink) -> bytes:
     """The certificate as a PNG: the render the app previews
-    (GET /verify/certificates/{code}/image), same design, same engine."""
+    (GET /verify/certificates/{code}/image), same design, same engine.
+
+    The design is read, then the transaction ends: no connection is held
+    while it is drawn. The wait is bounded (pool.picture): pool.RenderBusy
+    when the renders are too busy."""
     style = await certificate_style(session, reg)
-    job = certificate_job(reg, style)
-    if job.preset:
-        from app.api.doc_presets.config import classic
-        from app.api.doc_presets.jobs import png_of
+    await session.commit()
 
-        pdf = await doc_cache.cached(job.cache_key("certificate", reg.id), job.draw)
-        if not job.state.get("fallback"):
-            return await png_of(job, pdf)
-        # The render service could not draw it (D9): the classic certificate's own picture.
-        style = classic(style)
+    async def render() -> bytes:
+        nonlocal style
         job = certificate_job(reg, style)
-    if in_layout_mode(style):
-        pdf = await doc_cache.cached(job.cache_key("certificate", reg.id), job.draw)
-        return await pool.run(layout_png, style, pdf)
-    context = certificate_context(reg, style)
-    width = image_width(context["style"], default=1400)
+        if job.preset:
+            from app.api.doc_presets.config import classic
+            from app.api.doc_presets.jobs import png_of
 
-    def draw() -> bytes:
-        inline, _ = embedded(context["style"], fields=CERTIFICATE_FIELDS)
-        return generate_image_bytes(template_path="events/certificate.html", context={**context, "style": inline}, width=width).getvalue()
+            pdf = await doc_cache.cached(job.cache_key("certificate", reg.id), job.draw)
+            if not job.state.get("fallback"):
+                return await png_of(job, pdf)
+            # The render service could not draw it (D9): the classic certificate's own picture.
+            style = classic(style)
+            job = certificate_job(reg, style)
+        if in_layout_mode(style):
+            pdf = await doc_cache.cached(job.cache_key("certificate", reg.id), job.draw)
+            return await pool.run(layout_png, style, pdf)
+        context = certificate_context(reg, style)
+        width = image_width(context["style"], default=1400)
 
-    return await pool.run(draw)
+        def draw() -> bytes:
+            inline, _ = embedded(context["style"], fields=CERTIFICATE_FIELDS)
+            return generate_image_bytes(template_path="events/certificate.html", context={**context, "style": inline}, width=width).getvalue()
+
+        return await pool.run(draw)
+
+    return await pool.picture(render)
 
 
 async def file_digests(session, reg: EventRegistrationsLink) -> list[str]:

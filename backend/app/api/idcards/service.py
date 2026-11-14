@@ -5,7 +5,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
+import sqlalchemy as sa
 from sqlalchemy import func, select, update
+from sqlalchemy.dialects.postgresql import ARRAY, UUID as PG_UUID
 from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy.orm.attributes import set_committed_value
 
@@ -169,6 +171,7 @@ async def card_pdf(session, event: Events, registration_id, *, actor: GateActor,
     reg = await registration_of(session, event, registration_id)
     policy = event.reprint_policy or ReprintPolicy.anyone
     printed_before = reg.badge_printed_at
+    claimed = None
     if record:
         ok, why = may_print_again(policy, printed_before, actor.full, override)
         if not ok:
@@ -182,20 +185,19 @@ async def card_pdf(session, event: Events, registration_id, *, actor: GateActor,
             raise CustomHTTPException(403, message=why, error_code="REPRINT_REFUSED")
         set_committed_value(reg, "badge_printed_at", claimed)
     style = await badge_style(session, event, role_of(reg))
-    how = drawn_by(style)
-    printed_at = datetime.now(timezone.utc) if record else None
-    if how == PRESET:
-        from app.api.doc_presets.jobs import card_page
-
-        pdf = await _preset_pdf(session, [card_page(event, reg, style, door=_door_of(actor, door), printed_at=printed_at)])
-    elif how == LAYOUT_V2:
-        from app.api.doc_presets import layouts
-
-        page = layouts.card_page(event, reg, style, door=_door_of(actor, door), printed_at=printed_at, skip_preprinted=record and skip_preprinted_for(event, style))
-        pdf = await _preset_pdf(session, [page], v2=True)
-    else:
-        # Drawn on the render pool, off the event loop.
-        pdf = await pool.run(render_layout_document, **card_args(event, reg, style, for_print=record))
+    # Everything the card needs is read, and the claim is kept: commit
+    # before drawing. The render can take seconds (up to a minute when the
+    # render service is queued), and until now it held a pooled connection
+    # idle in a transaction and the guest's row locked against the phone
+    # capture at the same door, a walk-up payment or an edit. A second door
+    # printing meanwhile sees the claim and is refused as before.
+    await session.commit()
+    try:
+        pdf = await _draw_card(session, event, reg, style, actor=actor, door=door, record=record)
+    except BaseException:
+        if claimed is not None:
+            await _let_go(session, reg.id, claimed, printed_before)
+        raise
     if record:
         overrode = bool(printed_before) and override and actor.full and policy is not ReprintPolicy.anyone
         session.add(PrintJobs(id=uuid.uuid4(), event_id=event.id, registration_id=reg.id, source=source, door_label=door or (actor.door.name if actor.door else None), requested_by=actor.user_id, cards=1, design_version=design_version_of(style), overrode=overrode))
@@ -203,11 +205,45 @@ async def card_pdf(session, event: Events, registration_id, *, actor: GateActor,
     return pdf
 
 
+async def _draw_card(session, event: Events, reg: EventRegistrationsLink, style: dict, *, actor: GateActor, door: Optional[str], record: bool) -> bytes:
+    """One card's PDF, from rows already read; no query runs here."""
+    how = drawn_by(style)
+    printed_at = datetime.now(timezone.utc) if record else None
+    if how == PRESET:
+        from app.api.doc_presets.jobs import card_page
+
+        return await _preset_pdf(session, [card_page(event, reg, style, door=_door_of(actor, door), printed_at=printed_at)])
+    if how == LAYOUT_V2:
+        from app.api.doc_presets import layouts
+
+        page = layouts.card_page(event, reg, style, door=_door_of(actor, door), printed_at=printed_at, skip_preprinted=record and skip_preprinted_for(event, style))
+        return await _preset_pdf(session, [page], v2=True)
+    # Drawn on the render pool, off the event loop.
+    return await pool.run(render_layout_document, **card_args(event, reg, style, for_print=record))
+
+
+async def _let_go(session, registration_id, claimed, before) -> None:
+    """A card that was claimed but not drawn: the guest's printed time goes
+    back to what it was, unless another print has claimed it since (the
+    UPDATE's own condition), so a failed render never uses up their card."""
+    table = EventRegistrationsLink.__table__
+    try:
+        await session.rollback()
+        await session.execute(
+            update(table).where(table.c.id == registration_id, table.c.badge_printed_at == claimed).values(badge_printed_at=before)
+        )
+        await session.commit()
+    except Exception:  # noqa: BLE001 - the render's own error is the one to report
+        await session.rollback()
+        logger.exception("the print claim on registration %s could not be let go", registration_id)
+
+
 async def claim_print(session, registration_id, *, first_only: bool):
     """Mark the card printed now. With `first_only` (the rule allows this
     person a first card and no other), only while nothing has printed:
     UPDATE ... WHERE badge_printed_at IS NULL. The new time, or None when
-    another print got there first. The row stays held until the commit."""
+    another print got there first. The row stays held until the commit,
+    which card_pdf makes before drawing."""
     table = EventRegistrationsLink.__table__
     stmt = update(table).where(table.c.id == registration_id).values(badge_printed_at=func.now()).returning(table.c.badge_printed_at)
     if first_only:
@@ -266,10 +302,17 @@ async def batch_pdf(session, event: Events, *, scope: str, role: Optional[str], 
             runs[-1][1].append(page)
         else:
             runs.append((how, [page]))
+    ids = [reg.id for reg in regs]
+    title = f"{event.name} · ID cards"
+    # Every row is read: end the transaction before the drawing, which for a
+    # few hundred cards takes minutes. It used to stay open all that time,
+    # holding a connection and a snapshot that kept vacuum off the busiest
+    # tables of the day.
+    await session.commit()
     parts = []
     for how, pages in runs:
         if how == LAYOUT_V1:
-            parts.append(await pool.run(render_layout_pages, pages, title=f"{event.name} · ID cards"))
+            parts.append(await pool.run(render_layout_pages, pages, title=title))
         else:
             parts.append(await _preset_pdf(session, pages, v2=how == LAYOUT_V2))
     if len(parts) == 1:
@@ -279,11 +322,13 @@ async def batch_pdf(session, event: Events, *, scope: str, role: Optional[str], 
 
         pdf = await pool.run(join_pdfs, parts)
     if record:
-        now = datetime.now(timezone.utc)
+        # Then one short transaction: the job, and every card marked printed in one statement.
         version = max((design_version_of(s) for s in styles.values()), default=0)
         session.add(PrintJobs(id=uuid.uuid4(), event_id=event.id, registration_id=None, source=PrintSource.batch, requested_by=actor.user_id, cards=len(regs), design_version=version))
-        for reg in regs:
-            reg.badge_printed_at = now
+        table = EventRegistrationsLink.__table__
+        await session.execute(
+            update(table).where(table.c.id == sa.any_(sa.literal(ids, ARRAY(PG_UUID(as_uuid=True))))).values(badge_printed_at=func.now())
+        )
         await session.commit()
     return pdf, len(regs)
 
