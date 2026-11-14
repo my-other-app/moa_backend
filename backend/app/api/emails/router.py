@@ -309,7 +309,7 @@ async def create_library_template(session: SessionDep, user: ClubAuth, body: Ema
 @library_router.post("/preview", summary="A library email with sample values")
 async def preview_library(session: SessionDep, user: ClubAuth, body: PreviewRequest) -> PreviewResponse:
     club = await service.club_of(session, user)
-    return PreviewResponse(**await service.preview(session, service.sample_event(club), body.subject, body.design))
+    return PreviewResponse(**await service.preview(session, service.sample_event(club), body.subject, body.design, club_id=club.id))
 
 
 @library_router.get("/context", summary="What the library editor needs")
