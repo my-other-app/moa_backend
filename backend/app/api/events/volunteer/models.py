@@ -1,3 +1,4 @@
+import sqlalchemy as sa
 from sqlalchemy import (
     UUID,
     Boolean,
@@ -30,3 +31,11 @@ class Volunteer(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     user = relationship("Users")
     club = relationship("Clubs")
     door = relationship("Doors")
+
+    __table_args__ = (
+        # By person: every gate request from a signed-in volunteer finds their row by it.
+        sa.Index("ix_volunteers_user", "user_id", postgresql_where=sa.text("NOT is_deleted")),
+        # An event's team, and the host's and co-hosts' club-wide volunteers.
+        sa.Index("ix_volunteers_event", "event_id", postgresql_where=sa.text("NOT is_deleted")),
+        sa.Index("ix_volunteers_club", "club_id", postgresql_where=sa.text("NOT is_deleted")),
+    )

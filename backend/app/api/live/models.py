@@ -71,7 +71,8 @@ class LiveQuizPlayers(AbstractSQLModel, TimestampsMixin):
     )
 
     id = _uuid_pk()
-    quiz_id = Column(UUID(as_uuid=True), ForeignKey("live_quizzes.id", ondelete="CASCADE"), nullable=False, index=True)
+    # By quiz through uq_live_quiz_players_key and the board's index, not one of its own.
+    quiz_id = Column(UUID(as_uuid=True), ForeignKey("live_quizzes.id", ondelete="CASCADE"), nullable=False)
     name = Column(String(60), nullable=False)
     # The secret the phone keeps; it is the player's whole identity.
     player_key = Column(String(64), nullable=False)
@@ -84,7 +85,8 @@ class LiveQuizAnswers(AbstractSQLModel, TimestampsMixin):
     __table_args__ = (UniqueConstraint("question_id", "player_id", name="uq_live_quiz_answers_once"),)
 
     id = _uuid_pk()
-    question_id = Column(UUID(as_uuid=True), ForeignKey("live_quiz_questions.id", ondelete="CASCADE"), nullable=False, index=True)
+    # By question through uq_live_quiz_answers_once, not an index of its own.
+    question_id = Column(UUID(as_uuid=True), ForeignKey("live_quiz_questions.id", ondelete="CASCADE"), nullable=False)
     player_id = Column(UUID(as_uuid=True), ForeignKey("live_quiz_players.id", ondelete="CASCADE"), nullable=False, index=True)
     option_key = Column(String(2), nullable=False)
     correct = Column(Boolean, nullable=False, default=False)
@@ -126,7 +128,8 @@ class LiveQuestionVotes(AbstractSQLModel):
     )
 
     id = _uuid_pk()
-    question_id = Column(UUID(as_uuid=True), ForeignKey("live_questions.id", ondelete="CASCADE"), nullable=False, index=True)
+    # By question through uq_live_question_votes_once, not an index of its own.
+    question_id = Column(UUID(as_uuid=True), ForeignKey("live_questions.id", ondelete="CASCADE"), nullable=False)
     voter_key = Column(String(64), nullable=False)
     created_at = Column(TZAwareDateTime(timezone=True), server_default=sa.func.now(), nullable=False)
 
@@ -172,7 +175,8 @@ class LivePollResponses(AbstractSQLModel):
     )
 
     id = _uuid_pk()
-    poll_id = Column(UUID(as_uuid=True), ForeignKey("live_polls.id", ondelete="CASCADE"), nullable=False, index=True)
+    # By poll through uq_live_poll_responses_once and the counts' index, not one of its own.
+    poll_id = Column(UUID(as_uuid=True), ForeignKey("live_polls.id", ondelete="CASCADE"), nullable=False)
     voter_key = Column(String(64), nullable=False)
     value = Column(String(120), nullable=False)
     created_at = Column(TZAwareDateTime(timezone=True), server_default=sa.func.now(), nullable=False)

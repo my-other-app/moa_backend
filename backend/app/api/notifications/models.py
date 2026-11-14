@@ -88,6 +88,17 @@ class Notifications(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
             "user_id",
             postgresql_where=sa.text("status = 'unread' AND NOT is_deleted"),
         ),
+        # A club's pushes by event and kind, newest first: its announcement
+        # history and insights.
+        sa.Index(
+            "ix_notifications_event_type_created", "event_id", "type", "created_at",
+            postgresql_where=sa.text("NOT is_deleted"),
+        ),
+        # Every push of one kind, newest first: the admin's list of announcements sent.
+        sa.Index(
+            "ix_notifications_type_created", "type", sa.text("created_at DESC"),
+            postgresql_where=sa.text("NOT is_deleted"),
+        ),
     )
 
 

@@ -160,6 +160,8 @@ class WaitlistEntries(AbstractSQLModel, TimestampsMixin):
         sa.Index("ix_waitlist_offer_expiry", "offer_expires_at", postgresql_where=sa.text("status = 'offered'")),
         # The club's list of an event's entries, newest first.
         sa.Index("ix_waitlist_event_created", "event_id", "created_at"),
+        # The offer a registration was made from: every checkout and capture of a paid one reads it.
+        sa.Index("ix_waitlist_registration", "registration_id", postgresql_where=sa.text("registration_id IS NOT NULL")),
         sa.Index("uq_waitlist_offer_token", "offer_token", unique=True, postgresql_where=sa.text("offer_token IS NOT NULL")),
         # One place in line per address and type.
         sa.Index(

@@ -66,6 +66,8 @@ class AdminAuditLogs(AbstractSQLModel, TimestampsMixin):
         # happened to one record.
         Index("ix_audit_created_at", "created_at"),
         Index("ix_audit_entity", "entity_type", "entity_id"),
+        # The log filtered by who acted, newest first.
+        Index("ix_audit_actor_created", "actor_id", text("created_at DESC"), postgresql_where=text("actor_id IS NOT NULL")),
         # The Activity page's search: words anywhere in who, what, which
         # record and why, on a trigram index (migration audit_search).
         Index("ix_audit_search_trgm", text(f"{search_sql()} gin_trgm_ops"), postgresql_using="gin"),

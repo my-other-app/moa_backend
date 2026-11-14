@@ -92,11 +92,12 @@ class Deliveries(AbstractSQLModel, TimestampsMixin):
         default=uuid.uuid4,
     )
     event_id = Column(Integer, ForeignKey("events.id"), nullable=False, index=True)
+    # By registration through uq_deliveries_registration_kind_channel (it
+    # leads with it), not an index of its own: one fewer write per delivery.
     registration_id = Column(
         UUID(as_uuid=True),
         ForeignKey("event_registrations_link.id"),
         nullable=False,
-        index=True,
     )
     kind = Column(Enum(DeliveryKind), nullable=False)
     channel = Column(Enum(DeliveryChannel), nullable=False)
