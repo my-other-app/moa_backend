@@ -12,8 +12,9 @@ use, so running one twice, or alongside a webhook, changes nothing twice:
   applied before applying became one transaction, or by a path that failed
   half-way -- are applied again (service.ensure_applied). The admins hear of
   each, once: repaired, or still not paid.
-- refunds: automatic refunds (event full, paid twice) Razorpay has not
-  confirmed are asked for again (service.settle_refund).
+- refunds: automatic refunds (event full, paid twice, a registration
+  already paid or taken off the list) Razorpay has not confirmed are asked
+  for again (service.settle_refund).
 
 One worker at a time, without holding anything across Razorpay's answers:
 the run is claimed in `scheduled_runs` under a transaction-scoped advisory

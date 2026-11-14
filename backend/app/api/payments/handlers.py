@@ -186,8 +186,43 @@ class Applied:
     #: The ticket became paid now: its mail goes once this has committed.
     newly_paid: bool = False
     #: The event's last paid place went while this was being paid: nothing
-    #: was applied, and the whole payment goes back (service.refund_due).
+    #: was applied, and the whole payment goes back (service.EVENT_FULL).
     full: bool = False
+    #: The registration is gone -- taken off the list while its guest was
+    #: paying -- or was never found: nothing was applied. A payment being
+    #: applied now goes back whole (service.REGISTRATION_REMOVED).
+    removed: bool = False
+    #: The payment being applied bought nothing: its ticket was paid already
+    #: and no picks it could pay for were waiting. It goes back whole
+    #: (service.ALREADY_PAID); the ticket and the payment that paid it stand.
+    surplus: bool = False
+    #: Rupees the payment being applied brought in beyond what the
+    #: registration owed, kept with what it did buy: the admins are told.
+    excess: Decimal = Decimal("0.00")
+
+
+def _order_event_id(order: PaymentOrders) -> int | None:
+    try:
+        return int((order.payload or {}).get("event_id"))
+    except (TypeError, ValueError):
+        return None
+
+
+async def _kept(session: AsyncSession, *where) -> Decimal:
+    """Rupees captured, and not being given back, on the orders `where` picks.
+    PaymentLogs.amount is rupees (Numeric), like every other money column."""
+    return money.rupees(
+        await session.scalar(
+            select(func.coalesce(func.sum(PaymentLogs.amount), 0))
+            .join(PaymentOrders, PaymentOrders.id == PaymentLogs.order_id)
+            .where(
+                PaymentLogs.status == PaymentStatus.captured,
+                # A payment being given back automatically paid for nothing.
+                PaymentLogs.refund_requested_at.is_(None),
+                *where,
+            )
+        )
+    )
 
 
 async def handle_event_registration_payment(
@@ -196,13 +231,31 @@ async def handle_event_registration_payment(
     background_tasks: BackgroundTasks | None = None,
     *,
     commit: bool = True,
+    payment: PaymentLogs | None = None,
 ) -> Applied:
     """
     The registration (and the store's picks riding on it) brought in line
-    with what this order has captured. Idempotent: run again, it changes
-    nothing. `commit=False` leaves the transaction to the caller (verify,
-    which marks the order paid in the same one), and the ticket mail to it;
-    with `commit=True` it commits and sends the mail itself.
+    with the money captured for it, across every order of its receipt: a
+    changed amount or Razorpay account makes a new order, and a store-only
+    order follows a paid ticket. A paid ticket is never set back to unpaid
+    here; only a refund does that.
+
+    `payment` is the capture being applied now, exactly once
+    (service.apply_payment holds its row): its money is new, and buys what
+    the registration still owes -- the ticket, and the picks waiting on the
+    shelf when it covers them too. With the ticket paid already and no picks
+    it can pay for, it bought nothing (`surplus`); with the registration gone,
+    it has nothing to buy (`removed`). Either way nothing is applied, and the
+    caller gives it back.
+
+    Without `payment`, it is run again (service.ensure_applied: a later
+    webhook or verify, the repair sweep) and is idempotent: what was applied
+    stands, and money already spent is not spent twice -- picks put on the
+    shelf after this order was made are not what it was made to pay for.
+
+    `commit=False` leaves the transaction to the caller (verify, which marks
+    the order paid in the same one), and the ticket mail to it; with
+    `commit=True` it commits and sends the mail itself.
 
     A ticket about to become paid on a paid event first takes its place
     (capacity.take_paid_place). With none left, nothing is applied, the
@@ -216,43 +269,75 @@ async def handle_event_registration_payment(
     from app.api.payments import capacity
     from app.api.store import service as store
 
-    event_registration = await registration_for_order(session, order, lock=True)
-    if not event_registration:
-        raise RequestValidationError(receipt="receipt is invalid")
+    # Deleted ones too: a guest taken off the list while paying is found, so
+    # their money is recorded against it and given back, not left unrecorded.
+    event_registration = await registration_for_order(session, order, lock=True, include_deleted=True)
+    if event_registration is None or event_registration.is_deleted:
+        outcome = Applied(
+            registration_id=event_registration.id if event_registration is not None else None,
+            event_id=event_registration.event_id if event_registration is not None else _order_event_id(order),
+            removed=True,
+        )
+        if commit:
+            await session.commit()
+        return outcome
     # Paid before the ledger existed: posted as it stands, before this changes it.
     await ledger.ensure_history(session, event_registration)
     outcome = Applied(registration_id=event_registration.id, event_id=event_registration.event_id)
 
-    # PaymentLogs.amount is rupees (Numeric), like every other money column.
-    total_paid = money.rupees(
-        await session.scalar(
-            select(func.sum(PaymentLogs.amount)).where(
-                PaymentLogs.order_id == order.id,
-                PaymentLogs.status == PaymentStatus.captured,
-                # A payment being given back automatically paid for nothing.
-                PaymentLogs.refund_requested_at.is_(None),
-            )
-        )
-    )
-
-    # The store's share comes off the top; the rest is the ticket's.
     pending = await store.pending_for(session, event_registration.id)
+    pending_total = money.rupees(pending.total) if pending is not None else Decimal("0.00")
     actual = money.rupees(event_registration.actual_amount)
-    ticket_due = max(Decimal(0), actual - money.rupees(event_registration.paid_amount))
-    covers_store = pending is not None and total_paid >= money.rupees(pending.total) + ticket_due
-    store_share = money.rupees(
-        await session.scalar(
-            select(func.coalesce(func.sum(StoreOrders.total), 0)).where(
-                StoreOrders.registration_id == event_registration.id,
-                # Money taken for pieces, sold or oversold, is the store's.
-                StoreOrders.status.in_(store.TAKEN),
-            )
-        )
-    ) + (money.rupees(pending.total) if covers_store else Decimal(0))
-    ticket_paid = max(Decimal(0), total_paid - store_share)
-    becomes_paid = ticket_paid >= actual
-
+    paid_before = money.rupees(event_registration.paid_amount)
+    ticket_due = max(Decimal(0), actual - paid_before)
     was_paid = bool(event_registration.is_paid)
+
+    if payment is not None:
+        new = money.rupees(payment.amount)
+        if was_paid:
+            # The ticket stands. This payment can buy only the picks waiting
+            # on the shelf: a later checkout's payment for a ticket already
+            # paid (another order, made when the amount or the account
+            # changed) bought nothing.
+            covers_store = pending is not None and new >= pending_total
+            if not covers_store:
+                outcome.surplus = True
+                if commit:
+                    await session.commit()
+                return outcome
+            ticket_total = paid_before
+            outcome.excess = new - pending_total
+        else:
+            covers_store = pending is not None and new >= ticket_due + pending_total
+            ticket_total = paid_before + new - (pending_total if covers_store else Decimal(0))
+            outcome.excess = max(Decimal("0.00"), ticket_total - actual)
+    else:
+        # This order's own money pays for picks only if they were waiting
+        # when it was made (its amount included them); never picks added
+        # since, which another order pays for.
+        waiting = pending is not None and (
+            pending.created_at is None or order.created_at is None or pending.created_at <= order.created_at
+        )
+        mine = await _kept(session, PaymentLogs.order_id == order.id)
+        covers_store = waiting and mine >= ticket_due + pending_total
+        if was_paid:
+            ticket_total = paid_before
+        else:
+            # Every order of the registration's receipt counts towards the
+            # ticket, less what the shelf took.
+            taken = money.rupees(
+                await session.scalar(
+                    select(func.coalesce(func.sum(StoreOrders.total), 0)).where(
+                        StoreOrders.registration_id == event_registration.id,
+                        # Money taken for pieces, sold or oversold, is the store's.
+                        StoreOrders.status.in_(store.TAKEN),
+                    )
+                )
+            )
+            everything = await _kept(session, PaymentOrders.receipt == order.receipt, PaymentOrders.source == order.source)
+            ticket_total = everything - taken - (pending_total if covers_store else Decimal(0))
+    becomes_paid = was_paid or ticket_total >= actual
+
     if becomes_paid and not was_paid:
         event = await session.get(Events, event_registration.event_id)
         from app.api.ticketing.places import capture_room
@@ -265,13 +350,16 @@ async def handle_event_registration_payment(
             if pending is not None:
                 await store.release(session, pending, status="cancelled")
             outcome.full = True
+            outcome.excess = Decimal("0.00")
             if commit:
                 await session.commit()
             return outcome
 
     if covers_store:
         await store.mark_paid(session, pending)
-    event_registration.paid_amount = min(actual, ticket_paid)
+    if not was_paid:
+        # Never less than was applied before (a run again counts afresh).
+        event_registration.paid_amount = max(paid_before, min(actual, max(Decimal(0), ticket_total)))
     event_registration.is_paid = becomes_paid
     outcome.newly_paid = becomes_paid and not was_paid
     await ledger.sync_registration(session, event_registration, kind=ledger_book.APPLY, channel=ledger.ONLINE)
@@ -341,12 +429,14 @@ async def handle_post_payment(
     background_tasks: BackgroundTasks | None = None,
     *,
     commit: bool = True,
+    payment: PaymentLogs | None = None,
 ) -> Applied:
     """
-    handles post payment operations
+    handles post payment operations; `payment` is the capture being applied
+    now (handle_event_registration_payment)
     """
     if order.source == "event_registration":
         return await handle_event_registration_payment(
-            session, order, background_tasks=background_tasks, commit=commit
+            session, order, background_tasks=background_tasks, commit=commit, payment=payment
         )
     raise RequestValidationError(source="source is invalid")

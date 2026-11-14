@@ -17,10 +17,14 @@ The rules every path here keeps:
   keys of the account its order was made on before anything is applied, so a
   leaked webhook secret cannot mint a ticket.
 - Money that is not owed goes back on its own, in full: a payment that lands
-  when the event's last paid place has gone (`event_full`), and a second
-  payment on an order already paid (`duplicate`). The payment is marked in
-  the transaction that finds it, Razorpay is asked after it commits, and the
-  sweep keeps asking until Razorpay has done it (`settle_refund`).
+  when the event's last paid place has gone (`event_full`), a second
+  payment on an order already paid (`duplicate`), a payment on another order
+  of a registration already paid in full that bought nothing
+  (`already_paid`), and a payment for a registration taken off the list
+  while its guest was paying (`registration_removed`). The payment is marked
+  in the transaction that finds it, Razorpay is asked after it commits,
+  through the account the order was made on, and the sweep keeps asking
+  until Razorpay has done it (`settle_refund`).
 """
 from datetime import datetime, timedelta, timezone
 import asyncio
@@ -66,6 +70,14 @@ logger = logging.getLogger(__name__)
 #: Why a captured payment is being given back without anyone asking.
 EVENT_FULL = "event_full"
 DUPLICATE = "duplicate"
+#: A payment on another order of a registration already paid in full, that
+#: bought nothing (the amount or the account changed between two checkouts).
+ALREADY_PAID = "already_paid"
+#: A payment for a registration taken off the list while its guest was paying.
+REGISTRATION_REMOVED = "registration_removed"
+#: Reasons whose refund gives back only that payment: the registration, its
+#: picks and the payment that paid for them stand.
+GIVES_BACK_ONLY_ITSELF = (DUPLICATE, ALREADY_PAID, REGISTRATION_REMOVED)
 
 
 def _now() -> datetime:
@@ -325,6 +337,18 @@ async def verify_razorpay_payment(
     )
 
 
+def _give_back_reason(outcome) -> str | None:
+    """Why the capture just applied goes back whole, if it does: nothing of
+    it was applied (handlers.Applied)."""
+    if getattr(outcome, "full", False):
+        return EVENT_FULL
+    if getattr(outcome, "removed", False):
+        return REGISTRATION_REMOVED
+    if getattr(outcome, "surplus", False):
+        return ALREADY_PAID
+    return None
+
+
 async def apply_payment(
     session: AsyncSession,
     order_id,
@@ -341,9 +365,12 @@ async def apply_payment(
 
     Captured: the order is paid, and the registration and the store's picks
     with it (handlers.handle_post_payment), in the same transaction. When the
-    event's last paid place went meanwhile, or the order was already paid by
-    another payment, the payment is marked for a full refund instead, and
-    given back once this commits (`settle_refund`).
+    event's last paid place went meanwhile, the order was already paid by
+    another payment, the registration was paid in full already and this
+    payment bought nothing, or the registration was taken off the list, the
+    payment is recorded and marked for a full refund instead, and given back
+    once this commits (`settle_refund`), through the account that took it.
+    Money kept beyond what the registration owed is told to the admins.
     """
     payment_id = details.get("id")
     if not payment_id:
@@ -408,9 +435,10 @@ async def apply_payment(
     # The money into the ledger, and (handle_post_payment) what it bought,
     # in this same transaction.
     await ledger.capture(session, log, order)
-    outcome = await handle_post_payment(session, order, background_tasks=background_tasks, commit=False)
-    if outcome.full:
-        log.refund_reason, log.refund_requested_at = EVENT_FULL, now
+    outcome = await handle_post_payment(session, order, background_tasks=background_tasks, commit=False, payment=log)
+    give_back = _give_back_reason(outcome)
+    if give_back is not None:
+        log.refund_reason, log.refund_requested_at = give_back, now
     else:
         # Every capture comes here (verify, both Razorpay webhooks, the
         # reconcile sweep): told once, never for one refunded at once (app/api/webhooks_out).
@@ -420,9 +448,11 @@ async def apply_payment(
         await webhooks.payment_completed(session, log.id, event_id=event_id)
         if getattr(outcome, "newly_paid", False) and getattr(outcome, "registration_id", None) is not None:
             await webhooks.registration_paid(session, outcome.registration_id, event_id=event_id)
+        if money.rupees(getattr(outcome, "excess", 0)) > 0:
+            await _tell_overpaid(session, log, order, outcome)
     await session.commit()
 
-    if outcome.full:
+    if give_back is not None:
         await settle_refund(session, log.id)
         return await _log_with_order(session, payment_id)
 
@@ -543,8 +573,12 @@ async def _apply_refund(session: AsyncSession, db_payment: PaymentLogs, *, refun
     (a refund initiated directly from the Razorpay dashboard converges on the
     same state as one triggered from our app) and the automatic refunds.
 
-    A duplicate payment's refund touches nothing but itself: the order's
-    first payment still stands.
+    A payment that bought nothing (GIVES_BACK_ONLY_ITSELF: a duplicate, a
+    later checkout's payment for a ticket already paid, a payment for a
+    registration taken off the list) touches nothing but itself: the
+    registration and the payment that paid for it still stand. Its order,
+    paid by nothing else, is refunded with it (a duplicate's stays paid by
+    its first payment).
 
     The ledger gets what the refund took back (the ticket, the store orders)
     and the money going out, in the same transaction; a registration paid
@@ -552,14 +586,18 @@ async def _apply_refund(session: AsyncSession, db_payment: PaymentLogs, *, refun
     """
     order = db_payment.order
     registration = None
-    if db_payment.refund_reason != DUPLICATE:
+    only_itself = db_payment.refund_reason in GIVES_BACK_ONLY_ITSELF
+    if not only_itself:
         # Re-blocks check-in via the existing has_fee-and-not-is_paid gate in
         # checkin_user/mark_attendance — no changes needed there.
         registration = await registration_for_order(session, order, lock=True)
         if registration:
             await ledger.ensure_history(session, registration)
     db_payment.status = PaymentStatus.refunded
-    if db_payment.refund_reason != DUPLICATE:
+    if only_itself:
+        if db_payment.refund_reason != DUPLICATE:
+            order.status = OrderStatus.refunded
+    else:
         order.status = OrderStatus.refunded
         if registration:
             registration.is_paid = False
@@ -572,12 +610,12 @@ async def _apply_refund(session: AsyncSession, db_payment: PaymentLogs, *, refun
             await ledger.sync_registration(session, registration, kind=ledger_book.UNAPPLY,
                                            origin_at=db_payment.created_at)
     await ledger.refund(session, db_payment, order, registration=registration, refund_id=refund_id)
-    if db_payment.refund_reason in (EVENT_FULL, DUPLICATE):
+    if db_payment.refund_reason == EVENT_FULL or only_itself:
         await _tell_auto_refund(session, db_payment, order, registration)
     else:
         # Every full refund comes here (the admin's, the club's, a cancelled
         # event's, Razorpay's dashboard by its webhook). A payment that bought
-        # nothing (a duplicate, an event already full) was never told as
+        # nothing (a duplicate, an event already full, ...) was never told as
         # completed, so its refund is not told either (app/api/webhooks_out).
         from app.api.webhooks_out import signals as webhooks
 
@@ -674,33 +712,66 @@ async def _refund_failed(session, log_id, reason: str) -> None:
     await session.commit()
 
 
-async def _club_of_order(session, order) -> int | None:
+async def _event_of_order(session, order, registration=None):
+    """The event an order's money was for, found even when its registration
+    (or the event) has been deleted since: the alerts about that money need
+    its club."""
     from app.api.events.models import Events
+    from app.api.payments.handlers import _order_event_id
 
-    reg = await registration_for_order(session, order) if order is not None else None
-    if reg is None:
+    if registration is None and order is not None:
+        registration = await registration_for_order(session, order, include_deleted=True)
+    event_id = registration.event_id if registration is not None else (_order_event_id(order) if order is not None else None)
+    if event_id is None:
         return None
-    return await session.scalar(select(Events.club_id).where(Events.id == reg.event_id))
+    return await session.scalar(select(Events).where(Events.id == event_id).execution_options(include_deleted=True))
+
+
+async def _club_of_order(session, order) -> int | None:
+    event = await _event_of_order(session, order)
+    return event.club_id if event is not None else None
 
 
 async def _tell_auto_refund(session, log: PaymentLogs, order: PaymentOrders, registration) -> None:
-    """The guest (why their money came back), the admins (an alert) and, for
-    an event that filled, the organiser: after the refund commits."""
+    """The guest (why their money came back), the admins (an alert) and,
+    unless it was only the same order paid twice, the organiser: after the
+    refund commits."""
     from app.api.admin_alerts import notify
-    from app.api.events.models import Events
     from app.core.after_commit import run_after_commit
 
     if registration is None:
-        registration = await registration_for_order(session, order)
-    event = await session.get(Events, registration.event_id) if registration is not None else None
+        # A registration taken off the list is still the one the money was for.
+        registration = await registration_for_order(session, order, include_deleted=True)
+    event = await _event_of_order(session, order, registration)
     name = event.name if event is not None else "the event"
     amount = f"₹{money.rupees(log.amount)}"
+    who = registration.full_name if registration is not None and registration.full_name else "A guest"
+    organiser = None
     if log.refund_reason == EVENT_FULL:
         title = f"{name} filled up while {registration.full_name if registration else 'a guest'} was paying: {amount} refunded"
         guest = [
             f"Sorry — the last place at {name} went while you were paying.",
             f"We have refunded your payment of {amount} in full. It usually reaches your account in 5–7 working days.",
         ]
+        organiser = (f"{who} paid {amount} just after the last paid place at {name} went. "
+                     "The payment has been refunded to them in full; nothing for you to do.")
+    elif log.refund_reason == ALREADY_PAID:
+        title = f"{who} paid {amount} for {name} on a second checkout after their ticket was paid: refunded"
+        guest = [
+            f"Your ticket for {name} was already paid for, so your later payment of {amount} was not needed.",
+            "It has been refunded in full and usually reaches your account in 5–7 working days. Your ticket stands.",
+        ]
+        organiser = (f"{who} paid {amount} for {name} on a second checkout, after their ticket had already been paid. "
+                     "The extra payment has been refunded to them in full; their ticket stands. Nothing for you to do.")
+    elif log.refund_reason == REGISTRATION_REMOVED:
+        title = f"{who} paid {amount} for {name} after being taken off the list: refunded"
+        guest = [
+            f"Your registration for {name} was cancelled before your payment of {amount} went through.",
+            "The payment has been refunded in full and usually reaches your account in 5–7 working days.",
+        ]
+        organiser = (f"{who} paid {amount} for {name} after their registration had been taken off the list. "
+                     "The payment has been refunded to them in full. If they should be on the list, add them again "
+                     "and ask them to pay.")
     else:
         title = f"A second payment of {amount} for the same order was refunded"
         guest = [
@@ -712,22 +783,41 @@ async def _tell_auto_refund(session, log: PaymentLogs, order: PaymentOrders, reg
         body=f"Payment {log.razorpay_payment_id} on order {order.razorpay_order_id} was refunded automatically ({log.refund_reason}).",
         club=event.club_id if event is not None else None,
         data={"payment_id": log.razorpay_payment_id, "reason": log.refund_reason, "amount": str(log.amount),
-              "registration_id": str(registration.id) if registration is not None else None},
+              "registration_id": str(registration.id) if registration is not None else None,
+              "razorpay_order_id": order.razorpay_order_id,
+              "gateway": "club" if order.payment_gateway_id else "platform"},
         dedupe_on={"payment_id": log.razorpay_payment_id},
     )
     from app.api.subscriptions import notices
 
     if registration is not None and registration.email:
         run_after_commit(session, notices._send, registration.email, f"Your payment for {name} was refunded", guest, None, None)
-    if log.refund_reason == EVENT_FULL and event is not None and event.club_id is not None:
+    if organiser is not None and event is not None and event.club_id is not None:
         to = await notices.owner_address(session, event.club_id)
         if to:
-            run_after_commit(
-                session, notices._send, to, title,
-                [f"{registration.full_name if registration else 'A guest'} paid {amount} just after the last paid place at {name} went. "
-                 "The payment has been refunded to them in full; nothing for you to do."],
-                None, None,
-            )
+            run_after_commit(session, notices._send, to, title, [organiser], None, None)
+
+
+async def _tell_overpaid(session, log: PaymentLogs, order: PaymentOrders, outcome) -> None:
+    """A payment kept for what it bought that brought in more than the
+    registration owed (picks changed between two checkouts, say): the admins
+    hear, with how much, so the extra can be given back in part. In the
+    capture's own transaction: told only if it commits."""
+    from app.api.admin_alerts import notify
+
+    excess = money.rupees(outcome.excess)
+    event = await _event_of_order(session, order)
+    await notify(
+        session, "payment_overpaid",
+        title=f"A payment of ₹{money.rupees(log.amount)} was ₹{excess} more than its registration owed",
+        body=(f"Payment {log.razorpay_payment_id} on order {order.razorpay_order_id} was applied and kept; "
+              f"₹{excess} of it paid for nothing. Refund that part from the payment's page."),
+        club=event.club_id if event is not None else None,
+        data={"payment_id": log.razorpay_payment_id, "registration_id": str(outcome.registration_id) if outcome.registration_id else None,
+              "amount": str(money.rupees(log.amount)), "excess": str(excess),
+              "gateway": "club" if order.payment_gateway_id else "platform"},
+        dedupe_on={"payment_id": log.razorpay_payment_id},
+    )
 
 
 async def list_payments(
