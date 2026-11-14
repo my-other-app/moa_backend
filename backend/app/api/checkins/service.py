@@ -11,13 +11,13 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Optional
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, inspect, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import joinedload
 
 from app.api.checkins import after
 from app.api.checkins import doors as doors_mod
-from app.api.checkins.gate_auth import GateActor
+from app.api.checkins.gate_auth import GateActor, load_event
 from app.api.checkins.models import CheckIns, CheckInVia, DoorKind, DoorMode, Doors
 from app.api.closeout.models import DOOR_OPEN_STATUSES, EventStatus
 from app.api.events import questions
@@ -257,6 +257,10 @@ async def scan(session, event: Events, *, code: Optional[str] = None, door_label
         return _not_admitted("UNPAID", attendee=summary(reg))
     now = datetime.now(timezone.utc)
     when = now
+    if scanned_at is not None and scanned_at.tzinfo is None:
+        # A device time with no offset is UTC (ScanBody reads it so too),
+        # never compared as it is with an aware one, which raised.
+        scanned_at = scanned_at.replace(tzinfo=timezone.utc)
     if via is CheckInVia.offline_sync and scanned_at is not None and scanned_at <= now and now - scanned_at < timedelta(hours=24):
         when = scanned_at
     row = await admit(session, event, reg, actor=actor, via=via, door_label=door_label, client_ref=client_ref, checked_in_at=when, scanned_at=scanned_at, background=background)
@@ -288,18 +292,71 @@ def _already(event: Events, reg: EventRegistrationsLink, existing: CheckIns, cli
     }
 
 
+#: A scan the server could not record just now. INVALID, as the consoles and
+#: the app already read it, and `retry`: the device keeps it and sends it
+#: again. Its outcome says nothing about the ticket.
+NOT_RECORDED = "This scan could not be recorded just now. Keep it and send it again."
+
+
+def _send_again() -> dict:
+    return {**_not_admitted("INVALID", error=NOT_RECORDED), "retry": True}
+
+
 async def scan_batch(session, event: Events, scans: list[dict], actor: GateActor, background=None) -> list[dict]:
-    """The offline queue drained: each scan independently idempotent."""
+    """The offline queue drained: each scan independently idempotent, and
+    each on its own SAVEPOINT. One that fails (a broken statement, a dropped
+    connection, a bad stored answer) is undone alone and answered INVALID
+    with `retry: true`, and the scans after it still land.
+
+    Nothing a rollback expired is used again. Rolling back the session's
+    transaction expires every row it holds, and the next scan's first read
+    of the event or the actor then raised MissingGreenlet: one bad scan
+    failed every scan after it in the batch, and the consoles dropped them
+    all. After a failure the event is read again, and so is any of the
+    actor's rows the rollback expired."""
+    event_id = event.id
     out = []
-    for s in scans:
+    for i, s in enumerate(scans):
+        ref = s["client_ref"]
+        savepoint = await session.begin_nested()
         try:
-            res = await scan(session, event, code=s["code"], door_label=s.get("door"), client_ref=s["client_ref"], scanned_at=s.get("scanned_at"), actor=actor, via=CheckInVia.offline_sync, background=background)
-        except Exception as exc:
-            logger.exception("offline scan %s failed", s.get("client_ref"))
-            await session.rollback()
-            res = _not_admitted("INVALID", error=str(exc)[:200])
-        out.append({"client_ref": s["client_ref"], "response": res})
+            res = await scan(session, event, code=s["code"], door_label=s.get("door"), client_ref=ref, scanned_at=s.get("scanned_at"), actor=actor, via=CheckInVia.offline_sync, background=background)
+            # Recording an admission commits, which ends the savepoint with
+            # the transaction; a scan that recorded nothing releases it here.
+            if savepoint.is_active:
+                await savepoint.commit()
+        except Exception:
+            logger.exception("offline scan %s on event %s failed; the device is asked to send it again", ref, event_id)
+            res = _send_again()
+            try:
+                event = await _after_failed_scan(session, savepoint, event_id, actor)
+            except Exception:
+                # The database is not answering: nothing after this can be
+                # recorded either, so every scan left is asked for again.
+                logger.exception("offline batch on event %s stopped at scan %s; %d scan(s) asked for again", event_id, ref, len(scans) - i)
+                out.extend({"client_ref": rest["client_ref"], "response": _send_again()} for rest in scans[i:])
+                return out
+        out.append({"client_ref": ref, "response": res})
     return out
+
+
+async def _after_failed_scan(session, savepoint, event_id: int, actor: GateActor) -> Events:
+    """Undo a failed scan, then read again what the undoing expired."""
+    if session.in_nested_transaction():
+        # Still inside this scan's savepoint (a failed flush leaves it
+        # inactive, not closed): only its work goes, and only the rows it
+        # changed expire.
+        await savepoint.rollback()
+    else:
+        # It failed after its admission committed: that stays (a replay of
+        # the same client_ref finds it), and what came after goes. Every row
+        # the session holds expires.
+        await session.rollback()
+    event = await load_event(session, event_id)
+    for row in (actor.user, actor.door, actor.volunteer):
+        if row is not None and inspect(row).expired_attributes:
+            await session.refresh(row)
+    return event
 
 
 async def check_in_by_hand(session, event: Events, registration_id, door_label: Optional[str], actor: GateActor, background=None) -> dict:

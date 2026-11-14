@@ -6,7 +6,9 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from sqlalchemy import text
 
+from app.api.checkins import service
 from app.api.deliveries import service as deliveries
 from app.api.events.volunteer.models import Volunteer
 from app.core.email import email as email_mod
@@ -237,3 +239,114 @@ async def test_the_offline_queue_drains_idempotently(client, world):
     # Admitted when the phone scanned them, not when the queue drained.
     assert row["via"] == "offline_sync"
     assert abs((datetime.fromisoformat(row["checked_in_at"]) - datetime.fromisoformat(earlier)).total_seconds()) < 60
+
+
+# --- an offline batch with a scan that fails --------------------------------------
+
+
+def _fail_once(monkeypatch, module, name, when, *, broken_statement=True):
+    """`module.name` fails the first time `when(*args)` holds: with a broken
+    statement (the transaction is aborted, as on a dropped connection or a
+    bad row, and must be rolled back), or else an error in Python. Returns
+    the calls it failed, at most one."""
+    real = getattr(module, name)
+    failed: list = []
+
+    async def failing(*args, **kwargs):
+        if not failed and when(*args):
+            failed.append(args)
+            await args[0].execute(text("SELECT 1/0"))
+        return await real(*args, **kwargs)
+
+    def failing_sync(*args, **kwargs):
+        if not failed and when(*args, **kwargs):
+            failed.append(args)
+            raise RuntimeError("the card could not be worked out")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(module, name, failing if broken_statement else failing_sync)
+    return failed
+
+
+async def _third_guest(world, make_user, make_registration):
+    d = await make_user(email="devi-d@example.com")
+    return await make_registration(event=world["event"], user=d, full_name="Devi Menon")
+
+
+async def test_a_scan_that_fails_mid_batch_is_asked_for_again_and_the_rest_land(client, world, make_user, make_registration, monkeypatch):
+    h = world["club"]
+    d = await _third_guest(world, make_user, make_registration)
+    codes, d_id = [world["a"].ticket_id, d.ticket_id, world["b"].ticket_id], d.id
+    failed = _fail_once(monkeypatch, service, "admit", lambda session, event, reg: reg.id == d_id)
+    batch = {"scans": [{"code": c, "door": "Gate C", "scanned_at": datetime.now(timezone.utc).isoformat(), "client_ref": uuid.uuid4().hex} for c in codes]}
+
+    r = await client.post(_url(world, "/gate/scan-batch"), json=batch, headers=h)
+    assert r.status_code == 200, r.text
+    assert len(failed) == 1
+    results = [x["response"] for x in r.json()["results"]]
+    assert [x["outcome"] for x in results] == ["CHECKED_IN", "INVALID", "CHECKED_IN"]
+    # Not an answer about the ticket: the console keeps it and sends it again.
+    assert results[1]["retry"] is True and results[1]["attendee"] is None
+    assert "retry" not in results[0] and "retry" not in results[2]
+    log = await client.get(_url(world, "/check-ins"), headers=h)
+    assert {x["name"] for x in log.json()["items"]} == {"Ananya Iyer", "Bala Krishnan"}
+
+    # Sent again, the whole batch: the two already in are replays, and the
+    # one asked for again is admitted, once.
+    again = await client.post(_url(world, "/gate/scan-batch"), json=batch, headers=h)
+    results = [x["response"] for x in again.json()["results"]]
+    assert [x["outcome"] for x in results] == ["CHECKED_IN", "CHECKED_IN", "CHECKED_IN"]
+    assert [x["replayed"] for x in results] == [True, False, True]
+    assert not any(x.get("retry") for x in results)
+    log = await client.get(_url(world, "/check-ins"), headers=h)
+    assert sorted(x["name"] for x in log.json()["items"]) == ["Ananya Iyer", "Bala Krishnan", "Devi Menon"]
+    assert {x["via"] for x in log.json()["items"]} == {"offline_sync"}
+
+
+async def test_a_scan_that_fails_after_it_was_recorded_replays_as_admitted(client, world, make_user, make_registration, monkeypatch):
+    """The admission committed, then the answer failed: the transaction since
+    is rolled back, which expires every row the session holds; the scans
+    after it still land, here on a gate link's door."""
+    from app.api.idcards import service as idcards
+
+    h = world["club"]
+    door = await client.post(_url(world, "/doors"), json={"name": "Loading bay", "kind": "door"}, headers=h)
+    key = (await client.post(_url(world, f"/doors/{door.json()['id']}/link"), json={"can_walkup": False}, headers=h)).json()["key"]
+    d = await _third_guest(world, make_user, make_registration)
+    codes, d_id = [world["a"].ticket_id, d.ticket_id, world["b"].ticket_id], d.id
+    failed = _fail_once(monkeypatch, idcards, "badge_for_scan", lambda event, reg, actor, admitted: admitted and reg.id == d_id, broken_statement=False)
+    scans = [{"code": c, "scanned_at": datetime.now(timezone.utc).isoformat(), "client_ref": uuid.uuid4().hex} for c in codes]
+
+    r = await client.post(_url(world, "/gate/scan-batch"), json={"scans": scans}, headers={"X-Gate-Key": key})
+    assert r.status_code == 200, r.text
+    assert len(failed) == 1
+    results = [x["response"] for x in r.json()["results"]]
+    assert [x["outcome"] for x in results] == ["CHECKED_IN", "INVALID", "CHECKED_IN"]
+    assert results[1]["retry"] is True
+    log = await client.get(_url(world, "/check-ins"), headers=h)
+    assert {(x["name"], x["door"]["name"]) for x in log.json()["items"]} == {("Ananya Iyer", "Loading bay"), ("Devi Menon", "Loading bay"), ("Bala Krishnan", "Loading bay")}
+
+    replay = await client.post(_url(world, "/gate/scan-batch"), json={"scans": [scans[1]]}, headers={"X-Gate-Key": key})
+    (only,) = replay.json()["results"]
+    assert only["response"]["outcome"] == "CHECKED_IN" and only["response"]["replayed"] is True
+    assert len((await client.get(_url(world, "/check-ins"), headers=h)).json()["items"]) == 3
+
+
+async def test_an_offline_scan_time_without_an_offset_is_read_as_utc(client, world):
+    h = world["club"]
+    earlier = (datetime.now(timezone.utc) - timedelta(minutes=30)).replace(tzinfo=None, microsecond=0)
+    batch = {"scans": [
+        {"code": world["a"].ticket_id, "door": "Gate C", "scanned_at": earlier.isoformat(), "client_ref": uuid.uuid4().hex},
+        {"code": world["b"].ticket_id, "door": "Gate C", "scanned_at": None, "client_ref": uuid.uuid4().hex},
+    ]}
+    assert "+" not in batch["scans"][0]["scanned_at"] and not batch["scans"][0]["scanned_at"].endswith("Z")
+    r = await client.post(_url(world, "/gate/scan-batch"), json=batch, headers=h)
+    assert r.status_code == 200, r.text
+    assert [x["response"]["outcome"] for x in r.json()["results"]] == ["CHECKED_IN", "CHECKED_IN"]
+    log = await client.get(_url(world, "/check-ins"), headers=h)
+    row = next(x for x in log.json()["items"] if x["name"] == "Ananya Iyer")
+    assert abs((datetime.fromisoformat(row["checked_in_at"]) - earlier.replace(tzinfo=timezone.utc)).total_seconds()) < 2
+
+    # The live scan reads it the same way.
+    live = await client.post(_url(world, "/gate/scan"), json={"code": world["a"].ticket_id, "scanned_at": earlier.isoformat(), "client_ref": uuid.uuid4().hex}, headers=h)
+    assert live.status_code == 200 and live.json()["outcome"] == "ALREADY_CHECKED_IN"

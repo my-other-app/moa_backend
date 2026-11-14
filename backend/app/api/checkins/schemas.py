@@ -1,10 +1,10 @@
 """The door's words: what a scan answers, what a walk-up needs, what the
 log and the team page show."""
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 DoorKindName = Literal["door", "desk", "kiosk"]
 DoorModeName = Literal["open", "auto", "closed"]
@@ -157,6 +157,16 @@ class ScanBody(BaseModel):
     scanned_at: Optional[datetime] = None
     # From the device, so a retried scan admits once.
     client_ref: str = Field(min_length=8, max_length=64)
+
+    @field_validator("scanned_at")
+    @classmethod
+    def _utc_without_an_offset(cls, value: Optional[datetime]) -> Optional[datetime]:
+        """A time with no offset is UTC. Dart's DateTime.now().toIso8601String()
+        sends one; compared as it was with the server's clock, it raised, and
+        failed the scan."""
+        if value is not None and value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
 
 
 class ScanResult(BaseModel):
