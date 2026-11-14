@@ -2,9 +2,14 @@
 (app.core.rate_limit: Redis when set, else this process; off with it).
 
 - /profiles/*: 120 a minute per address; /profiles/by-code: 30 a minute per
-  address, so codes cannot be walked. The address is the visitor's: for a
-  page the site's own server renders, the one it names behind its token
-  (app.core.site), else the connection's.
+  address, so codes cannot be walked.
+- The website's own server (a valid X-Site-Token, app.core.site) reads from
+  a few shared addresses for every visitor, so its reads are not counted
+  against its address. Each counts in the site's bucket, the same one its
+  other public reads spend (SITE_RATE_LIMIT, app.core.rate_limit), and,
+  when it names the visitor (X-Visitor-IP, believed only behind that
+  token), against that visitor too, at the route's own rate. Without a
+  valid token X-Visitor-IP means nothing: the caller's address counts.
 - Saves (POST /network): 60 a minute and 300 an hour per person, counted on
   every try, so a code cannot be guessed through saves either.
 
@@ -39,27 +44,42 @@ def _hit(rate: str, scope: str, who: str) -> None:
         wait = max(1, int(reset_at - time.time()) + 1)
     except Exception:  # noqa: BLE001 - the refusal is the answer; the wait is a courtesy
         wait = 60
-    raise CustomHTTPException(
+    raise _refused(wait)
+
+
+def _refused(wait: int = 60) -> CustomHTTPException:
+    return CustomHTTPException(
         429, message="Too many tries in a short time. Wait a moment and try again.",
         error_code="RATE_LIMITED", errors={"retry_after": wait},
     )
 
 
-def visitor(request) -> str:
+def _read(request, rate: str, scope: str) -> None:
+    """One public read: per address, or, from the site's own server, per
+    visitor it names and in the site's bucket."""
     from app.core import site
     from app.core.net import client_address
+    from app.core.rate_limit import site_bucket_spent
 
-    return site.visitor_ip(request) or client_address(request) or "unknown"
+    if not limiter.enabled:
+        return
+    bucket = site.token_id(request)
+    if bucket is None:
+        _hit(rate, scope, client_address(request) or "unknown")
+        return
+    visitor = site.visitor_ip(request)
+    if visitor:
+        _hit(rate, scope, visitor)
+    if site_bucket_spent(bucket):
+        raise _refused()
 
 
 def profile_read(request) -> None:
-    if limiter.enabled:
-        _hit(PROFILE_READS, "profiles:read", visitor(request))
+    _read(request, PROFILE_READS, "profiles:read")
 
 
 def code_read(request) -> None:
-    if limiter.enabled:
-        _hit(CODE_READS, "profiles:code", visitor(request))
+    _read(request, CODE_READS, "profiles:code")
 
 
 def save(user_id: int) -> None:

@@ -474,3 +474,57 @@ async def test_the_owners_user_id_is_given_only_to_a_signed_in_reader(client, se
     private = (await client.get(f"{API}/profiles/asha", headers=world["vh"])).json()
     assert private["private"] is True and private["user_id"] == owner.id
     assert (await client.get(f"{API}/profiles/asha")).json()["user_id"] is None
+
+
+SITE_TOKEN = "s" * 40
+SITE_ADDR = "76.76.21.21"  # the site's server, shared by every visitor
+
+
+async def test_the_sites_server_reads_in_its_own_bucket_not_its_address(client, world, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "SITE_TOKENS", SITE_TOKEN)
+    monkeypatch.setattr(limits, "PROFILE_READS", "3/minute")
+    monkeypatch.setattr(limits, "CODE_READS", "2/minute")
+    monkeypatch.setattr(settings, "SITE_RATE_LIMIT", "6/minute")
+    site = {"X-Forwarded-For": SITE_ADDR, "X-Site-Token": SITE_TOKEN}
+    # The site's renders, no visitor named (ISR): past one shared address's 3 a minute.
+    for _ in range(6):
+        assert (await client.get(f"{API}/profiles/asha", headers=site)).status_code == 200
+    # Its own bucket still bites (SITE_RATE_LIMIT), in RATE_LIMITED's words.
+    r = await client.get(f"{API}/profiles/asha/vcard", headers=site)
+    assert (r.status_code, r.json()["error_code"]) == (429, "RATE_LIMITED")
+    # The same address without the token is an ordinary caller: 3 a minute.
+    plain = {"X-Forwarded-For": "198.51.100.7"}
+    assert [(await client.get(f"{API}/profiles/asha", headers=plain)).status_code for _ in range(4)] == [200, 200, 200, 429]
+
+
+async def test_a_forwarded_visitor_counts_only_behind_the_sites_token(client, world, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "SITE_TOKENS", SITE_TOKEN)
+    monkeypatch.setattr(limits, "CODE_READS", "2/minute")
+    code = (await client.get(f"{API}/me/qr", headers=world["oh"])).json()["code"]
+    path = f"{API}/profiles/by-code/{code}"
+
+    def from_site(visitor):
+        return {"X-Forwarded-For": SITE_ADDR, "X-Site-Token": SITE_TOKEN, "X-Visitor-IP": visitor}
+
+    # Per visitor the site names: one scanner's 3rd ask is refused, another's goes.
+    assert [(await client.get(path, headers=from_site("49.37.10.1"))).status_code for _ in range(3)] == [200, 200, 429]
+    assert (await client.get(path, headers=from_site("49.37.10.2"))).status_code == 200
+    # Without the token (or with a wrong one) the header is ignored: the caller's address counts.
+    for token in (None, "t" * 40):
+        limiter_reset()
+        for i in range(3):
+            headers = {"X-Forwarded-For": "203.0.113.9", "X-Visitor-IP": f"10.0.0.{i + 1}"}
+            if token:
+                headers["X-Site-Token"] = token
+            status = (await client.get(path, headers=headers)).status_code
+            assert status == (429 if i == 2 else 200), (token, i)
+
+
+def limiter_reset():
+    from app.core.rate_limit import limiter
+
+    limiter.reset()
