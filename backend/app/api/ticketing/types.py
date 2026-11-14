@@ -79,7 +79,7 @@ async def adopt(session, event_id: int, default_id: int) -> None:
     )
 
 
-async def ensure(session, event, *, adopt_untyped: bool = False) -> list[TicketTypes]:
+async def ensure(session, event, *, adopt_untyped: bool = False, fresh: bool = False) -> list[TicketTypes]:
     """The event's live types, its default made first when it has none (an
     event made since the migration, or by a path that does not make one).
     The registrations it already had are of that default from then on, so
@@ -87,8 +87,9 @@ async def ensure(session, event, *, adopt_untyped: bool = False) -> list[TicketT
     without a type is too (the club's own writes ask for it). Writes only
     then; flushes, never commits. Never call it holding the event's row: the
     registrations it adopts are taken before the type's row, as a payment's
-    capture takes a registration's row before the event's."""
-    rows = await live(session, event.id)
+    capture takes a registration's row before the event's. `fresh`: the
+    types as the database holds them now, not as this session first read them."""
+    rows = await live(session, event.id, fresh=fresh)
     if rows:
         if adopt_untyped:
             default = next((t for t in rows if t.is_default), rows[0])

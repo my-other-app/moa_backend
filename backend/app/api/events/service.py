@@ -4,7 +4,7 @@ import logging
 from types import SimpleNamespace
 from typing import Optional
 from fastapi import Request, UploadFile
-from sqlalchemy import and_, delete, exists, select, func
+from sqlalchemy import and_, delete, exists, null, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
 from sqlalchemy.dialects.postgresql import INTERVAL
@@ -621,11 +621,27 @@ async def get_event(session: AsyncSession, event_id: str | int, user_id: int | N
         .scalar_subquery()
     )
     
+    # The viewer's own rating, in the same statement (it was one of its own).
+    own_rating = (
+        select(EventRatingsLink.rating)
+        .where(
+            EventRatingsLink.event_id == Events.id,
+            EventRatingsLink.user_id == user_id,
+            EventRatingsLink.is_deleted == False,
+        )
+        .correlate(Events)
+        .limit(1)
+        .scalar_subquery()
+        if user_id
+        else null()
+    )
+
     db_event = await session.execute(
         select(
             Events,
             rating_avg_subquery.label("rating"),
             rating_count_subquery.label("total_rating"),
+            own_rating.label("own_rating"),
         )
         .filter(
             Events.is_deleted == False,
@@ -760,16 +776,9 @@ async def get_event(session: AsyncSession, event_id: str | int, user_id: int | N
                 else:
                     data["position_label"] = f"{registration.position}th Place"
         
-        # Check user's rating for this event
-        user_rating = await session.scalar(
-            select(EventRatingsLink).where(
-                EventRatingsLink.event_id == event.id,
-                EventRatingsLink.user_id == user_id,
-                EventRatingsLink.is_deleted == False,
-            )
-        )
-        if user_rating:
-            data["user_rating"] = user_rating.rating
+        # The user's rating for this event, read with the event (never null when there is one).
+        if db_event[3] is not None:
+            data["user_rating"] = db_event[3]
 
     # Its tickets: the types on sale with what is left, and the waiting list
     # (app/api/ticketing, docs/TICKETING.md). Its default type is made here
