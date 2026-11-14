@@ -78,6 +78,8 @@ from app.api.social import models as _social_models  # noqa: F401
 # Outgoing webhooks: endpoints, changes to send, deliveries (app/api/webhooks_out).
 from app.api.webhooks_out import models as _webhooks_out_models  # noqa: F401
 from app.api.discover.geocode import GeocodeCache  # noqa: F401
+# Profiles and the Network: links, projects, QR codes, saves, encounters, notices, recaps (app/api/profiles).
+from app.api.profiles import models as _profile_models  # noqa: F401
 from app.api.discover.stats import DiscoverStats  # noqa: F401
 # The triggers that keep clubs.place_lat/place_lng, installed with the events table.
 from app.api.discover import places as _club_places  # noqa: F401
