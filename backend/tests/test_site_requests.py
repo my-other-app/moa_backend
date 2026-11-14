@@ -117,8 +117,11 @@ async def test_the_token_lifts_no_limit_outside_the_public_reads(client, tokens)
     assert (await client.get(path, headers=from_site())).status_code == 429
 
 
-async def test_the_token_lifts_no_limit_on_sign_in(client, tokens):
-    # A different account each time, so the per-account lockout stays out of it.
+async def test_the_token_lifts_no_limit_on_sign_in(client, tokens, monkeypatch):
+    # The per-address ceiling (a hall's worth by default), here 20 to count to;
+    # a different account each time, so the per-account lockout stays out of it.
+    monkeypatch.setattr(settings, "AUTH_PASSWORD_PER_ADDRESS", "20/minute")
+
     async def attempt(i):
         data = {"username": f"nobody{i}@example.com", "password": "wrong-password"}
         return (await client.post("/api/v1/auth/token", data=data, headers=from_site())).status_code

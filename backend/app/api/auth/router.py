@@ -37,6 +37,7 @@ from app.api.auth.schemas import (
     ImpersonationResponse,
 )
 from app.api.audit import service as audit
+from app.api.auth import limits as auth_limits
 from app.api.auth import service
 from app.db.core import SessionDep
 from app.core.response.base_model import CustomBaseModel
@@ -88,9 +89,10 @@ def _clear_auth_cookies(response: Response):
 
 
 @router.post("/google", summary="Sign in with Google")
-# Per caller address: a campus behind one Wi-Fi address signs in at a fest,
-# so loose; a script minting accounts or testing tokens meets it.
-@limiter.limit("30/minute")
+# Per caller address, a ceiling for a full hall (app/api/auth/limits.py): a
+# venue behind one Wi-Fi address signs in at a fest; a script minting
+# accounts or testing tokens still meets it.
+@limiter.limit(auth_limits.sign_in_per_address)
 async def google_sign_in(
     request: Request,
     body: GoogleSignInRequest,
@@ -103,7 +105,7 @@ async def google_sign_in(
 
 
 @router.post("/apple", summary="Sign in with Apple")
-@limiter.limit("30/minute")
+@limiter.limit(auth_limits.sign_in_per_address)
 async def apple_sign_in(
     request: Request,
     body: AppleSignInRequest,
@@ -260,10 +262,11 @@ async def _signed_in(
 
 
 @router.post("/token", summary="get access token")
-# Per caller address (app.core.net). A whole campus behind one Wi-Fi address
-# signs in through this at a fest, so the cap is loose; guessing one account's
-# password is stopped by the per-account lockout (LOGIN_LOCKED) below.
-@limiter.limit("20/minute")
+# Per caller address (app.core.net), a ceiling for a full hall: a whole
+# venue behind one Wi-Fi address signs in through this at a fest. Guessing
+# one account's password is stopped by the per-account lockout
+# (LOGIN_LOCKED) below (app/api/auth/limits.py).
+@limiter.limit(auth_limits.password_per_address)
 async def login_for_access_token(
     request: Request,
     response: Response,
@@ -319,7 +322,7 @@ GOOGLE_NO_ACCOUNT_MESSAGE = (
 
 @router.post("/google/dashboard", summary="Sign in to the club dashboard or the main portal with Google")
 # The password sign-in's limit: this is the same door.
-@limiter.limit("20/minute")
+@limiter.limit(auth_limits.password_per_address)
 async def google_dashboard_sign_in(
     request: Request,
     response: Response,
@@ -369,7 +372,9 @@ def _unauthorized(message: str, **extra) -> CustomHTTPException:
 
 
 @router.post("/refresh", summary="refresh access token")
-@limiter.limit("20/minute")
+# Per address only as a ceiling for a full hall; each session has its own
+# limit, counted below once the token says which session it is.
+@limiter.limit(auth_limits.refresh_per_address)
 async def refresh_access_token(
     request: Request,
     response: Response,
@@ -404,6 +409,9 @@ async def refresh_access_token(
         raise _unauthorized("Invalid token")
     if payload.token_type != "refresh_token":
         raise _unauthorized("Invalid token type")
+    # Per session (its id is the same across rotations), so a venue's phones
+    # sharing one address each have their own budget.
+    auth_limits.refresh_session(str(payload.sid) if payload.sid else f"user:{payload.user_id}")
     if payload.impersonated_by:
         # An admin's session as someone else is never renewed; one minted
         # before that rule carried a refresh token, which stops here.

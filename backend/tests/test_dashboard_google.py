@@ -350,7 +350,11 @@ async def test_wrong_codes_through_google_lock_the_door(client, session, world):
 
 
 async def test_the_rate_limit_is_the_password_sign_ins(client, world, monkeypatch):
+    from app.config import settings
+
     monkeypatch.setattr(limiter, "enabled", True)
+    # The password sign-in's per-address ceiling (a hall's worth by default), here 20.
+    monkeypatch.setattr(settings, "AUTH_PASSWORD_PER_ADDRESS", "20/minute")
     token = google_token("nobody@example.com")
     codes = [(await client.post(URL, json={"id_token": token, "scope": "club"})).status_code for _ in range(21)]
     assert codes[:20] == [401] * 20 and codes[20] == 429
