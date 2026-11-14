@@ -22,7 +22,7 @@ from types import SimpleNamespace
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import cast, func, literal, or_, select, text, update
+from sqlalchemy import cast, func, inspect, literal, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload, selectinload
@@ -1310,33 +1310,60 @@ def due_query(now: datetime):
     )
 
 
+async def _due_again(session, tpl_id: int, event_id: int):
+    """One timed email and its event read again, loaded as due_query loads
+    them: after a rollback expired the ones the sweep had. None when gone."""
+    return (await session.execute(
+        select(EmailTemplates, Events)
+        .join(Events, Events.id == EmailTemplates.event_id)
+        .options(joinedload(Events.club), selectinload(Events.cohost_clubs))
+        .where(EmailTemplates.id == tpl_id, Events.id == event_id)
+    )).unique().first()
+
+
 async def sweep(session, now: Optional[datetime] = None) -> int:
     """Queue every timed journey email that has come due and not yet gone,
     each with the job that sends it (start_message). Once per template, ever:
     the message row is the record -- and a message cut off half-sent is
     finished by the resumer, not sent again. Sends nothing itself, so one big
     reminder never holds up the sweep (or anyone else's reminder) while it
-    goes. Returns how many it queued."""
+    goes. Returns how many it queued.
+
+    One that cannot be queued is rolled back, logged by its id, and tried
+    again next minute; the ones after it still go. A rollback expires every
+    row the session holds, so the loop carries ids and reads a template and
+    its event again whenever they were expired. It used to read the expired
+    rows: every timed email due after a failing one waited until that one
+    left the window, two days later."""
     now = now or datetime.now(timezone.utc)
     queued: list = []
+    failed: list[int] = []
     # The session is the sweep's until it is done with it; the jobs start after.
     async with pipeline.session_lock(session):
-        rows = (await session.execute(due_query(now))).unique().all()
-        for tpl, event in rows:
+        rows = [(tpl.id, event.id, tpl, event) for tpl, event in (await session.execute(due_query(now))).unique().all()]
+        for tpl_id, event_id, tpl, event in rows:
             try:
+                if inspect(tpl).expired_attributes or inspect(event).expired_attributes:
+                    again = await _due_again(session, tpl_id, event_id)
+                    if again is None:
+                        continue
+                    tpl, event = again
                 # The stored instant chose the row; the rule itself still decides.
                 due = due_at(event, fields_of(tpl).trigger)
                 if due is None or due > now or due < now - SWEEP_GRACE:
                     continue
-                already = await session.scalar(select(func.count()).select_from(Messages).where(Messages.template_id == tpl.id, Messages.scheduled == True))  # noqa: E712
+                already = await session.scalar(select(func.count()).select_from(Messages).where(Messages.template_id == tpl_id, Messages.scheduled == True))  # noqa: E712
                 if already:
                     continue
                 msg = await send_template(session, event, tpl, scheduled=True)
                 queued.append(msg.id)
             except Exception:  # noqa: BLE001
                 # One email that cannot go must not hold up the others.
-                logger.exception("timed email %s could not be queued", tpl.id)
+                logger.exception("timed email %s on event %s could not be queued", tpl_id, event_id)
+                failed.append(tpl_id)
                 await session.rollback()
+    if failed:
+        logger.warning("timed email sweep: %d queued, %d could not be (templates %s)", len(queued), len(failed), failed)
     return len(queued)
 
 

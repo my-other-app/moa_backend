@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from sqlalchemy import select
 
 from app.api.checkins.models import CheckInVia, CheckIns
 from app.api.live import service
@@ -380,3 +381,28 @@ async def test_an_update_reaches_the_room_and_shifting_a_block_sends_one(client,
     screen = await client.get(_u(world, "/screen"), headers=h)
     assert screen.json()["update"]["kind"] == "schedule" and screen.json()["quiz"] is None and screen.json()["poll"] is None
     assert (await client.get(_u(world, "/updates"), headers=world["other"])).status_code in (403, 404)
+
+
+async def test_a_survey_that_fails_to_go_holds_up_none_after_it(client, session, world, make_event, monkeypatch, fail_once):
+    from app.api.live.models import FeedbackSurveys
+
+    monkeypatch.setattr(service.email_mod, "send_email", lambda **kw: None)
+    # Due an hour after it ends, before the world's event's survey.
+    earlier = await make_event(club=world["club"], created_by=world["owner"], name="Hack Night 03", event_datetime=START - timedelta(hours=2), duration=1.0)
+    earlier_id, event_id = earlier.id, world["event"].id
+    await service.survey_of(session, earlier)
+    await service.survey_of(session, world["event"])
+    now = START + timedelta(hours=5)
+
+    async def sent_at(eid):
+        return await session.scalar(select(FeedbackSurveys.sent_at).where(FeedbackSurveys.event_id == eid))
+
+    failed = fail_once(service, "send_survey")
+    assert await service.sweep(session, now=now) == 1
+    assert len(failed) == 1
+    assert await sent_at(earlier_id) is None and await sent_at(event_id) is not None
+    # Next minute, the one that failed goes.
+    assert await service.sweep(session, now=now) == 1
+    assert await sent_at(earlier_id) is not None
+    assert await service.sweep(session, now=now) == 0
+    await after_commit.drain()

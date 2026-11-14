@@ -285,6 +285,24 @@ async def test_a_timed_email_goes_out_once_when_due(client, session, world, outb
     assert await service.sweep(session, now=START + timedelta(hours=6)) == 0
 
 
+async def test_a_timed_email_that_cannot_be_queued_holds_up_none_after_it(client, session, world, outbox, background, fail_once):
+    post = _stage(await _journey(client, world), "POST_EVENT")["template"]
+    body = {k: v for k, v in post.items() if k in ("name", "subject", "design", "attachments", "audience", "trigger", "channels", "enabled")}
+    body["trigger"] = {"mode": "AFTER_END", "minutes": 60}
+    assert (await client.put(_url(world, f"/{post['id']}"), json=body, headers=world["club"])).status_code == 200
+    now = START + timedelta(hours=5)
+
+    # The first one due fails with a broken statement; the ones after it go.
+    failed = fail_once(service, "send_template")
+    first = await service.sweep(session, now=now)
+    assert len(failed) == 1 and first >= 1
+    # Next minute, the one that failed goes, and only it.
+    assert await service.sweep(session, now=now) == 1
+    assert await service.sweep(session, now=now) == 0
+    await jobs.settle()
+    await pipeline.drain()
+
+
 async def test_a_broadcast_is_sent_once_per_client_ref(client, world, outbox, background):
     count = await client.post(_url(world, "/audience"), json={"who": "CHECKED_IN", "roles": []}, headers=world["club"])
     assert count.json() == {"recipients": 2, "withoutEmail": 0}

@@ -45,7 +45,7 @@ from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
 import sqlalchemy as sa
-from sqlalchemy import delete, func, literal, select, update
+from sqlalchemy import delete, func, inspect, literal, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import joinedload
 
@@ -1449,17 +1449,32 @@ def due_query(now: datetime, limit: int = SWEEP_BATCH):
 
 
 async def sweep(session, now: Optional[datetime] = None) -> int:
-    """Every minute: surveys whose moment has come go out."""
+    """Every minute: surveys whose moment has come go out.
+
+    One that fails is rolled back, logged by its event's id, and tried again
+    next minute; the ones after it still go. A rollback expires every row the
+    session holds (send_survey rolls back itself on some failures), so the
+    loop carries ids and reads an event again whenever it was expired. It
+    used to read the expired rows: one failing survey held back every survey
+    due after it, each minute."""
     now = now or now_utc()
-    due = (await session.execute(due_query(now))).all()
+    due = [(survey.id, event.id, event) for survey, event in (await session.execute(due_query(now))).all()]
     sent = 0
-    for _survey, event in due:
+    failed: list[int] = []
+    for survey_id, event_id, event in due:
         try:
+            if inspect(event).expired_attributes:
+                event = await session.scalar(select(Events).options(joinedload(Events.club)).where(Events.id == event_id))
+                if event is None:
+                    continue
             await send_survey(session, event, now)
             sent += 1
         except Exception:  # noqa: BLE001
-            logger.exception("feedback auto-send failed for event %s", event.id)
+            logger.exception("feedback auto-send failed for survey %s on event %s", survey_id, event_id)
+            failed.append(event_id)
             await session.rollback()
+    if failed:
+        logger.warning("feedback sweep: %d sent, %d failed (events %s)", sent, len(failed), failed)
     return sent
 
 

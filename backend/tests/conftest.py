@@ -605,3 +605,37 @@ def classic_defaults(monkeypatch):
     from app.api.doc_presets import config
 
     monkeypatch.setattr(config, "DEFAULT_IDS", {})
+
+
+@pytest.fixture
+def fail_once(monkeypatch):
+    """One call made to fail as a broken statement does, for a test that a
+    loop keeps going past it. A rollback inside a loop expires every row the
+    session holds, and a loop that reads them again fails every item after
+    the first failure (lost door scans, stuck imports, held-back reminders).
+
+    `fail_once(module, "name", when=None)` replaces the async `module.name`:
+    the first call for which `when(*args, **kwargs)` holds (the first call,
+    when None) runs `SELECT 1/0` on its session (`session=`, else the first
+    argument), so the transaction is aborted and must be rolled back, as on
+    a dropped connection or a bad row. Every other call goes through.
+    Returns the list the failed call's arguments are put in."""
+    import functools
+
+    from sqlalchemy import text
+
+    def install(module, name: str, when=None) -> list:
+        real = getattr(module, name)
+        failed: list = []
+
+        @functools.wraps(real)
+        async def failing(*args, **kwargs):
+            if not failed and (when is None or when(*args, **kwargs)):
+                failed.append((args, kwargs))
+                await (kwargs["session"] if "session" in kwargs else args[0]).execute(text("SELECT 1/0"))
+            return await real(*args, **kwargs)
+
+        monkeypatch.setattr(module, name, failing)
+        return failed
+
+    return install

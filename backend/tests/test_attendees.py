@@ -119,3 +119,72 @@ async def test_an_import_is_recorded_against_the_event_and_emails_nobody(client,
 
     bad = await client.post(f"{e}/import", files={"file": ("x.csv", b"name,mail\nA,b@c.d\n", "text/csv")}, headers=world["club"])
     assert bad.status_code == 422
+
+
+def _sheet(*rows) -> bytes:
+    return ("full_name,email,phone,role\n" + "".join(f"{name},{email},,\n" for name, email in rows)).encode()
+
+
+async def _import(client, world, filename, sheet) -> dict:
+    """The import, and its entry in the history once the job has run."""
+    e = _base(world)
+    r = await client.post(f"{e}/import", files={"file": (filename, sheet, "text/csv")}, headers=world["club"])
+    assert r.status_code == 200, r.text
+    history = (await client.get(f"{e}/imports", headers=world["club"])).json()
+    return next(h for h in history if h["task_name"].startswith(f"Import {filename}"))
+
+
+async def _names(client, world) -> set:
+    return {row["full_name"] for row in (await client.get(f"{_base(world)}/list", headers=world["club"])).json()["items"]}
+
+
+FIRST = [("Chitra Nair", "chitra-a@example.com"), ("Devi Menon", "devi-a@example.com")]
+NEW = [("Esha Rao", "esha-a@example.com"), ("Farah Khan", "farah-a@example.com")]
+
+
+async def test_a_sheet_imported_again_adds_the_new_rows_and_skips_who_is_on_the_list(client, world, no_email):
+    first = await _import(client, world, "guests.csv", _sheet(*FIRST))
+    assert first["status"] == "COMPLETED" and first["imported"] == 2
+
+    # The updated sheet: a guest already on the list at the top, last
+    # time's rows, and two new ones at the end.
+    again = await _import(client, world, "guests-v2.csv", _sheet(("Ananya Iyer", "ananya-a@example.com"), *FIRST, *NEW))
+    assert again["status"] == "COMPLETED"
+    assert again["imported"] == 2 and again["failed"] == 3
+    assert again["issues"] == [
+        "Row 2: 'Ananya Iyer' <ananya-a@example.com> is already on the list",
+        "Row 3: 'Chitra Nair' <chitra-a@example.com> is already on the list",
+        "Row 4: 'Devi Menon' <devi-a@example.com> is already on the list",
+    ]
+    assert await _names(client, world) == {"Ananya Iyer", "Sita Raman", "Chitra Nair", "Devi Menon", "Esha Rao", "Farah Khan"}
+    assert no_email == []
+
+
+async def test_a_row_that_fails_is_reported_and_the_rows_after_it_still_land(client, world, no_email, fail_once):
+    from app.api.events.registration import service as registration
+
+    failed = fail_once(registration, "register_event", when=lambda **kw: kw["email"] == "chitra-a@example.com")
+    log = await _import(client, world, "guests.csv", _sheet(*FIRST, *NEW))
+    assert len(failed) == 1
+    assert log["status"] == "PARTIAL"
+    assert log["imported"] == 3 and log["failed"] == 1
+    assert log["issues"][0].startswith("Row 2: 'Chitra Nair' <chitra-a@example.com> could not be registered")
+    assert await _names(client, world) == {"Ananya Iyer", "Sita Raman", "Devi Menon", "Esha Rao", "Farah Khan"}
+
+
+async def test_an_import_that_stops_says_why_and_keeps_the_rows_it_did(client, world, no_email, fail_once):
+    from app.api.events.registration import service as registration
+
+    # The import's own last write fails, after every row went in.
+    fail_once(registration, "update_background_task_log", when=lambda *a, **kw: kw.get("new_status") in ("COMPLETED", "PARTIAL"))
+    log = await _import(client, world, "guests.csv", _sheet(*FIRST))
+    assert log["status"] == "PARTIAL"
+    assert log["imported"] == 2
+    assert log["issues"] == ["The import stopped before the end of the file. Upload it again to add the rest."]
+    assert {"Chitra Nair", "Devi Menon"} <= await _names(client, world)
+
+
+async def test_a_sheet_with_no_rows_fails_and_says_so(client, world, no_email):
+    log = await _import(client, world, "empty.csv", b"full_name,email,phone,role\n")
+    assert log["status"] == "FAILED"
+    assert log["issues"] == ["The file has no rows to import."]
