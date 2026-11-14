@@ -191,7 +191,7 @@ from sqlalchemy import inspect as sa_inspect
 from app.config import settings
 from app.core.layout.model import TicketLayoutFields, ticket_area
 from app.core.storage import objects
-from app.core.storage.bucket import key_from_url
+from app.core.storage.bucket import is_design_picture, is_design_upload, key_from_url
 from app.core.layout.renderer import RenderInput, pdf_to_png, render_pdf, render_pdf_pages
 from app.core.layout.tokens import (
     TokenAttendee,
@@ -373,7 +373,9 @@ def fetch_bytes(url: str) -> Optional[bytes]:
         return None
     key = key_from_url(url)
     if key:
-        return objects.get_bytes(key)
+        # Only a picture a design may draw (a logo, a poster, a template's
+        # image, a designer's upload: bucket.is_design_picture).
+        return objects.get_bytes(key) if is_design_picture(key) else None
     if not url.lower().startswith("https://"):
         # Never plain http, never file: or anything else -- the renderer
         # must not be what reads an internal address a design names.
@@ -399,7 +401,8 @@ def _template_bytes(style: dict, layout: TicketLayoutFields) -> tuple[Optional[b
     in the layout) or the template's background image. And whether it read."""
     from app.api.templates_images import key_of
 
-    key = layout.canvas.template_key or key_of(style, "background_image")
+    template_key = layout.canvas.template_key if is_design_upload(layout.canvas.template_key) else None
+    key = template_key or key_of(style, "background_image")
     if key:
         data = objects.get_bytes(key)
         return data, data is not None
@@ -432,10 +435,11 @@ def layout_input(style: dict, values: dict, qr_value: str, *, title: str,
     images read (by key, from the cache) -- and whether every image read."""
     layout = layout_of(style)
     template, ok_template = _template_bytes(style, layout)
+    # A designer's upload alone (bucket.is_design_upload): any other key draws nothing.
     images = {
         l.image_key: objects.get_bytes(l.image_key)
         for l in layout.layers
-        if l.kind == "image" and l.image_key
+        if l.kind == "image" and l.image_key and is_design_upload(l.image_key)
     }
     logo, ok_logo = _logo_bytes(style) if any(l.kind == "image" and l.source == "org_logo" for l in layout.layers) else (None, True)
     wants_icon = any(l.kind == "image" and l.source == "event_icon" for l in layout.layers)

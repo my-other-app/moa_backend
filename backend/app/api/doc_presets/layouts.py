@@ -32,6 +32,7 @@ import re
 from typing import Optional
 
 from app.api.doc_presets import engine
+from app.core.storage.bucket import under
 from app.api.doc_presets.config import (
     DEFAULT_IDS,
     classic,
@@ -156,7 +157,7 @@ def checked(kind: str, body: dict, *, prefixes: tuple) -> tuple[dict, list]:
         found = lib.problems(body, kind) or [{"code": "shape", "field": "layout", "message": str(exc)[:300], "level": "error"}]
         raise _refusal(found, "This design has a problem.") from exc
     layout = {**wire(parsed), "version": 2}
-    foreign = {f: "Upload the image through this designer." for f, key in upload_keys(layout).items() if not any(str(key).startswith(p) for p in prefixes)}
+    foreign = {f: "Upload the image through this designer." for f, key in upload_keys(layout).items() if not under(str(key), prefixes)}
     if foreign:
         raise Refused("Some images in this design were not uploaded here.", fields=foreign)
     found = _unsafe_svg(layout) + list(lib.problems(parsed, kind) or [])
@@ -293,6 +294,7 @@ def picture_refs(layout: dict, style: dict, event, mapped: Mapped, subject) -> d
     from app.api.events.tickets import poster_url
     from app.api.templates_images import key_of
     from app.api.doc_presets.values import club_logo_key
+    from app.core.storage.bucket import is_design_upload
 
     from app.core.layout_v2.vocabulary import IMAGE_TOKENS, show_if_names
 
@@ -324,7 +326,8 @@ def picture_refs(layout: dict, style: dict, event, mapped: Mapped, subject) -> d
         source = layer.get("source") or "upload"
         if source == "upload":
             key = layer.get("imageKey")
-            if key:
+            # A designer's upload alone (bucket.is_design_upload); any other key draws nothing.
+            if key and is_design_upload(key):
                 out[f"upload:{key}"] = ("key", key)
         elif source not in out:
             out[source] = ref(source)
@@ -540,7 +543,7 @@ def picture_links(layout: dict, style: dict, event) -> dict:
     from app.api.events.tickets import poster_url
     from app.api.templates_images import key_of
     from app.api.doc_presets.values import club_logo_key
-    from app.core.storage import objects
+    from app.core.storage import bucket, objects
 
     def signed(key):
         try:
@@ -553,7 +556,7 @@ def picture_links(layout: dict, style: dict, event) -> dict:
         "signature_1": signed(key_of(style, "signature_1")),
         "signature_2": signed(key_of(style, "signature_2")),
         "event_icon": poster_url(event),
-        "uploads": {key: signed(key) for key in set(upload_keys(layout).values())},
+        "uploads": {key: signed(key) for key in set(upload_keys(layout).values()) if bucket.is_design_upload(key)},
     }
 
 

@@ -72,7 +72,7 @@ from app.core.utils.pdf import generate_image_bytes
 from app.api.ticket_templates.service import system_default_config as ticket_default_config
 from app.config import settings
 from app.core.auth.dependencies import ClubAuth
-from app.core.storage import doc_art, objects
+from app.core.storage import bucket, doc_art, objects
 from app.db.core import SessionDep
 from app.response import CustomHTTPException
 
@@ -688,7 +688,9 @@ def _layout_dto(event, kind: DesignKind, audience: TemplateAudience, template, s
     layout = presets.layout_v1_of(style)
     data = layout or {**_starter(kind), "version": 0}
     colors = layout_colors(style, getattr(event, "club", None))
-    image_urls = {key: objects.presigned_url(key) for key in set(_layout_keys(data).values())}
+    # Only the designers' uploads are signed (bucket.is_design_upload): a
+    # layout names its pictures by key, and any other key shows nothing.
+    image_urls = {key: objects.presigned_url(key) for key in set(_layout_keys(data).values()) if bucket.is_design_upload(key)}
     template_key = (data.get("canvas") or {}).get("templateKey")
     club = getattr(event, "club", None)
     fields = [f.get("label") for f in (event.additional_details or []) if isinstance(f, dict) and f.get("label")]
@@ -886,7 +888,7 @@ def _validate_layout(kind: DesignKind, body: dict, *, prefixes: tuple) -> Ticket
         raise CustomHTTPException(422, message="This design has a problem.", errors={"detail": str(exc)[:2000]})
     # Keys are plain strings in the JSON; one pointing outside the folders this
     # design may use would let it print another club's upload.
-    foreign = {field: "Upload the image through this designer." for field, key in _layout_keys(body).items() if not any(key.startswith(prefix) for prefix in prefixes)}
+    foreign = {field: "Upload the image through this designer." for field, key in _layout_keys(body).items() if not bucket.under(key, prefixes)}
     if foreign:
         raise CustomHTTPException(422, message="Some images in this design were not uploaded here.", errors={"fields": foreign})
     problems = layout_problems(layout.canvas, layout.layers, layout.page, qr_required=kind in (DesignKind.ticket, DesignKind.badge))

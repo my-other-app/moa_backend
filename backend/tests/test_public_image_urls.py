@@ -139,16 +139,21 @@ def test_an_agenda_speaker_photo_from_the_events_uploads_is_a_public_link(signer
     assert signer == [(key, WEEK)]
 
 
-def test_any_other_key_an_organiser_typed_keeps_its_hour(monkeypatch):
-    """The key is not checked on save: a week of somebody else's file would
-    be worse than the hour it always had."""
+def test_another_events_upload_keeps_its_hour_and_any_other_key_has_no_link(monkeypatch):
+    """The key is the organiser's to give. A designer's upload from another
+    event (an agenda copied with its event) keeps the hour it always had;
+    a key outside the designers' folders has no link at all."""
     from app.api.event_designs.router import _layout_prefix
     from app.core.storage import objects
 
     asked = []
     monkeypatch.setattr(objects, "presigned_url", lambda key, expires=3600: asked.append((key, expires)) or f"https://files.test/{key}")
     monkeypatch.setattr(objects, "public_url", lambda key: pytest.fail(f"signed {key} for a week"))
-    for key in (f"{_layout_prefix(2)}speaker.png", "media/templates/certificates/signatures/x.png", f"{_layout_prefix(1)}../../2/layout/x.png"):
+    copied = f"{_layout_prefix(2)}speaker.png"
+    row = AgendaItems(id=None, event_id=1, title="Keynote", speaker_photo_key=copied)
+    assert agenda.item_out(row, set())["speaker_photo_url"] == f"https://files.test/{copied}"
+    for key in ("media/templates/certificates/signatures/x.png", f"{_layout_prefix(1)}../../2/layout/x.png", "docs/ticket/1/0-abc.pdf",
+                "events/files/report.pdf", f"{_layout_prefix(1)}nested/x.png"):
         row = AgendaItems(id=None, event_id=1, title="Keynote", speaker_photo_key=key)
-        assert agenda.item_out(row, set())["speaker_photo_url"] == f"https://files.test/{key}"
-    assert [e for _, e in asked] == [HOUR, HOUR, HOUR]
+        assert agenda.item_out(row, set())["speaker_photo_url"] is None, key
+    assert asked == [(copied, HOUR)]

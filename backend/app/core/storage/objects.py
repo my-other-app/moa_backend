@@ -57,9 +57,13 @@ def photo_url(key: Optional[str]) -> Optional[str]:
     """A link to a product photo (the event's store, the merch desk). The
     store shows it to anyone, so it is a public picture: on the media CDN
     when that is on and the key is under an event's merch folder
-    (media.PUBLIC_FOLDERS). Otherwise -- the CDN off, or a key from anywhere
-    else, which an item may name -- the hour-signed link it always had."""
-    if not key:
+    (media.PUBLIC_FOLDERS); with the CDN off, the hour-signed link it always
+    had. Only a key in a product-photo folder (an event's or a club's
+    `merch`, bucket.is_product_photo) has a link: an item names its photo by
+    key, and any other key shows no photo."""
+    from app.core.storage import bucket
+
+    if not key or not bucket.is_product_photo(key):
         return None
     return media.public_url(key, otherwise=lambda k: presigned_url(k))
 

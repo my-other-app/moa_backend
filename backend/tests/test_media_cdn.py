@@ -199,7 +199,9 @@ def test_a_private_key_is_never_on_the_cdn(cdn, signer, key):
     # The builder falls back to the signed link it always had.
     url = media.public_url(key)
     assert not url.startswith(CDN) and signer == [(key, 7 * 24 * 3600)]
-    assert objects.photo_url(key).startswith("https://") and not objects.photo_url(key).startswith(CDN)
+    # A product photo's link is for a product photo alone: any other key has none.
+    link = objects.photo_url(key)
+    assert link is None or (bucket.is_product_photo(key) and link.startswith("https://") and not link.startswith(CDN))
     # And an address on the CDN's host naming it is not believed.
     rest = media.relative(key) or key.lstrip("/")
     assert media.key_from_url(f"{CDN}/{rest}") is None
