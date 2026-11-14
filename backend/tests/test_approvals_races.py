@@ -172,3 +172,86 @@ async def test_paid_holds_at_once_never_outnumber_the_places(make):
         WaitlistEntries.event_id == w["event"], WaitlistEntries.status == "offered", WaitlistEntries.via_request == True,  # noqa: E712
     ))
     assert offers == 3
+
+
+async def test_a_door_scan_and_a_live_question_go_through_while_a_paid_confirm_holds_the_event(make, monkeypatch):
+    """A paid confirm holds the event's row for its whole chunk. Held FOR
+    UPDATE, every row that names the event waited for it -- Postgres checks
+    a foreign key with FOR KEY SHARE on the event's row -- so a door scan's
+    check-in and a live-room question stalled for seconds at a time while
+    the organiser confirmed. Held FOR NO KEY UPDATE, they go straight in."""
+    from sqlalchemy import text
+
+    from app.api.checkins import service as checkins
+    from app.api.checkins.gate_auth import GateActor
+    from app.api.live.models import LiveQuestions
+    from app.api.ticketing import waitlist
+    from app.core.utils.keys import generate_ticket_id
+
+    w = await _world(make, "doorconfirm", requests=1, has_fee=True, reg_fee=Decimal("150"))
+    async with make() as s:
+        person = await _make_user(s, email="doorconfirm-guest@example.com", username="doorconfirmguest")
+        guest = EventRegistrationsLink(event_id=w["event"], user_id=person.id, full_name="Paid Guest", email=person.email, ticket_id=generate_ticket_id(), is_paid=True)
+        s.add(guest)
+        await s.commit()
+        code = guest.ticket_id
+
+    holding, release = asyncio.Event(), asyncio.Event()
+    real = waitlist._locked_types
+
+    async def paused(session, event_id):
+        # The confirm, part way through its chunk: the event's row is held.
+        rows = await real(session, event_id)
+        holding.set()
+        await release.wait()
+        return rows
+
+    monkeypatch.setattr(waitlist, "_locked_types", paused)
+
+    async def scan():
+        async with make() as s:
+            # Fail fast rather than hang if the row lock blocks the insert.
+            await s.execute(text("SET LOCAL lock_timeout = '3s'"))
+            event = await s.get(Events, w["event"])
+            return await checkins.scan(
+                s, event, code=code, door_label="Gate A", client_ref=uuid.uuid4().hex, scanned_at=None,
+                actor=GateActor(kind="user", name="Door", full=True),
+            )
+
+    async def ask():
+        async with make() as s:
+            await s.execute(text("SET LOCAL lock_timeout = '3s'"))
+            s.add(LiveQuestions(event_id=w["event"], text="Is the keynote recorded?", author_key="doorconfirm-phone"))
+            await s.commit()
+            return True
+
+    confirm = asyncio.create_task(_approve(make, w["event"], w["ids"]))
+    try:
+        await asyncio.wait_for(holding.wait(), 10)
+        assert not confirm.done()
+        scanned = await asyncio.wait_for(scan(), 10)
+        asked = await asyncio.wait_for(ask(), 10)
+        assert not confirm.done()  # both went in while the confirm still held the row
+    finally:
+        release.set()
+        done = await confirm
+    assert scanned["outcome"] == "CHECKED_IN" and asked is True
+    assert [x["id"] for x in done["approved"]] == w["ids"] and done["approved"][0]["pay_by"]
+
+
+async def test_writers_of_the_event_row_still_wait_their_turn(make):
+    """The lighter lock still queues every writer of the event's row: a
+    second lock_event waits for the first transaction to end."""
+    from sqlalchemy import text
+
+    w = await _world(make, "writersqueue", requests=0)
+    async with make() as first, make() as second:
+        await types_mod.lock_event(first, w["event"])
+        await second.execute(text("SET LOCAL lock_timeout = '300ms'"))
+        with pytest.raises(Exception) as refused:
+            await types_mod.lock_event(second, w["event"])
+        assert "lock" in str(refused.value).lower()
+        await second.rollback()
+        await first.commit()
+        assert (await types_mod.lock_event(second, w["event"])).id == w["event"]
+        await second.commit()

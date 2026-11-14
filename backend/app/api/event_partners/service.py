@@ -74,7 +74,7 @@ async def row_for(session, event: Events, partner_id: int) -> EventPartners:
 async def _hold(session, event: Events) -> None:
     """Lock the event's row until commit, so two adds at once can neither
     pass the cap together nor take the same place in the order."""
-    await session.execute(select(Events.id).where(Events.id == event.id).with_for_update())
+    await session.execute(select(Events.id).where(Events.id == event.id).with_for_update(key_share=True))
 
 
 async def _room(session, event: Events, adding: int) -> None:

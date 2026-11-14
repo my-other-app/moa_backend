@@ -275,7 +275,7 @@ async def invite(session, event: Events, user, request, *, club_id: int, note: O
     if _closed(event, now):
         raise _refuse(409, "This event has ended or was called off, so it can't take co-hosts.", "COHOST_EVENT_CLOSED")
     # One invite at a time per event: concurrent invites count each other.
-    await session.execute(select(Events.id).where(Events.id == event.id).with_for_update())
+    await session.execute(select(Events.id).where(Events.id == event.id).with_for_update(key_share=True))
     await expire_stale(session, event_id=event.id)
     existing = await session.scalar(
         select(EventCohosts).where(

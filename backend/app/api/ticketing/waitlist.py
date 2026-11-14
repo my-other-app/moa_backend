@@ -397,7 +397,9 @@ async def fill(session, event_id: int, *, now: Optional[datetime] = None) -> lis
     now = now or _now()
     event = await session.scalar(
         select(Events).where(Events.id == event_id)
-        .with_for_update(of=Events).execution_options(populate_existing=True, include_deleted=True)
+        # FOR NO KEY UPDATE: writers queue on the row; rows naming the event
+        # (check-ins, live questions) do not (types.lock_event).
+        .with_for_update(of=Events, key_share=True).execution_options(populate_existing=True, include_deleted=True)
     )
     if event is None:
         await session.commit()

@@ -240,7 +240,7 @@ async def cancel(session, event_id: int, *, reason: str, actor, expected_registr
     from app.api.audit import service as audit
 
     event = await session.scalar(
-        select(Events).options(joinedload(Events.club)).where(Events.id == event_id).with_for_update(of=Events)
+        select(Events).options(joinedload(Events.club)).where(Events.id == event_id).with_for_update(of=Events, key_share=True)
         .execution_options(populate_existing=True)
     )
     if event is None:

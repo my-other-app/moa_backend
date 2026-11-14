@@ -124,9 +124,17 @@ EVENT_FIELDS = [
 async def lock_event(session, event_id: int) -> Events:
     """The event's row, held to the end of the transaction, and its fields
     as they are now. Only the columns are read again: the relationships the
-    caller loaded (to answer with) stay loaded."""
+    caller loaded (to answer with) stay loaded.
+
+    FOR NO KEY UPDATE (key_share=True), not FOR UPDATE: every writer of the
+    event's row (this lock, and every plain UPDATE of it) still waits its
+    turn, so places are counted one at a time as before. But Postgres checks
+    a foreign key with FOR KEY SHARE on the row it points at, and FOR UPDATE
+    blocks that: a door scan's check-in, a live-room question, any row that
+    names the event waited for a paid bulk confirm to finish each chunk.
+    FOR NO KEY UPDATE lets them in; nothing here changes the event's key."""
     held = await session.scalar(
-        select(Events.id).where(Events.id == event_id, Events.is_deleted == False).with_for_update()  # noqa: E712
+        select(Events.id).where(Events.id == event_id, Events.is_deleted == False).with_for_update(key_share=True)  # noqa: E712
     )
     if held is None:
         raise CustomHTTPException(404, message="Event not found")
